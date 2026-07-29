@@ -1188,7 +1188,7 @@ ALTER TABLE "GuestGameDeliveryEvent"
           "integrityState" = 'LEGACY_QUARANTINED'
           AND "integrityReasonCode" IS NOT NULL
         )
-      )
+      ) IS TRUE
       AND (
         "stateReasonCode" IS NULL
         OR "stateReasonCode" ~ '^[A-Z][A-Z0-9_]{2,95}$'
@@ -1420,6 +1420,27 @@ ALTER TABLE "GuestGameDeliveryEvent"
 CREATE UNIQUE INDEX "guest_game_delivery_current_attempt_uidx"
   ON "GuestGameDelivery" ("tenantId", "providerAttemptKey")
   WHERE "providerAttemptKey" IS NOT NULL;
+
+-- One delivery revision has exactly one canonical durable event. The
+-- SECURITY DEFINER writer below serializes on the Delivery row and rejects a
+-- replay with a deterministic error; this index is the final invariant for
+-- privileged/manual writes and concurrent callers.
+CREATE UNIQUE INDEX "guest_game_delivery_event_revision_uidx"
+  ON "GuestGameDeliveryEvent" (
+    "tenantId", "deliveryId", "transitionRevision"
+  )
+  WHERE
+    "transitionRevision" IS NOT NULL
+    AND "eventType" IN (
+      'DELIVERY_CLAIMED',
+      'DELIVERY_PROVIDER_ATTEMPTED',
+      'DELIVERY_FINALIZED',
+      'DELIVERY_REAPED',
+      'DELIVERY_RETRIED',
+      'DELIVERY_CANCELED',
+      'DELIVERY_RECONCILED',
+      'DELIVERY_INTEGRITY_QUARANTINED'
+    );
 
 CREATE INDEX "guest_game_delivery_ready_claim_idx"
   ON "GuestGameDelivery" (
@@ -2649,14 +2670,348 @@ BEFORE INSERT OR UPDATE OR DELETE ON "GuestGameDeliveryEvent"
 FOR EACH ROW
 EXECUTE FUNCTION public."guest_game_delivery_event_append_only"();
 
+-- Runtime roles intentionally have no INSERT privilege on the event table.
+-- SECURITY INVOKER therefore cannot provide the required narrow write
+-- boundary. This SECURITY DEFINER function is deliberately limited to one
+-- typed durable event for the already-current positive Delivery revision:
+-- no dynamic SQL, a pg_catalog-only search_path, exact input-key validation,
+-- a row lock, server-generated identity/key/time, and the ordinary table
+-- constraints/triggers still validate every inserted value. This is a
+-- worker-only boundary, so actorUserId is intentionally not accepted; an
+-- interactive actor boundary needs a separate same-tenant User authority
+-- contract. Its lock does
+-- not coordinate the separate Reward -> Delivery binding lock order; that
+-- remains an independent runtime-writer admission requirement.
+CREATE OR REPLACE FUNCTION public."guest_game_delivery_record_event_v1"(
+  event_payload JSON
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+  event_record public."GuestGameDeliveryEvent"%ROWTYPE;
+  delivery_record RECORD;
+  payload_key TEXT;
+  payload_key_count INTEGER;
+  distinct_payload_key_count INTEGER;
+BEGIN
+  IF event_payload IS NULL
+     OR pg_catalog.json_typeof(event_payload) <> 'object'
+  THEN
+    RAISE EXCEPTION
+      'Durable delivery event payload must be a JSON object'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT
+    pg_catalog.count(*)::INTEGER,
+    pg_catalog.count(DISTINCT key_row.key)::INTEGER
+  INTO payload_key_count, distinct_payload_key_count
+  FROM pg_catalog.json_object_keys(event_payload) AS key_row(key);
+
+  IF payload_key_count <> distinct_payload_key_count THEN
+    RAISE EXCEPTION
+      'Durable delivery event payload contains duplicate keys'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT key_row.key
+  INTO payload_key
+  FROM pg_catalog.json_object_keys(event_payload) AS key_row(key)
+  WHERE key_row.key NOT IN (
+    'tenantId',
+    'deliveryId',
+    'rewardId',
+    'storeId',
+    'attemptId',
+    'eventType',
+    'transitionRevision',
+    'fromStatus',
+    'toStatus',
+    'channel',
+    'claimGeneration',
+    'attemptNumber',
+    'claimJobKind',
+    'executionRevision',
+    'storeExecutionRevision',
+    'claimKeyVersion',
+    'claimOwnerDigest',
+    'claimTokenDigest',
+    'claimedAt',
+    'leaseExpiresAt',
+    'acknowledgeUntil',
+    'effectInputDigest',
+    'providerConfigDigest',
+    'providerAuthorityRevision',
+    'workloadIdentityDigest',
+    'providerAttemptKey',
+    'providerAttemptedAt',
+    'sendGrantDigest',
+    'sendGrantExpiresAt',
+    'providerOutcomeClass',
+    'providerOutcomeCode',
+    'providerObservedAt',
+    'providerReceiptDigest',
+    'providerReceiptRefEncrypted',
+    'providerReceiptKeyVersion',
+    'terminalAckDigest',
+    'integrityState',
+    'integrityReasonCode',
+    'stateReasonCode',
+    'adapterVersion',
+    'httpStatusClass',
+    'provenanceDigest',
+    'note',
+    'payload'
+  )
+  ORDER BY key_row.key
+  LIMIT 1;
+
+  IF FOUND THEN
+    RAISE EXCEPTION
+      'Durable delivery event payload contains unsupported key: %',
+      payload_key
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT populated.*
+  INTO event_record
+  FROM pg_catalog.json_populate_record(
+    NULL::public."GuestGameDeliveryEvent",
+    event_payload
+  ) AS populated;
+
+  IF event_record."eventType" IS NULL
+     OR event_record."eventType" NOT IN (
+       'DELIVERY_CLAIMED',
+       'DELIVERY_PROVIDER_ATTEMPTED',
+       'DELIVERY_FINALIZED',
+       'DELIVERY_REAPED',
+       'DELIVERY_RETRIED',
+       'DELIVERY_CANCELED',
+       'DELIVERY_RECONCILED',
+       'DELIVERY_INTEGRITY_QUARANTINED'
+     )
+  THEN
+    RAISE EXCEPTION
+      'Runtime event boundary accepts only typed durable events'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF event_record."transitionRevision" IS NULL
+     OR event_record."transitionRevision" <= 0
+  THEN
+    RAISE EXCEPTION
+      'Runtime durable event revision must be positive'
+      USING ERRCODE = '22023';
+  END IF;
+
+  -- Provenance is mandatory audit evidence, never caller authority. Tenant
+  -- and delivery authority are resolved independently from the locked row.
+  IF event_record."provenanceDigest" IS NULL
+     OR event_record."provenanceDigest" !~ '^[0-9a-f]{64}$'
+  THEN
+    RAISE EXCEPTION
+      'Runtime durable event provenance digest must be 64 lowercase hex characters'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT
+    delivery."rewardId",
+    delivery."storeId",
+    delivery."channel",
+    delivery."transitionRevision"
+  INTO delivery_record
+  FROM public."GuestGameDelivery" AS delivery
+  WHERE delivery."tenantId" = event_record."tenantId"
+    AND delivery."id" = event_record."deliveryId"
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION
+      'Runtime durable event delivery does not exist in the requested tenant'
+      USING ERRCODE = '23503';
+  END IF;
+
+  IF delivery_record."rewardId" IS DISTINCT FROM event_record."rewardId"
+     OR delivery_record."transitionRevision"
+       IS DISTINCT FROM event_record."transitionRevision"
+  THEN
+    RAISE EXCEPTION
+      'Runtime durable event does not match the current delivery revision'
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF delivery_record."storeId" IS DISTINCT FROM event_record."storeId"
+     OR delivery_record."channel" IS DISTINCT FROM event_record."channel"
+  THEN
+    RAISE EXCEPTION
+      'Runtime durable event does not match the current delivery scope'
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public."GuestGameDeliveryEvent" AS existing_event
+    WHERE existing_event."tenantId" = event_record."tenantId"
+      AND existing_event."deliveryId" = event_record."deliveryId"
+      AND existing_event."transitionRevision" =
+        event_record."transitionRevision"
+      AND existing_event."eventType" IN (
+        'DELIVERY_CLAIMED',
+        'DELIVERY_PROVIDER_ATTEMPTED',
+        'DELIVERY_FINALIZED',
+        'DELIVERY_REAPED',
+        'DELIVERY_RETRIED',
+        'DELIVERY_CANCELED',
+        'DELIVERY_RECONCILED',
+        'DELIVERY_INTEGRITY_QUARANTINED'
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'Runtime durable event already exists for the current delivery revision'
+      USING ERRCODE = '23505';
+  END IF;
+
+  event_record."id" := pg_catalog.gen_random_uuid()::TEXT;
+  event_record."transitionKey" :=
+    public."guest_game_delivery_transition_key_v1"(
+      event_record."tenantId",
+      event_record."deliveryId",
+      event_record."rewardId",
+      event_record."transitionRevision",
+      event_record."claimGeneration",
+      event_record."eventType",
+      event_record."attemptNumber",
+      event_record."providerOutcomeClass",
+      event_record."providerOutcomeCode",
+      event_record."fromStatus",
+      event_record."toStatus"
+    );
+  event_record."createdAt" := CURRENT_TIMESTAMP;
+
+  INSERT INTO public."GuestGameDeliveryEvent" (
+    "id",
+    "tenantId",
+    "deliveryId",
+    "rewardId",
+    "storeId",
+    "attemptId",
+    "actorUserId",
+    "eventType",
+    "transitionKey",
+    "transitionRevision",
+    "fromStatus",
+    "toStatus",
+    "channel",
+    "claimGeneration",
+    "attemptNumber",
+    "claimJobKind",
+    "executionRevision",
+    "storeExecutionRevision",
+    "claimKeyVersion",
+    "claimOwnerDigest",
+    "claimTokenDigest",
+    "claimedAt",
+    "leaseExpiresAt",
+    "acknowledgeUntil",
+    "effectInputDigest",
+    "providerConfigDigest",
+    "providerAuthorityRevision",
+    "workloadIdentityDigest",
+    "providerAttemptKey",
+    "providerAttemptedAt",
+    "sendGrantDigest",
+    "sendGrantExpiresAt",
+    "providerOutcomeClass",
+    "providerOutcomeCode",
+    "providerObservedAt",
+    "providerReceiptDigest",
+    "providerReceiptRefEncrypted",
+    "providerReceiptKeyVersion",
+    "terminalAckDigest",
+    "integrityState",
+    "integrityReasonCode",
+    "stateReasonCode",
+    "adapterVersion",
+    "httpStatusClass",
+    "provenanceDigest",
+    "note",
+    "payload",
+    "createdAt"
+  ) VALUES (
+    event_record."id",
+    event_record."tenantId",
+    event_record."deliveryId",
+    event_record."rewardId",
+    event_record."storeId",
+    event_record."attemptId",
+    event_record."actorUserId",
+    event_record."eventType",
+    event_record."transitionKey",
+    event_record."transitionRevision",
+    event_record."fromStatus",
+    event_record."toStatus",
+    event_record."channel",
+    event_record."claimGeneration",
+    event_record."attemptNumber",
+    event_record."claimJobKind",
+    event_record."executionRevision",
+    event_record."storeExecutionRevision",
+    event_record."claimKeyVersion",
+    event_record."claimOwnerDigest",
+    event_record."claimTokenDigest",
+    event_record."claimedAt",
+    event_record."leaseExpiresAt",
+    event_record."acknowledgeUntil",
+    event_record."effectInputDigest",
+    event_record."providerConfigDigest",
+    event_record."providerAuthorityRevision",
+    event_record."workloadIdentityDigest",
+    event_record."providerAttemptKey",
+    event_record."providerAttemptedAt",
+    event_record."sendGrantDigest",
+    event_record."sendGrantExpiresAt",
+    event_record."providerOutcomeClass",
+    event_record."providerOutcomeCode",
+    event_record."providerObservedAt",
+    event_record."providerReceiptDigest",
+    event_record."providerReceiptRefEncrypted",
+    event_record."providerReceiptKeyVersion",
+    event_record."terminalAckDigest",
+    event_record."integrityState",
+    event_record."integrityReasonCode",
+    event_record."stateReasonCode",
+    event_record."adapterVersion",
+    event_record."httpStatusClass",
+    event_record."provenanceDigest",
+    event_record."note",
+    event_record."payload",
+    event_record."createdAt"
+  );
+
+  RETURN pg_catalog.jsonb_build_object(
+    'eventId', event_record."id",
+    'transitionKey', event_record."transitionKey"
+  );
+END;
+$$;
+
+REVOKE ALL
+ON FUNCTION public."guest_game_delivery_record_event_v1"(JSON)
+FROM PUBLIC;
+
 -- PostgreSQL grants no table DML to PUBLIC by default, but make the
 -- append-only boundary explicit and resilient to broader future grants.
-REVOKE UPDATE, DELETE
-ON TABLE public."GuestGameDeliveryAttempt"
+REVOKE INSERT, UPDATE, DELETE
+ON TABLE public."GuestGameDeliveryEvent"
 FROM PUBLIC;
 
 REVOKE UPDATE, DELETE
-ON TABLE public."GuestGameDeliveryEvent"
+ON TABLE public."GuestGameDeliveryAttempt"
 FROM PUBLIC;
 
 COMMIT;

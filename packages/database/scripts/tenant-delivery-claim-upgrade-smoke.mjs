@@ -103,6 +103,7 @@ const REQUIRED_INDEXES = Object.freeze([
   "guest_game_delivery_attempt_generation_uidx",
   "guest_game_delivery_attempt_provider_key_uidx",
   "guest_game_delivery_event_transition_uidx",
+  "guest_game_delivery_event_revision_uidx",
   "guest_game_delivery_current_attempt_uidx",
   "guest_game_delivery_ready_claim_idx",
   "guest_game_delivery_processing_reaper_idx",
@@ -126,6 +127,7 @@ const REQUIRED_FUNCTIONS = Object.freeze([
   "guest_game_delivery_transition_event_check",
   "guest_game_delivery_attempt_append_only",
   "guest_game_delivery_event_append_only",
+  "guest_game_delivery_record_event_v1",
 ]);
 const REQUIRED_RESTRICT_FOREIGN_KEYS = Object.freeze([
   "GuestGameDelivery_tenantId_rewardId_fkey",
@@ -156,9 +158,10 @@ legacy events, then upgraded to CURRENT_166. The smoke verifies deterministic
 Store backfill, legacy quarantine, evidence preservation, same-scope RESTRICT
 foreign keys, CHECK/index/function/trigger catalogs, append-only evidence,
 four revision-fenced READY/BLOCKED transitions under a restricted runtime
-role, stale/future event replay rejection, final-row reason/integrity evidence
-consistency, seven rejected legacy-quarantine mutations with zero state/evidence
-drift, and idempotent deploy.
+role through one private SECURITY DEFINER event boundary, direct Event INSERT
+denial, stale/future/extra event replay rejection, final-row reason/integrity
+evidence consistency, seven rejected legacy-quarantine mutations with zero
+state/evidence drift, and idempotent deploy.
 
 The failure database proves separate cross-tenant reward/event preflights, all
 eight reserved typed-event collisions, a five-second migration lock timeout,
@@ -1066,6 +1069,12 @@ async function readPost166Catalog(client) {
        procedure_row.provolatile AS volatility,
        procedure_row.proparallel AS parallel_safety,
        procedure_row.prosecdef AS security_definer,
+       procedure_row.proowner = (
+         SELECT table_row.relowner
+         FROM pg_catalog.pg_class AS table_row
+         WHERE table_row.oid =
+           'public."GuestGameDeliveryEvent"'::regclass
+       ) AS owned_by_event_table_owner,
        EXISTS (
          SELECT 1
          FROM pg_catalog.aclexplode(
@@ -1198,6 +1207,16 @@ function assertPost166Catalog(catalog) {
     indexMap.get("guest_game_delivery_current_attempt_uidx")?.is_unique,
     true,
   );
+  const eventRevisionIndex = indexMap.get(
+    "guest_game_delivery_event_revision_uidx",
+  );
+  assert.equal(eventRevisionIndex?.is_unique, true);
+  for (const eventType of RESERVED_TYPED_EVENT_TYPES) {
+    assert.match(
+      eventRevisionIndex?.predicate ?? "",
+      new RegExp(eventType, "u"),
+    );
+  }
   assert.match(
     indexMap.get("guest_game_delivery_ready_claim_idx")?.predicate ?? "",
     /status.*READY/iu,
@@ -1239,8 +1258,23 @@ function assertPost166Catalog(catalog) {
   assert.equal(transitionKeyHelper.parallel_safety, "s");
   assert.equal(transitionKeyHelper.security_definer, false);
 
+  const eventBoundary = functionMap.get(
+    "guest_game_delivery_record_event_v1",
+  );
+  assert(eventBoundary);
+  assert.equal(eventBoundary.identity_arguments, "event_payload json");
+  assert.equal(eventBoundary.public_execute, false);
+  assert.deepEqual(eventBoundary.configuration, [
+    "search_path=pg_catalog",
+  ]);
+  assert.equal(eventBoundary.volatility, "v");
+  assert.equal(eventBoundary.security_definer, true);
+  assert.equal(eventBoundary.owned_by_event_table_owner, true);
+
   for (const name of REQUIRED_FUNCTIONS.filter(
-    (candidate) => candidate !== "guest_game_delivery_transition_key_v1",
+    (candidate) =>
+      candidate !== "guest_game_delivery_transition_key_v1" &&
+      candidate !== "guest_game_delivery_record_event_v1",
   )) {
     const fn = functionMap.get(name);
     assert(fn, `${name} is missing.`);
@@ -1575,6 +1609,7 @@ async function grantRestrictedRuntimeRole(client, roleName) {
   await client.$executeRawUnsafe(
     `GRANT UPDATE (
        "status",
+       "readinessStatus",
        "stateReasonCode",
        "transitionRevision"
      ) ON TABLE "GuestGameDelivery" TO ${quotedRole}`,
@@ -1587,27 +1622,6 @@ async function grantRestrictedRuntimeRole(client, roleName) {
   await client.$executeRawUnsafe(
     `GRANT UPDATE ("updatedAt")
      ON TABLE "GuestGameReward" TO ${quotedRole}`,
-  );
-  await client.$executeRawUnsafe(
-    `GRANT INSERT (
-       "id",
-       "tenantId",
-       "deliveryId",
-       "rewardId",
-       "storeId",
-       "eventType",
-       "transitionKey",
-       "transitionRevision",
-       "fromStatus",
-       "toStatus",
-       "channel",
-       "claimGeneration",
-       "attemptNumber",
-       "integrityState",
-       "integrityReasonCode",
-       "stateReasonCode",
-       "note"
-     ) ON TABLE "GuestGameDeliveryEvent" TO ${quotedRole}`,
   );
   await client.$executeRawUnsafe(
     `GRANT EXECUTE
@@ -1624,6 +1638,11 @@ async function grantRestrictedRuntimeRole(client, roleName) {
        TEXT,
        TEXT
      )
+     TO ${quotedRole}`,
+  );
+  await client.$executeRawUnsafe(
+    `GRANT EXECUTE
+     ON FUNCTION public."guest_game_delivery_record_event_v1"(JSON)
      TO ${quotedRole}`,
   );
 }
@@ -1645,6 +1664,11 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
          'public."guest_game_delivery_transition_key_v1"(text,text,text,bigint,integer,text,integer,text,text,text,text)',
          'EXECUTE'
        ) AS helper_execute,
+       pg_catalog.has_function_privilege(
+         $1,
+         'public."guest_game_delivery_record_event_v1"(json)',
+         'EXECUTE'
+       ) AS event_boundary_execute,
        pg_catalog.has_table_privilege(
          $1,
          'public."GuestGameDelivery"',
@@ -1694,6 +1718,12 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
        pg_catalog.has_column_privilege(
          $1,
          'public."GuestGameDelivery"',
+         'readinessStatus',
+         'UPDATE'
+       ) AS readiness_status_update,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameDelivery"',
          'transitionRevision',
          'UPDATE'
        ) AS revision_update,
@@ -1720,6 +1750,11 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
          'public."GuestGameDeliveryEvent"',
          'INSERT'
        ) AS broad_event_insert,
+       pg_catalog.has_any_column_privilege(
+         $1,
+         'public."GuestGameDeliveryEvent"',
+         'INSERT'
+       ) AS any_event_insert,
        pg_catalog.has_column_privilege(
          $1,
          'public."GuestGameDeliveryEvent"',
@@ -1762,6 +1797,7 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
     bypasses_rls: false,
     schema_usage: true,
     helper_execute: true,
+    event_boundary_execute: true,
     broad_delivery_update: false,
     broad_reward_update: false,
     reward_lock_update: true,
@@ -1770,14 +1806,16 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
     reward_guest_update: false,
     reward_status_update: false,
     status_update: true,
+    readiness_status_update: true,
     revision_update: true,
     state_reason_update: true,
     integrity_state_update: false,
     integrity_reason_update: false,
     broad_event_insert: false,
-    event_revision_insert: true,
-    event_integrity_state_insert: true,
-    event_integrity_reason_insert: true,
+    any_event_insert: false,
+    event_revision_insert: false,
+    event_integrity_state_insert: false,
+    event_integrity_reason_insert: false,
     event_update: false,
     event_delete: false,
   });
@@ -1829,6 +1867,18 @@ async function canonicalTransitionKey(
   return row.key;
 }
 
+async function recordDurableTransitionEvent(client, payload) {
+  const encodedPayload =
+    typeof payload === "string" ? payload : JSON.stringify(payload);
+  const [row] = await client.$queryRawUnsafe(
+    `SELECT public."guest_game_delivery_record_event_v1"(
+       $1::JSON
+     ) AS result`,
+    encodedPayload,
+  );
+  return row?.result;
+}
+
 async function insertCanonicalTransitionEvent(
   client,
   {
@@ -1846,72 +1896,31 @@ async function insertCanonicalTransitionEvent(
     stateReasonCode,
   },
 ) {
-  const transitionKey = await canonicalTransitionKey(client, {
-    tenantId,
-    deliveryId,
-    rewardId,
-    transitionRevision,
-    claimGeneration: 0,
-    eventType,
-    attemptNumber: 0,
-    fromStatus,
-    toStatus,
-  });
-  const eventId = randomUUID();
-  await client.$executeRawUnsafe(
-    `INSERT INTO "GuestGameDeliveryEvent" (
-       "id",
-       "tenantId",
-       "deliveryId",
-       "rewardId",
-       "storeId",
-       "eventType",
-       "transitionKey",
-       "transitionRevision",
-       "fromStatus",
-       "toStatus",
-       "channel",
-       "claimGeneration",
-       "attemptNumber",
-       "integrityState",
-       "integrityReasonCode",
-       "stateReasonCode",
-       "note"
-     ) VALUES (
-       $1,
-       $2,
-       $3,
-       $4,
-       $5,
-       $6,
-       $7,
-       $8::BIGINT,
-       $9,
-       $10,
-       $11,
-       0,
-       0,
-       $12,
-       $13,
-       $14,
-       'Restricted runtime role revision-fence rehearsal.'
-     )`,
-    eventId,
+  const payload = {
     tenantId,
     deliveryId,
     rewardId,
     storeId,
     eventType,
-    transitionKey,
     transitionRevision,
     fromStatus,
     toStatus,
     channel,
+    claimGeneration: 0,
+    attemptNumber: 0,
     integrityState,
     integrityReasonCode,
     stateReasonCode,
-  );
-  return { eventId, transitionKey };
+    provenanceDigest: "d".repeat(64),
+    note: "Restricted runtime role revision-fence rehearsal.",
+  };
+  const result = await recordDurableTransitionEvent(client, payload);
+  assert.match(result?.eventId ?? "", /^[0-9a-f-]{36}$/u);
+  assert.match(result?.transitionKey ?? "", /^v1:[0-9a-f]{64}$/u);
+  return {
+    eventId: result.eventId,
+    transitionKey: result.transitionKey,
+  };
 }
 
 async function applyRevisionFencedTransition(
@@ -1929,6 +1938,7 @@ async function applyRevisionFencedTransition(
     toStatus,
     deliveryReasonCode,
     eventReasonCode,
+    deliveryReadinessStatus = null,
   },
 ) {
   const changed = await client.$executeRawUnsafe(
@@ -1936,13 +1946,15 @@ async function applyRevisionFencedTransition(
      SET
        "status" = $1,
        "stateReasonCode" = $2,
-       "transitionRevision" = $3::BIGINT
-     WHERE "tenantId" = $4
-       AND "id" = $5
-       AND "status" = $6
-       AND "transitionRevision" = $7::BIGINT`,
+       "readinessStatus" = COALESCE($3, "readinessStatus"),
+       "transitionRevision" = $4::BIGINT
+     WHERE "tenantId" = $5
+       AND "id" = $6
+       AND "status" = $7
+       AND "transitionRevision" = $8::BIGINT`,
     toStatus,
     deliveryReasonCode,
+    deliveryReadinessStatus,
     transitionRevision,
     tenantId,
     deliveryId,
@@ -2010,6 +2022,26 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
     channel: "MAX",
   };
   const committedEvidence = [];
+
+  await expectSqlState(
+    "42501",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await transaction.$executeRawUnsafe(
+          `INSERT INTO "GuestGameDeliveryEvent" (
+             "id", "tenantId", "deliveryId", "rewardId", "eventType"
+           ) VALUES (
+             $1, $2, $3, $4, 'DELIVERY_FINALIZED'
+           )`,
+          randomUUID(),
+          delivery.tenantId,
+          delivery.deliveryId,
+          delivery.rewardId,
+        );
+      }),
+    /permission denied for table GuestGameDeliveryEvent/u,
+  );
 
   await client.$transaction(async (transaction) => {
     await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
@@ -2117,6 +2149,107 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
     3,
   );
 
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await insertCanonicalTransitionEvent(transaction, {
+          ...delivery,
+          channel: "TELEGRAM",
+          transitionRevision: 3,
+          eventType: "DELIVERY_FINALIZED",
+          fromStatus: "READY",
+          toStatus: "BLOCKED",
+          integrityState: "VERIFIED",
+          integrityReasonCode: null,
+          stateReasonCode: "TEST_REVISION_BLOCKED_TWO",
+        });
+      }),
+    /does not match the current delivery scope/u,
+  );
+
+  for (const eventType of ["DELIVERY_FINALIZED", "DELIVERY_CANCELED"]) {
+    await expectSqlState(
+      "23505",
+      () =>
+        client.$transaction(async (transaction) => {
+          await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+          await insertCanonicalTransitionEvent(transaction, {
+            ...delivery,
+            transitionRevision: 3,
+            eventType,
+            fromStatus: "READY",
+            toStatus: "BLOCKED",
+            integrityState: "VERIFIED",
+            integrityReasonCode: null,
+            stateReasonCode: "TEST_REVISION_BLOCKED_TWO",
+          });
+        }),
+      /already exists for the current delivery revision/u,
+    );
+  }
+
+  await expectSqlState(
+    "22023",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await recordDurableTransitionEvent(transaction, {
+          tenantId: delivery.tenantId,
+          deliveryId: delivery.deliveryId,
+          rewardId: delivery.rewardId,
+          eventType: "DELIVERY_FINALIZED",
+          transitionRevision: 3,
+          unsupportedAuthority: "must-not-be-accepted",
+        });
+      }),
+    /payload contains unsupported key: unsupportedAuthority/u,
+  );
+  await expectSqlState(
+    "22023",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await recordDurableTransitionEvent(transaction, {
+          tenantId: delivery.tenantId,
+          deliveryId: delivery.deliveryId,
+          rewardId: delivery.rewardId,
+          eventType: "DELIVERY_FINALIZED",
+          transitionRevision: 3,
+          actorUserId: randomUUID(),
+        });
+      }),
+    /payload contains unsupported key: actorUserId/u,
+  );
+  await expectSqlState(
+    "22023",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await recordDurableTransitionEvent(
+          transaction,
+          `{"tenantId":"${delivery.tenantId}","tenantId":"${delivery.tenantId}"}`,
+        );
+      }),
+    /payload contains duplicate keys/u,
+  );
+  await expectSqlState(
+    "22023",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await recordDurableTransitionEvent(transaction, {
+          tenantId: delivery.tenantId,
+          deliveryId: delivery.deliveryId,
+          rewardId: delivery.rewardId,
+          eventType: "DELIVERY_FINALIZED",
+          transitionRevision: 3,
+        });
+      }),
+    /provenance digest must be 64 lowercase hex characters/u,
+  );
+
   const finalRetryDelivery = {
     tenantId: fixtures.tenantA,
     deliveryId: fixtures.deliveries.blocked,
@@ -2136,6 +2269,7 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
       toStatus: "READY",
       deliveryReasonCode: null,
       eventReasonCode: "TEST_FINAL_RETRIED_REASON",
+      deliveryReadinessStatus: "READY_FOR_BOT",
     });
   });
   const finalRetryState = await readRevisionFenceState(
@@ -2222,7 +2356,7 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
           stateReasonCode: "TEST_FUTURE_REVISION_PREINSERT",
         });
       }),
-    /Durable event revision does not match its current delivery transition/u,
+    /Runtime durable event does not match the current delivery revision/u,
   );
 
   const reasonOnlyError =
@@ -2455,6 +2589,25 @@ async function assertNullClosedStateMatrices(client, fixtures) {
            $1, $2, $3, $4, 'LEGACY_PARTIAL_OUTCOME_FIXTURE',
            'MALFORMED_OUTCOME', CURRENT_TIMESTAMP,
            'NULL must not satisfy the outcome matrix.'
+         )`,
+        randomUUID(),
+        fixtures.tenantA,
+        fixtures.deliveries.backfill,
+        fixtures.rewards.backfill,
+      ),
+  );
+
+  await expectCheckConstraint(
+    "GuestGameDeliveryEvent_scope_value_check",
+    () =>
+      client.$executeRawUnsafe(
+        `INSERT INTO "GuestGameDeliveryEvent" (
+           "id", "tenantId", "deliveryId", "rewardId", "eventType",
+           "integrityReasonCode", "note"
+         ) VALUES (
+           $1, $2, $3, $4, 'LEGACY_PARTIAL_INTEGRITY_FIXTURE',
+           'TEST_REASON_WITHOUT_INTEGRITY_STATE',
+           'NULL integrityState must not satisfy the integrity pair matrix.'
          )`,
         randomUUID(),
         fixtures.tenantA,
@@ -3275,11 +3428,12 @@ async function runOfflineSelfTest() {
       populatedSuccessScenarios: 10,
       preflightRollbackScenarios: 3,
       reservedTypedEventCollisionFixtures: 8,
-      nullClosedMatrixScenarios: 4,
+      nullClosedMatrixScenarios: 5,
       lockTimeoutRollbackScenarios: 1,
       lateDdlRollbackScenarios: 1,
       revisionFencedTransitions: 4,
-      antiReplayScenarios: 2,
+      antiReplayScenarios: 4,
+      runtimeEventBoundaryNegativeScenarios: 9,
       legacyQuarantineFreezeScenarios: 7,
       reasonIntegrityConsistencyScenarios: 8,
       destructiveSourceDatabaseActions: 0,
@@ -3401,20 +3555,31 @@ async function runRealSmoke(environment) {
         indexes: REQUIRED_INDEXES.length,
         triggers: REQUIRED_TRIGGERS.length,
         publicExecutableFunctions: 0,
-        privateTriggerFunctions: REQUIRED_FUNCTIONS.length - 1,
+        privateTriggerFunctions: REQUIRED_FUNCTIONS.length - 2,
+        privateSecurityDefinerBoundaries: 1,
       },
       transitionRevisionEvidence: {
         restrictedRuntimeRole: true,
+        directEventInsertDenied: true,
+        boundaryOnlyEventWrites: true,
         committedTransitions: 4,
         distinctCanonicalKeys: 4,
         finalRetriedStateVerified: true,
         staleEventReplayRejected: true,
         futureRevisionPreinsertRejected: true,
+        currentRevisionReplayRejected: true,
+        currentRevisionExtraEventRejected: true,
+        mismatchedDeliveryScopeRejected: true,
+        unknownPayloadKeyRejected: true,
+        actorUserPayloadRejected: true,
+        duplicatePayloadKeyRejected: true,
+        missingProvenanceRejected: true,
       },
       nullClosedMatrixEvidence: {
         deliveryOutcomeRejected: true,
         deliveryProviderStateRejected: true,
         eventOutcomeRejected: true,
+        eventIntegrityPairRejected: true,
         durableEventRevisionRejected: true,
       },
       legacyQuarantineFreezeEvidence: {

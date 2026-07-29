@@ -212,6 +212,15 @@ function functionBlock(sql, functionName) {
   return sql.slice(start, end + 4);
 }
 
+function namedFunctionBlock(sql, functionName) {
+  const marker = `CREATE OR REPLACE FUNCTION public."${functionName}"`;
+  const start = sql.indexOf(marker);
+  assert(start >= 0, `${functionName} is missing.`);
+  const end = sql.indexOf("\n$$;", start);
+  assert(end > start, `${functionName} body is not terminated.`);
+  return sql.slice(start, end + 4);
+}
+
 function assertSqlColumns(sqlBlock, columns) {
   for (const [name, definition] of columns) {
     assert.match(
@@ -823,7 +832,7 @@ test("all named CHECK constraints retain the state, evidence, and time-window co
   );
   assert.match(
     eventChecks,
-    /GuestGameDeliveryEvent_scope_value_check"[\s\S]*"integrityState" IS NULL[\s\S]*"integrityReasonCode" IS NULL[\s\S]*"integrityState" = 'VERIFIED'[\s\S]*"integrityState" = 'LEGACY_QUARANTINED'[\s\S]*"integrityReasonCode" IS NOT NULL/u,
+    /GuestGameDeliveryEvent_scope_value_check"[\s\S]*"integrityState" IS NULL[\s\S]*"integrityReasonCode" IS NULL[\s\S]*"integrityState" = 'VERIFIED'[\s\S]*"integrityState" = 'LEGACY_QUARANTINED'[\s\S]*"integrityReasonCode" IS NOT NULL[\s\S]*\) IS TRUE[\s\S]*"stateReasonCode"/u,
   );
   assert.match(
     eventChecks,
@@ -869,6 +878,24 @@ test("all delivery claim indexes keep their exact keys, uniqueness, and partial 
       "GuestGameDeliveryEvent",
       ["tenantId", "transitionKey"],
       "",
+    ],
+    [
+      "CREATE UNIQUE INDEX",
+      "guest_game_delivery_event_revision_uidx",
+      "GuestGameDeliveryEvent",
+      ["tenantId", "deliveryId", "transitionRevision"],
+      `WHERE
+    "transitionRevision" IS NOT NULL
+    AND "eventType" IN (
+      'DELIVERY_CLAIMED',
+      'DELIVERY_PROVIDER_ATTEMPTED',
+      'DELIVERY_FINALIZED',
+      'DELIVERY_REAPED',
+      'DELIVERY_RETRIED',
+      'DELIVERY_CANCELED',
+      'DELIVERY_RECONCILED',
+      'DELIVERY_INTEGRITY_QUARANTINED'
+    )`,
     ],
     [
       "CREATE UNIQUE INDEX",
@@ -1263,6 +1290,90 @@ test("delivery events validate scope and deny all updates/deletes pending bounde
   );
   assert.match(
     sql,
-    /REVOKE UPDATE, DELETE\s+ON TABLE public\."GuestGameDeliveryEvent"\s+FROM PUBLIC;/u,
+    /REVOKE INSERT, UPDATE, DELETE\s+ON TABLE public\."GuestGameDeliveryEvent"\s+FROM PUBLIC;/u,
+  );
+});
+
+test("runtime durable events use one private SECURITY DEFINER boundary", async () => {
+  const { sql } = await artifacts();
+  const body = namedFunctionBlock(
+    sql,
+    "guest_game_delivery_record_event_v1",
+  );
+
+  assert.match(
+    body,
+    /guest_game_delivery_record_event_v1"\(\s*event_payload JSON\s*\)\s+RETURNS JSONB/u,
+  );
+  assert.match(body, /LANGUAGE plpgsql[\s\S]*VOLATILE[\s\S]*SECURITY DEFINER/u);
+  assert.match(body, /SET search_path = pg_catalog/u);
+  assert.doesNotMatch(body, /EXECUTE\s+format|EXECUTE\s+\w+/u);
+  assert.match(
+    body,
+    /json_typeof\(event_payload\) <> 'object'[\s\S]*payload must be a JSON object/u,
+  );
+  assert.match(
+    body,
+    /count\(\*\)[\s\S]*count\(DISTINCT key_row\.key\)[\s\S]*payload contains duplicate keys/u,
+  );
+  assert.match(
+    body,
+    /json_object_keys\(event_payload\)[\s\S]*payload contains unsupported key/u,
+  );
+  for (const serverOwnedKey of [
+    "id",
+    "transitionKey",
+    "createdAt",
+    "actorUserId",
+  ]) {
+    assert.doesNotMatch(
+      body.slice(
+        body.indexOf("WHERE key_row.key NOT IN"),
+        body.indexOf("ORDER BY key_row.key"),
+      ),
+      new RegExp(`'${serverOwnedKey}'`, "u"),
+      `${serverOwnedKey} must remain server-owned.`,
+    );
+  }
+  for (const eventType of DURABLE_EVENT_TYPES) {
+    assert.match(body, new RegExp(`'${eventType}'`, "u"));
+  }
+  assert.match(
+    body,
+    /transitionRevision" IS NULL[\s\S]*transitionRevision" <= 0[\s\S]*revision must be positive/u,
+  );
+  assert.match(
+    body,
+    /provenanceDigest" IS NULL[\s\S]*\^\[0-9a-f\]\{64\}\$[\s\S]*provenance digest must be 64 lowercase hex characters/u,
+  );
+  assert.match(
+    body,
+    /FROM public\."GuestGameDelivery" AS delivery[\s\S]*FOR UPDATE;/u,
+  );
+  assert.match(
+    body,
+    /delivery_record\."transitionRevision"[\s\S]*event_record\."transitionRevision"[\s\S]*does not match the current delivery revision/u,
+  );
+  assert.match(
+    body,
+    /delivery_record\."storeId"[\s\S]*event_record\."storeId"[\s\S]*delivery_record\."channel"[\s\S]*event_record\."channel"[\s\S]*does not match the current delivery scope/u,
+  );
+  assert.match(
+    body,
+    /FROM public\."GuestGameDeliveryEvent" AS existing_event[\s\S]*already exists for the current delivery revision[\s\S]*ERRCODE = '23505'/u,
+  );
+  assert.match(body, /pg_catalog\.gen_random_uuid\(\)::TEXT/u);
+  assert.match(
+    body,
+    /guest_game_delivery_transition_key_v1"[\s\S]*INSERT INTO public\."GuestGameDeliveryEvent"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL\s+ON FUNCTION public\."guest_game_delivery_record_event_v1"\(JSON\)\s+FROM PUBLIC;/u,
+  );
+  assert.doesNotMatch(
+    sql,
+    /GRANT EXECUTE[\s\S]*TO PUBLIC;/u,
+    "Migration 166 must leave zero PUBLIC-executable functions.",
   );
 });

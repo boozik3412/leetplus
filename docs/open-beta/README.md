@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.35                                         |
+| Версия           | 1.36                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -160,6 +160,11 @@ enterprise-isolation option и не сокращает shared gates.
     limits, strict Origin/JSON/token, preview projection и explicit INTERNAL
     residual. Schema остаётся `CURRENT_169`; outbox, activation locator,
     verified OWNER delivery и production acceptance ещё pending.
+    Implementation exact-head
+    `f09383563bbcc22e11e0e67ca597360cf8996f4b` принят CI
+    [`30488598755`](https://github.com/boozik3412/leetplus/actions/runs/30488598755)
+    (`run #43`), `3/3 PASS`; independent review — `PASS` без actionable
+    P0/P1/P2.
 
 Текущий schema target рабочего кандидата — `CURRENT_169`. Локальный
 disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`, exact
@@ -224,15 +229,18 @@ engineering evidence не являются production-like admission, persisted 
   schema, six-RPC allowlist и shared admin route не изменены. Exact-head
   `f4224072f60507bd97f8e49440e3bda89ffe2aaa`, PostgreSQL 16 и independent
   review приняты; production-like admission и activation остаются pending;
-- invite secret transport candidate: canonical URL использует только
+- accepted invite secret transport engineering checkpoint: canonical URL
+  использует только
   `/register#invite=<43-char base64url>`, fragment удаляется до первого
   session/preview request, legacy token-path/query fallback отсутствует,
   fixed POST BFF/API имеют bounded body, strict request/token checks,
   allowlisted preview и private no-store responses. Для `INTERNAL` generic
   create/reissue всё ещё возвращает fragment-only `registrationUrl`
   авторизованному actor/UI; external generic workflow закрыт, обе shared-beta
-  admin route остаются `503`. Exact-head CI/review и production
-  proxy/APM/CSP/browser/mail-client acceptance pending;
+  admin route остаются `503`. Exact-head
+  `f09383563bbcc22e11e0e67ca597360cf8996f4b` / CI `30488598755`
+  (`run #43`) — `3/3 PASS`, independent review — `PASS`; production
+  proxy/APM/CSP/browser/mail-client acceptance остаётся pending;
 - external authenticated HTTP admission candidate: обязательные beta-prefixes
   получают `module + READ|WRITE|OUTBOUND`, неизвестный route запрещён;
   reusable lower-layer admission перечитывает persisted state на каждый

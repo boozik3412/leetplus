@@ -2,7 +2,7 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.2 |
+| Версия | 1.3 |
 | Дата | 29.07.2026 |
 | Schema target | `CURRENT_169` |
 | Migration | `20260729230000_identity_invite_writer_boundary` |
@@ -177,8 +177,8 @@ persisted GO, production deployment или разрешением на созд�
    outbox.
 3. Реализовать verified delivery и resend/revoke; для уже реализованного
    [`BETA-IAM-004E`](./invite-secret-transport.md) browser fragment + fixed
-   POST-body token flow принять exact-head CI/review и production
-   proxy/APM/CSP/browser/mail-client evidence.
+   POST-body token flow exact-head CI/review приняты; production
+   proxy/APM/CSP/browser/mail-client evidence остаётся pending.
 4. Реализовать first-class verified `EMAIL_CHANGE`; до этого user/invite
    email mutation остаётся закрытой.
 5. Принять оставшееся evidence для уже реализованной

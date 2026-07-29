@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                       |
 | ---------------- | -------------------------------------------------------------- |
-| Версия           | 1.0                                                            |
+| Версия           | 1.1                                                            |
 | Дата             | 29.07.2026                                                     |
-| Статус           | `IMPLEMENTED_CANDIDATE`; exact-head CI/review ещё pending       |
+| Статус           | `ACCEPTED_ENGINEERING_CHECKPOINT`; exact-head CI/review приняты |
 | Schema target    | `CURRENT_169`; migration и runtime RPC allowlist не изменялись |
 | Release decision | `NO-GO` для external tenant, initial OWNER invite и production |
 
@@ -193,7 +193,7 @@ Full-table или column-wide runtime `SELECT` fallback запрещён. Есл
 - rate limit и bounded proxy/body/parser limits действуют на обе fixed POST
   route.
 
-## 8. Evidence кандидата
+## 8. Evidence engineering checkpoint
 
 Локально на 29.07.2026:
 
@@ -208,6 +208,13 @@ Full-table или column-wide runtime `SELECT` fallback запрещён. Есл
 - manual browser smoke: fragment очищается до preview, query игнорируется,
   reload после scrub fail-closed, valid preview не оставляет hash.
 
-Full regression/build, independent review, exact commit SHA и GitHub CI
-фиксируются отдельно до перевода backlog item в `Готово`. Эти evidence не
-являются production-like admission и не меняют общий `NO-GO`.
+Implementation exact-head
+`f09383563bbcc22e11e0e67ca597360cf8996f4b` принят GitHub CI
+[`30488598755`](https://github.com/boozik3412/leetplus/actions/runs/30488598755)
+(`run #43`), `3/3 PASS`: Application `90700487213`, PostgreSQL 16
+`90700487216`, Authority root `90700487264`. Финальный independent review —
+`PASS` без actionable P0/P1/P2.
+
+Этот engineering checkpoint не является production-like admission, не
+разрешает deployment, initial OWNER invite или внешний pilot и не меняет
+общий `NO-GO`.

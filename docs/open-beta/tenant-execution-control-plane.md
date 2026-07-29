@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.30                                                                        |
+| Версия           | 1.31                                                                        |
 | Дата             | 29.07.2026                                                                  |
 | Статус           | Schema target `CURRENT_169`; engineering exact-head accepted, production-like admission pending |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
@@ -267,9 +267,11 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 
 Protected activation locator, encrypted mail outbox, initial OWNER delivery,
 trial start и signed legacy proposal/apply/rollback ещё не реализованы.
-`BETA-IAM-004E` fragment + fixed POST-body transport существует как
-engineering candidate на неизменном `CURRENT_169`; exact-head CI/review и
-production proxy/APM/CSP/browser/mail-client acceptance ещё pending.
+`BETA-IAM-004E` fragment + fixed POST-body transport принят как engineering
+checkpoint на неизменном `CURRENT_169`: exact-head
+`f09383563bbcc22e11e0e67ca597360cf8996f4b` / CI `30488598755`
+(`run #43`) — `3/3 PASS`, independent review — `PASS`. Production
+proxy/APM/CSP/browser/mail-client acceptance остаётся pending.
 `BETA-IAM-004B` ограничен read-only inventory candidate; local core self-test
 `18`, smoke self-test `18`, unit `17/17` и PostgreSQL 16 three-clone smoke
 приняты, включая exact catalog/RI-trigger/22-column ACL/TLS,

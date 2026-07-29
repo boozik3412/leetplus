@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 29.07.2026
-- Версия: 1.58
+- Версия: 1.59
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -226,7 +226,7 @@
 | BETA-IAM-004B | P0        | В работе      | `IDENTITY_LEGACY_RECONCILIATION_V1`                       | На exact `CURRENT_169` integrated least-privilege inventory читает `User`/`UserInvite`/claims без DML; local core self-test `18`, smoke self-test `18`, unit `17/17` и PostgreSQL 16 smoke на трёх disposable clones — `PASS`; exact-head `d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI `30479020686` (`run #39`) — `3/3 PASS`, финальный independent security review — `PASS` без оставшихся P0/P1/P2; item остаётся `В работе` до отдельного production-like inventory; любой User, включая inactive, остаётся owner-кандидатом, invite — только live candidate; bound claim + `NULL` provenance, collision/mismatch/invalid email блокируют, terminal history не получает synthetic revision, Platform Admin/unverified User и legacy live token требуют review; evidence aggregate-only и HMAC-bound; production inventory не выполнялся, proposal/apply/rollback отсутствуют и запрещены; обе admin route остаются `503`, runtime allowlist — exact six-RPC | BETA-SEC-007..009, BETA-IAM-004A |
 | BETA-IAM-004C | P0        | Запланировано | Включить tenant-owned employee invites и email change     | Только после 004A/004B/004E OWNER может выдавать scope-bounded invites; email change требует password step-up, reservation, confirmation, `authVersion` revoke и уведомления на old/new mailbox; owner transfer остаётся отдельным workflow                                                                                | BETA-IAM-002..005, BETA-IAM-004A, BETA-IAM-004B, BETA-IAM-004E |
 | BETA-IAM-004D | P0        | Готово        | `DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`              | Legacy design-partner CLI `provision`/`rotate-invite` и оба exported writer entrypoint fail-closed с `DESIGN_PARTNER_IDENTITY_WRITER_DISABLED` до чтения manifest, загрузки/создания Prisma client, обращения к БД или генерации token; exact package operator namespace содержит только guarded CLI, URL builder и legacy write bodies отсутствуют; `status` только читает уже существующие isolated fixtures, emergency `suspend` только сужает эффекты; arbitrary repository/DB-owner execution не входит в этот checkpoint и требует отдельной runtime-role/credential границы; schema, exact six-RPC runtime allowlist и обе `503` admin route не изменены. Local unit/boundary `23/23 PASS`, independent review — `PASS` без actionable P0/P1/P2; implementation exact-head `f4224072f60507bd97f8e49440e3bda89ffe2aaa`, CI `30483184102` (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 writer-isolation lifecycle. Production, account и invites не изменялись | BETA-IAM-004A, BETA-IAM-004B                          |
-| BETA-IAM-004E | P0        | В работе      | `INVITE_SECRET_TRANSPORT_V1`                              | На неизменном `CURRENT_169` canonical URL имеет вид `/register#invite=<43-char base64url>`; gate capture/scrub выполняется до session/preview и хранит token только в ephemeral memory; preview/accept используют fixed same-origin POST+BFF/API body, streaming/API parser limit `4 KiB`, strict JSON/origin/fields/token и allowlisted preview projection; legacy token path и query fallback отсутствуют, malformed token отклоняется до DB. External generic invite и обе shared-beta admin route остаются fail-closed/`503`. Residual `INTERNAL` create/reissue всё ещё раскрывает fragment-only `registrationUrl` авторизованному actor/UI, но ответы имеют private no-store; это не verified delivery. Outbox, locator, initial OWNER и production proxy/CSP/mail-client acceptance pending; external pilot `NO-GO`. Local API focused `68`, route e2e `6`, web runtime `7` — `PASS`; exact-head CI/review pending | BETA-IAM-004, BETA-SEC-008..010 |
+| BETA-IAM-004E | P0        | Готово        | `INVITE_SECRET_TRANSPORT_V1`                              | На неизменном `CURRENT_169` canonical URL имеет вид `/register#invite=<43-char base64url>`; gate capture/scrub выполняется до session/preview и хранит token только в ephemeral memory; preview/accept используют fixed same-origin POST+BFF/API body, streaming/API parser limit `4 KiB`, strict JSON/origin/fields/token и allowlisted preview projection; legacy token path и query fallback отсутствуют, malformed token отклоняется до DB. External generic invite и обе shared-beta admin route остаются fail-closed/`503`. Residual `INTERNAL` create/reissue всё ещё раскрывает fragment-only `registrationUrl` авторизованному actor/UI, но ответы имеют private no-store; это не verified delivery. Outbox, locator, initial OWNER и production proxy/CSP/mail-client acceptance pending; external pilot `NO-GO`. Local API focused `68`, route e2e `6`, web runtime `7` — `PASS`; final independent review — `PASS` без actionable P0/P1/P2; implementation exact-head `f09383563bbcc22e11e0e67ca597360cf8996f4b`, CI `30488598755` (`run #43`) — `3/3 PASS`. Production, account и invites не изменялись | BETA-IAM-004, BETA-SEC-008..010 |
 | BETA-IAM-005  | P0        | В работе      | Ограничить особо чувствительное повышение привилегий      | Generic users/invites API не назначает OWNER; добавление/смена OWNER выполняется только отдельным атомарным owner-transfer workflow; Platform Admin нельзя назначить tenant API                                                                                                                                            | BETA-IAM-001, BETA-IAM-003                             |
 | BETA-IAM-006  | P0        | Запланировано | Свести backend/frontend permission maps                   | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization                                                                                                                                                                                      | BETA-IAM-001                                           |
 | BETA-IAM-007  | P0        | Запланировано | Добавить журнал доступа и управление сессиями             | Владелец видит активных пользователей и security events своей сети; может блокировать аккаунт и отзывать его сессии                                                                                                                                                                                                        | BETA-SEC-010                                           |
@@ -2094,7 +2094,7 @@ tenant lifecycle/stage/trial
 - sealed identity/shell candidate не завершает OWNER workflow: остаются
   privacy-safe inventory/admitted backfill исторических rows без provenance,
   activation locator, persisted GO, encrypted outbox и verified OWNER
-  delivery. `BETA-IAM-004E` реализует engineering transport candidate; его
+  delivery. `BETA-IAM-004E` принят как engineering transport checkpoint; его
   production proxy/APM/CSP/browser/mail-client acceptance остаётся pending.
   Fingerprint HMAC startup validation уже реализована candidate и CI
   environment contract обновлён; до deploy требуется отдельное защищённое
@@ -2524,7 +2524,7 @@ independent review: PASS, новых P0 не обнаружено
    rehearsal.
 
 Список выше зафиксирован как historical `CURRENT_168` evidence. Позднейший
-`BETA-IAM-004E` реализовал fragment + fixed POST-body engineering candidate;
+`BETA-IAM-004E` принят как fragment + fixed POST-body engineering checkpoint;
 это не закрывает остальные перечисленные P0 и production acceptance.
 Открытый hardening P1 до внешней активации:
 
@@ -2797,7 +2797,7 @@ invite issue/reissue остаётся fail-closed. В compatibility lane тек�
 авторизованный actor/UI всё ещё получает raw fragment-only `registrationUrl`;
 это явно не verified delivery и должно быть удалено после encrypted outbox.
 
-Local evidence:
+Engineering evidence:
 
 ```text
 focused API: 4 suites / 68 PASS
@@ -2809,7 +2809,12 @@ API/web typecheck + production build: PASS
 manual browser smoke: fragment scrub/query deny/reload deny/valid preview PASS
 schema/migrations/RPC allowlist: UNCHANGED / CURRENT_169
 production/account/invites: UNCHANGED
-exact-head CI + final independent re-review: PENDING
+implementation exact-head: f09383563bbcc22e11e0e67ca597360cf8996f4b
+GitHub CI: 30488598755 / run #43 / 3 of 3 PASS
+Application job: 90700487213 / PASS
+PostgreSQL 16 job: 90700487216 / PASS
+Authority root job: 90700487264 / PASS
+final independent re-review: PASS / no actionable P0/P1/P2
 release decision: NO-GO
 ```
 

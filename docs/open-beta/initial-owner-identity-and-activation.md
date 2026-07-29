@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.11                                                            |
+| Версия           | 1.12                                                            |
 | Дата             | 29.07.2026                                                      |
-| Статус           | `CURRENT_169`; transport candidate, activation ещё pending       |
+| Статус           | `CURRENT_169`; transport engineering accepted, activation pending |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
 | Scope            | Первый OWNER нового tenant, email delivery, activation, suspend |
 
@@ -487,12 +487,15 @@ Two-tenant:
 - previous `CURRENT_168` exact-head
   `3b8228dd278fae062c753bf4301e0339ba93738b`, CI `30460154200`,
   `3/3 PASS`, сохраняется как historical prerequisite.
-- `BETA-IAM-004E` transport candidate на неизменном `CURRENT_169`:
+- `BETA-IAM-004E` transport engineering checkpoint на неизменном `CURRENT_169`:
   fragment-only link, capture/scrub до session/preview, fixed POST-body
   BFF/API, streaming/route-scoped `4 KiB` limit, strict Origin/JSON/token,
   allowlisted preview и no-store. External generic invite и обе shared-beta
   admin route остаются fail-closed; INTERNAL `registrationUrl` residual,
-  exact-head CI/review и production acceptance ещё pending.
+  production acceptance остаётся pending. Implementation exact-head
+  `f09383563bbcc22e11e0e67ca597360cf8996f4b` принят CI `30488598755`
+  (`run #43`), `3/3 PASS`; independent review — `PASS` без actionable
+  P0/P1/P2.
 
 Следующие обязательные шаги:
 

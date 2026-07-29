@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.18                                                       |
+| Версия     | 1.19                                                       |
 | Дата       | 29.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -185,9 +185,11 @@ Evidence:
       как correlation evidence, отдельный versioned encryption key и очищает
       ciphertext после terminal state; ambiguous provider attempt уходит в
       reconciliation без blind resend.
-- [ ] Engineering `BETA-IAM-004E` candidate принят exact-head CI/review:
-      browser fragment очищается до session/preview, fixed BFF/API POST
-      принимает token только в body, query/path fallback отсутствует.
+- [x] Engineering `BETA-IAM-004E` checkpoint принят: exact-head
+      `f09383563bbcc22e11e0e67ca597360cf8996f4b`, CI `30488598755`
+      (`run #43`) — `3/3 PASS`; independent review — `PASS`. Browser fragment
+      очищается до session/preview, fixed BFF/API POST принимает token только
+      в body, query/path fallback отсутствует.
 - [ ] Production proxy/APM/CSP/browser/mail-client acceptance transport
       пройдена; legacy query invites inventoried/revoked/reissued.
 - [ ] Reissue/revoke отменяет старый invite/outbox, ротирует token и делает

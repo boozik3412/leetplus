@@ -2,7 +2,7 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.5 |
+| Версия | 1.6 |
 | Дата | 29.07.2026 |
 | Schema target | `CURRENT_169` |
 | Foundation migration | `20260729190000_identity_email_claim_foundation` |
@@ -264,12 +264,12 @@ secrets и требует version `v1`; CI environment contract обновлён
    leak и перепроверить её под lock.
 3. Реализовать persisted `SHARED BETA GO`, activation, trial start,
    `UserInvite`, encrypted leased outbox и verified delivery.
-4. Принять exact-head CI/review и production proxy/APM/CSP/browser/mail-client
-   evidence для уже реализованного
+4. Exact-head CI/review уже реализованного
    [`BETA-IAM-004E`](./invite-secret-transport.md) fragment + fixed POST-body
-   transport; отдельно реализовать resend/session revoke и bounded expiry
-   sweeper. Application acceptance/reissue/revoke candidate уже использует
-   `assert → write → transition`.
+   transport приняты; отдельно принять production
+   proxy/APM/CSP/browser/mail-client evidence и реализовать resend/session
+   revoke и bounded expiry sweeper. Application acceptance/reissue/revoke
+   candidate уже использует `assert → write → transition`.
 5. Выполнить полный 100-way accept/accept, accept/revoke и accept/reissue
    PostgreSQL matrix.
 6. Пройти production-like upgrade/rollback/zero-diff и полноценную

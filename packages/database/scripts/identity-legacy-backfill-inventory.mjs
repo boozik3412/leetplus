@@ -41,6 +41,7 @@ const MAX_HMAC_KEY_BYTES = 4_096;
 export const REQUIRED_COLUMN_SELECTS = Object.freeze({
   _prisma_migrations: Object.freeze([
     "migration_name",
+    "checksum",
     "finished_at",
     "rolled_back_at",
   ]),
@@ -220,9 +221,37 @@ const EXPECTED_CATALOG_RELATIONS = Object.freeze([
   "User",
   "UserInvite",
   "IdentityEmailClaim",
+  "IdentityOwnerInviteIssueCommand",
+  "IdentityMailOutbox",
+]);
+
+const EXACT_IDENTITY_RELATIONS = Object.freeze([
+  "IdentityEmailClaim",
+  "IdentityOwnerInviteIssueCommand",
+  "IdentityMailOutbox",
+]);
+
+const DORMANT_IDENTITY_RELATIONS = Object.freeze([
+  "IdentityOwnerInviteIssueCommand",
+  "IdentityMailOutbox",
+]);
+
+const DORMANT_IDENTITY_FUNCTIONS = Object.freeze([
+  "identity_owner_invite_issue_command_immutable_v1",
+  "identity_mail_outbox_hold_immutable_v1",
+  "identity_owner_invite_issue_hold_v1",
 ]);
 
 const EXPECTED_CATALOG_COLUMNS = Object.freeze([
+  [
+    "_prisma_migrations",
+    "checksum",
+    2,
+    "character varying(64)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
   [
     "_prisma_migrations",
     "finished_at",
@@ -405,7 +434,321 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "",
     "pg_catalog.default",
   ],
+  ["IdentityMailOutbox", "id", 1, "text", true, "", "pg_catalog.default"],
+  [
+    "IdentityMailOutbox",
+    "tenantId",
+    2,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "issueCommandId",
+    3,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "inviteId",
+    4,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "workflowLocator",
+    5,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "aadEnvironment",
+    6,
+    "character varying(64)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "template",
+    7,
+    '"IdentityMailTemplate"',
+    true,
+    "'INITIAL_OWNER_INVITE'::\"IdentityMailTemplate\"",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "status",
+    8,
+    '"IdentityMailOutboxStatus"',
+    true,
+    "'HOLD'::\"IdentityMailOutboxStatus\"",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "messageKey",
+    9,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "issueRequestDigest",
+    10,
+    "character varying(64)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "tokenHash",
+    11,
+    "character varying(64)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "tokenDigestVersion",
+    12,
+    "character varying(16)",
+    true,
+    "'sha256-v1'::character varying",
+    "pg_catalog.default",
+  ],
+  ["IdentityMailOutbox", "secretCiphertext", 13, "bytea", true, "", ""],
+  ["IdentityMailOutbox", "envelopeVersion", 14, "integer", true, "1", ""],
+  [
+    "IdentityMailOutbox",
+    "keyVersion",
+    15,
+    "character varying(16)",
+    true,
+    "'v1'::character varying",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "expiresAt",
+    16,
+    "timestamp(3) with time zone",
+    true,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "createdAt",
+    17,
+    "timestamp(3) with time zone",
+    true,
+    "CURRENT_TIMESTAMP",
+    "",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "id",
+    1,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "tenantId",
+    2,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "action",
+    3,
+    "character varying(64)",
+    true,
+    "'ISSUE_INITIAL_OWNER_INVITE'::character varying",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "requestId",
+    4,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "issueRequestDigest",
+    5,
+    "character varying(64)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "aadEnvironment",
+    6,
+    "character varying(64)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "workflowLocator",
+    7,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "reservationSubjectId",
+    8,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "reservationClaimRevision",
+    9,
+    "integer",
+    true,
+    "",
+    "",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "inviteId",
+    10,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "outboxId",
+    11,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "messageKey",
+    12,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "tokenHash",
+    13,
+    "character varying(64)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "tokenDigestVersion",
+    14,
+    "character varying(16)",
+    true,
+    "'sha256-v1'::character varying",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "template",
+    15,
+    '"IdentityMailTemplate"',
+    true,
+    "'INITIAL_OWNER_INVITE'::\"IdentityMailTemplate\"",
+    "",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "envelopeVersion",
+    16,
+    "integer",
+    true,
+    "1",
+    "",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "keyVersion",
+    17,
+    "character varying(16)",
+    true,
+    "'v1'::character varying",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "expiresAt",
+    18,
+    "timestamp(3) with time zone",
+    true,
+    "",
+    "",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "claimRevision",
+    19,
+    "integer",
+    true,
+    "",
+    "",
+  ],
+  [
+    "IdentityOwnerInviteIssueCommand",
+    "createdAt",
+    20,
+    "timestamp(3) with time zone",
+    true,
+    "CURRENT_TIMESTAMP",
+    "",
+  ],
 ]);
+
+const EXPECTED_EXACT_IDENTITY_COLUMN_COUNT =
+  EXPECTED_CATALOG_COLUMNS.filter(([relation]) =>
+    EXACT_IDENTITY_RELATIONS.includes(relation),
+  ).length;
 
 function expectedCatalogRelationValues() {
   return EXPECTED_CATALOG_RELATIONS.map(
@@ -514,6 +857,214 @@ const EXPECTED_CONSTRAINT_MANIFEST = Object.freeze([
     definitionSha256:
       "bf585b411fd75eb8e01bbcf9b9235dddeb8535fac6f607dffefa412040914af8",
   },
+  ...[
+    [
+      "IdentityMailOutbox_aad_env_check",
+      "IdentityMailOutbox",
+      "c",
+      "687d5c2d6b23325c72505b9c2463c3d9aa6b4fc6b8caca71d724f26c7374cd34",
+    ],
+    [
+      "IdentityMailOutbox_command_id_check",
+      "IdentityMailOutbox",
+      "c",
+      "cb5188a02a3d22443e08790a3f01534d49590fce15a75942d01f91550dd8e61b",
+    ],
+    [
+      "IdentityMailOutbox_crypto_check",
+      "IdentityMailOutbox",
+      "c",
+      "e1688c926ea11ead0f42c445a18b5fb52fa6555acf31f4bb8ab1ead44b7fe2f2",
+    ],
+    [
+      "IdentityMailOutbox_expiry_check",
+      "IdentityMailOutbox",
+      "c",
+      "50f86481e27d818599c60451ae875aec7382bb981cfaac0f8be6dfcbd71c4470",
+    ],
+    [
+      "IdentityMailOutbox_id_check",
+      "IdentityMailOutbox",
+      "c",
+      "2e2abebdc6aae2ba2d2d911df1816ba0f059a01ad86ceb3ee66ddc53f71c146a",
+    ],
+    [
+      "IdentityMailOutbox_invite_fkey",
+      "IdentityMailOutbox",
+      "f",
+      "a66289a7de1e00ffc3d3cfc629be64aff39a30483fd0614022b38b835c34f35b",
+    ],
+    [
+      "IdentityMailOutbox_invite_id_check",
+      "IdentityMailOutbox",
+      "c",
+      "061a9d22b5db33a7fe9c3b4f463bef4fb3e9410564e22284f31578da0da0f684",
+    ],
+    [
+      "IdentityMailOutbox_issueCommand_fkey",
+      "IdentityMailOutbox",
+      "f",
+      "f51c7c3360c8ac6d6a6843285b8b8312821aa24f2c4aca3acb4b5d14fcca74f8",
+    ],
+    [
+      "IdentityMailOutbox_locator_check",
+      "IdentityMailOutbox",
+      "c",
+      "6e0abd4cccc01c0a8412c04faee92b9ec93984ccc9a840557178b27837422096",
+    ],
+    [
+      "IdentityMailOutbox_message_key_check",
+      "IdentityMailOutbox",
+      "c",
+      "4cd52eda7a527832d665548b4f61afe9ac7a8f8f9d523d4c02579a1b4e76423e",
+    ],
+    [
+      "IdentityMailOutbox_pkey",
+      "IdentityMailOutbox",
+      "p",
+      "8c8464f42472e42ee190fc91ca8db79b5351d3a4609040516578d229c56f6fa5",
+    ],
+    [
+      "IdentityMailOutbox_request_digest_check",
+      "IdentityMailOutbox",
+      "c",
+      "fae33df72c3f3b9194b13ad6d09618ec487a71a4a0073ef83b94821ee4d9f8fb",
+    ],
+    [
+      "IdentityMailOutbox_tenantId_fkey",
+      "IdentityMailOutbox",
+      "f",
+      "10c53f59767da1037868e70c34767641c6f2ea5cff4ad85c4249247201afdeba",
+    ],
+    [
+      "IdentityMailOutbox_tenant_check",
+      "IdentityMailOutbox",
+      "c",
+      "9493cd7988ac4bfe706f271e819e524b55c9f2c76953cb74fb75b15d8e3fe6f4",
+    ],
+    [
+      "IdentityMailOutbox_token_hash_check",
+      "IdentityMailOutbox",
+      "c",
+      "5e3b98d602b3981545017832539ecdf20022a4863d717d228b3184b21e7c5219",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_aad_env_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "687d5c2d6b23325c72505b9c2463c3d9aa6b4fc6b8caca71d724f26c7374cd34",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_action_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "eb65d0b07650ae7f01bfbf1c4fd51e9ab981892953b4abb05f4bd6a84d187251",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_crypto_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "025f3bfbb8b2a28b9ebddacafa4f79dec45ea3b90ebe9d1cae6a7ef1ca2db8c9",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_digest_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "fae33df72c3f3b9194b13ad6d09618ec487a71a4a0073ef83b94821ee4d9f8fb",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_expiry_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "50f86481e27d818599c60451ae875aec7382bb981cfaac0f8be6dfcbd71c4470",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_id_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "2e2abebdc6aae2ba2d2d911df1816ba0f059a01ad86ceb3ee66ddc53f71c146a",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_ids_distinct_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "1eff0cc2138a87d43918ce27f595c0ef03aea8602f8b0081096e1e90e5f77bb3",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_invite_fkey",
+      "IdentityOwnerInviteIssueCommand",
+      "f",
+      "a66289a7de1e00ffc3d3cfc629be64aff39a30483fd0614022b38b835c34f35b",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_invite_id_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "061a9d22b5db33a7fe9c3b4f463bef4fb3e9410564e22284f31578da0da0f684",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_locator_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "6e0abd4cccc01c0a8412c04faee92b9ec93984ccc9a840557178b27837422096",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_message_key_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "4cd52eda7a527832d665548b4f61afe9ac7a8f8f9d523d4c02579a1b4e76423e",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_outbox_id_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "061ff573f0aa9993af5aeacc45c97a0c18833dd4b0aabe3e2d8f7c0de2e2a562",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_pkey",
+      "IdentityOwnerInviteIssueCommand",
+      "p",
+      "8c8464f42472e42ee190fc91ca8db79b5351d3a4609040516578d229c56f6fa5",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_request_id_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "123a4ade1e604ba690e555e3065ca8c310eb840375b49d15d0d99fe9f0c49788",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_revision_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "a65472cfbe900e1921ea1e573e7a603c3cca272475d701ffa61fbc807be4b8a8",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_subject_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "7c3057d5d5a0e786b028414073b3a5e2f215022483879e99b143c7329e3ac1ed",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_tenantId_fkey",
+      "IdentityOwnerInviteIssueCommand",
+      "f",
+      "10c53f59767da1037868e70c34767641c6f2ea5cff4ad85c4249247201afdeba",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_tenant_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "9493cd7988ac4bfe706f271e819e524b55c9f2c76953cb74fb75b15d8e3fe6f4",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_token_hash_check",
+      "IdentityOwnerInviteIssueCommand",
+      "c",
+      "5e3b98d602b3981545017832539ecdf20022a4863d717d228b3184b21e7c5219",
+    ],
+  ].map(([name, relation, type, definitionSha256]) =>
+    Object.freeze({ name, relation, type, definitionSha256 }),
+  ),
 ]);
 
 const EXPECTED_INDEX_MANIFEST = Object.freeze([
@@ -589,6 +1140,121 @@ const EXPECTED_INDEX_MANIFEST = Object.freeze([
     definitionSha256:
       "1a392dcffa38e24423101f309b3e5364b393ad8e259fa24ad1d924a61be03e6b",
   },
+  ...[
+    [
+      "IdentityMailOutbox_pkey",
+      "IdentityMailOutbox",
+      true,
+      true,
+      "c237d1e43b0c79010a84585473bcfc30384f0500b547dfb7d5a279deb81fa4cc",
+    ],
+    [
+      "identity_mail_outbox_invite_uidx",
+      "IdentityMailOutbox",
+      true,
+      false,
+      "cfa8dcf65a2143cd31eac6a381d59b8a3ef8e6fc02d70dcbc6e9c68bdb1e7eaf",
+    ],
+    [
+      "identity_mail_outbox_issue_command_uidx",
+      "IdentityMailOutbox",
+      true,
+      false,
+      "4878f43a43c0f1fca15c7a6ab8a771ec62aef9a566c50c96158ff5277c80d9c3",
+    ],
+    [
+      "identity_mail_outbox_locator_uidx",
+      "IdentityMailOutbox",
+      true,
+      false,
+      "25a6b228b09c818a7fc72652438612212de47e598be1f4f9c231fec8ad4534e7",
+    ],
+    [
+      "identity_mail_outbox_message_key",
+      "IdentityMailOutbox",
+      true,
+      false,
+      "549faa310a148e9cfee217d19fed7b40746aa127607cc61a5d3b2ad0cc6a5199",
+    ],
+    [
+      "identity_mail_outbox_tenant_id_key",
+      "IdentityMailOutbox",
+      true,
+      false,
+      "372a44e68e12e04c09ddc9bc1a8c92e0bf5f4ad07c9396f0179ef21c7fd78baf",
+    ],
+    [
+      "identity_mail_outbox_tenant_status_created_idx",
+      "IdentityMailOutbox",
+      false,
+      false,
+      "bf45555229910d0f37bb8cf40f12f62a3ad17222b62a1342ebdb11687e2e13c0",
+    ],
+    [
+      "IdentityOwnerInviteIssueCommand_pkey",
+      "IdentityOwnerInviteIssueCommand",
+      true,
+      true,
+      "04a5b04811eba540d83c33e11d1009c7647585bdf064e78f24413c4674e99db0",
+    ],
+    [
+      "identity_owner_invite_issue_command_invite_uidx",
+      "IdentityOwnerInviteIssueCommand",
+      true,
+      false,
+      "0d2528ee45e8c23a199d89d22a21c70e38cd9155fe02c7e06e25b045fe32cc33",
+    ],
+    [
+      "identity_owner_invite_issue_command_locator_uidx",
+      "IdentityOwnerInviteIssueCommand",
+      true,
+      false,
+      "90b544ab9bc1c144e2b5888bc6ab295fc957be3e07b59ce87b4011edeb5037b1",
+    ],
+    [
+      "identity_owner_invite_issue_command_message_key",
+      "IdentityOwnerInviteIssueCommand",
+      true,
+      false,
+      "96e5d76c637f535c257b0c76d5e7e8c63da6d4cb11c49375966926c74e6f4248",
+    ],
+    [
+      "identity_owner_invite_issue_command_outbox_uidx",
+      "IdentityOwnerInviteIssueCommand",
+      true,
+      false,
+      "faf5b7be27edf7297151152360a141cb1c898a16130ddb09e318c80e81e487ef",
+    ],
+    [
+      "identity_owner_invite_issue_command_request_uidx",
+      "IdentityOwnerInviteIssueCommand",
+      true,
+      false,
+      "eb4825cec6315d6965cde85055276acaa4fdcbfa5fd2a497eb473dff99742fbe",
+    ],
+    [
+      "identity_owner_invite_issue_command_tenant_id_key",
+      "IdentityOwnerInviteIssueCommand",
+      true,
+      false,
+      "03f44eb3ea902fabdb2e83e7b4df255fb84b00680bee58dac639c09bb7f1f463",
+    ],
+    [
+      "UserInvite_tenantId_id_key",
+      "UserInvite",
+      true,
+      false,
+      "dd7fe89bd9f6000ed5a825fae2461e22c8146e777a2b18f91363417feb3bebb8",
+    ],
+  ].map(([name, relation, unique, primary, definitionSha256]) =>
+    Object.freeze({
+      name,
+      relation,
+      unique,
+      primary,
+      definitionSha256,
+    }),
+  ),
 ]);
 
 const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
@@ -680,6 +1346,31 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     definitionSha256:
       "f2495241681f4dd8be6ca2b36dbd0d487e104e18a2712422f3da5f435f597f62",
   },
+  {
+    name: "identity_mail_outbox_hold_immutable_v1",
+    identityArguments: "",
+    result: "trigger",
+    securityDefiner: false,
+    definitionSha256:
+      "78ca14bdd404aa45e00d266ba154e573b78c688ba71f7d97bc96c374dfd8ef08",
+  },
+  {
+    name: "identity_owner_invite_issue_command_immutable_v1",
+    identityArguments: "",
+    result: "trigger",
+    securityDefiner: false,
+    definitionSha256:
+      "9c9f27bd39e89eb6dcfeedfd7977c76b5c9300129813e6e12df006df849199ad",
+  },
+  {
+    name: "identity_owner_invite_issue_hold_v1",
+    identityArguments:
+      "requested_workflow_locator text, expected_tenant_id text, expected_reservation_subject_id text, expected_claim_revision integer, issue_request_id text, issue_request_digest text, requested_aad_environment text, candidate_command_id text, candidate_invite_id text, candidate_outbox_id text, candidate_message_key text, candidate_token_hash text, candidate_secret_ciphertext bytea, candidate_expires_at timestamp with time zone",
+    result: "jsonb",
+    securityDefiner: true,
+    definitionSha256:
+      "787e025ba9fa501fc3d62dde7502c0e82bf01afeac1858031db54a6b2b982533",
+  },
 ]);
 
 const EXPECTED_TRIGGER_MANIFEST = Object.freeze([
@@ -687,12 +1378,95 @@ const EXPECTED_TRIGGER_MANIFEST = Object.freeze([
     name: "IdentityEmailClaim_revision_guard_trigger",
     relation: "IdentityEmailClaim",
     functionName: "identity_email_claim_revision_guard_v1",
+    triggerType: 23,
     definitionSha256:
       "388dcc06ff27451656b844d302b4a536f7720062f470f0c2b8befd884be9c6a7",
   },
+  {
+    name: "IdentityMailOutbox_hold_immutable_trigger",
+    relation: "IdentityMailOutbox",
+    functionName: "identity_mail_outbox_hold_immutable_v1",
+    triggerType: 27,
+    definitionSha256:
+      "fe733a25af09484e9bf79e05ad21ecaa3c11132232efe82de4e401f6877ee087",
+  },
+  {
+    name: "IdentityOwnerInviteIssueCommand_immutable_trigger",
+    relation: "IdentityOwnerInviteIssueCommand",
+    functionName: "identity_owner_invite_issue_command_immutable_v1",
+    triggerType: 27,
+    definitionSha256:
+      "7ca9f4915da0696925bccd73381ae209c227e8b4ccd37b0d72c58f2d3c371aff",
+  },
 ]);
 
+function restrictRiTriggerManifest(
+  constraintName,
+  constraintRelation,
+  referencedRelation,
+) {
+  return [
+    {
+      constraintName,
+      constraintRelation,
+      triggerRelation: constraintRelation,
+      constraintPeerRelation: referencedRelation,
+      functionName: "RI_FKey_check_ins",
+      triggerType: 5,
+    },
+    {
+      constraintName,
+      constraintRelation,
+      triggerRelation: constraintRelation,
+      constraintPeerRelation: referencedRelation,
+      functionName: "RI_FKey_check_upd",
+      triggerType: 17,
+    },
+    {
+      constraintName,
+      constraintRelation,
+      triggerRelation: referencedRelation,
+      constraintPeerRelation: constraintRelation,
+      functionName: "RI_FKey_restrict_del",
+      triggerType: 9,
+    },
+    {
+      constraintName,
+      constraintRelation,
+      triggerRelation: referencedRelation,
+      constraintPeerRelation: constraintRelation,
+      functionName: "RI_FKey_restrict_upd",
+      triggerType: 17,
+    },
+  ].map((entry) => Object.freeze(entry));
+}
+
 const EXPECTED_RI_TRIGGER_MANIFEST = Object.freeze([
+  ...restrictRiTriggerManifest(
+    "IdentityMailOutbox_invite_fkey",
+    "IdentityMailOutbox",
+    "UserInvite",
+  ),
+  ...restrictRiTriggerManifest(
+    "IdentityMailOutbox_issueCommand_fkey",
+    "IdentityMailOutbox",
+    "IdentityOwnerInviteIssueCommand",
+  ),
+  ...restrictRiTriggerManifest(
+    "IdentityMailOutbox_tenantId_fkey",
+    "IdentityMailOutbox",
+    "Tenant",
+  ),
+  ...restrictRiTriggerManifest(
+    "IdentityOwnerInviteIssueCommand_invite_fkey",
+    "IdentityOwnerInviteIssueCommand",
+    "UserInvite",
+  ),
+  ...restrictRiTriggerManifest(
+    "IdentityOwnerInviteIssueCommand_tenantId_fkey",
+    "IdentityOwnerInviteIssueCommand",
+    "Tenant",
+  ),
   {
     constraintName: "IdentityEmailClaim_tenantId_fkey",
     constraintRelation: "IdentityEmailClaim",
@@ -759,6 +1533,34 @@ const EXPECTED_RI_TRIGGER_MANIFEST = Object.freeze([
   },
 ]);
 
+const EXPECTED_ENUM_MANIFEST = Object.freeze([
+  {
+    typeName: "IdentityEmailClaimType",
+    label: "INVITE",
+    sortOrder: 1,
+  },
+  {
+    typeName: "IdentityEmailClaimType",
+    label: "USER",
+    sortOrder: 2,
+  },
+  {
+    typeName: "IdentityEmailClaimType",
+    label: "EMAIL_CHANGE",
+    sortOrder: 3,
+  },
+  {
+    typeName: "IdentityMailOutboxStatus",
+    label: "HOLD",
+    sortOrder: 1,
+  },
+  {
+    typeName: "IdentityMailTemplate",
+    label: "INITIAL_OWNER_INVITE",
+    sortOrder: 1,
+  },
+]);
+
 function expectedConstraintValues() {
   return EXPECTED_CONSTRAINT_MANIFEST.map((entry) =>
     `(${[
@@ -800,8 +1602,16 @@ function expectedTriggerValues() {
       sqlLiteral(entry.name),
       sqlLiteral(entry.relation),
       sqlLiteral(entry.functionName),
+      entry.triggerType,
       sqlLiteral(entry.definitionSha256),
     ].join(", ")})`,
+  ).join(",\n    ");
+}
+
+function expectedEnumValues() {
+  return EXPECTED_ENUM_MANIFEST.map(
+    (entry) =>
+      `(${sqlLiteral(entry.typeName)}, ${sqlLiteral(entry.label)}, ${entry.sortOrder}::real)`,
   ).join(",\n    ");
 }
 
@@ -839,6 +1649,7 @@ LEFT JOIN pg_catalog.pg_stat_ssl AS transport_row
 export const APPLIED_MIGRATION_STATE_SQL = `
 SELECT
   "migration_name"::text AS migration_name,
+  "checksum"::text AS checksum,
   "finished_at" AS finished_at,
   "rolled_back_at" AS rolled_back_at
 FROM public."_prisma_migrations"
@@ -896,6 +1707,7 @@ WITH
     object_name,
     relation_name,
     function_name,
+    trigger_type,
     definition_sha256
   ) AS (
     VALUES
@@ -912,11 +1724,14 @@ WITH
     VALUES
     ${expectedRiTriggerValues()}
   ),
-  expected_enum(enum_label, sort_order) AS (
+  expected_enum(type_name, enum_label, sort_order) AS (
     VALUES
-      ('INVITE', 1::real),
-      ('USER', 2::real),
-      ('EMAIL_CHANGE', 3::real)
+    ${expectedEnumValues()}
+  ),
+  database_owner AS (
+    SELECT database_row.datdba AS owner_oid
+    FROM pg_catalog.pg_database AS database_row
+    WHERE database_row.datname = current_database()
   ),
   actual_column AS (
     SELECT
@@ -984,6 +1799,79 @@ SELECT
   ) AS matched_relation_count,
   (
     SELECT COUNT(*)::text
+    FROM pg_catalog.pg_class AS relation_row
+    WHERE relation_row.relnamespace = 'public'::regnamespace
+      AND relation_row.relkind = 'r'
+      AND relation_row.relname = ANY(
+        ${sqlTextArray(DORMANT_IDENTITY_RELATIONS)}
+      )
+      AND relation_row.relowner <> (
+        SELECT owner_oid
+        FROM database_owner
+      )
+  ) AS dormant_relation_owner_mismatch_count,
+  (
+    SELECT COUNT(*)::text
+    FROM pg_catalog.pg_class AS relation_row
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+      COALESCE(
+        relation_row.relacl,
+        pg_catalog.acldefault('r', relation_row.relowner)
+      )
+    ) AS privilege_row
+    WHERE relation_row.relnamespace = 'public'::regnamespace
+      AND relation_row.relkind = 'r'
+      AND relation_row.relname = ANY(
+        ${sqlTextArray(DORMANT_IDENTITY_RELATIONS)}
+      )
+      AND privilege_row.grantee <> relation_row.relowner
+  ) AS dormant_relation_nonowner_acl_count,
+  (
+    SELECT COUNT(*)::text
+    FROM pg_catalog.pg_class AS relation_row
+    JOIN pg_catalog.pg_attribute AS attribute_row
+      ON attribute_row.attrelid = relation_row.oid
+     AND attribute_row.attnum > 0
+     AND NOT attribute_row.attisdropped
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+      attribute_row.attacl
+    ) AS privilege_row
+    WHERE relation_row.relnamespace = 'public'::regnamespace
+      AND relation_row.relkind = 'r'
+      AND relation_row.relname = ANY(
+        ${sqlTextArray(DORMANT_IDENTITY_RELATIONS)}
+      )
+      AND privilege_row.grantee <> relation_row.relowner
+  ) AS dormant_column_nonowner_acl_count,
+  (
+    SELECT COUNT(*)::text
+    FROM pg_catalog.pg_proc AS function_row
+    WHERE function_row.pronamespace = 'public'::regnamespace
+      AND function_row.proname = ANY(
+        ${sqlTextArray(DORMANT_IDENTITY_FUNCTIONS)}
+      )
+      AND function_row.proowner <> (
+        SELECT owner_oid
+        FROM database_owner
+      )
+  ) AS dormant_function_owner_mismatch_count,
+  (
+    SELECT COUNT(*)::text
+    FROM pg_catalog.pg_proc AS function_row
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+      COALESCE(
+        function_row.proacl,
+        pg_catalog.acldefault('f', function_row.proowner)
+      )
+    ) AS privilege_row
+    WHERE function_row.pronamespace = 'public'::regnamespace
+      AND function_row.proname = ANY(
+        ${sqlTextArray(DORMANT_IDENTITY_FUNCTIONS)}
+      )
+      AND privilege_row.grantee <> function_row.proowner
+  ) AS dormant_function_nonowner_acl_count,
+  (
+    SELECT COUNT(*)::text
     FROM expected_column
   ) AS expected_column_count,
   (
@@ -1002,6 +1890,20 @@ SELECT
      AND actual.is_local
      AND actual.inherited_count = 0
   ) AS matched_column_count,
+  (
+    SELECT COUNT(*)::text
+    FROM expected_column AS expected
+    WHERE expected.relation_name = ANY(
+      ${sqlTextArray(EXACT_IDENTITY_RELATIONS)}
+    )
+  ) AS expected_exact_identity_column_count,
+  (
+    SELECT COUNT(*)::text
+    FROM actual_column AS actual
+    WHERE actual.relation_name = ANY(
+      ${sqlTextArray(EXACT_IDENTITY_RELATIONS)}
+    )
+  ) AS actual_exact_identity_column_count,
   (
     SELECT COUNT(*)::text
     FROM expected_constraint AS expected
@@ -1031,9 +1933,17 @@ SELECT
   (
     SELECT COUNT(*)::text
     FROM pg_catalog.pg_constraint AS constraint_row
+    JOIN pg_catalog.pg_class AS relation_row
+      ON relation_row.oid = constraint_row.conrelid
+     AND relation_row.relnamespace = 'public'::regnamespace
     WHERE constraint_row.connamespace = 'public'::regnamespace
-      AND constraint_row.conname = ANY(
-        ${sqlTextArray(EXPECTED_CONSTRAINT_MANIFEST.map((entry) => entry.name))}
+      AND (
+        relation_row.relname = ANY(
+          ${sqlTextArray(EXACT_IDENTITY_RELATIONS)}
+        )
+        OR constraint_row.conname = ANY(
+          ${sqlTextArray(EXPECTED_CONSTRAINT_MANIFEST.map((entry) => entry.name))}
+        )
       )
   ) AS actual_constraint_count,
   (
@@ -1069,10 +1979,20 @@ SELECT
   (
     SELECT COUNT(*)::text
     FROM pg_catalog.pg_class AS index_row
+    JOIN pg_catalog.pg_index AS index_state
+      ON index_state.indexrelid = index_row.oid
+    JOIN pg_catalog.pg_class AS relation_row
+      ON relation_row.oid = index_state.indrelid
+     AND relation_row.relnamespace = 'public'::regnamespace
     WHERE index_row.relnamespace = 'public'::regnamespace
       AND index_row.relkind = 'i'
-      AND index_row.relname = ANY(
-        ${sqlTextArray(EXPECTED_INDEX_MANIFEST.map((entry) => entry.name))}
+      AND (
+        relation_row.relname = ANY(
+          ${sqlTextArray(EXACT_IDENTITY_RELATIONS)}
+        )
+        OR index_row.relname = ANY(
+          ${sqlTextArray(EXPECTED_INDEX_MANIFEST.map((entry) => entry.name))}
+        )
       )
   ) AS actual_index_count,
   (
@@ -1118,8 +2038,10 @@ SELECT
     SELECT COUNT(*)::text
     FROM pg_catalog.pg_proc AS function_row
     WHERE function_row.pronamespace = 'public'::regnamespace
-      AND function_row.proname = ANY(
-        ${sqlTextArray(EXPECTED_FUNCTION_MANIFEST.map((entry) => entry.name))}
+      AND (
+        function_row.proname LIKE 'identity_email_claim_%'
+        OR function_row.proname LIKE 'identity_owner_invite_%'
+        OR function_row.proname LIKE 'identity_mail_outbox_%'
       )
   ) AS actual_function_count,
   (
@@ -1131,7 +2053,8 @@ SELECT
     JOIN pg_catalog.pg_type AS type_row
       ON type_row.oid = enum_row.enumtypid
     WHERE type_row.typnamespace = 'public'::regnamespace
-      AND type_row.typname = 'IdentityEmailClaimType'
+      AND type_row.typname = expected.type_name
+      AND type_row.typtype = 'e'
       AND type_row.typowner = (
         SELECT database_row.datdba
         FROM pg_catalog.pg_database AS database_row
@@ -1144,7 +2067,11 @@ SELECT
     JOIN pg_catalog.pg_type AS type_row
       ON type_row.oid = enum_row.enumtypid
     WHERE type_row.typnamespace = 'public'::regnamespace
-      AND type_row.typname = 'IdentityEmailClaimType'
+      AND type_row.typname = ANY(
+        ${sqlTextArray([
+          ...new Set(EXPECTED_ENUM_MANIFEST.map((entry) => entry.typeName)),
+        ])}
+      )
   ) AS total_enum_label_count,
   (
     SELECT COUNT(*)::text
@@ -1162,7 +2089,7 @@ SELECT
      AND pg_catalog.pg_get_function_identity_arguments(function_row.oid) = ''
     WHERE NOT trigger_row.tgisinternal
       AND trigger_row.tgenabled = 'O'
-      AND trigger_row.tgtype = 23
+      AND trigger_row.tgtype = expected.trigger_type
       AND trigger_row.tgnargs = 0
       AND trigger_row.tgqual IS NULL
       AND trigger_row.tgconstraint = 0
@@ -1183,9 +2110,11 @@ SELECT
     JOIN pg_catalog.pg_class AS relation_row
       ON relation_row.oid = trigger_row.tgrelid
     WHERE relation_row.relnamespace = 'public'::regnamespace
-      AND relation_row.relname = 'IdentityEmailClaim'
       AND NOT trigger_row.tgisinternal
-  ) AS actual_identity_claim_trigger_count,
+      AND relation_row.relname = ANY(
+        ${sqlTextArray(EXACT_IDENTITY_RELATIONS)}
+      )
+  ) AS actual_identity_trigger_count,
   (
     SELECT COUNT(*)::text
     FROM expected_ri_trigger AS expected
@@ -1231,11 +2160,16 @@ SELECT
     JOIN pg_catalog.pg_trigger AS trigger_row
       ON trigger_row.tgconstraint = constraint_row.oid
      AND trigger_row.tgisinternal
-    WHERE (constraint_row.conname, constraint_relation.relname) IN (
-      SELECT DISTINCT
-        expected.constraint_name,
-        expected.constraint_relation_name
-      FROM expected_ri_trigger AS expected
+    WHERE (
+      constraint_relation.relname = ANY(
+        ${sqlTextArray(EXACT_IDENTITY_RELATIONS)}
+      )
+      OR (constraint_row.conname, constraint_relation.relname) IN (
+        SELECT DISTINCT
+          expected.constraint_name,
+          expected.constraint_relation_name
+        FROM expected_ri_trigger AS expected
+      )
     )
   ) AS actual_ri_trigger_count
 `.trim();
@@ -2832,6 +3766,55 @@ export function assertRuntimeDependencyVersions(
   return true;
 }
 
+export function buildMigrationSourceArtifact(
+  migrationNames,
+  migrationObjects,
+) {
+  if (
+    !Array.isArray(migrationNames) ||
+    !Array.isArray(migrationObjects) ||
+    migrationNames.length === 0 ||
+    migrationNames.length !== migrationObjects.length ||
+    migrationNames.some((name) => !MIGRATION_NAME_PATTERN.test(name)) ||
+    new Set(migrationNames).size !== migrationNames.length
+  ) {
+    contractError(
+      "SOURCE_MIGRATION_MANIFEST_INVALID",
+      "The release migration object manifest is invalid.",
+    );
+  }
+  const migrationChecksums = migrationObjects.map((object, index) => {
+    const expectedSuffix = `/${migrationNames[index]}/migration.sql`;
+    if (
+      !Buffer.isBuffer(object?.content) ||
+      !String(object?.path ?? "")
+        .replaceAll("\\", "/")
+        .endsWith(expectedSuffix)
+    ) {
+      contractError(
+        "SOURCE_MIGRATION_MANIFEST_INVALID",
+        "The release migration object binding is invalid.",
+      );
+    }
+    return createHash("sha256").update(object.content).digest("hex");
+  });
+  const sourceManifestDigest = createHash("sha256")
+    .update(
+      migrationNames
+        .map(
+          (migrationName, index) =>
+            `${migrationName}\0${migrationChecksums[index]}`,
+        )
+        .join("\n"),
+    )
+    .digest("hex");
+  return {
+    migrationNames: Object.freeze([...migrationNames]),
+    migrationChecksums: Object.freeze(migrationChecksums),
+    sourceManifestDigest,
+  };
+}
+
 export async function loadExpectedMigrationArtifact(releaseSha) {
   assertRuntimeDependencyVersions();
   if (!SHA_PATTERN.test(String(releaseSha ?? ""))) {
@@ -2928,7 +3911,7 @@ export async function loadExpectedMigrationArtifact(releaseSha) {
   ) {
     contractError(
       "SOURCE_MIGRATION_MANIFEST_INVALID",
-      "The source migration manifest does not match exact CURRENT_170.",
+      `The source migration manifest does not match exact ${STAFF_TASK_CURRENT_RELEASE_STATE}.`,
     );
   }
 
@@ -2943,22 +3926,7 @@ export async function loadExpectedMigrationArtifact(releaseSha) {
     }),
     migrationPaths,
   );
-  const sourceManifestDigest = createHash("sha256")
-    .update(
-      migrationObjects
-        .map(
-          (object, index) =>
-            `${migrationNames[index]}\0${createHash("sha256")
-              .update(object.content)
-              .digest("hex")}`,
-        )
-        .join("\n"),
-    )
-    .digest("hex");
-  return {
-    migrationNames,
-    sourceManifestDigest,
-  };
+  return buildMigrationSourceArtifact(migrationNames, migrationObjects);
 }
 
 function safeCount(value, code = "DATABASE_COUNT_INVALID") {
@@ -2995,10 +3963,33 @@ function arraysEqual(left, right) {
   );
 }
 
+function migrationManifestDigest(migrationNames, migrationChecksums) {
+  return createHash("sha256")
+    .update(
+      migrationNames
+        .map(
+          (migrationName, index) =>
+            `${migrationName}\0${migrationChecksums[index]}`,
+        )
+        .join("\n"),
+    )
+    .digest("hex");
+}
+
 export function buildMigrationState(expectedArtifact, rows) {
+  const expectedNames = expectedArtifact?.migrationNames;
+  const expectedChecksums = expectedArtifact?.migrationChecksums;
   if (
-    !Array.isArray(expectedArtifact?.migrationNames) ||
-    !HMAC_PATTERN.test(String(expectedArtifact?.sourceManifestDigest ?? ""))
+    !Array.isArray(expectedNames) ||
+    !Array.isArray(expectedChecksums) ||
+    expectedNames.length !== expectedChecksums.length ||
+    expectedNames.length !== CURRENT_EXPECTED_MIGRATION_COUNT ||
+    expectedNames.some((name) => !MIGRATION_NAME_PATTERN.test(name)) ||
+    new Set(expectedNames).size !== expectedNames.length ||
+    expectedChecksums.some((checksum) => !HMAC_PATTERN.test(checksum)) ||
+    !HMAC_PATTERN.test(String(expectedArtifact?.sourceManifestDigest ?? "")) ||
+    expectedArtifact.sourceManifestDigest !==
+      migrationManifestDigest(expectedNames, expectedChecksums)
   ) {
     contractError(
       "EXPECTED_MIGRATION_ARTIFACT_INVALID",
@@ -3006,11 +3997,15 @@ export function buildMigrationState(expectedArtifact, rows) {
     );
   }
   const normalizedRows = Array.isArray(rows) ? rows : [];
-  const appliedNames = normalizedRows
-    .filter(
-      (row) => row?.finished_at !== null && row?.rolled_back_at === null,
-    )
-    .map((row) => String(row?.migration_name ?? ""));
+  const appliedRows = normalizedRows.filter(
+    (row) => row?.finished_at !== null && row?.rolled_back_at === null,
+  );
+  const appliedNames = appliedRows.map((row) =>
+    String(row?.migration_name ?? ""),
+  );
+  const appliedChecksums = appliedRows.map((row) =>
+    String(row?.checksum ?? ""),
+  );
   const unfinishedCount = normalizedRows.filter(
     (row) => row?.finished_at === null && row?.rolled_back_at === null,
   ).length;
@@ -3020,45 +4015,88 @@ export function buildMigrationState(expectedArtifact, rows) {
   const invalidNameCount = normalizedRows.filter(
     (row) => !MIGRATION_NAME_PATTERN.test(String(row?.migration_name ?? "")),
   ).length;
+  const invalidChecksumCount = normalizedRows.filter(
+    (row) => !HMAC_PATTERN.test(String(row?.checksum ?? "")),
+  ).length;
   const duplicateNameCount =
     normalizedRows.length -
     new Set(
       normalizedRows.map((row) => String(row?.migration_name ?? "")),
     ).size;
   const orderedNamesMatched = arraysEqual(
-    expectedArtifact.migrationNames,
+    expectedNames,
     appliedNames,
   );
+  const orderedChecksumsMatched = arraysEqual(
+    expectedChecksums,
+    appliedChecksums,
+  );
+  const checksumMismatchCount =
+    expectedChecksums.reduce(
+      (count, checksum, index) =>
+        count + (appliedChecksums[index] === checksum ? 0 : 1),
+      0,
+    ) + Math.max(0, appliedChecksums.length - expectedChecksums.length);
   return {
     checked: true,
     ready:
       orderedNamesMatched &&
-      normalizedRows.length === expectedArtifact.migrationNames.length &&
+      orderedChecksumsMatched &&
+      normalizedRows.length === expectedNames.length &&
       unfinishedCount === 0 &&
       rolledBackCount === 0 &&
       duplicateNameCount === 0 &&
-      invalidNameCount === 0,
-    expectedCount: expectedArtifact.migrationNames.length,
+      invalidNameCount === 0 &&
+      invalidChecksumCount === 0,
+    expectedCount: expectedNames.length,
     recordedCount: normalizedRows.length,
     appliedCount: appliedNames.length,
     unfinishedCount,
     rolledBackCount,
     duplicateNameCount,
     invalidNameCount,
+    invalidChecksumCount,
+    checksumMismatchCount,
     latestMigration: appliedNames.at(-1) ?? "",
     orderedNamesMatched,
+    orderedChecksumsMatched,
     sourceManifestDigest: expectedArtifact.sourceManifestDigest,
     databaseNameManifestDigest: createHash("sha256")
       .update(appliedNames.join("\n"))
       .digest("hex"),
+    databaseMigrationManifestDigest: migrationManifestDigest(
+      appliedNames,
+      appliedChecksums,
+    ),
   };
 }
 
 export function buildCatalogState(row) {
   const expectedRelationCount = safeCount(row?.expected_relation_count);
   const matchedRelationCount = safeCount(row?.matched_relation_count);
+  const dormantRelationOwnerMismatchCount = safeCount(
+    row?.dormant_relation_owner_mismatch_count,
+  );
+  const dormantRelationNonownerAclCount = safeCount(
+    row?.dormant_relation_nonowner_acl_count,
+  );
+  const dormantColumnNonownerAclCount = safeCount(
+    row?.dormant_column_nonowner_acl_count,
+  );
+  const dormantFunctionOwnerMismatchCount = safeCount(
+    row?.dormant_function_owner_mismatch_count,
+  );
+  const dormantFunctionNonownerAclCount = safeCount(
+    row?.dormant_function_nonowner_acl_count,
+  );
   const expectedColumnCount = safeCount(row?.expected_column_count);
   const matchedColumnCount = safeCount(row?.matched_column_count);
+  const expectedExactIdentityColumnCount = safeCount(
+    row?.expected_exact_identity_column_count,
+  );
+  const actualExactIdentityColumnCount = safeCount(
+    row?.actual_exact_identity_column_count,
+  );
   const matchedConstraintCount = safeCount(row?.matched_constraint_count);
   const actualConstraintCount = safeCount(row?.actual_constraint_count);
   const matchedIndexCount = safeCount(row?.matched_index_count);
@@ -3068,8 +4106,8 @@ export function buildCatalogState(row) {
   const matchedEnumLabelCount = safeCount(row?.matched_enum_label_count);
   const totalEnumLabelCount = safeCount(row?.total_enum_label_count);
   const matchedTriggerCount = safeCount(row?.matched_trigger_count);
-  const actualIdentityClaimTriggerCount = safeCount(
-    row?.actual_identity_claim_trigger_count,
+  const actualIdentityTriggerCount = safeCount(
+    row?.actual_identity_trigger_count,
   );
   const matchedRiTriggerCount = safeCount(row?.matched_ri_trigger_count);
   const actualRiTriggerCount = safeCount(row?.actual_ri_trigger_count);
@@ -3077,24 +4115,40 @@ export function buildCatalogState(row) {
     ready:
       expectedRelationCount === EXPECTED_CATALOG_RELATIONS.length &&
       matchedRelationCount === EXPECTED_CATALOG_RELATIONS.length &&
+      dormantRelationOwnerMismatchCount === 0 &&
+      dormantRelationNonownerAclCount === 0 &&
+      dormantColumnNonownerAclCount === 0 &&
+      dormantFunctionOwnerMismatchCount === 0 &&
+      dormantFunctionNonownerAclCount === 0 &&
       expectedColumnCount === EXPECTED_CATALOG_COLUMNS.length &&
       matchedColumnCount === EXPECTED_CATALOG_COLUMNS.length &&
+      expectedExactIdentityColumnCount ===
+        EXPECTED_EXACT_IDENTITY_COLUMN_COUNT &&
+      actualExactIdentityColumnCount ===
+        EXPECTED_EXACT_IDENTITY_COLUMN_COUNT &&
       matchedConstraintCount === EXPECTED_CONSTRAINT_MANIFEST.length &&
       actualConstraintCount === EXPECTED_CONSTRAINT_MANIFEST.length &&
       matchedIndexCount === EXPECTED_INDEX_MANIFEST.length &&
       actualIndexCount === EXPECTED_INDEX_MANIFEST.length &&
       matchedFunctionCount === EXPECTED_FUNCTION_MANIFEST.length &&
       actualFunctionCount === EXPECTED_FUNCTION_MANIFEST.length &&
-      matchedEnumLabelCount === 3 &&
-      totalEnumLabelCount === 3 &&
+      matchedEnumLabelCount === EXPECTED_ENUM_MANIFEST.length &&
+      totalEnumLabelCount === EXPECTED_ENUM_MANIFEST.length &&
       matchedTriggerCount === EXPECTED_TRIGGER_MANIFEST.length &&
-      actualIdentityClaimTriggerCount === EXPECTED_TRIGGER_MANIFEST.length &&
+      actualIdentityTriggerCount === EXPECTED_TRIGGER_MANIFEST.length &&
       matchedRiTriggerCount === EXPECTED_RI_TRIGGER_MANIFEST.length &&
       actualRiTriggerCount === EXPECTED_RI_TRIGGER_MANIFEST.length,
     expectedRelationCount,
     matchedRelationCount,
+    dormantRelationOwnerMismatchCount,
+    dormantRelationNonownerAclCount,
+    dormantColumnNonownerAclCount,
+    dormantFunctionOwnerMismatchCount,
+    dormantFunctionNonownerAclCount,
     expectedColumnCount,
     matchedColumnCount,
+    expectedExactIdentityColumnCount,
+    actualExactIdentityColumnCount,
     expectedConstraintCount: EXPECTED_CONSTRAINT_MANIFEST.length,
     matchedConstraintCount,
     actualConstraintCount,
@@ -3108,7 +4162,7 @@ export function buildCatalogState(row) {
     totalEnumLabelCount,
     expectedTriggerCount: EXPECTED_TRIGGER_MANIFEST.length,
     matchedTriggerCount,
-    actualIdentityClaimTriggerCount,
+    actualIdentityTriggerCount,
     expectedRiTriggerCount: EXPECTED_RI_TRIGGER_MANIFEST.length,
     matchedRiTriggerCount,
     actualRiTriggerCount,
@@ -3536,6 +4590,7 @@ export function buildReport({
       outputContainsRoleName: false,
       outputContainsRowIdentifiers: false,
       outputContainsEmailAddresses: false,
+      outputContainsMigrationChecksums: false,
       evidenceAuthorizesProposalOrApply: false,
     },
     limits: {
@@ -3802,18 +4857,29 @@ function selfTestCatalogRow() {
   return {
     expected_relation_count: String(EXPECTED_CATALOG_RELATIONS.length),
     matched_relation_count: String(EXPECTED_CATALOG_RELATIONS.length),
+    dormant_relation_owner_mismatch_count: "0",
+    dormant_relation_nonowner_acl_count: "0",
+    dormant_column_nonowner_acl_count: "0",
+    dormant_function_owner_mismatch_count: "0",
+    dormant_function_nonowner_acl_count: "0",
     expected_column_count: String(EXPECTED_CATALOG_COLUMNS.length),
     matched_column_count: String(EXPECTED_CATALOG_COLUMNS.length),
+    expected_exact_identity_column_count: String(
+      EXPECTED_EXACT_IDENTITY_COLUMN_COUNT,
+    ),
+    actual_exact_identity_column_count: String(
+      EXPECTED_EXACT_IDENTITY_COLUMN_COUNT,
+    ),
     matched_constraint_count: String(EXPECTED_CONSTRAINT_MANIFEST.length),
     actual_constraint_count: String(EXPECTED_CONSTRAINT_MANIFEST.length),
     matched_index_count: String(EXPECTED_INDEX_MANIFEST.length),
     actual_index_count: String(EXPECTED_INDEX_MANIFEST.length),
     matched_function_count: String(EXPECTED_FUNCTION_MANIFEST.length),
     actual_function_count: String(EXPECTED_FUNCTION_MANIFEST.length),
-    matched_enum_label_count: "3",
-    total_enum_label_count: "3",
+    matched_enum_label_count: String(EXPECTED_ENUM_MANIFEST.length),
+    total_enum_label_count: String(EXPECTED_ENUM_MANIFEST.length),
     matched_trigger_count: String(EXPECTED_TRIGGER_MANIFEST.length),
-    actual_identity_claim_trigger_count: String(
+    actual_identity_trigger_count: String(
       EXPECTED_TRIGGER_MANIFEST.length,
     ),
     matched_ri_trigger_count: String(EXPECTED_RI_TRIGGER_MANIFEST.length),
@@ -3924,13 +4990,18 @@ export function runSelfTest() {
         ? CURRENT_EXPECTED_LATEST_MIGRATION
         : `${String(index).padStart(14, "0")}_self_test`,
   );
-  const migrationState = buildMigrationState(
-    {
-      migrationNames,
-      sourceManifestDigest: "b".repeat(64),
-    },
+  const migrationArtifact = buildMigrationSourceArtifact(
+    migrationNames,
     migrationNames.map((migrationName) => ({
+      path: `packages/database/prisma/migrations/${migrationName}/migration.sql`,
+      content: Buffer.from(`-- self test ${migrationName}\n`, "utf8"),
+    })),
+  );
+  const migrationState = buildMigrationState(
+    migrationArtifact,
+    migrationNames.map((migrationName, index) => ({
       migration_name: migrationName,
+      checksum: migrationArtifact.migrationChecksums[index],
       finished_at: new Date("2026-07-29T00:00:00.000Z"),
       rolled_back_at: null,
     })),

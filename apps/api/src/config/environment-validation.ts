@@ -18,10 +18,20 @@ export const PRODUCTION_SECRET_KEYS = [
   'APP_ENCRYPTION_KEY',
   'INTEGRATION_ENCRYPTION_KEY',
   'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY',
+  'IDENTITY_MAIL_ENCRYPTION_KEY',
   'SYNC_SERVICE_TOKEN',
 ] as const;
 
 export type ProductionSecretKey = (typeof PRODUCTION_SECRET_KEYS)[number];
+type FallbackProductionSecretKey = Exclude<
+  ProductionSecretKey,
+  'IDENTITY_MAIL_ENCRYPTION_KEY'
+>;
+
+export const IDENTITY_MAIL_ENCRYPTION_KEY_VERSION = 'v1' as const;
+export const IDENTITY_MAIL_ENCRYPTION_KEY_BYTES = 32;
+const IDENTITY_MAIL_ENCRYPTION_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+const IDENTITY_MAIL_AAD_ENVIRONMENT_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 
 export const PRODUCTION_RELEASE_KEYS = [
   'RELEASE_SHA',
@@ -160,6 +170,45 @@ function isPlaceholderSecret(value: string) {
   return PLACEHOLDER_SECRET_PATTERNS.some((pattern) => pattern.test(value));
 }
 
+export function decodeIdentityMailEncryptionKey(
+  value: unknown,
+): Buffer | undefined {
+  if (
+    typeof value !== 'string' ||
+    !IDENTITY_MAIL_ENCRYPTION_KEY_PATTERN.test(value)
+  ) {
+    return undefined;
+  }
+
+  const decoded = Buffer.from(value, 'base64url');
+  if (
+    decoded.length !== IDENTITY_MAIL_ENCRYPTION_KEY_BYTES ||
+    decoded.toString('base64url') !== value
+  ) {
+    return undefined;
+  }
+
+  const firstByte = decoded[0];
+  if (decoded.every((byte) => byte === firstByte)) {
+    return undefined;
+  }
+
+  return decoded;
+}
+
+export function resolveIdentityMailAadEnvironment(
+  value: unknown,
+): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    !IDENTITY_MAIL_AAD_ENVIRONMENT_PATTERN.test(value)
+  ) {
+    return undefined;
+  }
+
+  return value;
+}
+
 /**
  * Nest calls this before constructing application providers. Production must
  * never continue with a missing, shared, placeholder, or undersized secret.
@@ -226,6 +275,17 @@ export function validateEnvironment(config: EnvironmentValues) {
       'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY must not exceed 4096 bytes',
     );
   }
+  const identityMailEncryptionKey = configuredSecrets.get(
+    'IDENTITY_MAIL_ENCRYPTION_KEY',
+  );
+  if (
+    identityMailEncryptionKey &&
+    !decodeIdentityMailEncryptionKey(config.IDENTITY_MAIL_ENCRYPTION_KEY)
+  ) {
+    errors.push(
+      'IDENTITY_MAIL_ENCRYPTION_KEY must be an exact unpadded base64url encoding of a non-degenerate 32-byte key',
+    );
+  }
 
   const releaseSha = stringValue(config.RELEASE_SHA);
   const buildTime = stringValue(config.BUILD_TIME);
@@ -235,6 +295,13 @@ export function validateEnvironment(config: EnvironmentValues) {
   );
   const identityEmailFingerprintKeyVersion = stringValue(
     config.IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION,
+  );
+  const identityMailEncryptionKeyVersion =
+    typeof config.IDENTITY_MAIL_ENCRYPTION_KEY_VERSION === 'string'
+      ? config.IDENTITY_MAIL_ENCRYPTION_KEY_VERSION
+      : '';
+  const identityMailAadEnvironment = resolveIdentityMailAadEnvironment(
+    config.IDENTITY_MAIL_AAD_ENVIRONMENT,
   );
   const configuredAccessScopeMode = stringValue(
     config.ACCESS_SCOPE_ENFORCEMENT_MODE,
@@ -294,6 +361,16 @@ export function validateEnvironment(config: EnvironmentValues) {
   if (identityEmailFingerprintKeyVersion !== 'v1') {
     errors.push('IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION must equal v1');
   }
+  if (
+    identityMailEncryptionKeyVersion !== IDENTITY_MAIL_ENCRYPTION_KEY_VERSION
+  ) {
+    errors.push('IDENTITY_MAIL_ENCRYPTION_KEY_VERSION must equal v1');
+  }
+  if (!identityMailAadEnvironment) {
+    errors.push(
+      'IDENTITY_MAIL_AAD_ENVIRONMENT must be an exact lowercase environment identifier',
+    );
+  }
 
   if (isolatedMode === 'true') {
     for (const [key, expected] of Object.entries(
@@ -340,6 +417,8 @@ export function validateEnvironment(config: EnvironmentValues) {
     EXPECTED_DATABASE_MIGRATION_COUNT: expectedMigrationCount,
     IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION:
       identityEmailFingerprintKeyVersion,
+    IDENTITY_MAIL_ENCRYPTION_KEY_VERSION: identityMailEncryptionKeyVersion,
+    IDENTITY_MAIL_AAD_ENVIRONMENT: identityMailAadEnvironment,
     ACCESS_SCOPE_ENFORCEMENT_MODE: accessScopeEnforcementMode,
     STAFF_ATTACHMENT_ACL_MODE: staffAttachmentAclMode,
     DESIGN_PARTNER_ISOLATED_MODE: isolatedMode || undefined,
@@ -364,9 +443,15 @@ export function isProductionConfig(configService: ConfigService) {
  */
 export function resolveSecuritySecret(
   configService: ConfigService,
-  key: ProductionSecretKey,
-  nonProductionFallbackKeys: readonly ProductionSecretKey[] = [],
+  key: FallbackProductionSecretKey,
+  nonProductionFallbackKeys: readonly FallbackProductionSecretKey[] = [],
 ) {
+  if ((key as string) === 'IDENTITY_MAIL_ENCRYPTION_KEY') {
+    throw new Error(
+      'IDENTITY_MAIL_ENCRYPTION_KEY cannot use a fallback secret resolver',
+    );
+  }
+
   const configured = configService.get<string>(key)?.trim();
   if (configured) {
     return configured;

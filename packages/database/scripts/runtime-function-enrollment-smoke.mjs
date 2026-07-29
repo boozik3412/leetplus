@@ -7,6 +7,7 @@ import {
   APPLICATION_RUNTIME_FUNCTIONS,
   EXCLUDED_PENDING_FUNCTIONS,
   EXCLUDED_WORKER_FUNCTIONS,
+  SEALED_RUNTIME_TABLES,
   expectedApplyConfirmation,
 } from "./runtime-function-enrollment.mjs";
 
@@ -34,14 +35,21 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact latest migration 170 and exact completed count 170 are mandatory.
+  - Exact latest migration 171 and exact completed count 171 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
+  - Deliberate target-role and PUBLIC table/column ACL drift is remediated.
   - The generated role and every grant are removed in finally.
 `;
 
 function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function exactColumnList(entry) {
+  return entry.columns
+    .map((columnName) => quoteIdentifier(columnName))
+    .join(", ");
 }
 
 function parseSafeSmokeDatabaseUrl(rawValue) {
@@ -334,9 +342,58 @@ function callIdentityReleaseBoundary(runtime) {
   );
 }
 
+function callIdentityOwnerInviteHoldBoundary(runtime) {
+  return runtime.$queryRawUnsafe(
+    `
+      SELECT public."identity_owner_invite_issue_hold_v1"(
+        CAST($1 AS TEXT),
+        CAST($2 AS TEXT),
+        CAST($3 AS TEXT),
+        CAST($4 AS INTEGER),
+        CAST($5 AS TEXT),
+        CAST($6 AS TEXT),
+        CAST($7 AS TEXT),
+        CAST($8 AS TEXT),
+        CAST($9 AS TEXT),
+        CAST($10 AS TEXT),
+        CAST($11 AS TEXT),
+        CAST($12 AS TEXT),
+        CAST($13 AS BYTEA),
+        CAST($14 AS TIMESTAMPTZ)
+      )
+    `,
+    "00000000-0000-4000-8000-000000000002",
+    "00000000-0000-4000-8000-000000000001",
+    "00000000-0000-4000-8000-000000000002",
+    1,
+    "00000000-0000-4000-8000-000000000003",
+    "a".repeat(64),
+    "test",
+    "00000000-0000-4000-8000-000000000004",
+    "00000000-0000-4000-8000-000000000005",
+    "00000000-0000-4000-8000-000000000006",
+    "00000000-0000-4000-8000-000000000007",
+    "b".repeat(64),
+    Buffer.alloc(71, 1),
+    new Date("2099-01-01T00:00:00.000Z"),
+  );
+}
+
 function selectIdentityClaimTable(runtime) {
   return runtime.$queryRawUnsafe(
     'SELECT COUNT(*)::integer AS claim_count FROM public."IdentityEmailClaim"',
+  );
+}
+
+function selectIdentityOwnerInviteCommandTable(runtime) {
+  return runtime.$queryRawUnsafe(
+    'SELECT COUNT(*)::integer AS command_count FROM public."IdentityOwnerInviteIssueCommand"',
+  );
+}
+
+function selectIdentityMailOutboxTable(runtime) {
+  return runtime.$queryRawUnsafe(
+    'SELECT COUNT(*)::integer AS outbox_count FROM public."IdentityMailOutbox"',
   );
 }
 
@@ -363,6 +420,82 @@ function insertIdentityClaimTable(runtime) {
   );
 }
 
+async function inspectSealedColumnPrivileges(admin, roleName) {
+  const totals = {
+    columns: 0,
+    effective: 0,
+    directTarget: 0,
+    directPublic: 0,
+  };
+  for (const entry of SEALED_RUNTIME_TABLES) {
+    const [row] = await admin.$queryRawUnsafe(
+      `
+        WITH relation_object AS (
+          SELECT pg_catalog.to_regclass($2) AS oid
+        ),
+        columns AS (
+          SELECT
+            attribute.attrelid,
+            attribute.attnum,
+            attribute.attacl
+          FROM relation_object
+          JOIN pg_catalog.pg_attribute AS attribute
+            ON attribute.attrelid = relation_object.oid
+           AND attribute.attnum > 0
+           AND NOT attribute.attisdropped
+        ),
+        privilege_kinds(privilege_type) AS (
+          VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES')
+        )
+        SELECT
+          (SELECT pg_catalog.count(*)::integer FROM columns)
+            AS column_count,
+          (
+            SELECT pg_catalog.count(*)::integer
+            FROM columns
+            CROSS JOIN privilege_kinds
+            WHERE pg_catalog.has_column_privilege(
+              $1,
+              columns.attrelid,
+              columns.attnum,
+              privilege_kinds.privilege_type
+            )
+          ) AS effective_count,
+          (
+            SELECT pg_catalog.count(*)::integer
+            FROM columns
+            CROSS JOIN LATERAL pg_catalog.aclexplode(
+              columns.attacl
+            ) AS column_acl
+            CROSS JOIN pg_catalog.pg_roles AS target_role
+            WHERE target_role.rolname = $1
+              AND column_acl.grantee = target_role.oid
+          ) AS direct_target_count,
+          (
+            SELECT pg_catalog.count(*)::integer
+            FROM columns
+            CROSS JOIN LATERAL pg_catalog.aclexplode(
+              columns.attacl
+            ) AS column_acl
+            WHERE column_acl.grantee = 0
+          ) AS direct_public_count
+      `,
+      roleName,
+      entry.catalogName,
+    );
+    assert.equal(
+      Number(row?.column_count ?? -1),
+      entry.columns.length,
+      `${entry.key} exact column manifest`,
+    );
+    totals.columns += Number(row.column_count);
+    totals.effective += Number(row.effective_count);
+    totals.directTarget += Number(row.direct_target_count);
+    totals.directPublic += Number(row.direct_public_count);
+  }
+  return totals;
+}
+
 async function runSmoke() {
   assert.notEqual(
     process.env.NODE_ENV,
@@ -385,6 +518,7 @@ async function runSmoke() {
   const admin = new PrismaClient({ log: [] });
   let runtime = null;
   let roleCreated = false;
+  let publicDriftGranted = false;
 
   try {
     const [server] = await admin.$queryRaw`
@@ -419,6 +553,35 @@ async function runSmoke() {
     await admin.$executeRawUnsafe(
       `GRANT ALL PRIVILEGES ON TABLE public."IdentityEmailClaim" TO ${role}`,
     );
+    await admin.$executeRawUnsafe(
+      `GRANT ALL PRIVILEGES ON TABLE public."IdentityOwnerInviteIssueCommand" TO ${role}`,
+    );
+    await admin.$executeRawUnsafe(
+      `GRANT ALL PRIVILEGES ON TABLE public."IdentityMailOutbox" TO ${role}`,
+    );
+    await admin.$executeRawUnsafe(
+      `GRANT SELECT ("emailCanonical"), UPDATE ("revision") ON TABLE public."IdentityEmailClaim" TO ${role}`,
+    );
+    await admin.$executeRawUnsafe(
+      `GRANT UPDATE ("status") ON TABLE public."IdentityMailOutbox" TO ${role}`,
+    );
+    publicDriftGranted = true;
+    await admin.$executeRawUnsafe(
+      'GRANT SELECT ON TABLE public."IdentityOwnerInviteIssueCommand" TO PUBLIC',
+    );
+    await admin.$executeRawUnsafe(
+      'GRANT SELECT ("requestId") ON TABLE public."IdentityOwnerInviteIssueCommand" TO PUBLIC',
+    );
+    await admin.$executeRawUnsafe(
+      'GRANT UPDATE ("status") ON TABLE public."IdentityMailOutbox" TO PUBLIC',
+    );
+
+    const preEnrollmentColumnAcl =
+      await inspectSealedColumnPrivileges(admin, roleName);
+    assert.equal(preEnrollmentColumnAcl.columns, 45);
+    assert.ok(preEnrollmentColumnAcl.effective > 0);
+    assert.ok(preEnrollmentColumnAcl.directTarget >= 3);
+    assert.ok(preEnrollmentColumnAcl.directPublic >= 2);
 
     const runtimeUrl = runtimeDatabaseUrl(parsed, roleName, password);
     runtime = new PrismaClient({
@@ -471,8 +634,18 @@ async function runSmoke() {
       () => callIdentityReleaseBoundary(runtime),
       /permission denied for function identity_email_claim_release_v2/iu,
     );
+    await expectSqlState(
+      "42501",
+      () => callIdentityOwnerInviteHoldBoundary(runtime),
+      /permission denied for function identity_owner_invite_issue_hold_v1/iu,
+    );
     const preEnrollmentClaims = await selectIdentityClaimTable(runtime);
     assert.equal(preEnrollmentClaims.length, 1);
+    const preEnrollmentCommands =
+      await selectIdentityOwnerInviteCommandTable(runtime);
+    assert.equal(preEnrollmentCommands.length, 1);
+    const preEnrollmentOutbox = await selectIdentityMailOutboxTable(runtime);
+    assert.equal(preEnrollmentOutbox.length, 1);
 
     const cliEnvironment = {
       DATABASE_URL: rawDatabaseUrl,
@@ -511,9 +684,40 @@ async function runSmoke() {
     );
     assert.equal(
       applyReceipt.postconditions.sealedTableWithoutRuntimePrivilegesCount,
-      1,
+      3,
+    );
+    assert.equal(
+      applyReceipt.postconditions.sealedPublicTablePrivilegeCount,
+      0,
+    );
+    assert.equal(applyReceipt.postconditions.sealedColumnCount, 45);
+    assert.equal(
+      applyReceipt.postconditions
+        .sealedColumnWithoutRuntimePrivilegesCount,
+      45,
+    );
+    assert.equal(
+      applyReceipt.postconditions
+        .sealedEffectiveColumnPrivilegeCount,
+      0,
+    );
+    assert.equal(
+      applyReceipt.postconditions.sealedDirectColumnPrivilegeCount,
+      0,
+    );
+    assert.equal(
+      applyReceipt.postconditions.sealedPublicColumnPrivilegeCount,
+      0,
     );
     assertNoSecretLeak(apply, [rawDatabaseUrl, password]);
+    const postEnrollmentColumnAcl =
+      await inspectSealedColumnPrivileges(admin, roleName);
+    assert.deepEqual(postEnrollmentColumnAcl, {
+      columns: 45,
+      effective: 0,
+      directTarget: 0,
+      directPublic: 0,
+    });
 
     const transitionKey = await callTransitionKey(runtime);
     assert.match(transitionKey, /^v1:[0-9a-f]{64}$/u);
@@ -559,6 +763,11 @@ async function runSmoke() {
     );
     await expectSqlState(
       "42501",
+      () => callIdentityOwnerInviteHoldBoundary(runtime),
+      /permission denied for function identity_owner_invite_issue_hold_v1/iu,
+    );
+    await expectSqlState(
+      "42501",
       () => selectIdentityClaimTable(runtime),
       /permission denied for table IdentityEmailClaim/iu,
     );
@@ -567,6 +776,77 @@ async function runSmoke() {
       () => insertIdentityClaimTable(runtime),
       /permission denied for table IdentityEmailClaim/iu,
     );
+    await expectSqlState(
+      "42501",
+      () => selectIdentityOwnerInviteCommandTable(runtime),
+      /permission denied for table IdentityOwnerInviteIssueCommand/iu,
+    );
+    await expectSqlState(
+      "42501",
+      () => selectIdentityMailOutboxTable(runtime),
+      /permission denied for table IdentityMailOutbox/iu,
+    );
+
+    await admin.$executeRawUnsafe(
+      `GRANT SELECT ("emailCanonical") ON TABLE public."IdentityEmailClaim" TO ${role}`,
+    );
+    await admin.$executeRawUnsafe(
+      'GRANT UPDATE ("status") ON TABLE public."IdentityMailOutbox" TO PUBLIC',
+    );
+    const isolatedColumnDrift =
+      await inspectSealedColumnPrivileges(admin, roleName);
+    assert.equal(isolatedColumnDrift.columns, 45);
+    assert.equal(isolatedColumnDrift.directTarget, 1);
+    assert.equal(isolatedColumnDrift.directPublic, 1);
+    assert.equal(isolatedColumnDrift.effective, 2);
+
+    const columnDriftCheck = runCli("check", cliEnvironment);
+    assert.notEqual(columnDriftCheck.status, 0);
+    assert.match(
+      columnDriftCheck.stderr,
+      /EFFECTIVE_COLUMN_PRIVILEGE_PRESENT/u,
+    );
+    assert.match(
+      columnDriftCheck.stderr,
+      /PUBLIC_COLUMN_PRIVILEGE_PRESENT/u,
+    );
+    assertNoSecretLeak(columnDriftCheck, [rawDatabaseUrl, password]);
+
+    const columnRemediation = runCli("apply", {
+      ...cliEnvironment,
+      RUNTIME_FUNCTION_ENROLLMENT_CONFIRM: expectedApplyConfirmation(
+        databaseName,
+        roleName,
+      ),
+    });
+    const columnRemediationReceipt = parseCliReceipt(columnRemediation);
+    assert.equal(columnRemediationReceipt.decision, "ENROLLED");
+    assert.equal(columnRemediationReceipt.changed, true);
+    assert.equal(
+      columnRemediationReceipt.postconditions
+        .sealedEffectiveColumnPrivilegeCount,
+      0,
+    );
+    assert.equal(
+      columnRemediationReceipt.postconditions
+        .sealedDirectColumnPrivilegeCount,
+      0,
+    );
+    assert.equal(
+      columnRemediationReceipt.postconditions
+        .sealedPublicColumnPrivilegeCount,
+      0,
+    );
+    assert.deepEqual(
+      await inspectSealedColumnPrivileges(admin, roleName),
+      {
+        columns: 45,
+        effective: 0,
+        directTarget: 0,
+        directPublic: 0,
+      },
+    );
+    assertNoSecretLeak(columnRemediation, [rawDatabaseUrl, password]);
 
     const replay = runCli("apply", {
       ...cliEnvironment,
@@ -593,6 +873,19 @@ async function runSmoke() {
       checkReceipt.excludedPendingFunctions.length,
       EXCLUDED_PENDING_FUNCTIONS.length,
     );
+    assert.equal(checkReceipt.postconditions.sealedColumnCount, 45);
+    assert.equal(
+      checkReceipt.postconditions.sealedEffectiveColumnPrivilegeCount,
+      0,
+    );
+    assert.equal(
+      checkReceipt.postconditions.sealedDirectColumnPrivilegeCount,
+      0,
+    );
+    assert.equal(
+      checkReceipt.postconditions.sealedPublicColumnPrivilegeCount,
+      0,
+    );
     assertNoSecretLeak(afterCheck, [rawDatabaseUrl, password]);
 
     process.stdout.write(
@@ -600,7 +893,7 @@ async function runSmoke() {
         ok: true,
         schemaVersion: 1,
         database: databaseName,
-        preEnrollmentPermissionDenials: 9,
+        preEnrollmentPermissionDenials: 10,
         applicationFunctionGrants:
           APPLICATION_RUNTIME_FUNCTIONS.length,
         excludedWorkerFunctionGrants: 0,
@@ -609,7 +902,15 @@ async function runSmoke() {
         excludedPendingFunctionGrants: 0,
         excludedPendingFunctionsDenied:
           EXCLUDED_PENDING_FUNCTIONS.length,
-        sealedIdentityClaimTablePrivileges: 0,
+        sealedTablePrivileges: 0,
+        sealedPublicTablePrivileges: 0,
+        sealedColumnPrivileges: 0,
+        sealedDirectColumnPrivileges: 0,
+        sealedPublicColumnPrivileges: 0,
+        sealedColumns: 45,
+        sealedTables: 3,
+        isolatedColumnDriftDetected: true,
+        isolatedColumnDriftRemediated: true,
         idempotentReplay: true,
         postEnrollmentCheck: "COMPLIANT",
       })}\n`,
@@ -620,6 +921,24 @@ async function runSmoke() {
       await runtime.$disconnect().catch((error) => {
         cleanupError ??= error;
       });
+    }
+    if (publicDriftGranted) {
+      for (const entry of SEALED_RUNTIME_TABLES) {
+        await admin
+          .$executeRawUnsafe(
+            `REVOKE ALL PRIVILEGES ON TABLE ${entry.grantName} FROM PUBLIC`,
+          )
+          .catch((error) => {
+            cleanupError ??= error;
+          });
+        await admin
+          .$executeRawUnsafe(
+            `REVOKE ALL PRIVILEGES (${exactColumnList(entry)}) ON TABLE ${entry.grantName} FROM PUBLIC`,
+          )
+          .catch((error) => {
+            cleanupError ??= error;
+          });
+      }
     }
     if (roleCreated) {
       await admin

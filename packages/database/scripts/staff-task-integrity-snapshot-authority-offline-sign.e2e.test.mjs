@@ -104,7 +104,7 @@ function acquisitionRequest(releaseSha, clock) {
     profile: "STAFF_TASK_INTEGRITY_PRODUCTION_LIKE_V1",
     isolationProfile: "ISOLATED_ENCRYPTED_NO_EGRESS_V1",
     releaseSha,
-    expectedState: "CURRENT_170",
+    expectedState: "CURRENT_171",
     snapshotArtifactDigest: "b".repeat(64),
     databaseIdentity: {
       currentDatabase: "leetplus_snapshot_authority_e2e",
@@ -315,7 +315,7 @@ test("child-process detached authority ceremony completes against one exact clea
     assert.equal(canonicalStringify(receipt), receiptText);
     assert.equal(receipt.kind, SIGNING_RECEIPT_KIND);
     assert.equal(receipt.releaseSha, releaseSha);
-    assert.equal(receipt.expectedState, "CURRENT_170");
+    assert.equal(receipt.expectedState, "CURRENT_171");
     assert.equal(receipt.signingKeyId, TEST_KEY_ID);
     assert.equal(receipt.authorityEnvelopeDigest, envelopeDigest);
     assert.equal(

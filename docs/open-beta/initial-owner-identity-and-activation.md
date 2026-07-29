@@ -152,9 +152,11 @@ opaque UUID `workflowLocator` и sealed PII-free
 independent review — `PASS` без P0/P1/P2. Подробный контракт:
 [identity activation locator](./identity-activation-locator.md).
 
-Исторические строки ещё требуют inventory/backfill, а sealed issue-by-locator,
-activation/outbox/mail delivery не реализованы, поэтому identity workflow
-остаётся `NO-GO`.
+Исторические строки ещё требуют inventory/backfill. Dormant
+issue-by-locator/encrypted `HOLD` aggregate реализован в migration 171, но не
+зарегистрирован и не разрешает отправку; persisted GO, activation/trial,
+controlled delivery и verified mail ещё не реализованы, поэтому identity
+workflow остаётся `NO-GO`.
 Подробный checkpoint:
 [identity invite writer boundary](./identity-invite-writer-boundary.md).
 
@@ -297,8 +299,9 @@ Serializable transaction:
 
 Provisioning не запускает trial и не создаёт mail outbox.
 
-Service-level shell, writer boundary и PII-free locator replay реализованы в
-`CURRENT_170` candidate, но routes остаются намеренно закрыты:
+Service-level shell, writer boundary, PII-free locator replay и dormant
+encrypted `HOLD` aggregate реализованы в `CURRENT_171` candidate, но routes
+остаются намеренно закрыты:
 
 ```text
 503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING
@@ -337,6 +340,15 @@ Exact-head `8dfe219...` / CI `30493779099` (`run #47`) принят,
 `3/3 PASS`; independent review — `PASS` без P0/P1/P2, release artifact и
 three-clone tooling пересобраны для migration 170.
 
+`CURRENT_171` candidate добавляет atomic hard-coded `NETWORK OWNER`
+`UserInvite` hash, encrypted immutable `HOLD` outbox, claim transition,
+idempotency command и PII-free audit/receipt. Issue RPC остаётся
+`EXCLUDED_PENDING`, runtime allowlist — ровно семь, target/PUBLIC privileges
+на sealed relations/columns отсутствуют. Локально прошли clean `171/171`,
+populated `170 → 171`, hostile-default-ACL rollback/retry,
+`1 CREATED + 99 REPLAYED + 0 deadlocks`, late-fault rollback и crypto
+known-answer vector. Exact-head remote CI этого candidate ещё pending.
+
 ### 5.2. Activation
 
 ```http
@@ -361,7 +373,8 @@ Serializable transaction использует один глобальный lock
 accept/reissue/revoke:
 
 ```text
-nonlocking authority/request preflight
+canonical authority/request preflight
+  → request-scoped advisory lock и command replay lookup
   → bounded locator discovery
   → canonical e-mail advisory lock
   → exact IdentityEmailClaim row FOR UPDATE
@@ -369,6 +382,9 @@ nonlocking authority/request preflight
   → admission/gate/profile rows в deterministic order
   → invite/outbox/command writes
 ```
+
+Coordinator выполняет не более одного issue RPC в одной короткой transaction;
+batch issue запрещён до отдельного изменения и теста lock protocol.
 
 Порядок `Tenant → identity claim` запрещён: он инвертирует действующий
 accept-path и создаёт риск deadlock.
@@ -464,7 +480,11 @@ Production startup обязан завершаться ошибкой, если 
 - HTTPS `WEB_URL`;
 - SMTP host/port/from;
 - обязательный TLS/verification mode;
-- `IDENTITY_MAIL_ENCRYPTION_KEY` и active key version;
+- отдельный `IDENTITY_MAIL_ENCRYPTION_KEY`: ровно 32 CSPRNG-байта в canonical
+  unpadded base64url строке из 43 символов, без fallback/reuse;
+- exact `IDENTITY_MAIL_ENCRYPTION_KEY_VERSION=v1`;
+- stable lowercase `IDENTITY_MAIL_AAD_ENVIRONMENT` по шаблону
+  `[a-z0-9][a-z0-9._-]{0,63}`, не выводимый из `NODE_ENV`;
 - отдельный сильный `IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY` и его active
   version;
 - token HMAC/hash version;
@@ -478,6 +498,11 @@ Fingerprint HMAC startup-validation candidate уже реализован: тр�
 отдельный production secret, запрещён reuse и принимается только key version
 `v1`; CI environment contract обновлён. До deploy остаётся операционно
 создать, защищённо установить и аттестовать отдельное production-значение.
+Тот же fail-closed принцип применяется к identity-mail key: production и
+isolated startup не принимают missing, malformed, non-canonical, reused key,
+неподдерживаемую version или отсутствующий AAD environment. Само наличие этих
+переменных не регистрирует mail service, не открывает route и не разрешает
+outbound.
 
 Public login/invite endpoints получают rate limit и progressive backoff.
 Login policy по `emailVerifiedAt` фиксируется явно; неявный обход запрещён.
@@ -525,11 +550,16 @@ Two-tenant:
 - migration 170: immutable opaque `workflowLocator`, partial unique
   `INVITE | USER` index и PII-free sealed locator assert; exact-head
   `8dfe219...` / CI `30493779099` и independent review приняты;
+- migration 171 candidate: atomic hard-coded `NETWORK OWNER` invite hash,
+  encrypted immutable `HOLD` outbox, persisted claim transition, immutable
+  idempotency command и PII-free audit/receipt; RPC dormant и
+  `EXCLUDED_PENDING`;
 - shell-only service: `PILOT/SUSPENDED/PROVISIONING`, inactive Store, six-row
   profile, HMAC audit, без User/UserInvite/token/trial/outbox;
-- local PostgreSQL `16.13`: historical `169/169` identity `1/99`,
-  revoke→reserve и shell `2/2`; candidate populated `169 → 170`, clean
-  `170/170`, locator/ACL/rollback checks и shell `2/2`;
+- local PostgreSQL 16: historical `169/169` identity `1/99`,
+  revoke→reserve и shell `2/2`; locator populated `169 → 170`, а current
+  candidate — clean `171/171`, populated `170 → 171`,
+  hostile-default/column ACL/replay/rollback checks;
 - engineering exact-head `CURRENT_169`
   `f5d39fd89145c995c51e7005698327f5581a5cd8`, CI `30467882578`
   (`run #37`): `3/3 PASS`, independent review без новых P0/P1;
@@ -564,11 +594,12 @@ Two-tenant:
 2. Использовать принятый `MIGRATION_170_ACTIVATION_LOCATOR` exact-head и
    release-bound inventory; full-table/column-wide `IdentityEmailClaim`
    SELECT fallback остаётся запрещён.
-3. Реализовать sealed issue-by-locator: внутри PostgreSQL скопировать canonical
-   e-mail непосредственно в `UserInvite`, атомарно перевести claim и вернуть
-   только PII-free receipt.
-4. Добавить encrypted identity mail outbox и fail-closed mail config.
-5. Реализовать release-gate attestations и tenant admission decision.
+3. Принять exact-head migration 171 и release-bound legacy inventory по
+   remote CI; issue RPC, provider и routes сохранить dormant.
+4. Добавить сквозной `seal → RPC → persisted outbox → open` PostgreSQL test и
+   application invariant «один issue RPC на короткую transaction».
+5. Реализовать release-gate attestations, persisted tenant admission decision
+   и controlled `HOLD→PENDING`.
 6. Реализовать initial OWNER activation, trial start, encrypted
    issue/reissue/resend delivery и emergency suspend поверх уже sealed
    application revoke/accept state machine; оба admin route до этого

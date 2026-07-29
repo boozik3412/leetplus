@@ -24,17 +24,23 @@ Additional environment for --apply:
   RUNTIME_FUNCTION_ENROLLMENT_CONFIRM
 
 The exact confirmation value is:
-  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20260729233000_identity_activation_locator 170
+  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20260730010000_identity_owner_invite_hold_outbox 171
 
 Safety contract:
   - The command never creates a role, database, schema, table, or function.
   - The migration/admin DATABASE_URL must be different from the target role.
-  - PostgreSQL 16, completed migration 166, exact latest migration 170 and exact count 170 are required.
+  - PostgreSQL 16, completed migration 166, exact latest migration 171 and exact count 171 are required.
   - Only seven exact application functions receive EXECUTE: two delivery
     helpers and five sealed identity-email boundaries.
   - The worker-only durable Event writer is explicitly excluded.
   - The raw identity-email lock helper remains excluded.
-  - All runtime table privileges on IdentityEmailClaim are explicitly revoked.
+  - The dormant OWNER invite HOLD writer remains excluded.
+  - All table-level privileges on IdentityEmailClaim,
+    IdentityOwnerInviteIssueCommand, and IdentityMailOutbox are explicitly
+    revoked from both the runtime role and PUBLIC.
+  - All SELECT, INSERT, UPDATE, and REFERENCES column privileges are revoked
+    from the runtime role and PUBLIC across exact reviewed column manifests;
+    compliance verifies attacl and effective has_column_privilege results.
   - No password, connection URL, token, or function owner is printed.
 `;
 

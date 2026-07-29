@@ -2,8 +2,8 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.22                                                       |
-| Дата       | 29.07.2026                                                 |
+| Версия     | 1.23                                                       |
+| Дата       | 30.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
 | Topology   | `Tenant A/A1..A4` + новый `Tenant B/B1`                    |
@@ -21,24 +21,27 @@ Production IDs, email, телефоны, invite URL/token, password, database UR
 API keys, encryption/signing secrets и raw business data запрещено сохранять
 в git. В документах используются только aliases `Tenant A/B` и `Store A1..A4/B1`.
 
-## Текущий engineering candidate: `CURRENT_170`
+## Текущий engineering candidate: `CURRENT_171`
 
-Migration `20260729233000_identity_activation_locator` расширяет принятый
-`CURRENT_169` prerequisite immutable opaque `workflowLocator` и sealed
-PII-free locator assert. Shell replay теперь подтверждает reservation по
-persisted UUID без raw e-mail. Runtime candidate имеет exact семь application
-RPC — две guest-game и пять identity — при zero effective
-`IdentityEmailClaim` table privileges.
+Migration `20260730010000_identity_owner_invite_hold_outbox` поверх принятого
+`CURRENT_170` locator checkpoint добавляет dormant atomic writer для
+hard-coded `NETWORK OWNER`, hash-only `UserInvite`, immutable idempotency
+command и encrypted outbox только в статусе `HOLD`. Locator остаётся
+correlation, а не authority; writer не зарегистрирован в application runtime,
+не имеет PUBLIC/runtime `EXECUTE`, не меняет lifecycle/trial и не отправляет
+письмо. Runtime candidate сохраняет exact семь application RPC — две
+guest-game и пять identity — при zero effective table/column privileges на
+sealed identity relations.
 
-PostgreSQL `16.13` подтвердил populated upgrade `169 → 170`, clean
-state `170/170`, locator backfill/immutability, PII-free exact receipt,
-lock-race/ACL checks, transactional rollback при legacy subject не в exact
-lowercase trimmed UUID, включая uppercase/whitespace, и shell integration
-`2/2`. Exact-head `8dfe219...` / CI `30493779099` (`run #47`) принят,
-`3/3 PASS`; independent review — `PASS` без P0/P1/P2, release artifact и
-three-clone tooling пересобраны для `CURRENT_170`. Migration не создаёт
-`UserInvite`, token, outbox, trial или письмо и не включает admin route.
-Launch checkboxes ниже этим не закрываются.
+Локальный PostgreSQL `16.13` подтвердил populated upgrade `170 → 171`, clean
+state `171/171`, atomic create/replay, rollback, exact 37-column ACL, hostile
+default и column-only ACL rejection. Same-request race дал
+`1 CREATED + 99 REPLAYED`; два разных request к одному locator дали
+`1 CREATED + 1 generic conflict`, zero partial loser writes и zero deadlocks.
+Exact Git-checksum inventory и exact-head CI для `CURRENT_171` ещё pending.
+Принятый `CURRENT_170` exact-head `8dfe219...` / CI `30493779099`
+(`run #47`), `3/3 PASS`, остаётся historical prerequisite. Admin routes
+сохраняют `503`; launch checkboxes ниже этим не закрываются.
 
 Принятый historical `CURRENT_169` prerequisite сохраняет следующие evidence:
 
@@ -83,7 +86,7 @@ Historical engineering exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
 `3/3 PASS`, и независимым review без новых P0 только как historical
-prerequisite. Ни historical evidence, ни локальный `CURRENT_170` candidate не
+prerequisite. Ни historical evidence, ни локальный `CURRENT_171` candidate не
 являются production-like admission: persisted GO, production deploy и доступ
 тестеру ещё не приняты.
 
@@ -130,8 +133,9 @@ prerequisite. Ни historical evidence, ни локальный `CURRENT_170` ca
 - [ ] Runtime DB role либо DB invariant запрещает прямое изменение
       `TenantModuleEntitlement` в обход profile-revision workflow.
 - [ ] Runtime DB role enrolled как отдельная non-owner identity: имеет exact
-      seven-RPC allowlist на `CURRENT_170` и zero effective
-      `IdentityEmailClaim` table DML;
+      seven-RPC allowlist на `CURRENT_171` и zero effective table/column
+      privileges на `IdentityEmailClaim`, `IdentityOwnerInviteIssueCommand`
+      и `IdentityMailOutbox`;
       migration owner/superuser не используется приложением.
 - [ ] Delivery, общий Langame sync и остальные jobs имеют durable
       claim/lease; старый permit не может commit/ack/send после suspend, а
@@ -171,22 +175,23 @@ Evidence:
       Legacy design-partner CLI writer isolation принят exact-head, но checkbox
       остаётся открытым до inventory/backfill строк без provenance и реализации
       activation/outbox writers.
-- [x] `BETA-IAM-004B` engineering read-only inventory на exact `CURRENT_169`
-      принят по
-      exact-head tests/CI/review: все User, включая inactive, считаются
+- [ ] `BETA-IAM-004B` engineering read-only inventory на exact `CURRENT_171`
+      реализован как candidate; exact-head PostgreSQL/CI evidence ещё pending.
+      Все User, включая inactive, считаются
       owner-кандидатами; invite — только live candidate; collision/mismatch/
       invalid и bound claim + `NULL` provenance блокируют, terminal history не
       получает synthetic revision, Platform Admin/unverified User и legacy
-      live token требуют review. Exact catalog/22-column ACL, strict remote TLS,
-      approved production database digest и release-artifact binding должны
-      пройти fail-closed; ownership dependencies, system-schema/object,
+      live token требуют review. Exact catalog/23-column ACL, ordered
+      `migration_name + checksum`, strict remote TLS, approved production
+      database digest и release-artifact binding должны пройти fail-closed;
+      ownership dependencies, system-schema/object,
       FDW/parameter/type authority равны zero, `pg_catalog` PUBLIC ACL не
       расширен относительно `pg_init_privs`, built-in `information_schema`
       сохраняет только штатный `SELECT/USAGE` без grant option, executable
       high-OID system function и system `SECURITY DEFINER` отсутствуют, exact
-      восемь internal RI FK triggers enabled, frozen lock/package manifest и
+      `28` internal RI FK triggers enabled, frozen lock/package manifest и
       Prisma `6.19.3` совпадают с artifact. Это закрывает только engineering
-      checkbox: production inventory не выполнялся, а signed
+      contract после exact-head evidence: production inventory не выполнялся, а signed
       proposal/apply/rollback остаются отдельными будущими решениями.
 - [ ] До production deploy создано, защищённо установлено и аттестовано
       отдельное fingerprint HMAC secret value version `v1`; оно не
@@ -237,7 +242,10 @@ Evidence:
 
 - [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
       matrix, включая case-variant email collision;
-- [x] exact-head CI и independent review для `CURRENT_170` activation locator:
+- [ ] exact-head CI и independent review для текущего `CURRENT_171` dormant
+      OWNER invite HOLD candidate;
+- [x] historical exact-head CI и independent review для `CURRENT_170`
+      activation locator:
       `8dfe219...` / CI `30493779099` (`run #47`), `3/3 PASS`, review без
       P0/P1/P2; это не является production-like admission;
 - [x] remote exact-head CI и independent review для `CURRENT_169`:

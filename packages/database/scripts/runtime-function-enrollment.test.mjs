@@ -46,10 +46,10 @@ function compliantSnapshot() {
     migration: {
       completedTargetCount: 1,
       completedRequiredCount: 1,
-      completedCount: 170,
+      completedCount: 171,
       unfinishedCount: 0,
       latestCompletedMigration:
-        "20260729233000_identity_activation_locator",
+        "20260730010000_identity_owner_invite_hold_outbox",
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -104,6 +104,8 @@ function compliantSnapshot() {
     sealedTables: SEALED_RUNTIME_TABLES.map((entry) => ({
       key: entry.key,
       catalogName: entry.catalogName,
+      expectedColumns: [...entry.columns],
+      columnManifestMatches: true,
       exists: true,
       ownerName: "migration_owner",
       canSelect: false,
@@ -114,6 +116,19 @@ function compliantSnapshot() {
       canReference: false,
       canTrigger: false,
       publicAnyPrivilege: false,
+      publicAnyColumnPrivilege: false,
+      columns: entry.columns.map((name) => ({
+        name,
+        canSelect: false,
+        canInsert: false,
+        canUpdate: false,
+        canReference: false,
+        directSelect: false,
+        directInsert: false,
+        directUpdate: false,
+        directReference: false,
+        publicAnyPrivilege: false,
+      })),
       grantorCanRevoke: true,
     })),
   };
@@ -151,7 +166,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260729233000_identity_activation_locator 170$/u,
+    /20260730010000_identity_owner_invite_hold_outbox 171$/u,
   );
 });
 
@@ -208,7 +223,7 @@ for (const [environment, expectedCode] of [
 test("builds only the exact application grants and worker exclusion", () => {
   const statements =
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime");
-  assert.equal(statements.length, 20);
+  assert.equal(statements.length, 32);
   assert.equal(
     statements.filter((statement) => statement.startsWith("GRANT EXECUTE"))
       .length,
@@ -224,7 +239,21 @@ test("builds only the exact application grants and worker exclusion", () => {
     statements.filter((statement) =>
       statement.startsWith("REVOKE EXECUTE"),
     ).length,
-    5,
+    6,
+  );
+  assert.equal(
+    statements.filter((statement) =>
+      statement.startsWith("REVOKE ALL PRIVILEGES ("),
+    ).length,
+    6,
+  );
+  assert.equal(
+    statements.filter(
+      (statement) =>
+        statement.startsWith("REVOKE ALL PRIVILEGES ON TABLE") &&
+        statement.endsWith("FROM PUBLIC"),
+    ).length,
+    3,
   );
 
   const sql = statements.join("\n");
@@ -240,10 +269,34 @@ test("builds only the exact application grants and worker exclusion", () => {
   assert.match(sql, /identity_email_claim_release_v1/u);
   assert.match(sql, /identity_email_claim_transition_v2/u);
   assert.match(sql, /identity_email_claim_release_v2/u);
+  assert.match(sql, /identity_owner_invite_issue_hold_v1/u);
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
   );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityOwnerInviteIssueCommand"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityMailOutbox"/u,
+  );
+  for (const entry of SEALED_RUNTIME_TABLES) {
+    const exactColumns = entry.columns
+      .map((columnName) => `"${columnName}"`)
+      .join(", ");
+    assert.ok(
+      statements.includes(
+        `REVOKE ALL PRIVILEGES (${exactColumns}) ON TABLE ${entry.grantName} FROM "leetplus_runtime"`,
+      ),
+    );
+    assert.ok(
+      statements.includes(
+        `REVOKE ALL PRIVILEGES (${exactColumns}) ON TABLE ${entry.grantName} FROM PUBLIC`,
+      ),
+    );
+  }
   assert.doesNotMatch(sql, /\bALL FUNCTIONS\b/iu);
   assert.doesNotMatch(sql, /\bALTER DEFAULT PRIVILEGES\b/iu);
   assert.doesNotMatch(sql, /\bTO PUBLIC\b/iu);
@@ -295,7 +348,33 @@ test("detects authority, migration and function ACL drift independently", () => 
   snapshot.functions.find(
     (entry) => entry.key === "identityEmailClaimDirectLock",
   ).directExecute = true;
+  snapshot.functions.find(
+    (entry) => entry.key === "identityOwnerInviteIssueHold",
+  ).effectiveExecute = true;
+  snapshot.functions.find(
+    (entry) => entry.key === "identityOwnerInviteIssueHold",
+  ).directExecute = true;
   snapshot.sealedTables[0].canSelect = true;
+  snapshot.sealedTables.find(
+    (entry) => entry.key === "identityOwnerInviteIssueCommand",
+  ).canInsert = true;
+  snapshot.sealedTables.find(
+    (entry) => entry.key === "identityMailOutbox",
+  ).canSelect = true;
+  snapshot.sealedTables[0].columns[0].canSelect = true;
+  snapshot.sealedTables[0].columns[0].directSelect = true;
+  const commandTable = snapshot.sealedTables.find(
+    (entry) => entry.key === "identityOwnerInviteIssueCommand",
+  );
+  commandTable.columns[1].canUpdate = true;
+  commandTable.columns[1].directUpdate = true;
+  const outboxTable = snapshot.sealedTables.find(
+    (entry) => entry.key === "identityMailOutbox",
+  );
+  outboxTable.publicAnyPrivilege = true;
+  outboxTable.columns[2].canSelect = true;
+  outboxTable.columns[2].publicAnyPrivilege = true;
+  outboxTable.publicAnyColumnPrivilege = true;
   const config = parseRuntimeFunctionEnrollmentConfig(
     SAFE_ENVIRONMENT,
     "check",
@@ -318,12 +397,36 @@ test("detects authority, migration and function ACL drift independently", () => 
     [
       "durableDeliveryEventWriter:WORKER_EXECUTE_PRESENT",
       "identityEmailClaimDirectLock:PENDING_EXECUTE_PRESENT",
+      "identityOwnerInviteIssueHold:PENDING_EXECUTE_PRESENT",
       "identityEmailClaim:DIRECT_TABLE_PRIVILEGE_PRESENT",
+      "identityEmailClaim:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
+      "identityEmailClaim:DIRECT_COLUMN_PRIVILEGE_PRESENT",
+      "identityOwnerInviteIssueCommand:DIRECT_TABLE_PRIVILEGE_PRESENT",
+      "identityOwnerInviteIssueCommand:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
+      "identityOwnerInviteIssueCommand:DIRECT_COLUMN_PRIVILEGE_PRESENT",
+      "identityMailOutbox:DIRECT_TABLE_PRIVILEGE_PRESENT",
+      "identityMailOutbox:PUBLIC_TABLE_PRIVILEGE_PRESENT",
+      "identityMailOutbox:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
+      "identityMailOutbox:PUBLIC_COLUMN_PRIVILEGE_PRESENT",
     ],
   );
 });
 
-test("binds enrollment to exact current migration 170 and exact count 170", () => {
+test("rejects any exact sealed-column manifest drift before enrollment", () => {
+  const snapshot = compliantSnapshot();
+  snapshot.sealedTables[0].columnManifestMatches = false;
+  const config = parseRuntimeFunctionEnrollmentConfig(
+    SAFE_ENVIRONMENT,
+    "check",
+  );
+
+  assert.deepEqual(
+    runtimeFunctionEnrollmentPreconditionViolations(snapshot, config),
+    ["identityEmailClaim:COLUMN_MANIFEST_MISMATCH"],
+  );
+});
+
+test("binds enrollment to exact current migration 171 and exact count 171", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

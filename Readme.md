@@ -518,6 +518,9 @@ MAIL_SECURE="false"
 MAIL_USER=""
 MAIL_PASS=""
 MAIL_FROM="LeetPlus <no-reply@leetplus.ru>"
+IDENTITY_MAIL_ENCRYPTION_KEY=""
+IDENTITY_MAIL_ENCRYPTION_KEY_VERSION="v1"
+IDENTITY_MAIL_AAD_ENVIRONMENT="development"
 SYNC_SERVICE_TOKEN="<unique-strong-scheduler-secret>"
 REPORT_DIGEST_SCHEDULER_ENABLED="false"
 REPORT_DIGEST_SCHEDULER_TIMEZONE_OFFSET_MINUTES="300"
@@ -535,9 +538,28 @@ REPORT_DIGEST_SCHEDULER_INTERVAL_MS="60000"
 
 В production API запускается только при наличии независимых секретов
 `JWT_SECRET`, `GUEST_PORTAL_JWT_SECRET`, `GUEST_GAME_REFERRAL_SECRET`,
-`APP_ENCRYPTION_KEY`,
-`INTEGRATION_ENCRYPTION_KEY` и `SYNC_SERVICE_TOKEN`. Каждый секрет должен
-содержать не менее 32 символов, не быть placeholder и не совпадать с другим.
+`APP_ENCRYPTION_KEY`, `INTEGRATION_ENCRYPTION_KEY`,
+`IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY`, `IDENTITY_MAIL_ENCRYPTION_KEY` и
+`SYNC_SERVICE_TOKEN`. Обычные строковые секреты должны содержать не менее
+32 символов, не быть placeholder и не совпадать друг с другом.
+
+`IDENTITY_MAIL_ENCRYPTION_KEY` имеет более строгий контракт: это ровно
+32 CSPRNG-байта, закодированные canonical unpadded base64url строкой из
+43 символов. Ключ создаётся вне репозитория и не может переиспользовать JWT,
+APP, integration, fingerprint или иной production secret. Дополнительно
+обязательны exact `IDENTITY_MAIL_ENCRYPTION_KEY_VERSION=v1` и стабильный
+`IDENTITY_MAIL_AAD_ENVIRONMENT`, соответствующий шаблону
+`[a-z0-9][a-z0-9._-]{0,63}`. Environment является несекретным persisted AAD
+binding для изоляции local/staging/production и restore-контуров; его нельзя
+неявно выводить из `NODE_ENV`.
+
+Сгенерировать допустимый ключ можно локально, не сохраняя результат в shell
+history или репозитории:
+
+```powershell
+node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
 Также production требует явный `ACCESS_SCOPE_ENFORCEMENT_MODE`:
 `SHADOW` только пишет диагностику неклассифицированных аккаунтов и всё равно
 отказывает им в доступе; `ENFORCED` является штатным режимом после

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import {
@@ -16,6 +17,7 @@ import {
   assertRuntimeDependencyVersions,
   buildCatalogState,
   buildInventoryState,
+  buildMigrationSourceArtifact,
   buildMigrationState,
   buildPrivilegeState,
   buildReadOnlyDatabaseUrl,
@@ -69,15 +71,19 @@ function expectedMigrationArtifact() {
         ? CURRENT_EXPECTED_LATEST_MIGRATION
         : `${String(index).padStart(14, "0")}_identity_inventory_test`,
   );
-  return {
+  return buildMigrationSourceArtifact(
     migrationNames,
-    sourceManifestDigest: "b".repeat(64),
-  };
+    migrationNames.map((migrationName) => ({
+      path: `packages/database/prisma/migrations/${migrationName}/migration.sql`,
+      content: Buffer.from(`-- fixture ${migrationName}\n`, "utf8"),
+    })),
+  );
 }
 
 function appliedMigrationRows(artifact = expectedMigrationArtifact()) {
-  return artifact.migrationNames.map((migrationName) => ({
+  return artifact.migrationNames.map((migrationName, index) => ({
     migration_name: migrationName,
+    checksum: artifact.migrationChecksums[index],
     finished_at: new Date("2026-07-29T00:00:00.000Z"),
     rolled_back_at: null,
   }));
@@ -85,22 +91,29 @@ function appliedMigrationRows(artifact = expectedMigrationArtifact()) {
 
 function catalogRow(overrides = {}) {
   return {
-    expected_relation_count: "5",
-    matched_relation_count: "5",
-    expected_column_count: "30",
-    matched_column_count: "30",
-    matched_constraint_count: "11",
-    actual_constraint_count: "11",
-    matched_index_count: "9",
-    actual_index_count: "9",
-    matched_function_count: "10",
-    actual_function_count: "10",
-    matched_enum_label_count: "3",
-    total_enum_label_count: "3",
-    matched_trigger_count: "1",
-    actual_identity_claim_trigger_count: "1",
-    matched_ri_trigger_count: "8",
-    actual_ri_trigger_count: "8",
+    expected_relation_count: "7",
+    matched_relation_count: "7",
+    dormant_relation_owner_mismatch_count: "0",
+    dormant_relation_nonowner_acl_count: "0",
+    dormant_column_nonowner_acl_count: "0",
+    dormant_function_owner_mismatch_count: "0",
+    dormant_function_nonowner_acl_count: "0",
+    expected_column_count: "68",
+    matched_column_count: "68",
+    expected_exact_identity_column_count: "45",
+    actual_exact_identity_column_count: "45",
+    matched_constraint_count: "45",
+    actual_constraint_count: "45",
+    matched_index_count: "24",
+    actual_index_count: "24",
+    matched_function_count: "13",
+    actual_function_count: "13",
+    matched_enum_label_count: "5",
+    total_enum_label_count: "5",
+    matched_trigger_count: "3",
+    actual_identity_trigger_count: "3",
+    matched_ri_trigger_count: "28",
+    actual_ri_trigger_count: "28",
     ...overrides,
   };
 }
@@ -543,10 +556,10 @@ test("timeouts are bounded and embedded in the one-connection read-only URL", ()
 });
 
 test("the manifest exposes exactly two create-only proposal codes and exact column ACL", () => {
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 170);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 171);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260729233000_identity_activation_locator",
+    "20260730010000_identity_owner_invite_hold_outbox",
   );
   assert.deepEqual(
     Object.entries(FINDING_MANIFEST)
@@ -565,6 +578,7 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.deepEqual(REQUIRED_COLUMN_SELECTS, {
     _prisma_migrations: [
       "migration_name",
+      "checksum",
       "finished_at",
       "rolled_back_at",
     ],
@@ -597,7 +611,7 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.equal(Object.hasOwn(REQUIRED_COLUMN_SELECTS, "Tenant"), false);
   assert.equal(
     REQUIRED_COLUMN_SELECTS._prisma_migrations.includes("checksum"),
-    false,
+    true,
   );
   assert.equal(
     REQUIRED_COLUMN_SELECTS.IdentityEmailClaim.includes("workflowLocator"),
@@ -624,14 +638,20 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     );
   }
   for (const catalogDrift of [
-    { matched_column_count: "29" },
-    { matched_constraint_count: "10" },
-    { actual_index_count: "10" },
-    { actual_function_count: "11" },
-    { total_enum_label_count: "4" },
-    { actual_identity_claim_trigger_count: "2" },
-    { matched_ri_trigger_count: "7" },
-    { actual_ri_trigger_count: "9" },
+    { dormant_relation_owner_mismatch_count: "1" },
+    { dormant_relation_nonowner_acl_count: "1" },
+    { dormant_column_nonowner_acl_count: "1" },
+    { dormant_function_owner_mismatch_count: "1" },
+    { dormant_function_nonowner_acl_count: "1" },
+    { matched_column_count: "67" },
+    { actual_exact_identity_column_count: "46" },
+    { matched_constraint_count: "44" },
+    { actual_index_count: "25" },
+    { actual_function_count: "14" },
+    { total_enum_label_count: "6" },
+    { actual_identity_trigger_count: "4" },
+    { matched_ri_trigger_count: "27" },
+    { actual_ri_trigger_count: "29" },
   ]) {
     assert.equal(buildCatalogState(catalogRow(catalogDrift)).ready, false);
   }
@@ -678,6 +698,37 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     CATALOG_STATE_SQL,
     /388dcc06ff27451656b844d302b4a536f7720062f470f0c2b8befd884be9c6a7/u,
   );
+  assert.match(CATALOG_STATE_SQL, /IdentityOwnerInviteIssueCommand/u);
+  assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox/u);
+  assert.match(CATALOG_STATE_SQL, /secretCiphertext/u);
+  assert.match(
+    CATALOG_STATE_SQL,
+    /identity_owner_invite_issue_hold_v1/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /787e025ba9fa501fc3d62dde7502c0e82bf01afeac1858031db54a6b2b982533/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /IdentityMailOutbox_hold_immutable_trigger/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /IdentityOwnerInviteIssueCommand_immutable_trigger/u,
+  );
+  assert.match(CATALOG_STATE_SQL, /IdentityMailOutboxStatus/u);
+  assert.match(CATALOG_STATE_SQL, /IdentityMailTemplate/u);
+  assert.match(CATALOG_STATE_SQL, /actual_exact_identity_column_count/u);
+  assert.match(CATALOG_STATE_SQL, /dormant_relation_nonowner_acl_count/u);
+  assert.match(CATALOG_STATE_SQL, /dormant_column_nonowner_acl_count/u);
+  assert.match(CATALOG_STATE_SQL, /dormant_function_nonowner_acl_count/u);
+  assert.match(CATALOG_STATE_SQL, /pg_catalog\.aclexplode/iu);
+  assert.match(CATALOG_STATE_SQL, /pg_catalog\.acldefault\('f'/u);
+  assert.doesNotMatch(
+    JSON.stringify(REQUIRED_COLUMN_SELECTS),
+    /IdentityOwnerInviteIssueCommand|IdentityMailOutbox|tokenHash|secretCiphertext/u,
+  );
   assert.match(CATALOG_STATE_SQL, /format_type/iu);
   assert.match(CATALOG_STATE_SQL, /matched_ri_trigger_count/iu);
   assert.match(CATALOG_STATE_SQL, /trigger_row\.tgenabled = 'O'/u);
@@ -689,6 +740,100 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(PRIVILEGE_STATE_SQL, /initial_row\.objsubid = attribute_row\.attnum/iu);
   assert.match(PRIVILEGE_STATE_SQL, /function_row\.prosecdef/iu);
   assert.match(PRIVILEGE_STATE_SQL, /function_row\.oid >= 16384/u);
+});
+
+test("migration artifact and database state bind ordered Git blob checksums", () => {
+  const firstName = "20260730010000_first_fixture";
+  const secondName = "20260730010100_second_fixture";
+  const firstContent = Buffer.from("-- first fixture\r\n", "utf8");
+  const secondContent = Buffer.from("-- second fixture\n", "utf8");
+  const artifact = buildMigrationSourceArtifact(
+    [firstName, secondName],
+    [
+      {
+        path: `packages/database/prisma/migrations/${firstName}/migration.sql`,
+        content: firstContent,
+      },
+      {
+        path: `packages/database/prisma/migrations/${secondName}/migration.sql`,
+        content: secondContent,
+      },
+    ],
+  );
+  assert.deepEqual(artifact.migrationChecksums, [
+    createHash("sha256").update(firstContent).digest("hex"),
+    createHash("sha256").update(secondContent).digest("hex"),
+  ]);
+  assert.notEqual(
+    artifact.migrationChecksums[0],
+    createHash("sha256")
+      .update(Buffer.from("-- first fixture\n", "utf8"))
+      .digest("hex"),
+  );
+  assert.match(artifact.sourceManifestDigest, /^[0-9a-f]{64}$/u);
+  assert.throws(
+    () =>
+      buildMigrationSourceArtifact(
+        [firstName],
+        [
+          {
+            path: `packages/database/prisma/migrations/${secondName}/migration.sql`,
+            content: firstContent,
+          },
+        ],
+      ),
+    { code: "SOURCE_MIGRATION_MANIFEST_INVALID" },
+  );
+
+  const currentArtifact = expectedMigrationArtifact();
+  const currentRows = appliedMigrationRows(currentArtifact);
+  const admitted = buildMigrationState(currentArtifact, currentRows);
+  assert.equal(admitted.ready, true);
+  assert.equal(admitted.orderedChecksumsMatched, true);
+  assert.equal(admitted.checksumMismatchCount, 0);
+  assert.equal(admitted.invalidChecksumCount, 0);
+  assert.equal(
+    admitted.databaseMigrationManifestDigest,
+    currentArtifact.sourceManifestDigest,
+  );
+
+  const changedChecksum =
+    currentRows[0].checksum[0] === "0"
+      ? `1${currentRows[0].checksum.slice(1)}`
+      : `0${currentRows[0].checksum.slice(1)}`;
+  const checksumDrift = buildMigrationState(currentArtifact, [
+    { ...currentRows[0], checksum: changedChecksum },
+    ...currentRows.slice(1),
+  ]);
+  assert.equal(checksumDrift.ready, false);
+  assert.equal(checksumDrift.orderedNamesMatched, true);
+  assert.equal(checksumDrift.orderedChecksumsMatched, false);
+  assert.equal(checksumDrift.checksumMismatchCount, 1);
+  assert.equal(checksumDrift.invalidChecksumCount, 0);
+  const serializedDrift = JSON.stringify(checksumDrift);
+  assert.equal(serializedDrift.includes(changedChecksum), false);
+  assert.equal(
+    serializedDrift.includes(currentArtifact.migrationChecksums[0]),
+    false,
+  );
+
+  const invalidChecksum = buildMigrationState(currentArtifact, [
+    { ...currentRows[0], checksum: "A".repeat(64) },
+    ...currentRows.slice(1),
+  ]);
+  assert.equal(invalidChecksum.ready, false);
+  assert.equal(invalidChecksum.invalidChecksumCount, 1);
+  assert.throws(
+    () =>
+      buildMigrationState(
+        {
+          ...currentArtifact,
+          sourceManifestDigest: "f".repeat(64),
+        },
+        currentRows,
+      ),
+    { code: "EXPECTED_MIGRATION_ARTIFACT_INVALID" },
+  );
 });
 
 test("buildInventoryState produces PASS, READY, REVIEW, and BLOCKED deterministically", () => {
@@ -829,7 +974,11 @@ test("reports are HMAC-bound, aggregate-only, and reject tampering", () => {
   assert.equal(report.safety.outputContainsRoleName, false);
   assert.equal(report.safety.outputContainsRowIdentifiers, false);
   assert.equal(report.safety.outputContainsEmailAddresses, false);
+  assert.equal(report.safety.outputContainsMigrationChecksums, false);
   assert.equal(report.safety.evidenceAuthorizesProposalOrApply, false);
+  for (const checksum of expectedMigrationArtifact().migrationChecksums) {
+    assert.equal(serialized.includes(checksum), false);
+  }
 
   const tampered = structuredClone(report);
   tampered.summary.blockingTotal = 1;
@@ -1014,6 +1163,66 @@ test("inspectDatabase signs rejection before reading migrations when required AC
   assert.equal(exitCodeForReport(report, config.hmacKey), 3);
 });
 
+test("inspectDatabase rejects checksum drift before inventory SQL", async () => {
+  const environment = runtimeEnvironment();
+  const config = parseRuntimeContract(environment);
+  const artifact = expectedMigrationArtifact();
+  const migrationRows = appliedMigrationRows(artifact);
+  const changedChecksum =
+    migrationRows[0].checksum[0] === "0"
+      ? `1${migrationRows[0].checksum.slice(1)}`
+      : `0${migrationRows[0].checksum.slice(1)}`;
+  migrationRows[0] = {
+    ...migrationRows[0],
+    checksum: changedChecksum,
+  };
+  const queriedStatements = [];
+  const transaction = {
+    async $executeRawUnsafe() {
+      return 0;
+    },
+    async $queryRawUnsafe(sql) {
+      queriedStatements.push(sql);
+      if (sql === SNAPSHOT_STATE_SQL) return [snapshotRow()];
+      if (sql === CATALOG_STATE_SQL) return [catalogRow()];
+      if (sql === PRIVILEGE_STATE_SQL) return [privilegeRow()];
+      if (sql === APPLIED_MIGRATION_STATE_SQL) return migrationRows;
+      if (sql === INVENTORY_SQL) {
+        throw new Error("Inventory SQL must not execute after checksum drift.");
+      }
+      throw new Error("Unexpected SQL in checksum drift mock.");
+    },
+  };
+  const prisma = {
+    async $transaction(callback) {
+      return callback(transaction);
+    },
+    async $disconnect() {},
+  };
+  const report = await inspectDatabase(environment, config, {
+    expectedMigrationArtifact: artifact,
+    prismaFactory: () => prisma,
+  });
+  assert.equal(report.summary.decision, "SCHEMA_MISMATCH");
+  assert.equal(report.summary.inventoryExecuted, false);
+  assert.deepEqual(report.summary.schemaRejectionCodes, [
+    "MIGRATION_STATE_MISMATCH",
+  ]);
+  assert.equal(report.database.migrations.orderedNamesMatched, true);
+  assert.equal(report.database.migrations.orderedChecksumsMatched, false);
+  assert.equal(report.database.migrations.checksumMismatchCount, 1);
+  assert.equal(report.database.migrations.invalidChecksumCount, 0);
+  assert.equal(JSON.stringify(report).includes(changedChecksum), false);
+  assert.deepEqual(queriedStatements, [
+    SNAPSHOT_STATE_SQL,
+    CATALOG_STATE_SQL,
+    PRIVILEGE_STATE_SQL,
+    APPLIED_MIGRATION_STATE_SQL,
+  ]);
+  assert.equal(queriedStatements.includes(INVENTORY_SQL), false);
+  assert.equal(exitCodeForReport(report, config.hmacKey), 3);
+});
+
 test("all database SQL is read-only and inventory source avoids sensitive columns", () => {
   const mutatingKeyword =
     /\b(?:INSERT|UPDATE|DELETE|MERGE|ALTER|CREATE|DROP|TRUNCATE|COPY|CALL|DO|GRANT|REVOKE)\b/iu;
@@ -1053,7 +1262,7 @@ test("all database SQL is read-only and inventory source avoids sensitive column
   assert.match(PRIVILEGE_STATE_SQL, /required_relation_rls_count/u);
   assert.match(PRIVILEGE_STATE_SQL, /table_select_relation_count/u);
   assert.match(PRIVILEGE_STATE_SQL, /excess_select_column_count/u);
-  assert.doesNotMatch(APPLIED_MIGRATION_STATE_SQL, /checksum/iu);
+  assert.match(APPLIED_MIGRATION_STATE_SQL, /"checksum"::text AS checksum/u);
 });
 
 test("release artifact guard rejects malformed and non-canonical SHAs before Git inspection", async () => {

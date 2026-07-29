@@ -148,6 +148,9 @@ jobs:
       - name: Validate identity activation locator upgrade smoke
         run: pnpm --filter database check:identity-activation-locator
 
+      - name: Validate dormant OWNER invite HOLD outbox
+        run: pnpm --filter database check:identity-owner-invite-hold-outbox
+
       - name: Validate identity email claim and invite writer boundaries
         run: pnpm --filter database check:identity-email-claim-boundary
 
@@ -211,11 +214,14 @@ jobs:
           INTEGRATION_ENCRYPTION_KEY: ci-contract-integration-ffffffffffffffffffffffffffffffff
           IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY: ci-contract-identity-hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
           IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION: v1
+          IDENTITY_MAIL_ENCRYPTION_KEY: AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA
+          IDENTITY_MAIL_ENCRYPTION_KEY_VERSION: v1
+          IDENTITY_MAIL_AAD_ENVIRONMENT: ci
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260729233000_identity_activation_locator
-          EXPECTED_DATABASE_MIGRATION_COUNT: "170"
+          EXPECTED_DATABASE_MIGRATION: 20260730010000_identity_owner_invite_hold_outbox
+          EXPECTED_DATABASE_MIGRATION_COUNT: "171"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -329,6 +335,11 @@ jobs:
         run: pnpm --filter database db:smoke:identity-activation-locator-upgrade
         env:
           IDENTITY_ACTIVATION_LOCATOR_UPGRADE_SMOKE_CONFIRM: run-identity-activation-locator-upgrade-smoke
+
+      - name: Rehearse dormant OWNER invite HOLD outbox CURRENT_170 to CURRENT_171 upgrade
+        run: pnpm --filter database db:smoke:identity-owner-invite-hold-outbox-upgrade
+        env:
+          IDENTITY_OWNER_INVITE_HOLD_OUTBOX_UPGRADE_SMOKE_CONFIRM: run-identity-owner-invite-hold-outbox-upgrade-smoke
 
       - name: Verify sealed identity email claim write boundaries
         run: pnpm --filter database db:smoke:identity-email-claim-boundary

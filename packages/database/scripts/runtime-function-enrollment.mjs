@@ -5,8 +5,8 @@ export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
-  "20260729233000_identity_activation_locator";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 170;
+  "20260730010000_identity_owner_invite_hold_outbox";
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 171;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -123,6 +123,15 @@ export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
     securityDefiner: true,
     volatility: "v",
   }),
+  Object.freeze({
+    key: "identityOwnerInviteIssueHold",
+    catalogSignature:
+      'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
+    grantSignature:
+      'public."identity_owner_invite_issue_hold_v1"(TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BYTEA, TIMESTAMP WITH TIME ZONE)',
+    securityDefiner: true,
+    volatility: "v",
+  }),
 ]);
 
 const EXCLUDED_RUNTIME_FUNCTIONS = Object.freeze([
@@ -138,7 +147,80 @@ export const SEALED_RUNTIME_TABLES = Object.freeze([
     key: "identityEmailClaim",
     catalogName: 'public."IdentityEmailClaim"',
     grantName: 'public."IdentityEmailClaim"',
+    columns: Object.freeze([
+      "emailCanonical",
+      "claimType",
+      "tenantId",
+      "subjectId",
+      "revision",
+      "createdAt",
+      "updatedAt",
+      "workflowLocator",
+    ]),
   }),
+  Object.freeze({
+    key: "identityOwnerInviteIssueCommand",
+    catalogName: 'public."IdentityOwnerInviteIssueCommand"',
+    grantName: 'public."IdentityOwnerInviteIssueCommand"',
+    columns: Object.freeze([
+      "id",
+      "tenantId",
+      "action",
+      "requestId",
+      "issueRequestDigest",
+      "aadEnvironment",
+      "workflowLocator",
+      "reservationSubjectId",
+      "reservationClaimRevision",
+      "inviteId",
+      "outboxId",
+      "messageKey",
+      "tokenHash",
+      "tokenDigestVersion",
+      "template",
+      "envelopeVersion",
+      "keyVersion",
+      "expiresAt",
+      "claimRevision",
+      "createdAt",
+    ]),
+  }),
+  Object.freeze({
+    key: "identityMailOutbox",
+    catalogName: 'public."IdentityMailOutbox"',
+    grantName: 'public."IdentityMailOutbox"',
+    columns: Object.freeze([
+      "id",
+      "tenantId",
+      "issueCommandId",
+      "inviteId",
+      "workflowLocator",
+      "aadEnvironment",
+      "template",
+      "status",
+      "messageKey",
+      "issueRequestDigest",
+      "tokenHash",
+      "tokenDigestVersion",
+      "secretCiphertext",
+      "envelopeVersion",
+      "keyVersion",
+      "expiresAt",
+      "createdAt",
+    ]),
+  }),
+]);
+const EFFECTIVE_COLUMN_PRIVILEGE_FIELDS = Object.freeze([
+  "canSelect",
+  "canInsert",
+  "canUpdate",
+  "canReference",
+]);
+const DIRECT_COLUMN_PRIVILEGE_FIELDS = Object.freeze([
+  "directSelect",
+  "directInsert",
+  "directUpdate",
+  "directReference",
 ]);
 const SAFE_DATABASE_NAME = /^[a-z][a-z0-9_]{0,62}$/u;
 const SAFE_ROLE_NAME = /^[a-z][a-z0-9_]{2,62}$/u;
@@ -353,8 +435,20 @@ export function buildRuntimeFunctionEnrollmentStatements(roleName) {
   const statements = [];
 
   for (const entry of SEALED_RUNTIME_TABLES) {
+    const columns = entry.columns
+      .map((columnName) => quoteIdentifier(columnName))
+      .join(", ");
     statements.push(
       `REVOKE ALL PRIVILEGES ON TABLE ${entry.grantName} FROM ${role}`,
+    );
+    statements.push(
+      `REVOKE ALL PRIVILEGES ON TABLE ${entry.grantName} FROM PUBLIC`,
+    );
+    statements.push(
+      `REVOKE ALL PRIVILEGES (${columns}) ON TABLE ${entry.grantName} FROM ${role}`,
+    );
+    statements.push(
+      `REVOKE ALL PRIVILEGES (${columns}) ON TABLE ${entry.grantName} FROM PUBLIC`,
     );
   }
   for (const entry of APPLICATION_RUNTIME_FUNCTIONS) {
@@ -595,10 +689,132 @@ async function inspectSealedTable(prisma, roleName, entry) {
     roleName,
     entry.catalogName,
   );
+  const columnRows = await prisma.$queryRawUnsafe(
+    `
+      SELECT
+        attribute.attname AS column_name,
+        pg_catalog.has_column_privilege(
+          $1,
+          relation_object.oid,
+          attribute.attnum,
+          'SELECT'
+        ) AS can_select,
+        pg_catalog.has_column_privilege(
+          $1,
+          relation_object.oid,
+          attribute.attnum,
+          'INSERT'
+        ) AS can_insert,
+        pg_catalog.has_column_privilege(
+          $1,
+          relation_object.oid,
+          attribute.attnum,
+          'UPDATE'
+        ) AS can_update,
+        pg_catalog.has_column_privilege(
+          $1,
+          relation_object.oid,
+          attribute.attnum,
+          'REFERENCES'
+        ) AS can_reference,
+        COALESCE(
+          (
+            SELECT pg_catalog.bool_or(
+              column_acl.grantee = target_role.oid
+              AND column_acl.privilege_type = 'SELECT'
+            )
+            FROM pg_catalog.aclexplode(
+              attribute.attacl
+            ) AS column_acl
+          ),
+          FALSE
+        ) AS direct_select,
+        COALESCE(
+          (
+            SELECT pg_catalog.bool_or(
+              column_acl.grantee = target_role.oid
+              AND column_acl.privilege_type = 'INSERT'
+            )
+            FROM pg_catalog.aclexplode(
+              attribute.attacl
+            ) AS column_acl
+          ),
+          FALSE
+        ) AS direct_insert,
+        COALESCE(
+          (
+            SELECT pg_catalog.bool_or(
+              column_acl.grantee = target_role.oid
+              AND column_acl.privilege_type = 'UPDATE'
+            )
+            FROM pg_catalog.aclexplode(
+              attribute.attacl
+            ) AS column_acl
+          ),
+          FALSE
+        ) AS direct_update,
+        COALESCE(
+          (
+            SELECT pg_catalog.bool_or(
+              column_acl.grantee = target_role.oid
+              AND column_acl.privilege_type = 'REFERENCES'
+            )
+            FROM pg_catalog.aclexplode(
+              attribute.attacl
+            ) AS column_acl
+          ),
+          FALSE
+        ) AS direct_reference,
+        COALESCE(
+          (
+            SELECT pg_catalog.bool_or(column_acl.grantee = 0)
+            FROM pg_catalog.aclexplode(
+              attribute.attacl
+            ) AS column_acl
+          ),
+          FALSE
+        ) AS public_any_privilege
+      FROM (
+        SELECT pg_catalog.to_regclass($2) AS oid
+      ) AS requested
+      JOIN pg_catalog.pg_class AS relation_object
+        ON relation_object.oid = requested.oid
+      JOIN pg_catalog.pg_attribute AS attribute
+        ON attribute.attrelid = relation_object.oid
+       AND attribute.attnum > 0
+       AND NOT attribute.attisdropped
+      CROSS JOIN pg_catalog.pg_roles AS target_role
+      WHERE target_role.rolname = $1
+      ORDER BY attribute.attnum
+    `,
+    roleName,
+    entry.catalogName,
+  );
   const row = rows[0];
+  const columns = columnRows.map((column) => ({
+    name:
+      typeof column.column_name === "string"
+        ? column.column_name
+        : null,
+    canSelect: column.can_select === true,
+    canInsert: column.can_insert === true,
+    canUpdate: column.can_update === true,
+    canReference: column.can_reference === true,
+    directSelect: column.direct_select === true,
+    directInsert: column.direct_insert === true,
+    directUpdate: column.direct_update === true,
+    directReference: column.direct_reference === true,
+    publicAnyPrivilege: column.public_any_privilege === true,
+  }));
   return {
     key: entry.key,
     catalogName: entry.catalogName,
+    expectedColumns: [...entry.columns],
+    columnManifestMatches:
+      columns.length === entry.columns.length &&
+      columns.every(
+        (column, index) => column.name === entry.columns[index],
+      ),
     exists: row?.exists === true,
     ownerName: typeof row?.owner_name === "string" ? row.owner_name : null,
     canSelect: row?.can_select === true,
@@ -609,6 +825,10 @@ async function inspectSealedTable(prisma, roleName, entry) {
     canReference: row?.can_reference === true,
     canTrigger: row?.can_trigger === true,
     publicAnyPrivilege: row?.public_any_privilege === true,
+    publicAnyColumnPrivilege: columns.some(
+      (column) => column.publicAnyPrivilege,
+    ),
+    columns,
     grantorCanRevoke: row?.grantor_can_revoke === true,
   };
 }
@@ -868,11 +1088,11 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
       violations.push(`${entry.key}:TABLE_MISSING`);
       continue;
     }
+    if (!entry.columnManifestMatches) {
+      violations.push(`${entry.key}:COLUMN_MANIFEST_MISMATCH`);
+    }
     if (entry.ownerName === config.roleName) {
       violations.push(`${entry.key}:RUNTIME_ROLE_OWNS_TABLE`);
-    }
-    if (entry.publicAnyPrivilege) {
-      violations.push(`${entry.key}:PUBLIC_TABLE_PRIVILEGE_PRESENT`);
     }
     if (!entry.grantorCanRevoke) {
       violations.push(`${entry.key}:GRANTOR_CANNOT_REVOKE`);
@@ -924,6 +1144,32 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
     ) {
       violations.push(`${entry.key}:DIRECT_TABLE_PRIVILEGE_PRESENT`);
     }
+    if (entry.publicAnyPrivilege) {
+      violations.push(`${entry.key}:PUBLIC_TABLE_PRIVILEGE_PRESENT`);
+    }
+    if (
+      entry.columns.some((column) =>
+        EFFECTIVE_COLUMN_PRIVILEGE_FIELDS.some(
+          (field) => column[field],
+        ),
+      )
+    ) {
+      violations.push(
+        `${entry.key}:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT`,
+      );
+    }
+    if (
+      entry.columns.some((column) =>
+        DIRECT_COLUMN_PRIVILEGE_FIELDS.some(
+          (field) => column[field],
+        ),
+      )
+    ) {
+      violations.push(`${entry.key}:DIRECT_COLUMN_PRIVILEGE_PRESENT`);
+    }
+    if (entry.publicAnyColumnPrivilege) {
+      violations.push(`${entry.key}:PUBLIC_COLUMN_PRIVILEGE_PRESENT`);
+    }
   }
   return violations;
 }
@@ -962,10 +1208,13 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
     excludedPendingFunctions: EXCLUDED_PENDING_FUNCTIONS.map(
       ({ key, catalogSignature }) => ({ key, catalogSignature }),
     ),
-    sealedTables: SEALED_RUNTIME_TABLES.map(({ key, catalogName }) => ({
-      key,
-      catalogName,
-    })),
+    sealedTables: SEALED_RUNTIME_TABLES.map(
+      ({ key, catalogName, columns }) => ({
+        key,
+        catalogName,
+        columns,
+      }),
+    ),
     postconditions: {
       applicationExecuteCount: snapshot.functions.filter(
         (entry) =>
@@ -1004,6 +1253,66 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
           !entry.canReference &&
           !entry.canTrigger,
       ).length,
+      sealedPublicTablePrivilegeCount: snapshot.sealedTables.filter(
+        (entry) => entry.publicAnyPrivilege,
+      ).length,
+      sealedColumnCount: snapshot.sealedTables.reduce(
+        (count, entry) => count + entry.columns.length,
+        0,
+      ),
+      sealedColumnWithoutRuntimePrivilegesCount:
+        snapshot.sealedTables.reduce(
+          (count, entry) =>
+            count +
+            entry.columns.filter(
+              (column) =>
+                !EFFECTIVE_COLUMN_PRIVILEGE_FIELDS.some(
+                  (field) => column[field],
+                ) &&
+                !DIRECT_COLUMN_PRIVILEGE_FIELDS.some(
+                  (field) => column[field],
+                ) &&
+                !column.publicAnyPrivilege,
+            ).length,
+          0,
+        ),
+      sealedEffectiveColumnPrivilegeCount:
+        snapshot.sealedTables.reduce(
+          (count, entry) =>
+            count +
+            entry.columns.reduce(
+              (columnCount, column) =>
+                columnCount +
+                EFFECTIVE_COLUMN_PRIVILEGE_FIELDS.filter(
+                  (field) => column[field],
+                ).length,
+              0,
+            ),
+          0,
+        ),
+      sealedDirectColumnPrivilegeCount:
+        snapshot.sealedTables.reduce(
+          (count, entry) =>
+            count +
+            entry.columns.reduce(
+              (columnCount, column) =>
+                columnCount +
+                DIRECT_COLUMN_PRIVILEGE_FIELDS.filter(
+                  (field) => column[field],
+                ).length,
+              0,
+            ),
+          0,
+        ),
+      sealedPublicColumnPrivilegeCount:
+        snapshot.sealedTables.reduce(
+          (count, entry) =>
+            count +
+            entry.columns.filter(
+              (column) => column.publicAnyPrivilege,
+            ).length,
+          0,
+        ),
     },
   };
 }
@@ -1085,6 +1394,11 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   const sql = buildRuntimeFunctionEnrollmentStatements(
     "leetplus_runtime",
   ).join("\n");
+  assert.equal(
+    buildRuntimeFunctionEnrollmentStatements("leetplus_runtime")
+      .length,
+    32,
+  );
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
@@ -1093,9 +1407,30 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(sql, /identity_email_claim_assert_invite_locator_v1/u);
   assert.match(sql, /identity_email_claim_transition_v2/u);
   assert.match(sql, /identity_email_claim_release_v2/u);
+  assert.match(sql, /identity_owner_invite_issue_hold_v1/u);
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityOwnerInviteIssueCommand"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityMailOutbox"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES \("emailCanonical", "claimType", "tenantId", "subjectId", "revision", "createdAt", "updatedAt", "workflowLocator"\) ON TABLE public\."IdentityEmailClaim" FROM "leetplus_runtime"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES \("id", "tenantId", "issueCommandId".*\) ON TABLE public\."IdentityMailOutbox" FROM PUBLIC/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityOwnerInviteIssueCommand" FROM PUBLIC/u,
   );
   assert.match(sql, /REVOKE EXECUTE.*guest_game_delivery_record_event_v1/su);
   assert.match(sql, /REVOKE EXECUTE.*identity_email_claim_lock_v1/su);

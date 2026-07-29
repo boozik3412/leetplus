@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,15 +12,14 @@ const INVENTORY_MODULE_URL = new URL(
   "./identity-legacy-backfill-inventory.mjs",
   import.meta.url,
 );
-const MIGRATIONS_DIRECTORY_URL = new URL("../prisma/migrations/", import.meta.url);
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const SOURCE_DATABASE_PATTERN = /^[a-z][a-z0-9_]{0,59}_ci$/u;
 const SAFE_IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
 const SQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const EXPECTED_MIGRATION_COUNT = 170;
+const EXPECTED_MIGRATION_COUNT = 171;
 const EXPECTED_LATEST_MIGRATION =
-  "20260729233000_identity_activation_locator";
+  "20260730010000_identity_owner_invite_hold_outbox";
 const ADMIN_CONNECT_TIMEOUT_SECONDS = 10;
 const ADMIN_LOCK_TIMEOUT_MS = 5_000;
 const ADMIN_STATEMENT_TIMEOUT_MS = 120_000;
@@ -53,12 +51,14 @@ const READER_COLUMN_GRANTS = Object.freeze({
   ]),
   _prisma_migrations: Object.freeze([
     "migration_name",
+    "checksum",
     "finished_at",
     "rolled_back_at",
   ]),
 });
 const IDENTITY_FUNCTION_SIGNATURES = Object.freeze([
   'public."identity_email_claim_lock_v1"(text)',
+  'public."identity_email_claim_revision_guard_v1"()',
   'public."identity_email_claim_reserve_invite_v1"(text,text,text)',
   'public."identity_email_claim_reserve_invite_v2"(text,text,text)',
   'public."identity_email_claim_assert_invite_v1"(text,text,text,integer)',
@@ -67,6 +67,9 @@ const IDENTITY_FUNCTION_SIGNATURES = Object.freeze([
   'public."identity_email_claim_transition_v2"(text,text,text,text,integer,text,text)',
   'public."identity_email_claim_release_v1"(text,text,text,text,integer)',
   'public."identity_email_claim_release_v2"(text,text,text,text,integer)',
+  'public."identity_mail_outbox_hold_immutable_v1"()',
+  'public."identity_owner_invite_issue_command_immutable_v1"()',
+  'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
 ]);
 
 const HELP = `
@@ -213,34 +216,6 @@ function cloneDescriptor(suffix, scenario) {
   };
 }
 
-function buildExpectedMigrationArtifact() {
-  const migrationsDirectory = fileURLToPath(MIGRATIONS_DIRECTORY_URL);
-  const migrationNames = readdirSync(migrationsDirectory, {
-    withFileTypes: true,
-  })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .filter((name) => /^\d{14}_[a-z0-9_]+$/u.test(name))
-    .sort();
-  assert.equal(migrationNames.length, EXPECTED_MIGRATION_COUNT);
-  assert.equal(migrationNames.at(-1), EXPECTED_LATEST_MIGRATION);
-  const sourceManifestDigest = createHash("sha256")
-    .update(
-      migrationNames
-        .map((migrationName) => {
-          const migration = readFileSync(
-            path.join(migrationsDirectory, migrationName, "migration.sql"),
-          );
-          return `${migrationName}\0${createHash("sha256")
-            .update(migration)
-            .digest("hex")}`;
-        })
-        .join("\n"),
-    )
-    .digest("hex");
-  return { migrationNames, sourceManifestDigest };
-}
-
 function inventoryEnvironment(
   environment,
   databaseUrl,
@@ -266,6 +241,7 @@ async function loadInventoryModule() {
     "REQUIRED_COLUMN_SELECTS",
     "exitCodeForReport",
     "inspectDatabase",
+    "loadExpectedMigrationArtifact",
     "parseRuntimeContract",
   ]) {
     if (!(exportName in inventory)) {
@@ -275,6 +251,7 @@ async function loadInventoryModule() {
   if (
     typeof inventory.parseRuntimeContract !== "function" ||
     typeof inventory.inspectDatabase !== "function" ||
+    typeof inventory.loadExpectedMigrationArtifact !== "function" ||
     typeof inventory.exitCodeForReport !== "function"
   ) {
     contractError("INVENTORY_EXPORT_CONTRACT_MISMATCH");
@@ -1127,7 +1104,7 @@ async function assertReaderRole(admin, reader, descriptor) {
     'SELECT "acceptedByUserId" FROM public."UserInvite" LIMIT 0',
   );
   await reader.$queryRawUnsafe(
-    'SELECT "migration_name" FROM public."_prisma_migrations" LIMIT 0',
+    'SELECT "migration_name", "checksum" FROM public."_prisma_migrations" LIMIT 0',
   );
   await expectPermissionDenied("full User SELECT", () =>
     reader.$queryRawUnsafe('SELECT * FROM public."User" LIMIT 0'),
@@ -1142,13 +1119,23 @@ async function assertReaderRole(admin, reader, descriptor) {
       'SELECT "tokenHash" FROM public."UserInvite" LIMIT 0',
     ),
   );
-  await expectPermissionDenied("migration checksum SELECT", () =>
-    reader.$queryRawUnsafe(
-      'SELECT "checksum" FROM public."_prisma_migrations" LIMIT 0',
-    ),
-  );
   await expectPermissionDenied("Tenant SELECT", () =>
     reader.$queryRawUnsafe('SELECT * FROM public."Tenant" LIMIT 0'),
+  );
+  await expectPermissionDenied("owner invite command SELECT", () =>
+    reader.$queryRawUnsafe(
+      'SELECT * FROM public."IdentityOwnerInviteIssueCommand" LIMIT 0',
+    ),
+  );
+  await expectPermissionDenied("mail outbox SELECT", () =>
+    reader.$queryRawUnsafe(
+      'SELECT * FROM public."IdentityMailOutbox" LIMIT 0',
+    ),
+  );
+  await expectPermissionDenied("mail ciphertext SELECT", () =>
+    reader.$queryRawUnsafe(
+      'SELECT "secretCiphertext" FROM public."IdentityMailOutbox" LIMIT 0',
+    ),
   );
   for (const tableName of Object.keys(READER_COLUMN_GRANTS)) {
     await expectPermissionDenied(`${tableName} full SELECT`, () =>
@@ -1354,6 +1341,245 @@ async function assertAuthorityAndCatalogDriftRejected(
       return { config, report };
     };
     const readerRole = quoteIdentifier(descriptor.roleName);
+    const ownerInviteIssueSignature = `
+      public."identity_owner_invite_issue_hold_v1"(
+        TEXT,
+        TEXT,
+        TEXT,
+        INTEGER,
+        TEXT,
+        TEXT,
+        TEXT,
+        TEXT,
+        TEXT,
+        TEXT,
+        TEXT,
+        TEXT,
+        BYTEA,
+        TIMESTAMP WITH TIME ZONE
+      )
+    `;
+    const latestMigrationName =
+      expectedMigrationArtifact.migrationNames.at(-1);
+    const expectedLatestChecksum =
+      expectedMigrationArtifact.migrationChecksums.at(-1);
+    const [migrationRow] = await admin.$queryRawUnsafe(
+      `
+        SELECT "checksum"::text AS checksum
+        FROM public."_prisma_migrations"
+        WHERE "migration_name" = $1
+      `,
+      latestMigrationName,
+    );
+    assert.equal(migrationRow?.checksum, expectedLatestChecksum);
+    const changedChecksum =
+      migrationRow.checksum[0] === "0"
+        ? `1${migrationRow.checksum.slice(1)}`
+        : `0${migrationRow.checksum.slice(1)}`;
+    sensitive.add(migrationRow.checksum);
+    sensitive.add(changedChecksum);
+    await admin.$executeRawUnsafe(
+      `
+        UPDATE public."_prisma_migrations"
+        SET "checksum" = $1
+        WHERE "migration_name" = $2
+      `,
+      changedChecksum,
+      latestMigrationName,
+    );
+    registerCleanup("restore reviewed migration checksum", () =>
+      admin.$executeRawUnsafe(
+        `
+          UPDATE public."_prisma_migrations"
+          SET "checksum" = $1
+          WHERE "migration_name" = $2
+        `,
+        migrationRow.checksum,
+        latestMigrationName,
+      ),
+    );
+    const checksumDrift = await inspect();
+    assert.equal(
+      checksumDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      checksumDrift.report?.summary?.inventoryExecuted,
+      false,
+    );
+    assert.equal(
+      checksumDrift.report?.database?.migrations?.orderedNamesMatched,
+      true,
+    );
+    assert.equal(
+      checksumDrift.report?.database?.migrations
+        ?.orderedChecksumsMatched,
+      false,
+    );
+    assert.equal(
+      checksumDrift.report?.database?.migrations?.checksumMismatchCount,
+      1,
+    );
+    assert.equal(
+      checksumDrift.report?.database?.migrations?.invalidChecksumCount,
+      0,
+    );
+    assert.deepEqual(
+      checksumDrift.report?.summary?.schemaRejectionCodes,
+      ["MIGRATION_STATE_MISMATCH"],
+    );
+    await requireCleanCheckpoint();
+
+    const thirdPartyRoleName = `lp_idinv_acl_${createHash("sha256")
+      .update(descriptor.databaseName)
+      .digest("hex")
+      .slice(0, 16)}`;
+    const thirdPartyRole = quoteIdentifier(thirdPartyRoleName);
+    await admin.$executeRawUnsafe(
+      `CREATE ROLE ${thirdPartyRole}
+        NOLOGIN
+        NOINHERIT
+        NOSUPERUSER
+        NOCREATEDB
+        NOCREATEROLE
+        NOREPLICATION
+        NOBYPASSRLS`,
+    );
+    registerCleanup("remove dormant ACL third-party role", async () => {
+      await admin.$executeRawUnsafe(
+        `ALTER FUNCTION ${ownerInviteIssueSignature} OWNER TO CURRENT_USER`,
+      );
+      await admin.$executeRawUnsafe(
+        `REVOKE ALL PRIVILEGES ON TABLE
+          public."IdentityOwnerInviteIssueCommand",
+          public."IdentityMailOutbox"
+        FROM ${thirdPartyRole}`,
+      );
+      await admin.$executeRawUnsafe(
+        `REVOKE SELECT ("tokenHash")
+        ON TABLE public."IdentityOwnerInviteIssueCommand"
+        FROM ${thirdPartyRole}`,
+      );
+      await admin.$executeRawUnsafe(
+        `REVOKE ALL PRIVILEGES
+        ON FUNCTION ${ownerInviteIssueSignature}
+        FROM ${thirdPartyRole}`,
+      );
+      await admin.$executeRawUnsafe(
+        `DROP ROLE IF EXISTS ${thirdPartyRole}`,
+      );
+    });
+
+    await admin.$executeRawUnsafe(
+      `GRANT SELECT
+      ON TABLE public."IdentityOwnerInviteIssueCommand"
+      TO ${thirdPartyRole}`,
+    );
+    const thirdPartyTableAclDrift = await inspect();
+    assert.equal(
+      thirdPartyTableAclDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      thirdPartyTableAclDrift.report?.summary?.inventoryExecuted,
+      false,
+    );
+    assert.ok(
+      thirdPartyTableAclDrift.report?.database?.catalog
+        ?.dormantRelationNonownerAclCount > 0,
+    );
+    assert.equal(
+      thirdPartyTableAclDrift.report?.database?.migrations?.checked,
+      false,
+    );
+    await admin.$executeRawUnsafe(
+      `REVOKE SELECT
+      ON TABLE public."IdentityOwnerInviteIssueCommand"
+      FROM ${thirdPartyRole}`,
+    );
+
+    await admin.$executeRawUnsafe(
+      `GRANT SELECT ("tokenHash")
+      ON TABLE public."IdentityOwnerInviteIssueCommand"
+      TO ${thirdPartyRole}`,
+    );
+    const thirdPartyColumnAclDrift = await inspect();
+    assert.equal(
+      thirdPartyColumnAclDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      thirdPartyColumnAclDrift.report?.summary?.inventoryExecuted,
+      false,
+    );
+    assert.ok(
+      thirdPartyColumnAclDrift.report?.database?.catalog
+        ?.dormantColumnNonownerAclCount > 0,
+    );
+    await admin.$executeRawUnsafe(
+      `REVOKE SELECT ("tokenHash")
+      ON TABLE public."IdentityOwnerInviteIssueCommand"
+      FROM ${thirdPartyRole}`,
+    );
+
+    await admin.$executeRawUnsafe(
+      `GRANT EXECUTE
+      ON FUNCTION ${ownerInviteIssueSignature}
+      TO ${thirdPartyRole}`,
+    );
+    const thirdPartyFunctionAclDrift = await inspect();
+    assert.equal(
+      thirdPartyFunctionAclDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      thirdPartyFunctionAclDrift.report?.summary?.inventoryExecuted,
+      false,
+    );
+    assert.ok(
+      thirdPartyFunctionAclDrift.report?.database?.catalog
+        ?.dormantFunctionNonownerAclCount > 0,
+    );
+    await admin.$executeRawUnsafe(
+      `REVOKE EXECUTE
+      ON FUNCTION ${ownerInviteIssueSignature}
+      FROM ${thirdPartyRole}`,
+    );
+
+    await admin.$executeRawUnsafe(
+      `ALTER FUNCTION ${ownerInviteIssueSignature}
+      OWNER TO ${thirdPartyRole}`,
+    );
+    const thirdPartyFunctionOwnerDrift = await inspect();
+    assert.equal(
+      thirdPartyFunctionOwnerDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      thirdPartyFunctionOwnerDrift.report?.summary?.inventoryExecuted,
+      false,
+    );
+    assert.equal(
+      thirdPartyFunctionOwnerDrift.report?.database?.catalog
+        ?.dormantFunctionOwnerMismatchCount,
+      1,
+    );
+    await admin.$executeRawUnsafe(
+      `ALTER FUNCTION ${ownerInviteIssueSignature} OWNER TO CURRENT_USER`,
+    );
+    await requireCleanCheckpoint();
+    const [thirdPartyResidue] = await admin.$queryRawUnsafe(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_roles
+          WHERE rolname = $1
+        ) AS role_exists
+      `,
+      thirdPartyRoleName,
+    );
+    assert.equal(thirdPartyResidue?.role_exists, false);
+
     await admin.$executeRawUnsafe(
       "CREATE EXTENSION IF NOT EXISTS postgres_fdw",
     );
@@ -1547,12 +1773,114 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     await requireCleanCheckpoint();
 
-    await admin.$executeRawUnsafe(
-      `ALTER TYPE public."IdentityEmailClaimType" OWNER TO ${readerRole}`,
+    await admin.$executeRawUnsafe(`
+      ALTER TABLE public."IdentityMailOutbox"
+      ADD COLUMN "catalogDriftProbe" integer
+    `);
+    registerCleanup("drop identity outbox catalog probe column", () =>
+      admin.$executeRawUnsafe(`
+        ALTER TABLE public."IdentityMailOutbox"
+        DROP COLUMN "catalogDriftProbe"
+      `),
     );
-    registerCleanup("restore identity claim enum owner", () =>
+    const columnDrift = await inspect();
+    assert.equal(columnDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
+    assert.equal(
+      columnDrift.report?.database?.catalog
+        ?.actualExactIdentityColumnCount,
+      46,
+    );
+    await requireCleanCheckpoint();
+
+    await admin.$executeRawUnsafe(`
+      ALTER TABLE public."IdentityMailOutbox"
+      ADD CONSTRAINT "IdentityMailOutbox_catalog_drift_check"
+      CHECK ("envelopeVersion" > 0)
+    `);
+    registerCleanup("drop identity outbox catalog probe constraint", () =>
+      admin.$executeRawUnsafe(`
+        ALTER TABLE public."IdentityMailOutbox"
+        DROP CONSTRAINT "IdentityMailOutbox_catalog_drift_check"
+      `),
+    );
+    const constraintDrift = await inspect();
+    assert.equal(
+      constraintDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      constraintDrift.report?.database?.catalog?.actualConstraintCount,
+      46,
+    );
+    await requireCleanCheckpoint();
+
+    await admin.$executeRawUnsafe(`
+      CREATE INDEX "identity_mail_outbox_catalog_drift_idx"
+      ON public."IdentityMailOutbox" ("createdAt")
+    `);
+    registerCleanup("drop identity outbox catalog probe index", () =>
+      admin.$executeRawUnsafe(`
+        DROP INDEX public."identity_mail_outbox_catalog_drift_idx"
+      `),
+    );
+    const indexDrift = await inspect();
+    assert.equal(indexDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
+    assert.equal(
+      indexDrift.report?.database?.catalog?.actualIndexCount,
+      25,
+    );
+    await requireCleanCheckpoint();
+
+    await admin.$executeRawUnsafe(`
+      ALTER TABLE public."IdentityMailOutbox"
+      DISABLE TRIGGER "IdentityMailOutbox_hold_immutable_trigger"
+    `);
+    registerCleanup("enable identity outbox immutable trigger", () =>
+      admin.$executeRawUnsafe(`
+        ALTER TABLE public."IdentityMailOutbox"
+        ENABLE TRIGGER "IdentityMailOutbox_hold_immutable_trigger"
+      `),
+    );
+    const triggerDrift = await inspect();
+    assert.equal(triggerDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
+    assert.equal(
+      triggerDrift.report?.database?.catalog?.matchedTriggerCount,
+      2,
+    );
+    assert.equal(
+      triggerDrift.report?.database?.catalog?.actualIdentityTriggerCount,
+      3,
+    );
+    await requireCleanCheckpoint();
+
+    await admin.$executeRawUnsafe(`
+      ALTER TYPE public."IdentityMailOutboxStatus"
+      RENAME VALUE 'HOLD' TO 'HOLD_DRIFT'
+    `);
+    registerCleanup("restore identity outbox status enum label", () =>
+      admin.$executeRawUnsafe(`
+        ALTER TYPE public."IdentityMailOutboxStatus"
+        RENAME VALUE 'HOLD_DRIFT' TO 'HOLD'
+      `),
+    );
+    const enumDrift = await inspect();
+    assert.equal(enumDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
+    assert.equal(
+      enumDrift.report?.database?.catalog?.matchedEnumLabelCount,
+      4,
+    );
+    assert.equal(
+      enumDrift.report?.database?.catalog?.totalEnumLabelCount,
+      5,
+    );
+    await requireCleanCheckpoint();
+
+    await admin.$executeRawUnsafe(
+      `ALTER TYPE public."IdentityMailTemplate" OWNER TO ${readerRole}`,
+    );
+    registerCleanup("restore identity mail template enum owner", () =>
       admin.$executeRawUnsafe(
-        'ALTER TYPE public."IdentityEmailClaimType" OWNER TO CURRENT_USER',
+        'ALTER TYPE public."IdentityMailTemplate" OWNER TO CURRENT_USER',
       ),
     );
     const typeOwnerDrift = await inspect();
@@ -1571,12 +1899,12 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     await requireCleanCheckpoint();
 
-    await admin.$executeRawUnsafe(`
-      ALTER FUNCTION public."identity_email_claim_lock_v1"(text) STABLE
-    `);
-    registerCleanup("restore identity lock function volatility", () =>
+    await admin.$executeRawUnsafe(
+      `ALTER FUNCTION ${ownerInviteIssueSignature} STABLE`,
+    );
+    registerCleanup("restore owner invite issue function volatility", () =>
       admin.$executeRawUnsafe(`
-        ALTER FUNCTION public."identity_email_claim_lock_v1"(text) VOLATILE
+        ALTER FUNCTION ${ownerInviteIssueSignature} VOLATILE
       `),
     );
     const { config, report } = await inspect();
@@ -1600,18 +1928,19 @@ async function assertAuthorityAndCatalogDriftRejected(
        AND trigger_row.tgtype = 5
       JOIN pg_catalog.pg_class AS relation_row
         ON relation_row.oid = trigger_row.tgrelid
-      WHERE constraint_row.conname = 'UserInvite_revokedByUserId_fkey'
+      WHERE constraint_row.conname =
+          'IdentityMailOutbox_issueCommand_fkey'
         AND relation_row.relnamespace = 'public'::regnamespace
-        AND relation_row.relname = 'UserInvite'
+        AND relation_row.relname = 'IdentityMailOutbox'
     `);
     assert.equal(typeof riTrigger?.trigger_name, "string");
     const quotedRiTrigger = quoteIdentifier(riTrigger.trigger_name);
     await admin.$executeRawUnsafe(
-      `ALTER TABLE public."UserInvite" DISABLE TRIGGER ${quotedRiTrigger}`,
+      `ALTER TABLE public."IdentityMailOutbox" DISABLE TRIGGER ${quotedRiTrigger}`,
     );
-    registerCleanup("re-enable UserInvite RI trigger", () =>
+    registerCleanup("re-enable IdentityMailOutbox RI trigger", () =>
       admin.$executeRawUnsafe(
-        `ALTER TABLE public."UserInvite" ENABLE TRIGGER ${quotedRiTrigger}`,
+        `ALTER TABLE public."IdentityMailOutbox" ENABLE TRIGGER ${quotedRiTrigger}`,
       ),
     );
     const riTriggerDrift = await inspect();
@@ -1622,11 +1951,11 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     assert.equal(
       riTriggerDrift.report?.database?.catalog?.matchedRiTriggerCount,
-      7,
+      27,
     );
     assert.equal(
       riTriggerDrift.report?.database?.catalog?.actualRiTriggerCount,
-      8,
+      28,
     );
     await requireCleanCheckpoint();
   } catch (error) {
@@ -1714,14 +2043,36 @@ export function runSelfTest() {
   ]);
   assert.equal(READER_COLUMN_GRANTS.User.includes("passwordHash"), false);
   assert.equal(READER_COLUMN_GRANTS.UserInvite.includes("tokenHash"), false);
-  assert.equal(EXPECTED_MIGRATION_COUNT, 170);
+  assert.equal(
+    READER_COLUMN_GRANTS._prisma_migrations.includes("checksum"),
+    true,
+  );
+  assert.equal(
+    Object.hasOwn(READER_COLUMN_GRANTS, "IdentityMailOutbox"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(
+      READER_COLUMN_GRANTS,
+      "IdentityOwnerInviteIssueCommand",
+    ),
+    false,
+  );
+  assert.equal(EXPECTED_MIGRATION_COUNT, 171);
   assert.equal(
     EXPECTED_LATEST_MIGRATION,
-    "20260729233000_identity_activation_locator",
+    "20260730010000_identity_owner_invite_hold_outbox",
   );
   assert.equal(
     IDENTITY_FUNCTION_SIGNATURES.includes(
       'public."identity_email_claim_assert_invite_locator_v1"(text,text,text,integer)',
+    ),
+    true,
+  );
+  assert.equal(IDENTITY_FUNCTION_SIGNATURES.length, 13);
+  assert.equal(
+    IDENTITY_FUNCTION_SIGNATURES.includes(
+      'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
     ),
     true,
   );
@@ -1781,7 +2132,16 @@ export async function runSmoke(environment = process.env) {
     "USER_CLAIM_CREATE_CANDIDATE",
   ]);
 
-  const expectedMigrationArtifact = buildExpectedMigrationArtifact();
+  const expectedMigrationArtifact =
+    await inventory.loadExpectedMigrationArtifact(environment.RELEASE_SHA);
+  assert.equal(
+    expectedMigrationArtifact.migrationNames.length,
+    EXPECTED_MIGRATION_COUNT,
+  );
+  assert.equal(
+    expectedMigrationArtifact.migrationNames.at(-1),
+    EXPECTED_LATEST_MIGRATION,
+  );
   const suffix = randomBytes(16).toString("hex");
   const descriptors = [
     cloneDescriptor(suffix, "healthy"),
@@ -1996,9 +2356,11 @@ export async function runSmoke(environment = process.env) {
       clones: 3,
       authorityDriftRejected: true,
       catalogDriftRejected: true,
+      dormantAclDriftRejected: true,
       exactColumnReaderRoles: 3,
       healthyDecision: healthy.report.summary.decision,
       healthyTopologyZeroFindings: true,
+      migrationChecksumDriftRejected: true,
       proposalCount: review.report.summary.proposalTotal,
       reviewDecision: review.report.summary.decision,
       script: SCRIPT_NAME,

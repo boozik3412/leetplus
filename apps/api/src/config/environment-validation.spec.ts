@@ -10,6 +10,10 @@ import {
   validateEnvironment,
 } from './environment-validation';
 
+const VALID_IDENTITY_MAIL_ENCRYPTION_KEY = Buffer.from(
+  Array.from({ length: 32 }, (_, index) => index + 1),
+).toString('base64url');
+
 function validProductionEnvironment() {
   return {
     NODE_ENV: 'production',
@@ -20,6 +24,9 @@ function validProductionEnvironment() {
     INTEGRATION_ENCRYPTION_KEY: `integration_${'f'.repeat(44)}`,
     IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY: `identity_${'h'.repeat(44)}`,
     IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION: 'v1',
+    IDENTITY_MAIL_ENCRYPTION_KEY: VALID_IDENTITY_MAIL_ENCRYPTION_KEY,
+    IDENTITY_MAIL_ENCRYPTION_KEY_VERSION: 'v1',
+    IDENTITY_MAIL_AAD_ENVIRONMENT: 'production',
     SYNC_SERVICE_TOKEN: `scheduler_${'g'.repeat(44)}`,
     RELEASE_SHA: 'a'.repeat(40),
     BUILD_TIME: '2026-07-26T15:00:00.000Z',
@@ -128,6 +135,102 @@ describe('validateEnvironment', () => {
     expect(() => validateEnvironment(unsupported)).toThrow(
       /IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION must equal v1/,
     );
+  });
+
+  it('requires the exact identity-mail key, version, and AAD environment', () => {
+    const missingVersion = validProductionEnvironment();
+    delete (
+      missingVersion as Partial<ReturnType<typeof validProductionEnvironment>>
+    ).IDENTITY_MAIL_ENCRYPTION_KEY_VERSION;
+    const unsupportedVersion = {
+      ...validProductionEnvironment(),
+      IDENTITY_MAIL_ENCRYPTION_KEY_VERSION: 'v2',
+    };
+    const missingEnvironment = validProductionEnvironment();
+    delete (
+      missingEnvironment as Partial<
+        ReturnType<typeof validProductionEnvironment>
+      >
+    ).IDENTITY_MAIL_AAD_ENVIRONMENT;
+    const nonCanonicalEnvironment = {
+      ...validProductionEnvironment(),
+      IDENTITY_MAIL_AAD_ENVIRONMENT: ' Production ',
+    };
+
+    expect(() => validateEnvironment(missingVersion)).toThrow(
+      /IDENTITY_MAIL_ENCRYPTION_KEY_VERSION must equal v1/,
+    );
+    expect(() => validateEnvironment(unsupportedVersion)).toThrow(
+      /IDENTITY_MAIL_ENCRYPTION_KEY_VERSION must equal v1/,
+    );
+    expect(() => validateEnvironment(missingEnvironment)).toThrow(
+      /IDENTITY_MAIL_AAD_ENVIRONMENT must be an exact lowercase environment identifier/,
+    );
+    expect(() => validateEnvironment(nonCanonicalEnvironment)).toThrow(
+      /IDENTITY_MAIL_AAD_ENVIRONMENT must be an exact lowercase environment identifier/,
+    );
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['short', 'short'],
+    ['padded', `${VALID_IDENTITY_MAIL_ENCRYPTION_KEY}=`],
+    ['wrong decoded length', Buffer.alloc(31, 7).toString('base64url')],
+    ['degenerate', Buffer.alloc(32).toString('base64url')],
+  ])('rejects a %s identity-mail encryption key', (_case, key) => {
+    const environment = validProductionEnvironment();
+    (
+      environment as Partial<ReturnType<typeof validProductionEnvironment>>
+    ).IDENTITY_MAIL_ENCRYPTION_KEY = key;
+
+    expect(() => validateEnvironment(environment)).toThrow(
+      key
+        ? /IDENTITY_MAIL_ENCRYPTION_KEY must be an exact unpadded base64url encoding of a non-degenerate 32-byte key/
+        : /IDENTITY_MAIL_ENCRYPTION_KEY is required/,
+    );
+  });
+
+  it.each([
+    'JWT_SECRET',
+    'GUEST_PORTAL_JWT_SECRET',
+    'GUEST_GAME_REFERRAL_SECRET',
+    'APP_ENCRYPTION_KEY',
+    'INTEGRATION_ENCRYPTION_KEY',
+    'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY',
+    'SYNC_SERVICE_TOKEN',
+  ] as const)(
+    'rejects identity-mail key reuse with %s without disclosing the key',
+    (reusedBoundary) => {
+      const environment = validProductionEnvironment();
+      environment[reusedBoundary] = environment.IDENTITY_MAIL_ENCRYPTION_KEY;
+      let message = '';
+
+      try {
+        validateEnvironment(environment);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+
+      expect(message).toMatch(/must use independent values/);
+      expect(message).not.toContain(VALID_IDENTITY_MAIL_ENCRYPTION_KEY);
+    },
+  );
+
+  it('does not trim or disclose a non-canonical identity-mail key', () => {
+    const environment = validProductionEnvironment();
+    environment.IDENTITY_MAIL_ENCRYPTION_KEY = ` ${VALID_IDENTITY_MAIL_ENCRYPTION_KEY} `;
+    let message = '';
+
+    try {
+      validateEnvironment(environment);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toMatch(
+      /IDENTITY_MAIL_ENCRYPTION_KEY must be an exact unpadded base64url encoding/,
+    );
+    expect(message).not.toContain(VALID_IDENTITY_MAIL_ENCRYPTION_KEY);
   });
 
   it('requires exact release identity and schema revision in production', () => {
@@ -293,6 +396,21 @@ describe('resolveStaffAttachmentAclMode', () => {
 });
 
 describe('resolveSecuritySecret', () => {
+  it('cannot create or reuse a fallback for the identity-mail key', () => {
+    const config = new ConfigService({
+      NODE_ENV: 'test',
+      APP_ENCRYPTION_KEY: VALID_IDENTITY_MAIL_ENCRYPTION_KEY,
+    });
+
+    expect(() =>
+      resolveSecuritySecret(config, 'IDENTITY_MAIL_ENCRYPTION_KEY' as never, [
+        'APP_ENCRYPTION_KEY',
+      ]),
+    ).toThrow(
+      'IDENTITY_MAIL_ENCRYPTION_KEY cannot use a fallback secret resolver',
+    );
+  });
+
   it('creates a stable process-local fallback outside production', () => {
     const config = new ConfigService({ NODE_ENV: 'test' });
 

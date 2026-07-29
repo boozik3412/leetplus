@@ -2,12 +2,12 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.6 |
+| Версия | 1.7 |
 | Дата | 29.07.2026 |
 | Backlog | `BETA-IAM-004B` |
 | Contract | `IDENTITY_LEGACY_RECONCILIATION_V1` |
-| Schema target | exact `CURRENT_170` engineering checkpoint |
-| Текущий статус | Locator-aware release artifact/three-clone tooling принято; production-like inventory pending |
+| Schema target | exact `CURRENT_171` engineering checkpoint |
+| Текущий статус | Checksum-bound CURRENT_171 inventory candidate и disposable-clone preflight локально пройдены; exact-head PostgreSQL/CI evidence pending |
 | Release decision | `NO-GO`; production inventory не выполнялся, proposal/apply/rollback отсутствуют |
 | Deployment | `NOT DEPLOYED`; аккаунты, invites, tokens и outbound effects не создаются |
 
@@ -20,7 +20,7 @@ Migration 169 намеренно оставила историческим `User
 
 Текущий bounded slice выполняет только privacy-safe inventory:
 
-- читает глобальный identity namespace на exact `CURRENT_170`;
+- читает глобальный identity namespace на exact `CURRENT_171`;
 - классифицирует текущих owner-кандидатов, terminal history, collision,
   mismatch и review-only строки;
 - выдаёт только aggregate/HMAC-bound evidence;
@@ -36,8 +36,9 @@ zero-diff являются будущими отдельными решения�
 
 Обе Platform Admin route сохраняют `503`, application runtime candidate
 сохраняет exact seven-RPC allowlist и zero effective `IdentityEmailClaim`
-table DML. Reader остаётся column-scoped: новый `workflowLocator` входит в
-exact catalog, но намеренно не входит в его `22` разрешённые SELECT columns.
+table DML. Reader остаётся column-scoped: `workflowLocator`, sealed
+command/outbox, `tokenHash` и `secretCiphertext` входят в exact catalog, но не
+входят в его `23` разрешённые SELECT columns.
 
 ## 2. Модель ownership
 
@@ -160,8 +161,13 @@ runtime `databaseIdentityDigest`, signed report возвращает
 Inventory выполняется отдельной least-privilege ролью:
 
 - `LOGIN NOINHERIT`, без superuser/create role/create DB/bypass RLS;
-- только `CONNECT`, public schema `USAGE` и exact `SELECT` на `22` columns:
-  `3` migration + `6` User + `8` UserInvite + `5` IdentityEmailClaim;
+- только `CONNECT`, public schema `USAGE` и exact `SELECT` на `23` columns:
+  `4` migration + `6` User + `8` UserInvite + `5` IdentityEmailClaim;
+- migration reader видит только `migration_name`, `checksum`, `finished_at`
+  и `rolled_back_at`; имя и checksum каждой применённой миграции должны
+  совпасть с exact Git blobs выбранного `RELEASE_SHA`;
+- zero table/column privileges на `Tenant`, `IdentityOwnerInviteIssueCommand`
+  и `IdentityMailOutbox`, включая `tokenHash` и `secretCiphertext`;
 - `updatedAt` не входит в reader grants;
 - zero `CONNECT WITH GRANT OPTION`, `USAGE WITH GRANT OPTION`, database/public
   schema `CREATE`, а также non-public schema `USAGE/CREATE`;
@@ -182,7 +188,8 @@ Inventory выполняется отдельной least-privilege ролью:
   `SECURITY DEFINER` function;
 - `systemHighOidExecutableFunctionCount=0`: custom/high-OID system function
   не может быть executable независимо от `SECURITY DEFINER/INVOKER`;
-- zero `EXECUTE` на reserve/assert/transition/release и raw lock helpers;
+- zero `EXECUTE` на все `13` identity functions, включая dormant issue
+  function, reserve/assert/transition/release и raw lock helpers;
 - transaction принудительно read-only и использует один consistent snapshot.
 
 PUBLIC baseline сравнивается fail-closed:
@@ -203,14 +210,15 @@ Target/TLS, exact identity catalog и полный least-privilege ACL admission
 Exact catalog admission проверяет:
 
 ```text
-relations                 = 5
-catalog columns           = 30 IAM columns
-constraints               = 11
-indexes                   = 9
-functions                 = 10
-IdentityEmailClaimType    = INVITE, USER, EMAIL_CHANGE / exact order
-IdentityEmailClaim trigger = 1
-enabled PG16 internal RI FK triggers = 8
+relations                 = 7
+catalog columns           = 68
+exact identity columns    = 45
+constraints               = 45
+indexes                   = 24
+functions                 = 13
+enum labels               = 5 / exact order per enum
+user-defined triggers     = 3
+enabled PG16 internal RI FK triggers = 28
 ```
 
 Проверяются не только количества: обязательные identity relation/column
@@ -219,8 +227,13 @@ body digests должны совпасть; owner `IdentityEmailClaimType` об�
 с owner текущей database. Signed `SCHEMA_MISMATCH` дают missing/altered
 manifest identity object, overload/conflicting same-name object, enum-owner
 drift, disabled/missing exact PG16 internal RI FK trigger либо extra
-noninternal trigger на `IdentityEmailClaim`. Произвольные дополнительные
-relations, columns, constraints и indexes вне manifest намеренно допускаются.
+noninternal trigger на identity relations. Для двух dormant sealed tables и
+трёх новых functions admission дополнительно требует exact owner и zero
+non-owner/PUBLIC relation, column и function ACL. Поэтому произвольный
+third-party table grant, column-only grant, function `EXECUTE` или owner drift
+отклоняется до чтения migration state и до inventory. Дополнительные
+relations, columns, constraints и indexes вне manifest по-прежнему намеренно
+допускаются.
 
 Application/runtime роль не используется как inventory authority. Временные
 grants и роль должны быть отозваны после disposable-clone rehearsal либо
@@ -303,8 +316,10 @@ password/token/hash, invite URL, database URL/name, ciphertext и secrets.
 
 Inventory немедленно прекращается с zero DML, если:
 
-1. schema не exact `CURRENT_170`, migrations unfinished либо latest migration
-   отличается от `20260729233000_identity_activation_locator`;
+1. schema не exact `CURRENT_171`, migrations unfinished, ordered
+   `migration_name + checksum` не совпадают с exact Git artifact либо latest
+   migration отличается от
+   `20260730010000_identity_owner_invite_hold_outbox`;
 2. release SHA/artifact, target, expected database, production attestation
    либо approved database identity digest не совпадают;
 3. remote transport не использует exact strict TLS либо production backend
@@ -397,6 +412,18 @@ three-clone PostgreSQL inventory smoke приняты. Source manifest digest �
 `6b8962d98011b0fc519bfc181fbcdc8691f02b09a46d61d0e5fdb39ee9d98632`.
 Independent review — `PASS` без P0/P1/P2. Принятые `CURRENT_169` результаты
 остаются только historical prerequisite.
+
+`CURRENT_171` candidate расширяет exact release binding до ordered
+`migration_name + checksum` для всех `171` Git migration blobs и exact catalog
+до `7 relations / 68 catalog columns / 45 identity columns / 45 constraints /
+24 indexes / 13 functions / 5 enum labels / 3 user-defined triggers / 28
+enabled PG16 internal RI FK triggers`. Reader allowlist содержит только `23`
+column grants и не имеет доступа к sealed command/outbox, их столбцам или
+identity functions. Локальные self-tests и `19/19` contract tests пройдены.
+Disposable-clone preflight отклонил checksum drift, third-party full-table и
+column-only grants, function `EXECUTE` и function-owner drift до inventory.
+Это пока `IMPLEMENTED_CANDIDATE`: exact committed release artifact, чистый
+PostgreSQL 16 smoke и exact-head CI должны быть зафиксированы отдельно.
 
 В CI добавлены отдельные gates:
 

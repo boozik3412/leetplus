@@ -254,14 +254,23 @@ async function readMigrationPlan() {
     [...STAFF_TASK_ALLOWED_ADDITIVE_TAIL],
     "The reviewed additive migration tail changed.",
   );
-  assert.equal(migrationDirectories.at(-2), PREVIOUS_MIGRATION);
-  assert.equal(migrationDirectories.at(-1), TARGET_MIGRATION);
-  assert.equal(CURRENT_EXPECTED_LATEST_MIGRATION, TARGET_MIGRATION);
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_170");
+  const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
+  assert.equal(
+    targetIndex,
+    169,
+    "The historical locator migration moved in the release manifest.",
+  );
+  assert.equal(migrationDirectories[targetIndex - 1], PREVIOUS_MIGRATION);
+  assert.equal(
+    CURRENT_EXPECTED_LATEST_MIGRATION,
+    "20260730010000_identity_owner_invite_hold_outbox",
+  );
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_171");
+  const historicalMigrations = migrationDirectories.slice(0, targetIndex + 1);
   return {
     sourcePrismaDir,
-    prefixMigrations: migrationDirectories.slice(0, -1),
-    allMigrations: migrationDirectories,
+    prefixMigrations: historicalMigrations.slice(0, -1),
+    allMigrations: historicalMigrations,
     targetMigration: TARGET_MIGRATION,
   };
 }

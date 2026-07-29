@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.9                                                        |
+| Версия     | 1.16                                                       |
 | Дата       | 29.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -12,8 +12,10 @@
 
 Этот checklist исполняется вместе с
 [профилем доступа](./shared-multi-tenant-beta-profile.md) и
-[`OPEN_BETA_BACKLOG.md`](../../OPEN_BETA_BACKLOG.md). Галочка без ссылки на
-exact protected evidence не считается выполнением.
+[`OPEN_BETA_BACKLOG.md`](../../OPEN_BETA_BACKLOG.md). Identity reconciliation
+ведётся по отдельному
+[read-only inventory/backfill contract](./identity-legacy-backfill.md).
+Галочка без ссылки на exact protected evidence не считается выполнением.
 
 Production IDs, email, телефоны, invite URL/token, password, database URL,
 API keys, encryption/signing secrets и raw business data запрещено сохранять
@@ -51,8 +53,11 @@ identity state machine. Launch checkboxes ниже этим не закрыва�
 - legacy initial-owner revoke route возвращает
   `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`.
 
-Remote exact-head CI и independent review текущего `CURRENT_169` SHA ещё
-pending. Предыдущий `CURRENT_168` exact-head
+Engineering exact-head
+`f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
+[`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
+(`run #37`), `3/3 PASS`, и independent review без новых P0/P1. Предыдущий
+`CURRENT_168` exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
 `3/3 PASS`, и независимым review без новых P0 только как historical
@@ -141,6 +146,22 @@ Evidence:
       Обычные `UsersService`/`AuthService` paths переведены в `CURRENT_169`,
       но checkbox остаётся открытым до inventory/backfill строк без provenance,
       изоляции design-partner CLI и реализации activation/outbox writers.
+- [ ] `BETA-IAM-004B` read-only inventory на exact `CURRENT_169` принят по
+      exact-head tests/CI/review: все User, включая inactive, считаются
+      owner-кандидатами; invite — только live candidate; collision/mismatch/
+      invalid и bound claim + `NULL` provenance блокируют, terminal history не
+      получает synthetic revision, Platform Admin/unverified User и legacy
+      live token требуют review. Exact catalog/22-column ACL, strict remote TLS,
+      approved production database digest и release-artifact binding должны
+      пройти fail-closed; ownership dependencies, system-schema/object,
+      FDW/parameter/type authority равны zero, `pg_catalog` PUBLIC ACL не
+      расширен относительно `pg_init_privs`, built-in `information_schema`
+      сохраняет только штатный `SELECT/USAGE` без grant option, executable
+      high-OID system function и system `SECURITY DEFINER` отсутствуют, exact
+      восемь internal RI FK triggers enabled, frozen lock/package manifest и
+      Prisma `6.19.3` совпадают с artifact. Production inventory не
+      выполнялся, а signed proposal/apply/rollback остаются отдельными
+      будущими решениями.
 - [ ] До production deploy создано, защищённо установлено и аттестовано
       отдельное fingerprint HMAC secret value version `v1`; оно не
       переиспользует другой production secret.
@@ -182,9 +203,23 @@ Evidence:
 
 - [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
       matrix, включая case-variant email collision;
-- [ ] remote exact-head CI и independent review для `CURRENT_169`; local
-      `169/169`, focused `89/89`, full API `99 suites / 1940 passed / 2 todo`
-      и shell PostgreSQL `2/2` являются только engineering prerequisites;
+- [x] remote exact-head CI и independent review для `CURRENT_169`:
+      `f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
+      (`run #37`), `3/3 PASS`, review PASS без новых P0/P1; это только
+      engineering prerequisite, не production-like admission;
+- [x] local engineering evidence нового `BETA-IAM-004B` inventory candidate:
+      core self-test `18`, smoke self-test `18`, Node unit `17/17`,
+      PostgreSQL 16 smoke на трёх disposable clones — `PASS`; healthy
+      topology=`zero findings`, два proposal + `REVIEW`,
+      adversarial=`BLOCKED / reachable codes`, catalog/authority
+      drift=`REJECTED`, privacy=`PASS`,
+      cleanup=`guaranteed LIFO / 0 DB / 0 roles / 0 parameter ACL`,
+      `clusterAclRestored=true`;
+- [x] финальный independent security review нового `BETA-IAM-004B` inventory
+      candidate — `PASS` без оставшихся actionable P0/P1/P2;
+- [ ] exact-head GitHub CI нового `BETA-IAM-004B` inventory candidate; до его
+      сохранения evidence остаётся `PENDING`, production inventory не запускался и
+      `gr1mmphone1@gmail.com` не создан;
 - [x] remote exact-head CI и independent review для `CURRENT_168`:
       `3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,
       `3/3 PASS`, review PASS без новых P0; local `168/168`, identity `1/99`

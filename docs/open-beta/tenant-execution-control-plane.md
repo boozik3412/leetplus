@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.21                                                                        |
+| Версия           | 1.28                                                                        |
 | Дата             | 29.07.2026                                                                  |
-| Статус           | Schema target `CURRENT_169`; local implementation evidence accepted, exact-head CI и production-like admission pending |
+| Статус           | Schema target `CURRENT_169`; engineering exact-head accepted, production-like admission pending |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
 | Migrations       | control-plane/revision/store/delivery fences + identity claim foundation/runtime writers (`163..169`) |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть                   |
@@ -16,6 +16,8 @@ service-level shell-only candidate: invite/trial/User/UserInvite/outbox не
 candidate нельзя использовать с реальным email. Целевой
 identity-outbox/activation contract зафиксирован в
 [initial OWNER identity and activation](./initial-owner-identity-and-activation.md).
+Legacy reconciliation ведётся по отдельному
+[read-only inventory/backfill contract](./identity-legacy-backfill.md).
 Обычные application invite/reissue/revoke/accept writers в `CURRENT_169`
 переведены на persisted claim provenance, но это не открывает Platform Admin
 activation route и не заменяет legacy inventory/backfill.
@@ -228,8 +230,10 @@ identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, transition
 destination replay-check, retained revoked history, новую same-email
 reservation после explicit revoke и shell integration `2/2`. Focused
 application tests прошли `89/89`, full API —
-`99 suites / 1940 passed / 2 todo`. Remote exact-head CI и independent review
-для `CURRENT_169` ещё pending.
+`99 suites / 1940 passed / 2 todo`. Engineering exact-head
+`f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
+[`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
+(`run #37`), `3/3 PASS`, и independent review без новых P0/P1.
 
 Предыдущий `CURRENT_168` exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
@@ -254,9 +258,17 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 ```
 
 Protected activation locator, encrypted mail outbox, initial OWNER delivery,
-trial start и admitted legacy backfill ещё не реализованы. Обычная
-application identity state machine не открывает эти controller routes:
-endpoint нельзя вызывать с данными реального тестера.
+trial start и signed legacy proposal/apply/rollback ещё не реализованы.
+`BETA-IAM-004B` ограничен read-only inventory candidate; local core self-test
+`18`, smoke self-test `18`, unit `17/17` и PostgreSQL 16 three-clone smoke
+приняты, включая exact catalog/RI-trigger/22-column ACL/TLS,
+system/PUBLIC-ACL baseline/high-OID function/FDW/parameter/type authority
+drift evidence, LIFO cleanup с `clusterAclRestored=true` и frozen-lock Prisma
+`6.19.3` dependency binding.
+Финальный independent security review завершён с `PASS`; exact-head GitHub CI
+пока pending, production inventory не выполнялся. Обычная application identity state
+machine не открывает эти controller routes: endpoint нельзя вызывать с
+данными реального тестера.
 
 ## 5. Runtime policy
 
@@ -449,8 +461,11 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
 2. durable worker lease/claim для delivery, Langame sync и оставшихся
    schedulers; strict suspend/drain поверх уже реализованного revision fence и
    временного 17-job fail-closed containment;
-3. выполнить inventory/admitted backfill исторических identity rows без
-   provenance и изолировать design-partner CLI от application runtime;
+3. принять exact-head GitHub CI `BETA-IAM-004B` поверх уже принятого
+   independent security review, затем отдельно выполнить production-like
+   inventory и будущий signed
+   proposal/apply/rollback исторических identity rows без provenance;
+   изолировать design-partner CLI от application runtime;
 4. реализовать privacy-safe activation locator, encrypted outbox и
    fail-closed mail config;
 5. persisted release gates и dedicated initial OWNER
@@ -598,8 +613,9 @@ StaffTask integrity-проверки сохраняют immutable prefix `1..162
 остаётся в state `EXPAND_162`; фактическая текущая БД и downstream
 inventory/planner для current implementation candidate должны проходить
 отдельный admission как `CURRENT_169` (`migrationCount=169`, latest
-`20260729230000_identity_invite_writer_boundary`). Exact-head evidence
-текущего candidate ещё pending. Принятый `CURRENT_168`
-`3b8228dd...` / CI `30460154200`, `3/3 PASS`, остаётся historical
-prerequisite; local и remote engineering evidence не являются
-production-like admission.
+`20260729230000_identity_invite_writer_boundary`). Engineering exact-head
+`f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
+(`run #37`) принят, `3/3 PASS`, и independent review без новых P0/P1.
+Принятый `CURRENT_168` `3b8228dd...` / CI `30460154200`, `3/3 PASS`,
+остаётся historical prerequisite; local и remote engineering evidence не
+являются production-like admission.

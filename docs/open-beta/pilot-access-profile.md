@@ -3,7 +3,7 @@
 | Поле          | Значение                                               |
 | ------------- | ------------------------------------------------------ |
 | Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
-| Версия        | 1.13                                                   |
+| Версия        | 1.14                                                   |
 | Дата          | 29.07.2026                                             |
 | Статус        | `NO-GO`; control-plane foundation реализован, adoption pending |
 | Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
@@ -12,8 +12,8 @@
 | Schema target | `CURRENT_169` |
 | Previous accepted baseline | PR-head-associated merge-ref `bbef153a...` / `30443837684`; not exact-SHA |
 | Previous accepted exact-head | `d525b736...` / CI `30447467729`; `3/3 PASS` |
-| Last accepted checkpoint | exact-head `3b8228dd...` / CI `30460154200`; `3/3 PASS` |
-| Current candidate | `CURRENT_169`; local PostgreSQL/application PASS, exact-head CI/review pending |
+| Previous accepted checkpoint | exact-head `3b8228dd...` / CI `30460154200`; `3/3 PASS` |
+| Current engineering checkpoint | `CURRENT_169` exact-head `f5d39fd...` / CI `30467882578`; `3/3 PASS`, not deployed |
 | Accepted prerequisite | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS |
 | Historical evidence | `044ceca2` / `2341b999`, не evidence текущего candidate |
 
@@ -22,10 +22,12 @@ Persisted stage/trial, атомарный six-row entitlement profile и баз�
 deny-by-default policy уже реализованы. Shared shell provisioning candidate
 атомарно создаёт suspended tenant/store/profile, OWNER capability override и
 canonical owner-email claim, но намеренно не создаёт `User`, `UserInvite`,
-token, trial, outbox или письмо. Local `CURRENT_169`
-PostgreSQL/application evidence принято, а remote exact-head CI/review ещё
-pending; принятый remote `CURRENT_168` относится только к предыдущему
-shell-only prerequisite. Email delivery, dedicated activation,
+token, trial, outbox или письмо. Engineering exact-head `CURRENT_169`
+`f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
+[`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
+(`run #37`), `3/3 PASS`, и independent review без новых P0/P1; принятый
+remote `CURRENT_168` относится только к предыдущему shell-only prerequisite.
+Email delivery, dedicated activation,
 route/job/Telegram/integration adoption, role matrix и production-like
 evidence ещё не завершены.
 Initial shared-beta profile содержит пять product modules и supporting
@@ -91,7 +93,9 @@ whole-transaction bounded retry — defense-in-depth.
 Текущий `CURRENT_169` implementation локально подтвердил clean migrations
 `169/169`, identity `1 CREATED + 99 ALREADY_RESERVED`, revoke→same-email
 reserve, shell integration `2/2`, focused `89/89` и full API
-`99 suites / 1940 passed / 2 todo`; exact-head CI/review pending.
+`99 suites / 1940 passed / 2 todo`. Engineering exact-head
+`f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
+(`run #37`) принят, `3/3 PASS`, и independent review без новых P0/P1.
 Предыдущий `CURRENT_168` implementation
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),

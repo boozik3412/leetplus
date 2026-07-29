@@ -148,6 +148,16 @@ jobs:
       - name: Validate identity email claim and invite writer boundaries
         run: pnpm --filter database check:identity-email-claim-boundary
 
+      - name: Validate legacy identity read-only inventory
+        run: pnpm --filter database check:identity-legacy-backfill-inventory
+
+      - name: Verify legacy identity exact-head release artifact
+        env:
+          RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
+        run: >-
+          pnpm --filter database
+          check:identity-legacy-backfill-release-artifact
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -307,6 +317,12 @@ jobs:
         run: pnpm --filter database db:smoke:identity-email-claim-boundary
         env:
           IDENTITY_EMAIL_CLAIM_BOUNDARY_SMOKE_CONFIRM: run-identity-email-claim-boundary-smoke
+
+      - name: Rehearse legacy identity inventory on disposable clones
+        run: pnpm --filter database db:smoke:identity-legacy-backfill-inventory
+        env:
+          RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
+          IDENTITY_LEGACY_INVENTORY_SMOKE_CONFIRM: run-identity-legacy-inventory-smoke
 
       - name: Verify shared tenant shell provisioning transaction
         run: pnpm --filter api test:integration:shared-tenant-shell-provisioning:pg

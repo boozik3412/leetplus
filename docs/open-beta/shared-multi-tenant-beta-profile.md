@@ -3,7 +3,7 @@
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
 | Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                   |
-| Версия           | 1.5                                                             |
+| Версия           | 1.9                                                             |
 | Дата             | 29.07.2026                                                      |
 | Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены         |
 | Формат           | Первый friendly external club, invite-only                      |
@@ -119,8 +119,10 @@ identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, transition
 destination replay-check, retained revoked history, новую same-email
 reservation после explicit revoke и shell integration `2/2`. Focused
 application tests прошли `89/89`, full API —
-`99 suites / 1940 passed / 2 todo`. Remote exact-head CI и independent review
-для `CURRENT_169` ещё pending.
+`99 suites / 1940 passed / 2 todo`. Engineering exact-head
+`f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
+[`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
+(`run #37`), `3/3 PASS`, и independent review без новых P0/P1.
 
 Предыдущий `CURRENT_168` exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
@@ -141,9 +143,13 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 
 OWNER invite появится только в отдельной protected activation после
 persisted `SHARED BETA GO`. До неё необходимо реализовать activation locator,
-encrypted outbox и verified delivery, выполнить inventory/backfill
-исторических identity rows, закрыть design-partner CLI и пройти полный
-issue/reissue/revoke/accept race. Fingerprint HMAC startup validation уже
+encrypted outbox и verified delivery, закрыть
+[`BETA-IAM-004B`](./identity-legacy-backfill.md): после принятого local
+engineering evidence и финального independent security review exact
+catalog/ACL/TLS/authority/dependency binding получить exact-head GitHub CI, а
+затем отдельно выполнить production-like inventory и будущий signed
+proposal/apply/rollback; также нужно закрыть design-partner CLI и пройти
+полный issue/reissue/revoke/accept race. Fingerprint HMAC startup validation уже
 реализована candidate; до deploy требуется защищённо настроить и аттестовать
 отдельный production secret version `v1`. Поэтому реальный tester email в
 route не передаётся.

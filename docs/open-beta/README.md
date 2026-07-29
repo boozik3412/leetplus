@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.25                                         |
+| Версия           | 1.32                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -134,6 +134,15 @@ enterprise-isolation option и не сокращает shared gates.
     migration 169, persisted claim provenance, explicit revoke history,
     sealed issue/reissue/revoke/accept, direct-create/email-change fail-closed
     и точный список оставшихся activation/backfill blockers.
+27. [Legacy identity inventory and future backfill](./identity-legacy-backfill.md) —
+    `IDENTITY_LEGACY_RECONCILIATION_V1`, least-privilege read-only inventory,
+    exact catalog/RI-trigger/system authority, PG16 PUBLIC-ACL baseline,
+    high-OID/SECURITY-DEFINER/INVOKER, FDW/parameter/type guards и 22-column
+    ACL, strict remote TLS/production database binding, frozen-lock/Prisma
+    `6.19.3` release verification; local core self `18` + smoke self `18` +
+    unit `17/17` + three-clone PostgreSQL 16 smoke `PASS`; финальный independent
+    security review — `PASS` без actionable P0/P1/P2, exact-head CI pending. Signed
+    proposal/apply/rollback остаются отдельной будущей lane.
 
 Текущий schema target рабочего кандидата — `CURRENT_169`. Локальный
 disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`, exact
@@ -141,8 +150,10 @@ six-RPC runtime allowlist, zero `IdentityEmailClaim` table DML, identity
 idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, retained revoked-history
 release и повторную same-email reservation после explicit revoke. Focused
 application tests прошли `89/89`, full API — `99 suites / 1940 passed /
-2 todo`, shell PostgreSQL integration — `2/2`. Exact-head remote CI и
-independent review для `CURRENT_169` ещё pending.
+2 todo`, shell PostgreSQL integration — `2/2`. Engineering exact-head
+`f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
+[`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
+(`run #37`), `3/3 PASS`, и independent review без новых P0/P1.
 
 Предыдущий принятый `CURRENT_168` exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` прошёл GitHub CI
@@ -360,8 +371,9 @@ engineering evidence не являются production-like admission, persisted 
   `be8c94c4...` / CI `30449026506` (`run #29`) — `3/3 PASS`; все четыре
   исходных engineering provider-write P1 закрыты. Принятый `CURRENT_168`
   implementation — `3b8228dd...` / CI `30460154200`, `3/3 PASS` — является
-  предыдущим historical prerequisite. Exact-head remote evidence
-  `CURRENT_169` ещё pending. Это не production-like admission.
+  предыдущим historical prerequisite. Engineering exact-head `CURRENT_169`
+  `f5d39fd...` / CI `30467882578` (`run #37`) принят, `3/3 PASS`, но это не
+  production-like admission.
   `IMPLEMENTED_CANDIDATE`, not deployed. Admission принимает только
   изолированную loopback PostgreSQL 16 копию в точном `BASELINE_156`,
   `EXPAND_162` или `CURRENT_169`,
@@ -421,10 +433,12 @@ engineering evidence не являются production-like admission, persisted 
 
 Ближайшая последовательность намеренно разделена на независимые решения:
 
-1. Зафиксировать exact `CURRENT_169` SHA, пройти mandatory remote CI и
-   independent review без новых P0. Принятый `CURRENT_168`
-   `3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,
-   `3/3 PASS`, использовать только как historical prerequisite.
+1. Использовать принятый engineering exact `CURRENT_169`
+   `f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
+   (`run #37`), `3/3 PASS`, как текущий prerequisite. Он не deployed и не
+   является production-like admission; `CURRENT_168`
+   `3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`
+   сохраняется только как historical prerequisite.
 2. Независимо проверить detached authority candidate, утвердить внешний
    signer/HSM, separation of duties и key custody; затем отдельным reviewed
    change enrol Ed25519 public root и получить зелёный remote CI exact
@@ -455,11 +469,12 @@ engineering evidence не являются production-like admission, persisted 
 9. после выполнения всех platform/module prerequisites и отдельного `Gate 2A`
    explicit `CUTOVER GO` — in-place cutover четырёх `Store` текущей сети
    внутри одного существующего `Tenant`;
-10. параллельно закрыть `BETA-MT-001..009`: выполнить admitted
-    inventory/backfill исторических identity rows, изолировать design-partner
-    CLI, реализовать activation locator, encrypted outbox/verified OWNER
-    delivery и persisted GO; затем закрыть delegation/integrations, A/B
-    isolation и tenant-aware workers/Telegram;
+10. параллельно закрыть `BETA-MT-001..009`: принять
+    `BETA-IAM-004B` read-only identity inventory candidate, отдельно выполнить
+    production-like inventory и будущий signed proposal/apply/rollback,
+    изолировать design-partner CLI, реализовать activation locator, encrypted
+    outbox/verified OWNER delivery и persisted GO; затем закрыть
+    delegation/integrations, A/B isolation и tenant-aware workers/Telegram;
 11. семь стабильных дней internal alpha и Gate 1MT завершают Gate 2; только
     затем возможен protected `SHARED BETA GO` и owner invite нового
     `Tenant B/Store B1`.

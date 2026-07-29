@@ -3,9 +3,9 @@
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
 | Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                   |
-| Версия           | 1.12                                                            |
+| Версия           | 1.13                                                            |
 | Дата             | 29.07.2026                                                      |
-| Schema target    | `CURRENT_170` candidate; exact-head CI/review pending           |
+| Schema target    | `CURRENT_170`; engineering exact-head CI/review приняты         |
 | Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены         |
 | Формат           | Первый friendly external club, invite-only                      |
 | Data plane       | Shared web, API, workers, PostgreSQL и Telegram                 |
@@ -92,7 +92,8 @@ deny-by-default. Frontend visibility не является авторизаци�
 ## 3. Владелец и delegation
 
 Platform operator в целевом workflow сначала выполняет idempotent shell-only
-provisioning. Текущий `CURRENT_170` candidate сохраняет реализованный в
+provisioning. Текущий `CURRENT_170` engineering checkpoint сохраняет
+реализованный в
 `CURRENT_168` shell service, который одной serializable-транзакцией:
 
 1. создаёт `Tenant B` как
@@ -118,13 +119,14 @@ persisted reservation UUID без raw e-mail. Runtime role имеет zero
 boundaries. Direct user creation и user/invite email change остаются
 fail-closed.
 
-Локальный disposable PostgreSQL `16.13` подтвердил clean deploy `170/170`,
+Disposable PostgreSQL `16.13` подтвердил clean deploy `170/170`,
 populated upgrade `169 → 170`, locator/ACL/rollback checks,
 identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, transition
 destination replay-check, retained revoked history, новую same-email
 reservation после explicit revoke и shell integration `2/2`. Full API —
-`101 suites / 1960 passed / 2 todo`. Exact-head CI/review для `CURRENT_170`
-ещё pending. Historical engineering exact-head `CURRENT_169`
+`101 suites / 1960 passed / 2 todo`. Exact-head `8dfe219...` / CI
+`30493779099` (`run #47`) принят, `3/3 PASS`; independent review — `PASS` без
+P0/P1/P2. Historical engineering exact-head `CURRENT_169`
 `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
 [`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
 (`run #37`), `3/3 PASS`, и independent review без новых P0/P1.
@@ -147,8 +149,9 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 ```
 
 OWNER invite появится только в отдельной protected activation после
-persisted `SHARED BETA GO`. До неё необходимо принять locator exact-head,
-реализовать sealed issue-by-locator, encrypted outbox и verified delivery,
+persisted `SHARED BETA GO`. До неё необходимо использовать принятый locator
+checkpoint, реализовать sealed issue-by-locator, encrypted outbox и verified
+delivery,
 закрыть
 [`BETA-IAM-004B`](./identity-legacy-backfill.md): local evidence, финальный
 independent security review и exact-head

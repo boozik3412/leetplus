@@ -2,18 +2,18 @@
 
 | Поле             | Значение                                                       |
 | ---------------- | -------------------------------------------------------------- |
-| Версия           | 1.2                                                            |
+| Версия           | 1.3                                                            |
 | Дата             | 29.07.2026                                                     |
 | Статус           | `ACCEPTED_ENGINEERING_CHECKPOINT`; exact-head CI/review приняты |
-| Schema target    | `CURRENT_170` candidate; locator CI/review ещё не приняты       |
+| Schema target    | `CURRENT_170`; locator exact-head CI/review приняты             |
 | Release decision | `NO-GO` для external tenant, initial OWNER invite и production |
 
 Этот checkpoint изолирует bearer-secret приглашения от HTTP path и query.
 Он закрывает только transport implementation. Он не реализует mailbox
 delivery, identity outbox, initial OWNER issue/activation, persisted
 `SHARED BETA GO` или право создать учётную запись тестера. Activation locator
-реализован отдельно только как локально проверенный schema/application
-candidate; он не меняет принятый transport checkpoint и не открывает routes.
+принят отдельно как engineering checkpoint; он не меняет принятый transport
+checkpoint и не открывает routes.
 
 ## 1. Канонический контракт
 
@@ -158,8 +158,9 @@ Email verification (`confirm-email`) использует отдельный leg
 
 ### MIGRATION_170_ACTIVATION_LOCATOR
 
-Migration `20260729233000_identity_activation_locator` реализована как
-`CURRENT_170` candidate. Она добавляет в `IdentityEmailClaim` immutable opaque
+Migration `20260729233000_identity_activation_locator` принята как
+`CURRENT_170` engineering checkpoint. Она добавляет в `IdentityEmailClaim`
+immutable opaque
 UUID `workflowLocator`: для initial OWNER он равен server-generated
 reservation UUID и не меняется при transition `INVITE → USER`.
 
@@ -180,11 +181,11 @@ persisted `ownerIdentity.reservationId`, но locator остаётся толь�
 key, не authority и не заменяет persisted GO.
 
 Migration не создаёт `UserInvite`, token, outbox, trial или письмо и не
-включает admin route. Локальный PostgreSQL 16 upgrade/ACL/concurrency evidence
-получен, но exact committed SHA, CI, independent review и новый release-bound
-inventory ещё не приняты. Поэтому принятые `CURRENT_169` artifact/admission
-evidence сохраняются только как historical prerequisite и должны быть заново
-собраны для `CURRENT_170`. Полный контракт:
+включает admin route. Exact-head `8dfe219...` / CI `30493779099`
+(`run #47`) принят, `3/3 PASS`; independent review — `PASS` без P0/P1/P2.
+Принятые `CURRENT_169` evidence сохраняются только как historical
+prerequisite, а current release artifact и three-clone tooling уже
+пересобраны для `CURRENT_170`. Полный контракт:
 [identity activation locator](./identity-activation-locator.md).
 
 ## 7. Production acceptance

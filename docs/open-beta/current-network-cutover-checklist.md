@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.20.0                                             |
+| Версия          | 1.21.0                                             |
 | Дата            | 29.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -87,12 +87,12 @@ admission.
       implementation/security review и review compatibility fix не нашли
       новых P0/P1; у fix нет P2. Это engineering checkpoint, не production-like
       admission и не разрешение на cutover.
-- [ ] Exact-head CI и independent review current `CURRENT_170` candidate
-      приняты. Локальный PostgreSQL `16.13` уже подтвердил clean `170/170`,
-      populated `169 → 170`, exact seven-RPC runtime enrollment при zero
-      `IdentityEmailClaim` table privileges, locator/ACL/rollback и shell
-      `2/2`, но это не заполняет checkbox и не является production-like
-      admission.
+- [x] Exact-head CI и independent review current `CURRENT_170` candidate
+      приняты: `8dfe219...` / CI `30493779099` (`run #47`), `3/3 PASS`,
+      independent review без P0/P1/P2. PostgreSQL `16.13` подтвердил clean
+      `170/170`, populated `169 → 170`, exact seven-RPC runtime enrollment при
+      zero `IdentityEmailClaim` table privileges, locator/ACL/rollback и shell
+      `2/2`; это не является production-like admission.
 - [x] Rejected initial `CURRENT_169` exact-head
       `f9db2643b576778fbb0c651229c37e42d3f0892c`, CI
       [`30467211571`](https://github.com/boozik3412/leetplus/actions/runs/30467211571)
@@ -507,6 +507,10 @@ marker/freshness/blob mismatch.
   `20260729233000_identity_activation_locator`). Локальный PostgreSQL 16
   candidate подтверждён, но exact-head CI/review, production-like admission,
   cutover и внешний доступ остаются unchecked `NO-GO`.
+- `1.21.0`, 29.07.2026 — engineering exact-head `CURRENT_170`
+  `8dfe219...` / CI `30493779099` (`run #47`) и independent review приняты;
+  production-like admission, cutover и внешний доступ остаются unchecked
+  `NO-GO`.
 - `1.19.1`, 29.07.2026 — engineering exact-head `CURRENT_169`
   `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
   `30467882578` (`run #37`), `3/3 PASS`, и independent review без новых

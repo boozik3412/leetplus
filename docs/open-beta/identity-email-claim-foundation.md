@@ -2,14 +2,14 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.7 |
+| Версия | 1.8 |
 | Дата | 29.07.2026 |
-| Schema target | `CURRENT_170` candidate |
+| Schema target | exact `CURRENT_170` engineering checkpoint |
 | Foundation migration | `20260729190000_identity_email_claim_foundation` |
 | Write-boundary migration | `20260729210000_identity_email_claim_write_boundary` |
 | Writer-boundary migration | `20260729230000_identity_invite_writer_boundary` |
 | Activation-locator migration | `20260729233000_identity_activation_locator` |
-| Статус | `IMPLEMENTED_CANDIDATE`; locator local PostgreSQL PASS, exact-head CI/review для `CURRENT_170` pending, not deployed |
+| Статус | `ACCEPTED_ENGINEERING_FOUNDATION`; `CURRENT_170` CI/review PASS, not deployed |
 | Release decision | `NO-GO` для реального Tenant B, OWNER invite и production deploy |
 
 ## Назначение

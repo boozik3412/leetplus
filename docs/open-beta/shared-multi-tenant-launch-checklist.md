@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.21                                                       |
+| Версия     | 1.22                                                       |
 | Дата       | 29.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -30,12 +30,13 @@ persisted UUID без raw e-mail. Runtime candidate имеет exact семь ap
 RPC — две guest-game и пять identity — при zero effective
 `IdentityEmailClaim` table privileges.
 
-Локальный PostgreSQL `16.13` подтвердил populated upgrade `169 → 170`, clean
+PostgreSQL `16.13` подтвердил populated upgrade `169 → 170`, clean
 state `170/170`, locator backfill/immutability, PII-free exact receipt,
 lock-race/ACL checks, transactional rollback при legacy subject не в exact
 lowercase trimmed UUID, включая uppercase/whitespace, и shell integration
-`2/2`. Exact committed SHA, CI, independent review и новый
-release-bound inventory для `CURRENT_170` ещё pending. Migration не создаёт
+`2/2`. Exact-head `8dfe219...` / CI `30493779099` (`run #47`) принят,
+`3/3 PASS`; independent review — `PASS` без P0/P1/P2, release artifact и
+three-clone tooling пересобраны для `CURRENT_170`. Migration не создаёт
 `UserInvite`, token, outbox, trial или письмо и не включает admin route.
 Launch checkboxes ниже этим не закрываются.
 
@@ -192,9 +193,8 @@ Evidence:
       переиспользует другой production secret.
 - [ ] Activation имеет privacy-safe locator для зарезервированной identity и
       повторно проверяет exact claim под lock без raw email в audit/response.
-      Migration 170 реализует этот engineering candidate локально, но checkbox
-      остаётся открытым до exact-head CI/review, release-bound inventory и
-      использования locator в admitted activation.
+      Migration 170 принята как engineering checkpoint, но checkbox остаётся
+      открытым до использования locator в admitted activation.
 - [ ] Dedicated activation принимает persisted GO, запускает trial и атомарно
       создаёт email-bound `NETWORK OWNER` invite hash + encrypted mail outbox,
       переводя tenant в `ACTIVE/OWNER_INVITED`.
@@ -237,9 +237,9 @@ Evidence:
 
 - [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
       matrix, включая case-variant email collision;
-- [ ] exact-head CI и independent review для `CURRENT_170` activation locator;
-      local populated/clean PostgreSQL 16, ACL, rollback и shell evidence не
-      являются production-like admission;
+- [x] exact-head CI и independent review для `CURRENT_170` activation locator:
+      `8dfe219...` / CI `30493779099` (`run #47`), `3/3 PASS`, review без
+      P0/P1/P2; это не является production-like admission;
 - [x] remote exact-head CI и independent review для `CURRENT_169`:
       `f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
       (`run #37`), `3/3 PASS`, review PASS без новых P0/P1; это только

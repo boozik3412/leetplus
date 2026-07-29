@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.13                                                            |
+| Версия           | 1.14                                                            |
 | Дата             | 29.07.2026                                                      |
-| Статус           | `CURRENT_170` candidate; locator local PASS, exact-head CI/review pending |
+| Статус           | Locator checkpoint принят; issue/outbox/activation остаются `NO-GO` |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
 | Scope            | Первый OWNER нового tenant, email delivery, activation, suspend |
 
@@ -147,9 +147,10 @@ opaque UUID `workflowLocator` и sealed PII-free
 теперь адресует reservation по persisted UUID без raw e-mail, затем функция
 берёт canonical e-mail advisory lock и повторно проверяет exact claim под
 `FOR UPDATE`. Runtime по-прежнему не имеет table/column `SELECT`; locator не
-является authority и не заменяет persisted GO. Кандидат локально проверен на
-PostgreSQL 16, но exact-head CI и independent review ещё не приняты. Подробный
-контракт: [identity activation locator](./identity-activation-locator.md).
+является authority и не заменяет persisted GO. Engineering checkpoint принят
+на exact-head `8dfe219...` / CI `30493779099` (`run #47`), `3/3 PASS`;
+independent review — `PASS` без P0/P1/P2. Подробный контракт:
+[identity activation locator](./identity-activation-locator.md).
 
 Исторические строки ещё требуют inventory/backfill, а sealed issue-by-locator,
 activation/outbox/mail delivery не реализованы, поэтому identity workflow
@@ -326,14 +327,15 @@ prerequisite. Engineering exact-head `CURRENT_169`
 remote engineering evidence не являются production-like admission или
 разрешением вызвать route.
 
-Локальный `CURRENT_170` candidate дополнительно подтвердил populated upgrade
+`CURRENT_170` engineering checkpoint дополнительно подтвердил populated upgrade
 `169 → 170`, clean state `170/170`, immutable
 `workflowLocator = initial subjectId`, PII-free locator receipt, exact seven
 application RPC при zero effective `IdentityEmailClaim` table privileges,
 shell integration `2/2` и fail-closed transactional rollback при любом legacy
 subject не в exact lowercase trimmed UUID, включая uppercase/whitespace.
-Exact committed SHA, CI, independent review и новый
-release-bound inventory для этого head ещё pending.
+Exact-head `8dfe219...` / CI `30493779099` (`run #47`) принят,
+`3/3 PASS`; independent review — `PASS` без P0/P1/P2, release artifact и
+three-clone tooling пересобраны для migration 170.
 
 ### 5.2. Activation
 
@@ -355,19 +357,39 @@ Request:
 }
 ```
 
-Serializable transaction:
+Serializable transaction использует один глобальный lock order, совместимый с
+accept/reissue/revoke:
 
-1. проверяет actor, replay/digest, exact confirmation и tenant lock;
-2. блокирует tenant, decision и gate rows в постоянном порядке;
-3. проверяет exact release/environment/schema/profile/gate validity;
-4. требует `SUSPENDED/PROVISIONING`, valid support owner и email claim;
-5. требует exact six-row current profile, у всех read/write ON и outbound OFF;
+```text
+nonlocking authority/request preflight
+  → bounded locator discovery
+  → canonical e-mail advisory lock
+  → exact IdentityEmailClaim row FOR UPDATE
+  → Tenant row
+  → admission/gate/profile rows в deterministic order
+  → invite/outbox/command writes
+```
+
+Порядок `Tenant → identity claim` запрещён: он инвертирует действующий
+accept-path и создаёт риск deadlock.
+
+1. без row lock проверяет форму actor authority, exact confirmation,
+   `(tenantId, action, requestId)` и logical payload digest;
+2. по locator находит reservation, берёт canonical e-mail advisory lock и
+   exact claim row `FOR UPDATE`;
+3. блокирует tenant, decision, gate и profile rows в постоянном порядке;
+4. после всех locks повторно проверяет actor authority, shell provenance,
+   request digest, claim revision, tenant state и exact
+   release/environment/schema/profile/gate validity;
+5. требует `SUSPENDED/PROVISIONING`, valid support owner и exact six-row
+   current profile: read/write ON, outbound OFF;
 6. фиксирует trial window от activation time;
-7. создаёт one-time invite hash и encrypted `PENDING` mail outbox;
-8. CAS-переводит tenant в `ACTIVE/OWNER_INVITED`, увеличивает
-   `executionRevision`;
-9. consumes decision и пишет audit receipt;
-10. commit.
+7. атомарно создаёт idempotency command, one-time invite hash и encrypted
+   `PENDING` mail outbox; OWNER scope hard-coded как `NETWORK`;
+8. переводит claim reservation → invite с persisted revision provenance;
+9. CAS-переводит tenant в `ACTIVE/OWNER_INVITED`, увеличивает
+   `executionRevision`, consumes decision и пишет PII-free audit receipt;
+10. commit; SMTP и decrypt выполняются только после commit отдельным worker.
 
 Response не содержит email/token/URL/ciphertext:
 
@@ -501,8 +523,8 @@ Two-tenant:
 - migration 169: persisted provenance/revocation и sealed runtime
   issue/reissue/revoke/accept candidate;
 - migration 170: immutable opaque `workflowLocator`, partial unique
-  `INVITE | USER` index и PII-free sealed locator assert; local PostgreSQL
-  evidence получен, exact-head CI/review pending;
+  `INVITE | USER` index и PII-free sealed locator assert; exact-head
+  `8dfe219...` / CI `30493779099` и independent review приняты;
 - shell-only service: `PILOT/SUSPENDED/PROVISIONING`, inactive Store, six-row
   profile, HMAC audit, без User/UserInvite/token/trial/outbox;
 - local PostgreSQL `16.13`: historical `169/169` identity `1/99`,
@@ -539,9 +561,9 @@ Two-tenant:
    (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke. CLI/exported
    `provision` и `rotate-invite` fail-closed до manifest/Prisma/БД/token,
    local unit/boundary `23/23 PASS`.
-2. Принять exact committed SHA, CI, independent review и новый release-bound
-   inventory для `MIGRATION_170_ACTIVATION_LOCATOR`; full-table/column-wide
-   `IdentityEmailClaim` SELECT fallback остаётся запрещён.
+2. Использовать принятый `MIGRATION_170_ACTIVATION_LOCATOR` exact-head и
+   release-bound inventory; full-table/column-wide `IdentityEmailClaim`
+   SELECT fallback остаётся запрещён.
 3. Реализовать sealed issue-by-locator: внутри PostgreSQL скопировать canonical
    e-mail непосредственно в `UserInvite`, атомарно перевести claim и вернуть
    только PII-free receipt.

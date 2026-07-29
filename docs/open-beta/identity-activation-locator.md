@@ -2,12 +2,12 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.0 |
+| Версия | 1.1 |
 | Дата | 29.07.2026 |
 | Backlog | `BETA-IAM-004F` |
 | Schema target | `CURRENT_170` |
 | Migration | `20260729233000_identity_activation_locator` |
-| Статус | `IMPLEMENTED_CANDIDATE`; локальный PostgreSQL 16 подтверждён, exact-head CI/review pending |
+| Статус | `ACCEPTED_ENGINEERING_CHECKPOINT`; exact-head CI/review приняты |
 | Release decision | `NO-GO`; production, Tenant B, OWNER invite и outbound не изменялись |
 
 ## 1. Назначение
@@ -154,7 +154,7 @@ persisted `ownerIdentity.reservationId`, а не передаёт raw owner e-ma
 identity assert RPC. Provisioning route остаётся `503`, поэтому это не открывает
 внешний tenant creation path.
 
-## 7. Локальные доказательства кандидата
+## 7. Доказательства engineering checkpoint
 
 На disposable PostgreSQL `16.13` выполнено:
 
@@ -172,9 +172,28 @@ identity assert RPC. Provisioning route остаётся `503`, поэтому �
   column/function не остаются после полного rollback;
 - clean database smoke на `CURRENT_170`.
 
+Final implementation exact-head:
+`8dfe219eb8f882b84782c524e3526c10acbefc68`.
+GitHub CI
+[`30493779099`](https://github.com/boozik3412/leetplus/actions/runs/30493779099)
+(`run #47`) завершился `3/3 PASS`: authority root trust gate, application
+checks и PostgreSQL migration smoke. Exact release artifact подтвердил:
+
+```text
+migrationCount = 170
+latestMigration = 20260729233000_identity_activation_locator
+sourceManifestDigest =
+  6b8962d98011b0fc519bfc181fbcdc8691f02b09a46d61d0e5fdb39ee9d98632
+```
+
+Independent security review завершён с `PASS` без P0/P1/P2. Отдельный
+автоматический `CURRENT_169` fixture с invalid/uppercase subject и проверкой
+полного rollback остаётся P3; ручной rollback proof получен и milestone не
+блокирует.
+
 Эти результаты являются engineering evidence, а не production admission.
-Exact committed SHA, CI, independent review и новый release-bound inventory
-обязательны отдельно.
+Production-like inventory, deploy и доступ внешнему тестеру по-прежнему
+требуют отдельных разрешений и доказательств.
 
 ## 8. Что намеренно не реализовано
 

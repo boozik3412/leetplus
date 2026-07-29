@@ -3,17 +3,17 @@
 | Поле          | Значение                                               |
 | ------------- | ------------------------------------------------------ |
 | Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
-| Версия        | 1.15                                                   |
+| Версия        | 1.16                                                   |
 | Дата          | 29.07.2026                                             |
 | Статус        | `NO-GO`; control-plane foundation реализован, adoption pending |
 | Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
 | Область       | Собственная сеть или явно разрешённые клубы            |
 | Назначение    | Первый shared external tenant и последующая когорта    |
-| Schema target | `CURRENT_170` candidate |
+| Schema target | `CURRENT_170` engineering checkpoint |
 | Previous accepted baseline | PR-head-associated merge-ref `bbef153a...` / `30443837684`; not exact-SHA |
 | Previous accepted exact-head | `d525b736...` / CI `30447467729`; `3/3 PASS` |
 | Previous accepted checkpoint | exact-head `3b8228dd...` / CI `30460154200`; `3/3 PASS` |
-| Current engineering checkpoint | `CURRENT_170`; local PostgreSQL PASS, exact-head CI/review pending, not deployed |
+| Current engineering checkpoint | `8dfe219...` / CI `30493779099`; `3/3 PASS`, review PASS, not deployed |
 | Historical accepted checkpoint | `CURRENT_169` exact-head `f5d39fd...` / CI `30467882578`; `3/3 PASS` |
 | Accepted prerequisite | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS |
 | Historical evidence | `044ceca2` / `2341b999`, не evidence текущего candidate |
@@ -30,9 +30,9 @@ token, trial, outbox или письмо. Historical engineering exact-head `CUR
 remote `CURRENT_168` относится только к предыдущему shell-only prerequisite.
 Migration 170 добавляет immutable opaque locator и PII-free sealed replay
 assert; current runtime allowlist содержит exact семь RPC при zero
-`IdentityEmailClaim` table privileges. Local PostgreSQL evidence принято
-только как candidate, exact-head CI/review ещё pending. Sealed issue-by-locator,
-email delivery и dedicated activation,
+`IdentityEmailClaim` table privileges. Exact-head `8dfe219...` / CI
+`30493779099` (`run #47`) принят, `3/3 PASS`; independent review — `PASS` без
+P0/P1/P2. Sealed issue-by-locator, email delivery и dedicated activation,
 route/job/Telegram/integration adoption, role matrix и production-like
 evidence ещё не завершены.
 Initial shared-beta profile содержит пять product modules и supporting
@@ -95,12 +95,13 @@ provider-write P1 закрыты. Actual non-owner runtime/app DB role всё е
 пройти admission и получить explicit `EXECUTE` grant (`PUBLIC EXECUTE`
 revoked); batch/rebind/future provider writers остаются fail-closed,
 whole-transaction bounded retry — defense-in-depth.
-Текущий `CURRENT_170` candidate локально подтвердил clean migrations
+Текущий `CURRENT_170` engineering checkpoint подтвердил clean migrations
 `170/170`, populated `169 → 170`, identity
 `1 CREATED + 99 ALREADY_RESERVED`, revoke→same-email reserve, locator/ACL/
 rollback checks и shell integration `2/2`; full API —
-`101 suites / 1960 passed / 2 todo`. Exact-head CI/review для этого candidate
-pending. Historical engineering exact-head
+`101 suites / 1960 passed / 2 todo`. Exact-head `8dfe219...` / CI
+`30493779099` (`run #47`) и independent review приняты. Historical engineering
+exact-head
 `f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
 (`run #37`) принят, `3/3 PASS`, и independent review без новых P0/P1.
 Предыдущий `CURRENT_168` implementation

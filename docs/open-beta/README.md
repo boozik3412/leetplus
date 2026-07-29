@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.37                                         |
+| Версия           | 1.38                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -168,9 +168,10 @@ enterprise-isolation option и не сокращает shared gates.
     P0/P1/P2.
 30. [Identity activation locator](./identity-activation-locator.md) —
     migration 170, immutable opaque workflow UUID, PII-free locked assertion,
-    exact seven-RPC runtime allowlist и zero table privileges. Локальный
-    PostgreSQL 16 candidate подтверждён; exact-head CI/review, sealed OWNER
-    issue, encrypted outbox и production admission ещё pending.
+    exact seven-RPC runtime allowlist и zero table privileges. Engineering
+    exact-head `8dfe219...` принят CI `30493779099` (`run #47`), `3/3 PASS`;
+    independent review — `PASS` без P0/P1/P2. Sealed OWNER issue, encrypted
+    outbox и production admission ещё pending.
 
 Текущий schema target рабочего кандидата — `CURRENT_170`. Локальный
 disposable PostgreSQL `16.13` подтвердил clean deploy `170/170`, populated
@@ -179,8 +180,9 @@ upgrade `169 → 170`, exact seven-RPC runtime allowlist, zero
 identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, retained
 revoked-history release и повторную same-email reservation после explicit
 revoke. Full API — `101 suites / 1960 passed / 2 todo`, shell PostgreSQL
-integration — `2/2`. Exact-head CI/review и release-bound inventory для
-`CURRENT_170` ещё pending.
+integration — `2/2`. Exact-head `8dfe219...` / CI `30493779099`
+(`run #47`), `3/3 PASS`, independent review и release-bound inventory для
+`CURRENT_170` приняты как engineering evidence.
 
 Historical engineering exact-head `CURRENT_169`
 `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
@@ -235,8 +237,9 @@ engineering evidence не являются production-like admission, persisted 
   требует отдельный fingerprint HMAC key version `v1`, запрещает reuse и
   включён в CI environment contract; до deploy нужно настроить отдельное
   production значение. Exact-head CI/review и release-bound inventory для
-  locator, sealed issue-by-locator, admitted legacy provenance backfill,
-  encrypted outbox/verified delivery и persisted GO ещё pending.
+  locator приняты на `8dfe219...` / CI `30493779099`; sealed issue-by-locator,
+  admitted production-like legacy provenance backfill, encrypted
+  outbox/verified delivery и persisted GO ещё pending.
   Design-partner identity writer boundary принята как engineering checkpoint:
   legacy `provision`/`rotate-invite` fail-closed до manifest/Prisma/БД/token;
   на том historical `CURRENT_169` schema, six-RPC allowlist и shared admin
@@ -488,9 +491,10 @@ engineering evidence не являются production-like admission, persisted 
 
 1. Использовать принятый historical engineering exact `CURRENT_169`
    `f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
-   (`run #37`), `3/3 PASS`, как prerequisite. Exact-head CI/review для
-   `CURRENT_170` locator candidate ещё pending. Ни один из них не deployed и
-   не является production-like admission; `CURRENT_168`
+   (`run #37`), `3/3 PASS`, как prerequisite, и принятый `CURRENT_170`
+   locator exact-head `8dfe219...` / CI `30493779099` (`run #47`),
+   `3/3 PASS`. Ни один из них не deployed и не является production-like
+   admission; `CURRENT_168`
    `3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`
    сохраняется только как historical prerequisite.
 2. Независимо проверить detached authority candidate, утвердить внешний
@@ -527,8 +531,8 @@ engineering evidence не являются production-like admission, persisted 
 10. параллельно закрыть `BETA-MT-001..009`: использовать принятые exact-head
     CI/review `BETA-IAM-004B` как engineering prerequisite, отдельно выполнить
     production-like inventory и будущий signed proposal/apply/rollback;
-    использовать принятый exact-head PostgreSQL/CI/review checkpoint
-    design-partner writer isolation, принять locator exact-head, реализовать
+    использовать принятые exact-head PostgreSQL/CI/review checkpoints
+    design-partner writer isolation и locator, реализовать
     sealed issue-by-locator, encrypted outbox/verified OWNER delivery и
     persisted GO, а для реализованного
     `BETA-IAM-004E` пройти production proxy/APM/CSP/browser/mail-client

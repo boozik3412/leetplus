@@ -2,12 +2,12 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.5 |
+| Версия | 1.6 |
 | Дата | 29.07.2026 |
 | Backlog | `BETA-IAM-004B` |
 | Contract | `IDENTITY_LEGACY_RECONCILIATION_V1` |
-| Schema target | exact `CURRENT_170` candidate |
-| Текущий статус | Locator-aware contract реализован локально; exact-head CI/review для `CURRENT_170` pending, production-like inventory pending |
+| Schema target | exact `CURRENT_170` engineering checkpoint |
+| Текущий статус | Locator-aware release artifact/three-clone tooling принято; production-like inventory pending |
 | Release decision | `NO-GO`; production inventory не выполнялся, proposal/apply/rollback отсутствуют |
 | Deployment | `NOT DEPLOYED`; аккаунты, invites, tokens и outbound effects не создаются |
 
@@ -335,8 +335,9 @@ authorization из read-only report:
 3. выполнить disposable-clone row dry-run с lock/recheck/CAS;
 4. отдельно принять production apply authority, backup и rollback;
 5. выполнить apply, rollback rehearsal и повторный zero-diff inventory;
-6. только после zero blocking и принятия locator exact-head перейти к sealed
-   issue-by-locator, encrypted outbox, persisted GO и initial OWNER invite.
+6. только после zero blocking, используя принятый locator exact-head, перейти
+   к sealed issue-by-locator, encrypted outbox, persisted GO и initial OWNER
+   invite.
 
 Production proposal/apply нельзя добавлять как скрытый flag текущего script.
 Это должен быть отдельный reviewed contract с явной authority,
@@ -383,15 +384,19 @@ negative и все authority grants гарантированно очищают�
 cleanup подтвердил `clusterAclRestored=true` и zero DB/role/parameter-ACL
 residue в source cluster.
 
-`CURRENT_170` candidate обновляет exact catalog до
+`CURRENT_170` engineering checkpoint обновляет exact catalog до
 `5 relations / 30 IAM columns / 11 constraints / 9 indexes / 10 functions`.
 Он проверяет `workflowLocator`, его CHECK/partial unique index, sealed locator
 RPC и изменённый revision guard по exact definitions/digests. Reader allowlist
 остаётся прежним: `22` column grants, без `workflowLocator`, `updatedAt`,
-password/token material или full-row `SELECT`. Exact-head artifact binding,
-CI и independent security review для нового head ещё pending. Locator-aware
-`CURRENT_170` full PostgreSQL inventory smoke локально прошёл; принятые
-`CURRENT_169` результаты не являются exact-head evidence нового candidate.
+password/token material или full-row `SELECT`. Exact-head
+`8dfe219eb8f882b84782c524e3526c10acbefc68` / CI
+[`30493779099`](https://github.com/boozik3412/leetplus/actions/runs/30493779099)
+(`run #47`) завершился `3/3 PASS`; release artifact и locator-aware
+three-clone PostgreSQL inventory smoke приняты. Source manifest digest —
+`6b8962d98011b0fc519bfc181fbcdc8691f02b09a46d61d0e5fdb39ee9d98632`.
+Independent review — `PASS` без P0/P1/P2. Принятые `CURRENT_169` результаты
+остаются только historical prerequisite.
 
 В CI добавлены отдельные gates:
 

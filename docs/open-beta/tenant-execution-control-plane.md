@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.32                                                                        |
+| Версия           | 1.33                                                                        |
 | Дата             | 29.07.2026                                                                  |
-| Статус           | Schema target `CURRENT_170` candidate; locator local PASS, exact-head CI/review pending |
+| Статус           | `CURRENT_170` engineering checkpoint принят; production-like admission pending |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
 | Migrations       | control-plane/revision/store/delivery fences + identity claim/writers/locator (`163..170`) |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть                   |
@@ -35,7 +35,8 @@ routes не изменялись; exact-head
 (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke; independent review —
 без actionable P0/P1/P2.
 Migration 170 отдельно повышает current candidate allowlist до семи RPC.
-Её exact-head CI/review ещё не приняты.
+Её exact-head `8dfe219...` / CI `30493779099` (`run #47`) принят,
+`3/3 PASS`; independent review — `PASS` без P0/P1/P2.
 Документ не разрешает production migration или выдачу доступа.
 
 ## 1. Persisted control plane
@@ -268,13 +269,14 @@ application tests прошли `89/89`, full API —
 prerequisite. Эти engineering prerequisites не являются production-like
 admission или launch approval.
 
-Локальный `CURRENT_170` candidate подтвердил populated upgrade `169 → 170`,
+`CURRENT_170` engineering checkpoint подтвердил populated upgrade `169 → 170`,
 clean state `170/170`, locator backfill/immutability, PII-free receipt,
 seven-RPC ACL при zero sealed-table privileges, lock race, transactional
 rollback при legacy subject не в exact lowercase trimmed UUID, включая
-uppercase/whitespace, и shell integration `2/2`. Exact committed SHA, CI,
-independent review и новый release-bound inventory для
-этого head ещё pending.
+uppercase/whitespace, и shell integration `2/2`. Exact-head
+`8dfe219...` / CI `30493779099` (`run #47`) принят, `3/3 PASS`;
+independent review — `PASS` без P0/P1/P2, release artifact и three-clone
+tooling пересобраны для migration 170.
 
 Production startup-validation candidate уже требует отдельный fingerprint
 HMAC secret, запрещает reuse и принимает только version `v1`; CI environment
@@ -511,9 +513,9 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
    proposal/apply/rollback исторических identity rows без provenance;
    использовать принятый exact-head PostgreSQL/CI/review checkpoint fail-closed
    изоляции design-partner identity writers;
-4. принять exact-head CI/review и release-bound inventory для уже
-   реализованного `CURRENT_170` locator candidate, затем реализовать sealed
-   issue-by-locator, encrypted outbox и fail-closed mail config;
+4. использовать принятые exact-head CI/review и release-bound inventory
+   `CURRENT_170` locator checkpoint, затем реализовать sealed issue-by-locator,
+   encrypted outbox и fail-closed mail config;
 5. persisted release gates и dedicated initial OWNER
    activation/suspend/encrypted issue/reissue delivery;
 6. полный PostgreSQL provision/activate/accept/revoke/reissue concurrency
@@ -659,8 +661,9 @@ StaffTask integrity-проверки сохраняют immutable prefix `1..162
 остаётся в state `EXPAND_162`; фактическая текущая БД и downstream
 inventory/planner для current implementation candidate должны проходить
 отдельный admission как `CURRENT_170` (`migrationCount=170`, latest
-`20260729233000_identity_activation_locator`). Exact-head CI/review для этого
-candidate ещё pending. Historical `CURRENT_169` engineering exact-head
+`20260729233000_identity_activation_locator`). Exact-head
+`8dfe219...` / CI `30493779099` (`run #47`) и independent review приняты.
+Historical `CURRENT_169` engineering exact-head
 `f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
 (`run #37`) принят, `3/3 PASS`, и independent review без новых P0/P1.
 Принятый `CURRENT_168` `3b8228dd...` / CI `30460154200`, `3/3 PASS`,

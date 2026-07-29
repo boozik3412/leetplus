@@ -2,7 +2,7 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.3 |
+| Версия | 1.4 |
 | Дата | 29.07.2026 |
 | Backlog | `BETA-IAM-004B` |
 | Contract | `IDENTITY_LEGACY_RECONCILIATION_V1` |
@@ -399,7 +399,7 @@ Exact-head implementation
 Это не закрывает `BETA-IAM-004B`: production-like inventory должен быть
 принят отдельно. Production inventory не запускался, proposal/apply/rollback
 и deploy остаются `NOT RUN / NO-GO`.
-Аккаунт `gr1mmphone1@gmail.com` не создан.
+Реальная учётная запись тестера не создана.
 
 Принятый `CURRENT_169` writer-boundary checkpoint
 `f5d39fd89145c995c51e7005698327f5581a5cd8` / GitHub CI

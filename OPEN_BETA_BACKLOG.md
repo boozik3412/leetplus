@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 29.07.2026
-- Версия: 1.59
+- Версия: 1.60
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -2691,8 +2691,8 @@ prerequisite.
 (`run #39`), `3/3 PASS`; финальный independent security review нового slice —
 `PASS` без оставшихся actionable P0/P1/P2. Production inventory не запускался.
 Production proposal/apply/rollback отсутствуют и запрещены, deployment и
-release decision остаются `NOT DEPLOYED / NO-GO`, аккаунт
-`gr1mmphone1@gmail.com` не создан.
+release decision остаются `NOT DEPLOYED / NO-GO`, реальная учётная запись
+тестера не создана.
 
 Открытые launch-blocking P0:
 
@@ -2727,8 +2727,8 @@ literal-pattern static writer test требуется усилить AST/DB-leve
 и
 [legacy identity reconciliation](./docs/open-beta/identity-legacy-backfill.md).
 До закрытия P0, Gate 1MT, Gate 2 и protected `SHARED BETA GO` обе admin route
-остаются `503`, `gr1mmphone1@gmail.com` не создаётся, пароль `123456` не
-устанавливается и production не изменяется.
+остаются `503`, реальная учётная запись тестера не создаётся, временный пароль
+не устанавливается и production не изменяется.
 
 ### 5.34. `DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1` — 29.07.2026
 

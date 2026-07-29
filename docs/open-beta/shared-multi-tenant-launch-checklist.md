@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.19                                                       |
+| Версия     | 1.20                                                       |
 | Дата       | 29.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -238,8 +238,8 @@ Evidence:
       (`run #39`), `3/3 PASS`;
 - [ ] отдельно принять production-like inventory; до этого `BETA-IAM-004B`
       остаётся открытым, production inventory не запускался,
-      proposal/apply/rollback/deploy остаются `NO-GO`, а
-      `gr1mmphone1@gmail.com` не создан;
+      proposal/apply/rollback/deploy остаются `NO-GO`, а реальная учётная
+      запись тестера не создана;
 - [x] принять exact-head
       [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md):
       `f4224072f60507bd97f8e49440e3bda89ffe2aaa` /

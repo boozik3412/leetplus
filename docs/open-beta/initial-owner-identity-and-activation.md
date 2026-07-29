@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.8                                                             |
+| Версия           | 1.9                                                             |
 | Дата             | 29.07.2026                                                      |
 | Статус           | `CURRENT_169` engineering accepted; activation ещё pending       |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
@@ -488,14 +488,14 @@ Two-tenant:
 
 Следующие обязательные шаги:
 
-1. Принять
-   [`BETA-IAM-004B`](./identity-legacy-backfill.md) exact-head GitHub CI
-   поверх принятых local inventory evidence и финального independent security
-   review exact catalog/22-column ACL/TLS/authority/dependency binding, затем
-   отдельно выполнить production-like
-   inventory и будущий signed proposal/apply/rollback исторических
-   `User`/`UserInvite` без provenance; изолировать design-partner CLI и
-   подтвердить отсутствие direct application runtime table DML.
+1. Использовать принятые
+   [`BETA-IAM-004B`](./identity-legacy-backfill.md) exact-head
+   `d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI `30479020686`
+   (`run #39`), `3/3 PASS`, local evidence и финальный independent security
+   review как engineering prerequisites; item остаётся открытым до отдельного
+   production-like inventory и будущего signed proposal/apply/rollback
+   исторических `User`/`UserInvite` без provenance. Изолировать design-partner
+   CLI и подтвердить отсутствие direct application runtime table DML.
 2. Спроектировать activation locator без хранения и раскрытия raw email;
    lookup и повторная проверка claim должны выполняться fail-closed под lock.
 3. Добавить encrypted identity mail outbox и fail-closed mail config.

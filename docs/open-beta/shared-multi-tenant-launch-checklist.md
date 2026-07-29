@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.16                                                       |
+| Версия     | 1.17                                                       |
 | Дата       | 29.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -146,7 +146,8 @@ Evidence:
       Обычные `UsersService`/`AuthService` paths переведены в `CURRENT_169`,
       но checkbox остаётся открытым до inventory/backfill строк без provenance,
       изоляции design-partner CLI и реализации activation/outbox writers.
-- [ ] `BETA-IAM-004B` read-only inventory на exact `CURRENT_169` принят по
+- [x] `BETA-IAM-004B` engineering read-only inventory на exact `CURRENT_169`
+      принят по
       exact-head tests/CI/review: все User, включая inactive, считаются
       owner-кандидатами; invite — только live candidate; collision/mismatch/
       invalid и bound claim + `NULL` provenance блокируют, terminal history не
@@ -159,9 +160,9 @@ Evidence:
       сохраняет только штатный `SELECT/USAGE` без grant option, executable
       high-OID system function и system `SECURITY DEFINER` отсутствуют, exact
       восемь internal RI FK triggers enabled, frozen lock/package manifest и
-      Prisma `6.19.3` совпадают с artifact. Production inventory не
-      выполнялся, а signed proposal/apply/rollback остаются отдельными
-      будущими решениями.
+      Prisma `6.19.3` совпадают с artifact. Это закрывает только engineering
+      checkbox: production inventory не выполнялся, а signed
+      proposal/apply/rollback остаются отдельными будущими решениями.
 - [ ] До production deploy создано, защищённо установлено и аттестовано
       отдельное fingerprint HMAC secret value version `v1`; оно не
       переиспользует другой production secret.
@@ -217,8 +218,13 @@ Evidence:
       `clusterAclRestored=true`;
 - [x] финальный independent security review нового `BETA-IAM-004B` inventory
       candidate — `PASS` без оставшихся actionable P0/P1/P2;
-- [ ] exact-head GitHub CI нового `BETA-IAM-004B` inventory candidate; до его
-      сохранения evidence остаётся `PENDING`, production inventory не запускался и
+- [x] exact-head GitHub CI нового `BETA-IAM-004B` inventory candidate:
+      `d1162eed042893ec3b27ed823bdaddfa64c7e90f` /
+      [`30479020686`](https://github.com/boozik3412/leetplus/actions/runs/30479020686)
+      (`run #39`), `3/3 PASS`;
+- [ ] отдельно принять production-like inventory; до этого `BETA-IAM-004B`
+      остаётся открытым, production inventory не запускался,
+      proposal/apply/rollback/deploy остаются `NO-GO`, а
       `gr1mmphone1@gmail.com` не создан;
 - [x] remote exact-head CI и independent review для `CURRENT_168`:
       `3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,

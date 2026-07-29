@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.32                                         |
+| Версия           | 1.33                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -141,7 +141,10 @@ enterprise-isolation option и не сокращает shared gates.
     ACL, strict remote TLS/production database binding, frozen-lock/Prisma
     `6.19.3` release verification; local core self `18` + smoke self `18` +
     unit `17/17` + three-clone PostgreSQL 16 smoke `PASS`; финальный independent
-    security review — `PASS` без actionable P0/P1/P2, exact-head CI pending. Signed
+    security review — `PASS` без actionable P0/P1/P2, exact-head
+    `d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI
+    [`30479020686`](https://github.com/boozik3412/leetplus/actions/runs/30479020686)
+    (`run #39`) — `3/3 PASS`. Production-like inventory и signed
     proposal/apply/rollback остаются отдельной будущей lane.
 
 Текущий schema target рабочего кандидата — `CURRENT_169`. Локальный
@@ -469,8 +472,8 @@ engineering evidence не являются production-like admission, persisted 
 9. после выполнения всех platform/module prerequisites и отдельного `Gate 2A`
    explicit `CUTOVER GO` — in-place cutover четырёх `Store` текущей сети
    внутри одного существующего `Tenant`;
-10. параллельно закрыть `BETA-MT-001..009`: принять
-    `BETA-IAM-004B` read-only identity inventory candidate, отдельно выполнить
+10. параллельно закрыть `BETA-MT-001..009`: использовать принятые exact-head
+    CI/review `BETA-IAM-004B` как engineering prerequisite, отдельно выполнить
     production-like inventory и будущий signed proposal/apply/rollback,
     изолировать design-partner CLI, реализовать activation locator, encrypted
     outbox/verified OWNER delivery и persisted GO; затем закрыть

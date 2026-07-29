@@ -7,7 +7,7 @@
 | Backlog | `BETA-IAM-004B` |
 | Contract | `IDENTITY_LEGACY_RECONCILIATION_V1` |
 | Schema target | exact `CURRENT_169` |
-| Текущий статус | `IMPLEMENTED_CANDIDATE`: local engineering evidence и финальный independent security review приняты; exact-head CI pending |
+| Текущий статус | `IMPLEMENTED_CANDIDATE`: local, exact-head CI и финальный independent security review приняты; production-like inventory pending |
 | Release decision | `NO-GO`; production inventory не выполнялся, proposal/apply/rollback отсутствуют |
 | Deployment | `NOT DEPLOYED`; аккаунты, invites, tokens и outbound effects не создаются |
 
@@ -327,14 +327,13 @@ Inventory немедленно прекращается с zero DML, если:
 Следующие этапы не входят в `IMPLEMENTED_CANDIDATE` и не наследуют
 authorization из read-only report:
 
-1. отдельно принять exact-head GitHub CI read-only inventory поверх уже
-   принятых local engineering evidence и independent security review;
-2. отдельно выполнить approved production-like read-only inventory;
-3. назначить owner каждому non-zero finding и подписать bounded proposal;
-4. выполнить disposable-clone row dry-run с lock/recheck/CAS;
-5. отдельно принять production apply authority, backup и rollback;
-6. выполнить apply, rollback rehearsal и повторный zero-diff inventory;
-7. только после zero blocking перейти к activation locator, encrypted outbox,
+1. используя принятые local/exact-head CI/review prerequisites, отдельно
+   выполнить approved production-like read-only inventory;
+2. назначить owner каждому non-zero finding и подписать bounded proposal;
+3. выполнить disposable-clone row dry-run с lock/recheck/CAS;
+4. отдельно принять production apply authority, backup и rollback;
+5. выполнить apply, rollback rehearsal и повторный zero-diff inventory;
+6. только после zero blocking перейти к activation locator, encrypted outbox,
    persisted GO и initial OWNER invite.
 
 Production proposal/apply нельзя добавлять как скрытый flag текущего script.
@@ -391,11 +390,15 @@ residue в source cluster.
 - `Rehearse legacy identity inventory on disposable clones` запускает
   `pnpm --filter database db:smoke:identity-legacy-backfill-inventory`.
 
-До push exact candidate SHA exact-head GitHub CI для нового inventory slice
-остаётся `PENDING`. Финальный independent security review завершён с `PASS`
-без оставшихся actionable P0/P1/P2. Поэтому `BETA-IAM-004B` ещё не закрыт,
-production inventory не запускался, а proposal/apply/rollback и deploy
-остаются `NOT RUN / NO-GO`.
+Exact-head implementation
+`d1162eed042893ec3b27ed823bdaddfa64c7e90f` принят GitHub Actions
+[`30479020686`](https://github.com/boozik3412/leetplus/actions/runs/30479020686)
+(`run #39`), все три job — `PASS`. Финальный independent security review
+завершён с `PASS` без оставшихся actionable P0/P1/P2.
+
+Это не закрывает `BETA-IAM-004B`: production-like inventory должен быть
+принят отдельно. Production inventory не запускался, proposal/apply/rollback
+и deploy остаются `NOT RUN / NO-GO`.
 Аккаунт `gr1mmphone1@gmail.com` не создан.
 
 Принятый `CURRENT_169` writer-boundary checkpoint

@@ -3,7 +3,7 @@
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
 | Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                   |
-| Версия           | 1.9                                                             |
+| Версия           | 1.10                                                            |
 | Дата             | 29.07.2026                                                      |
 | Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены         |
 | Формат           | Первый friendly external club, invite-only                      |
@@ -144,12 +144,13 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 OWNER invite появится только в отдельной protected activation после
 persisted `SHARED BETA GO`. До неё необходимо реализовать activation locator,
 encrypted outbox и verified delivery, закрыть
-[`BETA-IAM-004B`](./identity-legacy-backfill.md): после принятого local
-engineering evidence и финального independent security review exact
-catalog/ACL/TLS/authority/dependency binding получить exact-head GitHub CI, а
-затем отдельно выполнить production-like inventory и будущий signed
-proposal/apply/rollback; также нужно закрыть design-partner CLI и пройти
-полный issue/reissue/revoke/accept race. Fingerprint HMAC startup validation уже
+[`BETA-IAM-004B`](./identity-legacy-backfill.md): local evidence, финальный
+independent security review и exact-head
+`d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI `30479020686`
+(`run #39`), `3/3 PASS`, приняты, но item остаётся открытым до отдельного
+production-like inventory и будущего signed proposal/apply/rollback; также
+нужно закрыть design-partner CLI и пройти полный issue/reissue/revoke/accept
+race. Fingerprint HMAC startup validation уже
 реализована candidate; до deploy требуется защищённо настроить и аттестовать
 отдельный production secret version `v1`. Поэтому реальный tester email в
 route не передаётся.

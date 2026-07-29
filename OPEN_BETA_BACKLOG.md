@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 29.07.2026
-- Версия: 1.55
+- Версия: 1.56
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -223,7 +223,7 @@
 | BETA-IAM-003  | P0        | В работе      | Ограничить полномочия управляющего actor                  | Store manager не может создать NETWORK user, назначить чужой store, выдать роль/capability выше собственной или управлять пользователем вне пересечения scopes; защищены self-escalation и последний OWNER                                                                                                                 | BETA-IAM-001, BETA-IAM-002                             |
 | BETA-IAM-004  | P0        | В работе      | Завершить invite/resend/revoke workflow                   | Для external tenant generic direct-create, invite issue/rotation и email change остаются fail-closed; verified workflow доставляет opaque token только на bound mailbox, не возвращает raw URL tenant actor, резервирует normalized email под lock, аудирует send/resend/revoke/accept и отклоняет revoked/expired token   | BETA-SEC-009, BETA-IAM-003                             |
 | BETA-IAM-004A | P0        | В работе      | Реализовать initial OWNER identity outbox                 | Migrations 167..169 дают case-insensitive `IdentityEmailClaim`, sealed RPC, persisted `User/UserInvite` provenance/revocation, zero runtime table DML и обычные sealed issue/reissue/revoke/accept paths; legacy reconciliation выделен в `BETA-IAM-004B`; до готовности initial OWNER остаются CLI isolation, activation locator, encrypted leased outbox/verified delivery, protected initial issue/reissue/resend и fragment + POST-body transport; до deploy настраивается отдельный prod HMAC secret; raw email/token/URL/ciphertext отсутствуют в responses/logs/audit | BETA-SEC-008, BETA-SEC-009, BETA-TEN-001, BETA-TEN-002 |
-| BETA-IAM-004B | P0        | В работе      | `IDENTITY_LEGACY_RECONCILIATION_V1`                       | На exact `CURRENT_169` integrated least-privilege inventory читает `User`/`UserInvite`/claims без DML; local core self-test `18`, smoke self-test `18`, unit `17/17` и PostgreSQL 16 smoke на трёх disposable clones — `PASS`; финальный independent security review — `PASS` без оставшихся P0/P1/P2, exact-head GitHub CI пока `PENDING`; любой User, включая inactive, остаётся owner-кандидатом, invite — только live candidate; bound claim + `NULL` provenance, collision/mismatch/invalid email блокируют, terminal history не получает synthetic revision, Platform Admin/unverified User и legacy live token требуют review; evidence aggregate-only и HMAC-bound; production inventory не выполнялся, proposal/apply/rollback отсутствуют и запрещены; обе admin route остаются `503`, runtime allowlist — exact six-RPC | BETA-SEC-007..009, BETA-IAM-004A |
+| BETA-IAM-004B | P0        | В работе      | `IDENTITY_LEGACY_RECONCILIATION_V1`                       | На exact `CURRENT_169` integrated least-privilege inventory читает `User`/`UserInvite`/claims без DML; local core self-test `18`, smoke self-test `18`, unit `17/17` и PostgreSQL 16 smoke на трёх disposable clones — `PASS`; exact-head `d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI `30479020686` (`run #39`) — `3/3 PASS`, финальный independent security review — `PASS` без оставшихся P0/P1/P2; item остаётся `В работе` до отдельного production-like inventory; любой User, включая inactive, остаётся owner-кандидатом, invite — только live candidate; bound claim + `NULL` provenance, collision/mismatch/invalid email блокируют, terminal history не получает synthetic revision, Platform Admin/unverified User и legacy live token требуют review; evidence aggregate-only и HMAC-bound; production inventory не выполнялся, proposal/apply/rollback отсутствуют и запрещены; обе admin route остаются `503`, runtime allowlist — exact six-RPC | BETA-SEC-007..009, BETA-IAM-004A |
 | BETA-IAM-004C | P0        | Запланировано | Включить tenant-owned employee invites и email change     | Только после 004A/004B OWNER может выдавать scope-bounded invites; email change требует password step-up, reservation, confirmation, `authVersion` revoke и уведомления на old/new mailbox; owner transfer остаётся отдельным workflow                                                                                     | BETA-IAM-002..005, BETA-IAM-004A, BETA-IAM-004B       |
 | BETA-IAM-005  | P0        | В работе      | Ограничить особо чувствительное повышение привилегий      | Generic users/invites API не назначает OWNER; добавление/смена OWNER выполняется только отдельным атомарным owner-transfer workflow; Platform Admin нельзя назначить tenant API                                                                                                                                            | BETA-IAM-001, BETA-IAM-003                             |
 | BETA-IAM-006  | P0        | Запланировано | Свести backend/frontend permission maps                   | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization                                                                                                                                                                                      | BETA-IAM-001                                           |
@@ -2675,19 +2675,19 @@ prerequisite.
 В CI добавлены gates
 `check:identity-legacy-backfill-inventory`,
 `check:identity-legacy-backfill-release-artifact` и
-`db:smoke:identity-legacy-backfill-inventory`. До push exact candidate SHA
-exact-head GitHub CI остаётся `PENDING`; финальный independent security review
-нового slice — `PASS` без оставшихся actionable P0/P1/P2. Production inventory
-не запускался.
+`db:smoke:identity-legacy-backfill-inventory`. Exact-head implementation
+`d1162eed042893ec3b27ed823bdaddfa64c7e90f` принят GitHub Actions
+[`30479020686`](https://github.com/boozik3412/leetplus/actions/runs/30479020686)
+(`run #39`), `3/3 PASS`; финальный independent security review нового slice —
+`PASS` без оставшихся actionable P0/P1/P2. Production inventory не запускался.
 Production proposal/apply/rollback отсутствуют и запрещены, deployment и
 release decision остаются `NOT DEPLOYED / NO-GO`, аккаунт
 `gr1mmphone1@gmail.com` не создан.
 
 Открытые launch-blocking P0:
 
-1. Закрыть `BETA-IAM-004B`: получить exact-head GitHub CI integrated
-   least-privilege read-only inventory на `CURRENT_169`, затем отдельно
-   выполнить production-like inventory и только
+1. Exact-head CI/review `BETA-IAM-004B` приняты, но item не закрыт: отдельно
+   выполнить approved production-like read-only inventory и только затем
    будущий signed proposal/apply/rollback; collision/ambiguous rows не
    допускаются автоматически.
 2. Privacy-safe activation locator по reservation UUID/HMAC, persisted
@@ -2948,13 +2948,13 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
     mentions, receipts, SSE, notifications, PII и background execution.
 14. Завершить initial OWNER IAM поверх уже реализованных claim boundary,
     shell service и application issue/reissue/revoke/accept writers:
-    принять `BETA-IAM-004B` read-only inventory candidate, затем отдельно
-    выполнить production-like inventory и будущий signed
-    proposal/apply/rollback, изолировать design-partner CLI, добавить
-    activation locator, encrypted leased outbox, persisted GO, protected
-    issue/reissue/revoke/accept, POST-body token transport, session revoke и
-    полный 100-way concurrency matrix. Обе admin route до завершения остаются
-    `503`.
+    использовать принятые exact-head CI/review `BETA-IAM-004B` как
+    engineering prerequisite, затем отдельно выполнить production-like
+    inventory и будущий signed proposal/apply/rollback, изолировать
+    design-partner CLI, добавить activation locator, encrypted leased outbox,
+    persisted GO, protected issue/reissue/revoke/accept, POST-body token
+    transport, session revoke и полный 100-way concurrency matrix. Обе admin
+    route до завершения остаются `503`.
 15. Последовательно подключить единый scope к gamification/ledger, затем к
     assortment/reports/imports и пройти store-level negative suites.
 16. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных

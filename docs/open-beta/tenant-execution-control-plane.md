@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.28                                                                        |
+| Версия           | 1.29                                                                        |
 | Дата             | 29.07.2026                                                                  |
 | Статус           | Schema target `CURRENT_169`; engineering exact-head accepted, production-like admission pending |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
@@ -265,10 +265,13 @@ trial start и signed legacy proposal/apply/rollback ещё не реализо�
 system/PUBLIC-ACL baseline/high-OID function/FDW/parameter/type authority
 drift evidence, LIFO cleanup с `clusterAclRestored=true` и frozen-lock Prisma
 `6.19.3` dependency binding.
-Финальный independent security review завершён с `PASS`; exact-head GitHub CI
-пока pending, production inventory не выполнялся. Обычная application identity state
-machine не открывает эти controller routes: endpoint нельзя вызывать с
-данными реального тестера.
+Финальный independent security review завершён с `PASS`; exact-head
+`d1162eed042893ec3b27ed823bdaddfa64c7e90f` / GitHub Actions
+[`30479020686`](https://github.com/boozik3412/leetplus/actions/runs/30479020686)
+(`run #39`) принят, `3/3 PASS`. Production inventory не выполнялся, поэтому
+`BETA-IAM-004B` остаётся открытым. Обычная application identity state machine
+не открывает эти controller routes: endpoint нельзя вызывать с данными
+реального тестера.
 
 ## 5. Runtime policy
 
@@ -461,9 +464,9 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
 2. durable worker lease/claim для delivery, Langame sync и оставшихся
    schedulers; strict suspend/drain поверх уже реализованного revision fence и
    временного 17-job fail-closed containment;
-3. принять exact-head GitHub CI `BETA-IAM-004B` поверх уже принятого
-   independent security review, затем отдельно выполнить production-like
-   inventory и будущий signed
+3. использовать принятые exact-head CI/review `BETA-IAM-004B` как engineering
+   prerequisite, затем отдельно выполнить production-like inventory и
+   будущий signed
    proposal/apply/rollback исторических identity rows без provenance;
    изолировать design-partner CLI от application runtime;
 4. реализовать privacy-safe activation locator, encrypted outbox и

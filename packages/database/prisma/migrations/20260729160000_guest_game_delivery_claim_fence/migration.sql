@@ -2215,8 +2215,8 @@ WHEN (
 )
 EXECUTE FUNCTION public."guest_game_delivery_transition_event_check"();
 
--- Attempt evidence is insert-validated and append-only. UPDATE always fails;
--- DELETE is reserved for the separately operated evidence-retention identity.
+-- Attempt evidence is insert-validated and append-only. UPDATE and DELETE
+-- always fail until a bounded, audited retention procedure is introduced.
 CREATE OR REPLACE FUNCTION public."guest_game_delivery_attempt_append_only"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -2287,12 +2287,6 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  IF TG_OP = 'DELETE'
-     AND CURRENT_USER = 'leetplus_evidence_retention'
-  THEN
-    RETURN OLD;
-  END IF;
-
   RAISE EXCEPTION
     'GuestGameDeliveryAttempt evidence is append-only'
     USING ERRCODE = '55000';
@@ -2308,8 +2302,8 @@ BEFORE INSERT OR UPDATE OR DELETE ON "GuestGameDeliveryAttempt"
 FOR EACH ROW
 EXECUTE FUNCTION public."guest_game_delivery_attempt_append_only"();
 
--- Durable events are insert-validated and append-only. UPDATE always fails;
--- DELETE is reserved for the separately operated evidence-retention identity.
+-- Durable events are insert-validated and append-only. UPDATE and DELETE
+-- always fail until a bounded, audited retention procedure is introduced.
 CREATE OR REPLACE FUNCTION public."guest_game_delivery_event_append_only"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -2442,12 +2436,6 @@ BEGIN
     END IF;
 
     RETURN NEW;
-  END IF;
-
-  IF TG_OP = 'DELETE'
-     AND CURRENT_USER = 'leetplus_evidence_retention'
-  THEN
-    RETURN OLD;
   END IF;
 
   RAISE EXCEPTION

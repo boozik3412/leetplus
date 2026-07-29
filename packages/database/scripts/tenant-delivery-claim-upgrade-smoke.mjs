@@ -156,7 +156,7 @@ legacy events, then upgraded to CURRENT_166. The smoke verifies deterministic
 Store backfill, legacy quarantine, evidence preservation, same-scope RESTRICT
 foreign keys, CHECK/index/function/trigger catalogs, append-only evidence,
 three revision-fenced READY/BLOCKED transitions under a restricted runtime
-role, stale/future event replay rejection, six rejected legacy-quarantine
+role, stale/future event replay rejection, seven rejected legacy-quarantine
 mutations with zero state/evidence drift, and idempotent deploy.
 
 The failure database proves separate cross-tenant reward/event preflights, all
@@ -2309,6 +2309,18 @@ async function assertTriggerSemantics(client, fixtures) {
       ),
     immutableQuarantineError,
   );
+  await expectSqlState(
+    "55000",
+    () =>
+      client.$executeRawUnsafe(
+        `DELETE FROM "GuestGameDeliveryEvent"
+         WHERE "tenantId" = $1
+           AND "deliveryId" = $2`,
+        fixtures.tenantA,
+        quarantinedDeliveryId,
+      ),
+    /GuestGameDeliveryEvent evidence is append-only/u,
+  );
   assert.deepEqual(
     await readQuarantineSnapshot(),
     quarantineBefore,
@@ -2923,7 +2935,7 @@ async function runOfflineSelfTest() {
       lateDdlRollbackScenarios: 1,
       revisionFencedTransitions: 3,
       antiReplayScenarios: 2,
-      legacyQuarantineFreezeScenarios: 6,
+      legacyQuarantineFreezeScenarios: 7,
       destructiveSourceDatabaseActions: 0,
     })}\n`,
   );
@@ -3059,7 +3071,7 @@ async function runRealSmoke(environment) {
         durableEventRevisionRejected: true,
       },
       legacyQuarantineFreezeEvidence: {
-        immutableMutationsRejected: 6,
+        immutableMutationsRejected: 7,
         finalStateAndEvidenceUnchanged: true,
       },
       rollbackEvidence: {

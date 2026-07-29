@@ -1094,7 +1094,7 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
 });
 
-test("delivery attempts are insert-validated, append-only, and deletable only by the retention role", async () => {
+test("delivery attempts are insert-validated and fully append-only pending bounded retention", async () => {
   const { sql } = await artifacts();
   const body = functionBlock(
     sql,
@@ -1138,10 +1138,7 @@ test("delivery attempts are insert-validated, append-only, and deletable only by
     body,
     /Attempt does not match the current delivery provider marker[\s\S]*ERRCODE = '23514'/u,
   );
-  assert.match(
-    body,
-    /TG_OP = 'DELETE'[\s\S]*CURRENT_USER = 'leetplus_evidence_retention'[\s\S]*RETURN OLD;/u,
-  );
+  assert.doesNotMatch(body, /CURRENT_USER|SESSION_USER/u);
   assert.match(
     body,
     /GuestGameDeliveryAttempt evidence is append-only[\s\S]*ERRCODE = '55000'/u,
@@ -1157,7 +1154,7 @@ test("delivery attempts are insert-validated, append-only, and deletable only by
   );
 });
 
-test("delivery events validate delivery and attempt scope, deny updates, and restrict ordinary deletes", async () => {
+test("delivery events validate scope and deny all updates/deletes pending bounded retention", async () => {
   const { sql } = await artifacts();
   const body = functionBlock(sql, "guest_game_delivery_event_append_only");
   assert.match(
@@ -1208,10 +1205,7 @@ test("delivery events validate delivery and attempt scope, deny updates, and res
     );
   }
   assert.match(body, /Delivery event does not match its immutable attempt/u);
-  assert.match(
-    body,
-    /TG_OP = 'DELETE'[\s\S]*CURRENT_USER = 'leetplus_evidence_retention'[\s\S]*RETURN OLD;/u,
-  );
+  assert.doesNotMatch(body, /CURRENT_USER|SESSION_USER/u);
   assert.match(
     body,
     /GuestGameDeliveryEvent evidence is append-only[\s\S]*ERRCODE = '55000'/u,

@@ -139,6 +139,9 @@ jobs:
       - name: Validate tenant delivery claim contract
         run: pnpm --filter database check:tenant-delivery-claim
 
+      - name: Validate runtime function ACL enrollment contract
+        run: pnpm --filter database check:runtime-function-enrollment
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -281,6 +284,11 @@ jobs:
 
       - name: Verify database connectivity and migration state
         run: pnpm --filter database db:smoke
+
+      - name: Verify runtime function ACL enrollment on a disposable role
+        run: pnpm --filter database db:smoke:runtime-function-enrollment
+        env:
+          RUNTIME_FUNCTION_ENROLLMENT_SMOKE_CONFIRM: run-runtime-function-enrollment-smoke
 
       - name: Verify isolated design-partner provisioning lifecycle
         run: pnpm --filter database db:smoke:design-partner-provisioning

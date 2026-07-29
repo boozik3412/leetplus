@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.3                                                     |
+| Версия           | 1.4                                                     |
 | Дата             | 29.07.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -236,9 +236,10 @@ Suite проверяет:
 1. Сохранить remote PostgreSQL 16 PASS populated rehearsal `163 → 164` как
    исторический prerequisite evidence migration `165`: SHA `37f8cc88...` / CI
    `30423839760`.
-2. Получить отдельный remote exact-SHA `CURRENT_165` PASS populated rehearsal
-   `164 → 165`; до зелёного CI кандидата этот gate остаётся pending.
-3. Только после этого отдельным reviewed migration `166` добавить durable delivery
+2. Remote exact-SHA `CURRENT_165` PASS populated rehearsal `164 → 165`
+   получен: `4bd6a036...` / CI `30428288353`; это engineering evidence, не
+   production apply.
+3. Отдельным reviewed migration `166` добавить durable delivery
    claim-generation, captured execution revision, lease owner/expiry,
    provider-attempt marker, потребление Store revision fence и fenced
    finalize/reconcile согласно

@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.13.0                                             |
+| Версия          | 1.14.0                                             |
 | Дата            | 29.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -54,6 +54,9 @@ admission.
 - [x] Remote PostgreSQL 16 prerequisite `CURRENT_164` зелёный на
       `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI `30423839760`; это
       SYNTHETIC evidence, runtime `CURRENT_164` не принимает.
+- [x] Remote `CURRENT_165` candidate и populated `164 → 165` rehearsal
+      зелёные на `4bd6a036...` / CI `30428288353`; все три CI job успешны.
+      Это не закрывает production-like или deployment checkbox ниже.
 - [ ] `main` защищён branch protection/ruleset, CODEOWNERS/approval routing
       настроены и независимый reviewer одобрил root-enrollment change.
 - [ ] Reviewed Ed25519 public authority root enrolment выполнен отдельным
@@ -382,6 +385,9 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.14.0`, 29.07.2026 — remote `CURRENT_165` и populated `164 → 165`
+  rehearsal приняты на `4bd6a036...` / CI `30428288353`; production-like,
+  backup/restore, apply/cutover и внешний доступ остаются незакрытыми.
 - `1.13.0`, 29.07.2026 — перед любым production apply добавлен atomic
   release-env gate для exact migration `165`/count `165`; миграционная
   совместимость подтверждается `/health/ready`, а не legacy `/health`.

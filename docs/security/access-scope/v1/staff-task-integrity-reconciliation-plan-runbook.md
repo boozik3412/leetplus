@@ -2,11 +2,11 @@
 
 | Поле                  | Значение                                                                   |
 | --------------------- | -------------------------------------------------------------------------- |
-| Статус                | `IMPLEMENTED_CANDIDATE`; current candidate SHA pending; не deployed        |
-| Версия                | 1.9.0                                                                      |
+| Статус                | `IMPLEMENTED_CANDIDATE`; current remote engineering CI PASS; не deployed   |
+| Версия                | 1.10.0                                                                     |
 | Дата                  | 29.07.2026                                                                 |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                       |
-| Current candidate SHA | Не назначен: current-state change находится в рабочем дереве               |
+| Current candidate SHA | `4bd6a036...`; remote CURRENT_165 engineering CI PASS                      |
 | Historical planner    | `2c74c663780b3f183be708a01431c22efe57a723`; не current evidence            |
 | Historical dry-run    | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; SYNTHETIC, не current evidence |
 | Report schema version | 1                                                                          |
@@ -403,9 +403,10 @@ acquisition production-like admission/dry-run fail-closed запрещены.
 Отдельный test evidence
 `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
 admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в isolated
-child. Remote CI evidence pending; experimental Node 22 module mock — P2.
-Production root enrollment, operational signer и approved acquisition остаются
-P0.
+child. Current `CURRENT_165` engineering CI
+`4bd6a036...` / `30428288353` прошёл; experimental Node 22 module mock — P2.
+Production root enrollment, operational signer и approved acquisition
+остаются P0.
 
 Production-like inventory/planner/proposal dry-run, standalone dry-run,
 reconciliation apply,
@@ -476,6 +477,9 @@ release_decision: NO-GO | RECONCILE | READY_FOR_VALIDATE_REHEARSAL
 
 ## 11. Changelog
 
+- `1.10.0`, 29.07.2026 — current `CURRENT_165` planner/catalog/admission
+  engineering gates прошли remote CI `4bd6a036...` / `30428288353`;
+  production-like planner/apply остаются `NO-GO`.
 - `1.9.0`, 29.07.2026 — current planner gate расширен до `CURRENT_165` с
   allowlisted migrations `163..165`; count `165`, latest
   `20260729120000_store_background_execution_fence`. Frozen StaffTask

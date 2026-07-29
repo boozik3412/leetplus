@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 29.07.2026
-- Версия: 1.42
+- Версия: 1.43
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -296,8 +296,9 @@ admission/inventory/planner допускается только на `CURRENT_16
 плюс allowlisted migrations
 `20260728120000_tenant_execution_control_plane_expand` и
 `20260728150000_tenant_execution_revision_fence` и
-`20260729120000_store_background_execution_fence`. Новый exact candidate
-SHA и production-like evidence ещё pending. Strict acquisition contract,
+`20260729120000_store_background_execution_fence`. Exact engineering
+candidate `4bd6a036df16579f68b2c96a14b6475c8311b231` принят по зелёному remote
+CI `30428288353`; production-like evidence ещё pending. Strict acquisition contract,
 root lifecycle и detached `prepare → external sign → finalize` реализованы как
 candidate; реальный public root намеренно не enrolled. Статус остаётся
 `В работе / NO-GO`.
@@ -2156,6 +2157,13 @@ bounded schema candidate `20260729120000_store_background_execution_fence`
 только fail-closed Store-level execution fence. Все существующие и новые Store
 остаются `backgroundExecutionEnabled=false`; автоматической активации и
 outbound effects нет. Production migration/deploy не выполнялись.
+
+Remote exact-SHA evidence для `CURRENT_165` принято: SHA
+`4bd6a036df16579f68b2c96a14b6475c8311b231`, CI run `30428288353`. Все три
+job завершились `PASS`; real PostgreSQL шаг подтвердил populated
+`164 → 165`, а StaffTask EXPAND/admission/security/inventory/planner/catalog
+drift и application/authority gates зелёные. Это engineering/release evidence,
+не production-like acquisition/admission, deploy или разрешение доступа.
 
 Authority bundle локально проходит `40/40`, включая child-process positive
 ceremony E2E; canonical root registry остаётся `{}`. В `main` нет branch

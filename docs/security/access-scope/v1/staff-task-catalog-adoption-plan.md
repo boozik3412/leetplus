@@ -3,7 +3,7 @@
 | Поле           | Значение                                                                                                                                                  |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Статус         | templates, recurring actor HTTP, snapshot admission, inventory/planner, SYNTHETIC proposal dry-run и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.12.0                                                                                                                                                    |
+| Версия         | 1.13.0                                                                                                                                                    |
 | Дата           | 29.07.2026                                                                                                                                                |
 | Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                                                                      |
 | Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                                                                    |
@@ -214,7 +214,8 @@ Schema-only EXPAND реализован отдельным bounded candidate
 Aggregate-only reconciliation planner описан в отдельном
 [runbook](./staff-task-integrity-reconciliation-plan-runbook.md):
 historical candidate `2c74c663...` не является current evidence; exact
-current candidate SHA ещё не назначен.
+engineering candidate `4bd6a036df16579f68b2c96a14b6475c8311b231` принят по
+зелёному remote CI `30428288353`, а production-like evidence ещё pending.
 
 - использует одно соединение и одну `READ ONLY REPEATABLE READ` transaction;
 - требует exact target/confirmation, production attestation, 40-hex
@@ -247,8 +248,9 @@ idempotent apply, locks/recheck, audit, rollback и повторный zero-diff
 Historical snapshot admission evidence boundary зафиксирован на
 `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; это не current candidate
 evidence. Current admission также поддерживает `CURRENT_165` после exact
-allowlisted migrations `163..165`, но требует нового exact SHA и повторного
-evidence.
+allowlisted migrations `163..165`; exact engineering candidate
+`4bd6a036...` прошёл remote CI `30428288353`. Production-like evidence
+остаётся отдельным незакрытым gate.
 Admission допускает только loopback snapshot, точные runtime bytes и migration
 manifest из Git artifact. Logical allowlist содержит девять
 relations, но роль получает table-level `SELECT` только на восемь; для `User`
@@ -261,7 +263,8 @@ production-like admission, inventory и planner остаются fail-closed `NO
 Отдельный historical test evidence
 `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
 admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в
-изолированном child-процессе. Remote CI evidence ещё pending; используемый
+изолированном child-процессе. Его successor в exact `CURRENT_165` candidate
+прошёл remote CI `4bd6a036...` / `30428288353`; используемый
 экспериментальный Node 22 module mock классифицирован как P2. Это тест verifier
 path, а не enrollment production root: reviewed root enrollment, operational
 signer и approved snapshot acquisition остаются P0.
@@ -357,6 +360,9 @@ ownership и общий Gate 2.
 
 ## 7. Changelog
 
+- `1.13.0`, 29.07.2026 — current `CURRENT_165` catalog/admission/planner
+  engineering gates прошли remote CI `4bd6a036...` / `30428288353`;
+  production-like evidence и scheduler остаются `NO-GO`.
 - `1.10.0`, 28.07.2026 — runtime candidate сохранён на
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, а тестовый контур зафиксирован
   отдельным SHA `2341b99937e54cc50d1763a0a794d975816c72ce`: authority `9/9`,

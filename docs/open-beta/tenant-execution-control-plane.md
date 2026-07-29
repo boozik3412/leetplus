@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.14                                                                        |
+| Версия           | 1.15                                                                        |
 | Дата             | 29.07.2026                                                                  |
-| Статус           | Foundation + revision fencing slice; evidence pending                       |
+| Статус           | Foundation + revision/Store fencing; remote engineering PASS; operational evidence pending |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
 | Migrations       | `20260728120000...control_plane_expand` + `20260728150000...revision_fence` + `20260729120000...store_background_execution_fence` |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть                   |
@@ -477,6 +477,9 @@ database и проверяет populated success, три SQLSTATE `55000` drain 
 (`42P07`) и rollback, `5` rolled-back attempts и recovery deploy.
 Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
 `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`.
+Exact `CURRENT_165` engineering candidate затем прошёл все три job на SHA
+`4bd6a036df16579f68b2c96a14b6475c8311b231`, CI run `30428288353`, включая
+populated Store rehearsal `164 → 165` и полный migration-smoke tail.
 Локальный diagnostic запуск сам по себе production-like evidence не является.
 Migration `165` не применялась в production и не меняет release decision.
 

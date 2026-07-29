@@ -3,10 +3,10 @@
 | Поле                  | Значение                                                                                                                    |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Статус                | Snapshot admission, inventory, aggregate planner и DB EXPAND candidates; production-like admission/inventory не выполнялись |
-| Версия                | 1.9.0                                                                                                                       |
+| Версия                | 1.10.0                                                                                                                      |
 | Дата                  | 29.07.2026                                                                                                                  |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                        |
-| Current candidate SHA | Не назначен; historical `56d61543...` не является current evidence                                                         |
+| Current candidate SHA | `4bd6a036...`; remote CURRENT_165 engineering CI PASS; historical `56d61543...` не current evidence                          |
 | Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)                                            |
 | Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md)                                                  |
 | Следующий checkpoint  | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                      |
@@ -367,8 +367,9 @@ acquisition, root enrollment, restore, admission и inventory не выполн�
 Public-only pre-signed pinned-path test имеет отдельный evidence SHA
 `2341b99937e54cc50d1763a0a794d975816c72ce`, повышает admission suite до
 `19/19` и имеет `LOCAL PASS` в isolated child.
-Remote CI evidence pending; experimental Node 22 module mock — P2. Production
-root enrollment, operational signer и approved acquisition остаются P0.
+Current `CURRENT_165` engineering CI `4bd6a036...` / `30428288353` прошёл;
+experimental Node 22 module mock — P2. Production root enrollment,
+operational signer и approved acquisition остаются P0.
 
 ## 9. Exit criteria
 
@@ -390,6 +391,9 @@ rehearsal.
 
 ## 10. Changelog
 
+- `1.10.0`, 29.07.2026 — current `CURRENT_165` inventory/admission engineering
+  gates прошли remote CI `4bd6a036...` / `30428288353`; production-like
+  inventory и root/acquisition gates остаются `NO-GO`.
 - `1.9.0`, 29.07.2026 — exact current inventory/planner path переведён на
   `CURRENT_165`: frozen prefix `EXPAND_162` плюс reviewed additive tail
   `163..165`; migration count `165`, latest

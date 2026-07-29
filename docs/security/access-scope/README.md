@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.19.0                                                                                              |
+| Версия контракта               | 1.20.0                                                                                              |
 | Дата                           | 29.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -19,6 +19,7 @@
 | Staff snapshot admission       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; synthetic verified; production-like NO-GO   |
 | Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — included in green remote SHA `d77c7439...`             |
 | Authority operations           | Detached candidate; local 40/40; production public root `{}` / FAIL-CLOSED                          |
+| Current remote candidate       | `4bd6a036...` / CI `30428288353`; CURRENT_165 engineering gates PASS; not deployed                  |
 | Staff proposal dry-run         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — all 8 fixtures; SYNTHETIC only; no apply; not deployed |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
@@ -333,8 +334,9 @@ realpath guard; production root registry на диске остаётся пус
 Выполнены `SYNTHETIC` rehearsal и локальный public-only test-only pinned-path.
 Production-like acquisition/restore/admission, inventory/planner/row dry-run,
 reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
-не выполнялись; exact remote CI текущего authority-operations candidate ещё не
-получен.
+не выполнялись. Remote CI текущего `CURRENT_165` engineering candidate,
+включая application/authority и real PostgreSQL `164 → 165`, пройден; это не
+production-like evidence.
 
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
@@ -352,6 +354,10 @@ reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
 
 ## Changelog
 
+- `1.20.0`, 29.07.2026 — remote `CURRENT_165` engineering evidence принято:
+  `4bd6a036...` / CI `30428288353`, все три job и real PostgreSQL
+  `164 → 165` зелёные. Root registry остаётся `{}`; production-like
+  acquisition/admission, deploy и внешний beta остаются `NO-GO`.
 - `1.19.0`, 29.07.2026 — current release contract переведён в `CURRENT_165`:
   exact additive tail `163..165`, migration count `165`, latest
   `20260729120000_store_background_execution_fence`. Remote `CURRENT_164`

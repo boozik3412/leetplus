@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.19                                         |
+| Версия           | 1.20                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -126,7 +126,8 @@ enterprise-isolation option и не сокращает shared gates.
 
 Current migration `165` — отдельный bounded fail-closed Store fence candidate:
 все Store остаются `backgroundExecutionEnabled=false`, ни один Store не
-активирован, outbound `OFF`. Production apply/deploy не выполнялись.
+активирован, outbound `OFF`. Remote populated `164 → 165` и все три CI job
+прошли на evidence из backlog §5.29. Production apply/deploy не выполнялись.
 
 При противоречии исторического документа этому пакету действует
 `OPEN_BETA_BACKLOG.md`. Изменение продуктового состава первой когорты требует
@@ -219,7 +220,8 @@ Current migration `165` — отдельный bounded fail-closed Store fence c
   baseline 156 и применяет ровно шесть migrations `157..162`.
 - aggregate-only StaffTask reconciliation planner: historical candidate
   `2c74c663780b3f183be708a01431c22efe57a723` не является evidence текущего
-  рабочего дерева; новый exact candidate SHA ещё не назначен. Полный каталог
+  рабочего дерева; current `CURRENT_165` remote evidence принято на
+  `4bd6a036...` / CI `30428288353` (полная ссылка — backlog §5.29). Полный каталог
   из 43 кодов классифицирован как `8 proposal + 29 operator + 6 review`;
   обязательны одна read-only `REPEATABLE READ` transaction, exact target /
   confirmation / production attestation / 40-hex SHA / HMAC и expected
@@ -240,7 +242,8 @@ Current migration `165` — отдельный bounded fail-closed Store fence c
   и adversarial disposable-clone smoke для неверного FK/index contract прошли.
 - StaffTask snapshot admission schema `v2`: исторический runtime
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` не является current evidence;
-  новый exact candidate SHA ещё не назначен. `IMPLEMENTED_CANDIDATE`, not
+  current `CURRENT_165` remote candidate `4bd6a036...` прошёл CI.
+  `IMPLEMENTED_CANDIDATE`, not
   deployed. Admission принимает только изолированную loopback PostgreSQL 16
   копию в точном `BASELINE_156`, `EXPAND_162` или `CURRENT_165`,
   сверяет ordered migration names/checksums, exact Git blob content, catalog,

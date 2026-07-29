@@ -3,11 +3,11 @@
 | Поле                    | Значение                                                                   |
 | ----------------------- | -------------------------------------------------------------------------- |
 | Статус                  | `IMPLEMENTED_CANDIDATE`; SYNTHETIC real-PG `PASS`; PRODUCTION_LIKE `NO-GO` |
-| Версия                  | 0.11.0                                                                     |
+| Версия                  | 0.12.0                                                                     |
 | Дата                    | 29.07.2026                                                                 |
 | Backlog                 | `BETA-MOD-STAFF-003`, `BETA-OPS-002`, `BETA-OPS-006`, `BETA-CUT-001`       |
 | Current candidate SHA   | Exact PR/release SHA; принимается только с green remote CI evidence        |
-| Latest green remote SHA | `37f8cc88cdba05b3c73f6bc14e14528f831228ee`; CURRENT_164 prerequisite PASS  |
+| Latest green remote SHA | `4bd6a036df16579f68b2c96a14b6475c8311b231`; CI `30428288353`; CURRENT_165 PASS |
 | Historical runtime SHA  | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; не current evidence            |
 | Historical test SHA     | `2341b99937e54cc50d1763a0a794d975816c72ce`; не current evidence            |
 | Report schema version   | 2                                                                          |
@@ -71,8 +71,9 @@ SYNTHETIC real PostgreSQL verification = PASS (23 scenarios; PostgreSQL 16.13)
 PRODUCTION_LIKE acquisition/restore/run = NOT EXECUTED
 production-like authority roots         = {} / EMPTY; FAIL-CLOSED
 remote CURRENT_164 prerequisite          = PASS / 37f8cc88... / CI 30423839760
+remote CURRENT_165 engineering candidate = PASS / 4bd6a036... / CI 30428288353
 main protection/ruleset/CODEOWNERS       = ABSENT
-exact authority-candidate remote CI     = REQUIRED / RELEASE EVIDENCE
+exact authority-candidate remote CI     = PASS / 4bd6a036...
 Node 22 experimental module mocks        = P2 TEST-INFRA RISK
 remote admission                        = NO-GO
 production apply/VALIDATE/deploy        = NO-GO
@@ -946,10 +947,9 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
 1. P0: независимо проверить detached signer/acquisition/root-lifecycle
    candidate; утвердить внешний signer/HSM, separation of duties, key custody
    и защищённый acquisition-to-signature transport;
-2. считать SHA `37f8cc88cdba05b3c73f6bc14e14528f831228ee`
-   зелёным remote PostgreSQL 16 prerequisite для exact `CURRENT_164`
-   (CI `30423839760`), но не production-like evidence; получить clean remote
-   CI для нового exact `CURRENT_165` authority candidate SHA;
+2. считать `37f8cc88...` historical prerequisite `CURRENT_164`, а
+   `4bd6a036...` / CI `30428288353` — зелёным exact `CURRENT_165` engineering
+   candidate evidence; ни одно из них не является production-like evidence;
 3. P2: зафиксировать поддерживаемую Node 22 версию для test-only
    `--experimental-test-module-mocks` и отслеживать/заменить experimental API,
    если он изменится;
@@ -979,6 +979,11 @@ apply/rollback, zero-diff и повторные проверки.
 
 ## 18. Changelog
 
+- `0.12.0`, 29.07.2026 — exact `CURRENT_165` remote engineering candidate
+  `4bd6a036...` прошёл CI `30428288353`: все три job, real PostgreSQL
+  `164 → 165`, admission/application/authority gates зелёные.
+  Production-like acquisition/admission, root enrollment, deploy и внешний
+  beta остаются `NO-GO`.
 - `0.11.0`, 29.07.2026 — current admission contract переведён в
   `CURRENT_165`: `migrationCount=165`, latest
   `20260729120000_store_background_execution_fence`, exact allowlisted tail

@@ -3,13 +3,13 @@
 | Поле          | Значение                                               |
 | ------------- | ------------------------------------------------------ |
 | Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
-| Версия        | 1.6                                                    |
-| Дата          | 28.07.2026                                             |
+| Версия        | 1.7                                                    |
+| Дата          | 29.07.2026                                             |
 | Статус        | `NO-GO`; control-plane foundation реализован, adoption pending |
 | Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
 | Область       | Собственная сеть или явно разрешённые клубы            |
 | Назначение    | Первый shared external tenant и последующая когорта    |
-| Candidate SHA | Не назначен: shared control-plane пока в рабочем дереве |
+| Candidate SHA | `4bd6a036...`; remote engineering CI `30428288353` PASS |
 | Historical evidence | `044ceca2` / `2341b999`, не evidence текущего candidate |
 
 Этот профиль фиксирует обязательный продуктовый состав тестового доступа.
@@ -34,12 +34,13 @@ protected `SHARED BETA GO` активация остаётся `NO-GO`.
 web/API/workers/PostgreSQL/Telegram data plane. Отдельный runtime/DB остаётся
 только optional contingency/enterprise-isolation lane.
 
-Local public-only pinned-path evidence прошёл admission suite `19/19`, но
-remote CI ещё pending. Production authority roots остаются
-`EMPTY / FAIL-CLOSED`, поэтому fixture не является production-like authority
-или Gate 2 evidence. Experimental Node.js 22 module mock учитывается как `P2`
-test-infrastructure risk и не меняет entitlement или продуктовый состав этого
-профиля.
+Local public-only pinned-path evidence прошёл admission suite `19/19`; его
+current successor вместе с authority/application/PostgreSQL gates прошёл
+remote CI на `4bd6a036...` / `30428288353`. Production authority roots
+остаются `EMPTY / FAIL-CLOSED`, поэтому fixture не является production-like
+authority или Gate 2 evidence. Experimental Node.js 22 module mock учитывается
+как `P2` test-infrastructure risk и не меняет entitlement или продуктовый
+состав этого профиля.
 
 ## Включено
 

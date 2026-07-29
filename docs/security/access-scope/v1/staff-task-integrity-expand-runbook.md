@@ -2,8 +2,8 @@
 
 | Поле                    | Значение                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Статус                  | `IMPLEMENTED_CANDIDATE`; локальная real PostgreSQL rehearsal пройдена; не deployed                                                                           |
-| Версия                  | 1.8.0                                                                                                                                                        |
+| Статус                  | `IMPLEMENTED_CANDIDATE`; local EXPAND и remote CURRENT_165 engineering rehearsal пройдены; не deployed                                                        |
+| Версия                  | 1.9.0                                                                                                                                                        |
 | Дата                    | 29.07.2026                                                                                                                                                   |
 | Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                                                         |
 | Migration count         | 162                                                                                                                                                          |
@@ -491,6 +491,9 @@ decision: NO-GO | RECONCILE | READY_FOR_VALIDATE | GO
 
 ## 11. Changelog
 
+- `1.9.0`, 29.07.2026 — exact `CURRENT_165` additive-tail/EXPAND engineering
+  gates и populated `164 → 165` прошли remote CI
+  `4bd6a036...` / `30428288353`; production apply остаётся `NO-GO`.
 - `1.8.0`, 29.07.2026 — current additive tail расширен migration `165`;
   admission/planner state теперь `CURRENT_165`, migration count `165`, latest
   `20260729120000_store_background_execution_fence`. Store остаются

@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                   |
 | ---------------- | ---------------------------------------------------------- |
-| Версия           | 0.5                                                        |
+| Версия           | 0.6                                                        |
 | Дата             | 29.07.2026                                                 |
 | Статус           | Design candidate; 4 review включены, code отсутствует      |
 | Release decision | `NO-GO` для external delivery и owner invite               |
@@ -28,9 +28,9 @@ Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на
 `37f8cc88cdba05b3c73f6bc14e14528f831228ee` (CI run `30423839760`).
 Migration `165` добавляет только fail-closed Store background-execution fence,
 не включает ни один Store и не разрешает outbound. Delivery claim migration
-`166` всё ещё не создана. До начала её реализации обязателен отдельный remote
-PostgreSQL 16 PASS exact-SHA кандидата `CURRENT_165`, включая populated
-rehearsal `164 → 165`; локальные проверки этого не заменяют. Этот документ
+`166` всё ещё не создана. Отдельный remote PostgreSQL 16 PASS exact-SHA
+кандидата `CURRENT_165`, включая populated rehearsal `164 → 165`, получен на
+`4bd6a036...` / CI `30428288353`. Этот документ
 является design contract, а не разрешением создать migration, применить DDL
 или включить outbound.
 
@@ -675,8 +675,9 @@ Status labels, DTO validators, mappers, metrics и audit payload меняютс�
 1. сохранить immutable manifest первых `165` migrations с names/checksums;
 2. сохранить уже полученный remote exact-SHA PASS populated `163 → 164` как
    исторический prerequisite migration `165`;
-3. получить отдельный remote exact-SHA `CURRENT_165` PASS populated
-   `164 → 165` и зафиксировать его как обязательный base gate migration `166`;
+3. сохранить принятый remote exact-SHA `CURRENT_165` PASS populated
+   `164 → 165` (`4bd6a036...` / CI `30428288353`) как обязательный base gate
+   migration `166`;
 4. отвязать rehearsal `165` от предположения, что она всегда latest;
 5. создать отдельный `tenant-delivery-claim-upgrade-smoke`.
 
@@ -756,8 +757,8 @@ Acceptance:
 1. Remote `CURRENT_164` evidence — `PASS` на SHA `37f8cc88...`, CI
    `30423839760`; это исторический prerequisite migration `165`, а не
    production-like `GO`.
-2. До реализации `166` получить и сохранить отдельный remote exact-SHA
-   `CURRENT_165` PASS populated `164 → 165`; pending до зелёного CI кандидата.
+2. Отдельный remote exact-SHA `CURRENT_165` PASS populated `164 → 165`
+   принят на `4bd6a036...` / CI `30428288353`.
 3. Независимо reviewed additive migration `166` и отдельный real PostgreSQL
    rehearsal `165 → 166` на exact candidate SHA.
 4. Protected release manifest фиксирует accepted SHA,

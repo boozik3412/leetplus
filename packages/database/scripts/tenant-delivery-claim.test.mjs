@@ -274,6 +274,11 @@ async function artifacts() {
 
 test("migration 166 is transactional and requires the exact CURRENT_165 Store fence", async () => {
   const { sql, schema } = await artifacts();
+  assert.doesNotMatch(
+    sql,
+    /\bAS\s+constraint\b/u,
+    "PostgreSQL reserved keyword CONSTRAINT cannot be used as an unquoted alias.",
+  );
   const baseManifest = JSON.parse(await readFile(baseManifestUrl, "utf8"));
   const migrationNames = (
     await readdir(migrationsUrl, { withFileTypes: true })

@@ -43,18 +43,18 @@ BEGIN
       AND trigger.tgenabled <> 'D'
   ) OR NOT EXISTS (
     SELECT 1
-    FROM pg_catalog.pg_constraint AS constraint
-    WHERE constraint.conrelid = 'public."Store"'::pg_catalog.regclass
-      AND constraint.conname = 'Store_executionRevision_nonnegative_check'
-      AND constraint.contype = 'c'
-      AND constraint.convalidated
+    FROM pg_catalog.pg_constraint AS catalog_constraint
+    WHERE catalog_constraint.conrelid = 'public."Store"'::pg_catalog.regclass
+      AND catalog_constraint.conname = 'Store_executionRevision_nonnegative_check'
+      AND catalog_constraint.contype = 'c'
+      AND catalog_constraint.convalidated
   ) OR NOT EXISTS (
     SELECT 1
-    FROM pg_catalog.pg_constraint AS constraint
-    WHERE constraint.conrelid = 'public."Store"'::pg_catalog.regclass
-      AND constraint.conname = 'Store_backgroundExecution_requires_active_check'
-      AND constraint.contype = 'c'
-      AND constraint.convalidated
+    FROM pg_catalog.pg_constraint AS catalog_constraint
+    WHERE catalog_constraint.conrelid = 'public."Store"'::pg_catalog.regclass
+      AND catalog_constraint.conname = 'Store_backgroundExecution_requires_active_check'
+      AND catalog_constraint.contype = 'c'
+      AND catalog_constraint.convalidated
   ) OR NOT EXISTS (
     SELECT 1
     FROM pg_catalog.pg_proc AS procedure

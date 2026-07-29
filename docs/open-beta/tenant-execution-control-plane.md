@@ -267,6 +267,9 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 
 Protected activation locator, encrypted mail outbox, initial OWNER delivery,
 trial start и signed legacy proposal/apply/rollback ещё не реализованы.
+`BETA-IAM-004E` fragment + fixed POST-body transport существует как
+engineering candidate на неизменном `CURRENT_169`; exact-head CI/review и
+production proxy/APM/CSP/browser/mail-client acceptance ещё pending.
 `BETA-IAM-004B` ограничен read-only inventory candidate; local core self-test
 `18`, smoke self-test `18`, unit `17/17` и PostgreSQL 16 three-clone smoke
 приняты, включая exact catalog/RI-trigger/22-column ACL/TLS,

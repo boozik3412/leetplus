@@ -24,6 +24,11 @@ import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
 import { IdentityEmailClaimService } from './identity-email-claim.service';
 
+const BEARER_INVITE_TOKEN = 'A'.repeat(43);
+const OWNER_INVITE_TOKEN = 'B'.repeat(43);
+const MEMBER_INVITE_TOKEN = 'C'.repeat(43);
+const LEGACY_INVITE_TOKEN = 'D'.repeat(43);
+
 type PrismaMock = {
   user: {
     findUnique: jest.Mock;
@@ -398,9 +403,7 @@ describe('AuthService', () => {
   it('resolves an invite only by the hash of its opaque bearer token', async () => {
     prisma.userInvite.findUnique.mockResolvedValue(createMemberInvite());
 
-    await expect(
-      service.getInvite('opaque-bearer-token'),
-    ).resolves.toMatchObject({
+    await expect(service.getInvite(BEARER_INVITE_TOKEN)).resolves.toMatchObject({
       email: 'invitee@example.test',
       scope: 'NETWORK',
     });
@@ -408,13 +411,35 @@ describe('AuthService', () => {
       expect.objectContaining({
         where: {
           tokenHash: createHash('sha256')
-            .update('opaque-bearer-token')
+            .update(BEARER_INVITE_TOKEN)
             .digest('hex'),
           revokedAt: null,
         },
       }),
     );
   });
+
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['empty', ''],
+    ['whitespace', ` ${BEARER_INVITE_TOKEN}`],
+    ['short', 'A'.repeat(42)],
+    ['long', 'A'.repeat(44)],
+    ['standard base64 plus', `${'A'.repeat(42)}+`],
+    ['standard base64 slash', `${'A'.repeat(42)}/`],
+    ['padded', `${'A'.repeat(42)}=`],
+  ])(
+    'rejects a %s invite token before database access',
+    async (_case, token) => {
+      await expect(service.getInvite(token)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(prisma.userInvite.findUnique).not.toHaveBeenCalled();
+      expect(passwordService.hash).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     [
@@ -440,9 +465,9 @@ describe('AuthService', () => {
         },
       });
 
-      await expect(
-        service.getInvite('opaque-bearer-token'),
-      ).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(service.getInvite(BEARER_INVITE_TOKEN)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
     },
   );
 
@@ -464,7 +489,7 @@ describe('AuthService', () => {
       }),
     );
 
-    const response = await service.acceptInvite('opaque-owner-token', {
+    const response = await service.acceptInvite(OWNER_INVITE_TOKEN, {
       password: 'strong-password',
       confirmPassword: 'strong-password',
     });
@@ -533,7 +558,7 @@ describe('AuthService', () => {
       },
     });
     expect(JSON.stringify(auditCall?.[0].data)).not.toContain(
-      'opaque-owner-token',
+      OWNER_INVITE_TOKEN,
     );
     expect(JSON.stringify(auditCall?.[0].data)).not.toContain(
       'owner@club-a.leetplus.ru',
@@ -615,7 +640,7 @@ describe('AuthService', () => {
   });
 
   it('fails closed for a legacy invite without identity provenance before writes', async () => {
-    const token = 'legacy-opaque-token';
+    const token = LEGACY_INVITE_TOKEN;
     const email = 'invitee@example.test';
     prisma.userInvite.findUnique.mockResolvedValue({
       ...createMemberInvite(),
@@ -672,7 +697,7 @@ describe('AuthService', () => {
 
     try {
       await expect(
-        service.acceptInvite('opaque-member-token', {
+        service.acceptInvite(MEMBER_INVITE_TOKEN, {
           password: 'strong-password',
           confirmPassword: 'strong-password',
         }),
@@ -704,7 +729,7 @@ describe('AuthService', () => {
       createMemberInvite(TenantOnboardingStatus.OWNER_INVITED),
     );
 
-    await expect(service.getInvite('opaque-member-token')).rejects.toThrow(
+    await expect(service.getInvite(MEMBER_INVITE_TOKEN)).rejects.toThrow(
       UnauthorizedException,
     );
   });
@@ -715,7 +740,7 @@ describe('AuthService', () => {
       tenant: createInviteTenant(TenantOnboardingStatus.ACTIVE),
     });
 
-    await expect(service.getInvite('opaque-owner-token')).rejects.toThrow(
+    await expect(service.getInvite(OWNER_INVITE_TOKEN)).rejects.toThrow(
       UnauthorizedException,
     );
   });
@@ -732,7 +757,7 @@ describe('AuthService', () => {
 
     let rejection: unknown;
     try {
-      await service.acceptInvite('opaque-owner-token', {
+      await service.acceptInvite(OWNER_INVITE_TOKEN, {
         password: 'strong-password',
         confirmPassword: 'strong-password',
       });
@@ -760,7 +785,7 @@ describe('AuthService', () => {
     });
 
     await expect(
-      service.acceptInvite('opaque-owner-token', {
+      service.acceptInvite(OWNER_INVITE_TOKEN, {
         password: 'strong-password',
         confirmPassword: 'strong-password',
       }),
@@ -779,7 +804,7 @@ describe('AuthService', () => {
     prisma.user.count.mockResolvedValue(1);
 
     await expect(
-      service.acceptInvite('opaque-owner-token', {
+      service.acceptInvite(OWNER_INVITE_TOKEN, {
         password: 'strong-password',
         confirmPassword: 'strong-password',
       }),
@@ -806,7 +831,7 @@ describe('AuthService', () => {
       tenant: expiredTenant,
     });
 
-    await expect(service.getInvite('opaque-member-token')).rejects.toThrow(
+    await expect(service.getInvite(MEMBER_INVITE_TOKEN)).rejects.toThrow(
       UnauthorizedException,
     );
   });
@@ -816,7 +841,7 @@ describe('AuthService', () => {
       createMemberInvite(TenantOnboardingStatus.PROVISIONING),
     );
 
-    await expect(service.getInvite('opaque-bearer-token')).rejects.toThrow(
+    await expect(service.getInvite(BEARER_INVITE_TOKEN)).rejects.toThrow(
       UnauthorizedException,
     );
   });
@@ -831,7 +856,7 @@ describe('AuthService', () => {
       tenant: createInviteTenant(),
     });
 
-    await expect(service.getInvite('opaque-bearer-token')).rejects.toThrow(
+    await expect(service.getInvite(BEARER_INVITE_TOKEN)).rejects.toThrow(
       BadRequestException,
     );
   });

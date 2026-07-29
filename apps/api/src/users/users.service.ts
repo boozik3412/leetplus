@@ -1643,7 +1643,7 @@ export class UsersService {
       'https://leetplus.ru';
     const base = configuredBase.replace(/\/+$/, '');
 
-    return `${base}/register?invite=${encodeURIComponent(token)}`;
+    return `${base}/register#invite=${token}`;
   }
 
   private async resolveStoreIds(tenantId: string, storeIds: unknown) {

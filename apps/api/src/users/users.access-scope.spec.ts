@@ -557,8 +557,9 @@ describe('UsersService AccessScope boundary', () => {
       email: 'new-user@example.test',
     });
     expect(result.registrationUrl).toMatch(
-      /^https:\/\/example\.test\/register\?invite=/,
+      /^https:\/\/example\.test\/register#invite=[A-Za-z0-9_-]{43}$/,
     );
+    expect(result.registrationUrl).not.toContain('?invite=');
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
@@ -671,8 +672,9 @@ describe('UsersService AccessScope boundary', () => {
       fullName: 'Reissued User',
     });
     expect(result.registrationUrl).toMatch(
-      /^https:\/\/example\.test\/register\?invite=/,
+      /^https:\/\/example\.test\/register#invite=[A-Za-z0-9_-]{43}$/,
     );
+    expect(result.registrationUrl).not.toContain('?invite=');
   });
 
   it('does not transition identity when an invite changed concurrently', async () => {

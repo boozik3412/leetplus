@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Param,
   Patch,
   Post,
@@ -54,6 +55,10 @@ export class UsersController {
   }
 
   @Post('invites')
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Pragma', 'no-cache')
+  @Header('Referrer-Policy', 'no-referrer')
+  @Header('X-Content-Type-Options', 'nosniff')
   createInvite(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UserInviteDto,
@@ -62,6 +67,10 @@ export class UsersController {
   }
 
   @Patch('invites/:id')
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Pragma', 'no-cache')
+  @Header('Referrer-Policy', 'no-referrer')
+  @Header('X-Content-Type-Options', 'nosniff')
   updateInvite(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

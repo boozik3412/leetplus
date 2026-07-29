@@ -1,17 +1,25 @@
 import { NextResponse } from "next/server";
 import { getApiUrl, getAuthHeaders } from "./api";
 
+type ProxyJsonRequestOptions = {
+  privateNoStore?: boolean;
+};
+
 export async function proxyJsonRequest(
   request: Request,
   path: string,
   method: "GET" | "POST" | "PATCH" | "DELETE",
+  options: ProxyJsonRequestOptions = {},
 ) {
   const headers = await getAuthHeaders();
+  const responseHeaders = options.privateNoStore
+    ? PRIVATE_JSON_RESPONSE_HEADERS
+    : undefined;
 
   if (!headers.Authorization) {
     return NextResponse.json(
       { message: "Необходимо войти в аккаунт" },
-      { status: 401 },
+      { status: 401, headers: responseHeaders },
     );
   }
 
@@ -31,10 +39,13 @@ export async function proxyJsonRequest(
   if (!response.ok) {
     return NextResponse.json(await readProxyErrorBody(response), {
       status: response.status,
+      headers: responseHeaders,
     });
   }
 
-  return NextResponse.json(await response.json());
+  return NextResponse.json(await response.json(), {
+    headers: responseHeaders,
+  });
 }
 
 async function readProxyErrorBody(response: Response) {
@@ -105,6 +116,15 @@ const PRIVATE_FILE_RESPONSE_HEADERS = {
   "Cache-Control": "private, no-store, max-age=0",
   Pragma: "no-cache",
   Vary: "Cookie, Authorization",
+  "X-Content-Type-Options": "nosniff",
+  "Cross-Origin-Resource-Policy": "same-origin",
+} as const;
+
+const PRIVATE_JSON_RESPONSE_HEADERS = {
+  "Cache-Control": "private, no-store, max-age=0",
+  Pragma: "no-cache",
+  Vary: "Cookie, Authorization",
+  "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
   "Cross-Origin-Resource-Policy": "same-origin",
 } as const;

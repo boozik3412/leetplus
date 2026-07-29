@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.34                                         |
+| Версия           | 1.35                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -154,6 +154,12 @@ enterprise-isolation option и не сокращает shared gates.
     review без actionable P0/P1/P2; exact-head
     `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
     (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 writer-isolation lifecycle.
+29. [Invite secret transport](./invite-secret-transport.md) —
+    `INVITE_SECRET_TRANSPORT_V1`: fragment-only delivery, capture/scrub до
+    session/preview, fixed POST-body BFF/API, streaming/route-scoped `4 KiB`
+    limits, strict Origin/JSON/token, preview projection и explicit INTERNAL
+    residual. Schema остаётся `CURRENT_169`; outbox, activation locator,
+    verified OWNER delivery и production acceptance ещё pending.
 
 Текущий schema target рабочего кандидата — `CURRENT_169`. Локальный
 disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`, exact
@@ -218,6 +224,15 @@ engineering evidence не являются production-like admission, persisted 
   schema, six-RPC allowlist и shared admin route не изменены. Exact-head
   `f4224072f60507bd97f8e49440e3bda89ffe2aaa`, PostgreSQL 16 и independent
   review приняты; production-like admission и activation остаются pending;
+- invite secret transport candidate: canonical URL использует только
+  `/register#invite=<43-char base64url>`, fragment удаляется до первого
+  session/preview request, legacy token-path/query fallback отсутствует,
+  fixed POST BFF/API имеют bounded body, strict request/token checks,
+  allowlisted preview и private no-store responses. Для `INTERNAL` generic
+  create/reissue всё ещё возвращает fragment-only `registrationUrl`
+  авторизованному actor/UI; external generic workflow закрыт, обе shared-beta
+  admin route остаются `503`. Exact-head CI/review и production
+  proxy/APM/CSP/browser/mail-client acceptance pending;
 - external authenticated HTTP admission candidate: обязательные beta-prefixes
   получают `module + READ|WRITE|OUTBOUND`, неизвестный route запрещён;
   reusable lower-layer admission перечитывает persisted state на каждый
@@ -489,8 +504,10 @@ engineering evidence не являются production-like admission, persisted 
     production-like inventory и будущий signed proposal/apply/rollback;
     использовать принятый exact-head PostgreSQL/CI/review checkpoint
     design-partner writer isolation, реализовать activation locator, encrypted
-    outbox/verified OWNER delivery и persisted GO; затем закрыть
-    delegation/integrations, A/B isolation и tenant-aware workers/Telegram;
+    outbox/verified OWNER delivery и persisted GO, а для реализованного
+    `BETA-IAM-004E` пройти production proxy/APM/CSP/browser/mail-client
+    acceptance; затем закрыть delegation/integrations, A/B isolation и
+    tenant-aware workers/Telegram;
 11. семь стабильных дней internal alpha и Gate 1MT завершают Gate 2; только
     затем возможен protected `SHARED BETA GO` и owner invite нового
     `Tenant B/Store B1`.

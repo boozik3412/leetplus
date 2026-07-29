@@ -175,8 +175,10 @@ persisted GO, production deployment или разрешением на созд�
 2. Реализовать activation locator по reservation UUID/HMAC, persisted
    `SHARED BETA GO`, trial start, initial OWNER invite и encrypted leased mail
    outbox.
-3. Реализовать verified delivery, resend/revoke transport и browser
-   fragment + POST-body token flow без утечки URL/token.
+3. Реализовать verified delivery и resend/revoke; для уже реализованного
+   [`BETA-IAM-004E`](./invite-secret-transport.md) browser fragment + fixed
+   POST-body token flow принять exact-head CI/review и production
+   proxy/APM/CSP/browser/mail-client evidence.
 4. Реализовать first-class verified `EMAIL_CHANGE`; до этого user/invite
    email mutation остаётся закрытой.
 5. Принять оставшееся evidence для уже реализованной

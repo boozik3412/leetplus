@@ -181,11 +181,15 @@ Evidence:
       переводя tenant в `ACTIVE/OWNER_INVITED`.
 - [ ] Activation response/replay не содержит email, token, registration URL
       или ciphertext.
-- [ ] Identity mail worker использует lease/CAS/retry, stable Message-ID,
-      отдельный versioned encryption key и очищает ciphertext после terminal
-      state.
-- [ ] Invite transport использует browser fragment + немедленную очистку URL,
-      а API принимает token только в POST body; query/path transport удалён.
+- [ ] Identity mail worker использует lease/CAS/retry, stable Message-ID только
+      как correlation evidence, отдельный versioned encryption key и очищает
+      ciphertext после terminal state; ambiguous provider attempt уходит в
+      reconciliation без blind resend.
+- [ ] Engineering `BETA-IAM-004E` candidate принят exact-head CI/review:
+      browser fragment очищается до session/preview, fixed BFF/API POST
+      принимает token только в body, query/path fallback отсутствует.
+- [ ] Production proxy/APM/CSP/browser/mail-client acceptance transport
+      пройдена; legacy query invites inventoried/revoked/reissued.
 - [ ] Reissue/revoke отменяет старый invite/outbox, ротирует token и делает
       старый secret недействительным без его возврата actor.
 - [ ] Mail/HTTPS/TLS/key configuration валидируется fail-closed; production

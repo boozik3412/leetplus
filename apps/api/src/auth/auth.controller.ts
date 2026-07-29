@@ -3,8 +3,11 @@ import {
   Controller,
   ForbiddenException,
   Get,
-  Param,
+  Header,
+  Headers,
+  HttpCode,
   Post,
+  UnsupportedMediaTypeException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
@@ -13,6 +16,7 @@ import type {
   ConfirmEmailDto,
   AcceptUserInviteDto,
   LoginDto,
+  PreviewUserInviteDto,
   RegisterDto,
   ResendEmailVerificationDto,
 } from './auth.dto';
@@ -31,17 +35,32 @@ export class AuthController {
     );
   }
 
-  @Get('invites/:token')
-  getInvite(@Param('token') token: string) {
-    return this.authService.getInvite(token);
+  @Post('invites/preview')
+  @HttpCode(200)
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Pragma', 'no-cache')
+  @Header('Referrer-Policy', 'no-referrer')
+  @Header('X-Content-Type-Options', 'nosniff')
+  getInvite(
+    @Body() dto: PreviewUserInviteDto,
+    @Headers('content-type') contentType?: string,
+  ) {
+    this.assertInviteJson(contentType);
+    return this.authService.getInvite(dto?.token);
   }
 
-  @Post('invites/:token/accept')
+  @Post('invites/accept')
+  @HttpCode(200)
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Pragma', 'no-cache')
+  @Header('Referrer-Policy', 'no-referrer')
+  @Header('X-Content-Type-Options', 'nosniff')
   acceptInvite(
-    @Param('token') token: string,
     @Body() dto: AcceptUserInviteDto,
+    @Headers('content-type') contentType?: string,
   ) {
-    return this.authService.acceptInvite(token, dto);
+    this.assertInviteJson(contentType);
+    return this.authService.acceptInvite(dto?.token, dto);
   }
 
   @Post('login')
@@ -63,5 +82,15 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.me(user.id);
+  }
+
+  private assertInviteJson(contentType: string | undefined): void {
+    const mediaType = contentType?.split(';', 1)[0]?.trim().toLowerCase();
+    if (mediaType !== 'application/json') {
+      throw new UnsupportedMediaTypeException({
+        message: 'Некорректный запрос приглашения',
+        reasonCode: 'INVITE_REQUEST_MEDIA_TYPE_INVALID',
+      });
+    }
   }
 }

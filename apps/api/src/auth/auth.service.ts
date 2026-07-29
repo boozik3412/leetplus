@@ -39,6 +39,7 @@ type AuthResponse = {
 };
 
 const AUTH_TOKEN_EXPIRES_IN = '24h';
+const OPAQUE_INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const tenantModuleEntitlementExecutionSelect = {
   module: true,
   readEnabled: true,
@@ -138,7 +139,7 @@ export class AuthService {
     );
   }
 
-  async getInvite(token: string): Promise<UserInvitePreview> {
+  async getInvite(token: unknown): Promise<UserInvitePreview> {
     const invite = await this.resolveActiveInvite(token);
     this.assertInviteAdmitted(invite);
     const storeIds = await this.resolveInviteStoreIds(
@@ -175,7 +176,7 @@ export class AuthService {
   }
 
   async acceptInvite(
-    token: string,
+    token: unknown,
     dto: AcceptUserInviteDto,
   ): Promise<AuthResponse> {
     const invite = await this.resolveActiveInvite(token);
@@ -566,16 +567,20 @@ export class AuthService {
     return value;
   }
 
-  private async resolveActiveInvite(token: string) {
-    const normalizedToken = typeof token === 'string' ? token.trim() : '';
-
-    if (!normalizedToken) {
-      throw new BadRequestException('Токен приглашения обязателен');
+  private async resolveActiveInvite(token: unknown) {
+    if (
+      typeof token !== 'string' ||
+      !OPAQUE_INVITE_TOKEN_PATTERN.test(token)
+    ) {
+      throw new BadRequestException({
+        message: 'Некорректное приглашение',
+        reasonCode: 'INVITE_TOKEN_INVALID',
+      });
     }
 
     const invite = await this.prisma.userInvite.findUnique({
       where: {
-        tokenHash: this.hashInviteToken(normalizedToken),
+        tokenHash: this.hashInviteToken(token),
         revokedAt: null,
       },
       include: {

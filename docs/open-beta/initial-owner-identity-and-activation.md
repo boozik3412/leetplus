@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.10                                                            |
+| Версия           | 1.11                                                            |
 | Дата             | 29.07.2026                                                      |
-| Статус           | `CURRENT_169` engineering accepted; activation ещё pending       |
+| Статус           | `CURRENT_169`; transport candidate, activation ещё pending       |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
 | Scope            | Первый OWNER нового tenant, email delivery, activation, suspend |
 
@@ -154,7 +154,7 @@ tenantId
 inviteId
 template
 status                  HOLD | PENDING | CLAIMED | RETRY | SENT | DEAD |
-                        CANCELED
+                        CANCELED | RECONCILIATION_REQUIRED
 secretCiphertext        nullable AES-GCM ciphertext
 keyVersion
 messageId
@@ -177,8 +177,10 @@ Raw 256-bit token:
 - никогда не возвращается Platform Admin или tenant actor.
 
 Worker использует `FOR UPDATE SKIP LOCKED`, lease и CAS по `leaseVersion`.
-SMTP вызывается после commit. Для at-least-once delivery используется
-стабильный provider idempotency key/`Message-ID`.
+SMTP вызывается после commit. Стабильный `Message-ID` является только
+correlation evidence, а не provider idempotency. Timeout/crash после provider
+attempt переводит запись в `RECONCILIATION_REQUIRED`/quarantine; blind
+automatic resend запрещён до provider/operator reconciliation.
 
 ### 3.3. Execution fence
 
@@ -485,6 +487,12 @@ Two-tenant:
 - previous `CURRENT_168` exact-head
   `3b8228dd278fae062c753bf4301e0339ba93738b`, CI `30460154200`,
   `3/3 PASS`, сохраняется как historical prerequisite.
+- `BETA-IAM-004E` transport candidate на неизменном `CURRENT_169`:
+  fragment-only link, capture/scrub до session/preview, fixed POST-body
+  BFF/API, streaming/route-scoped `4 KiB` limit, strict Origin/JSON/token,
+  allowlisted preview и no-store. External generic invite и обе shared-beta
+  admin route остаются fail-closed; INTERNAL `registrationUrl` residual,
+  exact-head CI/review и production acceptance ещё pending.
 
 Следующие обязательные шаги:
 
@@ -503,13 +511,19 @@ Two-tenant:
    local unit/boundary `23/23 PASS`.
 2. Спроектировать activation locator без хранения и раскрытия raw email;
    lookup и повторная проверка claim должны выполняться fail-closed под lock.
+   Schema-neutral вариант на `CURRENT_169` отсутствует: текущие RPC требуют
+   raw email, runtime не имеет table `SELECT`, поэтому
+   `MIGRATION_170_ACTIVATION_LOCATOR` остаётся отдельным pending decision без
+   full-table/column-wide SELECT fallback.
 3. Добавить encrypted identity mail outbox и fail-closed mail config.
 4. Реализовать release-gate attestations и tenant admission decision.
 5. Реализовать initial OWNER activation, trial start, encrypted
    issue/reissue/resend delivery и emergency suspend поверх уже sealed
    application revoke/accept state machine; оба admin route до этого
    сохраняют `503`.
-6. Перевести invite transport на fragment + POST body.
+6. Принять production proxy/APM/logging/CSP/browser/mail-client evidence для
+   реализованного fragment + fixed POST-body transport и удалить INTERNAL
+   raw `registrationUrl` compatibility residual после готовности outbox.
 7. Выполнить полный real PostgreSQL concurrency matrix и two-tenant tests.
 8. Довести durable lease/effect fencing для оставшихся workers, guest и
    Telegram surfaces поверх реализованного `executionRevision`.

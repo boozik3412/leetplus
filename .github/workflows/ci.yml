@@ -164,6 +164,9 @@ jobs:
       - name: Lint API security, health, and configuration boundary
         run: pnpm --filter api lint:ci:boundary
 
+      - name: Lint invite secret transport
+        run: pnpm --filter api lint:ci:invite-secret-transport
+
       - name: Lint tenant execution admission boundary
         run: pnpm --filter api lint:ci:tenant-execution
 
@@ -175,6 +178,9 @@ jobs:
 
       - name: Run focused API security tests
         run: pnpm --filter api test:ci:focused
+
+      - name: Verify invite secret transport routes
+        run: pnpm --filter api test:e2e:invite-secret-transport
 
       - name: Run tenant execution admission tests
         run: pnpm --filter api test:ci:tenant-execution
@@ -209,6 +215,9 @@ jobs:
           EXPECTED_DATABASE_MIGRATION_COUNT: "169"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
+
+      - name: Test web invite secret transport
+        run: pnpm --filter web test:invite-secret-transport
 
       - name: Lint web
         run: pnpm --filter web lint

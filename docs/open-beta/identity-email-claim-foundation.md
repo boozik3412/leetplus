@@ -264,9 +264,12 @@ secrets и требует version `v1`; CI environment contract обновлён
    leak и перепроверить её под lock.
 3. Реализовать persisted `SHARED BETA GO`, activation, trial start,
    `UserInvite`, encrypted leased outbox и verified delivery.
-4. Реализовать fragment + POST-body invite transport, resend/session revoke и
-   bounded expiry sweeper; application acceptance/reissue/revoke candidate уже
-   использует `assert → write → transition`.
+4. Принять exact-head CI/review и production proxy/APM/CSP/browser/mail-client
+   evidence для уже реализованного
+   [`BETA-IAM-004E`](./invite-secret-transport.md) fragment + fixed POST-body
+   transport; отдельно реализовать resend/session revoke и bounded expiry
+   sweeper. Application acceptance/reissue/revoke candidate уже использует
+   `assert → write → transition`.
 5. Выполнить полный 100-way accept/accept, accept/revoke и accept/reissue
    PostgreSQL matrix.
 6. Пройти production-like upgrade/rollback/zero-diff и полноценную

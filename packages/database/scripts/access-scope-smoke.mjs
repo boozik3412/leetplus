@@ -107,6 +107,7 @@ try {
       tenantId: tenantA.id,
       email: `access-scope-network-${fixtureId}@invalid.example`,
       passwordHash: 'not-a-real-password-hash',
+      role: 'MANAGER',
       accessScope: 'NETWORK',
     },
   });
@@ -116,6 +117,7 @@ try {
       tenantId: tenantA.id,
       email: `access-scope-stores-${fixtureId}@invalid.example`,
       passwordHash: 'not-a-real-password-hash',
+      role: 'MANAGER',
       accessScope: 'STORES',
     },
   });
@@ -125,6 +127,7 @@ try {
       tenantId: tenantA.id,
       email: `access-scope-unresolved-${fixtureId}@invalid.example`,
       passwordHash: 'not-a-real-password-hash',
+      role: 'MANAGER',
     },
   });
   userIds.push(unresolvedUser.id);
@@ -133,6 +136,7 @@ try {
       tenantId: tenantB.id,
       email: `access-scope-tenant-b-${fixtureId}@invalid.example`,
       passwordHash: 'not-a-real-password-hash',
+      role: 'MANAGER',
       accessScope: 'STORES',
     },
   });

@@ -943,6 +943,7 @@ async function createUser(prisma, tenantId, fixtureId, suffix) {
       tenantId,
       email: `integrity-${suffix}-${fixtureId}@invalid.example`,
       passwordHash: "not-a-real-password-hash",
+      role: "MANAGER",
       accessScope: "NETWORK",
     },
   });

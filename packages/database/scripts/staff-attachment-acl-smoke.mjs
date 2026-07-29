@@ -173,6 +173,7 @@ try {
       tenantId: tenantA.id,
       email: `attachment-acl-a-${fixtureId}@invalid.example`,
       passwordHash: 'not-a-real-password-hash',
+      role: 'MANAGER',
       accessScope: 'STORES',
     },
   });
@@ -182,6 +183,7 @@ try {
       tenantId: tenantB.id,
       email: `attachment-acl-b-${fixtureId}@invalid.example`,
       passwordHash: 'not-a-real-password-hash',
+      role: 'MANAGER',
       accessScope: 'STORES',
     },
   });

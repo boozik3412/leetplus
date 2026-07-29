@@ -85,6 +85,7 @@ try {
       tenantId,
       email: `catalog-audit-smoke-${fixtureId}@invalid.example`,
       passwordHash: "not-a-real-password-hash",
+      role: "MANAGER",
       accessScope: "NETWORK",
     },
   });

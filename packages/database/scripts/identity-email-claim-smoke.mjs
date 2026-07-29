@@ -151,6 +151,10 @@ const tenantAId = `identity-claim-a-${suffix}`;
 const tenantBId = `identity-claim-b-${suffix}`;
 const subjectAId = randomUUID();
 const subjectBId = randomUUID();
+const userSubjectId = randomUUID();
+const skippedRevisionSubjectId = randomUUID();
+const foreignTenantSubjectId = randomUUID();
+const backwardInviteSubjectId = randomUUID();
 const rawEmail = `  Concurrent.Owner.${suffix}@Example.Test  `;
 const canonicalEmail = `concurrent.owner.${suffix}@example.test`;
 const holderReady = deferred();
@@ -386,7 +390,7 @@ try {
       UPDATE "IdentityEmailClaim"
       SET
         "claimType" = 'USER'::"IdentityEmailClaimType",
-        "subjectId" = ${`user-a-${suffix}`},
+        "subjectId" = ${userSubjectId},
         "revision" = 2
       WHERE "emailCanonical" = ${canonicalEmail}
       RETURNING
@@ -409,7 +413,7 @@ try {
       await tx.$executeRaw`
         UPDATE "IdentityEmailClaim"
         SET
-          "subjectId" = ${`skipped-revision-${suffix}`},
+          "subjectId" = ${skippedRevisionSubjectId},
           "revision" = 4
         WHERE "emailCanonical" = ${canonicalEmail}
       `;
@@ -422,7 +426,7 @@ try {
         UPDATE "IdentityEmailClaim"
         SET
           "tenantId" = ${tenantBId},
-          "subjectId" = ${`foreign-user-${suffix}`},
+          "subjectId" = ${foreignTenantSubjectId},
           "revision" = 3
         WHERE "emailCanonical" = ${canonicalEmail}
       `;
@@ -435,7 +439,7 @@ try {
         UPDATE "IdentityEmailClaim"
         SET
           "claimType" = 'INVITE'::"IdentityEmailClaimType",
-          "subjectId" = ${`backward-invite-${suffix}`},
+          "subjectId" = ${backwardInviteSubjectId},
           "revision" = 3
         WHERE "emailCanonical" = ${canonicalEmail}
       `;

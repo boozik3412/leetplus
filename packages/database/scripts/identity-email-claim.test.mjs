@@ -118,7 +118,11 @@ test("Prisma schema retains the database defaults and RESTRICT relation contract
   );
   assert.match(
     schema,
-    /model IdentityEmailClaim \{[\s\S]*emailCanonical String\s+@id @db\.VarChar\(320\)/,
+    /model IdentityEmailClaim \{[\s\S]*emailCanonical\s+String\s+@id @db\.VarChar\(320\)/,
+  );
+  assert.match(
+    schema,
+    /model IdentityEmailClaim \{[\s\S]*workflowLocator\s+String/,
   );
   assert.match(
     schema,

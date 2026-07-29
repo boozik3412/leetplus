@@ -61,6 +61,7 @@ import {
   evaluateLegacyGuestGameDeliveryProtocolGate,
   isLegacyGuestGameProviderDeliveryChannel,
 } from './guest-game-delivery-protocol-gate';
+import { acquireGuestGameRewardDeliveryLock } from './guest-game-reward-delivery-lock';
 import {
   GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
   guestGameRewardIsBattlePassCompletionMarker,
@@ -11531,6 +11532,8 @@ export class GuestGamificationService {
     const current = await this.assertDelivery(user, id);
     const currentChannel = deliveryChannelValue(current.channel, null);
     if (isLegacyGuestGameProviderDeliveryChannel(currentChannel)) {
+      // Keep provider updates fail-closed until every delivery rebind/batch
+      // writer enters the migration-166 reward boundary before its first DML.
       const protocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
         'LEGACY_PROVIDER_UPDATE',
       );
@@ -11721,17 +11724,13 @@ export class GuestGamificationService {
     tenantId: string,
     rewardId: string,
   ) {
-    const rows = await tx.$queryRaw<Array<{ claimRequired: boolean }>>(
-      Prisma.sql`
-        SELECT "claimRequired"
-        FROM "GuestGameReward"
-        WHERE "id" = ${rewardId}
-          AND "tenantId" = ${tenantId}
-        FOR UPDATE
-      `,
+    const { claimRequired } = await acquireGuestGameRewardDeliveryLock(
+      tx,
+      tenantId,
+      rewardId,
     );
 
-    return rows[0]?.claimRequired === false;
+    return claimRequired === false;
   }
 
   private async createDeliveryEvent(
@@ -12032,13 +12031,7 @@ export class GuestGamificationService {
     }
 
     const row = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`
-        SELECT "id"
-        FROM "GuestGameReward"
-        WHERE "id" = ${id}
-          AND "tenantId" = ${user.tenantId}
-        FOR UPDATE
-      `);
+      await acquireGuestGameRewardDeliveryLock(tx, user.tenantId, id);
       await this.assertRewardHasNoAcceptedWalletDelivery(
         tx,
         user,

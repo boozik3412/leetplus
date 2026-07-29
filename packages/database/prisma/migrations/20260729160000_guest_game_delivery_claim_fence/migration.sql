@@ -1756,6 +1756,68 @@ BEFORE INSERT OR UPDATE OR DELETE ON "GuestGameDelivery"
 FOR EACH ROW
 EXECUTE FUNCTION public."guest_game_delivery_transition_guard"();
 
+-- Every single-reward runtime writer must enter through the same lock order
+-- before its first DML: advisory namespace 166, canonical Reward, then the
+-- complete VERIFIED provider Delivery set in deterministic id order. This is
+-- deliberately SECURITY INVOKER: it coordinates locks without granting any
+-- table authority that the caller does not already hold.
+CREATE OR REPLACE FUNCTION public."guest_game_reward_delivery_lock_v1"(
+  tenant_id TEXT,
+  reward_id TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+VOLATILE
+SECURITY INVOKER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+  reward_record RECORD;
+BEGIN
+  IF tenant_id IS NULL
+     OR pg_catalog.btrim(tenant_id) = ''
+     OR reward_id IS NULL
+     OR pg_catalog.btrim(reward_id) = ''
+  THEN
+    RAISE EXCEPTION
+      'Reward-delivery lock boundary requires tenant and reward identifiers'
+      USING ERRCODE = '22023';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(tenant_id || ':' || reward_id, 166)
+  );
+
+  SELECT reward."tenantId", reward."claimRequired"
+  INTO reward_record
+  FROM public."GuestGameReward" AS reward
+  WHERE reward."id" = reward_id
+    AND reward."tenantId" = tenant_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION
+      'Reward-delivery lock boundary reward does not exist in requested tenant'
+      USING ERRCODE = '23503';
+  END IF;
+
+  PERFORM delivery."id"
+  FROM public."GuestGameDelivery" AS delivery
+  WHERE delivery."tenantId" = tenant_id
+    AND delivery."rewardId" = reward_id
+    AND delivery."channel" IN ('TELEGRAM', 'MAX')
+    AND delivery."integrityState" = 'VERIFIED'
+  ORDER BY delivery."id"
+  FOR UPDATE;
+
+  RETURN reward_record."claimRequired";
+END;
+$$;
+
+REVOKE ALL
+ON FUNCTION public."guest_game_reward_delivery_lock_v1"(TEXT, TEXT)
+FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION public."guest_game_delivery_binding_check"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -1787,21 +1849,22 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  PERFORM pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(
-      delivery_record."tenantId" || ':' || delivery_record."rewardId",
-      166
-    )
+  -- Deferred trigger entry is a final invariant check, not safe writer
+  -- admission: by commit time the caller may already hold a Delivery lock.
+  -- Every admitted runtime writer must call this boundary before its first
+  -- DML; delegation here prevents the trigger lock order from drifting.
+  PERFORM public."guest_game_reward_delivery_lock_v1"(
+    delivery_record."tenantId",
+    delivery_record."rewardId"
   );
 
-  -- Canonical lock order is Reward, then Delivery. The delivery row is
-  -- selected again after both locks so every queued trigger sees final state.
+  -- The boundary already holds Reward and the complete VERIFIED provider
+  -- Delivery set. Re-read final values without acquiring a second lock order.
   SELECT reward."storeId", reward."profileId", reward."guestId"
   INTO STRICT reward_record
   FROM public."GuestGameReward" AS reward
   WHERE reward."tenantId" = delivery_record."tenantId"
-    AND reward."id" = delivery_record."rewardId"
-  FOR UPDATE;
+    AND reward."id" = delivery_record."rewardId";
 
   SELECT
     delivery."storeId",
@@ -1812,8 +1875,7 @@ BEGIN
   INTO STRICT delivery_record
   FROM public."GuestGameDelivery" AS delivery
   WHERE delivery."tenantId" = delivery_record."tenantId"
-    AND delivery."id" = NEW."id"
-  FOR UPDATE;
+    AND delivery."id" = NEW."id";
 
   IF delivery_record."integrityState" = 'VERIFIED'
      AND delivery_record."channel" IN ('TELEGRAM', 'MAX')
@@ -1880,13 +1942,16 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  PERFORM pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(
-      reward_record."tenantId" || ':' || reward_record."id",
-      166
-    )
+  -- A deferred trigger is too late to establish safe writer admission after
+  -- arbitrary DML. Runtime writers must call the same boundary before their
+  -- first mutation; this delegation is the final fail-closed invariant check.
+  PERFORM public."guest_game_reward_delivery_lock_v1"(
+    reward_record."tenantId",
+    reward_record."id"
   );
 
+  -- The boundary already holds Reward and every VERIFIED provider Delivery.
+  -- Re-read the final Reward state without introducing a second lock order.
   SELECT
     reward."id",
     reward."tenantId",
@@ -1896,17 +1961,7 @@ BEGIN
   INTO STRICT reward_record
   FROM public."GuestGameReward" AS reward
   WHERE reward."tenantId" = reward_record."tenantId"
-    AND reward."id" = reward_record."id"
-  FOR UPDATE;
-
-  PERFORM delivery."id"
-  FROM public."GuestGameDelivery" AS delivery
-  WHERE delivery."tenantId" = reward_record."tenantId"
-    AND delivery."rewardId" = reward_record."id"
-    AND delivery."channel" IN ('TELEGRAM', 'MAX')
-    AND delivery."integrityState" = 'VERIFIED'
-  ORDER BY delivery."id"
-  FOR UPDATE;
+    AND reward."id" = reward_record."id";
 
   IF EXISTS (
        SELECT 1

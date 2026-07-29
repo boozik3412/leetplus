@@ -17549,6 +17549,7 @@ describe('GuestGamificationService', () => {
 
       prisma.guestGameReward.findFirst.mockResolvedValue(pending);
       prisma.guestGameReward.update.mockResolvedValue(approved);
+      prisma.$queryRaw.mockResolvedValue([{ claimRequired: true }]);
 
       const result = await service.updateReward(
         user,
@@ -17566,6 +17567,16 @@ describe('GuestGamificationService', () => {
             approvedByUserId: user.id,
           }),
         }),
+      );
+      expect(prisma.$queryRaw.mock.calls[0][0].strings.join('')).toContain(
+        'guest_game_reward_delivery_lock_v1',
+      );
+      expect(prisma.$queryRaw.mock.calls[0][0].values).toEqual([
+        user.tenantId,
+        'reward-mission-pending',
+      ]);
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.guestGameReward.update.mock.invocationCallOrder[0],
       );
       expect(prisma.guestGameEvent.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -17648,6 +17659,7 @@ describe('GuestGamificationService', () => {
 
       prisma.guestGameReward.findFirst.mockResolvedValue(pending);
       prisma.guestGameReward.update.mockResolvedValue(approved);
+      prisma.$queryRaw.mockResolvedValue([{ claimRequired: false }]);
 
       await service.updateReward(user, 'reward-season-marker', {
         status: 'APPROVED',
@@ -17855,7 +17867,7 @@ describe('GuestGamificationService', () => {
       });
     });
 
-    it('revalidates claimRequired under a reward row lock before preparing a legacy delivery', async () => {
+    it('revalidates claimRequired under the canonical reward-delivery lock before preparing a legacy delivery', async () => {
       const { service, prisma } = createService();
       jest
         .spyOn(service, 'getProfiles')
@@ -17874,6 +17886,9 @@ describe('GuestGamificationService', () => {
         deliveries: [],
       });
       expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$queryRaw.mock.calls[0][0].strings.join('')).toContain(
+        'guest_game_reward_delivery_lock_v1',
+      );
       expect(prisma.guestGameDelivery.create).not.toHaveBeenCalled();
       expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
     });
@@ -17989,6 +18004,12 @@ describe('GuestGamificationService', () => {
           }),
         );
         expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+        expect(prisma.$queryRaw.mock.calls[0][0].strings.join('')).toContain(
+          'guest_game_reward_delivery_lock_v1',
+        );
+        expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          prisma.guestGameDelivery.create.mock.invocationCallOrder[0],
+        );
       },
     );
 

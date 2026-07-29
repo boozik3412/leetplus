@@ -122,6 +122,7 @@ const REQUIRED_TRIGGERS = Object.freeze([
 const REQUIRED_FUNCTIONS = Object.freeze([
   "guest_game_delivery_transition_key_v1",
   "guest_game_delivery_transition_guard",
+  "guest_game_reward_delivery_lock_v1",
   "guest_game_delivery_binding_check",
   "guest_game_reward_delivery_binding_check",
   "guest_game_delivery_transition_event_check",
@@ -160,8 +161,9 @@ foreign keys, CHECK/index/function/trigger catalogs, append-only evidence,
 four revision-fenced READY/BLOCKED transitions under a restricted runtime
 role through one private SECURITY DEFINER event boundary, direct Event INSERT
 denial, stale/future/extra event replay rejection, final-row reason/integrity
-evidence consistency, seven rejected legacy-quarantine mutations with zero
-state/evidence drift, and idempotent deploy.
+evidence consistency, an exact two-session advisory/Reward/Delivery lock-order
+regression, seven rejected legacy-quarantine mutations with zero state/evidence
+drift, and idempotent deploy.
 
 The failure database proves separate cross-tenant reward/event preflights, all
 eight reserved typed-event collisions, a five-second migration lock timeout,
@@ -1271,10 +1273,26 @@ function assertPost166Catalog(catalog) {
   assert.equal(eventBoundary.security_definer, true);
   assert.equal(eventBoundary.owned_by_event_table_owner, true);
 
+  const rewardDeliveryLockBoundary = functionMap.get(
+    "guest_game_reward_delivery_lock_v1",
+  );
+  assert(rewardDeliveryLockBoundary);
+  assert.equal(
+    rewardDeliveryLockBoundary.identity_arguments,
+    "tenant_id text, reward_id text",
+  );
+  assert.equal(rewardDeliveryLockBoundary.public_execute, false);
+  assert.deepEqual(rewardDeliveryLockBoundary.configuration, [
+    "search_path=pg_catalog",
+  ]);
+  assert.equal(rewardDeliveryLockBoundary.volatility, "v");
+  assert.equal(rewardDeliveryLockBoundary.security_definer, false);
+
   for (const name of REQUIRED_FUNCTIONS.filter(
     (candidate) =>
       candidate !== "guest_game_delivery_transition_key_v1" &&
-      candidate !== "guest_game_delivery_record_event_v1",
+      candidate !== "guest_game_delivery_record_event_v1" &&
+      candidate !== "guest_game_reward_delivery_lock_v1",
   )) {
     const fn = functionMap.get(name);
     assert(fn, `${name} is missing.`);
@@ -1645,6 +1663,11 @@ async function grantRestrictedRuntimeRole(client, roleName) {
      ON FUNCTION public."guest_game_delivery_record_event_v1"(JSON)
      TO ${quotedRole}`,
   );
+  await client.$executeRawUnsafe(
+    `GRANT EXECUTE
+     ON FUNCTION public."guest_game_reward_delivery_lock_v1"(TEXT, TEXT)
+     TO ${quotedRole}`,
+  );
 }
 
 async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
@@ -1669,6 +1692,11 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
          'public."guest_game_delivery_record_event_v1"(json)',
          'EXECUTE'
        ) AS event_boundary_execute,
+       pg_catalog.has_function_privilege(
+         $1,
+         'public."guest_game_reward_delivery_lock_v1"(text,text)',
+         'EXECUTE'
+       ) AS reward_delivery_lock_execute,
        pg_catalog.has_table_privilege(
          $1,
          'public."GuestGameDelivery"',
@@ -1798,6 +1826,7 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
     schema_usage: true,
     helper_execute: true,
     event_boundary_execute: true,
+    reward_delivery_lock_execute: true,
     broad_delivery_update: false,
     broad_reward_update: false,
     reward_lock_update: true,
@@ -1819,6 +1848,290 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
     event_update: false,
     event_delete: false,
   });
+}
+
+function deferredSignal() {
+  let resolveSignal;
+  const promise = new Promise((resolvePromise) => {
+    resolveSignal = resolvePromise;
+  });
+  return { promise, resolve: resolveSignal };
+}
+
+async function acquireRewardDeliveryBoundary(
+  client,
+  tenantId,
+  rewardId,
+) {
+  const [row] = await client.$queryRawUnsafe(
+    `SELECT public."guest_game_reward_delivery_lock_v1"(
+       $1::TEXT,
+       $2::TEXT
+     ) AS "claimRequired"`,
+    tenantId,
+    rewardId,
+  );
+  assert.equal(typeof row?.claimRequired, "boolean");
+  return row.claimRequired;
+}
+
+async function readRewardDeliveryBoundarySnapshot(
+  client,
+  tenantId,
+  rewardId,
+) {
+  const [row] = await client.$queryRawUnsafe(
+    `SELECT pg_catalog.jsonb_build_object(
+       'reward',
+       (
+         SELECT pg_catalog.to_jsonb(reward)
+         FROM public."GuestGameReward" AS reward
+         WHERE reward."tenantId" = $1
+           AND reward."id" = $2
+       ),
+       'deliveries',
+       COALESCE(
+         (
+           SELECT pg_catalog.jsonb_agg(
+             pg_catalog.to_jsonb(delivery)
+             ORDER BY delivery."id"
+           )
+           FROM public."GuestGameDelivery" AS delivery
+           WHERE delivery."tenantId" = $1
+             AND delivery."rewardId" = $2
+         ),
+         '[]'::JSONB
+       ),
+       'attempts',
+       COALESCE(
+         (
+           SELECT pg_catalog.jsonb_agg(
+             pg_catalog.to_jsonb(attempt)
+             ORDER BY attempt."id"
+           )
+           FROM public."GuestGameDeliveryAttempt" AS attempt
+           WHERE attempt."tenantId" = $1
+             AND attempt."rewardId" = $2
+         ),
+         '[]'::JSONB
+       ),
+       'events',
+       COALESCE(
+         (
+           SELECT pg_catalog.jsonb_agg(
+             pg_catalog.to_jsonb(event)
+             ORDER BY event."id"
+           )
+           FROM public."GuestGameDeliveryEvent" AS event
+           WHERE event."tenantId" = $1
+             AND event."rewardId" = $2
+         ),
+         '[]'::JSONB
+       )
+     ) AS snapshot`,
+    tenantId,
+    rewardId,
+  );
+  assert(row?.snapshot?.reward);
+  return row.snapshot;
+}
+
+async function waitForAdvisoryWait(observer, waiterPid, holderPid) {
+  const deadline = Date.now() + 4_000;
+  while (Date.now() < deadline) {
+    const [row] = await observer.$queryRawUnsafe(
+      `SELECT
+         activity.wait_event_type,
+         activity.wait_event,
+         pg_catalog.pg_blocking_pids(activity.pid) AS blocking_pids,
+         EXISTS (
+           SELECT 1
+           FROM pg_catalog.pg_locks AS waiting_lock
+           WHERE waiting_lock.pid = activity.pid
+             AND waiting_lock.locktype = 'advisory'
+             AND NOT waiting_lock.granted
+         ) AS waiting_on_advisory
+       FROM pg_catalog.pg_stat_activity AS activity
+       WHERE activity.pid = $1::INTEGER`,
+      waiterPid,
+    );
+    if (
+      row?.wait_event_type === "Lock" &&
+      row?.wait_event === "advisory" &&
+      row?.waiting_on_advisory === true &&
+      row.blocking_pids.includes(holderPid)
+    ) {
+      return row;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
+  assert.fail(
+    `Backend ${waiterPid} did not wait on holder ${holderPid}'s advisory lock.`,
+  );
+}
+
+function assertNoRawLockOrderFailure(error) {
+  const states = extractSqlStates(error);
+  assert.equal(states.has("40P01"), false, "Unexpected raw deadlock SQLSTATE.");
+  assert.equal(states.has("55P03"), false, "Unexpected raw lock-timeout SQLSTATE.");
+  assert.doesNotMatch(
+    extractErrorText(error),
+    /(?:40P01|55P03|deadlock detected|lock timeout)/iu,
+  );
+}
+
+async function assertRewardDeliveryLockBoundaryScope(
+  client,
+  fixtures,
+  roleName,
+) {
+  const quotedRole = quoteIdentifier(roleName);
+  for (const [tenantId, rewardId] of [
+    [fixtures.tenantA, `missing-${randomUUID()}`],
+    [fixtures.tenantB, fixtures.rewards.match],
+  ]) {
+    await expectSqlState(
+      "23503",
+      () =>
+        client.$transaction(async (transaction) => {
+          await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+          await acquireRewardDeliveryBoundary(
+            transaction,
+            tenantId,
+            rewardId,
+          );
+        }),
+      /(?:reward does not exist in requested tenant|Foreign key constraint (?:failed|violated))/iu,
+    );
+  }
+}
+
+async function assertRewardDeliveryLockBoundaryConcurrency(
+  databaseUrl,
+  fixtures,
+) {
+  const observer = prismaClient(databaseUrl);
+  const holder = prismaClient(databaseUrl);
+  const waiter = prismaClient(databaseUrl);
+  const tenantId = fixtures.tenantA;
+  const rewardId = fixtures.rewards.match;
+  const deliveryId = fixtures.deliveries.match;
+  const holderReady = deferredSignal();
+  const releaseHolder = deferredSignal();
+  const waiterPidReady = deferredSignal();
+  let holderPid;
+  let waiterPid;
+  let waiterAcquired = false;
+  let observationError;
+
+  try {
+    const before = await readRewardDeliveryBoundarySnapshot(
+      observer,
+      tenantId,
+      rewardId,
+    );
+
+    const holderRun = holder.$transaction(async (transaction) => {
+      await transaction.$executeRawUnsafe(`SET LOCAL lock_timeout = '5s'`);
+      const [identity] = await transaction.$queryRawUnsafe(
+        `SELECT pg_catalog.pg_backend_pid() AS pid`,
+      );
+      holderPid = identity.pid;
+      const claimRequired = await acquireRewardDeliveryBoundary(
+        transaction,
+        tenantId,
+        rewardId,
+      );
+      const updatedDeliveries = await transaction.$executeRawUnsafe(
+        `UPDATE public."GuestGameDelivery"
+         SET "status" = "status"
+         WHERE "tenantId" = $1
+           AND "rewardId" = $2
+           AND "id" = $3`,
+        tenantId,
+        rewardId,
+        deliveryId,
+      );
+      assert.equal(updatedDeliveries, 1);
+      holderReady.resolve();
+      await releaseHolder.promise;
+      return { claimRequired, updatedDeliveries };
+    });
+
+    const holderSignal = await Promise.race([
+      holderReady.promise.then(() => "LOCK_HELD"),
+      holderRun.then(() => "TRANSACTION_COMPLETED"),
+    ]);
+    assert.equal(holderSignal, "LOCK_HELD");
+
+    const waiterRun = waiter.$transaction(async (transaction) => {
+      await transaction.$executeRawUnsafe(`SET LOCAL lock_timeout = '5s'`);
+      const [identity] = await transaction.$queryRawUnsafe(
+        `SELECT pg_catalog.pg_backend_pid() AS pid`,
+      );
+      waiterPid = identity.pid;
+      waiterPidReady.resolve();
+      const claimRequired = await acquireRewardDeliveryBoundary(
+        transaction,
+        tenantId,
+        rewardId,
+      );
+      const updatedRewards = await transaction.$executeRawUnsafe(
+        `UPDATE public."GuestGameReward"
+         SET "storeId" = "storeId"
+         WHERE "tenantId" = $1
+           AND "id" = $2`,
+        tenantId,
+        rewardId,
+      );
+      assert.equal(updatedRewards, 1);
+      waiterAcquired = true;
+      return { claimRequired, updatedRewards };
+    });
+
+    const waiterSignal = await Promise.race([
+      waiterPidReady.promise.then(() => "PID_READY"),
+      waiterRun.then(() => "TRANSACTION_COMPLETED"),
+    ]);
+    assert.equal(waiterSignal, "PID_READY");
+
+    try {
+      await waitForAdvisoryWait(observer, waiterPid, holderPid);
+      assert.equal(waiterAcquired, false);
+    } catch (error) {
+      observationError = error;
+    } finally {
+      releaseHolder.resolve();
+    }
+
+    const outcomes = await Promise.allSettled([holderRun, waiterRun]);
+    for (const outcome of outcomes) {
+      if (outcome.status === "rejected") {
+        assertNoRawLockOrderFailure(outcome.reason);
+        throw outcome.reason;
+      }
+      assert.equal(outcome.value.claimRequired, before.reward.claimRequired);
+    }
+    assert.equal(outcomes[0].value.updatedDeliveries, 1);
+    assert.equal(outcomes[1].value.updatedRewards, 1);
+    if (observationError) {
+      throw observationError;
+    }
+
+    const after = await readRewardDeliveryBoundarySnapshot(
+      observer,
+      tenantId,
+      rewardId,
+    );
+    assert.deepEqual(after, before);
+  } finally {
+    releaseHolder.resolve();
+    await Promise.allSettled([
+      observer.$disconnect(),
+      holder.$disconnect(),
+      waiter.$disconnect(),
+    ]);
+  }
 }
 
 async function canonicalTransitionKey(
@@ -2986,6 +3299,15 @@ async function runSuccessfulUpgrade(
     assertPost166Catalog(await readPost166Catalog(client));
     await assertSuccessfulBackfillAndQuarantine(client, fixtures);
     await assertRevisionFencedTransitions(client, fixtures, runtimeRoleName);
+    await assertRewardDeliveryLockBoundaryScope(
+      client,
+      fixtures,
+      runtimeRoleName,
+    );
+    await assertRewardDeliveryLockBoundaryConcurrency(
+      databaseUrl,
+      fixtures,
+    );
     await assertNullClosedStateMatrices(client, fixtures);
     await assertTriggerSemantics(client, fixtures);
     assert.deepEqual(await readTargetAttemptCounts(client), {
@@ -3440,6 +3762,8 @@ async function runOfflineSelfTest() {
       revisionFencedTransitions: 4,
       antiReplayScenarios: 4,
       runtimeEventBoundaryNegativeScenarios: 9,
+      rewardDeliveryLockScopeScenarios: 2,
+      rewardDeliveryLockConcurrencyScenarios: 1,
       legacyQuarantineFreezeScenarios: 7,
       reasonIntegrityConsistencyScenarios: 8,
       destructiveSourceDatabaseActions: 0,
@@ -3561,8 +3885,9 @@ async function runRealSmoke(environment) {
         indexes: REQUIRED_INDEXES.length,
         triggers: REQUIRED_TRIGGERS.length,
         publicExecutableFunctions: 0,
-        privateTriggerFunctions: REQUIRED_FUNCTIONS.length - 2,
+        privateTriggerFunctions: REQUIRED_FUNCTIONS.length - 3,
         privateSecurityDefinerBoundaries: 1,
+        privateSecurityInvokerLockBoundaries: 1,
       },
       transitionRevisionEvidence: {
         restrictedRuntimeRole: true,
@@ -3580,6 +3905,18 @@ async function runRealSmoke(environment) {
         actorUserPayloadRejected: true,
         duplicatePayloadKeyRejected: true,
         missingProvenanceRejected: true,
+      },
+      rewardDeliveryLockOrderEvidence: {
+        restrictedRuntimeScopeChecks: true,
+        disposableOwnerDmlSessions: 2,
+        missingRewardRejected: true,
+        crossTenantRewardRejected: true,
+        waiterObservedOnAdvisoryLock: true,
+        deliveryDeferredTriggerCommitted: true,
+        rewardDeferredTriggerCommitted: true,
+        holderAndWaiterCommitted: true,
+        rawDeadlockOrLockTimeoutErrors: 0,
+        stateAndEvidenceUnchanged: true,
       },
       nullClosedMatrixEvidence: {
         deliveryOutcomeRejected: true,

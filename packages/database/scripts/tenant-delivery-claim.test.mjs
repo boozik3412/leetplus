@@ -1066,11 +1066,11 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
 
   const binding = functionBlock(sql, "guest_game_delivery_binding_check");
-  assert.match(binding, /pg_advisory_xact_lock[\s\S]*166/u);
   assert.match(
     binding,
-    /INTO STRICT reward_record[\s\S]*FROM public\."GuestGameReward" AS reward[\s\S]*FOR UPDATE;[\s\S]*INTO STRICT delivery_record[\s\S]*FROM public\."GuestGameDelivery" AS delivery[\s\S]*FOR UPDATE;/u,
+    /must call this boundary before its first[\s\S]*DML[\s\S]*PERFORM public\."guest_game_reward_delivery_lock_v1"\(\s*delivery_record\."tenantId",\s*delivery_record\."rewardId"\s*\)[\s\S]*INTO STRICT reward_record[\s\S]*FROM public\."GuestGameReward" AS reward[\s\S]*INTO STRICT delivery_record[\s\S]*FROM public\."GuestGameDelivery" AS delivery/u,
   );
+  assert.doesNotMatch(binding, /pg_advisory_xact_lock|FOR UPDATE/u);
   assert.match(
     binding,
     /Verified provider delivery does not match canonical reward binding[\s\S]*ERRCODE = '23514'/u,
@@ -1084,11 +1084,11 @@ test("transition, binding, and durable-event functions are hardened and attached
     sql,
     "guest_game_reward_delivery_binding_check",
   );
-  assert.match(rewardBinding, /pg_advisory_xact_lock[\s\S]*166/u);
   assert.match(
     rewardBinding,
-    /INTO STRICT reward_record[\s\S]*FROM public\."GuestGameReward" AS reward[\s\S]*FOR UPDATE;[\s\S]*ORDER BY delivery\."id"\s+FOR UPDATE;/u,
+    /must call the same boundary before their[\s\S]*first mutation[\s\S]*PERFORM public\."guest_game_reward_delivery_lock_v1"\(\s*reward_record\."tenantId",\s*reward_record\."id"\s*\)[\s\S]*INTO STRICT reward_record[\s\S]*FROM public\."GuestGameReward" AS reward/u,
   );
+  assert.doesNotMatch(rewardBinding, /pg_advisory_xact_lock|FOR UPDATE/u);
   assert.match(
     rewardBinding,
     /Claimed provider reward Store binding is immutable[\s\S]*ERRCODE = '23514'/u,
@@ -1291,6 +1291,58 @@ test("delivery events validate scope and deny all updates/deletes pending bounde
   assert.match(
     sql,
     /REVOKE INSERT, UPDATE, DELETE\s+ON TABLE public\."GuestGameDeliveryEvent"\s+FROM PUBLIC;/u,
+  );
+});
+
+test("single-reward writers acquire the canonical migration-166 lock order", async () => {
+  const { sql } = await artifacts();
+  const body = namedFunctionBlock(
+    sql,
+    "guest_game_reward_delivery_lock_v1",
+  );
+
+  assert.match(
+    body,
+    /guest_game_reward_delivery_lock_v1"\(\s*tenant_id TEXT,\s*reward_id TEXT\s*\)\s+RETURNS BOOLEAN/u,
+  );
+  assert.match(
+    body,
+    /LANGUAGE plpgsql[\s\S]*VOLATILE[\s\S]*SECURITY INVOKER[\s\S]*SET search_path = pg_catalog/u,
+  );
+  assert.doesNotMatch(body, /SECURITY DEFINER|EXECUTE\s+format|EXECUTE\s+\w+/u);
+
+  const advisoryLock = body.indexOf("pg_advisory_xact_lock");
+  const rewardLock = body.indexOf('FROM public."GuestGameReward" AS reward');
+  const deliveryLock = body.indexOf(
+    'FROM public."GuestGameDelivery" AS delivery',
+  );
+  assert(advisoryLock >= 0);
+  assert(rewardLock > advisoryLock);
+  assert(deliveryLock > rewardLock);
+  assert.match(
+    body,
+    /hashtextextended\(tenant_id \|\| ':' \|\| reward_id, 166\)/u,
+  );
+  assert.match(
+    body,
+    /FROM public\."GuestGameReward" AS reward[\s\S]*WHERE reward\."id" = reward_id[\s\S]*reward\."tenantId" = tenant_id[\s\S]*FOR UPDATE;/u,
+  );
+  assert.match(
+    body,
+    /reward does not exist in requested tenant[\s\S]*ERRCODE = '23503'/u,
+  );
+  assert.doesNotMatch(body, /reward\."id" = reward_id\s+FOR UPDATE/u);
+  assert.match(
+    body,
+    /FROM public\."GuestGameDelivery" AS delivery[\s\S]*delivery\."tenantId" = tenant_id[\s\S]*delivery\."rewardId" = reward_id[\s\S]*delivery\."channel" IN \('TELEGRAM', 'MAX'\)[\s\S]*delivery\."integrityState" = 'VERIFIED'[\s\S]*ORDER BY delivery\."id"[\s\S]*FOR UPDATE;/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL\s+ON FUNCTION public\."guest_game_reward_delivery_lock_v1"\(TEXT, TEXT\)\s+FROM PUBLIC;/u,
+  );
+  assert.doesNotMatch(
+    sql,
+    /GRANT EXECUTE\s+ON FUNCTION public\."guest_game_reward_delivery_lock_v1"\(TEXT, TEXT\)\s+TO PUBLIC;/u,
   );
 });
 

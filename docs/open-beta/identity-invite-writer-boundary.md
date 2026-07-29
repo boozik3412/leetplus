@@ -2,11 +2,11 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.0 |
+| Версия | 1.1 |
 | Дата | 29.07.2026 |
 | Schema target | `CURRENT_169` |
 | Migration | `20260729230000_identity_invite_writer_boundary` |
-| Статус | `IMPLEMENTED_CANDIDATE`; local PostgreSQL evidence принято, exact-head CI pending |
+| Статус | `IMPLEMENTED_CANDIDATE`; local PostgreSQL и exact-head engineering CI/review приняты |
 | Release decision | `NO-GO`; production и внешний доступ не изменялись |
 
 ## Зачем нужен этот срез
@@ -149,9 +149,23 @@ retained revoked invite release: PASS
 revoked invite → same-email reserve_v2: PASS
 ```
 
-Remote exact-head CI и независимый review для этого SHA ещё обязательны.
-Local evidence не является production-like admission, persisted GO,
-production deployment или разрешением на создание аккаунта тестера.
+Первый exact-head `f9db264...` / CI
+[`30467211571`](https://github.com/boozik3412/leetplus/actions/runs/30467211571)
+сохранён как `REJECTED`, `2/3 PASS`: historical StaffTask `EXPAND_162`
+rehearsal обнаружил post-baseline `User.identityClaimRevision` в
+неограниченном Prisma `RETURNING`. Compatibility fix заморозил historical
+User create/update/delete projection до `id/tenantId`.
+
+Engineering exact-head
+`f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
+[`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
+(`run #37`), `3/3 PASS`: Application `90630292527`, authority-root
+`90630292169`, PostgreSQL 16 `90630292257`. Independent reviews не нашли
+новых P0/P1; review compatibility fix также не нашёл P2.
+
+Local и remote engineering evidence не являются production-like admission,
+persisted GO, production deployment или разрешением на создание аккаунта
+тестера.
 
 ## Оставшиеся launch blockers
 

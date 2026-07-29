@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.19.0                                             |
+| Версия          | 1.19.1                                             |
 | Дата            | 29.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -79,8 +79,21 @@ admission.
 - [x] Historical `CURRENT_168` exact-head
       `3b8228dd278fae062c753bf4301e0339ba93738b` прошёл CI `30460154200`,
       `3/3 PASS`, и independent review без новых P0.
-- [ ] Exact `CURRENT_169` candidate SHA, remote CI и independent review
-      приняты; local `169/169`/application evidence не закрывает этот пункт.
+- [x] Engineering exact `CURRENT_169` candidate
+      `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
+      [`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
+      (`run #37`), `3/3 PASS`: Application `90630292527`, authority-root
+      `90630292169`, PostgreSQL 16 `90630292257`. Independent
+      implementation/security review и review compatibility fix не нашли
+      новых P0/P1; у fix нет P2. Это engineering checkpoint, не production-like
+      admission и не разрешение на cutover.
+- [x] Rejected initial `CURRENT_169` exact-head
+      `f9db2643b576778fbb0c651229c37e42d3f0892c`, CI
+      [`30467211571`](https://github.com/boozik3412/leetplus/actions/runs/30467211571)
+      (`run #36`), сохранён как `REJECTED`, `2/3 PASS`: historical
+      `EXPAND_162` rehearsal обнаружил post-baseline
+      `User.identityClaimRevision` в Prisma `RETURNING`; исправлено frozen
+      `id/tenantId` projection для create/update/delete.
 - [x] Rejected exact-head candidate
       `a644b81e909ea97c21e3c404480505bf97b19935`, CI
       [`30447011917`](https://github.com/boozik3412/leetplus/actions/runs/30447011917)
@@ -482,6 +495,13 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.19.1`, 29.07.2026 — engineering exact-head `CURRENT_169`
+  `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
+  `30467882578` (`run #37`), `3/3 PASS`, и independent review без новых
+  P0/P1. Initial candidate `f9db264...` / CI `30467211571` сохранён как
+  `REJECTED`, `2/3 PASS`; historical User projection исправлен и повторный
+  PostgreSQL 16 rehearsal прошёл. Production-like admission, cutover и внешний
+  доступ остаются unchecked `NO-GO`.
 - `1.19.0`, 29.07.2026 — current cutover target синхронизирован с
   `CURRENT_169` (`163..169`, latest
   `20260729230000_identity_invite_writer_boundary`). Local engineering

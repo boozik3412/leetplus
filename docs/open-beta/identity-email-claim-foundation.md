@@ -2,13 +2,13 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.3 |
+| Версия | 1.4 |
 | Дата | 29.07.2026 |
 | Schema target | `CURRENT_169` |
 | Foundation migration | `20260729190000_identity_email_claim_foundation` |
 | Write-boundary migration | `20260729210000_identity_email_claim_write_boundary` |
 | Writer-boundary migration | `20260729230000_identity_invite_writer_boundary` |
-| Статус | `IMPLEMENTED_CANDIDATE`; local PostgreSQL принято, exact-head CI pending, not deployed |
+| Статус | `IMPLEMENTED_CANDIDATE`; local PostgreSQL и exact-head engineering CI/review приняты, not deployed |
 | Release decision | `NO-GO` для реального Tenant B, OWNER invite и production deploy |
 
 ## Назначение
@@ -217,13 +217,29 @@ deployment, получены:
 - runtime enrollment подтвердил exact six-RPC allowlist и zero
   `IdentityEmailClaim` table DML.
 
+Первый `CURRENT_169` exact-head
+`f9db2643b576778fbb0c651229c37e42d3f0892c` / CI
+[`30467211571`](https://github.com/boozik3412/leetplus/actions/runs/30467211571)
+(`run #36`) сохранён как `REJECTED`, `2/3 PASS`: application и authority-root
+прошли, PostgreSQL упал в historical `EXPAND_162` rehearsal из-за
+неограниченного Prisma `User` projection с post-baseline колонкой
+`identityClaimRevision`.
+
+Compatibility fix ограничил historical create/update/delete проекцией
+`id/tenantId` и добавил exact self-test. Принятый `CURRENT_169` engineering
+exact-head — `f5d39fd89145c995c51e7005698327f5581a5cd8`, GitHub CI
+[`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
+(`run #37`), `3/3 PASS`: Application `90630292527`, authority-root
+`90630292169`, PostgreSQL 16 `90630292257`. Independent
+implementation/security review и review compatibility fix не нашли новых
+P0/P1; у fix нет P2.
+
 Предыдущий `CURRENT_168` exact-head
-`3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
-[`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
-`3/3 PASS`, и независимым review без новых P0. Exact-head CI/review для
-`CURRENT_169` ещё pending. Local и remote engineering
-evidence не являются production-like admission, persisted GO, production
-deploy или разрешением на выдачу доступа.
+`3b8228dd278fae062c753bf4301e0339ba93738b` / CI
+[`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200)
+остаётся historical prerequisite. Local и remote engineering evidence не
+являются production-like admission, persisted GO, production deploy или
+разрешением на выдачу доступа.
 
 Startup validation candidate уже требует отдельный
 `IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY`, запрещает reuse с другими production
@@ -252,9 +268,9 @@ secrets и требует version `v1`; CI environment contract обновлён
 6. Пройти production-like upgrade/rollback/zero-diff и полноценную
    two-tenant rehearsal.
 
-Remote exact-head CI и независимый review текущего `CURRENT_169` кандидата
-ещё не закрыты. `3b8228dd...` / CI `30460154200` относится к предыдущему
-`CURRENT_168` prerequisite.
+Engineering exact-head CI и независимый review текущего `CURRENT_169`
+закрыты на `f5d39fd...` / CI `30467882578`. Это не закрывает перечисленные
+launch blockers, production-like admission или deploy.
 
 До внешней активации также закрываются P1 hardening items:
 

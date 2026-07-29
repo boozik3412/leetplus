@@ -2169,6 +2169,12 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
     /does not match the current delivery scope/u,
   );
 
+  // A sequential replay is normally rejected by the SECURITY DEFINER
+  // boundary. The partial unique index is the final invariant and may reject
+  // first as well; Prisma 6 preserves SQLSTATE 23505 for that path but reduces
+  // the database detail to the generic "Unique constraint failed" message.
+  const currentRevisionDuplicateError =
+    /(?:already exists for the current delivery revision|Unique constraint failed)/u;
   for (const eventType of ["DELIVERY_FINALIZED", "DELIVERY_CANCELED"]) {
     await expectSqlState(
       "23505",
@@ -2186,7 +2192,7 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
             stateReasonCode: "TEST_REVISION_BLOCKED_TWO",
           });
         }),
-      /already exists for the current delivery revision/u,
+      currentRevisionDuplicateError,
     );
   }
 

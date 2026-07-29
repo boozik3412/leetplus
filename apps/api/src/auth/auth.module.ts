@@ -7,6 +7,7 @@ import { TenancyModule } from '../tenancy/tenancy.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
+import { IdentityEmailClaimService } from './identity-email-claim.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PasswordService } from './password.service';
 import { PlatformAdminGuard } from './platform-admin.guard';
@@ -38,6 +39,7 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
   providers: [
     AuthService,
     EmailVerificationService,
+    IdentityEmailClaimService,
     PasswordService,
     PlatformAdminGuard,
     JwtAuthGuard,
@@ -46,6 +48,7 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
   ],
   exports: [
     AuthService,
+    IdentityEmailClaimService,
     JwtModule,
     JwtAuthGuard,
     PlatformAdminGuard,

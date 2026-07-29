@@ -177,7 +177,7 @@ It then injects synthetic cross-tenant legacy fixtures,
 including a positive matrix for all eight proposal codes and the two-reason
 last-task overlap, binds a signed short-lived provenance manifest to the
 disposable database, and exercises the read-only row-level proposal dry-run.
-Finally it applies the exact reviewed additive tail and admits CURRENT_167,
+Finally it applies the exact reviewed additive tail and admits CURRENT_168,
 while preserving the independently verified EXPAND_162 evidence boundary.
 The generated database and login are destroyed in a finally block.
 

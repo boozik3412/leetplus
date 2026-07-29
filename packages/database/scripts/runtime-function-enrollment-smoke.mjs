@@ -34,7 +34,7 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact latest migration 167 and exact completed count 167 are mandatory.
+  - Exact latest migration 168 and exact completed count 168 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
   - The generated role and every grant are removed in finally.
@@ -243,6 +243,109 @@ function callPendingIdentityBoundary(runtime) {
   );
 }
 
+function callIdentityReserveBoundary(runtime) {
+  return runtime.$queryRawUnsafe(
+    `
+      SELECT public."identity_email_claim_reserve_invite_v1"(
+        CAST($1 AS TEXT),
+        CAST($2 AS TEXT),
+        CAST($3 AS TEXT)
+      )
+    `,
+    "reserved.identity@example.test",
+    "00000000-0000-4000-8000-000000000001",
+    "00000000-0000-4000-8000-000000000002",
+  );
+}
+
+function callIdentityAssertBoundary(runtime) {
+  return runtime.$queryRawUnsafe(
+    `
+      SELECT public."identity_email_claim_assert_invite_v1"(
+        CAST($1 AS TEXT),
+        CAST($2 AS TEXT),
+        CAST($3 AS TEXT),
+        CAST($4 AS INTEGER)
+      )
+    `,
+    "assert.identity@example.test",
+    "00000000-0000-4000-8000-000000000001",
+    "00000000-0000-4000-8000-000000000002",
+    1,
+  );
+}
+
+function callIdentityTransitionBoundary(runtime) {
+  return runtime.$queryRawUnsafe(
+    `
+      SELECT public."identity_email_claim_transition_v1"(
+        CAST($1 AS TEXT),
+        CAST($2 AS TEXT),
+        CAST($3 AS TEXT),
+        CAST($4 AS TEXT),
+        CAST($5 AS INTEGER),
+        CAST($6 AS TEXT),
+        CAST($7 AS TEXT)
+      )
+    `,
+    "transition.identity@example.test",
+    "00000000-0000-4000-8000-000000000001",
+    "INVITE",
+    "00000000-0000-4000-8000-000000000002",
+    1,
+    "USER",
+    "00000000-0000-4000-8000-000000000003",
+  );
+}
+
+function callIdentityReleaseBoundary(runtime) {
+  return runtime.$queryRawUnsafe(
+    `
+      SELECT public."identity_email_claim_release_v1"(
+        CAST($1 AS TEXT),
+        CAST($2 AS TEXT),
+        CAST($3 AS TEXT),
+        CAST($4 AS TEXT),
+        CAST($5 AS INTEGER)
+      )
+    `,
+    "release.identity@example.test",
+    "00000000-0000-4000-8000-000000000001",
+    "INVITE",
+    "00000000-0000-4000-8000-000000000002",
+    1,
+  );
+}
+
+function selectIdentityClaimTable(runtime) {
+  return runtime.$queryRawUnsafe(
+    'SELECT COUNT(*)::integer AS claim_count FROM public."IdentityEmailClaim"',
+  );
+}
+
+function insertIdentityClaimTable(runtime) {
+  return runtime.$executeRawUnsafe(
+    `
+      INSERT INTO public."IdentityEmailClaim" (
+        "emailCanonical",
+        "claimType",
+        "tenantId",
+        "subjectId",
+        "revision",
+        "updatedAt"
+      )
+      VALUES (
+        'direct.identity@example.test',
+        'INVITE'::public."IdentityEmailClaimType",
+        '00000000-0000-4000-8000-000000000001',
+        '00000000-0000-4000-8000-000000000002',
+        1,
+        CURRENT_TIMESTAMP
+      )
+    `,
+  );
+}
+
 async function runSmoke() {
   assert.notEqual(
     process.env.NODE_ENV,
@@ -296,6 +399,9 @@ async function runSmoke() {
     await admin.$executeRawUnsafe(
       `GRANT USAGE ON SCHEMA public TO ${role}`,
     );
+    await admin.$executeRawUnsafe(
+      `GRANT ALL PRIVILEGES ON TABLE public."IdentityEmailClaim" TO ${role}`,
+    );
 
     const runtimeUrl = runtimeDatabaseUrl(parsed, roleName, password);
     runtime = new PrismaClient({
@@ -323,6 +429,28 @@ async function runSmoke() {
       () => callPendingIdentityBoundary(runtime),
       /permission denied for function identity_email_claim_lock_v1/iu,
     );
+    await expectSqlState(
+      "42501",
+      () => callIdentityReserveBoundary(runtime),
+      /permission denied for function identity_email_claim_reserve_invite_v1/iu,
+    );
+    await expectSqlState(
+      "42501",
+      () => callIdentityAssertBoundary(runtime),
+      /permission denied for function identity_email_claim_assert_invite_v1/iu,
+    );
+    await expectSqlState(
+      "42501",
+      () => callIdentityTransitionBoundary(runtime),
+      /permission denied for function identity_email_claim_transition_v1/iu,
+    );
+    await expectSqlState(
+      "42501",
+      () => callIdentityReleaseBoundary(runtime),
+      /permission denied for function identity_email_claim_release_v1/iu,
+    );
+    const preEnrollmentClaims = await selectIdentityClaimTable(runtime);
+    assert.equal(preEnrollmentClaims.length, 1);
 
     const cliEnvironment = {
       DATABASE_URL: rawDatabaseUrl,
@@ -359,6 +487,10 @@ async function runSmoke() {
       applyReceipt.postconditions.excludedPendingExecuteCount,
       0,
     );
+    assert.equal(
+      applyReceipt.postconditions.sealedTableWithoutRuntimePrivilegesCount,
+      1,
+    );
     assertNoSecretLeak(apply, [rawDatabaseUrl, password]);
 
     const transitionKey = await callTransitionKey(runtime);
@@ -378,6 +510,36 @@ async function runSmoke() {
       () => callPendingIdentityBoundary(runtime),
       /permission denied for function identity_email_claim_lock_v1/iu,
     );
+    await expectSqlState(
+      "23503",
+      () => callIdentityReserveBoundary(runtime),
+      /tenant was not found/iu,
+    );
+    await expectSqlState(
+      "23503",
+      () => callIdentityAssertBoundary(runtime),
+      /claim was not found/iu,
+    );
+    await expectSqlState(
+      "23503",
+      () => callIdentityTransitionBoundary(runtime),
+      /claim was not found/iu,
+    );
+    await expectSqlState(
+      "23503",
+      () => callIdentityReleaseBoundary(runtime),
+      /claim was not found/iu,
+    );
+    await expectSqlState(
+      "42501",
+      () => selectIdentityClaimTable(runtime),
+      /permission denied for table IdentityEmailClaim/iu,
+    );
+    await expectSqlState(
+      "42501",
+      () => insertIdentityClaimTable(runtime),
+      /permission denied for table IdentityEmailClaim/iu,
+    );
 
     const replay = runCli("apply", {
       ...cliEnvironment,
@@ -395,7 +557,10 @@ async function runSmoke() {
     const checkReceipt = parseCliReceipt(afterCheck);
     assert.equal(checkReceipt.decision, "COMPLIANT");
     assert.equal(checkReceipt.changed, false);
-    assert.equal(checkReceipt.applicationFunctions.length, 2);
+    assert.equal(
+      checkReceipt.applicationFunctions.length,
+      APPLICATION_RUNTIME_FUNCTIONS.length,
+    );
     assert.equal(checkReceipt.excludedWorkerFunctions.length, 1);
     assert.equal(
       checkReceipt.excludedPendingFunctions.length,
@@ -408,7 +573,7 @@ async function runSmoke() {
         ok: true,
         schemaVersion: 1,
         database: databaseName,
-        preEnrollmentPermissionDenials: 4,
+        preEnrollmentPermissionDenials: 8,
         applicationFunctionGrants:
           APPLICATION_RUNTIME_FUNCTIONS.length,
         excludedWorkerFunctionGrants: 0,
@@ -417,6 +582,7 @@ async function runSmoke() {
         excludedPendingFunctionGrants: 0,
         excludedPendingFunctionsDenied:
           EXCLUDED_PENDING_FUNCTIONS.length,
+        sealedIdentityClaimTablePrivileges: 0,
         idempotentReplay: true,
         postEnrollmentCheck: "COMPLIANT",
       })}\n`,

@@ -17,6 +17,7 @@ export const PRODUCTION_SECRET_KEYS = [
   'GUEST_GAME_REFERRAL_SECRET',
   'APP_ENCRYPTION_KEY',
   'INTEGRATION_ENCRYPTION_KEY',
+  'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY',
   'SYNC_SERVICE_TOKEN',
 ] as const;
 
@@ -214,12 +215,26 @@ export function validateEnvironment(config: EnvironmentValues) {
       errors.push(`${keys.join(', ')} must use independent values`);
     }
   }
+  const identityEmailFingerprintKey = configuredSecrets.get(
+    'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY',
+  );
+  if (
+    identityEmailFingerprintKey &&
+    Buffer.byteLength(identityEmailFingerprintKey, 'utf8') > 4096
+  ) {
+    errors.push(
+      'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY must not exceed 4096 bytes',
+    );
+  }
 
   const releaseSha = stringValue(config.RELEASE_SHA);
   const buildTime = stringValue(config.BUILD_TIME);
   const expectedMigration = stringValue(config.EXPECTED_DATABASE_MIGRATION);
   const expectedMigrationCount = stringValue(
     config.EXPECTED_DATABASE_MIGRATION_COUNT,
+  );
+  const identityEmailFingerprintKeyVersion = stringValue(
+    config.IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION,
   );
   const configuredAccessScopeMode = stringValue(
     config.ACCESS_SCOPE_ENFORCEMENT_MODE,
@@ -276,6 +291,9 @@ export function validateEnvironment(config: EnvironmentValues) {
   if (!/^[1-9]\d*$/.test(expectedMigrationCount)) {
     errors.push('EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer');
   }
+  if (identityEmailFingerprintKeyVersion !== 'v1') {
+    errors.push('IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION must equal v1');
+  }
 
   if (isolatedMode === 'true') {
     for (const [key, expected] of Object.entries(
@@ -320,6 +338,8 @@ export function validateEnvironment(config: EnvironmentValues) {
     BUILD_TIME: buildTime,
     EXPECTED_DATABASE_MIGRATION: expectedMigration,
     EXPECTED_DATABASE_MIGRATION_COUNT: expectedMigrationCount,
+    IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION:
+      identityEmailFingerprintKeyVersion,
     ACCESS_SCOPE_ENFORCEMENT_MODE: accessScopeEnforcementMode,
     STAFF_ATTACHMENT_ACL_MODE: staffAttachmentAclMode,
     DESIGN_PARTNER_ISOLATED_MODE: isolatedMode || undefined,

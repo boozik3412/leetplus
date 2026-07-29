@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.23                                         |
+| Версия           | 1.24                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -96,7 +96,7 @@ enterprise-isolation option и не сокращает shared gates.
 18. [Runbook admission StaffTask snapshot](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md) —
     обязательный fail-closed checkpoint перед production-like inventory и
     planner: PostgreSQL 16, frozen `BASELINE_156 | EXPAND_162`, current
-    implementation candidate `CURRENT_166`, release manifest, catalog и
+    implementation candidate `CURRENT_168`, release manifest, catalog и
     отдельная SELECT-only роль.
     18a. [Runbook production-like authority operations](../security/access-scope/v1/staff-task-integrity-snapshot-authority-operations.md) —
     strict acquisition evidence, public-root lifecycle и detached Ed25519
@@ -126,18 +126,19 @@ enterprise-isolation option и не сокращает shared gates.
     переведён в implementation candidate: additive migration и fail-closed
     legacy runtime containment созданы, но coordinator, Store-scoped effect
     enforcement, production-like evidence и cutover ещё не приняты.
-25. [Identity email claim foundation](./identity-email-claim-foundation.md) —
-    migration 167, global canonical reservation, private advisory-lock
-    namespace, monotonic claim transitions и оставшаяся fail-closed граница
-    до shell-only provisioning.
+25. [Identity email claim foundation and sealed write boundary](./identity-email-claim-foundation.md) —
+    migrations 167/168, global canonical reservation, private advisory-lock
+    namespace, sealed reserve/assert/transition/release RPC и zero-DML
+    runtime-role contract для shell-only provisioning.
 
-Accepted remote prerequisite остаётся migration `165` — отдельный bounded
-fail-closed Store fence candidate: все Store остаются
-`backgroundExecutionEnabled=false`, ни один Store не активирован, outbound
-`OFF`. Remote populated `164 → 165` и все три CI job прошли на evidence из
-backlog §5.29. Migration `166` находится только в рабочей ветке; её актуальный
-статус и незакрытые условия перечислены в backlog §5.30. Production
-apply/deploy не выполнялись.
+Текущий schema target рабочего кандидата — `CURRENT_168`. Локальный
+disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`, identity
+idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
+`INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
+cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`, exact
+six-RPC runtime allowlist и zero `IdentityEmailClaim` table DML. Эти
+результаты не являются remote exact-head CI, production-like admission,
+persisted GO или production deploy. Production apply/deploy не выполнялись.
 
 При противоречии исторического документа этому пакету действует
 `OPEN_BETA_BACKLOG.md`. Изменение продуктового состава первой когорты требует
@@ -155,16 +156,28 @@ apply/deploy не выполнялись.
   session/activation policy, запрет generic lifecycle mutation для каждого
   non-`INTERNAL` tenant, owner-invite onboarding transition и удалённый
   database default с `User.role`;
-- legacy shared provisioning/revoke foundation candidate: Platform Admin атомарно
-  создаёт `PILOT/SUSPENDED/OWNER_INVITED/revision 1` tenant, один неактивный
-  Store, OWNER override, exact six-row profile, email-bound `NETWORK OWNER`
-  invite и audit/request digest; replay не создаёт дублей и не раскрывает
-  one-time URL повторно; revoke возвращает только pristine pre-owner tenant в
-  `SUSPENDED/PROVISIONING`. Real PostgreSQL/concurrency evidence, email
-  delivery, reissue/rotation и dedicated activation ещё pending. Candidate
-  не используется с реальным email и до launch заменяется на shell-only flow:
-  без invite/token/trial до protected activation; controller legacy
-  provisioning возвращает стабильный `503` и не вызывает candidate;
+- shared shell-only provisioning candidate: Platform Admin service атомарно
+  создаёт `PILOT/SUSPENDED/PROVISIONING/revision 1` tenant, один неактивный
+  Store, OWNER override, exact six-row profile
+  `read/write=ON + outbound=OFF`, canonical owner-email reservation и
+  HMAC-only audit/request digest. Он не создаёт `User`, `UserInvite`, token,
+  registration URL, trial, outbox или письмо. Provision controller остаётся
+  закрыт с `503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING`, legacy
+  initial-owner revoke route — с
+  `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`;
+- identity email claim candidate: migration 167 создаёт global canonical
+  claim/lock namespace, migration 168 — sealed
+  reserve/assert/transition/release boundary. Runtime role имеет exact six
+  application RPC и zero effective `IdentityEmailClaim` table DML. Combined
+  subject invariant охватывает `INVITE | USER`, reserve recheck legacy state
+  выполняется до replay, exact `search_path=pg_catalog` проверяется по
+  PostgreSQL catalog. Local PostgreSQL `16.14` evidence: `168/168`, identity
+  `1/99`, shell `2/2`. Production startup-validation candidate уже требует
+  отдельный fingerprint HMAC key version `v1`, запрещает reuse и включён в CI
+  environment contract; до deploy нужно настроить отдельное production
+  значение. Legacy
+  `User`/`UserInvite` writers, activation locator,
+  outbox/invite/accept/reissue/revoke и persisted GO ещё pending;
 - external authenticated HTTP admission candidate: обязательные beta-prefixes
   получают `module + READ|WRITE|OUTBOUND`, неизвестный route запрещён;
   reusable lower-layer admission перечитывает persisted state на каждый
@@ -199,7 +212,8 @@ apply/deploy не выполнялись.
   Bonus-ledger revoke и Telegram unsubscribe продолжают основную
   ledger/reward/consent mutation, но не изменяют provider delivery rows/events;
   `CASHIER/MANUAL` cancellation сохраняется.
-  Schema target — `CURRENT_166`. Previous accepted engineering baseline связан с
+  Schema target этого historical guest-game checkpoint — `CURRENT_166`.
+  Previous accepted engineering baseline связан с
   PR head
   `bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
   [`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)
@@ -304,8 +318,8 @@ apply/deploy не выполнялись.
   confirmation / production attestation / 40-hex SHA / HMAC и expected
   database binding. Frozen StaffTask evidence остаётся на exact
   `EXPAND_162`, а current implementation candidate schema-first gate требует
-  `CURRENT_166`, `migrationCount=166`, latest
-  `20260729160000_guest_game_delivery_claim_fence`,
+  `CURRENT_168`, `migrationCount=168`, latest
+  `20260729210000_identity_email_claim_write_boundary`,
   `unfinished=0`, `14 composite exact`, `14 simple exact`,
   `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact` и
   `0 index mismatch`; expected/actual database names не выводятся, а
@@ -333,7 +347,7 @@ apply/deploy не выполнялись.
   admission.
   `IMPLEMENTED_CANDIDATE`, not deployed. Admission принимает только
   изолированную loopback PostgreSQL 16 копию в точном `BASELINE_156`,
-  `EXPAND_162` или `CURRENT_166`,
+  `EXPAND_162` или `CURRENT_168`,
   сверяет ordered migration names/checksums, exact Git blob content, catalog,
   database marker и freshness. Отдельная `LOGIN NOINHERIT` роль получает
   table-level `SELECT` ровно на восьми разрешённых relations и column-level
@@ -407,10 +421,12 @@ apply/deploy не выполнялись.
    `20260728120000_tenant_execution_control_plane_expand` → exact
    `20260728150000_tenant_execution_revision_fence` → exact fail-closed
    migration `20260729120000_store_background_execution_fence` → exact
-   migration `20260729160000_guest_game_delivery_claim_fence` → новый третий
-   `CURRENT_166` request/envelope/marker и третий admission. Protected StaffTask
-   evidence остаётся bound к prefix 162; planner работает только на current
-   DB 166;
+   migration `20260729160000_guest_game_delivery_claim_fence` → foundation
+   migration `20260729190000_identity_email_claim_foundation` → sealed
+   boundary migration `20260729210000_identity_email_claim_write_boundary` →
+   новый третий `CURRENT_168` request/envelope/marker и третий admission.
+   Protected StaffTask evidence остаётся bound к prefix 162; planner работает
+   только на current DB 168;
 5. отдельно production-like inventory и aggregate planner;
 6. отдельно production-like row dry-run;
 7. отдельно explicit apply, rollback и доказательство zero-diff;
@@ -419,9 +435,11 @@ apply/deploy не выполнялись.
 9. после выполнения всех platform/module prerequisites и отдельного `Gate 2A`
    explicit `CUTOVER GO` — in-place cutover четырёх `Store` текущей сети
    внутри одного существующего `Tenant`;
-10. параллельно закрыть `BETA-MT-001..009`: shared topology, persisted
-    stage/trial/entitlements, `TenantExecutionPolicy`, owner provisioning,
-    delegation/integrations, A/B isolation и tenant-aware workers/Telegram;
+10. параллельно закрыть `BETA-MT-001..009`: перевести legacy
+    `User`/`UserInvite` writers на sealed claim boundary, реализовать
+    activation locator, outbox/invite/accept/reissue/revoke и
+    persisted GO; затем закрыть delegation/integrations, A/B isolation и
+    tenant-aware workers/Telegram;
 11. семь стабильных дней internal alpha и Gate 1MT завершают Gate 2; только
     затем возможен protected `SHARED BETA GO` и owner invite нового
     `Tenant B/Store B1`.
@@ -482,6 +500,12 @@ Gate 2 и
   применяются fail-closed во всех HTTP/background/Telegram paths;
 - idempotent shell provisioning создаёт отдельный Tenant B, Store B1,
   six-row profile и canonical owner-email claim без User/invite/token/trial;
+- отдельная non-owner runtime role имеет exact six-RPC allowlist и zero
+  `IdentityEmailClaim` table DML; legacy `User`/`UserInvite` writers не
+  обходят sealed reserve/assert/transition/release invariant;
+- отдельное production fingerprint HMAC secret value version `v1`
+  защищённо настроено и аттестовано; protected activation использует
+  privacy-safe claim locator без raw-email lookup leak;
 - persisted GO и dedicated activation запускают trial и атомарно создают
   email-bound OWNER invite + encrypted mail outbox; response/replay не
   раскрывает identity secret, а real PostgreSQL concurrency подтверждает
@@ -502,8 +526,8 @@ Gate 2 и
 - тот же production-like snapshot до inventory прошёл
   [обязательный admission checkpoint](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
   в `BASELINE_156`, после migrations `157..162` — в frozen-prefix
-  `EXPAND_162`, а после exact allowlisted migrations `163..166` — в
-  `CURRENT_166`;
+  `EXPAND_162`, а после exact allowlisted migrations `163..168` — в
+  `CURRENT_168`;
   для каждого состояния использован отдельный signed envelope, перед каждым
   следующим admission DB marker заменён digest нового envelope, а
   state-specific protected evidence и marker-rotation attestation
@@ -523,8 +547,8 @@ Gate 2 и
   findings имеют owner и принятое решение;
 - aggregate reconciliation planner запущен на том же production-like
   snapshot и прошёл exact schema-first gate:
-  `CURRENT_166`, `migrationCount=166`, latest
-  `20260729160000_guest_game_delivery_claim_fence`, `unfinished=0`,
+  `CURRENT_168`, `migrationCount=168`, latest
+  `20260729210000_identity_email_claim_write_boundary`, `unfinished=0`,
   `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
   `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
   `databaseIdentityMatched=true`, `databaseIdentityDigest` зафиксирован,

@@ -320,6 +320,7 @@ async function assertCatalogContract(prisma, roleName, fixtureTableName) {
     WHERE schema_object.nspname = 'public'
       AND relation_object.relkind IN ('r', 'p')
       AND relation_object.relname <> '_prisma_migrations'
+      AND relation_object.relname <> 'IdentityEmailClaim'
   `;
 
   assert.ok(
@@ -331,6 +332,54 @@ async function assertCatalogContract(prisma, roleName, fixtureTableName) {
   assert.equal(tableCoverage.all_update, true);
   assert.equal(tableCoverage.all_delete, true);
   assert.equal(tableCoverage.any_excess_table_privilege, false);
+
+  const [identityClaimBoundary] = await prisma.$queryRaw`
+    SELECT
+      has_table_privilege(
+        ${roleName},
+        'public."IdentityEmailClaim"',
+        'SELECT'
+      ) AS can_select,
+      has_table_privilege(
+        ${roleName},
+        'public."IdentityEmailClaim"',
+        'INSERT'
+      ) AS can_insert,
+      has_table_privilege(
+        ${roleName},
+        'public."IdentityEmailClaim"',
+        'UPDATE'
+      ) AS can_update,
+      has_table_privilege(
+        ${roleName},
+        'public."IdentityEmailClaim"',
+        'DELETE'
+      ) AS can_delete,
+      has_table_privilege(
+        ${roleName},
+        'public."IdentityEmailClaim"',
+        'TRUNCATE'
+      ) AS can_truncate,
+      has_table_privilege(
+        ${roleName},
+        'public."IdentityEmailClaim"',
+        'REFERENCES'
+      ) AS can_reference,
+      has_table_privilege(
+        ${roleName},
+        'public."IdentityEmailClaim"',
+        'TRIGGER'
+      ) AS can_trigger
+  `;
+  assert.deepEqual(identityClaimBoundary, {
+    can_select: false,
+    can_insert: false,
+    can_update: false,
+    can_delete: false,
+    can_truncate: false,
+    can_reference: false,
+    can_trigger: false,
+  });
 
   const [migrationBoundary] = await prisma.$queryRaw`
     SELECT
@@ -546,6 +595,7 @@ async function exerciseRuntimeDml(runtime, fixtureTableName) {
 
 async function exerciseRuntimeDenials(runtime, fixtureTableName) {
   const table = `public.${quoteIdentifier(fixtureTableName)}`;
+  const identityClaimTable = 'public."IdentityEmailClaim"';
 
   await expectDenied(
     "public table CREATE",
@@ -599,6 +649,42 @@ async function exerciseRuntimeDenials(runtime, fixtureTableName) {
         `CREATE ROLE ${quoteIdentifier(`${ROLE_PREFIX}denied`)}`,
       ),
     /permission denied to create role/i,
+  );
+  await expectDenied(
+    "identity claim SELECT",
+    () => runtime.$queryRawUnsafe(`SELECT * FROM ${identityClaimTable}`),
+    /permission denied for table IdentityEmailClaim/i,
+  );
+  await expectDenied(
+    "identity claim INSERT",
+    () =>
+      runtime.$executeRawUnsafe(
+        `INSERT INTO ${identityClaimTable} (
+          "emailCanonical",
+          "claimType",
+          "tenantId",
+          "subjectId"
+        ) VALUES (
+          'denied.identity@example.test',
+          'INVITE'::public."IdentityEmailClaimType",
+          'denied-tenant',
+          'denied-subject'
+        )`,
+      ),
+    /permission denied for table IdentityEmailClaim/i,
+  );
+  await expectDenied(
+    "identity claim UPDATE",
+    () =>
+      runtime.$executeRawUnsafe(
+        `UPDATE ${identityClaimTable} SET "revision" = "revision"`,
+      ),
+    /permission denied for table IdentityEmailClaim/i,
+  );
+  await expectDenied(
+    "identity claim DELETE",
+    () => runtime.$executeRawUnsafe(`DELETE FROM ${identityClaimTable}`),
+    /permission denied for table IdentityEmailClaim/i,
   );
 }
 
@@ -683,6 +769,9 @@ async function runSmoke() {
       `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`,
     );
     await admin.$executeRawUnsafe(
+      `REVOKE ALL PRIVILEGES ON TABLE public."IdentityEmailClaim" FROM ${role}`,
+    );
+    await admin.$executeRawUnsafe(
       `REVOKE ALL ON TABLE public."_prisma_migrations" FROM ${role}`,
     );
     await admin.$executeRawUnsafe(
@@ -706,7 +795,7 @@ async function runSmoke() {
     await exerciseRuntimeDenials(runtime, fixtureTableName);
 
     console.log(
-      "Design-partner runtime-role smoke passed: isolated login role has exact application DML and read-only migration readiness, with no migration writes, ownership, membership, CREATE, DDL, BYPASSRLS, or grant option.",
+      "Design-partner runtime-role smoke passed: isolated login role has application DML except the sealed IdentityEmailClaim table, plus read-only migration readiness, with no migration writes, ownership, membership, CREATE, DDL, BYPASSRLS, or grant option.",
     );
   } finally {
     if (runtime) {

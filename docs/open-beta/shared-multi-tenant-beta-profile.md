@@ -3,8 +3,8 @@
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
 | Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                   |
-| Версия           | 1.2                                                             |
-| Дата             | 28.07.2026                                                      |
+| Версия           | 1.3                                                             |
+| Дата             | 29.07.2026                                                      |
 | Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены         |
 | Формат           | Первый friendly external club, invite-only                      |
 | Data plane       | Shared web, API, workers, PostgreSQL и Telegram                 |
@@ -90,25 +90,51 @@ deny-by-default. Frontend visibility не является авторизаци�
 
 ## 3. Владелец и delegation
 
-Platform operator выполняет idempotent provisioning. Foundation candidate
-одной serializable-транзакцией:
+Platform operator в целевом workflow сначала выполняет idempotent shell-only
+provisioning. Реализованный `CURRENT_168` service candidate одной
+serializable-транзакцией:
 
 1. создаёт `Tenant B` как
-   `PILOT/SUSPENDED/OWNER_INVITED/profileRevision=1`;
-2. создаёт неактивный `Store B1`;
-3. назначает trial/cohort/support owner;
-4. создаёт OWNER role override и exact six-row entitlement profile;
-5. создаёт один email-bound opaque `OWNER + NETWORK` invite;
-6. сохраняет audit receipt и request digest без raw token.
+   `PILOT/SUSPENDED/PROVISIONING/profileRevision=1`;
+2. создаёт неактивный `Store B1` с gamification/background execution `OFF`;
+3. оставляет `trialStartsAt/trialEndsAt` пустыми;
+4. создаёт OWNER capability override и exact six-row entitlement profile;
+5. резервирует canonical owner email через sealed claim RPC, но не создаёт
+   `User` или `UserInvite`;
+6. сохраняет HMAC-bound request digest и audit fingerprint/version без raw
+   email;
+7. возвращает только несекретный shell snapshot.
 
-Первый успешный ответ содержит one-time registration URL. Идентичный replay
-не создаёт дубли и не раскрывает URL повторно. Platform Admin может отозвать
-initial invite только у pristine pre-owner tenant; revoke возвращает его в
-`SUSPENDED/PROVISIONING`. Persisted onboarding checklist, защищённая email
-delivery, invite reissue/rotation, real PostgreSQL/concurrency evidence и
-dedicated external activation остаются незавершёнными P0. Поэтому candidate
-endpoint нельзя вызывать для реального тестера до protected
-`SHARED BETA GO`.
+Shell не создаёт invite, token, registration URL, trial, outbox или письмо.
+Runtime role имеет zero `IdentityEmailClaim` DML и exact `EXECUTE` на четыре
+identity RPC; полный application allowlist содержит ровно шесть RPC с учётом
+двух guest-game boundaries. Combined subject invariant охватывает
+`INVITE | USER`, reserve проверяет legacy identity rows до replay, а exact
+`search_path=pg_catalog` всех definer RPC аттестуется по PostgreSQL catalog.
+
+Локальный disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`,
+identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
+`INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
+cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`. Это
+local candidate evidence, не remote exact-head CI и не launch approval.
+
+Оба Platform Admin route остаются закрытыми:
+
+```text
+POST /admin/shared-beta/tenants/provision
+  → 503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING
+
+POST /admin/tenants/:tenantId/initial-owner-invite/revoke
+  → 503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING
+```
+
+OWNER invite появится только в отдельной protected activation после
+persisted `SHARED BETA GO`. До неё необходимо реализовать activation locator,
+encrypted outbox, issue/reissue/revoke/accept и перевести legacy
+`User`/`UserInvite` writers на общий claim invariant. Fingerprint HMAC
+startup validation уже реализована candidate; до deploy требуется только
+защищённо настроить и аттестовать отдельный production secret version `v1`.
+Поэтому реальный tester email в route не передаётся.
 
 После принятия invite OWNER:
 
@@ -232,7 +258,8 @@ system/custom roles, capabilities, `NETWORK | STORES` scope и audit.
    API/BFF/browser/files/jobs/SSE/Telegram.
 4. Все пять product modules и supporting `INTEGRATIONS` имеют
    `VERIFIED + ENFORCED` access policy.
-5. Owner provisioning/invite/delegation/session revoke работают атомарно.
+5. Shell provisioning, protected activation/invite, delegation и session
+   revoke работают атомарно.
 6. Integration preview/mapping не импортирует чужие клубы.
 7. Shared workers имеют tenant/store system identity, durable lease/fencing
    и idempotency.
@@ -240,6 +267,10 @@ system/custom roles, capabilities, `NETWORK | STORES` scope и audit.
    проверены.
 9. Support/incident/feedback/offboarding owners и trial expiry назначены.
 10. Protected `SHARED BETA GO` сохранён до создания invite.
+
+Дополнительно до любого внешнего доступа обязательны production-like
+upgrade/rollback/zero-diff и полноценная two-tenant rehearsal. Local
+`CURRENT_168` PostgreSQL evidence не заменяет эти gates.
 
 Немедленные stop conditions:
 

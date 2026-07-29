@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 29.07.2026
-- Версия: 1.45
+- Версия: 1.46
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -207,7 +207,7 @@
 | ------------ | --------- | ------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | BETA-TEN-001 | P0        | В работе      | Разделить operational lifecycle и customer stage                 | Существуют lifecycle `ACTIVE/SUSPENDED/ARCHIVED` и отдельный stage `INTERNAL/PILOT/BETA/LIVE`; сохраняются cohort, trial dates, support owner и onboarding state                                                                                                                                                                                                                    | BETA-SRC-002                                            |
 | BETA-TEN-002 | P0        | В работе      | Добавить tenant/store entitlements                               | Полный атомарный профиль первого теста содержит пять product rows `gamification`, `assortment`, `staff`, `communications`, `users_roles` и supporting row `integrations`; initial state для всех шести — `read/write=ON`, `outbound=OFF`; изменения имеют revision, reason, expiry и audit, а outbound включается только отдельным workflow                                         | BETA-TEN-001                                            |
-| BETA-TEN-003 | P0        | В работе      | Реализовать idempotent shell-only Platform Admin provisioning    | Target workflow атомарно создаёт `PILOT/SUSPENDED/PROVISIONING` tenant, неактивный Store, OWNER override, полный six-row профиль и canonical owner-email reservation, но не создаёт `UserInvite`, token, mail и не запускает trial; replay не создаёт дублей и не раскрывает identity data; текущий foundation candidate с `OWNER_INVITED`/raw URL подлежит замене до использования | BETA-TEN-001, BETA-TEN-002, BETA-IAM-004A               |
+| BETA-TEN-003 | P0        | В работе      | Реализовать idempotent shell-only Platform Admin provisioning    | Service candidate атомарно создаёт `PILOT/SUSPENDED/PROVISIONING` tenant, неактивный Store, OWNER override, полный six-row профиль и canonical owner-email reservation, но не создаёт `User/UserInvite`, token, mail/outbox и не запускает trial; replay HMAC-bound и не раскрывает identity data; HTTP route остаётся `503` до protected activation, remote exact-head и production-like evidence | BETA-TEN-001, BETA-TEN-002, BETA-IAM-004A               |
 | BETA-TEN-004 | P0        | В работе      | Ввести единый `TenantExecutionPolicy`                            | External HTTP routes fail-closed сопоставлены с module/action; reusable fresh-PostgreSQL admission поддерживает cross-module requirements; login, invites, BFF/files, guest/Telegram, schedulers, sync, messages, rewards и exports принимают тот же policy; `INTERNAL` имеет только временный entitlement bypass; неизвестный route/action запрещён                                | BETA-TEN-002, BETA-SEC-003                              |
 | BETA-TEN-005 | P1        | Запланировано | Расширить Platform Admin cockpit                                 | Видны stage, trial, entitlement, owner invite, onboarding, stores, source freshness, sync errors, last activity, support owner и incidents                                                                                                                                                                                                                                          | BETA-TEN-003, BETA-OPS-010                              |
 | BETA-TEN-006 | P0        | Запланировано | Реализовать offboarding и retention workflow                     | Suspend/archive отзывает invites/sessions, выключает integrations и jobs; data export/delete/retention выполняются по утверждённой процедуре и аудируются                                                                                                                                                                                                                           | BETA-TEN-004                                            |
@@ -222,7 +222,7 @@
 | BETA-IAM-002  | P0        | В работе      | Реализовать явный network-level и club-level scope        | `NETWORK` и `STORES` — явные режимы; отсутствие `UserStoreAccess` не повышает пользователя до NETWORK; смена scope действует сразу на API, BFF, exports, files и активные сессии                                                                                                                                           | BETA-SEC-003, BETA-IAM-001                             |
 | BETA-IAM-003  | P0        | В работе      | Ограничить полномочия управляющего actor                  | Store manager не может создать NETWORK user, назначить чужой store, выдать роль/capability выше собственной или управлять пользователем вне пересечения scopes; защищены self-escalation и последний OWNER                                                                                                                 | BETA-IAM-001, BETA-IAM-002                             |
 | BETA-IAM-004  | P0        | В работе      | Завершить invite/resend/revoke workflow                   | Для external tenant generic direct-create, invite issue/rotation и email change остаются fail-closed; verified workflow доставляет opaque token только на bound mailbox, не возвращает raw URL tenant actor, резервирует normalized email под lock, аудирует send/resend/revoke/accept и отклоняет revoked/expired token   | BETA-SEC-009, BETA-IAM-003                             |
-| BETA-IAM-004A | P0        | Запланировано | Реализовать initial OWNER identity outbox                 | Case-insensitive `IdentityEmailClaim`, encrypted leased outbox, fail-closed SMTP/HTTPS/key validation, shell provisioning, protected issue/reissue/revoke и fragment + POST-body token transport; raw email/token/URL/ciphertext отсутствуют в responses/logs/audit; acceptance atomically переводит claim `INVITE → USER` | BETA-SEC-008, BETA-SEC-009, BETA-TEN-001, BETA-TEN-002 |
+| BETA-IAM-004A | P0        | В работе      | Реализовать initial OWNER identity outbox                 | Migrations 167/168 дают case-insensitive `IdentityEmailClaim`, sealed reserve/assert/transition/release RPC, zero runtime table DML, shell reservation и fingerprint-HMAC startup validation; до готовности остаются activation locator, encrypted leased outbox, protected issue/reissue/revoke/accept и fragment + POST-body transport; до deploy настраивается отдельный prod HMAC secret; raw email/token/URL/ciphertext отсутствуют в responses/logs/audit | BETA-SEC-008, BETA-SEC-009, BETA-TEN-001, BETA-TEN-002 |
 | BETA-IAM-004B | P0        | Запланировано | Включить tenant-owned employee invites и email change     | Только после 004A OWNER может выдавать scope-bounded invites; email change требует password step-up, reservation, confirmation, `authVersion` revoke и уведомления на old/new mailbox; owner transfer остаётся отдельным workflow                                                                                          | BETA-IAM-002..005, BETA-IAM-004A                       |
 | BETA-IAM-005  | P0        | В работе      | Ограничить особо чувствительное повышение привилегий      | Generic users/invites API не назначает OWNER; добавление/смена OWNER выполняется только отдельным атомарным owner-transfer workflow; Platform Admin нельзя назначить tenant API                                                                                                                                            | BETA-IAM-001, BETA-IAM-003                             |
 | BETA-IAM-006  | P0        | Запланировано | Свести backend/frontend permission maps                   | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization                                                                                                                                                                                      | BETA-IAM-001                                           |
@@ -294,18 +294,20 @@ Current-state уточнение `BETA-MOD-STAFF-003`: перечисленны�
 `EXPAND_162` gate и старые SHA являются frozen/historical evidence. Protected
 StaffTask prefix остаётся 162, но current production-like
 admission/inventory/planner для текущего implementation candidate допускается
-только на `CURRENT_166` — exact prefix
+только на `CURRENT_168` — exact prefix
 плюс allowlisted migrations
 `20260728120000_tenant_execution_control_plane_expand` и
 `20260728150000_tenant_execution_revision_fence` и
 `20260729120000_store_background_execution_fence` и
-`20260729160000_guest_game_delivery_claim_fence`. Исторический exact
+`20260729160000_guest_game_delivery_claim_fence` и
+`20260729190000_identity_email_claim_foundation` и
+`20260729210000_identity_email_claim_write_boundary`. Исторический exact
 engineering prerequisite `CURRENT_165` на
 `4bd6a036df16579f68b2c96a14b6475c8311b231` принят по зелёному remote CI
 `30428288353`; documentation/evidence successor
 `7c20adec4ee7cb0a390f1e38ec8e7dd333fa367f` также прошёл remote CI
 `30429463161`. Оба SHA являются historical `CURRENT_165` evidence; remote
-exact-SHA и PostgreSQL evidence для `CURRENT_166`, как и production-like
+exact-SHA и remote CI evidence для `CURRENT_168`, как и production-like
 evidence, ещё pending. Strict acquisition contract,
 root lifecycle и detached `prepare → external sign → finalize` реализованы как
 candidate; реальный public root намеренно не enrolled. Статус остаётся
@@ -1939,7 +1941,7 @@ tenant lifecycle/stage/trial
 | BETA-MT-010 | P0        | Запланировано | Принять shared beta access decision и выполнить day-0               | Gate 1MT и Gate 2 закрыты; exact SHA/CI/backup/restore/rollback/alerts приняты; protected `SHARED BETA GO` содержит Tenant/Store aliases, entitlement revision, trial, approver, support/rollback owner и stop conditions; owner invite создаётся после GO; day-0 login/scope/feedback/kill-switch smoke зелёный                                                                                                  | BETA-MT-001..009, BETA-CUT-009, BETA-PILOT-005..006         |
 | BETA-MT-011 | P0        | Запланировано | Провести controlled first-club cycle и offboarding                  | Один новый tenant активируется за change window; D1/D7 review привязаны к SHA; suspend, session/invite revoke, integration stop, export/retention и support подтверждены; второй внешний tenant не создаётся до принятия first-club review и capacity/incident decision                                                                                                                                           | BETA-MT-010                                                 |
 
-Implementation checkpoint `Tenant execution control plane 1.7`:
+Текущий implementation checkpoint `CURRENT_168`:
 
 - новая сеть fail-closed создаётся как
   `SUSPENDED + INTERNAL + PROVISIONING + profileRevision=0`;
@@ -1964,18 +1966,20 @@ Implementation checkpoint `Tenant execution control plane 1.7`:
   email без доказательства владения mailbox;
 - database default с `User.role` удалён: любой create/invite/transfer path
   обязан назначать роль явно;
-- candidate shared provisioning endpoint уже атомарно создаёт
-  `PILOT/SUSPENDED/OWNER_INVITED/revision 1` tenant, один неактивный Store,
-  OWNER role override, exact six-row `read/write=ON + outbound=OFF` profile,
-  email-bound `NETWORK OWNER` invite и audit с request digest; идентичный
-  replay не создаёт дублей и намеренно не раскрывает one-time URL повторно;
-  trial начинается в пределах 24 часов от provisioning, а invite сохраняет
-  минимум 24 часа на принятие от более позднего момента:
-  `max(provisioning time, trialStartsAt)`; идентичный replay остаётся
-  доступным после истечения create-only temporal admission window;
-- candidate Platform Admin revoke удаляет initial invite и возвращает только
-  pristine pre-owner tenant в `SUSPENDED/PROVISIONING`; tenant с user, другим
-  invite или integration state отклоняется;
+- shared shell service candidate атомарно создаёт
+  `PILOT/SUSPENDED/PROVISIONING/revision 1` tenant, один неактивный Store с
+  gamification/background execution `OFF`, OWNER capability override и exact
+  six-row `read/write=ON + outbound=OFF` profile без validity window;
+  `trialStartsAt/trialEndsAt` остаются `null`;
+- canonical owner email резервируется через sealed
+  `identity_email_claim_reserve_invite_v1`, audit содержит только
+  domain-separated HMAC fingerprint/key version и HMAC-bound request digest.
+  `User`, `UserInvite`, token, registration URL, trial, outbox и письмо не
+  создаются; identical replay не создаёт дублей и не раскрывает identity data;
+- provisioning controller остаётся fail-closed:
+  `503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING`; legacy
+  initial-owner revoke route также закрыт:
+  `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`;
 - generic lifecycle mutation теперь запрещена для каждого non-`INTERNAL`
   tenant. Activation shared external tenant остаётся отдельным dedicated
   workflow и в этом срезе не реализована;
@@ -2063,18 +2067,30 @@ Implementation checkpoint `Tenant execution control plane 1.7`:
   широкого `manage_guest_crm`;
 - activation primitive запрещает `outbound=ON` в любом из шести modules для
   всех допустимых reactivation states, а не только `OWNER_INVITED`;
-- аудит identity/activation выявил, что текущий provisioning candidate
-  преждевременно создаёт invite/trial и возвращает raw registration URL.
-  Его controller теперь fail-closed возвращает
-  `503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING` и не вызывает
-  legacy service. Candidate должен быть заменён на shell-only flow +
-  canonical email claim + encrypted mail outbox + persisted GO согласно
-  [initial OWNER contract](./docs/open-beta/initial-owner-identity-and-activation.md);
+- migrations `167/168` добавили global canonical email claim и sealed
+  reserve/assert/transition/release boundary. Application runtime role имеет
+  exact шесть RPC: две guest-game boundary и четыре identity boundary; zero
+  effective `IdentityEmailClaim` table DML, direct lock helper и worker event
+  function остаются запрещены. Combined subject invariant охватывает
+  `INVITE | USER`, reserve recheck legacy identity state выполняется до
+  replay, exact `search_path=pg_catalog` четырёх definer RPC аттестуется по
+  PostgreSQL catalog. Local disposable PostgreSQL `16.14` evidence:
+  clean deploy `168/168`, identity idempotency
+  `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined `INVITE | USER`
+  same-subject collision rejection и shell integration `2/2`; 100-way
+  cross-slug shell race даёт `50` winner responses и `50`
+  `IDENTITY_EMAIL_UNAVAILABLE`;
+- sealed identity/shell candidate не завершает OWNER workflow: legacy
+  `User`/`UserInvite` writers ещё обходят claim invariant, отсутствуют
+  activation locator, persisted GO, encrypted outbox,
+  issue/reissue/revoke/accept и protected invite transport. Fingerprint HMAC
+  startup validation уже реализована candidate и CI environment contract
+  обновлён; до deploy требуется отдельное защищённое prod secret value `v1`;
 - StaffTask integrity contract сохранён как immutable migrations `1..162`;
-  migrations `163..166` допускаются только как проверенный additive tail, не
+  migrations `163..168` допускаются только как проверенный additive tail, не
   меняющий protected `StaffTask*` relations. Schema target —
-  `CURRENT_166`, `migrationCount=166`, latest
-  `20260729160000_guest_game_delivery_claim_fence`. Предыдущий accepted
+  `CURRENT_168`, `migrationCount=168`, latest
+  `20260729210000_identity_email_claim_write_boundary`. Предыдущий accepted
   engineering baseline был связан с PR head
   `bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
   [`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)
@@ -2140,13 +2156,14 @@ Implementation checkpoint `Tenant execution control plane 1.7`:
   PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
   `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`.
 
-Этот checkpoint закрывает foundation, но не Gate 1MT. Следующий обязательный
-P0-порядок: закончить durable lease/job/guest/Telegram effect fencing →
-реализовать identity claim/outbox и shell-only provisioning → persisted
-release gates + dedicated activation/suspend/reissue/revoke → real
-PostgreSQL concurrency → безопасный integration preview/select/map →
-two-tenant matrix и production-like migration/rollback rehearsal. До закрытия
-этих gates реальный внешний tenant не provisioned и owner invite тестеру не
+Этот checkpoint закрывает только local claim/shell foundation, но не Gate 1MT.
+Следующий обязательный P0-порядок: перевести legacy identity writers на sealed
+boundary → реализовать activation locator → реализовать
+persisted GO, encrypted outbox, issue/reissue/revoke/accept и invite transport
+→ закончить durable lease/job/guest/Telegram effect fencing → безопасный
+integration preview/select/map → полный PostgreSQL concurrency, two-tenant и
+production-like migration/rollback/zero-diff rehearsal. До закрытия этих
+gates реальный внешний tenant не provisioned и owner invite тестеру не
 выдаётся.
 
 Исполнимый профиль и launch checklist:
@@ -2399,6 +2416,89 @@ Migration/runtime containment являются implementation candidate и не
 registry — `{}`. Gate 1MT, создание external tenant, owner invite и тестовый
 доступ для второго клуба остаются `NO-GO`.
 
+### 5.31. `CURRENT_168`: sealed OWNER identity boundary и shell-only provisioning — 29.07.2026
+
+Текущий рабочий schema candidate:
+
+```text
+migrationCount = 168
+latest = 20260729210000_identity_email_claim_write_boundary
+release decision = NO-GO
+```
+
+Реализовано как engineering candidate, не применённый к production:
+
+- migration 167 создаёт global case-insensitive `IdentityEmailClaim` и единый
+  advisory-lock namespace;
+- migration 168 создаёт sealed `SECURITY DEFINER`
+  `reserve/assert/transition/release` RPC, combined `INVITE | USER` subject
+  invariant и отдельный `EMAIL_CHANGE` invariant; reserve проверяет legacy
+  identity rows до replay, exact `search_path=pg_catalog` всех четырёх
+  definer RPC аттестуется по PostgreSQL catalog;
+- actual non-owner application runtime enrollment содержит ровно шесть RPC:
+  две guest-game и четыре identity; direct lock helper и worker event function
+  excluded;
+- runtime role имеет zero effective `SELECT/INSERT/UPDATE/DELETE/TRUNCATE/
+  REFERENCES/TRIGGER` на `IdentityEmailClaim`, а `PUBLIC` privileges отозваны;
+- shell service в одной serializable-транзакции создаёт только
+  `PILOT/SUSPENDED/PROVISIONING` tenant, inactive Store, OWNER capability
+  override, exact six-row `read/write=ON + outbound=OFF` profile и canonical
+  owner reservation; после recovery допускается ровно один полный retry только
+  для serialization conflict (`P2034`/`IDENTITY_CLAIM_RETRY_REQUIRED`);
+- shell audit содержит только HMAC fingerprint/key version и HMAC-bound
+  request digest; raw email не сохраняется в audit/response;
+- production startup-validation candidate требует отдельный fingerprint HMAC
+  secret, запрещает reuse и принимает только version `v1`; CI environment
+  contract обновлён;
+- shell не создаёт `User`, `UserInvite`, token, registration URL, trial,
+  outbox или письмо;
+- provision route остаётся
+  `503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING`, legacy
+  initial-owner revoke route —
+  `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`.
+
+Local disposable PostgreSQL `16.14` evidence без production data:
+
+```text
+clean migrations: 168/168
+identity idempotency: 100 total = 1 CREATED + 99 ALREADY_RESERVED
+combined subject invariant: INVITE versus USER collision rejected
+shell PostgreSQL integration: 2/2
+cross-slug shell race: 50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE
+```
+
+Это не remote exact-head CI, не production-like admission, не persisted GO,
+не deploy и не разрешение создать external account.
+
+Открытые launch-blocking P0:
+
+1. Legacy `User` и `UserInvite` writers ещё не используют sealed claim
+   invariant; direct или параллельный обход lock-before-read недопустим.
+2. Нужен privacy-safe activation locator: по claim UUID/HMAC необходимо найти
+   identity без raw-email leak и повторно проверить exact claim под lock.
+3. Отсутствуют persisted `SHARED BETA GO`, activation/trial start,
+   `UserInvite`, encrypted leased outbox, verified mail delivery,
+   issue/reissue/revoke/resend/accept и fragment + POST-body transport.
+4. Не пройдены полный 100-way accept/revoke/reissue matrix,
+   production-like upgrade/rollback/zero-diff и полноценная two-tenant
+   rehearsal.
+5. Remote exact-head CI и независимый review текущего `CURRENT_168` ещё
+   pending.
+
+Открытый hardening P1 до внешней активации:
+
+1. Runtime admission должен привязать четыре `SECURITY DEFINER` RPC не только
+   к signature/security mode/volatility/search path, но и к эталонному body
+   digest и ожидаемому definer-owner с least-privilege доступом.
+2. Replay shell должен перечитать и сопоставить фактические Tenant/Store,
+   OWNER override и six-row entitlement state, а не доверять одному audit
+   receipt после проверки tenant/slug/claim.
+
+До production deploy отдельно создаётся, защищённо устанавливается и
+аттестуется production fingerprint HMAC secret value `v1`. До закрытия всех
+launch blockers обе admin route остаются `503`, production не изменяется, а
+тестовый доступ не выдаётся.
+
 ## 6. Release gates
 
 ### Gate 0 — каноническая основа
@@ -2448,6 +2548,11 @@ Gate 2A, Gate 2 либо Gate 3.
   outbox создаются только dedicated activation по persisted GO и дают
   `NETWORK` только внутри `Tenant B`; дальнейшая delegation не может расширить
   полномочия actor.
+- Отдельная non-owner runtime role имеет exact six-RPC allowlist и zero
+  `IdentityEmailClaim` DML; legacy `User`/`UserInvite` writers используют
+  sealed invariant, отдельное production fingerprint HMAC secret value `v1`
+  настроено и аттестовано, а activation находит и перепроверяет reservation
+  без raw-email leak.
 - Full two-tenant/two-store PostgreSQL, API/BFF/browser/file/job/SSE/Telegram
   matrix для всех обязательных модулей зелёная без test-only bypass.
 - `INTEGRATIONS` допускает только tenant-owned encrypted credentials,
@@ -2519,7 +2624,10 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
 возобновить только по отдельному решению о contingency/enterprise isolation;
 эта lane не переносит approvals или evidence в shared последовательность.
 
-1. Schema target — `CURRENT_166`. SHA `2341b999...`, `044ceca2...` и
+1. Schema target — `CURRENT_168`. Local disposable PostgreSQL `16.14`
+   подтвердил `168/168`, identity `1 winner / 99 fail-closed` и shell `2/2`,
+   но remote exact-head CI текущего кандидата ещё pending. SHA
+   `2341b999...`, `044ceca2...` и
    accepted precursor
    `c1fee42cc0d85a2c2d1acb354ff5198280bc4ecc` являются historical evidence, а
    не current candidate. Previous accepted baseline связан с PR head
@@ -2558,9 +2666,11 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
    admission. Затем применить только exact allowlisted migrations
    `20260728120000_tenant_execution_control_plane_expand`, затем exact
    `20260728150000_tenant_execution_revision_fence`, exact
-   `20260729120000_store_background_execution_fence` и exact
-   `20260729160000_guest_game_delivery_claim_fence`, выпустить новый
-   `CURRENT_166` request/envelope с новым binding, повторно заменить marker и
+   `20260729120000_store_background_execution_fence`, exact
+   `20260729160000_guest_game_delivery_claim_fence`, exact
+   `20260729190000_identity_email_claim_foundation` и exact
+   `20260729210000_identity_email_claim_write_boundary`, выпустить новый
+   `CURRENT_168` request/envelope с новым binding, повторно заменить marker и
    пройти current admission. Protected StaffTask evidence остаётся bound к prefix 162;
    предыдущие marker не переиспользовать; все state-specific authority bundle и
    marker-rotation attestation сохранить. Exact роль
@@ -2571,8 +2681,8 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
    reader role отзывается и удаляется до уничтожения snapshot.
 5. Только после всех state-specific admission отдельно выполнить read-only inventory и
    aggregate reconciliation planner schema `v1` на exact current
-   `CURRENT_166` (`migrationCount=166`, latest
-   `20260729160000_guest_game_delivery_claim_fence`) с
+   `CURRENT_168` (`migrationCount=168`, latest
+   `20260729210000_identity_email_claim_write_boundary`) с
    одинаковыми thresholds, exact protected StaffTask catalog gate и owner для
    каждого non-zero code. HMAC
    `databaseIdentityDigest`, `contentDigest` и `executionDigest` являются
@@ -2608,17 +2718,20 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
     `ENFORCED`; пройти browser/BFF/file regression и rollback drill.
 13. Завершить оставшиеся staff/communications surfaces, включая membership,
     mentions, receipts, SSE, notifications, PII и background execution.
-14. Завершить initial OWNER IAM: canonical email claim, encrypted leased
-    outbox, shell provisioning, protected activation/reissue/revoke, POST-body
-    token transport, session revoke и 100-way accept concurrency.
+14. Завершить initial OWNER IAM поверх уже реализованных claim boundary и
+    shell service: перевести legacy `User`/`UserInvite` writers, добавить
+    activation locator, затем encrypted leased outbox,
+    persisted GO, protected issue/reissue/revoke/accept, POST-body token
+    transport, session revoke и полный 100-way concurrency matrix. Обе admin
+    route до завершения остаются `503`.
 15. Последовательно подключить единый scope к gamification/ledger, затем к
     assortment/reports/imports и пройти store-level negative suites.
 16. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных
     контуров.
-17. Реализовать `BETA-MT-001..006`: persisted customer stage/trial/module
-    entitlements, fail-closed `TenantExecutionPolicy`, shell-only shared
-    provisioning, persisted GO + owner activation/invite, delegation limits и
-    безопасный tenant-owned integrations control-plane.
+17. Завершить `BETA-MT-001..006`: принять shell-only shared provisioning
+    только после remote exact-head evidence, реализовать persisted GO + owner
+    activation/invite, delegation limits и безопасный tenant-owned
+    integrations control-plane.
 18. Реализовать `BETA-MT-007..009`: полную shared PostgreSQL/API/BFF/browser/
     file/job/SSE/Telegram isolation matrix, tenant-aware worker/Telegram
     execution и full-scope module acceptance для `Tenant B/Store B1`.

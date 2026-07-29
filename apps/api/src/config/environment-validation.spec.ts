@@ -18,6 +18,8 @@ function validProductionEnvironment() {
     GUEST_GAME_REFERRAL_SECRET: `referral_${'d'.repeat(44)}`,
     APP_ENCRYPTION_KEY: `pii_${'e'.repeat(44)}`,
     INTEGRATION_ENCRYPTION_KEY: `integration_${'f'.repeat(44)}`,
+    IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY: `identity_${'h'.repeat(44)}`,
+    IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION: 'v1',
     SYNC_SERVICE_TOKEN: `scheduler_${'g'.repeat(44)}`,
     RELEASE_SHA: 'a'.repeat(40),
     BUILD_TIME: '2026-07-26T15:00:00.000Z',
@@ -108,6 +110,23 @@ describe('validateEnvironment', () => {
 
     expect(() => validateEnvironment(environment)).toThrow(
       /JWT_SECRET, GUEST_PORTAL_JWT_SECRET must use independent values/,
+    );
+  });
+
+  it('requires the supported identity fingerprint key version', () => {
+    const missing = validProductionEnvironment();
+    delete (missing as Partial<ReturnType<typeof validProductionEnvironment>>)
+      .IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION;
+    const unsupported = {
+      ...validProductionEnvironment(),
+      IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION: 'v2',
+    };
+
+    expect(() => validateEnvironment(missing)).toThrow(
+      /IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION must equal v1/,
+    );
+    expect(() => validateEnvironment(unsupported)).toThrow(
+      /IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION must equal v1/,
     );
   });
 

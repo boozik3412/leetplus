@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.1                                                             |
-| Дата             | 28.07.2026                                                      |
-| Статус           | Target contract; execution-fence foundation implemented         |
+| Версия           | 1.2                                                             |
+| Дата             | 29.07.2026                                                      |
+| Статус           | `CURRENT_168` shell/claim candidate; activation ещё pending      |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
 | Scope            | Первый OWNER нового tenant, email delivery, activation, suspend |
 
@@ -16,9 +16,9 @@ email delivery и execution control plane для первого внешнего
 До выполнения этого контракта:
 
 - email будущего тестера не передаётся в provisioning endpoint;
-- legacy provisioning controller возвращает
-  `503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING` до полной замены
-  implementation;
+- provisioning controller возвращает
+  `503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING`, а legacy revoke
+  route — `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`;
 - `Tenant B`, `Store B1`, `User`, `UserInvite` и тестовый пароль не создаются;
 - migration и candidate-код не накатываются в production;
 - release decision остаётся `NO-GO`.
@@ -99,15 +99,36 @@ updatedAt
 принадлежать только одному tenant. Поддержка membership одного человека в
 нескольких сетях требует будущей модели `Identity + TenantMembership`.
 
-Все команды provision/issue/accept/reissue/revoke/email-change используют
-один advisory-lock namespace:
+Migration `20260729190000_identity_email_claim_foundation` создаёт claim и
+единый advisory-lock namespace:
 
 ```text
 identity-email:v1:<canonical-email>
 ```
 
-При операции с двумя email locks берутся в лексикографическом порядке.
-Canonicalization и uniqueness должны быть case-insensitive.
+Migration `20260729210000_identity_email_claim_write_boundary` закрывает
+runtime DML четырьмя `SECURITY DEFINER` RPC:
+
+- `reserve_invite_v1`;
+- `assert_invite_v1`;
+- `transition_v1`;
+- `release_v1`.
+
+Обычная runtime role имеет нулевые effective table privileges на
+`IdentityEmailClaim` и exact `EXECUTE` только на эти четыре identity RPC плюс
+две разрешённые guest-game RPC. Direct lock helper и worker event function
+недоступны. Combined partial unique invariant запрещает одному
+`(tenantId, subjectId)` одновременно быть `INVITE` и `USER`, сохраняя
+отдельный pending `EMAIL_CHANGE`. Reserve повторно проверяет legacy
+`User`/live `UserInvite` до replay decision. Все четыре definer RPC имеют
+exact `search_path=pg_catalog`, который проверяется по PostgreSQL `proconfig`.
+При операции с двумя email locks они берутся в лексикографическом порядке.
+Canonicalization и uniqueness case-insensitive.
+
+Для будущего accept/reissue обязателен порядок
+`assert (lock retained) → User/UserInvite write → transition → commit`.
+Legacy `User`/`UserInvite` writers пока не используют этот invariant, поэтому
+identity workflow остаётся `NO-GO`.
 
 ### 3.2. Identity mail outbox
 
@@ -246,6 +267,26 @@ Serializable transaction:
 
 Provisioning не запускает trial и не создаёт mail outbox.
 
+Service-level shell candidate реализован на `CURRENT_168`, но route остаётся
+намеренно закрыт:
+
+```text
+503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING
+```
+
+Legacy initial-owner revoke route также закрыт:
+
+```text
+503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING
+```
+
+Локальный disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`,
+identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
+`INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
+cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`. Это
+engineering evidence без production data; оно не является remote exact-head
+CI, production-like admission или разрешением вызвать route.
+
 ### 5.2. Activation
 
 ```http
@@ -354,12 +395,19 @@ Production startup обязан завершаться ошибкой, если 
 - SMTP host/port/from;
 - обязательный TLS/verification mode;
 - `IDENTITY_MAIL_ENCRYPTION_KEY` и active key version;
+- отдельный сильный `IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY` и его active
+  version;
 - token HMAC/hash version;
 - release SHA/environment/schema identity;
 - mail worker kill switch и lease settings.
 
 `localhost:1025`, placeholder sender и implicit non-TLS не являются
 production defaults.
+
+Fingerprint HMAC startup-validation candidate уже реализован: требуется
+отдельный production secret, запрещён reuse и принимается только key version
+`v1`; CI environment contract обновлён. До deploy остаётся операционно
+создать, защищённо установить и аттестовать отдельное production-значение.
 
 Public login/invite endpoints получают rate limit и progressive backoff.
 Login policy по `emailVerifiedAt` фиксируется явно; неявный обход запрещён.
@@ -398,17 +446,31 @@ Two-tenant:
 
 ## 8. Последовательность реализации
 
-1. Довести durable lease/effect fencing для оставшихся workers, guest и
-   Telegram surfaces поверх реализованного `executionRevision`.
-2. Добавить canonical email claim и preflight case-insensitive conflicts.
+Завершённый candidate foundation:
+
+- migration 167: canonical claim и единый lock namespace;
+- migration 168: sealed reserve/assert/transition/release boundary;
+- shell-only service: `PILOT/SUSPENDED/PROVISIONING`, inactive Store, six-row
+  profile, HMAC audit, без User/UserInvite/token/trial/outbox;
+- local PostgreSQL `16.14`: `168/168`, identity `1/99`, shell `2/2`.
+
+Следующие обязательные шаги:
+
+1. Перевести legacy `User`/`UserInvite` writers на sealed claim invariant и
+   доказать отсутствие direct runtime table DML.
+2. Спроектировать activation locator без хранения и раскрытия raw email;
+   lookup и повторная проверка claim должны выполняться fail-closed под lock.
 3. Добавить encrypted identity mail outbox и fail-closed mail config.
-4. Перевести provisioning в shell-only flow.
-5. Реализовать release-gate attestations и tenant admission decision.
-6. Реализовать activation/suspend/reissue/revoke.
-7. Перевести invite transport на fragment + POST body.
-8. Выполнить real PostgreSQL concurrency и two-tenant tests.
-9. Провести production-like rehearsal, backup/restore и только затем
-    отдельное решение о production deployment и первом owner invite.
+4. Реализовать release-gate attestations и tenant admission decision.
+5. Реализовать activation, trial start, issue/reissue/revoke/resend/accept и
+   emergency suspend; оба admin route до этого сохраняют `503`.
+6. Перевести invite transport на fragment + POST body.
+7. Выполнить полный real PostgreSQL concurrency matrix и two-tenant tests.
+8. Довести durable lease/effect fencing для оставшихся workers, guest и
+   Telegram surfaces поверх реализованного `executionRevision`.
+9. Провести production-like upgrade/rollback/zero-diff, backup/restore и
+    two-tenant rehearsal; только затем принимать отдельные persisted GO,
+    production deployment и owner invite.
 
 External employee invites, self-service email change и owner transfer
 остаются fail-closed до завершения initial OWNER flow и вводятся отдельными

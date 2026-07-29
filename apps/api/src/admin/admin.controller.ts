@@ -86,11 +86,14 @@ export class AdminController {
     @Param('tenantId') tenantId: string,
     @Body() body: unknown,
   ) {
-    return this.sharedTenantProvisioningService.revokeInitialOwnerInvite(
-      user,
-      tenantId,
-      body ?? {},
-    );
+    void user;
+    void tenantId;
+    void body;
+    throw new ServiceUnavailableException({
+      message:
+        'Shared beta owner invite revoke is disabled until protected activation, delivery and revocation are implemented',
+      reasonCode: 'SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING',
+    });
   }
 
   @Post('tenants/:tenantId/entitlement-profile')

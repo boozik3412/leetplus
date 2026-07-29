@@ -6,15 +6,24 @@ import type { AdminService } from './admin.service';
 import type { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
 
 describe('AdminController shared beta provisioning boundary', () => {
-  it('keeps the legacy raw-URL provisioning candidate unreachable', () => {
+  function controller() {
     const sharedTenantProvisioningService = {
       provision: jest.fn(),
+      revokeInitialOwnerInvite: jest.fn(),
     };
-    const controller = new AdminController(
-      {} as AdminService,
-      {} as TenantEntitlementProfileService,
-      sharedTenantProvisioningService as unknown as SharedTenantProvisioningService,
-    );
+    return {
+      controller: new AdminController(
+        {} as AdminService,
+        {} as TenantEntitlementProfileService,
+        sharedTenantProvisioningService as unknown as SharedTenantProvisioningService,
+      ),
+      sharedTenantProvisioningService,
+    };
+  }
+
+  it('keeps shell provisioning unreachable before protected activation', () => {
+    const { controller: adminController, sharedTenantProvisioningService } =
+      controller();
 
     const user = {
       id: 'platform-admin',
@@ -22,7 +31,7 @@ describe('AdminController shared beta provisioning boundary', () => {
     } as AuthenticatedUser;
 
     try {
-      controller.provisionSharedBetaTenant(user, {});
+      adminController.provisionSharedBetaTenant(user, {});
       throw new Error('Expected provisioning boundary to reject');
     } catch (error) {
       expect(error).toBeInstanceOf(ServiceUnavailableException);
@@ -33,5 +42,29 @@ describe('AdminController shared beta provisioning boundary', () => {
       });
     }
     expect(sharedTenantProvisioningService.provision).not.toHaveBeenCalled();
+  });
+
+  it('keeps the legacy initial-owner revoke route fail-closed', () => {
+    const { controller: adminController, sharedTenantProvisioningService } =
+      controller();
+    const user = {
+      id: 'platform-admin',
+      isPlatformAdmin: true,
+    } as AuthenticatedUser;
+
+    try {
+      adminController.revokeSharedBetaInitialOwnerInvite(user, 'tenant-id', {});
+      throw new Error('Expected revoke boundary to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect(
+        (error as ServiceUnavailableException).getResponse(),
+      ).toMatchObject({
+        reasonCode: 'SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING',
+      });
+    }
+    expect(
+      sharedTenantProvisioningService.revokeInitialOwnerInvite,
+    ).not.toHaveBeenCalled();
   });
 });

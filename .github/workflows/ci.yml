@@ -145,6 +145,9 @@ jobs:
       - name: Validate identity email claim foundation
         run: pnpm --filter database check:identity-email-claim
 
+      - name: Validate identity email claim sealed write boundary
+        run: pnpm --filter database check:identity-email-claim-boundary
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -187,11 +190,13 @@ jobs:
           GUEST_GAME_REFERRAL_SECRET: ci-contract-referral-ddddddddddddddddddddddddddddddd
           APP_ENCRYPTION_KEY: ci-contract-pii-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
           INTEGRATION_ENCRYPTION_KEY: ci-contract-integration-ffffffffffffffffffffffffffffffff
+          IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY: ci-contract-identity-hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
+          IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION: v1
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260729190000_identity_email_claim_foundation
-          EXPECTED_DATABASE_MIGRATION_COUNT: "167"
+          EXPECTED_DATABASE_MIGRATION: 20260729210000_identity_email_claim_write_boundary
+          EXPECTED_DATABASE_MIGRATION_COUNT: "168"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -297,6 +302,16 @@ jobs:
         run: pnpm --filter database db:smoke:identity-email-claim
         env:
           IDENTITY_EMAIL_CLAIM_SMOKE_CONFIRM: run-identity-email-claim-smoke
+
+      - name: Verify sealed identity email claim write boundaries
+        run: pnpm --filter database db:smoke:identity-email-claim-boundary
+        env:
+          IDENTITY_EMAIL_CLAIM_BOUNDARY_SMOKE_CONFIRM: run-identity-email-claim-boundary-smoke
+
+      - name: Verify shared tenant shell provisioning transaction
+        run: pnpm --filter api test:integration:shared-tenant-shell-provisioning:pg
+        env:
+          SHARED_TENANT_SHELL_PROVISIONING_PG_CONFIRM: run-shared-tenant-shell-provisioning-postgres-fixtures
 
       - name: Verify isolated design-partner provisioning lifecycle
         run: pnpm --filter database db:smoke:design-partner-provisioning

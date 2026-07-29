@@ -1,41 +1,42 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import {
+  IdentityEmailClaimType,
+  Prisma,
   TenantCustomerStage,
   TenantLifecycleStatus,
   TenantOnboardingStatus,
-  UserAccessScope,
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { SHARED_BETA_INITIAL_OWNER_CAPABILITIES } from '../auth/capabilities';
+import { IdentityEmailClaimService } from '../auth/identity-email-claim.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-profile.service';
 import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
 
+const PLATFORM_ADMIN_ID = '11111111-1111-4111-8111-111111111111';
+const SUPPORT_OWNER_ID = '22222222-2222-4222-8222-222222222222';
+const TENANT_ID = '33333333-3333-4333-8333-333333333333';
+const STORE_ID = '44444444-4444-4444-8444-444444444444';
+const OWNER_EMAIL = 'owner@example.test';
+const FINGERPRINT_KEY = 'shared-shell-fingerprint-unit-key-aaaaaaaaaaaaaaaa';
+
 type SharedProvisioningPrismaMock = {
   tenant: {
-    findUnique: jest.Mock;
-    findUniqueOrThrow: jest.Mock;
     findFirst: jest.Mock;
     create: jest.Mock;
-    updateMany: jest.Mock;
   };
   store: {
     create: jest.Mock;
-    findMany: jest.Mock;
   };
   user: {
-    findUnique: jest.Mock;
-    findFirst: jest.Mock;
-    count: jest.Mock;
-  };
-  userInvite: {
-    findFirst: jest.Mock;
-    findUnique: jest.Mock;
-    create: jest.Mock;
-    count: jest.Mock;
-    delete: jest.Mock;
+    findMany: jest.Mock;
   };
   userRoleOverride: {
     create: jest.Mock;
@@ -43,15 +44,8 @@ type SharedProvisioningPrismaMock = {
   tenantModuleEntitlement: {
     createMany: jest.Mock;
   };
-  integrationSource: {
-    count: jest.Mock;
-  };
-  integrationCredential: {
-    count: jest.Mock;
-  };
   platformAdminAuditEvent: {
     findUnique: jest.Mock;
-    findFirst: jest.Mock;
     create: jest.Mock;
   };
   $queryRaw: jest.Mock;
@@ -61,27 +55,14 @@ type SharedProvisioningPrismaMock = {
 function createPrismaMock(): SharedProvisioningPrismaMock {
   const prisma: SharedProvisioningPrismaMock = {
     tenant: {
-      findUnique: jest.fn(),
-      findUniqueOrThrow: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
-      updateMany: jest.fn(),
     },
     store: {
       create: jest.fn(),
-      findMany: jest.fn(),
     },
     user: {
-      findUnique: jest.fn(),
-      findFirst: jest.fn(),
-      count: jest.fn(),
-    },
-    userInvite: {
-      findFirst: jest.fn(),
-      findUnique: jest.fn(),
-      create: jest.fn(),
-      count: jest.fn(),
-      delete: jest.fn(),
+      findMany: jest.fn(),
     },
     userRoleOverride: {
       create: jest.fn(),
@@ -89,18 +70,11 @@ function createPrismaMock(): SharedProvisioningPrismaMock {
     tenantModuleEntitlement: {
       createMany: jest.fn(),
     },
-    integrationSource: {
-      count: jest.fn(),
-    },
-    integrationCredential: {
-      count: jest.fn(),
-    },
     platformAdminAuditEvent: {
       findUnique: jest.fn(),
-      findFirst: jest.fn(),
       create: jest.fn(),
     },
-    $queryRaw: jest.fn(),
+    $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation(
@@ -124,15 +98,11 @@ function firstCallData(mock: jest.Mock): Record<string, unknown> {
 }
 
 const platformAdmin = {
-  id: 'platform-admin-1',
+  id: PLATFORM_ADMIN_ID,
   isPlatformAdmin: true,
 } as AuthenticatedUser;
 
 function provisioningDto(overrides: Record<string, unknown> = {}) {
-  const trialStartsAt = new Date(Date.now() + 60 * 60 * 1000);
-  const trialEndsAt = new Date(
-    trialStartsAt.getTime() + 30 * 24 * 60 * 60 * 1000,
-  );
   return {
     confirmation: 'PROVISION friendly-club',
     requestId: 'provision-request-1',
@@ -141,435 +111,545 @@ function provisioningDto(overrides: Record<string, unknown> = {}) {
     tenantName: 'Friendly Club',
     tenantSlug: 'friendly-club',
     cohortKey: 'friendly-club-1',
-    supportOwnerUserId: platformAdmin.id,
-    trialStartsAt: trialStartsAt.toISOString(),
-    trialEndsAt: trialEndsAt.toISOString(),
+    supportOwnerUserId: SUPPORT_OWNER_ID,
     storeName: 'Friendly Club — Main',
     storeTimeZone: 'Asia/Yekaterinburg',
-    ownerEmail: 'owner@example.test',
-    ownerFullName: 'Friendly Owner',
-    inviteExpiresInDays: 7,
+    ownerEmail: OWNER_EMAIL,
     ...overrides,
   };
 }
 
-describe('SharedTenantProvisioningService', () => {
+describe('SharedTenantProvisioningService shell boundary', () => {
   let prisma: SharedProvisioningPrismaMock;
+  let identity: IdentityEmailClaimService;
+  let reserveInvite: jest.SpiedFunction<
+    IdentityEmailClaimService['reserveInvite']
+  >;
+  let assertInvite: jest.SpiedFunction<
+    IdentityEmailClaimService['assertInvite']
+  >;
   let service: SharedTenantProvisioningService;
 
   beforeEach(() => {
     jest.clearAllMocks();
     prisma = createPrismaMock();
+    identity = new IdentityEmailClaimService({
+      get: jest.fn((key: string) => {
+        if (key === 'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY') {
+          return FINGERPRINT_KEY;
+        }
+        if (key === 'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION') {
+          return 'v1';
+        }
+        return undefined;
+      }),
+    } as unknown as ConfigService);
+    reserveInvite = jest.spyOn(identity, 'reserveInvite');
+    reserveInvite.mockImplementation((_tx, input) =>
+      Promise.resolve({
+        schemaVersion: 1,
+        operation: 'RESERVE_INVITE',
+        decision: 'CREATED',
+        claimType: IdentityEmailClaimType.INVITE,
+        tenantId: input.tenantId,
+        subjectId: input.subjectId,
+        revision: 1,
+        ...identity.fingerprint(input.email),
+      }),
+    );
+    assertInvite = jest.spyOn(identity, 'assertInvite');
+    assertInvite.mockImplementation((_tx, input) =>
+      Promise.resolve({
+        schemaVersion: 1,
+        operation: 'ASSERT_INVITE',
+        decision: 'MATCHED',
+        claimType: IdentityEmailClaimType.INVITE,
+        tenantId: input.tenantId,
+        subjectId: input.subjectId,
+        revision: input.expectedRevision,
+      }),
+    );
     service = new SharedTenantProvisioningService(
       prisma as unknown as PrismaService,
-      {
-        get: jest
-          .fn()
-          .mockImplementation((key: string) =>
-            key === 'WEB_URL' ? 'https://leetplus.example' : undefined,
-          ),
-      } as unknown as ConfigService,
+      identity,
     );
-    prisma.$queryRaw.mockResolvedValue([]);
-  });
 
-  afterEach(() => {
-    jest.useRealTimers();
-  });
-
-  it('provisions one suspended tenant, one inactive store and the exact six-row profile', async () => {
-    prisma.tenant.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
-    prisma.user.findUnique.mockResolvedValue({
-      id: platformAdmin.id,
-      isActive: true,
-      isPlatformAdmin: true,
-    });
-    prisma.user.findFirst.mockResolvedValue(null);
-    prisma.userInvite.findFirst.mockResolvedValue(null);
+    prisma.tenant.findFirst.mockResolvedValue(null);
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: PLATFORM_ADMIN_ID,
+        isActive: true,
+        isPlatformAdmin: true,
+      },
+      {
+        id: SUPPORT_OWNER_ID,
+        isActive: true,
+        isPlatformAdmin: true,
+      },
+    ]);
     prisma.tenant.create.mockResolvedValue({
-      id: 'tenant-b',
+      id: TENANT_ID,
       slug: 'friendly-club',
       status: TenantLifecycleStatus.SUSPENDED,
       customerStage: TenantCustomerStage.PILOT,
-      onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+      onboardingStatus: TenantOnboardingStatus.PROVISIONING,
       entitlementProfileRevision: 1,
       executionRevision: 0,
+      trialStartsAt: null,
+      trialEndsAt: null,
     });
     prisma.store.create.mockResolvedValue({
-      id: 'store-b1',
+      id: STORE_ID,
       name: 'Friendly Club — Main',
       isActive: false,
       gamificationEnabled: false,
+      backgroundExecutionEnabled: false,
     });
-    prisma.userInvite.create.mockResolvedValue({
-      id: 'invite-owner-b',
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    });
+  });
 
+  it('creates only a suspended shell, exact module profile and identity reservation', async () => {
     const result = await service.provision(platformAdmin, provisioningDto());
 
     expect(result).toMatchObject({
       ok: true,
-      decision: 'PROVISIONED_SUSPENDED',
+      decision: 'SHELL_PROVISIONED',
       replayed: false,
       activationRequired: true,
       tenant: {
-        id: 'tenant-b',
+        id: TENANT_ID,
         status: TenantLifecycleStatus.SUSPENDED,
         customerStage: TenantCustomerStage.PILOT,
-        onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+        onboardingStatus: TenantOnboardingStatus.PROVISIONING,
         profileRevision: 1,
         executionRevision: 0,
+        trialStartsAt: null,
+        trialEndsAt: null,
       },
       store: {
-        id: 'store-b1',
+        id: STORE_ID,
         isActive: false,
         gamificationEnabled: false,
+        backgroundExecutionEnabled: false,
       },
-      ownerInvite: {
-        id: 'invite-owner-b',
-        oneTimeSecretAvailable: true,
+      ownerIdentity: {
+        claimType: IdentityEmailClaimType.INVITE,
+        claimRevision: 1,
       },
     });
-    expect(result.ownerInvite.registrationUrl).toMatch(
-      /^https:\/\/leetplus\.example\/register\?invite=/,
+    expect(result.ownerIdentity.reservationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f-]{27}$/,
     );
     expect(result.modules).toHaveLength(6);
     expect(result.modules.map((entry) => entry.module)).toEqual(
       COMPLETE_TENANT_MODULE_PROFILE,
     );
-    expect(result.modules).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          readEnabled: true,
-          writeEnabled: true,
-          outboundEnabled: false,
-          profileRevision: 1,
-        }),
-      ]),
-    );
 
     expect(firstCallData(prisma.tenant.create)).toMatchObject({
       status: TenantLifecycleStatus.SUSPENDED,
       customerStage: TenantCustomerStage.PILOT,
-      onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+      onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+      trialStartsAt: null,
+      trialEndsAt: null,
       entitlementProfileRevision: 1,
+    });
+    expect(firstCallData(prisma.store.create)).toMatchObject({
+      isActive: false,
+      gamificationEnabled: false,
+      backgroundExecutionEnabled: false,
     });
     expect(prisma.userRoleOverride.create).toHaveBeenCalledWith({
       data: {
-        tenantId: 'tenant-b',
+        tenantId: TENANT_ID,
         role: UserRole.OWNER,
         permissions: [...SHARED_BETA_INITIAL_OWNER_CAPABILITIES],
       },
     });
-    const roleOverride = firstCallData(prisma.userRoleOverride.create);
-    expect(roleOverride.permissions).not.toContain('view_marketing');
-    expect(roleOverride.permissions).not.toContain('view_guests');
-    expect(roleOverride.permissions).not.toContain('view_guest_game_pii');
-    expect(firstCallData(prisma.userInvite.create)).toMatchObject({
-      tenantId: 'tenant-b',
-      email: 'owner@example.test',
-      role: UserRole.OWNER,
-      accessScope: UserAccessScope.NETWORK,
-      storeIds: [],
-      createdByUserId: platformAdmin.id,
-    });
-    expect(firstCallData(prisma.platformAdminAuditEvent.create)).toMatchObject({
-      tenantId: 'tenant-b',
+
+    const entitlementCall = (
+      prisma.tenantModuleEntitlement.createMany.mock.calls as unknown[][]
+    )[0]?.[0];
+    if (!record(entitlementCall) || !Array.isArray(entitlementCall.data)) {
+      throw new Error('Expected entitlement createMany payload');
+    }
+    expect(entitlementCall.data).toHaveLength(6);
+    for (const entry of entitlementCall.data) {
+      expect(entry).toMatchObject({
+        tenantId: TENANT_ID,
+        readEnabled: true,
+        writeEnabled: true,
+        outboundEnabled: false,
+        validFrom: null,
+        validUntil: null,
+        profileRevision: 1,
+      });
+    }
+
+    expect(reserveInvite).toHaveBeenCalledTimes(1);
+    expect(reserveInvite).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        email: OWNER_EMAIL,
+        tenantId: TENANT_ID,
+        subjectId: result.ownerIdentity.reservationId,
+      }),
+    );
+    expect(reserveInvite.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.platformAdminAuditEvent.create.mock.invocationCallOrder[0],
+    );
+
+    const audit = firstCallData(prisma.platformAdminAuditEvent.create);
+    expect(audit).toMatchObject({
+      tenantId: TENANT_ID,
+      actorUserId: PLATFORM_ADMIN_ID,
       requestId: 'provision-request-1',
-      action: 'SHARED_BETA_TENANT_PROVISIONED',
+      action: 'SHARED_BETA_TENANT_SHELL_PROVISIONED',
       metadata: {
-        executionRevision: 0,
+        ownerEmailFingerprintKeyVersion: 'v1',
+        inviteCreated: false,
+        trialStarted: false,
+        outboundDefault: 'OFF',
       },
     });
+    if (!record(audit.metadata)) {
+      throw new Error('Expected privacy-safe provisioning audit metadata');
+    }
+    expect(String(audit.metadata.ownerEmailFingerprint)).toMatch(
+      /^[0-9a-f]{64}$/,
+    );
+    const serialized = JSON.stringify({ result, audit });
+    expect(serialized).not.toContain(OWNER_EMAIL);
+    expect(serialized).not.toMatch(/registrationUrl|tokenHash|ciphertext/u);
   });
 
-  it('replays the same operation without exposing or regenerating the invite secret', async () => {
-    const replayBaseTime = new Date('2026-07-28T10:00:00.000Z');
-    jest.useFakeTimers();
-    jest.setSystemTime(replayBaseTime);
-    prisma.tenant.findFirst.mockResolvedValue({ id: 'tenant-b' });
-    const initialDto = provisioningDto();
+  it('replays the exact HMAC-bound shell without a second reservation', async () => {
+    await service.provision(platformAdmin, provisioningDto());
+    const audit = firstCallData(prisma.platformAdminAuditEvent.create);
 
-    const seedPrisma = createPrismaMock();
-    const seedService = new SharedTenantProvisioningService(
-      seedPrisma as unknown as PrismaService,
-      { get: jest.fn() } as unknown as ConfigService,
-    );
-    seedPrisma.tenant.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
-    seedPrisma.user.findUnique.mockResolvedValue({
-      id: platformAdmin.id,
-      isActive: true,
-      isPlatformAdmin: true,
-    });
-    seedPrisma.user.findFirst.mockResolvedValue(null);
-    seedPrisma.userInvite.findFirst.mockResolvedValue(null);
-    seedPrisma.tenant.create.mockResolvedValue({
-      id: 'tenant-b',
-      slug: 'friendly-club',
-      entitlementProfileRevision: 1,
-      executionRevision: 0,
-    });
-    seedPrisma.store.create.mockResolvedValue({
-      id: 'store-b1',
-      name: 'Friendly Club — Main',
-    });
-    seedPrisma.userInvite.create.mockResolvedValue({
-      id: 'invite-owner-b',
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    });
-    seedPrisma.$queryRaw.mockResolvedValue([]);
-
-    await seedService.provision(platformAdmin, initialDto);
-    const auditData = firstCallData(seedPrisma.platformAdminAuditEvent.create);
+    prisma.tenant.findFirst.mockResolvedValue({ id: TENANT_ID });
     prisma.platformAdminAuditEvent.findUnique.mockResolvedValue({
-      after: auditData.after,
-      metadata: auditData.metadata,
+      after: audit.after,
+      metadata: audit.metadata,
     });
+    reserveInvite.mockClear();
 
-    jest.setSystemTime(
-      replayBaseTime.getTime() + 26 * 60 * 60 * 1000,
+    await expect(
+      service.provision(
+        platformAdmin,
+        provisioningDto({ ownerEmail: ' OWNER@EXAMPLE.TEST ' }),
+      ),
+    ).resolves.toMatchObject({
+      decision: 'ALREADY_PROVISIONED',
+      replayed: true,
+      ownerIdentity: {
+        claimType: IdentityEmailClaimType.INVITE,
+      },
+    });
+    expect(reserveInvite).not.toHaveBeenCalled();
+    expect(assertInvite).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        email: 'OWNER@EXAMPLE.TEST',
+        tenantId: TENANT_ID,
+      }),
     );
-    await expect(
-      service.provision(platformAdmin, initialDto),
-    ).resolves.toMatchObject({
-      decision: 'ALREADY_PROVISIONED',
-      replayed: true,
-      ownerInvite: {
-        id: 'invite-owner-b',
-        registrationUrl: null,
-        oneTimeSecretAvailable: false,
-      },
-    });
-    expect(prisma.$transaction).not.toHaveBeenCalled();
-
-    jest.setSystemTime(replayBaseTime);
-    prisma.tenant.findFirst.mockReset();
-    prisma.tenant.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: 'tenant-b' });
-    prisma.$transaction.mockClear();
-
-    await expect(
-      service.provision(platformAdmin, initialDto),
-    ).resolves.toMatchObject({
-      decision: 'ALREADY_PROVISIONED',
-      replayed: true,
-      ownerInvite: {
-        registrationUrl: null,
-        oneTimeSecretAvailable: false,
-      },
-    });
-    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-
-    prisma.tenant.findFirst.mockResolvedValue({ id: 'tenant-b' });
 
     await expect(
       service.provision(
         platformAdmin,
         provisioningDto({
+          ownerEmail: ' OWNER@EXAMPLE.TEST ',
           reason: 'A materially different provisioning reason',
         }),
       ),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('rejects provisioning from a tenant user even if the controller guard is bypassed', async () => {
+  it('rechecks actor and support-owner authority before an existing replay', async () => {
+    await service.provision(platformAdmin, provisioningDto());
+    const audit = firstCallData(prisma.platformAdminAuditEvent.create);
+    prisma.tenant.findFirst.mockResolvedValue({ id: TENANT_ID });
+    prisma.platformAdminAuditEvent.findUnique.mockResolvedValue({
+      after: audit.after,
+      metadata: audit.metadata,
+    });
+    reserveInvite.mockClear();
+
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: SUPPORT_OWNER_ID,
+        isActive: true,
+        isPlatformAdmin: true,
+      },
+    ]);
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: PLATFORM_ADMIN_ID,
+        isActive: true,
+        isPlatformAdmin: true,
+      },
+      {
+        id: SUPPORT_OWNER_ID,
+        isActive: false,
+        isPlatformAdmin: true,
+      },
+    ]);
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(reserveInvite).not.toHaveBeenCalled();
+  });
+
+  it('rechecks authority in the concurrent replay recovery transaction', async () => {
+    await service.provision(platformAdmin, provisioningDto());
+    const audit = firstCallData(prisma.platformAdminAuditEvent.create);
+    prisma.tenant.findFirst.mockResolvedValue({ id: TENANT_ID });
+    prisma.platformAdminAuditEvent.findUnique.mockResolvedValue({
+      after: audit.after,
+      metadata: audit.metadata,
+    });
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: SUPPORT_OWNER_ID,
+        isActive: true,
+        isPlatformAdmin: true,
+      },
+    ]);
+    prisma.$transaction.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('serialization conflict', {
+        code: 'P2034',
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    const calls = prisma.$transaction.mock.calls as unknown[][];
+    expect(calls.at(-1)?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    });
+  });
+
+  it('retries the complete serializable shell once after P2034 without a replay', async () => {
+    prisma.$transaction.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('serialization conflict', {
+        code: 'P2034',
+        clientVersion: 'test',
+      }),
+    );
+    reserveInvite.mockRejectedValueOnce(
+      new ConflictException({
+        message: 'Identity email is unavailable',
+        reasonCode: 'IDENTITY_EMAIL_UNAVAILABLE',
+      }),
+    );
+
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'IDENTITY_EMAIL_UNAVAILABLE',
+      },
+    });
+
+    const calls = prisma.$transaction.mock.calls as unknown[][];
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+    expect(calls[1]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    });
+    expect(calls[2]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+    expect(reserveInvite).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a serializable shell more than once', async () => {
+    const firstConflict = new Prisma.PrismaClientKnownRequestError(
+      'first serialization conflict',
+      {
+        code: 'P2034',
+        clientVersion: 'test',
+      },
+    );
+    const secondConflict = new Prisma.PrismaClientKnownRequestError(
+      'second serialization conflict',
+      {
+        code: 'P2034',
+        clientVersion: 'test',
+      },
+    );
+    const defaultTransaction = async (
+      operation: (tx: SharedProvisioningPrismaMock) => Promise<unknown>,
+    ): Promise<unknown> => operation(prisma);
+    prisma.$transaction
+      .mockRejectedValueOnce(firstConflict)
+      .mockImplementationOnce(defaultTransaction)
+      .mockRejectedValueOnce(secondConflict)
+      .mockImplementationOnce(defaultTransaction);
+
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toMatchObject({
+      code: 'P2034',
+    });
+
+    const calls = prisma.$transaction.mock.calls as unknown[][];
+    expect(calls).toHaveLength(4);
+    expect(calls[0]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+    expect(calls[1]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    });
+    expect(calls[2]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+    expect(calls[3]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    });
+    expect(prisma.tenant.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stored replay receipt with any undeclared field', async () => {
+    await service.provision(platformAdmin, provisioningDto());
+    const audit = firstCallData(prisma.platformAdminAuditEvent.create);
+    if (!record(audit.after)) {
+      throw new Error('Expected stored shell receipt');
+    }
+    prisma.tenant.findFirst.mockResolvedValue({ id: TENANT_ID });
+    prisma.platformAdminAuditEvent.findUnique.mockResolvedValue({
+      after: {
+        ...audit.after,
+        ownerEmail: OWNER_EMAIL,
+      },
+      metadata: audit.metadata,
+    });
+
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechecks both actor and support owner in the database', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: SUPPORT_OWNER_ID,
+        isActive: true,
+        isPlatformAdmin: true,
+      },
+    ]);
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.tenant.create).not.toHaveBeenCalled();
+
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: PLATFORM_ADMIN_ID,
+        isActive: true,
+        isPlatformAdmin: true,
+      },
+      {
+        id: SUPPORT_OWNER_ID,
+        isActive: false,
+        isPlatformAdmin: true,
+      },
+    ]);
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.tenant.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects tenant actors, legacy invite/trial fields and PII in audit text', async () => {
     await expect(
       service.provision(
-        { id: 'tenant-owner', isPlatformAdmin: false } as AuthenticatedUser,
+        {
+          id: TENANT_ID,
+          isPlatformAdmin: false,
+        } as AuthenticatedUser,
         provisioningDto(),
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(prisma.tenant.findFirst).not.toHaveBeenCalled();
-  });
-
-  it('rejects an invite that would not leave a full acceptance day after trial start', async () => {
-    const trialStartsAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
-    const trialEndsAt = new Date(
-      trialStartsAt.getTime() + 30 * 24 * 60 * 60 * 1000,
-    );
-
     await expect(
       service.provision(
         platformAdmin,
         provisioningDto({
-          trialStartsAt: trialStartsAt.toISOString(),
-          trialEndsAt: trialEndsAt.toISOString(),
-          inviteExpiresInDays: 1,
+          trialStartsAt: new Date().toISOString(),
         }),
       ),
-    ).rejects.toThrow(
-      'Initial owner invite must remain valid for at least 24 hours after provisioning or trialStartsAt, whichever is later',
-    );
-    expect(prisma.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('measures the invite acceptance window from provisioning when trial already started', async () => {
-    const trialStartsAt = new Date(Date.now() - 23 * 60 * 60 * 1000);
-    const trialEndsAt = new Date(
-      trialStartsAt.getTime() + 24 * 60 * 60 * 1000,
-    );
-
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'SHARED_BETA_PROVISIONING_FIELD_NOT_ALLOWED',
+      },
+    });
     await expect(
       service.provision(
         platformAdmin,
         provisioningDto({
-          trialStartsAt: trialStartsAt.toISOString(),
-          trialEndsAt: trialEndsAt.toISOString(),
-          inviteExpiresInDays: 1,
+          reason: `Provision ${OWNER_EMAIL} as the initial owner`,
         }),
       ),
-    ).rejects.toThrow(
-      'Initial owner invite must remain valid for at least 24 hours after provisioning or trialStartsAt, whichever is later',
-    );
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'SHARED_BETA_OWNER_IDENTITY_METADATA_FORBIDDEN',
+      },
+    });
+    await expect(
+      service.provision(
+        platformAdmin,
+        provisioningDto({
+          ownerEmail: `\u00a0${OWNER_EMAIL}\u00a0`,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('revokes the exact pristine initial invite and returns the tenant to suspended provisioning', async () => {
-    const trialStartsAt = new Date(Date.now() + 60 * 60 * 1000);
-    const trialEndsAt = new Date(
-      trialStartsAt.getTime() + 30 * 24 * 60 * 60 * 1000,
-    );
-    const provisioningReceipt = {
-      profileVersion: 'SHARED_MULTI_TENANT_BETA_V1',
-      tenant: {
-        id: 'tenant-b',
-        slug: 'friendly-club',
-        status: TenantLifecycleStatus.SUSPENDED,
-        customerStage: TenantCustomerStage.PILOT,
-        onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
-        profileRevision: 1,
-        executionRevision: 0,
-      },
-      store: {
-        id: 'store-b1',
-        name: 'Friendly Club — Main',
-        isActive: false,
-        gamificationEnabled: false,
-      },
-      ownerInvite: {
-        id: 'invite-owner-b',
-        expiresAt: trialEndsAt.toISOString(),
-      },
-      modules: COMPLETE_TENANT_MODULE_PROFILE.map((module) => ({
-        module,
-        readEnabled: true,
-        writeEnabled: true,
-        outboundEnabled: false,
-        profileRevision: 1,
-      })),
-    };
-    prisma.tenant.findUnique.mockResolvedValue({
-      id: 'tenant-b',
-      slug: 'friendly-club',
-    });
-    prisma.platformAdminAuditEvent.findUnique.mockResolvedValue(null);
-    prisma.$queryRaw.mockResolvedValue([
-      {
-        id: 'tenant-b',
-        slug: 'friendly-club',
-        status: TenantLifecycleStatus.ACTIVE,
-        customerStage: TenantCustomerStage.PILOT,
-        onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
-        entitlementProfileRevision: 1,
-        executionRevision: 4,
-        updatedAt: new Date(),
-      },
-    ]);
-    prisma.platformAdminAuditEvent.findFirst.mockResolvedValue({
-      after: provisioningReceipt,
-    });
-    prisma.userInvite.findUnique.mockResolvedValue({
-      id: 'invite-owner-b',
-      tenantId: 'tenant-b',
-      role: UserRole.OWNER,
-      accessScope: UserAccessScope.NETWORK,
-      customRoleId: null,
-      storeIds: [],
-      acceptedAt: null,
-      expiresAt: trialEndsAt,
-    });
-    prisma.user.count.mockResolvedValue(0);
-    prisma.userInvite.count.mockResolvedValue(0);
-    prisma.integrationSource.count.mockResolvedValue(0);
-    prisma.integrationCredential.count.mockResolvedValue(0);
-    prisma.store.findMany.mockResolvedValue([
-      {
-        id: 'store-b1',
-        isActive: false,
-        gamificationEnabled: false,
-        integrationSourceId: null,
-        externalProvider: null,
-        externalDomain: null,
-        externalClubId: null,
-      },
-    ]);
-    prisma.tenant.updateMany.mockResolvedValue({ count: 1 });
-    prisma.tenant.findUniqueOrThrow.mockResolvedValue({
-      status: TenantLifecycleStatus.SUSPENDED,
-      onboardingStatus: TenantOnboardingStatus.PROVISIONING,
-      executionRevision: 5,
-    });
-
-    await expect(
-      service.revokeInitialOwnerInvite(platformAdmin, 'tenant-b', {
-        confirmation: 'REVOKE friendly-club',
-        requestId: 'revoke-request-1',
-        reason: 'Revoke the leaked initial owner invite',
-        supportTicket: 'INC-1',
+  it('does not persist audit when the sealed reservation rejects the email', async () => {
+    reserveInvite.mockRejectedValue(
+      new ConflictException({
+        message: 'Identity email is unavailable',
+        reasonCode: 'IDENTITY_EMAIL_UNAVAILABLE',
       }),
-    ).resolves.toMatchObject({
-      ok: true,
-      replayed: false,
-      tenantId: 'tenant-b',
-      revokedInviteId: 'invite-owner-b',
-      lifecycleStatus: TenantLifecycleStatus.SUSPENDED,
-      onboardingStatus: TenantOnboardingStatus.PROVISIONING,
-      executionRevisionBefore: 4,
-      executionRevisionAfter: 5,
-    });
-    expect(prisma.userInvite.delete).toHaveBeenCalledWith({
-      where: { id: 'invite-owner-b' },
-    });
-    const tenantUpdateCalls = prisma.tenant.updateMany.mock
-      .calls as unknown[][];
-    const tenantUpdate = tenantUpdateCalls[0]?.[0];
-    if (
-      !record(tenantUpdate) ||
-      !record(tenantUpdate.where) ||
-      !record(tenantUpdate.data)
-    ) {
-      throw new Error('Expected tenant updateMany CAS payload');
-    }
-    expect(tenantUpdate.where.executionRevision).toBe(4);
-    expect(tenantUpdate.data).toMatchObject({
-      status: TenantLifecycleStatus.SUSPENDED,
-      onboardingStatus: TenantOnboardingStatus.PROVISIONING,
-    });
-    const revokeAudit = firstCallData(
-      prisma.platformAdminAuditEvent.create,
     );
-    expect(revokeAudit).toMatchObject({
-      requestId: 'revoke-request-1',
-      action: 'SHARED_BETA_INITIAL_OWNER_INVITE_REVOKED',
-      targetId: 'invite-owner-b',
-      before: {
-        executionRevision: 4,
-      },
-      after: {
-        executionRevisionBefore: 4,
-        executionRevisionAfter: 5,
-        executionRevision: 5,
-      },
-      metadata: {
-        executionRevisionBefore: 4,
-        executionRevisionAfter: 5,
-      },
+
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails before opening a transaction when the fingerprint key is unavailable', async () => {
+    const unavailableIdentity = new IdentityEmailClaimService({
+      get: jest.fn(),
+    } as unknown as ConfigService);
+    const unavailableService = new SharedTenantProvisioningService(
+      prisma as unknown as PrismaService,
+      unavailableIdentity,
+    );
+
+    await expect(
+      unavailableService.provision(platformAdmin, provisioningDto()),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('requests a serializable transaction for the complete shell', async () => {
+    await service.provision(platformAdmin, provisioningDto());
+
+    const calls = prisma.$transaction.mock.calls as unknown[][];
+    const options = calls[0]?.[1];
+    expect(options).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
   });
 });

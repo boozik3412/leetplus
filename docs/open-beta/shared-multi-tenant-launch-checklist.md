@@ -2,8 +2,8 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.6                                                        |
-| Дата       | 28.07.2026                                                 |
+| Версия     | 1.7                                                        |
+| Дата       | 29.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
 | Topology   | `Tenant A/A1..A4` + новый `Tenant B/B1`                    |
@@ -18,6 +18,39 @@ exact protected evidence не считается выполнением.
 Production IDs, email, телефоны, invite URL/token, password, database URL,
 API keys, encryption/signing secrets и raw business data запрещено сохранять
 в git. В документах используются только aliases `Tenant A/B` и `Store A1..A4/B1`.
+
+## Текущий engineering checkpoint: `CURRENT_168`
+
+В рабочем кандидате реализованы sealed identity write boundary и shell-only
+service, но launch checkboxes ниже этим не закрываются:
+
+- schema clean deploy на disposable PostgreSQL `16.14`: `168/168`;
+- identity idempotency: `100` конкурентных попыток,
+  `1 CREATED + 99 ALREADY_RESERVED`;
+- combined `INVITE | USER` same-subject collision отклонён;
+- shell PostgreSQL integration: `2/2`;
+- 100-way cross-slug shell race:
+  `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`;
+- runtime role: exact six application RPC, из них четыре
+  `reserve/assert/transition/release` identity boundary, и zero effective
+  `IdentityEmailClaim` table DML;
+- combined subject invariant охватывает `INVITE | USER`, reserve повторно
+  проверяет legacy identity rows до replay, exact
+  `search_path=pg_catalog` аттестуется по PostgreSQL `proconfig`;
+- production startup-validation candidate требует отдельный
+  `IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY`, запрещает reuse и принимает version
+  `v1`; CI environment contract обновлён;
+- shell shape:
+  `PILOT/SUSPENDED/PROVISIONING`, inactive Store, six rows
+  `read/write=ON + outbound=OFF`, HMAC-only identity audit, no
+  `User/UserInvite/token/trial/outbox`;
+- provision route возвращает
+  `503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING`;
+- legacy initial-owner revoke route возвращает
+  `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`.
+
+Это local disposable evidence. Remote exact-head CI, production-like
+admission, persisted GO, production deploy и доступ тестеру ещё не приняты.
 
 ## A. Gate 0: source и release
 
@@ -40,8 +73,9 @@ API keys, encryption/signing secrets и raw business data запрещено с�
 - [ ] Public demo не использует operational/PII/integration data A или B.
 - [ ] `Tenant B` создаётся только idempotent Platform Admin workflow, без
       manual SQL.
-- [ ] Persisted lifecycle, customer stage, onboarding, trial dates, cohort и
-      support owner созданы.
+- [ ] Persisted lifecycle, customer stage, onboarding, nullable trial dates,
+      cohort и support owner созданы; shell оставляет trial dates пустыми до
+      protected activation.
 - [ ] Persisted profile содержит ровно шесть current-revision rows: пять
       product modules и supporting `INTEGRATIONS`; у всех initial
       `read/write=ON`, `outbound=OFF`, reason, validity и audit.
@@ -60,6 +94,9 @@ API keys, encryption/signing secrets и raw business data запрещено с�
       ownership перечитываются у effect boundary, stale transition fenced.
 - [ ] Runtime DB role либо DB invariant запрещает прямое изменение
       `TenantModuleEntitlement` в обход profile-revision workflow.
+- [ ] Runtime DB role enrolled как отдельная non-owner identity: имеет exact
+      six-RPC allowlist и zero effective `IdentityEmailClaim` table DML;
+      migration owner/superuser не используется приложением.
 - [ ] Delivery, общий Langame sync и остальные jobs имеют durable
       claim/lease; старый permit не может commit/ack/send после suspend, а
       начатый provider request проходит documented drain/reconciliation.
@@ -86,8 +123,19 @@ Evidence:
       `PILOT/SUSPENDED/PROVISIONING/revision 1` tenant, inactive Store, OWNER
       override, exact six-row профиль, canonical owner-email claim и
       audit/request digest; `UserInvite`, token, outbox и trial ещё отсутствуют.
+- [ ] Provision и legacy initial-owner revoke routes остаются `503` до
+      завершения activation/issue/reissue/revoke/accept workflow; нет
+      временного manual SQL или direct service bypass.
 - [ ] Case-insensitive email claim уникален между User/live invite/pending
       email change и защищён единым advisory-lock namespace.
+- [ ] Все legacy `User`/`UserInvite` writers используют sealed
+      `assert → write → transition`/reserve/release invariant и не обходят его
+      прямым table DML.
+- [ ] До production deploy создано, защищённо установлено и аттестовано
+      отдельное fingerprint HMAC secret value version `v1`; оно не
+      переиспользует другой production secret.
+- [ ] Activation имеет privacy-safe locator для зарезервированной identity и
+      повторно проверяет exact claim под lock без raw email в audit/response.
 - [ ] Dedicated activation принимает persisted GO, запускает trial и атомарно
       создаёт email-bound `NETWORK OWNER` invite hash + encrypted mail outbox,
       переводя tenant в `ACTIVE/OWNER_INVITED`.
@@ -124,6 +172,8 @@ Evidence:
 
 - [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
       matrix, включая case-variant email collision;
+- [ ] remote exact-head CI и independent review для `CURRENT_168`; local
+      `168/168`, identity `1/99` и shell `2/2` являются только prerequisite;
 - [ ] email outbox lease/crash/retry drill без утечки raw token;
 - [ ] delegation/escalation negative matrix;
 - [ ] stale-token и immediate-revoke tests;
@@ -267,6 +317,8 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [ ] Текущая сеть прошла семь стабильных дней internal alpha.
 - [ ] Все обязательные module gates имеют `VERIFIED + ENFORCED`.
 - [ ] Нет open launch-blocking P0/P1.
+- [ ] Production-like upgrade/rollback/zero-diff и полная two-tenant
+      rehearsal приняты как protected evidence.
 - [ ] Gate 2 закрыт отдельным approval.
 
 Ни Gate 1MT, ни Gate 2 по отдельности не разрешают invite. Требуется финальный

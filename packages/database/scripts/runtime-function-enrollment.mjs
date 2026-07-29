@@ -5,8 +5,8 @@ export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
-  "20260729190000_identity_email_claim_foundation";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 167;
+  "20260729210000_identity_email_claim_write_boundary";
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 168;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -27,6 +27,42 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
     securityDefiner: false,
     volatility: "v",
   }),
+  Object.freeze({
+    key: "identityEmailClaimReserveInvite",
+    catalogSignature:
+      'public."identity_email_claim_reserve_invite_v1"(text,text,text)',
+    grantSignature:
+      'public."identity_email_claim_reserve_invite_v1"(TEXT, TEXT, TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+  }),
+  Object.freeze({
+    key: "identityEmailClaimAssertInvite",
+    catalogSignature:
+      'public."identity_email_claim_assert_invite_v1"(text,text,text,integer)',
+    grantSignature:
+      'public."identity_email_claim_assert_invite_v1"(TEXT, TEXT, TEXT, INTEGER)',
+    securityDefiner: true,
+    volatility: "v",
+  }),
+  Object.freeze({
+    key: "identityEmailClaimTransition",
+    catalogSignature:
+      'public."identity_email_claim_transition_v1"(text,text,text,text,integer,text,text)',
+    grantSignature:
+      'public."identity_email_claim_transition_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+  }),
+  Object.freeze({
+    key: "identityEmailClaimRelease",
+    catalogSignature:
+      'public."identity_email_claim_release_v1"(text,text,text,text,integer)',
+    grantSignature:
+      'public."identity_email_claim_release_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER)',
+    securityDefiner: true,
+    volatility: "v",
+  }),
 ]);
 
 export const EXCLUDED_WORKER_FUNCTIONS = Object.freeze([
@@ -43,7 +79,7 @@ export const EXCLUDED_WORKER_FUNCTIONS = Object.freeze([
 
 export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
   Object.freeze({
-    key: "identityEmailClaimLockPendingBoundary",
+    key: "identityEmailClaimDirectLock",
     catalogSignature:
       'public."identity_email_claim_lock_v1"(text)',
     grantSignature:
@@ -60,6 +96,13 @@ const EXCLUDED_RUNTIME_FUNCTIONS = Object.freeze([
 const ALL_RUNTIME_FUNCTIONS = Object.freeze([
   ...APPLICATION_RUNTIME_FUNCTIONS,
   ...EXCLUDED_RUNTIME_FUNCTIONS,
+]);
+export const SEALED_RUNTIME_TABLES = Object.freeze([
+  Object.freeze({
+    key: "identityEmailClaim",
+    catalogName: 'public."IdentityEmailClaim"',
+    grantName: 'public."IdentityEmailClaim"',
+  }),
 ]);
 const SAFE_DATABASE_NAME = /^[a-z][a-z0-9_]{0,62}$/u;
 const SAFE_ROLE_NAME = /^[a-z][a-z0-9_]{2,62}$/u;
@@ -232,15 +275,32 @@ export function runtimeFunctionContractDigest() {
         migration: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION,
         migrationCount:
           RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT,
+        exactFunctionSearchPath: "pg_catalog",
         application: APPLICATION_RUNTIME_FUNCTIONS.map(
-          ({ key, catalogSignature }) => ({ key, catalogSignature }),
+          ({ key, catalogSignature, securityDefiner, volatility }) => ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+          }),
         ),
         excludedWorker: EXCLUDED_WORKER_FUNCTIONS.map(
-          ({ key, catalogSignature }) => ({ key, catalogSignature }),
+          ({ key, catalogSignature, securityDefiner, volatility }) => ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+          }),
         ),
         excludedPending: EXCLUDED_PENDING_FUNCTIONS.map(
-          ({ key, catalogSignature }) => ({ key, catalogSignature }),
+          ({ key, catalogSignature, securityDefiner, volatility }) => ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+          }),
         ),
+        sealedTables: SEALED_RUNTIME_TABLES,
       }),
     )
     .digest("hex");
@@ -256,6 +316,11 @@ export function buildRuntimeFunctionEnrollmentStatements(roleName) {
   const role = quoteIdentifier(roleName);
   const statements = [];
 
+  for (const entry of SEALED_RUNTIME_TABLES) {
+    statements.push(
+      `REVOKE ALL PRIVILEGES ON TABLE ${entry.grantName} FROM ${role}`,
+    );
+  }
   for (const entry of APPLICATION_RUNTIME_FUNCTIONS) {
     statements.push(
       `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
@@ -281,6 +346,11 @@ async function inspectFunction(prisma, roleName, entry) {
         owner_role.rolname AS owner_name,
         function_object.prosecdef AS security_definer,
         function_object.provolatile::text AS volatility,
+        COALESCE(
+          function_object.proconfig =
+            ARRAY['search_path=pg_catalog']::TEXT[],
+          FALSE
+        ) AS search_path_pg_catalog_only,
         CASE
           WHEN function_object.oid IS NULL THEN FALSE
           ELSE pg_catalog.has_function_privilege(
@@ -366,6 +436,8 @@ async function inspectFunction(prisma, roleName, entry) {
     exists: row?.exists === true,
     ownerName: typeof row?.owner_name === "string" ? row.owner_name : null,
     securityDefiner: row?.security_definer === true,
+    searchPathPgCatalogOnly:
+      row?.search_path_pg_catalog_only === true,
     volatility:
       typeof row?.volatility === "string" ? row.volatility : null,
     effectiveExecute: row?.effective_execute === true,
@@ -373,6 +445,135 @@ async function inspectFunction(prisma, roleName, entry) {
     targetGrantOption: row?.target_grant_option === true,
     publicExecute: row?.public_execute === true,
     grantorCanEnroll: row?.grantor_can_enroll === true,
+  };
+}
+
+async function inspectSealedTable(prisma, roleName, entry) {
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      SELECT
+        relation_object.oid IS NOT NULL AS exists,
+        owner_role.rolname AS owner_name,
+        CASE
+          WHEN relation_object.oid IS NULL THEN FALSE
+          ELSE pg_catalog.has_table_privilege(
+            $1,
+            relation_object.oid,
+            'SELECT'
+          )
+        END AS can_select,
+        CASE
+          WHEN relation_object.oid IS NULL THEN FALSE
+          ELSE pg_catalog.has_table_privilege(
+            $1,
+            relation_object.oid,
+            'INSERT'
+          )
+        END AS can_insert,
+        CASE
+          WHEN relation_object.oid IS NULL THEN FALSE
+          ELSE pg_catalog.has_table_privilege(
+            $1,
+            relation_object.oid,
+            'UPDATE'
+          )
+        END AS can_update,
+        CASE
+          WHEN relation_object.oid IS NULL THEN FALSE
+          ELSE pg_catalog.has_table_privilege(
+            $1,
+            relation_object.oid,
+            'DELETE'
+          )
+        END AS can_delete,
+        CASE
+          WHEN relation_object.oid IS NULL THEN FALSE
+          ELSE pg_catalog.has_table_privilege(
+            $1,
+            relation_object.oid,
+            'TRUNCATE'
+          )
+        END AS can_truncate,
+        CASE
+          WHEN relation_object.oid IS NULL THEN FALSE
+          ELSE pg_catalog.has_table_privilege(
+            $1,
+            relation_object.oid,
+            'REFERENCES'
+          )
+        END AS can_reference,
+        CASE
+          WHEN relation_object.oid IS NULL THEN FALSE
+          ELSE pg_catalog.has_table_privilege(
+            $1,
+            relation_object.oid,
+            'TRIGGER'
+          )
+        END AS can_trigger,
+        COALESCE(
+          (
+            SELECT pg_catalog.bool_or(
+              table_acl.grantee = 0
+              AND table_acl.privilege_type IN (
+                'SELECT',
+                'INSERT',
+                'UPDATE',
+                'DELETE',
+                'TRUNCATE',
+                'REFERENCES',
+                'TRIGGER'
+              )
+            )
+            FROM pg_catalog.aclexplode(
+              COALESCE(
+                relation_object.relacl,
+                pg_catalog.acldefault('r', relation_object.relowner)
+              )
+            ) AS table_acl
+          ),
+          FALSE
+        ) AS public_any_privilege,
+        CASE
+          WHEN relation_object.oid IS NULL THEN FALSE
+          ELSE (
+            relation_object.relowner = (
+              SELECT role.oid
+              FROM pg_catalog.pg_roles AS role
+              WHERE role.rolname = CURRENT_USER
+            )
+            OR (
+              SELECT role.rolsuper
+              FROM pg_catalog.pg_roles AS role
+              WHERE role.rolname = CURRENT_USER
+            )
+          )
+        END AS grantor_can_revoke
+      FROM (
+        SELECT pg_catalog.to_regclass($2) AS oid
+      ) AS requested
+      LEFT JOIN pg_catalog.pg_class AS relation_object
+        ON relation_object.oid = requested.oid
+      LEFT JOIN pg_catalog.pg_roles AS owner_role
+        ON owner_role.oid = relation_object.relowner
+    `,
+    roleName,
+    entry.catalogName,
+  );
+  const row = rows[0];
+  return {
+    key: entry.key,
+    catalogName: entry.catalogName,
+    exists: row?.exists === true,
+    ownerName: typeof row?.owner_name === "string" ? row.owner_name : null,
+    canSelect: row?.can_select === true,
+    canInsert: row?.can_insert === true,
+    canUpdate: row?.can_update === true,
+    canDelete: row?.can_delete === true,
+    canTruncate: row?.can_truncate === true,
+    canReference: row?.can_reference === true,
+    canTrigger: row?.can_trigger === true,
+    publicAnyPrivilege: row?.public_any_privilege === true,
+    grantorCanRevoke: row?.grantor_can_revoke === true,
   };
 }
 
@@ -480,6 +681,12 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
       await inspectFunction(prisma, config.roleName, entry),
     );
   }
+  const sealedTables = [];
+  for (const entry of SEALED_RUNTIME_TABLES) {
+    sealedTables.push(
+      await inspectSealedTable(prisma, config.roleName, entry),
+    );
+  }
 
   return {
     server: {
@@ -527,6 +734,7 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
           : null,
     },
     functions,
+    sealedTables,
   };
 }
 
@@ -609,11 +817,29 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
     if (entry.volatility !== entry.expectedVolatility) {
       violations.push(`${entry.key}:VOLATILITY_MISMATCH`);
     }
+    if (!entry.searchPathPgCatalogOnly) {
+      violations.push(`${entry.key}:SEARCH_PATH_MISMATCH`);
+    }
     if (entry.publicExecute) {
       violations.push(`${entry.key}:PUBLIC_EXECUTE_PRESENT`);
     }
     if (!entry.grantorCanEnroll) {
       violations.push(`${entry.key}:GRANTOR_CANNOT_ENROLL`);
+    }
+  }
+  for (const entry of snapshot.sealedTables) {
+    if (!entry.exists) {
+      violations.push(`${entry.key}:TABLE_MISSING`);
+      continue;
+    }
+    if (entry.ownerName === config.roleName) {
+      violations.push(`${entry.key}:RUNTIME_ROLE_OWNS_TABLE`);
+    }
+    if (entry.publicAnyPrivilege) {
+      violations.push(`${entry.key}:PUBLIC_TABLE_PRIVILEGE_PRESENT`);
+    }
+    if (!entry.grantorCanRevoke) {
+      violations.push(`${entry.key}:GRANTOR_CANNOT_REVOKE`);
     }
   }
   return violations;
@@ -648,6 +874,19 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
           `${entry.key}:${exclusionKind}_GRANT_OPTION_PRESENT`,
         );
       }
+    }
+  }
+  for (const entry of snapshot.sealedTables) {
+    if (
+      entry.canSelect ||
+      entry.canInsert ||
+      entry.canUpdate ||
+      entry.canDelete ||
+      entry.canTruncate ||
+      entry.canReference ||
+      entry.canTrigger
+    ) {
+      violations.push(`${entry.key}:DIRECT_TABLE_PRIVILEGE_PRESENT`);
     }
   }
   return violations;
@@ -687,6 +926,10 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
     excludedPendingFunctions: EXCLUDED_PENDING_FUNCTIONS.map(
       ({ key, catalogSignature }) => ({ key, catalogSignature }),
     ),
+    sealedTables: SEALED_RUNTIME_TABLES.map(({ key, catalogName }) => ({
+      key,
+      catalogName,
+    })),
     postconditions: {
       applicationExecuteCount: snapshot.functions.filter(
         (entry) =>
@@ -714,6 +957,16 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
           (entry.effectiveExecute ||
             entry.directExecute ||
             entry.targetGrantOption),
+        ).length,
+      sealedTableWithoutRuntimePrivilegesCount: snapshot.sealedTables.filter(
+        (entry) =>
+          !entry.canSelect &&
+          !entry.canInsert &&
+          !entry.canUpdate &&
+          !entry.canDelete &&
+          !entry.canTruncate &&
+          !entry.canReference &&
+          !entry.canTrigger,
       ).length,
     },
   };
@@ -798,6 +1051,14 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   ).join("\n");
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
+  assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
+  assert.match(sql, /identity_email_claim_assert_invite_v1/u);
+  assert.match(sql, /identity_email_claim_transition_v1/u);
+  assert.match(sql, /identity_email_claim_release_v1/u);
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
+  );
   assert.match(sql, /REVOKE EXECUTE.*guest_game_delivery_record_event_v1/su);
   assert.match(sql, /REVOKE EXECUTE.*identity_email_claim_lock_v1/su);
   assert.doesNotMatch(sql, /\bALL FUNCTIONS\b/iu);

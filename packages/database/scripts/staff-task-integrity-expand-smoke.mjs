@@ -320,6 +320,16 @@ const DB_NATIVE_REQUIRED_COLUMNS = Object.freeze([
   { table: "StaffTask", columns: ["id", "tenantId"] },
 ]);
 
+// This smoke intentionally stops at migration 162 while running with the
+// current generated Prisma Client. Keep Store writes projected to columns
+// that exist in the frozen baseline so later additive Store fields cannot
+// invalidate the historical rehearsal before its FK assertions execute.
+const BASELINE_STORE_SELECT = Object.freeze({
+  id: true,
+  tenantId: true,
+  isActive: true,
+});
+
 const EXPECTED_COMPATIBILITY_CONSTRAINT_NAMES = [
   ...LEGACY_STORE_CONSTRAINTS.map((constraint) => constraint.name),
   ...LEGACY_COMPATIBILITY_CONSTRAINTS.map((constraint) => constraint.name),
@@ -932,12 +942,32 @@ async function createTenant(prisma, fixtureId, suffix) {
 }
 
 async function createStore(prisma, tenantId, fixtureId, suffix) {
-  return prisma.store.create({
-    data: {
-      tenantId,
-      name: `Integrity store ${suffix} ${fixtureId}`,
-      isActive: true,
-    },
+  const id = randomUUID();
+  const name = `Integrity store ${suffix} ${fixtureId}`;
+  const [store] = await prisma.$queryRaw`
+    INSERT INTO "Store" ("id", "tenantId", "name", "isActive", "updatedAt")
+    VALUES (${id}, ${tenantId}, ${name}, true, CURRENT_TIMESTAMP)
+    RETURNING "id", "tenantId", "isActive"
+  `;
+  assert(
+    store?.id === id && store.tenantId === tenantId && store.isActive === true,
+    "Frozen baseline Store fixture was not created.",
+  );
+  return store;
+}
+
+function updateBaselineStore(prisma, id, data) {
+  return prisma.store.update({
+    where: { id },
+    data,
+    select: BASELINE_STORE_SELECT,
+  });
+}
+
+function deleteBaselineStore(prisma, id) {
+  return prisma.store.delete({
+    where: { id },
+    select: BASELINE_STORE_SELECT,
   });
 }
 
@@ -1790,11 +1820,10 @@ async function assertStoreArchivePolicy(prisma, fixtures, fixtureId) {
   await expectDmlConstraintFailure(
     "task-bound Store delete",
     ["StaffTask_storeId_fkey", "StaffTask_tenantId_storeId_fkey"],
-    () => prisma.store.delete({ where: { id: taskStore.id } }),
+    () => deleteBaselineStore(prisma, taskStore.id),
   );
-  const archivedTaskStore = await prisma.store.update({
-    where: { id: taskStore.id },
-    data: { isActive: false },
+  const archivedTaskStore = await updateBaselineStore(prisma, taskStore.id, {
+    isActive: false,
   });
 
   const templateStore = await createStore(
@@ -1816,12 +1845,13 @@ async function assertStoreArchivePolicy(prisma, fixtures, fixtureId) {
       "StaffTaskTemplate_storeId_fkey",
       "StaffTaskTemplate_tenantId_storeId_fkey",
     ],
-    () => prisma.store.delete({ where: { id: templateStore.id } }),
+    () => deleteBaselineStore(prisma, templateStore.id),
   );
-  const archivedTemplateStore = await prisma.store.update({
-    where: { id: templateStore.id },
-    data: { isActive: false },
-  });
+  const archivedTemplateStore = await updateBaselineStore(
+    prisma,
+    templateStore.id,
+    { isActive: false },
+  );
 
   const ruleStore = await createStore(
     prisma,
@@ -1838,11 +1868,10 @@ async function assertStoreArchivePolicy(prisma, fixtures, fixtureId) {
       "StaffTaskRecurringRule_storeId_fkey",
       "StaffTaskRecurringRule_tenantId_storeId_fkey",
     ],
-    () => prisma.store.delete({ where: { id: ruleStore.id } }),
+    () => deleteBaselineStore(prisma, ruleStore.id),
   );
-  const archivedRuleStore = await prisma.store.update({
-    where: { id: ruleStore.id },
-    data: { isActive: false },
+  const archivedRuleStore = await updateBaselineStore(prisma, ruleStore.id, {
+    isActive: false,
   });
 
   assert(
@@ -1874,11 +1903,10 @@ async function assertLegacyStoreDeleteProtection(prisma, fixtures) {
 
   for (const check of checks) {
     await expectDmlConstraintFailure(check.label, check.constraint, () =>
-      prisma.store.delete({ where: { id: check.store.id } }),
+      deleteBaselineStore(prisma, check.store.id),
     );
-    const archived = await prisma.store.update({
-      where: { id: check.store.id },
-      data: { isActive: false },
+    const archived = await updateBaselineStore(prisma, check.store.id, {
+      isActive: false,
     });
     assert(
       archived.isActive === false,
@@ -1954,10 +1982,7 @@ async function assertParentIdentifierUpdatesRejected(
         "StaffTask_tenantId_storeId_fkey",
       ],
       operation: () =>
-        prisma.store.update({
-          where: { id: store.id },
-          data: { id: randomUUID() },
-        }),
+        updateBaselineStore(prisma, store.id, { id: randomUUID() }),
     },
     {
       label: "User identifier update",
@@ -2022,9 +2047,8 @@ async function assertParentIdentifierUpdatesRejected(
       label: "Store tenant update",
       constraint: "StaffTask_tenantId_storeId_fkey",
       operation: () =>
-        prisma.store.update({
-          where: { id: store.id },
-          data: { tenantId: fixtures.tenantB.id },
+        updateBaselineStore(prisma, store.id, {
+          tenantId: fixtures.tenantB.id,
         }),
     },
     {
@@ -2454,6 +2478,11 @@ async function runOfflineSelfTest() {
   assert(
     EXPECTED_PRISMA_DRIFT_DROPS.length === 14,
     "Frozen Prisma destructive drift count changed unexpectedly.",
+  );
+  assertEqualArray(
+    Object.keys(BASELINE_STORE_SELECT),
+    ["id", "tenantId", "isActive"],
+    "Frozen Store mutation projection includes post-baseline columns.",
   );
 
   const migrationPlan = await readMigrationPlan();

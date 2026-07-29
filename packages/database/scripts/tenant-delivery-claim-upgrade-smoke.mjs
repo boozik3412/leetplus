@@ -2255,8 +2255,8 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
           delivery.deliveryId,
         );
         await transaction.$executeRawUnsafe(
-          `ALTER TABLE "GuestGameDelivery"
-           ENABLE TRIGGER "GuestGameDelivery_transition_guard"`,
+          `SET CONSTRAINTS "GuestGameDelivery_transition_event_check"
+           IMMEDIATE`,
         );
       }),
     /Final delivery state requires exactly one matching immutable durable event/u,

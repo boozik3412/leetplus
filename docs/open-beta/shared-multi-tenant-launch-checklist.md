@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.23                                                       |
+| Версия     | 1.24                                                       |
 | Дата       | 30.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -38,7 +38,14 @@ state `171/171`, atomic create/replay, rollback, exact 37-column ACL, hostile
 default и column-only ACL rejection. Same-request race дал
 `1 CREATED + 99 REPLAYED`; два разных request к одному locator дали
 `1 CREATED + 1 generic conflict`, zero partial loser writes и zero deadlocks.
-Exact Git-checksum inventory и exact-head CI для `CURRENT_171` ещё pending.
+Exact Git-checksum inventory и exact-head CI для `CURRENT_171` приняты на
+implementation `c03ee76...` и portability-fix/current head `7fca785...`.
+GitHub CI
+[`30501299486`](https://github.com/boozik3412/leetplus/actions/runs/30501299486)
+(`run #50`) завершился `3/3 PASS`; independent ordinary-archive PostgreSQL 16
+audit и final review — `PASS`, P0/P1/P2=0. Source manifest digest:
+`76d2c9df088e9fad201f2769e55d999b2a9232d14eaa1e69be38313fd7283f6f`.
+Rejected CI `30500793016` (`run #49`) evidence не является.
 Принятый `CURRENT_170` exact-head `8dfe219...` / CI `30493779099`
 (`run #47`), `3/3 PASS`, остаётся historical prerequisite. Admin routes
 сохраняют `503`; launch checkboxes ниже этим не закрываются.
@@ -175,8 +182,9 @@ Evidence:
       Legacy design-partner CLI writer isolation принят exact-head, но checkbox
       остаётся открытым до inventory/backfill строк без provenance и реализации
       activation/outbox writers.
-- [ ] `BETA-IAM-004B` engineering read-only inventory на exact `CURRENT_171`
-      реализован как candidate; exact-head PostgreSQL/CI evidence ещё pending.
+- [x] `BETA-IAM-004B` engineering read-only inventory на exact `CURRENT_171`
+      принят на `7fca785...` / CI `30501299486` (`run #50`), `3/3 PASS`;
+      independent ordinary-archive PostgreSQL audit и final review — `PASS`.
       Все User, включая inactive, считаются
       owner-кандидатами; invite — только live candidate; collision/mismatch/
       invalid и bound claim + `NULL` provenance блокируют, terminal history не
@@ -191,7 +199,7 @@ Evidence:
       high-OID system function и system `SECURITY DEFINER` отсутствуют, exact
       `28` internal RI FK triggers enabled, frozen lock/package manifest и
       Prisma `6.19.3` совпадают с artifact. Это закрывает только engineering
-      contract после exact-head evidence: production inventory не выполнялся, а signed
+      contract: production inventory не выполнялся, а signed
       proposal/apply/rollback остаются отдельными будущими решениями.
 - [ ] До production deploy создано, защищённо установлено и аттестовано
       отдельное fingerprint HMAC secret value version `v1`; оно не
@@ -242,8 +250,12 @@ Evidence:
 
 - [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
       matrix, включая case-variant email collision;
-- [ ] exact-head CI и independent review для текущего `CURRENT_171` dormant
-      OWNER invite HOLD candidate;
+- [x] exact-head CI и independent review для текущего `CURRENT_171` dormant
+      OWNER invite HOLD checkpoint:
+      `7fca785ac6c2d77bcbd3655985d668a45fca788a` / CI `30501299486`
+      (`run #50`), `3/3 PASS`; ordinary-archive PG16 audit и review —
+      `PASS`, P0/P1/P2=0. Это не включает `HOLD→PENDING`, activation,
+      delivery, production-like admission или launch GO;
 - [x] historical exact-head CI и independent review для `CURRENT_170`
       activation locator:
       `8dfe219...` / CI `30493779099` (`run #47`), `3/3 PASS`, review без

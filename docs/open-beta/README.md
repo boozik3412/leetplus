@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.39                                         |
-| Дата             | 29.07.2026                                   |
+| Версия           | 1.40                                         |
+| Дата             | 30.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -137,15 +137,16 @@ enterprise-isolation option и не сокращает shared gates.
 27. [Legacy identity inventory and future backfill](./identity-legacy-backfill.md) —
     `IDENTITY_LEGACY_RECONCILIATION_V1`, least-privilege read-only inventory,
     exact catalog/RI-trigger/system authority, PG16 PUBLIC-ACL baseline,
-    high-OID/SECURITY-DEFINER/INVOKER, FDW/parameter/type guards и 22-column
-    ACL, strict remote TLS/production database binding, frozen-lock/Prisma
-    `6.19.3` release verification; local core self `18` + smoke self `18` +
-    unit `17/17` + three-clone PostgreSQL 16 smoke `PASS`; финальный independent
-    security review — `PASS` без actionable P0/P1/P2, exact-head
-    `d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI
-     [`30479020686`](https://github.com/boozik3412/leetplus/actions/runs/30479020686)
-     (`run #39`) — `3/3 PASS`. Production-like inventory и signed
-     proposal/apply/rollback остаются отдельной будущей lane.
+    high-OID/SECURITY-DEFINER/INVOKER, FDW/parameter/type guards и current
+    23-column ACL, strict remote TLS/production database binding,
+    frozen-lock/Prisma `6.19.3` release verification. Принятый current
+    `CURRENT_171` exact-head
+    `7fca785ac6c2d77bcbd3655985d668a45fca788a` / CI
+    [`30501299486`](https://github.com/boozik3412/leetplus/actions/runs/30501299486)
+    (`run #50`) — `3/3 PASS`; ordinary-archive three-clone PostgreSQL 16 audit
+    и independent review — `PASS`, P0/P1/P2=0. Historical `CURRENT_169`
+    `d1162eed...` / CI `30479020686` остаётся prerequisite. Production-like
+    inventory и signed proposal/apply/rollback остаются отдельной будущей lane.
 28. [Design-partner identity writer isolation](./design-partner-identity-writer-isolation.md) —
     `DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`: legacy
     `provision`/`rotate-invite` fail-closed до manifest/Prisma/БД/token,
@@ -174,15 +175,19 @@ enterprise-isolation option и не сокращает shared gates.
     prerequisite для dormant OWNER issue; verified delivery, activation и
     production admission ещё pending.
 31. [Dormant OWNER invite HOLD outbox](./identity-owner-invite-hold-outbox.md) —
-    `BETA-IAM-004G` / migration 171 `IMPLEMENTED_CANDIDATE`: один atomic DB writer
+    `BETA-IAM-004G` / migration 171 — принятый bounded engineering checkpoint:
+    один atomic DB writer
     для hard-coded `NETWORK OWNER` invite hash, encrypted `HOLD` outbox,
     claim transition, immutable idempotency command и PII-free
     audit/receipt. Issue RPC остаётся `EXCLUDED_PENDING` без runtime grant,
     admin routes — `503`; SMTP, worker, `HOLD→PENDING`, persisted GO, trial,
     tenant mutation, deploy и tester account не входят. Clean/populated,
     hostile-default-ACL, replay/race/rollback, exact runtime column ACL и
-    crypto known-answer evidence локально `PASS`; exact-head remote CI ещё
-    pending, внешний `NO-GO` не изменён.
+    crypto known-answer evidence `PASS`. Implementation `c03ee76...`,
+    portability-fix/current head `7fca785...`; exact-head CI
+    [`30501299486`](https://github.com/boozik3412/leetplus/actions/runs/30501299486)
+    (`run #50`) — `3/3 PASS`, independent review — P0/P1/P2=0. Внешний
+    `NO-GO` не изменён.
 
 Текущий schema target рабочего кандидата — `CURRENT_171`. Локальный
 PostgreSQL 16 подтвердил clean deploy `171/171`, populated `170 → 171`,
@@ -190,7 +195,17 @@ hostile-default-ACL rollback/retry, `1 CREATED + 99 REPLAYED + 0 deadlocks`,
 late-fault rollback, exact seven-RPC runtime allowlist и zero
 target/PUBLIC privileges на трёх sealed relations / 45 columns. Exact AAD и
 71-byte AES-GCM закреплены known-answer vector, raw token удалён из seal DTO,
-runtime registration отсутствует. Exact-head CI для `CURRENT_171` pending.
+runtime registration отсутствует. Exact-head
+`7fca785ac6c2d77bcbd3655985d668a45fca788a` принят GitHub CI
+[`30501299486`](https://github.com/boozik3412/leetplus/actions/runs/30501299486)
+(`run #50`), `3/3 PASS`. Независимый ordinary-archive audit подтвердил
+`171/171` raw-equivalent LF migration blobs, zero checksum mismatch, exact
+PostgreSQL `171/171`, three-clone inventory и zero residue. Source manifest
+digest:
+`76d2c9df088e9fad201f2769e55d999b2a9232d14eaa1e69be38313fd7283f6f`.
+Rejected CI
+[`30500793016`](https://github.com/boozik3412/leetplus/actions/runs/30500793016)
+(`run #49`) evidence не является.
 Принятый locator exact-head `8dfe219...` / CI `30493779099` (`run #47`),
 `3/3 PASS`, остаётся engineering prerequisite `CURRENT_170`.
 

@@ -2,12 +2,12 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.8 |
-| Дата | 29.07.2026 |
+| Версия | 1.9 |
+| Дата | 30.07.2026 |
 | Backlog | `BETA-IAM-004B` |
 | Contract | `IDENTITY_LEGACY_RECONCILIATION_V1` |
 | Schema target | exact `CURRENT_171` engineering checkpoint |
-| Текущий статус | Checksum-bound CURRENT_171 inventory candidate и disposable-clone preflight локально пройдены; exact-head PostgreSQL/CI evidence pending |
+| Текущий статус | Checksum-bound `CURRENT_171` engineering inventory принят exact-head; production-like inventory pending |
 | Release decision | `NO-GO`; production inventory не выполнялся, proposal/apply/rollback отсутствуют |
 | Deployment | `NOT DEPLOYED`; аккаунты, invites, tokens и outbound effects не создаются |
 
@@ -115,11 +115,12 @@ Prisma checksum является bytewise: БД для release-bound rehearsal �
 преобразованными окончаниями строк. Репозиторий фиксирует
 `packages/database/prisma/migrations/**/migration.sql text eol=lf` в
 `.gitattributes`; contract test проверяет наличие этого правила. Уже
-существующий Windows checkout с историческими CRLF не является evidence —
-для него используется новый checkout, raw `git cat-file` materialization либо
-`git -c core.autocrlf=false archive` exact SHA. Обычный `git archive` при
-локальном `core.autocrlf=true` также может применить EOL-преобразование и не
-считается raw-blob evidence.
+существующий Windows checkout с историческими CRLF не является evidence.
+Допустимы новый checkout после действия `.gitattributes`, raw
+`git cat-file` materialization или обычный `git archive <exact SHA>`:
+независимая проверка current head подтвердила одинаковые raw-blob hashes при
+`core.autocrlf=true/false`. Worktree-copy/export, уже содержащий EOL conversion,
+не считается raw-blob evidence.
 
 Последняя команда является destructive fixture harness только для
 подтверждённой loopback `*_ci` PostgreSQL source database; она запрещает
@@ -424,17 +425,34 @@ three-clone PostgreSQL inventory smoke приняты. Source manifest digest �
 Independent review — `PASS` без P0/P1/P2. Принятые `CURRENT_169` результаты
 остаются только historical prerequisite.
 
-`CURRENT_171` candidate расширяет exact release binding до ordered
+Принятый `CURRENT_171` engineering checkpoint расширяет exact release binding
+до ordered
 `migration_name + checksum` для всех `171` Git migration blobs и exact catalog
 до `7 relations / 68 catalog columns / 45 identity columns / 45 constraints /
 24 indexes / 13 functions / 5 enum labels / 3 user-defined triggers / 28
 enabled PG16 internal RI FK triggers`. Reader allowlist содержит только `23`
 column grants и не имеет доступа к sealed command/outbox, их столбцам или
-identity functions. Локальные self-tests и `19/19` contract tests пройдены.
+identity functions. Self-tests и `20/20` contract tests пройдены.
 Disposable-clone preflight отклонил checksum drift, third-party full-table и
 column-only grants, function `EXECUTE` и function-owner drift до inventory.
-Это пока `IMPLEMENTED_CANDIDATE`: exact committed release artifact, чистый
-PostgreSQL 16 smoke и exact-head CI должны быть зафиксированы отдельно.
+Exact implementation `c03ee76d8e92d0c759afda7577a30e0593667a35`,
+portability-fix/current head
+`7fca785ac6c2d77bcbd3655985d668a45fca788a`; GitHub CI
+[`30501299486`](https://github.com/boozik3412/leetplus/actions/runs/30501299486)
+(`run #50`) завершился `3/3 PASS`. Независимый ordinary-`git archive` audit
+подтвердил `171/171` LF/raw-Git-equivalent blobs, zero checksum mismatch,
+exact PostgreSQL `171/171`, three-clone inventory `PASS`, отсутствие source
+writes и zero DB/role/parameter-ACL residue. Source manifest digest:
+`76d2c9df088e9fad201f2769e55d999b2a9232d14eaa1e69be38313fd7283f6f`.
+Final independent review — P0/P1/P2 `0`.
+
+CI
+[`30500793016`](https://github.com/boozik3412/leetplus/actions/runs/30500793016)
+(`run #49`) отклонён и evidence не является. Исправление historical
+`CURRENT_170` fixture не ослабило checksum admission: SHA-256 продолжает
+считаться по raw Git blobs, migration SQL закреплены `text eol=lf`, а
+historical runtime fixture не получает issue function или command/outbox
+privileges из migration 171.
 
 В CI добавлены отдельные gates:
 

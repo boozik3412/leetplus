@@ -2,12 +2,12 @@
 
 | Поле             | Значение                                                              |
 | ---------------- | --------------------------------------------------------------------- |
-| Версия           | 1.1                                                                   |
-| Дата             | 29.07.2026                                                            |
+| Версия           | 1.2                                                                   |
+| Дата             | 30.07.2026                                                            |
 | Backlog          | `BETA-IAM-004G`                                                       |
 | Contract         | `DORMANT_OWNER_INVITE_HOLD_OUTBOX_V1`                                 |
-| Schema target    | migration 171 / `CURRENT_171` candidate поверх принятого `CURRENT_170` |
-| Статус           | `IMPLEMENTED_CANDIDATE`; local evidence `PASS`, exact-head CI pending  |
+| Schema target    | migration 171 / принятый engineering `CURRENT_171`                    |
+| Статус           | `ACCEPTED_ENGINEERING_CHECKPOINT`; exact-head CI/review `PASS`         |
 | Release decision | `NO-GO`; production, outbound и tester account не изменяются          |
 
 ## 1. Назначение и строгая граница
@@ -356,10 +356,32 @@ Local candidate evidence:
 8. source-boundary test подтверждает отсутствие provider/module/route/worker
    registration.
 
-До перевода `BETA-IAM-004G` в «Готово» остаются exact release-artifact
-verification, полный локальный CI-equivalent, independent final review и
-remote GitHub CI на точном candidate SHA. До будущей активации дополнительно
-обязательны one-RPC-per-transaction coordinator invariant и сквозной
+`BETA-IAM-004G` принят как bounded engineering checkpoint:
+
+- implementation:
+  `c03ee76d8e92d0c759afda7577a30e0593667a35`;
+- portability-fix и exact current head:
+  `7fca785ac6c2d77bcbd3655985d668a45fca788a`;
+- GitHub CI
+  [`30501299486`](https://github.com/boozik3412/leetplus/actions/runs/30501299486)
+  (`run #50`) — `3/3 PASS`;
+- independent ordinary-`git archive` audit — `171/171` LF/raw-Git-equivalent
+  migration blobs, exact PostgreSQL `171/171`, three-clone inventory `PASS`,
+  source writes `0`, DB/role/parameter-ACL residue `0`;
+- final independent review — P0/P1/P2 `0`;
+- source manifest digest:
+  `76d2c9df088e9fad201f2769e55d999b2a9232d14eaa1e69be38313fd7283f6f`.
+
+Предыдущий GitHub CI
+[`30500793016`](https://github.com/boozik3412/leetplus/actions/runs/30500793016)
+(`run #49`) отклонён и не является release evidence. Он выявил, что historical
+`CURRENT_170` smoke ошибочно использовал `CURRENT_171` runtime enrollment.
+Fix сохраняет строгий checksum admission, закрепляет migration SQL как
+`text eol=lf` и выдаёт historical fixture только семь существовавших RPC —
+без issue function, command/outbox relations и новых privileges.
+
+До будущей активации дополнительно обязательны one-RPC-per-transaction
+coordinator invariant и сквозной
 `seal → RPC → persisted outbox → open` PostgreSQL integration test.
 
 Даже успешная engineering-приёмка этого checkpoint не разрешит выдачу

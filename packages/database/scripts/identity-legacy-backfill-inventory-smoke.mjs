@@ -5,6 +5,15 @@ import { fileURLToPath } from "node:url";
 
 import { PrismaClient } from "@prisma/client";
 
+import {
+  SHARED_BETA_ADMISSION_COLUMNS,
+  SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS,
+  SHARED_BETA_ADMISSION_DORMANT_RELATIONS,
+  SHARED_BETA_ADMISSION_DORMANT_TYPES,
+  SHARED_BETA_ADMISSION_FUNCTIONS,
+  SHARED_BETA_ADMISSION_RELATIONS,
+} from "./shared-beta-admission-provenance-catalog.mjs";
+
 const SCRIPT_NAME = "identity-legacy-backfill-inventory-smoke";
 const SMOKE_CONFIRMATION = "run-identity-legacy-inventory-smoke";
 const INVENTORY_CONFIRMATION = "run-identity-legacy-inventory";
@@ -17,9 +26,9 @@ const SOURCE_DATABASE_PATTERN = /^[a-z][a-z0-9_]{0,59}_ci$/u;
 const SAFE_IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
 const SQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const EXPECTED_MIGRATION_COUNT = 171;
+const EXPECTED_MIGRATION_COUNT = 172;
 const EXPECTED_LATEST_MIGRATION =
-  "20260730010000_identity_owner_invite_hold_outbox";
+  "20260730020000_shared_beta_admission_provenance";
 const ADMIN_CONNECT_TIMEOUT_SECONDS = 10;
 const ADMIN_LOCK_TIMEOUT_MS = 5_000;
 const ADMIN_STATEMENT_TIMEOUT_MS = 120_000;
@@ -70,6 +79,9 @@ const IDENTITY_FUNCTION_SIGNATURES = Object.freeze([
   'public."identity_mail_outbox_hold_immutable_v1"()',
   'public."identity_owner_invite_issue_command_immutable_v1"()',
   'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
+  ...SHARED_BETA_ADMISSION_FUNCTIONS.map(
+    (entry) => entry.catalogSignature,
+  ),
 ]);
 
 const HELP = `
@@ -1096,6 +1108,29 @@ async function assertReaderRole(admin, reader, descriptor) {
     functionPrivileges.every((entry) => entry.can_execute === false),
     true,
   );
+  const typePrivileges = await admin.$queryRawUnsafe(
+    `
+      SELECT
+        type_name,
+        has_type_privilege(
+          $1,
+          format('%I.%I', 'public', type_name),
+          'USAGE'
+        ) AS can_use
+      FROM unnest($2::text[]) AS type_names(type_name)
+      ORDER BY type_name COLLATE "C"
+    `,
+    descriptor.roleName,
+    SHARED_BETA_ADMISSION_DORMANT_TYPES,
+  );
+  assert.equal(
+    typePrivileges.length,
+    SHARED_BETA_ADMISSION_DORMANT_TYPES.length,
+  );
+  assert.equal(
+    typePrivileges.every((entry) => entry.can_use === false),
+    true,
+  );
 
   await reader.$queryRawUnsafe(
     'SELECT "id", "email" FROM public."User" LIMIT 0',
@@ -1137,6 +1172,26 @@ async function assertReaderRole(admin, reader, descriptor) {
       'SELECT "secretCiphertext" FROM public."IdentityMailOutbox" LIMIT 0',
     ),
   );
+  for (const relationName of SHARED_BETA_ADMISSION_RELATIONS) {
+    await expectPermissionDenied(
+      `${relationName} full SELECT`,
+      () =>
+        reader.$queryRawUnsafe(
+          `SELECT * FROM public.${quoteIdentifier(relationName)} LIMIT 0`,
+        ),
+    );
+  }
+  for (const [relationName, columnName] of SHARED_BETA_ADMISSION_COLUMNS) {
+    await expectPermissionDenied(
+      `${relationName}.${columnName} SELECT`,
+      () =>
+        reader.$queryRawUnsafe(
+          `SELECT ${quoteIdentifier(columnName)}
+          FROM public.${quoteIdentifier(relationName)}
+          LIMIT 0`,
+        ),
+    );
+  }
   for (const tableName of Object.keys(READER_COLUMN_GRANTS)) {
     await expectPermissionDenied(`${tableName} full SELECT`, () =>
       reader.$queryRawUnsafe(
@@ -1341,24 +1396,36 @@ async function assertAuthorityAndCatalogDriftRejected(
       return { config, report };
     };
     const readerRole = quoteIdentifier(descriptor.roleName);
-    const ownerInviteIssueSignature = `
-      public."identity_owner_invite_issue_hold_v1"(
-        TEXT,
-        TEXT,
-        TEXT,
-        INTEGER,
-        TEXT,
-        TEXT,
-        TEXT,
-        TEXT,
-        TEXT,
-        TEXT,
-        TEXT,
-        TEXT,
-        BYTEA,
-        TIMESTAMP WITH TIME ZONE
-      )
-    `;
+    const admissionRelationName =
+      SHARED_BETA_ADMISSION_DORMANT_RELATIONS[0];
+    const admissionColumn =
+      SHARED_BETA_ADMISSION_COLUMNS.find(
+        ([relationName]) => relationName === admissionRelationName,
+      );
+    const admissionFunction =
+      SHARED_BETA_ADMISSION_FUNCTIONS.find((entry) =>
+        SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS.includes(entry.name),
+      );
+    const profileDigestFunction =
+      SHARED_BETA_ADMISSION_FUNCTIONS.find(
+        (entry) =>
+          entry.volatility === "s" && entry.language === "sql",
+      );
+    const admissionTypeName = SHARED_BETA_ADMISSION_DORMANT_TYPES[0];
+    assert.equal(typeof admissionRelationName, "string");
+    assert.ok(Array.isArray(admissionColumn));
+    assert.equal(typeof admissionFunction?.catalogSignature, "string");
+    assert.equal(
+      typeof profileDigestFunction?.catalogSignature,
+      "string",
+    );
+    assert.equal(typeof admissionTypeName, "string");
+    const quotedAdmissionRelation = quoteIdentifier(admissionRelationName);
+    const quotedAdmissionColumn = quoteIdentifier(admissionColumn[1]);
+    const admissionFunctionSignature = admissionFunction.catalogSignature;
+    const profileDigestFunctionSignature =
+      profileDigestFunction.catalogSignature;
+    const quotedAdmissionType = quoteIdentifier(admissionTypeName);
     const latestMigrationName =
       expectedMigrationArtifact.migrationNames.at(-1);
     const expectedLatestChecksum =
@@ -1447,22 +1514,34 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     registerCleanup("remove dormant ACL third-party role", async () => {
       await admin.$executeRawUnsafe(
-        `ALTER FUNCTION ${ownerInviteIssueSignature} OWNER TO CURRENT_USER`,
+        `ALTER TABLE public.${quotedAdmissionRelation}
+        OWNER TO CURRENT_USER`,
       );
       await admin.$executeRawUnsafe(
-        `REVOKE ALL PRIVILEGES ON TABLE
-          public."IdentityOwnerInviteIssueCommand",
-          public."IdentityMailOutbox"
+        `ALTER FUNCTION ${admissionFunctionSignature}
+        OWNER TO CURRENT_USER`,
+      );
+      await admin.$executeRawUnsafe(
+        `ALTER TYPE public.${quotedAdmissionType}
+        OWNER TO CURRENT_USER`,
+      );
+      await admin.$executeRawUnsafe(
+        `REVOKE ALL PRIVILEGES ON TABLE public.${quotedAdmissionRelation}
         FROM ${thirdPartyRole}`,
       );
       await admin.$executeRawUnsafe(
-        `REVOKE SELECT ("tokenHash")
-        ON TABLE public."IdentityOwnerInviteIssueCommand"
+        `REVOKE SELECT (${quotedAdmissionColumn})
+        ON TABLE public.${quotedAdmissionRelation}
         FROM ${thirdPartyRole}`,
       );
       await admin.$executeRawUnsafe(
         `REVOKE ALL PRIVILEGES
-        ON FUNCTION ${ownerInviteIssueSignature}
+        ON FUNCTION ${admissionFunctionSignature}
+        FROM ${thirdPartyRole}`,
+      );
+      await admin.$executeRawUnsafe(
+        `REVOKE ALL PRIVILEGES
+        ON TYPE public.${quotedAdmissionType}
         FROM ${thirdPartyRole}`,
       );
       await admin.$executeRawUnsafe(
@@ -1472,7 +1551,7 @@ async function assertAuthorityAndCatalogDriftRejected(
 
     await admin.$executeRawUnsafe(
       `GRANT SELECT
-      ON TABLE public."IdentityOwnerInviteIssueCommand"
+      ON TABLE public.${quotedAdmissionRelation}
       TO ${thirdPartyRole}`,
     );
     const thirdPartyTableAclDrift = await inspect();
@@ -1494,13 +1573,13 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     await admin.$executeRawUnsafe(
       `REVOKE SELECT
-      ON TABLE public."IdentityOwnerInviteIssueCommand"
+      ON TABLE public.${quotedAdmissionRelation}
       FROM ${thirdPartyRole}`,
     );
 
     await admin.$executeRawUnsafe(
-      `GRANT SELECT ("tokenHash")
-      ON TABLE public."IdentityOwnerInviteIssueCommand"
+      `GRANT SELECT (${quotedAdmissionColumn})
+      ON TABLE public.${quotedAdmissionRelation}
       TO ${thirdPartyRole}`,
     );
     const thirdPartyColumnAclDrift = await inspect();
@@ -1517,14 +1596,14 @@ async function assertAuthorityAndCatalogDriftRejected(
         ?.dormantColumnNonownerAclCount > 0,
     );
     await admin.$executeRawUnsafe(
-      `REVOKE SELECT ("tokenHash")
-      ON TABLE public."IdentityOwnerInviteIssueCommand"
+      `REVOKE SELECT (${quotedAdmissionColumn})
+      ON TABLE public.${quotedAdmissionRelation}
       FROM ${thirdPartyRole}`,
     );
 
     await admin.$executeRawUnsafe(
       `GRANT EXECUTE
-      ON FUNCTION ${ownerInviteIssueSignature}
+      ON FUNCTION ${admissionFunctionSignature}
       TO ${thirdPartyRole}`,
     );
     const thirdPartyFunctionAclDrift = await inspect();
@@ -1542,12 +1621,12 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     await admin.$executeRawUnsafe(
       `REVOKE EXECUTE
-      ON FUNCTION ${ownerInviteIssueSignature}
+      ON FUNCTION ${admissionFunctionSignature}
       FROM ${thirdPartyRole}`,
     );
 
     await admin.$executeRawUnsafe(
-      `ALTER FUNCTION ${ownerInviteIssueSignature}
+      `ALTER FUNCTION ${admissionFunctionSignature}
       OWNER TO ${thirdPartyRole}`,
     );
     const thirdPartyFunctionOwnerDrift = await inspect();
@@ -1565,7 +1644,78 @@ async function assertAuthorityAndCatalogDriftRejected(
       1,
     );
     await admin.$executeRawUnsafe(
-      `ALTER FUNCTION ${ownerInviteIssueSignature} OWNER TO CURRENT_USER`,
+      `ALTER FUNCTION ${admissionFunctionSignature}
+      OWNER TO CURRENT_USER`,
+    );
+
+    await admin.$executeRawUnsafe(
+      `ALTER TABLE public.${quotedAdmissionRelation}
+      OWNER TO ${thirdPartyRole}`,
+    );
+    const thirdPartyRelationOwnerDrift = await inspect();
+    assert.equal(
+      thirdPartyRelationOwnerDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      thirdPartyRelationOwnerDrift.report?.summary?.inventoryExecuted,
+      false,
+    );
+    assert.equal(
+      thirdPartyRelationOwnerDrift.report?.database?.catalog
+        ?.dormantRelationOwnerMismatchCount,
+      1,
+    );
+    await admin.$executeRawUnsafe(
+      `ALTER TABLE public.${quotedAdmissionRelation}
+      OWNER TO CURRENT_USER`,
+    );
+
+    await admin.$executeRawUnsafe(
+      `GRANT USAGE
+      ON TYPE public.${quotedAdmissionType}
+      TO ${thirdPartyRole}`,
+    );
+    const thirdPartyTypeAclDrift = await inspect();
+    assert.equal(
+      thirdPartyTypeAclDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      thirdPartyTypeAclDrift.report?.summary?.inventoryExecuted,
+      false,
+    );
+    assert.ok(
+      thirdPartyTypeAclDrift.report?.database?.catalog
+        ?.dormantTypeNonownerAclCount > 0,
+    );
+    await admin.$executeRawUnsafe(
+      `REVOKE USAGE
+      ON TYPE public.${quotedAdmissionType}
+      FROM ${thirdPartyRole}`,
+    );
+
+    await admin.$executeRawUnsafe(
+      `ALTER TYPE public.${quotedAdmissionType}
+      OWNER TO ${thirdPartyRole}`,
+    );
+    const thirdPartyTypeOwnerDrift = await inspect();
+    assert.equal(
+      thirdPartyTypeOwnerDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      thirdPartyTypeOwnerDrift.report?.summary?.inventoryExecuted,
+      false,
+    );
+    assert.equal(
+      thirdPartyTypeOwnerDrift.report?.database?.catalog
+        ?.dormantTypeOwnerMismatchCount,
+      1,
+    );
+    await admin.$executeRawUnsafe(
+      `ALTER TYPE public.${quotedAdmissionType}
+      OWNER TO CURRENT_USER`,
     );
     await requireCleanCheckpoint();
     const [thirdPartyResidue] = await admin.$queryRawUnsafe(
@@ -1788,7 +1938,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(
       columnDrift.report?.database?.catalog
         ?.actualExactIdentityColumnCount,
-      46,
+      110,
     );
     await requireCleanCheckpoint();
 
@@ -1810,7 +1960,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     assert.equal(
       constraintDrift.report?.database?.catalog?.actualConstraintCount,
-      46,
+      74,
     );
     await requireCleanCheckpoint();
 
@@ -1827,7 +1977,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(indexDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(
       indexDrift.report?.database?.catalog?.actualIndexCount,
-      25,
+      39,
     );
     await requireCleanCheckpoint();
 
@@ -1845,11 +1995,11 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(triggerDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(
       triggerDrift.report?.database?.catalog?.matchedTriggerCount,
-      2,
+      5,
     );
     assert.equal(
       triggerDrift.report?.database?.catalog?.actualIdentityTriggerCount,
-      3,
+      6,
     );
     await requireCleanCheckpoint();
 
@@ -1867,11 +2017,11 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(enumDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(
       enumDrift.report?.database?.catalog?.matchedEnumLabelCount,
-      4,
+      7,
     );
     assert.equal(
       enumDrift.report?.database?.catalog?.totalEnumLabelCount,
-      5,
+      8,
     );
     await requireCleanCheckpoint();
 
@@ -1900,11 +2050,11 @@ async function assertAuthorityAndCatalogDriftRejected(
     await requireCleanCheckpoint();
 
     await admin.$executeRawUnsafe(
-      `ALTER FUNCTION ${ownerInviteIssueSignature} STABLE`,
+      `ALTER FUNCTION ${profileDigestFunctionSignature} VOLATILE`,
     );
-    registerCleanup("restore owner invite issue function volatility", () =>
+    registerCleanup("restore shared-beta profile digest volatility", () =>
       admin.$executeRawUnsafe(`
-        ALTER FUNCTION ${ownerInviteIssueSignature} VOLATILE
+        ALTER FUNCTION ${profileDigestFunctionSignature} STABLE
       `),
     );
     const { config, report } = await inspect();
@@ -1951,11 +2101,11 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     assert.equal(
       riTriggerDrift.report?.database?.catalog?.matchedRiTriggerCount,
-      27,
+      43,
     );
     assert.equal(
       riTriggerDrift.report?.database?.catalog?.actualRiTriggerCount,
-      28,
+      44,
     );
     await requireCleanCheckpoint();
   } catch (error) {
@@ -2058,10 +2208,21 @@ export function runSelfTest() {
     ),
     false,
   );
-  assert.equal(EXPECTED_MIGRATION_COUNT, 171);
+  assert.equal(
+    SHARED_BETA_ADMISSION_RELATIONS.every(
+      (relationName) =>
+        !Object.hasOwn(READER_COLUMN_GRANTS, relationName),
+    ),
+    true,
+  );
+  assert.deepEqual(
+    [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
+    [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
+  );
+  assert.equal(EXPECTED_MIGRATION_COUNT, 172);
   assert.equal(
     EXPECTED_LATEST_MIGRATION,
-    "20260730010000_identity_owner_invite_hold_outbox",
+    "20260730020000_shared_beta_admission_provenance",
   );
   assert.equal(
     IDENTITY_FUNCTION_SIGNATURES.includes(
@@ -2069,10 +2230,19 @@ export function runSelfTest() {
     ),
     true,
   );
-  assert.equal(IDENTITY_FUNCTION_SIGNATURES.length, 13);
+  assert.equal(IDENTITY_FUNCTION_SIGNATURES.length, 22);
   assert.equal(
     IDENTITY_FUNCTION_SIGNATURES.includes(
       'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
+    ),
+    true,
+  );
+  assert.equal(
+    SHARED_BETA_ADMISSION_FUNCTIONS.some(
+      (entry) =>
+        entry.volatility === "s" &&
+        entry.language === "sql" &&
+        IDENTITY_FUNCTION_SIGNATURES.includes(entry.catalogSignature),
     ),
     true,
   );
@@ -2357,6 +2527,7 @@ export async function runSmoke(environment = process.env) {
       authorityDriftRejected: true,
       catalogDriftRejected: true,
       dormantAclDriftRejected: true,
+      dormantTypeDriftRejected: true,
       exactColumnReaderRoles: 3,
       healthyDecision: healthy.report.summary.decision,
       healthyTopologyZeroFindings: true,
@@ -2365,6 +2536,10 @@ export async function runSmoke(environment = process.env) {
       reviewDecision: review.report.summary.decision,
       script: SCRIPT_NAME,
       sensitiveValuesAbsent: true,
+      sharedBetaDeniedColumns: SHARED_BETA_ADMISSION_COLUMNS.length,
+      sharedBetaDeniedFunctions: SHARED_BETA_ADMISSION_FUNCTIONS.length,
+      sharedBetaDeniedRelations: SHARED_BETA_ADMISSION_RELATIONS.length,
+      sharedBetaDeniedTypes: SHARED_BETA_ADMISSION_DORMANT_TYPES.length,
       sourceDatabaseWrites: false,
       status: "PASS",
     };

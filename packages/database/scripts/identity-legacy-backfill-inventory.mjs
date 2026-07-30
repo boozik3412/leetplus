@@ -13,6 +13,20 @@ import {
   CURRENT_EXPECTED_MIGRATION_COUNT,
   STAFF_TASK_CURRENT_RELEASE_STATE,
 } from "./staff-task-integrity-migration-state.mjs";
+import {
+  SHARED_BETA_ADMISSION_COLUMNS,
+  SHARED_BETA_ADMISSION_CONSTRAINTS,
+  SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS,
+  SHARED_BETA_ADMISSION_DORMANT_RELATIONS,
+  SHARED_BETA_ADMISSION_DORMANT_TYPES,
+  SHARED_BETA_ADMISSION_ENUMS,
+  SHARED_BETA_ADMISSION_FUNCTIONS,
+  SHARED_BETA_ADMISSION_INDEXES,
+  SHARED_BETA_ADMISSION_REFERENTIAL_CONSTRAINTS,
+  SHARED_BETA_ADMISSION_RELATIONS,
+  SHARED_BETA_ADMISSION_TRIGGERS,
+  SHARED_BETA_ADMISSION_TYPES,
+} from "./shared-beta-admission-provenance-catalog.mjs";
 
 export const SCRIPT_NAME = "identity-legacy-backfill-inventory";
 export const REPORT_SCHEMA_VERSION = 1;
@@ -118,6 +132,7 @@ const RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH =
   "packages/database/scripts/identity-legacy-backfill-inventory.mjs";
 const RELEASE_RUNTIME_SOURCE_PATHS = Object.freeze([
   RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH,
+  "packages/database/scripts/shared-beta-admission-provenance-catalog.mjs",
   "packages/database/scripts/staff-task-integrity-canonical-json.mjs",
   "packages/database/scripts/staff-task-integrity-migration-state.mjs",
   "packages/database/package.json",
@@ -223,24 +238,47 @@ const EXPECTED_CATALOG_RELATIONS = Object.freeze([
   "IdentityEmailClaim",
   "IdentityOwnerInviteIssueCommand",
   "IdentityMailOutbox",
+  ...SHARED_BETA_ADMISSION_RELATIONS,
 ]);
 
 const EXACT_IDENTITY_RELATIONS = Object.freeze([
   "IdentityEmailClaim",
   "IdentityOwnerInviteIssueCommand",
   "IdentityMailOutbox",
+  ...SHARED_BETA_ADMISSION_RELATIONS,
 ]);
 
 const DORMANT_IDENTITY_RELATIONS = Object.freeze([
   "IdentityOwnerInviteIssueCommand",
   "IdentityMailOutbox",
+  ...SHARED_BETA_ADMISSION_DORMANT_RELATIONS,
 ]);
 
 const DORMANT_IDENTITY_FUNCTIONS = Object.freeze([
   "identity_owner_invite_issue_command_immutable_v1",
   "identity_mail_outbox_hold_immutable_v1",
   "identity_owner_invite_issue_hold_v1",
+  ...SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS,
 ]);
+
+const DORMANT_IDENTITY_TYPES = Object.freeze([
+  ...SHARED_BETA_ADMISSION_DORMANT_TYPES,
+]);
+assert.deepEqual(
+  [...DORMANT_IDENTITY_TYPES].sort(),
+  SHARED_BETA_ADMISSION_TYPES.map((entry) => entry.name).sort(),
+  "Shared-beta dormant type names must match the exact type catalog.",
+);
+assert.equal(
+  SHARED_BETA_ADMISSION_TYPES.every(
+    (entry) =>
+      entry.kind === "e" &&
+      entry.ownerPolicy === "DATABASE_OWNER" &&
+      entry.aclPolicy === "OWNER_USAGE_ONLY",
+  ),
+  true,
+  "Shared-beta type catalog policies must stay fail-closed.",
+);
 
 const EXPECTED_CATALOG_COLUMNS = Object.freeze([
   [
@@ -743,6 +781,7 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "CURRENT_TIMESTAMP",
     "",
   ],
+  ...SHARED_BETA_ADMISSION_COLUMNS,
 ]);
 
 const EXPECTED_EXACT_IDENTITY_COLUMN_COUNT =
@@ -1065,6 +1104,10 @@ const EXPECTED_CONSTRAINT_MANIFEST = Object.freeze([
   ].map(([name, relation, type, definitionSha256]) =>
     Object.freeze({ name, relation, type, definitionSha256 }),
   ),
+  ...SHARED_BETA_ADMISSION_CONSTRAINTS.map(
+    ([name, relation, type, definitionSha256]) =>
+      Object.freeze({ name, relation, type, definitionSha256 }),
+  ),
 ]);
 
 const EXPECTED_INDEX_MANIFEST = Object.freeze([
@@ -1255,6 +1298,16 @@ const EXPECTED_INDEX_MANIFEST = Object.freeze([
       definitionSha256,
     }),
   ),
+  ...SHARED_BETA_ADMISSION_INDEXES.map(
+    ([relation, name, unique, primary, definitionSha256]) =>
+      Object.freeze({
+        name,
+        relation,
+        unique,
+        primary,
+        definitionSha256,
+      }),
+  ),
 ]);
 
 const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
@@ -1371,6 +1424,18 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     definitionSha256:
       "787e025ba9fa501fc3d62dde7502c0e82bf01afeac1858031db54a6b2b982533",
   },
+  ...SHARED_BETA_ADMISSION_FUNCTIONS.map((entry) =>
+    Object.freeze({
+      name: entry.name,
+      identityArguments: entry.identityArguments,
+      result: entry.result,
+      securityDefiner: entry.securityDefiner,
+      volatility: entry.volatility,
+      language: entry.language,
+      searchPath: entry.searchPath,
+      definitionSha256: entry.definitionDigest,
+    }),
+  ),
 ]);
 
 const EXPECTED_TRIGGER_MANIFEST = Object.freeze([
@@ -1398,6 +1463,16 @@ const EXPECTED_TRIGGER_MANIFEST = Object.freeze([
     definitionSha256:
       "7ca9f4915da0696925bccd73381ae209c227e8b4ccd37b0d72c58f2d3c371aff",
   },
+  ...SHARED_BETA_ADMISSION_TRIGGERS.map(
+    ([relation, name, functionName, triggerType, definitionSha256]) =>
+      Object.freeze({
+        name,
+        relation,
+        functionName,
+        triggerType,
+        definitionSha256,
+      }),
+  ),
 ]);
 
 function restrictRiTriggerManifest(
@@ -1531,6 +1606,24 @@ const EXPECTED_RI_TRIGGER_MANIFEST = Object.freeze([
     functionName: "RI_FKey_check_upd",
     triggerType: 17,
   },
+  ...SHARED_BETA_ADMISSION_REFERENTIAL_CONSTRAINTS.map(
+    ([
+      constraintName,
+      constraintRelation,
+      triggerRelation,
+      constraintPeerRelation,
+      functionName,
+      triggerType,
+    ]) =>
+      Object.freeze({
+        constraintName,
+        constraintRelation,
+        triggerRelation,
+        constraintPeerRelation,
+        functionName,
+        triggerType,
+      }),
+  ),
 ]);
 
 const EXPECTED_ENUM_MANIFEST = Object.freeze([
@@ -1559,6 +1652,9 @@ const EXPECTED_ENUM_MANIFEST = Object.freeze([
     label: "INITIAL_OWNER_INVITE",
     sortOrder: 1,
   },
+  ...SHARED_BETA_ADMISSION_ENUMS.map(([typeName, label, sortOrder]) =>
+    Object.freeze({ typeName, label, sortOrder }),
+  ),
 ]);
 
 function expectedConstraintValues() {
@@ -1585,15 +1681,27 @@ function expectedIndexValues() {
 }
 
 function expectedFunctionValues() {
-  return EXPECTED_FUNCTION_MANIFEST.map((entry) =>
-    `(${[
+  return EXPECTED_FUNCTION_MANIFEST.map((entry) => {
+    const volatility = entry.volatility ?? "v";
+    const language = entry.language ?? "plpgsql";
+    const searchPath = entry.searchPath ?? ["pg_catalog"];
+    assert.ok(
+      Array.isArray(searchPath) &&
+        searchPath.length > 0 &&
+        searchPath.every((value) => typeof value === "string"),
+      "Expected function search_path must be a non-empty string array.",
+    );
+    return `(${[
       sqlLiteral(entry.name),
       sqlLiteral(entry.identityArguments),
       sqlLiteral(entry.result),
       entry.securityDefiner ? "true" : "false",
+      sqlLiteral(volatility),
+      sqlLiteral(language),
+      sqlLiteral(`search_path=${searchPath.join(", ")}`),
       sqlLiteral(entry.definitionSha256),
-    ].join(", ")})`,
-  ).join(",\n    ");
+    ].join(", ")})`;
+  }).join(",\n    ");
 }
 
 function expectedTriggerValues() {
@@ -1698,6 +1806,9 @@ WITH
     identity_arguments,
     result_type,
     security_definer,
+    volatility,
+    language_name,
+    search_path_setting,
     definition_sha256
   ) AS (
     VALUES
@@ -1872,6 +1983,35 @@ SELECT
   ) AS dormant_function_nonowner_acl_count,
   (
     SELECT COUNT(*)::text
+    FROM pg_catalog.pg_type AS type_row
+    WHERE type_row.typnamespace = 'public'::regnamespace
+      AND type_row.typisdefined
+      AND type_row.typname = ANY(
+        ${sqlTextArray(DORMANT_IDENTITY_TYPES)}
+      )
+      AND type_row.typowner <> (
+        SELECT owner_oid
+        FROM database_owner
+      )
+  ) AS dormant_type_owner_mismatch_count,
+  (
+    SELECT COUNT(*)::text
+    FROM pg_catalog.pg_type AS type_row
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+      COALESCE(
+        type_row.typacl,
+        pg_catalog.acldefault('T', type_row.typowner)
+      )
+    ) AS privilege_row
+    WHERE type_row.typnamespace = 'public'::regnamespace
+      AND type_row.typisdefined
+      AND type_row.typname = ANY(
+        ${sqlTextArray(DORMANT_IDENTITY_TYPES)}
+      )
+      AND privilege_row.grantee <> type_row.typowner
+  ) AS dormant_type_nonowner_acl_count,
+  (
+    SELECT COUNT(*)::text
     FROM expected_column
   ) AS expected_column_count,
   (
@@ -2007,7 +2147,7 @@ SELECT
        expected.result_type
      AND function_row.prokind = 'f'
      AND function_row.prosecdef = expected.security_definer
-     AND function_row.provolatile = 'v'
+     AND function_row.provolatile::text = expected.volatility
      AND NOT function_row.proisstrict
      AND NOT function_row.proleakproof
      AND NOT function_row.proretset
@@ -2015,7 +2155,7 @@ SELECT
      AND function_row.provariadic = 0
      AND function_row.proparallel = 'u'
      AND function_row.proconfig =
-       ARRAY['search_path=pg_catalog']::text[]
+       ARRAY[expected.search_path_setting]::text[]
      AND function_row.proowner = (
        SELECT database_row.datdba
        FROM pg_catalog.pg_database AS database_row
@@ -2023,7 +2163,7 @@ SELECT
      )
     JOIN pg_catalog.pg_language AS language_row
       ON language_row.oid = function_row.prolang
-     AND language_row.lanname = 'plpgsql'
+     AND language_row.lanname = expected.language_name
     WHERE pg_catalog.encode(
       pg_catalog.sha256(
         pg_catalog.convert_to(
@@ -2042,6 +2182,7 @@ SELECT
         function_row.proname LIKE 'identity_email_claim_%'
         OR function_row.proname LIKE 'identity_owner_invite_%'
         OR function_row.proname LIKE 'identity_mail_outbox_%'
+        OR function_row.proname LIKE 'shared_beta_%'
       )
   ) AS actual_function_count,
   (
@@ -2758,6 +2899,20 @@ SELECT
       'EXECUTE'
     )
   ) AS executable_user_function_count,
+  (
+    SELECT COUNT(*)::text
+    FROM pg_catalog.pg_type AS type_row
+    WHERE type_row.typnamespace = 'public'::regnamespace
+      AND type_row.typisdefined
+      AND type_row.typname = ANY(
+        ${sqlTextArray(DORMANT_IDENTITY_TYPES)}
+      )
+      AND has_type_privilege(
+        current_user,
+        type_row.oid,
+        'USAGE'
+      )
+  ) AS dormant_type_usage_count,
   (
     SELECT COUNT(*)::text
     FROM pg_catalog.pg_foreign_server AS server_row
@@ -4089,6 +4244,12 @@ export function buildCatalogState(row) {
   const dormantFunctionNonownerAclCount = safeCount(
     row?.dormant_function_nonowner_acl_count,
   );
+  const dormantTypeOwnerMismatchCount = safeCount(
+    row?.dormant_type_owner_mismatch_count,
+  );
+  const dormantTypeNonownerAclCount = safeCount(
+    row?.dormant_type_nonowner_acl_count,
+  );
   const expectedColumnCount = safeCount(row?.expected_column_count);
   const matchedColumnCount = safeCount(row?.matched_column_count);
   const expectedExactIdentityColumnCount = safeCount(
@@ -4120,6 +4281,8 @@ export function buildCatalogState(row) {
       dormantColumnNonownerAclCount === 0 &&
       dormantFunctionOwnerMismatchCount === 0 &&
       dormantFunctionNonownerAclCount === 0 &&
+      dormantTypeOwnerMismatchCount === 0 &&
+      dormantTypeNonownerAclCount === 0 &&
       expectedColumnCount === EXPECTED_CATALOG_COLUMNS.length &&
       matchedColumnCount === EXPECTED_CATALOG_COLUMNS.length &&
       expectedExactIdentityColumnCount ===
@@ -4145,6 +4308,8 @@ export function buildCatalogState(row) {
     dormantColumnNonownerAclCount,
     dormantFunctionOwnerMismatchCount,
     dormantFunctionNonownerAclCount,
+    dormantTypeOwnerMismatchCount,
+    dormantTypeNonownerAclCount,
     expectedColumnCount,
     matchedColumnCount,
     expectedExactIdentityColumnCount,
@@ -4197,6 +4362,7 @@ const ZERO_PRIVILEGE_FIELDS = Object.freeze([
   "publicColumnPrivilegeCount",
   "sequencePrivilegeCount",
   "executableUserFunctionCount",
+  "dormantTypeUsageCount",
   "foreignServerUsageCount",
   "foreignDataWrapperUsageCount",
   "parameterPrivilegeCount",
@@ -4297,6 +4463,7 @@ export function buildPrivilegeState(
     executableUserFunctionCount: safeCount(
       row?.executable_user_function_count,
     ),
+    dormantTypeUsageCount: safeCount(row?.dormant_type_usage_count),
     foreignServerUsageCount: safeCount(row?.foreign_server_usage_count),
     foreignDataWrapperUsageCount: safeCount(
       row?.foreign_data_wrapper_usage_count,
@@ -4862,6 +5029,8 @@ function selfTestCatalogRow() {
     dormant_column_nonowner_acl_count: "0",
     dormant_function_owner_mismatch_count: "0",
     dormant_function_nonowner_acl_count: "0",
+    dormant_type_owner_mismatch_count: "0",
+    dormant_type_nonowner_acl_count: "0",
     expected_column_count: String(EXPECTED_CATALOG_COLUMNS.length),
     matched_column_count: String(EXPECTED_CATALOG_COLUMNS.length),
     expected_exact_identity_column_count: String(
@@ -4936,6 +5105,7 @@ function selfTestPrivilegeRow() {
     public_column_privilege_count: "0",
     sequence_privilege_count: "0",
     executable_user_function_count: "0",
+    dormant_type_usage_count: "0",
     foreign_server_usage_count: "0",
     foreign_data_wrapper_usage_count: "0",
     parameter_privilege_count: "0",

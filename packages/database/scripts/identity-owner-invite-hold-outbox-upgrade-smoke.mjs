@@ -1,23 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import {
-  cp,
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readdir,
-  rm,
-} from "node:fs/promises";
+import { cp, copyFile, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
-import {
-  APPLICATION_RUNTIME_FUNCTIONS,
-  buildRuntimeFunctionEnrollmentStatements,
-} from "./runtime-function-enrollment.mjs";
+import { APPLICATION_RUNTIME_FUNCTIONS } from "./runtime-function-enrollment.mjs";
 import {
   CURRENT_EXPECTED_LATEST_MIGRATION,
   CURRENT_EXPECTED_MIGRATION_COUNT,
@@ -30,8 +20,7 @@ import {
 const SCRIPT_NAME = "identity-owner-invite-hold-outbox-upgrade-smoke";
 const REQUIRED_CONFIRMATION =
   "run-identity-owner-invite-hold-outbox-upgrade-smoke";
-const TARGET_MIGRATION =
-  "20260730010000_identity_owner_invite_hold_outbox";
+const TARGET_MIGRATION = "20260730010000_identity_owner_invite_hold_outbox";
 const PREVIOUS_MIGRATION = "20260729233000_identity_activation_locator";
 const ISSUE_FUNCTION = "identity_owner_invite_issue_hold_v1";
 const ISSUE_CATALOG_SIGNATURE =
@@ -42,14 +31,11 @@ const MIGRATION_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
 const SAFE_SOURCE_DATABASE_PATTERN =
   /(?:^|[_-])(?:ci|test|testing)(?:$|[_-])/iu;
 const DATABASE_PREFIX = "lp_owner_hold_";
-const UPGRADE_DATABASE_PATTERN =
-  /^lp_owner_hold_upgrade_ci_[a-f0-9]{16}$/u;
-const CLEAN_DATABASE_PATTERN =
-  /^lp_owner_hold_clean_ci_[a-f0-9]{16}$/u;
+const UPGRADE_DATABASE_PATTERN = /^lp_owner_hold_upgrade_ci_[a-f0-9]{16}$/u;
+const CLEAN_DATABASE_PATTERN = /^lp_owner_hold_clean_ci_[a-f0-9]{16}$/u;
 const HOSTILE_ACL_DATABASE_PATTERN =
   /^lp_owner_hold_hostile_acl_ci_[a-f0-9]{16}$/u;
-const ROLE_PATTERN =
-  /^lp_owner_hold_(?:app|issuer|unsafe_acl)_[a-f0-9]{16}$/u;
+const ROLE_PATTERN = /^lp_owner_hold_(?:app|issuer|unsafe_acl)_[a-f0-9]{16}$/u;
 const TEMP_ROOT_PREFIX = "leetplus-owner-hold-upgrade-";
 const MIGRATION_TIMEOUT_MS = 10 * 60 * 1000;
 const CLUSTER_LOCK_CLASS = 1_281_120_000;
@@ -103,6 +89,24 @@ const NEW_SEALED_COLUMN_MANIFEST = Object.freeze({
     "createdAt",
   ]),
 });
+const HISTORICAL_CURRENT_171_IDENTITY_CLAIM_COLUMNS = Object.freeze([
+  "emailCanonical",
+  "claimType",
+  "tenantId",
+  "subjectId",
+  "revision",
+  "createdAt",
+  "updatedAt",
+  "workflowLocator",
+]);
+const HISTORICAL_CURRENT_171_EXCLUDED_FUNCTIONS = Object.freeze([
+  'public."guest_game_delivery_record_event_v1"(JSON)',
+  'public."identity_email_claim_lock_v1"(TEXT)',
+  'public."identity_email_claim_reserve_invite_v1"(TEXT, TEXT, TEXT)',
+  'public."identity_email_claim_transition_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT)',
+  'public."identity_email_claim_release_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER)',
+  ISSUE_GRANT_SIGNATURE,
+]);
 const COLUMN_PRIVILEGES = Object.freeze([
   "SELECT",
   "INSERT",
@@ -189,6 +193,49 @@ function quoteIdentifier(value) {
   return `"${value}"`;
 }
 
+function buildHistoricalCurrent171RuntimeEnrollmentStatements(roleName) {
+  assert.equal(
+    APPLICATION_RUNTIME_FUNCTIONS.length,
+    7,
+    "The historical CURRENT_171 runtime function manifest changed.",
+  );
+  const role = quoteIdentifier(roleName);
+  const sealedTables = [
+    [
+      'public."IdentityEmailClaim"',
+      HISTORICAL_CURRENT_171_IDENTITY_CLAIM_COLUMNS,
+    ],
+    [
+      'public."IdentityOwnerInviteIssueCommand"',
+      NEW_SEALED_COLUMN_MANIFEST.IdentityOwnerInviteIssueCommand,
+    ],
+    [
+      'public."IdentityMailOutbox"',
+      NEW_SEALED_COLUMN_MANIFEST.IdentityMailOutbox,
+    ],
+  ];
+  return Object.freeze([
+    ...sealedTables.flatMap(([tableName, columns]) => {
+      const columnList = columns
+        .map((columnName) => quoteIdentifier(columnName))
+        .join(", ");
+      return [
+        `REVOKE ALL PRIVILEGES ON TABLE ${tableName} FROM ${role}`,
+        `REVOKE ALL PRIVILEGES ON TABLE ${tableName} FROM PUBLIC`,
+        `REVOKE ALL PRIVILEGES (${columnList}) ON TABLE ${tableName} FROM ${role}`,
+        `REVOKE ALL PRIVILEGES (${columnList}) ON TABLE ${tableName} FROM PUBLIC`,
+      ];
+    }),
+    ...APPLICATION_RUNTIME_FUNCTIONS.flatMap((entry) => [
+      `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
+      `REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION ${entry.grantSignature} FROM ${role}`,
+    ]),
+    ...HISTORICAL_CURRENT_171_EXCLUDED_FUNCTIONS.map(
+      (signature) => `REVOKE EXECUTE ON FUNCTION ${signature} FROM ${role}`,
+    ),
+  ]);
+}
+
 function parseSafeSourceDatabaseUrl(rawDatabaseUrl) {
   if (typeof rawDatabaseUrl !== "string" || rawDatabaseUrl.length === 0) {
     contractError("DATABASE_URL_REQUIRED");
@@ -252,8 +299,7 @@ function generatedNames() {
   return {
     upgradeDatabaseName: `${DATABASE_PREFIX}upgrade_ci_${suffix}`,
     cleanDatabaseName: `${DATABASE_PREFIX}clean_ci_${suffix}`,
-    hostileAclDatabaseName:
-      `${DATABASE_PREFIX}hostile_acl_ci_${suffix}`,
+    hostileAclDatabaseName: `${DATABASE_PREFIX}hostile_acl_ci_${suffix}`,
     appRoleName: `${DATABASE_PREFIX}app_${suffix}`,
     issuerRoleName: `${DATABASE_PREFIX}issuer_${suffix}`,
     unsafeAclRoleName: `${DATABASE_PREFIX}unsafe_acl_${suffix}`,
@@ -312,18 +358,26 @@ async function readMigrationPlan() {
     migrationDirectories[STAFF_TASK_FROZEN_PREFIX_COUNT - 1],
     STAFF_TASK_FROZEN_PREFIX_LATEST,
   );
-  assert.deepEqual(
-    migrationDirectories.slice(STAFF_TASK_FROZEN_PREFIX_COUNT),
-    [...STAFF_TASK_ALLOWED_ADDITIVE_TAIL],
+  assert.deepEqual(migrationDirectories.slice(STAFF_TASK_FROZEN_PREFIX_COUNT), [
+    ...STAFF_TASK_ALLOWED_ADDITIVE_TAIL,
+  ]);
+  assert.equal(
+    CURRENT_EXPECTED_LATEST_MIGRATION,
+    "20260730020000_shared_beta_admission_provenance",
   );
-  assert.equal(migrationDirectories.at(-2), PREVIOUS_MIGRATION);
-  assert.equal(migrationDirectories.at(-1), TARGET_MIGRATION);
-  assert.equal(CURRENT_EXPECTED_LATEST_MIGRATION, TARGET_MIGRATION);
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_171");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_172");
+  const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
+  assert.equal(
+    targetIndex,
+    170,
+    "The historical OWNER HOLD migration moved in the release manifest.",
+  );
+  assert.equal(migrationDirectories[targetIndex - 1], PREVIOUS_MIGRATION);
+  const historicalMigrations = migrationDirectories.slice(0, targetIndex + 1);
   return {
     sourcePrismaDir,
-    prefixMigrations: migrationDirectories.slice(0, -1),
-    allMigrations: migrationDirectories,
+    prefixMigrations: historicalMigrations.slice(0, -1),
+    allMigrations: historicalMigrations,
     targetMigration: TARGET_MIGRATION,
   };
 }
@@ -343,11 +397,7 @@ async function createMigrationArtifact(tempRoot, migrationPlan) {
   );
   for (const migrationName of migrationPlan.prefixMigrations) {
     await cp(
-      join(
-        migrationPlan.sourcePrismaDir,
-        "migrations",
-        migrationName,
-      ),
+      join(migrationPlan.sourcePrismaDir, "migrations", migrationName),
       join(targetMigrationsDir, migrationName),
       { recursive: true },
     );
@@ -410,11 +460,7 @@ function expectMigrateDeployFailure(schemaPath, databaseUrl) {
   );
 }
 
-function runMigrateResolveRolledBack(
-  schemaPath,
-  databaseUrl,
-  migrationName,
-) {
+function runMigrateResolveRolledBack(schemaPath, databaseUrl, migrationName) {
   assert.equal(migrationName, TARGET_MIGRATION);
   const require = createRequire(import.meta.url);
   const prismaCliPath = require.resolve("prisma/build/index.js");
@@ -1013,10 +1059,7 @@ function assertAggregate(aggregate, input, canonicalEmail) {
   assert.ok(aggregate.command);
   assert.equal(aggregate.command.tenantId, input.tenantId);
   assert.equal(aggregate.command.requestId, input.requestId);
-  assert.equal(
-    aggregate.command.issueRequestDigest,
-    input.requestDigest,
-  );
+  assert.equal(aggregate.command.issueRequestDigest, input.requestDigest);
   assert.equal(aggregate.command.aadEnvironment, input.aadEnvironment);
   assert.equal(aggregate.command.workflowLocator, input.workflowLocator);
   assert.equal(
@@ -1087,7 +1130,12 @@ function extractSqlStates(error) {
       }
     }
     if (typeof candidate === "object") {
-      for (const key of ["cause", "meta", "originalError", "driverAdapterError"]) {
+      for (const key of [
+        "cause",
+        "meta",
+        "originalError",
+        "driverAdapterError",
+      ]) {
         if (candidate[key] !== undefined) pending.push(candidate[key]);
       }
     }
@@ -1273,9 +1321,7 @@ async function assertCatalog(client) {
        AND NOT attribute.attisdropped
      ORDER BY relation.relname, attribute.attname`,
   );
-  const expectedColumnAclRows = Object.entries(
-    NEW_SEALED_COLUMN_MANIFEST,
-  )
+  const expectedColumnAclRows = Object.entries(NEW_SEALED_COLUMN_MANIFEST)
     .flatMap(([tableName, columns]) =>
       columns.map((columnName) => ({
         table_name: tableName,
@@ -1318,26 +1364,21 @@ async function assertAuthorityFailures(client, fixtures) {
       "wrong locator",
       cloneIssueInput(mainInput, { workflowLocator: randomUUID() }),
     ],
-    [
-      "wrong tenant",
-      cloneIssueInput(mainInput, { tenantId: otherTenantId }),
-    ],
+    ["wrong tenant", cloneIssueInput(mainInput, { tenantId: otherTenantId })],
     [
       "wrong subject",
       cloneIssueInput(mainInput, { reservationSubjectId: randomUUID() }),
     ],
-    [
-      "wrong revision",
-      cloneIssueInput(mainInput, { expectedRevision: 2 }),
-    ],
+    ["wrong revision", cloneIssueInput(mainInput, { expectedRevision: 2 })],
     ["wrong type", typeInput],
   ];
   for (const [label, input] of failures) {
-    await expectDatabaseFailure(
-      label,
-      () => issue(client, input),
-      ["22023", "23503", "23505", "23514"],
-    );
+    await expectDatabaseFailure(label, () => issue(client, input), [
+      "22023",
+      "23503",
+      "23505",
+      "23514",
+    ]);
   }
 
   const malformed = [
@@ -1363,10 +1404,7 @@ async function assertAuthorityFailures(client, fixtures) {
     );
   }
   await assertNoAggregate(client, mainInput);
-  const claim = await readClaimByLocator(
-    client,
-    mainInput.workflowLocator,
-  );
+  const claim = await readClaimByLocator(client, mainInput.workflowLocator);
   assert.equal(claim.subject_id, mainInput.reservationSubjectId);
   assert.equal(claim.revision, 1);
 }
@@ -1577,9 +1615,7 @@ async function assertImmutableAndProgressedMismatch(
 }
 
 async function assertConcurrentReplay(databaseUrl, input, canonicalEmail) {
-  const clients = Array.from({ length: 16 }, () =>
-    prismaClient(databaseUrl),
-  );
+  const clients = Array.from({ length: 16 }, () => prismaClient(databaseUrl));
   try {
     const contenders = 100;
     const receipts = await Promise.all(
@@ -1604,7 +1640,11 @@ async function assertConcurrentReplay(databaseUrl, input, canonicalEmail) {
   }
   const verifier = prismaClient(databaseUrl);
   try {
-    assertAggregate(await readAggregate(verifier, input), input, canonicalEmail);
+    assertAggregate(
+      await readAggregate(verifier, input),
+      input,
+      canonicalEmail,
+    );
   } finally {
     await verifier.$disconnect();
   }
@@ -1651,10 +1691,7 @@ function assertConflictIsGeneric(error, inputs, canonicalEmail) {
   }
 }
 
-async function waitForSharedBarrierWaiters(
-  coordinator,
-  barrierObject,
-) {
+async function waitForSharedBarrierWaiters(coordinator, barrierObject) {
   for (let attempt = 0; attempt < 500; attempt += 1) {
     const [row] = await coordinator.$queryRawUnsafe(
       `SELECT pg_catalog.count(*)::integer AS waiter_count
@@ -1673,9 +1710,7 @@ async function waitForSharedBarrierWaiters(
       barrierObject,
     );
     if (row?.waiter_count === 2) return;
-    await new Promise((resolvePromise) =>
-      setTimeout(resolvePromise, 20),
-    );
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
   assert.fail("two locator contenders did not reach the shared barrier");
 }
@@ -1686,12 +1721,8 @@ async function assertDifferentRequestSameLocatorConcurrency(
   canonicalEmail,
 ) {
   const coordinator = prismaClient(databaseUrl);
-  const contenders = [
-    prismaClient(databaseUrl),
-    prismaClient(databaseUrl),
-  ];
-  const barrierObject =
-    randomBytes(4).readUInt32BE(0) % 2_147_483_647;
+  const contenders = [prismaClient(databaseUrl), prismaClient(databaseUrl)];
+  const barrierObject = randomBytes(4).readUInt32BE(0) % 2_147_483_647;
   const inputs = [
     cloneIssueInput(baseInput),
     cloneIssueInput(baseInput, {
@@ -1794,11 +1825,7 @@ async function assertDifferentRequestSameLocatorConcurrency(
   const winner = fulfilled[0];
   const loser = rejected[0];
   assertExactReceipt(winner.value, inputs[winner.index], "CREATED");
-  assertReceiptIsPiiFree(
-    winner.value,
-    inputs[winner.index],
-    canonicalEmail,
-  );
+  assertReceiptIsPiiFree(winner.value, inputs[winner.index], canonicalEmail);
   assertConflictIsGeneric(loser.reason, inputs, canonicalEmail);
 
   const verifier = prismaClient(databaseUrl);
@@ -1856,10 +1883,7 @@ async function assertRoleHasNoTablePrivileges(admin, roleName) {
   }
 }
 
-async function assertRoleHasNoEffectiveNewColumnPrivileges(
-  admin,
-  roleName,
-) {
+async function assertRoleHasNoEffectiveNewColumnPrivileges(admin, roleName) {
   assertSafeRoleName(roleName);
   const rows = await admin.$queryRawUnsafe(
     `SELECT
@@ -1941,10 +1965,7 @@ async function assertEnumUsageWithoutAuthority(
   );
   await assertRoleHasNoTablePrivileges(admin, role.roleName);
   const effectiveColumnPrivilegeChecks =
-    await assertRoleHasNoEffectiveNewColumnPrivileges(
-      admin,
-      role.roleName,
-    );
+    await assertRoleHasNoEffectiveNewColumnPrivileges(admin, role.roleName);
 
   const [privileges] = await admin.$queryRawUnsafe(
     `SELECT
@@ -1973,12 +1994,7 @@ async function assertEnumUsageWithoutAuthority(
   });
 
   const roleClient = prismaClient(
-    databaseUrlFor(
-      sourceUrl,
-      databaseName,
-      role.roleName,
-      role.password,
-    ),
+    databaseUrlFor(sourceUrl, databaseName, role.roleName, role.password),
   );
   const probeInput = issueInput({
     tenantId: randomUUID(),
@@ -2027,7 +2043,7 @@ async function assertCleanAcl(
   await admin.$executeRawUnsafe(
     `GRANT USAGE ON SCHEMA public TO ${appRole}, ${issuerRole}`,
   );
-  for (const statement of buildRuntimeFunctionEnrollmentStatements(
+  for (const statement of buildHistoricalCurrent171RuntimeEnrollmentStatements(
     roles.appRoleName,
   )) {
     await admin.$executeRawUnsafe(statement);
@@ -2039,10 +2055,7 @@ async function assertCleanAcl(
   await assertRoleHasNoTablePrivileges(admin, roles.appRoleName);
   await assertRoleHasNoTablePrivileges(admin, roles.issuerRoleName);
   const applicationColumnPrivilegeChecks =
-    await assertRoleHasNoEffectiveNewColumnPrivileges(
-      admin,
-      roles.appRoleName,
-    );
+    await assertRoleHasNoEffectiveNewColumnPrivileges(admin, roles.appRoleName);
   const issuerColumnPrivilegeChecks =
     await assertRoleHasNoEffectiveNewColumnPrivileges(
       admin,
@@ -2081,11 +2094,7 @@ async function assertCleanAcl(
     }
     const receipt = await issue(issuerClient, fixture.input);
     assertExactReceipt(receipt, fixture.input, "CREATED");
-    assertReceiptIsPiiFree(
-      receipt,
-      fixture.input,
-      fixture.canonicalEmail,
-    );
+    assertReceiptIsPiiFree(receipt, fixture.input, fixture.canonicalEmail);
   } finally {
     await appClient.$disconnect();
     await issuerClient.$disconnect();
@@ -2318,6 +2327,15 @@ async function runOfflineSelfTest() {
   assert.equal(plan.targetMigration, TARGET_MIGRATION);
   assert.equal(plan.allMigrations.length, 171);
   assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 7);
+  const historicalEnrollment =
+    buildHistoricalCurrent171RuntimeEnrollmentStatements(
+      "lp_owner_hold_app_0123456789abcdef",
+    );
+  assert.equal(historicalEnrollment.length, 32);
+  assert.doesNotMatch(
+    historicalEnrollment.join("\n"),
+    /shared_beta_|SharedBetaReleaseGateCode/u,
+  );
   process.stdout.write(
     `${JSON.stringify({
       script: SCRIPT_NAME,
@@ -2348,15 +2366,9 @@ async function runRealSmoke(environment) {
     unsafeAclPassword: randomBytes(32).toString("hex"),
   };
   const sourceUrlValue = databaseUrlFor(sourceUrl, sourceDatabaseName);
-  const upgradeUrl = databaseUrlFor(
-    sourceUrl,
-    names.upgradeDatabaseName,
-  );
+  const upgradeUrl = databaseUrlFor(sourceUrl, names.upgradeDatabaseName);
   const cleanUrl = databaseUrlFor(sourceUrl, names.cleanDatabaseName);
-  const hostileAclUrl = databaseUrlFor(
-    sourceUrl,
-    names.hostileAclDatabaseName,
-  );
+  const hostileAclUrl = databaseUrlFor(sourceUrl, names.hostileAclDatabaseName);
   const admin = prismaClient(sourceUrlValue);
   let tempRoot;
   let lockHeld = false;
@@ -2383,11 +2395,7 @@ async function runRealSmoke(environment) {
       await createDatabase(admin, databaseName);
       createdDatabases.push(databaseName);
     }
-    await createRole(
-      admin,
-      roles.unsafeAclRoleName,
-      roles.unsafeAclPassword,
-    );
+    await createRole(admin, roles.unsafeAclRoleName, roles.unsafeAclPassword);
     createdRoles.push(roles.unsafeAclRoleName);
     await grantDatabaseConnection(
       admin,
@@ -2402,10 +2410,7 @@ async function runRealSmoke(environment) {
     let fixtures;
     let progressedState;
     try {
-      await assertAppliedMigrations(
-        upgrade,
-        migrationPlan.prefixMigrations,
-      );
+      await assertAppliedMigrations(upgrade, migrationPlan.prefixMigrations);
       fixtures = await createCurrent170Fixtures(upgrade, prefix);
     } finally {
       await upgrade.$disconnect();
@@ -2437,10 +2442,7 @@ async function runRealSmoke(environment) {
 
     const hostileAfterFailure = prismaClient(hostileAclUrl);
     try {
-      await assertTargetMigrationRolledBack(
-        hostileAfterFailure,
-        migrationPlan,
-      );
+      await assertTargetMigrationRolledBack(hostileAfterFailure, migrationPlan);
       await assertUnsafeDefaultPrivileges(
         hostileAfterFailure,
         roles.unsafeAclRoleName,
@@ -2499,15 +2501,9 @@ async function runRealSmoke(environment) {
         roles.unsafeAclRoleName,
         false,
       );
-      await assertUnsafeColumnAclInjector(
-        hostileColumnAfterFailure,
-        true,
-      );
+      await assertUnsafeColumnAclInjector(hostileColumnAfterFailure, true);
       await dropUnsafeColumnAclInjector(hostileColumnAfterFailure);
-      await assertUnsafeColumnAclInjector(
-        hostileColumnAfterFailure,
-        false,
-      );
+      await assertUnsafeColumnAclInjector(hostileColumnAfterFailure, false);
     } finally {
       await hostileColumnAfterFailure.$disconnect();
     }
@@ -2734,8 +2730,7 @@ async function main() {
 
 main().catch((error) => {
   const code =
-    typeof error?.code === "string" &&
-    !/^[0-9A-Z]{5}$/u.test(error.code)
+    typeof error?.code === "string" && !/^[0-9A-Z]{5}$/u.test(error.code)
       ? error.code
       : "IDENTITY_OWNER_INVITE_HOLD_OUTBOX_UPGRADE_SMOKE_FAILED";
   process.stderr.write(
@@ -2743,7 +2738,8 @@ main().catch((error) => {
       script: SCRIPT_NAME,
       status: "FAIL",
       code,
-      message: "The isolated owner-invite HOLD PostgreSQL smoke failed; detailed database output is suppressed.",
+      message:
+        "The isolated owner-invite HOLD PostgreSQL smoke failed; detailed database output is suppressed.",
     })}\n`,
   );
   process.exitCode = 1;

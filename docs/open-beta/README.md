@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.40                                         |
+| Версия           | 1.41                                         |
 | Дата             | 30.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -188,6 +188,24 @@ enterprise-isolation option и не сокращает shared gates.
     [`30501299486`](https://github.com/boozik3412/leetplus/actions/runs/30501299486)
     (`run #50`) — `3/3 PASS`, independent review — P0/P1/P2=0. Внешний
     `NO-GO` не изменён.
+32. [Signed shared-beta admission provenance](./shared-beta-admission-provenance.md) —
+    `BETA-IAM-004H` / будущая migration 172: отдельные Ed25519-bound gate
+    attestations и tenant admission decision, exact three-gate set,
+    целостность заявленных release/environment/schema/database/tenant/identity/
+    profile claims, create/assert/revoke без consumption и пустой production
+    root registry. Actual current DB/release context этот checkpoint независимо
+    не получает; `shellEvidenceDigest` здесь тоже является только signed claim и
+    не доказывает фактические Store/OWNER override/provisioning audit. Их
+    locked re-read, domain-separated recomputation и hard match обязательны в
+    `BETA-IAM-004I` до issue и повторно до consume.
+    Identity assert допускает только exact reservation либо доказанный
+    immutable command + live `OWNER/NETWORK` invite + encrypted `HOLD` outbox.
+    Отдельный PG16 test обязан доказать
+    `seal → один issue RPC → persisted outbox → open`. Standalone
+    `HOLD→PENDING` запрещён: он появится только в будущей единой activation
+    transaction вместе с trial, `ACTIVE/OWNER_INVITED` и persisted-GO consume.
+    SMTP, route, production и tester account не входят; статус
+    `IMPLEMENTATION_IN_PROGRESS / NO-GO`.
 
 Текущий schema target рабочего кандидата — `CURRENT_171`. Локальный
 PostgreSQL 16 подтвердил clean deploy `171/171`, populated `170 → 171`,

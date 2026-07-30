@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import {
+  SHARED_BETA_ADMISSION_COLUMNS,
+  SHARED_BETA_ADMISSION_FUNCTIONS,
+  SHARED_BETA_ADMISSION_GATE_CODES,
+  SHARED_BETA_ADMISSION_RELATIONS,
+  SHARED_BETA_ADMISSION_TYPES,
+} from "./shared-beta-admission-provenance-catalog.mjs";
 
 export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
-  "20260730010000_identity_owner_invite_hold_outbox";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 171;
+  "20260730020000_shared_beta_admission_provenance";
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 172;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -20,10 +27,8 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   }),
   Object.freeze({
     key: "rewardDeliveryLock",
-    catalogSignature:
-      'public."guest_game_reward_delivery_lock_v1"(text,text)',
-    grantSignature:
-      'public."guest_game_reward_delivery_lock_v1"(TEXT, TEXT)',
+    catalogSignature: 'public."guest_game_reward_delivery_lock_v1"(text,text)',
+    grantSignature: 'public."guest_game_reward_delivery_lock_v1"(TEXT, TEXT)',
     securityDefiner: false,
     volatility: "v",
   }),
@@ -77,10 +82,8 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
 export const EXCLUDED_WORKER_FUNCTIONS = Object.freeze([
   Object.freeze({
     key: "durableDeliveryEventWriter",
-    catalogSignature:
-      'public."guest_game_delivery_record_event_v1"(json)',
-    grantSignature:
-      'public."guest_game_delivery_record_event_v1"(JSON)',
+    catalogSignature: 'public."guest_game_delivery_record_event_v1"(json)',
+    grantSignature: 'public."guest_game_delivery_record_event_v1"(JSON)',
     securityDefiner: true,
     volatility: "v",
   }),
@@ -89,10 +92,8 @@ export const EXCLUDED_WORKER_FUNCTIONS = Object.freeze([
 export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
   Object.freeze({
     key: "identityEmailClaimDirectLock",
-    catalogSignature:
-      'public."identity_email_claim_lock_v1"(text)',
-    grantSignature:
-      'public."identity_email_claim_lock_v1"(TEXT)',
+    catalogSignature: 'public."identity_email_claim_lock_v1"(text)',
+    grantSignature: 'public."identity_email_claim_lock_v1"(TEXT)',
     securityDefiner: false,
     volatility: "v",
   }),
@@ -134,15 +135,39 @@ export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
   }),
 ]);
 
+assert.equal(
+  SHARED_BETA_ADMISSION_FUNCTIONS.length,
+  9,
+  "CURRENT_172 must expose exactly nine dormant admission functions.",
+);
+export const EXCLUDED_ADMISSION_FUNCTIONS = Object.freeze(
+  SHARED_BETA_ADMISSION_FUNCTIONS.map((entry) => {
+    assert.deepEqual(
+      entry.searchPath,
+      ["pg_catalog"],
+      `${entry.name} must use the sealed pg_catalog search_path.`,
+    );
+    return Object.freeze({
+      key: entry.name,
+      catalogSignature: entry.catalogSignature,
+      grantSignature: entry.grantSignature,
+      securityDefiner: entry.securityDefiner,
+      volatility: entry.volatility,
+      language: entry.language,
+    });
+  }),
+);
+
 const EXCLUDED_RUNTIME_FUNCTIONS = Object.freeze([
   ...EXCLUDED_WORKER_FUNCTIONS,
   ...EXCLUDED_PENDING_FUNCTIONS,
+  ...EXCLUDED_ADMISSION_FUNCTIONS,
 ]);
 const ALL_RUNTIME_FUNCTIONS = Object.freeze([
   ...APPLICATION_RUNTIME_FUNCTIONS,
   ...EXCLUDED_RUNTIME_FUNCTIONS,
 ]);
-export const SEALED_RUNTIME_TABLES = Object.freeze([
+const LEGACY_SEALED_RUNTIME_TABLES = Object.freeze([
   Object.freeze({
     key: "identityEmailClaim",
     catalogName: 'public."IdentityEmailClaim"',
@@ -210,6 +235,76 @@ export const SEALED_RUNTIME_TABLES = Object.freeze([
     ]),
   }),
 ]);
+assert.equal(
+  SHARED_BETA_ADMISSION_RELATIONS.length,
+  3,
+  "CURRENT_172 must expose exactly three sealed admission tables.",
+);
+assert.equal(
+  SHARED_BETA_ADMISSION_COLUMNS.length,
+  64,
+  "CURRENT_172 must expose exactly 64 sealed admission columns.",
+);
+const ADMISSION_SEALED_RUNTIME_TABLES = Object.freeze(
+  SHARED_BETA_ADMISSION_RELATIONS.map((relationName) => {
+    const columns = SHARED_BETA_ADMISSION_COLUMNS.filter(
+      ([candidateRelation]) => candidateRelation === relationName,
+    ).map(([, columnName]) => columnName);
+    assert.ok(
+      columns.length > 0,
+      `Admission table ${relationName} has no exact column manifest.`,
+    );
+    return Object.freeze({
+      key: relationName[0].toLowerCase() + relationName.slice(1),
+      catalogName: `public.${quoteIdentifier(relationName)}`,
+      grantName: `public.${quoteIdentifier(relationName)}`,
+      columns: Object.freeze(columns),
+    });
+  }),
+);
+export const SEALED_RUNTIME_TABLES = Object.freeze([
+  ...LEGACY_SEALED_RUNTIME_TABLES,
+  ...ADMISSION_SEALED_RUNTIME_TABLES,
+]);
+assert.equal(
+  SEALED_RUNTIME_TABLES.reduce(
+    (count, entry) => count + entry.columns.length,
+    0,
+  ),
+  109,
+  "CURRENT_172 must seal exactly 109 runtime-inaccessible columns.",
+);
+assert.equal(
+  SHARED_BETA_ADMISSION_TYPES.length,
+  1,
+  "CURRENT_172 must expose exactly one sealed admission enum.",
+);
+assert.equal(
+  SHARED_BETA_ADMISSION_GATE_CODES.length,
+  3,
+  "CURRENT_172 must expose exactly three admission gate codes.",
+);
+export const SEALED_RUNTIME_TYPES = Object.freeze(
+  SHARED_BETA_ADMISSION_TYPES.map((entry) => {
+    assert.equal(entry.kind, "e", `${entry.name} must remain an enum.`);
+    assert.equal(
+      entry.ownerPolicy,
+      "DATABASE_OWNER",
+      `${entry.name} must remain database-owner-owned.`,
+    );
+    assert.equal(
+      entry.aclPolicy,
+      "OWNER_USAGE_ONLY",
+      `${entry.name} must remain owner-only.`,
+    );
+    return Object.freeze({
+      key: entry.name[0].toLowerCase() + entry.name.slice(1),
+      catalogName: `public.${quoteIdentifier(entry.name)}`,
+      grantName: `public.${quoteIdentifier(entry.name)}`,
+      labels: Object.freeze([...SHARED_BETA_ADMISSION_GATE_CODES]),
+    });
+  }),
+);
 const EFFECTIVE_COLUMN_PRIVILEGE_FIELDS = Object.freeze([
   "canSelect",
   "canInsert",
@@ -246,10 +341,7 @@ export function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
 
-export function expectedApplyConfirmation(
-  databaseName,
-  roleName,
-) {
+export function expectedApplyConfirmation(databaseName, roleName) {
   return [
     "APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1",
     databaseName,
@@ -259,10 +351,7 @@ export function expectedApplyConfirmation(
   ].join(" ");
 }
 
-export function parseRuntimeFunctionEnrollmentConfig(
-  environment,
-  mode,
-) {
+export function parseRuntimeFunctionEnrollmentConfig(environment, mode) {
   if (mode !== "check" && mode !== "apply") {
     contractError(
       "RUNTIME_FUNCTION_ENROLLMENT_MODE_INVALID",
@@ -346,9 +435,7 @@ export function parseRuntimeFunctionEnrollmentConfig(
     );
   }
 
-  const roleName = stringValue(
-    environment.RUNTIME_FUNCTION_ENROLLMENT_ROLE,
-  );
+  const roleName = stringValue(environment.RUNTIME_FUNCTION_ENROLLMENT_ROLE);
   if (!SAFE_ROLE_NAME.test(roleName) || roleName === "public") {
     contractError(
       "RUNTIME_FUNCTION_ENROLLMENT_ROLE_INVALID",
@@ -377,8 +464,7 @@ export function parseRuntimeFunctionEnrollmentConfig(
     databaseUrl: rawDatabaseUrl,
     roleName,
     expectedMigration: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION,
-    expectedMigrationCount:
-      RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT,
+    expectedMigrationCount: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT,
     requiredConfirmation,
   });
 }
@@ -388,37 +474,72 @@ export function runtimeFunctionContractDigest() {
     .update(
       JSON.stringify({
         schemaVersion: RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION,
-        requiredMigration:
-          RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION,
+        requiredMigration: RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION,
         migration: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION,
-        migrationCount:
-          RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT,
+        migrationCount: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT,
         exactFunctionSearchPath: "pg_catalog",
         application: APPLICATION_RUNTIME_FUNCTIONS.map(
-          ({ key, catalogSignature, securityDefiner, volatility }) => ({
+          ({
             key,
             catalogSignature,
             securityDefiner,
             volatility,
+            language,
+          }) => ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+            language: language ?? null,
           }),
         ),
         excludedWorker: EXCLUDED_WORKER_FUNCTIONS.map(
-          ({ key, catalogSignature, securityDefiner, volatility }) => ({
+          ({
             key,
             catalogSignature,
             securityDefiner,
             volatility,
+            language,
+          }) => ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+            language: language ?? null,
           }),
         ),
         excludedPending: EXCLUDED_PENDING_FUNCTIONS.map(
-          ({ key, catalogSignature, securityDefiner, volatility }) => ({
+          ({
             key,
             catalogSignature,
             securityDefiner,
             volatility,
+            language,
+          }) => ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+            language: language ?? null,
+          }),
+        ),
+        excludedAdmission: EXCLUDED_ADMISSION_FUNCTIONS.map(
+          ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+            language,
+          }) => ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+            language,
           }),
         ),
         sealedTables: SEALED_RUNTIME_TABLES,
+        sealedTypes: SEALED_RUNTIME_TYPES,
       }),
     )
     .digest("hex");
@@ -451,6 +572,14 @@ export function buildRuntimeFunctionEnrollmentStatements(roleName) {
       `REVOKE ALL PRIVILEGES (${columns}) ON TABLE ${entry.grantName} FROM PUBLIC`,
     );
   }
+  for (const entry of SEALED_RUNTIME_TYPES) {
+    statements.push(
+      `REVOKE ALL PRIVILEGES ON TYPE ${entry.grantName} FROM ${role}`,
+    );
+    statements.push(
+      `REVOKE ALL PRIVILEGES ON TYPE ${entry.grantName} FROM PUBLIC`,
+    );
+  }
   for (const entry of APPLICATION_RUNTIME_FUNCTIONS) {
     statements.push(
       `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
@@ -476,6 +605,7 @@ async function inspectFunction(prisma, roleName, entry) {
         owner_role.rolname AS owner_name,
         function_object.prosecdef AS security_definer,
         function_object.provolatile::text AS volatility,
+        language_object.lanname AS language_name,
         COALESCE(
           function_object.proconfig =
             ARRAY['search_path=pg_catalog']::TEXT[],
@@ -550,6 +680,8 @@ async function inspectFunction(prisma, roleName, entry) {
         ON function_object.oid = requested.oid
       LEFT JOIN pg_catalog.pg_roles AS owner_role
         ON owner_role.oid = function_object.proowner
+      LEFT JOIN pg_catalog.pg_language AS language_object
+        ON language_object.oid = function_object.prolang
       CROSS JOIN pg_catalog.pg_roles AS target_role
       WHERE target_role.rolname = $1
     `,
@@ -563,13 +695,14 @@ async function inspectFunction(prisma, roleName, entry) {
     grantSignature: entry.grantSignature,
     expectedSecurityDefiner: entry.securityDefiner,
     expectedVolatility: entry.volatility,
+    expectedLanguage:
+      typeof entry.language === "string" ? entry.language : null,
     exists: row?.exists === true,
     ownerName: typeof row?.owner_name === "string" ? row.owner_name : null,
     securityDefiner: row?.security_definer === true,
-    searchPathPgCatalogOnly:
-      row?.search_path_pg_catalog_only === true,
-    volatility:
-      typeof row?.volatility === "string" ? row.volatility : null,
+    searchPathPgCatalogOnly: row?.search_path_pg_catalog_only === true,
+    volatility: typeof row?.volatility === "string" ? row.volatility : null,
+    language: typeof row?.language_name === "string" ? row.language_name : null,
     effectiveExecute: row?.effective_execute === true,
     directExecute: row?.direct_execute === true,
     targetGrantOption: row?.target_grant_option === true,
@@ -792,10 +925,7 @@ async function inspectSealedTable(prisma, roleName, entry) {
   );
   const row = rows[0];
   const columns = columnRows.map((column) => ({
-    name:
-      typeof column.column_name === "string"
-        ? column.column_name
-        : null,
+    name: typeof column.column_name === "string" ? column.column_name : null,
     canSelect: column.can_select === true,
     canInsert: column.can_insert === true,
     canUpdate: column.can_update === true,
@@ -812,9 +942,7 @@ async function inspectSealedTable(prisma, roleName, entry) {
     expectedColumns: [...entry.columns],
     columnManifestMatches:
       columns.length === entry.columns.length &&
-      columns.every(
-        (column, index) => column.name === entry.columns[index],
-      ),
+      columns.every((column, index) => column.name === entry.columns[index]),
     exists: row?.exists === true,
     ownerName: typeof row?.owner_name === "string" ? row.owner_name : null,
     canSelect: row?.can_select === true,
@@ -829,6 +957,126 @@ async function inspectSealedTable(prisma, roleName, entry) {
       (column) => column.publicAnyPrivilege,
     ),
     columns,
+    grantorCanRevoke: row?.grantor_can_revoke === true,
+  };
+}
+
+async function inspectSealedType(prisma, roleName, entry) {
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      SELECT
+        type_object.oid IS NOT NULL AS exists,
+        owner_role.rolname AS owner_name,
+        CASE
+          WHEN type_object.oid IS NULL THEN FALSE
+          ELSE pg_catalog.has_type_privilege(
+            $1,
+            type_object.oid,
+            'USAGE'
+          )
+        END AS effective_usage,
+        COALESCE(
+          (
+            SELECT pg_catalog.bool_or(
+              type_acl.grantee = target_role.oid
+              AND type_acl.privilege_type = 'USAGE'
+            )
+            FROM pg_catalog.aclexplode(
+              COALESCE(
+                type_object.typacl,
+                pg_catalog.acldefault('T', type_object.typowner)
+              )
+            ) AS type_acl
+          ),
+          FALSE
+        ) AS direct_usage,
+        COALESCE(
+          (
+            SELECT pg_catalog.bool_or(
+              type_acl.grantee = target_role.oid
+              AND type_acl.privilege_type = 'USAGE'
+              AND type_acl.is_grantable
+            )
+            FROM pg_catalog.aclexplode(
+              COALESCE(
+                type_object.typacl,
+                pg_catalog.acldefault('T', type_object.typowner)
+              )
+            ) AS type_acl
+          ),
+          FALSE
+        ) AS target_grant_option,
+        COALESCE(
+          (
+            SELECT pg_catalog.bool_or(
+              type_acl.grantee = 0
+              AND type_acl.privilege_type = 'USAGE'
+            )
+            FROM pg_catalog.aclexplode(
+              COALESCE(
+                type_object.typacl,
+                pg_catalog.acldefault('T', type_object.typowner)
+              )
+            ) AS type_acl
+          ),
+          FALSE
+        ) AS public_usage,
+        CASE
+          WHEN type_object.oid IS NULL THEN FALSE
+          ELSE (
+            type_object.typowner = (
+              SELECT role.oid
+              FROM pg_catalog.pg_roles AS role
+              WHERE role.rolname = CURRENT_USER
+            )
+            OR (
+              SELECT role.rolsuper
+              FROM pg_catalog.pg_roles AS role
+              WHERE role.rolname = CURRENT_USER
+            )
+          )
+        END AS grantor_can_revoke
+      FROM (
+        SELECT pg_catalog.to_regtype($2) AS oid
+      ) AS requested
+      LEFT JOIN pg_catalog.pg_type AS type_object
+        ON type_object.oid = requested.oid
+      LEFT JOIN pg_catalog.pg_roles AS owner_role
+        ON owner_role.oid = type_object.typowner
+      CROSS JOIN pg_catalog.pg_roles AS target_role
+      WHERE target_role.rolname = $1
+    `,
+    roleName,
+    entry.catalogName,
+  );
+  const labelRows = await prisma.$queryRawUnsafe(
+    `
+      SELECT enum_value.enumlabel
+      FROM pg_catalog.pg_enum AS enum_value
+      WHERE enum_value.enumtypid = pg_catalog.to_regtype($1)
+      ORDER BY enum_value.enumsortorder
+    `,
+    entry.catalogName,
+  );
+  const labels = labelRows
+    .map((row) => row.enumlabel)
+    .filter((label) => typeof label === "string");
+  const row = rows[0];
+  return {
+    key: entry.key,
+    catalogName: entry.catalogName,
+    grantName: entry.grantName,
+    expectedLabels: [...entry.labels],
+    labelManifestMatches:
+      labels.length === entry.labels.length &&
+      labels.every((label, index) => label === entry.labels[index]),
+    labels,
+    exists: row?.exists === true,
+    ownerName: typeof row?.owner_name === "string" ? row.owner_name : null,
+    effectiveUsage: row?.effective_usage === true,
+    directUsage: row?.direct_usage === true,
+    targetGrantOption: row?.target_grant_option === true,
+    publicUsage: row?.public_usage === true,
     grantorCanRevoke: row?.grantor_can_revoke === true,
   };
 }
@@ -933,23 +1181,21 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
   );
   const functions = [];
   for (const entry of ALL_RUNTIME_FUNCTIONS) {
-    functions.push(
-      await inspectFunction(prisma, config.roleName, entry),
-    );
+    functions.push(await inspectFunction(prisma, config.roleName, entry));
   }
   const sealedTables = [];
   for (const entry of SEALED_RUNTIME_TABLES) {
-    sealedTables.push(
-      await inspectSealedTable(prisma, config.roleName, entry),
-    );
+    sealedTables.push(await inspectSealedTable(prisma, config.roleName, entry));
+  }
+  const sealedTypes = [];
+  for (const entry of SEALED_RUNTIME_TYPES) {
+    sealedTypes.push(await inspectSealedType(prisma, config.roleName, entry));
   }
 
   return {
     server: {
       databaseName:
-        typeof server?.database_name === "string"
-          ? server.database_name
-          : null,
+        typeof server?.database_name === "string" ? server.database_name : null,
       currentUserName:
         typeof server?.current_user_name === "string"
           ? server.current_user_name
@@ -976,12 +1222,8 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
             ownershipCount: Number(role.ownership_count ?? -1),
           },
     migration: {
-      completedTargetCount: Number(
-        migration?.completed_target_count ?? -1,
-      ),
-      completedRequiredCount: Number(
-        migration?.completed_required_count ?? -1,
-      ),
+      completedTargetCount: Number(migration?.completed_target_count ?? -1),
+      completedRequiredCount: Number(migration?.completed_required_count ?? -1),
       completedCount: Number(migration?.completed_count ?? -1),
       unfinishedCount: Number(migration?.unfinished_count ?? -1),
       latestCompletedMigration:
@@ -991,6 +1233,7 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
     },
     functions,
     sealedTables,
+    sealedTypes,
   };
 }
 
@@ -1045,14 +1288,11 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
     violations.push("CURRENT_MIGRATION_NOT_COMPLETED_EXACTLY_ONCE");
   }
   if (
-    snapshot.migration.latestCompletedMigration !==
-    config.expectedMigration
+    snapshot.migration.latestCompletedMigration !== config.expectedMigration
   ) {
     violations.push("CURRENT_MIGRATION_MISMATCH");
   }
-  if (
-    snapshot.migration.completedCount !== config.expectedMigrationCount
-  ) {
+  if (snapshot.migration.completedCount !== config.expectedMigrationCount) {
     violations.push("CURRENT_MIGRATION_COUNT_MISMATCH");
   }
   if (snapshot.migration.unfinishedCount !== 0) {
@@ -1072,6 +1312,12 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
     }
     if (entry.volatility !== entry.expectedVolatility) {
       violations.push(`${entry.key}:VOLATILITY_MISMATCH`);
+    }
+    if (
+      entry.expectedLanguage !== null &&
+      entry.language !== entry.expectedLanguage
+    ) {
+      violations.push(`${entry.key}:LANGUAGE_MISMATCH`);
     }
     if (!entry.searchPathPgCatalogOnly) {
       violations.push(`${entry.key}:SEARCH_PATH_MISMATCH`);
@@ -1098,6 +1344,21 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
       violations.push(`${entry.key}:GRANTOR_CANNOT_REVOKE`);
     }
   }
+  for (const entry of snapshot.sealedTypes) {
+    if (!entry.exists) {
+      violations.push(`${entry.key}:TYPE_MISSING`);
+      continue;
+    }
+    if (!entry.labelManifestMatches) {
+      violations.push(`${entry.key}:ENUM_LABEL_MANIFEST_MISMATCH`);
+    }
+    if (entry.ownerName === config.roleName) {
+      violations.push(`${entry.key}:RUNTIME_ROLE_OWNS_TYPE`);
+    }
+    if (!entry.grantorCanRevoke) {
+      violations.push(`${entry.key}:GRANTOR_CANNOT_REVOKE_TYPE`);
+    }
+  }
   return violations;
 }
 
@@ -1106,8 +1367,9 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
   const applicationKeys = new Set(
     APPLICATION_RUNTIME_FUNCTIONS.map(({ key }) => key),
   );
-  const workerKeys = new Set(
-    EXCLUDED_WORKER_FUNCTIONS.map(({ key }) => key),
+  const workerKeys = new Set(EXCLUDED_WORKER_FUNCTIONS.map(({ key }) => key));
+  const admissionKeys = new Set(
+    EXCLUDED_ADMISSION_FUNCTIONS.map(({ key }) => key),
   );
 
   for (const entry of snapshot.functions) {
@@ -1121,14 +1383,14 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
     } else {
       const exclusionKind = workerKeys.has(entry.key)
         ? "WORKER"
-        : "PENDING";
+        : admissionKeys.has(entry.key)
+          ? "ADMISSION"
+          : "PENDING";
       if (entry.effectiveExecute || entry.directExecute) {
         violations.push(`${entry.key}:${exclusionKind}_EXECUTE_PRESENT`);
       }
       if (entry.targetGrantOption) {
-        violations.push(
-          `${entry.key}:${exclusionKind}_GRANT_OPTION_PRESENT`,
-        );
+        violations.push(`${entry.key}:${exclusionKind}_GRANT_OPTION_PRESENT`);
       }
     }
   }
@@ -1149,26 +1411,28 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
     }
     if (
       entry.columns.some((column) =>
-        EFFECTIVE_COLUMN_PRIVILEGE_FIELDS.some(
-          (field) => column[field],
-        ),
+        EFFECTIVE_COLUMN_PRIVILEGE_FIELDS.some((field) => column[field]),
       )
     ) {
-      violations.push(
-        `${entry.key}:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT`,
-      );
+      violations.push(`${entry.key}:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT`);
     }
     if (
       entry.columns.some((column) =>
-        DIRECT_COLUMN_PRIVILEGE_FIELDS.some(
-          (field) => column[field],
-        ),
+        DIRECT_COLUMN_PRIVILEGE_FIELDS.some((field) => column[field]),
       )
     ) {
       violations.push(`${entry.key}:DIRECT_COLUMN_PRIVILEGE_PRESENT`);
     }
     if (entry.publicAnyColumnPrivilege) {
       violations.push(`${entry.key}:PUBLIC_COLUMN_PRIVILEGE_PRESENT`);
+    }
+  }
+  for (const entry of snapshot.sealedTypes) {
+    if (entry.effectiveUsage || entry.directUsage || entry.targetGrantOption) {
+      violations.push(`${entry.key}:RUNTIME_TYPE_USAGE_PRESENT`);
+    }
+    if (entry.publicUsage) {
+      violations.push(`${entry.key}:PUBLIC_TYPE_USAGE_PRESENT`);
     }
   }
   return violations;
@@ -1208,6 +1472,9 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
     excludedPendingFunctions: EXCLUDED_PENDING_FUNCTIONS.map(
       ({ key, catalogSignature }) => ({ key, catalogSignature }),
     ),
+    excludedAdmissionFunctions: EXCLUDED_ADMISSION_FUNCTIONS.map(
+      ({ key, catalogSignature }) => ({ key, catalogSignature }),
+    ),
     sealedTables: SEALED_RUNTIME_TABLES.map(
       ({ key, catalogName, columns }) => ({
         key,
@@ -1215,6 +1482,11 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
         columns,
       }),
     ),
+    sealedTypes: SEALED_RUNTIME_TYPES.map(({ key, catalogName, labels }) => ({
+      key,
+      catalogName,
+      labels,
+    })),
     postconditions: {
       applicationExecuteCount: snapshot.functions.filter(
         (entry) =>
@@ -1242,7 +1514,16 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
           (entry.effectiveExecute ||
             entry.directExecute ||
             entry.targetGrantOption),
-        ).length,
+      ).length,
+      excludedAdmissionExecuteCount: snapshot.functions.filter(
+        (entry) =>
+          EXCLUDED_ADMISSION_FUNCTIONS.some(
+            (candidate) => candidate.key === entry.key,
+          ) &&
+          (entry.effectiveExecute ||
+            entry.directExecute ||
+            entry.targetGrantOption),
+      ).length,
       sealedTableWithoutRuntimePrivilegesCount: snapshot.sealedTables.filter(
         (entry) =>
           !entry.canSelect &&
@@ -1260,59 +1541,58 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
         (count, entry) => count + entry.columns.length,
         0,
       ),
-      sealedColumnWithoutRuntimePrivilegesCount:
-        snapshot.sealedTables.reduce(
-          (count, entry) =>
-            count +
-            entry.columns.filter(
-              (column) =>
-                !EFFECTIVE_COLUMN_PRIVILEGE_FIELDS.some(
-                  (field) => column[field],
-                ) &&
-                !DIRECT_COLUMN_PRIVILEGE_FIELDS.some(
-                  (field) => column[field],
-                ) &&
-                !column.publicAnyPrivilege,
-            ).length,
-          0,
-        ),
-      sealedEffectiveColumnPrivilegeCount:
-        snapshot.sealedTables.reduce(
-          (count, entry) =>
-            count +
-            entry.columns.reduce(
-              (columnCount, column) =>
-                columnCount +
-                EFFECTIVE_COLUMN_PRIVILEGE_FIELDS.filter(
-                  (field) => column[field],
-                ).length,
-              0,
-            ),
-          0,
-        ),
-      sealedDirectColumnPrivilegeCount:
-        snapshot.sealedTables.reduce(
-          (count, entry) =>
-            count +
-            entry.columns.reduce(
-              (columnCount, column) =>
-                columnCount +
-                DIRECT_COLUMN_PRIVILEGE_FIELDS.filter(
-                  (field) => column[field],
-                ).length,
-              0,
-            ),
-          0,
-        ),
-      sealedPublicColumnPrivilegeCount:
-        snapshot.sealedTables.reduce(
-          (count, entry) =>
-            count +
-            entry.columns.filter(
-              (column) => column.publicAnyPrivilege,
-            ).length,
-          0,
-        ),
+      sealedColumnWithoutRuntimePrivilegesCount: snapshot.sealedTables.reduce(
+        (count, entry) =>
+          count +
+          entry.columns.filter(
+            (column) =>
+              !EFFECTIVE_COLUMN_PRIVILEGE_FIELDS.some(
+                (field) => column[field],
+              ) &&
+              !DIRECT_COLUMN_PRIVILEGE_FIELDS.some((field) => column[field]) &&
+              !column.publicAnyPrivilege,
+          ).length,
+        0,
+      ),
+      sealedEffectiveColumnPrivilegeCount: snapshot.sealedTables.reduce(
+        (count, entry) =>
+          count +
+          entry.columns.reduce(
+            (columnCount, column) =>
+              columnCount +
+              EFFECTIVE_COLUMN_PRIVILEGE_FIELDS.filter((field) => column[field])
+                .length,
+            0,
+          ),
+        0,
+      ),
+      sealedDirectColumnPrivilegeCount: snapshot.sealedTables.reduce(
+        (count, entry) =>
+          count +
+          entry.columns.reduce(
+            (columnCount, column) =>
+              columnCount +
+              DIRECT_COLUMN_PRIVILEGE_FIELDS.filter((field) => column[field])
+                .length,
+            0,
+          ),
+        0,
+      ),
+      sealedPublicColumnPrivilegeCount: snapshot.sealedTables.reduce(
+        (count, entry) =>
+          count +
+          entry.columns.filter((column) => column.publicAnyPrivilege).length,
+        0,
+      ),
+      sealedTypeWithoutRuntimeUsageCount: snapshot.sealedTypes.filter(
+        (entry) =>
+          !entry.effectiveUsage &&
+          !entry.directUsage &&
+          !entry.targetGrantOption,
+      ).length,
+      sealedPublicTypeUsageCount: snapshot.sealedTypes.filter(
+        (entry) => entry.publicUsage,
+      ).length,
     },
   };
 }
@@ -1320,8 +1600,7 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
 export async function checkRuntimeFunctionEnrollment(prisma, config) {
   const snapshot = await inspectRuntimeFunctionEnrollment(prisma, config);
   assertPreconditions(snapshot, config);
-  const violations =
-    runtimeFunctionEnrollmentComplianceViolations(snapshot);
+  const violations = runtimeFunctionEnrollmentComplianceViolations(snapshot);
   if (violations.length > 0) {
     contractError(
       "RUNTIME_FUNCTION_ENROLLMENT_DRIFT",
@@ -1336,9 +1615,7 @@ export async function applyRuntimeFunctionEnrollment(prisma, config) {
   assertPreconditions(before, config);
   const changed =
     runtimeFunctionEnrollmentComplianceViolations(before).length > 0;
-  const statements = buildRuntimeFunctionEnrollmentStatements(
-    config.roleName,
-  );
+  const statements = buildRuntimeFunctionEnrollmentStatements(config.roleName);
 
   await prisma.$transaction(async (tx) => {
     for (const statement of statements) {
@@ -1348,8 +1625,7 @@ export async function applyRuntimeFunctionEnrollment(prisma, config) {
 
   const after = await inspectRuntimeFunctionEnrollment(prisma, config);
   assertPreconditions(after, config);
-  const violations =
-    runtimeFunctionEnrollmentComplianceViolations(after);
+  const violations = runtimeFunctionEnrollmentComplianceViolations(after);
   if (violations.length > 0) {
     contractError(
       "RUNTIME_FUNCTION_ENROLLMENT_POSTCONDITION_FAILED",
@@ -1391,14 +1667,16 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   );
   assert.equal(applyConfig.mode, "apply");
 
-  const sql = buildRuntimeFunctionEnrollmentStatements(
-    "leetplus_runtime",
-  ).join("\n");
+  const sql =
+    buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").join("\n");
   assert.equal(
-    buildRuntimeFunctionEnrollmentStatements("leetplus_runtime")
-      .length,
-    32,
+    buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").length,
+    55,
   );
+  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 7);
+  assert.equal(EXCLUDED_ADMISSION_FUNCTIONS.length, 9);
+  assert.equal(SEALED_RUNTIME_TABLES.length, 6);
+  assert.equal(SEALED_RUNTIME_TYPES.length, 1);
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
@@ -1408,6 +1686,8 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(sql, /identity_email_claim_transition_v2/u);
   assert.match(sql, /identity_email_claim_release_v2/u);
   assert.match(sql, /identity_owner_invite_issue_hold_v1/u);
+  assert.match(sql, /shared_beta_tenant_profile_digest_v1/u);
+  assert.match(sql, /SharedBetaReleaseGateCode/u);
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
@@ -1436,6 +1716,11 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(sql, /REVOKE EXECUTE.*identity_email_claim_lock_v1/su);
   assert.match(sql, /REVOKE EXECUTE.*identity_email_claim_transition_v1/su);
   assert.match(sql, /REVOKE EXECUTE.*identity_email_claim_release_v1/su);
+  assert.match(sql, /REVOKE EXECUTE.*shared_beta_release_gate_attestation/su);
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TYPE public\."SharedBetaReleaseGateCode" FROM PUBLIC/u,
+  );
   assert.doesNotMatch(sql, /\bALL FUNCTIONS\b/iu);
   assert.doesNotMatch(sql, /\bTO PUBLIC\b/iu);
   assert.equal(runtimeFunctionContractDigest().length, 64);

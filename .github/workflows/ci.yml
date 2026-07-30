@@ -151,6 +151,9 @@ jobs:
       - name: Validate dormant OWNER invite HOLD outbox
         run: pnpm --filter database check:identity-owner-invite-hold-outbox
 
+      - name: Validate shared beta admission provenance
+        run: pnpm --filter database check:shared-beta-admission-provenance
+
       - name: Validate identity email claim and invite writer boundaries
         run: pnpm --filter database check:identity-email-claim-boundary
 
@@ -220,8 +223,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260730010000_identity_owner_invite_hold_outbox
-          EXPECTED_DATABASE_MIGRATION_COUNT: "171"
+          EXPECTED_DATABASE_MIGRATION: 20260730020000_shared_beta_admission_provenance
+          EXPECTED_DATABASE_MIGRATION_COUNT: "172"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -246,7 +249,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -340,6 +343,17 @@ jobs:
         run: pnpm --filter database db:smoke:identity-owner-invite-hold-outbox-upgrade
         env:
           IDENTITY_OWNER_INVITE_HOLD_OUTBOX_UPGRADE_SMOKE_CONFIRM: run-identity-owner-invite-hold-outbox-upgrade-smoke
+
+      - name: Rehearse shared beta admission provenance CURRENT_171 to CURRENT_172 upgrade
+        run: pnpm --filter database db:smoke:shared-beta-admission-provenance-upgrade
+        env:
+          SHARED_BETA_ADMISSION_PROVENANCE_UPGRADE_SMOKE_CONFIRM: run-shared-beta-admission-provenance-upgrade-smoke
+
+      - name: Verify OWNER invite HOLD outbox envelope transaction
+        run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_OWNER_INVITE_HOLD_PG_CONFIRM: run-owner-invite-hold-outbox-postgres-fixture
 
       - name: Verify sealed identity email claim write boundaries
         run: pnpm --filter database db:smoke:identity-email-claim-boundary

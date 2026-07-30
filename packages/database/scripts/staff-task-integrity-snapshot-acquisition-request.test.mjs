@@ -141,16 +141,16 @@ test("missing, extra, accessor, duplicate, and noncanonical fields reject", () =
   });
 });
 
-test("the ceremony accepts CURRENT_171 and rejects previous CURRENT_170", () => {
+test("the ceremony accepts CURRENT_172 and rejects previous CURRENT_171", () => {
   assert.equal(
-    normalizeAcquisitionRequest(request({ expectedState: "CURRENT_171" }), NOW)
+    normalizeAcquisitionRequest(request({ expectedState: "CURRENT_172" }), NOW)
       .expectedState,
-    "CURRENT_171",
+    "CURRENT_172",
   );
   assert.throws(
     () =>
       normalizeAcquisitionRequest(
-        request({ expectedState: "CURRENT_170" }),
+        request({ expectedState: "CURRENT_171" }),
         NOW,
       ),
     { code: "PRODUCTION_LIKE_ACQUISITION_REQUEST_INVALID" },

@@ -25,106 +25,106 @@ const baseManifestUrl = new URL(
 );
 
 const DELIVERY_COLUMNS = Object.freeze([
-  ['attempts', 'INTEGER NOT NULL DEFAULT 0'],
-  ['attemptBudget', 'INTEGER NOT NULL DEFAULT 5'],
-  ['claimGeneration', 'INTEGER NOT NULL DEFAULT 0'],
-  ['transitionRevision', 'BIGINT NOT NULL DEFAULT 0'],
-  ['claimJobKind', 'TEXT'],
-  ['integrityState', 'TEXT'],
-  ['integrityReasonCode', 'TEXT'],
-  ['stateReasonCode', 'TEXT'],
-  ['executionRevision', 'INTEGER'],
-  ['storeExecutionRevision', 'INTEGER'],
-  ['leaseOwner', 'TEXT'],
-  ['claimKeyVersion', 'INTEGER'],
-  ['claimOwnerDigest', 'TEXT'],
-  ['claimTokenDigest', 'TEXT'],
-  ['claimedAt', 'TIMESTAMPTZ(3)'],
-  ['leaseExpiresAt', 'TIMESTAMPTZ(3)'],
-  ['acknowledgeUntil', 'TIMESTAMPTZ(3)'],
-  ['effectInputDigest', 'TEXT'],
-  ['providerConfigDigest', 'TEXT'],
-  ['providerAuthorityRevision', 'INTEGER'],
-  ['workloadIdentityDigest', 'TEXT'],
-  ['sendGrantDigest', 'TEXT'],
-  ['sendGrantExpiresAt', 'TIMESTAMPTZ(3)'],
-  ['providerAttemptKey', 'TEXT'],
-  ['providerAttemptedAt', 'TIMESTAMPTZ(3)'],
-  ['providerOutcomeClass', 'TEXT'],
-  ['providerOutcomeCode', 'TEXT'],
-  ['providerObservedAt', 'TIMESTAMPTZ(3)'],
-  ['providerReceiptDigest', 'TEXT'],
-  ['providerReceiptRefEncrypted', 'BYTEA'],
-  ['providerReceiptKeyVersion', 'INTEGER'],
-  ['terminalAckDigest', 'TEXT'],
+  ["attempts", "INTEGER NOT NULL DEFAULT 0"],
+  ["attemptBudget", "INTEGER NOT NULL DEFAULT 5"],
+  ["claimGeneration", "INTEGER NOT NULL DEFAULT 0"],
+  ["transitionRevision", "BIGINT NOT NULL DEFAULT 0"],
+  ["claimJobKind", "TEXT"],
+  ["integrityState", "TEXT"],
+  ["integrityReasonCode", "TEXT"],
+  ["stateReasonCode", "TEXT"],
+  ["executionRevision", "INTEGER"],
+  ["storeExecutionRevision", "INTEGER"],
+  ["leaseOwner", "TEXT"],
+  ["claimKeyVersion", "INTEGER"],
+  ["claimOwnerDigest", "TEXT"],
+  ["claimTokenDigest", "TEXT"],
+  ["claimedAt", "TIMESTAMPTZ(3)"],
+  ["leaseExpiresAt", "TIMESTAMPTZ(3)"],
+  ["acknowledgeUntil", "TIMESTAMPTZ(3)"],
+  ["effectInputDigest", "TEXT"],
+  ["providerConfigDigest", "TEXT"],
+  ["providerAuthorityRevision", "INTEGER"],
+  ["workloadIdentityDigest", "TEXT"],
+  ["sendGrantDigest", "TEXT"],
+  ["sendGrantExpiresAt", "TIMESTAMPTZ(3)"],
+  ["providerAttemptKey", "TEXT"],
+  ["providerAttemptedAt", "TIMESTAMPTZ(3)"],
+  ["providerOutcomeClass", "TEXT"],
+  ["providerOutcomeCode", "TEXT"],
+  ["providerObservedAt", "TIMESTAMPTZ(3)"],
+  ["providerReceiptDigest", "TEXT"],
+  ["providerReceiptRefEncrypted", "BYTEA"],
+  ["providerReceiptKeyVersion", "INTEGER"],
+  ["terminalAckDigest", "TEXT"],
 ]);
 
 const EVENT_COLUMNS = Object.freeze([
-  ['transitionKey', 'TEXT'],
-  ['transitionRevision', 'BIGINT'],
-  ['storeId', 'TEXT'],
-  ['attemptId', 'TEXT'],
-  ['claimGeneration', 'INTEGER'],
-  ['attemptNumber', 'INTEGER'],
-  ['claimJobKind', 'TEXT'],
-  ['executionRevision', 'INTEGER'],
-  ['storeExecutionRevision', 'INTEGER'],
-  ['claimKeyVersion', 'INTEGER'],
-  ['claimOwnerDigest', 'TEXT'],
-  ['claimTokenDigest', 'TEXT'],
-  ['claimedAt', 'TIMESTAMPTZ(3)'],
-  ['leaseExpiresAt', 'TIMESTAMPTZ(3)'],
-  ['acknowledgeUntil', 'TIMESTAMPTZ(3)'],
-  ['effectInputDigest', 'TEXT'],
-  ['providerConfigDigest', 'TEXT'],
-  ['providerAuthorityRevision', 'INTEGER'],
-  ['workloadIdentityDigest', 'TEXT'],
-  ['providerAttemptKey', 'TEXT'],
-  ['providerAttemptedAt', 'TIMESTAMPTZ(3)'],
-  ['sendGrantDigest', 'TEXT'],
-  ['sendGrantExpiresAt', 'TIMESTAMPTZ(3)'],
-  ['providerOutcomeClass', 'TEXT'],
-  ['providerOutcomeCode', 'TEXT'],
-  ['providerObservedAt', 'TIMESTAMPTZ(3)'],
-  ['providerReceiptDigest', 'TEXT'],
-  ['providerReceiptRefEncrypted', 'BYTEA'],
-  ['providerReceiptKeyVersion', 'INTEGER'],
-  ['terminalAckDigest', 'TEXT'],
-  ['integrityState', 'TEXT'],
-  ['integrityReasonCode', 'TEXT'],
-  ['stateReasonCode', 'TEXT'],
-  ['adapterVersion', 'TEXT'],
-  ['httpStatusClass', 'INTEGER'],
-  ['provenanceDigest', 'TEXT'],
+  ["transitionKey", "TEXT"],
+  ["transitionRevision", "BIGINT"],
+  ["storeId", "TEXT"],
+  ["attemptId", "TEXT"],
+  ["claimGeneration", "INTEGER"],
+  ["attemptNumber", "INTEGER"],
+  ["claimJobKind", "TEXT"],
+  ["executionRevision", "INTEGER"],
+  ["storeExecutionRevision", "INTEGER"],
+  ["claimKeyVersion", "INTEGER"],
+  ["claimOwnerDigest", "TEXT"],
+  ["claimTokenDigest", "TEXT"],
+  ["claimedAt", "TIMESTAMPTZ(3)"],
+  ["leaseExpiresAt", "TIMESTAMPTZ(3)"],
+  ["acknowledgeUntil", "TIMESTAMPTZ(3)"],
+  ["effectInputDigest", "TEXT"],
+  ["providerConfigDigest", "TEXT"],
+  ["providerAuthorityRevision", "INTEGER"],
+  ["workloadIdentityDigest", "TEXT"],
+  ["providerAttemptKey", "TEXT"],
+  ["providerAttemptedAt", "TIMESTAMPTZ(3)"],
+  ["sendGrantDigest", "TEXT"],
+  ["sendGrantExpiresAt", "TIMESTAMPTZ(3)"],
+  ["providerOutcomeClass", "TEXT"],
+  ["providerOutcomeCode", "TEXT"],
+  ["providerObservedAt", "TIMESTAMPTZ(3)"],
+  ["providerReceiptDigest", "TEXT"],
+  ["providerReceiptRefEncrypted", "BYTEA"],
+  ["providerReceiptKeyVersion", "INTEGER"],
+  ["terminalAckDigest", "TEXT"],
+  ["integrityState", "TEXT"],
+  ["integrityReasonCode", "TEXT"],
+  ["stateReasonCode", "TEXT"],
+  ["adapterVersion", "TEXT"],
+  ["httpStatusClass", "INTEGER"],
+  ["provenanceDigest", "TEXT"],
 ]);
 
 const ATTEMPT_COLUMNS = Object.freeze([
-  ['id', 'TEXT NOT NULL'],
-  ['tenantId', 'TEXT NOT NULL'],
-  ['deliveryId', 'TEXT NOT NULL'],
-  ['rewardId', 'TEXT NOT NULL'],
-  ['storeId', 'TEXT NOT NULL'],
-  ['channel', 'TEXT NOT NULL'],
-  ['claimGeneration', 'INTEGER NOT NULL'],
-  ['attemptNumber', 'INTEGER NOT NULL'],
-  ['claimJobKind', 'TEXT NOT NULL'],
-  ['executionRevision', 'INTEGER NOT NULL'],
-  ['storeExecutionRevision', 'INTEGER NOT NULL'],
-  ['claimKeyVersion', 'INTEGER NOT NULL'],
-  ['claimOwnerDigest', 'TEXT NOT NULL'],
-  ['claimTokenDigest', 'TEXT NOT NULL'],
-  ['claimedAt', 'TIMESTAMPTZ(3) NOT NULL'],
-  ['leaseExpiresAt', 'TIMESTAMPTZ(3) NOT NULL'],
-  ['acknowledgeUntil', 'TIMESTAMPTZ(3) NOT NULL'],
-  ['effectInputDigest', 'TEXT NOT NULL'],
-  ['providerConfigDigest', 'TEXT NOT NULL'],
-  ['providerAuthorityRevision', 'INTEGER NOT NULL'],
-  ['workloadIdentityDigest', 'TEXT NOT NULL'],
-  ['providerAttemptKey', 'TEXT NOT NULL'],
-  ['providerAttemptedAt', 'TIMESTAMPTZ(3) NOT NULL'],
-  ['sendGrantDigest', 'TEXT NOT NULL'],
-  ['sendGrantExpiresAt', 'TIMESTAMPTZ(3) NOT NULL'],
-  ['createdAt', 'TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+  ["id", "TEXT NOT NULL"],
+  ["tenantId", "TEXT NOT NULL"],
+  ["deliveryId", "TEXT NOT NULL"],
+  ["rewardId", "TEXT NOT NULL"],
+  ["storeId", "TEXT NOT NULL"],
+  ["channel", "TEXT NOT NULL"],
+  ["claimGeneration", "INTEGER NOT NULL"],
+  ["attemptNumber", "INTEGER NOT NULL"],
+  ["claimJobKind", "TEXT NOT NULL"],
+  ["executionRevision", "INTEGER NOT NULL"],
+  ["storeExecutionRevision", "INTEGER NOT NULL"],
+  ["claimKeyVersion", "INTEGER NOT NULL"],
+  ["claimOwnerDigest", "TEXT NOT NULL"],
+  ["claimTokenDigest", "TEXT NOT NULL"],
+  ["claimedAt", "TIMESTAMPTZ(3) NOT NULL"],
+  ["leaseExpiresAt", "TIMESTAMPTZ(3) NOT NULL"],
+  ["acknowledgeUntil", "TIMESTAMPTZ(3) NOT NULL"],
+  ["effectInputDigest", "TEXT NOT NULL"],
+  ["providerConfigDigest", "TEXT NOT NULL"],
+  ["providerAuthorityRevision", "INTEGER NOT NULL"],
+  ["workloadIdentityDigest", "TEXT NOT NULL"],
+  ["providerAttemptKey", "TEXT NOT NULL"],
+  ["providerAttemptedAt", "TIMESTAMPTZ(3) NOT NULL"],
+  ["sendGrantDigest", "TEXT NOT NULL"],
+  ["sendGrantExpiresAt", "TIMESTAMPTZ(3) NOT NULL"],
+  ["createdAt", "TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP"],
 ]);
 
 const DELIVERY_CHECKS = Object.freeze([
@@ -293,20 +293,15 @@ test("migration 166 is transactional and requires the exact CURRENT_165 Store fe
     "PostgreSQL reserved keyword CONSTRAINT cannot be used as an unquoted alias.",
   );
   const baseManifest = JSON.parse(await readFile(baseManifestUrl, "utf8"));
-  const migrationNames = (
-    await readdir(migrationsUrl, { withFileTypes: true })
-  )
+  const migrationNames = (await readdir(migrationsUrl, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
   const targetIndex = migrationNames.indexOf(TARGET_MIGRATION);
 
   assert.equal(migrationNames.length, CURRENT_EXPECTED_MIGRATION_COUNT);
-  assert.equal(
-    migrationNames.at(-1),
-    CURRENT_EXPECTED_LATEST_MIGRATION,
-  );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_171");
+  assert.equal(migrationNames.at(-1), CURRENT_EXPECTED_LATEST_MIGRATION);
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_172");
   const additiveTargetIndex =
     STAFF_TASK_ALLOWED_ADDITIVE_TAIL.indexOf(TARGET_MIGRATION);
   assert.deepEqual(
@@ -318,12 +313,9 @@ test("migration 166 is transactional and requires the exact CURRENT_165 Store fe
   );
   assert.equal(targetIndex, 165);
   assert.equal(migrationNames[targetIndex - 1], PREFIX_MIGRATION);
+  assert.equal(migrationNames[targetIndex + 1], IDENTITY_FOUNDATION_MIGRATION);
   assert.equal(
-    migrationNames[targetIndex + 1],
-    IDENTITY_FOUNDATION_MIGRATION,
-  );
-  assert.equal(
-    migrationNames[targetIndex + 5],
+    STAFF_TASK_ALLOWED_ADDITIVE_TAIL.at(-1),
     CURRENT_EXPECTED_LATEST_MIGRATION,
   );
   assert.deepEqual(
@@ -355,10 +347,7 @@ test("migration 166 is transactional and requires the exact CURRENT_165 Store fe
   for (const entry of baseManifest.migrations) {
     assert.match(entry.sha256, /^[0-9a-f]{64}$/u);
     const migrationSql = await readFile(
-      new URL(
-        `${entry.migrationName}/migration.sql`,
-        migrationsUrl,
-      ),
+      new URL(`${entry.migrationName}/migration.sql`, migrationsUrl),
       "utf8",
     );
     const normalizedSql = migrationSql.replace(/\r\n?/gu, "\n");
@@ -416,11 +405,11 @@ test("migration 166 is transactional and requires the exact CURRENT_165 Store fe
     "Reserved typed delivery-event inventory must run before migration 166 DDL.",
   );
 
-  assert.doesNotMatch(sql, /(?:ALTER TABLE|UPDATE|INSERT INTO|DELETE FROM)\s+"Store"/u);
   assert.doesNotMatch(
     sql,
-    /SET\s+"backgroundExecutionEnabled"\s*=/iu,
+    /(?:ALTER TABLE|UPDATE|INSERT INTO|DELETE FROM)\s+"Store"/u,
   );
+  assert.doesNotMatch(sql, /SET\s+"backgroundExecutionEnabled"\s*=/iu);
   const store = modelBlock(schema, "Store");
   assertPrismaField(
     store,
@@ -477,31 +466,31 @@ test("migration and Prisma schema expose the exact delivery claim columns and mo
         ? "Bytes?"
         : name === "transitionRevision"
           ? "BigInt"
-        : dateTimeFields.has(name)
-          ? "DateTime?"
-          : new Set([
-                "attempts",
-                "attemptBudget",
-                "claimGeneration",
-                "executionRevision",
-                "storeExecutionRevision",
-                "claimKeyVersion",
-                "providerAuthorityRevision",
-                "providerReceiptKeyVersion",
-              ]).has(name)
-            ? name === "attempts" ||
-              name === "attemptBudget" ||
-              name === "claimGeneration"
-              ? "Int"
-              : "Int?"
-            : name === "integrityState"
-              ? "String"
-              : "String?";
+          : dateTimeFields.has(name)
+            ? "DateTime?"
+            : new Set([
+                  "attempts",
+                  "attemptBudget",
+                  "claimGeneration",
+                  "executionRevision",
+                  "storeExecutionRevision",
+                  "claimKeyVersion",
+                  "providerAuthorityRevision",
+                  "providerReceiptKeyVersion",
+                ]).has(name)
+              ? name === "attempts" ||
+                name === "attemptBudget" ||
+                name === "claimGeneration"
+                ? "Int"
+                : "Int?"
+              : name === "integrityState"
+                ? "String"
+                : "String?";
     const attributes = dateTimeFields.has(name)
       ? "@db.Timestamptz(3)"
       : name === "integrityState"
         ? '@default("VERIFIED")'
-        : intDefaults.get(name) ?? "";
+        : (intDefaults.get(name) ?? "");
     assertPrismaField(delivery, name, type, attributes);
   }
 
@@ -519,20 +508,20 @@ test("migration and Prisma schema expose the exact delivery claim columns and mo
         ? "Bytes?"
         : name === "transitionRevision"
           ? "BigInt?"
-        : dateTimeFields.has(name)
-          ? "DateTime?"
-          : new Set([
-                "claimGeneration",
-                "attemptNumber",
-                "executionRevision",
-                "storeExecutionRevision",
-                "claimKeyVersion",
-                "providerAuthorityRevision",
-                "providerReceiptKeyVersion",
-                "httpStatusClass",
-              ]).has(name)
-            ? "Int?"
-            : "String?";
+          : dateTimeFields.has(name)
+            ? "DateTime?"
+            : new Set([
+                  "claimGeneration",
+                  "attemptNumber",
+                  "executionRevision",
+                  "storeExecutionRevision",
+                  "claimKeyVersion",
+                  "providerAuthorityRevision",
+                  "providerReceiptKeyVersion",
+                  "httpStatusClass",
+                ]).has(name)
+              ? "Int?"
+              : "String?";
     assertPrismaField(
       event,
       name,
@@ -595,10 +584,7 @@ test("parent uniques and all delivery evidence foreign keys are same-scope RESTR
     );
     assert.match(
       modelBlock(schema, table),
-      new RegExp(
-        `@@unique\\(\\[tenantId, id\\], map: "${indexName}"\\)`,
-        "u",
-      ),
+      new RegExp(`@@unique\\(\\[tenantId, id\\], map: "${indexName}"\\)`, "u"),
     );
   }
 
@@ -724,13 +710,7 @@ test("parent uniques and all delivery evidence foreign keys are same-scope RESTR
     'map: "GuestGameDelivery_tenantId_guestId_fkey"',
     'map: "GuestGameDelivery_tenantId_storeId_fkey"',
   ]) {
-    assert.match(
-      delivery,
-      new RegExp(
-        `${escapeRegExp(relation)}\\)`,
-        "u",
-      ),
-    );
+    assert.match(delivery, new RegExp(`${escapeRegExp(relation)}\\)`, "u"));
   }
   assert.equal(
     occurrenceCount(delivery, "onDelete: Restrict, onUpdate: Restrict"),
@@ -821,9 +801,7 @@ test("all named CHECK constraints retain the state, evidence, and time-window co
   );
 
   const eventChecks = sql.slice(
-    sql.indexOf(
-      'ADD CONSTRAINT "GuestGameDeliveryEvent_transition_key_check"',
-    ),
+    sql.indexOf('ADD CONSTRAINT "GuestGameDeliveryEvent_transition_key_check"'),
     sql.indexOf(
       'CREATE UNIQUE INDEX "guest_game_delivery_current_attempt_uidx"',
     ),
@@ -840,10 +818,7 @@ test("all named CHECK constraints retain the state, evidence, and time-window co
     eventChecks,
     /"eventType" = 'DELIVERY_RECONCILED'[\s\S]*"attemptId" IS NOT NULL[\s\S]*"providerOutcomeClass" IN \('APPLIED', 'NOT_APPLIED'\)/u,
   );
-  assert.match(
-    eventChecks,
-    /"httpStatusClass" BETWEEN 1 AND 5/u,
-  );
+  assert.match(eventChecks, /"httpStatusClass" BETWEEN 1 AND 5/u);
   assert.match(
     eventChecks,
     /GuestGameDeliveryEvent_scope_value_check"[\s\S]*"providerOutcomeClass" IS NOT NULL[\s\S]*"providerOutcomeCode" IS NOT NULL[\s\S]*"providerOutcomeClass" IN \('APPLIED', 'NOT_APPLIED', 'AMBIGUOUS'\)/u,
@@ -959,9 +934,7 @@ test("all delivery claim indexes keep their exact keys, uniqueness, and partial 
     ],
   ];
   for (const [kind, name, table, columns, predicate] of indexContracts) {
-    const predicatePattern = predicate
-      ? `\\s+${escapeRegExp(predicate)}`
-      : "";
+    const predicatePattern = predicate ? `\\s+${escapeRegExp(predicate)}` : "";
     const columnsPattern = columns
       .map((column) => `"${escapeRegExp(column)}"`)
       .join("\\s*,\\s*");
@@ -1011,10 +984,7 @@ test("transition, binding, and durable-event functions are hardened and attached
     );
   }
 
-  const transition = functionBlock(
-    sql,
-    "guest_game_delivery_transition_guard",
-  );
+  const transition = functionBlock(sql, "guest_game_delivery_transition_guard");
   assert.match(
     transition,
     /TG_OP = 'DELETE'[\s\S]*OLD\."integrityState" = 'LEGACY_QUARANTINED'[\s\S]*Legacy quarantined delivery is immutable; dedicated reconciliation is not enabled[\s\S]*ERRCODE = '55000'[\s\S]*RETURN OLD;[\s\S]*is_provider :=/u,
@@ -1069,7 +1039,10 @@ test("transition, binding, and durable-event functions are hardened and attached
     /Delivery tenant, reward and channel identity is immutable/u,
   );
   assert.match(transition, /Claimed delivery scope is immutable/u);
-  assert.match(transition, /Claim snapshot is immutable within one generation/u);
+  assert.match(
+    transition,
+    /Claim snapshot is immutable within one generation/u,
+  );
   assert.match(
     transition,
     /Provider marker can change only on marker commit or dedicated retry/u,
@@ -1183,10 +1156,7 @@ test("transition, binding, and durable-event functions are hardened and attached
 
 test("delivery attempts are insert-validated and fully append-only pending bounded retention", async () => {
   const { sql } = await artifacts();
-  const body = functionBlock(
-    sql,
-    "guest_game_delivery_attempt_append_only",
-  );
+  const body = functionBlock(sql, "guest_game_delivery_attempt_append_only");
   assert.match(
     body,
     /IF TG_OP = 'INSERT' THEN[\s\S]*INTO STRICT delivery_record[\s\S]*FROM public\."GuestGameDelivery"/u,
@@ -1314,10 +1284,7 @@ test("delivery events validate scope and deny all updates/deletes pending bounde
 
 test("single-reward writers acquire the canonical migration-166 lock order", async () => {
   const { sql } = await artifacts();
-  const body = namedFunctionBlock(
-    sql,
-    "guest_game_reward_delivery_lock_v1",
-  );
+  const body = namedFunctionBlock(sql, "guest_game_reward_delivery_lock_v1");
 
   assert.match(
     body,
@@ -1366,10 +1333,7 @@ test("single-reward writers acquire the canonical migration-166 lock order", asy
 
 test("runtime durable events use one private SECURITY DEFINER boundary", async () => {
   const { sql } = await artifacts();
-  const body = namedFunctionBlock(
-    sql,
-    "guest_game_delivery_record_event_v1",
-  );
+  const body = namedFunctionBlock(sql, "guest_game_delivery_record_event_v1");
 
   assert.match(
     body,

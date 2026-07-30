@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   APPLICATION_RUNTIME_FUNCTIONS,
+  EXCLUDED_ADMISSION_FUNCTIONS,
   EXCLUDED_PENDING_FUNCTIONS,
   EXCLUDED_WORKER_FUNCTIONS,
   SEALED_RUNTIME_TABLES,
+  SEALED_RUNTIME_TYPES,
   RuntimeFunctionEnrollmentError,
   buildRuntimeFunctionEnrollmentStatements,
   expectedApplyConfirmation,
@@ -46,10 +48,10 @@ function compliantSnapshot() {
     migration: {
       completedTargetCount: 1,
       completedRequiredCount: 1,
-      completedCount: 171,
+      completedCount: 172,
       unfinishedCount: 0,
       latestCompletedMigration:
-        "20260730010000_identity_owner_invite_hold_outbox",
+        "20260730020000_shared_beta_admission_provenance",
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -57,11 +59,13 @@ function compliantSnapshot() {
         catalogSignature: entry.catalogSignature,
         expectedSecurityDefiner: entry.securityDefiner,
         expectedVolatility: entry.volatility,
+        expectedLanguage: entry.language ?? null,
         exists: true,
         ownerName: "migration_owner",
         securityDefiner: entry.securityDefiner,
         searchPathPgCatalogOnly: true,
         volatility: entry.volatility,
+        language: entry.language ?? "plpgsql",
         effectiveExecute: true,
         directExecute: true,
         targetGrantOption: false,
@@ -73,11 +77,13 @@ function compliantSnapshot() {
         catalogSignature: entry.catalogSignature,
         expectedSecurityDefiner: entry.securityDefiner,
         expectedVolatility: entry.volatility,
+        expectedLanguage: entry.language ?? null,
         exists: true,
         ownerName: "migration_owner",
         securityDefiner: entry.securityDefiner,
         searchPathPgCatalogOnly: true,
         volatility: entry.volatility,
+        language: entry.language ?? "plpgsql",
         effectiveExecute: false,
         directExecute: false,
         targetGrantOption: false,
@@ -89,11 +95,31 @@ function compliantSnapshot() {
         catalogSignature: entry.catalogSignature,
         expectedSecurityDefiner: entry.securityDefiner,
         expectedVolatility: entry.volatility,
+        expectedLanguage: entry.language ?? null,
         exists: true,
         ownerName: "migration_owner",
         securityDefiner: entry.securityDefiner,
         searchPathPgCatalogOnly: true,
         volatility: entry.volatility,
+        language: entry.language ?? "plpgsql",
+        effectiveExecute: false,
+        directExecute: false,
+        targetGrantOption: false,
+        publicExecute: false,
+        grantorCanEnroll: true,
+      })),
+      ...EXCLUDED_ADMISSION_FUNCTIONS.map((entry) => ({
+        key: entry.key,
+        catalogSignature: entry.catalogSignature,
+        expectedSecurityDefiner: entry.securityDefiner,
+        expectedVolatility: entry.volatility,
+        expectedLanguage: entry.language,
+        exists: true,
+        ownerName: "migration_owner",
+        securityDefiner: entry.securityDefiner,
+        searchPathPgCatalogOnly: true,
+        volatility: entry.volatility,
+        language: entry.language,
         effectiveExecute: false,
         directExecute: false,
         targetGrantOption: false,
@@ -131,6 +157,20 @@ function compliantSnapshot() {
       })),
       grantorCanRevoke: true,
     })),
+    sealedTypes: SEALED_RUNTIME_TYPES.map((entry) => ({
+      key: entry.key,
+      catalogName: entry.catalogName,
+      expectedLabels: [...entry.labels],
+      labelManifestMatches: true,
+      labels: [...entry.labels],
+      exists: true,
+      ownerName: "migration_owner",
+      effectiveUsage: false,
+      directUsage: false,
+      targetGrantOption: false,
+      publicUsage: false,
+      grantorCanRevoke: true,
+    })),
   };
 }
 
@@ -146,8 +186,7 @@ test("parses a bounded check target without requiring mutation confirmation", ()
 
 test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.throws(
-    () =>
-      parseRuntimeFunctionEnrollmentConfig(SAFE_ENVIRONMENT, "apply"),
+    () => parseRuntimeFunctionEnrollmentConfig(SAFE_ENVIRONMENT, "apply"),
     (error) =>
       error instanceof RuntimeFunctionEnrollmentError &&
       error.code === "RUNTIME_FUNCTION_ENROLLMENT_CONFIRMATION_INVALID",
@@ -166,7 +205,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260730010000_identity_owner_invite_hold_outbox 171$/u,
+    /20260730020000_shared_beta_admission_provenance 172$/u,
   );
 });
 
@@ -220,10 +259,21 @@ for (const [environment, expectedCode] of [
   });
 }
 
-test("builds only the exact application grants and worker exclusion", () => {
+test("builds only the exact application grants and sealed exclusions", () => {
   const statements =
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime");
-  assert.equal(statements.length, 32);
+  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 7);
+  assert.equal(EXCLUDED_ADMISSION_FUNCTIONS.length, 9);
+  assert.equal(SEALED_RUNTIME_TABLES.length, 6);
+  assert.equal(
+    SEALED_RUNTIME_TABLES.reduce(
+      (count, entry) => count + entry.columns.length,
+      0,
+    ),
+    109,
+  );
+  assert.equal(SEALED_RUNTIME_TYPES.length, 1);
+  assert.equal(statements.length, 55);
   assert.equal(
     statements.filter((statement) => statement.startsWith("GRANT EXECUTE"))
       .length,
@@ -236,16 +286,15 @@ test("builds only the exact application grants and worker exclusion", () => {
     7,
   );
   assert.equal(
-    statements.filter((statement) =>
-      statement.startsWith("REVOKE EXECUTE"),
-    ).length,
-    6,
+    statements.filter((statement) => statement.startsWith("REVOKE EXECUTE"))
+      .length,
+    15,
   );
   assert.equal(
     statements.filter((statement) =>
       statement.startsWith("REVOKE ALL PRIVILEGES ("),
     ).length,
-    6,
+    12,
   );
   assert.equal(
     statements.filter(
@@ -253,7 +302,13 @@ test("builds only the exact application grants and worker exclusion", () => {
         statement.startsWith("REVOKE ALL PRIVILEGES ON TABLE") &&
         statement.endsWith("FROM PUBLIC"),
     ).length,
-    3,
+    6,
+  );
+  assert.equal(
+    statements.filter((statement) =>
+      statement.startsWith("REVOKE ALL PRIVILEGES ON TYPE"),
+    ).length,
+    2,
   );
 
   const sql = statements.join("\n");
@@ -270,6 +325,13 @@ test("builds only the exact application grants and worker exclusion", () => {
   assert.match(sql, /identity_email_claim_transition_v2/u);
   assert.match(sql, /identity_email_claim_release_v2/u);
   assert.match(sql, /identity_owner_invite_issue_hold_v1/u);
+  for (const entry of EXCLUDED_ADMISSION_FUNCTIONS) {
+    assert.ok(
+      statements.includes(
+        `REVOKE EXECUTE ON FUNCTION ${entry.grantSignature} FROM "leetplus_runtime"`,
+      ),
+    );
+  }
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
@@ -297,6 +359,18 @@ test("builds only the exact application grants and worker exclusion", () => {
       ),
     );
   }
+  for (const entry of SEALED_RUNTIME_TYPES) {
+    assert.ok(
+      statements.includes(
+        `REVOKE ALL PRIVILEGES ON TYPE ${entry.grantName} FROM "leetplus_runtime"`,
+      ),
+    );
+    assert.ok(
+      statements.includes(
+        `REVOKE ALL PRIVILEGES ON TYPE ${entry.grantName} FROM PUBLIC`,
+      ),
+    );
+  }
   assert.doesNotMatch(sql, /\bALL FUNCTIONS\b/iu);
   assert.doesNotMatch(sql, /\bALTER DEFAULT PRIVILEGES\b/iu);
   assert.doesNotMatch(sql, /\bTO PUBLIC\b/iu);
@@ -313,10 +387,7 @@ test("accepts the exact non-owner PostgreSQL 16 contract", () => {
     runtimeFunctionEnrollmentPreconditionViolations(snapshot, config),
     [],
   );
-  assert.deepEqual(
-    runtimeFunctionEnrollmentComplianceViolations(snapshot),
-    [],
-  );
+  assert.deepEqual(runtimeFunctionEnrollmentComplianceViolations(snapshot), []);
 });
 
 test("detects authority, migration and function ACL drift independently", () => {
@@ -354,6 +425,15 @@ test("detects authority, migration and function ACL drift independently", () => 
   snapshot.functions.find(
     (entry) => entry.key === "identityOwnerInviteIssueHold",
   ).directExecute = true;
+  const admissionFunction = snapshot.functions.find(
+    (entry) => entry.key === EXCLUDED_ADMISSION_FUNCTIONS[0].key,
+  );
+  admissionFunction.effectiveExecute = true;
+  admissionFunction.directExecute = true;
+  const admissionLanguageDrift = snapshot.functions.find(
+    (entry) => entry.key === EXCLUDED_ADMISSION_FUNCTIONS[1].key,
+  );
+  admissionLanguageDrift.language = "internal";
   snapshot.sealedTables[0].canSelect = true;
   snapshot.sealedTables.find(
     (entry) => entry.key === "identityOwnerInviteIssueCommand",
@@ -375,6 +455,13 @@ test("detects authority, migration and function ACL drift independently", () => 
   outboxTable.columns[2].canSelect = true;
   outboxTable.columns[2].publicAnyPrivilege = true;
   outboxTable.publicAnyColumnPrivilege = true;
+  const admissionTable = snapshot.sealedTables[3];
+  admissionTable.canDelete = true;
+  const sealedType = snapshot.sealedTypes[0];
+  sealedType.labelManifestMatches = false;
+  sealedType.effectiveUsage = true;
+  sealedType.directUsage = true;
+  sealedType.publicUsage = true;
   const config = parseRuntimeFunctionEnrollmentConfig(
     SAFE_ENVIRONMENT,
     "check",
@@ -390,26 +477,29 @@ test("detects authority, migration and function ACL drift independently", () => 
       "rewardDeliveryLock:SECURITY_MODE_MISMATCH",
       "identityEmailClaimReserveInvite:SEARCH_PATH_MISMATCH",
       "identityEmailClaimAssertInviteLocator:SECURITY_MODE_MISMATCH",
+      `${admissionLanguageDrift.key}:LANGUAGE_MISMATCH`,
+      `${sealedType.key}:ENUM_LABEL_MANIFEST_MISMATCH`,
     ],
   );
-  assert.deepEqual(
-    runtimeFunctionEnrollmentComplianceViolations(snapshot),
-    [
-      "durableDeliveryEventWriter:WORKER_EXECUTE_PRESENT",
-      "identityEmailClaimDirectLock:PENDING_EXECUTE_PRESENT",
-      "identityOwnerInviteIssueHold:PENDING_EXECUTE_PRESENT",
-      "identityEmailClaim:DIRECT_TABLE_PRIVILEGE_PRESENT",
-      "identityEmailClaim:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
-      "identityEmailClaim:DIRECT_COLUMN_PRIVILEGE_PRESENT",
-      "identityOwnerInviteIssueCommand:DIRECT_TABLE_PRIVILEGE_PRESENT",
-      "identityOwnerInviteIssueCommand:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
-      "identityOwnerInviteIssueCommand:DIRECT_COLUMN_PRIVILEGE_PRESENT",
-      "identityMailOutbox:DIRECT_TABLE_PRIVILEGE_PRESENT",
-      "identityMailOutbox:PUBLIC_TABLE_PRIVILEGE_PRESENT",
-      "identityMailOutbox:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
-      "identityMailOutbox:PUBLIC_COLUMN_PRIVILEGE_PRESENT",
-    ],
-  );
+  assert.deepEqual(runtimeFunctionEnrollmentComplianceViolations(snapshot), [
+    "durableDeliveryEventWriter:WORKER_EXECUTE_PRESENT",
+    "identityEmailClaimDirectLock:PENDING_EXECUTE_PRESENT",
+    "identityOwnerInviteIssueHold:PENDING_EXECUTE_PRESENT",
+    `${admissionFunction.key}:ADMISSION_EXECUTE_PRESENT`,
+    "identityEmailClaim:DIRECT_TABLE_PRIVILEGE_PRESENT",
+    "identityEmailClaim:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
+    "identityEmailClaim:DIRECT_COLUMN_PRIVILEGE_PRESENT",
+    "identityOwnerInviteIssueCommand:DIRECT_TABLE_PRIVILEGE_PRESENT",
+    "identityOwnerInviteIssueCommand:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
+    "identityOwnerInviteIssueCommand:DIRECT_COLUMN_PRIVILEGE_PRESENT",
+    "identityMailOutbox:DIRECT_TABLE_PRIVILEGE_PRESENT",
+    "identityMailOutbox:PUBLIC_TABLE_PRIVILEGE_PRESENT",
+    "identityMailOutbox:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
+    "identityMailOutbox:PUBLIC_COLUMN_PRIVILEGE_PRESENT",
+    `${admissionTable.key}:DIRECT_TABLE_PRIVILEGE_PRESENT`,
+    `${sealedType.key}:RUNTIME_TYPE_USAGE_PRESENT`,
+    `${sealedType.key}:PUBLIC_TYPE_USAGE_PRESENT`,
+  ]);
 });
 
 test("rejects any exact sealed-column manifest drift before enrollment", () => {
@@ -426,7 +516,7 @@ test("rejects any exact sealed-column manifest drift before enrollment", () => {
   );
 });
 
-test("binds enrollment to exact current migration 171 and exact count 171", () => {
+test("binds enrollment to exact current migration 172 and exact count 172", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";
@@ -438,10 +528,7 @@ test("binds enrollment to exact current migration 171 and exact count 171", () =
 
   assert.deepEqual(
     runtimeFunctionEnrollmentPreconditionViolations(snapshot, config),
-    [
-      "CURRENT_MIGRATION_MISMATCH",
-      "CURRENT_MIGRATION_COUNT_MISMATCH",
-    ],
+    ["CURRENT_MIGRATION_MISMATCH", "CURRENT_MIGRATION_COUNT_MISMATCH"],
   );
 });
 

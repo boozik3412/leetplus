@@ -35,10 +35,8 @@ const SAFE_SOURCE_DATABASE_PATTERN =
 const SUCCESS_DATABASE_PREFIX = "lp_delivery_claim_upgrade_ci_";
 const FAILURE_DATABASE_PREFIX = "lp_delivery_claim_failure_ci_";
 const RUNTIME_ROLE_PREFIX = "lp_delivery_claim_runtime_";
-const SUCCESS_DATABASE_PATTERN =
-  /^lp_delivery_claim_upgrade_ci_[a-f0-9]{16}$/u;
-const FAILURE_DATABASE_PATTERN =
-  /^lp_delivery_claim_failure_ci_[a-f0-9]{16}$/u;
+const SUCCESS_DATABASE_PATTERN = /^lp_delivery_claim_upgrade_ci_[a-f0-9]{16}$/u;
+const FAILURE_DATABASE_PATTERN = /^lp_delivery_claim_failure_ci_[a-f0-9]{16}$/u;
 const RUNTIME_ROLE_PATTERN = /^lp_delivery_claim_runtime_[a-f0-9]{16}$/u;
 const TEMP_ROOT_PREFIX = "leetplus-delivery-claim-upgrade-";
 const MIGRATION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -340,11 +338,8 @@ async function readMigrationPlan() {
     "Committed migration directory names changed.",
   );
   assert.equal(migrationDirectories.length, CURRENT_EXPECTED_MIGRATION_COUNT);
-  assert.equal(
-    migrationDirectories.at(-1),
-    CURRENT_EXPECTED_LATEST_MIGRATION,
-  );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_171");
+  assert.equal(migrationDirectories.at(-1), CURRENT_EXPECTED_LATEST_MIGRATION);
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_172");
   const additiveTargetIndex =
     STAFF_TASK_ALLOWED_ADDITIVE_TAIL.indexOf(TARGET_MIGRATION);
   assert.deepEqual(
@@ -362,15 +357,12 @@ async function readMigrationPlan() {
     IDENTITY_FOUNDATION_MIGRATION,
   );
   assert.equal(
-    migrationDirectories[targetIndex + 5],
+    STAFF_TASK_ALLOWED_ADDITIVE_TAIL.at(-1),
     CURRENT_EXPECTED_LATEST_MIGRATION,
   );
 
   const manifest = JSON.parse(
-    await readFile(
-      new URL(`./${BASE_MANIFEST_FILE}`, import.meta.url),
-      "utf8",
-    ),
+    await readFile(new URL(`./${BASE_MANIFEST_FILE}`, import.meta.url), "utf8"),
   );
   assert.deepEqual(
     {
@@ -393,12 +385,7 @@ async function readMigrationPlan() {
   );
   for (const entry of manifest.migrations) {
     const content = await readFile(
-      join(
-        sourcePrismaDir,
-        "migrations",
-        entry.migrationName,
-        "migration.sql",
-      ),
+      join(sourcePrismaDir, "migrations", entry.migrationName, "migration.sql"),
       "utf8",
     );
     assert.equal(normalizedSha256(content), entry.sha256);
@@ -417,7 +404,11 @@ async function readMigrationPlan() {
     targetSql,
     /(?:ALTER TABLE|UPDATE|INSERT INTO|DELETE FROM)\s+"Store"/u,
   );
-  return { sourcePrismaDir, prefixMigrations, targetMigration: TARGET_MIGRATION };
+  return {
+    sourcePrismaDir,
+    prefixMigrations,
+    targetMigration: TARGET_MIGRATION,
+  };
 }
 
 async function createMigrationArtifact(tempRoot, migrationPlan) {
@@ -898,16 +889,96 @@ async function createSuccessFixtures(client, fixtureKey) {
   }
 
   const deliveries = [
-    ["backfill", "TELEGRAM", "READY", "READY_FOR_BOT", null, ids.profileA1, ids.guestA1],
-    ["match", "MAX", "READY", "READY_FOR_BOT", ids.storeA1, ids.profileA1, ids.guestA1],
-    ["mismatch", "TELEGRAM", "READY", "READY_FOR_BOT", ids.storeA1, ids.profileA1, ids.guestA1],
-    ["noStore", "MAX", "READY", "READY_FOR_BOT", null, ids.profileA1, ids.guestA1],
-    ["sent", "TELEGRAM", "SENT", "READY_FOR_BOT", ids.storeA1, ids.profileA1, ids.guestA1],
-    ["failed", "MAX", "FAILED", "READY_FOR_BOT", ids.storeA1, ids.profileA1, ids.guestA1],
-    ["canceled", "TELEGRAM", "CANCELED", "READY_FOR_BOT", ids.storeA1, ids.profileA1, ids.guestA1],
-    ["manual", "MANUAL", "READY", "READY_FOR_CASHIER", null, ids.profileA1, ids.guestA1],
-    ["recipient", "TELEGRAM", "READY", "READY_FOR_BOT", ids.storeA1, ids.profileA2, ids.guestA2],
-    ["blocked", "MAX", "BLOCKED", "NEEDS_CONSENT", ids.storeA1, ids.profileA1, ids.guestA1],
+    [
+      "backfill",
+      "TELEGRAM",
+      "READY",
+      "READY_FOR_BOT",
+      null,
+      ids.profileA1,
+      ids.guestA1,
+    ],
+    [
+      "match",
+      "MAX",
+      "READY",
+      "READY_FOR_BOT",
+      ids.storeA1,
+      ids.profileA1,
+      ids.guestA1,
+    ],
+    [
+      "mismatch",
+      "TELEGRAM",
+      "READY",
+      "READY_FOR_BOT",
+      ids.storeA1,
+      ids.profileA1,
+      ids.guestA1,
+    ],
+    [
+      "noStore",
+      "MAX",
+      "READY",
+      "READY_FOR_BOT",
+      null,
+      ids.profileA1,
+      ids.guestA1,
+    ],
+    [
+      "sent",
+      "TELEGRAM",
+      "SENT",
+      "READY_FOR_BOT",
+      ids.storeA1,
+      ids.profileA1,
+      ids.guestA1,
+    ],
+    [
+      "failed",
+      "MAX",
+      "FAILED",
+      "READY_FOR_BOT",
+      ids.storeA1,
+      ids.profileA1,
+      ids.guestA1,
+    ],
+    [
+      "canceled",
+      "TELEGRAM",
+      "CANCELED",
+      "READY_FOR_BOT",
+      ids.storeA1,
+      ids.profileA1,
+      ids.guestA1,
+    ],
+    [
+      "manual",
+      "MANUAL",
+      "READY",
+      "READY_FOR_CASHIER",
+      null,
+      ids.profileA1,
+      ids.guestA1,
+    ],
+    [
+      "recipient",
+      "TELEGRAM",
+      "READY",
+      "READY_FOR_BOT",
+      ids.storeA1,
+      ids.profileA2,
+      ids.guestA2,
+    ],
+    [
+      "blocked",
+      "MAX",
+      "BLOCKED",
+      "NEEDS_CONSENT",
+      ids.storeA1,
+      ids.profileA1,
+      ids.guestA1,
+    ],
   ];
   for (const [
     name,
@@ -1119,10 +1190,7 @@ async function readPost166Catalog(client) {
 
 function assertPost166Catalog(catalog) {
   const columnMap = new Map(
-    catalog.columns.map((row) => [
-      `${row.table_name}.${row.column_name}`,
-      row,
-    ]),
+    catalog.columns.map((row) => [`${row.table_name}.${row.column_name}`, row]),
   );
   for (const [key, expected] of [
     [
@@ -1189,11 +1257,7 @@ function assertPost166Catalog(catalog) {
   const constraintMap = new Map(
     catalog.constraints.map((row) => [row.name, row]),
   );
-  for (const name of [
-    ...DELIVERY_CHECKS,
-    ...ATTEMPT_CHECKS,
-    ...EVENT_CHECKS,
-  ]) {
+  for (const name of [...DELIVERY_CHECKS, ...ATTEMPT_CHECKS, ...EVENT_CHECKS]) {
     const row = constraintMap.get(name);
     assert(row, `${name} is missing.`);
     assert.equal(row.type, "c");
@@ -1278,15 +1342,11 @@ function assertPost166Catalog(catalog) {
   assert.equal(transitionKeyHelper.parallel_safety, "s");
   assert.equal(transitionKeyHelper.security_definer, false);
 
-  const eventBoundary = functionMap.get(
-    "guest_game_delivery_record_event_v1",
-  );
+  const eventBoundary = functionMap.get("guest_game_delivery_record_event_v1");
   assert(eventBoundary);
   assert.equal(eventBoundary.identity_arguments, "event_payload json");
   assert.equal(eventBoundary.public_execute, false);
-  assert.deepEqual(eventBoundary.configuration, [
-    "search_path=pg_catalog",
-  ]);
+  assert.deepEqual(eventBoundary.configuration, ["search_path=pg_catalog"]);
   assert.equal(eventBoundary.volatility, "v");
   assert.equal(eventBoundary.security_definer, true);
   assert.equal(eventBoundary.owned_by_event_table_owner, true);
@@ -1357,7 +1417,10 @@ async function assertSuccessfulBackfillAndQuarantine(client, fixtures) {
   );
   assert.equal(byId.get(fixtures.deliveries.match).integrityState, "VERIFIED");
   assert.equal(byId.get(fixtures.deliveries.manual).integrityState, "VERIFIED");
-  assert.equal(byId.get(fixtures.deliveries.blocked).integrityState, "VERIFIED");
+  assert.equal(
+    byId.get(fixtures.deliveries.blocked).integrityState,
+    "VERIFIED",
+  );
   assert.equal(byId.get(fixtures.deliveries.match).integrityReasonCode, null);
   assert.equal(byId.get(fixtures.deliveries.manual).integrityReasonCode, null);
   assert.equal(byId.get(fixtures.deliveries.blocked).integrityReasonCode, null);
@@ -1618,10 +1681,7 @@ async function expectCheckConstraint(constraintName, operation) {
   ]
     .filter((value) => typeof value === "string")
     .join("\n");
-  assert.match(
-    details || String(caught),
-    new RegExp(constraintName, "u"),
-  );
+  assert.match(details || String(caught), new RegExp(constraintName, "u"));
 }
 
 async function grantRestrictedRuntimeRole(client, roleName) {
@@ -1876,11 +1936,7 @@ function deferredSignal() {
   return { promise, resolve: resolveSignal };
 }
 
-async function acquireRewardDeliveryBoundary(
-  client,
-  tenantId,
-  rewardId,
-) {
+async function acquireRewardDeliveryBoundary(client, tenantId, rewardId) {
   const [row] = await client.$queryRawUnsafe(
     `SELECT public."guest_game_reward_delivery_lock_v1"(
        $1::TEXT,
@@ -1893,11 +1949,7 @@ async function acquireRewardDeliveryBoundary(
   return row.claimRequired;
 }
 
-async function readRewardDeliveryBoundarySnapshot(
-  client,
-  tenantId,
-  rewardId,
-) {
+async function readRewardDeliveryBoundarySnapshot(client, tenantId, rewardId) {
   const [row] = await client.$queryRawUnsafe(
     `SELECT pg_catalog.jsonb_build_object(
        'reward',
@@ -1991,7 +2043,11 @@ async function waitForAdvisoryWait(observer, waiterPid, holderPid) {
 function assertNoRawLockOrderFailure(error) {
   const states = extractSqlStates(error);
   assert.equal(states.has("40P01"), false, "Unexpected raw deadlock SQLSTATE.");
-  assert.equal(states.has("55P03"), false, "Unexpected raw lock-timeout SQLSTATE.");
+  assert.equal(
+    states.has("55P03"),
+    false,
+    "Unexpected raw lock-timeout SQLSTATE.",
+  );
   assert.doesNotMatch(
     extractErrorText(error),
     /(?:40P01|55P03|deadlock detected|lock timeout)/iu,
@@ -2013,11 +2069,7 @@ async function assertRewardDeliveryLockBoundaryScope(
       () =>
         client.$transaction(async (transaction) => {
           await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
-          await acquireRewardDeliveryBoundary(
-            transaction,
-            tenantId,
-            rewardId,
-          );
+          await acquireRewardDeliveryBoundary(transaction, tenantId, rewardId);
         }),
       /(?:reward does not exist in requested tenant|Foreign key constraint (?:failed|violated))/iu,
     );
@@ -2915,11 +2967,9 @@ async function assertNullClosedStateMatrices(client, fixtures) {
     ),
   );
 
-  await expectCheckConstraint(
-    "GuestGameDeliveryEvent_scope_value_check",
-    () =>
-      client.$executeRawUnsafe(
-        `INSERT INTO "GuestGameDeliveryEvent" (
+  await expectCheckConstraint("GuestGameDeliveryEvent_scope_value_check", () =>
+    client.$executeRawUnsafe(
+      `INSERT INTO "GuestGameDeliveryEvent" (
            "id", "tenantId", "deliveryId", "rewardId", "eventType",
            "providerOutcomeCode", "providerObservedAt", "note"
          ) VALUES (
@@ -2927,18 +2977,16 @@ async function assertNullClosedStateMatrices(client, fixtures) {
            'MALFORMED_OUTCOME', CURRENT_TIMESTAMP,
            'NULL must not satisfy the outcome matrix.'
          )`,
-        randomUUID(),
-        fixtures.tenantA,
-        fixtures.deliveries.backfill,
-        fixtures.rewards.backfill,
-      ),
+      randomUUID(),
+      fixtures.tenantA,
+      fixtures.deliveries.backfill,
+      fixtures.rewards.backfill,
+    ),
   );
 
-  await expectCheckConstraint(
-    "GuestGameDeliveryEvent_scope_value_check",
-    () =>
-      client.$executeRawUnsafe(
-        `INSERT INTO "GuestGameDeliveryEvent" (
+  await expectCheckConstraint("GuestGameDeliveryEvent_scope_value_check", () =>
+    client.$executeRawUnsafe(
+      `INSERT INTO "GuestGameDeliveryEvent" (
            "id", "tenantId", "deliveryId", "rewardId", "eventType",
            "integrityReasonCode", "note"
          ) VALUES (
@@ -2946,11 +2994,11 @@ async function assertNullClosedStateMatrices(client, fixtures) {
            'TEST_REASON_WITHOUT_INTEGRITY_STATE',
            'NULL integrityState must not satisfy the integrity pair matrix.'
          )`,
-        randomUUID(),
-        fixtures.tenantA,
-        fixtures.deliveries.backfill,
-        fixtures.rewards.backfill,
-      ),
+      randomUUID(),
+      fixtures.tenantA,
+      fixtures.deliveries.backfill,
+      fixtures.rewards.backfill,
+    ),
   );
 
   const transitionRevision = 3;
@@ -3047,10 +3095,7 @@ async function assertTriggerSemantics(client, fixtures) {
     return { delivery, events, attemptCount: attempts.count };
   };
   const quarantineBefore = await readQuarantineSnapshot();
-  assert.equal(
-    quarantineBefore.delivery.integrityState,
-    "LEGACY_QUARANTINED",
-  );
+  assert.equal(quarantineBefore.delivery.integrityState, "LEGACY_QUARANTINED");
   assert.equal(quarantineBefore.events.length, 1);
   assert.equal(quarantineBefore.events[0].integrityState, "LEGACY_QUARANTINED");
   assert.equal(
@@ -3322,10 +3367,7 @@ async function runSuccessfulUpgrade(
       fixtures,
       runtimeRoleName,
     );
-    await assertRewardDeliveryLockBoundaryConcurrency(
-      databaseUrl,
-      fixtures,
-    );
+    await assertRewardDeliveryLockBoundaryConcurrency(databaseUrl, fixtures);
     await assertNullClosedStateMatrices(client, fixtures);
     await assertTriggerSemantics(client, fixtures);
     assert.deepEqual(await readTargetAttemptCounts(client), {
@@ -3349,11 +3391,7 @@ async function assertFailedAttemptState(
   assert.deepEqual(await readTargetAttemptCounts(client), expectedCounts);
 }
 
-async function runPreflightFailures(
-  schemaPath,
-  databaseUrl,
-  fixtures,
-) {
+async function runPreflightFailures(schemaPath, databaseUrl, fixtures) {
   let client = prismaClient(databaseUrl);
   let baseline = await readLegacySnapshot(client);
   const [rewardScopeFixture] = await client.$queryRawUnsafe(
@@ -3706,16 +3744,14 @@ async function runOfflineSelfTest() {
   expectOfflineFailure(() =>
     assertRealEnvironment({
       NODE_ENV: "production",
-      DATABASE_URL:
-        "postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci",
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci",
       TENANT_DELIVERY_CLAIM_UPGRADE_SMOKE_CONFIRM: REQUIRED_CONFIRMATION,
     }),
   );
   expectOfflineFailure(() =>
     assertRealEnvironment({
       NODE_ENV: "test",
-      DATABASE_URL:
-        "postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci",
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci",
     }),
   );
   assertMigrationFailure(

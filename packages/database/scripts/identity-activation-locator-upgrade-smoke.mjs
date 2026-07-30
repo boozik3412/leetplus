@@ -40,8 +40,7 @@ const UPGRADE_DATABASE_PATTERN =
   /^lp_identity_locator_upgrade_ci_[a-f0-9]{16}$/u;
 const CLEAN_DATABASE_PATTERN =
   /^lp_identity_locator_clean_ci_[a-f0-9]{16}$/u;
-const RUNTIME_ROLE_PATTERN =
-  /^lp_identity_locator_runtime_[a-f0-9]{16}$/u;
+const RUNTIME_ROLE_PATTERN = /^lp_identity_locator_runtime_[a-f0-9]{16}$/u;
 const TEMP_ROOT_PREFIX = "leetplus-identity-locator-upgrade-";
 const MIGRATION_TIMEOUT_MS = 10 * 60 * 1000;
 const CLUSTER_LOCK_CLASS = 1_281_120_000;
@@ -104,7 +103,10 @@ function parseArguments(argv) {
       contractError("CLI_ARGUMENT_UNSUPPORTED");
     }
   }
-  return { help: false, selfTest: argv.includes("--self-test") };
+  return {
+    help: false,
+    selfTest: argv.includes("--self-test"),
+  };
 }
 
 function quoteIdentifier(value) {
@@ -146,7 +148,9 @@ function parseSafeSourceDatabaseUrl(rawDatabaseUrl) {
   ) {
     contractError("POSTGRESQL_URL_REQUIRED");
   }
-  const hostname = sourceUrl.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+  const hostname = sourceUrl.hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/gu, "");
   if (!new Set(["127.0.0.1", "localhost", "::1"]).has(hostname)) {
     contractError("LOOPBACK_POSTGRESQL_REQUIRED");
   }
@@ -199,7 +203,11 @@ function generatedNames() {
   assert.match(cleanDatabaseName, CLEAN_DATABASE_PATTERN);
   assert.match(runtimeRoleName, RUNTIME_ROLE_PATTERN);
   assert.notEqual(upgradeDatabaseName, cleanDatabaseName);
-  return { upgradeDatabaseName, cleanDatabaseName, runtimeRoleName };
+  return {
+    upgradeDatabaseName,
+    cleanDatabaseName,
+    runtimeRoleName,
+  };
 }
 
 function assertSafeGeneratedDatabaseName(databaseName) {
@@ -239,7 +247,9 @@ function prismaClient(databaseUrl) {
 }
 
 async function readMigrationPlan() {
-  const sourcePrismaDir = fileURLToPath(new URL("../prisma/", import.meta.url));
+  const sourcePrismaDir = fileURLToPath(
+    new URL("../prisma/", import.meta.url),
+  );
   const migrationDirectories = (
     await readdir(join(sourcePrismaDir, "migrations"), {
       withFileTypes: true,
@@ -276,10 +286,13 @@ async function readMigrationPlan() {
   assert.equal(migrationDirectories[targetIndex - 1], PREVIOUS_MIGRATION);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260730010000_identity_owner_invite_hold_outbox",
+    "20260730020000_shared_beta_admission_provenance",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_171");
-  const historicalMigrations = migrationDirectories.slice(0, targetIndex + 1);
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_172");
+  const historicalMigrations = migrationDirectories.slice(
+    0,
+    targetIndex + 1,
+  );
   return {
     sourcePrismaDir,
     prefixMigrations: historicalMigrations.slice(0, -1),
@@ -298,16 +311,16 @@ async function createMigrationArtifact(tempRoot, migrationPlan) {
     join(targetPrismaDir, "schema.prisma"),
   );
   await copyFile(
-    join(migrationPlan.sourcePrismaDir, "migrations", "migration_lock.toml"),
+    join(
+      migrationPlan.sourcePrismaDir,
+      "migrations",
+      "migration_lock.toml",
+    ),
     join(targetMigrationsDir, "migration_lock.toml"),
   );
   for (const migrationName of migrationPlan.prefixMigrations) {
     await cp(
-      join(
-        migrationPlan.sourcePrismaDir,
-        "migrations",
-        migrationName,
-      ),
+      join(migrationPlan.sourcePrismaDir, "migrations", migrationName),
       join(targetMigrationsDir, migrationName),
       { recursive: true },
     );
@@ -631,11 +644,7 @@ async function transitionInvite(
   return rows[0]?.receipt;
 }
 
-async function insertUser(client, {
-  id,
-  tenantId,
-  email,
-}) {
+async function insertUser(client, { id, tenantId, email }) {
   await client.$executeRawUnsafe(
     `INSERT INTO public."User" (
        "id",
@@ -668,12 +677,7 @@ async function insertUser(client, {
   );
 }
 
-async function insertInvite(client, {
-  id,
-  tenantId,
-  email,
-  tokenHash,
-}) {
+async function insertInvite(client, { id, tenantId, email, tokenHash }) {
   await client.$executeRawUnsafe(
     `INSERT INTO public."UserInvite" (
        "id",
@@ -870,8 +874,7 @@ function extractErrorText(error) {
     }
     if (
       candidate === null ||
-      (typeof candidate !== "object" &&
-        typeof candidate !== "function") ||
+      (typeof candidate !== "object" && typeof candidate !== "function") ||
       visited.has(candidate)
     ) {
       continue;
@@ -903,7 +906,10 @@ async function expectSqlState(label, expected, operation) {
   } catch (error) {
     caught = error;
   }
-  assert.ok(caught, `${label}: PostgreSQL unexpectedly accepted the command.`);
+  assert.ok(
+    caught,
+    `${label}: PostgreSQL unexpectedly accepted the command.`,
+  );
   const states = extractSqlStates(caught);
   assert.ok(
     states.has(expected),
@@ -972,29 +978,23 @@ async function assertUpgradeBehavior(client, fixtures) {
     fixtures.raceEmail,
   ]);
 
-  await expectSqlState(
-    "wrong tenant",
-    EXPECTED_SQL_STATES.missing,
-    () =>
-      assertByLocator(
-        client,
-        fixtures.exactReservation,
-        fixtures.tenantB,
-        fixtures.exactReservation,
-        1,
-      ),
+  await expectSqlState("wrong tenant", EXPECTED_SQL_STATES.missing, () =>
+    assertByLocator(
+      client,
+      fixtures.exactReservation,
+      fixtures.tenantB,
+      fixtures.exactReservation,
+      1,
+    ),
   );
-  await expectSqlState(
-    "stale revision",
-    EXPECTED_SQL_STATES.missing,
-    () =>
-      assertByLocator(
-        client,
-        fixtures.exactReservation,
-        fixtures.tenantA,
-        fixtures.exactReservation,
-        2,
-      ),
+  await expectSqlState("stale revision", EXPECTED_SQL_STATES.missing, () =>
+    assertByLocator(
+      client,
+      fixtures.exactReservation,
+      fixtures.tenantA,
+      fixtures.exactReservation,
+      2,
+    ),
   );
   await expectSqlState(
     "invalid locator",
@@ -1090,9 +1090,7 @@ async function runLockOrderRace(databaseUrl, fixtures) {
   try {
     holderPromise = holder.$transaction(
       async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SET LOCAL statement_timeout = '10s'`,
-        );
+        await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '10s'`);
         await tx.$queryRawUnsafe(
           `SELECT public."identity_email_claim_lock_v1"($1::text)`,
           fixtures.raceEmail,
@@ -1115,9 +1113,7 @@ async function runLockOrderRace(databaseUrl, fixtures) {
 
     waiterPromise = waiter.$transaction(
       async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SET LOCAL statement_timeout = '10s'`,
-        );
+        await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '10s'`);
         const [pid] = await tx.$queryRawUnsafe(
           `SELECT pg_catalog.pg_backend_pid() AS backend_pid`,
         );
@@ -1134,10 +1130,7 @@ async function runLockOrderRace(databaseUrl, fixtures) {
     );
 
     const waiterBackendPid = await waiterStarted.promise;
-    const observed = await waitForAdvisoryWait(
-      observer,
-      waiterBackendPid,
-    );
+    const observed = await waitForAdvisoryWait(observer, waiterBackendPid);
     assert.equal(
       observed,
       true,
@@ -1180,11 +1173,7 @@ async function runLockOrderRace(databaseUrl, fixtures) {
   }
 }
 
-async function assertCleanBehavior(
-  client,
-  fixtures,
-  runtimeContext,
-) {
+async function assertCleanBehavior(client, fixtures, runtimeContext) {
   await assertPost170Catalog(client);
   await createTenants(client, fixtures);
   const reserve = await reserveInvite(
@@ -1214,7 +1203,9 @@ async function assertCleanBehavior(
   assertPiiFreeReceipt(receipt, [fixtures.cleanEmail]);
 
   const role = quoteIdentifier(runtimeContext.roleName);
-  await client.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${role}`);
+  await client.$executeRawUnsafe(
+    `GRANT USAGE ON SCHEMA public TO ${role}`,
+  );
   const runtime = prismaClient(runtimeContext.databaseUrl);
   runtimeContext.runtime = runtime;
   await expectSqlState(
@@ -1421,11 +1412,8 @@ async function runRealSmoke(environment) {
   const { sourceUrl, databaseName: sourceDatabaseName } =
     assertRealEnvironment(environment);
   const migrationPlan = await readMigrationPlan();
-  const {
-    upgradeDatabaseName,
-    cleanDatabaseName,
-    runtimeRoleName,
-  } = generatedNames();
+  const { upgradeDatabaseName, cleanDatabaseName, runtimeRoleName } =
+    generatedNames();
   const password = randomBytes(32).toString("hex");
   const sourceDatabaseUrl = databaseUrlFor(sourceUrl, sourceDatabaseName);
   const upgradeDatabaseUrl = databaseUrlFor(
@@ -1451,7 +1439,10 @@ async function runRealSmoke(environment) {
     clusterLockHeld = true;
     tempRoot = await mkdtemp(join(tmpdir(), TEMP_ROOT_PREFIX));
     assertSafeTempRoot(tempRoot);
-    const artifact = await createMigrationArtifact(tempRoot, migrationPlan);
+    const artifact = await createMigrationArtifact(
+      tempRoot,
+      migrationPlan,
+    );
 
     await createDisposableDatabase(admin, upgradeDatabaseName);
     upgradeDatabaseCreated = true;

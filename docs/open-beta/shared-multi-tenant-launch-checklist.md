@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.24                                                       |
+| Версия     | 1.25                                                       |
 | Дата       | 30.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -147,8 +147,10 @@ deploy и доступ тестеру ещё не приняты.
 - [ ] Delivery, общий Langame sync и остальные jobs имеют durable
       claim/lease; старый permit не может commit/ack/send после suspend, а
       начатый provider request проходит documented drain/reconciliation.
-- [ ] Persisted `SHARED BETA GO` привязан к exact release SHA, environment,
-      schema head, policy manifest, profile digest и execution revision.
+- [ ] Persisted `SHARED BETA GO` содержит подписанные exact release SHA,
+      environment, schema head, policy manifest, database/profile digests и
+      execution revision; activation независимо получает фактический
+      DB/release context и hard-match проверяет его до issue и consume.
 - [ ] Unknown/missing/expired state прекращает действие fail-closed.
 - [ ] Tenant suspend действует на login/invite/API/BFF/files/jobs/sync/
       rewards/Telegram без restart.
@@ -256,6 +258,24 @@ Evidence:
       (`run #50`), `3/3 PASS`; ordinary-archive PG16 audit и review —
       `PASS`, P0/P1/P2=0. Это не включает `HOLD→PENDING`, activation,
       delivery, production-like admission или launch GO;
+- [ ] `BETA-IAM-004H` signed admission provenance принят exact-head:
+      exact three-gate Ed25519 signed-claim binding, empty production root registry,
+      zero runtime/PUBLIC privileges и real PostgreSQL
+      `seal→one RPC→persisted→open` evidence. Этот checkbox не разрешает
+      `HOLD→PENDING` и не доказывает actual current DB/release context;
+      `shellEvidenceDigest` остаётся signed claim и не доказывает Store,
+      OWNER override/capability digest или provisioning audit/receipt;
+      assert принимает identity только как exact `RESERVATION` либо
+      immutable-command-bound live `OWNER/NETWORK` + encrypted `HOLD`;
+- [ ] `BETA-IAM-004I` одной atomic transaction потребляет persisted GO,
+      но сначала независимо получает и hard-match проверяет фактические
+      DB/release/environment/schema/artifact/policy markers и под блокировками
+      перечитывает `Tenant`, ровно один inactive `Store`, exact OWNER
+      override/capability digest, provisioning audit/receipt и ровно шесть
+      entitlement rows; actual-context и actual-shell digests domain-separated
+      пересчитываются и проверяются до issue и повторно до consume; затем
+      запускается trial, shell переводится в `ACTIVE/OWNER_INVITED`, а exact
+      outbox — в `HOLD→PENDING`; standalone release RPC отсутствует;
 - [x] historical exact-head CI и independent review для `CURRENT_170`
       activation locator:
       `8dfe219...` / CI `30493779099` (`run #47`), `3/3 PASS`, review без

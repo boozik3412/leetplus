@@ -36,6 +36,14 @@ import {
   CURRENT_EXPECTED_LATEST_MIGRATION,
   CURRENT_EXPECTED_MIGRATION_COUNT,
 } from "./staff-task-integrity-migration-state.mjs";
+import {
+  SHARED_BETA_ADMISSION_COLUMNS,
+  SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS,
+  SHARED_BETA_ADMISSION_DORMANT_RELATIONS,
+  SHARED_BETA_ADMISSION_DORMANT_TYPES,
+  SHARED_BETA_ADMISSION_FUNCTIONS,
+  SHARED_BETA_ADMISSION_RELATIONS,
+} from "./shared-beta-admission-provenance-catalog.mjs";
 
 const METRIC_CODES = Object.freeze([
   "USER_TOTAL",
@@ -94,29 +102,31 @@ function appliedMigrationRows(artifact = expectedMigrationArtifact()) {
 
 function catalogRow(overrides = {}) {
   return {
-    expected_relation_count: "7",
-    matched_relation_count: "7",
+    expected_relation_count: "10",
+    matched_relation_count: "10",
     dormant_relation_owner_mismatch_count: "0",
     dormant_relation_nonowner_acl_count: "0",
     dormant_column_nonowner_acl_count: "0",
     dormant_function_owner_mismatch_count: "0",
     dormant_function_nonowner_acl_count: "0",
-    expected_column_count: "68",
-    matched_column_count: "68",
-    expected_exact_identity_column_count: "45",
-    actual_exact_identity_column_count: "45",
-    matched_constraint_count: "45",
-    actual_constraint_count: "45",
-    matched_index_count: "24",
-    actual_index_count: "24",
-    matched_function_count: "13",
-    actual_function_count: "13",
-    matched_enum_label_count: "5",
-    total_enum_label_count: "5",
-    matched_trigger_count: "3",
-    actual_identity_trigger_count: "3",
-    matched_ri_trigger_count: "28",
-    actual_ri_trigger_count: "28",
+    dormant_type_owner_mismatch_count: "0",
+    dormant_type_nonowner_acl_count: "0",
+    expected_column_count: "132",
+    matched_column_count: "132",
+    expected_exact_identity_column_count: "109",
+    actual_exact_identity_column_count: "109",
+    matched_constraint_count: "73",
+    actual_constraint_count: "73",
+    matched_index_count: "38",
+    actual_index_count: "38",
+    matched_function_count: "22",
+    actual_function_count: "22",
+    matched_enum_label_count: "8",
+    total_enum_label_count: "8",
+    matched_trigger_count: "6",
+    actual_identity_trigger_count: "6",
+    matched_ri_trigger_count: "44",
+    actual_ri_trigger_count: "44",
     ...overrides,
   };
 }
@@ -170,6 +180,7 @@ function privilegeRow(overrides = {}) {
     public_column_privilege_count: "0",
     sequence_privilege_count: "0",
     executable_user_function_count: "0",
+    dormant_type_usage_count: "0",
     foreign_server_usage_count: "0",
     foreign_data_wrapper_usage_count: "0",
     parameter_privilege_count: "0",
@@ -559,10 +570,10 @@ test("timeouts are bounded and embedded in the one-connection read-only URL", ()
 });
 
 test("the manifest exposes exactly two create-only proposal codes and exact column ACL", () => {
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 171);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 172);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260730010000_identity_owner_invite_hold_outbox",
+    "20260730020000_shared_beta_admission_provenance",
   );
   assert.deepEqual(
     Object.entries(FINDING_MANIFEST)
@@ -620,6 +631,31 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     REQUIRED_COLUMN_SELECTS.IdentityEmailClaim.includes("workflowLocator"),
     false,
   );
+  assert.equal(SHARED_BETA_ADMISSION_RELATIONS.length, 3);
+  assert.equal(SHARED_BETA_ADMISSION_COLUMNS.length, 64);
+  assert.equal(SHARED_BETA_ADMISSION_FUNCTIONS.length, 9);
+  assert.equal(SHARED_BETA_ADMISSION_DORMANT_TYPES.length, 1);
+  assert.deepEqual(
+    [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
+    [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
+  );
+  assert.deepEqual(
+    [...SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS].sort(),
+    SHARED_BETA_ADMISSION_FUNCTIONS.map((entry) => entry.name).sort(),
+  );
+  assert.equal(
+    SHARED_BETA_ADMISSION_FUNCTIONS.some(
+      (entry) => entry.volatility === "s" && entry.language === "sql",
+    ),
+    true,
+  );
+  assert.equal(
+    SHARED_BETA_ADMISSION_RELATIONS.every(
+      (relationName) =>
+        !Object.hasOwn(REQUIRED_COLUMN_SELECTS, relationName),
+    ),
+    true,
+  );
   for (const unsafePrivilege of [
     { current_database_connect_grant_option: true },
     { public_schema_usage_grant_option: true },
@@ -632,6 +668,7 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     { system_security_definer_function_count: "1" },
     { system_high_oid_executable_function_count: "1" },
     { writable_relation_count: "1" },
+    { dormant_type_usage_count: "1" },
     { foreign_data_wrapper_usage_count: "1" },
     { parameter_privilege_count: "1" },
   ]) {
@@ -646,15 +683,17 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     { dormant_column_nonowner_acl_count: "1" },
     { dormant_function_owner_mismatch_count: "1" },
     { dormant_function_nonowner_acl_count: "1" },
-    { matched_column_count: "67" },
-    { actual_exact_identity_column_count: "46" },
-    { matched_constraint_count: "44" },
-    { actual_index_count: "25" },
-    { actual_function_count: "14" },
-    { total_enum_label_count: "6" },
-    { actual_identity_trigger_count: "4" },
-    { matched_ri_trigger_count: "27" },
-    { actual_ri_trigger_count: "29" },
+    { dormant_type_owner_mismatch_count: "1" },
+    { dormant_type_nonowner_acl_count: "1" },
+    { matched_column_count: "131" },
+    { actual_exact_identity_column_count: "110" },
+    { matched_constraint_count: "72" },
+    { actual_index_count: "39" },
+    { actual_function_count: "23" },
+    { total_enum_label_count: "9" },
+    { actual_identity_trigger_count: "7" },
+    { matched_ri_trigger_count: "43" },
+    { actual_ri_trigger_count: "45" },
   ]) {
     assert.equal(buildCatalogState(catalogRow(catalogDrift)).ready, false);
   }
@@ -726,8 +765,11 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(CATALOG_STATE_SQL, /dormant_relation_nonowner_acl_count/u);
   assert.match(CATALOG_STATE_SQL, /dormant_column_nonowner_acl_count/u);
   assert.match(CATALOG_STATE_SQL, /dormant_function_nonowner_acl_count/u);
+  assert.match(CATALOG_STATE_SQL, /dormant_type_owner_mismatch_count/u);
+  assert.match(CATALOG_STATE_SQL, /dormant_type_nonowner_acl_count/u);
   assert.match(CATALOG_STATE_SQL, /pg_catalog\.aclexplode/iu);
   assert.match(CATALOG_STATE_SQL, /pg_catalog\.acldefault\('f'/u);
+  assert.match(CATALOG_STATE_SQL, /pg_catalog\.acldefault\('T'/u);
   assert.doesNotMatch(
     JSON.stringify(REQUIRED_COLUMN_SELECTS),
     /IdentityOwnerInviteIssueCommand|IdentityMailOutbox|tokenHash|secretCiphertext/u,
@@ -735,6 +777,10 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(CATALOG_STATE_SQL, /format_type/iu);
   assert.match(CATALOG_STATE_SQL, /matched_ri_trigger_count/iu);
   assert.match(CATALOG_STATE_SQL, /trigger_row\.tgenabled = 'O'/u);
+  assert.match(CATALOG_STATE_SQL, /expected\.volatility/u);
+  assert.match(CATALOG_STATE_SQL, /expected\.language_name/u);
+  assert.match(CATALOG_STATE_SQL, /expected\.search_path_setting/u);
+  assert.match(CATALOG_STATE_SQL, /shared_beta_/u);
   assert.match(PRIVILEGE_STATE_SQL, /ownership_dependency_count/iu);
   assert.match(PRIVILEGE_STATE_SQL, /system_schema_create_count/iu);
   assert.match(PRIVILEGE_STATE_SQL, /system_object_privilege_count/iu);
@@ -743,6 +789,8 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(PRIVILEGE_STATE_SQL, /initial_row\.objsubid = attribute_row\.attnum/iu);
   assert.match(PRIVILEGE_STATE_SQL, /function_row\.prosecdef/iu);
   assert.match(PRIVILEGE_STATE_SQL, /function_row\.oid >= 16384/u);
+  assert.match(PRIVILEGE_STATE_SQL, /dormant_type_usage_count/u);
+  assert.match(PRIVILEGE_STATE_SQL, /has_type_privilege/iu);
 });
 
 test("migration artifact and database state bind ordered Git blob checksums", () => {
@@ -1332,7 +1380,7 @@ test("runtime dependency boundary pins the reviewed Prisma 6 client", () => {
 test("migration checkouts stay LF-stable for Prisma checksum portability", () => {
   const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
   const representativeMigration =
-    "packages/database/prisma/migrations/20260730010000_identity_owner_invite_hold_outbox/migration.sql";
+    "packages/database/prisma/migrations/20260730020000_shared_beta_admission_provenance/migration.sql";
   const attributes = readFileSync(
     new URL("../../../.gitattributes", import.meta.url),
     "utf8",

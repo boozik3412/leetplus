@@ -24,23 +24,24 @@ Additional environment for --apply:
   RUNTIME_FUNCTION_ENROLLMENT_CONFIRM
 
 The exact confirmation value is:
-  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20260730010000_identity_owner_invite_hold_outbox 171
+  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20260730020000_shared_beta_admission_provenance 172
 
 Safety contract:
   - The command never creates a role, database, schema, table, or function.
   - The migration/admin DATABASE_URL must be different from the target role.
-  - PostgreSQL 16, completed migration 166, exact latest migration 171 and exact count 171 are required.
+  - PostgreSQL 16, completed migration 166, exact latest migration 172 and exact count 172 are required.
   - Only seven exact application functions receive EXECUTE: two delivery
     helpers and five sealed identity-email boundaries.
   - The worker-only durable Event writer is explicitly excluded.
   - The raw identity-email lock helper remains excluded.
   - The dormant OWNER invite HOLD writer remains excluded.
-  - All table-level privileges on IdentityEmailClaim,
-    IdentityOwnerInviteIssueCommand, and IdentityMailOutbox are explicitly
-    revoked from both the runtime role and PUBLIC.
+  - All nine shared-beta admission provenance functions remain excluded.
+  - All table-level privileges on the three identity and three shared-beta
+    sealed tables are explicitly revoked from both the runtime role and PUBLIC.
   - All SELECT, INSERT, UPDATE, and REFERENCES column privileges are revoked
-    from the runtime role and PUBLIC across exact reviewed column manifests;
-    compliance verifies attacl and effective has_column_privilege results.
+    from the runtime role and PUBLIC across all 109 exact sealed columns.
+  - USAGE on SharedBetaReleaseGateCode is revoked from the runtime role and
+    PUBLIC; compliance verifies the exact enum labels and type ACL.
   - No password, connection URL, token, or function owner is printed.
 `;
 

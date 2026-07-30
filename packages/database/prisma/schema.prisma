@@ -205,6 +205,12 @@ enum IdentityMailOutboxStatus {
   HOLD
 }
 
+enum SharedBetaReleaseGateCode {
+  MODULE_POLICY_ENFORCED
+  EMAIL_INVITE_WORKFLOW_VERIFIED
+  POSTGRESQL_RELEASE_REHEARSAL_VERIFIED
+}
+
 model Tenant {
   id                         String                 @id @default(uuid())
   name                       String
@@ -364,6 +370,7 @@ model Tenant {
   identityEmailClaims                  IdentityEmailClaim[]
   identityOwnerInviteIssueCommands     IdentityOwnerInviteIssueCommand[]
   identityMailOutboxEntries            IdentityMailOutbox[]
+  admissionDecisions                   TenantAdmissionDecision[]
   platformAdminAuditEvents             PlatformAdminAuditEvent[]
 
   @@index([status, onboardingStatus, customerStage])
@@ -499,6 +506,7 @@ model User {
   acknowledgedStaffNotifications       StaffNotification[]                   @relation("StaffNotificationAcknowledgedBy")
   resolvedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationResolvedBy")
   targetedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationTargetUser")
+  approvedTenantAdmissionDecisions     TenantAdmissionDecision[]             @relation("TenantAdmissionDecisionApprovedBy")
   platformAdminAuditEvents             PlatformAdminAuditEvent[]             @relation("PlatformAdminAuditActor")
   supportedTenants                     Tenant[]                              @relation("TenantSupportOwner")
 
@@ -587,13 +595,13 @@ model UserInvite {
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 
-  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customRole UserAccessRole? @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
-  createdBy  User?           @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  acceptedBy User?           @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
-  revokedBy  User?           @relation("UserInviteRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  tenant                   Tenant                           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customRole               UserAccessRole?                  @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  createdBy                User?                            @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  acceptedBy               User?                            @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  revokedBy                User?                            @relation("UserInviteRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
   initialOwnerIssueCommand IdentityOwnerInviteIssueCommand? @relation("IdentityOwnerInviteIssueCommandInvite")
-  identityMailOutbox      IdentityMailOutbox?               @relation("IdentityMailOutboxInvite")
+  identityMailOutbox       IdentityMailOutbox?              @relation("IdentityMailOutboxInvite")
 
   @@unique([tenantId, id], map: "UserInvite_tenantId_id_key")
   @@index([tenantId, createdAt])
@@ -651,8 +659,8 @@ model IdentityOwnerInviteIssueCommand {
   claimRevision            Int
   createdAt                DateTime             @default(now()) @db.Timestamptz(3)
 
-  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  invite UserInvite   @relation("IdentityOwnerInviteIssueCommandInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityOwnerInviteIssueCommand_invite_fkey")
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  invite UserInvite          @relation("IdentityOwnerInviteIssueCommandInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityOwnerInviteIssueCommand_invite_fkey")
   outbox IdentityMailOutbox? @relation("IdentityOwnerInviteIssueCommandOutbox")
 
   @@unique([tenantId, id], map: "identity_owner_invite_issue_command_tenant_id_key")
@@ -666,23 +674,23 @@ model IdentityOwnerInviteIssueCommand {
 /// Dormant encrypted initial-owner invite payload. Migration 171 permits HOLD
 /// only; delivery states and worker leases require a later admitted migration.
 model IdentityMailOutbox {
-  id                   String                   @id
-  tenantId             String
-  issueCommandId       String
-  inviteId             String
-  workflowLocator      String
-  aadEnvironment       String                   @db.VarChar(64)
-  template             IdentityMailTemplate     @default(INITIAL_OWNER_INVITE)
-  status               IdentityMailOutboxStatus @default(HOLD)
-  messageKey           String
-  issueRequestDigest   String                   @db.VarChar(64)
-  tokenHash            String                   @db.VarChar(64)
-  tokenDigestVersion   String                   @default("sha256-v1") @db.VarChar(16)
-  secretCiphertext     Bytes
-  envelopeVersion      Int                      @default(1)
-  keyVersion           String                   @default("v1") @db.VarChar(16)
-  expiresAt            DateTime                 @db.Timestamptz(3)
-  createdAt            DateTime                 @default(now()) @db.Timestamptz(3)
+  id                 String                   @id
+  tenantId           String
+  issueCommandId     String
+  inviteId           String
+  workflowLocator    String
+  aadEnvironment     String                   @db.VarChar(64)
+  template           IdentityMailTemplate     @default(INITIAL_OWNER_INVITE)
+  status             IdentityMailOutboxStatus @default(HOLD)
+  messageKey         String
+  issueRequestDigest String                   @db.VarChar(64)
+  tokenHash          String                   @db.VarChar(64)
+  tokenDigestVersion String                   @default("sha256-v1") @db.VarChar(16)
+  secretCiphertext   Bytes
+  envelopeVersion    Int                      @default(1)
+  keyVersion         String                   @default("v1") @db.VarChar(16)
+  expiresAt          DateTime                 @db.Timestamptz(3)
+  createdAt          DateTime                 @default(now()) @db.Timestamptz(3)
 
   tenant       Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   issueCommand IdentityOwnerInviteIssueCommand @relation("IdentityOwnerInviteIssueCommandOutbox", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey")
@@ -694,6 +702,109 @@ model IdentityMailOutbox {
   @@unique([tenantId, workflowLocator], map: "identity_mail_outbox_locator_uidx")
   @@unique([messageKey], map: "identity_mail_outbox_message_key")
   @@index([tenantId, status, createdAt], map: "identity_mail_outbox_tenant_status_created_idx")
+}
+
+/// Sealed, externally verified Ed25519 provenance for one release gate.
+/// The signed payload is immutable; only an explicit CAS revocation may
+/// advance stateRevision. No application role receives direct table access.
+model ReleaseGateAttestation {
+  id                     String                    @id
+  gateCode               SharedBetaReleaseGateCode
+  contractVersion        String                    @default("RELEASE_GATE_ATTESTATION_V1") @db.VarChar(40)
+  releaseSha             String                    @db.Char(40)
+  environment            String                    @db.VarChar(64)
+  artifactDigest         String                    @db.Char(64)
+  schemaHead             String                    @db.VarChar(128)
+  migrationCount         Int
+  policyManifestDigest   String                    @db.Char(64)
+  payload                Json
+  payloadDigest          String                    @db.Char(64)
+  signatureAlgorithm     String                    @default("Ed25519") @db.VarChar(16)
+  signingKeyId           String                    @db.VarChar(64)
+  provenanceKeyVersion   String                    @db.VarChar(64)
+  publicKeyFingerprint   String                    @db.Char(64)
+  signature              Bytes
+  passedAt               DateTime                  @db.Timestamptz(3)
+  validUntil             DateTime                  @db.Timestamptz(3)
+  stateRevision          Int                       @default(1)
+  revokedAt              DateTime?                 @db.Timestamptz(3)
+  revocationReasonDigest String?                   @db.Char(64)
+  createdAt              DateTime                  @default(now()) @db.Timestamptz(3)
+
+  decisionGates TenantAdmissionDecisionGate[]
+
+  @@unique([id, gateCode], map: "release_gate_attestation_id_code_key")
+  @@unique([payloadDigest], map: "release_gate_attestation_payload_digest_key")
+  @@index([releaseSha, environment, gateCode, validUntil], map: "release_gate_attestation_release_env_code_valid_idx")
+}
+
+/// Persisted SHARED BETA GO bound to one exact tenant revision and the exact
+/// three release gates. This migration supports create/assert/revoke only:
+/// decisions cannot be consumed and do not mutate tenant, trial, or outbox.
+model TenantAdmissionDecision {
+  id                                 String    @id
+  tenantId                           String
+  decision                           String    @default("GO") @db.VarChar(8)
+  requestId                          String
+  requestDigest                      String    @db.Char(64)
+  workflowLocator                    String
+  reservationSubjectId               String
+  expectedClaimRevision              Int
+  shellEvidenceDigest                String    @db.Char(64)
+  releaseSha                         String    @db.Char(40)
+  environment                        String    @db.VarChar(64)
+  artifactDigest                     String    @db.Char(64)
+  schemaHead                         String    @db.VarChar(128)
+  migrationCount                     Int
+  policyManifestDigest               String    @db.Char(64)
+  databaseIdentityDigest             String    @db.Char(64)
+  expectedEntitlementProfileRevision Int
+  expectedExecutionRevision          Int
+  profileDigest                      String    @db.Char(64)
+  gateSetVersion                     String    @default("SHARED_BETA_GATE_SET_V1") @db.VarChar(32)
+  gateSetDigest                      String    @db.Char(64)
+  approvedByUserId                   String
+  approvalReferenceDigest            String    @db.Char(64)
+  payload                            Json
+  payloadDigest                      String    @db.Char(64)
+  signatureAlgorithm                 String    @default("Ed25519") @db.VarChar(16)
+  signingKeyId                       String    @db.VarChar(64)
+  publicKeyFingerprint               String    @db.Char(64)
+  signature                          Bytes
+  approvedAt                         DateTime  @db.Timestamptz(3)
+  validUntil                         DateTime  @db.Timestamptz(3)
+  stateRevision                      Int       @default(1)
+  revokedAt                          DateTime? @db.Timestamptz(3)
+  revocationReasonDigest             String?   @db.Char(64)
+  consumedAt                         DateTime? @db.Timestamptz(3)
+  createdAt                          DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant     Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy User                          @relation("TenantAdmissionDecisionApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  gates      TenantAdmissionDecisionGate[]
+
+  @@unique([id, tenantId], map: "tenant_admission_decision_id_tenant_key")
+  @@unique([tenantId, requestId], map: "tenant_admission_decision_request_key")
+  @@unique([payloadDigest], map: "tenant_admission_decision_payload_digest_key")
+  @@index([tenantId, validUntil], map: "tenant_admission_decision_tenant_valid_idx")
+  @@index([approvedByUserId, approvedAt], map: "tenant_admission_decision_approver_idx")
+}
+
+/// Immutable exact-code binding between one GO decision and one attestation.
+model TenantAdmissionDecisionGate {
+  decisionId               String
+  gateCode                 SharedBetaReleaseGateCode
+  attestationId            String
+  boundAttestationRevision Int
+  boundPayloadDigest       String                    @db.Char(64)
+  createdAt                DateTime                  @default(now()) @db.Timestamptz(3)
+
+  decision    TenantAdmissionDecision @relation(fields: [decisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attestation ReleaseGateAttestation  @relation(fields: [attestationId, gateCode], references: [id, gateCode], onDelete: Restrict, onUpdate: Restrict, map: "tenant_admission_decision_gate_attestation_fkey")
+
+  @@id([decisionId, gateCode])
+  @@unique([decisionId, attestationId], map: "tenant_admission_decision_gate_attestation_key")
+  @@index([attestationId], map: "tenant_admission_decision_gate_attestation_idx")
 }
 
 model UserStoreAccess {

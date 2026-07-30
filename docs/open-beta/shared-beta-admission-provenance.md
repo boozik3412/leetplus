@@ -2,12 +2,14 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.2 |
+| Версия | 1.3 |
 | Дата | 30.07.2026 |
 | Backlog | `BETA-IAM-004H` |
 | Contract | `SIGNED_ADMISSION_PROVENANCE_ASSERT_V1` |
-| Schema target | migration 172 / будущий `CURRENT_172` |
-| Статус | `IMPLEMENTATION_IN_PROGRESS` |
+| Schema target | migration 172 / `CURRENT_172` |
+| Статус | `ENGINEERING_ACCEPTED` |
+| Implementation SHA | `12d574166bffe860205b128dd9d092f4f54514fc` |
+| GitHub CI | `30509157338` / run `#53` / `3/3 PASS` |
 | Release decision | `NO-GO`; production, outbound и tester account не изменяются |
 
 ## 1. Назначение
@@ -326,7 +328,32 @@ Engineering checkpoint может быть принят только при од
 13. сквозной AES-GCM/PostgreSQL fixture;
 14. exact release artifact verification;
 15. полный local CI-equivalent и GitHub CI `3/3 PASS` exact SHA;
-16. independent security review без P0/P1.
+16. independent security review без P0/P1/P2.
+
+Принятое exact-head evidence:
+
+- migration SHA-256:
+  `58f0ee03e49f64fe7a21562fc5c64f8741a270cafba2232ce99b732e9ea99bb0`;
+- generated catalog file SHA-256:
+  `4acc8b734c5de0990c09866bb7884fda67741b03a8b51278792c263167942685`;
+- canonical catalog snapshot digest:
+  `3f53d6aac9f48445e6bef5cbbdcdb6a4a21bc8f253ea59d3056be040e026eb3b`;
+- catalog: `3` relations, `64` columns, `28` constraints, `14` indexes,
+  `9` functions, `1` enum type / `3` labels, `3` user triggers и `16`
+  referential triggers;
+- local PostgreSQL 16: clean `172/172`, populated `171→172`, hostile
+  TABLE/FUNCTION/TYPE/COLUMN ACL rollback/retry, create/issue/claim/revoke races,
+  runtime allowlist `7`, zero generated database/role residue — `PASS`;
+- separate API crypto/PostgreSQL integration `1/1 PASS`;
+- ordinary `git archive`: `172/172`, migration и generated catalog
+  byte-for-byte LF-stable;
+- local application CI-equivalent: database TAP `240/240`, API full
+  `2020 PASS + 2 todo`, web build `205/205`;
+- independent security и CI-wiring review: P0/P1/P2=`0`;
+- exact implementation
+  `12d574166bffe860205b128dd9d092f4f54514fc`, GitHub CI
+  [`30509157338`](https://github.com/boozik3412/leetplus/actions/runs/30509157338)
+  (`run #53`) — `3/3 PASS`.
 
 Принятие этого списка подтверждает только signed-claim provenance. Actual
 current-context и actual-shell acquisition/recomputation/match остаются

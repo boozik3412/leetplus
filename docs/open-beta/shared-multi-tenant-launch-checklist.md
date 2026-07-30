@@ -258,7 +258,9 @@ Evidence:
       (`run #50`), `3/3 PASS`; ordinary-archive PG16 audit и review —
       `PASS`, P0/P1/P2=0. Это не включает `HOLD→PENDING`, activation,
       delivery, production-like admission или launch GO;
-- [ ] `BETA-IAM-004H` signed admission provenance принят exact-head:
+- [x] `BETA-IAM-004H` signed admission provenance принят exact-head
+      `12d574166bffe860205b128dd9d092f4f54514fc`, CI `30509157338`
+      (`run #53`) — `3/3 PASS`, independent reviews — P0/P1/P2=0:
       exact three-gate Ed25519 signed-claim binding, empty production root registry,
       zero runtime/PUBLIC privileges и real PostgreSQL
       `seal→one RPC→persisted→open` evidence. Этот checkbox не разрешает

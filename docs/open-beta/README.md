@@ -189,7 +189,7 @@ enterprise-isolation option и не сокращает shared gates.
     (`run #50`) — `3/3 PASS`, independent review — P0/P1/P2=0. Внешний
     `NO-GO` не изменён.
 32. [Signed shared-beta admission provenance](./shared-beta-admission-provenance.md) —
-    `BETA-IAM-004H` / будущая migration 172: отдельные Ed25519-bound gate
+    `BETA-IAM-004H` / migration 172: отдельные Ed25519-bound gate
     attestations и tenant admission decision, exact three-gate set,
     целостность заявленных release/environment/schema/database/tenant/identity/
     profile claims, create/assert/revoke без consumption и пустой production
@@ -204,10 +204,25 @@ enterprise-isolation option и не сокращает shared gates.
     `seal → один issue RPC → persisted outbox → open`. Standalone
     `HOLD→PENDING` запрещён: он появится только в будущей единой activation
     transaction вместе с trial, `ACTIVE/OWNER_INVITED` и persisted-GO consume.
-    SMTP, route, production и tester account не входят; статус
-    `IMPLEMENTATION_IN_PROGRESS / NO-GO`.
+    Exact implementation `12d574166bffe860205b128dd9d092f4f54514fc`,
+    migration `58f0ee03...`, catalog snapshot `3f53d6aa...`; GitHub CI
+    [`30509157338`](https://github.com/boozik3412/leetplus/actions/runs/30509157338)
+    (`run #53`) — `3/3 PASS`, independent reviews — P0/P1/P2=0. SMTP, route,
+    production и tester account не входят; статус
+    `ENGINEERING_ACCEPTED / NO-GO`.
 
-Текущий schema target рабочего кандидата — `CURRENT_171`. Локальный
+Текущий schema target рабочего кандидата — `CURRENT_172`. Локальный
+PostgreSQL 16 подтвердил clean `172/172`, populated `171→172`, exact
+three-gate create/assert/revoke, reservation/issued-HOLD ветки, hostile
+TABLE/FUNCTION/TYPE/COLUMN ACL rollback/retry, create/issue/claim/revoke races,
+runtime allowlist `7` и zero generated residue. Separate API
+`seal→one RPC→persisted→open` test, catalog self-verification, exact release
+artifact и ordinary archive `172/172` LF portability — `PASS`. Exact-head
+`12d574166bffe860205b128dd9d092f4f54514fc` принят GitHub CI
+[`30509157338`](https://github.com/boozik3412/leetplus/actions/runs/30509157338)
+(`run #53`), `3/3 PASS`; independent reviews — P0/P1/P2=0.
+
+Предыдущий принятый schema target `CURRENT_171`: локальный
 PostgreSQL 16 подтвердил clean deploy `171/171`, populated `170 → 171`,
 hostile-default-ACL rollback/retry, `1 CREATED + 99 REPLAYED + 0 deadlocks`,
 late-fault rollback, exact seven-RPC runtime allowlist и zero
@@ -270,8 +285,10 @@ engineering evidence не являются production-like admission, persisted 
   persisted `User`/`UserInvite` claim provenance, explicit revoke history и
   sealed application issue/reissue/revoke/accept writers. Migration 170
   добавляет immutable opaque `workflowLocator` и PII-free sealed locator
-  assert. Migration 171 добавляет dormant atomic `NETWORK OWNER` issue,
-  immutable encrypted `HOLD` outbox и не получает runtime grant. Runtime
+  assert. Migration 171 добавляет dormant atomic `NETWORK OWNER` issue и
+  immutable encrypted `HOLD` outbox. Migration 172 добавляет signed,
+  non-consuming admission provenance. Новые issue/admission primitives не
+  получают runtime grant. Runtime
   candidate имеет exact семь application RPC и zero effective
   `IdentityEmailClaim` table privileges; identity allowlist использует
   `reserve_v2/assert_v1/assert_invite_locator_v1/transition_v2/release_v2`.

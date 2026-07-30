@@ -154,6 +154,18 @@ jobs:
       - name: Validate shared beta admission provenance
         run: pnpm --filter database check:shared-beta-admission-provenance
 
+      - name: Validate dormant identity mail PENDING enum expansion
+        run: pnpm --filter database check:identity-mail-outbox-pending-enum
+
+      - name: Validate independent build and deployment provenance
+        run: pnpm --filter database check:shared-beta-runtime-release-provenance
+
+      - name: Validate atomic shared beta activation contract
+        run: pnpm --filter database check:shared-beta-runtime-release-activation
+
+      - name: Validate populated runtime activation upgrade rehearsal
+        run: pnpm --filter database check:shared-beta-runtime-release-activation-upgrade
+
       - name: Validate identity email claim and invite writer boundaries
         run: pnpm --filter database check:identity-email-claim-boundary
 
@@ -223,8 +235,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260730020000_shared_beta_admission_provenance
-          EXPECTED_DATABASE_MIGRATION_COUNT: "172"
+          EXPECTED_DATABASE_MIGRATION: 20260730040000_shared_beta_runtime_release_activation
+          EXPECTED_DATABASE_MIGRATION_COUNT: "174"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -349,6 +361,11 @@ jobs:
         env:
           SHARED_BETA_ADMISSION_PROVENANCE_UPGRADE_SMOKE_CONFIRM: run-shared-beta-admission-provenance-upgrade-smoke
 
+      - name: Rehearse populated shared beta runtime release CURRENT_172 to CURRENT_174 upgrade
+        run: pnpm --filter database db:smoke:shared-beta-runtime-release-activation-upgrade
+        env:
+          SHARED_BETA_RUNTIME_RELEASE_ACTIVATION_UPGRADE_SMOKE_CONFIRM: run-shared-beta-runtime-release-activation-upgrade-smoke
+
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg
         env:
@@ -370,6 +387,13 @@ jobs:
         run: pnpm --filter api test:integration:shared-tenant-shell-provisioning:pg
         env:
           SHARED_TENANT_SHELL_PROVISIONING_PG_CONFIRM: run-shared-tenant-shell-provisioning-postgres-fixtures
+
+      - name: Verify atomic shared beta tenant activation transaction
+        run: pnpm --filter api test:integration:shared-beta-runtime-release-activation:pg
+        env:
+          NODE_ENV: test
+          SHARED_BETA_RUNTIME_RELEASE_ACTIVATION_PG_CONFIRM: run-shared-beta-runtime-release-activation-postgres-fixture
+          SHARED_BETA_RUNTIME_RELEASE_ACTIVATION_PG_CLUSTER_CONFIRM: isolated-single-purpose-postgresql-cluster-with-restorable-public-connect
 
       - name: Verify isolated design-partner writer isolation lifecycle
         run: pnpm --filter database db:smoke:design-partner-provisioning

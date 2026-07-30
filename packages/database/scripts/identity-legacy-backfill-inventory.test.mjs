@@ -276,11 +276,7 @@ test("CLI and runtime contract require explicit identity inventory authority", (
     pretty: false,
   });
   assert.throws(
-    () =>
-      parseArguments([
-        "--self-test",
-        "--verify-release-artifact",
-      ]),
+    () => parseArguments(["--self-test", "--verify-release-artifact"]),
     { code: "CLI_MODE_CONFLICT" },
   );
   assert.throws(() => parseArguments(["--apply"]), {
@@ -360,18 +356,13 @@ test("production requires target agreement and the exact attestation", () => {
     ...production,
     DATABASE_URL:
       "postgresql://identity_reader:secret@db.example.test:5432/identity_inventory_ci?schema=public&sslmode=require&sslaccept=strict",
-    IDENTITY_LEGACY_INVENTORY_PRODUCTION_ATTESTATION:
-      PRODUCTION_ATTESTATION,
-    IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST:
-      "d".repeat(64),
+    IDENTITY_LEGACY_INVENTORY_PRODUCTION_ATTESTATION: PRODUCTION_ATTESTATION,
+    IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST: "d".repeat(64),
   });
   assert.equal(admitted.productionAttested, true);
   assert.equal(admitted.target, "production");
   assert.equal(admitted.transportEncryptionRequired, true);
-  assert.equal(
-    admitted.expectedDatabaseIdentityDigest,
-    "d".repeat(64),
-  );
+  assert.equal(admitted.expectedDatabaseIdentityDigest, "d".repeat(64));
 
   assert.throws(
     () =>
@@ -388,8 +379,9 @@ test("production requires target agreement and the exact attestation", () => {
         ...production,
         IDENTITY_LEGACY_INVENTORY_PRODUCTION_ATTESTATION:
           PRODUCTION_ATTESTATION,
-        IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST:
-          "d".repeat(64),
+        IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST: "d".repeat(
+          64,
+        ),
       }),
     { code: "STRICT_TLS_REQUIRED" },
   );
@@ -402,8 +394,9 @@ test("production requires target agreement and the exact attestation", () => {
           "postgresql://identity_reader:secret@db.example.test:5432/identity_inventory_ci?schema=public&sslmode=require&sslaccept=accept_invalid_certs",
         IDENTITY_LEGACY_INVENTORY_PRODUCTION_ATTESTATION:
           PRODUCTION_ATTESTATION,
-        IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST:
-          "d".repeat(64),
+        IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST: "d".repeat(
+          64,
+        ),
       }),
     { code: "STRICT_TLS_REQUIRED" },
   );
@@ -415,8 +408,9 @@ test("production requires target agreement and the exact attestation", () => {
           "postgresql://identity_reader:secret@db.example.test:5432/identity_inventory_ci?schema=public&sslmode=require&sslmode=prefer&sslaccept=strict",
         IDENTITY_LEGACY_INVENTORY_PRODUCTION_ATTESTATION:
           PRODUCTION_ATTESTATION,
-        IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST:
-          "d".repeat(64),
+        IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST: "d".repeat(
+          64,
+        ),
       }),
     { code: "DATABASE_URL_PARAMETER_DUPLICATE" },
   );
@@ -485,8 +479,7 @@ test("production report requires both approved database identity and encrypted t
     IDENTITY_LEGACY_INVENTORY_TARGET: "production",
     DATABASE_URL:
       "postgresql://identity_reader:secret@db.example.test:5432/identity_inventory_ci?schema=public&sslmode=require&sslaccept=strict",
-    IDENTITY_LEGACY_INVENTORY_PRODUCTION_ATTESTATION:
-      PRODUCTION_ATTESTATION,
+    IDENTITY_LEGACY_INVENTORY_PRODUCTION_ATTESTATION: PRODUCTION_ATTESTATION,
     IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST:
       developmentReport.database.databaseIdentityDigest,
   });
@@ -504,8 +497,7 @@ test("production report requires both approved database identity and encrypted t
 
   const wrongIdentityConfig = parseRuntimeContract({
     ...productionEnvironment,
-    IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST:
-      "d".repeat(64),
+    IDENTITY_LEGACY_INVENTORY_EXPECTED_DATABASE_IDENTITY_DIGEST: "d".repeat(64),
   });
   const rejectedIdentity = buildReport({
     config: wrongIdentityConfig,
@@ -557,10 +549,22 @@ test("timeouts are bounded and embedded in the one-connection read-only URL", ()
   assert.match(options, /idle_in_transaction_session_timeout=70000/u);
 
   for (const [name, value, expectedCode] of [
-    ["IDENTITY_LEGACY_INVENTORY_CONNECT_TIMEOUT_SECONDS", "0", "CONNECT_TIMEOUT_INVALID"],
+    [
+      "IDENTITY_LEGACY_INVENTORY_CONNECT_TIMEOUT_SECONDS",
+      "0",
+      "CONNECT_TIMEOUT_INVALID",
+    ],
     ["IDENTITY_LEGACY_INVENTORY_LOCK_TIMEOUT_MS", "99", "LOCK_TIMEOUT_INVALID"],
-    ["IDENTITY_LEGACY_INVENTORY_STATEMENT_TIMEOUT_MS", "999", "STATEMENT_TIMEOUT_INVALID"],
-    ["IDENTITY_LEGACY_INVENTORY_TRANSACTION_TIMEOUT_MS", "600001", "TRANSACTION_TIMEOUT_INVALID"],
+    [
+      "IDENTITY_LEGACY_INVENTORY_STATEMENT_TIMEOUT_MS",
+      "999",
+      "STATEMENT_TIMEOUT_INVALID",
+    ],
+    [
+      "IDENTITY_LEGACY_INVENTORY_TRANSACTION_TIMEOUT_MS",
+      "600001",
+      "TRANSACTION_TIMEOUT_INVALID",
+    ],
   ]) {
     assert.throws(
       () => parseRuntimeContract(runtimeEnvironment({ [name]: value })),
@@ -570,20 +574,17 @@ test("timeouts are bounded and embedded in the one-connection read-only URL", ()
 });
 
 test("the manifest exposes exactly two create-only proposal codes and exact column ACL", () => {
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 172);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 174);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260730020000_shared_beta_admission_provenance",
+    "20260730040000_shared_beta_runtime_release_activation",
   );
   assert.deepEqual(
     Object.entries(FINDING_MANIFEST)
       .filter(([, severity]) => severity === "PROPOSAL")
       .map(([code]) => code)
       .sort(),
-    [
-      "LIVE_INVITE_CLAIM_CREATE_CANDIDATE",
-      "USER_CLAIM_CREATE_CANDIDATE",
-    ],
+    ["LIVE_INVITE_CLAIM_CREATE_CANDIDATE", "USER_CLAIM_CREATE_CANDIDATE"],
   );
   assert.doesNotMatch(
     JSON.stringify(FINDING_MANIFEST),
@@ -651,8 +652,7 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   );
   assert.equal(
     SHARED_BETA_ADMISSION_RELATIONS.every(
-      (relationName) =>
-        !Object.hasOwn(REQUIRED_COLUMN_SELECTS, relationName),
+      (relationName) => !Object.hasOwn(REQUIRED_COLUMN_SELECTS, relationName),
     ),
     true,
   );
@@ -700,10 +700,7 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(CATALOG_STATE_SQL, /pg_catalog\.sha256/iu);
   assert.match(CATALOG_STATE_SQL, /pg_get_function_identity_arguments/iu);
   assert.match(CATALOG_STATE_SQL, /workflowLocator/u);
-  assert.match(
-    CATALOG_STATE_SQL,
-    /IdentityEmailClaim_workflow_locator_check/u,
-  );
+  assert.match(CATALOG_STATE_SQL, /IdentityEmailClaim_workflow_locator_check/u);
   assert.match(
     CATALOG_STATE_SQL,
     /6e0abd4cccc01c0a8412c04faee92b9ec93984ccc9a840557178b27837422096/u,
@@ -732,10 +729,7 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     CATALOG_STATE_SQL,
     /433e282c5ce0920ebad6d1ced19220f870e3944d84ed6a0e7ddb7d53fd9cd411/u,
   );
-  assert.match(
-    CATALOG_STATE_SQL,
-    /IdentityEmailClaim_revision_guard_trigger/u,
-  );
+  assert.match(CATALOG_STATE_SQL, /IdentityEmailClaim_revision_guard_trigger/u);
   assert.match(
     CATALOG_STATE_SQL,
     /388dcc06ff27451656b844d302b4a536f7720062f470f0c2b8befd884be9c6a7/u,
@@ -743,18 +737,12 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(CATALOG_STATE_SQL, /IdentityOwnerInviteIssueCommand/u);
   assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox/u);
   assert.match(CATALOG_STATE_SQL, /secretCiphertext/u);
-  assert.match(
-    CATALOG_STATE_SQL,
-    /identity_owner_invite_issue_hold_v1/u,
-  );
+  assert.match(CATALOG_STATE_SQL, /identity_owner_invite_issue_hold_v1/u);
   assert.match(
     CATALOG_STATE_SQL,
     /787e025ba9fa501fc3d62dde7502c0e82bf01afeac1858031db54a6b2b982533/u,
   );
-  assert.match(
-    CATALOG_STATE_SQL,
-    /IdentityMailOutbox_hold_immutable_trigger/u,
-  );
+  assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox_hold_immutable_trigger/u);
   assert.match(
     CATALOG_STATE_SQL,
     /IdentityOwnerInviteIssueCommand_immutable_trigger/u,
@@ -786,7 +774,10 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(PRIVILEGE_STATE_SQL, /system_object_privilege_count/iu);
   assert.match(PRIVILEGE_STATE_SQL, /pg_catalog\.pg_init_privs/iu);
   assert.match(PRIVILEGE_STATE_SQL, /system_schema_privilege_count/iu);
-  assert.match(PRIVILEGE_STATE_SQL, /initial_row\.objsubid = attribute_row\.attnum/iu);
+  assert.match(
+    PRIVILEGE_STATE_SQL,
+    /initial_row\.objsubid = attribute_row\.attnum/iu,
+  );
   assert.match(PRIVILEGE_STATE_SQL, /function_row\.prosecdef/iu);
   assert.match(PRIVILEGE_STATE_SQL, /function_row\.oid >= 16384/u);
   assert.match(PRIVILEGE_STATE_SQL, /dormant_type_usage_count/u);
@@ -961,10 +952,9 @@ test("a live invite create candidate carries mandatory legacy-token review", () 
 
 test("aggregate manifests fail closed on unknown, duplicate, or incomplete rows", () => {
   const complete = aggregateRows();
-  assert.throws(
-    () => buildInventoryState(complete.slice(1)),
-    { code: "INVENTORY_AGGREGATE_INCOMPLETE" },
-  );
+  assert.throws(() => buildInventoryState(complete.slice(1)), {
+    code: "INVENTORY_AGGREGATE_INCOMPLETE",
+  });
   assert.throws(
     () =>
       buildInventoryState([
@@ -978,10 +968,9 @@ test("aggregate manifests fail closed on unknown, duplicate, or incomplete rows"
       ]),
     { code: "INVENTORY_FINDING_MANIFEST_MISMATCH" },
   );
-  assert.throws(
-    () => buildInventoryState([...complete, complete[0]]),
-    { code: "INVENTORY_FINDING_MANIFEST_MISMATCH" },
-  );
+  assert.throws(() => buildInventoryState([...complete, complete[0]]), {
+    code: "INVENTORY_FINDING_MANIFEST_MISMATCH",
+  });
 });
 
 test("reports are HMAC-bound, aggregate-only, and reject tampering", () => {
@@ -1127,10 +1116,7 @@ test("inspectDatabase never executes inventory SQL after ACL rejection", async (
   assert.equal(report.safety.releaseArtifactBound, false);
   assert.equal(exitCodeForReport(report, config.hmacKey), 3);
   assert.equal(queriedStatements.includes(INVENTORY_SQL), false);
-  assert.equal(
-    queriedStatements.includes(APPLIED_MIGRATION_STATE_SQL),
-    false,
-  );
+  assert.equal(queriedStatements.includes(APPLIED_MIGRATION_STATE_SQL), false);
   assert.deepEqual(queriedStatements, [
     SNAPSHOT_STATE_SQL,
     CATALOG_STATE_SQL,
@@ -1139,9 +1125,7 @@ test("inspectDatabase never executes inventory SQL after ACL rejection", async (
   assert.equal(executedStatements[0], "SET TRANSACTION READ ONLY");
   assert.ok(executedStatements.includes("SET LOCAL TIME ZONE 'UTC'"));
   assert.ok(
-    executedStatements.includes(
-      "SET LOCAL search_path = public, pg_catalog",
-    ),
+    executedStatements.includes("SET LOCAL search_path = public, pg_catalog"),
   );
   assert.match(
     executedStatements.join("\n"),
@@ -1207,10 +1191,7 @@ test("inspectDatabase signs rejection before reading migrations when required AC
     CATALOG_STATE_SQL,
     PRIVILEGE_STATE_SQL,
   ]);
-  assert.equal(
-    queriedStatements.includes(APPLIED_MIGRATION_STATE_SQL),
-    false,
-  );
+  assert.equal(queriedStatements.includes(APPLIED_MIGRATION_STATE_SQL), false);
   assert.equal(exitCodeForReport(report, config.hmacKey), 3);
 });
 
@@ -1277,8 +1258,7 @@ test("inspectDatabase rejects checksum drift before inventory SQL", async () => 
 test("all database SQL is read-only and inventory source avoids sensitive columns", () => {
   const mutatingKeyword =
     /\b(?:INSERT|UPDATE|DELETE|MERGE|ALTER|CREATE|DROP|TRUNCATE|COPY|CALL|DO|GRANT|REVOKE)\b/iu;
-  const stripSqlLiterals = (sql) =>
-    sql.replace(/'(?:''|[^'])*'/gu, "''");
+  const stripSqlLiterals = (sql) => sql.replace(/'(?:''|[^'])*'/gu, "''");
   for (const sql of [
     SNAPSHOT_STATE_SQL,
     APPLIED_MIGRATION_STATE_SQL,
@@ -1317,14 +1297,12 @@ test("all database SQL is read-only and inventory source avoids sensitive column
 });
 
 test("release artifact guard rejects malformed and non-canonical SHAs before Git inspection", async () => {
-  await assert.rejects(
-    loadExpectedMigrationArtifact("not-a-release-sha"),
-    { code: "RELEASE_SHA_INVALID" },
-  );
-  await assert.rejects(
-    loadExpectedMigrationArtifact("A".repeat(40)),
-    { code: "RELEASE_SHA_INVALID" },
-  );
+  await assert.rejects(loadExpectedMigrationArtifact("not-a-release-sha"), {
+    code: "RELEASE_SHA_INVALID",
+  });
+  await assert.rejects(loadExpectedMigrationArtifact("A".repeat(40)), {
+    code: "RELEASE_SHA_INVALID",
+  });
 });
 
 test("release source path matching preserves case-sensitive production semantics", () => {
@@ -1371,10 +1349,9 @@ test("release source path matching preserves case-sensitive production semantics
 test("runtime dependency boundary pins the reviewed Prisma 6 client", () => {
   assert.equal(EXPECTED_PRISMA_CLIENT_VERSION, "6.19.3");
   assert.equal(assertRuntimeDependencyVersions(), true);
-  assert.throws(
-    () => assertRuntimeDependencyVersions("6.19.4"),
-    { code: "PRISMA_CLIENT_VERSION_MISMATCH" },
-  );
+  assert.throws(() => assertRuntimeDependencyVersions("6.19.4"), {
+    code: "PRISMA_CLIENT_VERSION_MISMATCH",
+  });
 });
 
 test("migration checkouts stay LF-stable for Prisma checksum portability", () => {

@@ -203,6 +203,7 @@ enum IdentityMailTemplate {
 
 enum IdentityMailOutboxStatus {
   HOLD
+  PENDING
 }
 
 enum SharedBetaReleaseGateCode {
@@ -371,6 +372,7 @@ model Tenant {
   identityOwnerInviteIssueCommands     IdentityOwnerInviteIssueCommand[]
   identityMailOutboxEntries            IdentityMailOutbox[]
   admissionDecisions                   TenantAdmissionDecision[]
+  sharedBetaActivationCommand          SharedBetaTenantActivationCommand?
   platformAdminAuditEvents             PlatformAdminAuditEvent[]
 
   @@index([status, onboardingStatus, customerStage])
@@ -507,6 +509,7 @@ model User {
   resolvedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationResolvedBy")
   targetedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationTargetUser")
   approvedTenantAdmissionDecisions     TenantAdmissionDecision[]             @relation("TenantAdmissionDecisionApprovedBy")
+  sharedBetaTenantActivations          SharedBetaTenantActivationCommand[]   @relation("SharedBetaTenantActivationActor")
   platformAdminAuditEvents             PlatformAdminAuditEvent[]             @relation("PlatformAdminAuditActor")
   supportedTenants                     Tenant[]                              @relation("TenantSupportOwner")
 
@@ -595,13 +598,14 @@ model UserInvite {
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 
-  tenant                   Tenant                           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customRole               UserAccessRole?                  @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
-  createdBy                User?                            @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  acceptedBy               User?                            @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
-  revokedBy                User?                            @relation("UserInviteRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
-  initialOwnerIssueCommand IdentityOwnerInviteIssueCommand? @relation("IdentityOwnerInviteIssueCommandInvite")
-  identityMailOutbox       IdentityMailOutbox?              @relation("IdentityMailOutboxInvite")
+  tenant                   Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customRole               UserAccessRole?                    @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  createdBy                User?                              @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  acceptedBy               User?                              @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  revokedBy                User?                              @relation("UserInviteRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  initialOwnerIssueCommand IdentityOwnerInviteIssueCommand?   @relation("IdentityOwnerInviteIssueCommandInvite")
+  identityMailOutbox       IdentityMailOutbox?                @relation("IdentityMailOutboxInvite")
+  sharedBetaActivation     SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationInvite")
 
   @@unique([tenantId, id], map: "UserInvite_tenantId_id_key")
   @@index([tenantId, createdAt])
@@ -659,9 +663,10 @@ model IdentityOwnerInviteIssueCommand {
   claimRevision            Int
   createdAt                DateTime             @default(now()) @db.Timestamptz(3)
 
-  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  invite UserInvite          @relation("IdentityOwnerInviteIssueCommandInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityOwnerInviteIssueCommand_invite_fkey")
-  outbox IdentityMailOutbox? @relation("IdentityOwnerInviteIssueCommandOutbox")
+  tenant               Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  invite               UserInvite                         @relation("IdentityOwnerInviteIssueCommandInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityOwnerInviteIssueCommand_invite_fkey")
+  outbox               IdentityMailOutbox?                @relation("IdentityOwnerInviteIssueCommandOutbox")
+  sharedBetaActivation SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationIssue")
 
   @@unique([tenantId, id], map: "identity_owner_invite_issue_command_tenant_id_key")
   @@unique([tenantId, action, requestId], map: "identity_owner_invite_issue_command_request_uidx")
@@ -671,8 +676,9 @@ model IdentityOwnerInviteIssueCommand {
   @@unique([tenantId, workflowLocator], map: "identity_owner_invite_issue_command_locator_uidx")
 }
 
-/// Dormant encrypted initial-owner invite payload. Migration 171 permits HOLD
-/// only; delivery states and worker leases require a later admitted migration.
+/// Dormant encrypted initial-owner invite payload. Migration 173 exposes the
+/// PENDING label but preserves the HOLD-only guard; migration 174 may authorize
+/// only the exact atomic activation transition. Worker leases remain separate.
 model IdentityMailOutbox {
   id                 String                   @id
   tenantId           String
@@ -690,11 +696,13 @@ model IdentityMailOutbox {
   envelopeVersion    Int                      @default(1)
   keyVersion         String                   @default("v1") @db.VarChar(16)
   expiresAt          DateTime                 @db.Timestamptz(3)
+  releasedAt         DateTime?                @db.Timestamptz(3)
   createdAt          DateTime                 @default(now()) @db.Timestamptz(3)
 
-  tenant       Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  issueCommand IdentityOwnerInviteIssueCommand @relation("IdentityOwnerInviteIssueCommandOutbox", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey")
-  invite       UserInvite                      @relation("IdentityMailOutboxInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_invite_fkey")
+  tenant               Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  issueCommand         IdentityOwnerInviteIssueCommand    @relation("IdentityOwnerInviteIssueCommandOutbox", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey")
+  invite               UserInvite                         @relation("IdentityMailOutboxInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_invite_fkey")
+  sharedBetaActivation SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationOutbox")
 
   @@unique([tenantId, id], map: "identity_mail_outbox_tenant_id_key")
   @@unique([tenantId, issueCommandId], map: "identity_mail_outbox_issue_command_uidx")
@@ -739,8 +747,8 @@ model ReleaseGateAttestation {
 }
 
 /// Persisted SHARED BETA GO bound to one exact tenant revision and the exact
-/// three release gates. This migration supports create/assert/revoke only:
-/// decisions cannot be consumed and do not mutate tenant, trial, or outbox.
+/// three release gates. Migration 174 permits a one-way consume only from the
+/// sealed same-transaction activation coordinator; revoke remains independent.
 model TenantAdmissionDecision {
   id                                 String    @id
   tenantId                           String
@@ -779,9 +787,10 @@ model TenantAdmissionDecision {
   consumedAt                         DateTime? @db.Timestamptz(3)
   createdAt                          DateTime  @default(now()) @db.Timestamptz(3)
 
-  tenant     Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  approvedBy User                          @relation("TenantAdmissionDecisionApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  gates      TenantAdmissionDecisionGate[]
+  tenant            Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy        User                               @relation("TenantAdmissionDecisionApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  gates             TenantAdmissionDecisionGate[]
+  activationCommand SharedBetaTenantActivationCommand?
 
   @@unique([id, tenantId], map: "tenant_admission_decision_id_tenant_key")
   @@unique([tenantId, requestId], map: "tenant_admission_decision_request_key")
@@ -805,6 +814,195 @@ model TenantAdmissionDecisionGate {
   @@id([decisionId, gateCode])
   @@unique([decisionId, attestationId], map: "tenant_admission_decision_gate_attestation_key")
   @@index([attestationId], map: "tenant_admission_decision_gate_attestation_idx")
+}
+
+/// Sealed CI-build provenance for one exact artifact, migration manifest,
+/// policy manifest and explicitly signed trial duration. Application roles
+/// receive no direct access.
+model SharedBetaBuildProvenance {
+  id                      String    @id
+  authorityDomain         String    @default("SHARED_BETA_BUILD") @db.VarChar(32)
+  contractVersion         String    @default("SHARED_BETA_BUILD_PROVENANCE_V1") @db.VarChar(64)
+  releaseSha              String    @db.Char(40)
+  buildTime               String
+  builtAt                 DateTime  @db.Timestamptz(3)
+  artifactContentDigest   String    @db.Char(64)
+  releaseManifestDigest   String    @db.Char(64)
+  schemaHead              String    @db.VarChar(128)
+  migrationCount          Int
+  migrationManifestDigest String    @db.Char(64)
+  policyManifestDigest    String    @db.Char(64)
+  trialPolicyVersion      String    @db.VarChar(64)
+  trialDurationSeconds    Int
+  buildReferenceDigest    String    @db.Char(64)
+  payload                 Json
+  payloadDigest           String    @unique(map: "shared_beta_build_payload_digest_uidx") @db.Char(64)
+  signatureAlgorithm      String    @default("Ed25519") @db.VarChar(16)
+  signingKeyId            String    @db.VarChar(64)
+  publicKeyFingerprint    String    @db.Char(64)
+  signatureBase64url      String
+  validUntil              DateTime  @db.Timestamptz(3)
+  stateRevision           Int       @default(1)
+  revokedAt               DateTime? @db.Timestamptz(3)
+  revocationReasonDigest  String?   @db.Char(64)
+  createdAt               DateTime  @default(now()) @db.Timestamptz(3)
+
+  challenges         SharedBetaRuntimeReleaseChallenge[]
+  markers            SharedBetaRuntimeReleaseMarker[]
+  activationCommands SharedBetaTenantActivationCommand[]
+
+  @@index([releaseSha, validUntil], map: "shared_beta_build_release_valid_idx")
+}
+
+/// UNLOGGED singleton anchoring release provenance to one concrete PostgreSQL
+/// instance and boot epoch. It is populated only by the owner-only challenge
+/// boundary and intentionally absent from physical backups and standbys.
+model SharedBetaRuntimeInstanceAnchor {
+  id          String   @id @default("SHARED_BETA_RUNTIME_INSTANCE") @db.VarChar(64)
+  anchorNonce String   @db.Char(64)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+}
+
+/// One-shot database-generated challenge that binds deployment provenance to
+/// the actual database identity, migration state and dedicated activation role.
+model SharedBetaRuntimeReleaseChallenge {
+  id                      String    @id
+  buildProvenanceId       String
+  environment             String    @db.VarChar(64)
+  activationRoleName      String    @db.VarChar(63)
+  activationRoleOid       BigInt
+  installerRoleName       String    @db.VarChar(63)
+  installerRoleOid        BigInt
+  creationNonce           String    @db.Char(64)
+  databaseIdentityDigest  String    @db.Char(64)
+  schemaHead              String    @db.VarChar(128)
+  migrationCount          Int
+  migrationManifestDigest String    @db.Char(64)
+  expectedStateRevision   Int
+  candidateGeneration     BigInt
+  predecessorMarkerId     String?
+  predecessorMarkerDigest String    @db.Char(64)
+  challengeDigest         String    @unique(map: "shared_beta_runtime_challenge_digest_uidx") @db.Char(64)
+  actualContextDigest     String    @db.Char(64)
+  stateRevision           Int       @default(1)
+  consumedAt              DateTime? @db.Timestamptz(3)
+  createdAt               DateTime  @default(now()) @db.Timestamptz(3)
+  validUntil              DateTime  @db.Timestamptz(3)
+
+  build  SharedBetaBuildProvenance       @relation(fields: [buildProvenanceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseChallenge_build_fkey")
+  marker SharedBetaRuntimeReleaseMarker? @relation("SharedBetaRuntimeReleaseChallengeMarker")
+
+  @@index([stateRevision, validUntil], map: "shared_beta_runtime_challenge_expiry_idx")
+}
+
+/// Sealed ops-deployment marker for one exact verified build and one consumed
+/// database challenge. Only the current unrevoked marker can authorize an
+/// activation coordinator.
+model SharedBetaRuntimeReleaseMarker {
+  id                       String    @id
+  buildProvenanceId        String
+  challengeId              String    @unique(map: "shared_beta_runtime_marker_challenge_uidx")
+  authorityDomain          String    @default("SHARED_BETA_DEPLOYMENT") @db.VarChar(32)
+  contractVersion          String    @default("SHARED_BETA_DEPLOYMENT_PROVENANCE_V1") @db.VarChar(64)
+  generation               BigInt    @unique(map: "shared_beta_runtime_marker_generation_uidx")
+  environment              String    @db.VarChar(64)
+  buildPayloadDigest       String    @db.Char(64)
+  deploymentInstanceDigest String    @db.Char(64)
+  databaseIdentityDigest   String    @db.Char(64)
+  databaseChallengeDigest  String    @db.Char(64)
+  actualContextDigest      String    @db.Char(64)
+  schemaHead               String    @db.VarChar(128)
+  migrationCount           Int
+  migrationManifestDigest  String    @db.Char(64)
+  activationDatabaseRole   String    @db.VarChar(63)
+  coordinatorRoleName      String    @db.VarChar(63)
+  coordinatorRoleOid       BigInt
+  predecessorMarkerId      String?
+  predecessorMarkerDigest  String    @db.Char(64)
+  payload                  Json
+  payloadDigest            String    @unique(map: "shared_beta_runtime_marker_payload_digest_uidx") @db.Char(64)
+  signatureAlgorithm       String    @default("Ed25519") @db.VarChar(16)
+  signingKeyId             String    @db.VarChar(64)
+  publicKeyFingerprint     String    @db.Char(64)
+  signatureBase64url       String
+  deployedAt               DateTime  @db.Timestamptz(3)
+  validUntil               DateTime  @db.Timestamptz(3)
+  stateRevision            Int       @default(1)
+  revokedAt                DateTime? @db.Timestamptz(3)
+  revocationReasonDigest   String?   @db.Char(64)
+  createdAt                DateTime  @default(now()) @db.Timestamptz(3)
+
+  build              SharedBetaBuildProvenance           @relation(fields: [buildProvenanceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseMarker_build_fkey")
+  challenge          SharedBetaRuntimeReleaseChallenge   @relation("SharedBetaRuntimeReleaseChallengeMarker", fields: [challengeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseMarker_challenge_fkey")
+  predecessor        SharedBetaRuntimeReleaseMarker?     @relation("SharedBetaRuntimeReleaseChain", fields: [predecessorMarkerId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseMarker_predecessor_fkey")
+  successors         SharedBetaRuntimeReleaseMarker[]    @relation("SharedBetaRuntimeReleaseChain")
+  currentForStates   SharedBetaRuntimeReleaseState[]
+  activationCommands SharedBetaTenantActivationCommand[]
+}
+
+/// Singleton CAS pointer to the only current runtime-release marker.
+model SharedBetaRuntimeReleaseState {
+  id              String   @id @db.VarChar(64)
+  currentMarkerId String?
+  generation      BigInt   @default(0)
+  stateRevision   Int      @default(0)
+  updatedAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  currentMarker SharedBetaRuntimeReleaseMarker? @relation(fields: [currentMarkerId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseState_marker_fkey")
+}
+
+/// Immutable PII-free receipt binding one atomic tenant activation, admission
+/// consumption, dormant OWNER issue and exact HOLD-to-PENDING transition.
+model SharedBetaTenantActivationCommand {
+  id                         String   @id
+  tenantId                   String   @unique(map: "shared_beta_activation_tenant_uidx")
+  action                     String   @default("ACTIVATE_AND_RELEASE_OWNER_INVITE") @db.VarChar(64)
+  requestId                  String
+  requestDigest              String   @db.Char(64)
+  decisionId                 String   @unique(map: "shared_beta_activation_decision_uidx")
+  markerId                   String
+  markerPayloadDigest        String   @db.Char(64)
+  markerGeneration           BigInt
+  buildProvenanceId          String
+  actualContextDigest        String   @db.Char(64)
+  actualShellDigest          String   @db.Char(64)
+  reservationSubjectId       String
+  reservationClaimRevision   Int
+  issueRequestId             String
+  issueRequestDigest         String   @db.Char(64)
+  issueCommandId             String   @unique(map: "shared_beta_activation_issue_uidx")
+  inviteId                   String   @unique(map: "shared_beta_activation_invite_uidx")
+  outboxId                   String   @unique(map: "shared_beta_activation_outbox_uidx")
+  messageKey                 String
+  tokenHash                  String   @db.Char(64)
+  secretCiphertextDigest     String   @db.Char(64)
+  workflowLocator            String   @unique(map: "shared_beta_activation_locator_uidx")
+  activatedByUserId          String
+  entitlementProfileRevision Int
+  executionRevisionBefore    Int
+  executionRevisionAfter     Int
+  trialPolicyVersion         String   @db.VarChar(64)
+  trialDurationSeconds       Int
+  trialStartsAt              DateTime @db.Timestamptz(3)
+  trialEndsAt                DateTime @db.Timestamptz(3)
+  receipt                    Json
+  createdTransactionId       String
+  activatedAt                DateTime @db.Timestamptz(3)
+
+  tenant      Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_tenant_fkey")
+  decision    TenantAdmissionDecision         @relation(fields: [decisionId, tenantId], references: [id, tenantId], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_decision_fkey")
+  marker      SharedBetaRuntimeReleaseMarker  @relation(fields: [markerId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_marker_fkey")
+  build       SharedBetaBuildProvenance       @relation(fields: [buildProvenanceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_build_fkey")
+  issue       IdentityOwnerInviteIssueCommand @relation("SharedBetaTenantActivationIssue", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_issue_fkey")
+  invite      UserInvite                      @relation("SharedBetaTenantActivationInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_invite_fkey")
+  outbox      IdentityMailOutbox              @relation("SharedBetaTenantActivationOutbox", fields: [tenantId, outboxId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_outbox_fkey")
+  activatedBy User                            @relation("SharedBetaTenantActivationActor", fields: [activatedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_actor_fkey")
+
+  @@unique([tenantId, action, requestId], map: "shared_beta_activation_request_uidx")
+  @@unique([decisionId, tenantId], map: "shared_beta_activation_decision_tenant_uidx")
+  @@unique([tenantId, issueCommandId], map: "shared_beta_activation_tenant_issue_uidx")
+  @@unique([tenantId, inviteId], map: "shared_beta_activation_tenant_invite_uidx")
+  @@unique([tenantId, outboxId], map: "shared_beta_activation_tenant_outbox_uidx")
 }
 
 model UserStoreAccess {

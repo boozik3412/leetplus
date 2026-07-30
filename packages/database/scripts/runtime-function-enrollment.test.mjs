@@ -5,7 +5,9 @@ import {
   APPLICATION_RUNTIME_FUNCTIONS,
   EXCLUDED_ADMISSION_FUNCTIONS,
   EXCLUDED_PENDING_FUNCTIONS,
+  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
   EXCLUDED_WORKER_FUNCTIONS,
+  RUNTIME_RELEASE_SEALED_RUNTIME_TABLES,
   SEALED_RUNTIME_TABLES,
   SEALED_RUNTIME_TYPES,
   RuntimeFunctionEnrollmentError,
@@ -44,14 +46,16 @@ function compliantSnapshot() {
       schemaUsage: true,
       membershipCount: 0,
       ownershipCount: 0,
+      liveActivationChallengeBindingCount: 0,
+      unrevokedActivationMarkerBindingCount: 0,
     },
     migration: {
       completedTargetCount: 1,
       completedRequiredCount: 1,
-      completedCount: 172,
+      completedCount: 174,
       unfinishedCount: 0,
       latestCompletedMigration:
-        "20260730020000_shared_beta_admission_provenance",
+        "20260730040000_shared_beta_runtime_release_activation",
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -126,14 +130,34 @@ function compliantSnapshot() {
         publicExecute: false,
         grantorCanEnroll: true,
       })),
+      ...EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.map((entry) => ({
+        key: entry.key,
+        catalogSignature: entry.catalogSignature,
+        expectedSecurityDefiner: entry.securityDefiner,
+        expectedVolatility: entry.volatility,
+        expectedLanguage: entry.language,
+        exists: true,
+        ownerName: "migration_owner",
+        securityDefiner: entry.securityDefiner,
+        searchPathPgCatalogOnly: true,
+        volatility: entry.volatility,
+        language: entry.language,
+        effectiveExecute: false,
+        directExecute: false,
+        targetGrantOption: false,
+        publicExecute: false,
+        grantorCanEnroll: true,
+      })),
     ],
     sealedTables: SEALED_RUNTIME_TABLES.map((entry) => ({
       key: entry.key,
       catalogName: entry.catalogName,
       expectedColumns: [...entry.columns],
+      expectedPersistence: entry.expectedPersistence ?? null,
       columnManifestMatches: true,
       exists: true,
       ownerName: "migration_owner",
+      persistence: entry.expectedPersistence ?? "p",
       canSelect: false,
       canInsert: false,
       canUpdate: false,
@@ -205,7 +229,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260730020000_shared_beta_admission_provenance 172$/u,
+    /20260730040000_shared_beta_runtime_release_activation 174$/u,
   );
 });
 
@@ -264,16 +288,122 @@ test("builds only the exact application grants and sealed exclusions", () => {
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime");
   assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 7);
   assert.equal(EXCLUDED_ADMISSION_FUNCTIONS.length, 9);
-  assert.equal(SEALED_RUNTIME_TABLES.length, 6);
+  assert.equal(EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length, 21);
+  assert.equal(
+    APPLICATION_RUNTIME_FUNCTIONS.length +
+      EXCLUDED_WORKER_FUNCTIONS.length +
+      EXCLUDED_PENDING_FUNCTIONS.length +
+      EXCLUDED_ADMISSION_FUNCTIONS.length +
+      EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+    43,
+  );
+  const updatedAdmissionGuard = EXCLUDED_ADMISSION_FUNCTIONS.find(
+    (entry) =>
+      entry.catalogSignature ===
+      'public."shared_beta_tenant_admission_decision_guard_v1"()',
+  );
+  assert.deepEqual(
+    {
+      catalogSignature: updatedAdmissionGuard?.catalogSignature,
+      securityDefiner: updatedAdmissionGuard?.securityDefiner,
+      volatility: updatedAdmissionGuard?.volatility,
+      language: updatedAdmissionGuard?.language,
+    },
+    {
+      catalogSignature:
+        'public."shared_beta_tenant_admission_decision_guard_v1"()',
+      securityDefiner: false,
+      volatility: "v",
+      language: "plpgsql",
+    },
+  );
+  assert.equal(
+    new Set([
+      ...EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.map(
+        ({ catalogSignature }) => catalogSignature,
+      ),
+      updatedAdmissionGuard.catalogSignature,
+    ]).size,
+    22,
+  );
+  const instanceAnchorGuard = EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.find(
+    (entry) => entry.key === "shared_beta_runtime_instance_anchor_guard_v1",
+  );
+  assert.deepEqual(instanceAnchorGuard, {
+    key: "shared_beta_runtime_instance_anchor_guard_v1",
+    catalogSignature: 'public."shared_beta_runtime_instance_anchor_guard_v1"()',
+    grantSignature: 'public."shared_beta_runtime_instance_anchor_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  });
+  const databaseIdentityDigest = EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.find(
+    (entry) => entry.key === "shared_beta_runtime_database_identity_digest_v1",
+  );
+  assert.equal(databaseIdentityDigest?.language, "plpgsql");
+  assert.equal(RUNTIME_RELEASE_SEALED_RUNTIME_TABLES.length, 6);
+  assert.equal(SEALED_RUNTIME_TABLES.length, 12);
   assert.equal(
     SEALED_RUNTIME_TABLES.reduce(
       (count, entry) => count + entry.columns.length,
       0,
     ),
-    109,
+    232,
   );
-  assert.equal(SEALED_RUNTIME_TYPES.length, 1);
-  assert.equal(statements.length, 55);
+  const instanceAnchor = RUNTIME_RELEASE_SEALED_RUNTIME_TABLES.find(
+    (entry) => entry.key === "sharedBetaRuntimeInstanceAnchor",
+  );
+  assert.deepEqual(instanceAnchor, {
+    key: "sharedBetaRuntimeInstanceAnchor",
+    catalogName: 'public."SharedBetaRuntimeInstanceAnchor"',
+    grantName: 'public."SharedBetaRuntimeInstanceAnchor"',
+    expectedPersistence: "u",
+    columns: ["id", "anchorNonce", "createdAt"],
+  });
+  const activationCommand = RUNTIME_RELEASE_SEALED_RUNTIME_TABLES.find(
+    (entry) => entry.key === "sharedBetaTenantActivationCommand",
+  );
+  assert.deepEqual(activationCommand.columns, [
+    "id",
+    "tenantId",
+    "action",
+    "requestId",
+    "requestDigest",
+    "decisionId",
+    "markerId",
+    "markerPayloadDigest",
+    "markerGeneration",
+    "buildProvenanceId",
+    "actualContextDigest",
+    "actualShellDigest",
+    "reservationSubjectId",
+    "reservationClaimRevision",
+    "issueRequestId",
+    "issueRequestDigest",
+    "issueCommandId",
+    "inviteId",
+    "outboxId",
+    "messageKey",
+    "tokenHash",
+    "secretCiphertextDigest",
+    "workflowLocator",
+    "activatedByUserId",
+    "entitlementProfileRevision",
+    "executionRevisionBefore",
+    "executionRevisionAfter",
+    "trialPolicyVersion",
+    "trialDurationSeconds",
+    "trialStartsAt",
+    "trialEndsAt",
+    "receipt",
+    "createdTransactionId",
+    "activatedAt",
+  ]);
+  assert.equal(SEALED_RUNTIME_TYPES.length, 2);
+  assert.equal(
+    statements.length,
+    81 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+  );
   assert.equal(
     statements.filter((statement) => statement.startsWith("GRANT EXECUTE"))
       .length,
@@ -288,13 +418,13 @@ test("builds only the exact application grants and sealed exclusions", () => {
   assert.equal(
     statements.filter((statement) => statement.startsWith("REVOKE EXECUTE"))
       .length,
-    15,
+    15 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
   );
   assert.equal(
     statements.filter((statement) =>
       statement.startsWith("REVOKE ALL PRIVILEGES ("),
     ).length,
-    12,
+    24,
   );
   assert.equal(
     statements.filter(
@@ -302,13 +432,13 @@ test("builds only the exact application grants and sealed exclusions", () => {
         statement.startsWith("REVOKE ALL PRIVILEGES ON TABLE") &&
         statement.endsWith("FROM PUBLIC"),
     ).length,
-    6,
+    12,
   );
   assert.equal(
     statements.filter((statement) =>
       statement.startsWith("REVOKE ALL PRIVILEGES ON TYPE"),
     ).length,
-    2,
+    4,
   );
 
   const sql = statements.join("\n");
@@ -332,6 +462,18 @@ test("builds only the exact application grants and sealed exclusions", () => {
       ),
     );
   }
+  for (const entry of EXCLUDED_RUNTIME_RELEASE_FUNCTIONS) {
+    assert.ok(
+      statements.includes(
+        `REVOKE EXECUTE ON FUNCTION ${entry.grantSignature} FROM "leetplus_runtime"`,
+      ),
+    );
+    assert.ok(
+      !statements.includes(
+        `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO "leetplus_runtime"`,
+      ),
+    );
+  }
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
@@ -343,6 +485,31 @@ test("builds only the exact application grants and sealed exclusions", () => {
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityMailOutbox"/u,
+  );
+  assert.match(sql, /"releasedAt"/u);
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaBuildProvenance"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaRuntimeInstanceAnchor"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaRuntimeReleaseChallenge"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaRuntimeReleaseMarker"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaRuntimeReleaseState"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaTenantActivationCommand"/u,
   );
   for (const entry of SEALED_RUNTIME_TABLES) {
     const exactColumns = entry.columns
@@ -371,6 +538,8 @@ test("builds only the exact application grants and sealed exclusions", () => {
       ),
     );
   }
+  assert.match(sql, /public\."IdentityMailOutboxStatus"/u);
+  assert.match(sql, /public\."SharedBetaReleaseGateCode"/u);
   assert.doesNotMatch(sql, /\bALL FUNCTIONS\b/iu);
   assert.doesNotMatch(sql, /\bALTER DEFAULT PRIVILEGES\b/iu);
   assert.doesNotMatch(sql, /\bTO PUBLIC\b/iu);
@@ -434,6 +603,15 @@ test("detects authority, migration and function ACL drift independently", () => 
     (entry) => entry.key === EXCLUDED_ADMISSION_FUNCTIONS[1].key,
   );
   admissionLanguageDrift.language = "internal";
+  const runtimeReleaseFunction = snapshot.functions.find(
+    (entry) => entry.key === EXCLUDED_RUNTIME_RELEASE_FUNCTIONS[0].key,
+  );
+  runtimeReleaseFunction.effectiveExecute = true;
+  runtimeReleaseFunction.directExecute = true;
+  const runtimeReleaseLanguageDrift = snapshot.functions.find(
+    (entry) => entry.key === EXCLUDED_RUNTIME_RELEASE_FUNCTIONS[1].key,
+  );
+  runtimeReleaseLanguageDrift.language = "internal";
   snapshot.sealedTables[0].canSelect = true;
   snapshot.sealedTables.find(
     (entry) => entry.key === "identityOwnerInviteIssueCommand",
@@ -478,6 +656,7 @@ test("detects authority, migration and function ACL drift independently", () => 
       "identityEmailClaimReserveInvite:SEARCH_PATH_MISMATCH",
       "identityEmailClaimAssertInviteLocator:SECURITY_MODE_MISMATCH",
       `${admissionLanguageDrift.key}:LANGUAGE_MISMATCH`,
+      `${runtimeReleaseLanguageDrift.key}:LANGUAGE_MISMATCH`,
       `${sealedType.key}:ENUM_LABEL_MANIFEST_MISMATCH`,
     ],
   );
@@ -486,6 +665,7 @@ test("detects authority, migration and function ACL drift independently", () => 
     "identityEmailClaimDirectLock:PENDING_EXECUTE_PRESENT",
     "identityOwnerInviteIssueHold:PENDING_EXECUTE_PRESENT",
     `${admissionFunction.key}:ADMISSION_EXECUTE_PRESENT`,
+    `${runtimeReleaseFunction.key}:RUNTIME_RELEASE_EXECUTE_PRESENT`,
     "identityEmailClaim:DIRECT_TABLE_PRIVILEGE_PRESENT",
     "identityEmailClaim:EFFECTIVE_COLUMN_PRIVILEGE_PRESENT",
     "identityEmailClaim:DIRECT_COLUMN_PRIVILEGE_PRESENT",
@@ -516,7 +696,44 @@ test("rejects any exact sealed-column manifest drift before enrollment", () => {
   );
 });
 
-test("binds enrollment to exact current migration 172 and exact count 172", () => {
+test("rejects a logged replacement for the unlogged runtime instance anchor", () => {
+  const snapshot = compliantSnapshot();
+  const instanceAnchor = snapshot.sealedTables.find(
+    (entry) => entry.key === "sharedBetaRuntimeInstanceAnchor",
+  );
+  instanceAnchor.persistence = "p";
+  const config = parseRuntimeFunctionEnrollmentConfig(
+    SAFE_ENVIRONMENT,
+    "check",
+  );
+
+  assert.deepEqual(
+    runtimeFunctionEnrollmentPreconditionViolations(snapshot, config),
+    ["sharedBetaRuntimeInstanceAnchor:PERSISTENCE_MISMATCH"],
+  );
+});
+
+test("rejects every activation-bound role before general enrollment", () => {
+  const challengeBound = compliantSnapshot();
+  challengeBound.role.liveActivationChallengeBindingCount = 1;
+  const markerBound = compliantSnapshot();
+  markerBound.role.unrevokedActivationMarkerBindingCount = 1;
+  const config = parseRuntimeFunctionEnrollmentConfig(
+    SAFE_ENVIRONMENT,
+    "check",
+  );
+
+  assert.deepEqual(
+    runtimeFunctionEnrollmentPreconditionViolations(challengeBound, config),
+    ["RUNTIME_ROLE_BOUND_TO_LIVE_ACTIVATION_CHALLENGE"],
+  );
+  assert.deepEqual(
+    runtimeFunctionEnrollmentPreconditionViolations(markerBound, config),
+    ["RUNTIME_ROLE_BOUND_TO_UNREVOKED_ACTIVATION_MARKER"],
+  );
+});
+
+test("binds enrollment to exact current migration 174 and exact count 174", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

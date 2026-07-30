@@ -1,19 +1,19 @@
 # Профиль `SHARED_MULTI_TENANT_BETA_V1`
 
-| Поле             | Значение                                                        |
-| ---------------- | --------------------------------------------------------------- |
-| Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                   |
-| Версия           | 1.13                                                            |
-| Дата             | 29.07.2026                                                      |
-| Schema target    | `CURRENT_170`; engineering exact-head CI/review приняты         |
-| Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены         |
-| Формат           | Первый friendly external club, invite-only                      |
-| Data plane       | Shared web, API, workers, PostgreSQL и Telegram                 |
-| Current topology | `Tenant A`, четыре `Store A1..A4`                               |
-| Partner topology | Новый `Tenant B`, первоначально один `Store B1`                 |
-| Владелец         | Email-bound OWNER invite; `NETWORK` только внутри `Tenant B`    |
-| Product scope    | Пять основных модулей целиком                                  |
-| Integrations     | Обязательная шестая supporting row; outbound отдельно gated    |
+| Поле             | Значение                                                     |
+| ---------------- | ------------------------------------------------------------ |
+| Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                |
+| Версия           | 1.14                                                         |
+| Дата             | 30.07.2026                                                   |
+| Schema target    | local `CURRENT_174`; last remote accepted `CURRENT_172`      |
+| Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены      |
+| Формат           | Первый friendly external club, invite-only                   |
+| Data plane       | Shared web, API, workers, PostgreSQL и Telegram              |
+| Current topology | `Tenant A`, четыре `Store A1..A4`                            |
+| Partner topology | Новый `Tenant B`, первоначально один `Store B1`              |
+| Владелец         | Email-bound OWNER invite; `NETWORK` только внутри `Tenant B` |
+| Product scope    | Пять основных модулей целиком                                |
+| Integrations     | Обязательная шестая supporting row; outbound отдельно gated  |
 
 Этот профиль является контрактом первого внешнего доступа в целевой
 multi-tenant архитектуре LeetPlus. Он не разрешает deployment, создание
@@ -92,9 +92,9 @@ deny-by-default. Frontend visibility не является авторизаци�
 ## 3. Владелец и delegation
 
 Platform operator в целевом workflow сначала выполняет idempotent shell-only
-provisioning. Текущий `CURRENT_170` engineering checkpoint сохраняет
-реализованный в
-`CURRENT_168` shell service, который одной serializable-транзакцией:
+provisioning. Historical `CURRENT_170` locator checkpoint сохраняет
+реализованный в `CURRENT_168` shell service, который одной
+serializable-транзакцией:
 
 1. создаёт `Tenant B` как
    `PILOT/SUSPENDED/PROVISIONING/profileRevision=1`;
@@ -138,6 +138,17 @@ P0/P1/P2. Historical engineering exact-head `CURRENT_169`
 prerequisite. Ни local, ни remote engineering evidence не являются launch
 approval.
 
+Historical `CURRENT_171` добавил dormant `NETWORK OWNER` issue и encrypted
+`HOLD` outbox. Последний remote-accepted `CURRENT_172` добавил signed
+non-consuming admission provenance: exact-head
+`12d574166bffe860205b128dd9d092f4f54514fc`, CI `30509157338`
+(`run #53`) — `3/3 PASS`. Local candidate `CURRENT_174` реализует отдельные
+build/deployment provenance, instance-bound activation role и одну atomic
+transaction с finite trial, GO consume и `HOLD→PENDING`; он остаётся
+`LOCAL_ACCEPTED / EXACT_SHA_CI_PENDING / NOT_DEPLOYED`. Production roots,
+production-like rehearsal, delivery worker/SMTP и admin route остаются
+pending, поэтому внешний доступ — `NO-GO`.
+
 Оба Platform Admin route остаются закрытыми:
 
 ```text
@@ -157,14 +168,14 @@ delivery,
 independent security review и exact-head
 `d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI `30479020686`
 (`run #39`), `3/3 PASS`, приняты, но item остаётся открытым до отдельного
-  production-like inventory и будущего signed proposal/apply/rollback.
-  Legacy design-partner `provision`/`rotate-invite` уже изолированы
-  fail-closed до manifest/Prisma/БД/token; local unit/boundary `23/23 PASS`,
-  independent review без actionable P0/P1/P2; exact-head
-  `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
-  (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke. Полный
-  issue/reissue/revoke/accept race всё ещё не
-  пройден. Fingerprint HMAC startup validation уже
+production-like inventory и будущего signed proposal/apply/rollback.
+Legacy design-partner `provision`/`rotate-invite` уже изолированы
+fail-closed до manifest/Prisma/БД/token; local unit/boundary `23/23 PASS`,
+independent review без actionable P0/P1/P2; exact-head
+`f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
+(`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke. Полный
+issue/reissue/revoke/accept race всё ещё не
+пройден. Fingerprint HMAC startup validation уже
 реализована candidate; до deploy требуется защищённо настроить и аттестовать
 отдельный production secret version `v1`. Поэтому реальный tester email в
 route не передаётся.
@@ -187,12 +198,12 @@ route не передаётся.
 
 | Module key       | Initial read | Initial write | Initial outbound |
 | ---------------- | ------------ | ------------- | ---------------- |
-| `GAMIFICATION`   | `ON`         | `ON`          | `OFF`             |
-| `ASSORTMENT`     | `ON`         | `ON`          | `OFF`             |
-| `STAFF`          | `ON`         | `ON`          | `OFF`             |
-| `COMMUNICATIONS` | `ON`         | `ON`          | `OFF`             |
-| `USERS_ROLES`    | `ON`         | `ON`          | `OFF`             |
-| `INTEGRATIONS`   | `ON`         | `ON`          | `OFF`             |
+| `GAMIFICATION`   | `ON`         | `ON`          | `OFF`            |
+| `ASSORTMENT`     | `ON`         | `ON`          | `OFF`            |
+| `STAFF`          | `ON`         | `ON`          | `OFF`            |
+| `COMMUNICATIONS` | `ON`         | `ON`          | `OFF`            |
+| `USERS_ROLES`    | `ON`         | `ON`          | `OFF`            |
+| `INTEGRATIONS`   | `ON`         | `ON`          | `OFF`            |
 
 Профиль хранится и обновляется как полный атомарный набор. Значение
 `Tenant.entitlementProfileRevision` является CAS-версией всего набора, а
@@ -302,8 +313,9 @@ system/custom roles, capabilities, `NETWORK | STORES` scope и audit.
 10. Protected `SHARED BETA GO` сохранён до создания invite.
 
 Дополнительно до любого внешнего доступа обязательны production-like
-upgrade/rollback/zero-diff и полноценная two-tenant rehearsal. Local
-`CURRENT_170` PostgreSQL evidence не заменяет эти gates.
+upgrade/rollback/zero-diff и полноценная two-tenant rehearsal. Ни historical
+`CURRENT_170/171`, ни remote-accepted `CURRENT_172`, ни local
+`CURRENT_174` PostgreSQL evidence не заменяют эти gates.
 
 Немедленные stop conditions:
 

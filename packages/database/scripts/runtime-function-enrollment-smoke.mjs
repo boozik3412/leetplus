@@ -7,6 +7,7 @@ import {
   APPLICATION_RUNTIME_FUNCTIONS,
   EXCLUDED_ADMISSION_FUNCTIONS,
   EXCLUDED_PENDING_FUNCTIONS,
+  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
   EXCLUDED_WORKER_FUNCTIONS,
   SEALED_RUNTIME_TABLES,
   SEALED_RUNTIME_TYPES,
@@ -19,6 +20,13 @@ const ROLE_PREFIX = "lp_runtime_acl_smoke_";
 const CLI_PATH = fileURLToPath(
   new URL("./runtime-function-enrollment.cli.mjs", import.meta.url),
 );
+const STRICT_EXCLUDED_FUNCTION_ARGUMENTS = Object.freeze({
+  shared_beta_runtime_canonical_json_v1: Object.freeze(["'{}'::jsonb"]),
+  shared_beta_runtime_digest_v1: Object.freeze([
+    "'runtime-function-enrollment-smoke'::text",
+    "'{}'::jsonb",
+  ]),
+});
 
 const HELP = `LeetPlus runtime function ACL enrollment PostgreSQL smoke
 
@@ -33,10 +41,12 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact latest migration 172 and exact completed count 172 are mandatory.
+  - Exact latest migration 174 and exact completed count 174 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
-  - Deliberate target-role and PUBLIC table/column/type ACL drift is remediated.
+  - Deliberate target-role and PUBLIC function/table/column/type ACL drift is
+    remediated, including all twenty-two unique CURRENT_174 routines.
+  - Dedicated activation/coordinator roles are rejected, never enrolled.
   - The generated role and every grant are removed in finally.
 `;
 
@@ -68,16 +78,24 @@ function tableNamePattern(entry) {
   );
 }
 
-function callExcludedAdmissionBoundary(runtime, entry) {
+function callExcludedFunctionBoundary(runtime, entry) {
   const match = /^(.*)\((.*)\)$/u.exec(entry.catalogSignature);
   assert.ok(match, `Invalid function catalog signature: ${entry.key}.`);
   const argumentTypes =
     match[2].length === 0
       ? []
       : match[2].split(",").map((typeName) => typeName.trim());
-  const argumentsSql = argumentTypes
-    .map((typeName) => `NULL::${typeName}`)
-    .join(", ");
+  const strictArguments = STRICT_EXCLUDED_FUNCTION_ARGUMENTS[entry.key];
+  if (strictArguments) {
+    assert.equal(
+      strictArguments.length,
+      argumentTypes.length,
+      `${entry.key} strict ACL probe arity`,
+    );
+  }
+  const argumentsSql = (
+    strictArguments ?? argumentTypes.map((typeName) => `NULL::${typeName}`)
+  ).join(", ");
   return runtime.$queryRawUnsafe(`SELECT ${match[1]}(${argumentsSql})`);
 }
 
@@ -528,6 +546,21 @@ async function inspectSealedColumnPrivileges(admin, roleName) {
   return totals;
 }
 
+async function inspectRuntimeInstanceAnchorPersistence(admin) {
+  const [row] = await admin.$queryRawUnsafe(
+    `
+      SELECT relation.relpersistence::text AS persistence
+      FROM pg_catalog.pg_class AS relation
+      INNER JOIN pg_catalog.pg_namespace AS namespace
+        ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public'
+        AND relation.relname = 'SharedBetaRuntimeInstanceAnchor'
+        AND relation.relkind = 'r'
+    `,
+  );
+  return typeof row?.persistence === "string" ? row.persistence : null;
+}
+
 async function inspectSealedTypePrivileges(admin, roleName) {
   const totals = {
     types: 0,
@@ -684,15 +717,16 @@ async function runSmoke() {
       admin,
       roleName,
     );
-    assert.equal(preEnrollmentColumnAcl.columns, 109);
+    assert.equal(preEnrollmentColumnAcl.columns, 232);
     assert.ok(preEnrollmentColumnAcl.effective > 0);
     assert.ok(preEnrollmentColumnAcl.directTarget >= 3);
     assert.ok(preEnrollmentColumnAcl.directPublic >= 2);
+    assert.equal(await inspectRuntimeInstanceAnchorPersistence(admin), "u");
     assert.deepEqual(await inspectSealedTypePrivileges(admin, roleName), {
-      types: 1,
-      effectiveTarget: 1,
-      directTarget: 1,
-      directPublic: 1,
+      types: 2,
+      effectiveTarget: 2,
+      directTarget: 2,
+      directPublic: 2,
     });
 
     const runtimeUrl = runtimeDatabaseUrl(parsed, roleName, password);
@@ -754,7 +788,14 @@ async function runSmoke() {
     for (const entry of EXCLUDED_ADMISSION_FUNCTIONS) {
       await expectSqlState(
         "42501",
-        () => callExcludedAdmissionBoundary(runtime, entry),
+        () => callExcludedFunctionBoundary(runtime, entry),
+        functionNamePattern(entry),
+      );
+    }
+    for (const entry of EXCLUDED_RUNTIME_RELEASE_FUNCTIONS) {
+      await expectSqlState(
+        "42501",
+        () => callExcludedFunctionBoundary(runtime, entry),
         functionNamePattern(entry),
       );
     }
@@ -766,6 +807,11 @@ async function runSmoke() {
     const preEnrollmentOutbox = await selectIdentityMailOutboxTable(runtime);
     assert.equal(preEnrollmentOutbox.length, 1);
     for (const entry of EXCLUDED_ADMISSION_FUNCTIONS) {
+      await admin.$executeRawUnsafe(
+        `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
+      );
+    }
+    for (const entry of EXCLUDED_RUNTIME_RELEASE_FUNCTIONS) {
       await admin.$executeRawUnsafe(
         `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
       );
@@ -799,17 +845,21 @@ async function runSmoke() {
     assert.equal(applyReceipt.postconditions.excludedPendingExecuteCount, 0);
     assert.equal(applyReceipt.postconditions.excludedAdmissionExecuteCount, 0);
     assert.equal(
+      applyReceipt.postconditions.excludedRuntimeReleaseExecuteCount,
+      0,
+    );
+    assert.equal(
       applyReceipt.postconditions.sealedTableWithoutRuntimePrivilegesCount,
-      6,
+      12,
     );
     assert.equal(
       applyReceipt.postconditions.sealedPublicTablePrivilegeCount,
       0,
     );
-    assert.equal(applyReceipt.postconditions.sealedColumnCount, 109);
+    assert.equal(applyReceipt.postconditions.sealedColumnCount, 232);
     assert.equal(
       applyReceipt.postconditions.sealedColumnWithoutRuntimePrivilegesCount,
-      109,
+      232,
     );
     assert.equal(
       applyReceipt.postconditions.sealedEffectiveColumnPrivilegeCount,
@@ -825,7 +875,7 @@ async function runSmoke() {
     );
     assert.equal(
       applyReceipt.postconditions.sealedTypeWithoutRuntimeUsageCount,
-      1,
+      2,
     );
     assert.equal(applyReceipt.postconditions.sealedPublicTypeUsageCount, 0);
     assertNoSecretLeak(apply, [rawDatabaseUrl, password]);
@@ -834,13 +884,13 @@ async function runSmoke() {
       roleName,
     );
     assert.deepEqual(postEnrollmentColumnAcl, {
-      columns: 109,
+      columns: 232,
       effective: 0,
       directTarget: 0,
       directPublic: 0,
     });
     assert.deepEqual(await inspectSealedTypePrivileges(admin, roleName), {
-      types: 1,
+      types: 2,
       effectiveTarget: 0,
       directTarget: 0,
       directPublic: 0,
@@ -896,7 +946,14 @@ async function runSmoke() {
     for (const entry of EXCLUDED_ADMISSION_FUNCTIONS) {
       await expectSqlState(
         "42501",
-        () => callExcludedAdmissionBoundary(runtime, entry),
+        () => callExcludedFunctionBoundary(runtime, entry),
+        functionNamePattern(entry),
+      );
+    }
+    for (const entry of EXCLUDED_RUNTIME_RELEASE_FUNCTIONS) {
+      await expectSqlState(
+        "42501",
+        () => callExcludedFunctionBoundary(runtime, entry),
         functionNamePattern(entry),
       );
     }
@@ -922,7 +979,7 @@ async function runSmoke() {
       admin,
       roleName,
     );
-    assert.equal(isolatedColumnDrift.columns, 109);
+    assert.equal(isolatedColumnDrift.columns, 232);
     assert.equal(isolatedColumnDrift.directTarget, 1);
     assert.equal(isolatedColumnDrift.directPublic, 1);
     assert.equal(isolatedColumnDrift.effective, 2);
@@ -960,7 +1017,7 @@ async function runSmoke() {
       0,
     );
     assert.deepEqual(await inspectSealedColumnPrivileges(admin, roleName), {
-      columns: 109,
+      columns: 232,
       effective: 0,
       directTarget: 0,
       directPublic: 0,
@@ -996,7 +1053,11 @@ async function runSmoke() {
       checkReceipt.excludedAdmissionFunctions.length,
       EXCLUDED_ADMISSION_FUNCTIONS.length,
     );
-    assert.equal(checkReceipt.postconditions.sealedColumnCount, 109);
+    assert.equal(
+      checkReceipt.excludedRuntimeReleaseFunctions.length,
+      EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+    );
+    assert.equal(checkReceipt.postconditions.sealedColumnCount, 232);
     assert.equal(
       checkReceipt.postconditions.sealedEffectiveColumnPrivilegeCount,
       0,
@@ -1011,7 +1072,7 @@ async function runSmoke() {
     );
     assert.equal(
       checkReceipt.postconditions.sealedTypeWithoutRuntimeUsageCount,
-      1,
+      2,
     );
     assert.equal(checkReceipt.postconditions.sealedPublicTypeUsageCount, 0);
     assertNoSecretLeak(afterCheck, [rawDatabaseUrl, password]);
@@ -1021,7 +1082,8 @@ async function runSmoke() {
         ok: true,
         schemaVersion: 1,
         database: databaseName,
-        preEnrollmentPermissionDenials: 19,
+        preEnrollmentPermissionDenials:
+          19 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
         applicationFunctionGrants: APPLICATION_RUNTIME_FUNCTIONS.length,
         excludedWorkerFunctionGrants: 0,
         excludedWorkerFunctionsDenied: EXCLUDED_WORKER_FUNCTIONS.length,
@@ -1029,16 +1091,19 @@ async function runSmoke() {
         excludedPendingFunctionsDenied: EXCLUDED_PENDING_FUNCTIONS.length,
         excludedAdmissionFunctionGrants: 0,
         excludedAdmissionFunctionsDenied: EXCLUDED_ADMISSION_FUNCTIONS.length,
+        excludedRuntimeReleaseFunctionGrants: 0,
+        excludedRuntimeReleaseFunctionsDenied:
+          EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
         sealedTablePrivileges: 0,
         sealedPublicTablePrivileges: 0,
         sealedColumnPrivileges: 0,
         sealedDirectColumnPrivileges: 0,
         sealedPublicColumnPrivileges: 0,
-        sealedColumns: 109,
-        sealedTables: 6,
+        sealedColumns: 232,
+        sealedTables: 12,
         sealedTypeRuntimeUsage: 0,
         sealedPublicTypeUsage: 0,
-        sealedTypes: 1,
+        sealedTypes: 2,
         isolatedColumnDriftDetected: true,
         isolatedColumnDriftRemediated: true,
         idempotentReplay: true,

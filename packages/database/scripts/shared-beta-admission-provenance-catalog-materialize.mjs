@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  createHash,
-  randomBytes,
-} from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   copyFile,
   cp,
@@ -17,51 +14,32 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import {
-  basename,
-  dirname,
-  join,
-  resolve,
-} from "node:path";
-import {
-  fileURLToPath,
-  pathToFileURL,
-} from "node:url";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { PrismaClient } from "@prisma/client";
 
-import { canonicalStringify } from
-  "./staff-task-integrity-canonical-json.mjs";
-import {
-  CURRENT_EXPECTED_LATEST_MIGRATION,
-  CURRENT_EXPECTED_MIGRATION_COUNT,
-  STAFF_TASK_CURRENT_RELEASE_STATE,
-} from "./staff-task-integrity-migration-state.mjs";
-
+import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 export const SCRIPT_NAME =
   "shared-beta-admission-provenance-catalog-materialize";
 export const REQUIRED_CONFIRMATION =
   "write-exact-shared-beta-admission-provenance-catalog";
 export const TARGET_MIGRATION =
   "20260730020000_shared_beta_admission_provenance";
+export const TARGET_MIGRATION_COUNT = 172;
 
 const MIGRATION_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
-const SAFE_SOURCE_DATABASE_PATTERN =
-  /^[a-z0-9][a-z0-9_.-]{0,58}_ci$/iu;
-const GENERATED_DATABASE_PATTERN =
-  /^lp_admission172_catalog_ci_[a-f0-9]{16}$/u;
-const TEMP_ROOT_PREFIX =
-  "leetplus-admission-provenance-catalog-";
-const GENERATED_FILE_PREFIX =
-  ".shared-beta-admission-provenance-catalog-";
+const SAFE_SOURCE_DATABASE_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,58}_ci$/iu;
+const GENERATED_DATABASE_PATTERN = /^lp_admission172_catalog_ci_[a-f0-9]{16}$/u;
+const TEMP_ROOT_PREFIX = "leetplus-admission-provenance-catalog-";
+const GENERATED_FILE_PREFIX = ".shared-beta-admission-provenance-catalog-";
 const MIGRATION_TIMEOUT_MS = 10 * 60 * 1_000;
 const CLUSTER_LOCK_CLASS = 1_281_120_000;
 const CLUSTER_LOCK_OBJECT = 172;
 const POSTGRESQL_MAJOR = 16;
 const SNAPSHOT_SCHEMA_VERSION = 1;
-const SNAPSHOT_DIGEST_ALGORITHM =
-  "RFC8785_STYLE_CANONICAL_JSON_SHA256_V1";
+const SNAPSHOT_DIGEST_ALGORITHM = "RFC8785_STYLE_CANONICAL_JSON_SHA256_V1";
 
 const TARGET_RELATIONS = Object.freeze([
   "ReleaseGateAttestation",
@@ -215,9 +193,7 @@ function parseSafeSourceDatabaseUrl(rawDatabaseUrl) {
   ) {
     contractError("POSTGRESQL_URL_REQUIRED");
   }
-  const hostname = sourceUrl.hostname
-    .toLowerCase()
-    .replace(/^\[|\]$/gu, "");
+  const hostname = sourceUrl.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
   if (!new Set(["127.0.0.1", "localhost", "::1"]).has(hostname)) {
     contractError("LOOPBACK_POSTGRESQL_REQUIRED");
   }
@@ -253,8 +229,7 @@ function databaseUrlFor(sourceUrl, databaseName) {
 }
 
 function generatedDatabaseName() {
-  const databaseName =
-    `lp_admission172_catalog_ci_${randomBytes(8).toString("hex")}`;
+  const databaseName = `lp_admission172_catalog_ci_${randomBytes(8).toString("hex")}`;
   assert.match(databaseName, GENERATED_DATABASE_PATTERN);
   return databaseName;
 }
@@ -291,15 +266,13 @@ function assertRealEnvironment(environment) {
     contractError("PRODUCTION_ENVIRONMENT_REFUSED");
   }
   if (
-    environment
-      .SHARED_BETA_ADMISSION_CATALOG_MATERIALIZE_CONFIRM !==
+    environment.SHARED_BETA_ADMISSION_CATALOG_MATERIALIZE_CONFIRM !==
     REQUIRED_CONFIRMATION
   ) {
     contractError("MATERIALIZE_CONFIRMATION_REQUIRED");
   }
   const expectedMigrationSha256 = String(
-    environment
-      .SHARED_BETA_ADMISSION_CATALOG_EXPECTED_MIGRATION_SHA256 ?? "",
+    environment.SHARED_BETA_ADMISSION_CATALOG_EXPECTED_MIGRATION_SHA256 ?? "",
   ).trim();
   if (!SHA256_PATTERN.test(expectedMigrationSha256)) {
     contractError("EXPECTED_MIGRATION_SHA256_REQUIRED");
@@ -311,10 +284,8 @@ function assertRealEnvironment(environment) {
 }
 
 async function readMigrationPlan(expectedMigrationSha256) {
-  const sourcePrismaDir = fileURLToPath(
-    new URL("../prisma/", import.meta.url),
-  );
-  const migrationDirectories = (
+  const sourcePrismaDir = fileURLToPath(new URL("../prisma/", import.meta.url));
+  const allMigrationDirectories = (
     await readdir(join(sourcePrismaDir, "migrations"), {
       withFileTypes: true,
     })
@@ -322,19 +293,21 @@ async function readMigrationPlan(expectedMigrationSha256) {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_172");
-  assert.equal(CURRENT_EXPECTED_LATEST_MIGRATION, TARGET_MIGRATION);
-  assert.equal(
-    migrationDirectories.length,
-    CURRENT_EXPECTED_MIGRATION_COUNT,
-  );
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 172);
   assert(
-    migrationDirectories.every((name) =>
-      MIGRATION_PATTERN.test(name),
-    ),
+    allMigrationDirectories.every((name) => MIGRATION_PATTERN.test(name)),
     "Migration directory names must match the release contract.",
   );
+  const targetIndex = allMigrationDirectories.indexOf(TARGET_MIGRATION);
+  assert.equal(
+    targetIndex + 1,
+    TARGET_MIGRATION_COUNT,
+    "The frozen CURRENT_172 target must remain migration 172.",
+  );
+  const migrationDirectories = allMigrationDirectories.slice(
+    0,
+    targetIndex + 1,
+  );
+  assert.equal(migrationDirectories.length, TARGET_MIGRATION_COUNT);
   assert.equal(migrationDirectories.at(-1), TARGET_MIGRATION);
   const targetMigrationPath = join(
     sourcePrismaDir,
@@ -359,24 +332,30 @@ async function createMigrationArtifact(tempRoot, migrationPlan) {
   assertSafeTempRoot(tempRoot);
   const targetPrismaDir = join(tempRoot, "prisma");
   const targetMigrationsDir = join(targetPrismaDir, "migrations");
-  await mkdir(targetPrismaDir, { recursive: true });
+  await mkdir(targetMigrationsDir, { recursive: true });
   await copyFile(
     join(migrationPlan.sourcePrismaDir, "schema.prisma"),
     join(targetPrismaDir, "schema.prisma"),
   );
-  await cp(
-    join(migrationPlan.sourcePrismaDir, "migrations"),
-    targetMigrationsDir,
-    { recursive: true },
+  await copyFile(
+    join(migrationPlan.sourcePrismaDir, "migrations", "migration_lock.toml"),
+    join(targetMigrationsDir, "migration_lock.toml"),
+  );
+  await Promise.all(
+    migrationPlan.migrationDirectories.map((migrationDirectory) =>
+      cp(
+        join(migrationPlan.sourcePrismaDir, "migrations", migrationDirectory),
+        join(targetMigrationsDir, migrationDirectory),
+        { recursive: true },
+      ),
+    ),
   );
   const copiedMigrationPath = join(
     targetMigrationsDir,
     TARGET_MIGRATION,
     "migration.sql",
   );
-  const copiedMigrationSqlSha256 = sha256(
-    await readFile(copiedMigrationPath),
-  );
+  const copiedMigrationSqlSha256 = sha256(await readFile(copiedMigrationPath));
   assert.equal(
     copiedMigrationSqlSha256,
     migrationPlan.migrationSqlSha256,
@@ -393,13 +372,7 @@ function runMigrateDeploy(schemaPath, databaseUrl) {
   const prismaCliPath = require.resolve("prisma/build/index.js");
   const result = spawnSync(
     process.execPath,
-    [
-      prismaCliPath,
-      "migrate",
-      "deploy",
-      "--schema",
-      schemaPath,
-    ],
+    [prismaCliPath, "migrate", "deploy", "--schema", schemaPath],
     {
       cwd: dirname(schemaPath),
       encoding: "utf8",
@@ -408,8 +381,7 @@ function runMigrateDeploy(schemaPath, databaseUrl) {
         DATABASE_URL: databaseUrl,
         NODE_ENV: "test",
         NO_COLOR: "1",
-        PGOPTIONS:
-          "-c lock_timeout=5000 -c statement_timeout=120000",
+        PGOPTIONS: "-c lock_timeout=5000 -c statement_timeout=120000",
         PRISMA_HIDE_UPDATE_MESSAGE: "true",
       },
       maxBuffer: 8 * 1024 * 1_024,
@@ -480,18 +452,14 @@ async function releaseClusterLock(admin) {
 async function createDatabase(admin, databaseName) {
   assertSafeGeneratedDatabaseName(databaseName);
   await admin.$executeRawUnsafe(
-    `CREATE DATABASE ${quoteIdentifier(
-      databaseName,
-    )} TEMPLATE template0`,
+    `CREATE DATABASE ${quoteIdentifier(databaseName)} TEMPLATE template0`,
   );
 }
 
 async function dropDatabase(admin, databaseName) {
   assertSafeGeneratedDatabaseName(databaseName);
   await admin.$executeRawUnsafe(
-    `DROP DATABASE IF EXISTS ${quoteIdentifier(
-      databaseName,
-    )} WITH (FORCE)`,
+    `DROP DATABASE IF EXISTS ${quoteIdentifier(databaseName)} WITH (FORCE)`,
   );
 }
 
@@ -530,10 +498,7 @@ async function sourceMigrationFingerprint(client) {
   return sha256(canonicalStringify(rows));
 }
 
-async function assertAppliedMigrations(
-  client,
-  migrationPlan,
-) {
+async function assertAppliedMigrations(client, migrationPlan) {
   const rows = await client.$queryRawUnsafe(
     `SELECT
        "migration_name"::TEXT AS migration_name,
@@ -548,9 +513,7 @@ async function assertAppliedMigrations(
     migrationPlan.migrationDirectories,
   );
   assert.equal(
-    rows.every(
-      (row) => row.finished === true && row.not_rolled_back === true,
-    ),
+    rows.every((row) => row.finished === true && row.not_rolled_back === true),
     true,
   );
   const target = rows.at(-1);
@@ -678,11 +641,7 @@ function compareCodepoint(left, right) {
   return 0;
 }
 
-async function readCatalogSnapshot(
-  client,
-  migrationPlan,
-  setPhase = () => {},
-) {
+async function readCatalogSnapshot(client, migrationPlan, setPhase = () => {}) {
   setPhase("PG_CATALOG_APPLIED_MIGRATIONS");
   await assertAppliedMigrations(client, migrationPlan);
   setPhase("PG_CATALOG_ACL");
@@ -947,12 +906,14 @@ async function readCatalogSnapshot(
     TARGET_TYPE,
   );
   assert.deepEqual(typeRows, [{ kind: "e", name: TARGET_TYPE }]);
-  const types = [{
-    name: TARGET_TYPE,
-    kind: "e",
-    ownerPolicy: "DATABASE_OWNER",
-    aclPolicy: "OWNER_USAGE_ONLY",
-  }];
+  const types = [
+    {
+      name: TARGET_TYPE,
+      kind: "e",
+      ownerPolicy: "DATABASE_OWNER",
+      aclPolicy: "OWNER_USAGE_ONLY",
+    },
+  ];
 
   setPhase("PG_CATALOG_ENUMS");
   const enumRows = await client.$queryRawUnsafe(
@@ -1072,11 +1033,10 @@ async function readCatalogSnapshot(
     true,
   );
   riRows.sort((left, right) => {
-    const constraintOrder =
-      compareCodepoint(
-        left.constraint_name,
-        right.constraint_name,
-      );
+    const constraintOrder = compareCodepoint(
+      left.constraint_name,
+      right.constraint_name,
+    );
     if (constraintOrder !== 0) return constraintOrder;
     return (
       RI_FUNCTION_ORDER.get(left.function_name) -
@@ -1150,10 +1110,7 @@ function renderJson(value) {
 }
 
 function renderCatalogModule(snapshot, migrationSqlSha256) {
-  const snapshotDigest = catalogSnapshotDigest(
-    snapshot,
-    migrationSqlSha256,
-  );
+  const snapshotDigest = catalogSnapshotDigest(snapshot, migrationSqlSha256);
   return `// Generated from a clean PostgreSQL 16 CURRENT_172 catalog.
 //
 // Source migration:
@@ -1266,10 +1223,7 @@ export const SHARED_BETA_ADMISSION_CATALOG = Object.freeze({
 
 function catalogTargetPath() {
   return fileURLToPath(
-    new URL(
-      "./shared-beta-admission-provenance-catalog.mjs",
-      import.meta.url,
-    ),
+    new URL("./shared-beta-admission-provenance-catalog.mjs", import.meta.url),
   );
 }
 
@@ -1281,18 +1235,13 @@ async function atomicWriteCatalog(source, migrationSqlSha256) {
     `${GENERATED_FILE_PREFIX}${process.pid}-${randomBytes(8).toString("hex")}.mjs`,
   );
   assert.equal(dirname(resolve(temporaryPath)), resolve(targetDirectory));
-  assert.equal(
-    basename(temporaryPath).startsWith(GENERATED_FILE_PREFIX),
-    true,
-  );
+  assert.equal(basename(temporaryPath).startsWith(GENERATED_FILE_PREFIX), true);
   try {
     await writeFile(temporaryPath, source, {
       encoding: "utf8",
       flag: "wx",
     });
-    const temporaryFileSha256 = sha256(
-      await readFile(temporaryPath),
-    );
+    const temporaryFileSha256 = sha256(await readFile(temporaryPath));
     const preReplaceVerification = await verifyCatalogModule(
       temporaryPath,
       temporaryFileSha256,
@@ -1377,8 +1326,7 @@ function assertSnapshotShape(snapshot, generated) {
       enumLabelCount: snapshot.enums.length,
       functionCount: snapshot.functions.length,
       indexCount: snapshot.indexes.length,
-      referentialTriggerCount:
-        snapshot.referentialConstraints.length,
+      referentialTriggerCount: snapshot.referentialConstraints.length,
       relationCount: snapshot.relations.length,
       sealedColumnCount: snapshot.columns.length,
       triggerCount: snapshot.triggers.length,
@@ -1485,9 +1433,7 @@ function assertSnapshotShape(snapshot, generated) {
           ? "text"
           : "jsonb";
       const expectedVolatility =
-        entry.name === "shared_beta_tenant_profile_digest_v1"
-          ? "s"
-          : "v";
+        entry.name === "shared_beta_tenant_profile_digest_v1" ? "s" : "v";
       return (
         Object.keys(entry).sort().join(",") ===
           [
@@ -1502,7 +1448,9 @@ function assertSnapshotShape(snapshot, generated) {
             "searchPath",
             "securityDefiner",
             "volatility",
-          ].sort().join(",") &&
+          ]
+            .sort()
+            .join(",") &&
         entry.language === expectedLanguage &&
         entry.result === expectedResult &&
         entry.volatility === expectedVolatility &&
@@ -1533,11 +1481,7 @@ function assertSnapshotShape(snapshot, generated) {
   ]);
   assert.deepEqual(
     snapshot.enums,
-    TARGET_GATE_CODES.map((code, index) => [
-      TARGET_TYPE,
-      code,
-      index + 1,
-    ]),
+    TARGET_GATE_CODES.map((code, index) => [TARGET_TYPE, code, index + 1]),
   );
 
   assert.equal(
@@ -1563,10 +1507,9 @@ function assertSnapshotShape(snapshot, generated) {
         Array.isArray(row) &&
         row.length === 6 &&
         typeof row[0] === "string" &&
-        new Set([
-          "TenantAdmissionDecision",
-          "TenantAdmissionDecisionGate",
-        ]).has(row[1]) &&
+        new Set(["TenantAdmissionDecision", "TenantAdmissionDecisionGate"]).has(
+          row[1],
+        ) &&
         typeof row[2] === "string" &&
         row[2].length > 0 &&
         typeof row[3] === "string" &&
@@ -1592,34 +1535,24 @@ function assertSnapshotShape(snapshot, generated) {
     generated.SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS,
     TARGET_FUNCTIONS,
   );
-  assert.deepEqual(
-    generated.SHARED_BETA_ADMISSION_DORMANT_TYPES,
-    [TARGET_TYPE],
-  );
+  assert.deepEqual(generated.SHARED_BETA_ADMISSION_DORMANT_TYPES, [
+    TARGET_TYPE,
+  ]);
   assert.equal(
-    Object.isFrozen(
-      generated.SHARED_BETA_ADMISSION_DORMANT_RELATIONS,
-    ),
+    Object.isFrozen(generated.SHARED_BETA_ADMISSION_DORMANT_RELATIONS),
     true,
   );
   assert.equal(
-    Object.isFrozen(
-      generated.SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS,
-    ),
+    Object.isFrozen(generated.SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS),
     true,
   );
   assert.equal(
-    Object.isFrozen(
-      generated.SHARED_BETA_ADMISSION_DORMANT_TYPES,
-    ),
+    Object.isFrozen(generated.SHARED_BETA_ADMISSION_DORMANT_TYPES),
     true,
   );
 }
 
-export function verifyCatalogExports(
-  generated,
-  migrationSqlSha256,
-) {
+export function verifyCatalogExports(generated, migrationSqlSha256) {
   assertSha256(migrationSqlSha256, "Migration SHA-256 is invalid.");
   const snapshot = snapshotFromCatalogModule(generated);
   assertSnapshotShape(snapshot, generated);
@@ -1651,10 +1584,7 @@ export function verifyCatalogExports(
       "referentialTriggerCount",
     ].sort(),
   );
-  const expectedDigest = catalogSnapshotDigest(
-    snapshot,
-    migrationSqlSha256,
-  );
+  const expectedDigest = catalogSnapshotDigest(snapshot, migrationSqlSha256);
   assert.equal(catalog?.schemaVersion, SNAPSHOT_SCHEMA_VERSION);
   assert.equal(catalog?.migration, TARGET_MIGRATION);
   assert.equal(
@@ -1699,10 +1629,7 @@ export function verifyCatalogExports(
   };
 }
 
-async function importCatalogModule(
-  targetPath,
-  catalogFileSha256,
-) {
+async function importCatalogModule(targetPath, catalogFileSha256) {
   assertSha256(catalogFileSha256, "Catalog file SHA-256 is invalid.");
   const moduleUrl = pathToFileURL(targetPath);
   moduleUrl.searchParams.set("sha256", catalogFileSha256);
@@ -1727,20 +1654,10 @@ export async function runCheckedInCatalogVerification() {
       import.meta.url,
     ),
   );
-  const migrationSqlSha256 = sha256(
-    await readFile(targetMigrationPath),
-  );
-  assertSha256(
-    migrationSqlSha256,
-    "Actual migration SHA-256 is invalid.",
-  );
-  const migrationPlan = await readMigrationPlan(
-    migrationSqlSha256,
-  );
-  assert.equal(
-    migrationPlan.targetMigrationPath,
-    targetMigrationPath,
-  );
+  const migrationSqlSha256 = sha256(await readFile(targetMigrationPath));
+  assertSha256(migrationSqlSha256, "Actual migration SHA-256 is invalid.");
+  const migrationPlan = await readMigrationPlan(migrationSqlSha256);
+  assert.equal(migrationPlan.targetMigrationPath, targetMigrationPath);
   const targetPath = catalogTargetPath();
   const catalogFileSha256 = sha256(await readFile(targetPath));
   const verification = await verifyCatalogModule(
@@ -1755,8 +1672,7 @@ export async function runCheckedInCatalogVerification() {
     migration: TARGET_MIGRATION,
     migrationSqlSha256,
     catalogFileSha256,
-    catalogSnapshotDigestSha256:
-      verification.catalogSnapshotDigestSha256,
+    catalogSnapshotDigestSha256: verification.catalogSnapshotDigestSha256,
     catalogCountsVerified: verification.countsVerified,
     databaseConnections: 0,
     filesWritten: 0,
@@ -1799,34 +1715,25 @@ export async function runOfflineSelfTest() {
       DATABASE_URL:
         "postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci?schema=public",
       NODE_ENV: "production",
-      SHARED_BETA_ADMISSION_CATALOG_MATERIALIZE_CONFIRM:
-        REQUIRED_CONFIRMATION,
-      SHARED_BETA_ADMISSION_CATALOG_EXPECTED_MIGRATION_SHA256:
-        "a".repeat(64),
+      SHARED_BETA_ADMISSION_CATALOG_MATERIALIZE_CONFIRM: REQUIRED_CONFIRMATION,
+      SHARED_BETA_ADMISSION_CATALOG_EXPECTED_MIGRATION_SHA256: "a".repeat(64),
     }),
   );
   const parsed = assertRealEnvironment({
     DATABASE_URL:
       "postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci?schema=public",
     NODE_ENV: "test",
-    SHARED_BETA_ADMISSION_CATALOG_MATERIALIZE_CONFIRM:
-      REQUIRED_CONFIRMATION,
-    SHARED_BETA_ADMISSION_CATALOG_EXPECTED_MIGRATION_SHA256:
-      "a".repeat(64),
+    SHARED_BETA_ADMISSION_CATALOG_MATERIALIZE_CONFIRM: REQUIRED_CONFIRMATION,
+    SHARED_BETA_ADMISSION_CATALOG_EXPECTED_MIGRATION_SHA256: "a".repeat(64),
   });
   assert.equal(parsed.databaseName, "leetplus_ci");
   assertSafeGeneratedDatabaseName(
     "lp_admission172_catalog_ci_0123456789abcdef",
   );
-  assert.throws(() =>
-    assertSafeGeneratedDatabaseName("leetplus_ci"),
-  );
-  assertSafeTempRoot(
-    join(tmpdir(), `${TEMP_ROOT_PREFIX}0123456789abcdef`),
-  );
+  assert.throws(() => assertSafeGeneratedDatabaseName("leetplus_ci"));
+  assertSafeTempRoot(join(tmpdir(), `${TEMP_ROOT_PREFIX}0123456789abcdef`));
   assert.throws(() => assertSafeTempRoot(tmpdir()));
-  const checkedInVerification =
-    await runCheckedInCatalogVerification();
+  const checkedInVerification = await runCheckedInCatalogVerification();
   assert.equal(checkedInVerification.mode, "VERIFY");
   assert.equal(checkedInVerification.databaseConnections, 0);
   assert.equal(checkedInVerification.filesWritten, 0);
@@ -1839,14 +1746,10 @@ export async function runOfflineSelfTest() {
     checkedInCatalogFileSha256,
   );
   const fixture = snapshotFromCatalogModule(checkedInModule);
-  const migrationSqlSha256 =
-    checkedInVerification.migrationSqlSha256;
+  const migrationSqlSha256 = checkedInVerification.migrationSqlSha256;
   assert.equal(
     catalogSnapshotDigest(fixture, migrationSqlSha256),
-    catalogSnapshotDigest(
-      structuredClone(fixture),
-      migrationSqlSha256,
-    ),
+    catalogSnapshotDigest(structuredClone(fixture), migrationSqlSha256),
   );
   const rendered = renderCatalogModule(
     structuredClone(fixture),
@@ -1855,14 +1758,9 @@ export async function runOfflineSelfTest() {
   assert.match(rendered, /Do not edit catalog rows/u);
   assert.match(
     rendered,
-    new RegExp(
-      `migrationSqlSha256:\\s*\\n\\s+"${migrationSqlSha256}"`,
-      "u",
-    ),
+    new RegExp(`migrationSqlSha256:\\s*\\n\\s+"${migrationSqlSha256}"`, "u"),
   );
-  const verificationRoot = await mkdtemp(
-    join(tmpdir(), TEMP_ROOT_PREFIX),
-  );
+  const verificationRoot = await mkdtemp(join(tmpdir(), TEMP_ROOT_PREFIX));
   assertSafeTempRoot(verificationRoot);
   try {
     const verificationPath = join(
@@ -1870,9 +1768,7 @@ export async function runOfflineSelfTest() {
       "generated-catalog-self-test.mjs",
     );
     await writeFile(verificationPath, rendered, "utf8");
-    const verificationFileSha256 = sha256(
-      await readFile(verificationPath),
-    );
+    const verificationFileSha256 = sha256(await readFile(verificationPath));
     assert.deepEqual(
       await verifyCatalogModule(
         verificationPath,
@@ -1880,11 +1776,10 @@ export async function runOfflineSelfTest() {
         migrationSqlSha256,
       ),
       {
-        catalogSnapshotDigestSha256:
-          catalogSnapshotDigest(
-            fixture,
-            migrationSqlSha256,
-          ),
+        catalogSnapshotDigestSha256: catalogSnapshotDigest(
+          fixture,
+          migrationSqlSha256,
+        ),
         countsVerified: true,
       },
     );
@@ -1898,9 +1793,7 @@ export async function runOfflineSelfTest() {
     () =>
       verifyCatalogExports(
         checkedInModule,
-        migrationSqlSha256 === "a".repeat(64)
-          ? "b".repeat(64)
-          : "a".repeat(64),
+        migrationSqlSha256 === "a".repeat(64) ? "b".repeat(64) : "a".repeat(64),
       ),
     /migrationSqlSha256/u,
   );
@@ -1913,11 +1806,7 @@ export async function runOfflineSelfTest() {
     }),
   };
   assert.throws(
-    () =>
-      verifyCatalogExports(
-        countTamperedModule,
-        migrationSqlSha256,
-      ),
+    () => verifyCatalogExports(countTamperedModule, migrationSqlSha256),
     /count metadata/u,
   );
   const digestTamperedModule = {
@@ -1932,11 +1821,7 @@ export async function runOfflineSelfTest() {
     }),
   };
   assert.throws(
-    () =>
-      verifyCatalogExports(
-        digestTamperedModule,
-        migrationSqlSha256,
-      ),
+    () => verifyCatalogExports(digestTamperedModule, migrationSqlSha256),
     /catalogSnapshotDigestSha256/u,
   );
   return {
@@ -1955,18 +1840,10 @@ async function runRealMaterialization(environment) {
     expectedMigrationSha256,
     sourceUrl,
   } = assertRealEnvironment(environment);
-  const migrationPlan = await readMigrationPlan(
-    expectedMigrationSha256,
-  );
+  const migrationPlan = await readMigrationPlan(expectedMigrationSha256);
   const databaseName = generatedDatabaseName();
-  const sourceDatabaseUrl = databaseUrlFor(
-    sourceUrl,
-    sourceDatabaseName,
-  );
-  const generatedDatabaseUrl = databaseUrlFor(
-    sourceUrl,
-    databaseName,
-  );
+  const sourceDatabaseUrl = databaseUrlFor(sourceUrl, sourceDatabaseName);
+  const generatedDatabaseUrl = databaseUrlFor(sourceUrl, databaseName);
   const admin = prismaClient(sourceDatabaseUrl);
   let clusterLockHeld = false;
   let databaseCreated = false;
@@ -1982,18 +1859,14 @@ async function runRealMaterialization(environment) {
     phase = "SOURCE_ADMIN_ADMISSION";
     await assertTestSuperuser(admin, sourceDatabaseName);
     phase = "SOURCE_FINGERPRINT_BEFORE";
-    sourceFingerprintBefore =
-      await sourceMigrationFingerprint(admin);
+    sourceFingerprintBefore = await sourceMigrationFingerprint(admin);
     phase = "CLUSTER_LOCK";
     await acquireClusterLock(admin);
     clusterLockHeld = true;
     phase = "MIGRATION_ARTIFACT";
     tempRoot = await mkdtemp(join(tmpdir(), TEMP_ROOT_PREFIX));
     assertSafeTempRoot(tempRoot);
-    const artifact = await createMigrationArtifact(
-      tempRoot,
-      migrationPlan,
-    );
+    const artifact = await createMigrationArtifact(tempRoot, migrationPlan);
     assert.equal(
       sha256(await readFile(artifact.copiedMigrationPath)),
       expectedMigrationSha256,
@@ -2111,10 +1984,7 @@ async function runRealMaterialization(environment) {
     }
     throw error;
   }
-  assert.equal(
-    writeEvidence.preReplaceVerification.countsVerified,
-    true,
-  );
+  assert.equal(writeEvidence.preReplaceVerification.countsVerified, true);
   const verification = await verifyCatalogModule(
     writeEvidence.targetPath,
     writeEvidence.catalogFileSha256,
@@ -2126,8 +1996,7 @@ async function runRealMaterialization(environment) {
     mode: "WRITE",
     migration: TARGET_MIGRATION,
     migrationSqlSha256: expectedMigrationSha256,
-    catalogSnapshotDigestSha256:
-      verification.catalogSnapshotDigestSha256,
+    catalogSnapshotDigestSha256: verification.catalogSnapshotDigestSha256,
     catalogFileSha256: writeEvidence.catalogFileSha256,
     catalogCountsVerified: verification.countsVerified,
     postgresMajor: POSTGRESQL_MAJOR,
@@ -2148,16 +2017,12 @@ async function main() {
     return;
   }
   if (options.selfTest) {
-    process.stdout.write(
-      `${JSON.stringify(await runOfflineSelfTest())}\n`,
-    );
+    process.stdout.write(`${JSON.stringify(await runOfflineSelfTest())}\n`);
     return;
   }
   if (options.verify) {
     process.stdout.write(
-      `${JSON.stringify(
-        await runCheckedInCatalogVerification(),
-      )}\n`,
+      `${JSON.stringify(await runCheckedInCatalogVerification())}\n`,
     );
     return;
   }
@@ -2169,21 +2034,12 @@ async function main() {
 const invokedPath = process.argv[1]
   ? resolve(process.argv[1]).toLowerCase()
   : "";
-if (
-  invokedPath ===
-  resolve(fileURLToPath(import.meta.url)).toLowerCase()
-) {
+if (invokedPath === resolve(fileURLToPath(import.meta.url)).toLowerCase()) {
   main().catch((error) => {
     const primaryError =
-      error instanceof AggregateError
-        ? error.errors[0]
-        : error;
-    const phase = String(
-      primaryError?.catalogMaterializationPhase ?? "",
-    );
-    const sqlState = String(
-      primaryError?.meta?.code ?? "",
-    );
+      error instanceof AggregateError ? error.errors[0] : error;
+    const phase = String(primaryError?.catalogMaterializationPhase ?? "");
+    const sqlState = String(primaryError?.meta?.code ?? "");
     process.stderr.write(
       `${JSON.stringify({
         script: SCRIPT_NAME,
@@ -2193,8 +2049,7 @@ if (
             typeof primaryError?.code === "string"
               ? primaryError.code
               : "CATALOG_MATERIALIZATION_FAILED",
-          ...((
-            new Set([
+          ...(new Set([
             "SOURCE_ADMIN_ADMISSION",
             "SOURCE_FINGERPRINT_BEFORE",
             "CLUSTER_LOCK",
@@ -2204,14 +2059,10 @@ if (
             "PG_CATALOG_SNAPSHOT",
             "SOURCE_FINGERPRINT_AFTER",
             "CATALOG_REPLACE",
-            ]).has(phase) ||
-            /^PG_CATALOG_[A-Z_]+$/u.test(phase)
-          )
+          ]).has(phase) || /^PG_CATALOG_[A-Z_]+$/u.test(phase)
             ? { phase }
             : {}),
-          ...(/^[0-9A-Z]{5}$/u.test(sqlState)
-            ? { sqlState }
-            : {}),
+          ...(/^[0-9A-Z]{5}$/u.test(sqlState) ? { sqlState } : {}),
         },
       })}\n`,
     );

@@ -1,53 +1,29 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import {
-  cp,
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readdir,
-  rm,
-} from "node:fs/promises";
+import { cp, copyFile, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 
-import {
-  CURRENT_EXPECTED_LATEST_MIGRATION,
-  CURRENT_EXPECTED_MIGRATION_COUNT,
-  STAFF_TASK_ALLOWED_ADDITIVE_TAIL,
-  STAFF_TASK_CURRENT_RELEASE_STATE,
-  STAFF_TASK_FROZEN_PREFIX_COUNT,
-  STAFF_TASK_FROZEN_PREFIX_LATEST,
-} from "./staff-task-integrity-migration-state.mjs";
-
-const SCRIPT_NAME =
-  "shared-beta-admission-provenance-upgrade-smoke";
+const SCRIPT_NAME = "shared-beta-admission-provenance-upgrade-smoke";
 const REQUIRED_CONFIRMATION =
   "run-shared-beta-admission-provenance-upgrade-smoke";
-const INNER_SMOKE_CONFIRMATION =
-  "run-shared-beta-admission-provenance-smoke";
-const TARGET_MIGRATION =
-  "20260730020000_shared_beta_admission_provenance";
-const PREVIOUS_MIGRATION =
-  "20260730010000_identity_owner_invite_hold_outbox";
+const INNER_SMOKE_CONFIRMATION = "run-shared-beta-admission-provenance-smoke";
+const TARGET_MIGRATION = "20260730020000_shared_beta_admission_provenance";
+const TARGET_MIGRATION_COUNT = 172;
+const PREVIOUS_MIGRATION = "20260730010000_identity_owner_invite_hold_outbox";
+const PREVIOUS_MIGRATION_COUNT = 171;
 const MIGRATION_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
-const SAFE_SOURCE_DATABASE_PATTERN =
-  /^[a-z0-9][a-z0-9_.-]{0,58}_ci$/iu;
+const SAFE_SOURCE_DATABASE_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,58}_ci$/iu;
 const DATABASE_PREFIX = "lp_admission172_";
-const UPGRADE_DATABASE_PATTERN =
-  /^lp_admission172_upgrade_ci_[a-f0-9]{16}$/u;
-const CLEAN_DATABASE_PATTERN =
-  /^lp_admission172_clean_ci_[a-f0-9]{16}$/u;
-const HOSTILE_DATABASE_PATTERN =
-  /^lp_admission172_hostile_ci_[a-f0-9]{16}$/u;
-const HOSTILE_ROLE_PATTERN =
-  /^lp_admission172_hostile_acl_ci_[a-f0-9]{16}$/u;
-const TEMP_ROOT_PREFIX =
-  "leetplus-admission-provenance-upgrade-";
+const UPGRADE_DATABASE_PATTERN = /^lp_admission172_upgrade_ci_[a-f0-9]{16}$/u;
+const CLEAN_DATABASE_PATTERN = /^lp_admission172_clean_ci_[a-f0-9]{16}$/u;
+const HOSTILE_DATABASE_PATTERN = /^lp_admission172_hostile_ci_[a-f0-9]{16}$/u;
+const HOSTILE_ROLE_PATTERN = /^lp_admission172_hostile_acl_ci_[a-f0-9]{16}$/u;
+const TEMP_ROOT_PREFIX = "leetplus-admission-provenance-upgrade-";
 const COLUMN_ACL_INJECTOR_FUNCTION =
   "shared_beta_admission_column_acl_injector_ci_v1";
 const COLUMN_ACL_INJECTOR_TRIGGER =
@@ -151,9 +127,7 @@ function parseSafeSourceDatabaseUrl(rawDatabaseUrl) {
   ) {
     contractError("POSTGRESQL_URL_REQUIRED");
   }
-  const hostname = sourceUrl.hostname
-    .toLowerCase()
-    .replace(/^\[|\]$/gu, "");
+  const hostname = sourceUrl.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
   if (!new Set(["127.0.0.1", "localhost", "::1"]).has(hostname)) {
     contractError("LOOPBACK_POSTGRESQL_REQUIRED");
   }
@@ -193,14 +167,10 @@ function databaseUrlFor(sourceUrl, databaseName) {
 function generatedNames() {
   const suffix = randomBytes(8).toString("hex");
   const names = {
-    cleanDatabaseName:
-      `${DATABASE_PREFIX}clean_ci_${suffix}`,
-    hostileDatabaseName:
-      `${DATABASE_PREFIX}hostile_ci_${suffix}`,
-    hostileRoleName:
-      `${DATABASE_PREFIX}hostile_acl_ci_${suffix}`,
-    upgradeDatabaseName:
-      `${DATABASE_PREFIX}upgrade_ci_${suffix}`,
+    cleanDatabaseName: `${DATABASE_PREFIX}clean_ci_${suffix}`,
+    hostileDatabaseName: `${DATABASE_PREFIX}hostile_ci_${suffix}`,
+    hostileRoleName: `${DATABASE_PREFIX}hostile_acl_ci_${suffix}`,
+    upgradeDatabaseName: `${DATABASE_PREFIX}upgrade_ci_${suffix}`,
   };
   assert.match(names.cleanDatabaseName, CLEAN_DATABASE_PATTERN);
   assert.match(names.hostileDatabaseName, HOSTILE_DATABASE_PATTERN);
@@ -255,10 +225,8 @@ function prismaClient(databaseUrl) {
 }
 
 async function readMigrationPlan() {
-  const sourcePrismaDir = fileURLToPath(
-    new URL("../prisma/", import.meta.url),
-  );
-  const migrationDirectories = (
+  const sourcePrismaDir = fileURLToPath(new URL("../prisma/", import.meta.url));
+  const allMigrationDirectories = (
     await readdir(join(sourcePrismaDir, "migrations"), {
       withFileTypes: true,
     })
@@ -267,38 +235,26 @@ async function readMigrationPlan() {
     .map((entry) => entry.name)
     .sort();
   assert(
-    migrationDirectories.every((name) =>
-      MIGRATION_PATTERN.test(name),
-    ),
+    allMigrationDirectories.every((name) => MIGRATION_PATTERN.test(name)),
     "Migration directory names must match the release contract.",
   );
+  const targetIndex = allMigrationDirectories.indexOf(TARGET_MIGRATION);
   assert.equal(
-    migrationDirectories.length,
-    CURRENT_EXPECTED_MIGRATION_COUNT,
+    targetIndex + 1,
+    TARGET_MIGRATION_COUNT,
+    "The frozen CURRENT_172 target must remain migration 172.",
   );
-  assert.equal(
-    migrationDirectories[STAFF_TASK_FROZEN_PREFIX_COUNT - 1],
-    STAFF_TASK_FROZEN_PREFIX_LATEST,
+  const migrationDirectories = allMigrationDirectories.slice(
+    0,
+    targetIndex + 1,
   );
-  assert.deepEqual(
-    migrationDirectories.slice(STAFF_TASK_FROZEN_PREFIX_COUNT),
-    [...STAFF_TASK_ALLOWED_ADDITIVE_TAIL],
-  );
-  assert.equal(
-    migrationDirectories.at(-1),
-    CURRENT_EXPECTED_LATEST_MIGRATION,
-  );
-  assert.equal(CURRENT_EXPECTED_LATEST_MIGRATION, TARGET_MIGRATION);
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_172");
-  const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
-  assert.equal(targetIndex, 171);
-  assert.equal(
-    migrationDirectories[targetIndex - 1],
-    PREVIOUS_MIGRATION,
-  );
+  assert.equal(migrationDirectories.length, TARGET_MIGRATION_COUNT);
+  assert.equal(migrationDirectories.at(-1), TARGET_MIGRATION);
+  assert.equal(targetIndex, TARGET_MIGRATION_COUNT - 1);
+  assert.equal(migrationDirectories[targetIndex - 1], PREVIOUS_MIGRATION);
   return {
     allMigrations: migrationDirectories,
-    prefixMigrations: migrationDirectories.slice(0, targetIndex),
+    prefixMigrations: migrationDirectories.slice(0, PREVIOUS_MIGRATION_COUNT),
     sourcePrismaDir,
     targetMigration: TARGET_MIGRATION,
   };
@@ -314,20 +270,12 @@ async function createMigrationArtifact(tempRoot, migrationPlan) {
     join(targetPrismaDir, "schema.prisma"),
   );
   await copyFile(
-    join(
-      migrationPlan.sourcePrismaDir,
-      "migrations",
-      "migration_lock.toml",
-    ),
+    join(migrationPlan.sourcePrismaDir, "migrations", "migration_lock.toml"),
     join(targetMigrationsDir, "migration_lock.toml"),
   );
   for (const migrationName of migrationPlan.prefixMigrations) {
     await cp(
-      join(
-        migrationPlan.sourcePrismaDir,
-        "migrations",
-        migrationName,
-      ),
+      join(migrationPlan.sourcePrismaDir, "migrations", migrationName),
       join(targetMigrationsDir, migrationName),
       { recursive: true },
     );
@@ -345,10 +293,7 @@ async function addTargetMigration(artifact, migrationPlan) {
       "migrations",
       migrationPlan.targetMigration,
     ),
-    join(
-      artifact.targetMigrationsDir,
-      migrationPlan.targetMigration,
-    ),
+    join(artifact.targetMigrationsDir, migrationPlan.targetMigration),
     { recursive: true },
   );
 }
@@ -363,13 +308,7 @@ function prismaCliInvocation(
   const prismaCliPath = require.resolve("prisma/build/index.js");
   return spawnSync(
     process.execPath,
-    [
-      prismaCliPath,
-      "migrate",
-      ...cliArguments,
-      "--schema",
-      schemaPath,
-    ],
+    [prismaCliPath, "migrate", ...cliArguments, "--schema", schemaPath],
     {
       cwd: dirname(schemaPath),
       encoding: "utf8",
@@ -378,8 +317,7 @@ function prismaCliInvocation(
         DATABASE_URL: databaseUrl,
         NODE_ENV: "test",
         NO_COLOR: "1",
-        PGOPTIONS:
-          "-c lock_timeout=5000 -c statement_timeout=120000",
+        PGOPTIONS: "-c lock_timeout=5000 -c statement_timeout=120000",
         PRISMA_HIDE_UPDATE_MESSAGE: "true",
       },
       maxBuffer: 8 * 1024 * 1_024,
@@ -391,11 +329,7 @@ function prismaCliInvocation(
 }
 
 function runMigrateDeploy(schemaPath, databaseUrl) {
-  const result = prismaCliInvocation(
-    schemaPath,
-    databaseUrl,
-    ["deploy"],
-  );
+  const result = prismaCliInvocation(schemaPath, databaseUrl, ["deploy"]);
   if (result.error || result.status !== 0) {
     contractError(
       "MIGRATION_DEPLOY_FAILED",
@@ -405,11 +339,7 @@ function runMigrateDeploy(schemaPath, databaseUrl) {
 }
 
 function expectMigrateDeployFailure(schemaPath, databaseUrl) {
-  const result = prismaCliInvocation(
-    schemaPath,
-    databaseUrl,
-    ["deploy"],
-  );
+  const result = prismaCliInvocation(schemaPath, databaseUrl, ["deploy"]);
   assert.equal(
     result.error,
     undefined,
@@ -422,17 +352,13 @@ function expectMigrateDeployFailure(schemaPath, databaseUrl) {
   );
 }
 
-function runMigrateResolveRolledBack(
-  schemaPath,
-  databaseUrl,
-  migrationName,
-) {
+function runMigrateResolveRolledBack(schemaPath, databaseUrl, migrationName) {
   assert.equal(migrationName, TARGET_MIGRATION);
-  const result = prismaCliInvocation(
-    schemaPath,
-    databaseUrl,
-    ["resolve", "--rolled-back", migrationName],
-  );
+  const result = prismaCliInvocation(schemaPath, databaseUrl, [
+    "resolve",
+    "--rolled-back",
+    migrationName,
+  ]);
   if (result.error || result.status !== 0) {
     contractError(
       "MIGRATION_RESOLVE_FAILED",
@@ -447,10 +373,7 @@ function runFunctionalSmoke(databaseUrl, phase) {
   functionalDatabaseUrl.search = "";
   functionalDatabaseUrl.searchParams.set("schema", "public");
   const smokePath = fileURLToPath(
-    new URL(
-      "./shared-beta-admission-provenance-smoke.mjs",
-      import.meta.url,
-    ),
+    new URL("./shared-beta-admission-provenance-smoke.mjs", import.meta.url),
   );
   const result = spawnSync(process.execPath, [smokePath], {
     cwd: dirname(smokePath),
@@ -459,8 +382,7 @@ function runFunctionalSmoke(databaseUrl, phase) {
       ...process.env,
       DATABASE_URL: functionalDatabaseUrl.toString(),
       NODE_ENV: "test",
-      SHARED_BETA_ADMISSION_PROVENANCE_SMOKE_CONFIRM:
-        INNER_SMOKE_CONFIRMATION,
+      SHARED_BETA_ADMISSION_PROVENANCE_SMOKE_CONFIRM: INNER_SMOKE_CONFIRMATION,
     },
     maxBuffer: 4 * 1024 * 1_024,
     shell: false,
@@ -469,8 +391,7 @@ function runFunctionalSmoke(databaseUrl, phase) {
   });
   if (result.error || result.status !== 0) {
     const sqlState =
-      result.stderr.match(/Code: `([0-9A-Z]{5})`/u)?.[1] ??
-      "unknown";
+      result.stderr.match(/Code: `([0-9A-Z]{5})`/u)?.[1] ?? "unknown";
     const sourceLine =
       result.stderr.match(
         /shared-beta-admission-provenance-smoke\.mjs:(\d+):/u,
@@ -518,36 +439,24 @@ function runFunctionalSmoke(databaseUrl, phase) {
     consumedDecisions: evidence.consumedDecisions,
     decisionRevocationCAS: evidence.decisionRevocationCAS,
     exactAssertion: evidence.exactAssertion,
-    executionRevisionDriftRejected:
-      evidence.executionRevisionDriftRejected,
+    executionRevisionDriftRejected: evidence.executionRevisionDriftRejected,
     gateRevocationCAS: evidence.gateRevocationCAS,
     idempotentReplay: evidence.idempotentReplay,
-    preIssueReservationAsserted:
-      evidence.preIssueReservationAsserted,
+    preIssueReservationAsserted: evidence.preIssueReservationAsserted,
     issuedHoldAsserted: evidence.issuedHoldAsserted,
-    missingIssueAggregateRejected:
-      evidence.missingIssueAggregateRejected,
-    tamperedIssueAggregateRejected:
-      evidence.tamperedIssueAggregateRejected,
+    missingIssueAggregateRejected: evidence.missingIssueAggregateRejected,
+    tamperedIssueAggregateRejected: evidence.tamperedIssueAggregateRejected,
     issueBeforeRecheckOrderingVerified:
       evidence.issueBeforeRecheckOrderingVerified,
-    lateGateInsertRejected:
-      evidence.lateGateInsertRejected,
-    createIssueRaceSerialized:
-      evidence.createIssueRaceSerialized,
-    approverDemotionRaceSerialized:
-      evidence.approverDemotionRaceSerialized,
-    decisionRevokeTimestampRebased:
-      evidence.decisionRevokeTimestampRebased,
-    gateRevokeTimestampRebased:
-      evidence.gateRevokeTimestampRebased,
-    claimTransitionRaceSerialized:
-      evidence.claimTransitionRaceSerialized,
+    lateGateInsertRejected: evidence.lateGateInsertRejected,
+    createIssueRaceSerialized: evidence.createIssueRaceSerialized,
+    approverDemotionRaceSerialized: evidence.approverDemotionRaceSerialized,
+    decisionRevokeTimestampRebased: evidence.decisionRevokeTimestampRebased,
+    gateRevokeTimestampRebased: evidence.gateRevokeTimestampRebased,
+    claimTransitionRaceSerialized: evidence.claimTransitionRaceSerialized,
     nonHoldOutbox: evidence.nonHoldOutbox,
-    profileBooleanDriftRejected:
-      evidence.profileBooleanDriftRejected,
-    profileWindowDriftRejected:
-      evidence.profileWindowDriftRejected,
+    profileBooleanDriftRejected: evidence.profileBooleanDriftRejected,
+    profileWindowDriftRejected: evidence.profileWindowDriftRejected,
     requestCollisionRejected: evidence.requestCollisionRejected,
     signedDecisions: evidence.signedDecisions,
     signedGates: evidence.signedGates,
@@ -609,18 +518,14 @@ async function releaseClusterLock(admin) {
 async function createDatabase(admin, databaseName) {
   assertSafeGeneratedDatabaseName(databaseName);
   await admin.$executeRawUnsafe(
-    `CREATE DATABASE ${quoteIdentifier(
-      databaseName,
-    )} TEMPLATE template0`,
+    `CREATE DATABASE ${quoteIdentifier(databaseName)} TEMPLATE template0`,
   );
 }
 
 async function dropDatabase(admin, databaseName) {
   assertSafeGeneratedDatabaseName(databaseName);
   await admin.$executeRawUnsafe(
-    `DROP DATABASE IF EXISTS ${quoteIdentifier(
-      databaseName,
-    )} WITH (FORCE)`,
+    `DROP DATABASE IF EXISTS ${quoteIdentifier(databaseName)} WITH (FORCE)`,
   );
 }
 
@@ -893,11 +798,7 @@ async function assertCurrent171FixturePreserved(client, fixture) {
   });
 }
 
-async function setUnsafeDefaultPrivileges(
-  client,
-  roleName,
-  enabled,
-) {
+async function setUnsafeDefaultPrivileges(client, roleName, enabled) {
   assertSafeGeneratedRoleName(roleName);
   const role = quoteIdentifier(roleName);
   const action = enabled ? "GRANT" : "REVOKE";
@@ -916,11 +817,7 @@ async function setUnsafeDefaultPrivileges(
   );
 }
 
-async function assertUnsafeDefaultPrivileges(
-  client,
-  roleName,
-  expected,
-) {
+async function assertUnsafeDefaultPrivileges(client, roleName, expected) {
   assertSafeGeneratedRoleName(roleName);
   const rows = await client.$queryRawUnsafe(
     `SELECT
@@ -945,9 +842,7 @@ async function assertUnsafeDefaultPrivileges(
     roleName,
   );
   assert.deepEqual(
-    rows.map(
-      (row) => `${row.object_type}:${row.privilege_type}`,
-    ),
+    rows.map((row) => `${row.object_type}:${row.privilege_type}`),
     expected ? ["T:USAGE", "f:EXECUTE", "r:SELECT"] : [],
   );
 }
@@ -956,9 +851,7 @@ async function installUnsafeColumnAclInjector(client, roleName) {
   assertSafeGeneratedRoleName(roleName);
   const role = quoteIdentifier(roleName);
   await client.$executeRawUnsafe(
-    `CREATE FUNCTION public.${quoteIdentifier(
-      COLUMN_ACL_INJECTOR_FUNCTION,
-    )}()
+    `CREATE FUNCTION public.${quoteIdentifier(COLUMN_ACL_INJECTOR_FUNCTION)}()
      RETURNS event_trigger
      LANGUAGE plpgsql
      SECURITY DEFINER
@@ -984,9 +877,7 @@ async function installUnsafeColumnAclInjector(client, roleName) {
      $column_acl_injector$`,
   );
   await client.$executeRawUnsafe(
-    `CREATE EVENT TRIGGER ${quoteIdentifier(
-      COLUMN_ACL_INJECTOR_TRIGGER,
-    )}
+    `CREATE EVENT TRIGGER ${quoteIdentifier(COLUMN_ACL_INJECTOR_TRIGGER)}
      ON ddl_command_end
      WHEN TAG IN ('CREATE TABLE')
      EXECUTE FUNCTION public.${quoteIdentifier(
@@ -1034,10 +925,7 @@ async function dropUnsafeColumnAclInjector(client) {
   );
 }
 
-async function assertTargetMigrationRolledBack(
-  client,
-  migrationPlan,
-) {
+async function assertTargetMigrationRolledBack(client, migrationPlan) {
   assert.deepEqual(
     await readMigrationNames(client),
     migrationPlan.prefixMigrations,
@@ -1397,8 +1285,7 @@ function assertRealEnvironment(environment) {
     contractError("PRODUCTION_ENVIRONMENT_REFUSED");
   }
   if (
-    environment
-      .SHARED_BETA_ADMISSION_PROVENANCE_UPGRADE_SMOKE_CONFIRM !==
+    environment.SHARED_BETA_ADMISSION_PROVENANCE_UPGRADE_SMOKE_CONFIRM !==
     REQUIRED_CONFIRMATION
   ) {
     contractError("UPGRADE_SMOKE_CONFIRMATION_REQUIRED");
@@ -1439,22 +1326,13 @@ async function runOfflineSelfTest() {
     assertSafeGeneratedDatabaseName(databaseName);
   }
   assertSafeGeneratedRoleName(names.hostileRoleName);
-  assert.throws(() =>
-    assertSafeGeneratedDatabaseName("leetplus_ci"),
-  );
-  assert.throws(() =>
-    assertSafeGeneratedRoleName("postgres"),
-  );
-  assertSafeTempRoot(
-    join(tmpdir(), `${TEMP_ROOT_PREFIX}0123456789abcdef`),
-  );
+  assert.throws(() => assertSafeGeneratedDatabaseName("leetplus_ci"));
+  assert.throws(() => assertSafeGeneratedRoleName("postgres"));
+  assertSafeTempRoot(join(tmpdir(), `${TEMP_ROOT_PREFIX}0123456789abcdef`));
   assert.throws(() => assertSafeTempRoot(tmpdir()));
   const migrationPlan = await readMigrationPlan();
   assert.equal(migrationPlan.prefixMigrations.length, 171);
-  assert.equal(
-    migrationPlan.prefixMigrations.at(-1),
-    PREVIOUS_MIGRATION,
-  );
+  assert.equal(migrationPlan.prefixMigrations.at(-1), PREVIOUS_MIGRATION);
   assert.equal(migrationPlan.allMigrations.length, 172);
   assert.equal(migrationPlan.targetMigration, TARGET_MIGRATION);
   process.stdout.write(
@@ -1474,24 +1352,16 @@ async function runOfflineSelfTest() {
 }
 
 async function runRealSmoke(environment) {
-  const {
-    databaseName: sourceDatabaseName,
-    sourceUrl,
-  } = assertRealEnvironment(environment);
+  const { databaseName: sourceDatabaseName, sourceUrl } =
+    assertRealEnvironment(environment);
   const migrationPlan = await readMigrationPlan();
   const names = generatedNames();
-  const sourceDatabaseUrl = databaseUrlFor(
-    sourceUrl,
-    sourceDatabaseName,
-  );
+  const sourceDatabaseUrl = databaseUrlFor(sourceUrl, sourceDatabaseName);
   const upgradeDatabaseUrl = databaseUrlFor(
     sourceUrl,
     names.upgradeDatabaseName,
   );
-  const cleanDatabaseUrl = databaseUrlFor(
-    sourceUrl,
-    names.cleanDatabaseName,
-  );
+  const cleanDatabaseUrl = databaseUrlFor(sourceUrl, names.cleanDatabaseName);
   const hostileDatabaseUrl = databaseUrlFor(
     sourceUrl,
     names.hostileDatabaseName,
@@ -1513,10 +1383,7 @@ async function runRealSmoke(environment) {
     clusterLockHeld = true;
     tempRoot = await mkdtemp(join(tmpdir(), TEMP_ROOT_PREFIX));
     assertSafeTempRoot(tempRoot);
-    const artifact = await createMigrationArtifact(
-      tempRoot,
-      migrationPlan,
-    );
+    const artifact = await createMigrationArtifact(tempRoot, migrationPlan);
 
     for (const databaseName of [
       names.upgradeDatabaseName,
@@ -1535,10 +1402,7 @@ async function runRealSmoke(environment) {
     let upgrade = prismaClient(upgradeDatabaseUrl);
     let upgradeFixture;
     try {
-      await assertAppliedMigrations(
-        upgrade,
-        migrationPlan.prefixMigrations,
-      );
+      await assertAppliedMigrations(upgrade, migrationPlan.prefixMigrations);
       await assertPre172Catalog(upgrade);
       upgradeFixture = await createCurrent171Fixture(upgrade);
     } finally {
@@ -1566,14 +1430,8 @@ async function runRealSmoke(environment) {
     upgrade = prismaClient(upgradeDatabaseUrl);
     let upgradeCatalog;
     try {
-      await assertAppliedMigrations(
-        upgrade,
-        migrationPlan.allMigrations,
-      );
-      await assertCurrent171FixturePreserved(
-        upgrade,
-        upgradeFixture,
-      );
+      await assertAppliedMigrations(upgrade, migrationPlan.allMigrations);
+      await assertCurrent171FixturePreserved(upgrade, upgradeFixture);
       upgradeCatalog = await assertSealedCatalog(upgrade);
       assert.deepEqual(upgradeCatalog.sealedRows, {
         attestations: 0,
@@ -1584,14 +1442,8 @@ async function runRealSmoke(environment) {
       await upgrade.$disconnect();
     }
 
-    const upgradeFunctional = runFunctionalSmoke(
-      upgradeDatabaseUrl,
-      "upgrade",
-    );
-    const cleanFunctional = runFunctionalSmoke(
-      cleanDatabaseUrl,
-      "clean",
-    );
+    const upgradeFunctional = runFunctionalSmoke(upgradeDatabaseUrl, "upgrade");
+    const cleanFunctional = runFunctionalSmoke(cleanDatabaseUrl, "clean");
 
     const hostileBefore = prismaClient(hostileDatabaseUrl);
     try {
@@ -1614,14 +1466,9 @@ async function runRealSmoke(environment) {
       await hostileBefore.$disconnect();
     }
 
-    expectMigrateDeployFailure(
-      artifact.schemaPath,
-      hostileDatabaseUrl,
-    );
+    expectMigrateDeployFailure(artifact.schemaPath, hostileDatabaseUrl);
 
-    const hostileAfterDefaultFailure = prismaClient(
-      hostileDatabaseUrl,
-    );
+    const hostileAfterDefaultFailure = prismaClient(hostileDatabaseUrl);
     try {
       await assertTargetMigrationRolledBack(
         hostileAfterDefaultFailure,
@@ -1651,9 +1498,7 @@ async function runRealSmoke(environment) {
       TARGET_MIGRATION,
     );
 
-    const hostileBeforeColumnFailure = prismaClient(
-      hostileDatabaseUrl,
-    );
+    const hostileBeforeColumnFailure = prismaClient(hostileDatabaseUrl);
     try {
       await assertAppliedMigrations(
         hostileBeforeColumnFailure,
@@ -1663,38 +1508,22 @@ async function runRealSmoke(environment) {
         hostileBeforeColumnFailure,
         names.hostileRoleName,
       );
-      await assertUnsafeColumnAclInjector(
-        hostileBeforeColumnFailure,
-        true,
-      );
+      await assertUnsafeColumnAclInjector(hostileBeforeColumnFailure, true);
     } finally {
       await hostileBeforeColumnFailure.$disconnect();
     }
 
-    expectMigrateDeployFailure(
-      artifact.schemaPath,
-      hostileDatabaseUrl,
-    );
+    expectMigrateDeployFailure(artifact.schemaPath, hostileDatabaseUrl);
 
-    const hostileAfterColumnFailure = prismaClient(
-      hostileDatabaseUrl,
-    );
+    const hostileAfterColumnFailure = prismaClient(hostileDatabaseUrl);
     try {
       await assertTargetMigrationRolledBack(
         hostileAfterColumnFailure,
         migrationPlan,
       );
-      await assertUnsafeColumnAclInjector(
-        hostileAfterColumnFailure,
-        true,
-      );
-      await dropUnsafeColumnAclInjector(
-        hostileAfterColumnFailure,
-      );
-      await assertUnsafeColumnAclInjector(
-        hostileAfterColumnFailure,
-        false,
-      );
+      await assertUnsafeColumnAclInjector(hostileAfterColumnFailure, true);
+      await dropUnsafeColumnAclInjector(hostileAfterColumnFailure);
+      await assertUnsafeColumnAclInjector(hostileAfterColumnFailure, false);
     } finally {
       await hostileAfterColumnFailure.$disconnect();
     }
@@ -1713,9 +1542,7 @@ async function runRealSmoke(environment) {
         hostileAfterRetry,
         migrationPlan.allMigrations,
       );
-      hostileCatalog = await assertSealedCatalog(
-        hostileAfterRetry,
-      );
+      hostileCatalog = await assertSealedCatalog(hostileAfterRetry);
       hostileAuthority = await assertHostileRoleHasNoAuthority(
         hostileAfterRetry,
         names.hostileRoleName,
@@ -1760,8 +1587,7 @@ async function runRealSmoke(environment) {
         columnInjectorRollback: true,
         failedMigrationRolledBack: true,
         normalRetrySucceeded: true,
-        ownerOnlyAcl:
-          hostileCatalog.inventory.unsafe_acl_count === 0,
+        ownerOnlyAcl: hostileCatalog.inventory.unsafe_acl_count === 0,
         ...hostileAuthority,
       },
       sourceDatabaseMigrationsApplied: 0,
@@ -1858,9 +1684,7 @@ main().catch((error) => {
       script: SCRIPT_NAME,
       status: "ERROR",
       error: {
-        code:
-          error?.code ??
-          "SHARED_BETA_ADMISSION_UPGRADE_SMOKE_FAILED",
+        code: error?.code ?? "SHARED_BETA_ADMISSION_UPGRADE_SMOKE_FAILED",
         message:
           typeof error?.message === "string"
             ? error.message

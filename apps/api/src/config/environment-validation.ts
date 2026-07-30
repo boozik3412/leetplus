@@ -338,8 +338,8 @@ export function validateEnvironment(config: EnvironmentValues) {
     }
   }
 
-  if (!/^[0-9a-f]{40}$/i.test(releaseSha)) {
-    errors.push('RELEASE_SHA must be the full 40-character Git SHA');
+  if (!/^[0-9a-f]{40}$/.test(releaseSha)) {
+    errors.push('RELEASE_SHA must be the full lowercase 40-character Git SHA');
   }
 
   if (

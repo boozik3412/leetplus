@@ -13,6 +13,10 @@ import {
   SHARED_BETA_ADMISSION_FUNCTIONS,
   SHARED_BETA_ADMISSION_RELATIONS,
 } from "./shared-beta-admission-provenance-catalog.mjs";
+import {
+  CURRENT_EXPECTED_LATEST_MIGRATION,
+  CURRENT_EXPECTED_MIGRATION_COUNT,
+} from "./staff-task-integrity-migration-state.mjs";
 
 const SCRIPT_NAME = "identity-legacy-backfill-inventory-smoke";
 const SMOKE_CONFIRMATION = "run-identity-legacy-inventory-smoke";
@@ -26,9 +30,6 @@ const SOURCE_DATABASE_PATTERN = /^[a-z][a-z0-9_]{0,59}_ci$/u;
 const SAFE_IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
 const SQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const EXPECTED_MIGRATION_COUNT = 172;
-const EXPECTED_LATEST_MIGRATION =
-  "20260730020000_shared_beta_admission_provenance";
 const ADMIN_CONNECT_TIMEOUT_SECONDS = 10;
 const ADMIN_LOCK_TIMEOUT_MS = 5_000;
 const ADMIN_STATEMENT_TIMEOUT_MS = 120_000;
@@ -79,9 +80,7 @@ const IDENTITY_FUNCTION_SIGNATURES = Object.freeze([
   'public."identity_mail_outbox_hold_immutable_v1"()',
   'public."identity_owner_invite_issue_command_immutable_v1"()',
   'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
-  ...SHARED_BETA_ADMISSION_FUNCTIONS.map(
-    (entry) => entry.catalogSignature,
-  ),
+  ...SHARED_BETA_ADMISSION_FUNCTIONS.map((entry) => entry.catalogSignature),
 ]);
 
 const HELP = `
@@ -156,9 +155,7 @@ function parseSourceDatabaseUrl(rawValue) {
   }
   if (
     !["postgres:", "postgresql:"].includes(parsed.protocol) ||
-    !LOOPBACK_HOSTS.has(
-      parsed.hostname.toLowerCase().replace(/^\[|\]$/gu, ""),
-    )
+    !LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase().replace(/^\[|\]$/gu, ""))
   ) {
     contractError("LOOPBACK_POSTGRES_REQUIRED");
   }
@@ -228,12 +225,7 @@ function cloneDescriptor(suffix, scenario) {
   };
 }
 
-function inventoryEnvironment(
-  environment,
-  databaseUrl,
-  databaseName,
-  hmacKey,
-) {
+function inventoryEnvironment(environment, databaseUrl, databaseName, hmacKey) {
   return {
     DATABASE_URL: databaseUrl,
     NODE_ENV: "test",
@@ -496,11 +488,7 @@ async function createClaim(
   collectSensitive(state, emailCanonical, tenantId, subjectId);
 }
 
-async function createLegacyClaimBypassingRevisionGuard(
-  prisma,
-  state,
-  claim,
-) {
+async function createLegacyClaimBypassingRevisionGuard(prisma, state, claim) {
   const trigger = '"IdentityEmailClaim_revision_guard_trigger"';
   await prisma.$executeRawUnsafe(
     `ALTER TABLE public."IdentityEmailClaim" DISABLE TRIGGER ${trigger}`,
@@ -837,8 +825,7 @@ async function seedAdversarialScenario(prisma, state) {
     subjectId: wrongRevision.id,
   });
 
-  const acceptedLineageEmail =
-    `accepted-lineage.${state.suffix}@example.test`;
+  const acceptedLineageEmail = `accepted-lineage.${state.suffix}@example.test`;
   const acceptedLineageUser = await createUser(prisma, state, {
     tenantId: tenantA,
     email: acceptedLineageEmail,
@@ -1145,9 +1132,7 @@ async function assertReaderRole(admin, reader, descriptor) {
     reader.$queryRawUnsafe('SELECT * FROM public."User" LIMIT 0'),
   );
   await expectPermissionDenied("passwordHash SELECT", () =>
-    reader.$queryRawUnsafe(
-      'SELECT "passwordHash" FROM public."User" LIMIT 0',
-    ),
+    reader.$queryRawUnsafe('SELECT "passwordHash" FROM public."User" LIMIT 0'),
   );
   await expectPermissionDenied("tokenHash SELECT", () =>
     reader.$queryRawUnsafe(
@@ -1163,9 +1148,7 @@ async function assertReaderRole(admin, reader, descriptor) {
     ),
   );
   await expectPermissionDenied("mail outbox SELECT", () =>
-    reader.$queryRawUnsafe(
-      'SELECT * FROM public."IdentityMailOutbox" LIMIT 0',
-    ),
+    reader.$queryRawUnsafe('SELECT * FROM public."IdentityMailOutbox" LIMIT 0'),
   );
   await expectPermissionDenied("mail ciphertext SELECT", () =>
     reader.$queryRawUnsafe(
@@ -1173,23 +1156,19 @@ async function assertReaderRole(admin, reader, descriptor) {
     ),
   );
   for (const relationName of SHARED_BETA_ADMISSION_RELATIONS) {
-    await expectPermissionDenied(
-      `${relationName} full SELECT`,
-      () =>
-        reader.$queryRawUnsafe(
-          `SELECT * FROM public.${quoteIdentifier(relationName)} LIMIT 0`,
-        ),
+    await expectPermissionDenied(`${relationName} full SELECT`, () =>
+      reader.$queryRawUnsafe(
+        `SELECT * FROM public.${quoteIdentifier(relationName)} LIMIT 0`,
+      ),
     );
   }
   for (const [relationName, columnName] of SHARED_BETA_ADMISSION_COLUMNS) {
-    await expectPermissionDenied(
-      `${relationName}.${columnName} SELECT`,
-      () =>
-        reader.$queryRawUnsafe(
-          `SELECT ${quoteIdentifier(columnName)}
+    await expectPermissionDenied(`${relationName}.${columnName} SELECT`, () =>
+      reader.$queryRawUnsafe(
+        `SELECT ${quoteIdentifier(columnName)}
           FROM public.${quoteIdentifier(relationName)}
           LIMIT 0`,
-        ),
+      ),
     );
   }
   for (const tableName of Object.keys(READER_COLUMN_GRANTS)) {
@@ -1242,7 +1221,9 @@ async function grantReaderRole(admin, descriptor) {
   await admin.$executeRawUnsafe(
     `REVOKE ALL PRIVILEGES ON DATABASE ${database} FROM PUBLIC`,
   );
-  await admin.$executeRawUnsafe(`GRANT CONNECT ON DATABASE ${database} TO ${role}`);
+  await admin.$executeRawUnsafe(
+    `GRANT CONNECT ON DATABASE ${database} TO ${role}`,
+  );
   await admin.$executeRawUnsafe(
     "REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC",
   );
@@ -1324,11 +1305,9 @@ async function runScenario(
       hmacKey,
     );
     const config = inventory.parseRuntimeContract(scopedEnvironment);
-    const report = await inventory.inspectDatabase(
-      scopedEnvironment,
-      config,
-      { expectedMigrationArtifact },
-    );
+    const report = await inventory.inspectDatabase(scopedEnvironment, config, {
+      expectedMigrationArtifact,
+    });
     assertSensitiveValuesAbsent(report, state.sensitive);
     return { config, expectations, report };
   } finally {
@@ -1396,29 +1375,21 @@ async function assertAuthorityAndCatalogDriftRejected(
       return { config, report };
     };
     const readerRole = quoteIdentifier(descriptor.roleName);
-    const admissionRelationName =
-      SHARED_BETA_ADMISSION_DORMANT_RELATIONS[0];
-    const admissionColumn =
-      SHARED_BETA_ADMISSION_COLUMNS.find(
-        ([relationName]) => relationName === admissionRelationName,
-      );
-    const admissionFunction =
-      SHARED_BETA_ADMISSION_FUNCTIONS.find((entry) =>
-        SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS.includes(entry.name),
-      );
-    const profileDigestFunction =
-      SHARED_BETA_ADMISSION_FUNCTIONS.find(
-        (entry) =>
-          entry.volatility === "s" && entry.language === "sql",
-      );
+    const admissionRelationName = SHARED_BETA_ADMISSION_DORMANT_RELATIONS[0];
+    const admissionColumn = SHARED_BETA_ADMISSION_COLUMNS.find(
+      ([relationName]) => relationName === admissionRelationName,
+    );
+    const admissionFunction = SHARED_BETA_ADMISSION_FUNCTIONS.find((entry) =>
+      SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS.includes(entry.name),
+    );
+    const profileDigestFunction = SHARED_BETA_ADMISSION_FUNCTIONS.find(
+      (entry) => entry.volatility === "s" && entry.language === "sql",
+    );
     const admissionTypeName = SHARED_BETA_ADMISSION_DORMANT_TYPES[0];
     assert.equal(typeof admissionRelationName, "string");
     assert.ok(Array.isArray(admissionColumn));
     assert.equal(typeof admissionFunction?.catalogSignature, "string");
-    assert.equal(
-      typeof profileDigestFunction?.catalogSignature,
-      "string",
-    );
+    assert.equal(typeof profileDigestFunction?.catalogSignature, "string");
     assert.equal(typeof admissionTypeName, "string");
     const quotedAdmissionRelation = quoteIdentifier(admissionRelationName);
     const quotedAdmissionColumn = quoteIdentifier(admissionColumn[1]);
@@ -1426,8 +1397,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     const profileDigestFunctionSignature =
       profileDigestFunction.catalogSignature;
     const quotedAdmissionType = quoteIdentifier(admissionTypeName);
-    const latestMigrationName =
-      expectedMigrationArtifact.migrationNames.at(-1);
+    const latestMigrationName = expectedMigrationArtifact.migrationNames.at(-1);
     const expectedLatestChecksum =
       expectedMigrationArtifact.migrationChecksums.at(-1);
     const [migrationRow] = await admin.$queryRawUnsafe(
@@ -1466,21 +1436,14 @@ async function assertAuthorityAndCatalogDriftRejected(
       ),
     );
     const checksumDrift = await inspect();
-    assert.equal(
-      checksumDrift.report?.summary?.decision,
-      "SCHEMA_MISMATCH",
-    );
-    assert.equal(
-      checksumDrift.report?.summary?.inventoryExecuted,
-      false,
-    );
+    assert.equal(checksumDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
+    assert.equal(checksumDrift.report?.summary?.inventoryExecuted, false);
     assert.equal(
       checksumDrift.report?.database?.migrations?.orderedNamesMatched,
       true,
     );
     assert.equal(
-      checksumDrift.report?.database?.migrations
-        ?.orderedChecksumsMatched,
+      checksumDrift.report?.database?.migrations?.orderedChecksumsMatched,
       false,
     );
     assert.equal(
@@ -1491,10 +1454,9 @@ async function assertAuthorityAndCatalogDriftRejected(
       checksumDrift.report?.database?.migrations?.invalidChecksumCount,
       0,
     );
-    assert.deepEqual(
-      checksumDrift.report?.summary?.schemaRejectionCodes,
-      ["MIGRATION_STATE_MISMATCH"],
-    );
+    assert.deepEqual(checksumDrift.report?.summary?.schemaRejectionCodes, [
+      "MIGRATION_STATE_MISMATCH",
+    ]);
     await requireCleanCheckpoint();
 
     const thirdPartyRoleName = `lp_idinv_acl_${createHash("sha256")
@@ -1544,9 +1506,7 @@ async function assertAuthorityAndCatalogDriftRejected(
         ON TYPE public.${quotedAdmissionType}
         FROM ${thirdPartyRole}`,
       );
-      await admin.$executeRawUnsafe(
-        `DROP ROLE IF EXISTS ${thirdPartyRole}`,
-      );
+      await admin.$executeRawUnsafe(`DROP ROLE IF EXISTS ${thirdPartyRole}`);
     });
 
     await admin.$executeRawUnsafe(
@@ -1789,33 +1749,26 @@ async function assertAuthorityAndCatalogDriftRejected(
       authorityDrift.report?.summary?.decision,
       "ADMISSION_MISMATCH",
     );
-    assert.equal(
-      authorityDrift.report?.summary?.inventoryExecuted,
-      false,
-    );
+    assert.equal(authorityDrift.report?.summary?.inventoryExecuted, false);
     assert.ok(
       authorityDrift.report?.database?.privileges
         ?.foreignDataWrapperUsageCount > 0,
     );
     assert.ok(
-      authorityDrift.report?.database?.privileges
-        ?.parameterPrivilegeCount > 0,
+      authorityDrift.report?.database?.privileges?.parameterPrivilegeCount > 0,
     );
     assert.ok(
       authorityDrift.report?.database?.privileges?.systemSchemaCreateCount > 0,
     );
     assert.ok(
-      authorityDrift.report?.database?.privileges
-        ?.systemSchemaPrivilegeCount >= 2,
+      authorityDrift.report?.database?.privileges?.systemSchemaPrivilegeCount >=
+        2,
     );
     assert.ok(
-      authorityDrift.report?.database?.privileges
-        ?.systemObjectPrivilegeCount >= 2,
+      authorityDrift.report?.database?.privileges?.systemObjectPrivilegeCount >=
+        2,
     );
-    assert.equal(
-      authorityDrift.report?.database?.migrations?.checked,
-      false,
-    );
+    assert.equal(authorityDrift.report?.database?.migrations?.checked, false);
     assert.equal(
       inventory.exitCodeForReport(
         authorityDrift.report,
@@ -1936,8 +1889,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     const columnDrift = await inspect();
     assert.equal(columnDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(
-      columnDrift.report?.database?.catalog
-        ?.actualExactIdentityColumnCount,
+      columnDrift.report?.database?.catalog?.actualExactIdentityColumnCount,
       110,
     );
     await requireCleanCheckpoint();
@@ -1954,10 +1906,7 @@ async function assertAuthorityAndCatalogDriftRejected(
       `),
     );
     const constraintDrift = await inspect();
-    assert.equal(
-      constraintDrift.report?.summary?.decision,
-      "SCHEMA_MISMATCH",
-    );
+    assert.equal(constraintDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(
       constraintDrift.report?.database?.catalog?.actualConstraintCount,
       74,
@@ -1975,10 +1924,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     const indexDrift = await inspect();
     assert.equal(indexDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
-    assert.equal(
-      indexDrift.report?.database?.catalog?.actualIndexCount,
-      39,
-    );
+    assert.equal(indexDrift.report?.database?.catalog?.actualIndexCount, 39);
     await requireCleanCheckpoint();
 
     await admin.$executeRawUnsafe(`
@@ -2015,14 +1961,8 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     const enumDrift = await inspect();
     assert.equal(enumDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
-    assert.equal(
-      enumDrift.report?.database?.catalog?.matchedEnumLabelCount,
-      7,
-    );
-    assert.equal(
-      enumDrift.report?.database?.catalog?.totalEnumLabelCount,
-      8,
-    );
+    assert.equal(enumDrift.report?.database?.catalog?.matchedEnumLabelCount, 7);
+    assert.equal(enumDrift.report?.database?.catalog?.totalEnumLabelCount, 8);
     await requireCleanCheckpoint();
 
     await admin.$executeRawUnsafe(
@@ -2036,17 +1976,11 @@ async function assertAuthorityAndCatalogDriftRejected(
     const typeOwnerDrift = await inspect();
     assert.equal(typeOwnerDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(typeOwnerDrift.report?.summary?.inventoryExecuted, false);
+    assert.ok(typeOwnerDrift.report?.database?.privileges?.ownedTypeCount > 0);
     assert.ok(
-      typeOwnerDrift.report?.database?.privileges?.ownedTypeCount > 0,
+      typeOwnerDrift.report?.database?.privileges?.ownershipDependencyCount > 0,
     );
-    assert.ok(
-      typeOwnerDrift.report?.database?.privileges
-        ?.ownershipDependencyCount > 0,
-    );
-    assert.equal(
-      typeOwnerDrift.report?.database?.migrations?.checked,
-      false,
-    );
+    assert.equal(typeOwnerDrift.report?.database?.migrations?.checked, false);
     await requireCleanCheckpoint();
 
     await admin.$executeRawUnsafe(
@@ -2063,10 +1997,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.deepEqual(report?.summary?.schemaRejectionCodes, [
       "CATALOG_STATE_MISMATCH",
     ]);
-    assert.equal(
-      inventory.exitCodeForReport(report, config.hmacKey),
-      3,
-    );
+    assert.equal(inventory.exitCodeForReport(report, config.hmacKey), 3);
     await requireCleanCheckpoint();
 
     const [riTrigger] = await admin.$queryRawUnsafe(`
@@ -2095,10 +2026,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     const riTriggerDrift = await inspect();
     assert.equal(riTriggerDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
-    assert.equal(
-      riTriggerDrift.report?.summary?.inventoryExecuted,
-      false,
-    );
+    assert.equal(riTriggerDrift.report?.summary?.inventoryExecuted, false);
     assert.equal(
       riTriggerDrift.report?.database?.catalog?.matchedRiTriggerCount,
       43,
@@ -2130,7 +2058,10 @@ async function assertAuthorityAndCatalogDriftRejected(
     throw operationError;
   }
   if (cleanupErrors.length > 0) {
-    throw new AggregateError(cleanupErrors, "Authority fixture cleanup failed.");
+    throw new AggregateError(
+      cleanupErrors,
+      "Authority fixture cleanup failed.",
+    );
   }
 }
 
@@ -2202,16 +2133,12 @@ export function runSelfTest() {
     false,
   );
   assert.equal(
-    Object.hasOwn(
-      READER_COLUMN_GRANTS,
-      "IdentityOwnerInviteIssueCommand",
-    ),
+    Object.hasOwn(READER_COLUMN_GRANTS, "IdentityOwnerInviteIssueCommand"),
     false,
   );
   assert.equal(
     SHARED_BETA_ADMISSION_RELATIONS.every(
-      (relationName) =>
-        !Object.hasOwn(READER_COLUMN_GRANTS, relationName),
+      (relationName) => !Object.hasOwn(READER_COLUMN_GRANTS, relationName),
     ),
     true,
   );
@@ -2219,10 +2146,10 @@ export function runSelfTest() {
     [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
     [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
   );
-  assert.equal(EXPECTED_MIGRATION_COUNT, 172);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 174);
   assert.equal(
-    EXPECTED_LATEST_MIGRATION,
-    "20260730020000_shared_beta_admission_provenance",
+    CURRENT_EXPECTED_LATEST_MIGRATION,
+    "20260730040000_shared_beta_runtime_release_activation",
   );
   assert.equal(
     IDENTITY_FUNCTION_SIGNATURES.includes(
@@ -2284,8 +2211,7 @@ export async function runSmoke(environment = process.env) {
     contractError("PRODUCTION_EXECUTION_PROHIBITED");
   }
   if (
-    environment.IDENTITY_LEGACY_INVENTORY_SMOKE_CONFIRM !==
-    SMOKE_CONFIRMATION
+    environment.IDENTITY_LEGACY_INVENTORY_SMOKE_CONFIRM !== SMOKE_CONFIRMATION
   ) {
     contractError("SMOKE_CONFIRMATION_REQUIRED");
   }
@@ -2306,11 +2232,11 @@ export async function runSmoke(environment = process.env) {
     await inventory.loadExpectedMigrationArtifact(environment.RELEASE_SHA);
   assert.equal(
     expectedMigrationArtifact.migrationNames.length,
-    EXPECTED_MIGRATION_COUNT,
+    CURRENT_EXPECTED_MIGRATION_COUNT,
   );
   assert.equal(
     expectedMigrationArtifact.migrationNames.at(-1),
-    EXPECTED_LATEST_MIGRATION,
+    CURRENT_EXPECTED_LATEST_MIGRATION,
   );
   const suffix = randomBytes(16).toString("hex");
   const descriptors = [
@@ -2501,10 +2427,7 @@ export async function runSmoke(environment = process.env) {
       assert.equal(findingOccurrences(blocked.report, code), 0);
     }
     assert.equal(
-      findingOccurrences(
-        blocked.report,
-        "USER_SENSITIVE_IDENTITY_REVIEW",
-      ),
+      findingOccurrences(blocked.report, "USER_SENSITIVE_IDENTITY_REVIEW"),
       2,
     );
     assert.equal(

@@ -76,8 +76,11 @@ function functionBody(sql, functionName, nextMarker) {
 }
 
 function receiptBodies(functionSql) {
-  return [...functionSql.matchAll(/receipt := pg_catalog\.jsonb_build_object\(([\s\S]*?)\n\s{2,4}\);/gu)]
-    .map((match) => match[1]);
+  return [
+    ...functionSql.matchAll(
+      /receipt := pg_catalog\.jsonb_build_object\(([\s\S]*?)\n\s{2,4}\);/gu,
+    ),
+  ].map((match) => match[1]);
 }
 
 test("CURRENT_171 HOLD outbox migration is additive, dormant, and transactional", async () => {
@@ -90,7 +93,10 @@ test("CURRENT_171 HOLD outbox migration is additive, dormant, and transactional"
   assert.doesNotMatch(sql, /^\s*GRANT\b/imu);
   assert.doesNotMatch(sql, /\bDROP\s+(?:TABLE|COLUMN|FUNCTION|TYPE)\b/iu);
   assert.doesNotMatch(sql, /\bEXECUTE\s+(?:FORMAT|\()/iu);
-  assert.doesNotMatch(sql, /\b(?:smtp|nodemailer|sendmail|registrationUrl)\b/iu);
+  assert.doesNotMatch(
+    sql,
+    /\b(?:smtp|nodemailer|sendmail|registrationUrl)\b/iu,
+  );
 });
 
 test("creates immutable command authority and an encrypted HOLD-only outbox", async () => {
@@ -122,10 +128,7 @@ test("creates immutable command authority and an encrypted HOLD-only outbox", as
     sql,
     /"status" public\."IdentityMailOutboxStatus" NOT NULL DEFAULT 'HOLD'/u,
   );
-  assert.match(
-    sql,
-    /pg_catalog\.octet_length\("secretCiphertext"\) = 71/u,
-  );
+  assert.match(sql, /pg_catalog\.octet_length\("secretCiphertext"\) = 71/u);
   assert.match(
     sql,
     /"aadEnvironment" =[\s\S]*'\^\[a-z0-9\]\[a-z0-9\._-\]\{0,63\}\$'/u,
@@ -134,10 +137,7 @@ test("creates immutable command authority and an encrypted HOLD-only outbox", as
     sql,
     /"issueRequestDigest" COLLATE "C"\) ~ '\^\[0-9a-f\]\{64\}\$'/u,
   );
-  assert.match(
-    sql,
-    /"tokenHash" COLLATE "C"\) ~ '\^\[0-9a-f\]\{64\}\$'/u,
-  );
+  assert.match(sql, /"tokenHash" COLLATE "C"\) ~ '\^\[0-9a-f\]\{64\}\$'/u);
   assert.match(
     sql,
     /"expiresAt" > "createdAt"[\s\S]*"expiresAt" <= "createdAt" \+ INTERVAL '30 days'/u,
@@ -165,8 +165,14 @@ test("uses tenant-safe composite provenance relations", async () => {
     /identity_owner_invite_issue_command_request_uidx"[\s\S]*"tenantId",[\s\S]*"action",[\s\S]*"requestId"/u,
   );
 
-  assert.match(schema, /enum IdentityMailTemplate \{\s*INITIAL_OWNER_INVITE\s*\}/u);
-  assert.match(schema, /enum IdentityMailOutboxStatus \{\s*HOLD\s*\}/u);
+  assert.match(
+    schema,
+    /enum IdentityMailTemplate \{\s*INITIAL_OWNER_INVITE\s*\}/u,
+  );
+  assert.match(
+    schema,
+    /enum IdentityMailOutboxStatus \{\s*HOLD\s+PENDING\s*\}/u,
+  );
   assert.match(schema, /model IdentityOwnerInviteIssueCommand \{/u);
   assert.match(schema, /model IdentityMailOutbox \{/u);
   assert.match(
@@ -175,7 +181,7 @@ test("uses tenant-safe composite provenance relations", async () => {
   );
   assert.match(
     schema,
-    /issueCommand IdentityOwnerInviteIssueCommand @relation\("IdentityOwnerInviteIssueCommandOutbox", fields: \[tenantId, issueCommandId\], references: \[tenantId, id\], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey"\)/u,
+    /issueCommand\s+IdentityOwnerInviteIssueCommand\s+@relation\("IdentityOwnerInviteIssueCommandOutbox", fields: \[tenantId, issueCommandId\], references: \[tenantId, id\], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey"\)/u,
   );
   assert.match(
     schema,
@@ -202,7 +208,10 @@ test("defines the exact private RPC without a raw token or caller actor fields",
     signature,
     /\b(?:raw_token|rawToken|candidate_email|actor_user_id|reason)\b/u,
   );
-  assert.doesNotMatch(body, /FROM public\."Tenant"|UPDATE public\."Tenant"|FOR UPDATE OF .*Tenant/iu);
+  assert.doesNotMatch(
+    body,
+    /FROM public\."Tenant"|UPDATE public\."Tenant"|FOR UPDATE OF .*Tenant/iu,
+  );
 });
 
 test("locks request, discovers replay, then locks and rechecks canonical claim", async () => {
@@ -268,8 +277,12 @@ test("replay exact-binds authority but ignores newly generated ephemeral candida
     body.slice(replayLookup, ephemeralValidation),
     /"issueRequestDigest" IS DISTINCT FROM request_digest[\s\S]*"aadEnvironment" IS DISTINCT FROM aad_environment[\s\S]*"workflowLocator" IS DISTINCT FROM workflow_locator[\s\S]*"reservationSubjectId" IS DISTINCT FROM[\s\S]*"reservationClaimRevision" IS DISTINCT FROM/u,
   );
-  assert.ok(replayReturn > authorityConflict && replayReturn < ephemeralValidation);
-  assert.ok(ephemeralValidation < body.indexOf("command_id :=", ephemeralValidation));
+  assert.ok(
+    replayReturn > authorityConflict && replayReturn < ephemeralValidation,
+  );
+  assert.ok(
+    ephemeralValidation < body.indexOf("command_id :=", ephemeralValidation),
+  );
   assert.match(
     body,
     /IF command_found THEN[\s\S]*claim\."subjectId" = command_record\."inviteId"[\s\S]*claim\."revision" = command_record\."claimRevision"/u,
@@ -288,10 +301,7 @@ test("first issue hard-codes OWNER NETWORK and atomically advances provenance", 
     body,
     /INSERT INTO public\."UserInvite"[\s\S]*locked_canonical_email[\s\S]*'OWNER'::public\."UserRole"[\s\S]*'NETWORK'::public\."UserAccessScope"[\s\S]*ARRAY\[\]::TEXT\[\][\s\S]*token_hash/u,
   );
-  assert.match(
-    body,
-    /INSERT INTO public\."IdentityOwnerInviteIssueCommand"/u,
-  );
+  assert.match(body, /INSERT INTO public\."IdentityOwnerInviteIssueCommand"/u);
   assert.match(
     body,
     /INSERT INTO public\."IdentityMailOutbox"[\s\S]*'INITIAL_OWNER_INVITE'::public\."IdentityMailTemplate"[\s\S]*'HOLD'::public\."IdentityMailOutboxStatus"[\s\S]*candidate_secret_ciphertext[\s\S]*1,[\s\S]*'v1'/u,
@@ -304,10 +314,7 @@ test("first issue hard-codes OWNER NETWORK and atomically advances provenance", 
     body,
     /INSERT INTO public\."PlatformAdminAuditEvent"[\s\S]*NULL,[\s\S]*request_id,[\s\S]*fixed_action,[\s\S]*'UserInvite'[\s\S]*receipt/u,
   );
-  assert.match(
-    body,
-    /candidate_expires_at AT TIME ZONE 'UTC'/u,
-  );
+  assert.match(body, /candidate_expires_at AT TIME ZONE 'UTC'/u);
   assert.match(
     body,
     /invite_record\."expiresAt" IS DISTINCT FROM[\s\S]*command_record\."expiresAt" AT TIME ZONE 'UTC'/u,
@@ -532,7 +539,10 @@ test("real rehearsal injects hostile defaults, proves rollback, and retries safe
   ]) {
     assert.ok(source.includes(objectName));
   }
-  assert.match(source, /pg_catalog\.to_regprocedure\(\$1\)::text AS issue_rpc/u);
+  assert.match(
+    source,
+    /pg_catalog\.to_regprocedure\(\$1\)::text AS issue_rpc/u,
+  );
   assert.match(
     source,
     /assert\.deepEqual\([\s\S]*await readSourceMigrationState\(admin\),[\s\S]*sourceMigrationState/u,
@@ -576,10 +586,7 @@ test("real rehearsal checks effective and direct ACL for every new column", asyn
   for (const privilege of ["SELECT", "INSERT", "UPDATE", "REFERENCES"]) {
     assert.match(
       source,
-      new RegExp(
-        `has_column_privilege\\([\\s\\S]*'${privilege}'`,
-        "u",
-      ),
+      new RegExp(`has_column_privilege\\([\\s\\S]*'${privilege}'`, "u"),
     );
   }
   assert.match(
@@ -603,10 +610,7 @@ test("real rehearsal synchronizes different requests for one locator", async () 
     source,
     /pg_try_advisory_lock\([\s\S]*pg_advisory_xact_lock_shared\(/u,
   );
-  assert.match(
-    source,
-    /waiter_count === 2[\s\S]*pg_advisory_unlock\(/u,
-  );
+  assert.match(source, /waiter_count === 2[\s\S]*pg_advisory_unlock\(/u);
   assert.match(
     source,
     /requestId: randomUUID\(\),[\s\S]*requestDigest: randomBytes\(32\)[\s\S]*commandId: randomUUID\(\),[\s\S]*inviteId: randomUUID\(\),[\s\S]*outboxId: randomUUID\(\)/u,

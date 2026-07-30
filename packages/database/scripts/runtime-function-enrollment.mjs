@@ -12,8 +12,8 @@ export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
-  "20260730020000_shared_beta_admission_provenance";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 172;
+  "20260730040000_shared_beta_runtime_release_activation";
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 174;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -158,15 +158,253 @@ export const EXCLUDED_ADMISSION_FUNCTIONS = Object.freeze(
   }),
 );
 
+const CURRENT_174_UPDATED_ADMISSION_GUARD = EXCLUDED_ADMISSION_FUNCTIONS.find(
+  (entry) =>
+    entry.catalogSignature ===
+    'public."shared_beta_tenant_admission_decision_guard_v1"()',
+);
+assert.deepEqual(
+  CURRENT_174_UPDATED_ADMISSION_GUARD,
+  {
+    key: "shared_beta_tenant_admission_decision_guard_v1",
+    catalogSignature:
+      'public."shared_beta_tenant_admission_decision_guard_v1"()',
+    grantSignature: 'public."shared_beta_tenant_admission_decision_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  },
+  "CURRENT_174 must retain the exact updated admission decision guard contract.",
+);
+
+// CURRENT_174 creates twenty-one new routines and replaces the admission
+// decision guard already sealed by CURRENT_172. Keep the twenty-one new
+// signatures here and prove the twenty-second exact contract above so
+// enrollment never inspects or
+// revokes the same PostgreSQL routine twice.
+export const EXCLUDED_RUNTIME_RELEASE_FUNCTIONS = Object.freeze([
+  Object.freeze({
+    key: "identity_mail_outbox_release_guard_v1",
+    catalogSignature: 'public."identity_mail_outbox_release_guard_v1"()',
+    grantSignature: 'public."identity_mail_outbox_release_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_activation_audit_guard_v1",
+    catalogSignature: 'public."shared_beta_activation_audit_guard_v1"()',
+    grantSignature: 'public."shared_beta_activation_audit_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_activation_command_immutable_v1",
+    catalogSignature: 'public."shared_beta_activation_command_immutable_v1"()',
+    grantSignature: 'public."shared_beta_activation_command_immutable_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_build_provenance_guard_v1",
+    catalogSignature: 'public."shared_beta_build_provenance_guard_v1"()',
+    grantSignature: 'public."shared_beta_build_provenance_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_build_provenance_persist_v1",
+    catalogSignature:
+      'public."shared_beta_build_provenance_persist_v1"(text,text,text,timestamp with time zone,text,text,text,integer,text,text,text,integer,text,jsonb,text,text,text,text,text,timestamp with time zone)',
+    grantSignature:
+      'public."shared_beta_build_provenance_persist_v1"(TEXT, TEXT, TEXT, TIMESTAMP WITH TIME ZONE, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT, TEXT, INTEGER, TEXT, JSONB, TEXT, TEXT, TEXT, TEXT, TEXT, TIMESTAMP WITH TIME ZONE)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_activation_role_assert_v1",
+    catalogSignature:
+      'public."shared_beta_runtime_activation_role_assert_v1"(text,bigint)',
+    grantSignature:
+      'public."shared_beta_runtime_activation_role_assert_v1"(TEXT, BIGINT)',
+    securityDefiner: true,
+    volatility: "s",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_actual_context_assert_v1",
+    catalogSignature:
+      'public."shared_beta_runtime_actual_context_assert_v1"(text)',
+    grantSignature:
+      'public."shared_beta_runtime_actual_context_assert_v1"(TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_actual_context_from_challenge_v1",
+    catalogSignature:
+      'public."shared_beta_runtime_actual_context_from_challenge_v1"(text)',
+    grantSignature:
+      'public."shared_beta_runtime_actual_context_from_challenge_v1"(TEXT)',
+    securityDefiner: true,
+    volatility: "s",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_canonical_json_v1",
+    catalogSignature: 'public."shared_beta_runtime_canonical_json_v1"(jsonb)',
+    grantSignature: 'public."shared_beta_runtime_canonical_json_v1"(JSONB)',
+    securityDefiner: true,
+    volatility: "i",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_challenge_guard_v1",
+    catalogSignature: 'public."shared_beta_runtime_challenge_guard_v1"()',
+    grantSignature: 'public."shared_beta_runtime_challenge_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_database_identity_digest_v1",
+    catalogSignature:
+      'public."shared_beta_runtime_database_identity_digest_v1"(text)',
+    grantSignature:
+      'public."shared_beta_runtime_database_identity_digest_v1"(TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_instance_anchor_guard_v1",
+    catalogSignature: 'public."shared_beta_runtime_instance_anchor_guard_v1"()',
+    grantSignature: 'public."shared_beta_runtime_instance_anchor_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_digest_v1",
+    catalogSignature: 'public."shared_beta_runtime_digest_v1"(text,jsonb)',
+    grantSignature: 'public."shared_beta_runtime_digest_v1"(TEXT, JSONB)',
+    securityDefiner: true,
+    volatility: "i",
+    language: "sql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_marker_guard_v1",
+    catalogSignature: 'public."shared_beta_runtime_marker_guard_v1"()',
+    grantSignature: 'public."shared_beta_runtime_marker_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_migration_state_v1",
+    catalogSignature: 'public."shared_beta_runtime_migration_state_v1"()',
+    grantSignature: 'public."shared_beta_runtime_migration_state_v1"()',
+    securityDefiner: true,
+    volatility: "s",
+    language: "sql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_release_challenge_create_v1",
+    catalogSignature:
+      'public."shared_beta_runtime_release_challenge_create_v1"(text,text,text,text,timestamp with time zone)',
+    grantSignature:
+      'public."shared_beta_runtime_release_challenge_create_v1"(TEXT, TEXT, TEXT, TEXT, TIMESTAMP WITH TIME ZONE)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_release_marker_persist_v1",
+    catalogSignature:
+      'public."shared_beta_runtime_release_marker_persist_v1"(text,text,text,text,text,text,text,text,bigint,text,text,text,bigint,timestamp with time zone,jsonb,text,text,text,text,text,timestamp with time zone)',
+    grantSignature:
+      'public."shared_beta_runtime_release_marker_persist_v1"(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT, TEXT, TEXT, BIGINT, TIMESTAMP WITH TIME ZONE, JSONB, TEXT, TEXT, TEXT, TEXT, TEXT, TIMESTAMP WITH TIME ZONE)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_runtime_state_guard_v1",
+    catalogSignature: 'public."shared_beta_runtime_state_guard_v1"()',
+    grantSignature: 'public."shared_beta_runtime_state_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_tenant_activate_v1",
+    catalogSignature:
+      'public."shared_beta_tenant_activate_v1"(text,text,text,text,text,text,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
+    grantSignature:
+      'public."shared_beta_tenant_activate_v1"(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BYTEA, TIMESTAMP WITH TIME ZONE)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_tenant_activation_guard_v1",
+    catalogSignature: 'public."shared_beta_tenant_activation_guard_v1"()',
+    grantSignature: 'public."shared_beta_tenant_activation_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "shared_beta_tenant_actual_shell_v1",
+    catalogSignature: 'public."shared_beta_tenant_actual_shell_v1"(text)',
+    grantSignature: 'public."shared_beta_tenant_actual_shell_v1"(TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+]);
+assert.equal(
+  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+  21,
+  "CURRENT_174 must add exactly twenty-one new runtime-excluded routines.",
+);
+assert.equal(
+  new Set([
+    ...EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.map(
+      ({ catalogSignature }) => catalogSignature,
+    ),
+    CURRENT_174_UPDATED_ADMISSION_GUARD.catalogSignature,
+  ]).size,
+  22,
+  "CURRENT_174 must cover exactly twenty-two unique runtime-excluded routines.",
+);
+
 const EXCLUDED_RUNTIME_FUNCTIONS = Object.freeze([
   ...EXCLUDED_WORKER_FUNCTIONS,
   ...EXCLUDED_PENDING_FUNCTIONS,
   ...EXCLUDED_ADMISSION_FUNCTIONS,
+  ...EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
 ]);
 const ALL_RUNTIME_FUNCTIONS = Object.freeze([
   ...APPLICATION_RUNTIME_FUNCTIONS,
   ...EXCLUDED_RUNTIME_FUNCTIONS,
 ]);
+assert.equal(
+  ALL_RUNTIME_FUNCTIONS.length,
+  43,
+  "Runtime enrollment must inspect exactly 43 CURRENT_174 function contracts.",
+);
+assert.equal(
+  new Set(ALL_RUNTIME_FUNCTIONS.map(({ catalogSignature }) => catalogSignature))
+    .size,
+  ALL_RUNTIME_FUNCTIONS.length,
+  "Runtime enrollment function signatures must be unique.",
+);
 const LEGACY_SEALED_RUNTIME_TABLES = Object.freeze([
   Object.freeze({
     key: "identityEmailClaim",
@@ -232,6 +470,7 @@ const LEGACY_SEALED_RUNTIME_TABLES = Object.freeze([
       "keyVersion",
       "expiresAt",
       "createdAt",
+      "releasedAt",
     ]),
   }),
 ]);
@@ -262,17 +501,181 @@ const ADMISSION_SEALED_RUNTIME_TABLES = Object.freeze(
     });
   }),
 );
+export const RUNTIME_RELEASE_SEALED_RUNTIME_TABLES = Object.freeze([
+  Object.freeze({
+    key: "sharedBetaRuntimeInstanceAnchor",
+    catalogName: 'public."SharedBetaRuntimeInstanceAnchor"',
+    grantName: 'public."SharedBetaRuntimeInstanceAnchor"',
+    expectedPersistence: "u",
+    columns: Object.freeze(["id", "anchorNonce", "createdAt"]),
+  }),
+  Object.freeze({
+    key: "sharedBetaBuildProvenance",
+    catalogName: 'public."SharedBetaBuildProvenance"',
+    grantName: 'public."SharedBetaBuildProvenance"',
+    columns: Object.freeze([
+      "id",
+      "authorityDomain",
+      "contractVersion",
+      "releaseSha",
+      "buildTime",
+      "builtAt",
+      "artifactContentDigest",
+      "releaseManifestDigest",
+      "schemaHead",
+      "migrationCount",
+      "migrationManifestDigest",
+      "policyManifestDigest",
+      "trialPolicyVersion",
+      "trialDurationSeconds",
+      "buildReferenceDigest",
+      "payload",
+      "payloadDigest",
+      "signatureAlgorithm",
+      "signingKeyId",
+      "publicKeyFingerprint",
+      "signatureBase64url",
+      "validUntil",
+      "stateRevision",
+      "revokedAt",
+      "revocationReasonDigest",
+      "createdAt",
+    ]),
+  }),
+  Object.freeze({
+    key: "sharedBetaRuntimeReleaseChallenge",
+    catalogName: 'public."SharedBetaRuntimeReleaseChallenge"',
+    grantName: 'public."SharedBetaRuntimeReleaseChallenge"',
+    columns: Object.freeze([
+      "id",
+      "buildProvenanceId",
+      "environment",
+      "activationRoleName",
+      "activationRoleOid",
+      "installerRoleName",
+      "installerRoleOid",
+      "creationNonce",
+      "databaseIdentityDigest",
+      "schemaHead",
+      "migrationCount",
+      "migrationManifestDigest",
+      "expectedStateRevision",
+      "candidateGeneration",
+      "predecessorMarkerId",
+      "predecessorMarkerDigest",
+      "challengeDigest",
+      "actualContextDigest",
+      "stateRevision",
+      "consumedAt",
+      "createdAt",
+      "validUntil",
+    ]),
+  }),
+  Object.freeze({
+    key: "sharedBetaRuntimeReleaseMarker",
+    catalogName: 'public."SharedBetaRuntimeReleaseMarker"',
+    grantName: 'public."SharedBetaRuntimeReleaseMarker"',
+    columns: Object.freeze([
+      "id",
+      "buildProvenanceId",
+      "challengeId",
+      "authorityDomain",
+      "contractVersion",
+      "generation",
+      "environment",
+      "buildPayloadDigest",
+      "deploymentInstanceDigest",
+      "databaseIdentityDigest",
+      "databaseChallengeDigest",
+      "actualContextDigest",
+      "schemaHead",
+      "migrationCount",
+      "migrationManifestDigest",
+      "activationDatabaseRole",
+      "coordinatorRoleName",
+      "coordinatorRoleOid",
+      "predecessorMarkerId",
+      "predecessorMarkerDigest",
+      "payload",
+      "payloadDigest",
+      "signatureAlgorithm",
+      "signingKeyId",
+      "publicKeyFingerprint",
+      "signatureBase64url",
+      "deployedAt",
+      "validUntil",
+      "stateRevision",
+      "revokedAt",
+      "revocationReasonDigest",
+      "createdAt",
+    ]),
+  }),
+  Object.freeze({
+    key: "sharedBetaRuntimeReleaseState",
+    catalogName: 'public."SharedBetaRuntimeReleaseState"',
+    grantName: 'public."SharedBetaRuntimeReleaseState"',
+    columns: Object.freeze([
+      "id",
+      "currentMarkerId",
+      "generation",
+      "stateRevision",
+      "updatedAt",
+    ]),
+  }),
+  Object.freeze({
+    key: "sharedBetaTenantActivationCommand",
+    catalogName: 'public."SharedBetaTenantActivationCommand"',
+    grantName: 'public."SharedBetaTenantActivationCommand"',
+    columns: Object.freeze([
+      "id",
+      "tenantId",
+      "action",
+      "requestId",
+      "requestDigest",
+      "decisionId",
+      "markerId",
+      "markerPayloadDigest",
+      "markerGeneration",
+      "buildProvenanceId",
+      "actualContextDigest",
+      "actualShellDigest",
+      "reservationSubjectId",
+      "reservationClaimRevision",
+      "issueRequestId",
+      "issueRequestDigest",
+      "issueCommandId",
+      "inviteId",
+      "outboxId",
+      "messageKey",
+      "tokenHash",
+      "secretCiphertextDigest",
+      "workflowLocator",
+      "activatedByUserId",
+      "entitlementProfileRevision",
+      "executionRevisionBefore",
+      "executionRevisionAfter",
+      "trialPolicyVersion",
+      "trialDurationSeconds",
+      "trialStartsAt",
+      "trialEndsAt",
+      "receipt",
+      "createdTransactionId",
+      "activatedAt",
+    ]),
+  }),
+]);
 export const SEALED_RUNTIME_TABLES = Object.freeze([
   ...LEGACY_SEALED_RUNTIME_TABLES,
   ...ADMISSION_SEALED_RUNTIME_TABLES,
+  ...RUNTIME_RELEASE_SEALED_RUNTIME_TABLES,
 ]);
 assert.equal(
   SEALED_RUNTIME_TABLES.reduce(
     (count, entry) => count + entry.columns.length,
     0,
   ),
-  109,
-  "CURRENT_172 must seal exactly 109 runtime-inaccessible columns.",
+  232,
+  "CURRENT_174 must seal exactly 232 runtime-inaccessible columns.",
 );
 assert.equal(
   SHARED_BETA_ADMISSION_TYPES.length,
@@ -284,7 +687,7 @@ assert.equal(
   3,
   "CURRENT_172 must expose exactly three admission gate codes.",
 );
-export const SEALED_RUNTIME_TYPES = Object.freeze(
+const ADMISSION_SEALED_RUNTIME_TYPES = Object.freeze(
   SHARED_BETA_ADMISSION_TYPES.map((entry) => {
     assert.equal(entry.kind, "e", `${entry.name} must remain an enum.`);
     assert.equal(
@@ -305,6 +708,15 @@ export const SEALED_RUNTIME_TYPES = Object.freeze(
     });
   }),
 );
+export const SEALED_RUNTIME_TYPES = Object.freeze([
+  Object.freeze({
+    key: "identityMailOutboxStatus",
+    catalogName: 'public."IdentityMailOutboxStatus"',
+    grantName: 'public."IdentityMailOutboxStatus"',
+    labels: Object.freeze(["HOLD", "PENDING"]),
+  }),
+  ...ADMISSION_SEALED_RUNTIME_TYPES,
+]);
 const EFFECTIVE_COLUMN_PRIVILEGE_FIELDS = Object.freeze([
   "canSelect",
   "canInsert",
@@ -538,6 +950,21 @@ export function runtimeFunctionContractDigest() {
             language,
           }),
         ),
+        excludedRuntimeRelease: EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.map(
+          ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+            language,
+          }) => ({
+            key,
+            catalogSignature,
+            securityDefiner,
+            volatility,
+            language,
+          }),
+        ),
         sealedTables: SEALED_RUNTIME_TABLES,
         sealedTypes: SEALED_RUNTIME_TYPES,
       }),
@@ -717,6 +1144,7 @@ async function inspectSealedTable(prisma, roleName, entry) {
       SELECT
         relation_object.oid IS NOT NULL AS exists,
         owner_role.rolname AS owner_name,
+        relation_object.relpersistence::text AS persistence,
         CASE
           WHEN relation_object.oid IS NULL THEN FALSE
           ELSE pg_catalog.has_table_privilege(
@@ -940,11 +1368,13 @@ async function inspectSealedTable(prisma, roleName, entry) {
     key: entry.key,
     catalogName: entry.catalogName,
     expectedColumns: [...entry.columns],
+    expectedPersistence: entry.expectedPersistence ?? null,
     columnManifestMatches:
       columns.length === entry.columns.length &&
       columns.every((column, index) => column.name === entry.columns[index]),
     exists: row?.exists === true,
     ownerName: typeof row?.owner_name === "string" ? row.owner_name : null,
+    persistence: typeof row?.persistence === "string" ? row.persistence : null,
     canSelect: row?.can_select === true,
     canInsert: row?.can_insert === true,
     canUpdate: row?.can_update === true,
@@ -1138,7 +1568,30 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
             FROM pg_catalog.pg_proc AS function_object
             WHERE function_object.proowner = role.oid
           )
-        )::integer AS ownership_count
+        )::integer AS ownership_count,
+        (
+          SELECT pg_catalog.count(*)::integer
+          FROM public."SharedBetaRuntimeReleaseChallenge" AS challenge
+          WHERE challenge."stateRevision" = 1
+            AND challenge."consumedAt" IS NULL
+            AND challenge."validUntil" >
+              pg_catalog.statement_timestamp()
+            AND (
+              challenge."activationRoleName" = role.rolname
+              OR challenge."activationRoleOid" = role.oid::BIGINT
+            )
+        ) AS live_activation_challenge_binding_count,
+        (
+          SELECT pg_catalog.count(*)::integer
+          FROM public."SharedBetaRuntimeReleaseMarker" AS marker
+          WHERE marker."stateRevision" = 1
+            AND marker."revokedAt" IS NULL
+            AND (
+              marker."activationDatabaseRole" = role.rolname
+              OR marker."coordinatorRoleName" = role.rolname
+              OR marker."coordinatorRoleOid" = role.oid::BIGINT
+            )
+        ) AS unrevoked_activation_marker_binding_count
       FROM pg_catalog.pg_roles AS role
       WHERE role.rolname = $1
     `,
@@ -1220,6 +1673,12 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
             schemaUsage: role.schema_usage === true,
             membershipCount: Number(role.membership_count ?? -1),
             ownershipCount: Number(role.ownership_count ?? -1),
+            liveActivationChallengeBindingCount: Number(
+              role.live_activation_challenge_binding_count ?? -1,
+            ),
+            unrevokedActivationMarkerBindingCount: Number(
+              role.unrevoked_activation_marker_binding_count ?? -1,
+            ),
           },
     migration: {
       completedTargetCount: Number(migration?.completed_target_count ?? -1),
@@ -1280,6 +1739,12 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
     if (snapshot.role.ownershipCount !== 0) {
       violations.push("RUNTIME_ROLE_OWNS_OBJECTS");
     }
+    if (snapshot.role.liveActivationChallengeBindingCount !== 0) {
+      violations.push("RUNTIME_ROLE_BOUND_TO_LIVE_ACTIVATION_CHALLENGE");
+    }
+    if (snapshot.role.unrevokedActivationMarkerBindingCount !== 0) {
+      violations.push("RUNTIME_ROLE_BOUND_TO_UNREVOKED_ACTIVATION_MARKER");
+    }
   }
   if (snapshot.migration.completedRequiredCount !== 1) {
     violations.push("MIGRATION_166_NOT_COMPLETED_EXACTLY_ONCE");
@@ -1337,6 +1802,12 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
     if (!entry.columnManifestMatches) {
       violations.push(`${entry.key}:COLUMN_MANIFEST_MISMATCH`);
     }
+    if (
+      entry.expectedPersistence !== null &&
+      entry.persistence !== entry.expectedPersistence
+    ) {
+      violations.push(`${entry.key}:PERSISTENCE_MISMATCH`);
+    }
     if (entry.ownerName === config.roleName) {
       violations.push(`${entry.key}:RUNTIME_ROLE_OWNS_TABLE`);
     }
@@ -1371,6 +1842,9 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
   const admissionKeys = new Set(
     EXCLUDED_ADMISSION_FUNCTIONS.map(({ key }) => key),
   );
+  const runtimeReleaseKeys = new Set(
+    EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.map(({ key }) => key),
+  );
 
   for (const entry of snapshot.functions) {
     if (applicationKeys.has(entry.key)) {
@@ -1385,7 +1859,9 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
         ? "WORKER"
         : admissionKeys.has(entry.key)
           ? "ADMISSION"
-          : "PENDING";
+          : runtimeReleaseKeys.has(entry.key)
+            ? "RUNTIME_RELEASE"
+            : "PENDING";
       if (entry.effectiveExecute || entry.directExecute) {
         violations.push(`${entry.key}:${exclusionKind}_EXECUTE_PRESENT`);
       }
@@ -1475,11 +1951,15 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
     excludedAdmissionFunctions: EXCLUDED_ADMISSION_FUNCTIONS.map(
       ({ key, catalogSignature }) => ({ key, catalogSignature }),
     ),
+    excludedRuntimeReleaseFunctions: EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.map(
+      ({ key, catalogSignature }) => ({ key, catalogSignature }),
+    ),
     sealedTables: SEALED_RUNTIME_TABLES.map(
-      ({ key, catalogName, columns }) => ({
+      ({ key, catalogName, columns, expectedPersistence }) => ({
         key,
         catalogName,
         columns,
+        expectedPersistence: expectedPersistence ?? null,
       }),
     ),
     sealedTypes: SEALED_RUNTIME_TYPES.map(({ key, catalogName, labels }) => ({
@@ -1518,6 +1998,15 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
       excludedAdmissionExecuteCount: snapshot.functions.filter(
         (entry) =>
           EXCLUDED_ADMISSION_FUNCTIONS.some(
+            (candidate) => candidate.key === entry.key,
+          ) &&
+          (entry.effectiveExecute ||
+            entry.directExecute ||
+            entry.targetGrantOption),
+      ).length,
+      excludedRuntimeReleaseExecuteCount: snapshot.functions.filter(
+        (entry) =>
+          EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.some(
             (candidate) => candidate.key === entry.key,
           ) &&
           (entry.effectiveExecute ||
@@ -1671,12 +2160,12 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").join("\n");
   assert.equal(
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").length,
-    55,
+    81 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
   );
   assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 7);
   assert.equal(EXCLUDED_ADMISSION_FUNCTIONS.length, 9);
-  assert.equal(SEALED_RUNTIME_TABLES.length, 6);
-  assert.equal(SEALED_RUNTIME_TYPES.length, 1);
+  assert.equal(SEALED_RUNTIME_TABLES.length, 12);
+  assert.equal(SEALED_RUNTIME_TYPES.length, 2);
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
@@ -1688,6 +2177,8 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(sql, /identity_owner_invite_issue_hold_v1/u);
   assert.match(sql, /shared_beta_tenant_profile_digest_v1/u);
   assert.match(sql, /SharedBetaReleaseGateCode/u);
+  assert.match(sql, /IdentityMailOutboxStatus/u);
+  assert.match(sql, /"releasedAt"/u);
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
@@ -1699,6 +2190,26 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityMailOutbox"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaBuildProvenance"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaRuntimeReleaseChallenge"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaRuntimeReleaseMarker"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaRuntimeReleaseState"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaTenantActivationCommand"/u,
   );
   assert.match(
     sql,

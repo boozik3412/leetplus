@@ -241,7 +241,7 @@ describe('validateEnvironment', () => {
     environment.EXPECTED_DATABASE_MIGRATION_COUNT = '0';
 
     expect(() => validateEnvironment(environment)).toThrow(
-      /RELEASE_SHA must be the full 40-character Git SHA/,
+      /RELEASE_SHA must be the full lowercase 40-character Git SHA/,
     );
     expect(() => validateEnvironment(environment)).toThrow(
       /BUILD_TIME must be a UTC ISO-8601 timestamp/,
@@ -251,6 +251,15 @@ describe('validateEnvironment', () => {
     );
     expect(() => validateEnvironment(environment)).toThrow(
       /EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer/,
+    );
+  });
+
+  it('rejects uppercase release identity in production', () => {
+    const environment = validProductionEnvironment();
+    environment.RELEASE_SHA = 'A'.repeat(40);
+
+    expect(() => validateEnvironment(environment)).toThrow(
+      /RELEASE_SHA must be the full lowercase 40-character Git SHA/,
     );
   });
 

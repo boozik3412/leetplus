@@ -140,8 +140,9 @@ describePostgres(
           AND rolled_back_at IS NULL
       `);
       expect(migrationState).toEqual({
-        migration_count: 172,
-        latest_migration: '20260730020000_shared_beta_admission_provenance',
+        migration_count: 174,
+        latest_migration:
+          '20260730040000_shared_beta_runtime_release_activation',
       });
 
       encryptionKey = randomBytes(32).toString('base64url');
@@ -817,10 +818,7 @@ function assertSafeIntegrationDatabase(): URL {
 
   const parsed = new URL(databaseUrl);
   const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
-  const normalizedHostname = parsed.hostname.replace(
-    /^\[([^\]]+)\]$/u,
-    '$1',
-  );
+  const normalizedHostname = parsed.hostname.replace(/^\[([^\]]+)\]$/u, '$1');
   const databaseName = parsed.pathname.replace(/^\/+/u, '').toLowerCase();
   if (
     !localHosts.has(normalizedHostname) ||

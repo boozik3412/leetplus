@@ -1,22 +1,23 @@
 # Профиль доступа первой внешней когорты
 
-| Поле          | Значение                                               |
-| ------------- | ------------------------------------------------------ |
-| Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
-| Версия        | 1.16                                                   |
-| Дата          | 29.07.2026                                             |
-| Статус        | `NO-GO`; control-plane foundation реализован, adoption pending |
-| Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
-| Область       | Собственная сеть или явно разрешённые клубы            |
-| Назначение    | Первый shared external tenant и последующая когорта    |
-| Schema target | `CURRENT_170` engineering checkpoint |
-| Previous accepted baseline | PR-head-associated merge-ref `bbef153a...` / `30443837684`; not exact-SHA |
-| Previous accepted exact-head | `d525b736...` / CI `30447467729`; `3/3 PASS` |
-| Previous accepted checkpoint | exact-head `3b8228dd...` / CI `30460154200`; `3/3 PASS` |
-| Current engineering checkpoint | `8dfe219...` / CI `30493779099`; `3/3 PASS`, review PASS, not deployed |
-| Historical accepted checkpoint | `CURRENT_169` exact-head `f5d39fd...` / CI `30467882578`; `3/3 PASS` |
-| Accepted prerequisite | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS |
-| Historical evidence | `044ceca2` / `2341b999`, не evidence текущего candidate |
+| Поле                            | Значение                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| Profile key                     | `OPEN_BETA_FULL_OPERATIONS_V1`                                            |
+| Версия                          | 1.17                                                                      |
+| Дата                            | 30.07.2026                                                                |
+| Статус                          | `NO-GO`; control-plane foundation реализован, adoption pending            |
+| Выдача                          | Invite-only, отдельный Tenant на независимую сеть                         |
+| Область                         | Собственная сеть или явно разрешённые клубы                               |
+| Назначение                      | Первый shared external tenant и последующая когорта                       |
+| Schema target                   | local candidate `CURRENT_174`; exact-SHA CI pending                       |
+| Previous accepted baseline      | PR-head-associated merge-ref `bbef153a...` / `30443837684`; not exact-SHA |
+| Previous accepted exact-head    | `d525b736...` / CI `30447467729`; `3/3 PASS`                              |
+| Previous accepted checkpoint    | exact-head `3b8228dd...` / CI `30460154200`; `3/3 PASS`                   |
+| Last remote accepted checkpoint | `CURRENT_172`: `12d5741...` / CI `30509157338`; `3/3 PASS`                |
+| Historical locator checkpoint   | `CURRENT_170`: `8dfe219...` / CI `30493779099`; `3/3 PASS`                |
+| Historical accepted checkpoint  | `CURRENT_169` exact-head `f5d39fd...` / CI `30467882578`; `3/3 PASS`      |
+| Accepted prerequisite           | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS                 |
+| Historical evidence             | `044ceca2` / `2341b999`, не evidence текущего candidate                   |
 
 Этот профиль фиксирует обязательный продуктовый состав тестового доступа.
 Persisted stage/trial, атомарный six-row entitlement profile и базовый
@@ -28,13 +29,18 @@ token, trial, outbox или письмо. Historical engineering exact-head `CUR
 [`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
 (`run #37`), `3/3 PASS`, и independent review без новых P0/P1; принятый
 remote `CURRENT_168` относится только к предыдущему shell-only prerequisite.
-Migration 170 добавляет immutable opaque locator и PII-free sealed replay
-assert; current runtime allowlist содержит exact семь RPC при zero
+Historical migration 170 добавила immutable opaque locator и PII-free sealed
+replay assert; runtime allowlist содержит exact семь RPC при zero
 `IdentityEmailClaim` table privileges. Exact-head `8dfe219...` / CI
 `30493779099` (`run #47`) принят, `3/3 PASS`; independent review — `PASS` без
-P0/P1/P2. Sealed issue-by-locator, email delivery и dedicated activation,
-route/job/Telegram/integration adoption, role matrix и production-like
-evidence ещё не завершены.
+P0/P1/P2. Historical `CURRENT_171` добавил dormant issue-by-locator и
+encrypted `HOLD` outbox, а последний remote-accepted `CURRENT_172` —
+non-consuming signed admission provenance. Local candidate `CURRENT_174`
+реализует atomic activation, finite trial, GO consume и единственный
+`HOLD→PENDING`, но остаётся
+`LOCAL_ACCEPTED / EXACT_SHA_CI_PENDING / NOT_DEPLOYED`. Production roots,
+production-like rehearsal, delivery worker/SMTP, admin route,
+job/Telegram/integration adoption и полная role matrix ещё не приняты.
 Initial shared-beta profile содержит пять product modules и supporting
 `INTEGRATIONS`; у всех шести `read/write=ON`, `outbound=OFF`. Generic profile
 mutation не включает outbound.
@@ -54,8 +60,9 @@ Local public-only pinned-path evidence прошёл admission suite `19/19`; е�
 исторический prerequisite вместе с authority/application/PostgreSQL gates
 прошёл remote CI как `CURRENT_165` на
 `4bd6a036...` / `30428288353`; documentation/evidence successor
-`7c20adec...` / `30429463161` также зелёный. Current schema target —
-`CURRENT_170`. Previous accepted engineering baseline связан с PR head
+`7c20adec...` / `30429463161` также зелёный. Current local schema target —
+`CURRENT_174`; последний remote-accepted target — `CURRENT_172`. Previous
+accepted engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856` / merge-ref CI `30443837684`
 (`run #23`), не exact-SHA checkout evidence: `3/3 PASS`, PostgreSQL job
 `90549245372` подтвердил
@@ -95,7 +102,7 @@ provider-write P1 закрыты. Actual non-owner runtime/app DB role всё е
 пройти admission и получить explicit `EXECUTE` grant (`PUBLIC EXECUTE`
 revoked); batch/rebind/future provider writers остаются fail-closed,
 whole-transaction bounded retry — defense-in-depth.
-Текущий `CURRENT_170` engineering checkpoint подтвердил clean migrations
+Historical `CURRENT_170` engineering checkpoint подтвердил clean migrations
 `170/170`, populated `169 → 170`, identity
 `1 CREATED + 99 ALREADY_RESERVED`, revoke→same-email reserve, locator/ACL/
 rollback checks и shell integration `2/2`; full API —

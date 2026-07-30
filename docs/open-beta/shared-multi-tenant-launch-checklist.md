@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.25                                                       |
+| Версия     | 1.27                                                       |
 | Дата       | 30.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -21,7 +21,17 @@ Production IDs, email, телефоны, invite URL/token, password, database UR
 API keys, encryption/signing secrets и raw business data запрещено сохранять
 в git. В документах используются только aliases `Tenant A/B` и `Store A1..A4/B1`.
 
-## Текущий engineering candidate: `CURRENT_171`
+## Текущий engineering candidate: `CURRENT_174`
+
+`CURRENT_174` — локально принятый кандидат `BETA-IAM-004I` поверх последнего
+принятого remote checkpoint `CURRENT_172`. Он добавляет независимые build и
+deployment provenance, instance-bound database identity, выделенную
+activation-роль и одну atomic activation transaction. Exact-SHA GitHub CI для
+этого кандидата ещё не принят, production-like rehearsal и deploy не
+выполнялись, поэтому статус внешнего пилота остаётся `NO-GO`.
+
+Ниже сохранено historical evidence принятого `CURRENT_171` dormant
+OWNER-invite checkpoint.
 
 Migration `20260730010000_identity_owner_invite_hold_outbox` поверх принятого
 `CURRENT_170` locator checkpoint добавляет dormant atomic writer для
@@ -252,7 +262,7 @@ Evidence:
 
 - [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
       matrix, включая case-variant email collision;
-- [x] exact-head CI и independent review для текущего `CURRENT_171` dormant
+- [x] exact-head CI и independent review для historical `CURRENT_171` dormant
       OWNER invite HOLD checkpoint:
       `7fca785ac6c2d77bcbd3655985d668a45fca788a` / CI `30501299486`
       (`run #50`), `3/3 PASS`; ordinary-archive PG16 audit и review —
@@ -277,7 +287,33 @@ Evidence:
       entitlement rows; actual-context и actual-shell digests domain-separated
       пересчитываются и проверяются до issue и повторно до consume; затем
       запускается trial, shell переводится в `ACTIVE/OWNER_INVITED`, а exact
-      outbox — в `HOLD→PENDING`; standalone release RPC отсутствует;
+      outbox — в `HOLD→PENDING`; standalone release RPC отсутствует. Реализация
+      имеет локальный статус `LOCAL_ACCEPTED`: populated `172→173→174`, clean
+      `174/174`, hostile ACL, activation/replay/race/fault, runtime enrollment
+      и независимые P0/P1/P2 reviews прошли; checkbox остаётся открытым до
+      exact-SHA GitHub CI;
+- [ ] `CURRENT_174` database identity v2 связан с owner-only `UNLOGGED`
+      instance anchor и `pg_postmaster_start_time()`; missing anchor, restart,
+      backup/standby promotion требуют нового challenge и deployment marker;
+- [ ] Activation role проходит полную hostile matrix: only target `CONNECT`,
+      `public USAGE`, coordinator `EXECUTE`; zero TEMP/other DB/schema,
+      membership/ownership/settings, FDW/server/parameter/tablespace/large
+      object и system/PUBLIC-ACL drift. Перед challenge выполнена отдельная
+      type-ACL ceremony: default `PUBLIC USAGE` на defined user enum/domain
+      отозван, штатные runtime grants выданы явно, activation role имеет zero
+      effective type `USAGE`. Отдельно проверены direct/PUBLIC type drift,
+      `pg_authid SELECT` и direct/PUBLIC `pg_read_file EXECUTE`;
+- [ ] CI build provenance и ops deployment provenance подписаны разными
+      Ed25519 roots; production registries прошли отдельные reviewed enrollment
+      ceremonies и не заполняются из env/request/database rows;
+- [ ] Build provenance содержит exact immutable artifact/release/migration
+      manifests, policy digest и обязательные `trialPolicyVersion` +
+      положительный `trialDurationSeconds` без default. Длительность trial
+      отдельно утверждена владельцем продукта; 14-дневная pilot cohort и
+      30-дневный invite TTL не используются как неявное значение;
+- [ ] Deployment marker потребил одноразовый DB-generated challenge, связан с
+      actual database identity/migration checksums, environment и exact
+      dedicated `NOINHERIT` activation `session_user` role name/OID;
 - [x] historical exact-head CI и independent review для `CURRENT_170`
       activation locator:
       `8dfe219...` / CI `30493779099` (`run #47`), `3/3 PASS`, review без

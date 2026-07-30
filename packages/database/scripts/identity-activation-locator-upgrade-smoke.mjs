@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import {
-  cp,
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readdir,
-  rm,
-} from "node:fs/promises";
+import { cp, copyFile, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -25,11 +18,9 @@ import {
 } from "./staff-task-integrity-migration-state.mjs";
 
 const SCRIPT_NAME = "identity-activation-locator-upgrade-smoke";
-const REQUIRED_CONFIRMATION =
-  "run-identity-activation-locator-upgrade-smoke";
+const REQUIRED_CONFIRMATION = "run-identity-activation-locator-upgrade-smoke";
 const TARGET_MIGRATION = "20260729233000_identity_activation_locator";
-const PREVIOUS_MIGRATION =
-  "20260729230000_identity_invite_writer_boundary";
+const PREVIOUS_MIGRATION = "20260729230000_identity_invite_writer_boundary";
 const MIGRATION_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
 const SAFE_SOURCE_DATABASE_PATTERN =
   /(?:^|[_-])(?:ci|test|testing)(?:$|[_-])/iu;
@@ -38,8 +29,7 @@ const CLEAN_DATABASE_PREFIX = "lp_identity_locator_clean_ci_";
 const RUNTIME_ROLE_PREFIX = "lp_identity_locator_runtime_";
 const UPGRADE_DATABASE_PATTERN =
   /^lp_identity_locator_upgrade_ci_[a-f0-9]{16}$/u;
-const CLEAN_DATABASE_PATTERN =
-  /^lp_identity_locator_clean_ci_[a-f0-9]{16}$/u;
+const CLEAN_DATABASE_PATTERN = /^lp_identity_locator_clean_ci_[a-f0-9]{16}$/u;
 const RUNTIME_ROLE_PATTERN = /^lp_identity_locator_runtime_[a-f0-9]{16}$/u;
 const TEMP_ROOT_PREFIX = "leetplus-identity-locator-upgrade-";
 const MIGRATION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -148,9 +138,7 @@ function parseSafeSourceDatabaseUrl(rawDatabaseUrl) {
   ) {
     contractError("POSTGRESQL_URL_REQUIRED");
   }
-  const hostname = sourceUrl.hostname
-    .toLowerCase()
-    .replace(/^\[|\]$/gu, "");
+  const hostname = sourceUrl.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
   if (!new Set(["127.0.0.1", "localhost", "::1"]).has(hostname)) {
     contractError("LOOPBACK_POSTGRESQL_REQUIRED");
   }
@@ -247,9 +235,7 @@ function prismaClient(databaseUrl) {
 }
 
 async function readMigrationPlan() {
-  const sourcePrismaDir = fileURLToPath(
-    new URL("../prisma/", import.meta.url),
-  );
+  const sourcePrismaDir = fileURLToPath(new URL("../prisma/", import.meta.url));
   const migrationDirectories = (
     await readdir(join(sourcePrismaDir, "migrations"), {
       withFileTypes: true,
@@ -286,13 +272,10 @@ async function readMigrationPlan() {
   assert.equal(migrationDirectories[targetIndex - 1], PREVIOUS_MIGRATION);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260730020000_shared_beta_admission_provenance",
+    "20260730040000_shared_beta_runtime_release_activation",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_172");
-  const historicalMigrations = migrationDirectories.slice(
-    0,
-    targetIndex + 1,
-  );
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_174");
+  const historicalMigrations = migrationDirectories.slice(0, targetIndex + 1);
   return {
     sourcePrismaDir,
     prefixMigrations: historicalMigrations.slice(0, -1),
@@ -311,11 +294,7 @@ async function createMigrationArtifact(tempRoot, migrationPlan) {
     join(targetPrismaDir, "schema.prisma"),
   );
   await copyFile(
-    join(
-      migrationPlan.sourcePrismaDir,
-      "migrations",
-      "migration_lock.toml",
-    ),
+    join(migrationPlan.sourcePrismaDir, "migrations", "migration_lock.toml"),
     join(targetMigrationsDir, "migration_lock.toml"),
   );
   for (const migrationName of migrationPlan.prefixMigrations) {
@@ -571,13 +550,7 @@ async function reserveInvite(client, email, tenantId, subjectId) {
   return rows[0]?.receipt;
 }
 
-async function assertByEmail(
-  client,
-  email,
-  tenantId,
-  subjectId,
-  revision,
-) {
+async function assertByEmail(client, email, tenantId, subjectId, revision) {
   const rows = await client.$queryRawUnsafe(
     `SELECT public."identity_email_claim_assert_invite_v1"(
        $1::text,
@@ -593,13 +566,7 @@ async function assertByEmail(
   return rows[0]?.receipt;
 }
 
-async function assertByLocator(
-  client,
-  locator,
-  tenantId,
-  subjectId,
-  revision,
-) {
+async function assertByLocator(client, locator, tenantId, subjectId, revision) {
   const rows = await client.$queryRawUnsafe(
     `SELECT public."identity_email_claim_assert_invite_locator_v1"(
        $1::text,
@@ -906,10 +873,7 @@ async function expectSqlState(label, expected, operation) {
   } catch (error) {
     caught = error;
   }
-  assert.ok(
-    caught,
-    `${label}: PostgreSQL unexpectedly accepted the command.`,
-  );
+  assert.ok(caught, `${label}: PostgreSQL unexpectedly accepted the command.`);
   const states = extractSqlStates(caught);
   assert.ok(
     states.has(expected),
@@ -996,17 +960,14 @@ async function assertUpgradeBehavior(client, fixtures) {
       2,
     ),
   );
-  await expectSqlState(
-    "invalid locator",
-    EXPECTED_SQL_STATES.invalid,
-    () =>
-      assertByLocator(
-        client,
-        "not-a-uuid",
-        fixtures.tenantA,
-        fixtures.exactReservation,
-        1,
-      ),
+  await expectSqlState("invalid locator", EXPECTED_SQL_STATES.invalid, () =>
+    assertByLocator(
+      client,
+      "not-a-uuid",
+      fixtures.tenantA,
+      fixtures.exactReservation,
+      1,
+    ),
   );
 
   const typeClaim = await readClaim(client, fixtures.typeEmail);
@@ -1014,17 +975,14 @@ async function assertUpgradeBehavior(client, fixtures) {
   assert.equal(typeClaim.subjectId, fixtures.typeUser);
   assert.equal(typeClaim.workflowLocator, fixtures.typeUser);
   assert.equal(typeClaim.revision, 2);
-  await expectSqlState(
-    "wrong claim type",
-    EXPECTED_SQL_STATES.missing,
-    () =>
-      assertByLocator(
-        client,
-        typeClaim.workflowLocator,
-        fixtures.tenantA,
-        fixtures.typeUser,
-        2,
-      ),
+  await expectSqlState("wrong claim type", EXPECTED_SQL_STATES.missing, () =>
+    assertByLocator(
+      client,
+      typeClaim.workflowLocator,
+      fixtures.tenantA,
+      fixtures.typeUser,
+      2,
+    ),
   );
 
   await expectSqlState(
@@ -1162,9 +1120,7 @@ async function runLockOrderRace(databaseUrl, fixtures) {
     };
   } finally {
     continueHolder.resolve();
-    await Promise.allSettled(
-      [holderPromise, waiterPromise].filter(Boolean),
-    );
+    await Promise.allSettled([holderPromise, waiterPromise].filter(Boolean));
     await Promise.all([
       holder.$disconnect(),
       waiter.$disconnect(),
@@ -1203,9 +1159,7 @@ async function assertCleanBehavior(client, fixtures, runtimeContext) {
   assertPiiFreeReceipt(receipt, [fixtures.cleanEmail]);
 
   const role = quoteIdentifier(runtimeContext.roleName);
-  await client.$executeRawUnsafe(
-    `GRANT USAGE ON SCHEMA public TO ${role}`,
-  );
+  await client.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${role}`);
   const runtime = prismaClient(runtimeContext.databaseUrl);
   runtimeContext.runtime = runtime;
   await expectSqlState(
@@ -1340,9 +1294,7 @@ async function runOfflineSelfTest() {
   assertSafeGeneratedDatabaseName(names.upgradeDatabaseName);
   assertSafeGeneratedDatabaseName(names.cleanDatabaseName);
   assertSafeGeneratedRuntimeRoleName(names.runtimeRoleName);
-  expectOfflineFailure(() =>
-    assertSafeGeneratedDatabaseName("leetplus_ci"),
-  );
+  expectOfflineFailure(() => assertSafeGeneratedDatabaseName("leetplus_ci"));
   expectOfflineFailure(() =>
     assertSafeGeneratedRuntimeRoleName("leetplus_runtime"),
   );
@@ -1353,8 +1305,7 @@ async function runOfflineSelfTest() {
       NODE_ENV: "production",
       DATABASE_URL:
         "postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci?schema=public",
-      IDENTITY_ACTIVATION_LOCATOR_UPGRADE_SMOKE_CONFIRM:
-        REQUIRED_CONFIRMATION,
+      IDENTITY_ACTIVATION_LOCATOR_UPGRADE_SMOKE_CONFIRM: REQUIRED_CONFIRMATION,
     }),
   );
   expectOfflineFailure(() =>
@@ -1370,9 +1321,7 @@ async function runOfflineSelfTest() {
   assert.equal(plan.targetMigration, TARGET_MIGRATION);
   assert.equal(plan.allMigrations.length, 170);
   const historicalEnrollment =
-    buildHistoricalCurrent170RuntimeEnrollmentStatements(
-      names.runtimeRoleName,
-    );
+    buildHistoricalCurrent170RuntimeEnrollmentStatements(names.runtimeRoleName);
   assert.equal(historicalEnrollment.length, 15);
   assert.equal(
     historicalEnrollment.some((statement) =>
@@ -1416,10 +1365,7 @@ async function runRealSmoke(environment) {
     generatedNames();
   const password = randomBytes(32).toString("hex");
   const sourceDatabaseUrl = databaseUrlFor(sourceUrl, sourceDatabaseName);
-  const upgradeDatabaseUrl = databaseUrlFor(
-    sourceUrl,
-    upgradeDatabaseName,
-  );
+  const upgradeDatabaseUrl = databaseUrlFor(sourceUrl, upgradeDatabaseName);
   const cleanDatabaseUrl = databaseUrlFor(sourceUrl, cleanDatabaseName);
   const admin = prismaClient(sourceDatabaseUrl);
   let tempRoot;
@@ -1439,10 +1385,7 @@ async function runRealSmoke(environment) {
     clusterLockHeld = true;
     tempRoot = await mkdtemp(join(tmpdir(), TEMP_ROOT_PREFIX));
     assertSafeTempRoot(tempRoot);
-    const artifact = await createMigrationArtifact(
-      tempRoot,
-      migrationPlan,
-    );
+    const artifact = await createMigrationArtifact(tempRoot, migrationPlan);
 
     await createDisposableDatabase(admin, upgradeDatabaseName);
     upgradeDatabaseCreated = true;
@@ -1469,10 +1412,7 @@ async function runRealSmoke(environment) {
 
     upgrade = prismaClient(upgradeDatabaseUrl);
     try {
-      await assertExactAppliedMigrations(
-        upgrade,
-        migrationPlan.allMigrations,
-      );
+      await assertExactAppliedMigrations(upgrade, migrationPlan.allMigrations);
       await assertUpgradeBehavior(upgrade, fixtures);
     } finally {
       await upgrade.$disconnect();
@@ -1484,11 +1424,7 @@ async function runRealSmoke(environment) {
 
     await createRuntimeRole(admin, runtimeRoleName, password);
     runtimeRoleCreated = true;
-    await grantRuntimeConnection(
-      admin,
-      cleanDatabaseName,
-      runtimeRoleName,
-    );
+    await grantRuntimeConnection(admin, cleanDatabaseName, runtimeRoleName);
     const clean = prismaClient(cleanDatabaseUrl);
     const cleanFixtures = fixtureSet(randomBytes(5).toString("hex"));
     const runtimeContext = {
@@ -1503,10 +1439,7 @@ async function runRealSmoke(environment) {
     };
     let aclEvidence;
     try {
-      await assertExactAppliedMigrations(
-        clean,
-        migrationPlan.allMigrations,
-      );
+      await assertExactAppliedMigrations(clean, migrationPlan.allMigrations);
       aclEvidence = await assertCleanBehavior(
         clean,
         cleanFixtures,
@@ -1622,10 +1555,7 @@ async function runRealSmoke(environment) {
     throw primaryError;
   }
   if (cleanupErrors.length > 0) {
-    throw new AggregateError(
-      cleanupErrors,
-      "Locator smoke cleanup failed.",
-    );
+    throw new AggregateError(cleanupErrors, "Locator smoke cleanup failed.");
   }
   assert.ok(evidence);
   process.stdout.write(`${JSON.stringify(evidence)}\n`);

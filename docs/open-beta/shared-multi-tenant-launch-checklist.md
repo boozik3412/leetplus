@@ -93,9 +93,9 @@ Historical engineering exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
 `3/3 PASS`, и независимым review без новых P0 только как historical
-prerequisite. Ни historical evidence, ни локальный `CURRENT_171` candidate не
-являются production-like admission: persisted GO, production deploy и доступ
-тестеру ещё не приняты.
+prerequisite. Ни historical evidence, ни принятый `CURRENT_171` engineering
+checkpoint не являются production-like admission: persisted GO, production
+deploy и доступ тестеру ещё не приняты.
 
 ## A. Gate 0: source и release
 

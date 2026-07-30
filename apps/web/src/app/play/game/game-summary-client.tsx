@@ -466,6 +466,9 @@ type QuestBoardStyle = CSSProperties &
     >
   >;
 
+const GUEST_GAME_AUTH_REQUIRED_MESSAGE =
+  "Сессия входа не найдена или истекла. Подтвердите телефон заново.";
+
 class EmptySessionError extends Error {}
 
 export function GameSummaryClient() {
@@ -583,26 +586,28 @@ export function GameSummaryClient() {
     return <GameShell body={<LoadingView />} />;
   }
 
-  if (loadState === "empty" || !summary) {
+  if (loadState === "error") {
     return (
       <GameShell
         body={
           <EmptySessionView
-            title="Игровой профиль еще не открыт"
-            message={message ?? "Подтвердите телефон, чтобы увидеть квесты."}
+            kind="retry"
+            title="Не удалось открыть игру"
+            message={message ?? "Попробуйте обновить страницу чуть позже."}
           />
         }
       />
     );
   }
 
-  if (loadState === "error") {
+  if (loadState === "empty" || !summary) {
     return (
       <GameShell
         body={
           <EmptySessionView
-            title="Не удалось открыть игру"
-            message={message ?? "Попробуйте обновить страницу чуть позже."}
+            kind="auth-required"
+            title="Нужно войти в игровой модуль"
+            message={message ?? GUEST_GAME_AUTH_REQUIRED_MESSAGE}
           />
         }
       />
@@ -768,28 +773,28 @@ export function GameRewardsClient() {
     return <GameShell body={<LoadingView />} />;
   }
 
-  if (loadState === "empty" || !summary) {
+  if (loadState === "error") {
     return (
       <GameShell
         body={
           <EmptySessionView
-            title="Журнал наград пока недоступен"
-            message={
-              message ?? "Подтвердите телефон, чтобы увидеть историю наград."
-            }
+            kind="retry"
+            title="Не удалось открыть журнал"
+            message={message ?? "Попробуйте обновить страницу чуть позже."}
           />
         }
       />
     );
   }
 
-  if (loadState === "error") {
+  if (loadState === "empty" || !summary) {
     return (
       <GameShell
         body={
           <EmptySessionView
-            title="Не удалось открыть журнал"
-            message={message ?? "Попробуйте обновить страницу чуть позже."}
+            kind="auth-required"
+            title="Журнал наград пока недоступен"
+            message={message ?? GUEST_GAME_AUTH_REQUIRED_MESSAGE}
           />
         }
       />
@@ -979,25 +984,48 @@ function LoadingView() {
 }
 
 function EmptySessionView({
+  kind,
   title,
   message,
 }: {
+  kind: "auth-required" | "retry";
   title: string;
   message: string;
 }) {
+  const authRequired = kind === "auth-required";
+
   return (
     <section className="lp-club-home-static">
       <div className="lp-club-static-card">
-        <p className="lp-club-small-label">Игровой вход</p>
+        <p className="lp-club-small-label">
+          {authRequired ? "Игровой вход" : "Игровой модуль"}
+        </p>
         <h1 className="lp-club-static-title">{title}</h1>
         <p className="lp-club-static-copy">{message}</p>
         <div className="lp-club-static-actions">
-          <Link href="/play" className="lp-club-primary-link">
-            Зарегистрироваться
-          </Link>
-          <Link href="/" className="lp-club-ghost-link">
-            На главную
-          </Link>
+          {authRequired ? (
+            <>
+              <Link href="/game/auth" className="lp-club-primary-link">
+                Перейти ко входу
+              </Link>
+              <Link href="/start" className="lp-club-ghost-link">
+                К выбору раздела
+              </Link>
+            </>
+          ) : (
+            <>
+              <button
+                className="lp-club-primary-link"
+                type="button"
+                onClick={() => window.location.reload()}
+              >
+                Повторить
+              </button>
+              <Link href="/start" className="lp-club-ghost-link">
+                К выбору раздела
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </section>
@@ -15924,6 +15952,15 @@ const clubHomeCss = `
   margin-top: 22px;
 }
 
+.lp-club-static-actions > .lp-club-primary-link,
+.lp-club-static-actions > .lp-club-ghost-link {
+  padding: 0 14px;
+}
+
+.lp-club-static-actions > button {
+  cursor: pointer;
+}
+
 .lp-club-skeleton {
   height: 12px;
   border-radius: 999px;
@@ -16417,7 +16454,7 @@ async function loadGameSummary() {
   });
 
   if (response.status === 401) {
-    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
   }
 
   if (!response.ok) {
@@ -16442,7 +16479,7 @@ async function acknowledgeGameCompletionNotification(notificationId: string) {
   );
 
   if (response.status === 401) {
-    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
   }
 
   if (!response.ok) {
@@ -16478,9 +16515,7 @@ async function postGameRewardWalletClaim(
   });
 
   if (response.status === 401) {
-    throw new EmptySessionError(
-      "Сначала подтвердите телефон и выберите клуб.",
-    );
+    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
   }
 
   if (!response.ok) {
@@ -16518,7 +16553,7 @@ async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
   });
 
   if (response.status === 401) {
-    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
   }
 
   if (!response.ok) {
@@ -16545,7 +16580,7 @@ async function updateGameProfileNickname(displayName: string) {
   });
 
   if (response.status === 401) {
-    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
   }
 
   if (!response.ok) {
@@ -16566,7 +16601,7 @@ async function checkInGameSession(): Promise<GuestPortalCheckInResponse> {
   });
 
   if (response.status === 401) {
-    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
   }
 
   if (!response.ok) {
@@ -16598,7 +16633,7 @@ async function openGameLootBox(
   });
 
   if (response.status === 401) {
-    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
   }
 
   if (!response.ok) {

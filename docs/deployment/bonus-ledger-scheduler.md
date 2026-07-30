@@ -1,8 +1,10 @@
 # Bonus ledger scheduler для геймификации
 
-> Актуальный контракт от 26.07.2026: этот scheduler доставляет legacy non-claim rewards и обычные claim-required rewards только после своевременного явного claim гостя. `GuestGamificationPipelineSchedulerService` автоматически фиксирует квалификацию Battle Pass/заданий/check-in/event, но не начисляет бонус и не обходит 30-дневный кошелёк.
+> Актуальный контракт от 30.07.2026: этот scheduler доставляет legacy non-claim rewards и обычные claim-required rewards только после своевременного явного claim гостя. `GuestGamificationPipelineSchedulerService` автоматически фиксирует квалификацию Battle Pass/заданий/check-in/event, но не начисляет бонус и не обходит 30-дневный кошелёк. Completion ACK не является claim; завершённые и ожидающие результаты остаются доступны через reward wallet/history.
 
 Этот runbook включает API-side scheduler `GuestBonusLedgerSchedulerService`, который без админского клика вызывает защищенный контур `POST /guests/gamification/scheduled/bonus-ledger/dispatch`. Scheduler работает внутри `leetplus-api.service`, поэтому отдельный systemd unit не нужен.
+
+Bonus ledger не оценивает условия миссии, Battle Pass, лутбокса или чекина. LIVE, последовательный Ledger fallback и supplemental-контур сходятся до него в единые immutable event/intent/effect/wallet записи; дальше действует один claim gate и один контур доставки.
 
 ## Что делает scheduler
 

@@ -8,16 +8,18 @@ async function verifyTenantExecutionRevisionFence() {
   const suffix = randomUUID();
   const tenantId = `execution-revision-smoke-${suffix}`;
   const tenantSlug = `execution-revision-smoke-${suffix}`;
+  const pilotShellTenantId = `activation-guard-smoke-${suffix}`;
+  const pilotShellTenantSlug = `activation-guard-smoke-${suffix}`;
   const ledgerEntryId = `execution-revision-ledger-${suffix}`;
 
   try {
-    const shell = await prisma.tenant.create({
+    const revisionTenant = await prisma.tenant.create({
       data: {
         id: tenantId,
         name: 'Execution revision smoke',
         slug: tenantSlug,
         status: 'SUSPENDED',
-        customerStage: 'PILOT',
+        customerStage: 'INTERNAL',
         onboardingStatus: 'PROVISIONING',
       },
       select: {
@@ -28,12 +30,83 @@ async function verifyTenantExecutionRevisionFence() {
     });
 
     if (
-      shell.executionRevision !== 0 ||
-      shell.trialStartsAt !== null ||
-      shell.trialEndsAt !== null
+      revisionTenant.executionRevision !== 0 ||
+      revisionTenant.trialStartsAt !== null ||
+      revisionTenant.trialEndsAt !== null
     ) {
       throw new Error(
-        'A new suspended external shell did not start at revision 0 without a trial.',
+        'A new internal revision fixture did not start at revision 0 without a trial.',
+      );
+    }
+
+    const pilotShell = await prisma.tenant.create({
+      data: {
+        id: pilotShellTenantId,
+        name: 'Activation guard smoke',
+        slug: pilotShellTenantSlug,
+        status: 'SUSPENDED',
+        customerStage: 'PILOT',
+        onboardingStatus: 'PROVISIONING',
+      },
+      select: {
+        status: true,
+        customerStage: true,
+        onboardingStatus: true,
+        entitlementProfileRevision: true,
+        executionRevision: true,
+        trialStartsAt: true,
+        trialEndsAt: true,
+      },
+    });
+
+    if (
+      pilotShell.status !== 'SUSPENDED' ||
+      pilotShell.customerStage !== 'PILOT' ||
+      pilotShell.onboardingStatus !== 'PROVISIONING' ||
+      pilotShell.entitlementProfileRevision !== 0 ||
+      pilotShell.executionRevision !== 0 ||
+      pilotShell.trialStartsAt !== null ||
+      pilotShell.trialEndsAt !== null
+    ) {
+      throw new Error(
+        'The external activation-guard fixture was not an exact dormant PILOT shell.',
+      );
+    }
+
+    let directExternalProfileMutationRejected = false;
+    try {
+      await prisma.tenant.update({
+        where: { id: pilotShellTenantId },
+        data: { entitlementProfileRevision: 1 },
+      });
+    } catch {
+      directExternalProfileMutationRejected = true;
+    }
+    if (!directExternalProfileMutationRejected) {
+      throw new Error(
+        'A direct entitlement-profile mutation of an external PILOT shell was accepted.',
+      );
+    }
+
+    const externalTrialStartsAt = new Date(Date.now() - 60_000);
+    const externalTrialEndsAt = new Date(Date.now() + 86_400_000);
+    let directExternalActivationRejected = false;
+    try {
+      await prisma.tenant.update({
+        where: { id: pilotShellTenantId },
+        data: {
+          status: 'ACTIVE',
+          onboardingStatus: 'OWNER_INVITED',
+          trialStartsAt: externalTrialStartsAt,
+          trialEndsAt: externalTrialEndsAt,
+        },
+      });
+    } catch {
+      directExternalActivationRejected = true;
+    }
+    if (!directExternalActivationRejected) {
+      throw new Error(
+        'A direct activation of an external PILOT shell bypassed the activation coordinator.',
       );
     }
 
@@ -70,41 +143,6 @@ async function verifyTenantExecutionRevisionFence() {
     if (!directRevisionMutationRejected) {
       throw new Error(
         'A direct mutation of trigger-owned executionRevision was accepted.',
-      );
-    }
-
-    let triallessActivationRejected = false;
-    try {
-      await prisma.tenant.update({
-        where: { id: tenantId },
-        data: {
-          status: 'ACTIVE',
-          onboardingStatus: 'ACTIVE',
-        },
-      });
-    } catch {
-      triallessActivationRejected = true;
-    }
-    if (!triallessActivationRejected) {
-      throw new Error(
-        'An active external tenant without a finite trial window was accepted.',
-      );
-    }
-
-    let triallessNonShellRejected = false;
-    try {
-      await prisma.tenant.update({
-        where: { id: tenantId },
-        data: {
-          onboardingStatus: 'OWNER_INVITED',
-        },
-      });
-    } catch {
-      triallessNonShellRejected = true;
-    }
-    if (!triallessNonShellRejected) {
-      throw new Error(
-        'A trialless external tenant escaped the exact SUSPENDED/PROVISIONING shell.',
       );
     }
 
@@ -272,7 +310,9 @@ async function verifyTenantExecutionRevisionFence() {
     await prisma.guestBonusLedgerEntry.deleteMany({
       where: { id: ledgerEntryId, tenantId },
     });
-    await prisma.tenant.deleteMany({ where: { id: tenantId } });
+    await prisma.tenant.deleteMany({
+      where: { id: { in: [tenantId, pilotShellTenantId] } },
+    });
   }
 }
 

@@ -1,23 +1,38 @@
 # LeetPlus Project State
 
-## Mission wizard v2 and supplemental ledger layer (20.07.2026)
+## Current gamification state (30.07.2026)
+
+- The canonical manager route is `/gamification`, diagnostics live at `/gamification/log`, missions are created and edited only in `/gamification/missions/wizard`, and the guest flow is `/game/auth -> /game/clubs -> /game` with reward history at `/game/rewards`.
+- Mission v2 and Battle Pass share the same condition family: `APP_OPEN`, `PLAY_TIME`, `PRODUCT_PURCHASE`, `BALANCE_TOPUP`, and `CHECK_IN`. Loot boxes accept `ANY`, `HOURLY`, or `PACKAGE_OR_SUBSCRIPTION`.
+- Source policy is intentionally layered. `APP_OPEN` and check-in remain direct LIVE-only facts. Session start and play time can use sequential `LIVE_WITH_LEDGER_FALLBACK`. Purchases remain LIVE-primary with Ledger in SHADOW. Balance top-up uses the isolated `LEDGER_SUPPLEMENTAL` path.
+- Fallback/supplemental/materializer availability in code is not proof that it is enabled on production. Runtime env/status and `/gamification/log` are authoritative for mode, tenant scope, cutoff, fact allow-list, lag, retries, and dead letters.
+- Completion notifications for missions and Battle Pass are durable and return after reload until the guest explicitly acknowledges them. ACK is read-only and is separate from wallet claim/open.
+- The reward wallet and `/game/rewards` keep pending and completed outcomes visible. Ordinary reward and XP are claimed independently; a loot box is an entitlement and rolls a prize only on manual open.
+- Expired or missing guest sessions on `/game` and `/game/rewards` return the guest to `/game/auth`; retryable API/network failures keep a separate retry path and do not masquerade as an authentication failure.
+- A domain-scoped, idempotent identity resolver refreshes stale Langame links from the verified guest identity during authentication and synchronization. Ambiguous matches fail closed instead of binding a profile to the wrong guest.
+- Check-in streak progress is based on unique club-local calendar dates and resets after a missed date. Reward-only `REWARD_TEMPLATE` loot boxes are excluded from the standalone catalog.
+- Product categories keep separate `LANGAME` and `LEETPLUS` identities. Exact tariff dictionaries remain blocked by readiness checks until a reliable structured source is available.
+
+### Mission wizard v2 and supplemental ledger layer (20.07.2026)
+
+> Historical implementation milestone. The current source-policy summary above and production runtime status are authoritative; the safe defaults and rollout state recorded below do not prove the current VDS configuration.
 
 - Added the embedded mission wizard route `/gamification/missions/wizard` with the three steps `Условия → Награды → Внешнее оформление`, DRAFT-only autosave, backend readiness-check and explicit activation confirmation. New and existing missions are created and edited through this wizard; the legacy mission editor is no longer exposed.
 - Mission definitions are versioned. Existing v1 missions remain on the current LIVE path; v2 `PLAY_TIME`, `PRODUCT_PURCHASE` and `CHECK_IN` missions use `LIVE_PRIMARY`, while v2 `BALANCE_TOPUP` missions are assigned `LEDGER_SUPPLEMENTAL` exclusively by the backend.
 - Added an isolated supplemental scheduler with `OFF`, `SHADOW` and `LIVE` modes, a kill switch, tenant scope, safe normalized evidence and stable `sourceExternalId` idempotency. Its allowed fact set is currently hard-limited to `BALANCE_TOPUP`.
-- Started a separate sequential `LIVE_WITH_LEDGER_FALLBACK` contour for play-time and later purchases: source-neutral `originKey`, strict execution-lane router, first-seen grace receipt, leased atomic claim and reuse of the existing `processEvent`/reward pipeline are implemented behind `OFF`. Additive migrations and atomic event/XP/reward-intent persistence are deployed; fallback rollout remains OFF. Play-time can use the stable session ID when Langame omits a generic row ID, while purchases still require a stable sale ID and cancellation/return reconciliation.
+- Started a separate sequential `LIVE_WITH_LEDGER_FALLBACK` contour for play-time and later purchases: source-neutral `originKey`, strict execution-lane router, first-seen grace receipt, leased atomic claim and reuse of the existing `processEvent`/reward pipeline are implemented behind fail-closed runtime controls. Additive migrations and atomic event/XP/reward-intent persistence are deployed. Play-time can use the stable session ID when Langame omits a generic row ID, while purchases still require a stable sale ID and cancellation/return reconciliation.
 - Added administrator-only fallback controls: runtime status is exposed without raw evidence and is tenant-redacted for non-platform operators; only an `OWNER`, `ADMIN` or `MANAGER` can opt a v2 `PLAY_TIME` draft into `LIVE_WITH_LEDGER_FALLBACK`. Active and non-play-time rules fail closed, optimistic locking prevents wizard autosave from racing a canary policy change, and rollout can be constrained to one exact profile in addition to tenant scope.
 - Purchase v2 rules support ANY/ALL across separate purchases and single/minimum/cumulative amount modes. Only positive, non-canceled purchases linked to a guest are eligible. Product categories are synchronized for every Langame domain and club and can be selected in the wizard; exact tariff dictionaries remain disabled as `В разработке`.
 - Langame catalog sync reads the active product-group directory per domain and the product configuration per club. Category membership is stored separately as a club-scoped mapping and joins to the canonical product through Langame `product_id`, so sync does not overwrite the LeetPlus-owned `Product.categoryId`.
 - Category-based purchase missions explicitly select `LANGAME` or `LEETPLUS`. Langame rules match club-scoped `domain:groupId` values; LeetPlus rules match the internal `Category.id`. The wizard, LIVE evaluator and SHADOW ledger never combine the two selector sets implicitly.
 - Guest task cards now open a full modal rendered by the same React preview component used by the wizard. Quest covers use a dedicated tenant-owned media store with JPG/PNG/WebP signature validation and a 2 MB limit.
-- Supplemental production mode remains `OFF` by default. Production rollout must pass `SHADOW` diagnostics before `LIVE` is enabled; the existing LIVE snapshot pipeline is not replaced.
+- Supplemental production mode has the safe code default `OFF`. Its actual production mode must be confirmed through runtime status; rollout must pass `SHADOW` diagnostics before `LIVE` is enabled, and the existing LIVE snapshot pipeline is not replaced.
 - Session-start lootboxes now have an isolated Ledger recovery lane behind `OFF|SHADOW|LIVE`. It reuses the LIVE evaluator and the same atomic entitlement writer, and can materialize only an openable entitlement, never a random prize. Exact tenant/profile/cutoff scope and matching entitlement read scope are mandatory in LIVE; replay and parser-version changes are deduplicated by stable source identity.
 - Guest-facing lootbox availability and every interactive open are entitlement-authoritative: `game-summary`, the catalog card and both open routes require the same live 30-day wallet entitlement. `OFF|CANARY|PRIMARY` remains diagnostic/recovery rollout metadata and cannot authorize a legacy-event-only open. Earned daily entitlements remain openable after the source time window/day; period limits control a new entitlement, not the lifetime of an existing one.
 - The ordinary LIVE snapshot window remains the primary path. Historical anti-join recovery for guest-bound sessions and purchases is independently gated by `GUEST_GAME_PIPELINE_BACKFILL_MODE=OFF|SHADOW|LIVE` and defaults to `OFF`, where it executes no anti-join SQL. Every enabled mode requires an exact tenant and an explicitly false kill switch; `LIVE` also requires a timezone-qualified cutoff plus an exact profile unless tenant-wide rollout is explicitly allowed. `SHADOW` records diagnostic decisions only and cannot create event, XP, reward or entitlement. `PLAY_HOUR` is emitted only after a session has stopped, so an intermediate duration cannot seal a stale event before the final 60-minute boundary. The Ledger recovery lane remains secondary and acts only after the primary grace window.
 - Standalone cases, mission-target cases and Battle Pass lootbox rewards share entitlement limits and opening semantics. `STANDALONE` is directly earnable, `REWARD_TEMPLATE` is only granted by a mission or Battle Pass target, and `BOTH` supports both paths. Qualification never selects a random prize; the guest's manual open action does that exactly once.
 
-Last updated: 2026-07-25
+Last updated: 2026-07-30
 
 ## Current Workflow
 
@@ -29,7 +44,7 @@ Last updated: 2026-07-25
 - VDS auto-deploy watches `origin/main`; preferred workflow is code change, verify build if needed, commit, push.
 - VDS deploy script builds API and Web sequentially (`pnpm --filter api build`, then `pnpm --filter web build`) because the server currently has no swap and parallel workspace builds can be OOM-killed, leaving an incomplete `.next` production build.
 - Do not spend time refreshing local DB state or restarting local services unless explicitly requested. User reviews changes directly on `leetplus.ru`.
-- Production QA owner account: `123@123.ru`; production QA shift-role administrator account: `123admin@123.ru`. Passwords are provided in the task context and must not be committed to the repository.
+- Production QA uses dedicated operator accounts. Credentials remain outside the repository and project documentation.
 
 ## Stack
 
@@ -58,7 +73,7 @@ Last updated: 2026-07-25
 - Lootboxes remain intentional guest actions: the pipeline may create eligibility/entitlement, but the prize is selected and issued only through the guest's `open` action. A fulfilled time, day or session condition must not be re-evaluated as a reason to remove an already granted entitlement.
 - `/game` polls game summary every 15 seconds and compares it with the previous state. New check-in, task and Battle Pass completions are shown as a sequential modal queue so several rewards from one refresh are not lost.
 - Check-in is separate from задания and limited to one check-in per club per local calendar day. Successful, already-counted and error outcomes use modal dialogs, not transient tooltips.
-- Session payment conditions are intentionally coarse while Langame does not expose a stable structured tariff discriminator: `HOURLY` versus `PACKAGE_OR_SUBSCRIPTION` ("пакет или абонемент"). Langame guest-log text and activity-ledger facts are used as a second source for diagnosing package/subscription usage.
+- Session payment conditions are intentionally coarse while Langame does not expose a stable structured tariff discriminator: `ANY`, `HOURLY` or `PACKAGE_OR_SUBSCRIPTION` ("пакет или абонемент"). An unknown session type may satisfy only `ANY`; it must not be guessed as hourly or package-based. Langame guest-log text and activity-ledger facts remain diagnostic evidence for package/subscription usage.
 - The extended editor controls rule conditions and activation. Activating an item for clubs puts it into the current guest configuration immediately; the visual editor keeps its own publish step only for layout and appearance. Deleting an item used by clubs requires an explicit warning and removes the active placement everywhere after confirmation.
 - Guest game management is a separate top-level navigation area at `/gamification`; its diagnostic journal is `/gamification/log`. Legacy `/guests/gamification` and `/gamification-log` links redirect to the new routes. Rule decisions, activity ledger facts, source freshness and reward history remain available there. Never put raw phones, tokens, Langame credentials or VDS credentials in project documentation.
 

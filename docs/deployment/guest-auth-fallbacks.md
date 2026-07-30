@@ -1,6 +1,16 @@
 # Fallback-вход в геймификацию
 
-Этот runbook описывает резервные каналы авторизации участника геймификации на `/play`: звонок пользователя на номер и входящий звонок с последними 4 цифрами. Основной канал остается Telegram-бот с contact-share; fallback нужен, чтобы не останавливать регистрацию при временно неготовом Telegram или высокой цене SMS.
+Дата актуализации: 30.07.2026
+
+Этот runbook описывает резервные каналы авторизации участника геймификации. Канонический пользовательский маршрут: `/game/auth -> /game/clubs -> /game`; `/play` сохраняется только как совместимый legacy-вход. Основной канал остаётся Telegram-бот с contact-share; fallback нужен, чтобы не останавливать регистрацию при временно неготовом Telegram или высокой цене SMS.
+
+## Маршрутизация и ошибки сессии
+
+- Успешное подтверждение Telegram, звонком или SMS должно выдать guest-token, затем открыть выбор клуба `/game/clubs` и только после выбора — `/game`.
+- `401`, отсутствующая или истёкшая guest-cookie означают повторную авторизацию. На `/game` и `/game/rewards` показывается сообщение `Сессия входа не найдена или истекла. Подтвердите телефон заново.` с основным действием `Перейти ко входу` на `/game/auth`.
+- Network/timeout/5xx — повторяемая техническая ошибка, а не доказательство истёкшей сессии. UI показывает `Повторить` и безопасный переход на `/start`, не стирая валидную cookie заранее.
+- Возврат из Telegram должен продолжать тот же handoff/challenge. Повторный status polling обязан быть идемпотентным и не создавать второй профиль, referral event или guest-token lifecycle.
+- После выбора клуба первый trusted `APP_OPEN` фиксирует `GuestGameProfile.gameActivatedAt`; одно подтверждение телефона без выбора клуба и `APP_OPEN` ещё не является входом в игровой контур.
 
 ## Приоритет каналов
 
@@ -11,7 +21,7 @@
 
 ## Звонок пользователя на номер
 
-Контур с SMS.ru Callcheck: `/play` создает `USER_CALL` challenge, LeetPlus запрашивает у SMS.ru временный номер через `callcheck/add`, гость звонит на этот номер с введенного телефона, а browser status endpoint polling-ом проверяет `callcheck/status` по сохраненному `check_id`. Провайдер сбрасывает вызов после проверки, поэтому звонок для гостя бесплатный; API возвращает `freeCall=true`, а frontend показывает нейтральное сообщение `Звонок будет сброшен сразу после проверки` рядом с методом входа. После подтверждения LeetPlus выдает guest-token и активирует отдельный `GuestGameProfile` без callback от администратора.
+Контур с SMS.ru Callcheck: `/game/auth` создает `USER_CALL` challenge, LeetPlus запрашивает у SMS.ru временный номер через `callcheck/add`, гость звонит на этот номер с введенного телефона, а browser status endpoint polling-ом проверяет `callcheck/status` по сохраненному `check_id`. Провайдер сбрасывает вызов после проверки, поэтому звонок для гостя бесплатный; API возвращает `freeCall=true`, а frontend показывает нейтральное сообщение `Звонок будет сброшен сразу после проверки` рядом с методом входа. После подтверждения LeetPlus выдает guest-token и активирует отдельный `GuestGameProfile` без callback от администратора.
 
 Env на VDS для SMS.ru:
 
@@ -24,7 +34,7 @@ GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL="https://sms.ru"
 
 `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID` хранится только в production env. Не коммитить реальное значение в `.env.example`, runbook или issue.
 
-Ручной callback-provider остается совместимым контуром: `/play` создает `USER_CALL` challenge, гость звонит с введенного телефона на настроенный номер, внешний call-provider подтверждает caller id через защищенный callback.
+Ручной callback-provider остается совместимым контуром: `/game/auth` создает `USER_CALL` challenge, гость звонит с введенного телефона на настроенный номер, внешний call-provider подтверждает caller id через защищенный callback.
 
 Env на VDS для ручного provider:
 
@@ -75,7 +85,7 @@ Readiness `OTP_SMS` в Guest Game Hub должен показывать толь
 
 ## Входящий звонок с 4 цифрами
 
-Контур: `/play` создает `INCOMING_CALL_LAST4` challenge, backend отправляет запрос call-provider, provider звонит гостю, гость вводит последние 4 цифры номера входящего звонка в `/play`, LeetPlus сверяет код и выдает guest-token.
+Контур: `/game/auth` создает `INCOMING_CALL_LAST4` challenge, backend отправляет запрос call-provider, provider звонит гостю, гость вводит последние 4 цифры номера входящего звонка в `/game/auth`, LeetPlus сверяет код и выдает guest-token.
 
 Env на VDS:
 
@@ -92,9 +102,9 @@ GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN="<provider-token>"
 
 ## Безопасный запуск
 
-1. Сначала включить Telegram-runbook и убедиться, что `/play` показывает Telegram первым.
+1. Сначала включить Telegram-runbook и убедиться, что `/game/auth` показывает Telegram первым.
 2. Настроить `USER_CALL` env, перезапустить API и проверить readiness `Звонок пользователя для входа` в Guest Game Hub. Для текущего production-пути использовать SMS.ru Callcheck.
-3. Выполнить QA: открыть `/play`, выбрать клуб 1337, выбрать звонок пользователя, ввести телефон, убедиться, что UI показывает нейтральное сообщение о сбросе звонка после проверки, позвонить на выданный номер и дождаться guest-token через polling status. Для ручного provider дополнительно отправить provider callback.
+3. Выполнить QA: открыть `/game/auth`, выбрать звонок пользователя, ввести телефон, убедиться, что UI показывает нейтральное сообщение о сбросе звонка после проверки, позвонить на выданный номер, дождаться guest-token через polling status и перейти к `/game/clubs`. Для ручного provider дополнительно отправить provider callback.
 4. Проверить, что создан или переиспользован отдельный `GuestGameProfile`, общий `Guest` публичной регистрацией не создан, а status response содержит только safe match/backfill.
 5. SMS держать как резервный канал после user-call: в staged/test-mode проверять provider acceptance и отсутствие утечек; live-режим включать отдельно только через `GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED=true`, с включенными rate limits, anti-abuse guard и бюджетным контролем.
 6. `INCOMING_CALL_LAST4` включать только после выбора provider-а исходящих звонков и отдельного теста блокировок: `NOT_CONFIGURED`, `BLOCKED`, успешный verify.
@@ -105,7 +115,7 @@ GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN="<provider-token>"
 - Отключить звонок пользователя: `GUEST_PORTAL_USER_CALL_ENABLED=false`, затем перезапустить `leetplus-api.service`.
 - Отключить входящий звонок с 4 цифрами: `GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED=false`.
 - Если SMS.ru `api_id` или provider callback скомпрометирован, заменить `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID`, `GUEST_PORTAL_USER_CALL_SECRET` или `GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN` на VDS и перезапустить API.
-- `/play` автоматически откроет первый готовый канал из оставшихся: Telegram, user-call, SMS или incoming-call-last4.
+- `/game/auth` автоматически откроет первый готовый канал из оставшихся: Telegram, user-call, SMS или incoming-call-last4.
 
 ## Инварианты
 

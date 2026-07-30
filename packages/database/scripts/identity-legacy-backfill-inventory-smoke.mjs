@@ -17,6 +17,9 @@ import {
   CURRENT_EXPECTED_LATEST_MIGRATION,
   CURRENT_EXPECTED_MIGRATION_COUNT,
 } from "./staff-task-integrity-migration-state.mjs";
+import {
+  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
+} from "./runtime-function-enrollment.mjs";
 
 const SCRIPT_NAME = "identity-legacy-backfill-inventory-smoke";
 const SMOKE_CONFIRMATION = "run-identity-legacy-inventory-smoke";
@@ -33,6 +36,15 @@ const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const ADMIN_CONNECT_TIMEOUT_SECONDS = 10;
 const ADMIN_LOCK_TIMEOUT_MS = 5_000;
 const ADMIN_STATEMENT_TIMEOUT_MS = 120_000;
+const CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS = Object.freeze(
+  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.filter(
+    ({ key }) => key !== "identity_mail_outbox_release_guard_v1",
+  ),
+);
+assert.equal(
+  CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.length,
+  20,
+);
 const READER_COLUMN_GRANTS = Object.freeze({
   IdentityEmailClaim: Object.freeze([
     "emailCanonical",
@@ -77,10 +89,13 @@ const IDENTITY_FUNCTION_SIGNATURES = Object.freeze([
   'public."identity_email_claim_transition_v2"(text,text,text,text,integer,text,text)',
   'public."identity_email_claim_release_v1"(text,text,text,text,integer)',
   'public."identity_email_claim_release_v2"(text,text,text,text,integer)',
-  'public."identity_mail_outbox_hold_immutable_v1"()',
+  'public."identity_mail_outbox_release_guard_v1"()',
   'public."identity_owner_invite_issue_command_immutable_v1"()',
   'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
   ...SHARED_BETA_ADMISSION_FUNCTIONS.map((entry) => entry.catalogSignature),
+  ...CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.map(
+    (entry) => entry.catalogSignature,
+  ),
 ]);
 
 const HELP = `
@@ -1323,7 +1338,9 @@ async function assertAuthorityAndCatalogDriftRejected(
   hmacKey,
   expectedMigrationArtifact,
   sensitive,
+  roleCreationAttempts,
 ) {
+  assert.ok(Array.isArray(roleCreationAttempts));
   const adminUrl = databaseUrlFor(sourceUrl, descriptor.databaseName);
   const readerUrl = databaseUrlFor(sourceUrl, descriptor.databaseName, {
     username: descriptor.roleName,
@@ -1385,11 +1402,16 @@ async function assertAuthorityAndCatalogDriftRejected(
     const profileDigestFunction = SHARED_BETA_ADMISSION_FUNCTIONS.find(
       (entry) => entry.volatility === "s" && entry.language === "sql",
     );
+    const runtimeReleaseFunction =
+      CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.find(
+        (entry) => entry.key === "shared_beta_runtime_digest_v1",
+      );
     const admissionTypeName = SHARED_BETA_ADMISSION_DORMANT_TYPES[0];
     assert.equal(typeof admissionRelationName, "string");
     assert.ok(Array.isArray(admissionColumn));
     assert.equal(typeof admissionFunction?.catalogSignature, "string");
     assert.equal(typeof profileDigestFunction?.catalogSignature, "string");
+    assert.equal(typeof runtimeReleaseFunction?.catalogSignature, "string");
     assert.equal(typeof admissionTypeName, "string");
     const quotedAdmissionRelation = quoteIdentifier(admissionRelationName);
     const quotedAdmissionColumn = quoteIdentifier(admissionColumn[1]);
@@ -1474,6 +1496,7 @@ async function assertAuthorityAndCatalogDriftRejected(
         NOREPLICATION
         NOBYPASSRLS`,
     );
+    roleCreationAttempts.push(thirdPartyRoleName);
     registerCleanup("remove dormant ACL third-party role", async () => {
       await admin.$executeRawUnsafe(
         `ALTER TABLE public.${quotedAdmissionRelation}
@@ -1499,6 +1522,11 @@ async function assertAuthorityAndCatalogDriftRejected(
       await admin.$executeRawUnsafe(
         `REVOKE ALL PRIVILEGES
         ON FUNCTION ${admissionFunctionSignature}
+        FROM ${thirdPartyRole}`,
+      );
+      await admin.$executeRawUnsafe(
+        `REVOKE ALL PRIVILEGES
+        ON FUNCTION ${runtimeReleaseFunction.catalogSignature}
         FROM ${thirdPartyRole}`,
       );
       await admin.$executeRawUnsafe(
@@ -1582,6 +1610,30 @@ async function assertAuthorityAndCatalogDriftRejected(
     await admin.$executeRawUnsafe(
       `REVOKE EXECUTE
       ON FUNCTION ${admissionFunctionSignature}
+      FROM ${thirdPartyRole}`,
+    );
+
+    await admin.$executeRawUnsafe(
+      `GRANT EXECUTE
+      ON FUNCTION ${runtimeReleaseFunction.catalogSignature}
+      TO ${thirdPartyRole}`,
+    );
+    const thirdPartyRuntimeReleaseAclDrift = await inspect();
+    assert.equal(
+      thirdPartyRuntimeReleaseAclDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      thirdPartyRuntimeReleaseAclDrift.report?.summary?.inventoryExecuted,
+      false,
+    );
+    assert.ok(
+      thirdPartyRuntimeReleaseAclDrift.report?.database?.catalog
+        ?.dormantFunctionNonownerAclCount > 0,
+    );
+    await admin.$executeRawUnsafe(
+      `REVOKE EXECUTE
+      ON FUNCTION ${runtimeReleaseFunction.catalogSignature}
       FROM ${thirdPartyRole}`,
     );
 
@@ -1876,6 +1928,107 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     await requireCleanCheckpoint();
 
+    const [runtimeReleaseDefinition] = await admin.$queryRawUnsafe(`
+      SELECT pg_catalog.pg_get_functiondef(
+        pg_catalog.to_regprocedure(
+          'public."shared_beta_runtime_digest_v1"(text,jsonb)'
+        )
+      ) AS definition
+    `);
+    assert.equal(typeof runtimeReleaseDefinition?.definition, "string");
+    await admin.$executeRawUnsafe(`
+      CREATE OR REPLACE FUNCTION public."shared_beta_runtime_digest_v1"(
+        domain text,
+        candidate jsonb
+      )
+      RETURNS text
+      LANGUAGE sql
+      IMMUTABLE
+      STRICT
+      SECURITY DEFINER
+      SET search_path = pg_catalog
+      AS 'SELECT pg_catalog.repeat(''0'', 64)'
+    `);
+    registerCleanup("restore runtime-release function definition", () =>
+      admin.$executeRawUnsafe(runtimeReleaseDefinition.definition),
+    );
+    const runtimeReleaseDefinitionDrift = await inspect();
+    assert.equal(
+      runtimeReleaseDefinitionDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      runtimeReleaseDefinitionDrift.report?.database?.catalog
+        ?.matchedFunctionCount,
+      41,
+    );
+    assert.equal(
+      runtimeReleaseDefinitionDrift.report?.database?.catalog
+        ?.actualFunctionCount,
+      42,
+    );
+    await requireCleanCheckpoint();
+
+    await admin.$executeRawUnsafe(`
+      ALTER FUNCTION
+        public."shared_beta_runtime_database_identity_digest_v1"(text)
+      RENAME TO "shared_beta_runtime_database_identity_digest_drift_v1"
+    `);
+    registerCleanup("restore runtime-release function name", () =>
+      admin.$executeRawUnsafe(`
+        ALTER FUNCTION
+          public."shared_beta_runtime_database_identity_digest_drift_v1"(text)
+        RENAME TO "shared_beta_runtime_database_identity_digest_v1"
+      `),
+    );
+    const runtimeReleaseMissingDrift = await inspect();
+    assert.equal(
+      runtimeReleaseMissingDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      runtimeReleaseMissingDrift.report?.database?.catalog
+        ?.matchedFunctionCount,
+      41,
+    );
+    assert.equal(
+      runtimeReleaseMissingDrift.report?.database?.catalog
+        ?.actualFunctionCount,
+      42,
+    );
+    await requireCleanCheckpoint();
+
+    await admin.$executeRawUnsafe(`
+      CREATE FUNCTION public."shared_beta_runtime_digest_v1"(text)
+      RETURNS text
+      LANGUAGE sql
+      SECURITY INVOKER
+      SET search_path = pg_catalog
+      AS 'SELECT $1'
+    `);
+    await admin.$executeRawUnsafe(`
+      REVOKE ALL
+      ON FUNCTION public."shared_beta_runtime_digest_v1"(text)
+      FROM PUBLIC
+    `);
+    registerCleanup("drop unexpected runtime-release overload", () =>
+      admin.$executeRawUnsafe(`
+        DROP FUNCTION IF EXISTS
+          public."shared_beta_runtime_digest_v1"(text)
+      `),
+    );
+    const runtimeReleaseOverloadDrift = await inspect();
+    assert.equal(
+      runtimeReleaseOverloadDrift.report?.summary?.decision,
+      "SCHEMA_MISMATCH",
+    );
+    assert.equal(
+      runtimeReleaseOverloadDrift.report?.database?.catalog
+        ?.actualFunctionCount,
+      43,
+    );
+    await requireCleanCheckpoint();
+
     await admin.$executeRawUnsafe(`
       ALTER TABLE public."IdentityMailOutbox"
       ADD COLUMN "catalogDriftProbe" integer
@@ -1890,7 +2043,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(columnDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(
       columnDrift.report?.database?.catalog?.actualExactIdentityColumnCount,
-      110,
+      111,
     );
     await requireCleanCheckpoint();
 
@@ -1929,12 +2082,12 @@ async function assertAuthorityAndCatalogDriftRejected(
 
     await admin.$executeRawUnsafe(`
       ALTER TABLE public."IdentityMailOutbox"
-      DISABLE TRIGGER "IdentityMailOutbox_hold_immutable_trigger"
+      DISABLE TRIGGER "IdentityMailOutbox_release_guard_trigger"
     `);
-    registerCleanup("enable identity outbox immutable trigger", () =>
+    registerCleanup("enable identity outbox release guard trigger", () =>
       admin.$executeRawUnsafe(`
         ALTER TABLE public."IdentityMailOutbox"
-        ENABLE TRIGGER "IdentityMailOutbox_hold_immutable_trigger"
+        ENABLE TRIGGER "IdentityMailOutbox_release_guard_trigger"
       `),
     );
     const triggerDrift = await inspect();
@@ -1961,8 +2114,8 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     const enumDrift = await inspect();
     assert.equal(enumDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
-    assert.equal(enumDrift.report?.database?.catalog?.matchedEnumLabelCount, 7);
-    assert.equal(enumDrift.report?.database?.catalog?.totalEnumLabelCount, 8);
+    assert.equal(enumDrift.report?.database?.catalog?.matchedEnumLabelCount, 8);
+    assert.equal(enumDrift.report?.database?.catalog?.totalEnumLabelCount, 9);
     await requireCleanCheckpoint();
 
     await admin.$executeRawUnsafe(
@@ -2157,7 +2310,7 @@ export function runSelfTest() {
     ),
     true,
   );
-  assert.equal(IDENTITY_FUNCTION_SIGNATURES.length, 22);
+  assert.equal(IDENTITY_FUNCTION_SIGNATURES.length, 42);
   assert.equal(
     IDENTITY_FUNCTION_SIGNATURES.includes(
       'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
@@ -2170,6 +2323,12 @@ export function runSelfTest() {
         entry.volatility === "s" &&
         entry.language === "sql" &&
         IDENTITY_FUNCTION_SIGNATURES.includes(entry.catalogSignature),
+    ),
+    true,
+  );
+  assert.equal(
+    CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.every((entry) =>
+      IDENTITY_FUNCTION_SIGNATURES.includes(entry.catalogSignature),
     ),
     true,
   );
@@ -2194,7 +2353,7 @@ export function runSelfTest() {
     /statement_timeout=120000/u,
   );
   return {
-    checks: 21,
+    checks: 22,
     destructiveTarget: "generated-clones-only",
     script: SCRIPT_NAME,
     sourceDatabaseWrites: false,
@@ -2366,6 +2525,7 @@ export async function runSmoke(environment = process.env) {
       healthy.config.hmacKey,
       expectedMigrationArtifact,
       stateByScenario.get("healthy").sensitive,
+      roleCreationAttempts,
     );
 
     const review = await runScenario(

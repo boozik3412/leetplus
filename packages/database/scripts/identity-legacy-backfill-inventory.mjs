@@ -27,6 +27,7 @@ import {
   SHARED_BETA_ADMISSION_TRIGGERS,
   SHARED_BETA_ADMISSION_TYPES,
 } from "./shared-beta-admission-provenance-catalog.mjs";
+import { EXCLUDED_RUNTIME_RELEASE_FUNCTIONS } from "./runtime-function-enrollment.mjs";
 
 export const SCRIPT_NAME = "identity-legacy-backfill-inventory";
 export const REPORT_SCHEMA_VERSION = 1;
@@ -51,6 +52,214 @@ const DEFAULT_LOCK_TIMEOUT_MS = 500;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 30_000;
 const DEFAULT_TRANSACTION_TIMEOUT_MS = 120_000;
 const MAX_HMAC_KEY_BYTES = 4_096;
+const CURRENT_174_OUTBOX_RELEASE_GUARD =
+  "identity_mail_outbox_release_guard_v1";
+const CURRENT_174_ADMISSION_DECISION_GUARD =
+  "shared_beta_tenant_admission_decision_guard_v1";
+const CURRENT_174_ADMISSION_DECISION_GUARD_DEFINITION_SHA256 =
+  "d27ce0e9a3644f39707dab510384805d34def0f68a8ef99dbefa7aadebeea891";
+const CURRENT_174_OUTBOX_CRYPTO_CHECK_DEFINITION_SHA256 =
+  "17b45564316ec0c1211a56ba6d424842ccc1a6a5ca04d4db9f3f1768cb782ad5";
+const CURRENT_174_ADMISSION_DECISION_STATE_CHECK =
+  "TenantAdmissionDecision_state_check";
+const CURRENT_174_ADMISSION_DECISION_STATE_CHECK_DEFINITION_SHA256 =
+  "858cd4ca21dc83d394178534690cebd15e4ef9932dc83000bb143c2b17b488d7";
+const CURRENT_172_ADMISSION_DECISION_AVAILABLE_INDEX =
+  "tenant_admission_decision_one_unrevoked_uidx";
+const CURRENT_174_ADMISSION_DECISION_AVAILABLE_INDEX =
+  "tenant_admission_decision_one_available_uidx";
+const CURRENT_174_ADMISSION_DECISION_AVAILABLE_INDEX_DEFINITION_SHA256 =
+  "f5643096ae50c2b9fc64e47ba5eb8d6ed6b5617ed4b4b782b0a4aef9393b8fa0";
+assert.deepEqual(
+  SHARED_BETA_ADMISSION_CONSTRAINTS.filter(
+    ([name]) => name === CURRENT_174_ADMISSION_DECISION_STATE_CHECK,
+  ).map(([name, relation, type]) => [name, relation, type]),
+  [
+    [
+      CURRENT_174_ADMISSION_DECISION_STATE_CHECK,
+      "TenantAdmissionDecision",
+      "c",
+    ],
+  ],
+  "CURRENT_174 must override exactly the historical admission-decision state check.",
+);
+assert.deepEqual(
+  SHARED_BETA_ADMISSION_INDEXES.filter(
+    ([, name]) => name === CURRENT_172_ADMISSION_DECISION_AVAILABLE_INDEX,
+  ).map(([relation, name, unique, primary]) => [
+    relation,
+    name,
+    unique,
+    primary,
+  ]),
+  [
+    [
+      "TenantAdmissionDecision",
+      CURRENT_172_ADMISSION_DECISION_AVAILABLE_INDEX,
+      true,
+      false,
+    ],
+  ],
+  "CURRENT_174 must replace exactly the historical unrevoked admission-decision index.",
+);
+const CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS = Object.freeze(
+  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.filter(
+    ({ key }) => key !== CURRENT_174_OUTBOX_RELEASE_GUARD,
+  ).map(
+    ({
+      key,
+      catalogSignature,
+      securityDefiner,
+      volatility,
+      language,
+    }) => {
+      const signaturePrefix = `public."${key}"(`;
+      assert.equal(
+        catalogSignature.startsWith(signaturePrefix) &&
+          catalogSignature.endsWith(")"),
+        true,
+        "Runtime-release catalog signatures must use a canonical public schema identity.",
+      );
+      return Object.freeze({
+        catalogSignature,
+        language,
+        name: key,
+        securityDefiner,
+        volatility,
+      });
+    },
+  ),
+);
+assert.equal(
+  CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.length,
+  20,
+  "CURRENT_174 must bind exactly twenty non-identity runtime-release routines into this catalog.",
+);
+assert.equal(
+  CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.every(({ name }) =>
+    name.startsWith("shared_beta_"),
+  ),
+  true,
+  "Only shared-beta runtime-release routines may extend the bounded identity catalog.",
+);
+const CURRENT_174_RUNTIME_RELEASE_FUNCTION_METADATA = Object.freeze(
+  Object.fromEntries(
+    [
+      [
+        "shared_beta_activation_audit_guard_v1",
+        "trigger",
+        "8e435acb81b3ec4b398cc91b9916416e50c1b75616394cc59c3aa0f06942036e",
+      ],
+      [
+        "shared_beta_activation_command_immutable_v1",
+        "trigger",
+        "84bbe87d5fdd2817a8827112d1dc0e2494cbd898b5d8c174d334614444ef1477",
+      ],
+      [
+        "shared_beta_build_provenance_guard_v1",
+        "trigger",
+        "df6d7351eb1d8c942c831131ec3ed539453aaa6a5213807e30604e185c24a0ad",
+      ],
+      [
+        "shared_beta_build_provenance_persist_v1",
+        "jsonb",
+        "45ef2edede52b98565f19bad15de272e648dc5ae4c1e5b03aa09d8127d4b3bbe",
+      ],
+      [
+        "shared_beta_runtime_activation_role_assert_v1",
+        "boolean",
+        "a63b02a8afc198cb6c8aa13036475dbb5ef5060affdce1c7b114f348a48e2069",
+      ],
+      [
+        "shared_beta_runtime_actual_context_assert_v1",
+        "jsonb",
+        "92760425b3235dfd4bc9926954168e6b617210e0bce11da1ecaf2b2b5b57ca83",
+      ],
+      [
+        "shared_beta_runtime_actual_context_from_challenge_v1",
+        "text",
+        "1d3fa4c71559895beb42fa5ddec01839498a53a28d0def427def7288e74263ba",
+      ],
+      [
+        "shared_beta_runtime_canonical_json_v1",
+        "text",
+        "53d17c03ced8d4800ad85c9a121068616457637d35efbd3fdee1ace606e57dd1",
+        true,
+      ],
+      [
+        "shared_beta_runtime_challenge_guard_v1",
+        "trigger",
+        "6d603113abc1156ed1fb51b98af218af040a15de1d6adcd7f84746dc754b329f",
+      ],
+      [
+        "shared_beta_runtime_database_identity_digest_v1",
+        "text",
+        "6264054ab6dfc899b8662a51a6545d9c0fa6cef6c83f876dc6f82266aaacdbda",
+      ],
+      [
+        "shared_beta_runtime_instance_anchor_guard_v1",
+        "trigger",
+        "2acff92d4d9b597ed9804110dd1956239ec8de97b9fd9a35c704b8b8fa9fd8f4",
+      ],
+      [
+        "shared_beta_runtime_digest_v1",
+        "text",
+        "99123c87cb9a6b037b3e7e9ad7d2f0cd94f05ecdc592537efe1f88d86e971a75",
+        true,
+      ],
+      [
+        "shared_beta_runtime_marker_guard_v1",
+        "trigger",
+        "e1bbbc9bf472baaa38739aebd9c56efb5721f361c9d7e0600c2f4f8d171643d9",
+      ],
+      [
+        "shared_beta_runtime_migration_state_v1",
+        "jsonb",
+        "df49ac2f363fe4232460e05387d6be96d6e243279b51b2b14df2b45781db70e0",
+      ],
+      [
+        "shared_beta_runtime_release_challenge_create_v1",
+        "jsonb",
+        "f3e00f57b7c1c2efe065dab48041ac17eeaa91a5beedd21c982e9eb4804d58fe",
+      ],
+      [
+        "shared_beta_runtime_release_marker_persist_v1",
+        "jsonb",
+        "bbb65ef49cd55f90630dcfbeca48c14cc949b84b22e3bdd16d14adc2ff957759",
+      ],
+      [
+        "shared_beta_runtime_state_guard_v1",
+        "trigger",
+        "39c76133b4c624db18c0eca183689afe1cd1f0beeea0861077f99254cacc2560",
+      ],
+      [
+        "shared_beta_tenant_activate_v1",
+        "jsonb",
+        "6d39d22a7926fabb7e540f7f957b82936be1595e9593e70027c1df51dcb5c7ee",
+      ],
+      [
+        "shared_beta_tenant_activation_guard_v1",
+        "trigger",
+        "efec1de6fe3931c8d82f68c49afded71a3e912aac4cd7f2126e916942c59f47f",
+      ],
+      [
+        "shared_beta_tenant_actual_shell_v1",
+        "jsonb",
+        "2cb14db57b903f6ece4c3460c5f3d84920544751aa134b027910f36404f41c94",
+      ],
+    ].map(([name, result, definitionSha256, strict = false]) => [
+      name,
+      Object.freeze({ definitionSha256, result, strict }),
+    ]),
+  ),
+);
+assert.deepEqual(
+  Object.keys(CURRENT_174_RUNTIME_RELEASE_FUNCTION_METADATA).sort(),
+  CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.map(
+    ({ name }) => name,
+  ).sort(),
+  "Every CURRENT_174 runtime-release function must have one exact result and definition digest.",
+);
 
 export const REQUIRED_COLUMN_SELECTS = Object.freeze({
   _prisma_migrations: Object.freeze([
@@ -133,6 +342,7 @@ const RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH =
 const RELEASE_RUNTIME_SOURCE_PATHS = Object.freeze([
   RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH,
   "packages/database/scripts/shared-beta-admission-provenance-catalog.mjs",
+  "packages/database/scripts/runtime-function-enrollment.mjs",
   "packages/database/scripts/staff-task-integrity-canonical-json.mjs",
   "packages/database/scripts/staff-task-integrity-migration-state.mjs",
   "packages/database/package.json",
@@ -256,9 +466,12 @@ const DORMANT_IDENTITY_RELATIONS = Object.freeze([
 
 const DORMANT_IDENTITY_FUNCTIONS = Object.freeze([
   "identity_owner_invite_issue_command_immutable_v1",
-  "identity_mail_outbox_hold_immutable_v1",
+  CURRENT_174_OUTBOX_RELEASE_GUARD,
   "identity_owner_invite_issue_hold_v1",
   ...SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS,
+  ...CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.map(
+    ({ name }) => name,
+  ),
 ]);
 
 const DORMANT_IDENTITY_TYPES = Object.freeze([
@@ -602,6 +815,15 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "",
   ],
   [
+    "IdentityMailOutbox",
+    "releasedAt",
+    18,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
     "IdentityOwnerInviteIssueCommand",
     "id",
     1,
@@ -913,7 +1135,7 @@ const EXPECTED_CONSTRAINT_MANIFEST = Object.freeze([
       "IdentityMailOutbox_crypto_check",
       "IdentityMailOutbox",
       "c",
-      "e1688c926ea11ead0f42c445a18b5fb52fa6555acf31f4bb8ab1ead44b7fe2f2",
+      CURRENT_174_OUTBOX_CRYPTO_CHECK_DEFINITION_SHA256,
     ],
     [
       "IdentityMailOutbox_expiry_check",
@@ -1106,7 +1328,15 @@ const EXPECTED_CONSTRAINT_MANIFEST = Object.freeze([
   ),
   ...SHARED_BETA_ADMISSION_CONSTRAINTS.map(
     ([name, relation, type, definitionSha256]) =>
-      Object.freeze({ name, relation, type, definitionSha256 }),
+      Object.freeze({
+        name,
+        relation,
+        type,
+        definitionSha256:
+          name === CURRENT_174_ADMISSION_DECISION_STATE_CHECK
+            ? CURRENT_174_ADMISSION_DECISION_STATE_CHECK_DEFINITION_SHA256
+            : definitionSha256,
+      }),
   ),
 ]);
 
@@ -1301,11 +1531,17 @@ const EXPECTED_INDEX_MANIFEST = Object.freeze([
   ...SHARED_BETA_ADMISSION_INDEXES.map(
     ([relation, name, unique, primary, definitionSha256]) =>
       Object.freeze({
-        name,
+        name:
+          name === CURRENT_172_ADMISSION_DECISION_AVAILABLE_INDEX
+            ? CURRENT_174_ADMISSION_DECISION_AVAILABLE_INDEX
+            : name,
         relation,
         unique,
         primary,
-        definitionSha256,
+        definitionSha256:
+          name === CURRENT_172_ADMISSION_DECISION_AVAILABLE_INDEX
+            ? CURRENT_174_ADMISSION_DECISION_AVAILABLE_INDEX_DEFINITION_SHA256
+            : definitionSha256,
       }),
   ),
 ]);
@@ -1400,12 +1636,12 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
       "f2495241681f4dd8be6ca2b36dbd0d487e104e18a2712422f3da5f435f597f62",
   },
   {
-    name: "identity_mail_outbox_hold_immutable_v1",
+    name: CURRENT_174_OUTBOX_RELEASE_GUARD,
     identityArguments: "",
     result: "trigger",
     securityDefiner: false,
     definitionSha256:
-      "78ca14bdd404aa45e00d266ba154e573b78c688ba71f7d97bc96c374dfd8ef08",
+      "0fdb6423260b2f15b0cd3eead0deb8348c1178b024281800ae6c51e794d9fbd7",
   },
   {
     name: "identity_owner_invite_issue_command_immutable_v1",
@@ -1433,9 +1669,28 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
       volatility: entry.volatility,
       language: entry.language,
       searchPath: entry.searchPath,
-      definitionSha256: entry.definitionDigest,
+      definitionSha256:
+        entry.name === CURRENT_174_ADMISSION_DECISION_GUARD
+          ? CURRENT_174_ADMISSION_DECISION_GUARD_DEFINITION_SHA256
+          : entry.definitionDigest,
     }),
   ),
+  ...CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.map((entry) => {
+    const metadata =
+      CURRENT_174_RUNTIME_RELEASE_FUNCTION_METADATA[entry.name];
+    return Object.freeze({
+      name: entry.name,
+      catalogSignature: entry.catalogSignature,
+      identityArguments: "",
+      result: metadata.result,
+      securityDefiner: entry.securityDefiner,
+      strict: metadata.strict,
+      volatility: entry.volatility,
+      language: entry.language,
+      searchPath: ["pg_catalog"],
+      definitionSha256: metadata.definitionSha256,
+    });
+  }),
 ]);
 
 const EXPECTED_TRIGGER_MANIFEST = Object.freeze([
@@ -1448,12 +1703,12 @@ const EXPECTED_TRIGGER_MANIFEST = Object.freeze([
       "388dcc06ff27451656b844d302b4a536f7720062f470f0c2b8befd884be9c6a7",
   },
   {
-    name: "IdentityMailOutbox_hold_immutable_trigger",
+    name: "IdentityMailOutbox_release_guard_trigger",
     relation: "IdentityMailOutbox",
-    functionName: "identity_mail_outbox_hold_immutable_v1",
+    functionName: CURRENT_174_OUTBOX_RELEASE_GUARD,
     triggerType: 27,
     definitionSha256:
-      "fe733a25af09484e9bf79e05ad21ecaa3c11132232efe82de4e401f6877ee087",
+      "71c745cba2f40476cc13a24b953a791a49d8f1cd6afcb74e9e03d4187bd6a782",
   },
   {
     name: "IdentityOwnerInviteIssueCommand_immutable_trigger",
@@ -1648,6 +1903,11 @@ const EXPECTED_ENUM_MANIFEST = Object.freeze([
     sortOrder: 1,
   },
   {
+    typeName: "IdentityMailOutboxStatus",
+    label: "PENDING",
+    sortOrder: 2,
+  },
+  {
     typeName: "IdentityMailTemplate",
     label: "INITIAL_OWNER_INVITE",
     sortOrder: 1,
@@ -1693,9 +1953,11 @@ function expectedFunctionValues() {
     );
     return `(${[
       sqlLiteral(entry.name),
+      sqlLiteral(entry.catalogSignature ?? ""),
       sqlLiteral(entry.identityArguments),
       sqlLiteral(entry.result),
       entry.securityDefiner ? "true" : "false",
+      entry.strict ? "true" : "false",
       sqlLiteral(volatility),
       sqlLiteral(language),
       sqlLiteral(`search_path=${searchPath.join(", ")}`),
@@ -1803,9 +2065,11 @@ WITH
   ),
   expected_function(
     object_name,
+    catalog_signature,
     identity_arguments,
     result_type,
     security_definer,
+    required_strict,
     volatility,
     language_name,
     search_path_setting,
@@ -2141,14 +2405,24 @@ SELECT
     JOIN pg_catalog.pg_proc AS function_row
       ON function_row.proname = expected.object_name
      AND function_row.pronamespace = 'public'::regnamespace
-     AND pg_catalog.pg_get_function_identity_arguments(function_row.oid) =
-       expected.identity_arguments
+     AND (
+       (
+         expected.catalog_signature = ''
+         AND pg_catalog.pg_get_function_identity_arguments(function_row.oid) =
+           expected.identity_arguments
+       )
+       OR (
+         expected.catalog_signature <> ''
+         AND function_row.oid =
+           pg_catalog.to_regprocedure(expected.catalog_signature)
+       )
+     )
      AND pg_catalog.pg_get_function_result(function_row.oid) =
        expected.result_type
      AND function_row.prokind = 'f'
      AND function_row.prosecdef = expected.security_definer
+     AND function_row.proisstrict = expected.required_strict
      AND function_row.provolatile::text = expected.volatility
-     AND NOT function_row.proisstrict
      AND NOT function_row.proleakproof
      AND NOT function_row.proretset
      AND function_row.pronargdefaults = 0

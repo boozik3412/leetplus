@@ -44,6 +44,9 @@ import {
   SHARED_BETA_ADMISSION_FUNCTIONS,
   SHARED_BETA_ADMISSION_RELATIONS,
 } from "./shared-beta-admission-provenance-catalog.mjs";
+import {
+  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
+} from "./runtime-function-enrollment.mjs";
 
 const METRIC_CODES = Object.freeze([
   "USER_TOTAL",
@@ -111,18 +114,18 @@ function catalogRow(overrides = {}) {
     dormant_function_nonowner_acl_count: "0",
     dormant_type_owner_mismatch_count: "0",
     dormant_type_nonowner_acl_count: "0",
-    expected_column_count: "132",
-    matched_column_count: "132",
-    expected_exact_identity_column_count: "109",
-    actual_exact_identity_column_count: "109",
+    expected_column_count: "133",
+    matched_column_count: "133",
+    expected_exact_identity_column_count: "110",
+    actual_exact_identity_column_count: "110",
     matched_constraint_count: "73",
     actual_constraint_count: "73",
     matched_index_count: "38",
     actual_index_count: "38",
-    matched_function_count: "22",
-    actual_function_count: "22",
-    matched_enum_label_count: "8",
-    total_enum_label_count: "8",
+    matched_function_count: "42",
+    actual_function_count: "42",
+    matched_enum_label_count: "9",
+    total_enum_label_count: "9",
     matched_trigger_count: "6",
     actual_identity_trigger_count: "6",
     matched_ri_trigger_count: "44",
@@ -685,12 +688,12 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     { dormant_function_nonowner_acl_count: "1" },
     { dormant_type_owner_mismatch_count: "1" },
     { dormant_type_nonowner_acl_count: "1" },
-    { matched_column_count: "131" },
-    { actual_exact_identity_column_count: "110" },
+    { matched_column_count: "132" },
+    { actual_exact_identity_column_count: "111" },
     { matched_constraint_count: "72" },
     { actual_index_count: "39" },
-    { actual_function_count: "23" },
-    { total_enum_label_count: "9" },
+    { actual_function_count: "43" },
+    { total_enum_label_count: "10" },
     { actual_identity_trigger_count: "7" },
     { matched_ri_trigger_count: "43" },
     { actual_ri_trigger_count: "45" },
@@ -736,18 +739,52 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   );
   assert.match(CATALOG_STATE_SQL, /IdentityOwnerInviteIssueCommand/u);
   assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox/u);
+  assert.match(CATALOG_STATE_SQL, /releasedAt/u);
   assert.match(CATALOG_STATE_SQL, /secretCiphertext/u);
   assert.match(CATALOG_STATE_SQL, /identity_owner_invite_issue_hold_v1/u);
   assert.match(
     CATALOG_STATE_SQL,
     /787e025ba9fa501fc3d62dde7502c0e82bf01afeac1858031db54a6b2b982533/u,
   );
-  assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox_hold_immutable_trigger/u);
+  assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox_release_guard_trigger/u);
+  assert.match(
+    CATALOG_STATE_SQL,
+    /0fdb6423260b2f15b0cd3eead0deb8348c1178b024281800ae6c51e794d9fbd7/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /d27ce0e9a3644f39707dab510384805d34def0f68a8ef99dbefa7aadebeea891/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /17b45564316ec0c1211a56ba6d424842ccc1a6a5ca04d4db9f3f1768cb782ad5/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /858cd4ca21dc83d394178534690cebd15e4ef9932dc83000bb143c2b17b488d7/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /tenant_admission_decision_one_available_uidx/u,
+  );
+  assert.doesNotMatch(
+    CATALOG_STATE_SQL,
+    /tenant_admission_decision_one_unrevoked_uidx/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /f5643096ae50c2b9fc64e47ba5eb8d6ed6b5617ed4b4b782b0a4aef9393b8fa0/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /71c745cba2f40476cc13a24b953a791a49d8f1cd6afcb74e9e03d4187bd6a782/u,
+  );
   assert.match(
     CATALOG_STATE_SQL,
     /IdentityOwnerInviteIssueCommand_immutable_trigger/u,
   );
   assert.match(CATALOG_STATE_SQL, /IdentityMailOutboxStatus/u);
+  assert.match(CATALOG_STATE_SQL, /PENDING/u);
   assert.match(CATALOG_STATE_SQL, /IdentityMailTemplate/u);
   assert.match(CATALOG_STATE_SQL, /actual_exact_identity_column_count/u);
   assert.match(CATALOG_STATE_SQL, /dormant_relation_nonowner_acl_count/u);
@@ -769,6 +806,19 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(CATALOG_STATE_SQL, /expected\.language_name/u);
   assert.match(CATALOG_STATE_SQL, /expected\.search_path_setting/u);
   assert.match(CATALOG_STATE_SQL, /shared_beta_/u);
+  assert.doesNotMatch(CATALOG_STATE_SQL, /excluded_runtime_release_function/u);
+  assert.match(
+    CATALOG_STATE_SQL,
+    /function_row\.oid =\s+pg_catalog\.to_regprocedure\(expected\.catalog_signature\)/iu,
+  );
+  const currentRuntimeReleaseFunctions =
+    EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.filter(
+      ({ key }) => key !== "identity_mail_outbox_release_guard_v1",
+    );
+  assert.equal(currentRuntimeReleaseFunctions.length, 20);
+  for (const entry of currentRuntimeReleaseFunctions) {
+    assert.equal(CATALOG_STATE_SQL.includes(entry.catalogSignature), true);
+  }
   assert.match(PRIVILEGE_STATE_SQL, /ownership_dependency_count/iu);
   assert.match(PRIVILEGE_STATE_SQL, /system_schema_create_count/iu);
   assert.match(PRIVILEGE_STATE_SQL, /system_object_privilege_count/iu);

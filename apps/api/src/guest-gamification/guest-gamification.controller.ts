@@ -44,6 +44,8 @@ import {
 } from './guest-game-ledger-fallback-scheduler.service';
 import {
   GuestGameRewardMaterializerSchedulerService,
+  type GuestGameRewardMaterializerManualRunDto,
+  type GuestGameRewardMaterializerManualRunResult,
   type GuestGameRewardMaterializerQueueSnapshot,
   type GuestGameRewardMaterializerRuntimeStatus,
 } from './guest-game-reward-materializer-scheduler.service';
@@ -205,10 +207,21 @@ export class GuestGamificationController {
     queue: GuestGameRewardMaterializerQueueSnapshot;
   }> {
     return {
-      runtime: this.rewardMaterializerScheduler.getRuntimeStatus(),
+      runtime: this.rewardMaterializerScheduler.getRuntimeStatus(user),
       queue:
         await this.rewardMaterializerScheduler.getTenantQueueSnapshot(user),
     };
+  }
+
+  @Post('reward-materializer/run')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  runRewardMaterializer(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto?: GuestGameRewardMaterializerManualRunDto | null,
+  ): Promise<GuestGameRewardMaterializerManualRunResult> {
+    return this.rewardMaterializerScheduler.runTenantOnce(user, dto);
   }
 
   @Get('ledger-fallback/status')

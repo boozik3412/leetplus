@@ -18,6 +18,81 @@ export type GuestGameRewardStatus =
 
 export type GuestGameRewardRarity = "common" | "rare" | "epic" | "legendary";
 
+export type GuestGameRewardMaterializerCounts = {
+  claimed: number;
+  applied: number;
+  recovered: number;
+  canceled: number;
+  failed: number;
+  deadLettered: number;
+  staleFinalizations: number;
+};
+
+export type GuestGameRewardMaterializerManualRunResult = {
+  status: "PROCESSED" | "PARTIAL" | "FAILED" | "SKIPPED";
+  reason:
+    | "KILL_SWITCH_ENABLED"
+    | "RUN_ALREADY_IN_PROGRESS"
+    | "MATERIALIZATION_FAILED"
+    | null;
+  limit: number;
+  startedAt: string | null;
+  finishedAt: string;
+  intents: GuestGameRewardMaterializerCounts;
+  effects: GuestGameRewardMaterializerCounts;
+  failedStages: Array<"INTENTS" | "EFFECTS">;
+};
+
+export type GuestGameRewardMaterializerQueueMetrics = {
+  total: number;
+  statusCounts: Record<string, number>;
+  ready: number;
+  processing: number;
+  expiredLeases: number;
+  deadLetters: number;
+  oldestReadyCreatedAt: string | null;
+  oldestReadyAgeMs: number | null;
+};
+
+export type GuestGameRewardMaterializerStatus = {
+  runtime: {
+    enabled: boolean;
+    backgroundReady: boolean;
+    inlineClaimsAllowed: boolean;
+    killSwitchEnabled: boolean;
+    scope: {
+      tenantId: string | null;
+      tenantSlug: string | null;
+      allowAllTenants: boolean;
+      configured: boolean;
+      appliesToViewerTenant: boolean;
+    };
+    running: boolean;
+    intervalMs: number | null;
+    lastStartedAt: string | null;
+    lastFinishedAt: string | null;
+    lastOutcome: "SUCCESS" | "PARTIAL" | "ERROR" | null;
+    lastError: string | null;
+    lastResult: {
+      checkedTenants: number;
+      processedTenants: number;
+      skippedTenants: number;
+      erroredTenants: number;
+      intents: GuestGameRewardMaterializerCounts;
+      effects: GuestGameRewardMaterializerCounts;
+    } | null;
+    lastSkippedAt: string | null;
+    lastSkipReason: string | null;
+  };
+  queue: {
+    tenantId: string;
+    observedAt: string;
+    maxAttempts: number;
+    intents: GuestGameRewardMaterializerQueueMetrics;
+    effects: GuestGameRewardMaterializerQueueMetrics;
+  };
+};
+
 export type GuestGameLootBoxUsageKind =
   | "STANDALONE"
   | "REWARD_TEMPLATE"
@@ -1551,6 +1626,22 @@ export async function getGuestGamificationWorkspace(
   }
 
   return response.json() as Promise<GuestGamificationWorkspace>;
+}
+
+export async function getGuestGameRewardMaterializerStatus(): Promise<GuestGameRewardMaterializerStatus> {
+  const response = await fetch(
+    `${getApiUrl()}/guests/gamification/reward-materializer/status`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest game reward materializer status");
+  }
+
+  return response.json() as Promise<GuestGameRewardMaterializerStatus>;
 }
 
 export async function checkInGuestGame(

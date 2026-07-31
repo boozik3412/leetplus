@@ -2,7 +2,9 @@
 
 This runbook covers the additive reward-materializer migration series from
 `20260718150000_guest_game_origin_fallback` through
-`20260731090000_guest_game_case_reward_lifecycle`. Indexes on populated tables
+the expand migration `20260731090000_guest_game_case_reward_lifecycle` and its
+separate contract migration
+`20260731110000_guest_game_case_reward_contract`. Indexes on populated tables
 are deliberately isolated into one-statement migrations so PostgreSQL can run
 each `CREATE INDEX CONCURRENTLY` outside an implicit multi-statement transaction.
 
@@ -73,7 +75,8 @@ WHERE migration_name IN (
   '20260718180000_guest_game_effect_postings',
   '20260718190000_guest_game_reward_effect_outbox',
   '20260718190100_staff_chat_message_dedupe_index',
-  '20260731090000_guest_game_case_reward_lifecycle'
+  '20260731090000_guest_game_case_reward_lifecycle',
+  '20260731110000_guest_game_case_reward_contract'
 )
    OR (finished_at IS NULL AND rolled_back_at IS NULL)
 ORDER BY started_at;
@@ -96,9 +99,13 @@ WHERE table_schema = 'public'
   AND table_name = 'GuestGameEntitlement'
   AND column_name = 'sourceRewardId';
 
-SELECT conname, contype
+SELECT conname, contype, convalidated, pg_get_constraintdef(oid)
 FROM pg_constraint
-WHERE conname = 'GuestGameEntitlement_sourceRewardId_fkey';
+WHERE conname IN (
+  'GuestGameEntitlement_sourceRewardId_fkey',
+  'GuestGameEntitlement_sourceOutcome_distinct_check'
+)
+ORDER BY conname;
 
 SELECT event_object_table, trigger_name
 FROM information_schema.triggers
@@ -108,6 +115,11 @@ WHERE trigger_schema = 'public'
     'GuestGameEntitlement_capture_legacy_source_reward'
   )
 ORDER BY trigger_name;
+
+SELECT COUNT(*) AS legacy_source_outcome_aliases
+FROM "GuestGameEntitlement"
+WHERE "sourceRewardId" IS NOT NULL
+  AND "rewardId" = "sourceRewardId";
 
 SELECT relname, n_live_tup, n_dead_tup,
        pg_size_pretty(pg_relation_size(relid)) AS heap_size,
@@ -141,6 +153,17 @@ triggers normalize supported old-binary case-parent writes and reject a stale
 ordinary claim atomically. Those guards stay installed until the separate
 contract deployment has confirmed that every old API process was replaced.
 
+The contract migration is deliberately a later deployment. It takes
+`SHARE ROW EXCLUSIVE` locks in the application write order, stops if a consumed
+entitlement still aliases its source reward, clears only the temporary
+non-consumed `rewardId = sourceRewardId` aliases, removes both compatibility
+triggers/functions, and validates a database check that source and outcome
+reward IDs must differ. Apply it only after the new API contract has been
+observed on every process. The migration sets a 5-second lock timeout and a
+30-second per-statement timeout so contention or an unexpectedly long
+validation rolls the whole transaction back instead of holding production
+indefinitely.
+
 ## Apply and verify
 
 Use a short lock timeout so deployment fails instead of waiting indefinitely. A timeout is a stop condition: inspect `_prisma_migrations` and real objects before retrying or using `prisma migrate resolve`.
@@ -158,6 +181,26 @@ After the API is stable, build and restart web separately:
 pnpm --filter web build
 sudo systemctl restart leetplus-web.service
 ```
+
+For the contract wave, repeat the preflight and the same sequential API-then-web
+deployment. Do not apply `20260731110000_guest_game_case_reward_contract` until
+the expand-capable API has replaced every old process. Confirm the entitlement
+table size and active transactions from the preflight, and do not start a manual
+or background materializer pass while the migration is running. A failed lock
+acquisition, statement timeout, or consumed-alias guard is a stop condition;
+leave the transaction rolled back, inspect the evidence, and fix forward.
+Prisma can retain a failed migration-history row even though PostgreSQL rolled
+the explicit transaction back. Before retrying, prove that the database is
+still in the complete expand-only state (both normal-write triggers, no
+source/outcome check, no partial contract objects), then mark only this failed
+attempt rolled back and rerun the preflight:
+
+```bash
+pnpm --filter database exec prisma migrate resolve \
+  --rolled-back 20260731110000_guest_game_case_reward_contract
+```
+
+Never use `--applied` after a timeout or guard failure.
 
 Postflight database checks:
 
@@ -195,19 +238,45 @@ compatibility triggers with the catalog queries above. Do not clear the legacy
 `rewardId = sourceRewardId` alias or remove either trigger in the same deployment
 that first adds them.
 
-With an authenticated `OWNER`, `ADMIN`, or `MANAGER` session, also call:
+For the contract wave, confirm the source/outcome check is validated, the alias
+count is zero, and both compatibility triggers are absent.
+
+With an authenticated `OWNER`, `ADMIN`, or `MANAGER` session, call:
 
 ```text
 GET /guests/gamification/reward-materializer/status
 ```
 
-The response is tenant-scoped. Verify `runtime.backgroundReady`, `runtime.inlineClaimsAllowed`, the configured scope, the latest run outcome, ready/processing counts, expired leases, dead letters, and oldest ready age. This endpoint performs database-backed queue reads and is the required API smoke check after the migrations; the public `/health` endpoint alone is not sufficient.
+The response is tenant-scoped. Verify `runtime.backgroundReady`,
+`runtime.scope.appliesToViewerTenant`, `runtime.inlineClaimsAllowed`, the latest
+run outcome, ready/processing counts, expired leases, dead letters, and oldest
+ready age. A tenant viewer cannot see another tenant's configured scope or last
+run details. This endpoint performs database-backed queue reads and is the
+required API smoke check after the migrations; the public `/health` endpoint
+alone is not sufficient.
+
+When the autonomous scheduler is intentionally disabled but a known tenant queue
+must be drained, an authenticated `OWNER` or `ADMIN` can run one bounded pass:
+
+```text
+POST /guests/gamification/reward-materializer/run
+Content-Type: application/json
+
+{"limit": 100}
+```
+
+This command ignores only the autonomous scheduler's enable/scope selection. It
+always honors the global kill switch, processes only the authenticated actor's
+tenant, uses the same intent-then-effect claim/lease/fencing pipeline, and
+returns aggregate counts without reward identifiers. Concurrent runs in the
+same API process are skipped. Repeating the command is safe: already finalized
+intents/effects are not applied twice.
 
 ## Tenant canary
 
 1. Keep `ALLOW_ALL_TENANTS=false` and select exactly one tenant.
 2. Confirm `GET /guests/gamification/reward-materializer/status` reports the intended scope and no dead letters or expired leases.
-3. Set `ENABLED=true`, keep `KILL_SWITCH=false`, and restart only API.
+3. Either run one explicit tenant-scoped pass as `OWNER`/`ADMIN`, or set `ENABLED=true`, keep `KILL_SWITCH=false`, and restart only API.
 4. Verify exactly one event, XP posting, reward intent, reward, effect, and bonus-ledger entry for the controlled fact.
-5. Replay the same fact and restart API; no second XP or reward may appear.
+5. Replay the same fact and rerun the same processing path; no second XP, reward, effect, entitlement, or bonus posting may appear.
 6. If lag, retries, stale finalizations, or dead letters grow, set `KILL_SWITCH=true`, restart API, and investigate without deleting queue rows.

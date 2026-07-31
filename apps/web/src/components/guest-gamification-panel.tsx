@@ -44,6 +44,8 @@ import type {
   GuestGameProfile,
   GuestGameProfileStatus,
   GuestGamePipelineRunResult,
+  GuestGameRewardMaterializerManualRunResult,
+  GuestGameRewardMaterializerStatus,
   GuestGameReward,
   GuestGameRewardStatus,
   GuestGameSeason,
@@ -66,6 +68,7 @@ type Props = {
   leads: GuestCrmLead[];
   products: Product[];
   tenantSlug: string;
+  initialRewardMaterializerStatus: GuestGameRewardMaterializerStatus | null;
   initialTab?: TabId;
   initialEditorMode?: EditorMode;
   access: {
@@ -73,6 +76,7 @@ type Props = {
     canApproveRewards: boolean;
     canViewGuestPii: boolean;
     isPlatformAdmin: boolean;
+    canRunRewardMaterializer: boolean;
   };
 };
 
@@ -1421,6 +1425,7 @@ export function GuestGamificationPanel({
   leads,
   products,
   tenantSlug,
+  initialRewardMaterializerStatus,
   initialTab = "overview",
   initialEditorMode = "advanced",
   access,
@@ -1463,6 +1468,11 @@ export function GuestGamificationPanel({
     useState<GuestGameDeliveryDispatchResult | null>(null);
   const [bonusLedgerResult, setBonusLedgerResult] =
     useState<BonusLedgerActionResult | null>(null);
+  const [rewardMaterializerStatus, setRewardMaterializerStatus] = useState(
+    initialRewardMaterializerStatus,
+  );
+  const [rewardMaterializerResult, setRewardMaterializerResult] =
+    useState<GuestGameRewardMaterializerManualRunResult | null>(null);
   const [redeemedReward, setRedeemedReward] = useState<GuestGameReward | null>(
     null,
   );
@@ -1739,6 +1749,31 @@ export function GuestGamificationPanel({
       "/api/guests/gamification/workspace?compact=1",
     );
     setWorkspace(next);
+  }
+
+  async function runRewardMaterializer() {
+    await saveAction("reward-materializer-run", async () => {
+      assertCan(
+        access.canRunRewardMaterializer,
+        "Ручной запуск materializer доступен только владельцу или администратору.",
+      );
+      const result =
+        await postJson<GuestGameRewardMaterializerManualRunResult>(
+          "/api/guests/gamification/reward-materializer/run",
+          { limit: 100 },
+        );
+      setRewardMaterializerResult(result);
+
+      const [nextStatus] = await Promise.all([
+        fetchJson<GuestGameRewardMaterializerStatus>(
+          "/api/guests/gamification/reward-materializer/status",
+        ).catch(() => null),
+        reloadWorkspace().catch(() => undefined),
+      ]);
+      if (nextStatus) {
+        setRewardMaterializerStatus(nextStatus);
+      }
+    });
   }
 
   async function switchEditorMode(mode: EditorMode) {
@@ -2868,6 +2903,16 @@ export function GuestGamificationPanel({
             </p>
           </Link>
         </div>
+
+        {rewardMaterializerStatus || access.canRunRewardMaterializer ? (
+          <RewardMaterializerControl
+            status={rewardMaterializerStatus}
+            result={rewardMaterializerResult}
+            canRun={access.canRunRewardMaterializer}
+            running={saving === "reward-materializer-run"}
+            onRun={runRewardMaterializer}
+          />
+        ) : null}
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
@@ -14305,6 +14350,141 @@ function SectionTitle({ title }: { title: string }) {
   return (
     <h2 className="text-lg font-bold text-zinc-950 dark:text-white">{title}</h2>
   );
+}
+
+function RewardMaterializerControl({
+  status,
+  result,
+  canRun,
+  running,
+  onRun,
+}: {
+  status: GuestGameRewardMaterializerStatus | null;
+  result: GuestGameRewardMaterializerManualRunResult | null;
+  canRun: boolean;
+  running: boolean;
+  onRun: () => Promise<void>;
+}) {
+  const queueReady =
+    (status?.queue.intents.ready ?? 0) + (status?.queue.effects.ready ?? 0);
+  const queueProcessing =
+    (status?.queue.intents.processing ?? 0) +
+    (status?.queue.effects.processing ?? 0);
+  const deadLetters =
+    (status?.queue.intents.deadLetters ?? 0) +
+    (status?.queue.effects.deadLetters ?? 0);
+  const runtimeRunning = status?.runtime.running ?? false;
+  const backgroundReady = status?.runtime.backgroundReady ?? false;
+  const backgroundAppliesToTenant =
+    backgroundReady &&
+    (status?.runtime.scope.appliesToViewerTenant ?? false);
+  const killSwitchEnabled = status?.runtime.killSwitchEnabled ?? false;
+  const runDisabled =
+    !status ||
+    running ||
+    runtimeRunning ||
+    backgroundAppliesToTenant ||
+    killSwitchEnabled;
+
+  const modeLabel = !status
+    ? "статус недоступен"
+    : killSwitchEnabled
+      ? "kill switch включен"
+      : runtimeRunning
+        ? "выполняется"
+        : backgroundAppliesToTenant
+          ? "фоновый режим"
+          : "ручной режим";
+  const modeClass = !status
+    ? "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+    : killSwitchEnabled
+      ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+      : runtimeRunning
+        ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+        : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200";
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-bold text-zinc-950 dark:text-white">
+              Materializer наград
+            </h2>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${modeClass}`}
+            >
+              {modeLabel}
+            </span>
+          </div>
+          <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            {status ? (
+              <>
+                Готово к обработке: {queueReady}. В работе: {queueProcessing}.
+                Dead letter: {deadLetters}. Ручной проход обрабатывает только
+                текущую сеть через штатные lease, retries и идемпотентность.
+              </>
+            ) : (
+              "Очередь не загружена, поэтому ручной запуск заблокирован."
+            )}
+          </p>
+        </div>
+        {canRun ? (
+          <button
+            type="button"
+            disabled={runDisabled}
+            onClick={() => void onRun()}
+            className="shrink-0 rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+          >
+            {running || runtimeRunning
+              ? "Обрабатываем…"
+              : backgroundAppliesToTenant
+                ? "Фоновая обработка включена"
+                : "Обработать (до 100 на этап)"}
+          </button>
+        ) : null}
+      </div>
+
+      {result ? (
+        <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-200">
+          <span className="font-semibold">
+            {rewardMaterializerResultLabel(result)}
+          </span>
+          {" · "}intents: {result.intents.applied} применено,{" "}
+          {materializerIssueCount(result.intents)} проблем; effects:{" "}
+          {result.effects.applied} применено, {result.effects.recovered}{" "}
+          восстановлено, {materializerIssueCount(result.effects)} проблем
+          (failed {result.effects.failed}, dead letter{" "}
+          {result.effects.deadLettered}, stale{" "}
+          {result.effects.staleFinalizations}).
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function materializerIssueCount(
+  counts: GuestGameRewardMaterializerManualRunResult["intents"],
+) {
+  return counts.failed + counts.deadLettered + counts.staleFinalizations;
+}
+
+function rewardMaterializerResultLabel(
+  result: GuestGameRewardMaterializerManualRunResult,
+) {
+  if (result.reason === "KILL_SWITCH_ENABLED") {
+    return "Запуск заблокирован kill switch";
+  }
+  if (result.reason === "RUN_ALREADY_IN_PROGRESS") {
+    return "Другой проход уже выполняется";
+  }
+  if (result.status === "PARTIAL") {
+    return "Проход завершён частично";
+  }
+  if (result.status === "FAILED") {
+    return "Проход завершился ошибкой";
+  }
+  return "Проход завершён";
 }
 
 function StatCard({ label, value }: { label: string; value: ReactNode }) {

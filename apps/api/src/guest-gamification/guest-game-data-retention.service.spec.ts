@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { ConfigService } from '@nestjs/config';
+import type { Prisma } from '@prisma/client';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +13,24 @@ const rewardWalletMigrationSql = readFileSync(
   ),
   'utf8',
 );
+
+const sourceRewardIdField = {
+  modelName: 'GuestGameEntitlement',
+  name: 'sourceRewardId',
+  typeName: 'String',
+  isList: false,
+} as Prisma.GuestGameEntitlementFieldRefs['sourceRewardId'];
+
+type GuestGameDataRetentionServiceTestAccess = {
+  deleteExpiredRewardWalletItemBatches(cutoff: Date): Promise<number>;
+  recoverStaleRewardWalletOpeningBatches(now: Date): Promise<number>;
+};
+
+function testAccess(
+  service: GuestGameDataRetentionService,
+): GuestGameDataRetentionServiceTestAccess {
+  return service as unknown as GuestGameDataRetentionServiceTestAccess;
+}
 
 function createFixture(configValues: Record<string, string | undefined> = {}) {
   const delegates = {
@@ -42,12 +61,7 @@ function createFixture(configValues: Record<string, string | undefined> = {}) {
     },
     guestGameEntitlement: {
       fields: {
-        sourceRewardId: {
-          modelName: 'GuestGameEntitlement',
-          name: 'sourceRewardId',
-          typeName: 'String',
-          isList: false,
-        },
+        sourceRewardId: sourceRewardIdField,
       },
       count: jest.fn().mockResolvedValue(7),
       findFirst: jest.fn().mockResolvedValue(null),
@@ -85,15 +99,15 @@ function retentionDelegate(count: number) {
   };
 }
 
-function unopenedEntitlementRewardWhere(delegates: any) {
+function unopenedEntitlementRewardWhere(
+  field: Prisma.GuestGameEntitlementFieldRefs['sourceRewardId'],
+) {
   return {
     OR: [
       { rewardId: null },
       {
         sourceRewardId: { not: null },
-        rewardId: {
-          equals: delegates.guestGameEntitlement.fields.sourceRewardId,
-        },
+        rewardId: { equals: field },
       },
     ],
   };
@@ -179,7 +193,12 @@ describe('GuestGameDataRetentionService', () => {
                           status: 'AVAILABLE',
                           consumedAt: null,
                           canceledAt: null,
-                          AND: [unopenedEntitlementRewardWhere(delegates)],
+                          AND: [
+                            unopenedEntitlementRewardWhere(
+                              delegates.guestGameEntitlement.fields
+                                .sourceRewardId,
+                            ),
+                          ],
                         },
                         {
                           status: {
@@ -227,7 +246,11 @@ describe('GuestGameDataRetentionService', () => {
         status: 'AVAILABLE',
         consumedAt: null,
         canceledAt: null,
-        AND: [unopenedEntitlementRewardWhere(delegates)],
+        AND: [
+          unopenedEntitlementRewardWhere(
+            delegates.guestGameEntitlement.fields.sourceRewardId,
+          ),
+        ],
       },
       data: {
         status: 'EXPIRED',
@@ -259,7 +282,7 @@ describe('GuestGameDataRetentionService', () => {
     delegates.guestGameEntitlement.findFirst.mockResolvedValue(null);
 
     await expect(
-      (service as any).deleteExpiredRewardWalletItemBatches(now),
+      testAccess(service).deleteExpiredRewardWalletItemBatches(now),
     ).resolves.toBe(0);
 
     expect(delegates.guestGameEntitlement.updateMany).toHaveBeenCalledWith({
@@ -269,7 +292,11 @@ describe('GuestGameDataRetentionService', () => {
         status: 'AVAILABLE',
         consumedAt: null,
         canceledAt: null,
-        AND: [unopenedEntitlementRewardWhere(delegates)],
+        AND: [
+          unopenedEntitlementRewardWhere(
+            delegates.guestGameEntitlement.fields.sourceRewardId,
+          ),
+        ],
       },
       data: {
         status: 'EXPIRED',
@@ -459,7 +486,7 @@ describe('GuestGameDataRetentionService', () => {
         },
       ]);
     delegates.guestGameReward.updateMany.mockImplementation(
-      async ({ where }: { where: Record<string, unknown> }) => ({
+      ({ where }: { where: Record<string, unknown> }) => ({
         count:
           rewardState.status === where.status &&
           rewardState.deliveryRequestedAt === where.deliveryRequestedAt &&
@@ -605,7 +632,7 @@ describe('GuestGameDataRetentionService', () => {
     });
 
     await expect(
-      (service as any).recoverStaleRewardWalletOpeningBatches(now),
+      testAccess(service).recoverStaleRewardWalletOpeningBatches(now),
     ).resolves.toBe(1);
 
     expect(delegates.guestGameReward.findFirst).not.toHaveBeenCalled();
@@ -629,7 +656,11 @@ describe('GuestGameDataRetentionService', () => {
         ruleType: 'LOOT_BOX',
         ruleId: 'lootbox-1',
         status: 'OPENING',
-        AND: [unopenedEntitlementRewardWhere(delegates)],
+        AND: [
+          unopenedEntitlementRewardWhere(
+            delegates.guestGameEntitlement.fields.sourceRewardId,
+          ),
+        ],
       },
       data: {
         status: 'AVAILABLE',
@@ -673,7 +704,7 @@ describe('GuestGameDataRetentionService', () => {
     delegates.guestGameReward.findFirst.mockResolvedValue(null);
 
     await expect(
-      (service as any).recoverStaleRewardWalletOpeningBatches(now),
+      testAccess(service).recoverStaleRewardWalletOpeningBatches(now),
     ).resolves.toBe(0);
 
     expect(delegates.guestGameEvent.findFirst).not.toHaveBeenCalled();

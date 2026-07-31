@@ -13929,6 +13929,9 @@ export class GuestGamificationService {
       ? `battle-pass-loot-box-approval:${reward.id}`
       : `mission-loot-box-approval:${reward.id}`;
     await this.prisma.$transaction(async (tx) => {
+      // Rule mutations take this advisory lock before touching rewards.
+      // Keep issuance in the same global order to avoid a lock inversion.
+      await acquireGuestGameLootBoxRuleLock(tx, user.tenantId, lootBox.id);
       await tx.$queryRaw(Prisma.sql`
         SELECT "id"
         FROM "GuestGameReward"
@@ -14009,7 +14012,6 @@ export class GuestGamificationService {
       }
       const sourceEventId = sourceEventIds[0] ?? null;
 
-      await acquireGuestGameLootBoxRuleLock(tx, user.tenantId, lootBox.id);
       const liveLootBox = await tx.guestGameLootBox.findFirst({
         where: {
           id: lootBox.id,

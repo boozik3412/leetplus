@@ -14654,7 +14654,12 @@ describe('GuestGamificationService', () => {
         'The case reward changed before its entitlement was materialized.',
       );
 
-      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+      const rawQueries = prisma.$queryRaw.mock.calls.map(([query]) =>
+        ((query as { strings?: readonly string[] }).strings ?? []).join(''),
+      );
+      expect(rawQueries[0]).toContain('pg_advisory_xact_lock');
+      expect(rawQueries[1]).toContain('FROM "GuestGameReward"');
       expect(prisma.guestGameReward.findFirst).toHaveBeenCalledWith({
         where: {
           id: reward.id,

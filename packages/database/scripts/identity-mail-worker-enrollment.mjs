@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 
 export const IDENTITY_MAIL_WORKER_ENROLLMENT_SCHEMA_VERSION = 1;
 export const IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION =
-  "20260731020000_initial_owner_mail_delivery_boundary";
-export const IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT = 176;
+  "20260731120000_identity_mail_delivery_release_head";
+export const IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT = 179;
 
 export const IDENTITY_MAIL_WORKER_FUNCTIONS = Object.freeze([
   Object.freeze({

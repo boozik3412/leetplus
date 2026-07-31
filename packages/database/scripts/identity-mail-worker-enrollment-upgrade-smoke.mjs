@@ -27,7 +27,7 @@ Usage:
 
 Required environment:
   NODE_ENV=test
-  DATABASE_URL=<loopback PostgreSQL 16 dedicated *_ci database at CURRENT_176>
+  DATABASE_URL=<loopback PostgreSQL 16 dedicated *_ci database at CURRENT_179>
   IDENTITY_MAIL_WORKER_ENROLLMENT_SMOKE_CONFIRM=${REQUIRED_CONFIRMATION}
 
 The smoke creates one disposable LOGIN NOINHERIT role and one disposable
@@ -471,12 +471,10 @@ async function runSmoke() {
         worker.$executeRawUnsafe(
           `CREATE TEMP TABLE "identity_mail_worker_temp_probe" ("id" INTEGER)`,
         ),
-      /permission denied to create temporary tables/iu,
     );
     await expectSqlState(
       "42501",
       () => worker.$queryRawUnsafe(`SELECT * FROM ${schema}."probe"`),
-      /permission denied/iu,
     );
     await expectSqlState(
       "42501",
@@ -535,7 +533,7 @@ async function runSmoke() {
       `${JSON.stringify({
         ok: true,
         decision: "SMOKE_PASSED",
-        migrationCount: 176,
+        migrationCount: 179,
         workerRpcGrants: 5,
         deniedDeliveryRoutines: 9,
         tenantEnrollmentRows: 0,

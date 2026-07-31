@@ -6,13 +6,13 @@ import {
   randomUUID,
 } from "node:crypto";
 import {
-  cp,
   copyFile,
   readFile,
   mkdir,
   mkdtemp,
   readdir,
   rm,
+  writeFile,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -25,17 +25,39 @@ const REQUIRED_CONFIRMATION = "run-identity-mail-delivery-upgrade-smoke";
 const CURRENT_174_COUNT = 174;
 const CURRENT_175_COUNT = 175;
 const CURRENT_176_COUNT = 176;
+const CURRENT_177_COUNT = 177;
+const CURRENT_178_COUNT = 178;
+const CURRENT_179_COUNT = 179;
 const CURRENT_174 =
   "20260730040000_shared_beta_runtime_release_activation";
 const CURRENT_175 =
   "20260731010000_identity_mail_delivery_status_expand";
 const CURRENT_176 =
   "20260731020000_initial_owner_mail_delivery_boundary";
+const CURRENT_177 =
+  "20260731090000_guest_game_case_reward_lifecycle";
+const CURRENT_178 =
+  "20260731110000_guest_game_case_reward_contract";
+const CURRENT_179 =
+  "20260731120000_identity_mail_delivery_release_head";
+const MERGE_BASE_REF = "226667f07da6001757589c4777c8bd2aebb84c3d";
+const ORIGIN_MAIN_REF = "c5d29360d2c46be2be27a905b460908d811f6855";
+const IDENTITY_176_REF = "339be7fe7eaad3c9d28104803858baaa8da7bd2d";
+const MERGE_BASE_MANIFEST_DIGEST =
+  "3e165fbe37df20fa74837f8b63d4bbcb822d2a24b1f69edb98a906362f0143ad";
+const ORIGIN_MAIN_MANIFEST_DIGEST =
+  "848fc69b4e3d6175285eeed6e61ba376d3341534379fcee49ddf89a9d6fabcc1";
+const IDENTITY_176_MANIFEST_DIGEST =
+  "bdbe4e11070302bf2c6f381d8902301009df6ebf2cec9007083f238f5c98472b";
+const PRETERMINAL_178_MANIFEST_DIGEST =
+  "7f9867971a39e010b2dac03be18fc083dabe67b98d1d6ed15a0cc4540a8cfd14";
+const GIT_MIGRATIONS_PATH = "packages/database/prisma/migrations";
+const REPOSITORY_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const MIGRATION_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
 const SAFE_SOURCE_DATABASE_PATTERN =
   /(?:^|[_-])(?:ci|test|testing|004j)(?:$|[_-])/iu;
 const DATABASE_PATTERN =
-  /^lp_identity_mail_(?:upgrade|clean|legacy_reject|claim_reject|acl_reject)_ci_[a-f0-9]{16}$/u;
+  /^lp_identity_mail_(?:upgrade|origin|clean|legacy_reject|claim_reject|acl_reject)_ci_[a-f0-9]{16}$/u;
 const ROLE_PATTERN =
   /^lp_identity_mail_(?:worker|hostile|app)_[a-f0-9]{16}$/u;
 const TEMP_ROOT_PREFIX = "leetplus-identity-mail-delivery-";
@@ -87,11 +109,15 @@ const SEALED_TABLES = Object.freeze([
 const HELP = `
 ${SCRIPT_NAME}
 
-Local/CI-only PostgreSQL 16 integration and upgrade rehearsal for CURRENT_175
-and CURRENT_176. It creates fresh disposable databases from template0, deploys
-one through exact CURRENT_174 -> CURRENT_175 -> CURRENT_176 and one directly
-through all 176 migrations, exercises the leased initial-owner delivery state
-machine, and removes every generated database and role in finally.
+Local/CI-only PostgreSQL 16 integration and three-history release rehearsal.
+It pins the exact merge-base, origin/main, and 339be7f migration manifests,
+then proves: (1) exact CURRENT_176 -> separate case expand -> synthetic
+source-aware application wave/drain -> case contract -> terminal CURRENT_179;
+(2) exact origin/main CURRENT_152, where case migrations already finished,
+then 26 identity migrations with started_at head CURRENT_176 -> terminal
+CURRENT_179; and (3) a clean CURRENT_179 deploy. The origin/main path proves
+the enrolled worker fails before and becomes READY after the terminal migration
+without re-enrollment. Every generated database and role is removed in finally.
 
 Usage:
   node scripts/${SCRIPT_NAME}.mjs
@@ -239,8 +265,74 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function readMigrationPlan() {
-  const sourcePrismaDir = fileURLToPath(new URL("../prisma/", import.meta.url));
+const gitBlobCache = new Map();
+
+function runGit(args, encoding = null) {
+  const result = spawnSync("git", args, {
+    cwd: REPOSITORY_ROOT,
+    encoding,
+    maxBuffer: 32 * 1024 * 1024,
+    timeout: 60_000,
+    windowsHide: true,
+    shell: false,
+  });
+  if (result.error || result.status !== 0) {
+    contractError(
+      "GIT_HISTORY_UNAVAILABLE",
+      `Exact migration history is unavailable for ${args.at(-1) ?? "ref"}.`,
+    );
+  }
+  return result.stdout;
+}
+
+function readGitBlob(objectId) {
+  const cached = gitBlobCache.get(objectId);
+  if (cached) return cached;
+  const content = runGit(["cat-file", "blob", objectId]);
+  gitBlobCache.set(objectId, content);
+  return content;
+}
+
+function readGitMigrationManifest(ref) {
+  const tree = runGit(
+    ["ls-tree", "-r", ref, "--", GIT_MIGRATIONS_PATH],
+    "utf8",
+  );
+  const entries = tree
+    .split(/\r?\n/u)
+    .filter((line) => line.endsWith("/migration.sql"))
+    .map((line) => {
+      const match = /^\d{6} blob ([0-9a-f]{40})\t(.+)$/u.exec(line);
+      assert.ok(match, `Unexpected git tree row for ${ref}.`);
+      const [, objectId, path] = match;
+      const segments = path.split("/");
+      const name = segments.at(-2);
+      assert.ok(name && MIGRATION_PATTERN.test(name));
+      const content = readGitBlob(objectId);
+      return Object.freeze({
+        name,
+        path,
+        objectId,
+        content,
+        sha256: digest(content),
+      });
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+  assert.equal(new Set(entries.map(({ name }) => name)).size, entries.length);
+  const manifestBytes = Buffer.from(
+    `${entries.map(({ name, sha256 }) => `${name} ${sha256}`).join("\n")}\n`,
+    "utf8",
+  );
+  return Object.freeze({
+    ref,
+    count: entries.length,
+    head: entries.at(-1)?.name ?? null,
+    digest: digest(manifestBytes),
+    entries: Object.freeze(entries),
+  });
+}
+
+async function readWorkingMigrationManifest(sourcePrismaDir) {
   const migrationDirectories = (
     await readdir(join(sourcePrismaDir, "migrations"), {
       withFileTypes: true,
@@ -249,19 +341,187 @@ async function readMigrationPlan() {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
-  assert.equal(migrationDirectories.length, CURRENT_176_COUNT);
-  assert.ok(
-    migrationDirectories.every((name) => MIGRATION_PATTERN.test(name)),
+  const entries = [];
+  for (const name of migrationDirectories) {
+    assert.ok(MIGRATION_PATTERN.test(name));
+    const path = join(
+      sourcePrismaDir,
+      "migrations",
+      name,
+      "migration.sql",
+    );
+    const worktreeContent = await readFile(path);
+    const worktreeText = worktreeContent.toString("utf8");
+    const gitCleanText = worktreeText.replace(/\r\n/gu, "\n");
+    assert.doesNotMatch(
+      gitCleanText,
+      /\r/u,
+      `${name} contains a noncanonical carriage return.`,
+    );
+    const content = Buffer.from(gitCleanText, "utf8");
+    entries.push(
+      Object.freeze({ name, path, content, sha256: digest(content) }),
+    );
+  }
+  const manifestBytes = Buffer.from(
+    `${entries.map(({ name, sha256 }) => `${name} ${sha256}`).join("\n")}\n`,
+    "utf8",
   );
-  assert.equal(migrationDirectories[CURRENT_174_COUNT - 1], CURRENT_174);
-  assert.equal(migrationDirectories[CURRENT_175_COUNT - 1], CURRENT_175);
-  assert.equal(migrationDirectories[CURRENT_176_COUNT - 1], CURRENT_176);
-  return { sourcePrismaDir, migrationDirectories };
+  return Object.freeze({
+    ref: "WORKTREE",
+    count: entries.length,
+    head: entries.at(-1)?.name ?? null,
+    digest: digest(manifestBytes),
+    entries: Object.freeze(entries),
+  });
 }
 
-async function createMigrationArtifact(tempRoot, migrationPlan) {
+function assertPinnedManifest(manifest, count, digestValue) {
+  assert.equal(manifest.count, count, `${manifest.ref} migration count drifted.`);
+  assert.equal(
+    manifest.digest,
+    digestValue,
+    `${manifest.ref} migration manifest drifted.`,
+  );
+}
+
+function entryByName(manifest, migrationName) {
+  const entry = manifest.entries.find(({ name }) => name === migrationName);
+  assert.ok(entry, `${migrationName} is absent from ${manifest.ref}.`);
+  return entry;
+}
+
+async function readMigrationPlan() {
+  const sourcePrismaDir = fileURLToPath(new URL("../prisma/", import.meta.url));
+  const mergeBaseManifest = readGitMigrationManifest(MERGE_BASE_REF);
+  const originMainManifest = readGitMigrationManifest(ORIGIN_MAIN_REF);
+  const identity176Manifest = readGitMigrationManifest(IDENTITY_176_REF);
+  const workingManifest = await readWorkingMigrationManifest(sourcePrismaDir);
+
+  assertPinnedManifest(
+    mergeBaseManifest,
+    150,
+    MERGE_BASE_MANIFEST_DIGEST,
+  );
+  assertPinnedManifest(
+    originMainManifest,
+    152,
+    ORIGIN_MAIN_MANIFEST_DIGEST,
+  );
+  assertPinnedManifest(
+    identity176Manifest,
+    CURRENT_176_COUNT,
+    IDENTITY_176_MANIFEST_DIGEST,
+  );
+  assert.equal(identity176Manifest.head, CURRENT_176);
+  assert.equal(originMainManifest.head, CURRENT_178);
+  assert.equal(workingManifest.count, CURRENT_179_COUNT);
+  assert.equal(workingManifest.head, CURRENT_179);
+
+  const workingNames = workingManifest.entries.map(({ name }) => name);
+  assert.equal(workingNames[CURRENT_174_COUNT - 1], CURRENT_174);
+  assert.equal(workingNames[CURRENT_175_COUNT - 1], CURRENT_175);
+  assert.equal(workingNames[CURRENT_176_COUNT - 1], CURRENT_176);
+  assert.equal(workingNames[CURRENT_177_COUNT - 1], CURRENT_177);
+  assert.equal(workingNames[CURRENT_178_COUNT - 1], CURRENT_178);
+  assert.equal(workingNames[CURRENT_179_COUNT - 1], CURRENT_179);
+
+  for (const historicalEntry of identity176Manifest.entries) {
+    assert.ok(
+      entryByName(workingManifest, historicalEntry.name).content.equals(
+        historicalEntry.content,
+      ),
+      `${historicalEntry.name} changed from exact 339be7f.`,
+    );
+  }
+  for (const caseMigration of [CURRENT_177, CURRENT_178]) {
+    assert.ok(
+      entryByName(workingManifest, caseMigration).content.equals(
+        entryByName(originMainManifest, caseMigration).content,
+      ),
+      `${caseMigration} changed from exact origin/main.`,
+    );
+  }
+
+  const originNames = new Set(
+    originMainManifest.entries.map(({ name }) => name),
+  );
+  const identityNames = new Set(
+    identity176Manifest.entries.map(({ name }) => name),
+  );
+  const identityPendingOnOrigin = identity176Manifest.entries.filter(
+    ({ name }) => !originNames.has(name),
+  );
+  const originOnly = originMainManifest.entries
+    .filter(({ name }) => !identityNames.has(name))
+    .map((entry) => entry);
+  assert.equal(identityPendingOnOrigin.length, 26);
+  assert.deepEqual(
+    originOnly.map(({ name }) => name),
+    [CURRENT_177, CURRENT_178],
+  );
+  const merged178Entries = Object.freeze(
+    [...identity176Manifest.entries, ...originOnly].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    ),
+  );
+  const merged178ManifestBytes = Buffer.from(
+    `${merged178Entries
+      .map(({ name, sha256 }) => `${name} ${sha256}`)
+      .join("\n")}\n`,
+    "utf8",
+  );
+  const merged178Manifest = Object.freeze({
+    ref: "MERGED_CURRENT_178",
+    count: merged178Entries.length,
+    head: merged178Entries.at(-1)?.name ?? null,
+    digest: digest(merged178ManifestBytes),
+    entries: merged178Entries,
+  });
+  assert.equal(merged178Manifest.count, CURRENT_178_COUNT);
+  assert.equal(merged178Manifest.head, CURRENT_178);
+  assert.equal(
+    merged178Manifest.digest,
+    PRETERMINAL_178_MANIFEST_DIGEST,
+  );
+  const expectedWorkingNames = new Set([
+    ...identity176Manifest.entries.map(({ name }) => name),
+    ...originMainManifest.entries.map(({ name }) => name),
+    CURRENT_179,
+  ]);
+  assert.equal(expectedWorkingNames.size, CURRENT_179_COUNT);
+  assert.deepEqual(
+    [...new Set(workingNames)].sort(),
+    [...expectedWorkingNames].sort(),
+  );
+  assert.deepEqual(
+    workingNames.filter((name) => !identityNames.has(name) && !originNames.has(name)),
+    [CURRENT_179],
+  );
+  assert.deepEqual(
+    workingManifest.entries.slice(0, CURRENT_178_COUNT).map(({ name }) => name),
+    merged178Manifest.entries.map(({ name }) => name),
+  );
+  assert.deepEqual(
+    mergeBaseManifest.entries.map(({ name }) => name),
+    identity176Manifest.entries.slice(0, 150).map(({ name }) => name),
+  );
+
+  return {
+    sourcePrismaDir,
+    mergeBaseManifest,
+    originMainManifest,
+    identity176Manifest,
+    workingManifest,
+    merged178Manifest,
+    identityPendingOnOrigin,
+  };
+}
+
+async function createMigrationArtifact(tempRoot, name, migrationPlan) {
   assertSafeTempRoot(tempRoot);
-  const targetPrismaDir = join(tempRoot, "prisma");
+  assert.match(name, /^[a-z][a-z0-9-]{0,31}$/u);
+  const targetPrismaDir = join(tempRoot, `prisma-${name}`);
   const targetMigrationsDir = join(targetPrismaDir, "migrations");
   await mkdir(targetMigrationsDir, { recursive: true });
   await copyFile(
@@ -272,32 +532,29 @@ async function createMigrationArtifact(tempRoot, migrationPlan) {
     join(migrationPlan.sourcePrismaDir, "migrations", "migration_lock.toml"),
     join(targetMigrationsDir, "migration_lock.toml"),
   );
-  for (const migrationName of migrationPlan.migrationDirectories.slice(
-    0,
-    CURRENT_174_COUNT,
-  )) {
-    await cp(
-      join(migrationPlan.sourcePrismaDir, "migrations", migrationName),
-      join(targetMigrationsDir, migrationName),
-      { recursive: true },
-    );
-  }
   return {
     schemaPath: join(targetPrismaDir, "schema.prisma"),
     targetMigrationsDir,
   };
 }
 
-async function addMigration(artifact, migrationPlan, migrationName) {
-  assert.ok(new Set([CURRENT_175, CURRENT_176]).has(migrationName));
-  await cp(
-    join(migrationPlan.sourcePrismaDir, "migrations", migrationName),
-    join(artifact.targetMigrationsDir, migrationName),
-    { recursive: true },
-  );
+async function addManifestMigration(artifact, manifest, migrationName) {
+  const entry = entryByName(manifest, migrationName);
+  const targetDirectory = join(artifact.targetMigrationsDir, migrationName);
+  await mkdir(targetDirectory);
+  await writeFile(join(targetDirectory, "migration.sql"), entry.content, {
+    flag: "wx",
+  });
 }
 
-function runMigrateDeploy(schemaPath, targetDatabaseUrl) {
+async function seedManifest(artifact, manifest, entries = manifest.entries) {
+  for (const { name } of entries) {
+    await addManifestMigration(artifact, manifest, name);
+  }
+}
+
+function runMigrateDeploy(schemaPath, targetDatabaseUrl, stage) {
+  assert.match(stage, /^[a-z0-9_-]{1,80}$/u);
   const require = createRequire(import.meta.url);
   const prismaCliPath = require.resolve("prisma/build/index.js");
   const result = spawnSync(
@@ -323,7 +580,7 @@ function runMigrateDeploy(schemaPath, targetDatabaseUrl) {
   if (result.error || result.status !== 0) {
     contractError(
       "MIGRATION_DEPLOY_FAILED",
-      `Migration deploy failed with status ${result.status ?? "unknown"}; output suppressed.`,
+      `Migration deploy stage ${stage} failed with status ${result.status ?? "unknown"}; output suppressed.`,
     );
   }
 }
@@ -506,6 +763,110 @@ async function assertMigrationState(client, count, head) {
     head,
     unfinished: 0,
   });
+}
+
+async function readMigrationOrderEvidence(client) {
+  const [row] = await client.$queryRawUnsafe(`
+    SELECT
+      pg_catalog.count(*) FILTER (
+        WHERE "finished_at" IS NOT NULL
+          AND "rolled_back_at" IS NULL
+      )::INTEGER AS completed_count,
+      (
+        SELECT migration."migration_name"
+        FROM public."_prisma_migrations" AS migration
+        WHERE migration."finished_at" IS NOT NULL
+          AND migration."rolled_back_at" IS NULL
+        ORDER BY
+          migration."started_at" DESC,
+          migration."migration_name" DESC
+        LIMIT 1
+      ) AS started_at_head,
+      pg_catalog.max("migration_name") FILTER (
+        WHERE "finished_at" IS NOT NULL
+          AND "rolled_back_at" IS NULL
+      ) AS lexical_head,
+      pg_catalog.count(*) FILTER (
+        WHERE "finished_at" IS NULL
+          AND "rolled_back_at" IS NULL
+      )::INTEGER AS unfinished_count
+    FROM public."_prisma_migrations"
+  `);
+  return {
+    completedCount: Number(row?.completed_count ?? -1),
+    startedAtHead: row?.started_at_head ?? null,
+    lexicalHead: row?.lexical_head ?? null,
+    unfinishedCount: Number(row?.unfinished_count ?? -1),
+  };
+}
+
+async function assertDatabaseMigrationManifest(client, expectedManifest) {
+  const [integrity] = await client.$queryRawUnsafe(`
+    SELECT
+      pg_catalog.count(*)::INTEGER AS total_count,
+      pg_catalog.count(*) FILTER (
+        WHERE "rolled_back_at" IS NOT NULL
+      )::INTEGER AS rolled_back_count,
+      pg_catalog.count(*) FILTER (
+        WHERE "finished_at" IS NULL
+          AND "rolled_back_at" IS NULL
+      )::INTEGER AS unfinished_count,
+      (
+        SELECT pg_catalog.count(*)::INTEGER
+        FROM (
+          SELECT "migration_name"
+          FROM public."_prisma_migrations"
+          WHERE "finished_at" IS NOT NULL
+            AND "rolled_back_at" IS NULL
+          GROUP BY "migration_name"
+          HAVING pg_catalog.count(*) <> 1
+        ) AS duplicate_name
+      ) AS duplicate_completed_name_count
+    FROM public."_prisma_migrations"
+  `);
+  assert.deepEqual(
+    {
+      totalCount: Number(integrity?.total_count ?? -1),
+      rolledBackCount: Number(integrity?.rolled_back_count ?? -1),
+      unfinishedCount: Number(integrity?.unfinished_count ?? -1),
+      duplicateCompletedNameCount: Number(
+        integrity?.duplicate_completed_name_count ?? -1,
+      ),
+    },
+    {
+      totalCount: expectedManifest.count,
+      rolledBackCount: 0,
+      unfinishedCount: 0,
+      duplicateCompletedNameCount: 0,
+    },
+  );
+  const rows = await client.$queryRawUnsafe(`
+    SELECT "migration_name", "checksum"
+    FROM public."_prisma_migrations"
+    WHERE "finished_at" IS NOT NULL
+      AND "rolled_back_at" IS NULL
+    ORDER BY "migration_name"
+  `);
+  const actualRows = rows.map((row) => ({
+    name: row.migration_name,
+    sha256: row.checksum,
+  }));
+  const expectedRows = expectedManifest.entries.map(({ name, sha256 }) => ({
+    name,
+    sha256,
+  }));
+  assert.deepEqual(actualRows, expectedRows);
+  const manifestBytes = Buffer.from(
+    `${actualRows.map(({ name, sha256 }) => `${name} ${sha256}`).join("\n")}\n`,
+    "utf8",
+  );
+  const manifestDigest = digest(manifestBytes);
+  assert.equal(manifestDigest, expectedManifest.digest);
+  return {
+    count: actualRows.length,
+    head: actualRows.at(-1)?.name ?? null,
+    digest: manifestDigest,
+  };
 }
 
 async function readCurrent176RollbackFingerprint(client) {
@@ -1391,7 +1752,6 @@ async function assertNoDirectTableAccess(client) {
             tableName,
           )}`,
         ),
-      /permission denied/iu,
     );
   }
 }
@@ -1516,7 +1876,6 @@ async function assertAclBoundary(
            "id" INTEGER
          )`,
       ),
-    /permission denied to create temporary tables/iu,
   );
   await expectSqlState(
     "42501",
@@ -1530,7 +1889,6 @@ async function assertAclBoundary(
         "2".repeat(64),
         CONFIG_DIGEST,
       ),
-    /permission denied for function/iu,
   );
   await expectSqlState(
     "42501",
@@ -1544,7 +1902,6 @@ async function assertAclBoundary(
         "2".repeat(64),
         CONFIG_DIGEST,
       ),
-    /permission denied for function/iu,
   );
   await expectSqlState(
     "42501",
@@ -1557,7 +1914,6 @@ async function assertAclBoundary(
         randomUUID(),
         "3".repeat(64),
       ),
-    /permission denied for function/iu,
   );
 
   for (const signature of [...WORKER_SIGNATURES, SENT_ASSERT_SIGNATURE]) {
@@ -2139,8 +2495,9 @@ async function runDeliveryMatrix({
       operation: "ASSERT_IDENTITY_MAIL_DELIVERY_WORKER",
       decision: "READY",
       tenantId: primaryFixture.tenantId,
-      migrationHead: CURRENT_176,
-      migrationCount: CURRENT_176_COUNT,
+      migrationHead: CURRENT_179,
+      migrationCount: CURRENT_179_COUNT,
+      preterminalManifestDigest: PRETERMINAL_178_MANIFEST_DIGEST,
       policyRevision: 1,
       maxAttempts: 3,
       leaseSeconds: 10,
@@ -2157,8 +2514,9 @@ async function runDeliveryMatrix({
       operation: "ASSERT_IDENTITY_MAIL_DELIVERY_WORKER",
       decision: "READY",
       tenantId: tenantBFixture.tenantId,
-      migrationHead: CURRENT_176,
-      migrationCount: CURRENT_176_COUNT,
+      migrationHead: CURRENT_179,
+      migrationCount: CURRENT_179_COUNT,
+      preterminalManifestDigest: PRETERMINAL_178_MANIFEST_DIGEST,
       policyRevision: 1,
       maxAttempts: 3,
       leaseSeconds: 10,
@@ -3429,6 +3787,584 @@ async function runDeliveryMatrix({
   };
 }
 
+async function assertCaseExpandApplicationWave(client, tenantId, suffix) {
+  const [catalog] = await client.$queryRawUnsafe(`
+    SELECT
+      EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_attribute AS attribute
+        WHERE attribute.attrelid =
+          'public."GuestGameEntitlement"'::pg_catalog.regclass
+          AND attribute.attname = 'sourceRewardId'
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+      ) AS source_column,
+      EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_index AS index_row
+        WHERE index_row.indexrelid = pg_catalog.to_regclass(
+          'public.guest_game_entitlement_source_reward_uidx'
+        )
+          AND index_row.indisunique
+          AND index_row.indisready
+          AND index_row.indisvalid
+          AND index_row.indislive
+      ) AS source_index,
+      EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint AS constraint_row
+        WHERE constraint_row.conname =
+          'GuestGameEntitlement_sourceRewardId_fkey'
+          AND constraint_row.conrelid =
+            'public."GuestGameEntitlement"'::pg_catalog.regclass
+          AND constraint_row.confrelid =
+            'public."GuestGameReward"'::pg_catalog.regclass
+          AND constraint_row.contype = 'f'
+          AND constraint_row.confdeltype = 'r'
+          AND constraint_row.confupdtype = 'c'
+          AND constraint_row.convalidated
+      ) AS source_fk,
+      NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint AS constraint_row
+        WHERE constraint_row.conname =
+          'GuestGameEntitlement_sourceOutcome_distinct_check'
+          AND constraint_row.conrelid =
+            'public."GuestGameEntitlement"'::pg_catalog.regclass
+      ) AS contract_check_absent,
+      (
+        SELECT pg_catalog.count(*)::INTEGER
+        FROM pg_catalog.pg_trigger AS trigger_row
+        WHERE trigger_row.tgname IN (
+          'GuestGameReward_guard_case_parent_claim',
+          'GuestGameEntitlement_capture_legacy_source_reward'
+        )
+          AND trigger_row.tgenabled = 'O'
+          AND NOT trigger_row.tgisinternal
+      ) AS compatibility_trigger_count,
+      (
+        SELECT pg_catalog.count(*)::INTEGER
+        FROM (
+          VALUES
+            ('public."guest_game_reward_guard_case_parent_claim"()'),
+            ('public."guest_game_entitlement_capture_legacy_source_reward"()')
+        ) AS required("signature")
+        WHERE pg_catalog.to_regprocedure(required."signature") IS NOT NULL
+      ) AS compatibility_function_count
+  `);
+  assert.deepEqual(
+    {
+      sourceColumn: catalog?.source_column,
+      sourceIndex: catalog?.source_index,
+      sourceFk: catalog?.source_fk,
+      contractCheckAbsent: catalog?.contract_check_absent,
+      compatibilityTriggerCount: Number(
+        catalog?.compatibility_trigger_count ?? -1,
+      ),
+      compatibilityFunctionCount: Number(
+        catalog?.compatibility_function_count ?? -1,
+      ),
+    },
+    {
+      sourceColumn: true,
+      sourceIndex: true,
+      sourceFk: true,
+      contractCheckAbsent: true,
+      compatibilityTriggerCount: 2,
+      compatibilityFunctionCount: 2,
+    },
+  );
+
+  const profileId = randomUUID();
+  const missionId = randomUUID();
+  const legacyParentRewardId = randomUUID();
+  const sourceAwareParentRewardId = randomUUID();
+  const legacyEntitlementId = randomUUID();
+  const sourceAwareEntitlementId = randomUUID();
+
+  await client.$executeRawUnsafe(
+    `INSERT INTO public."GuestGameProfile" (
+       "id", "tenantId", "displayName", "status", "gameActivatedAt",
+       "createdAt", "updatedAt"
+     ) VALUES ($1, $2, $3, 'ACTIVE', pg_catalog.clock_timestamp(),
+       pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp())`,
+    profileId,
+    tenantId,
+    `${suffix}-case-wave`,
+  );
+  await client.$executeRawUnsafe(
+    `INSERT INTO public."GuestGameMission" (
+       "id", "tenantId", "name", "status", "missionType",
+       "triggerKind", "rewardType", "conditions", "createdAt", "updatedAt"
+     ) VALUES (
+       $1, $2, $3, 'ACTIVE', 'VISIT', 'MANUAL',
+       'LOOT_BOX_ENTITLEMENT', '{}'::JSONB,
+       pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp()
+     )`,
+    missionId,
+    tenantId,
+    `${suffix}-case-mission`,
+  );
+  for (const [rewardId, idempotencySuffix] of [
+    [legacyParentRewardId, "legacy-parent"],
+    [sourceAwareParentRewardId, "source-aware-parent"],
+  ]) {
+    await client.$executeRawUnsafe(
+      `INSERT INTO public."GuestGameReward" (
+         "id", "tenantId", "profileId", "missionId", "status", "source",
+         "idempotencyKey", "rewardType", "rewardAmount", "rewardLabel",
+         "claimRequired", "qualifiedAt", "evidence", "createdAt", "updatedAt"
+       ) VALUES (
+         $1, $2, $3, $4, 'APPROVED', 'MISSION', $5,
+         'LOOT_BOX_ENTITLEMENT', 0, 'Case entitlement', TRUE,
+         pg_catalog.clock_timestamp(),
+         pg_catalog.jsonb_build_object('fixture', $5),
+         pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp()
+       )`,
+      rewardId,
+      tenantId,
+      profileId,
+      missionId,
+      `${suffix}-${idempotencySuffix}`,
+    );
+  }
+
+  await client.$executeRawUnsafe(
+    `INSERT INTO public."GuestGameEntitlement" (
+       "id", "tenantId", "profileId", "ruleType", "ruleId", "ruleName",
+       "status", "idempotencyKey", "qualifiedAt", "rewardId", "evidence",
+       "createdAt", "updatedAt"
+     ) VALUES (
+       $1, $2, $3, 'LOOT_BOX', $4, 'Legacy alias writer', 'AVAILABLE', $5,
+       pg_catalog.clock_timestamp(), $6,
+       pg_catalog.jsonb_build_object('writer', 'LEGACY_ALIAS'),
+       pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp()
+     )`,
+    legacyEntitlementId,
+    tenantId,
+    profileId,
+    missionId,
+    `${suffix}-legacy-entitlement`,
+    legacyParentRewardId,
+  );
+  await client.$executeRawUnsafe(
+    `INSERT INTO public."GuestGameEntitlement" (
+       "id", "tenantId", "profileId", "ruleType", "ruleId", "ruleName",
+       "status", "idempotencyKey", "qualifiedAt", "sourceRewardId",
+       "evidence", "createdAt", "updatedAt"
+     ) VALUES (
+       $1, $2, $3, 'LOOT_BOX', $4, 'Source-aware writer', 'AVAILABLE', $5,
+       pg_catalog.clock_timestamp(), $6,
+       pg_catalog.jsonb_build_object('writer', 'SOURCE_REWARD_ID_AWARE'),
+       pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp()
+     )`,
+    sourceAwareEntitlementId,
+    tenantId,
+    profileId,
+    missionId,
+    `${suffix}-source-aware-entitlement`,
+    sourceAwareParentRewardId,
+  );
+
+  const entitlementRows = await client.$queryRawUnsafe(
+    `SELECT
+       "id", "rewardId" AS reward_id, "sourceRewardId" AS source_reward_id
+     FROM public."GuestGameEntitlement"
+     WHERE "id" IN ($1, $2)
+     ORDER BY "id"`,
+    legacyEntitlementId,
+    sourceAwareEntitlementId,
+  );
+  const legacyRow = entitlementRows.find(
+    (row) => row.id === legacyEntitlementId,
+  );
+  const sourceAwareRow = entitlementRows.find(
+    (row) => row.id === sourceAwareEntitlementId,
+  );
+  assert.equal(legacyRow?.reward_id, legacyParentRewardId);
+  assert.equal(legacyRow?.source_reward_id, legacyParentRewardId);
+  assert.equal(sourceAwareRow?.reward_id, null);
+  assert.equal(sourceAwareRow?.source_reward_id, sourceAwareParentRewardId);
+
+  const appWaveUpdated = await client.$executeRawUnsafe(
+    `UPDATE public."GuestGameEntitlement"
+     SET
+       "evidence" = COALESCE("evidence", '{}'::JSONB) ||
+         pg_catalog.jsonb_build_object(
+           'applicationWave', 'SOURCE_REWARD_ID_AWARE',
+           'fixtureWave', 'APPLICATION_WAVE_REHEARSED'
+         ),
+       "updatedAt" = pg_catalog.clock_timestamp()
+     WHERE "id" IN ($1, $2)
+       AND "sourceRewardId" IS NOT NULL`,
+    legacyEntitlementId,
+    sourceAwareEntitlementId,
+  );
+  assert.equal(appWaveUpdated, 2);
+
+  const [drain] = await client.$queryRawUnsafe(
+    `SELECT
+       pg_catalog.count(*) FILTER (
+         WHERE "sourceRewardId" IS NOT NULL
+           AND "rewardId" = "sourceRewardId"
+       )::INTEGER AS compatibility_alias_count,
+       pg_catalog.count(*) FILTER (
+         WHERE "sourceRewardId" IS NOT NULL
+           AND "rewardId" = "sourceRewardId"
+           AND ("status" = 'CONSUMED' OR "consumedAt" IS NOT NULL)
+       )::INTEGER AS blocking_consumed_alias_count,
+       pg_catalog.count(*) FILTER (
+         WHERE "sourceRewardId" IS NULL
+       )::INTEGER AS missing_source_count,
+       pg_catalog.count(*) FILTER (
+         WHERE "evidence" ->> 'fixtureWave' =
+           'APPLICATION_WAVE_REHEARSED'
+       )::INTEGER AS application_wave_marker_count
+     FROM public."GuestGameEntitlement"
+     WHERE "id" IN ($1, $2)`,
+    legacyEntitlementId,
+    sourceAwareEntitlementId,
+  );
+  assert.deepEqual(
+    {
+      compatibilityAliasCount: Number(
+        drain?.compatibility_alias_count ?? -1,
+      ),
+      blockingConsumedAliasCount: Number(
+        drain?.blocking_consumed_alias_count ?? -1,
+      ),
+      missingSourceCount: Number(drain?.missing_source_count ?? -1),
+      applicationWaveMarkerCount: Number(
+        drain?.application_wave_marker_count ?? -1,
+      ),
+    },
+    {
+      compatibilityAliasCount: 1,
+      blockingConsumedAliasCount: 0,
+      missingSourceCount: 0,
+      applicationWaveMarkerCount: 2,
+    },
+  );
+
+  return {
+    profileId,
+    missionId,
+    legacyEntitlementId,
+    sourceAwareEntitlementId,
+    legacyParentRewardId,
+    sourceAwareParentRewardId,
+    evidence: {
+      oldAliasWriteCaptured: true,
+      sourceAwareWriteAccepted: true,
+      compatibilityTriggerCount: 2,
+      applicationWaveMarkers: 2,
+      productionRestartDrainGate: "NOT_PROVEN_BY_SYNTHETIC_FIXTURE",
+      drainBlockingConsumedAliases: 0,
+    },
+  };
+}
+
+async function assertCaseContractWave(client, fixture, tenantId, suffix) {
+  const [catalog] = await client.$queryRawUnsafe(`
+    SELECT
+      (
+        SELECT pg_catalog.count(*)::INTEGER
+        FROM pg_catalog.pg_trigger AS trigger_row
+        WHERE trigger_row.tgname IN (
+          'GuestGameReward_guard_case_parent_claim',
+          'GuestGameEntitlement_capture_legacy_source_reward'
+        )
+          AND NOT trigger_row.tgisinternal
+      ) AS compatibility_trigger_count,
+      (
+        SELECT pg_catalog.count(*)::INTEGER
+        FROM (
+          VALUES
+            ('public."guest_game_reward_guard_case_parent_claim"()'),
+            ('public."guest_game_entitlement_capture_legacy_source_reward"()')
+        ) AS required("signature")
+        WHERE pg_catalog.to_regprocedure(required."signature") IS NOT NULL
+      ) AS compatibility_function_count,
+      EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint AS constraint_row
+        WHERE constraint_row.conname =
+          'GuestGameEntitlement_sourceOutcome_distinct_check'
+          AND constraint_row.conrelid =
+            'public."GuestGameEntitlement"'::pg_catalog.regclass
+          AND constraint_row.contype = 'c'
+          AND constraint_row.convalidated
+      ) AS distinct_check_validated
+  `);
+  assert.deepEqual(
+    {
+      compatibilityTriggerCount: Number(
+        catalog?.compatibility_trigger_count ?? -1,
+      ),
+      compatibilityFunctionCount: Number(
+        catalog?.compatibility_function_count ?? -1,
+      ),
+      distinctCheckValidated: catalog?.distinct_check_validated,
+    },
+    {
+      compatibilityTriggerCount: 0,
+      compatibilityFunctionCount: 0,
+      distinctCheckValidated: true,
+    },
+  );
+
+  const rows = await client.$queryRawUnsafe(
+    `SELECT
+       "id", "rewardId" AS reward_id, "sourceRewardId" AS source_reward_id,
+       "evidence" ->> 'fixtureWave' AS fixture_wave
+     FROM public."GuestGameEntitlement"
+     WHERE "id" IN ($1, $2)
+     ORDER BY "id"`,
+    fixture.legacyEntitlementId,
+    fixture.sourceAwareEntitlementId,
+  );
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    assert.equal(row.reward_id, null);
+    assert.ok(
+      new Set([
+        fixture.legacyParentRewardId,
+        fixture.sourceAwareParentRewardId,
+      ]).has(row.source_reward_id),
+    );
+    assert.equal(row.fixture_wave, "APPLICATION_WAVE_REHEARSED");
+  }
+
+  const outcomeRewardId = randomUUID();
+  await client.$executeRawUnsafe(
+    `INSERT INTO public."GuestGameReward" (
+       "id", "tenantId", "profileId", "status", "source",
+       "idempotencyKey", "rewardType", "rewardAmount", "rewardLabel",
+       "claimRequired", "qualifiedAt", "evidence", "createdAt", "updatedAt"
+     ) VALUES (
+       $1, $2, $3, 'APPROVED', 'LOOT_BOX', $4,
+       'BONUS', 100, 'Case outcome', FALSE,
+       pg_catalog.clock_timestamp(),
+       pg_catalog.jsonb_build_object('fixture', 'CONSUMED_OUTCOME'),
+       pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp()
+     )`,
+    outcomeRewardId,
+    tenantId,
+    fixture.profileId,
+    `${suffix}-case-outcome`,
+  );
+  await client.$executeRawUnsafe(
+    `UPDATE public."GuestGameEntitlement"
+     SET
+       "rewardId" = $2,
+       "status" = 'CONSUMED',
+       "consumedAt" = pg_catalog.clock_timestamp(),
+       "updatedAt" = pg_catalog.clock_timestamp()
+     WHERE "id" = $1`,
+    fixture.sourceAwareEntitlementId,
+    outcomeRewardId,
+  );
+  const [consumed] = await client.$queryRawUnsafe(
+    `SELECT
+       "rewardId" AS reward_id,
+       "sourceRewardId" AS source_reward_id,
+       "status",
+       "consumedAt" IS NOT NULL AS consumed
+     FROM public."GuestGameEntitlement"
+     WHERE "id" = $1`,
+    fixture.sourceAwareEntitlementId,
+  );
+  assert.equal(consumed?.reward_id, outcomeRewardId);
+  assert.equal(
+    consumed?.source_reward_id,
+    fixture.sourceAwareParentRewardId,
+  );
+  assert.notEqual(consumed?.reward_id, consumed?.source_reward_id);
+  assert.equal(consumed?.status, "CONSUMED");
+  assert.equal(consumed?.consumed, true);
+
+  return {
+    compatibilityTriggersRemoved: true,
+    compatibilityFunctionsRemoved: true,
+    distinctCheckValidated: true,
+    normalizedAliasRows: 2,
+    consumedOutcomeDistinctFromSource: true,
+  };
+}
+
+async function assertFinalWorkerRoutineBoundary(
+  databaseAdmin,
+  workerRoleName,
+  workerRoleOid,
+) {
+  const [row] = await databaseAdmin.$queryRawUnsafe(
+    `WITH required("signature") AS (
+       VALUES
+         ('public."identity_mail_delivery_worker_assert_v1"(text)'),
+         ('public."identity_initial_owner_mail_claim_v1"(text,text,text,text)'),
+         ('public."identity_initial_owner_mail_provider_mark_v1"(text,integer,text,text,text,text,text)'),
+         ('public."identity_initial_owner_mail_complete_v1"(text,integer,text,text,text,text,text)'),
+         ('public."identity_initial_owner_mail_reap_v1"(text,text,text,integer)')
+     ), routines AS (
+       SELECT routine.*
+       FROM required
+       INNER JOIN pg_catalog.pg_proc AS routine
+         ON routine.oid = pg_catalog.to_regprocedure(required."signature")
+     ), migration_owner AS (
+       SELECT relation.relowner AS owner_oid
+       FROM pg_catalog.pg_class AS relation
+       WHERE relation.oid = pg_catalog.to_regclass(
+         'public."IdentityMailOutbox"'
+       )
+     ), acl AS (
+       SELECT
+         routine.oid,
+         routine.proowner,
+         privilege.grantee,
+         privilege.privilege_type,
+         privilege.is_grantable
+       FROM routines AS routine
+       CROSS JOIN LATERAL pg_catalog.aclexplode(
+         COALESCE(
+           routine.proacl,
+           pg_catalog.acldefault('f', routine.proowner)
+         )
+       ) AS privilege
+     )
+     SELECT
+       (SELECT pg_catalog.count(*)::INTEGER FROM routines)
+         AS matched_function_count,
+       (
+         SELECT pg_catalog.count(*)::INTEGER
+         FROM routines, migration_owner
+         WHERE routines.proowner <> migration_owner.owner_oid
+       ) AS owner_mismatch_count,
+       (
+         SELECT pg_catalog.count(*)::INTEGER
+         FROM routines
+         INNER JOIN pg_catalog.pg_language AS language
+           ON language.oid = routines.prolang
+         WHERE NOT routines.prosecdef
+            OR routines.provolatile <> 'v'
+            OR language.lanname <> 'plpgsql'
+            OR routines.proconfig IS DISTINCT FROM
+              ARRAY['search_path=pg_catalog']::TEXT[]
+       ) AS metadata_mismatch_count,
+       (
+         SELECT pg_catalog.count(*)::INTEGER
+         FROM acl
+         WHERE acl.grantee = $2::OID
+           AND acl.privilege_type = 'EXECUTE'
+       ) AS worker_execute_count,
+       (
+         SELECT pg_catalog.count(*)::INTEGER
+         FROM acl
+         WHERE acl.grantee = $2::OID
+           AND acl.is_grantable
+       ) AS worker_grant_option_count,
+       (
+         SELECT pg_catalog.count(*)::INTEGER
+         FROM acl
+         WHERE acl.grantee = 0
+       ) AS public_privilege_count,
+       (
+         SELECT pg_catalog.count(*)::INTEGER
+         FROM acl
+         WHERE acl.grantee NOT IN (acl.proowner, $2::OID)
+            OR acl.privilege_type <> 'EXECUTE'
+       ) AS unexpected_privilege_count,
+       EXISTS (
+         SELECT 1
+         FROM pg_catalog.pg_roles AS role_row
+         WHERE role_row.oid = $2::OID
+           AND role_row.rolname = $1
+           AND role_row.rolcanlogin
+           AND NOT role_row.rolsuper
+           AND NOT role_row.rolinherit
+           AND NOT role_row.rolcreaterole
+           AND NOT role_row.rolcreatedb
+           AND NOT role_row.rolreplication
+           AND NOT role_row.rolbypassrls
+       ) AS worker_role_safe`,
+    workerRoleName,
+    workerRoleOid,
+  );
+  const evidence = {
+    matchedFunctionCount: Number(row?.matched_function_count ?? -1),
+    ownerMismatchCount: Number(row?.owner_mismatch_count ?? -1),
+    metadataMismatchCount: Number(row?.metadata_mismatch_count ?? -1),
+    workerExecuteCount: Number(row?.worker_execute_count ?? -1),
+    workerGrantOptionCount: Number(row?.worker_grant_option_count ?? -1),
+    publicPrivilegeCount: Number(row?.public_privilege_count ?? -1),
+    unexpectedPrivilegeCount: Number(
+      row?.unexpected_privilege_count ?? -1,
+    ),
+    workerRoleSafe: row?.worker_role_safe,
+  };
+  assert.deepEqual(evidence, {
+    matchedFunctionCount: 5,
+    ownerMismatchCount: 0,
+    metadataMismatchCount: 0,
+    workerExecuteCount: 5,
+    workerGrantOptionCount: 0,
+    publicPrivilegeCount: 0,
+    unexpectedPrivilegeCount: 0,
+    workerRoleSafe: true,
+  });
+  return evidence;
+}
+
+async function readWorkerRoutineDigests(databaseAdmin) {
+  const rows = await databaseAdmin.$queryRawUnsafe(
+    `WITH required("ordinal", "signature") AS (
+       VALUES
+         (1, 'public."identity_mail_delivery_worker_assert_v1"(text)'),
+         (2, 'public."identity_initial_owner_mail_claim_v1"(text,text,text,text)'),
+         (3, 'public."identity_initial_owner_mail_provider_mark_v1"(text,integer,text,text,text,text,text)'),
+         (4, 'public."identity_initial_owner_mail_complete_v1"(text,integer,text,text,text,text,text)'),
+         (5, 'public."identity_initial_owner_mail_reap_v1"(text,text,text,integer)')
+     )
+     SELECT
+       required."signature" AS signature,
+       pg_catalog.encode(
+         pg_catalog.sha256(
+           pg_catalog.convert_to(
+             pg_catalog.pg_get_functiondef(routine.oid),
+             'UTF8'
+           )
+         ),
+         'hex'
+       ) AS definition_sha256,
+       pg_catalog.encode(
+         pg_catalog.sha256(
+           pg_catalog.convert_to(routine.prosrc, 'UTF8')
+         ),
+         'hex'
+       ) AS prosrc_sha256
+     FROM required
+     INNER JOIN pg_catalog.pg_proc AS routine
+       ON routine.oid = pg_catalog.to_regprocedure(required."signature")
+     ORDER BY required."ordinal"`,
+  );
+  assert.equal(rows.length, 5);
+  const evidence = Object.fromEntries(
+    rows.map((row) => {
+      assert.equal(typeof row?.signature, "string");
+      assert.match(row?.definition_sha256, /^[a-f0-9]{64}$/u);
+      assert.match(row?.prosrc_sha256, /^[a-f0-9]{64}$/u);
+      return [
+        row.signature,
+        {
+          definitionSha256: row.definition_sha256,
+          prosrcSha256: row.prosrc_sha256,
+        },
+      ];
+    }),
+  );
+  assert.equal(Object.keys(evidence).length, 5);
+  return evidence;
+}
+
 async function runRealSmoke() {
   assert.equal(process.env.NODE_ENV, "test", "Smoke requires NODE_ENV=test.");
   assert.equal(
@@ -3441,6 +4377,7 @@ async function runRealSmoke() {
     parseSafeSourceDatabaseUrl(rawSourceUrl);
   const suffix = randomBytes(8).toString("hex");
   const upgradeDatabaseName = `lp_identity_mail_upgrade_ci_${suffix}`;
+  const originDatabaseName = `lp_identity_mail_origin_ci_${suffix}`;
   const cleanDatabaseName = `lp_identity_mail_clean_ci_${suffix}`;
   const legacyRejectDatabaseName =
     `lp_identity_mail_legacy_reject_ci_${suffix}`;
@@ -3459,6 +4396,7 @@ async function runRealSmoke() {
     [roles.appRoleName]: randomBytes(32).toString("hex"),
   };
   const upgradeUrl = databaseUrl(sourceUrl, upgradeDatabaseName);
+  const originUrl = databaseUrl(sourceUrl, originDatabaseName);
   const cleanUrl = databaseUrl(sourceUrl, cleanDatabaseName);
   const legacyRejectUrl = databaseUrl(
     sourceUrl,
@@ -3468,17 +4406,20 @@ async function runRealSmoke() {
   const aclRejectUrl = databaseUrl(sourceUrl, aclRejectDatabaseName);
   const admin = new PrismaClient({ log: [] });
   let databaseAdmin = null;
+  let originAdmin = null;
   let cleanAdmin = null;
   let legacyRejectAdmin = null;
   let claimRejectAdmin = null;
   let aclRejectAdmin = null;
   let workerA = null;
   let workerB = null;
+  let originWorker = null;
   let hostile = null;
   let app = null;
   let tempRoot = null;
   let clusterLockAcquired = false;
   let upgradeDatabaseCreated = false;
+  let originDatabaseCreated = false;
   let cleanDatabaseCreated = false;
   let legacyRejectDatabaseCreated = false;
   let claimRejectDatabaseCreated = false;
@@ -3491,13 +4432,41 @@ async function runRealSmoke() {
     clusterLockAcquired = true;
     tempRoot = await mkdtemp(join(tmpdir(), TEMP_ROOT_PREFIX));
     const migrationPlan = await readMigrationPlan();
-    const artifact = await createMigrationArtifact(tempRoot, migrationPlan);
+    const branchArtifact = await createMigrationArtifact(
+      tempRoot,
+      "branch",
+      migrationPlan,
+    );
+    const originArtifact = await createMigrationArtifact(
+      tempRoot,
+      "origin",
+      migrationPlan,
+    );
+    const cleanArtifact = await createMigrationArtifact(
+      tempRoot,
+      "clean",
+      migrationPlan,
+    );
+    await seedManifest(
+      branchArtifact,
+      migrationPlan.identity176Manifest,
+      migrationPlan.identity176Manifest.entries.slice(0, CURRENT_174_COUNT),
+    );
+    await seedManifest(
+      originArtifact,
+      migrationPlan.originMainManifest,
+    );
+    await seedManifest(cleanArtifact, migrationPlan.workingManifest);
 
     await createDatabase(admin, upgradeDatabaseName);
     upgradeDatabaseCreated = true;
     await hardenDatabasePublicAuthority(admin, upgradeDatabaseName);
+    await createDatabase(admin, originDatabaseName);
+    originDatabaseCreated = true;
+    await hardenDatabasePublicAuthority(admin, originDatabaseName);
     await createDatabase(admin, cleanDatabaseName);
     cleanDatabaseCreated = true;
+    await hardenDatabasePublicAuthority(admin, cleanDatabaseName);
     await createDatabase(admin, legacyRejectDatabaseName);
     legacyRejectDatabaseCreated = true;
     await createDatabase(admin, claimRejectDatabaseName);
@@ -3509,12 +4478,29 @@ async function runRealSmoke() {
       createdRoles.push(roleName);
     }
     await configureRoles(admin, upgradeDatabaseName, roles);
+    await configureRoles(admin, originDatabaseName, roles);
 
-    runMigrateDeploy(artifact.schemaPath, upgradeUrl);
-    runMigrateDeploy(artifact.schemaPath, legacyRejectUrl);
-    runMigrateDeploy(artifact.schemaPath, claimRejectUrl);
-    runMigrateDeploy(artifact.schemaPath, aclRejectUrl);
+    runMigrateDeploy(branchArtifact.schemaPath, upgradeUrl, "branch-174");
+    runMigrateDeploy(
+      branchArtifact.schemaPath,
+      legacyRejectUrl,
+      "legacy-reject-174",
+    );
+    runMigrateDeploy(
+      branchArtifact.schemaPath,
+      claimRejectUrl,
+      "claim-reject-174",
+    );
+    runMigrateDeploy(
+      branchArtifact.schemaPath,
+      aclRejectUrl,
+      "acl-reject-174",
+    );
+    runMigrateDeploy(originArtifact.schemaPath, originUrl, "origin-152");
+    runMigrateDeploy(cleanArtifact.schemaPath, cleanUrl, "clean-179");
     databaseAdmin = prismaClient(upgradeUrl);
+    originAdmin = prismaClient(originUrl);
+    cleanAdmin = prismaClient(cleanUrl);
     legacyRejectAdmin = prismaClient(legacyRejectUrl);
     claimRejectAdmin = prismaClient(claimRejectUrl);
     aclRejectAdmin = prismaClient(aclRejectUrl);
@@ -3534,6 +4520,16 @@ async function runRealSmoke() {
       CURRENT_174_COUNT,
       CURRENT_174,
     );
+    await assertMigrationState(originAdmin, 152, CURRENT_178);
+    const originInitialManifest = await assertDatabaseMigrationManifest(
+      originAdmin,
+      migrationPlan.originMainManifest,
+    );
+    await assertMigrationState(cleanAdmin, CURRENT_179_COUNT, CURRENT_179);
+    const cleanFinalManifest = await assertDatabaseMigrationManifest(
+      cleanAdmin,
+      migrationPlan.workingManifest,
+    );
 
     const primaryFixture = deliveryFixture(
       randomUUID(),
@@ -3549,11 +4545,27 @@ async function runRealSmoke() {
       legacyRejectFixture,
     );
 
-    await addMigration(artifact, migrationPlan, CURRENT_175);
-    runMigrateDeploy(artifact.schemaPath, upgradeUrl);
-    runMigrateDeploy(artifact.schemaPath, legacyRejectUrl);
-    runMigrateDeploy(artifact.schemaPath, claimRejectUrl);
-    runMigrateDeploy(artifact.schemaPath, aclRejectUrl);
+    await addManifestMigration(
+      branchArtifact,
+      migrationPlan.identity176Manifest,
+      CURRENT_175,
+    );
+    runMigrateDeploy(branchArtifact.schemaPath, upgradeUrl, "branch-175");
+    runMigrateDeploy(
+      branchArtifact.schemaPath,
+      legacyRejectUrl,
+      "legacy-reject-175",
+    );
+    runMigrateDeploy(
+      branchArtifact.schemaPath,
+      claimRejectUrl,
+      "claim-reject-175",
+    );
+    runMigrateDeploy(
+      branchArtifact.schemaPath,
+      aclRejectUrl,
+      "acl-reject-175",
+    );
     await assertEnumIsolation(databaseAdmin, primaryFixture);
 
     const malformedClaimFixture = deliveryFixture(
@@ -3586,20 +4598,24 @@ async function runRealSmoke() {
     const current176SqlDigest = digest(
       await readFile(current176SqlPath, "utf8"),
     );
+    assert.equal(
+      current176SqlDigest,
+      "36e0c3b54a667ff613704e372daa6e2e7f4fd68df91cc15a7df5720740e929ce",
+    );
     const legacyRejectStatus = runSqlFileExpectFailure(
-      artifact.schemaPath,
+      branchArtifact.schemaPath,
       current176SqlPath,
       legacyRejectUrl,
       /LEGACY_RECIPIENT_AAD_REISSUE_REQUIRED/u,
     );
     const claimRejectStatus = runSqlFileExpectFailure(
-      artifact.schemaPath,
+      branchArtifact.schemaPath,
       current176SqlPath,
       claimRejectUrl,
       /IdentityEmailClaim_email_canonical_check|violated by some row/iu,
     );
     const aclRejectStatus = runSqlFileExpectFailure(
-      artifact.schemaPath,
+      branchArtifact.schemaPath,
       current176SqlPath,
       aclRejectUrl,
       /inherited unsafe default privileges/iu,
@@ -3632,8 +4648,19 @@ async function runRealSmoke() {
       CURRENT_175,
     );
 
-    await addMigration(artifact, migrationPlan, CURRENT_176);
-    runMigrateDeploy(artifact.schemaPath, upgradeUrl);
+    await addManifestMigration(
+      branchArtifact,
+      migrationPlan.identity176Manifest,
+      CURRENT_176,
+    );
+    runMigrateDeploy(branchArtifact.schemaPath, upgradeUrl, "branch-176");
+    await assertMigrationState(databaseAdmin, CURRENT_176_COUNT, CURRENT_176);
+    const branchCheckpointManifest = await assertDatabaseMigrationManifest(
+      databaseAdmin,
+      migrationPlan.identity176Manifest,
+    );
+    const branchCheckpointWorkerDigests =
+      await readWorkerRoutineDigests(databaseAdmin);
     await assertPopulatedBusinessUpgrade(databaseAdmin, primaryFixture);
     const holdWriterCompatibility =
       await assertPost176HoldWriterCompatibility(databaseAdmin, suffix);
@@ -3647,11 +4674,343 @@ async function runRealSmoke() {
       suffix,
     );
 
-    runMigrateDeploy(artifact.schemaPath, cleanUrl);
-    cleanAdmin = prismaClient(cleanUrl);
-    await assertClean176(cleanAdmin);
+    await addManifestMigration(
+      branchArtifact,
+      migrationPlan.originMainManifest,
+      CURRENT_177,
+    );
+    runMigrateDeploy(branchArtifact.schemaPath, upgradeUrl, "branch-177");
+    await assertMigrationState(databaseAdmin, CURRENT_177_COUNT, CURRENT_177);
+    const branchExpandState = await readMigrationOrderEvidence(databaseAdmin);
+    const caseWaveFixture = await assertCaseExpandApplicationWave(
+      databaseAdmin,
+      primaryFixture.tenantId,
+      suffix,
+    );
+
+    await addManifestMigration(
+      branchArtifact,
+      migrationPlan.originMainManifest,
+      CURRENT_178,
+    );
+    runMigrateDeploy(branchArtifact.schemaPath, upgradeUrl, "branch-178");
+    await assertMigrationState(databaseAdmin, CURRENT_178_COUNT, CURRENT_178);
+    const branchContractManifest = await assertDatabaseMigrationManifest(
+      databaseAdmin,
+      migrationPlan.merged178Manifest,
+    );
+    const caseContractEvidence = await assertCaseContractWave(
+      databaseAdmin,
+      caseWaveFixture,
+      primaryFixture.tenantId,
+      suffix,
+    );
+
+    await addManifestMigration(
+      branchArtifact,
+      migrationPlan.workingManifest,
+      CURRENT_179,
+    );
+    runMigrateDeploy(branchArtifact.schemaPath, upgradeUrl, "branch-179");
+    await assertMigrationState(databaseAdmin, CURRENT_179_COUNT, CURRENT_179);
+    const branchFinalManifest = await assertDatabaseMigrationManifest(
+      databaseAdmin,
+      migrationPlan.workingManifest,
+    );
+
+    for (const pendingMigration of migrationPlan.identityPendingOnOrigin) {
+      await addManifestMigration(
+        originArtifact,
+        migrationPlan.identity176Manifest,
+        pendingMigration.name,
+      );
+    }
+    runMigrateDeploy(
+      originArtifact.schemaPath,
+      originUrl,
+      "origin-identity-tail-178",
+    );
+    const originPreTerminalOrder = await readMigrationOrderEvidence(
+      originAdmin,
+    );
+    assert.deepEqual(originPreTerminalOrder, {
+      completedCount: CURRENT_178_COUNT,
+      startedAtHead: CURRENT_176,
+      lexicalHead: CURRENT_178,
+      unfinishedCount: 0,
+    });
+    const originPreTerminalManifest = await assertDatabaseMigrationManifest(
+      originAdmin,
+      migrationPlan.merged178Manifest,
+    );
+
+    const current179SqlPath = join(
+      migrationPlan.sourcePrismaDir,
+      "migrations",
+      CURRENT_179,
+      "migration.sql",
+    );
+    const current179SqlDigest = digest(await readFile(current179SqlPath));
+    const pre176ManifestEntry =
+      migrationPlan.merged178Manifest.entries.find(
+        ({ name }) => name < CURRENT_175,
+      );
+    assert.ok(pre176ManifestEntry);
+    const preTerminalRoutineDigests =
+      await readWorkerRoutineDigests(originAdmin);
+    await originAdmin.$executeRawUnsafe(
+      `UPDATE public."_prisma_migrations"
+       SET "checksum" = $1
+       WHERE "migration_name" = $2`,
+      "9".repeat(64),
+      pre176ManifestEntry.name,
+    );
+    const terminalPre176ManifestRejectStatus = runSqlFileExpectFailure(
+      originArtifact.schemaPath,
+      current179SqlPath,
+      originUrl,
+      /exact completed CURRENT_178 migration set/iu,
+    );
+    await originAdmin.$executeRawUnsafe(
+      `UPDATE public."_prisma_migrations"
+       SET "checksum" = $1
+       WHERE "migration_name" = $2`,
+      pre176ManifestEntry.sha256,
+      pre176ManifestEntry.name,
+    );
+    assert.deepEqual(
+      await readWorkerRoutineDigests(originAdmin),
+      preTerminalRoutineDigests,
+    );
+    await assertDatabaseMigrationManifest(
+      originAdmin,
+      migrationPlan.merged178Manifest,
+    );
+    const exact176Checksum = entryByName(
+      migrationPlan.identity176Manifest,
+      CURRENT_176,
+    ).sha256;
+    await originAdmin.$executeRawUnsafe(
+      `UPDATE public."_prisma_migrations"
+       SET "checksum" = $1
+       WHERE "migration_name" = $2`,
+      "0".repeat(64),
+      CURRENT_176,
+    );
+    const terminalChecksumRejectStatus = runSqlFileExpectFailure(
+      originArtifact.schemaPath,
+      current179SqlPath,
+      originUrl,
+      /exact completed CURRENT_178 migration set/iu,
+    );
+    await originAdmin.$executeRawUnsafe(
+      `UPDATE public."_prisma_migrations"
+       SET "checksum" = $1
+       WHERE "migration_name" = $2`,
+      exact176Checksum,
+      CURRENT_176,
+    );
+
+    await originAdmin.$executeRawUnsafe(
+      `GRANT EXECUTE ON FUNCTION ${WORKER_ASSERT_SIGNATURE}
+       TO ${quoteIdentifier(roles.hostileRoleName)}`,
+    );
+    const terminalAclRejectStatus = runSqlFileExpectFailure(
+      originArtifact.schemaPath,
+      current179SqlPath,
+      originUrl,
+      /routine EXECUTE authority is unsafe/iu,
+    );
+    await originAdmin.$executeRawUnsafe(
+      `REVOKE EXECUTE ON FUNCTION ${WORKER_ASSERT_SIGNATURE}
+       FROM ${quoteIdentifier(roles.hostileRoleName)}`,
+    );
+
+    const [migrationOwner] = await originAdmin.$queryRawUnsafe(`
+      SELECT pg_catalog.pg_get_userbyid(relation.relowner) AS owner_name
+      FROM pg_catalog.pg_class AS relation
+      WHERE relation.oid = pg_catalog.to_regclass(
+        'public."IdentityMailOutbox"'
+      )
+    `);
+    assert.equal(typeof migrationOwner?.owner_name, "string");
+    const quotedMigrationOwner = quoteIdentifier(migrationOwner.owner_name);
+    await originAdmin.$executeRawUnsafe(
+      `ALTER FUNCTION ${WORKER_ASSERT_SIGNATURE}
+       OWNER TO ${quoteIdentifier(roles.hostileRoleName)}`,
+    );
+    const terminalOwnerRejectStatus = runSqlFileExpectFailure(
+      originArtifact.schemaPath,
+      current179SqlPath,
+      originUrl,
+      /routine ownership is unsafe/iu,
+    );
+    await originAdmin.$executeRawUnsafe(
+      `ALTER FUNCTION ${WORKER_ASSERT_SIGNATURE}
+       OWNER TO ${quotedMigrationOwner}`,
+    );
+
+    const [exactClaimRoutine] = await originAdmin.$queryRawUnsafe(
+      `SELECT
+         pg_catalog.pg_get_functiondef(
+           pg_catalog.to_regprocedure(
+             'public."identity_initial_owner_mail_claim_v1"(text,text,text,text)'
+           )
+         ) AS definition,
+         pg_catalog.encode(
+           pg_catalog.sha256(
+             pg_catalog.convert_to(routine.prosrc, 'UTF8')
+           ),
+           'hex'
+         ) AS prosrc_sha256
+       FROM pg_catalog.pg_proc AS routine
+       WHERE routine.oid = pg_catalog.to_regprocedure(
+         'public."identity_initial_owner_mail_claim_v1"(text,text,text,text)'
+       )`,
+    );
+    assert.equal(typeof exactClaimRoutine?.definition, "string");
+    assert.equal(
+      exactClaimRoutine?.prosrc_sha256,
+      "f2d56144cba4cbc3ee4626f09e1b5c106347822e500c7cd2310f52553b40b57b",
+    );
+    await originAdmin.$executeRawUnsafe(
+      `CREATE OR REPLACE FUNCTION public."identity_initial_owner_mail_claim_v1"(
+         p_tenant_id TEXT,
+         p_lease_owner_digest TEXT,
+         p_lease_token_digest TEXT,
+         p_worker_config_digest TEXT
+       )
+       RETURNS JSONB
+       LANGUAGE plpgsql
+       SECURITY DEFINER
+       SET search_path = pg_catalog
+       AS $tampered_claim$
+       BEGIN
+         RETURN pg_catalog.jsonb_build_object(
+           'decision', 'HOSTILE_BODY_SHOULD_NEVER_RUN'
+         );
+       END;
+       $tampered_claim$`,
+    );
+    const terminalBodyRejectStatus = runSqlFileExpectFailure(
+      originArtifact.schemaPath,
+      current179SqlPath,
+      originUrl,
+      /routine definition or metadata is unsafe/iu,
+    );
+    await originAdmin.$executeRawUnsafe(exactClaimRoutine.definition);
+    const [restoredClaimRoutine] = await originAdmin.$queryRawUnsafe(
+      `SELECT pg_catalog.encode(
+         pg_catalog.sha256(
+           pg_catalog.convert_to(routine.prosrc, 'UTF8')
+         ),
+         'hex'
+       ) AS prosrc_sha256
+       FROM pg_catalog.pg_proc AS routine
+       WHERE routine.oid = pg_catalog.to_regprocedure(
+         'public."identity_initial_owner_mail_claim_v1"(text,text,text,text)'
+       )`,
+    );
+    assert.equal(
+      restoredClaimRoutine?.prosrc_sha256,
+      exactClaimRoutine.prosrc_sha256,
+    );
 
     roles.workerRoleOid = await roleOid(admin, roles.workerRoleName);
+    const originFixture = deliveryFixture(
+      randomUUID(),
+      `${suffix}-origin-head`,
+    );
+    await insertTenant(originAdmin, originFixture);
+    await insertEnrollment(
+      originAdmin,
+      originFixture.tenantId,
+      roles.workerRoleName,
+      roles.workerRoleOid,
+    );
+    await grantRuntimeBoundaries(originAdmin, roles);
+    originWorker = prismaClient(
+      databaseUrl(sourceUrl, originDatabaseName, {
+        roleName: roles.workerRoleName,
+        password: credentials[roles.workerRoleName],
+      }),
+    );
+    const originBeforePreTerminalAssert =
+      await readTenantStateFingerprint(originAdmin, originFixture.tenantId);
+    await expectSqlState(
+      "55000",
+      () => callWorkerAssert(originWorker, originFixture.tenantId),
+      /not CURRENT_176/iu,
+    );
+    assert.deepEqual(
+      await readTenantStateFingerprint(originAdmin, originFixture.tenantId),
+      originBeforePreTerminalAssert,
+    );
+
+    await addManifestMigration(
+      originArtifact,
+      migrationPlan.workingManifest,
+      CURRENT_179,
+    );
+    runMigrateDeploy(originArtifact.schemaPath, originUrl, "origin-179");
+    await assertMigrationState(originAdmin, CURRENT_179_COUNT, CURRENT_179);
+    const originFinalManifest = await assertDatabaseMigrationManifest(
+      originAdmin,
+      migrationPlan.workingManifest,
+    );
+    const originBeforePostTerminalManifestTamper =
+      await readTenantStateFingerprint(originAdmin, originFixture.tenantId);
+    await originAdmin.$executeRawUnsafe(
+      `UPDATE public."_prisma_migrations"
+       SET "checksum" = $1
+       WHERE "migration_name" = $2`,
+      "8".repeat(64),
+      pre176ManifestEntry.name,
+    );
+    await expectSqlState(
+      "55000",
+      () => callWorkerAssert(originWorker, originFixture.tenantId),
+      /not CURRENT_179/iu,
+    );
+    assert.deepEqual(
+      await readTenantStateFingerprint(originAdmin, originFixture.tenantId),
+      originBeforePostTerminalManifestTamper,
+    );
+    await originAdmin.$executeRawUnsafe(
+      `UPDATE public."_prisma_migrations"
+       SET "checksum" = $1
+       WHERE "migration_name" = $2`,
+      pre176ManifestEntry.sha256,
+      pre176ManifestEntry.name,
+    );
+    await assertDatabaseMigrationManifest(
+      originAdmin,
+      migrationPlan.workingManifest,
+    );
+    const originReadyReceipt = await callWorkerAssert(
+      originWorker,
+      originFixture.tenantId,
+    );
+    assert.equal(originReadyReceipt?.decision, "READY");
+    assert.equal(originReadyReceipt?.migrationHead, CURRENT_179);
+    assert.equal(originReadyReceipt?.migrationCount, CURRENT_179_COUNT);
+    assert.equal(
+      originReadyReceipt?.preterminalManifestDigest,
+      PRETERMINAL_178_MANIFEST_DIGEST,
+    );
+    assert.deepEqual(
+      await readTenantStateFingerprint(originAdmin, originFixture.tenantId),
+      originBeforePreTerminalAssert,
+    );
+    const originWorkerRoutineBoundary = await assertFinalWorkerRoutineBoundary(
+      originAdmin,
+      roles.workerRoleName,
+      roles.workerRoleOid,
+    );
+    const terminalWorkerDigests =
+      await readWorkerRoutineDigests(originAdmin);
+    await assertNoDirectTableAccess(originWorker);
+
     await grantRuntimeBoundaries(databaseAdmin, roles);
     workerA = prismaClient(
       databaseUrl(sourceUrl, upgradeDatabaseName, {
@@ -3688,6 +5047,11 @@ async function runRealSmoke() {
       primaryFixture,
       suffix,
     });
+    const branchWorkerRoutineBoundary = await assertFinalWorkerRoutineBoundary(
+      databaseAdmin,
+      roles.workerRoleName,
+      roles.workerRoleOid,
+    );
     assert.deepEqual(await readStatusLabels(cleanAdmin), EXACT_STATUS_LABELS);
     assert.deepEqual(await readStatusLabels(databaseAdmin), EXACT_STATUS_LABELS);
     const cleanMigrationState = await readMigrationState(cleanAdmin);
@@ -3696,8 +5060,68 @@ async function runRealSmoke() {
       `${JSON.stringify({
         ok: true,
         decision: "SMOKE_PASSED",
-        migrationHead: CURRENT_176,
-        migrationCount: CURRENT_176_COUNT,
+        migrationHead: CURRENT_179,
+        migrationCount: CURRENT_179_COUNT,
+        identityCheckpointHead: CURRENT_176,
+        identityCheckpointCount: CURRENT_176_COUNT,
+        migrationArtifacts: {
+          identity176Sha256: current176SqlDigest,
+          terminal179Sha256: current179SqlDigest,
+        },
+        pinnedParentManifests: {
+          mergeBase150: {
+            ref: MERGE_BASE_REF,
+            digest: migrationPlan.mergeBaseManifest.digest,
+          },
+          originMain152: {
+            ref: ORIGIN_MAIN_REF,
+            digest: migrationPlan.originMainManifest.digest,
+          },
+          identityBranch176: {
+            ref: IDENTITY_176_REF,
+            digest: migrationPlan.identity176Manifest.digest,
+          },
+        },
+        histories: {
+          identityBranch: {
+            checkpointManifest: branchCheckpointManifest,
+            checkpointWorkerDigests: branchCheckpointWorkerDigests,
+            expandState: branchExpandState,
+            applicationWave: caseWaveFixture.evidence,
+            contractManifest: branchContractManifest,
+            contractEvidence: caseContractEvidence,
+            finalManifest: branchFinalManifest,
+          },
+          originMain: {
+            initialManifest: originInitialManifest,
+            pendingIdentityMigrations: 26,
+            preTerminalOrder: originPreTerminalOrder,
+            preTerminalManifest: originPreTerminalManifest,
+            preTerminalWorkerAssertSqlState: "55000",
+            preTerminalWorkerEffects: 0,
+            terminalRejects: {
+              wrongPre176Checksum: terminalPre176ManifestRejectStatus,
+              wrong176Checksum: terminalChecksumRejectStatus,
+              hostileExecuteGrant: terminalAclRejectStatus,
+              hostileFunctionOwner: terminalOwnerRejectStatus,
+              hostileFunctionBody: terminalBodyRejectStatus,
+            },
+            finalManifest: originFinalManifest,
+            sameEnrollmentReadyAfterTerminal: true,
+            postTerminalPre176ChecksumWorkerAssertSqlState: "55000",
+            postTerminalPre176ChecksumWorkerEffects: 0,
+            readyHead: originReadyReceipt.migrationHead,
+            readyCount: originReadyReceipt.migrationCount,
+            readyPreterminalManifestDigest:
+              originReadyReceipt.preterminalManifestDigest,
+            workerRoutineBoundary: originWorkerRoutineBoundary,
+            terminalWorkerDigests,
+          },
+          clean: {
+            finalManifest: cleanFinalManifest,
+            migrationState: cleanMigrationState,
+          },
+        },
         cleanMigrationState,
         upgradeMigrationState,
         rejectedMigrationSqlDigest: current176SqlDigest,
@@ -3708,6 +5132,7 @@ async function runRealSmoke() {
         },
         emailParity,
         holdWriterCompatibility,
+        branchWorkerRoutineBoundary,
         ...evidence,
       })}\n`,
     );
@@ -3716,9 +5141,11 @@ async function runRealSmoke() {
     for (const client of [
       workerA,
       workerB,
+      originWorker,
       hostile,
       app,
       databaseAdmin,
+      originAdmin,
       cleanAdmin,
       legacyRejectAdmin,
       claimRejectAdmin,
@@ -3732,6 +5159,11 @@ async function runRealSmoke() {
     }
     if (upgradeDatabaseCreated) {
       await dropDatabase(admin, upgradeDatabaseName).catch((error) => {
+        cleanupError ??= error;
+      });
+    }
+    if (originDatabaseCreated) {
+      await dropDatabase(admin, originDatabaseName).catch((error) => {
         cleanupError ??= error;
       });
     }
@@ -3812,9 +5244,23 @@ async function runSelfTest() {
       ),
   );
   const migrationPlan = await readMigrationPlan();
-  assert.equal(migrationPlan.migrationDirectories.length, CURRENT_176_COUNT);
+  assert.equal(migrationPlan.workingManifest.count, CURRENT_179_COUNT);
+  assert.equal(migrationPlan.workingManifest.head, CURRENT_179);
+  assert.equal(migrationPlan.identityPendingOnOrigin.length, 26);
   process.stdout.write(
-    `${JSON.stringify({ ok: true, decision: "SELF_TEST_PASSED" })}\n`,
+    `${JSON.stringify({
+      ok: true,
+      decision: "SELF_TEST_PASSED",
+      migrationHead: CURRENT_179,
+      migrationCount: CURRENT_179_COUNT,
+      parentManifests: {
+        mergeBase150: migrationPlan.mergeBaseManifest.digest,
+        originMain152: migrationPlan.originMainManifest.digest,
+        identityBranch176: migrationPlan.identity176Manifest.digest,
+      },
+      originPendingIdentityMigrations: 26,
+      destructiveSourceDatabaseActions: 0,
+    })}\n`,
   );
 }
 

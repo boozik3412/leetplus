@@ -3,8 +3,8 @@
 | Поле           | Значение                                                                                                                                                  |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Статус         | templates, recurring actor HTTP, snapshot admission, inventory/planner, SYNTHETIC proposal dry-run и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.16.0                                                                                                                                                    |
-| Дата           | 29.07.2026                                                                                                                                                |
+| Версия         | 1.17.0                                                                                                                                                    |
+| Дата           | 30.07.2026                                                                                                                                                |
 | Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                                                                      |
 | Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                                                                    |
 
@@ -27,14 +27,14 @@ Scheduler и scheduled all-tenant HTTP не зарегистрированы и 
 остаются `NO-GO`.
 
 State contract после control-plane EXPAND разделён: StaffTask evidence
-остаётся bound к frozen `EXPAND_162`, а current production-like
-inventory/planner допускается только после `CURRENT_166` admission — exact
-prefix плюс allowlisted migrations
-`20260728120000_tenant_execution_control_plane_expand` и
-`20260728150000_tenant_execution_revision_fence` и
-`20260729120000_store_background_execution_fence` и
-`20260729160000_guest_game_delivery_claim_fence`. Schema target —
-`CURRENT_166`. Prior engineering baseline связан с PR head
+остаётся bound к frozen `EXPAND_162` (count `162`, head
+`20260727131000_staff_task_integrity_expand`), а current production-like
+inventory/planner допускается только после `CURRENT_179` admission — exact
+prefix плюс ровно 17 exact allowlisted additive migrations `163..179` из
+[канонического current release contract](../README.md#канонический-current-release-contract).
+Current count `179`, head
+`20260731120000_identity_mail_delivery_release_head`, unfinished `0`. Prior
+engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856` / CI `30443837684`
 (`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
 Baseline завершился `3/3 PASS`; PostgreSQL подтвердил
@@ -67,7 +67,13 @@ runtime/app DB role должна пройти admission и получить яв
 `PUBLIC` revoked. Batch/rebind/future provider writers остаются fail-closed,
 bounded whole-transaction retry — defense-in-depth. Interactive actor boundary,
 retention, roots/acquisition и production-like apply/deploy/cutover pending.
-Historical SHA ниже не являются evidence current `CURRENT_166`.
+Signed `CURRENT_166` authority envelope и его DB marker являются historical
+evidence только для `CURRENT_166`; их нельзя переименовать или reuse как
+authorization для `CURRENT_179`. Для current state требуются новый acquisition
+request, `creationNonce`, state-bound Ed25519 envelope и marker rotation.
+Production roots `{}` / EMPTY, поэтому production-like admission и внешний
+beta остаются `NO-GO`. Historical SHA ниже не являются evidence current
+`CURRENT_179`.
 
 ## 1. Инвентаризация поверхности
 
@@ -251,7 +257,8 @@ historical candidate `2c74c663...` не является current evidence; exact
 `CURRENT_165` engineering candidate
 `4bd6a036df16579f68b2c96a14b6475c8311b231` принят по зелёному remote CI
 `30428288353`, а documentation/evidence successor `7c20adec...` — по CI
-`30429463161`. Это historical prerequisite. Schema target — `CURRENT_166`;
+`30429463161`. Это historical prerequisite. Living schema target —
+`CURRENT_179`; `CURRENT_166` evidence не разрешает current operations;
 prior PR-head-associated merge-ref baseline —
 `bbef153a...` / `30443837684`, не exact-SHA evidence; previous accepted
 exact-head — `d525b736...` / `30447467729`, `3/3 PASS`; last accepted
@@ -269,8 +276,8 @@ precursor. Production-like evidence ещё pending.
 - считает actionable cap только по proposal/operator, исключая review-only
   counts;
 - сохраняет protected StaffTask prefix `EXPAND_162`, но выполняет current
-  schema-first exact gate `CURRENT_166`, `migrationCount=166`, latest
-  `20260729160000_guest_game_delivery_claim_fence`, `unfinished=0`,
+  schema-first exact gate `CURRENT_179`, `migrationCount=179`, latest
+  `20260731120000_identity_mail_delivery_release_head`, `unfinished=0`,
   `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
   `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
 - использует exits `0/1/2/3`;
@@ -289,8 +296,8 @@ idempotent apply, locks/recheck, audit, rollback и повторный zero-diff
 
 Historical snapshot admission evidence boundary зафиксирован на
 `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; это не current candidate
-evidence. Current admission поддерживает schema target `CURRENT_166` после
-exact allowlisted migrations `163..166`; prior merge-ref engineering baseline
+evidence. Current admission поддерживает schema target `CURRENT_179` после
+exact 17-name allowlisted tail `163..179`; prior merge-ref engineering baseline
 — `bbef153a...` / `30443837684`, PostgreSQL major `16`; previous accepted
 exact-head — `d525b736...` / `30447467729`, `3/3 PASS`; last accepted
 exact-head — `be8c94c4...` / `30449026506`, `3/3 PASS`, все четыре engineering
@@ -343,7 +350,7 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 - historical integrity inventory contract — 9/9; frozen clean PostgreSQL
   prefix 162 `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
 - historical aggregate reconciliation planner contract — pass на prefix 162;
-  current `CURRENT_166` production-like evidence ещё pending;
+  current `CURRENT_179` production-like evidence ещё pending;
 - historical snapshot admission contract — `19` admission unit, `9` authority unit и
   `46` offline smoke checks; staged PostgreSQL 16.13 smoke прошёл `23`
   сценария `BASELINE_156 → migrations 157..162 → EXPAND_162`, exact восемь
@@ -388,8 +395,10 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 6. Свежий production-like snapshot прошёл Git-bound admission сначала с
    отдельным `BASELINE_156` authority envelope/DB marker, затем после exact
    migrations `157..162` — с новым `EXPAND_162` envelope, новым nonce-bound
-   binding и заменённым DB marker, затем после exact allowlisted tail
-   `163..166` — с отдельным `CURRENT_166` envelope и второй marker rotation;
+   binding и заменённым DB marker, затем после exact 17-name allowlisted tail
+   `163..179` — с отдельным `CURRENT_179` envelope и второй marker rotation;
+   historical `CURRENT_166` envelope/marker не переименовывались и не
+   переиспользовались;
    все state-specific protected evidence bundle и rotation attestation
    сохранены. Remote target, marker reuse и mutable worktree artifact не
    использовались.
@@ -409,6 +418,14 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 ownership и общий Gate 2.
 
 ## 7. Changelog
+
+- `1.17.0`, 30.07.2026 — living inventory/planner/admission target переведён
+  на terminal `CURRENT_179` (`179` /
+  `20260731120000_identity_mail_delivery_release_head`) при frozen prefix
+  `EXPAND_162` и exact 17-name tail `163..179`. Signed `CURRENT_166`
+  envelope/marker сохранён только как historical evidence; для `179` нужны
+  новый nonce-bound envelope и marker rotation. Roots `{}` / EMPTY сохраняют
+  production-like workflow и external beta в состоянии `NO-GO`.
 
 - `1.16.0`, 29.07.2026 — единая retroactive evidence correction:
   schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref

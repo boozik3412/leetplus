@@ -16,7 +16,7 @@ export async function acquireGuestGameLootBoxRuleLock(
     Prisma.sql`
       SELECT pg_advisory_xact_lock(
         hashtextextended(${`guest-game:loot-box:${tenantId}:${lootBoxId}`}, 0)
-      )
+      )::text
     `,
   );
 }

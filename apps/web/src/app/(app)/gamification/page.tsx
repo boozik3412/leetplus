@@ -13,6 +13,7 @@ import {
   type GuestDashboardRow,
 } from "@/lib/guests";
 import {
+  getGuestGameRewardMaterializerStatus,
   getGuestGamificationWorkspace,
   type GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
@@ -590,8 +591,19 @@ export default async function GamificationPage({
   );
   const needsLeads = initialTab === "profiles";
   const needsProductCatalog = initialTab === "seasons";
-  const [workspace, audiences, stores, guestsResponse, leads, products] =
-    await Promise.all([
+  const canViewRewardMaterializer = ["OWNER", "ADMIN", "MANAGER"].includes(
+    user.role,
+  );
+  const canRunRewardMaterializer = ["OWNER", "ADMIN"].includes(user.role);
+  const [
+    workspace,
+    audiences,
+    stores,
+    guestsResponse,
+    leads,
+    products,
+    rewardMaterializerStatus,
+  ] = await Promise.all([
       safeValue(
         getGuestGamificationWorkspace({ compact: true }),
         emptyWorkspace,
@@ -607,6 +619,9 @@ export default async function GamificationPage({
       needsProductCatalog
         ? safeValue<Product[]>(getProducts(), [])
         : Promise.resolve([]),
+      canViewRewardMaterializer
+        ? safeNullable(getGuestGameRewardMaterializerStatus())
+        : Promise.resolve(null),
     ]);
 
   const guests: GuestDashboardRow[] = guestsResponse?.rows ?? [];
@@ -628,6 +643,7 @@ export default async function GamificationPage({
           leads={leads}
           products={products}
           tenantSlug={user.tenantSlug}
+          initialRewardMaterializerStatus={rewardMaterializerStatus}
           initialTab={initialTab}
           initialEditorMode={initialEditorMode}
           access={{
@@ -636,6 +652,7 @@ export default async function GamificationPage({
             canOperateLedger: can(user, "operate_guest_game_ledger"),
             canViewGuestPii: can(user, "view_guest_game_pii"),
             isPlatformAdmin: user.isPlatformAdmin,
+            canRunRewardMaterializer,
           }}
         />
       </div>

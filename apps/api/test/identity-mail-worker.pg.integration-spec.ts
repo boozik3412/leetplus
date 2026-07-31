@@ -7,14 +7,13 @@ import {
   randomBytes,
   randomUUID,
 } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import {
   createServer as createNetServer,
   type Server,
   type Socket,
 } from 'node:net';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { createServer as createTlsServer } from 'node:tls';
 import { IdentityMailSecretEnvelopeService } from '../src/auth/identity-mail-secret-envelope.service';
 import {
@@ -28,13 +27,14 @@ import type {
   IdentityMailWorkerRepository,
   IdentityMailWorkerSmtpConfig,
 } from '../src/identity-mail-worker/identity-mail-worker.types';
+import { deployCanonicalPrismaMigrations } from './canonical-prisma-migration-deploy';
 
 const REQUIRED_CONFIRMATION = 'run-identity-mail-worker-postgres-smtp-e2e';
 const integrationEnabled =
   process.env.IDENTITY_MAIL_WORKER_PG_E2E_CONFIRM === REQUIRED_CONFIRMATION;
 const describePostgres = integrationEnabled ? describe : describe.skip;
-const CURRENT_MIGRATION = '20260731020000_initial_owner_mail_delivery_boundary';
-const CURRENT_MIGRATION_COUNT = 176;
+const CURRENT_MIGRATION = '20260731120000_identity_mail_delivery_release_head';
+const CURRENT_MIGRATION_COUNT = 179;
 const RELEASE_SHA = 'a'.repeat(40);
 const AAD_ENVIRONMENT = 'pg-worker-e2e';
 const TRIAL_DURATION_SECONDS = 7 * 24 * 60 * 60;
@@ -1442,37 +1442,11 @@ function prismaFor(databaseUrl: string): PrismaClient {
 }
 
 function deployMigrations(databaseUrl: string) {
-  const repositoryRoot = resolve(__dirname, '../../..');
-  const databasePackage = join(repositoryRoot, 'packages', 'database');
-  const prismaCli = join(
-    databasePackage,
-    'node_modules',
-    'prisma',
-    'build',
-    'index.js',
-  );
-  try {
-    execFileSync(
-      process.execPath,
-      [
-        prismaCli,
-        'migrate',
-        'deploy',
-        '--schema',
-        join(databasePackage, 'prisma', 'schema.prisma'),
-      ],
-      {
-        cwd: databasePackage,
-        env: { ...process.env, DATABASE_URL: databaseUrl },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 120_000,
-      },
-    );
-  } catch {
-    throw new Error(
+  deployCanonicalPrismaMigrations(databaseUrl, {
+    failureMessage:
       'Failed to deploy migrations into the disposable identity-mail worker database',
-    );
-  }
+    timeoutMs: 120_000,
+  });
 }
 
 function databaseUrlFor(databaseUrl: URL, databaseName: string): string {

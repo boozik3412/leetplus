@@ -435,7 +435,12 @@ export class GuestGameDataRetentionService {
                           status: 'AVAILABLE',
                           consumedAt: null,
                           canceledAt: null,
-                          rewardId: null,
+                          AND: [
+                            retentionUnopenedEntitlementRewardWhere(
+                              this.prisma.guestGameEntitlement.fields
+                                .sourceRewardId,
+                            ),
+                          ],
                         },
                         {
                           status: {
@@ -510,15 +515,14 @@ export class GuestGameDataRetentionService {
               },
             });
             if (expired.count !== 1) {
-              const terminalReward =
-                await tx.guestGameReward.findFirst({
-                  where: {
-                    id: row.rewardId,
-                    tenantId: row.tenantId,
-                    status: { in: ['PAID', 'CANCELED', 'EXPIRED'] },
-                  },
-                  select: { status: true },
-                });
+              const terminalReward = await tx.guestGameReward.findFirst({
+                where: {
+                  id: row.rewardId,
+                  tenantId: row.tenantId,
+                  status: { in: ['PAID', 'CANCELED', 'EXPIRED'] },
+                },
+                select: { status: true },
+              });
               if (!terminalReward) {
                 return 0;
               }
@@ -541,17 +545,16 @@ export class GuestGameDataRetentionService {
                 });
               }
 
-              const result =
-                await tx.guestGameRewardWalletItem.deleteMany({
-                  where: {
-                    id: row.id,
-                    tenantId: row.tenantId,
-                    rewardId: row.rewardId,
-                    kind: 'REWARD',
-                    status: 'PENDING',
-                    expiresAt: { lte: cutoff },
-                  },
-                });
+              const result = await tx.guestGameRewardWalletItem.deleteMany({
+                where: {
+                  id: row.id,
+                  tenantId: row.tenantId,
+                  rewardId: row.rewardId,
+                  kind: 'REWARD',
+                  status: 'PENDING',
+                  expiresAt: { lte: cutoff },
+                },
+              });
               return result.count;
             }
 
@@ -566,7 +569,8 @@ export class GuestGameDataRetentionService {
                 claimedAt: null,
                 claimExpiresAt: null,
                 nextAttemptAt: null,
-                lastError: 'Reward claim expired before delivery was requested.',
+                lastError:
+                  'Reward claim expired before delivery was requested.',
               },
             });
 
@@ -591,7 +595,11 @@ export class GuestGameDataRetentionService {
                 status: 'AVAILABLE',
                 consumedAt: null,
                 canceledAt: null,
-                rewardId: null,
+                AND: [
+                  retentionUnopenedEntitlementRewardWhere(
+                    tx.guestGameEntitlement.fields.sourceRewardId,
+                  ),
+                ],
               },
               data: {
                 status: 'EXPIRED',
@@ -614,17 +622,16 @@ export class GuestGameDataRetentionService {
                 return 0;
               }
 
-              const result =
-                await tx.guestGameRewardWalletItem.deleteMany({
-                  where: {
-                    id: row.id,
-                    tenantId: row.tenantId,
-                    entitlementId: row.entitlementId,
-                    kind: 'LOOT_BOX_ENTITLEMENT',
-                    status: 'PENDING',
-                    expiresAt: { lte: cutoff },
-                  },
-                });
+              const result = await tx.guestGameRewardWalletItem.deleteMany({
+                where: {
+                  id: row.id,
+                  tenantId: row.tenantId,
+                  entitlementId: row.entitlementId,
+                  kind: 'LOOT_BOX_ENTITLEMENT',
+                  status: 'PENDING',
+                  expiresAt: { lte: cutoff },
+                },
+              });
               return result.count;
             }
 
@@ -763,8 +770,7 @@ export class GuestGameDataRetentionService {
               claimedAt: null,
               claimExpiresAt: null,
               nextAttemptAt: null,
-              lastError:
-                'Reward claim expired before wallet materialization.',
+              lastError: 'Reward claim expired before wallet materialization.',
             },
           });
           return true;
@@ -848,6 +854,7 @@ export class GuestGameDataRetentionService {
                 select: {
                   id: true,
                   status: true,
+                  sourceRewardId: true,
                   rewardId: true,
                   ruleId: true,
                 },
@@ -858,7 +865,10 @@ export class GuestGameDataRetentionService {
             return false;
           }
 
-          let rewardId = current.entitlement.rewardId;
+          const persistedOutcomeRewardId = retentionEntitlementOutcomeRewardId(
+            current.entitlement,
+          );
+          let rewardId = persistedOutcomeRewardId;
           if (!rewardId) {
             const event = await tx.guestGameEvent.findFirst({
               where: {
@@ -876,7 +886,9 @@ export class GuestGameDataRetentionService {
                     profileId: row.profileId,
                     ruleType: 'LOOT_BOX',
                     ruleId: current.entitlement.ruleId,
-                    rewardId: { not: null },
+                    rewardId: current.entitlement.sourceRewardId
+                      ? { not: current.entitlement.sourceRewardId }
+                      : { not: null },
                   },
                   select: { rewardId: true },
                   orderBy: [{ processedAt: 'desc' }, { createdAt: 'desc' }],
@@ -900,6 +912,14 @@ export class GuestGameDataRetentionService {
             });
             if (reward) {
               if (current.entitlement.status === 'OPENING') {
+                if (
+                  !retentionEntitlementHasUnopenedRewardBinding(
+                    current.entitlement,
+                  ) ||
+                  current.entitlement.sourceRewardId === reward.id
+                ) {
+                  return false;
+                }
                 const finalized = await tx.guestGameEntitlement.updateMany({
                   where: {
                     id: entitlementId,
@@ -908,6 +928,17 @@ export class GuestGameDataRetentionService {
                     ruleType: 'LOOT_BOX',
                     ruleId: current.entitlement.ruleId,
                     status: 'OPENING',
+                    AND: [
+                      retentionUnopenedEntitlementRewardWhere(
+                        tx.guestGameEntitlement.fields.sourceRewardId,
+                      ),
+                      {
+                        OR: [
+                          { sourceRewardId: null },
+                          { sourceRewardId: { not: reward.id } },
+                        ],
+                      },
+                    ],
                   },
                   data: {
                     status: 'CONSUMED',
@@ -920,7 +951,7 @@ export class GuestGameDataRetentionService {
                 }
               } else if (
                 current.entitlement.status !== 'CONSUMED' ||
-                current.entitlement.rewardId !== reward.id
+                persistedOutcomeRewardId !== reward.id
               ) {
                 return false;
               }
@@ -932,6 +963,13 @@ export class GuestGameDataRetentionService {
             }
           }
 
+          if (
+            current.entitlement.status !== 'OPENING' ||
+            !retentionEntitlementHasUnopenedRewardBinding(current.entitlement)
+          ) {
+            return false;
+          }
+
           if (current.expiresAt > now) {
             const restored = await tx.guestGameEntitlement.updateMany({
               where: {
@@ -941,7 +979,11 @@ export class GuestGameDataRetentionService {
                 ruleType: 'LOOT_BOX',
                 ruleId: current.entitlement.ruleId,
                 status: 'OPENING',
-                rewardId: null,
+                AND: [
+                  retentionUnopenedEntitlementRewardWhere(
+                    tx.guestGameEntitlement.fields.sourceRewardId,
+                  ),
+                ],
               },
               data: {
                 status: 'AVAILABLE',
@@ -960,7 +1002,7 @@ export class GuestGameDataRetentionService {
             return true;
           }
 
-          await tx.guestGameEntitlement.updateMany({
+          const expired = await tx.guestGameEntitlement.updateMany({
             where: {
               id: entitlementId,
               tenantId: row.tenantId,
@@ -968,13 +1010,20 @@ export class GuestGameDataRetentionService {
               ruleType: 'LOOT_BOX',
               ruleId: current.entitlement.ruleId,
               status: 'OPENING',
-              rewardId: null,
+              AND: [
+                retentionUnopenedEntitlementRewardWhere(
+                  tx.guestGameEntitlement.fields.sourceRewardId,
+                ),
+              ],
             },
             data: {
               status: 'EXPIRED',
               validUntil: now,
             },
           });
+          if (expired.count !== 1) {
+            return false;
+          }
           await tx.guestGameRewardWalletItem.deleteMany({
             where: { id: current.id, status: 'OPENING' },
           });
@@ -1034,6 +1083,37 @@ export class GuestGameDataRetentionService {
       500,
     );
   }
+}
+
+function retentionEntitlementOutcomeRewardId(input: {
+  rewardId: string | null;
+  sourceRewardId: string | null;
+}) {
+  if (!input.rewardId) {
+    return null;
+  }
+  return input.rewardId === input.sourceRewardId ? null : input.rewardId;
+}
+
+function retentionEntitlementHasUnopenedRewardBinding(input: {
+  rewardId: string | null;
+  sourceRewardId: string | null;
+}) {
+  return retentionEntitlementOutcomeRewardId(input) === null;
+}
+
+function retentionUnopenedEntitlementRewardWhere(
+  sourceRewardIdField: Prisma.GuestGameEntitlementFieldRefs['sourceRewardId'],
+): Prisma.GuestGameEntitlementWhereInput {
+  return {
+    OR: [
+      { rewardId: null },
+      {
+        sourceRewardId: { not: null },
+        rewardId: { equals: sourceRewardIdField },
+      },
+    ],
+  };
 }
 
 function nullableEventCutoff(field: 'happenedAt', cutoff: Date) {

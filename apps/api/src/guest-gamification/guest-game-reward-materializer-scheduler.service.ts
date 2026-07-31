@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   OnModuleDestroy,
@@ -51,10 +52,18 @@ export type GuestGameRewardMaterializerRunOutcome =
   | 'PARTIAL'
   | 'ERROR';
 
+export type GuestGameRewardMaterializerSafeCounts = Omit<
+  GuestGameEffectMaterializeResult,
+  'rewardIds'
+>;
+
 export type GuestGameRewardMaterializerRuntimeResult = Omit<
   GuestGameRewardMaterializerRunResult,
-  'tenants'
->;
+  'tenants' | 'intents' | 'effects'
+> & {
+  intents: GuestGameRewardMaterializerSafeCounts;
+  effects: GuestGameRewardMaterializerSafeCounts;
+};
 
 export type GuestGameRewardMaterializerRuntimeStatus = {
   enabled: boolean;
@@ -66,6 +75,7 @@ export type GuestGameRewardMaterializerRuntimeStatus = {
     tenantSlug: string | null;
     allowAllTenants: boolean;
     configured: boolean;
+    appliesToViewerTenant: boolean;
   };
   running: boolean;
   intervalMs: number | null;
@@ -95,6 +105,31 @@ export type GuestGameRewardMaterializerQueueSnapshot = {
   maxAttempts: number;
   intents: GuestGameRewardMaterializerQueueMetrics;
   effects: GuestGameRewardMaterializerQueueMetrics;
+};
+
+export type GuestGameRewardMaterializerManualRunDto = {
+  limit?: unknown;
+};
+
+export type GuestGameRewardMaterializerManualRunResult = {
+  status: 'PROCESSED' | 'PARTIAL' | 'FAILED' | 'SKIPPED';
+  reason:
+    | 'KILL_SWITCH_ENABLED'
+    | 'RUN_ALREADY_IN_PROGRESS'
+    | 'MATERIALIZATION_FAILED'
+    | null;
+  limit: number;
+  startedAt: string | null;
+  finishedAt: string;
+  intents: GuestGameRewardMaterializerSafeCounts;
+  effects: GuestGameRewardMaterializerSafeCounts;
+  failedStages: Array<'INTENTS' | 'EFFECTS'>;
+};
+
+type GuestGameRewardMaterializerActorRun = {
+  intents: GuestGameEffectMaterializeResult;
+  effects: GuestGameEffectMaterializeResult;
+  errors: Array<{ stage: 'INTENTS' | 'EFFECTS'; message: string }>;
 };
 
 @Injectable()
@@ -153,26 +188,52 @@ export class GuestGameRewardMaterializerSchedulerService
     this.runtimeIntervalMs = null;
   }
 
-  getRuntimeStatus(): GuestGameRewardMaterializerRuntimeStatus {
+  getRuntimeStatus(
+    viewer?: Pick<
+      AuthenticatedUser,
+      'tenantId' | 'tenantSlug' | 'isPlatformAdmin'
+    >,
+  ): GuestGameRewardMaterializerRuntimeStatus {
     const policy = resolveGuestGameRewardMaterializerPolicy(this.config);
+    const viewerOwnsConfiguredScope =
+      Boolean(viewer) &&
+      !policy.allowAllTenants &&
+      policy.scopeConfigured &&
+      (!policy.tenantId || policy.tenantId === viewer?.tenantId) &&
+      (!policy.tenantSlug || policy.tenantSlug === viewer?.tenantSlug);
+    const appliesToViewerTenant =
+      Boolean(viewer) && (policy.allowAllTenants || viewerOwnsConfiguredScope);
+    const canViewLastRun =
+      !viewer || viewer.isPlatformAdmin || viewerOwnsConfiguredScope;
+    const canViewTenantId =
+      !viewer || viewer.isPlatformAdmin || policy.tenantId === viewer.tenantId;
+    const canViewTenantSlug =
+      !viewer ||
+      viewer.isPlatformAdmin ||
+      policy.tenantSlug === viewer.tenantSlug;
+
     return {
       enabled: policy.enabled,
       backgroundReady: policy.ready,
       inlineClaimsAllowed: guestGameRewardMaterializerClaimsAllowed(policy),
       killSwitchEnabled: policy.killSwitchEnabled,
       scope: {
-        tenantId: policy.tenantId,
-        tenantSlug: policy.tenantSlug,
+        tenantId: canViewTenantId ? policy.tenantId : null,
+        tenantSlug: canViewTenantSlug ? policy.tenantSlug : null,
         allowAllTenants: policy.allowAllTenants,
         configured: policy.scopeConfigured,
+        appliesToViewerTenant,
       },
       running: this.running,
       intervalMs: this.runtimeIntervalMs,
       lastStartedAt: this.lastStartedAt,
       lastFinishedAt: this.lastFinishedAt,
       lastOutcome: this.lastOutcome,
-      lastError: this.lastError,
-      lastResult: this.lastResult ? cloneRuntimeResult(this.lastResult) : null,
+      lastError: canViewLastRun ? this.lastError : null,
+      lastResult:
+        canViewLastRun && this.lastResult
+          ? cloneRuntimeResult(this.lastResult)
+          : null,
       lastSkippedAt: this.lastSkippedAt,
       lastSkipReason: this.lastSkipReason,
     };
@@ -291,6 +352,95 @@ export class GuestGameRewardMaterializerSchedulerService
     };
   }
 
+  async runTenantOnce(
+    user: AuthenticatedUser,
+    dto: GuestGameRewardMaterializerManualRunDto | null = {},
+  ): Promise<GuestGameRewardMaterializerManualRunResult> {
+    const limit = this.manualRunLimit(dto?.limit);
+    const finishedAt = () => new Date().toISOString();
+    const skipped = (
+      reason: Exclude<
+        GuestGameRewardMaterializerManualRunResult['reason'],
+        'MATERIALIZATION_FAILED' | null
+      >,
+    ): GuestGameRewardMaterializerManualRunResult => ({
+      status: 'SKIPPED',
+      reason,
+      limit,
+      startedAt: null,
+      finishedAt: finishedAt(),
+      intents: safeMaterializeCounts(emptyMaterializeResult()),
+      effects: safeMaterializeCounts(emptyMaterializeResult()),
+      failedStages: [],
+    });
+    const policy = resolveGuestGameRewardMaterializerPolicy(this.config);
+    if (policy.killSwitchEnabled) {
+      this.recordSkip('manual materializer run blocked by global kill switch');
+      return skipped('KILL_SWITCH_ENABLED');
+    }
+    if (this.running) {
+      this.recordSkip('previous materializer run is still running');
+      return skipped('RUN_ALREADY_IN_PROGRESS');
+    }
+
+    const tenantId = user.tenantId.trim();
+    const actorId = user.id.trim();
+    if (!tenantId || !actorId) {
+      throw new BadRequestException(
+        'An authenticated tenant actor is required for the materializer run.',
+      );
+    }
+
+    this.running = true;
+    const startedAt = new Date().toISOString();
+    try {
+      const run = await this.materializeForActor(user, {
+        limit,
+        claimLeaseMs: this.claimLeaseMs(),
+        maxAttempts: this.maxAttempts(),
+      });
+      const thrownStages = new Set(run.errors.map((error) => error.stage));
+      const failedStages: Array<'INTENTS' | 'EFFECTS'> = [];
+      if (
+        thrownStages.has('INTENTS') ||
+        materializeResultHasFailure(run.intents)
+      ) {
+        failedStages.push('INTENTS');
+      }
+      if (
+        thrownStages.has('EFFECTS') ||
+        materializeResultHasFailure(run.effects)
+      ) {
+        failedStages.push('EFFECTS');
+      }
+      const status =
+        failedStages.length === 0
+          ? 'PROCESSED'
+          : run.errors.length === 2
+            ? 'FAILED'
+            : 'PARTIAL';
+
+      if (failedStages.length > 0) {
+        this.logger.error(
+          `Manual guest game reward materializer run failed: stages=${failedStages.join(',')}`,
+        );
+      }
+
+      return {
+        status,
+        reason: failedStages.length > 0 ? 'MATERIALIZATION_FAILED' : null,
+        limit,
+        startedAt,
+        finishedAt: finishedAt(),
+        intents: safeMaterializeCounts(run.intents),
+        effects: safeMaterializeCounts(run.effects),
+        failedStages,
+      };
+    } finally {
+      this.running = false;
+    }
+  }
+
   async runOnce(): Promise<GuestGameRewardMaterializerRunResult | null> {
     if (this.running) {
       this.recordSkip('previous materializer run is still running');
@@ -393,30 +543,18 @@ export class GuestGameRewardMaterializerSchedulerService
           claimLeaseMs: this.claimLeaseMs(),
           maxAttempts: this.maxAttempts(),
         };
-        let intents = emptyMaterializeResult();
-        let effects = emptyMaterializeResult();
-        const errors: string[] = [];
-
-        try {
-          intents = await this.gamification.materializeRewardIntents(user, dto);
-        } catch (error) {
-          errors.push(`intents: ${safeErrorMessage(error)}`);
-        }
-        try {
-          // Intents may create rewards and their durable side-effect records,
-          // therefore effects must be drained after intents in every tick.
-          effects = await this.gamification.materializeRewardEffects(user, dto);
-        } catch (error) {
-          errors.push(`effects: ${safeErrorMessage(error)}`);
-        }
+        const materialized = await this.materializeForActor(user, dto);
+        const errors = materialized.errors.map(
+          (error) => `${error.stage.toLowerCase()}: ${error.message}`,
+        );
 
         results.push({
           tenantId: tenant.id,
           tenantSlug: tenant.slug,
           status: errors.length > 0 ? 'ERROR' : 'PROCESSED',
           reason: errors.length > 0 ? errors.join('; ').slice(0, 500) : null,
-          intents,
-          effects,
+          intents: materialized.intents,
+          effects: materialized.effects,
         });
       }
 
@@ -445,7 +583,7 @@ export class GuestGameRewardMaterializerSchedulerService
       return result;
     } catch (error) {
       this.lastOutcome = 'ERROR';
-      this.lastError = safeErrorMessage(error).slice(0, 500);
+      this.lastError = 'materializer scheduler failed';
       this.lastResult = null;
       this.logger.error(
         'Guest game reward materializer failed',
@@ -456,6 +594,40 @@ export class GuestGameRewardMaterializerSchedulerService
       this.lastFinishedAt = new Date().toISOString();
       this.running = false;
     }
+  }
+
+  private async materializeForActor(
+    user: AuthenticatedUser,
+    dto: {
+      limit: number;
+      claimLeaseMs: number;
+      maxAttempts: number;
+    },
+  ): Promise<GuestGameRewardMaterializerActorRun> {
+    let intents = emptyMaterializeResult();
+    let effects = emptyMaterializeResult();
+    const errors: GuestGameRewardMaterializerActorRun['errors'] = [];
+
+    try {
+      intents = await this.gamification.materializeRewardIntents(user, dto);
+    } catch (error) {
+      errors.push({
+        stage: 'INTENTS',
+        message: safeErrorMessage(error),
+      });
+    }
+    try {
+      // Intents may create rewards and their durable side-effect records,
+      // therefore effects must be drained after intents in every run.
+      effects = await this.gamification.materializeRewardEffects(user, dto);
+    } catch (error) {
+      errors.push({
+        stage: 'EFFECTS',
+        message: safeErrorMessage(error),
+      });
+    }
+
+    return { intents, effects, errors };
   }
 
   private recordSkip(reason: string) {
@@ -499,6 +671,23 @@ export class GuestGameRewardMaterializerSchedulerService
     );
   }
 
+  private manualRunLimit(value: unknown) {
+    if (value === undefined || value === null) {
+      return this.batchSize();
+    }
+    if (
+      typeof value !== 'number' ||
+      !Number.isInteger(value) ||
+      value < 1 ||
+      value > 100
+    ) {
+      throw new BadRequestException(
+        'limit must be an integer between 1 and 100.',
+      );
+    }
+    return value;
+  }
+
   private positiveInteger(
     key: string,
     fallback: number,
@@ -523,6 +712,28 @@ function emptyMaterializeResult(): GuestGameEffectMaterializeResult {
     staleFinalizations: 0,
     rewardIds: [],
   };
+}
+
+function safeMaterializeCounts(
+  result: GuestGameEffectMaterializeResult,
+): GuestGameRewardMaterializerSafeCounts {
+  return {
+    claimed: result.claimed,
+    applied: result.applied,
+    recovered: result.recovered,
+    canceled: result.canceled,
+    failed: result.failed,
+    deadLettered: result.deadLettered,
+    staleFinalizations: result.staleFinalizations,
+  };
+}
+
+function materializeResultHasFailure(result: GuestGameEffectMaterializeResult) {
+  return (
+    result.failed > 0 ||
+    result.deadLettered > 0 ||
+    result.staleFinalizations > 0
+  );
 }
 
 function emptyTenantResult(
@@ -642,8 +853,8 @@ function compactRuntimeResult(
     processedTenants: result.processedTenants,
     skippedTenants: result.skippedTenants,
     erroredTenants: result.erroredTenants,
-    intents: cloneMaterializeResult(result.intents),
-    effects: cloneMaterializeResult(result.effects),
+    intents: safeMaterializeCounts(result.intents),
+    effects: safeMaterializeCounts(result.effects),
   };
 }
 
@@ -652,13 +863,9 @@ function cloneRuntimeResult(
 ): GuestGameRewardMaterializerRuntimeResult {
   return {
     ...result,
-    intents: cloneMaterializeResult(result.intents),
-    effects: cloneMaterializeResult(result.effects),
+    intents: { ...result.intents },
+    effects: { ...result.effects },
   };
-}
-
-function cloneMaterializeResult(result: GuestGameEffectMaterializeResult) {
-  return { ...result, rewardIds: [...result.rewardIds] };
 }
 
 function runtimeOutcome(
@@ -669,10 +876,9 @@ function runtimeOutcome(
 }
 
 function runtimeError(result: GuestGameRewardMaterializerRunResult) {
-  const messages = result.tenants
-    .filter((tenant) => tenant.status === 'ERROR' && tenant.reason)
-    .map((tenant) => `${tenant.tenantSlug}: ${tenant.reason}`);
-  return messages.length > 0 ? messages.join('; ').slice(0, 500) : null;
+  return result.erroredTenants > 0
+    ? `materializer tenant failures: ${result.erroredTenants}`
+    : null;
 }
 
 function materializerNotReadyReason(

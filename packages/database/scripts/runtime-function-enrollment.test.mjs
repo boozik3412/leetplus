@@ -52,10 +52,10 @@ function compliantSnapshot() {
     migration: {
       completedTargetCount: 1,
       completedRequiredCount: 1,
-      completedCount: 176,
+      completedCount: 179,
       unfinishedCount: 0,
       latestCompletedMigration:
-        "20260731020000_initial_owner_mail_delivery_boundary",
+        "20260731120000_identity_mail_delivery_release_head",
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -229,7 +229,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260731020000_initial_owner_mail_delivery_boundary 176$/u,
+    /20260731120000_identity_mail_delivery_release_head 179$/u,
   );
 });
 
@@ -774,7 +774,7 @@ test("rejects every activation-bound role before general enrollment", () => {
   );
 });
 
-test("binds enrollment to exact current migration 176 and exact count 176", () => {
+test("binds enrollment to exact terminal migration 179 and exact count 179", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

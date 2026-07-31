@@ -2,7 +2,7 @@
 
 Контракт: `LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1`
 Backlog: `BETA-IAM-004J`
-Версия документа: `0.3`
+Версия документа: `0.5`
 Дата: `30.07.2026`
 Статус: `LOCAL_ACCEPTANCE_COMPLETE / EXACT_SHA_CI_PENDING / NOT_DEPLOYED /
 EXTERNAL_PILOT_NO-GO`
@@ -225,7 +225,10 @@ Preview вызывает PII-free assertion RPC. Acceptance повторяет a
 
 ## 9. Текущий implementation candidate
 
-Текущий schema target — `CURRENT_176`:
+Identity-mail checkpoint — immutable `CURRENT_176`; `CURRENT_178` является
+промежуточным merged `origin/main` prerequisite, а текущий общий terminal
+release candidate — `CURRENT_179` /
+`20260731120000_identity_mail_delivery_release_head`:
 
 - `CURRENT_175` содержит только additive enum expansion;
 - `CURRENT_176` содержит delivery state machine, enrollment/event relations,
@@ -246,6 +249,33 @@ Preview вызывает PII-free assertion RPC. Acceptance повторяет a
 миграции `CURRENT_176`:
 `36e0c3b54a667ff613704e372daa6e2e7f4fd68df91cc15a7df5720740e929ce`.
 
+Runtime/readiness/enrollment/CI требуют exact release head
+`20260731120000_identity_mail_delivery_release_head`, count `179`. Terminal
+migration имеет SHA-256
+`c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519`;
+нормализованный manifest всех `179` migrations —
+`3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431`.
+
+Fail-closed preterminal contract использует отдельный canonical digest первых
+`178` завершённых migrations:
+`7f9867971a39e010b2dac03be18fc083dabe67b98d1d6ed15a0cc4540a8cfd14`.
+Строки сортируются по `migration_name` в `C` collation, каждая кодируется как
+`<migration_name> <checksum>\n`, весь UTF-8 payload хешируется SHA-256.
+Terminal precondition вычисляет этот digest до изменения schema, а
+`identity_mail_delivery_worker_assert_v1` повторяет проверку при каждом
+readiness-вызове и возвращает exact поле `preterminalManifestDigest`.
+Следовательно, изменение checksum любой migration `1..178` блокирует и
+установку terminal head, и уже enrolled worker.
+
+Release artifact обязан сохранять canonical LF bytes migration-файлов.
+Прямой deploy из Windows checkout с CRLF намеренно не проходит exact checksum
+boundary; PostgreSQL integration fixtures создают временный LF-normalized
+artifact и удаляют его после проверки.
+Historical structural и rollback assertions всё ещё отдельно проверяют
+точную границу `CURRENT_176`; `CURRENT_177/178` проверяются как immutable
+case-reward prerequisite, а worker matrix запускается только после terminal
+`CURRENT_179`.
+
 До подключения producer/admin route rolling deploy обязан получить явный
 persisted AAD/envelope schema discriminator либо доказанный producer fence.
 Текущий zero-row migration guard защищает upgrade, но сам по себе не
@@ -253,11 +283,20 @@ persisted AAD/envelope schema discriminator либо доказанный produc
 
 Финально локально подтверждено:
 
-- clean PostgreSQL 16 deploy `176/176`;
-- populated `174 → 175 → 176` smoke со всей transition/ACL/two-tenant
-  матрицей — `SMOKE_PASSED`;
-- real PostgreSQL owner issue и shared activation на `CURRENT_176` —
-  по `1/1 PASS`;
+- clean PostgreSQL 16 deploy `179/179`;
+- three-history PostgreSQL 16 rehearsal — `PASS`: identity branch проходит
+  `174 → 175 → 176 → 177 → 178 → 179` с раздельными
+  expand/synthetic-application/contract wave, актуальный `origin/main` получает `26`
+  отсутствующих identity migrations перед terminal `179`, clean history
+  разворачивается до exact `179/179`;
+- terminal tamper matrix — `1/1/1/1/1`: fail-closed отклонены неверный
+  checksum ранней pre-176 миграции, неверный checksum `CURRENT_176`, hostile
+  worker `EXECUTE`, подмена owner и подмена тела worker assertion;
+- post-terminal readiness заново проверяет canonical manifest digest `1..178`:
+  ранний checksum drift получает `55000` без tenant state effects, после
+  восстановления тот же enrollment возвращает `READY`;
+- real PostgreSQL owner issue и shared activation на release head
+  `CURRENT_179` — по `1/1 PASS`;
 - worker PostgreSQL 16 + `LOGIN NOINHERIT` RPC-only role + trusted TLS fake
   SMTP acceptance — `1/1 PASS`; три независимых tenant-сценария завершаются
   как `SENT`, pre-provider `RETRY` и post-provider
@@ -271,19 +310,25 @@ persisted AAD/envelope schema discriminator либо доказанный produc
 - general runtime enrollment — `8` application RPC, denied
   worker/pending/admission/runtime-release RPC `6/13/9/20`, `14` sealed
   tables, `291` columns и `2` types закрыты для runtime/PUBLIC;
-- delivery static `12/12`, worker enrollment `37/37`, runtime enrollment
+- delivery static `13/13`, worker enrollment `37/37`, runtime enrollment
   `16/16`, legacy identity inventory `20/20`, pending enum `3/3`;
 - catalog inventory: relations `11/11`, columns `177/177` (identity
   `154/154`), constraints `83/83`, indexes `48/48`, functions `46/46`, enum
   labels `15/15`, triggers `9/9`, RI triggers `56/56`;
-- API worker-focused `13 suites / 362 tests` и full
-  `112 suites / 2323 passed / 2 todo`;
+- API worker-focused `13 suites / 363 tests` и full
+  `113 suites / 2394 passed / 2 todo`;
+- merged gamification regression — `5 suites / 486 tests`;
 - Prisma validate/generate, database/API typecheck, mandatory target lint,
   API build и `git diff --check`;
+- web lint — `0 errors / 30 warnings`, web typecheck — pass; локальный web
+  build заблокирован только DNS-доступом к `fonts.googleapis.com`, поэтому
+  production build должен быть доказан exact-SHA GitHub CI;
 - raw private-key headers — `0`: тестовый ключ хранится как PKCS#8 DER
   base64 и преобразуется в PEM только в памяти;
-- временные PostgreSQL databases/roles/sessions после cleanup — `0/0/0`;
-- финальный независимый review — `P0=0, P1=0, P2=0`.
+- cleanup residue three-history/tamper rehearsal — `0`; временные PostgreSQL
+  databases/roles/sessions после cleanup — `0/0/0`;
+- pre-merge независимый review — `P0=0, P1=0, P2=0`; merged re-review
+  обнаружил scope-gap и docs drift, оба исправлены, финальный verdict ожидается.
 
 Ранее найденные revoke/expiry/attempt-budget, ACL/readiness, SQL `NULL`,
 missing-outbox, encryption-key binding, recipient-AAD и real-fixture gaps
@@ -294,8 +339,13 @@ commit и exact-SHA CI `3/3 PASS`; локальный результат не р
 
 Engineering acceptance требует:
 
-- clean deploy `176/176`;
-- populated `CURRENT_174 -> 175 -> 176`;
+- clean deploy `179/179`;
+- identity-branch, актуальный `origin/main` и clean migration histories до
+  terminal `CURRENT_179`, с отдельным intermediate-176 assertion и раздельной
+  expand/application/contract wave;
+- exact terminal migration/manifest SHA, canonical preterminal digest
+  `7f9867971a39e010b2dac03be18fc083dabe67b98d1d6ed15a0cc4540a8cfd14`
+  и tamper matrix `1/1/1/1/1`;
 - enum migration isolation;
 - concurrent worker claim с единственным winner;
 - stale lease/CAS rejection;

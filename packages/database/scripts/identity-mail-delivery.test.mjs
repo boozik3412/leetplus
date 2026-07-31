@@ -10,6 +10,10 @@ const boundaryMigrationUrl = new URL(
   "../prisma/migrations/20260731020000_initial_owner_mail_delivery_boundary/migration.sql",
   import.meta.url,
 );
+const releaseHeadMigrationUrl = new URL(
+  "../prisma/migrations/20260731120000_identity_mail_delivery_release_head/migration.sql",
+  import.meta.url,
+);
 const schemaUrl = new URL("../prisma/schema.prisma", import.meta.url);
 const upgradeSmokeUrl = new URL(
   "./identity-mail-delivery-upgrade-smoke.mjs",
@@ -28,13 +32,15 @@ const EXACT_STATUS_LABELS = Object.freeze([
 ]);
 
 async function sources() {
-  const [statusSql, boundarySql, schema, smoke] = await Promise.all([
-    readFile(statusMigrationUrl, "utf8"),
-    readFile(boundaryMigrationUrl, "utf8"),
-    readFile(schemaUrl, "utf8"),
-    readFile(upgradeSmokeUrl, "utf8"),
-  ]);
-  return { statusSql, boundarySql, schema, smoke };
+  const [statusSql, boundarySql, releaseHeadSql, schema, smoke] =
+    await Promise.all([
+      readFile(statusMigrationUrl, "utf8"),
+      readFile(boundaryMigrationUrl, "utf8"),
+      readFile(releaseHeadMigrationUrl, "utf8"),
+      readFile(schemaUrl, "utf8"),
+      readFile(upgradeSmokeUrl, "utf8"),
+    ]);
+  return { statusSql, boundarySql, releaseHeadSql, schema, smoke };
 }
 
 function functionBody(sql, functionName, nextMarker) {
@@ -264,6 +270,52 @@ test("pins the five worker RPC signatures, readiness receipt and exact role/OID 
   );
 });
 
+test("CURRENT_179 replaces only worker readiness at the terminal release head", async () => {
+  const { releaseHeadSql } = await sources();
+  assert.match(releaseHeadSql, /^BEGIN;/u);
+  assert.match(releaseHeadSql, /COMMIT;\s*$/u);
+  assert.match(
+    releaseHeadSql,
+    /completed_migration_count IS DISTINCT FROM 178[\s\S]*20260731110000_guest_game_case_reward_contract/u,
+  );
+  assert.match(
+    releaseHeadSql,
+    /preterminal_manifest_digest IS DISTINCT FROM[\s\S]*7f9867971a39e010b2dac03be18fc083dabe67b98d1d6ed15a0cc4540a8cfd14/u,
+  );
+  assert.match(
+    releaseHeadSql,
+    /string_agg\([\s\S]*migration\."migration_name" \|\| ' ' \|\| migration\."checksum"[\s\S]*ORDER BY migration\."migration_name" COLLATE "C"/u,
+  );
+  assert.match(
+    releaseHeadSql,
+    /CREATE OR REPLACE FUNCTION public\."identity_mail_delivery_worker_assert_v1"/u,
+  );
+  assert.match(
+    releaseHeadSql,
+    /ORDER BY[\s\S]*migration\."started_at" DESC[\s\S]*migration\."migration_name" DESC/u,
+  );
+  assert.match(
+    releaseHeadSql,
+    /migration_count IS DISTINCT FROM 179[\s\S]*20260731120000_identity_mail_delivery_release_head/u,
+  );
+  assert.match(
+    releaseHeadSql,
+    /'preterminalManifestDigest', preterminal_manifest_digest/u,
+  );
+  assert.match(
+    releaseHeadSql,
+    /routine\.proowner <> migration_owner_oid[\s\S]*routine EXECUTE authority is unsafe/u,
+  );
+  assert.match(
+    releaseHeadSql,
+    /3ecf0e405a247be8b891975af7a9b209f9af83d7377368da1a4d718fcd577a54[\s\S]*routine\.prosrc[\s\S]*a8912b95b9dbd7197acd97981b88bae680bf80d3f820a13c569110c1efa49f37/u,
+  );
+  assert.doesNotMatch(
+    releaseHeadSql,
+    /CREATE OR REPLACE FUNCTION public\."identity_initial_owner_mail_(?:claim|provider_mark|complete|reap)_v1"/u,
+  );
+});
+
 test("claim is tenant-scoped, configuration-bound and concurrency-safe", async () => {
   const { boundarySql } = await sources();
   const claimBody = functionBody(
@@ -419,7 +471,7 @@ test("keeps every delivery object private and grants no runtime authority", asyn
   );
 });
 
-test("real upgrade smoke encodes the complete CURRENT_175/176 matrix", async () => {
+test("real upgrade smoke encodes all three histories through CURRENT_179", async () => {
   const { smoke } = await sources();
   for (const marker of [
     "cleanMigrationState",
@@ -439,6 +491,11 @@ test("real upgrade smoke encodes the complete CURRENT_175/176 matrix", async () 
     "holdWriterCompatibility",
     "actorAttributedEvents",
     "tenantEnrollments",
+    "hostileFunctionBody",
+    "wrongPre176Checksum",
+    "postTerminalPre176ChecksumWorkerAssertSqlState",
+    "postTerminalPre176ChecksumWorkerEffects",
+    "readyPreterminalManifestDigest",
   ]) {
     assert.match(smoke, new RegExp(marker, "u"));
   }
@@ -446,6 +503,18 @@ test("real upgrade smoke encodes the complete CURRENT_175/176 matrix", async () 
   assert.match(smoke, /CURRENT_174_COUNT = 174/u);
   assert.match(smoke, /CURRENT_175_COUNT = 175/u);
   assert.match(smoke, /CURRENT_176_COUNT = 176/u);
+  assert.match(smoke, /CURRENT_177_COUNT = 177/u);
+  assert.match(smoke, /CURRENT_178_COUNT = 178/u);
+  assert.match(smoke, /CURRENT_179_COUNT = 179/u);
+  assert.match(
+    smoke,
+    /PRETERMINAL_178_MANIFEST_DIGEST[\s\S]*7f9867971a39e010b2dac03be18fc083dabe67b98d1d6ed15a0cc4540a8cfd14/u,
+  );
+  assert.match(smoke, /identityCheckpointHead: CURRENT_176/u);
+  assert.match(smoke, /migrationHead: CURRENT_179/u);
+  assert.match(smoke, /originPreTerminalOrder/u);
+  assert.match(smoke, /productionRestartDrainGate/u);
+  assert.match(smoke, /NOT_PROVEN_BY_SYNTHETIC_FIXTURE/u);
   assert.match(smoke, /identity_initial_owner_mail_claim_v1[\s\S]*TEXT, TEXT, TEXT, TEXT/u);
   assert.match(smoke, /identity_initial_owner_mail_reap_v1[\s\S]*TEXT, TEXT, TEXT, INTEGER/u);
   assert.match(

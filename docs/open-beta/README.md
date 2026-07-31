@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.43                                         |
+| Версия           | 1.44                                         |
 | Дата             | 30.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -254,16 +254,25 @@ enterprise-isolation option и не сокращает shared gates.
     marker, post-marker reconciliation, strict TLS, fragment-only invite и
     обязательный `SENT` barrier для preview/accept. Статус:
     `LOCAL_ACCEPTANCE_COMPLETE / EXACT_SHA_CI_PENDING / NOT_DEPLOYED /
-    EXTERNAL_PILOT_NO-GO`. Local candidate `CURRENT_176` прошёл clean deploy,
-    populated PostgreSQL delivery smoke, owner issue/activation, RPC-only
-    worker с trusted TLS fake SMTP, negative SMTP matrix, worker/runtime
-    enrollment и full API `112 suites / 2323 passed / 2 todo`; финальный
-    независимый review — `P0/P1/P2=0`. Pending только candidate commit и
-    exact-SHA CI `3/3 PASS`.
+    EXTERNAL_PILOT_NO-GO`. Immutable identity checkpoint `CURRENT_176`
+    интегрирован через промежуточный merged prerequisite `CURRENT_178` в
+    terminal local release candidate `CURRENT_179` /
+    `20260731120000_identity_mail_delivery_release_head`; clean `179/179` и
+    три независимые migration history проходят. Terminal SHA —
+    `c394060fb...`, manifest `179` — `333018542...`, tamper matrix —
+    `1/1/1/1/1`, post-terminal manifest-drift rejection — `55000/effects 0`,
+    cleanup residue — `0`. Owner issue/activation, RPC-only worker
+    с trusted TLS fake SMTP, negative SMTP matrix, worker/runtime enrollment и
+    full API `113 suites / 2394 passed / 2 todo` проходят. Pending финальный
+    re-review, merge candidate commit и exact-SHA CI `3/3 PASS`; production
+    deploy/restart/drain и внешний доступ не выполнялись.
 
 Текущий engineering-accepted schema target — `CURRENT_174`.
-Текущий прошедший local acceptance candidate — `CURRENT_176`; он не становится
-accepted target до candidate commit и exact-SHA CI.
+Текущий прошедший local acceptance release candidate — `CURRENT_179`;
+`CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
+checkpoint, а `CURRENT_178` — промежуточным `origin/main` prerequisite.
+`CURRENT_179` не становится accepted target до merge candidate commit и
+exact-SHA CI; внешний статус остаётся `NO-GO`.
 Implementation `2540088076997ef228cd68e42165e857575aad86`, final accepted
 evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`, CI
 [`30592173595`](https://github.com/boozik3412/leetplus/actions/runs/30592173595)

@@ -3,11 +3,30 @@
 | Поле          | Значение                                                             |
 | ------------- | -------------------------------------------------------------------- |
 | Статус        | `IMPLEMENTED_CANDIDATE`; production root не enrolled                 |
-| Версия        | `1.4.0`                                                              |
-| Дата          | `29.07.2026`                                                         |
+| Версия        | `1.5.0`                                                              |
+| Дата          | `30.07.2026`                                                         |
 | Решение       | Detached Ed25519 signing; LeetPlus не читает private key             |
 | Scope         | Только production-like StaffTask rehearsal на loopback PostgreSQL 16 |
 | External beta | `NO-GO`                                                              |
+
+## Living current release contract
+
+Reviewed StaffTask boundary остаётся frozen prefix `EXPAND_162`: count `162`,
+head `20260727131000_staff_task_integrity_expand`. Единственный поддерживаемый
+current state — `CURRENT_179`: count `179`, head
+`20260731120000_identity_mail_delivery_release_head`, unfinished `0`. Exact
+additive tail `163..179` содержит ровно 17 migrations в порядке, закреплённом
+в [каноническом current release contract](../README.md#канонический-current-release-contract).
+
+Ранее выпущенный signed `CURRENT_166` envelope и установленный по нему DB
+marker — только historical evidence для `CURRENT_166`. Их запрещено
+переименовывать, копировать или повторно использовать как authority для
+`CURRENT_179`; они не разрешают admission, inventory, planner, apply или
+deployment на current target. Для `CURRENT_179` нужны новый acquisition
+request, новый `creationNonce`, новый state-bound Ed25519 envelope и rotation
+DB marker на digest именно нового envelope. Production root registry остаётся
+`{}` / EMPTY, поэтому production-like ceremony и внешний beta fail-closed
+`NO-GO`.
 
 Этот runbook описывает границу между acquisition evidence, offline signer и
 read-only snapshot admission. Он не разрешает backup, restore, migration,
@@ -18,7 +37,9 @@ Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на
 SYNTHETIC prerequisite evidence, а не отдельное production-like state.
 Historical `CURRENT_165` engineering evidence принято на
 `4bd6a036...` / CI `30428288353`, а documentation/evidence successor
-`7c20adec...` прошёл CI `30429463161`. Schema target — `CURRENT_166`. Prior
+`7c20adec...` прошёл CI `30429463161`. Living schema target — `CURRENT_179`.
+Подписанный `CURRENT_166` checkpoint ниже остаётся historical evidence и не
+разрешает `CURRENT_179`. Prior
 engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856` / CI `30443837684`
 (`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
@@ -130,8 +151,10 @@ Email, URL, credentials и свободный текст запрещены. `co
 Timeline: `acquiredAt <= restoredAt < expiresAt`; acquisition contract требует
 `expiresAt - acquiredAt <= 72 часа`, а admission отдельно требует
 `expiresAt - restoredAt <= 72 часа`. Оба ограничения обязательны.
-Поддерживаются только `BASELINE_156`, `EXPAND_162` и `CURRENT_166`.
+Поддерживаются только `BASELINE_156`, `EXPAND_162` и `CURRENT_179`.
 Historical `CURRENT_165` не является допустимым current authority state.
+`CURRENT_166` также является только historical state и не принимается как
+authority для `CURRENT_179`.
 
 Request обязан быть canonical UTF-8 JSON без BOM, newline, duplicate, missing
 или extra keys. Digest:
@@ -363,8 +386,9 @@ storage и записывается раньше envelope; наличие envelo
 1. `BASELINE_156`: новый request, nonce, signature, envelope и DB marker;
 2. после exact migrations `157..162` — `EXPAND_162` с новым request/nonce и
    обязательной marker rotation;
-3. после exact migrations `163..166` — `CURRENT_166` с третьим request/nonce и
-   второй marker rotation.
+3. после exact additive tail `163..179` из ровно 17 migrations, перечисленных
+   в [каноническом release contract](../README.md#канонический-current-release-contract),
+   — `CURRENT_179` с третьим request/nonce и второй marker rotation.
 
 Ни один envelope, signature, marker или approval не переиспользуется между
 state. Каждый admission должен завершиться exit `0`. Только после третьего
@@ -392,6 +416,14 @@ reader-role lifecycle и первый production-like admission остаются
 P0-решениями.
 
 ## 9. Changelog
+
+- `1.5.0`, 30.07.2026 — living target переведён на terminal `CURRENT_179`
+  (`179` / `20260731120000_identity_mail_delivery_release_head`) при frozen
+  prefix `EXPAND_162`; exact tail `163..179` закреплён как 17-name allowlist.
+  Signed envelope/DB marker `CURRENT_166` оставлены неизменяемым historical
+  evidence и прямо запрещены к reuse для `CURRENT_179`. Новый nonce-bound
+  envelope и marker rotation обязательны; roots `{}`, поэтому production-like
+  ceremony и external beta остаются `NO-GO`.
 
 - `1.4.0`, 29.07.2026 — единая retroactive evidence correction:
   schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref

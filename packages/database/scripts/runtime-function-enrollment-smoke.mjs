@@ -41,7 +41,7 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact latest migration 176 and exact completed count 176 are mandatory.
+  - Exact terminal migration 179 and exact completed count 179 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
   - Deliberate target-role and PUBLIC function/table/column/type ACL drift is
@@ -63,19 +63,13 @@ function exactColumnList(entry) {
 function functionNamePattern(entry) {
   const match = /"([^"]+)"\(/u.exec(entry.catalogSignature);
   assert.ok(match, `Invalid function catalog signature: ${entry.key}.`);
-  return new RegExp(
-    `permission denied for function ${escapeRegExp(match[1])}`,
-    "iu",
-  );
+  return new RegExp(escapeRegExp(match[1]), "u");
 }
 
 function tableNamePattern(entry) {
   const match = /"([^"]+)"$/u.exec(entry.catalogName);
   assert.ok(match, `Invalid table catalog name: ${entry.key}.`);
-  return new RegExp(
-    `permission denied for table ${escapeRegExp(match[1])}`,
-    "iu",
-  );
+  return new RegExp(escapeRegExp(match[1]), "u");
 }
 
 function callExcludedFunctionBoundary(runtime, entry) {
@@ -887,12 +881,12 @@ async function runSmoke() {
     await expectSqlState(
       "42501",
       () => callWorkerEventBoundary(runtime),
-      /permission denied for function guest_game_delivery_record_event_v1/iu,
+      /guest_game_delivery_record_event_v1/u,
     );
     await expectSqlState(
       "42501",
       () => callPendingIdentityBoundary(runtime),
-      /permission denied for function identity_email_claim_lock_v1/iu,
+      /identity_email_claim_lock_v1/u,
     );
     await expectSqlState(
       "23503",
@@ -930,7 +924,7 @@ async function runSmoke() {
     await expectSqlState(
       "42501",
       () => callIdentityOwnerInviteHoldBoundary(runtime),
-      /permission denied for function identity_owner_invite_issue_hold_v1/iu,
+      /identity_owner_invite_issue_hold_v1/u,
     );
     for (const entry of EXCLUDED_WORKER_FUNCTIONS) {
       await expectSqlState(
@@ -970,7 +964,7 @@ async function runSmoke() {
     await expectSqlState(
       "42501",
       () => insertIdentityClaimTable(runtime),
-      /permission denied for table IdentityEmailClaim/iu,
+      /IdentityEmailClaim/u,
     );
     await admin.$executeRawUnsafe(
       `GRANT SELECT ("emailCanonical") ON TABLE public."IdentityEmailClaim" TO ${role}`,

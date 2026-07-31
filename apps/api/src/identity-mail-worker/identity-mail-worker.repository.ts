@@ -15,8 +15,10 @@ import type {
 } from './identity-mail-worker.types';
 
 const CURRENT_MIGRATION =
-  '20260731020000_initial_owner_mail_delivery_boundary' as const;
-const CURRENT_MIGRATION_COUNT = 176 as const;
+  '20260731120000_identity_mail_delivery_release_head' as const;
+const CURRENT_MIGRATION_COUNT = 179 as const;
+const PRETERMINAL_MIGRATION_MANIFEST_DIGEST =
+  '7f9867971a39e010b2dac03be18fc083dabe67b98d1d6ed15a0cc4540a8cfd14' as const;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const UUID_PATTERN =
@@ -760,6 +762,7 @@ function assertReadinessReceipt(
       'tenantId',
       'migrationHead',
       'migrationCount',
+      'preterminalManifestDigest',
       'policyRevision',
       'maxAttempts',
       'leaseSeconds',
@@ -777,6 +780,8 @@ function assertReadinessReceipt(
     record.tenantId !== tenantId ||
     record.migrationHead !== input.expectedMigration ||
     record.migrationCount !== input.expectedMigrationCount ||
+    record.preterminalManifestDigest !==
+      PRETERMINAL_MIGRATION_MANIFEST_DIGEST ||
     !positiveSafeInteger(record.policyRevision) ||
     record.maxAttempts !== input.expectedPolicy.maxAttempts ||
     record.leaseSeconds !== input.expectedPolicy.leaseSeconds ||

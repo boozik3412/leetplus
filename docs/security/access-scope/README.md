@@ -3,8 +3,8 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.23.0                                                                                              |
-| Дата                           | 29.07.2026                                                                                          |
+| Версия контракта               | 1.24.0                                                                                              |
+| Дата                           | 30.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
 | Исходный baseline              | `eb7ad9ef7d4783c47a7ddb5efbc271e5eb8a2fe2`                                                          |
@@ -19,13 +19,51 @@
 | Staff snapshot admission       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; synthetic verified; production-like NO-GO   |
 | Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — included in green remote SHA `d77c7439...`             |
 | Authority operations           | Detached candidate; local 40/40; production public root `{}` / FAIL-CLOSED                          |
-| Schema target                  | `CURRENT_166`; not deployed                                                                       |
+| Schema target                  | `CURRENT_179`; count `179`; head `20260731120000_identity_mail_delivery_release_head`; not deployed |
 | Prior merge-ref baseline       | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA                      |
 | Previous accepted exact-head   | `d525b736...` / CI `30447467729` (`run #28`); `3/3 PASS`                                            |
 | Last accepted checkpoint       | exact-head `be8c94c4...` / CI `30449026506` (`run #29`); `3/3 PASS`                                 |
 | Current operational gate       | non-owner runtime/app DB role admission and explicit `EXECUTE`; provider activation remains `NO-GO` |
 | Historical remote evidence     | `CURRENT_165`: `4bd6a036...` / CI `30428288353`; `7c20adec...` / CI `30429463161` PASS              |
 | Staff proposal dry-run         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — all 8 fixtures; SYNTHETIC only; no apply; not deployed |
+
+## Канонический current release contract
+
+Reviewed StaffTask boundary остаётся frozen prefix `EXPAND_162`: migration
+count `162`, latest `20260727131000_staff_task_integrity_expand`. Единственный
+поддерживаемый current target — `CURRENT_179`: migration count `179`, latest
+`20260731120000_identity_mail_delivery_release_head`, unfinished `0`.
+
+Exact additive tail `163..179` состоит ровно из 17 migrations, в таком порядке:
+
+1. `20260728120000_tenant_execution_control_plane_expand`;
+2. `20260728150000_tenant_execution_revision_fence`;
+3. `20260729120000_store_background_execution_fence`;
+4. `20260729160000_guest_game_delivery_claim_fence`;
+5. `20260729190000_identity_email_claim_foundation`;
+6. `20260729210000_identity_email_claim_write_boundary`;
+7. `20260729230000_identity_invite_writer_boundary`;
+8. `20260729233000_identity_activation_locator`;
+9. `20260730010000_identity_owner_invite_hold_outbox`;
+10. `20260730020000_shared_beta_admission_provenance`;
+11. `20260730030000_identity_mail_outbox_pending_enum_expand`;
+12. `20260730040000_shared_beta_runtime_release_activation`;
+13. `20260731010000_identity_mail_delivery_status_expand`;
+14. `20260731020000_initial_owner_mail_delivery_boundary`;
+15. `20260731090000_guest_game_case_reward_lifecycle`;
+16. `20260731110000_guest_game_case_reward_contract`;
+17. `20260731120000_identity_mail_delivery_release_head`.
+
+Любой ранее подписанный `CURRENT_166` authority envelope и установленный по
+нему DB marker являются historical evidence только для `CURRENT_166`. Их
+нельзя переименовывать, копировать или выдавать за authority для
+`CURRENT_179`; они не разрешают admission, inventory, planner, apply или
+deployment на `CURRENT_179`. Для `CURRENT_179` обязательны новый acquisition
+request, новый `creationNonce`, отдельный state-bound Ed25519 envelope и
+rotation DB marker на digest именно этого нового envelope. Production root
+registry остаётся `{}` / EMPTY, поэтому выпуск такого production-like
+envelope сейчас невозможен, а `PRODUCTION_LIKE`, deploy и внешний beta
+остаются fail-closed `NO-GO`.
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
 invite-only открытому тесту. Она отвечает на вопросы:
@@ -242,7 +280,7 @@ evidence с database name, PostgreSQL `system_identifier` и database OID без
 Полный каталог из 43 reason codes классифицирован как `8 proposal +
 29 operator + 6 review`; `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` является
 `BLOCKING`. Schema-first gate требует exact
-`166/20260729160000_guest_game_delivery_claim_fence/unfinished 0 +
+`179/20260731120000_identity_mail_delivery_release_head/unfinished 0 +
 14 composite exact + 14 simple exact +
 0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
 0 index mismatch` и `databaseIdentityMatched=true`. Exits — `0/1/2/3`,
@@ -260,7 +298,8 @@ smoke для дополнительного конфликтующего FK/не
 [StaffTask snapshot admission](./v1/staff-task-integrity-snapshot-admission-runbook.md)
 `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` —
 `IMPLEMENTED_CANDIDATE`, not deployed. Он допускает только изолированную
-loopback PostgreSQL 16 копию в точном `BASELINE_156` либо `EXPAND_162`,
+loopback PostgreSQL 16 копию в точном `BASELINE_156`, `EXPAND_162` либо
+`CURRENT_179`,
 сверяет ordered migration names/checksums и фактический runtime content с
 exact Git blobs, FK/index/trigger catalog и отдельную `LOGIN NOINHERIT` роль.
 Её logical allowlist из девяти relations реализован как table `SELECT` на
@@ -281,13 +320,17 @@ transferable audit proof; аудит опирается на protected signed ma
 
 Authority envelope подписывает `expectedState`, поэтому production-like
 ceremony поддерживает ровно три состояния: `BASELINE_156`, `EXPAND_162` и
-`CURRENT_166`. После migrations `157..162`, а затем после единого exact
-allowlisted tail `163..166` выполняются новые
+`CURRENT_179`. После migrations `157..162`, а затем после exact 17-name
+allowlisted tail `163..179`, перечисленного в каноническом current release
+contract выше, выполняются новые
 detached ceremony `prepare → external Ed25519 sign → finalize` с новым
 nonce-bound binding. DB marker заменяется digest нового envelope до каждого
 следующего admission, а protected evidence хранит все state-specific bundle,
 первоначальную установку marker и rotation attestation. Marker reuse
 запрещён.
+Существующий signed `CURRENT_166` envelope/marker сохраняется только как
+historical evidence и не может быть переименован или использован для
+`CURRENT_179`.
 `CURRENT_164` остаётся только remote SYNTHETIC prerequisite evidence; runtime
 его не принимает и отдельный production-like envelope для него не выпускается.
 
@@ -343,7 +386,7 @@ reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
 не выполнялись. Historical `CURRENT_165` engineering candidate
 `4bd6a036...` / CI `30428288353` и documentation/evidence successor
 `7c20adec...` / CI `30429463161` прошли remote CI, включая real PostgreSQL
-`164 → 165`; это historical prerequisite. Schema target — `CURRENT_166`.
+`164 → 165`; это historical prerequisite. Schema target — `CURRENT_179`.
 Previous accepted engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
 [`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)

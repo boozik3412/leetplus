@@ -99,6 +99,11 @@ const HISTORICAL_CURRENT_171_IDENTITY_CLAIM_COLUMNS = Object.freeze([
   "updatedAt",
   "workflowLocator",
 ]);
+const HISTORICAL_CURRENT_171_RUNTIME_FUNCTIONS = Object.freeze(
+  APPLICATION_RUNTIME_FUNCTIONS.filter(
+    (entry) => entry.key !== "identityInitialOwnerInviteDeliveryAssertSent",
+  ),
+);
 const HISTORICAL_CURRENT_171_EXCLUDED_FUNCTIONS = Object.freeze([
   'public."guest_game_delivery_record_event_v1"(JSON)',
   'public."identity_email_claim_lock_v1"(TEXT)',
@@ -195,7 +200,7 @@ function quoteIdentifier(value) {
 
 function buildHistoricalCurrent171RuntimeEnrollmentStatements(roleName) {
   assert.equal(
-    APPLICATION_RUNTIME_FUNCTIONS.length,
+    HISTORICAL_CURRENT_171_RUNTIME_FUNCTIONS.length,
     7,
     "The historical CURRENT_171 runtime function manifest changed.",
   );
@@ -226,7 +231,7 @@ function buildHistoricalCurrent171RuntimeEnrollmentStatements(roleName) {
         `REVOKE ALL PRIVILEGES (${columnList}) ON TABLE ${tableName} FROM PUBLIC`,
       ];
     }),
-    ...APPLICATION_RUNTIME_FUNCTIONS.flatMap((entry) => [
+    ...HISTORICAL_CURRENT_171_RUNTIME_FUNCTIONS.flatMap((entry) => [
       `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
       `REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION ${entry.grantSignature} FROM ${role}`,
     ]),
@@ -363,9 +368,9 @@ async function readMigrationPlan() {
   ]);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260731020000_initial_owner_mail_delivery_boundary",
+    "20260731120000_identity_mail_delivery_release_head",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_176");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_179");
   const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
   assert.equal(
     targetIndex,
@@ -2112,7 +2117,7 @@ async function assertCleanAcl(
   assert.deepEqual(directGrants, [{ routine_name: ISSUE_FUNCTION }]);
 
   let appExecuteCount = 0;
-  for (const entry of APPLICATION_RUNTIME_FUNCTIONS) {
+  for (const entry of HISTORICAL_CURRENT_171_RUNTIME_FUNCTIONS) {
     const [row] = await admin.$queryRawUnsafe(
       `SELECT pg_catalog.has_function_privilege(
          $1,
@@ -2326,7 +2331,7 @@ async function runOfflineSelfTest() {
   assert.equal(plan.prefixMigrations.at(-1), PREVIOUS_MIGRATION);
   assert.equal(plan.targetMigration, TARGET_MIGRATION);
   assert.equal(plan.allMigrations.length, 171);
-  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 7);
+  assert.equal(HISTORICAL_CURRENT_171_RUNTIME_FUNCTIONS.length, 7);
   const historicalEnrollment =
     buildHistoricalCurrent171RuntimeEnrollmentStatements(
       "lp_owner_hold_app_0123456789abcdef",

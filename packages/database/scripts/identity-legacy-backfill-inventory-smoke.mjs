@@ -2301,10 +2301,10 @@ export function runSelfTest() {
     [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
     [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
   );
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 176);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 179);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260731020000_initial_owner_mail_delivery_boundary",
+    "20260731120000_identity_mail_delivery_release_head",
   );
   assert.equal(
     IDENTITY_FUNCTION_SIGNATURES.includes(

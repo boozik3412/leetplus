@@ -1573,6 +1573,11 @@ describe('GuestGameRuleReplayService loot-box entitlement maintenance', () => {
     };
     const sql = query.strings.join('?');
     expect(sql).toContain(`r."evidence"->>'eventType' = e."sourceEventType"`);
+    expect(sql).toContain(`e."sourceRewardId" IS NOT NULL`);
+    expect(sql).toContain(`e."rewardId" = e."sourceRewardId"`);
+    expect(sql).toContain(
+      `e."rewardId",\n            e."sourceRewardId",\n            e."sourceEventType"`,
+    );
     expect(sql).toContain(`to_char(\n                e."qualifiedAt",`);
     expect(sql).not.toContain('AT TIME ZONE');
     expect(sql).not.toContain('nextQualifiedAt');
@@ -1622,6 +1627,12 @@ describe('GuestGameRuleReplayService loot-box entitlement maintenance', () => {
       updatedCount: 1,
     });
     expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    const [executeCall] = tx.$executeRaw.mock.calls as unknown as [
+      [{ strings?: readonly string[] }],
+    ];
+    const updateSql = executeCall[0].strings?.join('');
+    expect(updateSql).toContain(`e."sourceRewardId" IS NOT NULL`);
+    expect(updateSql).toContain(`e."rewardId" = e."sourceRewardId"`);
     expect(JSON.stringify(auditCreate.mock.calls)).toContain(
       'LOOT_BOX_ENTITLEMENT_RECONCILED',
     );
@@ -1812,6 +1823,10 @@ describe('GuestGameRuleReplayService loot-box entitlement maintenance', () => {
     expect(query.strings?.join('')).toContain(
       `l."usageKind" IN ('STANDALONE', 'BOTH')`,
     );
+    expect(query.strings?.join('')).toContain(`e."sourceRewardId" IS NOT NULL`);
+    expect(query.strings?.join('')).toContain(
+      `e."rewardId" = e."sourceRewardId"`,
+    );
   });
 
   it('cancels only the previewed AVAILABLE rolling-window excess set', async () => {
@@ -1890,6 +1905,15 @@ describe('GuestGameRuleReplayService loot-box entitlement maintenance', () => {
         }),
       ],
     });
+    const queryCalls = tx.$queryRaw.mock.calls as unknown as Array<
+      [{ strings?: readonly string[] }]
+    >;
+    const lockSql = queryCalls[1]?.[0].strings?.join('');
+    const updateSql = queryCalls[3]?.[0].strings?.join('');
+    for (const sql of [lockSql, updateSql]) {
+      expect(sql).toContain(`e."sourceRewardId" IS NOT NULL`);
+      expect(sql).toContain(`e."rewardId" = e."sourceRewardId"`);
+    }
   });
 
   it('is idempotent after the rolling-window repair reaches zero candidates', async () => {

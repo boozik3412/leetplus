@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { ConfigService } from '@nestjs/config';
-import { TenantCustomerStage } from '@prisma/client';
+import { TenantCustomerStage, type Prisma } from '@prisma/client';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -13,6 +13,30 @@ const rewardWalletMigrationSql = readFileSync(
   ),
   'utf8',
 );
+
+const sourceRewardIdField = {
+  modelName: 'GuestGameEntitlement',
+  name: 'sourceRewardId',
+  typeName: 'String',
+  isList: false,
+} as Prisma.GuestGameEntitlementFieldRefs['sourceRewardId'];
+
+type GuestGameDataRetentionServiceTestAccess = {
+  deleteExpiredRewardWalletItemBatches(
+    cutoff: Date,
+    tenantIds: readonly string[],
+  ): Promise<number>;
+  recoverStaleRewardWalletOpeningBatches(
+    now: Date,
+    tenantIds: readonly string[],
+  ): Promise<number>;
+};
+
+function testAccess(
+  service: GuestGameDataRetentionService,
+): GuestGameDataRetentionServiceTestAccess {
+  return service as unknown as GuestGameDataRetentionServiceTestAccess;
+}
 
 function createFixture(configValues: Record<string, string | undefined> = {}) {
   const delegates = {
@@ -49,9 +73,15 @@ function createFixture(configValues: Record<string, string | undefined> = {}) {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     guestGameEntitlement: {
+      fields: {
+        sourceRewardId: sourceRewardIdField,
+      },
       count: jest.fn().mockResolvedValue(7),
       findFirst: jest.fn().mockResolvedValue(null),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    guestGameEvent: {
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     guestGameRewardWalletItem: retentionDelegate(0),
     $transaction: jest.fn(function (
@@ -75,8 +105,24 @@ function createFixture(configValues: Record<string, string | undefined> = {}) {
 function retentionDelegate(count: number) {
   return {
     count: jest.fn().mockResolvedValue(count),
+    findFirst: jest.fn().mockResolvedValue(null),
     findMany: jest.fn().mockResolvedValue([]),
+    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+  };
+}
+
+function unopenedEntitlementRewardWhere(
+  field: Prisma.GuestGameEntitlementFieldRefs['sourceRewardId'],
+) {
+  return {
+    OR: [
+      { rewardId: null },
+      {
+        sourceRewardId: { not: null },
+        rewardId: { equals: field },
+      },
+    ],
   };
 }
 
@@ -154,9 +200,7 @@ describe('GuestGameDataRetentionService', () => {
       },
     });
     expect(delegates.guestActivityRawRecord.deleteMany).not.toHaveBeenCalled();
-    expect(
-      delegates.guestGameRewardWalletItem.findMany,
-    ).toHaveBeenCalledWith(
+    expect(delegates.guestGameRewardWalletItem.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           tenantId: { in: ['tenant-1'] },
@@ -193,6 +237,28 @@ describe('GuestGameDataRetentionService', () => {
                 expect.objectContaining({
                   status: 'PENDING',
                   kind: 'LOOT_BOX_ENTITLEMENT',
+                  entitlement: {
+                    is: {
+                      OR: [
+                        {
+                          status: 'AVAILABLE',
+                          consumedAt: null,
+                          canceledAt: null,
+                          AND: [
+                            unopenedEntitlementRewardWhere(
+                              delegates.guestGameEntitlement.fields
+                                .sourceRewardId,
+                            ),
+                          ],
+                        },
+                        {
+                          status: {
+                            in: ['CONSUMED', 'CANCELED', 'EXPIRED'],
+                          },
+                        },
+                      ],
+                    },
+                  },
                 }),
               ]),
             }),
@@ -231,7 +297,11 @@ describe('GuestGameDataRetentionService', () => {
         status: 'AVAILABLE',
         consumedAt: null,
         canceledAt: null,
-        rewardId: null,
+        AND: [
+          unopenedEntitlementRewardWhere(
+            delegates.guestGameEntitlement.fields.sourceRewardId,
+          ),
+        ],
       },
       data: {
         status: 'EXPIRED',
@@ -243,6 +313,52 @@ describe('GuestGameDataRetentionService', () => {
         data: expect.objectContaining({ status: 'DRY_RUN_COMPLETE' }),
       }),
     );
+  });
+
+  it('keeps an expired wallet item when the entitlement has an incompatible outcome binding', async () => {
+    const { service, delegates } = createFixture();
+    delegates.guestGameRewardWalletItem.findMany.mockResolvedValue([
+      {
+        id: 'incompatible-entitlement-wallet',
+        tenantId: 'tenant-1',
+        status: 'PENDING',
+        kind: 'LOOT_BOX_ENTITLEMENT',
+        rewardId: null,
+        entitlementId: 'incompatible-entitlement',
+        eventId: null,
+        expiresAt: now,
+      },
+    ]);
+    delegates.guestGameEntitlement.updateMany.mockResolvedValue({ count: 0 });
+    delegates.guestGameEntitlement.findFirst.mockResolvedValue(null);
+
+    await expect(
+      testAccess(service).deleteExpiredRewardWalletItemBatches(now, [
+        'tenant-1',
+      ]),
+    ).resolves.toBe(0);
+
+    expect(delegates.guestGameEntitlement.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'incompatible-entitlement',
+        tenantId: 'tenant-1',
+        status: 'AVAILABLE',
+        consumedAt: null,
+        canceledAt: null,
+        AND: [
+          unopenedEntitlementRewardWhere(
+            delegates.guestGameEntitlement.fields.sourceRewardId,
+          ),
+        ],
+      },
+      data: {
+        status: 'EXPIRED',
+        validUntil: now,
+      },
+    });
+    expect(
+      delegates.guestGameRewardWalletItem.deleteMany,
+    ).not.toHaveBeenCalled();
   });
 
   it('expires an unrequested ordinary reward exactly at its claim deadline', async () => {
@@ -427,7 +543,7 @@ describe('GuestGameDataRetentionService', () => {
         },
       ]);
     delegates.guestGameReward.updateMany.mockImplementation(
-      async ({ where }: { where: Record<string, unknown> }) => ({
+      ({ where }: { where: Record<string, unknown> }) => ({
         count:
           rewardState.status === where.status &&
           rewardState.deliveryRequestedAt === where.deliveryRequestedAt &&
@@ -445,9 +561,7 @@ describe('GuestGameDataRetentionService', () => {
 
     expect(result.walletCleanup).toEqual({ deleted: 0 });
     expect(delegates.guestGameReward.updateMany).toHaveBeenCalledTimes(1);
-    expect(
-      delegates.guestGameRewardEffect.updateMany,
-    ).not.toHaveBeenCalled();
+    expect(delegates.guestGameRewardEffect.updateMany).not.toHaveBeenCalled();
     expect(
       delegates.guestGameRewardWalletItem.deleteMany,
     ).not.toHaveBeenCalled();
@@ -540,6 +654,125 @@ describe('GuestGameDataRetentionService', () => {
 
     expect(result.walletCleanup).toEqual({ deleted: 0 });
     expect(delegates.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+    expect(
+      delegates.guestGameRewardWalletItem.deleteMany,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('restores a stale OPENING entitlement whose reward still aliases its source reward', async () => {
+    const { service, delegates } = createFixture();
+    const entitlementId = 'opening-alias-entitlement';
+    delegates.guestGameRewardWalletItem.findMany.mockResolvedValue([
+      {
+        id: 'opening-alias-wallet',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        entitlementId,
+        expiresAt: new Date('2026-08-12T00:00:00.000Z'),
+        entitlement: { ruleId: 'lootbox-1' },
+      },
+    ]);
+    delegates.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+      id: 'opening-alias-wallet',
+      expiresAt: new Date('2026-08-12T00:00:00.000Z'),
+      entitlement: {
+        id: entitlementId,
+        status: 'OPENING',
+        sourceRewardId: 'case-parent-reward',
+        rewardId: 'case-parent-reward',
+        ruleId: 'lootbox-1',
+      },
+    });
+    delegates.guestGameEntitlement.updateMany.mockResolvedValue({ count: 1 });
+    delegates.guestGameRewardWalletItem.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    await expect(
+      testAccess(service).recoverStaleRewardWalletOpeningBatches(now, [
+        'tenant-1',
+      ]),
+    ).resolves.toBe(1);
+
+    expect(delegates.guestGameReward.findFirst).not.toHaveBeenCalled();
+    expect(delegates.guestGameRewardWalletItem.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          entitlement: {
+            select: expect.objectContaining({
+              sourceRewardId: true,
+              rewardId: true,
+            }),
+          },
+        }),
+      }),
+    );
+    expect(delegates.guestGameEntitlement.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: entitlementId,
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'lootbox-1',
+        status: 'OPENING',
+        AND: [
+          unopenedEntitlementRewardWhere(
+            delegates.guestGameEntitlement.fields.sourceRewardId,
+          ),
+        ],
+      },
+      data: {
+        status: 'AVAILABLE',
+        consumedAt: null,
+        canceledAt: null,
+        validUntil: null,
+      },
+    });
+    expect(delegates.guestGameRewardWalletItem.updateMany).toHaveBeenCalledWith(
+      {
+        where: { id: 'opening-alias-wallet', status: 'OPENING' },
+        data: { status: 'PENDING', claimedAt: null },
+      },
+    );
+  });
+
+  it('fails closed for a stale OPENING entitlement with a distinct persisted outcome', async () => {
+    const { service, delegates } = createFixture();
+    const entitlementId = 'opening-incompatible-entitlement';
+    delegates.guestGameRewardWalletItem.findMany.mockResolvedValue([
+      {
+        id: 'opening-incompatible-wallet',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        entitlementId,
+        expiresAt: new Date('2026-08-12T00:00:00.000Z'),
+        entitlement: { ruleId: 'lootbox-1' },
+      },
+    ]);
+    delegates.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+      id: 'opening-incompatible-wallet',
+      expiresAt: new Date('2026-08-12T00:00:00.000Z'),
+      entitlement: {
+        id: entitlementId,
+        status: 'OPENING',
+        sourceRewardId: 'case-parent-reward',
+        rewardId: 'different-outcome-reward',
+        ruleId: 'lootbox-1',
+      },
+    });
+    delegates.guestGameReward.findFirst.mockResolvedValue(null);
+
+    await expect(
+      testAccess(service).recoverStaleRewardWalletOpeningBatches(now, [
+        'tenant-1',
+      ]),
+    ).resolves.toBe(0);
+
+    expect(delegates.guestGameEvent.findFirst).not.toHaveBeenCalled();
+    expect(delegates.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+    expect(
+      delegates.guestGameRewardWalletItem.updateMany,
+    ).not.toHaveBeenCalled();
     expect(
       delegates.guestGameRewardWalletItem.deleteMany,
     ).not.toHaveBeenCalled();
@@ -644,9 +877,7 @@ describe('GuestGameDataRetentionService', () => {
 
 describe('reward wallet rollout migration', () => {
   it('fail-closes profile rewards but preserves legacy non-profile delivery', () => {
-    expect(rewardWalletMigrationSql).toContain(
-      `reward."profileId",`,
-    );
+    expect(rewardWalletMigrationSql).toContain(`reward."profileId",`);
     expect(rewardWalletMigrationSql).toContain(
       `IF linked_reward."claimRequired" = false THEN`,
     );
@@ -677,12 +908,8 @@ describe('reward wallet rollout migration', () => {
     expect(rewardWalletMigrationSql).toContain(
       `reward."qualifiedAt" <= CURRENT_TIMESTAMP - INTERVAL '30 days'`,
     );
-    expect(rewardWalletMigrationSql).toContain(
-      `"status" = 'EXPIRED'`,
-    );
-    expect(rewardWalletMigrationSql).toContain(
-      `"status" = 'WAITING_CLAIM'`,
-    );
+    expect(rewardWalletMigrationSql).toContain(`"status" = 'EXPIRED'`);
+    expect(rewardWalletMigrationSql).toContain(`"status" = 'WAITING_CLAIM'`);
     expect(rewardWalletMigrationSql).toContain(
       `profile."gameActivatedAt" IS NOT NULL`,
     );
@@ -701,9 +928,7 @@ describe('reward wallet rollout migration', () => {
     expect(rewardWalletMigrationSql).toContain(
       `LEFT JOIN "GuestGameLootBox" AS loot_box`,
     );
-    expect(rewardWalletMigrationSql).toContain(
-      `'LOOT_BOX_ENTITLEMENT'`,
-    );
+    expect(rewardWalletMigrationSql).toContain(`'LOOT_BOX_ENTITLEMENT'`);
     expect(rewardWalletMigrationSql).toContain(
       `entitlement."rewardId" IS NULL`,
     );

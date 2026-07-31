@@ -6,7 +6,8 @@ import { STRICT_ROLES_KEY } from '../auth/strict-roles.decorator';
 import { StrictRolesGuard } from '../auth/strict-roles.guard';
 import { GuestGamificationController } from './guest-gamification.controller';
 
-type ReplayHandlerName =
+type StrictOwnerAdminHandlerName =
+  | 'runRewardMaterializer'
   | 'previewBattlePassRuleReplay'
   | 'applyBattlePassRuleReplay'
   | 'previewExactPlayTimeCanonicalization'
@@ -21,7 +22,8 @@ type LedgerHandlerName =
   | 'dispatchBonusLedger'
   | 'cancelBonusLedgerEntry';
 
-const replayHandlerNames: ReplayHandlerName[] = [
+const strictOwnerAdminHandlerNames: StrictOwnerAdminHandlerName[] = [
+  'runRewardMaterializer',
   'previewBattlePassRuleReplay',
   'applyBattlePassRuleReplay',
   'previewExactPlayTimeCanonicalization',
@@ -38,8 +40,8 @@ const ledgerHandlerNames: LedgerHandlerName[] = [
   'cancelBonusLedgerEntry',
 ];
 
-function replayContext(
-  methodName: ReplayHandlerName,
+function strictOwnerAdminContext(
+  methodName: StrictOwnerAdminHandlerName,
   role: UserRole,
 ): ExecutionContext {
   return {
@@ -76,10 +78,10 @@ function ledgerContext(
   } as unknown as ExecutionContext;
 }
 
-describe('GuestGamificationController replay authorization', () => {
+describe('GuestGamificationController strict OWNER/ADMIN authorization', () => {
   const guard = new StrictRolesGuard(new Reflector());
 
-  it.each(replayHandlerNames)(
+  it.each(strictOwnerAdminHandlerNames)(
     'protects %s with exact OWNER/ADMIN roles',
     (methodName) => {
       const handler = GuestGamificationController.prototype[methodName];
@@ -94,20 +96,25 @@ describe('GuestGamificationController replay authorization', () => {
     },
   );
 
-  it.each(replayHandlerNames)('allows OWNER and ADMIN on %s', (methodName) => {
-    expect(guard.canActivate(replayContext(methodName, UserRole.OWNER))).toBe(
-      true,
-    );
-    expect(guard.canActivate(replayContext(methodName, UserRole.ADMIN))).toBe(
-      true,
-    );
-  });
+  it.each(strictOwnerAdminHandlerNames)(
+    'allows OWNER and ADMIN on %s',
+    (methodName) => {
+      expect(
+        guard.canActivate(strictOwnerAdminContext(methodName, UserRole.OWNER)),
+      ).toBe(true);
+      expect(
+        guard.canActivate(strictOwnerAdminContext(methodName, UserRole.ADMIN)),
+      ).toBe(true);
+    },
+  );
 
-  it.each(replayHandlerNames)(
+  it.each(strictOwnerAdminHandlerNames)(
     'denies a capability-enabled non-owner on %s',
     (methodName) => {
       expect(() =>
-        guard.canActivate(replayContext(methodName, UserRole.MARKETER)),
+        guard.canActivate(
+          strictOwnerAdminContext(methodName, UserRole.MARKETER),
+        ),
       ).toThrow(ForbiddenException);
     },
   );

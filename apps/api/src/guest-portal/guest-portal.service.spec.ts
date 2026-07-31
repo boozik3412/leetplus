@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { IntegrationProvider, Prisma } from '@prisma/client';
 import { createHash, createHmac } from 'node:crypto';
 import {
+  buildNextActions,
   GuestPortalService,
   guestPortalEffectiveXp,
   guestPortalMissionConditionLabel,
@@ -15,6 +16,7 @@ import {
   guestPortalMissionProgressUnitLabel,
   guestPortalVisibleBonusLedgerRows,
   rewardCodeVisibleAfterClaim,
+  rewardWalletState,
 } from './guest-portal.service';
 
 function createPrismaMock() {
@@ -146,6 +148,14 @@ function createPrismaMock() {
       create: jest.fn().mockResolvedValue({}),
     },
     guestGameEntitlement: {
+      fields: {
+        sourceRewardId: {
+          modelName: 'GuestGameEntitlement',
+          name: 'sourceRewardId',
+          typeName: 'String',
+          isList: false,
+        },
+      },
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       upsert: jest.fn(),
@@ -194,6 +204,20 @@ function createPrismaMock() {
   return prisma;
 }
 
+function unopenedEntitlementRewardWhere(prisma: any) {
+  return {
+    OR: [
+      { rewardId: null },
+      {
+        sourceRewardId: { not: null },
+        rewardId: {
+          equals: prisma.guestGameEntitlement.fields.sourceRewardId,
+        },
+      },
+    ],
+  };
+}
+
 function createService(configValues: Record<string, string | undefined> = {}) {
   const prisma = createPrismaMock();
   const configService = {
@@ -212,6 +236,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     createEvent: jest.fn(),
     dryRun: jest.fn(),
     materializeRewardEffects: jest.fn(),
+    recoverProfileLootBoxRewardEffects: jest.fn(),
     processEvent: jest.fn(),
     processLiveSessionStart: jest.fn(),
   };
@@ -1069,6 +1094,7 @@ function availablePortalLootBoxEntitlement(
     validUntil: null,
     consumedAt: null,
     canceledAt: null,
+    sourceRewardId: null,
     rewardId: null,
     evidence: {
       input: {
@@ -1281,6 +1307,131 @@ describe('rewardCodeVisibleAfterClaim', () => {
       }),
     ).toBe(false);
   });
+
+  it('never reveals a case-parent code even though ordinary claim is disabled', () => {
+    expect(
+      rewardCodeVisibleAfterClaim({
+        ...base,
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+        claimRequired: false,
+        deliveryRequestedAt: null,
+        claimExpiresAt: null,
+        walletItems: [],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('case reward public contract', () => {
+  it('keeps the parent out of ordinary claim actions after entitlement delivery', () => {
+    const walletState = rewardWalletState('APPROVED', null, {
+      claimRequired: false,
+      deliveryRequestedAt: null,
+      claimExpiresAt: null,
+      rewardType: 'LOOT_BOX_ENTITLEMENT',
+      rewardAmount: 0,
+      walletItems: [],
+      sourceEntitlements: [{ status: 'AVAILABLE' }],
+    });
+
+    expect(walletState).toBe('REDEEMED');
+    expect(
+      buildNextActions({
+        guestFound: true,
+        lootBoxes: [],
+        missions: [],
+        seasons: [],
+        rewards: [
+          {
+            id: 'case-parent-reward',
+            status: 'APPROVED',
+            walletState,
+            rewardType: 'LOOT_BOX_ENTITLEMENT',
+            rewardAmount: 0,
+            rewardLabel: 'Наградной кейс',
+            rewardRarity: null,
+            rewardRarityLabel: null,
+            rewardDropChance: null,
+            sourceId: 'mission-case',
+            sourceKind: 'MISSION',
+            sourceLabel: 'Задание с кейсом',
+            storeId: 'store-1',
+            storeName: 'Club',
+            rewardCode: null,
+            claimPayload: null,
+            qualifiedAt: '2026-07-30T10:00:00.000Z',
+            claimedAt: null,
+            expiresAt: null,
+          },
+        ],
+        checkIn: {
+          enabled: false,
+          ready: false,
+          title: 'Чекин',
+          description: 'Чекин недоступен',
+          rewardLabel: null,
+          xpReward: 0,
+          blockedReason: null,
+        },
+      }),
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'CLAIM_REWARD' }),
+      ]),
+    );
+  });
+
+  it('reports case delivery in progress until an entitlement exists', () => {
+    expect(
+      rewardWalletState('APPROVED', null, {
+        claimRequired: false,
+        deliveryRequestedAt: null,
+        claimExpiresAt: null,
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+        rewardAmount: 0,
+        walletItems: [],
+        sourceEntitlements: [],
+      }),
+    ).toBe('DELIVERY_PROCESSING');
+  });
+
+  it('does not confuse an outcome entitlement with delivery of the parent case reward', () => {
+    expect(
+      rewardWalletState('APPROVED', null, {
+        claimRequired: false,
+        deliveryRequestedAt: null,
+        claimExpiresAt: null,
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+        rewardAmount: 0,
+        sourceEntitlements: [],
+        entitlements: [{ status: 'AVAILABLE' }],
+      } as any),
+    ).toBe('DELIVERY_PROCESSING');
+  });
+
+  it('does not treat a migrated paid case parent as delivered before its entitlement exists', () => {
+    const claim = {
+      claimRequired: false,
+      deliveryRequestedAt: new Date('2026-07-30T10:00:00.000Z'),
+      claimExpiresAt: null,
+      rewardType: 'LOOT_BOX_ENTITLEMENT',
+      rewardAmount: 0,
+      walletItems: [],
+    };
+
+    expect(
+      rewardWalletState('PAID', null, {
+        ...claim,
+        sourceEntitlements: [],
+      }),
+    ).toBe('DELIVERY_PROCESSING');
+    expect(
+      rewardWalletState('PAID', null, {
+        ...claim,
+        sourceEntitlements: [{ status: 'AVAILABLE' }],
+      }),
+    ).toBe('REDEEMED');
+  });
 });
 
 describe('GuestPortalService', () => {
@@ -1394,6 +1545,63 @@ describe('GuestPortalService', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('reports a delivered case in the completion modal without offering ordinary claim', async () => {
+    const { prisma, service } = createService();
+    prisma.guestGameCompletionNotification.findMany.mockResolvedValue([
+      {
+        id: 'completion-case',
+        kind: 'MISSION',
+        createdAt: new Date('2026-07-30T10:00:00.000Z'),
+        reward: {
+          status: 'APPROVED',
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          rewardAmount: new Prisma.Decimal(0),
+          rewardLabel: 'Наградной кейс',
+          qualifiedAt: new Date('2026-07-30T10:00:00.000Z'),
+          expiresAt: null,
+          claimRequired: false,
+          deliveryRequestedAt: null,
+          claimExpiresAt: null,
+          walletItems: [],
+          sourceEntitlements: [{ status: 'AVAILABLE' }],
+          evidence: { rule: { rewardLootBoxId: 'case-template' } },
+          mission: { id: 'mission-case', name: 'Задание с кейсом' },
+          season: null,
+        },
+      },
+    ]);
+
+    const result = await (service as any).getPendingCompletionNotifications(
+      'tenant-1',
+      'profile-1',
+      new Date('2026-07-01T00:00:00.000Z'),
+    );
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'completion-case',
+        statusLabel: 'Награда получена',
+      }),
+    ]);
+    expect(
+      prisma.guestGameCompletionNotification.findMany,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: {
+          reward: {
+            select: expect.objectContaining({
+              sourceEntitlements: {
+                select: { status: true },
+                orderBy: { createdAt: 'asc' },
+                take: 1,
+              },
+            }),
+          },
+        },
+      }),
+    );
   });
 
   it('keeps only post-activation reward ledger rows while preserving manual history', () => {
@@ -1608,7 +1816,7 @@ describe('GuestPortalService', () => {
 
   describe('getGameSummary', () => {
     it('returns compact game state from the existing guest session payload', async () => {
-      const { prisma, service } = createService({
+      const { guestGamificationService, prisma, service } = createService({
         GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
         WEB_URL: 'https://leetplus.ru',
       });
@@ -1678,6 +1886,16 @@ describe('GuestPortalService', () => {
       expect(buildPortalPayload).toHaveBeenCalledWith(tokenPayload, {
         liveSessionStartResult: null,
       });
+      expect(
+        guestGamificationService.recoverProfileLootBoxRewardEffects,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: `guest-portal:${tokenPayload.sub}`,
+          tenantId: tokenPayload.tenantId,
+          tenantSlug: portal.tenant.slug,
+        }),
+        portal.profile.id,
+      );
       expect(summary).toMatchObject({
         tenant: portal.tenant,
         store: portal.store,
@@ -3222,9 +3440,7 @@ describe('GuestPortalService', () => {
       );
       expect(combinedSql).toContain(`"status" = 'CLAIMED'`);
       expect(combinedSql).toContain(`"claimedAt" =`);
-      expect(combinedSql).toContain(
-        `INSERT INTO "GuestGameRewardWalletItem"`,
-      );
+      expect(combinedSql).toContain(`INSERT INTO "GuestGameRewardWalletItem"`);
       expect(combinedSql).toContain(
         `ON CONFLICT ("tenantId", "rewardId") DO NOTHING`,
       );
@@ -3305,7 +3521,119 @@ describe('GuestPortalService', () => {
       );
     });
 
-    it('expires an unopened entitlement when its 30-day wallet item is removed', async () => {
+    it('exposes a delivered case only as an explicit open action', async () => {
+      const { prisma, service } = createService();
+      const availableAt = new Date('2026-07-30T10:00:00.000Z');
+      const expiresAt = new Date('2026-08-29T10:00:00.000Z');
+      const caseWalletRow = {
+        id: 'wallet-case',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        storeId: 'store-1',
+        rewardId: null,
+        entitlementId: 'entitlement-case',
+        eventId: null,
+        kind: 'LOOT_BOX_ENTITLEMENT',
+        sourceKind: 'MISSION',
+        sourceId: 'mission-case',
+        title: 'Задание с кейсом',
+        rewardLabel: '1 попытка открытия',
+        status: 'PENDING',
+        availableAt,
+        claimedAt: null,
+        expiresAt,
+        entitlement: { ruleId: 'case-template' },
+        store: { id: 'store-1', name: 'Club' },
+      };
+      prisma.guestGameRewardWalletItem.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([caseWalletRow])
+        .mockResolvedValueOnce([caseWalletRow]);
+      prisma.guestGameRewardWalletItem.count.mockResolvedValue(1);
+      prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+        expiresAt,
+      });
+
+      const wallet = await (service as any).getRewardWallet(
+        'tenant-1',
+        'profile-1',
+        new Date('2026-07-01T00:00:00.000Z'),
+      );
+
+      expect(wallet.items).toEqual([
+        expect.objectContaining({
+          id: 'wallet-case',
+          kind: 'LOOT_BOX_ENTITLEMENT',
+          lootBoxId: 'case-template',
+          action: 'OPEN_LOOT_BOX',
+        }),
+      ]);
+      expect(wallet.items).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ action: 'CLAIM_REWARD' }),
+        ]),
+      );
+      const visibleCall =
+        prisma.guestGameRewardWalletItem.findMany.mock.calls.find((call) =>
+          Boolean(call[0].include?.reward),
+        );
+      expect(visibleCall?.[0].where).toEqual(
+        expect.objectContaining({
+          NOT: {
+            kind: 'REWARD',
+            reward: {
+              is: { rewardType: 'LOOT_BOX_ENTITLEMENT' },
+            },
+          },
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              status: 'PENDING',
+              availableAt: {
+                gte: new Date('2026-07-01T00:00:00.000Z'),
+                lte: expect.any(Date),
+              },
+              expiresAt: { gt: expect.any(Date) },
+              AND: [
+                {
+                  OR: expect.arrayContaining([
+                    expect.objectContaining({
+                      reward: {
+                        is: expect.objectContaining({
+                          rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
+                        }),
+                      },
+                    }),
+                    {
+                      entitlement: {
+                        is: {
+                          status: 'AVAILABLE',
+                          AND: [unopenedEntitlementRewardWhere(prisma)],
+                        },
+                      },
+                    },
+                  ]),
+                },
+              ],
+            }),
+          ]),
+        }),
+      );
+      expect(
+        visibleCall?.[0].where.OR[0].AND[0].OR[2].entitlement.is,
+      ).not.toHaveProperty('qualifiedAt');
+      const historyCall =
+        prisma.guestGameRewardWalletItem.findMany.mock.calls.find(
+          (call) => call[0].where?.NOT?.kind === 'REWARD',
+        );
+      expect(historyCall?.[0].where.NOT).toEqual({
+        kind: 'REWARD',
+        reward: {
+          is: { rewardType: 'LOOT_BOX_ENTITLEMENT' },
+        },
+      });
+    });
+
+    it('expires a source-reward-linked entitlement when its wallet item expires', async () => {
       const { prisma, service } = createService();
       const cutoff = new Date('2026-07-31T00:00:00.000Z');
       prisma.guestGameRewardWalletItem.findMany.mockResolvedValue([
@@ -3327,6 +3655,15 @@ describe('GuestPortalService', () => {
         cutoff,
       );
 
+      const lootBoxSelection =
+        prisma.guestGameRewardWalletItem.findMany.mock.calls[0][0].where.AND[1]
+          .OR[3].entitlement.is.OR[0];
+      expect(lootBoxSelection).toEqual({
+        status: 'AVAILABLE',
+        consumedAt: null,
+        canceledAt: null,
+        AND: [unopenedEntitlementRewardWhere(prisma)],
+      });
       expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledWith({
         where: {
           id: { in: ['entitlement-expired'] },
@@ -3335,7 +3672,7 @@ describe('GuestPortalService', () => {
           status: 'AVAILABLE',
           consumedAt: null,
           canceledAt: null,
-          rewardId: null,
+          AND: [unopenedEntitlementRewardWhere(prisma)],
         },
         data: {
           status: 'EXPIRED',
@@ -3399,7 +3736,7 @@ describe('GuestPortalService', () => {
               ],
               consumedAt: null,
               canceledAt: null,
-              rewardId: null,
+              AND: [unopenedEntitlementRewardWhere(prisma)],
             }),
           }),
         );
@@ -3477,6 +3814,44 @@ describe('GuestPortalService', () => {
       ).not.toHaveBeenCalled();
     });
 
+    it('rejects a stale case-parent reward at the transactional claim guard', async () => {
+      const { prisma, service } = createService();
+      prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+        id: 'wallet-stale-case-parent',
+        status: 'PENDING',
+        kind: 'REWARD',
+        entitlementId: null,
+        rewardId: 'case-parent-reward',
+        eventId: null,
+        claimXpDelta: 0,
+        expiresAt: new Date(Date.now() + 60_000),
+        reward: {
+          id: 'case-parent-reward',
+          status: 'APPROVED',
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          rewardAmount: new Prisma.Decimal(0),
+          claimRequired: true,
+          deliveryRequestedAt: null,
+          claimExpiresAt: new Date(Date.now() + 60_000),
+        },
+        event: null,
+      });
+
+      await expect(
+        (service as any).acceptRewardWalletClaim(
+          'tenant-1',
+          'profile-1',
+          'wallet-stale-case-parent',
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
+      expect(
+        prisma.guestGameRewardWalletItem.updateMany,
+      ).not.toHaveBeenCalled();
+      expect(prisma.guestGameRewardEffect.updateMany).not.toHaveBeenCalled();
+    });
+
     it('opens only the exact owned entitlement from its source store after the guest switches clubs', async () => {
       const { prisma, service } = createService();
       const tokenPayload = {
@@ -3532,8 +3907,19 @@ describe('GuestPortalService', () => {
                 tenantId: 'tenant-1',
                 profileId: 'profile-1',
                 status: 'AVAILABLE',
+                AND: [unopenedEntitlementRewardWhere(prisma)],
               },
             },
+            OR: expect.arrayContaining([
+              expect.objectContaining({
+                status: 'PENDING',
+                availableAt: {
+                  gte: new Date('2026-07-01T00:00:00.000Z'),
+                  lte: expect.any(Date),
+                },
+                expiresAt: { gt: expect.any(Date) },
+              }),
+            ]),
           }),
         }),
       );
@@ -3712,7 +4098,7 @@ describe('GuestPortalService', () => {
       );
     });
 
-    it('excludes unopened lootbox entitlements from claim-all', async () => {
+    it('excludes unopened entitlements and stale case parents from claim-all', async () => {
       const { prisma, service } = createService();
       const gameActivatedAt = new Date('2026-06-01T00:00:00.000Z');
       jest.spyOn(service as any, 'verifyGuestToken').mockResolvedValue({
@@ -3751,6 +4137,31 @@ describe('GuestPortalService', () => {
           take: 1000,
         }),
       );
+      expect(
+        prisma.guestGameRewardWalletItem.findMany.mock.calls[0][0].where.OR,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            status: 'PENDING',
+            OR: expect.arrayContaining([
+              expect.objectContaining({
+                reward: {
+                  is: expect.objectContaining({
+                    rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
+                  }),
+                },
+              }),
+            ]),
+          }),
+        ]),
+      );
+      expect(
+        prisma.guestGameRewardWalletItem.findMany.mock.calls[0][0].where.NOT,
+      ).toEqual({
+        reward: {
+          is: { rewardType: 'LOOT_BOX_ENTITLEMENT' },
+        },
+      });
       expect(
         prisma.guestGameRewardWalletItem.updateMany,
       ).not.toHaveBeenCalled();
@@ -4035,6 +4446,15 @@ describe('GuestPortalService', () => {
           ruleType: 'LOOT_BOX',
           ruleId: 'loot-entitled',
           status: 'OPENING',
+          AND: [
+            unopenedEntitlementRewardWhere(prisma),
+            {
+              OR: [
+                { sourceRewardId: null },
+                { sourceRewardId: { not: 'reward-1' } },
+              ],
+            },
+          ],
         },
         data: {
           status: 'CONSUMED',
@@ -4204,7 +4624,7 @@ describe('GuestPortalService', () => {
       expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
     });
 
-    it('keeps an unused entitlement available while its wallet item is live', async () => {
+    it('uses the fresh wallet window instead of historical entitlement qualifiedAt', async () => {
       const { prisma, service } = createService();
       const now = new Date('2026-06-10T19:01:00.000Z');
       const gameActivatedAt = new Date('2026-06-01T00:00:00.000Z');
@@ -4228,17 +4648,19 @@ describe('GuestPortalService', () => {
             ruleType: 'LOOT_BOX',
             ruleId: 'loot-daily',
             status: 'EXPIRED',
-            qualifiedAt: expect.objectContaining({
-              gte: gameActivatedAt,
-            }),
             walletItems: {
               some: {
                 tenantId: 'tenant-1',
                 profileId: 'profile-1',
+                kind: 'LOOT_BOX_ENTITLEMENT',
                 status: 'PENDING',
+                availableAt: { gte: gameActivatedAt, lte: now },
                 expiresAt: { gt: now },
               },
             },
+            AND: expect.arrayContaining([
+              unopenedEntitlementRewardWhere(prisma),
+            ]),
           }),
           data: {
             status: 'AVAILABLE',
@@ -4252,22 +4674,29 @@ describe('GuestPortalService', () => {
             tenantId: 'tenant-1',
             ruleId: 'loot-daily',
             status: 'AVAILABLE',
-            qualifiedAt: expect.objectContaining({
-              gte: gameActivatedAt,
-              lte: now,
-            }),
             walletItems: {
               some: {
                 tenantId: 'tenant-1',
                 profileId: 'profile-1',
+                kind: 'LOOT_BOX_ENTITLEMENT',
                 status: 'PENDING',
+                availableAt: { gte: gameActivatedAt, lte: now },
                 expiresAt: { gt: now },
               },
             },
-            AND: [{ OR: [{ storeId: null }, { storeId: 'store-1' }] }],
+            AND: [
+              unopenedEntitlementRewardWhere(prisma),
+              { OR: [{ storeId: null }, { storeId: 'store-1' }] },
+            ],
           }),
         }),
       );
+      expect(
+        prisma.guestGameEntitlement.updateMany.mock.calls[0][0].where,
+      ).not.toHaveProperty('qualifiedAt');
+      expect(
+        prisma.guestGameEntitlement.findFirst.mock.calls[0][0].where,
+      ).not.toHaveProperty('qualifiedAt');
     });
 
     it('does not consume an entitlement when the persisted reward is missing', async () => {
@@ -4285,6 +4714,85 @@ describe('GuestPortalService', () => {
         }),
       ).rejects.toThrow('Награда по праву открытия не найдена в базе');
       expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('reserves a transitional entitlement whose reward still aliases its source reward', async () => {
+      const { prisma, service } = createService();
+      const reservedAt = new Date('2026-07-31T10:00:00.000Z');
+
+      await expect(
+        (service as any).reservePortalLootBoxEntitlement({
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          storeId: 'store-1',
+          lootBoxId: 'loot-entitled',
+          entitlementId: 'entitlement-alias',
+          walletItemId: 'wallet-alias',
+          reservedAt,
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'entitlement-alias',
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          ruleType: 'LOOT_BOX',
+          ruleId: 'loot-entitled',
+          status: 'AVAILABLE',
+          OR: [{ storeId: null }, { storeId: 'store-1' }],
+          AND: [unopenedEntitlementRewardWhere(prisma)],
+        },
+        data: { status: 'OPENING' },
+      });
+    });
+
+    it('finalizes a transitional source-reward alias with the distinct outcome reward', async () => {
+      const { prisma, service } = createService();
+      const consumedAt = new Date('2026-07-31T10:00:00.000Z');
+      prisma.guestGameReward.findFirst.mockResolvedValue({
+        id: 'outcome-prize-reward',
+      });
+      prisma.guestGameEntitlement.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(
+        (service as any).finalizePortalLootBoxEntitlement({
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          lootBoxId: 'loot-entitled',
+          entitlementId: 'entitlement-alias',
+          rewardId: 'outcome-prize-reward',
+          consumedAt,
+        }),
+      ).resolves.toBeUndefined();
+
+      const finalizeCall =
+        prisma.guestGameEntitlement.updateMany.mock.calls[0][0];
+      expect(finalizeCall).toEqual({
+        where: {
+          id: 'entitlement-alias',
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          ruleType: 'LOOT_BOX',
+          ruleId: 'loot-entitled',
+          status: 'OPENING',
+          AND: [
+            unopenedEntitlementRewardWhere(prisma),
+            {
+              OR: [
+                { sourceRewardId: null },
+                { sourceRewardId: { not: 'outcome-prize-reward' } },
+              ],
+            },
+          ],
+        },
+        data: {
+          status: 'CONSUMED',
+          consumedAt,
+          rewardId: 'outcome-prize-reward',
+        },
+      });
+      expect(finalizeCall.data).not.toHaveProperty('sourceRewardId');
     });
 
     it('reconciles an available entitlement with the exact legacy direct-open reward', async () => {
@@ -4371,7 +4879,7 @@ describe('GuestPortalService', () => {
             status: 'AVAILABLE',
             consumedAt: null,
             canceledAt: null,
-            rewardId: null,
+            AND: [unopenedEntitlementRewardWhere(prisma)],
           }),
           data: expect.objectContaining({
             status: 'CONSUMED',
@@ -4803,6 +5311,138 @@ describe('GuestPortalService', () => {
         }),
       ).resolves.toBeUndefined();
       expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('recovers an opening reservation from the outcome reward rather than the source case reward', async () => {
+      const { prisma, service } = createService();
+      const now = new Date('2026-07-31T10:00:00.000Z');
+      prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+        id: 'wallet-opening',
+        expiresAt: new Date('2026-08-30T10:00:00.000Z'),
+        updatedAt: new Date('2026-07-31T09:50:00.000Z'),
+        entitlement: {
+          id: 'entitlement-opening',
+          status: 'CONSUMED',
+          sourceRewardId: 'case-parent-reward',
+          rewardId: 'outcome-prize-reward',
+          ruleId: 'loot-entitled',
+        },
+      });
+      prisma.guestGameReward.findFirst.mockResolvedValue({
+        id: 'outcome-prize-reward',
+      });
+
+      await expect(
+        (service as any).recoverPortalLootBoxOpeningReservation({
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          lootBoxId: 'loot-entitled',
+          entitlementId: 'entitlement-opening',
+          now,
+        }),
+      ).resolves.toBe('FINALIZED');
+
+      expect(prisma.guestGameReward.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: 'outcome-prize-reward',
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          lootBoxId: 'loot-entitled',
+        },
+        select: { id: true },
+      });
+      expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+      expect(prisma.guestGameRewardWalletItem.updateMany).toHaveBeenCalledWith({
+        where: { id: 'wallet-opening', status: 'OPENING' },
+        data: { status: 'CLAIMED', claimedAt: now },
+      });
+    });
+
+    it('does not treat a transitional parent-reward alias as a crash-recovery outcome', async () => {
+      const { prisma, service } = createService();
+      const now = new Date('2026-07-31T10:00:00.000Z');
+      prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+        id: 'wallet-opening-alias',
+        expiresAt: new Date('2026-08-30T10:00:00.000Z'),
+        updatedAt: new Date('2026-07-31T09:00:00.000Z'),
+        entitlement: {
+          id: 'entitlement-opening-alias',
+          status: 'OPENING',
+          sourceRewardId: 'case-parent-reward',
+          rewardId: 'case-parent-reward',
+          ruleId: 'loot-entitled',
+        },
+      });
+      prisma.guestGameEvent.findFirst.mockResolvedValue(null);
+      prisma.guestGameEntitlement.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(
+        (service as any).recoverPortalLootBoxOpeningReservation({
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          lootBoxId: 'loot-entitled',
+          entitlementId: 'entitlement-opening-alias',
+          now,
+        }),
+      ).resolves.toBe('RESTORED');
+
+      expect(prisma.guestGameReward.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'entitlement-opening-alias',
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          ruleType: 'LOOT_BOX',
+          ruleId: 'loot-entitled',
+          status: 'OPENING',
+          sourceRewardId: 'case-parent-reward',
+          rewardId: 'case-parent-reward',
+        },
+        data: {
+          status: 'AVAILABLE',
+          consumedAt: null,
+          canceledAt: null,
+          validUntil: null,
+        },
+      });
+      expect(prisma.guestGameRewardWalletItem.updateMany).toHaveBeenCalledWith({
+        where: { id: 'wallet-opening-alias', status: 'OPENING' },
+        data: { status: 'PENDING', claimedAt: null },
+      });
+    });
+
+    it('fails closed when an opening entitlement already has a distinct outcome binding', async () => {
+      const { prisma, service } = createService();
+      const now = new Date('2026-07-31T10:00:00.000Z');
+      prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+        id: 'wallet-opening-incompatible',
+        expiresAt: new Date('2026-08-30T10:00:00.000Z'),
+        updatedAt: new Date('2026-07-31T09:00:00.000Z'),
+        entitlement: {
+          id: 'entitlement-opening-incompatible',
+          status: 'OPENING',
+          sourceRewardId: 'case-parent-reward',
+          rewardId: 'different-outcome-reward',
+          ruleId: 'loot-entitled',
+        },
+      });
+      prisma.guestGameReward.findFirst.mockResolvedValue(null);
+
+      await expect(
+        (service as any).recoverPortalLootBoxOpeningReservation({
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          lootBoxId: 'loot-entitled',
+          entitlementId: 'entitlement-opening-incompatible',
+          now,
+        }),
+      ).resolves.toBe('ACTIVE');
+
+      expect(prisma.guestGameEvent.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+      expect(
+        prisma.guestGameRewardWalletItem.updateMany,
+      ).not.toHaveBeenCalled();
     });
 
     it('enables entitlement primary mode only inside the configured canary scope', () => {
@@ -10257,8 +10897,7 @@ describe('GuestPortalService', () => {
       });
       expect(
         portal.gamification.rewards.find(
-          (reward: { id: string }) =>
-            reward.id === 'canceled-season-marker',
+          (reward: { id: string }) => reward.id === 'canceled-season-marker',
         ),
       ).toMatchObject({
         walletState: 'CANCELED',

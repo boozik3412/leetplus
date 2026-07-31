@@ -3,8 +3,8 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.21.0                                             |
-| Дата            | 29.07.2026                                         |
+| Версия          | 1.22.0                                             |
+| Дата            | 30.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
 | External access | Запрещён до успешного Gate 2                       |
@@ -15,8 +15,8 @@
 
 Все фиксированные SHA ниже — historical checkpoints. Они не заполняют
 `Full candidate SHA` и не заменяют CI/review/evidence нового exact current
-candidate, который должен включать additive migrations `163..170` и пройти
-`CURRENT_170`
+candidate, который должен включать exact additive migrations `163..179` и пройти
+`CURRENT_179`
 admission.
 
 ## A. Release identity и authority
@@ -87,12 +87,24 @@ admission.
       implementation/security review и review compatibility fix не нашли
       новых P0/P1; у fix нет P2. Это engineering checkpoint, не production-like
       admission и не разрешение на cutover.
-- [x] Exact-head CI и independent review current `CURRENT_170` candidate
+- [x] Historical exact-head CI и independent review `CURRENT_170` candidate
       приняты: `8dfe219...` / CI `30493779099` (`run #47`), `3/3 PASS`,
       independent review без P0/P1/P2. PostgreSQL `16.13` подтвердил clean
       `170/170`, populated `169 → 170`, exact seven-RPC runtime enrollment при
       zero `IdentityEmailClaim` table privileges, locator/ACL/rollback и shell
       `2/2`; это не является production-like admission.
+- [x] Terminal local candidate `CURRENT_179` /
+      `20260731120000_identity_mail_delivery_release_head` прошёл local
+      three-history PostgreSQL 16 rehearsal: identity branch, актуальный
+      `origin/main` и clean history — `PASS`; terminal migration SHA
+      `c394060fb...`, manifest `179` `333018542...`, tamper matrix
+      `1/1/1/1/1`,
+      cleanup residue `0`. `CURRENT_176` остаётся immutable identity-mail
+      checkpoint, `CURRENT_178` — промежуточным `origin/main` prerequisite.
+- [ ] Full candidate SHA зафиксирован, final independent re-review принят и
+      exact-SHA GitHub CI завершился `3/3 PASS` именно для `CURRENT_179`.
+      До этого local candidate не является engineering-accepted release,
+      production deploy/restart/drain и внешний доступ запрещены.
 - [x] Rejected initial `CURRENT_169` exact-head
       `f9db2643b576778fbb0c651229c37e42d3f0892c`, CI
       [`30467211571`](https://github.com/boozik3412/leetplus/actions/runs/30467211571)
@@ -212,16 +224,28 @@ admission.
       `20260729190000_identity_email_claim_foundation` и
       `20260729210000_identity_email_claim_write_boundary` и
       `20260729230000_identity_invite_writer_boundary` и
-      `20260729233000_identity_activation_locator`; они не изменили protected
-      `StaffTask*` relations. Выпущен отдельный `CURRENT_170`
-      envelope с новым nonce-bound binding, DB marker повторно заменён, третий
-      admission schema `v2` завершился exit `0`; reuse expand marker запрещён.
+      `20260729233000_identity_activation_locator` и
+      `20260730010000_identity_owner_invite_hold_outbox` и
+      `20260730020000_shared_beta_admission_provenance` и
+      `20260730030000_identity_mail_outbox_pending_enum_expand` и
+      `20260730040000_shared_beta_runtime_release_activation` и
+      `20260731010000_identity_mail_delivery_status_expand` и
+      `20260731020000_initial_owner_mail_delivery_boundary` и
+      `20260731090000_guest_game_case_reward_lifecycle` и
+      `20260731110000_guest_game_case_reward_contract` и
+      `20260731120000_identity_mail_delivery_release_head`; они не изменили
+      protected `StaffTask*` relations.
+- [ ] Для `CURRENT_179` выпущен новый authority envelope с отдельным
+      nonce-bound binding, DB marker повторно заменён и admission schema `v2`
+      завершился exit `0`; reuse expand marker запрещён. Исторический
+      `CURRENT_166` envelope/marker не разрешает `CURRENT_179` и не может быть
+      переименован или повторно использован.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
 - [ ] Aggregate reconciliation planner выполнен на том же snapshot,
       release SHA и thresholds; schema-first gate равен
-      `CURRENT_170`, `migrationCount=170`, latest
-      `20260729233000_identity_activation_locator`, `unfinished=0`,
+      `CURRENT_179`, `migrationCount=179`, latest
+      `20260731120000_identity_mail_delivery_release_head`, `unfinished=0`,
       `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
       `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
       actionable cap не превышен.
@@ -414,8 +438,8 @@ admission.
 
 - [ ] Accepted artifact, migration apply и production runtime environment
       обновляются одной release-операцией:
-      `EXPECTED_DATABASE_MIGRATION=20260729160000_guest_game_delivery_claim_fence`
-      и `EXPECTED_DATABASE_MIGRATION_COUNT=166`; старые значения не допускаются
+      `EXPECTED_DATABASE_MIGRATION=20260731120000_identity_mail_delivery_release_head`
+      и `EXPECTED_DATABASE_MIGRATION_COUNT=179`; старые значения не допускаются
       после apply.
 - [ ] `/health/live`, `/health/ready`, `/version` проверены внешним probe.
 - [ ] Migration identity/count подтверждены именно через `/health/ready`;
@@ -502,6 +526,14 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.22.0`, 30.07.2026 — living cutover target синхронизирован с terminal
+  local candidate `CURRENT_179` (`163..179`, latest
+  `20260731120000_identity_mail_delivery_release_head`). Зафиксированы terminal
+  SHA `c394060fb...`, manifest `179` `333018542...`, three-history rehearsal
+  `PASS`, tamper matrix `1/1/1/1/1`, post-terminal pre-176 checksum drift
+  rejection `55000/effects 0` и cleanup residue `0`. Exact-SHA CI,
+  production-like admission, deploy/restart/drain, cutover и внешний доступ
+  остаются unchecked `NO-GO`; historical evidence не переписано.
 - `1.20.0`, 29.07.2026 — current cutover target синхронизирован с
   `CURRENT_170` (`163..170`, latest
   `20260729233000_identity_activation_locator`). Локальный PostgreSQL 16

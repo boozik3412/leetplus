@@ -21,6 +21,9 @@ export const STAFF_TASK_ALLOWED_ADDITIVE_TAIL = Object.freeze([
   "20260730040000_shared_beta_runtime_release_activation",
   "20260731010000_identity_mail_delivery_status_expand",
   "20260731020000_initial_owner_mail_delivery_boundary",
+  "20260731090000_guest_game_case_reward_lifecycle",
+  "20260731110000_guest_game_case_reward_contract",
+  "20260731120000_identity_mail_delivery_release_head",
 ]);
 
 export const CURRENT_EXPECTED_MIGRATION_COUNT =
@@ -31,4 +34,4 @@ export const CURRENT_EXPECTED_LATEST_MIGRATION =
 
 // Keep the reader-facing admission state explicit. A later release migration
 // must update this value together with the additive-tail allowlist.
-export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_176";
+export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_179";

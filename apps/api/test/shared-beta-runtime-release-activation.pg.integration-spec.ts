@@ -9,12 +9,11 @@ import {
   verify,
   type KeyObject,
 } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
 import { IdentityEmailClaimService } from '../src/auth/identity-email-claim.service';
 import { SharedTenantProvisioningService } from '../src/admin/shared-tenant-provisioning.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { deployCanonicalPrismaMigrations } from './canonical-prisma-migration-deploy';
 
 const REQUIRED_CONFIRMATION =
   'run-shared-beta-runtime-release-activation-postgres-fixture';
@@ -31,7 +30,7 @@ const DISPOSABLE_DATABASE_PATTERN = /^lp_activation176_pg_test_[0-9a-f]{32}$/u;
 const DISPOSABLE_ROLE_PATTERN = /^lp_activation_role_ci_[0-9a-f]{24}$/u;
 const DISPOSABLE_BYSTANDER_ROLE_PATTERN =
   /^lp_activation_bystander_ci_[0-9a-f]{24}$/u;
-const TARGET_MIGRATION = '20260731020000_initial_owner_mail_delivery_boundary';
+const TARGET_MIGRATION = '20260731120000_identity_mail_delivery_release_head';
 const ACTIVATION_FUNCTION_SIGNATURE =
   'public."shared_beta_tenant_activate_v1"(text,text,text,text,text,text,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)';
 const CATALOG_RELATION_PROBE =
@@ -238,7 +237,7 @@ describePostgres(
           AND rolled_back_at IS NULL
       `);
       expect(migration).toEqual({
-        migration_count: 176,
+        migration_count: 179,
         latest_migration: TARGET_MIGRATION,
       });
 
@@ -575,7 +574,7 @@ describePostgres(
       const migrationState = await readMigrationState(owner);
       expect(migrationState).toMatchObject({
         schemaHead: TARGET_MIGRATION,
-        migrationCount: 176,
+        migrationCount: 179,
         nonAppliedCount: 0,
         checksumMismatchCount: 0,
       });
@@ -2492,37 +2491,11 @@ function prismaFor(databaseUrl: string): PrismaClient {
 }
 
 function deployMigrations(databaseUrl: string) {
-  const repositoryRoot = resolve(__dirname, '../../..');
-  const databasePackage = join(repositoryRoot, 'packages', 'database');
-  const prismaCli = join(
-    databasePackage,
-    'node_modules',
-    'prisma',
-    'build',
-    'index.js',
-  );
-  try {
-    execFileSync(
-      process.execPath,
-      [
-        prismaCli,
-        'migrate',
-        'deploy',
-        '--schema',
-        join(databasePackage, 'prisma', 'schema.prisma'),
-      ],
-      {
-        cwd: databasePackage,
-        env: { ...process.env, DATABASE_URL: databaseUrl },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 180_000,
-      },
-    );
-  } catch {
-    throw new Error(
+  deployCanonicalPrismaMigrations(databaseUrl, {
+    failureMessage:
       'Failed to deploy migrations into the disposable shared beta activation database',
-    );
-  }
+    timeoutMs: 180_000,
+  });
 }
 
 function databaseUrlFor(source: URL, databaseName: string): string {

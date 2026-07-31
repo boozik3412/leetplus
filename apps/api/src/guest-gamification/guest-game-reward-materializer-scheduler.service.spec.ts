@@ -1,4 +1,9 @@
-import { TenantCustomerStage, TenantLifecycleStatus } from '@prisma/client';
+import {
+  TenantCustomerStage,
+  TenantLifecycleStatus,
+  UserRole,
+} from '@prisma/client';
+import type { AuthenticatedUser } from '../auth/auth.types';
 import type { GuestGameEffectMaterializeResult } from './guest-gamification.service';
 import { GuestGameRewardMaterializerSchedulerService } from './guest-game-reward-materializer-scheduler.service';
 
@@ -36,6 +41,22 @@ function tenant(
         isPlatformAdmin: false,
       },
     ],
+    ...overrides,
+  };
+}
+
+function operator(
+  overrides: Partial<AuthenticatedUser> = {},
+): AuthenticatedUser {
+  return {
+    id: 'operator-1',
+    email: 'owner@example.com',
+    fullName: 'Tenant Owner',
+    role: UserRole.OWNER,
+    isPlatformAdmin: false,
+    tenantId: 'tenant-1',
+    tenantSlug: 'demo',
+    tenantStatus: TenantLifecycleStatus.ACTIVE,
     ...overrides,
   };
 }
@@ -109,6 +130,175 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
       lastSkipReason: 'background materializer is disabled',
     });
     expect(typeof status.lastSkippedAt).toBe('string');
+  });
+
+  it('manually drains only the authenticated tenant while background mode is OFF', async () => {
+    const { scheduler, prisma, gamification } = createScheduler({
+      GUEST_GAME_REWARD_MATERIALIZER_TENANT_ID: 'another-tenant',
+      GUEST_GAME_REWARD_MATERIALIZER_BATCH_SIZE: '44',
+      GUEST_GAME_REWARD_MATERIALIZER_CLAIM_LEASE_MS: '90000',
+      GUEST_GAME_REWARD_MATERIALIZER_MAX_ATTEMPTS: '7',
+    });
+    const caller = operator();
+    gamification.materializeRewardIntents.mockResolvedValue(
+      materializeResult({
+        claimed: 2,
+        applied: 2,
+        rewardIds: ['private-reward-id'],
+      }),
+    );
+    gamification.materializeRewardEffects.mockResolvedValue(
+      materializeResult({
+        claimed: 1,
+        recovered: 1,
+        rewardIds: ['private-reward-id'],
+      }),
+    );
+
+    await expect(
+      scheduler.runTenantOnce(caller, { limit: 12 }),
+    ).resolves.toMatchObject({
+      status: 'PROCESSED',
+      reason: null,
+      limit: 12,
+      intents: { claimed: 2, applied: 2 },
+      effects: { claimed: 1, recovered: 1 },
+      failedStages: [],
+    });
+    const result = await scheduler.runTenantOnce(caller, { limit: 1 });
+    expect(result.intents).not.toHaveProperty('rewardIds');
+    expect(result.effects).not.toHaveProperty('rewardIds');
+    expect(result.startedAt).toEqual(expect.any(String));
+    expect(result.finishedAt).toEqual(expect.any(String));
+    expect(prisma.tenant.findMany).not.toHaveBeenCalled();
+    expect(gamification.materializeRewardIntents).toHaveBeenNthCalledWith(
+      1,
+      caller,
+      {
+        limit: 12,
+        claimLeaseMs: 90_000,
+        maxAttempts: 7,
+      },
+    );
+    expect(gamification.materializeRewardEffects).toHaveBeenNthCalledWith(
+      1,
+      caller,
+      {
+        limit: 12,
+        claimLeaseMs: 90_000,
+        maxAttempts: 7,
+      },
+    );
+    expect(gamification.materializeRewardIntents).toHaveBeenNthCalledWith(
+      2,
+      caller,
+      {
+        limit: 1,
+        claimLeaseMs: 90_000,
+        maxAttempts: 7,
+      },
+    );
+  });
+
+  it.each([undefined, null])(
+    'accepts a missing request body (%p) and uses the bounded configured limit',
+    async (body) => {
+      const { scheduler, gamification } = createScheduler({
+        GUEST_GAME_REWARD_MATERIALIZER_BATCH_SIZE: '44',
+      });
+      const caller = operator();
+
+      await expect(
+        scheduler.runTenantOnce(caller, body),
+      ).resolves.toMatchObject({
+        status: 'PROCESSED',
+        limit: 44,
+      });
+      expect(gamification.materializeRewardIntents).toHaveBeenCalledWith(
+        caller,
+        expect.objectContaining({ limit: 44 }),
+      );
+      expect(gamification.materializeRewardEffects).toHaveBeenCalledWith(
+        caller,
+        expect.objectContaining({ limit: 44 }),
+      );
+    },
+  );
+
+  it('blocks a manual run on the kill switch without claiming work', async () => {
+    const { scheduler, prisma, gamification } = createScheduler({
+      GUEST_GAME_REWARD_MATERIALIZER_KILL_SWITCH: 'true',
+    });
+
+    await expect(
+      scheduler.runTenantOnce(operator(), { limit: 20 }),
+    ).resolves.toMatchObject({
+      status: 'SKIPPED',
+      reason: 'KILL_SWITCH_ENABLED',
+      limit: 20,
+      startedAt: null,
+      intents: { claimed: 0, applied: 0 },
+      effects: { claimed: 0, applied: 0 },
+      failedStages: [],
+    });
+    expect(prisma.tenant.findMany).not.toHaveBeenCalled();
+    expect(gamification.materializeRewardIntents).not.toHaveBeenCalled();
+    expect(gamification.materializeRewardEffects).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 101, 1.5, '10', Number.NaN])(
+    'rejects an invalid manual batch limit %p',
+    async (limit) => {
+      const { scheduler, gamification } = createScheduler();
+
+      await expect(
+        scheduler.runTenantOnce(operator(), { limit }),
+      ).rejects.toThrow('limit must be an integer between 1 and 100');
+      expect(gamification.materializeRewardIntents).not.toHaveBeenCalled();
+      expect(gamification.materializeRewardEffects).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns only safe stage codes when one manual materialization stage fails', async () => {
+    const { scheduler, gamification } = createScheduler();
+    gamification.materializeRewardIntents.mockRejectedValue(
+      new Error('profile private-id could not be materialized'),
+    );
+    gamification.materializeRewardEffects.mockResolvedValue(
+      materializeResult({ claimed: 1, applied: 1 }),
+    );
+
+    const result = await scheduler.runTenantOnce(operator(), { limit: 5 });
+
+    expect(result).toMatchObject({
+      status: 'PARTIAL',
+      reason: 'MATERIALIZATION_FAILED',
+      limit: 5,
+      intents: { claimed: 0, applied: 0 },
+      effects: { claimed: 1, applied: 1 },
+      failedStages: ['INTENTS'],
+    });
+    expect(JSON.stringify(result)).not.toContain('private-id');
+  });
+
+  it('reports per-item failures and dead letters as a partial manual run', async () => {
+    const { scheduler, gamification } = createScheduler();
+    gamification.materializeRewardIntents.mockResolvedValue(
+      materializeResult({ claimed: 2, applied: 1, failed: 1 }),
+    );
+    gamification.materializeRewardEffects.mockResolvedValue(
+      materializeResult({ claimed: 1, deadLettered: 1 }),
+    );
+
+    await expect(
+      scheduler.runTenantOnce(operator(), { limit: 5 }),
+    ).resolves.toMatchObject({
+      status: 'PARTIAL',
+      reason: 'MATERIALIZATION_FAILED',
+      intents: { applied: 1, failed: 1 },
+      effects: { deadLettered: 1 },
+      failedStages: ['INTENTS', 'EFFECTS'],
+    });
   });
 
   it('fails closed when enabled without an explicit tenant scope', async () => {
@@ -198,19 +388,26 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     ).toBeLessThan(
       gamification.materializeRewardEffects.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(scheduler.getRuntimeStatus()).toMatchObject({
+    const runtimeStatus = scheduler.getRuntimeStatus(operator());
+    expect(runtimeStatus).toMatchObject({
       running: false,
       lastOutcome: 'SUCCESS',
       lastError: null,
+      scope: {
+        tenantSlug: 'demo',
+        appliesToViewerTenant: true,
+      },
       lastResult: {
         checkedTenants: 1,
         processedTenants: 1,
         skippedTenants: 0,
         erroredTenants: 0,
-        intents: { claimed: 2, applied: 1, rewardIds: ['reward-1'] },
-        effects: { claimed: 1, recovered: 1, rewardIds: ['reward-1'] },
+        intents: { claimed: 2, applied: 1 },
+        effects: { claimed: 1, recovered: 1 },
       },
     });
+    expect(runtimeStatus.lastResult?.intents).not.toHaveProperty('rewardIds');
+    expect(runtimeStatus.lastResult?.effects).not.toHaveProperty('rewardIds');
     expect(scheduler.getRuntimeStatus().lastStartedAt).toEqual(
       expect.any(String),
     );
@@ -343,7 +540,7 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     expect(status).toMatchObject({
       running: false,
       lastOutcome: 'ERROR',
-      lastError: 'demo: intents: intent drain failed',
+      lastError: 'materializer tenant failures: 1',
     });
     expect(status.lastResult?.checkedTenants).toBe(1);
     expect(status.lastResult?.erroredTenants).toBe(1);
@@ -372,13 +569,69 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     expect(scheduler.getRuntimeStatus()).toMatchObject({
       running: false,
       lastOutcome: 'PARTIAL',
-      lastError: 'a-error: intents: claim failed',
+      lastError: 'materializer tenant failures: 1',
       lastResult: {
         checkedTenants: 2,
         processedTenants: 1,
         skippedTenants: 0,
         erroredTenants: 1,
       },
+    });
+    expect(scheduler.getRuntimeStatus(operator())).toMatchObject({
+      scope: {
+        tenantId: null,
+        tenantSlug: null,
+        allowAllTenants: true,
+        configured: true,
+        appliesToViewerTenant: true,
+      },
+      lastError: null,
+      lastResult: null,
+    });
+  });
+
+  it('redacts a different tenant scope and its last run', async () => {
+    const { scheduler } = createScheduler(
+      {
+        GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
+        GUEST_GAME_REWARD_MATERIALIZER_TENANT_SLUG: 'other',
+      },
+      [tenant({ id: 'tenant-2', slug: 'other' })],
+    );
+
+    await expect(scheduler.runOnce()).resolves.toMatchObject({
+      checkedTenants: 1,
+      processedTenants: 1,
+    });
+
+    expect(scheduler.getRuntimeStatus(operator())).toMatchObject({
+      scope: {
+        tenantId: null,
+        tenantSlug: null,
+        allowAllTenants: false,
+        configured: true,
+        appliesToViewerTenant: false,
+      },
+      lastError: null,
+      lastResult: null,
+    });
+  });
+
+  it('does not treat a conflicting ID and slug scope as applicable', () => {
+    const { scheduler } = createScheduler({
+      GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
+      GUEST_GAME_REWARD_MATERIALIZER_TENANT_ID: 'tenant-1',
+      GUEST_GAME_REWARD_MATERIALIZER_TENANT_SLUG: 'other',
+    });
+
+    expect(scheduler.getRuntimeStatus(operator())).toMatchObject({
+      backgroundReady: true,
+      scope: {
+        tenantId: 'tenant-1',
+        tenantSlug: null,
+        appliesToViewerTenant: false,
+      },
+      lastResult: null,
     });
   });
 
@@ -396,7 +649,7 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     expect(status).toMatchObject({
       running: false,
       lastOutcome: 'ERROR',
-      lastError: 'database unavailable',
+      lastError: 'materializer scheduler failed',
       lastResult: null,
     });
     expect(typeof status.lastStartedAt).toBe('string');
@@ -430,6 +683,42 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     await expect(first).resolves.toMatchObject({ processedTenants: 1 });
     expect(gamification.materializeRewardIntents).toHaveBeenCalledTimes(1);
     expect(gamification.materializeRewardEffects).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not overlap manual runs and keeps retries idempotent in the claim layer', async () => {
+    let release!: (value: GuestGameEffectMaterializeResult) => void;
+    const { scheduler, gamification } = createScheduler();
+    gamification.materializeRewardIntents.mockImplementationOnce(
+      () =>
+        new Promise<GuestGameEffectMaterializeResult>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const first = scheduler.runTenantOnce(operator(), { limit: 4 });
+    await Promise.resolve();
+    expect(gamification.materializeRewardIntents).toHaveBeenCalledTimes(1);
+    await expect(
+      scheduler.runTenantOnce(operator(), { limit: 4 }),
+    ).resolves.toMatchObject({
+      status: 'SKIPPED',
+      reason: 'RUN_ALREADY_IN_PROGRESS',
+      startedAt: null,
+    });
+    expect(gamification.materializeRewardIntents).toHaveBeenCalledTimes(1);
+
+    release(materializeResult({ claimed: 1, applied: 1 }));
+    await expect(first).resolves.toMatchObject({
+      status: 'PROCESSED',
+      intents: { claimed: 1, applied: 1 },
+    });
+    expect(gamification.materializeRewardEffects).toHaveBeenCalledTimes(1);
+
+    await expect(
+      scheduler.runTenantOnce(operator(), { limit: 4 }),
+    ).resolves.toMatchObject({ status: 'PROCESSED' });
+    expect(gamification.materializeRewardIntents).toHaveBeenCalledTimes(2);
+    expect(gamification.materializeRewardEffects).toHaveBeenCalledTimes(2);
   });
 
   it('returns tenant-scoped intent and effect queue metrics', async () => {

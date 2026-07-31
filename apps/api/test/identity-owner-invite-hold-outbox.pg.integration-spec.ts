@@ -2,8 +2,6 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
 import {
   IDENTITY_MAIL_ENVELOPE_VERSION,
   IDENTITY_MAIL_TOKEN_DIGEST_VERSION,
@@ -12,6 +10,7 @@ import {
   type OpenIdentityMailInviteTokenInput,
   type SealedIdentityMailInviteToken,
 } from '../src/auth/identity-mail-secret-envelope.service';
+import { deployCanonicalPrismaMigrations } from './canonical-prisma-migration-deploy';
 
 const REQUIRED_CONFIRMATION = 'run-owner-invite-hold-outbox-postgres-fixture';
 const integrationEnabled =
@@ -140,8 +139,8 @@ describePostgres(
           AND rolled_back_at IS NULL
       `);
       expect(migrationState).toEqual({
-        migration_count: 176,
-        latest_migration: '20260731020000_initial_owner_mail_delivery_boundary',
+        migration_count: 179,
+        latest_migration: '20260731120000_identity_mail_delivery_release_head',
       });
 
       encryptionKey = randomBytes(32).toString('base64url');
@@ -763,38 +762,11 @@ function prismaFor(databaseUrl: string): PrismaClient {
 }
 
 function deployMigrations(databaseUrl: string) {
-  const repositoryRoot = resolve(__dirname, '../../..');
-  const databasePackage = join(repositoryRoot, 'packages', 'database');
-  const prismaCli = join(
-    databasePackage,
-    'node_modules',
-    'prisma',
-    'build',
-    'index.js',
-  );
-
-  try {
-    execFileSync(
-      process.execPath,
-      [
-        prismaCli,
-        'migrate',
-        'deploy',
-        '--schema',
-        join(databasePackage, 'prisma', 'schema.prisma'),
-      ],
-      {
-        cwd: databasePackage,
-        env: { ...process.env, DATABASE_URL: databaseUrl },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 120_000,
-      },
-    );
-  } catch {
-    throw new Error(
+  deployCanonicalPrismaMigrations(databaseUrl, {
+    failureMessage:
       'Failed to deploy migrations into the disposable owner-invite test database',
-    );
-  }
+    timeoutMs: 120_000,
+  });
 }
 
 function databaseUrlFor(databaseUrl: URL, databaseName: string): string {

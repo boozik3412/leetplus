@@ -12,8 +12,8 @@ export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
-  "20260731020000_initial_owner_mail_delivery_boundary";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 176;
+  "20260731120000_identity_mail_delivery_release_head";
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 179;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -857,11 +857,11 @@ export const IDENTITY_MAIL_DELIVERY_SEALED_RUNTIME_TABLES = Object.freeze([
       "leaseOwnerDigest",
       "providerAttemptKey",
       "providerAuthorityDigest",
-      "actorDigest",
       "messageIdDigest",
       "providerOutcomeClass",
       "providerReceiptDigest",
       "terminalAckDigest",
+      "actorDigest",
       "stateReasonCode",
       "eventAt",
       "createdTransactionId",

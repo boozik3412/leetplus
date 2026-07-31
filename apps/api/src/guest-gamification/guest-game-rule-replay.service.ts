@@ -529,7 +529,13 @@ export class GuestGameRuleReplayService {
               AND e."status" = 'AVAILABLE'
               AND e."consumedAt" IS NULL
               AND e."canceledAt" IS NULL
-              AND e."rewardId" IS NULL
+              AND (
+                e."rewardId" IS NULL
+                OR (
+                  e."sourceRewardId" IS NOT NULL
+                  AND e."rewardId" = e."sourceRewardId"
+                )
+              )
               AND EXISTS (
                 SELECT 1
                 FROM "GuestGameReward" r
@@ -676,7 +682,13 @@ export class GuestGameRuleReplayService {
               (
                 e."status" = 'AVAILABLE'
                 AND e."consumedAt" IS NULL
-                AND e."rewardId" IS NULL
+                AND (
+                  e."rewardId" IS NULL
+                  OR (
+                    e."sourceRewardId" IS NOT NULL
+                    AND e."rewardId" = e."sourceRewardId"
+                  )
+                )
               )
               OR e."status" = 'CONSUMED'
             )
@@ -742,7 +754,13 @@ export class GuestGameRuleReplayService {
               AND e."status" = 'AVAILABLE'
               AND e."consumedAt" IS NULL
               AND e."canceledAt" IS NULL
-              AND e."rewardId" IS NULL
+              AND (
+                e."rewardId" IS NULL
+                OR (
+                  e."sourceRewardId" IS NOT NULL
+                  AND e."rewardId" = e."sourceRewardId"
+                )
+              )
             RETURNING e."id"
           `,
         );
@@ -1189,6 +1207,7 @@ export class GuestGameRuleReplayService {
             e."consumedAt",
             e."canceledAt",
             e."rewardId",
+            e."sourceRewardId",
             e."sourceEventType"
           FROM "GuestGameEntitlement" e
           WHERE e."tenantId" = ${tenantId}
@@ -1215,7 +1234,13 @@ export class GuestGameRuleReplayService {
           WHERE e."status" = 'AVAILABLE'
             AND e."consumedAt" IS NULL
             AND e."canceledAt" IS NULL
-            AND e."rewardId" IS NULL
+            AND (
+              e."rewardId" IS NULL
+              OR (
+                e."sourceRewardId" IS NOT NULL
+                AND e."rewardId" = e."sourceRewardId"
+              )
+            )
             AND r."status" IN ('PENDING', 'APPROVED', 'PAID')
             AND r."source" = 'API_IMPORT'
             AND r."evidence"->>'sourceFactKind' = 'GUEST_LOOT_BOX_OPEN'
@@ -1286,7 +1311,13 @@ export class GuestGameRuleReplayService {
             (
               e."status" = 'AVAILABLE'
               AND e."consumedAt" IS NULL
-              AND e."rewardId" IS NULL
+              AND (
+                e."rewardId" IS NULL
+                OR (
+                  e."sourceRewardId" IS NOT NULL
+                  AND e."rewardId" = e."sourceRewardId"
+                )
+              )
             )
             OR e."status" = 'CONSUMED'
           )

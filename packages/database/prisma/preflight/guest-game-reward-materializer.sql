@@ -28,7 +28,9 @@ WHERE migration_name IN (
   '20260718150800_guest_activity_fact_fallback_queue_index',
   '20260718180000_guest_game_effect_postings',
   '20260718190000_guest_game_reward_effect_outbox',
-  '20260718190100_staff_chat_message_dedupe_index'
+  '20260718190100_staff_chat_message_dedupe_index',
+  '20260731090000_guest_game_case_reward_lifecycle',
+  '20260731110000_guest_game_case_reward_contract'
 )
    OR (finished_at IS NULL AND rolled_back_at IS NULL)
 ORDER BY started_at;
@@ -50,8 +52,43 @@ FROM (
     ('fact_fallback_queue_index', to_regclass('public.guest_activity_fact_fallback_queue_idx')),
     ('chat_dedupe_index', to_regclass('public.staff_chat_message_tenant_dedupe_unique')),
     ('intent_ready_index', to_regclass('public.guest_game_reward_intent_ready_partial_idx')),
-    ('effect_ready_index', to_regclass('public.guest_game_reward_effect_ready_partial_idx'))
+    ('effect_ready_index', to_regclass('public.guest_game_reward_effect_ready_partial_idx')),
+    ('case_source_reward_index', to_regclass('public.guest_game_entitlement_source_reward_uidx')),
+    ('case_parent_guard_function', to_regprocedure('public.guest_game_reward_guard_case_parent_claim()')::oid),
+    ('case_source_capture_function', to_regprocedure('public.guest_game_entitlement_capture_legacy_source_reward()')::oid),
+    (
+      'case_source_outcome_check',
+      (
+        SELECT oid
+        FROM pg_constraint
+        WHERE conname =
+          'GuestGameEntitlement_sourceOutcome_distinct_check'
+          AND conrelid =
+            to_regclass('public."GuestGameEntitlement"')
+      )
+    )
 ) AS objects(name, object_oid);
+
+SELECT
+  event_object_table AS table_name,
+  trigger_name
+FROM information_schema.triggers
+WHERE trigger_schema = 'public'
+  AND trigger_name IN (
+    'GuestGameReward_guard_case_parent_claim',
+    'GuestGameEntitlement_capture_legacy_source_reward'
+  )
+ORDER BY trigger_name;
+
+SELECT
+  conrelid::regclass AS table_name,
+  conname AS constraint_name,
+  contype AS constraint_type
+FROM pg_constraint
+WHERE conname IN (
+  'GuestGameEntitlement_sourceRewardId_fkey',
+  'GuestGameEntitlement_sourceOutcome_distinct_check'
+);
 
 SELECT
   table_name,
@@ -68,7 +105,10 @@ WHERE table_schema = 'public'
       AND column_name IN ('originKey', 'idempotencyKey')
     )
     OR (table_name = 'GuestGameRuleDecision' AND column_name = 'originKey')
-    OR (table_name = 'GuestGameEntitlement' AND column_name = 'originKey')
+    OR (
+      table_name = 'GuestGameEntitlement'
+      AND column_name IN ('originKey', 'sourceRewardId')
+    )
     OR (
       table_name = 'GuestActivityRawRecord'
       AND column_name = 'sourceExternalId'
@@ -95,6 +135,8 @@ FROM pg_stat_user_tables
 WHERE relname IN (
   'GuestGameEvent',
   'GuestGameReward',
+  'GuestGameRewardWalletItem',
+  'GuestGameRewardEffect',
   'GuestGameRuleDecision',
   'GuestGameEntitlement',
   'GuestActivityRawRecord',
@@ -126,6 +168,8 @@ WITH targets(relid) AS (
       to_regclass('public."StaffChatMessage"'),
       to_regclass('public."GuestGameEvent"'),
       to_regclass('public."GuestGameReward"'),
+      to_regclass('public."GuestGameRewardWalletItem"'),
+      to_regclass('public."GuestGameRewardEffect"'),
       to_regclass('public."GuestGameRuleDecision"'),
       to_regclass('public."GuestGameEntitlement"'),
       to_regclass('public."GuestActivityRawRecord"'),
@@ -149,9 +193,20 @@ ORDER BY l.granted, relation, l.mode;
 DO $$
 DECLARE
   unfinished_migrations integer;
-  target_migrations integer;
+  base_migrations integer;
+  case_migrations integer;
+  contract_migrations integer;
   rollout_objects integer;
   rollout_columns integer;
+  case_rollout_objects integer;
+  case_rollout_columns integer;
+  case_rollout_constraints integer;
+  case_contract_constraints integer;
+  case_rollout_triggers integer;
+  case_named_triggers integer;
+  case_source_index_valid integer;
+  case_legacy_aliases bigint;
+  case_consumed_aliases bigint;
   unsafe_transactions integer;
   waiting_locks integer;
 BEGIN
@@ -172,7 +227,7 @@ BEGIN
   END IF;
 
   SELECT COUNT(*)
-  INTO target_migrations
+  INTO base_migrations
   FROM "_prisma_migrations"
   WHERE migration_name IN (
     '20260718150000_guest_game_origin_fallback',
@@ -188,6 +243,20 @@ BEGIN
     '20260718190000_guest_game_reward_effect_outbox',
     '20260718190100_staff_chat_message_dedupe_index'
   )
+    AND finished_at IS NOT NULL
+    AND rolled_back_at IS NULL;
+
+  SELECT COUNT(*)
+  INTO case_migrations
+  FROM "_prisma_migrations"
+  WHERE migration_name = '20260731090000_guest_game_case_reward_lifecycle'
+    AND finished_at IS NOT NULL
+    AND rolled_back_at IS NULL;
+
+  SELECT COUNT(*)
+  INTO contract_migrations
+  FROM "_prisma_migrations"
+  WHERE migration_name = '20260731110000_guest_game_case_reward_contract'
     AND finished_at IS NOT NULL
     AND rolled_back_at IS NULL;
 
@@ -236,24 +305,219 @@ BEGIN
       )
     );
 
-  IF target_migrations = 0 AND (rollout_objects > 0 OR rollout_columns > 0) THEN
+  SELECT COUNT(*)
+  INTO case_rollout_objects
+  FROM (
+    VALUES
+      (to_regclass('public.guest_game_entitlement_source_reward_uidx')::oid),
+      (to_regprocedure('public.guest_game_reward_guard_case_parent_claim()')::oid),
+      (to_regprocedure('public.guest_game_entitlement_capture_legacy_source_reward()')::oid)
+  ) AS rollout(object_oid)
+  WHERE object_oid IS NOT NULL;
+
+  SELECT COUNT(*)
+  INTO case_rollout_columns
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'GuestGameEntitlement'
+    AND column_name = 'sourceRewardId';
+
+  SELECT COUNT(*)
+  INTO case_rollout_constraints
+  FROM pg_constraint
+  WHERE conname = 'GuestGameEntitlement_sourceRewardId_fkey'
+    AND conrelid = 'public."GuestGameEntitlement"'::regclass
+    AND confrelid = 'public."GuestGameReward"'::regclass
+    AND contype = 'f'
+    AND confdeltype = 'r'
+    AND confupdtype = 'c'
+    AND convalidated;
+
+  SELECT COUNT(*)
+  INTO case_contract_constraints
+  FROM pg_constraint
+  WHERE conname =
+      'GuestGameEntitlement_sourceOutcome_distinct_check'
+    AND conrelid = 'public."GuestGameEntitlement"'::regclass
+    AND contype = 'c'
+    AND convalidated
+    AND pg_get_constraintdef(oid) LIKE '%"sourceRewardId"%IS NULL%'
+    AND pg_get_constraintdef(oid) LIKE '%"rewardId"%IS NULL%'
+    AND pg_get_constraintdef(oid) LIKE '%"sourceRewardId"%<>%"rewardId"%';
+
+  SELECT COUNT(*)
+  INTO case_rollout_triggers
+  FROM (
+    VALUES
+      (
+        to_regclass('public."GuestGameReward"')::oid,
+        'GuestGameReward_guard_case_parent_claim',
+        to_regprocedure(
+          'public.guest_game_reward_guard_case_parent_claim()'
+        )::oid
+      ),
+      (
+        to_regclass('public."GuestGameEntitlement"')::oid,
+        'GuestGameEntitlement_capture_legacy_source_reward',
+        to_regprocedure(
+          'public.guest_game_entitlement_capture_legacy_source_reward()'
+        )::oid
+      )
+  ) AS expected(table_oid, trigger_name, function_oid)
+  JOIN pg_trigger AS actual
+    ON actual.tgrelid = expected.table_oid
+   AND actual.tgname = expected.trigger_name
+   AND actual.tgfoid = expected.function_oid
+   AND actual.tgenabled = 'O'
+   AND NOT actual.tgisinternal;
+
+  SELECT COUNT(*)
+  INTO case_named_triggers
+  FROM pg_trigger
+  WHERE NOT tgisinternal
+    AND (
+      (
+        tgrelid = 'public."GuestGameReward"'::regclass
+        AND tgname = 'GuestGameReward_guard_case_parent_claim'
+      )
+      OR (
+        tgrelid = 'public."GuestGameEntitlement"'::regclass
+        AND tgname =
+          'GuestGameEntitlement_capture_legacy_source_reward'
+      )
+    );
+
+  SELECT COUNT(*)
+  INTO case_source_index_valid
+  FROM pg_index
+  WHERE indexrelid = to_regclass(
+      'public.guest_game_entitlement_source_reward_uidx'
+    )
+    AND indrelid = 'public."GuestGameEntitlement"'::regclass
+    AND indisunique
+    AND indisready
+    AND indisvalid
+    AND indislive;
+
+  case_legacy_aliases := 0;
+  case_consumed_aliases := 0;
+  IF case_rollout_columns = 1 THEN
+    EXECUTE
+      'SELECT
+         COUNT(*),
+         COUNT(*) FILTER (
+           WHERE "status" = ''CONSUMED''
+              OR "consumedAt" IS NOT NULL
+         )
+       FROM public."GuestGameEntitlement"
+       WHERE "sourceRewardId" IS NOT NULL
+         AND "rewardId" = "sourceRewardId"'
+    INTO case_legacy_aliases, case_consumed_aliases;
+  END IF;
+
+  IF base_migrations = 0 AND (rollout_objects > 0 OR rollout_columns > 0) THEN
     RAISE EXCEPTION
       'reward materializer preflight found partial schema drift: % objects and % columns exist before migration history',
       rollout_objects,
       rollout_columns;
   END IF;
 
-  IF target_migrations NOT IN (0, 12) THEN
+  IF base_migrations NOT IN (0, 12) THEN
     RAISE EXCEPTION
       'reward materializer rollout is only safe before all migrations or after all migrations; % of 12 are completed',
-      target_migrations;
+      base_migrations;
   END IF;
 
-  IF target_migrations = 12 AND (rollout_objects <> 15 OR rollout_columns <> 8) THEN
+  IF base_migrations = 12 AND (rollout_objects <> 15 OR rollout_columns <> 8) THEN
     RAISE EXCEPTION
       'reward materializer post-migration schema is incomplete: % of 15 objects and % of 8 columns found',
       rollout_objects,
       rollout_columns;
+  END IF;
+
+  IF case_migrations NOT IN (0, 1) THEN
+    RAISE EXCEPTION
+      'case reward lifecycle migration history is ambiguous: % completed rows found',
+      case_migrations;
+  END IF;
+
+  IF contract_migrations NOT IN (0, 1) THEN
+    RAISE EXCEPTION
+      'case reward contract migration history is ambiguous: % completed rows found',
+      contract_migrations;
+  END IF;
+
+  IF contract_migrations = 1 AND case_migrations <> 1 THEN
+    RAISE EXCEPTION
+      'case reward contract is recorded without its expand migration';
+  END IF;
+
+  IF case_migrations = 0
+     AND (
+       case_rollout_objects > 0
+       OR case_rollout_columns > 0
+       OR case_rollout_constraints > 0
+       OR case_contract_constraints > 0
+       OR case_rollout_triggers > 0
+       OR case_named_triggers > 0
+       OR case_source_index_valid > 0
+     )
+  THEN
+    RAISE EXCEPTION
+      'case reward lifecycle preflight found partial schema drift before migration history';
+  END IF;
+
+  IF case_consumed_aliases > 0 THEN
+    RAISE EXCEPTION
+      'case reward contract is unsafe: % consumed source/outcome aliases found',
+      case_consumed_aliases;
+  END IF;
+
+  IF case_migrations = 1
+     AND contract_migrations = 0
+     AND (
+       case_rollout_objects <> 3
+       OR case_rollout_columns <> 1
+       OR case_rollout_constraints <> 1
+       OR case_rollout_triggers <> 2
+       OR case_named_triggers <> 2
+       OR case_source_index_valid <> 1
+       OR case_contract_constraints <> 0
+     )
+  THEN
+    RAISE EXCEPTION
+      'case reward lifecycle schema is incomplete: % of 3 objects, % of 1 columns, % of 1 FK constraints, % of 2 exact triggers, % of 2 named triggers, % of 1 valid unique indexes and % contract checks found',
+      case_rollout_objects,
+      case_rollout_columns,
+      case_rollout_constraints,
+      case_rollout_triggers,
+      case_named_triggers,
+      case_source_index_valid,
+      case_contract_constraints;
+  END IF;
+
+  IF contract_migrations = 1
+     AND (
+       case_rollout_objects <> 1
+       OR case_rollout_columns <> 1
+       OR case_rollout_constraints <> 1
+       OR case_rollout_triggers <> 0
+       OR case_named_triggers <> 0
+       OR case_source_index_valid <> 1
+       OR case_contract_constraints <> 1
+       OR case_legacy_aliases <> 0
+     )
+  THEN
+    RAISE EXCEPTION
+      'case reward contract schema is incomplete: % of 1 objects, % of 1 columns, % of 1 FK constraints, % exact compatibility triggers, % named compatibility triggers, % of 1 valid unique indexes, % of 1 source/outcome checks and % legacy aliases found',
+      case_rollout_objects,
+      case_rollout_columns,
+      case_rollout_constraints,
+      case_rollout_triggers,
+      case_named_triggers,
+      case_source_index_valid,
+      case_contract_constraints,
+      case_legacy_aliases;
   END IF;
 
   WITH targets(relid) AS (
@@ -262,6 +526,8 @@ BEGIN
         to_regclass('public."StaffChatMessage"'),
         to_regclass('public."GuestGameEvent"'),
         to_regclass('public."GuestGameReward"'),
+        to_regclass('public."GuestGameRewardWalletItem"'),
+        to_regclass('public."GuestGameRewardEffect"'),
         to_regclass('public."GuestGameRuleDecision"'),
         to_regclass('public."GuestGameEntitlement"'),
         to_regclass('public."GuestActivityRawRecord"'),
@@ -293,6 +559,8 @@ BEGIN
         to_regclass('public."StaffChatMessage"'),
         to_regclass('public."GuestGameEvent"'),
         to_regclass('public."GuestGameReward"'),
+        to_regclass('public."GuestGameRewardWalletItem"'),
+        to_regclass('public."GuestGameRewardEffect"'),
         to_regclass('public."GuestGameRuleDecision"'),
         to_regclass('public."GuestGameEntitlement"'),
         to_regclass('public."GuestActivityRawRecord"'),
@@ -314,10 +582,21 @@ BEGIN
   END IF;
 
   RAISE NOTICE
-    'reward materializer preflight passed: % of 12 migrations completed, % rollout objects, % rollout columns',
-    target_migrations,
+    'reward materializer preflight passed: % of 12 base migrations, % of 1 case expand migrations and % of 1 case contract migrations completed, % base objects, % base columns, % case objects, % case columns, % case FK constraints, % case contract constraints, % exact case triggers, % named case triggers, % valid case indexes, % legacy aliases, % consumed aliases',
+    base_migrations,
+    case_migrations,
+    contract_migrations,
     rollout_objects,
-    rollout_columns;
+    rollout_columns,
+    case_rollout_objects,
+    case_rollout_columns,
+    case_rollout_constraints,
+    case_contract_constraints,
+    case_rollout_triggers,
+    case_named_triggers,
+    case_source_index_valid,
+    case_legacy_aliases,
+    case_consumed_aliases;
 END
 $$;
 

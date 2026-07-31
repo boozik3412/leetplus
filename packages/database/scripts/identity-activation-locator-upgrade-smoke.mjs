@@ -41,6 +41,11 @@ const EXPECTED_SQL_STATES = Object.freeze({
   mismatch: "23514",
   denied: "42501",
 });
+const HISTORICAL_CURRENT_170_RUNTIME_FUNCTIONS = Object.freeze(
+  APPLICATION_RUNTIME_FUNCTIONS.filter(
+    (entry) => entry.key !== "identityInitialOwnerInviteDeliveryAssertSent",
+  ),
+);
 
 const HELP = `
 ${SCRIPT_NAME}
@@ -108,14 +113,14 @@ function quoteIdentifier(value) {
 
 function buildHistoricalCurrent170RuntimeEnrollmentStatements(roleName) {
   assert.equal(
-    APPLICATION_RUNTIME_FUNCTIONS.length,
+    HISTORICAL_CURRENT_170_RUNTIME_FUNCTIONS.length,
     7,
     "The historical CURRENT_170 runtime function manifest changed.",
   );
   const role = quoteIdentifier(roleName);
   return Object.freeze([
     `REVOKE ALL PRIVILEGES ON TABLE public."IdentityEmailClaim" FROM ${role}`,
-    ...APPLICATION_RUNTIME_FUNCTIONS.flatMap((entry) => [
+    ...HISTORICAL_CURRENT_170_RUNTIME_FUNCTIONS.flatMap((entry) => [
       `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
       `REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION ${entry.grantSignature} FROM ${role}`,
     ]),
@@ -272,9 +277,9 @@ async function readMigrationPlan() {
   assert.equal(migrationDirectories[targetIndex - 1], PREVIOUS_MIGRATION);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260731020000_initial_owner_mail_delivery_boundary",
+    "20260731120000_identity_mail_delivery_release_head",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_176");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_179");
   const historicalMigrations = migrationDirectories.slice(0, targetIndex + 1);
   return {
     sourcePrismaDir,
@@ -1236,14 +1241,15 @@ async function assertCleanBehavior(client, fixtures, runtimeContext) {
   assert.equal(acl?.role_grant_option, false);
   assert.equal(acl?.public_execute, false);
   assert.equal(acl?.any_table_privilege, false);
-  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 7);
+  assert.equal(HISTORICAL_CURRENT_170_RUNTIME_FUNCTIONS.length, 7);
   return {
     preEnrollmentExecuteDenied: true,
     postEnrollmentExecuteAllowed: true,
     publicExecute: false,
     runtimeGrantOption: false,
     sealedTablePrivileges: 0,
-    exactApplicationFunctionCount: APPLICATION_RUNTIME_FUNCTIONS.length,
+    exactApplicationFunctionCount:
+      HISTORICAL_CURRENT_170_RUNTIME_FUNCTIONS.length,
   };
 }
 

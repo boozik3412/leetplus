@@ -3,10 +3,10 @@
 | Поле                    | Значение                                                                   |
 | ----------------------- | -------------------------------------------------------------------------- |
 | Статус                  | `IMPLEMENTED_CANDIDATE`; SYNTHETIC real-PG `PASS`; PRODUCTION_LIKE `NO-GO` |
-| Версия                  | 0.15.0                                                                     |
-| Дата                    | 29.07.2026                                                                 |
+| Версия                  | 0.16.0                                                                     |
+| Дата                    | 30.07.2026                                                                 |
 | Backlog                 | `BETA-MOD-STAFF-003`, `BETA-OPS-002`, `BETA-OPS-006`, `BETA-CUT-001`       |
-| Schema target           | `CURRENT_166`                                                              |
+| Schema target           | `CURRENT_179`; count `179`; head `20260731120000_identity_mail_delivery_release_head` |
 | Prior merge-ref baseline | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA |
 | Previous accepted exact-head | `d525b736...` / CI `30447467729` (`run #28`); `3/3 PASS`                |
 | Last accepted checkpoint | exact-head `be8c94c4...` / CI `30449026506` (`run #29`); `3/3 PASS`         |
@@ -17,6 +17,23 @@
 | Report schema version   | 2                                                                          |
 | PostgreSQL              | Только major version `16`                                                  |
 | Разрешённая schema      | Только `public`                                                            |
+
+## Living current release contract
+
+Frozen StaffTask prefix остаётся `EXPAND_162`: count `162`, head
+`20260727131000_staff_task_integrity_expand`. Admission принимает current DB
+только как `CURRENT_179`: count `179`, head
+`20260731120000_identity_mail_delivery_release_head`, unfinished `0`, с exact
+17-name additive tail `163..179` из
+[канонического current release contract](../README.md#канонический-current-release-contract).
+
+Существующий signed `CURRENT_166` envelope и соответствующий DB marker —
+historical evidence только для `CURRENT_166`. Их нельзя переименовывать,
+копировать или reuse как `CURRENT_179`, и они не разрешают admission,
+inventory, planner, apply или deployment на `179`. Нужны новый acquisition
+request, новый `creationNonce`, отдельный state-bound Ed25519 envelope и
+rotation DB marker на digest этого envelope. Production roots остаются `{}` /
+EMPTY: `PRODUCTION_LIKE`, deploy и внешний beta fail-closed `NO-GO`.
 
 Этот документ описывает реализованный fail-closed admission candidate для
 изолированного StaffTask snapshot. Candidate только проверяет runtime, exact
@@ -46,7 +63,7 @@ Remote target, production process, reconciliation apply, `VALIDATE`,
 Candidate:
 
 - принимает только `SYNTHETIC` или `PRODUCTION_LIKE`;
-- принимает только `BASELINE_156`, `EXPAND_162` или `CURRENT_166`;
+- принимает только `BASELINE_156`, `EXPAND_162` или `CURRENT_179`;
 - разрешает PostgreSQL только на `127.0.0.1`, `localhost` или `::1`;
 - отвергает `NODE_ENV=production`;
 - использует exact committed `RELEASE_SHA`, а не содержимое mutable worktree;
@@ -284,11 +301,11 @@ State 157–161, post-`VALIDATE`, post-`CONTRACT`, иной PostgreSQL major, д
 schema, лишний protected FK или altered/disabled FK trigger получают
 `REJECTED`/exit `3`.
 
-### 5.3. `CURRENT_166`
+### 5.3. `CURRENT_179`
 
 ```text
-migrationCount                         = 166
-latestMigration                        = 20260729160000_guest_game_delivery_claim_fence
+migrationCount                         = 179
+latestMigration                        = 20260731120000_identity_mail_delivery_release_head
 unfinishedMigrationCount               = 0
 compositeContractMatchCount             = 14
 simpleContractMatchCount                = 14
@@ -299,23 +316,40 @@ parentIndexContractMismatchCount         = 0
 enforcement triggers per expected FK    = 4 enabled
 ```
 
-`CURRENT_166` содержит exact frozen StaffTask prefix `EXPAND_162` плюс ровно
-четыре allowlisted additive tail migrations:
-`20260728120000_tenant_execution_control_plane_expand` и
-`20260728150000_tenant_execution_revision_fence` и
-`20260729120000_store_background_execution_fence` и
-`20260729160000_guest_game_delivery_claim_fence`. Migration `165` добавляет
-fail-closed Store background-execution fence, migration `166` — delivery
-claim/attempt/transition fence как implementation candidate. Ни один Store не
-активируется, outbound остаётся `OFF`. Tail не может менять protected
-`StaffTask*` relations, FK, indexes или triggers. Иная migration в tail,
-дополнительная migration либо изменённый prefix получают
-`REJECTED`/exit `3`.
+`CURRENT_179` содержит exact frozen StaffTask prefix `EXPAND_162` плюс ровно
+17 allowlisted additive tail migrations, строго в таком порядке:
+
+1. `20260728120000_tenant_execution_control_plane_expand`;
+2. `20260728150000_tenant_execution_revision_fence`;
+3. `20260729120000_store_background_execution_fence`;
+4. `20260729160000_guest_game_delivery_claim_fence`;
+5. `20260729190000_identity_email_claim_foundation`;
+6. `20260729210000_identity_email_claim_write_boundary`;
+7. `20260729230000_identity_invite_writer_boundary`;
+8. `20260729233000_identity_activation_locator`;
+9. `20260730010000_identity_owner_invite_hold_outbox`;
+10. `20260730020000_shared_beta_admission_provenance`;
+11. `20260730030000_identity_mail_outbox_pending_enum_expand`;
+12. `20260730040000_shared_beta_runtime_release_activation`;
+13. `20260731010000_identity_mail_delivery_status_expand`;
+14. `20260731020000_initial_owner_mail_delivery_boundary`;
+15. `20260731090000_guest_game_case_reward_lifecycle`;
+16. `20260731110000_guest_game_case_reward_contract`;
+17. `20260731120000_identity_mail_delivery_release_head`.
+
+Tail не может менять protected `StaffTask*` relations, FK, indexes или
+triggers. Иная migration, отсутствие, дополнительная migration, перестановка
+или изменённый prefix получают `REJECTED`/exit `3`. Промежуточные states
+`CURRENT_166`, `CURRENT_170`, `CURRENT_172`, `CURRENT_176` и `CURRENT_178` не
+являются admissible current state и не получают новый либо переиспользованный
+authority envelope в ceremony для `CURRENT_179`. Уже существующий
+`CURRENT_166` envelope остаётся только historical evidence.
 
 `CURRENT_165` сохраняется только как historical accepted engineering evidence
 на `4bd6a036...`/`30428288353` и
-`7c20adec...`/`30429463161`; current admission его не принимает. Schema target
-— `CURRENT_166`. Prior engineering baseline связан с PR head
+`7c20adec...`/`30429463161`; current admission его не принимает. Living schema
+target — `CURRENT_179`. Signed `CURRENT_166` evidence ниже также historical и
+не может быть переиспользован для `CURRENT_179`. Prior engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856` / CI `30443837684`
 (`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
 Application `90549245276`, Authority checks `90549245284` и PostgreSQL
@@ -542,7 +576,7 @@ node packages/database/scripts/staff-task-integrity-snapshot-admission.mjs --pre
 DATABASE_URL=<loopback PostgreSQL URL with schema=public>
 RELEASE_SHA=<exact 40-character lowercase Git SHA>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION=SYNTHETIC|PRODUCTION_LIKE
-STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE=BASELINE_156|EXPAND_162|CURRENT_166
+STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE=BASELINE_156|EXPAND_162|CURRENT_179
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE=<exact restored DB name>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM=run-staff-task-integrity-snapshot-admission
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ISOLATION_ATTESTATION=I_ATTEST_THIS_IS_AN_ISOLATED_ENCRYPTED_NO_EGRESS_NON_PRODUCTION_SNAPSHOT
@@ -882,11 +916,13 @@ fingerprint/key id, acquisition/restore approvals и доказательств�
 exact DB marker. Они коррелируются с report/release SHA, но не копируются в
 обычный JSON/stdout.
 
-`BASELINE_156`, `EXPAND_162` и `CURRENT_166` используют три разных state-bound
+`BASELINE_156`, `EXPAND_162` и `CURRENT_179` используют три разных state-bound
 authority envelope. После migrations `157..162` повторная detached ceremony
 `prepare → external sign → finalize` выпускает `EXPAND_162` envelope с новым
-nonce-bound binding; после exact allowlisted migrations `163..166` третья
-ceremony выпускает `CURRENT_166` envelope с ещё одним новым binding.
+nonce-bound binding; после exact 17-name allowlisted tail `163..179` третья
+ceremony выпускает `CURRENT_179` envelope с ещё одним новым binding.
+Historical `CURRENT_166` envelope и marker не считаются третьей ceremony и не
+могут быть переименованы или переиспользованы.
 DB `COMMENT` marker заменяется digest соответствующего envelope до каждого
 следующего admission. Protected evidence хранит все три authority bundle,
 первоначальную установку marker и обе ротации. Raw marker или manifest в
@@ -922,13 +958,11 @@ acquisition approval
   → new EXPAND_162 request → prepare → external signer/HSM → finalize
   → replace DB comment marker with exact EXPAND_162 envelope digest
   → admission(EXPAND_162)
-  → exact allowlisted migration 20260728120000_tenant_execution_control_plane_expand
-  → exact allowlisted migration 20260728150000_tenant_execution_revision_fence
-  → exact allowlisted migration 20260729120000_store_background_execution_fence
-  → exact allowlisted migration 20260729160000_guest_game_delivery_claim_fence
-  → new CURRENT_166 request → prepare → external signer/HSM → finalize
-  → replace DB comment marker with exact CURRENT_166 envelope digest
-  → admission(CURRENT_166)
+  → exact 17-name allowlisted tail 163..179 from canonical current release contract
+  → new CURRENT_179 request with new creationNonce
+  → prepare → external signer/HSM → finalize
+  → replace DB comment marker with exact CURRENT_179 envelope digest
+  → admission(CURRENT_179)
   → read-only integrity inventory
   → aggregate reconciliation planner
   → owner decision for every non-zero code
@@ -1003,7 +1037,7 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
 2. считать `37f8cc88...` historical prerequisite `CURRENT_164`, а
    `4bd6a036...` / CI `30428288353` и
    `7c20adec...` / CI `30429463161` — historical `CURRENT_165` engineering
-   evidence; schema target — `CURRENT_166`, prior merge-ref baseline —
+   evidence; living schema target — `CURRENT_179`, prior merge-ref baseline —
    PR-head-associated merge-ref `bbef153a...` / CI `30443837684`, не exact-SHA
    evidence. `c1fee42c...` / CI `30442286822` сохраняется как historical
    precursor; previous accepted exact-head `d525b736...` / CI `30447467729`
@@ -1020,9 +1054,10 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
    Ed25519 public root с exact fingerprint, profile/purpose и validity window;
    private key не должен попадать в admission runtime, environment или repo;
 5. P0: одобрить acquisition/restore workflow, три state-bound nonce-signed
-   envelope (`BASELINE_156`, `EXPAND_162`, `CURRENT_166`), первоначальную
+   envelope (`BASELINE_156`, `EXPAND_162`, `CURRENT_179`), первоначальную
    установку и две обязательные ротации exact DB comment marker, а также
-   protected evidence storage;
+   protected evidence storage; historical `CURRENT_166` envelope/marker не
+   засчитывается и не переиспользуется;
 6. создать и допустить actual non-owner runtime/app DB role, сохранить revoked
    `PUBLIC` и выдать private lock boundary только explicit `EXECUTE`; отдельно
    подтвердить fail-closed batch/rebind/future provider writers;
@@ -1042,6 +1077,14 @@ deploy или внешний beta-доступ. После production-like admis
 apply/rollback, zero-diff и повторные проверки.
 
 ## 18. Changelog
+
+- `0.16.0`, 30.07.2026 — living admission target переведён на terminal
+  `CURRENT_179` (`179` / `20260731120000_identity_mail_delivery_release_head`)
+  при frozen prefix `EXPAND_162`; exact tail `163..179` закреплён как
+  17-name allowlist. Signed `CURRENT_166` envelope/DB marker оставлен только
+  historical evidence и не разрешает `179`; требуется новая nonce-bound
+  ceremony и marker rotation. Roots `{}` / EMPTY сохраняют
+  `PRODUCTION_LIKE`, deploy и external beta в состоянии `NO-GO`.
 
 - `0.15.0`, 29.07.2026 — единая retroactive evidence correction:
   schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref

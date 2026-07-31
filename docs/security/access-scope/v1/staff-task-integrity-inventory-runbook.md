@@ -3,10 +3,10 @@
 | Поле                  | Значение                                                                                                                    |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Статус                | Snapshot admission, inventory, aggregate planner и DB EXPAND candidates; production-like admission/inventory не выполнялись |
-| Версия                | 1.13.0                                                                                                                      |
-| Дата                  | 29.07.2026                                                                                                                  |
+| Версия                | 1.14.0                                                                                                                      |
+| Дата                  | 30.07.2026                                                                                                                  |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                        |
-| Schema target         | `CURRENT_166`; historical `56d61543...` не current evidence                                                    |
+| Schema target         | `CURRENT_179`; count `179`; head `20260731120000_identity_mail_delivery_release_head`                          |
 | Prior merge-ref baseline | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA                                 |
 | Previous accepted exact-head | `d525b736...` / CI `30447467729` (`run #28`); `3/3 PASS`                                                |
 | Last accepted checkpoint | exact-head `be8c94c4...` / CI `30449026506` (`run #29`); `3/3 PASS`                                          |
@@ -19,9 +19,16 @@
 Документ задаёт безопасный порядок проверки legacy-данных `StaffTask`,
 `StaffTaskTemplate`, `StaffTaskRecurringRule` и
 `StaffTaskRecurringRuleRun` после schema-only EXPAND и успешного
-`CURRENT_166` admission, но до reconciliation и `VALIDATE`. Reviewed
-StaffTask evidence остаётся привязана к frozen `EXPAND_162` prefix; current
-state добавляет только allowlisted additive tail migrations `163..166`.
+`CURRENT_179` admission, но до reconciliation и `VALIDATE`. Reviewed
+StaffTask evidence остаётся привязана к frozen `EXPAND_162` prefix (count
+`162`, head `20260727131000_staff_task_integrity_expand`); current state
+добавляет exact 17-name allowlisted additive tail `163..179` из
+[канонического current release contract](../README.md#канонический-current-release-contract).
+Signed `CURRENT_166` envelope и DB marker — historical evidence только для
+`CURRENT_166`: их нельзя переименовать или reuse для `CURRENT_179`. Для current
+state нужны новый acquisition request, `creationNonce`, state-bound Ed25519
+envelope и marker rotation. Roots `{}` / EMPTY, поэтому production-like
+inventory и внешний beta fail-closed `NO-GO`.
 Он не разрешает автоматическое исправление данных, production migration,
 включение scheduler или выдачу внешнего доступа.
 Production-like scanner можно запускать только после успешного admission
@@ -180,24 +187,23 @@ Review-находка не должна маскироваться как док
    отдельный `BASELINE_156` envelope, установить его DB marker и пройти
    admission. После exact migrations `157..162` выпустить новый state-bound
    `EXPAND_162` envelope с новым nonce-bound binding, заменить DB marker и
-   пройти второй admission. Затем применить exact allowlisted migrations
-   `20260728120000_tenant_execution_control_plane_expand`,
-   `20260728150000_tenant_execution_revision_fence`,
-   `20260729120000_store_background_execution_fence` и
-   `20260729160000_guest_game_delivery_claim_fence`, выпустить отдельный
-   `CURRENT_166` envelope, ещё раз заменить marker и пройти третий admission.
-   Предыдущие envelope/marker не переиспользовать.
+   пройти второй admission. Затем применить exact 17-name allowlisted tail
+   `163..179` в порядке из
+   [канонического current release contract](../README.md#канонический-current-release-contract),
+   выпустить отдельный `CURRENT_179` envelope с новым `creationNonce`, ещё раз
+   заменить marker и пройти третий admission. Предыдущие envelope/marker,
+   включая historical `CURRENT_166`, не переиспользовать.
    Текущий пустой production trusted-root registry означает fail-closed
    `NO-GO`.
-5. Только после успешного `CURRENT_166` admission выполнить scanner на том же
+5. Только после успешного `CURRENT_179` admission выполнить scanner на том же
    неизменённом восстановленном snapshot.
 6. Сохранить только aggregate JSON, SHA, время, target label и exit code в
    защищённый release evidence.
 7. Назначить owner каждому non-zero reason code.
 8. Запустить отдельный
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md)
-   на exact current schema-first gate: `CURRENT_166`, `migrationCount=166`,
-   latest `20260729160000_guest_game_delivery_claim_fence`,
+   на exact current schema-first gate: `CURRENT_179`, `migrationCount=179`,
+   latest `20260731120000_identity_mail_delivery_release_head`,
    `unfinished=0`, `14 composite exact`, `14 simple exact`,
    `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact`,
    `0 index mismatch`; подтвердить hidden expected/actual database identity,
@@ -293,7 +299,7 @@ executed_at:
 historical_snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
 historical_pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
 snapshot_admission_report_schema_version: 2
-snapshot_admission_state: CURRENT_166
+snapshot_admission_state: CURRENT_179
 baseline_authority_evidence_ref:
 baseline_marker_install_attestation_ref:
 expand_authority_evidence_ref:
@@ -398,7 +404,9 @@ Public-only pre-signed pinned-path test имеет отдельный evidence S
 `19/19` и имеет `LOCAL PASS` в isolated child.
 Historical `CURRENT_165` engineering CI
 `4bd6a036...` / `30428288353` и documentation/evidence successor
-`7c20adec...` / `30429463161` прошли. Schema target — `CURRENT_166`. Prior
+`7c20adec...` / `30429463161` прошли. Living schema target — `CURRENT_179`;
+`CURRENT_166` checkpoints в этом evidence paragraph являются historical и не
+разрешают current inventory. Prior
 engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856` / `30443837684` (`run #23`),
 выполненным через merge-ref; это не exact-SHA checkout evidence. Baseline —
@@ -427,7 +435,7 @@ Inventory slice считается реализованным, когда:
 4. blocking/review result детерминирован и не раскрывает row identifiers;
 5. clean-schema smoke зелёный;
 6. production-like scanner запускается только после успешного Git-bound
-   `BASELINE_156 → 157..162 → EXPAND_162 → allowlisted 163..166 → CURRENT_166`
+   `BASELINE_156 → 157..162 → EXPAND_162 → exact 17-name tail 163..179 → CURRENT_179`
    admission; protected StaffTask evidence остаётся bound к prefix 162;
 7. production-like reconciliation остаётся отдельным явным операционным шагом.
 
@@ -436,6 +444,13 @@ rehearsal.
 Внешний beta остаётся `NO-GO` до полного Gate 2.
 
 ## 10. Changelog
+
+- `1.14.0`, 30.07.2026 — living scanner/admission gate переведён на terminal
+  `CURRENT_179` (`179` / `20260731120000_identity_mail_delivery_release_head`)
+  при frozen prefix `EXPAND_162` и exact 17-name tail `163..179`. Signed
+  `CURRENT_166` envelope/marker сохранён только как historical evidence;
+  новый nonce-bound envelope и marker rotation обязательны. Roots `{}` /
+  EMPTY сохраняют production-like inventory и external beta в `NO-GO`.
 
 - `1.13.0`, 29.07.2026 — единая retroactive evidence correction:
   schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref

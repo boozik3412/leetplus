@@ -171,7 +171,7 @@ test("uses tenant-safe composite provenance relations", async () => {
   );
   assert.match(
     schema,
-    /enum IdentityMailOutboxStatus \{\s*HOLD\s+PENDING\s*\}/u,
+    /enum IdentityMailOutboxStatus \{\s*HOLD\s+PENDING\s+CLAIMED\s+RETRY\s+SENT\s+DEAD\s+CANCELED\s+RECONCILIATION_REQUIRED\s*\}/u,
   );
   assert.match(schema, /model IdentityOwnerInviteIssueCommand \{/u);
   assert.match(schema, /model IdentityMailOutbox \{/u);

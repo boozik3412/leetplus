@@ -2,9 +2,9 @@
 
 | Поле                    | Значение                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Статус                  | `IMPLEMENTED_CANDIDATE`; schema target CURRENT_166; last accepted exact-head `be8c94c4...` / run #29; all engineering provider-write P1 closed; не deployed |
-| Версия                  | 1.12.0                                                                                                                                                       |
-| Дата                    | 29.07.2026                                                                                                                                                   |
+| Статус                  | `IMPLEMENTED_CANDIDATE`; frozen EXPAND prefix `162`; current target `CURRENT_179`; не deployed                                                               |
+| Версия                  | 1.13.0                                                                                                                                                       |
+| Дата                    | 30.07.2026                                                                                                                                                   |
 | Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                                                         |
 | Migration count         | 162                                                                                                                                                          |
 | Latest migration        | `20260727131000_staff_task_integrity_expand`                                                                                                                 |
@@ -13,7 +13,7 @@
 | Historical EXPAND SHA   | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401`; frozen prefix evidence                                                                                           |
 | Historical admission    | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; не current evidence                                                                                              |
 | Входной gate            | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) `BASELINE_156`                                                                    |
-| После EXPAND            | `EXPAND_162` admission → allowlisted migrations `163..166` → `CURRENT_166` admission → [inventory](./staff-task-integrity-inventory-runbook.md)              |
+| После EXPAND            | `EXPAND_162` admission → exact 17-name tail `163..179` → `CURRENT_179` admission → [inventory](./staff-task-integrity-inventory-runbook.md)                  |
 | Следующий этап          | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                                                       |
 | Связанный adoption plan | [Templates и recurring rules](./staff-task-catalog-adoption-plan.md)                                                                                         |
 
@@ -28,13 +28,17 @@ Production-like inventory, reconciliation, `VALIDATE`, deployment и
 операционный rollback drill остаются отдельными обязательными шагами.
 До production-like inventory/planner обязательны три Git-bound admission:
 `BASELINE_156` до EXPAND, frozen-prefix `EXPAND_162` после exact migrations
-`157..162` и `CURRENT_166` после четырёх allowlisted additive migrations
-`20260728120000_tenant_execution_control_plane_expand` и
-`20260728150000_tenant_execution_revision_fence` и
-`20260729120000_store_background_execution_fence` и
-`20260729160000_guest_game_delivery_claim_fence`. Третий state не
-изменяет reviewed StaffTask prefix и не переиспользует его envelope/marker.
-Schema target — `CURRENT_166`. Prior engineering baseline связан с PR head
+`157..162` и `CURRENT_179` после exact 17-name allowlisted additive tail
+`163..179`, перечисленного в
+[каноническом current release contract](../README.md#канонический-current-release-contract).
+Третий state не изменяет reviewed StaffTask prefix. Ранее подписанный
+`CURRENT_166` envelope и DB marker являются historical evidence только для
+`CURRENT_166`: их нельзя переименовывать или reuse для `CURRENT_179`. Нужны
+новый acquisition request, `creationNonce`, state-bound Ed25519 envelope и
+marker rotation. Schema target — `CURRENT_179`, count `179`, head
+`20260731120000_identity_mail_delivery_release_head`, unfinished `0`. Roots
+`{}` / EMPTY, поэтому production-like запуск и внешний beta остаются
+fail-closed `NO-GO`. Prior engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856` / CI `30443837684`
 (`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
 Baseline завершился `3/3 PASS`; PostgreSQL подтвердил
@@ -314,7 +318,8 @@ checks. Smoke обязан работать в собственной случа
 0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
 0 index mismatch`; migration state читается из
   `public._prisma_migrations`. Это не operational planner target; current
-  planner запускается только после tail `163..166` и `CURRENT_166` admission.
+  planner запускается только после exact tail `163..179` и `CURRENT_179`
+  admission.
 - adversarial catalog smoke на disposable local/CI clone сохраняет все 28
   expected FK, добавляет дополнительный конфликтующий FK с другим именем и
   отдельно создаёт parent index с неверным порядком колонок; оба сценария
@@ -356,20 +361,19 @@ production-данных.
 6. получить новый state-bound `EXPAND_162` authority envelope с новым
    nonce-bound binding, заменить DB marker его digest и только затем повторно
    пройти snapshot admission; baseline envelope/marker не переиспользовать;
-7. применить только exact allowlisted additive migrations
-   `20260728120000_tenant_execution_control_plane_expand`,
-   `20260728150000_tenant_execution_revision_fence`,
-   `20260729120000_store_background_execution_fence` и
-   `20260729160000_guest_game_delivery_claim_fence`; подтвердить, что
-   protected `StaffTask*` relations не изменились;
-8. получить отдельный `CURRENT_166` authority envelope с новым nonce-bound
-   binding, повторно заменить DB marker и пройти третий admission;
+7. применить только exact 17-name allowlisted additive tail `163..179` в
+   порядке из
+   [канонического current release contract](../README.md#канонический-current-release-contract);
+   подтвердить, что protected `StaffTask*` relations не изменились;
+8. получить отдельный `CURRENT_179` authority envelope с новым nonce-bound
+   binding, повторно заменить DB marker и пройти третий admission; historical
+   `CURRENT_166` envelope/marker не переиспользовать;
 9. выполнить guarded read-only inventory и сохранить только aggregate
    evidence;
-10. на exact current schema `CURRENT_166` выполнить
+10. на exact current schema `CURRENT_179` выполнить
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md):
-   migration count `166`, latest
-   `20260729160000_guest_game_delivery_claim_fence`, unfinished `0`, 14
+   migration count `179`, latest
+   `20260731120000_identity_mail_delivery_release_head`, unfinished `0`, 14
    composite exact, 14 simple exact,
    `0` expected-FK mismatch, `0` unexpected protected FK, 5 indexes exact,
    `0` index mismatch, hidden expected/actual database identity,
@@ -536,6 +540,14 @@ decision: NO-GO | RECONCILE | READY_FOR_VALIDATE | GO
 запрещены.
 
 ## 11. Changelog
+
+- `1.13.0`, 30.07.2026 — frozen EXPAND остаётся `EXPAND_162`, а living
+  terminal target переведён на `CURRENT_179` (`179` /
+  `20260731120000_identity_mail_delivery_release_head`) с exact 17-name tail
+  `163..179`. Signed `CURRENT_166` envelope/marker объявлен historical и не
+  разрешает `179`; новый nonce-bound envelope и marker rotation обязательны.
+  Roots `{}` / EMPTY сохраняют production-like rollout и external beta в
+  состоянии `NO-GO`.
 
 - `1.12.0`, 29.07.2026 — единая retroactive evidence correction:
   schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref

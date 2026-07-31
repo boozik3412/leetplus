@@ -36,6 +36,17 @@ const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const ADMIN_CONNECT_TIMEOUT_SECONDS = 10;
 const ADMIN_LOCK_TIMEOUT_MS = 5_000;
 const ADMIN_STATEMENT_TIMEOUT_MS = 120_000;
+const DISPOSABLE_RESET_TRUNCATE_GUARDS = Object.freeze([
+  Object.freeze({
+    relationName: "IdentityMailDeliveryEvent",
+    triggerName: "IdentityMailDeliveryEvent_truncate_guard_trigger",
+  }),
+  Object.freeze({
+    relationName: "IdentityMailDeliveryTenantEnrollment",
+    triggerName:
+      "IdentityMailDeliveryTenantEnrollment_truncate_guard_trigger",
+  }),
+]);
 const CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS = Object.freeze([
   ...EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
 ]);
@@ -1264,6 +1275,121 @@ async function grantReaderRole(admin, descriptor) {
   }
 }
 
+async function inspectDisposableResetTruncateGuards(database) {
+  return database.$queryRawUnsafe(`
+    WITH expected_guard(relation_name, trigger_name) AS (
+      VALUES
+        (
+          'IdentityMailDeliveryEvent',
+          'IdentityMailDeliveryEvent_truncate_guard_trigger'
+        ),
+        (
+          'IdentityMailDeliveryTenantEnrollment',
+          'IdentityMailDeliveryTenantEnrollment_truncate_guard_trigger'
+        )
+    )
+    SELECT
+      expected_guard.relation_name,
+      expected_guard.trigger_name,
+      trigger_row.tgenabled::text AS enabled
+    FROM expected_guard
+    LEFT JOIN pg_catalog.pg_class AS relation_row
+      ON relation_row.relnamespace = 'public'::regnamespace
+     AND relation_row.relname = expected_guard.relation_name
+     AND relation_row.relkind = 'r'
+    LEFT JOIN pg_catalog.pg_trigger AS trigger_row
+      ON trigger_row.tgrelid = relation_row.oid
+     AND trigger_row.tgname = expected_guard.trigger_name
+     AND NOT trigger_row.tgisinternal
+    ORDER BY
+      expected_guard.relation_name COLLATE "C",
+      expected_guard.trigger_name COLLATE "C"
+  `);
+}
+
+async function assertDisposableResetTruncateGuardsEnabled(database) {
+  const guards = await inspectDisposableResetTruncateGuards(database);
+  assert.deepEqual(
+    guards,
+    DISPOSABLE_RESET_TRUNCATE_GUARDS.map((guard) => ({
+      enabled: "O",
+      relation_name: guard.relationName,
+      trigger_name: guard.triggerName,
+    })),
+  );
+}
+
+async function assertDisposableResetRejectsDisabledGuard(
+  sourceUrl,
+  descriptor,
+) {
+  const adminUrl = databaseUrlFor(sourceUrl, descriptor.databaseName);
+  const admin = new PrismaClient({ datasourceUrl: adminUrl, log: [] });
+  const guard = DISPOSABLE_RESET_TRUNCATE_GUARDS.at(-1);
+  try {
+    await admin.$executeRawUnsafe(
+      `ALTER TABLE public.${quoteIdentifier(
+        guard.relationName,
+      )} DISABLE TRIGGER ${quoteIdentifier(guard.triggerName)}`,
+    );
+    await assert.rejects(
+      () => resetDisposableClone(admin),
+      assert.AssertionError,
+    );
+    assert.deepEqual(
+      await inspectDisposableResetTruncateGuards(admin),
+      DISPOSABLE_RESET_TRUNCATE_GUARDS.map((entry) => ({
+        enabled: entry === guard ? "D" : "O",
+        relation_name: entry.relationName,
+        trigger_name: entry.triggerName,
+      })),
+    );
+  } finally {
+    await admin
+      .$executeRawUnsafe(
+        `ALTER TABLE public.${quoteIdentifier(
+          guard.relationName,
+        )} ENABLE TRIGGER ${quoteIdentifier(guard.triggerName)}`,
+      )
+      .finally(() => admin.$disconnect());
+  }
+}
+
+async function resetDisposableClone(admin) {
+  await admin.$transaction(
+    async (transaction) => {
+      await assertDisposableResetTruncateGuardsEnabled(transaction);
+      for (const guard of DISPOSABLE_RESET_TRUNCATE_GUARDS) {
+        await transaction.$executeRawUnsafe(
+          `ALTER TABLE public.${quoteIdentifier(
+            guard.relationName,
+          )} DISABLE TRIGGER ${quoteIdentifier(guard.triggerName)}`,
+        );
+      }
+      await transaction.$executeRawUnsafe(`
+        TRUNCATE TABLE
+          public."IdentityEmailClaim",
+          public."UserInvite",
+          public."User",
+          public."Tenant"
+        CASCADE
+      `);
+      for (const guard of [...DISPOSABLE_RESET_TRUNCATE_GUARDS].reverse()) {
+        await transaction.$executeRawUnsafe(
+          `ALTER TABLE public.${quoteIdentifier(
+            guard.relationName,
+          )} ENABLE TRIGGER ${quoteIdentifier(guard.triggerName)}`,
+        );
+      }
+      await assertDisposableResetTruncateGuardsEnabled(transaction);
+    },
+    {
+      maxWait: ADMIN_LOCK_TIMEOUT_MS,
+      timeout: ADMIN_STATEMENT_TIMEOUT_MS,
+    },
+  );
+}
+
 async function runScenario(
   inventory,
   environment,
@@ -1289,14 +1415,11 @@ async function runScenario(
     hmacKey,
   );
   try {
-    await admin.$executeRawUnsafe(`
-      TRUNCATE TABLE
-        public."IdentityEmailClaim",
-        public."UserInvite",
-        public."User",
-        public."Tenant"
-      CASCADE
-    `);
+    // CURRENT_176 makes the delivery-event ledger and tenant enrollment
+    // non-truncatable. This setup is restricted to generated disposable
+    // clones, so suspend only those two exact statement guards inside the
+    // reset transaction. Any failure rolls the trigger state back.
+    await resetDisposableClone(admin);
     const [emptyState] = await admin.$queryRawUnsafe(`
       SELECT
         (SELECT COUNT(*)::integer FROM public."IdentityEmailClaim")
@@ -2306,6 +2429,17 @@ export function runSelfTest() {
     CURRENT_EXPECTED_LATEST_MIGRATION,
     "20260731120000_identity_mail_delivery_release_head",
   );
+  assert.deepEqual(DISPOSABLE_RESET_TRUNCATE_GUARDS, [
+    {
+      relationName: "IdentityMailDeliveryEvent",
+      triggerName: "IdentityMailDeliveryEvent_truncate_guard_trigger",
+    },
+    {
+      relationName: "IdentityMailDeliveryTenantEnrollment",
+      triggerName:
+        "IdentityMailDeliveryTenantEnrollment_truncate_guard_trigger",
+    },
+  ]);
   assert.equal(
     IDENTITY_FUNCTION_SIGNATURES.includes(
       'public."identity_email_claim_assert_invite_locator_v1"(text,text,text,integer)',
@@ -2361,7 +2495,7 @@ export function runSelfTest() {
     /statement_timeout=120000/u,
   );
   return {
-    checks: 22,
+    checks: 23,
     destructiveTarget: "generated-clones-only",
     script: SCRIPT_NAME,
     sourceDatabaseWrites: false,
@@ -2503,6 +2637,11 @@ export async function runSmoke(environment = process.env) {
       );
     }
 
+    await assertDisposableResetRejectsDisabledGuard(
+      sourceUrl,
+      descriptors[0],
+    );
+
     const healthy = await runScenario(
       inventory,
       environment,
@@ -2615,6 +2754,7 @@ export async function runSmoke(environment = process.env) {
     smokeResult = {
       adversarialBlocked: true,
       clones: 3,
+      disabledResetGuardDriftRejected: true,
       authorityDriftRejected: true,
       catalogDriftRejected: true,
       dormantAclDriftRejected: true,

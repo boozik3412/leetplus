@@ -148,7 +148,7 @@ describe('IdentityMailWorkerService', () => {
     expect(readyInput?.databaseTlsRequired).toBe(true);
     expect(readyInput?.canaryTenantIds).toEqual([TENANT_ID]);
     expect(readyInput?.expectedPolicy.minimumAcknowledgeSeconds).toBe(50);
-    expect(readyInput?.workerConfigDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(readyInput?.providerAuthorityDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(smtpProvider.verify.mock.calls).toHaveLength(1);
     expect(logger.log.mock.calls[0]?.[0]).toEqual({
       event: 'IDENTITY_MAIL_WORKER_READY',
@@ -185,6 +185,26 @@ describe('IdentityMailWorkerService', () => {
         providerReceiptDigest: 'd'.repeat(64),
         providerOutcomeCode: 'SMTP_ACCEPTED',
       }),
+    );
+    for (const input of [
+      repository.assertReady.mock.calls[0]?.[0],
+      repository.reapExpired.mock.calls[0]?.[0],
+      repository.claimOne.mock.calls[0]?.[0],
+      repository.markProviderAttempt.mock.calls[0]?.[0],
+    ]) {
+      expect(input).toEqual(
+        expect.objectContaining({
+          providerAuthorityDigest: service.providerAuthorityDigest,
+        }),
+      );
+      expect(input).not.toHaveProperty('runtimeConfigDigest');
+      expect(input).not.toHaveProperty('workerConfigDigest');
+    }
+    expect(repository.markSent.mock.calls[0]?.[0]).not.toHaveProperty(
+      'providerAuthorityDigest',
+    );
+    expect(repository.markSent.mock.calls[0]?.[0]).not.toHaveProperty(
+      'runtimeConfigDigest',
     );
     expect(
       repository.markProviderAttempt.mock.invocationCallOrder[0],
@@ -313,15 +333,30 @@ describe('IdentityMailWorkerService', () => {
     expect(repository.markSent.mock.calls).toHaveLength(1);
   });
 
-  it('binds readiness to encryption, transport, policy, and the SMTP password without disclosure', async () => {
+  it('separates provider authority from tenant and runtime policy without disclosure', async () => {
     const first = harness(config());
     const secondConfig = {
       ...config(),
       encryptionKey: Buffer.alloc(32, 99).toString('base64url'),
     };
     const second = harness(secondConfig);
+    const secondTenant = harness({
+      ...config(),
+      canaryTenantIds: [TENANT_ID, SECOND_TENANT_ID],
+    });
+    const secondTenantReordered = harness({
+      ...config(),
+      canaryTenantIds: [SECOND_TENANT_ID, TENANT_ID],
+    });
     const largerBatch = harness({ ...config(), batchSize: 2 });
     const fasterPoll = harness({ ...config(), pollIntervalMs: 4000 });
+    const changedPolicy = harness({
+      ...config(),
+      leaseMs: 180_000,
+      maxAttempts: 6,
+      baseRetryMs: 90_000,
+      maxRetryMs: 4_000_000,
+    });
     const loopbackTransport = harness({
       ...config(),
       databaseUrl:
@@ -344,48 +379,161 @@ describe('IdentityMailWorkerService', () => {
         password: rotatedSmtpPassword,
       },
     });
+    const changedSmtpEndpoint = harness({
+      ...config(),
+      smtp: {
+        ...config().smtp,
+        host: 'smtp-b.example.test',
+        servername: 'smtp-b.example.test',
+      },
+    });
+    const changedSmtpTls = harness({
+      ...config(),
+      smtp: {
+        ...config().smtp,
+        port: 465,
+        tlsMode: 'IMPLICIT_TLS',
+      },
+    });
+    const changedSmtpTimeout = harness({
+      ...config(),
+      smtp: {
+        ...config().smtp,
+        socketTimeoutMs: 31_000,
+      },
+    });
+    const changedRelease = harness({
+      ...config(),
+      releaseSha: 'b'.repeat(40),
+    });
+    const changedDatabase = harness({
+      ...config(),
+      expectedDatabase: 'leetplus_beta_b',
+    });
+    const changedRole = harness({
+      ...config(),
+      expectedRole: 'leetplus_identity_mail_worker_b',
+    });
 
-    expect(first.service.workerConfigDigest).toMatch(/^[0-9a-f]{64}$/u);
-    expect(second.service.workerConfigDigest).toMatch(/^[0-9a-f]{64}$/u);
-    expect(first.service.workerConfigDigest).not.toBe(
-      second.service.workerConfigDigest,
+    expect(first.service.providerAuthorityDigest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(first.service.runtimeConfigDigest).toMatch(/^[0-9a-f]{64}$/u);
+    for (const authorityChange of [
+      second,
+      loopbackTransport,
+      longerSocketTimeout,
+      shorterConnectTimeout,
+      changedPassword,
+      changedSmtpEndpoint,
+      changedSmtpTls,
+      changedSmtpTimeout,
+      changedRelease,
+      changedDatabase,
+      changedRole,
+    ]) {
+      expect(authorityChange.service.providerAuthorityDigest).not.toBe(
+        first.service.providerAuthorityDigest,
+      );
+      expect(authorityChange.service.runtimeConfigDigest).not.toBe(
+        first.service.runtimeConfigDigest,
+      );
+    }
+
+    for (const runtimeOnly of [
+      secondTenant,
+      largerBatch,
+      fasterPoll,
+      changedPolicy,
+    ]) {
+      expect(runtimeOnly.service.providerAuthorityDigest).toBe(
+        first.service.providerAuthorityDigest,
+      );
+      expect(runtimeOnly.service.runtimeConfigDigest).not.toBe(
+        first.service.runtimeConfigDigest,
+      );
+    }
+    expect(secondTenantReordered.service.providerAuthorityDigest).toBe(
+      secondTenant.service.providerAuthorityDigest,
     );
-    expect(largerBatch.service.workerConfigDigest).not.toBe(
-      first.service.workerConfigDigest,
-    );
-    expect(fasterPoll.service.workerConfigDigest).not.toBe(
-      first.service.workerConfigDigest,
-    );
-    expect(loopbackTransport.service.workerConfigDigest).not.toBe(
-      first.service.workerConfigDigest,
-    );
-    expect(changedPassword.service.workerConfigDigest).not.toBe(
-      first.service.workerConfigDigest,
-    );
-    expect(longerSocketTimeout.service.workerConfigDigest).not.toBe(
-      first.service.workerConfigDigest,
-    );
-    expect(shorterConnectTimeout.service.workerConfigDigest).not.toBe(
-      first.service.workerConfigDigest,
+    expect(secondTenantReordered.service.runtimeConfigDigest).toBe(
+      secondTenant.service.runtimeConfigDigest,
     );
 
     await first.service.assertReady();
     await second.service.assertReady();
     await changedPassword.service.assertReady();
     expect(
-      first.repository.assertReady.mock.calls[0]?.[0].workerConfigDigest,
-    ).toBe(first.service.workerConfigDigest);
+      first.repository.assertReady.mock.calls[0]?.[0].providerAuthorityDigest,
+    ).toBe(first.service.providerAuthorityDigest);
     expect(
-      second.repository.assertReady.mock.calls[0]?.[0].workerConfigDigest,
-    ).toBe(second.service.workerConfigDigest);
+      second.repository.assertReady.mock.calls[0]?.[0].providerAuthorityDigest,
+    ).toBe(second.service.providerAuthorityDigest);
     const serialized = JSON.stringify({
-      digest: changedPassword.service.workerConfigDigest,
+      providerAuthorityDigest: changedPassword.service.providerAuthorityDigest,
+      runtimeConfigDigest: changedPassword.service.runtimeConfigDigest,
       log: changedPassword.logger.log.mock.calls,
       warn: changedPassword.logger.warn.mock.calls,
       error: changedPassword.logger.error.mock.calls,
     });
     expect(serialized).not.toContain(config().smtp.password);
     expect(serialized).not.toContain(rotatedSmtpPassword);
+    expect(serialized).not.toContain(config().encryptionKey);
+    expect(serialized).not.toContain(config().databaseUrl);
+    expect(serialized).not.toContain('password@db.example.test');
+    expect(serialized).not.toContain('owner@example.test');
+    expect(serialized).not.toContain(RAW_TOKEN);
+  });
+
+  it('owns one canonical immutable config snapshot after construction', async () => {
+    const mutableConfig = {
+      ...config(),
+      canaryTenantIds: [SECOND_TENANT_ID, TENANT_ID],
+      smtp: { ...config().smtp },
+    };
+    const canonical = harness({
+      ...config(),
+      canaryTenantIds: [TENANT_ID, SECOND_TENANT_ID],
+    });
+    const { service, repository } = harness(mutableConfig);
+    const providerAuthorityDigest = service.providerAuthorityDigest;
+    const runtimeConfigDigest = service.runtimeConfigDigest;
+
+    mutableConfig.canaryTenantIds.splice(
+      0,
+      mutableConfig.canaryTenantIds.length,
+      '99999999-9999-4999-8999-999999999999',
+    );
+    mutableConfig.batchSize = 4;
+    mutableConfig.publicWebOrigin = 'https://mutated.example.test';
+    mutableConfig.smtp.from = 'mutated@example.test';
+    mutableConfig.smtp.messageIdDomain = 'mutated.example.test';
+
+    await expect(service.runOnce()).resolves.toMatchObject({
+      claimed: 0,
+      sent: 0,
+    });
+
+    expect(service.providerAuthorityDigest).toBe(providerAuthorityDigest);
+    expect(service.runtimeConfigDigest).toBe(runtimeConfigDigest);
+    expect(providerAuthorityDigest).toBe(
+      canonical.service.providerAuthorityDigest,
+    );
+    expect(runtimeConfigDigest).toBe(canonical.service.runtimeConfigDigest);
+    expect(repository.assertReady.mock.calls[0]?.[0].canaryTenantIds).toEqual([
+      TENANT_ID,
+      SECOND_TENANT_ID,
+    ]);
+    expect(
+      repository.reapExpired.mock.calls.map(([input]) => ({
+        tenantId: input.tenantId,
+        batchLimit: input.batchLimit,
+      })),
+    ).toEqual([
+      { tenantId: TENANT_ID, batchLimit: 1 },
+      { tenantId: SECOND_TENANT_ID, batchLimit: 1 },
+    ]);
+    expect(
+      repository.claimOne.mock.calls.map(([input]) => input.tenantId),
+    ).toEqual([TENANT_ID, SECOND_TENANT_ID]);
   });
 
   it('uses safe retry only when failure is proven before provider marker', async () => {

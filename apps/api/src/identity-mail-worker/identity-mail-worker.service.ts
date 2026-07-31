@@ -1,12 +1,10 @@
-import {
-  createHash,
-  createHmac,
-  hkdfSync,
-  randomBytes,
-  randomUUID,
-} from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { IdentityMailSmtpProviderError } from './identity-mail-smtp-provider';
 import { isCanonicalIdentityMailRecipient } from './identity-mail-recipient';
+import {
+  buildIdentityMailWorkerConfigBindings,
+  snapshotEnabledIdentityMailWorkerConfig,
+} from './identity-mail-worker-config-binding';
 import {
   buildInitialOwnerInviteMessage,
   IdentityMailTemplateError,
@@ -27,10 +25,6 @@ const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const CONFIG_BINDING_HKDF_SALT =
-  'leetplus:identity-mail-worker:config-binding:salt:v1';
-const SMTP_PASSWORD_BINDING_HKDF_INFO =
-  'leetplus:identity-mail-worker:smtp-password-hmac:v1';
 const neverStop = () => false;
 
 type IdentityMailWorkerEntropy = {
@@ -58,11 +52,13 @@ export class IdentityMailWorkerProcessingError extends Error {
 }
 
 export class IdentityMailWorkerService {
-  readonly workerConfigDigest: string;
+  readonly providerAuthorityDigest: string;
+  readonly runtimeConfigDigest: string;
+  private readonly config: EnabledIdentityMailWorkerConfig;
   private readonly leaseOwnerDigest: string;
 
   constructor(
-    private readonly config: EnabledIdentityMailWorkerConfig,
+    config: EnabledIdentityMailWorkerConfig,
     private readonly repository: IdentityMailWorkerRepository,
     private readonly secretOpener: IdentityMailSecretOpener,
     private readonly smtpProvider: IdentityMailSmtpProvider,
@@ -72,7 +68,10 @@ export class IdentityMailWorkerService {
       randomUuid: randomUUID,
     },
   ) {
-    this.workerConfigDigest = this.configDigest(config);
+    this.config = snapshotEnabledIdentityMailWorkerConfig(config);
+    const bindings = buildIdentityMailWorkerConfigBindings(this.config);
+    this.providerAuthorityDigest = bindings.providerAuthorityDigest;
+    this.runtimeConfigDigest = bindings.runtimeConfigDigest;
     this.leaseOwnerDigest = createHash('sha256')
       .update(this.entropy.randomBytes(32))
       .digest('hex');
@@ -116,7 +115,7 @@ export class IdentityMailWorkerService {
       }
       await this.repository.reapExpired({
         tenantId,
-        workerConfigDigest: this.workerConfigDigest,
+        providerAuthorityDigest: this.providerAuthorityDigest,
         workerActorDigest: this.leaseOwnerDigest,
         batchLimit: this.config.batchSize,
       });
@@ -143,7 +142,7 @@ export class IdentityMailWorkerService {
           leaseTokenDigest: createHash('sha256')
             .update(leaseToken)
             .digest('hex'),
-          workerConfigDigest: this.workerConfigDigest,
+          providerAuthorityDigest: this.providerAuthorityDigest,
         });
         if (!claim) {
           break;
@@ -218,6 +217,7 @@ export class IdentityMailWorkerService {
         expectedTransitionRevision: claim.transitionRevision,
         messageId: message.messageId,
         providerAttemptKey,
+        providerAuthorityDigest: this.providerAuthorityDigest,
       });
       if (providerAttemptOutcome === 'CANCELED') {
         providerBoundaryEntered = false;
@@ -293,7 +293,6 @@ export class IdentityMailWorkerService {
       expectedTransitionRevision: claim.transitionRevision,
       leaseOwnerDigest: this.leaseOwnerDigest,
       leaseToken,
-      workerConfigDigest: this.workerConfigDigest,
     };
   }
 
@@ -306,7 +305,7 @@ export class IdentityMailWorkerService {
       expectedMigrationCount: this.config.expectedMigrationCount,
       releaseSha: this.config.releaseSha,
       canaryTenantIds: this.config.canaryTenantIds,
-      workerConfigDigest: this.workerConfigDigest,
+      providerAuthorityDigest: this.providerAuthorityDigest,
       expectedPolicy: {
         maxAttempts: this.config.maxAttempts,
         leaseSeconds: Math.ceil(this.config.leaseMs / 1000),
@@ -356,74 +355,6 @@ export class IdentityMailWorkerService {
       throw new IdentityMailWorkerProcessingError(
         'IDENTITY_MAIL_CLAIM_INVALID',
       );
-    }
-  }
-
-  private configDigest(config: EnabledIdentityMailWorkerConfig): string {
-    const keyBytes = Buffer.from(config.encryptionKey, 'base64url');
-    let configBindingKey: Buffer | undefined;
-
-    try {
-      const encryptionKeyFingerprint = createHash('sha256')
-        .update(keyBytes)
-        .digest('hex');
-      configBindingKey = Buffer.from(
-        hkdfSync(
-          'sha256',
-          keyBytes,
-          CONFIG_BINDING_HKDF_SALT,
-          SMTP_PASSWORD_BINDING_HKDF_INFO,
-          32,
-        ),
-      );
-      const smtpPasswordBindingHmac = createHmac('sha256', configBindingKey)
-        .update(config.smtp.password, 'utf8')
-        .digest('hex');
-
-      return createHash('sha256')
-        .update(
-          JSON.stringify({
-            schemaVersion: 4,
-            expectedDatabase: config.expectedDatabase,
-            expectedRole: config.expectedRole,
-            databaseTlsRequired: config.databaseTlsRequired,
-            databaseConnectTimeoutSeconds: config.databaseConnectTimeoutSeconds,
-            databaseSocketTimeoutSeconds: config.databaseSocketTimeoutSeconds,
-            expectedMigration: config.expectedMigration,
-            expectedMigrationCount: config.expectedMigrationCount,
-            releaseSha: config.releaseSha,
-            canaryTenantIds: config.canaryTenantIds,
-            publicWebOrigin: config.publicWebOrigin,
-            encryptionKeyVersion: config.encryptionKeyVersion,
-            encryptionKeyFingerprint,
-            aadEnvironment: config.aadEnvironment,
-            pollIntervalMs: config.pollIntervalMs,
-            leaseMs: config.leaseMs,
-            batchSize: config.batchSize,
-            maxAttempts: config.maxAttempts,
-            baseRetryMs: config.baseRetryMs,
-            maxRetryMs: config.maxRetryMs,
-            smtp: {
-              host: config.smtp.host,
-              port: config.smtp.port,
-              tlsMode: config.smtp.tlsMode,
-              servername: config.smtp.servername,
-              usernameDigest: createHash('sha256')
-                .update(config.smtp.username)
-                .digest('hex'),
-              passwordBindingHmac: smtpPasswordBindingHmac,
-              from: config.smtp.from,
-              messageIdDomain: config.smtp.messageIdDomain,
-              connectionTimeoutMs: config.smtp.connectionTimeoutMs,
-              greetingTimeoutMs: config.smtp.greetingTimeoutMs,
-              socketTimeoutMs: config.smtp.socketTimeoutMs,
-            },
-          }),
-        )
-        .digest('hex');
-    } finally {
-      configBindingKey?.fill(0);
-      keyBytes.fill(0);
     }
   }
 }

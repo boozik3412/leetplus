@@ -3,52 +3,52 @@ export type IdentityMailWorkerEnvironment = Record<string, string | undefined>;
 export type IdentityMailSmtpTlsMode = 'IMPLICIT_TLS' | 'STARTTLS';
 
 export type IdentityMailWorkerSmtpConfig = {
-  host: string;
-  port: number;
-  tlsMode: IdentityMailSmtpTlsMode;
-  servername: string;
-  username: string;
-  password: string;
-  from: string;
-  messageIdDomain: string;
-  connectionTimeoutMs: number;
-  greetingTimeoutMs: number;
-  socketTimeoutMs: number;
+  readonly host: string;
+  readonly port: number;
+  readonly tlsMode: IdentityMailSmtpTlsMode;
+  readonly servername: string;
+  readonly username: string;
+  readonly password: string;
+  readonly from: string;
+  readonly messageIdDomain: string;
+  readonly connectionTimeoutMs: number;
+  readonly greetingTimeoutMs: number;
+  readonly socketTimeoutMs: number;
 };
 
 export type DisabledIdentityMailWorkerConfig = {
-  enabled: false;
-  realSendEnabled: false;
-  liveCanaryEnabled: false;
+  readonly enabled: false;
+  readonly realSendEnabled: false;
+  readonly liveCanaryEnabled: false;
 };
 
 export type EnabledIdentityMailWorkerConfig = {
-  enabled: true;
-  realSendEnabled: true;
-  liveCanaryEnabled: true;
-  databaseUrl: string;
-  databaseTlsRequired: boolean;
-  databaseConnectTimeoutSeconds: number;
-  databaseSocketTimeoutSeconds: number;
-  expectedDatabase: string;
-  expectedRole: string;
-  expectedMigration: string;
-  expectedMigrationCount: number;
-  releaseSha: string;
-  canaryTenantIds: readonly string[];
-  publicWebOrigin: string;
-  encryptionKey: string;
-  encryptionKeyVersion: 'v1';
-  aadEnvironment: string;
-  pollIntervalMs: number;
-  leaseMs: number;
-  batchSize: number;
-  maxAttempts: number;
-  baseRetryMs: number;
-  maxRetryMs: number;
-  healthHost: '127.0.0.1';
-  healthPort: number;
-  smtp: IdentityMailWorkerSmtpConfig;
+  readonly enabled: true;
+  readonly realSendEnabled: true;
+  readonly liveCanaryEnabled: true;
+  readonly databaseUrl: string;
+  readonly databaseTlsRequired: boolean;
+  readonly databaseConnectTimeoutSeconds: number;
+  readonly databaseSocketTimeoutSeconds: number;
+  readonly expectedDatabase: string;
+  readonly expectedRole: string;
+  readonly expectedMigration: string;
+  readonly expectedMigrationCount: number;
+  readonly releaseSha: string;
+  readonly canaryTenantIds: readonly string[];
+  readonly publicWebOrigin: string;
+  readonly encryptionKey: string;
+  readonly encryptionKeyVersion: 'v1';
+  readonly aadEnvironment: string;
+  readonly pollIntervalMs: number;
+  readonly leaseMs: number;
+  readonly batchSize: number;
+  readonly maxAttempts: number;
+  readonly baseRetryMs: number;
+  readonly maxRetryMs: number;
+  readonly healthHost: '127.0.0.1';
+  readonly healthPort: number;
+  readonly smtp: IdentityMailWorkerSmtpConfig;
 };
 
 export type IdentityMailWorkerConfig =
@@ -83,7 +83,7 @@ export type ClaimIdentityMailDeliveryInput = {
   tenantId: string;
   leaseOwnerDigest: string;
   leaseTokenDigest: string;
-  workerConfigDigest: string;
+  providerAuthorityDigest: string;
 };
 
 export type IdentityMailDeliveryLeaseInput = {
@@ -93,7 +93,6 @@ export type IdentityMailDeliveryLeaseInput = {
   expectedTransitionRevision: number;
   leaseOwnerDigest: string;
   leaseToken: string;
-  workerConfigDigest: string;
 };
 
 export type MarkIdentityMailProviderAttemptInput =
@@ -101,6 +100,7 @@ export type MarkIdentityMailProviderAttemptInput =
     inviteId: string;
     messageId: string;
     providerAttemptKey: string;
+    providerAuthorityDigest: string;
   };
 
 export type IdentityMailProviderAttemptOutcome = 'MARKED' | 'CANCELED';
@@ -121,7 +121,7 @@ export type IdentityMailPreProviderFailureOutcome =
 
 export type ReapIdentityMailDeliveryInput = {
   tenantId: string;
-  workerConfigDigest: string;
+  providerAuthorityDigest: string;
   workerActorDigest: string;
   batchLimit: number;
 };
@@ -134,7 +134,7 @@ export type AssertIdentityMailWorkerReadyInput = {
   expectedMigrationCount: number;
   releaseSha: string;
   canaryTenantIds: readonly string[];
-  workerConfigDigest: string;
+  providerAuthorityDigest: string;
   expectedPolicy: {
     maxAttempts: number;
     leaseSeconds: number;

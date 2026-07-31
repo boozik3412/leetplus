@@ -129,7 +129,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
       input.expectedMigration !== CURRENT_MIGRATION ||
       input.expectedMigrationCount !== CURRENT_MIGRATION_COUNT ||
       !RELEASE_SHA_PATTERN.test(input.releaseSha) ||
-      !SHA256_PATTERN.test(input.workerConfigDigest) ||
+      !SHA256_PATTERN.test(input.providerAuthorityDigest) ||
       typeof input.databaseTlsRequired !== 'boolean' ||
       input.canaryTenantIds.length === 0 ||
       new Set(input.canaryTenantIds).size !== input.canaryTenantIds.length ||
@@ -466,7 +466,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
         ${input.tenantId}::TEXT,
         ${input.leaseOwnerDigest}::TEXT,
         ${input.leaseTokenDigest}::TEXT,
-        ${input.workerConfigDigest}::TEXT
+        ${input.providerAuthorityDigest}::TEXT
       ) AS result
     `);
     const untrustedRecord = recordValue(result);
@@ -540,7 +540,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
     const result = await this.rpc(Prisma.sql`
       SELECT public."identity_initial_owner_mail_reap_v1"(
         ${input.tenantId}::TEXT,
-        ${input.workerConfigDigest}::TEXT,
+        ${input.providerAuthorityDigest}::TEXT,
         ${input.workerActorDigest}::TEXT,
         ${input.batchLimit}::INTEGER
       ) AS result
@@ -564,7 +564,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
         ${input.leaseOwnerDigest}::TEXT,
         ${digest(input.leaseToken)}::TEXT,
         ${input.providerAttemptKey}::TEXT,
-        ${input.workerConfigDigest}::TEXT,
+        ${input.providerAuthorityDigest}::TEXT,
         ${digest(input.messageId)}::TEXT
       ) AS result
     `);
@@ -791,7 +791,7 @@ function assertReadinessReceipt(
     Number(record.acknowledgeSeconds) > 900 ||
     record.baseRetrySeconds !== input.expectedPolicy.baseRetrySeconds ||
     record.maxRetrySeconds !== input.expectedPolicy.maxRetrySeconds ||
-    record.providerAuthorityDigest !== input.workerConfigDigest
+    record.providerAuthorityDigest !== input.providerAuthorityDigest
   ) {
     fail('IDENTITY_MAIL_WORKER_READINESS_RECEIPT_INVALID');
   }

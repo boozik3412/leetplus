@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.44                                         |
+| Версия           | 1.46                                         |
 | Дата             | 30.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -245,36 +245,48 @@ enterprise-isolation option и не сокращает shared gates.
     production artifact/deployment marker, утверждённая длительность trial,
     root enrollment, SMTP delivery и production-like rehearsal всё ещё
     обязательны, поэтому внешний статус остаётся `NO-GO`.
-    Следующий bounded checkpoint — `BETA-IAM-004J /
-    LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1`; production SMTP, worker и routes
-    этим acceptance не включены.
+    Следующий после него checkpoint
+    `BETA-IAM-004J / LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1` принят отдельно
+    ниже; production
+    SMTP, worker enrollment и routes acceptance 004I не включала.
 34. [Leased initial-owner mail delivery](./leased-initial-owner-mail-delivery.md) —
     нормативный контракт `BETA-IAM-004J`: отдельная worker DB-role, tenant
     enrollment, leases/CAS, ciphertext erase до SMTP, immutable provider
     marker, post-marker reconciliation, strict TLS, fragment-only invite и
     обязательный `SENT` barrier для preview/accept. Статус:
-    `LOCAL_ACCEPTANCE_COMPLETE / EXACT_SHA_CI_PENDING / NOT_DEPLOYED /
-    EXTERNAL_PILOT_NO-GO`. Immutable identity checkpoint `CURRENT_176`
+    `ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`. Immutable
+    identity checkpoint `CURRENT_176`
     интегрирован через промежуточный merged prerequisite `CURRENT_178` в
-    terminal local release candidate `CURRENT_179` /
+    terminal accepted release `CURRENT_179` /
     `20260731120000_identity_mail_delivery_release_head`; clean `179/179` и
     три независимые migration history проходят. Terminal SHA —
     `c394060fb...`, manifest `179` — `333018542...`, tamper matrix —
     `1/1/1/1/1`, post-terminal manifest-drift rejection — `55000/effects 0`,
     cleanup residue — `0`. Owner issue/activation, RPC-only worker
     с trusted TLS fake SMTP, negative SMTP matrix, worker/runtime enrollment и
-    full API `113 suites / 2394 passed / 2 todo` проходят. Pending финальный
-    re-review, merge candidate commit и exact-SHA CI `3/3 PASS`; production
-    deploy/restart/drain и внешний доступ не выполнялись.
+    full API `113 suites / 2394 passed / 2 todo` проходят. Exact evidence SHA
+    `4bdad8c2e6a0f2efc86d54c487bfdc9bf2d9c899`, CI
+    [`30661123961`](https://github.com/boozik3412/leetplus/actions/runs/30661123961)
+    (`run #60`) — `3/3 PASS`, staged review — P0/P1/P2=0. Production
+    deploy/restart/drain, tenant enrollment и внешний доступ не выполнялись.
+35. [Protected mail-worker tenant enrollment](./protected-mail-worker-tenant-enrollment.md) —
+    контракт `BETA-IAM-004K`: provider authority отделена от полного runtime
+    config, tenant allowlist больше не ротирует authority существующей сети,
+    описаны `ACTIVE/DRAINING/DISABLED`, единый lock order и будущая
+    operator-only ceremony. Worker/config foundation реализован; только
+    proposal parser остаётся contract-only. Slice не создаёт
+    migration/enrollment/role, не содержит apply path и не разрешает
+    production mutation.
 
-Текущий engineering-accepted schema target — `CURRENT_174`.
-Текущий прошедший local acceptance release candidate — `CURRENT_179`;
+Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
 checkpoint, а `CURRENT_178` — промежуточным `origin/main` prerequisite.
-`CURRENT_179` не становится accepted target до merge candidate commit и
-exact-SHA CI; внешний статус остаётся `NO-GO`.
-Implementation `2540088076997ef228cd68e42165e857575aad86`, final accepted
-evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`, CI
+Exact evidence SHA `4bdad8c2e6a0f2efc86d54c487bfdc9bf2d9c899`, CI
+[`30661123961`](https://github.com/boozik3412/leetplus/actions/runs/30661123961)
+(`run #60`) — `3/3 PASS`; внешний статус остаётся `NO-GO`.
+Historical 004I implementation `2540088076997ef228cd68e42165e857575aad86`,
+final accepted evidence head
+`eb056a491bc7ad161addfd8c4d859606231f7f43`, CI
 [`30592173595`](https://github.com/boozik3412/leetplus/actions/runs/30592173595)
 (`run #57`) — `3/3 PASS`. `CURRENT_172` сохраняется как historical accepted
 prerequisite, а не current target. Он был принят exact-head

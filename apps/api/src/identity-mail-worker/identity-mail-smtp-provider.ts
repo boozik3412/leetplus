@@ -7,6 +7,7 @@ import type {
   IdentityMailWorkerSmtpConfig,
 } from './identity-mail-worker.types';
 import { isCanonicalIdentityMailRecipient } from './identity-mail-recipient';
+import { snapshotIdentityMailWorkerSmtpConfig } from './identity-mail-worker-config-binding';
 
 export type IdentityMailSmtpTransportOptions = {
   host: string;
@@ -50,29 +51,31 @@ export class IdentityMailSmtpProviderError extends Error {
 }
 
 export class StrictIdentityMailSmtpProvider implements IdentityMailSmtpProvider {
+  private readonly config: IdentityMailWorkerSmtpConfig;
   private readonly transport: IdentityMailSmtpTransport;
 
   constructor(
-    private readonly config: IdentityMailWorkerSmtpConfig,
+    config: IdentityMailWorkerSmtpConfig,
     transportFactory: IdentityMailSmtpTransportFactory = defaultTransportFactory,
   ) {
+    this.config = snapshotIdentityMailWorkerSmtpConfig(config);
     this.transport = transportFactory({
-      host: config.host,
-      port: config.port,
-      secure: config.tlsMode === 'IMPLICIT_TLS',
-      requireTLS: config.tlsMode === 'STARTTLS',
+      host: this.config.host,
+      port: this.config.port,
+      secure: this.config.tlsMode === 'IMPLICIT_TLS',
+      requireTLS: this.config.tlsMode === 'STARTTLS',
       auth: {
-        user: config.username,
-        pass: config.password,
+        user: this.config.username,
+        pass: this.config.password,
       },
       tls: {
         rejectUnauthorized: true,
         minVersion: 'TLSv1.2',
-        servername: config.servername,
+        servername: this.config.servername,
       },
-      connectionTimeout: config.connectionTimeoutMs,
-      greetingTimeout: config.greetingTimeoutMs,
-      socketTimeout: config.socketTimeoutMs,
+      connectionTimeout: this.config.connectionTimeoutMs,
+      greetingTimeout: this.config.greetingTimeoutMs,
+      socketTimeout: this.config.socketTimeoutMs,
     });
   }
 

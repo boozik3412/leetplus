@@ -109,6 +109,30 @@ describe('loadIdentityMailWorkerConfig', () => {
         servername: 'smtp.example.test',
       },
     });
+    expect(Object.isFrozen(config)).toBe(true);
+    if (!config.enabled) {
+      throw new Error(
+        'enabled fixture unexpectedly returned a disabled config',
+      );
+    }
+    expect(Object.isFrozen(config.canaryTenantIds)).toBe(true);
+    expect(Object.isFrozen(config.smtp)).toBe(true);
+  });
+
+  it('returns canary tenants in canonical order', () => {
+    const config = loadIdentityMailWorkerConfig({
+      ...enabledEnvironment(),
+      IDENTITY_MAIL_WORKER_CANARY_TENANT_IDS: [
+        MAXIMUM_CANARY_TENANT_IDS[3],
+        MAXIMUM_CANARY_TENANT_IDS[1],
+        MAXIMUM_CANARY_TENANT_IDS[0],
+        MAXIMUM_CANARY_TENANT_IDS[2],
+      ].join(','),
+    });
+    expect(config).toMatchObject({
+      enabled: true,
+      canaryTenantIds: MAXIMUM_CANARY_TENANT_IDS,
+    });
   });
 
   it('accepts at most four exact unique canary tenants', () => {

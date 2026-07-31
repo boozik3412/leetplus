@@ -1,0 +1,250 @@
+# Protected mail-worker tenant enrollment
+
+Контракт: `PROTECTED_MAIL_WORKER_TENANT_ENROLLMENT_V1`
+Backlog: `BETA-IAM-004K`
+Версия документа: `0.3`
+Дата: `30.07.2026`
+Статус: `FOUNDATION_IMPLEMENTED / PROPOSAL_CONTRACT_ONLY / NOT_DEPLOYED /
+EXTERNAL_PILOT_NO-GO`
+
+## 1. Назначение
+
+Этот checkpoint вводит отдельную operator-only границу включения
+identity-mail worker для ровно одного tenant. Он нужен до отправки первого
+`OWNER + NETWORK` invite внешнему клубу.
+
+Целевая topology не меняется:
+
+- четыре текущих клуба остаются `Tenant A / Store A1..A4`;
+- первый внешний клуб создаётся отдельно как `Tenant B / Store B1`;
+- worker и SMTP могут быть общими для нескольких tenant;
+- настройки, роли, данные и delivery policy каждого tenant остаются
+  tenant-scoped;
+- добавление Tenant B не должно менять provider authority уже принятого
+  Tenant A.
+
+## 2. Граница текущего slice
+
+Текущий slice не создаёт migration, enrollment row, роль, SMTP credentials,
+production marker, tenant, пользователя или invite. Он не содержит
+`check/apply/rollback` и не является authorization.
+
+Реализуется только безопасный фундамент:
+
+1. полный worker config разделён на независимые
+   `providerAuthorityDigest` и `runtimeConfigDigest`;
+2. claim, reap и provider marker передают в PostgreSQL только
+   `providerAuthorityDigest`; readiness получает по `tenantId` PII-free
+   enrollment receipt и сравнивает его authority digest с ожидаемым в
+   приложении;
+3. `runtimeConfigDigest` остаётся process-level evidence и не сохраняется в
+   enrollment/outbox;
+4. future ceremony proposal имеет строгий PII/secret-free parser, но явно
+   возвращает `authorization=false` и `canMutate=false`;
+5. production registry остаётся пустым по умолчанию.
+
+Исторические SQL-функции и их positional signatures не переименовываются:
+они checksum/prosrc-pinned. Их аргумент с историческим именем
+`p_worker_config_digest` семантически и фактически получает только
+`providerAuthorityDigest`. Исторический семиаргументный `complete_v1` authority
+digest не принимает: он завершает уже выданную lease по CAS. Безопасная
+ротация поэтому требует `DRAINING`, немедленного запрета новых claims и
+доказанного zero-`CLAIMED` перед сменой authority.
+
+Существующая строка enrollment, если она была создана со старым full-config
+digest, после обновления fail-closed перестанет совпадать. Dual-accept
+запрещён. Перед rollout registry должен быть доказанно пуст; при ненулевом
+registry требуется отдельная rotate ceremony, а не автоматическая перезапись.
+
+## 3. Два независимых digest
+
+### 3.1. `providerAuthorityDigest`
+
+Domain discriminator: `IDENTITY_MAIL_PROVIDER_AUTHORITY_V1`.
+
+Digest связывает:
+
+- expected database name;
+- worker role name;
+- обязательность TLS текущей database session;
+- database connect/socket timeouts;
+- exact migration head и migration count;
+- exact release SHA;
+- public web origin;
+- encryption key version и SHA-256 fingerprint без raw key;
+- AAD environment;
+- SMTP host, port, TLS mode и server name;
+- digest SMTP username и keyed HMAC SMTP password без raw credential;
+- sender, Message-ID domain и SMTP timeouts.
+
+Изменение database/release/role, crypto или SMTP authority требует отдельной
+rotate ceremony. Dual-accept старого и нового digest запрещён.
+
+### 3.2. `runtimeConfigDigest`
+
+Domain discriminator: `IDENTITY_MAIL_RUNTIME_CONFIG_V1`.
+
+Digest связывает:
+
+- `providerAuthorityDigest`;
+- canonical sorted tenant allowlist;
+- real-send/live-canary flags;
+- poll interval;
+- lease, batch, attempts и retry policy;
+- health host/port.
+
+Добавление tenant и изменение allowlist, poll, batch, `leaseMs`,
+`maxAttempts`, `baseRetryMs` или `maxRetryMs` меняет runtime digest, но не
+provider authority существующего tenant. Из SMTP
+connection/greeting/socket timeouts вычисляется только process-side
+`minimumAcknowledgeSeconds`; сами timeouts входят в provider authority.
+Persisted `acknowledgeSeconds` — отдельное подписанное поле tenant delivery
+policy, и readiness принимает его только в bounded диапазоне и не меньше
+process minimum. Весь подписанный delivery policy отдельно проверяется DB
+enrollment readiness.
+
+### 3.3. Запрещённые данные
+
+Ни canonical payload, ни logs/health/receipt не содержат:
+
+- raw `DATABASE_URL` или database password;
+- raw encryption key;
+- raw SMTP username/password;
+- recipient email;
+- invite token, URL fragment или ciphertext;
+- provider response body.
+
+## 4. Целевая state machine
+
+Текущий boolean `enabled` недостаточен для безопасного multi-tenant rollout.
+Следующая additive migration должна ввести явное состояние:
+
+```text
+ACTIVE
+DRAINING
+DISABLED
+```
+
+| Переход                     | Условие                                                                       |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| absent/`DISABLED -> ACTIVE` | signed `ENABLE`, exact release/database/role/provider authority, revision CAS |
+| `ACTIVE -> DRAINING`        | signed `DISABLE` или начало `ROTATE`; новые claims запрещаются сразу          |
+| `DRAINING -> DISABLED`      | claimed work отсутствует; expired leases reaped/quarantined                   |
+| `DRAINING -> ACTIVE`        | rotate завершён, claimed work отсутствует, новая authority/policy принята     |
+
+Rollback не удаляет event/enrollment и не уменьшает revision. Он повторно
+принимает предыдущую authority/policy как новую монотонную revision.
+
+Восстановление после crash выбирает модель exact persisted-request replay.
+Apply-слой обязан до первого `ACTIVE -> DRAINING` сохранить неизменяемую
+command identity:
+
+```text
+(tenantId, action, requestId, contentDigest)
+```
+
+Только повтор той же уже проверенной и сохранённой команды может
+возобновить drain и завершить переход из `DRAINING`. Новый proposal, другой
+`requestId`, action либо `contentDigest` из `DRAINING` отклоняется. Contract
+parser поэтому намеренно не принимает `DRAINING` как исходное состояние
+нового proposal; фактический resume/finalize остаётся обязанностью будущего
+transactional apply-слоя. Истечение исходного proposal после его атомарного
+принятия не блокирует завершение уже persisted команды: restart повторно
+проверяет сохранённую подпись, marker provenance и exact command identity, но
+не создаёт новое authorization.
+
+Единый lock order для будущих RPC:
+
+```text
+tenant advisory lock
+  -> tenant enrollment row
+  -> tenant outbox rows
+  -> invite / tenant / claim rows
+```
+
+Provider completion, claim и reap не могут брать эти блокировки в обратном
+порядке.
+
+## 5. Future proposal contract
+
+Contract-only parser принимает exact-key proposal
+`PROTECTED_MAIL_WORKER_TENANT_ENROLLMENT_V1` для действий:
+
+```text
+ENABLE
+ROTATE
+DISABLE
+```
+
+Proposal связывает:
+
+- UUID `requestId` и `tenantId`;
+- expected database name/OID;
+- expected worker role name/OID;
+- exact release SHA и deployment-marker digest;
+- provider authority и runtime config digests;
+- expected/next monotonic revision;
+- bounded delivery policy;
+- expected current state;
+- bounded requested/expires timestamps.
+
+Parser:
+
+- отклоняет extra/missing keys;
+- отклоняет неверные UUID/SHA/digest/OID/policy/time window;
+- требует `nextRevision = expectedRevision + 1`;
+- допускает `ENABLE` только из `ABSENT|DISABLED`, а `ROTATE|DISABLE` только из
+  `ACTIVE`;
+- возвращает deterministic `contentDigest`;
+- не проверяет production signature и поэтому никогда не авторизует mutation.
+
+## 6. Что требуется до apply
+
+Следующие bounded slices обязаны добавить отдельно:
+
+1. additive schema/event migration с `ACTIVE/DRAINING/DISABLED`;
+2. append-only PII-free enrollment event ledger;
+3. operator CLI с раздельными `--check`, `--apply`, `--rollback` и exact
+   confirmation;
+4. независимую подпись proposal и привязку к реально установленному
+   deployment marker/DB identity;
+5. exact role name/OID, database name/OID и hostile ACL admission;
+6. request idempotency и optimistic revision;
+7. persisted-command-before-drain и exact same-request resume/finalize после
+   crash;
+8. two-tenant PostgreSQL 16 tests, включая одновременный drain/claim/reap;
+9. zero-diff повтор, stale revision, wrong SHA/DB/role/config и rollback;
+10. production-like rehearsal на disposable clone;
+11. отдельный production `GO` на одну точную mutation.
+
+Role-level enrollment и tenant-level enrollment являются разными ceremony.
+Приложение не создаёт worker role и не получает полномочия изменять registry.
+
+## 7. Acceptance matrix
+
+До engineering acceptance 004K обязательны:
+
+- Tenant B не меняет provider authority Tenant A;
+- разные allowlist/poll/batch/policy меняют только runtime digest;
+- SMTP/crypto/release/database/role drift меняет authority digest;
+- runtime digest никогда не попадает в DB worker RPC;
+- production registry по умолчанию пуст;
+- disable немедленно блокирует новый claim и сохраняет deterministic
+  drain/reap/reconciliation;
+- check/apply/rollback/zero-diff проходят на disposable PostgreSQL 16;
+- hostile PUBLIC/direct table/column/sequence/function/database ACL
+  fail-closed;
+- receipt/event не содержат PII или secrets;
+- independent review не имеет P0/P1/P2;
+- exact-SHA GitHub CI проходит `3/3`.
+
+## 8. Release decision
+
+Текущий slice не разрешает production deploy или внешний доступ.
+Реальный email тестировщика, пароль, Tenant B, Store B1 и owner invite не
+сохраняются и не создаются. До завершения 004K, 004L и отдельного
+`SHARED BETA GO` статус остаётся:
+
+```text
+NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO
+```

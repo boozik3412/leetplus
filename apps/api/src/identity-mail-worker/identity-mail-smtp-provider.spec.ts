@@ -101,6 +101,50 @@ describe('StrictIdentityMailSmtpProvider', () => {
     });
   });
 
+  it('owns an immutable SMTP snapshot after construction', async () => {
+    const mutableConfig = { ...smtpConfig() };
+    let options: IdentityMailSmtpTransportOptions | undefined;
+    const sendMail = jest.fn().mockResolvedValue({
+      accepted: ['owner@example.test'],
+      rejected: [],
+      messageId: MESSAGE_ID,
+    });
+    const provider = new StrictIdentityMailSmtpProvider(
+      mutableConfig,
+      (candidate) => {
+        options = candidate;
+        return {
+          verify: jest.fn().mockResolvedValue(true),
+          sendMail,
+        };
+      },
+    );
+
+    mutableConfig.host = 'mutated.example.test';
+    mutableConfig.from = 'mutated@example.test';
+    mutableConfig.messageIdDomain = 'mutated.example.test';
+    mutableConfig.socketTimeoutMs = 99_000;
+
+    await expect(provider.send(message())).resolves.toMatchObject({
+      outcomeCode: 'SMTP_ACCEPTED',
+    });
+    expect(options).toMatchObject({
+      host: 'smtp.example.test',
+      socketTimeout: 30_000,
+    });
+    await expect(
+      provider.send({
+        ...message(),
+        from: 'mutated@example.test',
+        messageId:
+          '<initial-owner-22222222-2222-4222-8222-222222222222@mutated.example.test>',
+      }),
+    ).rejects.toMatchObject({
+      reasonCode: 'IDENTITY_MAIL_SMTP_MESSAGE_INVALID',
+    });
+    expect(sendMail).toHaveBeenCalledTimes(1);
+  });
+
   it('maps provider errors to a safe fixed reason without leaking response data', async () => {
     const secretProviderResponse = '550 owner@example.test token=A'.concat(
       'A'.repeat(42),

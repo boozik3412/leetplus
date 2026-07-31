@@ -2,9 +2,9 @@
 
 Контракт: `LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1`
 Backlog: `BETA-IAM-004J`
-Версия документа: `0.5`
+Версия документа: `0.6`
 Дата: `30.07.2026`
-Статус: `LOCAL_ACCEPTANCE_COMPLETE / EXACT_SHA_CI_PENDING / NOT_DEPLOYED /
+Статус: `ENGINEERING_ACCEPTED / NOT_DEPLOYED /
 EXTERNAL_PILOT_NO-GO`
 
 ## 1. Назначение
@@ -327,13 +327,17 @@ persisted AAD/envelope schema discriminator либо доказанный produc
   base64 и преобразуется в PEM только в памяти;
 - cleanup residue three-history/tamper rehearsal — `0`; временные PostgreSQL
   databases/roles/sessions после cleanup — `0/0/0`;
-- pre-merge независимый review — `P0=0, P1=0, P2=0`; merged re-review
-  обнаружил scope-gap и docs drift, оба исправлены, финальный verdict ожидается.
+- независимый staged review — `P0=0, P1=0, P2=0`;
+- exact evidence SHA
+  `4bdad8c2e6a0f2efc86d54c487bfdc9bf2d9c899`, GitHub Actions
+  [`30661123961`](https://github.com/boozik3412/leetplus/actions/runs/30661123961)
+  (`run #60`) — `3/3 PASS`: authority root trust, application checks и
+  PostgreSQL migration smoke, включая three-clone legacy inventory.
 
 Ранее найденные revoke/expiry/attempt-budget, ACL/readiness, SQL `NULL`,
 missing-outbox, encryption-key binding, recipient-AAD и real-fixture gaps
-закрыты и повторно проверены. До engineering acceptance остаются candidate
-commit и exact-SHA CI `3/3 PASS`; локальный результат не разрешает deploy.
+закрыты и повторно проверены. Checkpoint engineering-accepted, но этот
+результат не разрешает deploy, production enrollment или внешний доступ.
 
 ## 10. Обязательное evidence
 

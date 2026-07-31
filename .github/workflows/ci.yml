@@ -157,6 +157,9 @@ jobs:
       - name: Validate identity-mail worker enrollment boundary
         run: pnpm --filter database check:identity-mail-worker-enrollment
 
+      - name: Validate protected mail-worker tenant enrollment proposal
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-contract
+
       - name: Validate shared beta admission provenance
         run: pnpm --filter database check:shared-beta-admission-provenance
 

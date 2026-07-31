@@ -20,7 +20,7 @@ const LEASE_TOKEN = 'L'.repeat(43);
 const MESSAGE_ID = `<initial-owner-${MESSAGE_KEY}@mail.leetplus.ru>`;
 const LEASE_OWNER_DIGEST = 'a'.repeat(64);
 const LEASE_TOKEN_DIGEST = 'b'.repeat(64);
-const WORKER_CONFIG_DIGEST = 'c'.repeat(64);
+const PROVIDER_AUTHORITY_DIGEST = 'c'.repeat(64);
 const PROVIDER_RECEIPT_DIGEST = 'd'.repeat(64);
 const ALLOWED_WORKER_RPC_SIGNATURES = [
   'public.identity_initial_owner_mail_claim_v1(text, text, text, text)',
@@ -61,7 +61,7 @@ function readinessInput() {
     expectedMigrationCount: 179,
     releaseSha: 'e'.repeat(40),
     canaryTenantIds: [TENANT_ID],
-    workerConfigDigest: WORKER_CONFIG_DIGEST,
+    providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
     expectedPolicy: {
       maxAttempts: 5,
       leaseSeconds: 120,
@@ -127,7 +127,7 @@ function readinessReceipt(
     acknowledgeSeconds: 60,
     baseRetrySeconds: 60,
     maxRetrySeconds: 3600,
-    providerAuthorityDigest: WORKER_CONFIG_DIGEST,
+    providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
     ...overrides,
   };
 }
@@ -168,7 +168,6 @@ function leaseInput(
     expectedTransitionRevision,
     leaseOwnerDigest: LEASE_OWNER_DIGEST,
     leaseToken: LEASE_TOKEN,
-    workerConfigDigest: WORKER_CONFIG_DIGEST,
   };
 }
 
@@ -178,6 +177,7 @@ function providerAttemptInput(): MarkIdentityMailProviderAttemptInput {
     inviteId: INVITE_ID,
     messageId: MESSAGE_ID,
     providerAttemptKey: PROVIDER_ATTEMPT_KEY,
+    providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
   };
 }
 
@@ -386,7 +386,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
         tenantId: TENANT_ID,
         leaseOwnerDigest: LEASE_OWNER_DIGEST,
         leaseTokenDigest: LEASE_TOKEN_DIGEST,
-        workerConfigDigest: WORKER_CONFIG_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
       }),
     ).resolves.toBeNull();
 
@@ -396,7 +396,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
         tenantId: TENANT_ID,
         leaseOwnerDigest: LEASE_OWNER_DIGEST,
         leaseTokenDigest: LEASE_TOKEN_DIGEST,
-        workerConfigDigest: WORKER_CONFIG_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
       }),
     );
     expectReason(rejection, 'IDENTITY_MAIL_WORKER_CLAIM_RESPONSE_INVALID');
@@ -430,7 +430,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
           tenantId: TENANT_ID,
           leaseOwnerDigest: LEASE_OWNER_DIGEST,
           leaseTokenDigest: LEASE_TOKEN_DIGEST,
-          workerConfigDigest: WORKER_CONFIG_DIGEST,
+          providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
         }),
       );
       expectReason(rejection, 'IDENTITY_MAIL_WORKER_CLAIM_RESPONSE_INVALID');
@@ -445,7 +445,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
       tenantId: TENANT_ID,
       leaseOwnerDigest: LEASE_OWNER_DIGEST,
       leaseTokenDigest: LEASE_TOKEN_DIGEST,
-      workerConfigDigest: WORKER_CONFIG_DIGEST,
+      providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
     });
     expect(delivery).toMatchObject({
       tenantId: TENANT_ID,
@@ -465,7 +465,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
         tenantId: TENANT_ID,
         leaseOwnerDigest: LEASE_OWNER_DIGEST,
         leaseTokenDigest: LEASE_TOKEN_DIGEST,
-        workerConfigDigest: WORKER_CONFIG_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
       }),
     );
     expectReason(rejection, 'IDENTITY_MAIL_WORKER_CLAIM_RESPONSE_INVALID');
@@ -499,7 +499,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
       LEASE_OWNER_DIGEST,
       createHash('sha256').update(LEASE_TOKEN).digest('hex'),
       PROVIDER_ATTEMPT_KEY,
-      WORKER_CONFIG_DIGEST,
+      PROVIDER_AUTHORITY_DIGEST,
       createHash('sha256').update(MESSAGE_ID).digest('hex'),
     ]);
     expect(query.values).not.toContain(LEASE_TOKEN);
@@ -579,7 +579,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     expectReason(rejection, 'IDENTITY_MAIL_WORKER_DATABASE_RESPONSE_INVALID');
   });
 
-  it('binds the terminal acknowledgement digest to tenant, outbox, lease and outcome', async () => {
+  it('keeps historical completion authority-free and binds its acknowledgement to tenant, outbox, lease and outcome', async () => {
     const { prisma, repository } = harness();
     prisma.$queryRaw.mockResolvedValue([
       {
@@ -621,6 +621,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
       PROVIDER_RECEIPT_DIGEST,
       expectedTerminalAck,
     ]);
+    expect(query.values).not.toContain(PROVIDER_AUTHORITY_DIGEST);
   });
 
   it.each([
@@ -700,14 +701,14 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     await expect(
       repository.reapExpired({
         tenantId: TENANT_ID,
-        workerConfigDigest: WORKER_CONFIG_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
         workerActorDigest: LEASE_OWNER_DIGEST,
         batchLimit: 3,
       }),
     ).resolves.toBe(2);
     expect(queryFrom(prisma).values).toEqual([
       TENANT_ID,
-      WORKER_CONFIG_DIGEST,
+      PROVIDER_AUTHORITY_DIGEST,
       LEASE_OWNER_DIGEST,
       3,
     ]);
@@ -725,7 +726,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     const rejection = await rejectionOf(
       repository.reapExpired({
         tenantId: TENANT_ID,
-        workerConfigDigest: WORKER_CONFIG_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
         workerActorDigest: LEASE_OWNER_DIGEST,
         batchLimit: 3,
       }),
@@ -746,7 +747,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     const extraFieldRejection = await rejectionOf(
       repository.reapExpired({
         tenantId: TENANT_ID,
-        workerConfigDigest: WORKER_CONFIG_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
         workerActorDigest: LEASE_OWNER_DIGEST,
         batchLimit: 3,
       }),

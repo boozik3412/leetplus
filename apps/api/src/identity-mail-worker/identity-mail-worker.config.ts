@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { IDENTITY_MAIL_INDEPENDENT_SECRET_KEYS } from '../auth/identity-mail-independent-secret-keys';
 import { isCanonicalIdentityEmail } from '../utilities/canonical-identity-email';
+import { snapshotEnabledIdentityMailWorkerConfig } from './identity-mail-worker-config-binding';
 import type {
   EnabledIdentityMailWorkerConfig,
   IdentityMailWorkerConfig,
@@ -201,7 +202,7 @@ export function loadIdentityMailWorkerConfig(
   if (config.maxRetryMs < config.baseRetryMs) {
     fail('IDENTITY_MAIL_WORKER_RETRY_WINDOW_INVALID');
   }
-  return config;
+  return snapshotEnabledIdentityMailWorkerConfig(config);
 }
 
 function smtpConfig(

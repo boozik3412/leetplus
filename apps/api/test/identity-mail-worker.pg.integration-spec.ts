@@ -582,8 +582,11 @@ describePostgres(
         envelopeService,
         smtpProvider,
       );
-      expect(ambiguousWorker.workerConfigDigest).toBe(
-        ambiguousWorkerBase.service.workerConfigDigest,
+      expect(ambiguousWorker.providerAuthorityDigest).toBe(
+        ambiguousWorkerBase.service.providerAuthorityDigest,
+      );
+      expect(ambiguousWorker.runtimeConfigDigest).toBe(
+        ambiguousWorkerBase.service.runtimeConfigDigest,
       );
       await expect(ambiguousWorker.runOnce()).resolves.toEqual({
         claimed: 1,
@@ -1281,7 +1284,7 @@ async function createScenarioWorker(input: {
       ),
       baseRetrySeconds: config.baseRetryMs / 1_000,
       maxRetrySeconds: config.maxRetryMs / 1_000,
-      providerAuthorityDigest: service.workerConfigDigest,
+      providerAuthorityDigest: service.providerAuthorityDigest,
       enabledAt,
       createdAt: enabledAt,
       updatedAt: enabledAt,
@@ -1304,7 +1307,8 @@ function assertWorkerReleaseContract(
     canaryTenantIds: [tenantId],
   });
   expect(worker.config.expectedRole).toMatch(DISPOSABLE_ROLE_PATTERN);
-  expect(worker.service.workerConfigDigest).toMatch(/^[0-9a-f]{64}$/u);
+  expect(worker.service.providerAuthorityDigest).toMatch(/^[0-9a-f]{64}$/u);
+  expect(worker.service.runtimeConfigDigest).toMatch(/^[0-9a-f]{64}$/u);
 }
 
 function fixtureDigest(value: string): string {

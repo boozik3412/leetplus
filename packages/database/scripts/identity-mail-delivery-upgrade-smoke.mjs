@@ -1379,7 +1379,7 @@ function callClaim(
   tenantId,
   leaseOwnerDigest,
   leaseTokenDigest,
-  workerConfigDigest,
+  providerAuthorityDigest,
 ) {
   return client
     .$queryRawUnsafe(
@@ -1392,7 +1392,7 @@ function callClaim(
       tenantId,
       leaseOwnerDigest,
       leaseTokenDigest,
-      workerConfigDigest,
+      providerAuthorityDigest,
     )
     .then((rows) => rows[0]?.receipt);
 }
@@ -1479,7 +1479,7 @@ function callComplete(
 function callReap(
   client,
   tenantId,
-  workerConfigDigest,
+  providerAuthorityDigest,
   workerActorDigest,
   batchLimit,
 ) {
@@ -1492,7 +1492,7 @@ function callReap(
          CAST($4 AS INTEGER)
        ) AS receipt`,
       tenantId,
-      workerConfigDigest,
+      providerAuthorityDigest,
       workerActorDigest,
       batchLimit,
     )

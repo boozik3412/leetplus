@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.27                                                       |
+| Версия     | 1.28                                                       |
 | Дата       | 30.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -21,14 +21,18 @@ Production IDs, email, телефоны, invite URL/token, password, database UR
 API keys, encryption/signing secrets и raw business data запрещено сохранять
 в git. В документах используются только aliases `Tenant A/B` и `Store A1..A4/B1`.
 
-## Текущий engineering candidate: `CURRENT_174`
+## Текущий engineering-accepted target: `CURRENT_174`
 
-`CURRENT_174` — локально принятый кандидат `BETA-IAM-004I` поверх последнего
-принятого remote checkpoint `CURRENT_172`. Он добавляет независимые build и
+`CURRENT_174` принят как bounded `BETA-IAM-004I` checkpoint поверх historical
+accepted prerequisite `CURRENT_172`. Он добавляет независимые build и
 deployment provenance, instance-bound database identity, выделенную
-activation-роль и одну atomic activation transaction. Exact-SHA GitHub CI для
-этого кандидата ещё не принят, production-like rehearsal и deploy не
-выполнялись, поэтому статус внешнего пилота остаётся `NO-GO`.
+activation-роль и одну atomic activation transaction. Implementation
+`2540088076997ef228cd68e42165e857575aad86`, final accepted evidence head
+`eb056a491bc7ad161addfd8c4d859606231f7f43`, GitHub CI
+[`30592173595`](https://github.com/boozik3412/leetplus/actions/runs/30592173595)
+(`run #57`) — `3/3 PASS`; independent reviews — P0/P1/P2=0. Статус:
+`ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`.
+Production-like rehearsal и deploy не выполнялись.
 
 Ниже сохранено historical evidence принятого `CURRENT_171` dormant
 OWNER-invite checkpoint.
@@ -279,7 +283,7 @@ Evidence:
       OWNER override/capability digest или provisioning audit/receipt;
       assert принимает identity только как exact `RESERVATION` либо
       immutable-command-bound live `OWNER/NETWORK` + encrypted `HOLD`;
-- [ ] `BETA-IAM-004I` одной atomic transaction потребляет persisted GO,
+- [x] `BETA-IAM-004I` одной atomic transaction потребляет persisted GO,
       но сначала независимо получает и hard-match проверяет фактические
       DB/release/environment/schema/artifact/policy markers и под блокировками
       перечитывает `Tenant`, ровно один inactive `Store`, exact OWNER
@@ -287,22 +291,27 @@ Evidence:
       entitlement rows; actual-context и actual-shell digests domain-separated
       пересчитываются и проверяются до issue и повторно до consume; затем
       запускается trial, shell переводится в `ACTIVE/OWNER_INVITED`, а exact
-      outbox — в `HOLD→PENDING`; standalone release RPC отсутствует. Реализация
-      имеет локальный статус `LOCAL_ACCEPTED`: populated `172→173→174`, clean
+      outbox — в `HOLD→PENDING`; standalone release RPC отсутствует.
+      Implementation `2540088076997ef228cd68e42165e857575aad86`, accepted
+      evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`, GitHub CI
+      `30592173595` (`run #57`) — `3/3 PASS`; populated `172→173→174`, clean
       `174/174`, hostile ACL, activation/replay/race/fault, runtime enrollment
-      и независимые P0/P1/P2 reviews прошли; checkbox остаётся открытым до
-      exact-SHA GitHub CI;
-- [ ] `CURRENT_174` database identity v2 связан с owner-only `UNLOGGED`
+      и независимые P0/P1/P2 reviews прошли. Rejected runs
+      `30560278803` (`run #55`) и `30587233880` (`run #56`) остаются
+      `NON-EVIDENCE`;
+- [x] `CURRENT_174` database identity v2 связан с owner-only `UNLOGGED`
       instance anchor и `pg_postmaster_start_time()`; missing anchor, restart,
       backup/standby promotion требуют нового challenge и deployment marker;
-- [ ] Activation role проходит полную hostile matrix: only target `CONNECT`,
+- [x] Activation role проходит полную hostile matrix: only target `CONNECT`,
       `public USAGE`, coordinator `EXECUTE`; zero TEMP/other DB/schema,
       membership/ownership/settings, FDW/server/parameter/tablespace/large
       object и system/PUBLIC-ACL drift. Перед challenge выполнена отдельная
       type-ACL ceremony: default `PUBLIC USAGE` на defined user enum/domain
       отозван, штатные runtime grants выданы явно, activation role имеет zero
       effective type `USAGE`. Отдельно проверены direct/PUBLIC type drift,
-      `pg_authid SELECT` и direct/PUBLIC `pg_read_file EXECUTE`;
+      `pg_authid SELECT` и direct/PUBLIC `pg_read_file EXECUTE`. Эти три
+      checkbox подтверждают только engineering checkpoint; production root
+      enrollment, production-like rehearsal и deploy они не выполняют;
 - [ ] CI build provenance и ops deployment provenance подписаны разными
       Ed25519 roots; production registries прошли отдельные reviewed enrollment
       ceremonies и не заполняются из env/request/database rows;

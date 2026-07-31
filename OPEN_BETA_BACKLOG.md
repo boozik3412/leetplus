@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 30.07.2026
-- Версия: 1.69
+- Версия: 1.70
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -230,7 +230,8 @@
 | BETA-IAM-004F | P0        | Готово        | `MIGRATION_170_ACTIVATION_LOCATOR`                        | `IdentityEmailClaim.workflowLocator` — immutable opaque UUID, initial value выводится из server-generated reservation и сохраняется при transition; PII-free sealed assert выполняет bounded lookup → canonical advisory lock → exact row recheck, не возвращает email и не расширяет table/column grants. Runtime candidate имеет exact seven-RPC allowlist, shell replay больше не передаёт raw email в assert. Populated `169 → 170`, clean `170/170`, canonical UUID rollback, runtime ACL, lock-race и shell PostgreSQL приняты; release artifact: `170`, latest locator, digest `6b8962d9...`. Final implementation exact-head `8dfe219eb8f882b84782c524e3526c10acbefc68`, CI `30493779099` (`run #47`) — `3/3 PASS`; independent security review — `PASS` без P0/P1/P2. P3: invalid/uppercase `CURRENT_169` rollback доказан вручную, но ещё не выделен в отдельный автоматический upgrade fixture; это не blocker milestone. Locator не является authority и не закрывает issue/outbox/activation; production и tester account не изменялись                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | BETA-IAM-004A, BETA-IAM-004B, BETA-SEC-008..009                             |
 | BETA-IAM-004G | P0        | Готово        | `DORMANT_OWNER_INVITE_HOLD_OUTBOX_V1`                     | Migration 171 принята как bounded engineering checkpoint: atomic sealed writer создаёт только hard-coded `NETWORK OWNER` `UserInvite` hash, encrypted immutable `HOLD` outbox, claim transition, immutable idempotency command и PII-free audit/receipt. Locator — correlation, не authority. Issue RPC остаётся `EXCLUDED_PENDING`; application/PUBLIC EXECUTE отсутствует, runtime allowlist ровно `7`, три sealed relations и exact `45` columns не имеют target/PUBLIC privileges. Hostile default ACL откатывает migration целиком; clean/populated/replay/collision/rollback/100-way concurrency и column-drift fixtures `PASS`. Seal result не возвращает raw token; exact AAD и 71-byte AES-GCM закреплены known-answer vector. Exact implementation `c03ee76d8e92d0c759afda7577a30e0593667a35`, portability fix/current head `7fca785ac6c2d77bcbd3655985d668a45fca788a`, CI `30501299486` (`run #50`) — `3/3 PASS`; independent ordinary-archive PG16 audit — `171/171`, zero checksum mismatch/residue, P0/P1/P2=0. Rejected CI `30500793016` (`run #49`) не является evidence. До activation coordinator обязан делать один issue RPC на короткую transaction, а полный `seal→RPC→persisted→open` PG test обязателен. Admin routes остаются `503`; SMTP, worker, `HOLD→PENDING`, persisted GO, trial, tenant mutation, deploy и tester account не входят; внешний `NO-GO` не изменён                                                                                                                      | BETA-IAM-004A, BETA-IAM-004F, BETA-SEC-008..010                             |
 | BETA-IAM-004H | P0        | Готово        | `SIGNED_ADMISSION_PROVENANCE_ASSERT_V1`                   | Migration 172 создаёт sealed Ed25519-bound gate attestations, tenant admission decision и exact three-gate links. Подпись связывает заявленные release SHA/environment/schema/artifact/policy/database identity, tenant, locator, исходную reservation claim/execution/profile revisions, claimed `shellEvidenceDigest` и deterministic six-module profile digest; assert принимает current identity только как exact `RESERVATION` либо доказанный immutable command + live `OWNER/NETWORK` invite + encrypted `HOLD` outbox (`ISSUED_HOLD`). Сам checkpoint не доказывает, что заявленная database/release identity является фактическим текущим контекстом процесса, а `shellEvidenceDigest` — фактическим Store/OWNER override/provisioning-audit состоянием. Решение допускает только create/assert/revoke; consume запрещён до activation. Production root registry пуст и fail-closed; application/PUBLIC не имеют table/column/function privileges, runtime allowlist остаётся `7`. PG16 clean/populated/hostile ACL/races, exact catalog verify, `seal→one RPC→persisted→open`, LF-stable archive и independent reviews приняты. Migration `58f0ee03...`, catalog snapshot `3f53d6aa...`, implementation `12d574166bffe860205b128dd9d092f4f54514fc`, CI `30509157338` (`run #53`) — `3/3 PASS`, P0/P1/P2=0. `HOLD→PENDING`, independently acquired actual-context/actual-shell binding, SMTP/worker, tenant/trial mutation, route, production deploy и tester account не входят; внешний `NO-GO` не изменён | BETA-IAM-004G, BETA-TEN-008, BETA-SEC-008..010                              |
-| BETA-IAM-004I | P0        | В работе      | `ACTIVATE_AND_RELEASE_OWNER_INVITE_V1`                    | Sealed activation writer под persisted GO и фиксированным lock order независимо доказывает actual DB/release/environment/schema/artifact/policy context и exact tenant shell, затем одной transaction выполняет dormant OWNER issue, повторный assert, signed finite trial, `ACTIVE/OWNER_INVITED`, GO consume и единственный `HOLD→PENDING`; replay не создаёт новый secret и до возврата receipt повторно проверяет current marker, exact `session_user` name/OID и глобальную coordinator ACL. Trust разделён на admission, CI build и ops deployment; build/deployment production roots пока пусты. Migration 173 только добавляет dormant `PENDING`. Локально приняты populated `172→173→174`, clean `174/174`, hostile ACL rollback/retry, `1 ACTIVATED + 99 REPLAYED`, fault rollback, PUBLIC/direct enum-domain type drift, PUBLIC/bystander/recreated-role rejection, exact typed provenance replay и runtime enrollment `7` RPC / `12` tables / `232` columns / `2` sealed types; migration SHA: 173 `8c613bce...`, 174 `df7b7869...`; independent reviews P0/P1/P2=0. Статус остаётся `LOCAL_ACCEPTED / EXACT_SHA_CI_PENDING / NOT_DEPLOYED`; до exact-SHA CI, product approval trial duration, production root enrollment, production-like rehearsal и delivery worker/SMTP внешний доступ — `NO-GO`                                                                                                                                                                                                     | BETA-IAM-004H, BETA-TEN-008, BETA-OPS-002, BETA-OPS-004                     |
+| BETA-IAM-004I | P0        | Готово        | `ACTIVATE_AND_RELEASE_OWNER_INVITE_V1`                    | Sealed activation writer под persisted GO и фиксированным lock order независимо доказывает actual DB/release/environment/schema/artifact/policy context и exact tenant shell, затем одной transaction выполняет dormant OWNER issue, повторный assert, signed finite trial, `ACTIVE/OWNER_INVITED`, GO consume и единственный `HOLD→PENDING`; replay не создаёт новый secret и до возврата receipt повторно проверяет current marker, exact `session_user` name/OID и глобальную coordinator ACL. Trust разделён на admission, CI build и ops deployment; production roots пока пусты. Accepted populated `172→173→174`, clean `174/174`, hostile ACL rollback/retry, `1 ACTIVATED + 99 REPLAYED`, fault rollback, PUBLIC/direct enum-domain type drift, PUBLIC/bystander/recreated-role rejection, exact typed provenance replay и runtime enrollment `7` RPC / `12` tables / `232` columns / `2` sealed types. Implementation `2540088076997ef228cd68e42165e857575aad86`; final accepted evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`; CI `30592173595` (`run #57`) — `3/3 PASS`; independent reviews P0/P1/P2=0. Runs `30560278803` (`#55`) и `30587233880` (`#56`) отклонены и не являются evidence. Статус: `ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`; product approval trial duration, production root enrollment, production-like rehearsal, delivery worker/SMTP, admin route, deployment и tester invite не входят в checkpoint и остаются закрытыми | BETA-IAM-004H, BETA-TEN-008, BETA-OPS-002, BETA-OPS-004                     |
+| BETA-IAM-004J | P0        | Запланировано | `LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1`                   | Отдельный encrypted leased delivery worker с CAS/retry/reconciliation, verified SMTP/TLS/sender/Message-ID и protected resend/reissue/revoke. Никакой production SMTP, runtime grant, route или фактической отправки до отдельной engineering и operational acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | BETA-IAM-004I, BETA-SEC-008..010, BETA-OPS-004                              |
 | BETA-IAM-005  | P0        | В работе      | Ограничить особо чувствительное повышение привилегий      | Generic users/invites API не назначает OWNER; добавление/смена OWNER выполняется только отдельным атомарным owner-transfer workflow; Platform Admin нельзя назначить tenant API                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | BETA-IAM-001, BETA-IAM-003                                                  |
 | BETA-IAM-006  | P0        | Запланировано | Свести backend/frontend permission maps                   | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | BETA-IAM-001                                                                |
 | BETA-IAM-007  | P0        | Запланировано | Добавить журнал доступа и управление сессиями             | Владелец видит активных пользователей и security events своей сети; может блокировать аккаунт и отзывать его сессии                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | BETA-SEC-010                                                                |
@@ -3169,9 +3170,12 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
 возобновить только по отдельному решению о contingency/enterprise isolation;
 эта lane не переносит approvals или evidence в shared последовательность.
 
-1. Текущий schema target — локальный candidate `CURRENT_174`; его exact-SHA
-   CI и remote engineering acceptance ещё не завершены. Последний принятый
-   remote engineering checkpoint — `CURRENT_172`. Historical
+1. Текущий engineering-accepted schema target — `CURRENT_174`.
+   Implementation `2540088076997ef228cd68e42165e857575aad86`, final accepted
+   evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`, GitHub CI
+   `30592173595` (`run #57`) — `3/3 PASS`; independent reviews —
+   P0/P1/P2=0. `CURRENT_172` теперь является historical accepted
+   prerequisite. Historical
    `CURRENT_171` подтвердил local PostgreSQL 16 clean
    `171/171`, populated `170 → 171`, hostile-default-ACL rollback/retry,
    exact seven-RPC allowlist, zero sealed table/column privileges и dormant
@@ -3369,8 +3373,8 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
 
 ## 10. `BETA-IAM-004I`: instance-bound activation hardening — 30.07.2026
 
-Статус: `LOCAL ACCEPTED / EXACT-SHA CI PENDING / NOT DEPLOYED /
-EXTERNAL PILOT NO-GO`.
+Статус:
+`ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`.
 
 Migration `CURRENT_174` дополнительно обязана:
 
@@ -3400,13 +3404,14 @@ Required acceptance:
 2. real provision → signed GO → activation → replay/race;
 3. hostile `pg_authid` grant rejection и восстановление;
 4. missing-anchor rejection, exact `relpersistence='u'`, immutable anchor;
-5. simulated clone-loss test в CI и отдельный real base-backup/promotion drill
-   в production-like rehearsal;
+5. simulated clone-loss test в CI; отдельный real base-backup/promotion drill
+   остаётся последующим production-like launch gate и не входит в bounded
+   engineering acceptance;
 6. runtime enrollment: seven application RPC, все runtime-release routines и
    sealed relations excluded, zero generated role residue;
 7. exact-SHA CI и независимый security review без P0/P1.
 
-Локальное evidence 30.07.2026:
+Engineering acceptance evidence 30.07.2026:
 
 - migration 173:
   `8c613bcea1d31bd4422c3c14dfd64728ab8244a8e2a996df9c22f6698cc0f8ff`;
@@ -3424,13 +3429,32 @@ Required acceptance:
 - clean runtime enrollment: `7` application RPC; `5` pending, `9` admission и
   `21` runtime-release functions denied; zero privileges на `12` sealed
   tables, `232` columns и `2` types — pass;
+- bounded `CURRENT_174` legacy identity inventory: `133` columns, из них
+  `110` exact identity, `73` constraints, `38` indexes, `42` exact functions,
+  `9` enum labels, `6` triggers и `44` RI triggers; missing/body/overload,
+  catalog/ACL/authority drift fail-closed, cleanup residue `0/0/0/0` — pass;
 - Prisma validate/generate, database/API typecheck, targeted ESLint, Prettier,
   static contracts и focused API `38/38 suites`, `645/645 tests` — pass;
 - два финальных независимых review: P0/P1/P2=0.
 
-Это локальное evidence не заменяет exact-SHA GitHub CI и не является
-production-like rehearsal или deploy. До remote CI checkpoint не переводится
-в `ENGINEERING_ACCEPTED`.
+Implementation commit:
+`2540088076997ef228cd68e42165e857575aad86`.
+
+Final accepted evidence head:
+`eb056a491bc7ad161addfd8c4d859606231f7f43`.
+
+GitHub CI
+[`30592173595`](https://github.com/boozik3412/leetplus/actions/runs/30592173595)
+(`run #57`) — `3/3 PASS`; independent reviews — P0/P1/P2=0.
+
+Rejected `30560278803` (`run #55`) не является evidence: PostgreSQL step
+`Verify database connectivity and migration state` выявил неадаптированный к
+fail-closed activation guard `CURRENT_174` baseline smoke. Rejected
+`30587233880` (`run #56`) также не является evidence: legacy identity
+inventory ожидал historical catalog `CURRENT_171/172`, а не фактический
+`CURRENT_174`.
+
+Это engineering evidence не является production-like rehearsal или deploy.
 
 Этот checkpoint не включает SMTP delivery worker, production root enrollment,
 production-like rehearsal, deploy, создание tester account или выдачу invite.

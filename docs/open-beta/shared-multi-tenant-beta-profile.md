@@ -3,9 +3,9 @@
 | Поле             | Значение                                                     |
 | ---------------- | ------------------------------------------------------------ |
 | Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                |
-| Версия           | 1.14                                                         |
+| Версия           | 1.15                                                         |
 | Дата             | 30.07.2026                                                   |
-| Schema target    | local `CURRENT_174`; last remote accepted `CURRENT_172`      |
+| Schema target    | accepted `CURRENT_174`; historical `CURRENT_172`             |
 | Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены      |
 | Формат           | Первый friendly external club, invite-only                   |
 | Data plane       | Shared web, API, workers, PostgreSQL и Telegram              |
@@ -139,13 +139,16 @@ prerequisite. Ни local, ни remote engineering evidence не являются
 approval.
 
 Historical `CURRENT_171` добавил dormant `NETWORK OWNER` issue и encrypted
-`HOLD` outbox. Последний remote-accepted `CURRENT_172` добавил signed
-non-consuming admission provenance: exact-head
+`HOLD` outbox. Historical accepted `CURRENT_172` добавил signed non-consuming
+admission provenance: exact-head
 `12d574166bffe860205b128dd9d092f4f54514fc`, CI `30509157338`
-(`run #53`) — `3/3 PASS`. Local candidate `CURRENT_174` реализует отдельные
-build/deployment provenance, instance-bound activation role и одну atomic
-transaction с finite trial, GO consume и `HOLD→PENDING`; он остаётся
-`LOCAL_ACCEPTED / EXACT_SHA_CI_PENDING / NOT_DEPLOYED`. Production roots,
+(`run #53`) — `3/3 PASS`. Engineering-accepted `CURRENT_174` реализует
+отдельные build/deployment provenance, instance-bound activation role и одну
+atomic transaction с finite trial, GO consume и `HOLD→PENDING`.
+Implementation `2540088076997ef228cd68e42165e857575aad86`, final accepted
+evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`, CI `30592173595`
+(`run #57`) — `3/3 PASS`; independent reviews — P0/P1/P2=0. Статус:
+`ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`. Production roots,
 production-like rehearsal, delivery worker/SMTP и admin route остаются
 pending, поэтому внешний доступ — `NO-GO`.
 
@@ -314,7 +317,7 @@ system/custom roles, capabilities, `NETWORK | STORES` scope и audit.
 
 Дополнительно до любого внешнего доступа обязательны production-like
 upgrade/rollback/zero-diff и полноценная two-tenant rehearsal. Ни historical
-`CURRENT_170/171`, ни remote-accepted `CURRENT_172`, ни local
+`CURRENT_170/171/172`, ни engineering-accepted, но `NOT_DEPLOYED`
 `CURRENT_174` PostgreSQL evidence не заменяют эти gates.
 
 Немедленные stop conditions:

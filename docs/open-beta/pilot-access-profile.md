@@ -3,17 +3,18 @@
 | Поле                            | Значение                                                                  |
 | ------------------------------- | ------------------------------------------------------------------------- |
 | Profile key                     | `OPEN_BETA_FULL_OPERATIONS_V1`                                            |
-| Версия                          | 1.17                                                                      |
+| Версия                          | 1.18                                                                      |
 | Дата                            | 30.07.2026                                                                |
 | Статус                          | `NO-GO`; control-plane foundation реализован, adoption pending            |
 | Выдача                          | Invite-only, отдельный Tenant на независимую сеть                         |
 | Область                         | Собственная сеть или явно разрешённые клубы                               |
 | Назначение                      | Первый shared external tenant и последующая когорта                       |
-| Schema target                   | local candidate `CURRENT_174`; exact-SHA CI pending                       |
+| Schema target                   | engineering-accepted `CURRENT_174`; `NOT_DEPLOYED`                        |
 | Previous accepted baseline      | PR-head-associated merge-ref `bbef153a...` / `30443837684`; not exact-SHA |
 | Previous accepted exact-head    | `d525b736...` / CI `30447467729`; `3/3 PASS`                              |
 | Previous accepted checkpoint    | exact-head `3b8228dd...` / CI `30460154200`; `3/3 PASS`                   |
-| Last remote accepted checkpoint | `CURRENT_172`: `12d5741...` / CI `30509157338`; `3/3 PASS`                |
+| Current accepted checkpoint     | `CURRENT_174`: `eb056a4...` / CI `30592173595`; `3/3 PASS`                |
+| Historical accepted prerequisite | `CURRENT_172`: `12d5741...` / CI `30509157338`; `3/3 PASS`               |
 | Historical locator checkpoint   | `CURRENT_170`: `8dfe219...` / CI `30493779099`; `3/3 PASS`                |
 | Historical accepted checkpoint  | `CURRENT_169` exact-head `f5d39fd...` / CI `30467882578`; `3/3 PASS`      |
 | Accepted prerequisite           | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS                 |
@@ -34,11 +35,14 @@ replay assert; runtime allowlist содержит exact семь RPC при zero
 `IdentityEmailClaim` table privileges. Exact-head `8dfe219...` / CI
 `30493779099` (`run #47`) принят, `3/3 PASS`; independent review — `PASS` без
 P0/P1/P2. Historical `CURRENT_171` добавил dormant issue-by-locator и
-encrypted `HOLD` outbox, а последний remote-accepted `CURRENT_172` —
-non-consuming signed admission provenance. Local candidate `CURRENT_174`
+encrypted `HOLD` outbox, а historical accepted `CURRENT_172` —
+non-consuming signed admission provenance. Engineering-accepted `CURRENT_174`
 реализует atomic activation, finite trial, GO consume и единственный
-`HOLD→PENDING`, но остаётся
-`LOCAL_ACCEPTED / EXACT_SHA_CI_PENDING / NOT_DEPLOYED`. Production roots,
+`HOLD→PENDING`. Implementation
+`2540088076997ef228cd68e42165e857575aad86`, final accepted evidence head
+`eb056a491bc7ad161addfd8c4d859606231f7f43`, CI `30592173595`
+(`run #57`) — `3/3 PASS`; статус
+`ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`. Production roots,
 production-like rehearsal, delivery worker/SMTP, admin route,
 job/Telegram/integration adoption и полная role matrix ещё не приняты.
 Initial shared-beta profile содержит пять product modules и supporting
@@ -60,8 +64,9 @@ Local public-only pinned-path evidence прошёл admission suite `19/19`; е�
 исторический prerequisite вместе с authority/application/PostgreSQL gates
 прошёл remote CI как `CURRENT_165` на
 `4bd6a036...` / `30428288353`; documentation/evidence successor
-`7c20adec...` / `30429463161` также зелёный. Current local schema target —
-`CURRENT_174`; последний remote-accepted target — `CURRENT_172`. Previous
+`7c20adec...` / `30429463161` также зелёный. Current
+engineering-accepted schema target — `CURRENT_174`; `CURRENT_172` сохраняется
+как historical accepted prerequisite. Previous
 accepted engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856` / merge-ref CI `30443837684`
 (`run #23`), не exact-SHA checkout evidence: `3/3 PASS`, PostgreSQL job

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.41                                         |
+| Версия           | 1.42                                         |
 | Дата             | 30.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -211,7 +211,7 @@ enterprise-isolation option и не сокращает shared gates.
     production и tester account не входят; статус
     `ENGINEERING_ACCEPTED / NO-GO`.
 33. [Atomic OWNER activation and release](./activate-and-release-owner-invite.md) —
-    `BETA-IAM-004I` локально принят и ожидает exact-SHA GitHub CI. Migration
+    `BETA-IAM-004I` принят как bounded engineering checkpoint. Migration
     173 изолированно добавляет
     dormant enum label `PENDING`, но не разрешает ни одного перехода и не
     выдаёт новых privileges. Отдельный fail-closed verifier требует две
@@ -221,7 +221,7 @@ enterprise-isolation option и не сокращает shared gates.
     `trialPolicyVersion + trialDurationSeconds` без product default.
     Deployment связывает build с одноразовым DB challenge, environment,
     database identity и exact dedicated activation `session_user` role/OID.
-    Current candidate усиливает identity до v2: owner-only `UNLOGGED` instance
+    Accepted checkpoint усиливает identity до v2: owner-only `UNLOGGED` instance
     anchor плюс `pg_postmaster_start_time()` делают copied/restarted database
     fail-closed до нового signed marker. Dedicated role проверяется по полной
     hostile matrix, включая cross-database/TEMP, FDW/parameter/system/PUBLIC
@@ -235,25 +235,28 @@ enterprise-isolation option и не сокращает shared gates.
     Runtime enrollment сохранил `7` application RPC, запретил `5 + 9 + 21`
     private functions и подтвердил zero privileges на `12` tables, `232`
     columns и `2` sealed types.
-    Migration SHA-256: 173 `8c613bce...`, 174 `df7b7869...`; independent
-    reviews — P0/P1/P2=0. `CURRENT_174` остаётся
-    `LOCAL_ACCEPTED / EXACT_SHA_CI_PENDING / NOT_DEPLOYED`; immutable
+    Migration SHA-256: 173 `8c613bce...`, 174 `df7b7869...`.
+    Implementation
+    `2540088076997ef228cd68e42165e857575aad86`; final accepted evidence head
+    `eb056a491bc7ad161addfd8c4d859606231f7f43`; GitHub CI
+    [`30592173595`](https://github.com/boozik3412/leetplus/actions/runs/30592173595)
+    (`run #57`) — `3/3 PASS`; independent reviews — P0/P1/P2=0. Статус:
+    `ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`. Immutable
     production artifact/deployment marker, утверждённая длительность trial,
     root enrollment, SMTP delivery и production-like rehearsal всё ещё
     обязательны, поэтому внешний статус остаётся `NO-GO`.
+    Следующий bounded checkpoint — `BETA-IAM-004J /
+    LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1`; production SMTP, worker и routes
+    этим acceptance не включены.
 
-Текущий schema target рабочего кандидата — `CURRENT_174`. Последний
-engineering-accepted target до exact-SHA CI/acceptance `BETA-IAM-004I` —
-`CURRENT_172`. Для него локальный
-PostgreSQL 16 подтвердил clean `172/172`, populated `171→172`, exact
-three-gate create/assert/revoke, reservation/issued-HOLD ветки, hostile
-TABLE/FUNCTION/TYPE/COLUMN ACL rollback/retry, create/issue/claim/revoke races,
-runtime allowlist `7` и zero generated residue. Separate API
-`seal→one RPC→persisted→open` test, catalog self-verification, exact release
-artifact и ordinary archive `172/172` LF portability — `PASS`. Exact-head
-`12d574166bffe860205b128dd9d092f4f54514fc` принят GitHub CI
-[`30509157338`](https://github.com/boozik3412/leetplus/actions/runs/30509157338)
-(`run #53`), `3/3 PASS`; independent reviews — P0/P1/P2=0.
+Текущий engineering-accepted schema target — `CURRENT_174`.
+Implementation `2540088076997ef228cd68e42165e857575aad86`, final accepted
+evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`, CI
+[`30592173595`](https://github.com/boozik3412/leetplus/actions/runs/30592173595)
+(`run #57`) — `3/3 PASS`. `CURRENT_172` сохраняется как historical accepted
+prerequisite, а не current target. Он был принят exact-head
+`12d574166bffe860205b128dd9d092f4f54514fc` / CI `30509157338`
+(`run #53`) — `3/3 PASS`.
 
 Предыдущий принятый schema target `CURRENT_171`: локальный
 PostgreSQL 16 подтвердил clean deploy `171/171`, populated `170 → 171`,

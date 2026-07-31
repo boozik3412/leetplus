@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.15                                                            |
+| Версия           | 1.16                                                            |
 | Дата             | 30.07.2026                                                      |
-| Статус           | local `CURRENT_174`; exact-SHA CI, delivery и release `NO-GO`   |
+| Статус           | `CURRENT_174 ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO` |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
 | Scope            | Первый OWNER нового tenant, email delivery, activation, suspend |
 
@@ -108,7 +108,8 @@ identity-email:v1:<canonical-email>
 ```
 
 Migration `20260729210000_identity_email_claim_write_boundary` ввела sealed
-runtime DML. После migrations 169/170 текущий candidate allowlist содержит
+runtime DML. Принятый identity-boundary allowlist после migrations 169/170
+содержит
 пять identity RPC:
 
 - `reserve_invite_v2`;
@@ -155,10 +156,13 @@ independent review — `PASS` без P0/P1/P2. Подробный контрак
 Исторические строки ещё требуют inventory/backfill. Historical
 `CURRENT_171` реализовал dormant issue-by-locator/encrypted `HOLD` aggregate,
 но не зарегистрировал его в application runtime и не разрешил отправку.
-Последний remote-accepted `CURRENT_172` добавил signed non-consuming
-admission provenance. Local candidate `CURRENT_174` уже реализует atomic
-activation, finite trial, GO consume и единственный `HOLD→PENDING`, но
-остаётся `LOCAL_ACCEPTED / EXACT_SHA_CI_PENDING / NOT_DEPLOYED`.
+Historical accepted `CURRENT_172` добавил signed non-consuming admission
+provenance. Engineering-accepted `CURRENT_174` реализует atomic activation,
+finite trial, GO consume и единственный `HOLD→PENDING`. Implementation
+`2540088076997ef228cd68e42165e857575aad86`, final accepted evidence head
+`eb056a491bc7ad161addfd8c4d859606231f7f43`, CI `30592173595`
+(`run #57`) — `3/3 PASS`; статус
+`ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`.
 Production roots, production-like rehearsal, controlled delivery/SMTP,
 admin route и verified mail ещё не приняты, поэтому identity workflow и
 внешний доступ остаются `NO-GO`. Подробные checkpoints:
@@ -200,7 +204,7 @@ Raw 256-bit token:
 - никогда не возвращается Platform Admin или tenant actor.
 
 Целевой delivery worker обязан использовать `FOR UPDATE SKIP LOCKED`, lease и
-CAS по `leaseVersion`; local `CURRENT_174` его ещё не реализует. SMTP должен
+CAS по `leaseVersion`; accepted `CURRENT_174` его ещё не реализует. SMTP должен
 вызываться только после commit. Стабильный `Message-ID` является только
 correlation evidence, а не provider idempotency. Timeout/crash после provider
 attempt переводит запись в `RECONCILIATION_REQUIRED`/quarantine; blind
@@ -214,7 +218,7 @@ automatic resend запрещён до provider/operator reconciliation.
 executionRevision
 ```
 
-Следующие optional Tenant projection-поля остаются pending; local
+Следующие optional Tenant projection-поля остаются pending; accepted
 `CURRENT_174` хранит immutable activation command/receipt в отдельных sealed
 relations и не делает эти поля обязательными:
 
@@ -310,9 +314,9 @@ Provisioning не запускает trial и не создаёт mail outbox.
 
 Service-level shell, writer boundary, PII-free locator replay и dormant
 encrypted `HOLD` aggregate реализованы в historical accepted `CURRENT_171`.
-Remote-accepted `CURRENT_172` добавил admission provenance, а local
-`CURRENT_174` — atomic activation/trial/`HOLD→PENDING`. Оба admin route
-остаются намеренно закрыты:
+Historical `CURRENT_172` добавил admission provenance, а
+engineering-accepted, но `NOT_DEPLOYED` `CURRENT_174` — atomic
+activation/trial/`HOLD→PENDING`. Оба admin route остаются намеренно закрыты:
 
 ```text
 503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING
@@ -365,9 +369,9 @@ known-answer vector. Exact-head
 
 ### 5.2. Activation
 
-Local candidate `CURRENT_174` реализует database coordinator этой операции и
-прошёл local PostgreSQL acceptance, но ожидает exact-SHA GitHub CI. HTTP route
-ниже фиксирует целевой operator contract и не зарегистрирован для production;
+`CURRENT_174` database coordinator принят как bounded engineering checkpoint.
+HTTP route ниже фиксирует целевой operator contract и не зарегистрирован для
+production;
 существующие provisioning/revoke admin routes продолжают отвечать hard `503`.
 Production roots, rehearsal, SMTP worker и фактическая выдача invite
 отсутствуют.
@@ -579,19 +583,22 @@ Two-tenant:
   idempotency command и PII-free audit/receipt; RPC dormant и
   `EXCLUDED_PENDING`; exact-head `7fca785...` / CI `30501299486`
   (`run #50`) — `3/3 PASS`;
-- migration 172 — последний remote-accepted checkpoint: signed
+- migration 172 — historical accepted checkpoint: signed
   non-consuming admission provenance; exact-head `12d5741...` /
   CI `30509157338` (`run #53`) — `3/3 PASS`;
-- migrations 173/174 — local candidate `CURRENT_174`: dormant enum expand,
+- migrations 173/174 — engineering-accepted `CURRENT_174`: dormant enum expand,
   independent build/deployment provenance, instance-bound activation role и
-  atomic activation с finite trial, GO consume и `HOLD→PENDING`; status
-  `LOCAL_ACCEPTED / EXACT_SHA_CI_PENDING / NOT_DEPLOYED`;
+  atomic activation с finite trial, GO consume и `HOLD→PENDING`;
+  implementation `2540088076997ef228cd68e42165e857575aad86`, final accepted
+  evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`, CI `30592173595`
+  (`run #57`) — `3/3 PASS`; status
+  `ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`;
 - shell-only service: `PILOT/SUSPENDED/PROVISIONING`, inactive Store, six-row
   profile, HMAC audit, без User/UserInvite/token/trial/outbox;
 - local PostgreSQL 16: historical `169/169` identity `1/99`,
   revoke→reserve и shell `2/2`; locator populated `169 → 170`; historical
-  dormant checkpoint clean `171/171`, populated `170 → 171`; local current
-  candidate clean `174/174`, populated `172 → 173 → 174`, hostile ACL,
+  dormant checkpoint clean `171/171`, populated `170 → 171`; accepted current
+  checkpoint clean `174/174`, populated `172 → 173 → 174`, hostile ACL,
   `1 ACTIVATED + 99 REPLAYED`, fault rollback и exact typed provenance
   replay;
 - engineering exact-head `CURRENT_169`
@@ -628,26 +635,29 @@ Two-tenant:
 2. Использовать принятый `MIGRATION_170_ACTIVATION_LOCATOR` exact-head и
    release-bound inventory; full-table/column-wide `IdentityEmailClaim`
    SELECT fallback остаётся запрещён.
-3. Получить exact-SHA GitHub CI для local `CURRENT_174`; до этого не переводить
-   `BETA-IAM-004I` в `ENGINEERING_ACCEPTED`. Historical `CURRENT_171` и
-   remote-accepted `CURRENT_172` использовать только как prerequisites;
-   dormant issue RPC, provider и routes не включать.
-4. Отдельно утвердить finite trial duration, провести reviewed enrollment
+3. Использовать accepted `BETA-IAM-004I / CURRENT_174` как engineering
+   prerequisite. Historical `CURRENT_171/172` использовать только как
+   prerequisites; dormant provider и routes не включать.
+4. Следующим отдельным checkpoint реализовать
+   `BETA-IAM-004J / LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1`: database/runtime
+   lease/CAS/retry/reconciliation boundary и fake-SMTP concurrency/security
+   evidence без production provider.
+5. Отдельно утвердить finite trial duration, провести reviewed enrollment
    production build/deployment roots и production-like
    base-backup/promotion/rollback rehearsal. Пустые production registries
    сохраняют fail-closed.
-5. Реализовать encrypted leased delivery worker с CAS/retry/reconciliation,
-   production SMTP/TLS/sender/Message-ID contract и protected
-   resend/reissue/revoke; только после этого отдельно открыть reviewed admin
-   route. До этого обе admin route сохраняют `503`.
-6. Принять production proxy/APM/logging/CSP/browser/mail-client evidence для
+6. После engineering acceptance 004J отдельно принять production
+   SMTP/TLS/sender/Message-ID contract и protected resend/reissue/revoke;
+   только после этого открыть reviewed admin route. До этого обе admin route
+   сохраняют `503`.
+7. Принять production proxy/APM/logging/CSP/browser/mail-client evidence для
    реализованного fragment + fixed POST-body transport и удалить INTERNAL
    raw `registrationUrl` compatibility residual после готовности outbox.
-7. Выполнить полный real PostgreSQL delivery/reissue/revoke/accept concurrency
+8. Выполнить полный real PostgreSQL delivery/reissue/revoke/accept concurrency
    matrix, two-tenant tests и end-to-end verified mail acceptance.
-8. Довести durable lease/effect fencing для оставшихся workers, guest и
+9. Довести durable lease/effect fencing для оставшихся workers, guest и
    Telegram surfaces поверх реализованного `executionRevision`.
-9. Провести production-like inventory/admission, upgrade/rollback/zero-diff,
+10. Провести production-like inventory/admission, upgrade/rollback/zero-diff,
    backup/restore и two-tenant rehearsal; только затем принимать отдельный
    launch GO, production deployment и owner invite.
 

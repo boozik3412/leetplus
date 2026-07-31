@@ -1,7 +1,7 @@
 # ACTIVATE_AND_RELEASE_OWNER_INVITE_V1
 
 Статус:
-`LOCAL_ACCEPTED / EXACT_SHA_CI_PENDING / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`.
+`ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`.
 
 Задача `BETA-IAM-004I` завершает только атомарную database-границу первичной
 активации внешнего tenant. Она не открывает Platform Admin route, не включает
@@ -316,7 +316,8 @@ inactive: OWNER сначала принимает invite, добавляет с�
 - admission/build/deployment root separation, build↔challenge↔deployment
   binding и physical-clone DB identity mismatch; test обязан доказать
   `UNLOGGED` persistence, fail-closed при отсутствующем anchor и boot-epoch
-  binding, а production-like rehearsal — реальный base-backup/promotion;
+  binding. Реальный base-backup/promotion остаётся отдельным последующим
+  production-like launch gate и не входит в bounded engineering acceptance;
 - exact shell positive fixture и negative drift matrix;
 - `100` concurrent activation replay: `1 ACTIVATED + 99 REPLAYED`;
 - activation races против gate/decision revocation, profile/store/override/audit
@@ -339,10 +340,24 @@ inactive: OWNER сначала принимает invite, добавляет с�
 - Prisma validation, application tests, exact-SHA CI и independent security
   review.
 
-### Локальное acceptance evidence — 30.07.2026
+### Engineering acceptance evidence — 30.07.2026
 
-Текущий рабочий кандидат прошёл локальную инженерную приёмку, но ещё не
-является `ENGINEERING_ACCEPTED`, пока не пройдёт GitHub CI точного commit SHA:
+Implementation commit:
+`2540088076997ef228cd68e42165e857575aad86`.
+
+Final accepted evidence head:
+`eb056a491bc7ad161addfd8c4d859606231f7f43`.
+
+GitHub CI
+[`30592173595`](https://github.com/boozik3412/leetplus/actions/runs/30592173595)
+(`run #57`) — `3/3 PASS`; independent reviews — P0/P1/P2=0.
+
+Rejected `30560278803` (`run #55`) не является evidence: PostgreSQL step
+`Verify database connectivity and migration state` обнаружил, что прежний
+baseline smoke не учитывал fail-closed activation guard `CURRENT_174`.
+Rejected `30587233880` (`run #56`) также не является evidence: PostgreSQL
+legacy identity inventory ожидал historical catalog `CURRENT_171/172`, а не
+фактический `CURRENT_174`.
 
 - migration 173 SHA-256:
   `8c613bcea1d31bd4422c3c14dfd64728ab8244a8e2a996df9c22f6698cc0f8ff`;
@@ -368,6 +383,11 @@ inactive: OWNER сначала принимает invite, добавляет с�
   application RPC, запрет `5` pending, `9` admission и `21` runtime-release
   functions, а также zero privileges на `12` sealed tables, `232` columns и
   `2` types;
+- bounded `CURRENT_174` legacy identity inventory подтвердил `133` columns,
+  из них `110` exact identity, `73` constraints, `38` indexes, `42` exact
+  functions, `9` enum labels, `6` triggers и `44` RI triggers; missing,
+  body/overload, catalog/ACL/authority drift отклоняются fail-closed, cleanup
+  residue — `0/0/0/0`;
 - static activation contracts: `10 PASS + 1` ожидаемый env skip; Prisma
   validate/generate, database/API typecheck, targeted ESLint, Prettier и
   focused API `38 suites / 645 tests` прошли;
@@ -382,7 +402,8 @@ invite.
 Даже после acceptance этого checkpoint внешний тест остаётся `NO-GO`, пока не
 готовы:
 
-- lease/CAS/retry identity mail worker;
+- `BETA-IAM-004J / LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1`:
+  lease/CAS/retry/reconciliation identity mail worker;
 - production SMTP/TLS/sender/Message-ID contract;
 - verified delivery и protected resend/reissue/revoke;
 - production-like inventory/admission на фактическом окружении;

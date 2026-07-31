@@ -2,7 +2,7 @@
 
 This runbook covers the additive reward-materializer migration series from
 `20260718150000_guest_game_origin_fallback` through
-`20260718190100_staff_chat_message_dedupe_index`. Indexes on populated tables
+`20260731090000_guest_game_case_reward_lifecycle`. Indexes on populated tables
 are deliberately isolated into one-statement migrations so PostgreSQL can run
 each `CREATE INDEX CONCURRENTLY` outside an implicit multi-statement transaction.
 
@@ -32,6 +32,7 @@ Use `KILL_SWITCH=true` only when pausing all new reward claims is intended.
 3. Inspect `leetplus-api.service` with `systemctl show -p WorkingDirectory -p EnvironmentFiles -p ExecStart`. Do not print the complete environment.
 4. Confirm the real deployment script builds API and web sequentially. Never run the root `pnpm build` on the VDS.
 5. Build the API before applying migrations.
+6. Treat the case lifecycle as two deployments. Apply the expand migration and replace every API process before creating or applying its contract migration.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -71,7 +72,8 @@ WHERE migration_name IN (
   '20260718150800_guest_activity_fact_fallback_queue_index',
   '20260718180000_guest_game_effect_postings',
   '20260718190000_guest_game_reward_effect_outbox',
-  '20260718190100_staff_chat_message_dedupe_index'
+  '20260718190100_staff_chat_message_dedupe_index',
+  '20260731090000_guest_game_case_reward_lifecycle'
 )
    OR (finished_at IS NULL AND rolled_back_at IS NULL)
 ORDER BY started_at;
@@ -84,8 +86,28 @@ FROM (
     ('effect_table', to_regclass('public."GuestGameRewardEffect"')),
     ('chat_dedupe_index', to_regclass('public.staff_chat_message_tenant_dedupe_unique')),
     ('intent_ready_index', to_regclass('public.guest_game_reward_intent_ready_partial_idx')),
-    ('effect_ready_index', to_regclass('public.guest_game_reward_effect_ready_partial_idx'))
+    ('effect_ready_index', to_regclass('public.guest_game_reward_effect_ready_partial_idx')),
+    ('case_source_reward_index', to_regclass('public.guest_game_entitlement_source_reward_uidx'))
 ) AS objects(name, object_oid);
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'GuestGameEntitlement'
+  AND column_name = 'sourceRewardId';
+
+SELECT conname, contype
+FROM pg_constraint
+WHERE conname = 'GuestGameEntitlement_sourceRewardId_fkey';
+
+SELECT event_object_table, trigger_name
+FROM information_schema.triggers
+WHERE trigger_schema = 'public'
+  AND trigger_name IN (
+    'GuestGameReward_guard_case_parent_claim',
+    'GuestGameEntitlement_capture_legacy_source_reward'
+  )
+ORDER BY trigger_name;
 
 SELECT relname, n_live_tup, n_dead_tup,
        pg_size_pretty(pg_relation_size(relid)) AS heap_size,
@@ -93,7 +115,8 @@ SELECT relname, n_live_tup, n_dead_tup,
 FROM pg_stat_user_tables
 WHERE relname IN (
   'GuestGameEvent', 'GuestGameReward', 'GuestGameRuleDecision',
-  'GuestGameEntitlement', 'GuestActivityRawRecord', 'GuestActivityFact',
+  'GuestGameEntitlement', 'GuestGameRewardWalletItem',
+  'GuestGameRewardEffect', 'GuestActivityRawRecord', 'GuestActivityFact',
   'StaffChatMessage'
 )
 ORDER BY pg_total_relation_size(relid) DESC;
@@ -110,6 +133,13 @@ ORDER BY xact_start;
 ```
 
 Do not migrate while long or `idle in transaction` sessions touch the target tables. Each index on an existing hot table has its own single-statement `CREATE INDEX CONCURRENTLY` migration; do not merge those files. Nullable column additions still require a short `ACCESS EXCLUSIVE` lock.
+
+The case-lifecycle expand migration additionally takes `SHARE ROW EXCLUSIVE`
+locks on reward, wallet, and effect in the legacy write order. This serializes
+its frozen repair set with an in-flight old claim. After commit, compatibility
+triggers normalize supported old-binary case-parent writes and reject a stale
+ordinary claim atomically. Those guards stay installed until the separate
+contract deployment has confirmed that every old API process was replaced.
 
 ## Apply and verify
 
@@ -147,6 +177,7 @@ WHERE ci.relname IN (
   'staff_chat_message_tenant_dedupe_unique',
   'guest_game_xp_posting_idempotency_uidx',
   'guest_game_reward_intent_idempotency_uidx',
+  'guest_game_entitlement_source_reward_uidx',
   'guest_game_reward_effect_idempotency_uidx',
   'guest_game_reward_intent_ready_partial_idx',
   'guest_game_reward_effect_ready_partial_idx'
@@ -158,6 +189,11 @@ SELECT status, COUNT(*) FROM "GuestGameRewardEffect" GROUP BY status ORDER BY st
 ```
 
 All listed indexes must be ready, valid, and live. Unexpected `PROCESSING`, growing `FAILED`, or any `DEAD_LETTER` rows block canary.
+
+For the expand wave, also confirm the `sourceRewardId` column, its FK, and both
+compatibility triggers with the catalog queries above. Do not clear the legacy
+`rewardId = sourceRewardId` alias or remove either trigger in the same deployment
+that first adds them.
 
 With an authenticated `OWNER`, `ADMIN`, or `MANAGER` session, also call:
 

@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
@@ -538,6 +539,7 @@ const rewardInclude = {
       totalRewardLimit: true,
       manualApprovalRequired: true,
       note: true,
+      updatedAt: true,
     },
   },
   season: {
@@ -556,6 +558,15 @@ const rewardInclude = {
   store: { select: { id: true, name: true } },
   createdByUser: { select: creatorSelect },
   approvedByUser: { select: creatorSelect },
+  rewardIntents: {
+    where: { effectKind: 'REWARD' },
+    select: { id: true, eventId: true },
+    orderBy: { createdAt: 'asc' as const },
+  },
+  sourceEntitlements: {
+    select: { id: true, status: true },
+    orderBy: { createdAt: 'asc' as const },
+  },
 } satisfies Prisma.GuestGameRewardInclude;
 
 const deliveryEventInclude = {
@@ -1219,6 +1230,7 @@ export type GuestGameReward = {
   walletState:
     | 'WAITING_APPROVAL'
     | 'READY'
+    | 'DELIVERY_PROCESSING'
     | 'REDEEMED'
     | 'CANCELED'
     | 'EXPIRED';
@@ -3090,6 +3102,36 @@ function jsonRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function guestGameLegacyCaseClaimRepairIsValid(
+  evidence: Prisma.JsonValue | null,
+  now: Date,
+) {
+  const marker = jsonRecord(evidence).caseRewardLegacyClaim;
+  if (!isRecord(marker)) {
+    return false;
+  }
+  const acceptedAt =
+    typeof marker.acceptedAt === 'string'
+      ? Date.parse(marker.acceptedAt)
+      : Number.NaN;
+  const originalClaimExpiresAt =
+    typeof marker.originalClaimExpiresAt === 'string'
+      ? Date.parse(marker.originalClaimExpiresAt)
+      : Number.NaN;
+  const repairedAt =
+    typeof marker.repairedAt === 'string'
+      ? Date.parse(marker.repairedAt)
+      : Number.NaN;
+  return (
+    Number.isFinite(acceptedAt) &&
+    Number.isFinite(originalClaimExpiresAt) &&
+    Number.isFinite(repairedAt) &&
+    acceptedAt < originalClaimExpiresAt &&
+    repairedAt >= acceptedAt &&
+    repairedAt <= now.getTime()
+  );
 }
 
 function finiteJsonNumber(value: unknown): number | null {
@@ -7811,7 +7853,12 @@ export class GuestGamificationService {
         status: 'READY',
         readinessStatus: 'READY_FOR_BOT',
         channel: { in: channels },
-        reward: { is: { claimRequired: false } },
+        reward: {
+          is: {
+            claimRequired: false,
+            rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
+          },
+        },
       },
       include: deliveryInclude,
       orderBy: [{ preparedAt: 'asc' }, { createdAt: 'asc' }],
@@ -10629,11 +10676,7 @@ export class GuestGamificationService {
         ruleMatchesStoreIds(lootBox.storeIds, storeId)
       ) {
         await this.prisma.$transaction(async (tx) => {
-          await acquireGuestGameLootBoxRuleLock(
-            tx,
-            user.tenantId,
-            lootBox.id,
-          );
+          await acquireGuestGameLootBoxRuleLock(tx, user.tenantId, lootBox.id);
           const current = await tx.guestGameLootBox.findFirst({
             where: { id: lootBox.id, tenantId: user.tenantId },
           });
@@ -10860,7 +10903,12 @@ export class GuestGamificationService {
         status: 'READY',
         readinessStatus: 'READY_FOR_BOT',
         channel: { in: channels },
-        reward: { is: { claimRequired: false } },
+        reward: {
+          is: {
+            claimRequired: false,
+            rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
+          },
+        },
       },
       include: deliveryInclude,
       orderBy: [{ preparedAt: 'asc' }, { createdAt: 'asc' }],
@@ -11436,9 +11484,11 @@ export class GuestGamificationService {
     tenantId: string,
     rewardId: string,
   ) {
-    const rows = await tx.$queryRaw<Array<{ claimRequired: boolean }>>(
+    const rows = await tx.$queryRaw<
+      Array<{ claimRequired: boolean; rewardType: string }>
+    >(
       Prisma.sql`
-        SELECT "claimRequired"
+        SELECT "claimRequired", "rewardType"
         FROM "GuestGameReward"
         WHERE "id" = ${rewardId}
           AND "tenantId" = ${tenantId}
@@ -11446,7 +11496,7 @@ export class GuestGamificationService {
       `,
     );
 
-    return rows[0]?.claimRequired === false;
+    return rows[0] ? legacyDeliveryRewardEligible(rows[0]) : false;
   }
 
   private async createDeliveryEvent(
@@ -11648,6 +11698,15 @@ export class GuestGamificationService {
       claimExpiresAt?: Date | null;
     } = {},
   ): Promise<GuestGameReward> {
+    if (
+      nullableString(dto.rewardType)?.toUpperCase() ===
+        'LOOT_BOX_ENTITLEMENT' &&
+      !nullableString(canonicalIdentity.idempotencyKey)
+    ) {
+      throw new BadRequestException(
+        'Наградной кейс создаётся только каноническим контуром задания или Battle Pass.',
+      );
+    }
     const data = (await this.buildRewardData(
       user,
       dto,
@@ -11727,22 +11786,9 @@ export class GuestGamificationService {
     id: string,
     dto: GuestGameRewardUpdateDto,
   ): Promise<GuestGameReward> {
-    const current = await this.assertReward(user, id);
-    const data = await this.buildRewardData(user, dto, false);
+    await this.assertReward(user, id);
+    const requestedData = await this.buildRewardData(user, dto, false);
     const nextStatus = dto.status;
-
-    if (nextStatus && nextStatus === current.status) {
-      delete data.approvedByUserId;
-      delete data.paidAt;
-    }
-
-    if (
-      (nextStatus === 'APPROVED' || nextStatus === 'PAID') &&
-      !current.rewardCode &&
-      !('rewardCode' in data)
-    ) {
-      data.rewardCode = generateRewardCode();
-    }
 
     const row = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`
@@ -11752,19 +11798,60 @@ export class GuestGamificationService {
           AND "tenantId" = ${user.tenantId}
         FOR UPDATE
       `);
+      const liveCurrent = await tx.guestGameReward.findFirst({
+        where: { id, tenantId: user.tenantId },
+      });
+      if (!liveCurrent) {
+        throw new ConflictException(
+          'Состояние награды изменилось. Обновите список наград.',
+        );
+      }
+      const data = { ...requestedData };
+      const requestedRewardType =
+        typeof data.rewardType === 'string' ? data.rewardType : null;
+      if (
+        requestedRewardType &&
+        requestedRewardType !== liveCurrent.rewardType
+      ) {
+        throw new BadRequestException(
+          'Тип созданной награды нельзя изменять. Создайте новую награду с нужным типом.',
+        );
+      }
+      const effectiveRewardType = requestedRewardType ?? liveCurrent.rewardType;
+
+      if (nextStatus && nextStatus === liveCurrent.status) {
+        delete data.approvedByUserId;
+        delete data.paidAt;
+      }
+
+      if (effectiveRewardType === 'LOOT_BOX_ENTITLEMENT') {
+        data.rewardCode = null;
+        data.claimRequired = false;
+        data.claimExpiresAt = null;
+      } else if (
+        (nextStatus === 'APPROVED' || nextStatus === 'PAID') &&
+        !liveCurrent.rewardCode &&
+        !('rewardCode' in data)
+      ) {
+        data.rewardCode = generateRewardCode();
+      }
+
       await this.assertRewardHasNoAcceptedWalletDelivery(
         tx,
         user,
         id,
         'изменить',
       );
+      if (rewardUpdateHasSemanticChange(liveCurrent, data)) {
+        await this.assertRewardHasNoSourceEntitlement(tx, user, id, 'изменить');
+      }
       const updated = await tx.guestGameReward.update({
         where: { id },
         data,
         include: rewardInclude,
       });
 
-      if (dto.status && dto.status !== current.status) {
+      if (dto.status && dto.status !== liveCurrent.status) {
         await tx.guestGameEvent.create({
           data: {
             tenantId: user.tenantId,
@@ -11830,6 +11917,11 @@ export class GuestGamificationService {
 
     if (!row) {
       throw new NotFoundException('Награда с таким кодом не найдена');
+    }
+    if (row.rewardType === 'LOOT_BOX_ENTITLEMENT') {
+      throw new BadRequestException(
+        'Наградной кейс можно получить только через открытие контейнера.',
+      );
     }
     if (row.claimRequired) {
       const claimedWallet =
@@ -11946,17 +12038,21 @@ export class GuestGamificationService {
           'Состояние награды изменилось. Обновите список наград.',
         );
       }
+      if (latest.rewardType === 'LOOT_BOX_ENTITLEMENT') {
+        throw new BadRequestException(
+          'Наградной кейс можно получить только через открытие контейнера.',
+        );
+      }
       if (latest.claimRequired) {
-        const claimedWallet =
-          await tx.guestGameRewardWalletItem.findFirst({
-            where: {
-              tenantId: user.tenantId,
-              rewardId: latest.id,
-              kind: 'REWARD',
-              status: 'CLAIMED',
-            },
-            select: { id: true },
-          });
+        const claimedWallet = await tx.guestGameRewardWalletItem.findFirst({
+          where: {
+            tenantId: user.tenantId,
+            rewardId: latest.id,
+            kind: 'REWARD',
+            status: 'CLAIMED',
+          },
+          select: { id: true },
+        });
         if (!claimedWallet) {
           throw new BadRequestException(
             'Сначала получите награду в игровом кошельке.',
@@ -12075,8 +12171,7 @@ export class GuestGamificationService {
                 .map((rule) => rule.xpDelta),
             );
             const qualifiedXpDelta = xpDelta - deniedMissionXp;
-            const deferXpToWallet =
-              canonicalIdentity.deferXpToWallet === true;
+            const deferXpToWallet = canonicalIdentity.deferXpToWallet === true;
             const created = await tx.guestGameEvent.create({
               data: {
                 ...data,
@@ -12260,11 +12355,7 @@ export class GuestGamificationService {
               }
             }
 
-            if (
-              profileId &&
-              effectiveXpDelta > 0 &&
-              deferXpToWallet
-            ) {
+            if (profileId && effectiveXpDelta > 0 && deferXpToWallet) {
               const profile = await tx.guestGameProfile.findFirst({
                 where: {
                   id: profileId,
@@ -12523,18 +12614,36 @@ export class GuestGamificationService {
             tenantId: input.tenantId,
             ruleType: 'LOOT_BOX',
             status: { in: ['AVAILABLE', 'CONSUMED'] },
-            OR: ruleIds.map((ruleId) => ({
-              evidence: { path: ['missionId'], equals: ruleId },
-            })),
+            OR: [
+              {
+                sourceReward: {
+                  is: {
+                    tenantId: input.tenantId,
+                    missionId: { in: ruleIds },
+                    rewardType: 'LOOT_BOX_ENTITLEMENT',
+                  },
+                },
+              },
+              ...ruleIds.map((ruleId) => ({
+                evidence: { path: ['missionId'], equals: ruleId },
+              })),
+            ],
           },
           select: {
             id: true,
             eventId: true,
             rewardId: true,
+            sourceRewardId: true,
             profileId: true,
             guestId: true,
             qualifiedAt: true,
             evidence: true,
+            sourceReward: {
+              select: {
+                missionId: true,
+                rewardType: true,
+              },
+            },
           },
         }),
       ]);
@@ -12564,7 +12673,7 @@ export class GuestGamificationService {
         : [];
       const ruleEntitlementRows = Array.isArray(entitlementRows)
         ? entitlementRows.filter(
-            (row) => nullableId(jsonRecord(row.evidence).missionId) === rule.id,
+            (row) => missionEntitlementMissionId(row) === rule.id,
           )
         : [];
       const issuances = atomicMissionIssuances({
@@ -12889,6 +12998,7 @@ export class GuestGamificationService {
     const evaluatedAt = new Date();
     const evaluationMode = options.evaluationMode ?? 'LIVE';
     let decisionsPersisted = false;
+    let decisionPersistenceError: unknown = null;
 
     try {
       const decisionRows = dryRun.rules.map((rule) => ({
@@ -12939,6 +13049,7 @@ export class GuestGamificationService {
       }
       decisionsPersisted = true;
     } catch (error) {
+      decisionPersistenceError = error;
       this.logger.warn(
         `Failed to persist guest game rule decisions for tenant ${user.tenantId}: ${this.checkInErrorMessage(error)}`,
       );
@@ -12955,29 +13066,44 @@ export class GuestGamificationService {
     let lootBoxEntitlements: GuestGameLootBoxEntitlementWriteOutcome[] = [];
 
     if (isLiveObservation) {
-      if (decisionsPersisted) {
-        lootBoxEntitlements = await this.recordMatchedEntitlements(
-          user,
-          dryRun,
-          {
-            ...options,
-            evaluationRunId,
-          },
-        );
-      }
-      if (decisionsPersisted) {
-        await this.recordMatchedMissionRewardEntitlements(user, dryRun, {
-          ...options,
-          evaluationRunId,
-          evaluationMode,
-        });
-      }
+      lootBoxEntitlements = await this.recordMatchedEntitlements(user, dryRun, {
+        ...options,
+        evaluationRunId,
+      });
+      await this.ensureMatchedMissionRewardIntents(user, dryRun, {
+        ...options,
+        evaluationRunId,
+        evaluationMode,
+      });
       if (shouldRecordLedgerShadow) {
         await this.recordLedgerShadowRuleDecisions(user, dryRun, {
           ...options,
           evaluationRunId,
         });
       }
+    }
+
+    const failedEntitlementWrites = lootBoxEntitlements.filter(
+      (outcome) => outcome.status === 'PERSISTENCE_FAILED',
+    );
+    if (failedEntitlementWrites.length > 0) {
+      throw new ServiceUnavailableException({
+        code: 'GUEST_GAME_ENTITLEMENT_PERSISTENCE_FAILED',
+        message:
+          'Не удалось сохранить право на открытие кейса. Событие будет безопасно повторено.',
+        failedRuleCount: failedEntitlementWrites.length,
+      });
+    }
+    if (
+      decisionPersistenceError &&
+      nullableId(options.eventId) &&
+      isLiveObservation
+    ) {
+      throw new ServiceUnavailableException({
+        code: 'GUEST_GAME_DECISION_PERSISTENCE_FAILED',
+        message:
+          'Не удалось сохранить решение игрового правила. Событие будет безопасно повторено.',
+      });
     }
 
     return { lootBoxEntitlements, decisionsPersisted };
@@ -13056,13 +13182,20 @@ export class GuestGamificationService {
         tenantId: user.tenantId,
         eventId,
         ruleType: 'LOOT_BOX',
-        status: { in: ['AVAILABLE', 'CONSUMED', 'CANCELED'] },
       },
-      select: { evidence: true },
+      select: {
+        evidence: true,
+        sourceReward: {
+          select: {
+            missionId: true,
+            rewardType: true,
+          },
+        },
+      },
     });
     const existingMissionIds = new Set(
       existing
-        .map((row) => nullableId(jsonRecord(row.evidence).missionId))
+        .map(missionEntitlementMissionId)
         .filter((missionId): missionId is string => Boolean(missionId)),
     );
 
@@ -13101,9 +13234,7 @@ export class GuestGamificationService {
     const qualifiedAt = Number.isNaN(occurredAt.getTime())
       ? new Date()
       : occurredAt;
-    const gameActivatedAt = dryRunProfileGameActivatedAt(
-      dryRun.profile as GuestGameProfile,
-    );
+    const gameActivatedAt = dryRunProfileGameActivatedAt(dryRun.profile);
     if (!gameActivatedAt || qualifiedAt.getTime() < gameActivatedAt.getTime()) {
       return [];
     }
@@ -13314,10 +13445,13 @@ export class GuestGamificationService {
                     },
                     select: {
                       id: true,
+                      status: true,
                       profileId: true,
                       guestId: true,
                       rewardId: true,
+                      sourceRewardId: true,
                       qualifiedAt: true,
+                      evidence: true,
                     },
                   }),
                 ])
@@ -13439,7 +13573,7 @@ export class GuestGamificationService {
     throw new Error('Loot-box entitlement serialization retry exhausted.');
   }
 
-  private async recordMatchedMissionRewardEntitlements(
+  private async ensureMatchedMissionRewardIntents(
     user: AuthenticatedUser,
     dryRun: GuestGameDryRunResult,
     options: {
@@ -13452,12 +13586,12 @@ export class GuestGamificationService {
       evaluationMode: string;
       evidence?: Prisma.InputJsonValue;
     },
-  ) {
+  ): Promise<string[]> {
     // A mission reward is authoritative only after processEvent persisted the
     // canonical source event. Diagnostic LIVE_* evaluations (for example a
     // blocked guest-portal loot-box open attempt) intentionally have no
-    // eventId and must never materialize a reward entitlement.
-    if (!nullableId(options.eventId)) return;
+    // eventId and must never materialize a reward intent.
+    if (!nullableId(options.eventId)) return [];
 
     const candidateMissionRules = dryRun.rules.filter(
       (rule) =>
@@ -13466,10 +13600,62 @@ export class GuestGamificationService {
         rule.rewardType === 'LOOT_BOX_ENTITLEMENT' &&
         !rule.manualApprovalRequired,
     );
-    if (!candidateMissionRules.length || !dryRun.profile?.id) return;
+    if (!candidateMissionRules.length || !dryRun.profile?.id) return [];
 
     const eventId = nullableId(options.eventId)!;
-    const qualificationRequiredIds = candidateMissionRules
+    const existingRewardIntents =
+      await this.prisma.guestGameRewardIntent.findMany({
+        where: {
+          tenantId: user.tenantId,
+          eventId,
+          ruleType: 'MISSION',
+          ruleId: { in: candidateMissionRules.map((rule) => rule.id) },
+          effectKind: 'REWARD',
+        },
+        select: { id: true, ruleId: true },
+      });
+    const durableRuleIds = new Set(
+      existingRewardIntents.map((intent) => intent.ruleId),
+    );
+    const intentIds = existingRewardIntents.map((intent) => intent.id);
+    const intentMissingMissionRules = candidateMissionRules.filter(
+      (rule) => !durableRuleIds.has(rule.id),
+    );
+    if (!intentMissingMissionRules.length) return uniqueStrings(intentIds);
+
+    const legacyEntitlements = await this.prisma.guestGameEntitlement.findMany({
+      where: {
+        tenantId: user.tenantId,
+        eventId,
+        profileId: dryRun.profile.id,
+        ruleType: 'LOOT_BOX',
+      },
+      select: {
+        evidence: true,
+        sourceReward: {
+          select: {
+            missionId: true,
+            rewardType: true,
+          },
+        },
+      },
+    });
+    const deliveredLegacyMissionIds = new Set(
+      legacyEntitlements
+        .flatMap((entitlement) => [
+          nullableId(jsonRecord(entitlement.evidence).missionId),
+          entitlement.sourceReward?.rewardType === 'LOOT_BOX_ENTITLEMENT'
+            ? nullableId(entitlement.sourceReward.missionId)
+            : null,
+        ])
+        .filter((missionId): missionId is string => Boolean(missionId)),
+    );
+    const legacyMissionRules = intentMissingMissionRules.filter(
+      (rule) => !deliveredLegacyMissionIds.has(rule.id),
+    );
+    if (!legacyMissionRules.length) return uniqueStrings(intentIds);
+
+    const qualificationRequiredIds = legacyMissionRules
       .filter(missionDryRunRuleRequiresAtomicQualification)
       .map((rule) => rule.id);
     const qualificationRows = qualificationRequiredIds.length
@@ -13488,19 +13674,19 @@ export class GuestGamificationService {
     const qualifiedRuleIds = new Set(
       qualificationRows.map((row) => row.ruleId),
     );
-    const missionRules = candidateMissionRules.filter(
+    const missionRules = legacyMissionRules.filter(
       (rule) =>
         !missionDryRunRuleRequiresAtomicQualification(rule) ||
         qualifiedRuleIds.has(rule.id),
     );
-    if (!missionRules.length) return;
+    if (!missionRules.length) return uniqueStrings(intentIds);
 
     const missions = await this.prisma.guestGameMission.findMany({
       where: {
         tenantId: user.tenantId,
         id: { in: missionRules.map((rule) => rule.id) },
       },
-      select: { id: true, conditions: true, antiFraudRules: true },
+      select: { id: true, conditions: true, updatedAt: true },
     });
     const missionConfigById = new Map(
       missions.map((mission) => {
@@ -13511,18 +13697,30 @@ export class GuestGamificationService {
           mission.id,
           {
             lootBoxId: nullableId(reward.lootBoxId),
-            denySameDayRepeat:
-              jsonRecord(mission.antiFraudRules).denySameDayRepeat === true,
+            updatedAt: mission.updatedAt,
           },
         ] as const;
       }),
     );
     const targetIds = uniqueStrings(
-      [...missionConfigById.values()]
-        .map((value) => value.lootBoxId)
+      missionRules
+        .map((rule) => {
+          const immutableTargetId = nullableId(rule.rewardLootBoxId);
+          if (immutableTargetId) return immutableTargetId;
+          const missionConfig = missionConfigById.get(rule.id);
+          const evaluatedMissionUpdatedAt = dryRunDateOrNull(
+            rule.ruleUpdatedAt,
+          );
+          return missionConfig &&
+            evaluatedMissionUpdatedAt &&
+            missionConfig.updatedAt.getTime() ===
+              evaluatedMissionUpdatedAt.getTime()
+            ? missionConfig.lootBoxId
+            : null;
+        })
         .filter((value): value is string => Boolean(value)),
     );
-    if (!targetIds.length) return;
+    if (!targetIds.length) return uniqueStrings(intentIds);
 
     const lootBoxes = await this.prisma.guestGameLootBox.findMany({
       where: {
@@ -13531,166 +13729,151 @@ export class GuestGamificationService {
         status: 'ACTIVE',
         usageKind: { in: ['REWARD_TEMPLATE', 'BOTH'] },
       },
-      select: { id: true, name: true, updatedAt: true },
+      select: { id: true },
     });
     const lootBoxById = new Map(lootBoxes.map((item) => [item.id, item]));
     const occurredAt = new Date(dryRun.occurredAt);
     const qualifiedAt = Number.isNaN(occurredAt.getTime())
       ? new Date()
       : occurredAt;
-    const gameActivatedAt = dryRunProfileGameActivatedAt(
-      dryRun.profile as GuestGameProfile | null,
-    );
+    const gameActivatedAt = dryRunProfileGameActivatedAt(dryRun.profile);
     if (!gameActivatedAt || qualifiedAt.getTime() < gameActivatedAt.getTime()) {
-      return;
+      return uniqueStrings(intentIds);
     }
-    const sourceIdentity =
-      nullableString(options.originKey) ??
-      nullableId(options.eventId) ??
-      [options.sourceFactKind, options.sourceFactId].filter(Boolean).join(':');
-    const timeZone = guestGameTimeZone(dryRun.store?.timeZone ?? null);
 
-    await Promise.all(
-      missionRules.map(async (rule) => {
-        const missionConfig = missionConfigById.get(rule.id);
-        const targetId = missionConfig?.lootBoxId;
-        const target = targetId ? lootBoxById.get(targetId) : null;
-        if (!target || !missionConfig) return;
-        const entitlementDateKey = missionConfig.denySameDayRepeat
-          ? dryRunLocalDateKey(qualifiedAt, timeZone)
-          : null;
-        // The daily identity is enforced by the database unique key. Two
-        // workers evaluating different facts for the same mission/day can
-        // therefore create at most one automatic reward entitlement.
-        const idempotencyKey = missionConfig.denySameDayRepeat
-          ? [
-              'mission-loot-box',
-              rule.id,
-              'daily',
-              dryRun.profile!.id,
-              entitlementDateKey,
-            ].join(':')
-          : [
-              'mission-loot-box',
-              rule.id,
-              sourceIdentity || options.evaluationRunId,
-            ].join(':');
-        await this.prisma.$transaction(async (tx) => {
-          await acquireGuestGameLootBoxRuleLock(
-            tx,
-            user.tenantId,
-            target.id,
-          );
-          const liveTarget = await tx.guestGameLootBox.findFirst({
-            where: {
-              tenantId: user.tenantId,
-              id: target.id,
-              status: 'ACTIVE',
-              usageKind: { in: ['REWARD_TEMPLATE', 'BOTH'] },
-            },
-            select: { id: true, name: true, updatedAt: true },
-          });
-          const targetUpdatedAt = dryRunDateOrNull(target.updatedAt);
-          const liveTargetUpdatedAt = dryRunDateOrNull(liveTarget?.updatedAt);
-          if (
-            !liveTarget ||
-            (targetUpdatedAt &&
-              liveTargetUpdatedAt &&
-              liveTargetUpdatedAt.getTime() !== targetUpdatedAt.getTime())
-          ) {
-            return;
-          }
-          const entitlement = await tx.guestGameEntitlement.upsert({
-            where: {
-              tenantId_idempotencyKey: {
-                tenantId: user.tenantId,
-                idempotencyKey,
-              },
-            },
-            create: {
-              tenantId: user.tenantId,
-              profileId: dryRun.profile?.id ?? null,
-              guestId: dryRun.guest?.id ?? null,
-              storeId: dryRun.store?.id ?? null,
-              eventId: nullableId(options.eventId),
-              originKey: nullableString(options.originKey),
-              evaluationRunId: options.evaluationRunId,
-              ruleType: 'LOOT_BOX',
-              ruleId: liveTarget.id,
-              ruleName: liveTarget.name,
-              sourceEventType: dryRun.eventType,
-              sourceFactId: nullableString(options.sourceFactId),
-              sourceFactKind: nullableString(options.sourceFactKind),
-              traceId: nullableString(options.traceId),
-              status: 'AVAILABLE',
-              idempotencyKey,
-              qualifiedAt,
-              evidence: {
-                source: 'mission_reward',
-                missionId: rule.id,
-                evaluationMode: options.evaluationMode,
-                evaluatorVersion: 'mission-wizard-v2',
-                denySameDayRepeat: missionConfig.denySameDayRepeat,
-                entitlementDateKey,
-                timeZone,
-                sourceEvidence: options.evidence ?? null,
-              },
-            },
-            // AVAILABLE, CONSUMED and CANCELED are all durable outcomes. A
-            // retry must not mutate or reopen any previously issued right.
-            update: {},
-            select: {
-              id: true,
-              status: true,
-              qualifiedAt: true,
-              storeId: true,
-            },
-          });
+    for (const rule of missionRules) {
+      const missionConfig = missionConfigById.get(rule.id);
+      const immutableTargetId = nullableId(rule.rewardLootBoxId);
+      const evaluatedMissionUpdatedAt = dryRunDateOrNull(rule.ruleUpdatedAt);
+      if (
+        !immutableTargetId &&
+        evaluatedMissionUpdatedAt &&
+        missionConfig &&
+        missionConfig.updatedAt.getTime() !==
+          evaluatedMissionUpdatedAt.getTime()
+      ) {
+        throw new ConflictException(
+          'The mission changed after the canonical event was evaluated.',
+        );
+      }
+      const targetId =
+        immutableTargetId ??
+        (missionConfig &&
+        evaluatedMissionUpdatedAt &&
+        missionConfig.updatedAt.getTime() ===
+          evaluatedMissionUpdatedAt.getTime()
+          ? missionConfig.lootBoxId
+          : null);
+      if (!missionConfig || !targetId || !lootBoxById.has(targetId)) {
+        continue;
+      }
 
-          if (entitlement.status === 'AVAILABLE') {
-            await upsertEntitlementWalletItem(tx, {
-              tenantId: user.tenantId,
-              profileId: dryRun.profile!.id,
-              storeId: entitlement.storeId,
-              entitlementId: entitlement.id,
-              sourceKind: 'MISSION',
-              sourceId: rule.id,
-              title: rule.name,
-              qualifiedAt: entitlement.qualifiedAt,
-              gameActivatedAt,
-            });
-          }
-        });
-      }),
-    );
+      const immutableRule = {
+        ...rule,
+        rewardLootBoxId: targetId,
+      };
+      const plan = processRewardIntentPlan(
+        immutableRule,
+        qualifiedAt.toISOString(),
+        dryRun.profile.id,
+      );
+      const originKey = nullableString(options.originKey);
+      const idempotencyKey =
+        buildGuestGameRewardIdempotencyKey({
+          originKey,
+          ruleKind: plan.rule.kind,
+          ruleId: plan.rule.id,
+          slot: plan.slotKey,
+        }) ??
+        [
+          'guest-game-intent',
+          eventId,
+          plan.rule.kind,
+          plan.rule.id,
+          plan.slotKey,
+        ].join(':');
+      const intent = await this.prisma.guestGameRewardIntent.upsert({
+        where: {
+          tenantId_idempotencyKey: {
+            tenantId: user.tenantId,
+            idempotencyKey,
+          },
+        },
+        create: {
+          tenantId: user.tenantId,
+          eventId,
+          profileId: dryRun.profile.id,
+          originKey,
+          ruleType: plan.rule.kind,
+          ruleId: plan.rule.id,
+          effectKind: 'REWARD',
+          slotKey: plan.slotKey,
+          idempotencyKey,
+          claimKey: plan.claimKey,
+          status: 'PENDING',
+          plan,
+          qualifiedAt,
+        },
+        update: {},
+      });
+      const storedPlan = parseProcessRewardIntentPlan(intent.plan);
+      if (
+        intent.tenantId !== user.tenantId ||
+        intent.eventId !== eventId ||
+        intent.profileId !== dryRun.profile.id ||
+        intent.originKey !== originKey ||
+        intent.ruleType !== plan.rule.kind ||
+        intent.ruleId !== plan.rule.id ||
+        intent.effectKind !== 'REWARD' ||
+        intent.slotKey !== plan.slotKey ||
+        intent.idempotencyKey !== idempotencyKey ||
+        intent.claimKey !== plan.claimKey ||
+        !storedPlan ||
+        canonicalGuestGameJsonFingerprint(storedPlan) !==
+          canonicalGuestGameJsonFingerprint(plan)
+      ) {
+        throw new ConflictException(
+          'A legacy mission reward intent has incompatible immutable evidence.',
+        );
+      }
+      intentIds.push(intent.id);
+    }
+
+    return uniqueStrings(intentIds);
   }
 
   private async createApprovedRewardLootBoxEntitlement(
     user: AuthenticatedUser,
     reward: RewardRow,
   ) {
-    const rewardProfile = (
-      reward as RewardRow & {
-        profile?: { gameActivatedAt?: Date | null } | null;
-      }
-    ).profile;
-    const gameActivatedAt =
-      rewardProfile?.gameActivatedAt === undefined
-        ? new Date(0)
-        : rewardProfile.gameActivatedAt;
     if (
       reward.tenantId !== user.tenantId ||
-      reward.rewardType !== 'LOOT_BOX_ENTITLEMENT' ||
+      reward.rewardType !== 'LOOT_BOX_ENTITLEMENT'
+    ) {
+      throw new ConflictException(
+        'The reward does not belong to this loot-box materialization scope.',
+      );
+    }
+    const gameActivatedAt = reward.profile?.gameActivatedAt ?? null;
+    if (
       !reward.profileId ||
       !gameActivatedAt ||
       reward.qualifiedAt.getTime() < gameActivatedAt.getTime()
     ) {
-      return;
+      throw new ConflictException(
+        'The loot-box reward is outside the active game profile boundary.',
+      );
     }
 
     const rewardEvidence = jsonRecord(reward.evidence);
     const ruleEvidence = jsonRecord(
       rewardEvidence.rule as Prisma.JsonValue | null,
+    );
+    const legacyClaimEvidence = jsonRecord(
+      rewardEvidence.caseRewardLegacyClaim as Prisma.JsonValue | null,
+    );
+    const legacyClaimRepairedAt = dryRunDateOrNull(
+      legacyClaimEvidence.repairedAt,
     );
     const battlePassTrack = processBattlePassRewardTrack(
       ruleEvidence.battlePassRewardTrack,
@@ -13700,8 +13883,18 @@ export class GuestGamificationService {
           jsonRecord(reward.mission.conditions).reward as Prisma.JsonValue,
         )
       : null;
+    const immutableMissionLootBoxId = nullableId(ruleEvidence.rewardLootBoxId);
+    const evaluatedMissionUpdatedAt = dryRunDateOrNull(
+      ruleEvidence.ruleUpdatedAt,
+    );
+    const missionUpdatedAt = reward.mission?.updatedAt ?? null;
+    const missionVersionMatches =
+      missionUpdatedAt !== null &&
+      evaluatedMissionUpdatedAt !== null &&
+      missionUpdatedAt.getTime() === evaluatedMissionUpdatedAt.getTime();
     const lootBoxId = reward.mission
-      ? nullableId(missionReward?.lootBoxId)
+      ? (immutableMissionLootBoxId ??
+        (missionVersionMatches ? nullableId(missionReward?.lootBoxId) : null))
       : reward.season && battlePassTrack === 'FREE'
         ? nullableId(ruleEvidence.rewardLootBoxId)
         : null;
@@ -13711,7 +13904,9 @@ export class GuestGamificationService {
           'Наградной лутбокс Battle Pass не может быть выдан без подтвержденной FREE-дорожки и сохраненного идентификатора лутбокса.',
         );
       }
-      return;
+      throw new ConflictException(
+        'The mission loot-box target is missing or changed after qualification.',
+      );
     }
 
     const lootBox = await this.prisma.guestGameLootBox.findFirst({
@@ -13734,6 +13929,86 @@ export class GuestGamificationService {
       ? `battle-pass-loot-box-approval:${reward.id}`
       : `mission-loot-box-approval:${reward.id}`;
     await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id"
+        FROM "GuestGameReward"
+        WHERE "id" = ${reward.id}
+          AND "tenantId" = ${user.tenantId}
+        FOR UPDATE
+      `);
+      const liveSourceReward = await tx.guestGameReward.findFirst({
+        where: {
+          id: reward.id,
+          tenantId: user.tenantId,
+        },
+        select: {
+          id: true,
+          status: true,
+          rewardType: true,
+          profileId: true,
+          idempotencyKey: true,
+          updatedAt: true,
+          rewardIntents: {
+            where: { effectKind: 'REWARD' },
+            select: { eventId: true },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      });
+      if (
+        !liveSourceReward ||
+        !['APPROVED', 'PAID'].includes(liveSourceReward.status) ||
+        liveSourceReward.rewardType !== 'LOOT_BOX_ENTITLEMENT' ||
+        !liveSourceReward.profileId ||
+        liveSourceReward.profileId !== reward.profileId
+      ) {
+        throw new ConflictException(
+          'The case reward changed before its entitlement was materialized.',
+        );
+      }
+      if (liveSourceReward.updatedAt.getTime() !== reward.updatedAt.getTime()) {
+        throw new ConflictException(
+          'The case reward changed before its entitlement was materialized.',
+        );
+      }
+      const idempotencyIntents = liveSourceReward.idempotencyKey
+        ? await tx.guestGameRewardIntent.findMany({
+            where: {
+              tenantId: user.tenantId,
+              idempotencyKey: liveSourceReward.idempotencyKey,
+              effectKind: 'REWARD',
+            },
+            select: {
+              eventId: true,
+              profileId: true,
+              rewardId: true,
+            },
+            orderBy: { createdAt: 'asc' },
+          })
+        : [];
+      if (
+        idempotencyIntents.some(
+          (intent) =>
+            intent.profileId !== reward.profileId ||
+            (intent.rewardId !== null && intent.rewardId !== reward.id),
+        )
+      ) {
+        throw new ConflictException(
+          'The case reward idempotency key belongs to another immutable reward intent.',
+        );
+      }
+      const sourceEventIds = uniqueStrings(
+        [...liveSourceReward.rewardIntents, ...idempotencyIntents].map(
+          (intent) => intent.eventId,
+        ),
+      );
+      if (sourceEventIds.length > 1) {
+        throw new ConflictException(
+          'The case reward is linked to multiple canonical source events.',
+        );
+      }
+      const sourceEventId = sourceEventIds[0] ?? null;
+
       await acquireGuestGameLootBoxRuleLock(tx, user.tenantId, lootBox.id);
       const liveLootBox = await tx.guestGameLootBox.findFirst({
         where: {
@@ -13756,65 +14031,154 @@ export class GuestGamificationService {
           'Наградной лутбокс больше недоступен для выдачи.',
         );
       }
-      const entitlement = await tx.guestGameEntitlement.upsert({
+      const existingEntitlement = await tx.guestGameEntitlement.findFirst({
         where: {
-          tenantId_idempotencyKey: {
-            tenantId: user.tenantId,
-            idempotencyKey,
-          },
-        },
-        create: {
           tenantId: user.tenantId,
-          profileId: reward.profileId,
-          guestId: reward.guestId,
-          storeId: reward.storeId,
-          rewardId: reward.id,
-          ruleType: 'LOOT_BOX',
-          ruleId: liveLootBox.id,
-          ruleName: liveLootBox.name,
-          sourceEventType: isBattlePassReward
-            ? 'BATTLE_PASS_REWARD_APPROVED'
-            : 'MISSION_REWARD_APPROVED',
-          status: 'AVAILABLE',
-          idempotencyKey,
-          qualifiedAt: reward.qualifiedAt,
-          evidence: isBattlePassReward
-            ? {
-                source: reward.approvedByUser
-                  ? 'battle_pass_reward_admin_approval'
-                  : 'battle_pass_reward_auto',
-                seasonId: reward.season?.id ?? null,
-                battlePassLevel: intValue(ruleEvidence.battlePassLevel),
-                battlePassStep: intValue(ruleEvidence.battlePassStep),
-                battlePassRewardTrack: battlePassTrack,
-                rewardId: reward.id,
-                approvedByUserId: reward.approvedByUser?.id ?? null,
-                evaluatorVersion: 'battle-pass-rewards-v2',
-              }
-            : {
-                source: 'mission_reward_admin_approval',
-                missionId: reward.mission?.id ?? null,
-                rewardId: reward.id,
-                approvedByUserId: user.id,
-                evaluatorVersion: 'mission-wizard-v2',
-              },
+          sourceRewardId: reward.id,
         },
-        // Approval/effect retries are create-only. In particular, a consumed
-        // or canceled entitlement is terminal and must never become AVAILABLE
-        // again merely because the materializer retried the same reward.
-        update: {},
         select: {
           id: true,
+          profileId: true,
+          ruleType: true,
+          ruleId: true,
           status: true,
           storeId: true,
+          eventId: true,
+          sourceRewardId: true,
+          rewardId: true,
           qualifiedAt: true,
         },
       });
+      if (
+        existingEntitlement &&
+        (existingEntitlement.profileId !== reward.profileId ||
+          existingEntitlement.ruleType !== 'LOOT_BOX' ||
+          existingEntitlement.ruleId !== liveLootBox.id ||
+          existingEntitlement.sourceRewardId !== reward.id ||
+          !approvedRewardLootBoxEntitlementOutcomeLinkIsValid(
+            existingEntitlement.status,
+            existingEntitlement.rewardId,
+            reward.id,
+          ) ||
+          (sourceEventId !== null &&
+            existingEntitlement.eventId !== null &&
+            existingEntitlement.eventId !== sourceEventId))
+      ) {
+        throw new ConflictException(
+          'The reward is already linked to another loot-box entitlement.',
+        );
+      }
+      let entitlement =
+        existingEntitlement ??
+        (await tx.guestGameEntitlement.upsert({
+          where: {
+            tenantId_idempotencyKey: {
+              tenantId: user.tenantId,
+              idempotencyKey,
+            },
+          },
+          create: {
+            tenantId: user.tenantId,
+            profileId: reward.profileId,
+            guestId: reward.guestId,
+            storeId: reward.storeId,
+            eventId: sourceEventId,
+            sourceRewardId: reward.id,
+            ruleType: 'LOOT_BOX',
+            ruleId: liveLootBox.id,
+            ruleName: liveLootBox.name,
+            sourceEventType: isBattlePassReward
+              ? 'BATTLE_PASS_REWARD_APPROVED'
+              : 'MISSION_REWARD_APPROVED',
+            status: 'AVAILABLE',
+            idempotencyKey,
+            qualifiedAt: reward.qualifiedAt,
+            evidence: isBattlePassReward
+              ? {
+                  source: reward.approvedByUser
+                    ? 'battle_pass_reward_admin_approval'
+                    : 'battle_pass_reward_auto',
+                  seasonId: reward.season?.id ?? null,
+                  battlePassLevel: intValue(ruleEvidence.battlePassLevel),
+                  battlePassStep: intValue(ruleEvidence.battlePassStep),
+                  battlePassRewardTrack: battlePassTrack,
+                  sourceRewardId: reward.id,
+                  approvedByUserId: reward.approvedByUser?.id ?? null,
+                  evaluatorVersion: 'battle-pass-rewards-v2',
+                }
+              : {
+                  source: reward.approvedByUser
+                    ? 'mission_reward_admin_approval'
+                    : 'mission_reward_auto',
+                  missionId: reward.mission?.id ?? null,
+                  sourceRewardId: reward.id,
+                  approvedByUserId: reward.approvedByUser?.id ?? null,
+                  evaluatorVersion: 'mission-wizard-v2',
+                },
+          },
+          // Approval/effect retries are create-only. In particular, a consumed
+          // or canceled entitlement is terminal and must never become AVAILABLE
+          // again merely because the materializer retried the same reward.
+          update: {},
+          select: {
+            id: true,
+            profileId: true,
+            ruleType: true,
+            ruleId: true,
+            status: true,
+            storeId: true,
+            eventId: true,
+            sourceRewardId: true,
+            rewardId: true,
+            qualifiedAt: true,
+          },
+        }));
+
+      if (
+        entitlement.profileId !== reward.profileId ||
+        entitlement.ruleType !== 'LOOT_BOX' ||
+        entitlement.ruleId !== liveLootBox.id ||
+        entitlement.sourceRewardId !== reward.id ||
+        !approvedRewardLootBoxEntitlementOutcomeLinkIsValid(
+          entitlement.status,
+          entitlement.rewardId,
+          reward.id,
+        ) ||
+        (sourceEventId !== null &&
+          entitlement.eventId !== null &&
+          entitlement.eventId !== sourceEventId)
+      ) {
+        throw new ConflictException(
+          'The reward entitlement idempotency key belongs to another immutable issuance.',
+        );
+      }
+      if (sourceEventId !== null && entitlement.eventId === null) {
+        const canonicalized = await tx.guestGameEntitlement.updateMany({
+          where: {
+            id: entitlement.id,
+            tenantId: user.tenantId,
+            profileId: reward.profileId,
+            sourceRewardId: reward.id,
+            ruleType: 'LOOT_BOX',
+            ruleId: liveLootBox.id,
+            status: entitlement.status,
+            rewardId: entitlement.rewardId,
+            OR: [{ eventId: null }, { eventId: sourceEventId }],
+          },
+          data: { eventId: sourceEventId },
+        });
+        if (canonicalized.count !== 1) {
+          throw new ConflictException(
+            'The reward entitlement changed before its canonical source event was persisted.',
+          );
+        }
+        entitlement = { ...entitlement, eventId: sourceEventId };
+      }
 
       if (entitlement.status === 'AVAILABLE') {
         await upsertEntitlementWalletItem(tx, {
           tenantId: user.tenantId,
-          profileId: reward.profileId!,
+          profileId: reward.profileId,
           storeId: entitlement.storeId,
           entitlementId: entitlement.id,
           sourceKind: isBattlePassReward ? 'BATTLE_PASS' : 'MISSION',
@@ -13824,7 +14188,7 @@ export class GuestGamificationService {
           title:
             (isBattlePassReward ? reward.season?.name : reward.mission?.name) ??
             liveLootBox.name,
-          qualifiedAt: entitlement.qualifiedAt,
+          qualifiedAt: legacyClaimRepairedAt ?? entitlement.qualifiedAt,
           gameActivatedAt,
         });
       }
@@ -14386,6 +14750,46 @@ export class GuestGamificationService {
           },
         });
       }
+      const immutableMissionCaseDryRun =
+        materializeRewards && !options.replayRewardScope
+          ? automaticMissionCaseRewardRecoveryDryRun(
+              exactPersistence?.dryRun ??
+                processPersistedEventDryRun(existingEvent, effectDryRun),
+            )
+          : null;
+      const recoveredMissionCaseIntentIds = immutableMissionCaseDryRun
+        ? await this.ensureMatchedMissionRewardIntents(
+            user,
+            immutableMissionCaseDryRun,
+            {
+              eventId: existingEvent.id,
+              originKey,
+              traceId: nullableString(dto.traceId),
+              sourceFactId:
+                exactPersistence?.sourceFactId ??
+                nullableString(dto.sourceFactId),
+              sourceFactKind: exactPersistence
+                ? 'EXACT_CANONICAL_RECONCILIATION'
+                : nullableString(dto.sourceFactKind),
+              evaluationRunId: `mission-case-reward-intent-recovery:${existingEvent.id}`,
+              evaluationMode:
+                options.evaluationMode ??
+                (exactPersistence
+                  ? 'LIVE_LEDGER_FALLBACK'
+                  : 'LIVE_LOOT_BOX_RECOVERY'),
+              evidence: {
+                canonicalEventRecovery: true,
+                exactCanonicalReconciliation: Boolean(exactPersistence),
+              },
+            },
+          )
+        : [];
+      const exactDeliveryIntentIds = exactPersistence
+        ? uniqueStrings([
+            ...exactPersistence.intentIds,
+            ...recoveredMissionCaseIntentIds,
+          ])
+        : [];
       const existingRewards = materializeRewards
         ? await this.findProcessRewardsByReference(
             user,
@@ -14394,7 +14798,7 @@ export class GuestGamificationService {
           )
         : [];
       const materialized = materializeRewards
-        ? exactPersistence && exactPersistence.intentIds.length === 0
+        ? exactPersistence && exactDeliveryIntentIds.length === 0
           ? null
           : await this.materializeProcessRewardIntents(
               user,
@@ -14407,7 +14811,7 @@ export class GuestGamificationService {
               replayIntentIds
                 ? { intentIds: replayIntentIds }
                 : exactPersistence
-                  ? { intentIds: exactPersistence.intentIds }
+                  ? { intentIds: exactDeliveryIntentIds }
                   : undefined,
             )
         : null;
@@ -14489,7 +14893,7 @@ export class GuestGamificationService {
                 reconciliationKind === 'SESSION_START_RECLASSIFICATION',
               sourceFactId: exactPersistence.sourceFactId,
               physicalSessionKey: exactPersistence.physicalSessionKey,
-              intentIds: exactPersistence.intentIds,
+              intentIds: exactDeliveryIntentIds,
             },
           },
         );
@@ -14499,22 +14903,22 @@ export class GuestGamificationService {
           missingExactLootBoxes,
           missingExactMissions,
         ] = await Promise.all([
-          exactPersistence.intentIds.length
+          exactDeliveryIntentIds.length
             ? this.prisma.guestGameRewardIntent.count({
                 where: {
                   tenantId: user.tenantId,
                   eventId: existingEvent.id,
-                  id: { in: exactPersistence.intentIds },
+                  id: { in: exactDeliveryIntentIds },
                   status: { in: ['PENDING', 'PROCESSING', 'FAILED'] },
                 },
               })
             : Promise.resolve(0),
-          exactPersistence.intentIds.length
+          exactDeliveryIntentIds.length
             ? this.prisma.guestGameRewardIntent.count({
                 where: {
                   tenantId: user.tenantId,
                   eventId: existingEvent.id,
-                  id: { in: exactPersistence.intentIds },
+                  id: { in: exactDeliveryIntentIds },
                   status: 'DEAD_LETTER',
                 },
               })
@@ -14542,7 +14946,7 @@ export class GuestGamificationService {
             missingExactMissions.length === 0,
           waitingForDelivery: deliveryState.waitingForDelivery,
           deadLetterIntentCount,
-          persistedIntentCount: exactPersistence.intentIds.length,
+          persistedIntentCount: exactDeliveryIntentIds.length,
           appliedXpDelta: exactPersistence.appliedXpDelta,
           decisionsPersisted: decisionResult.decisionsPersisted,
         };
@@ -14674,6 +15078,28 @@ export class GuestGamificationService {
           ) {
             throw new ConflictException(
               'Каноническое событие уже связано с другим гостем или типом действия.',
+            );
+          }
+          const immutableMissionCaseDryRun = materializeRewards
+            ? automaticMissionCaseRewardRecoveryDryRun(
+                processPersistedEventDryRun(duplicateEvent, dryRun),
+              )
+            : null;
+          if (immutableMissionCaseDryRun) {
+            await this.ensureMatchedMissionRewardIntents(
+              user,
+              immutableMissionCaseDryRun,
+              {
+                eventId: duplicateEvent.id,
+                originKey,
+                traceId: nullableString(dto.traceId),
+                sourceFactId: nullableString(dto.sourceFactId),
+                sourceFactKind: nullableString(dto.sourceFactKind),
+                evaluationRunId: `mission-case-reward-intent-recovery:${duplicateEvent.id}`,
+                evaluationMode:
+                  options.evaluationMode ?? 'LIVE_LOOT_BOX_RECOVERY',
+                evidence: { canonicalEventConflictRecovery: true },
+              },
             );
           }
           const existingRewards = materializeRewards
@@ -17282,6 +17708,8 @@ export class GuestGamificationService {
         rewardType,
         rewardAmount,
       });
+      const claimRequired =
+        !completionMarker && rewardType !== 'LOOT_BOX_ENTITLEMENT';
 
       try {
         const reward = await this.createReward(
@@ -17355,12 +17783,10 @@ export class GuestGamificationService {
           {
             originKey,
             idempotencyKey,
-            claimRequired: !completionMarker,
-            claimExpiresAt: completionMarker
-              ? null
-              : new Date(
-                  Date.parse(qualifiedAt) + guestRewardWalletRetentionMs,
-                ),
+            claimRequired,
+            claimExpiresAt: claimRequired
+              ? new Date(Date.parse(qualifiedAt) + guestRewardWalletRetentionMs)
+              : null,
           },
         );
         rewards.push(reward);
@@ -17574,19 +18000,37 @@ export class GuestGamificationService {
         tenantId: user.tenantId,
         ruleType: 'LOOT_BOX',
         status: { in: ['AVAILABLE', 'CONSUMED'] },
-        OR: missionIds.map((missionId) => ({
-          evidence: { path: ['missionId'], equals: missionId },
-        })),
+        OR: [
+          {
+            sourceReward: {
+              is: {
+                tenantId: user.tenantId,
+                missionId: { in: missionIds },
+                rewardType: 'LOOT_BOX_ENTITLEMENT',
+              },
+            },
+          },
+          ...missionIds.map((missionId) => ({
+            evidence: { path: ['missionId'], equals: missionId },
+          })),
+        ],
       },
       select: {
         id: true,
         ruleId: true,
         status: true,
         rewardId: true,
+        sourceRewardId: true,
         profileId: true,
         guestId: true,
         qualifiedAt: true,
         evidence: true,
+        sourceReward: {
+          select: {
+            missionId: true,
+            rewardType: true,
+          },
+        },
       },
       orderBy: { qualifiedAt: 'desc' },
     });
@@ -17619,10 +18063,17 @@ export class GuestGamificationService {
         ruleId: true,
         status: true,
         rewardId: true,
+        sourceRewardId: true,
         profileId: true,
         guestId: true,
         qualifiedAt: true,
         evidence: true,
+        sourceReward: {
+          select: {
+            missionId: true,
+            rewardType: true,
+          },
+        },
       },
       orderBy: { qualifiedAt: 'desc' },
     });
@@ -17947,7 +18398,7 @@ export class GuestGamificationService {
     );
     const queueRewards = rewards.filter(
       (reward) =>
-        !reward.claimRequired &&
+        legacyDeliveryRewardEligible(reward) &&
         ['PENDING', 'APPROVED', 'PAID', 'CANCELED', 'EXPIRED'].includes(
           reward.status,
         ),
@@ -19272,6 +19723,7 @@ export class GuestGamificationService {
       isCreate ? 'PENDING' : undefined,
     );
     const rewardRarity = lootBoxRewardRarityCode(dto.rewardRarity);
+    const rewardType = requiredString(dto.rewardType, 'Тип награды', isCreate);
 
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
@@ -19302,7 +19754,7 @@ export class GuestGamificationService {
         ? nullableString(canonicalIdentity.idempotencyKey)
         : undefined,
       guestExternalId: nullableString(dto.guestExternalId),
-      rewardType: requiredString(dto.rewardType, 'Тип награды', isCreate),
+      rewardType,
       rewardAmount:
         decimalValue(dto.rewardAmount) ??
         (isCreate ? new Prisma.Decimal(0) : undefined),
@@ -19317,14 +19769,16 @@ export class GuestGamificationService {
         (rewardRarity ? lootBoxRewardRarityLabels[rewardRarity] : undefined),
       rewardDropChance: decimalValue(dto.rewardDropChance),
       rewardCode:
-        nullableString(dto.rewardCode) ??
-        (isCreate ? generateRewardCode() : undefined),
+        rewardType === 'LOOT_BOX_ENTITLEMENT'
+          ? null
+          : (nullableString(dto.rewardCode) ??
+            (isCreate ? generateRewardCode() : undefined)),
       claimRequired: isCreate
         ? canonicalIdentity.claimRequired === true
         : undefined,
       deliveryRequestedAt: isCreate ? null : undefined,
       claimExpiresAt: isCreate
-        ? canonicalIdentity.claimExpiresAt ?? null
+        ? (canonicalIdentity.claimExpiresAt ?? null)
         : undefined,
       qualifiedAt:
         dateValue(dto.qualifiedAt) ?? (isCreate ? new Date() : undefined),
@@ -19628,11 +20082,14 @@ export class GuestGamificationService {
         } else if (claim.effectKind === 'LOOT_BOX_ENTITLEMENT') {
           await this.createApprovedRewardLootBoxEntitlement(user, row);
         } else if (claim.effectKind === 'BONUS_LEDGER_QUEUE') {
-          const queued = await this.bonusLedgerService.queueApprovedRewards(user, {
-            rewardId: row.id,
-            rewardTypes: [row.rewardType],
-            limit: 1,
-          });
+          const queued = await this.bonusLedgerService.queueApprovedRewards(
+            user,
+            {
+              rewardId: row.id,
+              rewardTypes: [row.rewardType],
+              limit: 1,
+            },
+          );
           if (queued.rewardTypes.length > 0) {
             const queueItem = queued.items.find(
               (item) => item.rewardId === row.id,
@@ -19722,6 +20179,423 @@ export class GuestGamificationService {
 
     result.rewardIds = [...new Set(result.rewardIds)];
     return result;
+  }
+
+  async recoverProfileLootBoxRewardEffects(
+    user: AuthenticatedUser,
+    profileId: string,
+    requestedLimit = 10,
+  ): Promise<void> {
+    if (!this.rewardMaterializerClaimsAllowed()) {
+      return;
+    }
+    const profile = await this.prisma.guestGameProfile.findFirst({
+      where: {
+        id: profileId,
+        tenantId: user.tenantId,
+        status: 'ACTIVE',
+      },
+      select: { gameActivatedAt: true },
+    });
+    if (!profile?.gameActivatedAt) {
+      return;
+    }
+
+    const now = new Date();
+    const retentionCutoff = new Date(
+      now.getTime() - guestRewardWalletRetentionMs,
+    );
+    const rewards = await this.prisma.guestGameReward.findMany({
+      where: {
+        tenantId: user.tenantId,
+        profileId,
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+        status: { in: ['APPROVED', 'PAID'] },
+        qualifiedAt: { gte: profile.gameActivatedAt },
+        AND: [
+          {
+            OR: [
+              { qualifiedAt: { gt: retentionCutoff } },
+              {
+                evidence: {
+                  path: ['caseRewardLegacyClaim', 'repairedAt'],
+                  not: Prisma.AnyNull,
+                },
+              },
+            ],
+          },
+          {
+            OR: [
+              {
+                rewardEffects: {
+                  none: { effectKind: 'LOOT_BOX_ENTITLEMENT' },
+                },
+              },
+              {
+                rewardEffects: {
+                  some: {
+                    effectKind: 'LOOT_BOX_ENTITLEMENT',
+                    status: {
+                      in: ['WAITING_CLAIM', 'PENDING', 'FAILED', 'PROCESSING'],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      select: { id: true, qualifiedAt: true, evidence: true },
+      orderBy: [{ qualifiedAt: 'asc' }, { id: 'asc' }],
+      take: boundedEffectInteger(requestedLimit, 10, 1, 30),
+    });
+
+    const recoverableRewards = rewards.filter(
+      (reward) =>
+        reward.qualifiedAt.getTime() > retentionCutoff.getTime() ||
+        guestGameLegacyCaseClaimRepairIsValid(reward.evidence, now),
+    );
+    for (const reward of recoverableRewards) {
+      await this.prisma.guestGameRewardEffect.updateMany({
+        where: {
+          tenantId: user.tenantId,
+          rewardId: reward.id,
+          effectKind: 'LOOT_BOX_ENTITLEMENT',
+          status: 'WAITING_CLAIM',
+        },
+        data: {
+          status: 'PENDING',
+          nextAttemptAt: null,
+          claimedAt: null,
+          claimExpiresAt: null,
+          lastError: null,
+        },
+      });
+      await this.reconcileCreatedRewardSideEffectsById(user, reward.id);
+    }
+
+    await this.recoverPersistedAutomaticMissionCaseRewards(
+      user,
+      profileId,
+      profile.gameActivatedAt,
+      requestedLimit,
+    );
+  }
+
+  private async recoverPersistedAutomaticMissionCaseRewards(
+    user: AuthenticatedUser,
+    profileId: string,
+    gameActivatedAt: Date,
+    requestedLimit: number,
+  ): Promise<void> {
+    const now = new Date();
+    const thirtyDayCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1_000);
+    const recoveryLimit = boundedEffectInteger(requestedLimit, 10, 1, 30);
+    const candidatePageSize = 120;
+    const candidateScanCap = 1_000;
+    let scannedCandidateCount = 0;
+    let recoveredIntentCount = 0;
+    let candidateCursor: { occurredAt: Date; id: string } | null = null;
+    let recoveryProfileContext: {
+      mapped: ReturnType<typeof mapProfile>;
+      identity: NonNullable<GuestGameDryRunResult['profile']>;
+    } | null = null;
+
+    while (
+      recoveredIntentCount < recoveryLimit &&
+      scannedCandidateCount < candidateScanCap
+    ) {
+      const pageLimit = Math.min(
+        candidatePageSize,
+        candidateScanCap - scannedCandidateCount,
+      );
+      const cursorPredicate = candidateCursor
+        ? Prisma.sql`
+            AND (
+              source_event."occurredAt" > ${candidateCursor.occurredAt}
+              OR (
+                source_event."occurredAt" = ${candidateCursor.occurredAt}
+                AND source_event."id" > ${candidateCursor.id}
+              )
+            )
+          `
+        : Prisma.empty;
+      const candidateRows = await this.prisma.$queryRaw<
+        Array<{ id: string; occurredAt: Date }>
+      >(Prisma.sql`
+        SELECT source_event."id", source_event."occurredAt"
+        FROM "GuestGameEvent" source_event
+        WHERE source_event."tenantId" = ${user.tenantId}
+          AND source_event."profileId" = ${profileId}
+          AND source_event."occurredAt" >= ${gameActivatedAt}
+          AND source_event."occurredAt" > ${thirtyDayCutoff}
+          AND source_event."occurredAt" <= ${now}
+          ${cursorPredicate}
+          AND jsonb_typeof(source_event."payload") = 'object'
+          AND jsonb_typeof(
+            source_event."payload" -> 'processSchemaVersion'
+          ) = 'number'
+          AND source_event."payload" -> 'processSchemaVersion' = '2'::jsonb
+          AND jsonb_typeof(source_event."payload" -> 'source') = 'string'
+          AND source_event."payload" ->> 'source' =
+            'guest_gamification_process_event'
+          AND jsonb_typeof(source_event."payload" -> 'input') = 'object'
+          AND source_event."payload" -> 'input' <> '{}'::jsonb
+          AND jsonb_typeof(source_event."payload" -> 'store') = 'object'
+          AND jsonb_typeof(source_event."payload" -> 'rules') = 'array'
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(source_event."payload" -> 'rules') = 'array'
+                  THEN source_event."payload" -> 'rules'
+                ELSE '[]'::jsonb
+              END
+            ) AS persisted_rule(value)
+            WHERE jsonb_typeof(persisted_rule.value) = 'object'
+              AND jsonb_typeof(persisted_rule.value -> 'id') = 'string'
+              AND btrim(persisted_rule.value ->> 'id') <> ''
+              AND jsonb_typeof(persisted_rule.value -> 'name') = 'string'
+              AND btrim(persisted_rule.value ->> 'name') <> ''
+              AND jsonb_typeof(persisted_rule.value -> 'eligible') = 'boolean'
+              AND persisted_rule.value -> 'eligible' = 'true'::jsonb
+              AND jsonb_typeof(persisted_rule.value -> 'kind') = 'string'
+              AND persisted_rule.value ->> 'kind' = 'MISSION'
+              AND jsonb_typeof(persisted_rule.value -> 'rewardType') = 'string'
+              AND persisted_rule.value ->> 'rewardType' =
+                'LOOT_BOX_ENTITLEMENT'
+              AND jsonb_typeof(
+                persisted_rule.value -> 'manualApprovalRequired'
+              ) = 'boolean'
+              AND persisted_rule.value -> 'manualApprovalRequired' =
+                'false'::jsonb
+              AND (
+                (
+                  jsonb_typeof(
+                    persisted_rule.value -> 'rewardLootBoxId'
+                  ) = 'string'
+                  AND btrim(persisted_rule.value ->> 'rewardLootBoxId') <> ''
+                )
+                OR (
+                  jsonb_typeof(
+                    persisted_rule.value -> 'ruleUpdatedAt'
+                  ) = 'string'
+                  AND btrim(persisted_rule.value ->> 'ruleUpdatedAt') <> ''
+                )
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM "GuestGameRewardIntent" reward_intent
+                WHERE reward_intent."tenantId" = source_event."tenantId"
+                  AND reward_intent."eventId" = source_event."id"
+                  AND reward_intent."ruleType" = 'MISSION'
+                  AND reward_intent."effectKind" = 'REWARD'
+                  AND reward_intent."ruleId" =
+                    persisted_rule.value ->> 'id'
+              )
+          )
+        ORDER BY source_event."occurredAt" ASC, source_event."id" ASC
+        LIMIT ${pageLimit}
+      `);
+      if (!candidateRows?.length) break;
+
+      scannedCandidateCount += candidateRows.length;
+      const lastCandidate = candidateRows[candidateRows.length - 1];
+      const rawLastCandidateOccurredAt = lastCandidate.occurredAt as unknown;
+      const parsedLastCandidateOccurredAt =
+        rawLastCandidateOccurredAt instanceof Date
+          ? rawLastCandidateOccurredAt
+          : typeof rawLastCandidateOccurredAt === 'string'
+            ? new Date(rawLastCandidateOccurredAt)
+            : null;
+      const lastCandidateOccurredAt =
+        parsedLastCandidateOccurredAt &&
+        !Number.isNaN(parsedLastCandidateOccurredAt.getTime())
+          ? parsedLastCandidateOccurredAt
+          : null;
+      const lastCandidateId = nullableId(lastCandidate.id);
+      if (!lastCandidateOccurredAt || !lastCandidateId) {
+        this.logger.warn(
+          'Historical mission case recovery stopped on an invalid candidate cursor.',
+        );
+        break;
+      }
+      candidateCursor = {
+        occurredAt: lastCandidateOccurredAt,
+        id: lastCandidateId,
+      };
+
+      if (!recoveryProfileContext) {
+        const profileRow = await this.prisma.guestGameProfile.findFirst({
+          where: {
+            id: profileId,
+            tenantId: user.tenantId,
+            status: 'ACTIVE',
+          },
+          include: gameProfileInclude,
+        });
+        if (!profileRow?.gameActivatedAt) return;
+        const mapped = mapProfile(profileRow);
+        recoveryProfileContext = {
+          mapped,
+          identity: {
+            id: mapped.id,
+            displayName: mapped.displayName,
+            contactMasked: mapped.contactMasked,
+            xp: mapped.xp,
+            level: mapped.level,
+            status: mapped.status,
+            gameActivatedAt: mapped.gameActivatedAt,
+          },
+        };
+      }
+
+      const candidateIds = uniqueStrings(
+        candidateRows.map((row) => nullableId(row.id)),
+      );
+      const events = candidateIds.length
+        ? ((await this.prisma.guestGameEvent.findMany({
+            where: {
+              tenantId: user.tenantId,
+              profileId,
+              id: { in: candidateIds },
+              occurredAt: {
+                gt: thirtyDayCutoff,
+                gte: gameActivatedAt,
+                lte: now,
+              },
+            },
+            include: eventInclude,
+            orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+          })) ?? [])
+        : [];
+
+      for (const event of events) {
+        const remainingRecoveryLimit = recoveryLimit - recoveredIntentCount;
+        if (remainingRecoveryLimit <= 0) break;
+        const identityDryRun: GuestGameDryRunResult = {
+          dryRun: true,
+          eventType: event.eventType,
+          occurredAt: event.occurredAt.toISOString(),
+          profile: recoveryProfileContext.identity,
+          guest: recoveryProfileContext.mapped.guest,
+          store: null,
+          input: emptyProcessRewardInput(),
+          summary: {
+            checkedRules: 0,
+            eligibleRules: 0,
+            blockedRules: 0,
+            estimatedRewardAmount: 0,
+            projectedXpDelta: 0,
+          },
+          rules: [],
+          note: 'Historical case recovery uses immutable canonical event evidence.',
+        };
+
+        try {
+          const persistedDryRun = automaticMissionCaseRewardRecoveryDryRun(
+            processPersistedEventDryRun(event, identityDryRun),
+          );
+          if (!persistedDryRun) continue;
+
+          const existingRewardIntents =
+            await this.prisma.guestGameRewardIntent.findMany({
+              where: {
+                tenantId: user.tenantId,
+                eventId: event.id,
+                ruleType: 'MISSION',
+                ruleId: {
+                  in: persistedDryRun.rules.map((rule) => rule.id),
+                },
+                effectKind: 'REWARD',
+              },
+              select: { ruleId: true },
+            });
+          const existingRuleIds = new Set(
+            existingRewardIntents.map((intent) => intent.ruleId),
+          );
+          const missingRules = persistedDryRun.rules
+            .filter((rule) => !existingRuleIds.has(rule.id))
+            .slice(0, remainingRecoveryLimit);
+          if (!missingRules.length) continue;
+          const missingRewardDryRun = dryRunWithRules(
+            persistedDryRun,
+            missingRules,
+          );
+
+          const payload = jsonRecord(event.payload);
+          const intentIds = await this.ensureMatchedMissionRewardIntents(
+            user,
+            missingRewardDryRun,
+            {
+              eventId: event.id,
+              originKey: event.originKey,
+              sourceFactId: nullableString(payload.sourceFactId),
+              sourceFactKind: nullableString(payload.sourceFactKind),
+              evaluationRunId: `profile-mission-case-recovery:${event.id}`,
+              evaluationMode: 'LIVE_LOOT_BOX_RECOVERY',
+              evidence: {
+                canonicalEventRecovery: true,
+                profileSummaryRecovery: true,
+              },
+            },
+          );
+          if (!intentIds.length) continue;
+
+          const eventReference =
+            event.externalProvider && event.externalDomain && event.externalId
+              ? {
+                  externalProvider: event.externalProvider,
+                  externalDomain: event.externalDomain,
+                  externalId: event.externalId,
+                }
+              : null;
+          await this.materializeProcessRewardIntents(
+            user,
+            {
+              profileId,
+              guestId: event.guestId,
+              eventType: event.eventType,
+              occurredAt: event.occurredAt.toISOString(),
+              sourceFactId: nullableString(payload.sourceFactId),
+              sourceFactKind: nullableString(payload.sourceFactKind),
+              externalProvider: event.externalProvider,
+              externalDomain: event.externalDomain,
+              externalId: event.externalId,
+            },
+            missingRewardDryRun,
+            event,
+            profileId,
+            eventReference,
+            event.originKey,
+            {
+              intentIds,
+              // Only rules proven missing immediately above are handed to the
+              // materializer, so no older pending sibling can consume the
+              // bounded slot intended for a newly recovered case reward.
+              limit: intentIds.length,
+              throwOnFailure: false,
+            },
+          );
+          recoveredIntentCount += intentIds.length;
+        } catch (error) {
+          this.logger.warn(
+            `Historical mission case recovery deferred for event ${event.id}: ${this.checkInErrorMessage(error).slice(0, 300)}`,
+          );
+        }
+      }
+
+      if (candidateRows.length < pageLimit) break;
+    }
+
+    if (
+      recoveredIntentCount < recoveryLimit &&
+      scannedCandidateCount >= candidateScanCap
+    ) {
+      this.logger.warn(
+        `Historical mission case recovery reached its ${candidateScanCap}-event scan cap for profile ${profileId}.`,
+      );
+    }
   }
 
   private async claimRewardEffects(
@@ -20001,9 +20875,7 @@ export class GuestGamificationService {
     action: string,
   ) {
     const now = new Date();
-    const retentionCutoff = new Date(
-      now.getTime() - 30 * 24 * 60 * 60 * 1_000,
-    );
+    const retentionCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1_000);
     const [liveEntitlements, pendingWalletItems] = await Promise.all([
       db.guestGameEntitlement.count({
         where: {
@@ -20078,6 +20950,28 @@ export class GuestGamificationService {
         statusCode: 409,
         code: 'REWARD_WALLET_DELIVERY_IN_PROGRESS',
         message: `Нельзя ${action} награду после подтверждения получения, пока выдача не завершена или не сверена вручную.`,
+        rewardId,
+      });
+    }
+  }
+
+  private async assertRewardHasNoSourceEntitlement(
+    db: Prisma.TransactionClient | PrismaService,
+    user: AuthenticatedUser,
+    rewardId: string,
+    action: string,
+  ) {
+    const sourceEntitlements = await db.guestGameEntitlement.count({
+      where: {
+        tenantId: user.tenantId,
+        sourceRewardId: rewardId,
+      },
+    });
+    if (sourceEntitlements > 0) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'CASE_REWARD_ALREADY_MATERIALIZED',
+        message: `Нельзя ${action} наградной кейс после создания права на его открытие.`,
         rewardId,
       });
     }
@@ -22538,9 +23432,10 @@ function inlineImageUpload(value: string | null | undefined) {
     return null;
   }
 
-  const match = /^data:(image\/(?:jpeg|png|webp));base64,([a-z0-9+/=\s]+)$/i.exec(
-    value.trim(),
-  );
+  const match =
+    /^data:(image\/(?:jpeg|png|webp));base64,([a-z0-9+/=\s]+)$/i.exec(
+      value.trim(),
+    );
 
   if (!match) {
     return null;
@@ -22903,7 +23798,12 @@ function rewardBattlePassStepNumber(row: RewardRow) {
 }
 
 function mapReward(row: RewardRow): GuestGameReward {
-  const walletState = rewardWalletState(row.status, row.expiresAt);
+  const walletState = rewardWalletState(
+    row.status,
+    row.expiresAt,
+    row.rewardType,
+    row.sourceEntitlements.map((entitlement) => entitlement.status),
+  );
   const legacyDeliveryEligible = legacyDeliveryRewardEligible(row);
 
   return {
@@ -23602,14 +24502,70 @@ function lootBoxSemanticComparableValue(value: unknown): unknown {
   return value;
 }
 
-function legacyDeliveryRewardEligible(reward: { claimRequired: boolean }) {
-  return reward.claimRequired === false;
+function legacyDeliveryRewardEligible(reward: {
+  claimRequired: boolean;
+  rewardType: string;
+}) {
+  return (
+    reward.claimRequired === false &&
+    reward.rewardType !== 'LOOT_BOX_ENTITLEMENT'
+  );
+}
+
+function rewardUpdateHasSemanticChange(
+  current: Record<string, unknown>,
+  data: Prisma.GuestGameRewardUncheckedUpdateInput,
+) {
+  return Object.entries(data).some(([field, next]) => {
+    const previous = current[field];
+    if (previous instanceof Date || next instanceof Date) {
+      return !(
+        previous instanceof Date &&
+        next instanceof Date &&
+        previous.getTime() === next.getTime()
+      );
+    }
+    if (previous instanceof Prisma.Decimal || next instanceof Prisma.Decimal) {
+      return !(
+        previous instanceof Prisma.Decimal &&
+        next instanceof Prisma.Decimal &&
+        previous.equals(next)
+      );
+    }
+    if (
+      (previous !== null && typeof previous === 'object') ||
+      (next !== null && typeof next === 'object')
+    ) {
+      return (
+        canonicalGuestGameJsonFingerprint(previous) !==
+        canonicalGuestGameJsonFingerprint(next)
+      );
+    }
+    return previous !== next;
+  });
 }
 
 function rewardWalletState(
   status: string,
   expiresAt: Date | null,
+  rewardType?: string | null,
+  sourceEntitlementStatuses: string[] = [],
 ): GuestGameReward['walletState'] {
+  if (
+    rewardType === 'LOOT_BOX_ENTITLEMENT' &&
+    (status === 'APPROVED' || status === 'PAID')
+  ) {
+    if (sourceEntitlementStatuses.includes('CANCELED')) {
+      return 'CANCELED';
+    }
+    if (sourceEntitlementStatuses.includes('EXPIRED')) {
+      return 'EXPIRED';
+    }
+    return sourceEntitlementStatuses.length > 0
+      ? 'REDEEMED'
+      : 'DELIVERY_PROCESSING';
+  }
+
   if (status === 'PAID') {
     return 'REDEEMED';
   }
@@ -26619,7 +27575,8 @@ function guestGameRewardEffectPlans(row: {
     ].join(':'),
     status:
       row.claimRequired &&
-      effectKind !== 'STAFF_APPROVAL_NOTIFICATION'
+      effectKind !== 'STAFF_APPROVAL_NOTIFICATION' &&
+      effectKind !== 'LOOT_BOX_ENTITLEMENT'
         ? 'WAITING_CLAIM'
         : 'PENDING',
     payload: {
@@ -26655,6 +27612,18 @@ function guestGameRewardEffectStillApplies(
     );
   }
   return true;
+}
+
+function approvedRewardLootBoxEntitlementOutcomeLinkIsValid(
+  status: string,
+  outcomeRewardId: string | null,
+  sourceRewardId: string,
+) {
+  if (status === 'CONSUMED') {
+    return outcomeRewardId !== null && outcomeRewardId !== sourceRewardId;
+  }
+
+  return outcomeRewardId === null || outcomeRewardId === sourceRewardId;
 }
 
 function emptyEffectMaterializeResult(): GuestGameEffectMaterializeResult {
@@ -27764,6 +28733,20 @@ function processLootBoxEntitlementRecoveryDryRun(
   return rules.length ? dryRunWithRules(persisted, rules) : null;
 }
 
+function automaticMissionCaseRewardRecoveryDryRun(
+  dryRun: GuestGameDryRunResult | null,
+): GuestGameDryRunResult | null {
+  if (!dryRun) return null;
+  const rules = dryRun.rules.filter(
+    (rule) =>
+      rule.eligible &&
+      rule.kind === 'MISSION' &&
+      rule.rewardType === 'LOOT_BOX_ENTITLEMENT' &&
+      !rule.manualApprovalRequired,
+  );
+  return rules.length ? dryRunWithRules(dryRun, rules) : null;
+}
+
 function processRewardIntentPlans(value: unknown): ProcessRewardIntentPlan[] {
   if (!isRecord(value) || intValue(value.processSchemaVersion) !== 2) {
     return [];
@@ -27937,10 +28920,15 @@ function atomicMissionIssuances(input: {
     id: string;
     eventId: string | null;
     rewardId: string | null;
+    sourceRewardId: string | null;
     profileId: string | null;
     guestId: string | null;
     qualifiedAt: Date;
     evidence: Prisma.JsonValue | null;
+    sourceReward: {
+      missionId: string | null;
+      rewardType: string;
+    } | null;
   }>;
 }): AtomicMissionIssuance[] {
   const result = new Map<string, AtomicMissionIssuance>();
@@ -27994,15 +28982,14 @@ function atomicMissionIssuances(input: {
   }
 
   for (const entitlement of input.entitlements) {
-    const evidence = jsonRecord(entitlement.evidence);
-    if (nullableId(evidence.missionId) !== input.ruleId) continue;
+    if (missionEntitlementMissionId(entitlement) !== input.ruleId) continue;
     const qualifiedAt = dryRunDateOrNull(entitlement.qualifiedAt);
     if (!qualifiedAt) continue;
+    const sourceRewardId = missionEntitlementSourceRewardId(entitlement);
     const key = entitlement.eventId
       ? `event:${entitlement.eventId}`
-      : entitlement.rewardId
-        ? (rewardEventKeys.get(entitlement.rewardId) ??
-          `reward:${entitlement.rewardId}`)
+      : sourceRewardId
+        ? (rewardEventKeys.get(sourceRewardId) ?? `reward:${sourceRewardId}`)
         : `entitlement:${entitlement.id}`;
     add(key, {
       profileId: entitlement.profileId,
@@ -28812,7 +29799,7 @@ function shouldQueueProcessReward(rule: GuestGameDryRunRule) {
 
   if (rule.kind === 'MISSION') {
     if (rule.rewardType === 'LOOT_BOX_ENTITLEMENT') {
-      return rule.manualApprovalRequired;
+      return true;
     }
     return Boolean(rule.rewardLabel || (rule.rewardAmount ?? 0) > 0);
   }
@@ -29559,11 +30546,84 @@ type DryRunMissionRewardEntitlement = {
   ruleId: string;
   status: string;
   rewardId: string | null;
+  sourceRewardId: string | null;
   profileId: string | null;
   guestId: string | null;
   qualifiedAt: Date;
   evidence: Prisma.JsonValue | null;
+  sourceReward: {
+    missionId: string | null;
+    rewardType: string;
+  } | null;
 };
+
+function missionEntitlementSourceRewardId(entitlement: {
+  sourceRewardId: string | null;
+  evidence: Prisma.JsonValue | null;
+}) {
+  const sourceRewardId = nullableId(entitlement.sourceRewardId);
+  if (sourceRewardId) return sourceRewardId;
+
+  const evidence = jsonRecord(entitlement.evidence);
+  const legacySource = nullableString(evidence.source);
+  if (
+    !nullableId(evidence.missionId) ||
+    !['mission_reward_auto', 'mission_reward_admin_approval'].includes(
+      legacySource ?? '',
+    )
+  ) {
+    return null;
+  }
+  return nullableId(evidence.rewardId);
+}
+
+function missionEntitlementMissionId(entitlement: {
+  evidence: Prisma.JsonValue | null;
+  sourceReward: {
+    missionId: string | null;
+    rewardType: string;
+  } | null;
+}) {
+  if (entitlement.sourceReward?.rewardType === 'LOOT_BOX_ENTITLEMENT') {
+    const sourceMissionId = nullableId(entitlement.sourceReward.missionId);
+    if (sourceMissionId) return sourceMissionId;
+  }
+  return nullableId(jsonRecord(entitlement.evidence).missionId);
+}
+
+function lootBoxLimitEntitlementLinkedRewardIds(entitlement: {
+  status: string;
+  sourceRewardId: string | null;
+  rewardId: string | null;
+  evidence: Prisma.JsonValue | null;
+}) {
+  const sourceRewardId = nullableId(entitlement.sourceRewardId);
+  const outcomeRewardId = nullableId(entitlement.rewardId);
+  const evidence = jsonRecord(entitlement.evidence);
+  const legacySource = nullableString(evidence.source);
+  const isLegacyCaseReward =
+    (nullableId(evidence.missionId) &&
+      ['mission_reward_auto', 'mission_reward_admin_approval'].includes(
+        legacySource ?? '',
+      )) ||
+    (nullableId(evidence.seasonId) &&
+      ['battle_pass_reward_auto', 'battle_pass_reward_admin_approval'].includes(
+        legacySource ?? '',
+      ));
+  return uniqueStrings([
+    sourceRewardId ?? '',
+    ...(entitlement.status === 'CONSUMED' && outcomeRewardId
+      ? [outcomeRewardId]
+      : []),
+    ...(isLegacyCaseReward
+      ? [
+          nullableId(evidence.sourceRewardId) ?? '',
+          nullableId(evidence.rewardId) ?? '',
+          outcomeRewardId ?? '',
+        ]
+      : []),
+  ]);
+}
 
 type LootBoxAtomicLimitReward = {
   id: string;
@@ -29574,10 +30634,13 @@ type LootBoxAtomicLimitReward = {
 
 type LootBoxAtomicLimitEntitlement = {
   id: string;
+  status: string;
   profileId: string | null;
   guestId: string | null;
   rewardId: string | null;
+  sourceRewardId: string | null;
   qualifiedAt: Date;
+  evidence: Prisma.JsonValue | null;
 };
 
 type LootBoxAtomicLimitGuard = {
@@ -29720,10 +30783,10 @@ function evaluateMissionDryRun(
 ): GuestGameDryRunRule {
   const reasons: string[] = [];
   const blockers: string[] = [];
+  const missionReward = dryRunRecord(dryRunRecord(rule.conditions).reward);
   const ruleRewards = dryRunRewardsForRule(context.rewards, 'mission', rule.id);
   const ruleEntitlements = context.missionRewardEntitlements.filter(
-    (entitlement) =>
-      nullableId(jsonRecord(entitlement.evidence).missionId) === rule.id,
+    (entitlement) => missionEntitlementMissionId(entitlement) === rule.id,
   );
 
   appendDryRunProfileCheck(context, blockers, reasons);
@@ -29804,6 +30867,10 @@ function evaluateMissionDryRun(
       dryRunRecord(rule.antiFraudRules).denySameDayRepeat === true,
     missionPerGuestLimit: rule.perGuestLimit,
     missionTotalRewardLimit: rule.totalRewardLimit,
+    rewardLootBoxId:
+      rule.rewardType === 'LOOT_BOX_ENTITLEMENT'
+        ? nullableId(missionReward.lootBoxId)
+        : null,
     reasons,
     blockers,
   });
@@ -30632,9 +31699,7 @@ function appendDryRunLootBoxLimits(
       })
     : [];
   const entitlementRewardIds = new Set(
-    guestEntitlements
-      .map((entitlement) => entitlement.rewardId)
-      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+    guestEntitlements.flatMap(lootBoxLimitEntitlementLinkedRewardIds),
   );
   const guestIssuanceTimes: Array<string | Date> = [
     ...guestRewards
@@ -30643,9 +31708,7 @@ function appendDryRunLootBoxLimits(
     ...guestEntitlements.map((entitlement) => entitlement.qualifiedAt),
   ];
   const allEntitlementRewardIds = new Set(
-    limitEntitlements
-      .map((entitlement) => entitlement.rewardId)
-      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+    limitEntitlements.flatMap(lootBoxLimitEntitlementLinkedRewardIds),
   );
   const allIssuanceTimes: Array<string | Date> = [
     ...limitRewards
@@ -30779,9 +31842,7 @@ function lootBoxEntitlementLimitGuard(input: {
       happenedAfterGameActivation(entitlement.qualifiedAt),
   );
   const guestEntitlementRewardIds = new Set(
-    guestEntitlements
-      .map((entitlement) => entitlement.rewardId)
-      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+    guestEntitlements.flatMap(lootBoxLimitEntitlementLinkedRewardIds),
   );
   const guestIssuanceTimes: Date[] = [
     ...rewards
@@ -30795,9 +31856,7 @@ function lootBoxEntitlementLimitGuard(input: {
     ...guestEntitlements.map((entitlement) => entitlement.qualifiedAt),
   ];
   const allEntitlementRewardIds = new Set(
-    entitlements
-      .map((entitlement) => entitlement.rewardId)
-      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+    entitlements.flatMap(lootBoxLimitEntitlementLinkedRewardIds),
   );
   const allIssuanceTimes: Date[] = [
     ...rewards
@@ -30870,21 +31929,21 @@ function appendDryRunMissionLimits(
       (context.profile && entitlement.profileId === context.profile.id) ||
       (context.guest && entitlement.guestId === context.guest.id),
   );
-  const guestEntitlementRewardIds = new Set(
+  const guestEntitlementSourceRewardIds = new Set(
     guestEntitlements
-      .map((entitlement) => entitlement.rewardId)
+      .map(missionEntitlementSourceRewardId)
       .filter((rewardId): rewardId is string => Boolean(rewardId)),
   );
-  const allEntitlementRewardIds = new Set(
+  const allEntitlementSourceRewardIds = new Set(
     entitlements
-      .map((entitlement) => entitlement.rewardId)
+      .map(missionEntitlementSourceRewardId)
       .filter((rewardId): rewardId is string => Boolean(rewardId)),
   );
   const distinctGuestRewards = guestRewards.filter(
-    (reward) => !guestEntitlementRewardIds.has(reward.id),
+    (reward) => !guestEntitlementSourceRewardIds.has(reward.id),
   );
   const distinctRewards = rewards.filter(
-    (reward) => !allEntitlementRewardIds.has(reward.id),
+    (reward) => !allEntitlementSourceRewardIds.has(reward.id),
   );
   const qualifiedAtValues = [
     ...distinctGuestRewards.map((reward) => reward.qualifiedAt),

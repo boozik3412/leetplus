@@ -1,6 +1,6 @@
 # Live-награды гостевого игрового модуля
 
-Last updated: 2026-07-30
+Last updated: 2026-07-31
 
 Этот документ описывает боевой контракт гостевой геймификации. Он важнее старых заметок о ручной выдаче, если они расходятся.
 
@@ -34,9 +34,12 @@ Last updated: 2026-07-30
 | Этап Battle Pass | Фиксируется выполнение этапа; награда и XP квалифицируются в кошелёк | Нажать `Забрать`; переход этапа не означает выдачу ценности |
 | Чекин | После нажатия чекина квалифицируются настроенные reward/XP item | Явно забрать квалифицированные item |
 | Другое игровое событие | Reward и event XP сохраняются в кошелёк, но не применяются | Нажать `Забрать` |
+| Кейс как награда задания/Battle Pass/иной активности | Durable reward effect создаёт entitlement и отдельный wallet item без ordinary claim родительской награды | Нажать `Открыть контейнер`; приз выбирается только при этом действии |
 | Лутбокс | Сохраняется entitlement на одну ручную попытку открытия | Нажать `Открыть контейнер`; `Забрать все` его не открывает |
 
 Автоматически выполняется только проверка условия и фиксация квалификации. До явного claim обычная награда не отправляется во внешний контур, XP не применяется к профилю, а код и claim payload не раскрываются. Лутбокс никогда не должен автоматически выбирать приз из-за фоновой проверки, открытия приложения, completion ACK или scheduler tick.
+
+Наградной кейс является исключением только из ordinary claim родительского reward: `LOOT_BOX_ENTITLEMENT` не получает claim deadline и его effect сразу готов к безопасной материализации. Родитель не получает reward code, не попадает в cashier/bot delivery и не может быть погашен через admin redeem; единственное действие гостя относится к entitlement — `Открыть контейнер`. Это не открывает кейс и не выбирает приз. В entitlement поле `sourceRewardId` навсегда связывает право открытия с родительской наградой активности, а `rewardId` после завершения contract-этапа зарезервировано только для фактически выпавшего при открытии приза. Первый expand-деплой временно принимает исторический alias `rewardId = sourceRewardId`, чтобы старая и новая версия API одинаково считали лимиты; отдельная contract-миграция очищает alias только после подтверждённой замены старых процессов. Канонический event и immutable reward intent защищают повторную обработку, effect/entitlement/wallet имеют стабильные idempotency keys, а `game-summary` выполняет bounded best-effort recovery только для текущего tenant/profile и того же 30-дневного retention. Replay-safe миграция переводит ошибочно ожидавшие claim legacy effects и доказанные false-positive `APPLIED` без entitlement в `PENDING`, создаёт отсутствующий effect и очищает legacy reward code только для активированных профилей, внутри 30-дневного окна и при доказанном immutable target либо точном совпадении версии правила. Произвольные `CANCELED`, `EXPIRED` и уже завершённые записи не переоткрываются; единственное узкое исключение — старый case effect с точной причиной `claimed_without_external_delivery`, если claim был принят до исходного deadline, entitlement так и не появился, а migration marker проходит повторную runtime-проверку.
 
 ## Граница активации и кошелёк наград
 
@@ -63,7 +66,7 @@ Last updated: 2026-07-30
 
 1. Первый trusted `POST /guest-portal/session/app-open` атомарно фиксирует `gameActivatedAt`; только события и факты не раньше этой границы допускаются к боевой квалификации.
 2. `APP_OPEN` строит `previousSummary`, а `GuestGamificationPipelineSchedulerService` каждые 15 секунд по умолчанию обрабатывает подготовленные snapshot-факты через `runSnapshotPipelineScheduled`.
-3. После успешного активного правила создаётся идемпотентное игровое событие. Ordinary reward получает `claimRequired=true`, effect `WAITING_CLAIM` и wallet item; event XP сохраняется отдельным XP wallet item без изменения профиля.
+3. После успешного активного правила создаётся идемпотентное игровое событие. Ordinary reward получает `claimRequired=true`, effect `WAITING_CLAIM` и wallet item; наградной кейс получает `claimRequired=false`, effect `PENDING`, entitlement и case wallet item; event XP сохраняется отдельным XP wallet item без изменения профиля.
 4. Явный claim переводит ordinary wallet item в `PROCESSING`, историю — в `DELIVERY_PROCESSING`, а XP применяет локально и атомарно. Completion ACK этой границы не касается.
 5. Bonus ledger dispatcher выбирает claim-required reward только при доказанном своевременном `deliveryRequestedAt < claimExpiresAt` и связанном wallet item `PROCESSING/FAILED`.
 6. Подтверждённая внешняя доставка завершает reward/wallet. Если запрос во внешний Langame write уже был отправлен, но результат неоднозначен, ledger переходит в `RECONCILIATION_REQUIRED`, wallet остаётся `PROCESSING`, а автоматический и гостевой retry запрещены до сверки.
@@ -184,6 +187,8 @@ Additive-миграция `20260718180000_guest_game_effect_postings` добав
 Additive-миграция `20260718190000_guest_game_reward_effect_outbox` добавляет durable `GuestGameRewardEffect` и dedupe key системного сообщения staff chat. Reward и его начальные эффекты `STAFF_APPROVAL_NOTIFICATION`, `LOOT_BOX_ENTITLEMENT` или `BONUS_LEDGER_QUEUE` фиксируются одной транзакцией; claim-required `BONUS_LEDGER_QUEUE` стартует в `WAITING_CLAIM`. Effect materializer использует `FOR UPDATE SKIP LOCKED`, lease/reclaim, `leaseVersion` как fencing token, retry/backoff и терминальный `DEAD_LETTER`; финализация чужого или устаревшего claim запрещена.
 
 Additive-миграция `20260725213500_guest_game_reward_wallet` добавляет границу первой активации, 30-дневные wallet item и claim-поля reward. Её backfill fail-closed: ранее доставленные rewards, раскрытые коды и уже применённый XP не создают новые `PENDING` item. Backfill entitlement допускается только при точном живом источнике и внутри текущего окна.
+
+Additive-миграция `20260731090000_guest_game_case_reward_lifecycle` добавляет `sourceRewardId`, выводит родительский `LOOT_BOX_ENTITLEMENT` из ordinary claim и replay-safe восстанавливает только доказанные case effects. Она является expand-этапом: исторический alias в `rewardId` и совместимый write shield сохраняются до проверки первого production-деплоя. Миграция сериализует frozen repair set с legacy reward/wallet/effect writes, а временный DB-guard после commit нормализует поддерживаемые case-parent writes старого процесса и атомарно отклоняет его ordinary claim. Следующая contract-миграция удаляет shield и очищает alias; её нельзя отправлять в том же deployment wave. Обычный repair ограничен активированными профилями, 30-дневным retention, живой связью с mission/season и immutable target либо точной версией правила. Отдельно разрешён только ранее принятый в срок legacy claim с exact-причиной `claimed_without_external_delivery` и без entitlement; repaired wallet получает новый срок видимости от момента ремонта.
 
 Production gate остаётся fail-closed: `GuestGameRewardMaterializerSchedulerService` по умолчанию выключен, без tenant scope не запускается, имеет отдельный kill switch и последовательно дренирует intent, затем effect outbox. Перед tenant-scoped canary нужно подтвердить фактическое состояние миграций и очередей при `GUEST_GAME_REWARD_MATERIALIZER_ENABLED=false`; готовность кода сама по себе не разрешает rollout.
 

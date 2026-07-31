@@ -1757,6 +1757,9 @@ type GuestPortalRewardRow = {
     status: string;
     claimedAt: Date | null;
   }>;
+  sourceEntitlements?: Array<{
+    status: string;
+  }>;
 };
 
 type GuestPortalLootBoxUnlockEventRow = {
@@ -3844,6 +3847,27 @@ export class GuestPortalService {
     const portal = await this.buildPortalPayload(payload, {
       liveSessionStartResult,
     });
+    if (portal.profile.id) {
+      try {
+        await this.guestGamificationService.recoverProfileLootBoxRewardEffects(
+          {
+            id: `guest-portal:${payload.sub}`,
+            email: 'guest-portal@leetplus.local',
+            fullName: 'Гостевой портал',
+            role: UserRole.CLUB_MANAGER,
+            isPlatformAdmin: false,
+            tenantId: payload.tenantId,
+            tenantSlug: portal.tenant.slug,
+            tenantStatus: TenantLifecycleStatus.ACTIVE,
+          },
+          portal.profile.id,
+        );
+      } catch {
+        this.logger.warn(
+          `Failed to recover pending loot-box rewards for tenant ${payload.tenantId}; retry deferred.`,
+        );
+      }
+    }
     this.scheduleGuestActivityLedgerSync(
       payload,
       portal.profile.id,
@@ -4024,7 +4048,9 @@ export class GuestPortalService {
         ...guestPortalVisibleRewardWalletWhere(
           payload.tenantId,
           profile.id,
+          profile.gameActivatedAt,
           now,
+          this.prisma.guestGameEntitlement.fields.sourceRewardId,
         ),
         kind: 'LOOT_BOX_ENTITLEMENT',
         entitlementId: { not: null },
@@ -4033,6 +4059,11 @@ export class GuestPortalService {
             tenantId: payload.tenantId,
             profileId: profile.id,
             status: 'AVAILABLE',
+            AND: [
+              guestPortalUnopenedEntitlementRewardWhere(
+                this.prisma.guestGameEntitlement.fields.sourceRewardId,
+              ),
+            ],
           },
         },
       },
@@ -4270,6 +4301,11 @@ export class GuestPortalService {
             if (item.kind === 'LOOT_BOX_ENTITLEMENT' || item.entitlementId) {
               throw new BadRequestException(
                 'Лутбокс нужно открыть отдельно. Получение всех наград не открывает лутбоксы автоматически.',
+              );
+            }
+            if (item.reward?.rewardType === 'LOOT_BOX_ENTITLEMENT') {
+              throw new BadRequestException(
+                'Наградной кейс нужно открыть отдельно. Получение обычной награды не открывает кейс автоматически.',
               );
             }
             if (item.status === 'CLAIMED') {
@@ -4854,6 +4890,11 @@ export class GuestPortalService {
               select: { status: true },
               take: 1,
             },
+            sourceEntitlements: {
+              select: { status: true },
+              orderBy: { createdAt: 'asc' },
+              take: 1,
+            },
             evidence: true,
             mission: { select: { id: true, name: true } },
             season: { select: { id: true, name: true, levels: true } },
@@ -4973,7 +5014,6 @@ export class GuestPortalService {
       tenantId,
       profileId,
       activatedAt,
-      retentionCutoff,
       now,
     );
     await this.upgradeHistoricalRewardWalletClaims(
@@ -5038,7 +5078,11 @@ export class GuestPortalService {
           ],
           consumedAt: null,
           canceledAt: null,
-          rewardId: null,
+          AND: [
+            guestPortalUnopenedEntitlementRewardWhere(
+              this.prisma.guestGameEntitlement.fields.sourceRewardId,
+            ),
+          ],
           qualifiedAt: {
             gt: retentionCutoff,
             gte: activatedAt,
@@ -5054,6 +5098,8 @@ export class GuestPortalService {
           status: true,
           qualifiedAt: true,
           validUntil: true,
+          sourceRewardId: true,
+          rewardId: true,
           evidence: true,
         },
         orderBy: [{ qualifiedAt: 'asc' }, { id: 'asc' }],
@@ -5080,7 +5126,9 @@ export class GuestPortalService {
       activeMissingEntitlementRules.map((rule) => rule.id),
     );
     const eligibleMissingEntitlements = missingEntitlements.filter(
-      (entitlement) => activeMissingEntitlementRuleIds.has(entitlement.ruleId),
+      (entitlement) =>
+        activeMissingEntitlementRuleIds.has(entitlement.ruleId) &&
+        guestPortalEntitlementHasUnopenedRewardBinding(entitlement),
     );
 
     await Promise.all(
@@ -5190,7 +5238,6 @@ export class GuestPortalService {
         tenantId,
         profileId,
         activatedAt,
-        retentionCutoff,
         now,
       );
     }
@@ -5198,7 +5245,9 @@ export class GuestPortalService {
     const visibleWhere = guestPortalVisibleRewardWalletWhere(
       tenantId,
       profileId,
+      activatedAt,
       now,
+      this.prisma.guestGameEntitlement.fields.sourceRewardId,
     );
     const [rows, pendingCount, nextExpiringItem, historyRows] =
       await Promise.all([
@@ -5206,6 +5255,7 @@ export class GuestPortalService {
           where: visibleWhere,
           include: {
             entitlement: { select: { ruleId: true } },
+            reward: { select: { rewardType: true } },
             store: { select: { id: true, name: true } },
           },
           orderBy: [{ availableAt: 'desc' }, { id: 'desc' }],
@@ -5227,6 +5277,12 @@ export class GuestPortalService {
             tenantId,
             profileId,
             availableAt: { gte: activatedAt, lte: now },
+            NOT: {
+              kind: 'REWARD',
+              reward: {
+                is: { rewardType: 'LOOT_BOX_ENTITLEMENT' },
+              },
+            },
           },
           include: {
             entitlement: { select: { ruleId: true } },
@@ -5255,7 +5311,8 @@ export class GuestPortalService {
         row.status === 'PENDING' && row.kind === 'LOOT_BOX_ENTITLEMENT'
           ? 'OPEN_LOOT_BOX'
           : (row.status === 'PENDING' || row.status === 'FAILED') &&
-              row.kind !== 'LOOT_BOX_ENTITLEMENT'
+              row.kind !== 'LOOT_BOX_ENTITLEMENT' &&
+              row.reward?.rewardType !== 'LOOT_BOX_ENTITLEMENT'
             ? 'CLAIM_REWARD'
             : null,
       errorHint:
@@ -5304,7 +5361,6 @@ export class GuestPortalService {
     tenantId: string,
     profileId: string,
     activatedAt: Date,
-    retentionCutoff: Date,
     now: Date,
   ) {
     await this.prisma.$executeRaw(Prisma.sql`
@@ -5319,12 +5375,15 @@ export class GuestPortalService {
         AND entitlement."status" = 'EXPIRED'
         AND entitlement."consumedAt" IS NULL
         AND entitlement."canceledAt" IS NULL
-        AND entitlement."rewardId" IS NULL
+        AND (
+          entitlement."rewardId" IS NULL
+          OR (
+            entitlement."sourceRewardId" IS NOT NULL
+            AND entitlement."rewardId" = entitlement."sourceRewardId"
+          )
+        )
         AND entitlement."validUntil" IS NOT NULL
         AND entitlement."validUntil" <= ${now}
-        AND entitlement."qualifiedAt" > ${retentionCutoff}
-        AND entitlement."qualifiedAt" >= ${activatedAt}
-        AND entitlement."qualifiedAt" <= ${now}
         AND EXISTS (
           SELECT 1
           FROM "GuestGameLootBox" AS loot_box
@@ -5340,6 +5399,8 @@ export class GuestPortalService {
             AND wallet."entitlementId" = entitlement."id"
             AND wallet."kind" = 'LOOT_BOX_ENTITLEMENT'
             AND wallet."status" = 'PENDING'
+            AND wallet."availableAt" >= ${activatedAt}
+            AND wallet."availableAt" <= ${now}
             AND wallet."expiresAt" > ${now}
         )
     `);
@@ -5786,7 +5847,12 @@ export class GuestPortalService {
                           status: 'AVAILABLE',
                           consumedAt: null,
                           canceledAt: null,
-                          rewardId: null,
+                          AND: [
+                            guestPortalUnopenedEntitlementRewardWhere(
+                              this.prisma.guestGameEntitlement.fields
+                                .sourceRewardId,
+                            ),
+                          ],
                         },
                         {
                           status: {
@@ -5895,7 +5961,11 @@ export class GuestPortalService {
               status: 'AVAILABLE',
               consumedAt: null,
               canceledAt: null,
-              rewardId: null,
+              AND: [
+                guestPortalUnopenedEntitlementRewardWhere(
+                  tx.guestGameEntitlement.fields.sourceRewardId,
+                ),
+              ],
             },
             data: {
               status: 'EXPIRED',
@@ -10398,6 +10468,11 @@ export class GuestPortalService {
           },
           take: 1,
         },
+        sourceEntitlements: {
+          select: { status: true },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
+        },
       },
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
       take: 1000,
@@ -10538,9 +10613,6 @@ export class GuestPortalService {
     if (!activatedAt) {
       return null;
     }
-    const retentionCutoff = new Date(
-      now.getTime() - REWARD_WALLET_RETENTION_MS,
-    );
     const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
       { profileId },
       ...(guestId ? [{ guestId }] : []),
@@ -10555,21 +10627,23 @@ export class GuestPortalService {
         status: 'EXPIRED',
         consumedAt: null,
         canceledAt: null,
-        rewardId: null,
-        qualifiedAt: {
-          gt: retentionCutoff,
-          gte: activatedAt,
-          lte: now,
-        },
         walletItems: {
           some: {
             tenantId,
             profileId,
+            kind: 'LOOT_BOX_ENTITLEMENT',
             status: 'PENDING',
+            availableAt: { gte: activatedAt, lte: now },
             expiresAt: { gt: now },
           },
         },
-        AND: [{ OR: ownerFilters }, { OR: [{ storeId: null }, { storeId }] }],
+        AND: [
+          guestPortalUnopenedEntitlementRewardWhere(
+            this.prisma.guestGameEntitlement.fields.sourceRewardId,
+          ),
+          { OR: ownerFilters },
+          { OR: [{ storeId: null }, { storeId }] },
+        ],
       },
       data: {
         status: 'AVAILABLE',
@@ -10584,21 +10658,23 @@ export class GuestPortalService {
         ruleType: 'LOOT_BOX',
         ruleId: lootBoxId,
         status: 'AVAILABLE',
-        qualifiedAt: {
-          gt: retentionCutoff,
-          gte: activatedAt,
-          lte: now,
-        },
         walletItems: {
           some: {
             tenantId,
             ...(profileId ? { profileId } : {}),
+            kind: 'LOOT_BOX_ENTITLEMENT',
             status: 'PENDING',
+            availableAt: { gte: activatedAt, lte: now },
             expiresAt: { gt: now },
           },
         },
         OR: ownerFilters,
-        AND: [{ OR: [{ storeId: null }, { storeId }] }],
+        AND: [
+          guestPortalUnopenedEntitlementRewardWhere(
+            this.prisma.guestGameEntitlement.fields.sourceRewardId,
+          ),
+          { OR: [{ storeId: null }, { storeId }] },
+        ],
       },
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
     });
@@ -10661,7 +10737,7 @@ export class GuestPortalService {
       entitlement.status !== 'AVAILABLE' ||
       entitlement.consumedAt ||
       entitlement.canceledAt ||
-      entitlement.rewardId ||
+      !guestPortalEntitlementHasUnopenedRewardBinding(entitlement) ||
       !entitlement.sourceEventType ||
       !rewardProfileId
     ) {
@@ -10729,11 +10805,21 @@ export class GuestPortalService {
         }
 
         const reward = matchingRewards[0];
+        if (entitlement.sourceRewardId === reward.id) {
+          this.logger.warn(
+            `Legacy loot-box reconciliation resolved the source reward as the outcome for entitlement ${entitlement.id}.`,
+          );
+          return { entitlement, outcome: 'BLOCKED' };
+        }
         matchedRewardId = reward.id;
         const existingBinding = await tx.guestGameEntitlement.findFirst({
           where: {
             tenantId: entitlement.tenantId,
             rewardId: reward.id,
+            OR: [
+              { sourceRewardId: null },
+              { sourceRewardId: { not: reward.id } },
+            ],
           },
           select: { id: true },
         });
@@ -10763,7 +10849,11 @@ export class GuestPortalService {
             status: 'AVAILABLE',
             consumedAt: null,
             canceledAt: null,
-            rewardId: null,
+            AND: [
+              guestPortalUnopenedEntitlementRewardWhere(
+                tx.guestGameEntitlement.fields.sourceRewardId,
+              ),
+            ],
           },
           data: {
             status: 'CONSUMED',
@@ -10804,7 +10894,11 @@ export class GuestPortalService {
             tenantId: entitlement.tenantId,
           },
         });
-        if (current?.status === 'CONSUMED' && current.rewardId === reward.id) {
+        if (
+          current?.status === 'CONSUMED' &&
+          current.rewardId === reward.id &&
+          current.sourceRewardId !== reward.id
+        ) {
           await tx.guestGameRewardWalletItem.updateMany({
             where: {
               tenantId: entitlement.tenantId,
@@ -10847,6 +10941,10 @@ export class GuestPortalService {
           where: {
             tenantId: entitlement.tenantId,
             rewardId: matchedRewardId,
+            OR: [
+              { sourceRewardId: null },
+              { sourceRewardId: { not: matchedRewardId } },
+            ],
           },
           select: { id: true },
         }),
@@ -10854,6 +10952,7 @@ export class GuestPortalService {
       if (
         current?.status === 'CONSUMED' &&
         current.rewardId === matchedRewardId &&
+        current.sourceRewardId !== matchedRewardId &&
         existingBinding?.id === entitlement.id
       ) {
         await this.prisma.guestGameRewardWalletItem.updateMany({
@@ -11083,6 +11182,13 @@ export class GuestPortalService {
           });
         }
 
+        if (
+          entitlement.status === 'AVAILABLE' &&
+          !guestPortalEntitlementHasUnopenedRewardBinding(entitlement)
+        ) {
+          return null;
+        }
+
         if (entitlement.status === 'AVAILABLE') {
           await tx.guestGameRewardWalletItem.upsert({
             where: {
@@ -11138,9 +11244,6 @@ export class GuestPortalService {
     if (!activatedAt) {
       return [];
     }
-    const retentionCutoff = new Date(
-      now.getTime() - REWARD_WALLET_RETENTION_MS,
-    );
     const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
       ...(profileId ? [{ profileId }] : []),
       ...(guestId ? [{ guestId }] : []),
@@ -11158,21 +11261,23 @@ export class GuestPortalService {
         status: 'EXPIRED',
         consumedAt: null,
         canceledAt: null,
-        rewardId: null,
-        qualifiedAt: {
-          gt: retentionCutoff,
-          gte: activatedAt,
-          lte: now,
-        },
         walletItems: {
           some: {
             tenantId,
             ...(profileId ? { profileId } : {}),
+            kind: 'LOOT_BOX_ENTITLEMENT',
             status: 'PENDING',
+            availableAt: { gte: activatedAt, lte: now },
             expiresAt: { gt: now },
           },
         },
-        AND: [{ OR: ownerFilters }, { OR: [{ storeId: null }, { storeId }] }],
+        AND: [
+          guestPortalUnopenedEntitlementRewardWhere(
+            this.prisma.guestGameEntitlement.fields.sourceRewardId,
+          ),
+          { OR: ownerFilters },
+          { OR: [{ storeId: null }, { storeId }] },
+        ],
       },
       data: {
         status: 'AVAILABLE',
@@ -11185,20 +11290,20 @@ export class GuestPortalService {
         tenantId,
         ruleType: 'LOOT_BOX',
         status: 'AVAILABLE',
-        qualifiedAt: {
-          gt: retentionCutoff,
-          gte: activatedAt,
-          lte: now,
-        },
         walletItems: {
           some: {
             tenantId,
             ...(profileId ? { profileId } : {}),
+            kind: 'LOOT_BOX_ENTITLEMENT',
             status: 'PENDING',
+            availableAt: { gte: activatedAt, lte: now },
             expiresAt: { gt: now },
           },
         },
         AND: [
+          guestPortalUnopenedEntitlementRewardWhere(
+            this.prisma.guestGameEntitlement.fields.sourceRewardId,
+          ),
           { OR: ownerFilters },
           { OR: [{ storeId: null }, { storeId }] },
           { ruleId: { in: lootBoxIds } },
@@ -11247,6 +11352,11 @@ export class GuestPortalService {
           ruleId: input.lootBoxId,
           status: 'AVAILABLE',
           OR: [{ storeId: null }, { storeId: input.storeId }],
+          AND: [
+            guestPortalUnopenedEntitlementRewardWhere(
+              tx.guestGameEntitlement.fields.sourceRewardId,
+            ),
+          ],
         },
         data: { status: 'OPENING' },
       });
@@ -11291,6 +11401,17 @@ export class GuestPortalService {
           ruleType: 'LOOT_BOX',
           ruleId: input.lootBoxId,
           status: 'OPENING',
+          AND: [
+            guestPortalUnopenedEntitlementRewardWhere(
+              tx.guestGameEntitlement.fields.sourceRewardId,
+            ),
+            {
+              OR: [
+                { sourceRewardId: null },
+                { sourceRewardId: { not: reward.id } },
+              ],
+            },
+          ],
         },
         data: {
           status: 'CONSUMED',
@@ -11320,10 +11441,14 @@ export class GuestPortalService {
           id: input.entitlementId,
           tenantId: input.tenantId,
         },
-        select: { status: true, rewardId: true },
+        select: { status: true, sourceRewardId: true, rewardId: true },
       });
 
-      if (current?.status === 'CONSUMED' && current.rewardId === reward.id) {
+      if (
+        current?.status === 'CONSUMED' &&
+        current.rewardId === reward.id &&
+        current.sourceRewardId !== reward.id
+      ) {
         await tx.guestGameRewardWalletItem.updateMany({
           where: {
             tenantId: input.tenantId,
@@ -11371,6 +11496,7 @@ export class GuestPortalService {
             select: {
               id: true,
               status: true,
+              sourceRewardId: true,
               rewardId: true,
               ruleId: true,
             },
@@ -11381,7 +11507,23 @@ export class GuestPortalService {
         return 'MISSING';
       }
 
-      let rewardId = input.knownRewardId ?? walletItem.entitlement.rewardId;
+      const entitlement = walletItem.entitlement;
+      const persistedOutcomeRewardId =
+        guestPortalEntitlementOutcomeRewardId(entitlement);
+      const knownOutcomeRewardId =
+        input.knownRewardId &&
+        input.knownRewardId !== entitlement.sourceRewardId
+          ? input.knownRewardId
+          : null;
+      if (
+        persistedOutcomeRewardId &&
+        knownOutcomeRewardId &&
+        persistedOutcomeRewardId !== knownOutcomeRewardId
+      ) {
+        return 'ACTIVE';
+      }
+
+      let rewardId = knownOutcomeRewardId ?? persistedOutcomeRewardId;
       if (!rewardId) {
         const event = await tx.guestGameEvent.findFirst({
           where: {
@@ -11399,7 +11541,9 @@ export class GuestPortalService {
                 profileId: input.profileId,
                 ruleType: 'LOOT_BOX',
                 ruleId: input.lootBoxId,
-                rewardId: { not: null },
+                rewardId: entitlement.sourceRewardId
+                  ? { not: entitlement.sourceRewardId }
+                  : { not: null },
               },
               select: { rewardId: true },
               orderBy: [{ processedAt: 'desc' }, { createdAt: 'desc' }],
@@ -11422,7 +11566,10 @@ export class GuestPortalService {
           select: { id: true },
         });
         if (reward) {
-          if (walletItem.entitlement.status === 'OPENING') {
+          if (entitlement.status === 'OPENING') {
+            if (!guestPortalEntitlementHasUnopenedRewardBinding(entitlement)) {
+              return 'ACTIVE';
+            }
             const finalized = await tx.guestGameEntitlement.updateMany({
               where: {
                 id: input.entitlementId,
@@ -11431,6 +11578,8 @@ export class GuestPortalService {
                 ruleType: 'LOOT_BOX',
                 ruleId: input.lootBoxId,
                 status: 'OPENING',
+                sourceRewardId: entitlement.sourceRewardId,
+                rewardId: entitlement.rewardId,
               },
               data: {
                 status: 'CONSUMED',
@@ -11442,8 +11591,8 @@ export class GuestPortalService {
               return 'ACTIVE';
             }
           } else if (
-            walletItem.entitlement.status !== 'CONSUMED' ||
-            walletItem.entitlement.rewardId !== reward.id
+            entitlement.status !== 'CONSUMED' ||
+            persistedOutcomeRewardId !== reward.id
           ) {
             return 'ACTIVE';
           }
@@ -11454,6 +11603,13 @@ export class GuestPortalService {
           });
           return 'FINALIZED';
         }
+      }
+
+      if (
+        entitlement.status !== 'OPENING' ||
+        !guestPortalEntitlementHasUnopenedRewardBinding(entitlement)
+      ) {
+        return 'ACTIVE';
       }
 
       const staleBefore = new Date(
@@ -11472,7 +11628,8 @@ export class GuestPortalService {
             ruleType: 'LOOT_BOX',
             ruleId: input.lootBoxId,
             status: 'OPENING',
-            rewardId: null,
+            sourceRewardId: entitlement.sourceRewardId,
+            rewardId: entitlement.rewardId,
           },
           data: {
             status: 'AVAILABLE',
@@ -11499,7 +11656,8 @@ export class GuestPortalService {
           ruleType: 'LOOT_BOX',
           ruleId: input.lootBoxId,
           status: 'OPENING',
-          rewardId: null,
+          sourceRewardId: entitlement.sourceRewardId,
+          rewardId: entitlement.rewardId,
         },
         data: {
           status: 'EXPIRED',
@@ -19086,7 +19244,7 @@ function buildPortalCheckInSummary(input: {
   };
 }
 
-function buildNextActions(input: {
+export function buildNextActions(input: {
   guestFound: boolean;
   lootBoxes: GuestPortalLootBox[];
   missions: GuestPortalMission[];
@@ -20244,7 +20402,7 @@ function mapXpHistory(row: {
   };
 }
 
-function rewardWalletState(
+export function rewardWalletState(
   status: string,
   expiresAt: Date | null,
   claim?: {
@@ -20254,12 +20412,9 @@ function rewardWalletState(
     rewardType?: string | null;
     rewardAmount?: Prisma.Decimal | number | string | null;
     walletItems?: Array<{ status: string }>;
+    sourceEntitlements?: Array<{ status: string }>;
   },
 ): GuestPortalReward['walletState'] {
-  if (status === 'PAID') {
-    return 'REDEEMED';
-  }
-
   if (status === 'CANCELED') {
     return 'CANCELED';
   }
@@ -20273,6 +20428,20 @@ function rewardWalletState(
     claim &&
     guestGameRewardIsBattlePassCompletionMarker(claim)
   ) {
+    return 'REDEEMED';
+  }
+
+  if (
+    (status === 'APPROVED' || status === 'PAID') &&
+    claim?.rewardType === 'LOOT_BOX_ENTITLEMENT'
+  ) {
+    const entitlementStatus = claim.sourceEntitlements?.[0]?.status ?? null;
+    if (entitlementStatus === 'CANCELED') return 'CANCELED';
+    if (entitlementStatus === 'EXPIRED') return 'EXPIRED';
+    return entitlementStatus ? 'REDEEMED' : 'DELIVERY_PROCESSING';
+  }
+
+  if (status === 'PAID') {
     return 'REDEEMED';
   }
 
@@ -20339,6 +20508,7 @@ export type GuestPortalRewardCodeVisibilityInput = {
   tenantId: string;
   profileId: string | null;
   status: string;
+  rewardType?: string | null;
   claimRequired: boolean;
   deliveryRequestedAt: Date | null;
   claimExpiresAt: Date | null;
@@ -20354,6 +20524,7 @@ export type GuestPortalRewardCodeVisibilityInput = {
 export function rewardCodeVisibleAfterClaim(
   reward: GuestPortalRewardCodeVisibilityInput,
 ) {
+  if (reward.rewardType === 'LOOT_BOX_ENTITLEMENT') return false;
   if (!reward.claimRequired) return true;
   if (
     (reward.status !== 'APPROVED' && reward.status !== 'PAID') ||
@@ -20516,12 +20687,44 @@ export function guestPortalEffectiveXp(input: {
   return Math.max(0, Math.min(2147483647, rawXp - pendingExclusion));
 }
 
+function guestPortalEntitlementOutcomeRewardId(input: {
+  rewardId: string | null;
+  sourceRewardId: string | null;
+}) {
+  if (!input.rewardId) {
+    return null;
+  }
+  return input.sourceRewardId === input.rewardId ? null : input.rewardId;
+}
+
+function guestPortalEntitlementHasUnopenedRewardBinding(input: {
+  rewardId: string | null;
+  sourceRewardId: string | null;
+}) {
+  return guestPortalEntitlementOutcomeRewardId(input) === null;
+}
+
+function guestPortalUnopenedEntitlementRewardWhere(
+  sourceRewardIdField: Prisma.GuestGameEntitlementFieldRefs['sourceRewardId'],
+): Prisma.GuestGameEntitlementWhereInput {
+  return {
+    OR: [
+      { rewardId: null },
+      {
+        sourceRewardId: { not: null },
+        rewardId: { equals: sourceRewardIdField },
+      },
+    ],
+  };
+}
+
 function guestPortalVisibleRewardWalletWhere(
   tenantId: string,
   profileId: string,
+  activatedAt: Date,
   now: Date,
+  sourceRewardIdField: Prisma.GuestGameEntitlementFieldRefs['sourceRewardId'],
 ): Prisma.GuestGameRewardWalletItemWhereInput {
-  const retentionCutoff = new Date(now.getTime() - REWARD_WALLET_RETENTION_MS);
   const pendingSources: Prisma.GuestGameRewardWalletItemWhereInput[] = [
     { eventId: { not: null } },
     {
@@ -20532,6 +20735,7 @@ function guestPortalVisibleRewardWalletWhere(
           deliveryRequestedAt: null,
           paidAt: null,
           claimExpiresAt: { gt: now },
+          rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
           NOT: [
             {
               rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
@@ -20553,7 +20757,7 @@ function guestPortalVisibleRewardWalletWhere(
       entitlement: {
         is: {
           status: 'AVAILABLE',
-          qualifiedAt: { gt: retentionCutoff, lte: now },
+          AND: [guestPortalUnopenedEntitlementRewardWhere(sourceRewardIdField)],
         },
       },
     },
@@ -20562,10 +20766,16 @@ function guestPortalVisibleRewardWalletWhere(
   return {
     tenantId,
     profileId,
+    NOT: {
+      kind: 'REWARD',
+      reward: {
+        is: { rewardType: 'LOOT_BOX_ENTITLEMENT' },
+      },
+    },
     OR: [
       {
         status: 'PENDING',
-        availableAt: { lte: now },
+        availableAt: { gte: activatedAt, lte: now },
         expiresAt: { gt: now },
         AND: [{ OR: pendingSources }],
       },
@@ -20578,6 +20788,7 @@ function guestPortalVisibleRewardWalletWhere(
             deliveryRequestedAt: { not: null },
             paidAt: null,
             claimExpiresAt: { not: null },
+            rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
             NOT: [
               {
                 rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
@@ -20619,6 +20830,11 @@ function guestPortalClaimableRewardWalletWhere(
     profileId,
     kind: 'REWARD',
     entitlementId: null,
+    NOT: {
+      reward: {
+        is: { rewardType: 'LOOT_BOX_ENTITLEMENT' },
+      },
+    },
     OR: [
       {
         status: 'PENDING',
@@ -20634,6 +20850,7 @@ function guestPortalClaimableRewardWalletWhere(
                 deliveryRequestedAt: null,
                 paidAt: null,
                 claimExpiresAt: { gt: now },
+                rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
                 NOT: [
                   {
                     rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
@@ -20662,6 +20879,7 @@ function guestPortalClaimableRewardWalletWhere(
             deliveryRequestedAt: { not: null },
             paidAt: null,
             claimExpiresAt: { not: null },
+            rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
             NOT: [
               {
                 rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,

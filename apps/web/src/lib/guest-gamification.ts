@@ -392,6 +392,7 @@ export type GuestGameReward = {
   walletState:
     | "WAITING_APPROVAL"
     | "READY"
+    | "DELIVERY_PROCESSING"
     | "REDEEMED"
     | "CANCELED"
     | "EXPIRED";

@@ -857,6 +857,7 @@ const rewardWalletStateLabels: Record<GuestGameReward["walletState"], string> =
   {
     WAITING_APPROVAL: "ожидает подтверждения",
     READY: "можно выдать",
+    DELIVERY_PROCESSING: "кейс создаётся",
     REDEEMED: "погашено",
     CANCELED: "отменено",
     EXPIRED: "срок истек",
@@ -14446,6 +14447,8 @@ function rewardWalletPillTone(
       return "warning";
     case "READY":
       return "success";
+    case "DELIVERY_PROCESSING":
+      return "info";
     case "REDEEMED":
       return "cyan";
     case "CANCELED":

@@ -1939,7 +1939,8 @@ model GuestGameReward {
   deliveries         GuestGameDelivery[]
   deliveryEvents     GuestGameDeliveryEvent[]
   bonusLedgerEntries GuestBonusLedgerEntry[]
-  entitlements       GuestGameEntitlement[]
+  entitlements       GuestGameEntitlement[] @relation("GuestGameEntitlementOutcomeReward")
+  sourceEntitlements GuestGameEntitlement[] @relation("GuestGameEntitlementSourceReward")
   rewardIntents      GuestGameRewardIntent[]
   rewardEffects      GuestGameRewardEffect[]
   completionNotifications GuestGameCompletionNotification[]
@@ -2231,6 +2232,7 @@ model GuestGameEntitlement {
   consumedAt      DateTime?
   canceledAt      DateTime?
   rewardId        String?   @unique(map: "guest_game_entitlement_reward_uidx")
+  sourceRewardId  String?   @unique(map: "guest_game_entitlement_source_reward_uidx")
   evidence        Json?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -2240,7 +2242,8 @@ model GuestGameEntitlement {
   guest   Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
   store   Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
   event   GuestGameEvent?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  reward  GuestGameReward?  @relation(fields: [rewardId], references: [id], onDelete: SetNull)
+  reward       GuestGameReward?  @relation("GuestGameEntitlementOutcomeReward", fields: [rewardId], references: [id], onDelete: SetNull)
+  sourceReward GuestGameReward?  @relation("GuestGameEntitlementSourceReward", fields: [sourceRewardId], references: [id], onDelete: Restrict)
   walletItems GuestGameRewardWalletItem[]
 
   @@unique([tenantId, idempotencyKey], map: "guest_game_entitlement_idempotency_uidx")

@@ -8,6 +8,7 @@ import type {
 } from "@/lib/guest-gamification";
 import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
+import { HourlySessionSourceNote } from "@/components/hourly-session-source-note";
 
 export type BattlePassStepConditionValue = {
   schemaVersion?: number;
@@ -212,12 +213,16 @@ export function BattlePassStepConditionEditor({
         <select
           className={fieldClass}
           value={value.taskType}
-          onChange={(event) =>
+          onChange={(event) => {
+            const taskType = event.target
+              .value as BattlePassStepConditionValue["taskType"];
             patch({
-              taskType: event.target
-                .value as BattlePassStepConditionValue["taskType"],
-            })
-          }
+              taskType,
+              ...(taskType === "PLAY_TIME" || taskType === "CHECK_IN"
+                ? {}
+                : { sessionType: "ANY" as const }),
+            });
+          }}
         >
           <option value="APP_OPEN">Открытие игрового модуля</option>
           <option value="PLAY_TIME">Игровое время</option>
@@ -270,6 +275,7 @@ export function BattlePassStepConditionEditor({
               onChange={(minSessionMinutes) => patch({ minSessionMinutes })}
             />
           </div>
+          {value.sessionType === "HOURLY" ? <HourlySessionSourceNote /> : null}
           <ScheduleFields value={value} patch={patch} />
         </div>
       ) : null}
@@ -583,6 +589,30 @@ export function BattlePassStepConditionEditor({
 
       {value.taskType === "CHECK_IN" ? (
         <div className="space-y-3">
+          <div className={subClass}>
+            <SectionTitle>Тип сессии</SectionTitle>
+            <Field label="Активная сессия гостя">
+              <select
+                className={fieldClass}
+                value={value.sessionType}
+                onChange={(event) =>
+                  patch({
+                    sessionType: event.target
+                      .value as BattlePassStepConditionValue["sessionType"],
+                  })
+                }
+              >
+                <option value="ANY">Любая</option>
+                <option value="HOURLY">Почасовая</option>
+                <option value="PACKAGE_OR_SUBSCRIPTION">
+                  Пакет или абонемент
+                </option>
+              </select>
+            </Field>
+            {value.sessionType === "HOURLY" ? (
+              <HourlySessionSourceNote />
+            ) : null}
+          </div>
           <div className={subClass}>
             <SectionTitle>Сценарий чекина</SectionTitle>
             <div className="grid gap-2 md:grid-cols-4">

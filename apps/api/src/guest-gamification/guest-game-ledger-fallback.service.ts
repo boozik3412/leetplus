@@ -29,6 +29,8 @@ import {
   EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
   reconcileExactCanonicalEventOwner,
 } from './guest-game-exact-owner-reconciler';
+import { hasSessionFactsPendingHourlyReplay } from './guest-activity-hourly-replay';
+import { remediateLegacyGenericSessionClassifications } from './guest-game-generic-session-remediation';
 
 export type GuestGameLedgerFallbackMode = 'OFF' | 'SHADOW' | 'LIVE';
 
@@ -263,6 +265,27 @@ export class GuestGameLedgerFallbackService {
     const supportsSessionStart = factTypes.some((factType) =>
       isSessionStartFactType(factType),
     );
+    const genericClassificationRemediation =
+      await remediateLegacyGenericSessionClassifications(this.prisma, {
+        tenantId: user.tenantId,
+        limit,
+        includeSessionStart: supportsSessionStart,
+        includePlayTime: supportsPlayHour,
+      });
+    if (genericClassificationRemediation.scanned > 0) {
+      const result = emptyTenantResult(
+        user.tenantId,
+        user.tenantSlug,
+        'PROCESSED',
+        'Legacy generic session classifications were handled before rule evaluation; retry fallback on the next tick.',
+      );
+      result.checkedFacts = genericClassificationRemediation.scanned;
+      result.duplicateFacts = genericClassificationRemediation.remediated;
+      result.failedFacts =
+        genericClassificationRemediation.quarantined +
+        genericClassificationRemediation.failed;
+      return result;
+    }
     const [allMissions, allSeasons, allLootBoxes, stores] = await Promise.all([
       this.prisma.guestGameMission.findMany({
         where: {
@@ -408,16 +431,31 @@ export class GuestGameLedgerFallbackService {
       mode === 'LIVE' && liveNotBefore && liveNotBefore > earliestRuleActivation
         ? liveNotBefore
         : earliestRuleActivation;
+    const profileScope =
+      mode === 'LIVE' && (missionsAllowAllProfiles || playTimeAllowAllProfiles)
+        ? undefined
+        : (profileId ?? undefined);
+    if (
+      await hasSessionFactsPendingHourlyReplay(this.prisma, {
+        tenantId: user.tenantId,
+        factTypes,
+        profileId: profileScope,
+        happenedAtGte: earliestActivation,
+      })
+    ) {
+      return emptyTenantResult(
+        user.tenantId,
+        user.tenantSlug,
+        'SKIPPED',
+        'Hourly-session source replay is not complete; fallback watermark was not advanced.',
+      );
+    }
     const result = emptyTenantResult(
       user.tenantId,
       user.tenantSlug,
       'PROCESSED',
       null,
     );
-    const profileScope =
-      mode === 'LIVE' && (missionsAllowAllProfiles || playTimeAllowAllProfiles)
-        ? undefined
-        : (profileId ?? undefined);
     const factAnd: Prisma.GuestActivityFactWhereInput[] = [
       {
         OR: [{ guestId: { not: null } }, { profileId: { not: null } }],
@@ -2695,9 +2733,14 @@ function fallbackReceiptIsTerminal(
       'LIVE_PROCESSED',
       'PROCESSING',
       'DEAD_LETTER',
+      'QUARANTINED',
     ].includes(receipt.status);
   }
-  if (['PROCESSED', 'LIVE_PROCESSED', 'DEAD_LETTER'].includes(receipt.status)) {
+  if (
+    ['PROCESSED', 'LIVE_PROCESSED', 'DEAD_LETTER', 'QUARANTINED'].includes(
+      receipt.status,
+    )
+  ) {
     return true;
   }
   if (
@@ -2826,7 +2869,7 @@ function fallbackProcessDto(
           : fact.factType === 'HOURLY_SESSION_STARTED'
             ? 'HOURLY'
             : 'PACKAGE_OR_SUBSCRIPTION',
-      sessionPacket: fact.factType === 'PACKAGE_OR_SUBSCRIPTION_USED',
+      sessionPacket: fallbackSessionPacketFromFactType(fact.factType),
     };
   }
   if (
@@ -2844,8 +2887,7 @@ function fallbackProcessDto(
           : fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED'
             ? 'HOURLY'
             : 'PACKAGE_OR_SUBSCRIPTION',
-      sessionPacket:
-        fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      sessionPacket: fallbackSessionPacketFromFactType(fact.factType),
     };
   }
   if (fact.factType === 'PRODUCT_PURCHASED') {
@@ -3019,6 +3061,22 @@ function isSessionStartFactType(value: string) {
 
 function isSessionRuleFactType(value: string) {
   return isPlayTimeFactType(value) || isSessionStartFactType(value);
+}
+
+function fallbackSessionPacketFromFactType(value: string) {
+  if (
+    value === 'PACKAGE_OR_SUBSCRIPTION_USED' ||
+    value === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
+  ) {
+    return true;
+  }
+  if (
+    value === 'HOURLY_SESSION_STARTED' ||
+    value === 'HOURLY_PLAY_TIME_ACCUMULATED'
+  ) {
+    return false;
+  }
+  return null;
 }
 
 function fallbackEventTypes(factTypes: readonly string[]) {

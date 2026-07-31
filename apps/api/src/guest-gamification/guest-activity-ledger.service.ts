@@ -19,6 +19,12 @@ import type {
   LangameTransaction,
 } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  GUEST_ACTIVITY_HOURLY_SESSION_REPLAY_VERSION as GUEST_ACTIVITY_REPLAY_VERSION,
+  hourlySessionReplayReady,
+  replayVersionFromDiagnostics,
+} from './guest-activity-hourly-replay';
+import { drainLegacyGenericSessionClassifications } from './guest-game-generic-session-remediation';
 
 const DEFAULT_PAGE_LIMIT = 200;
 const MAX_SYNC_PAGES_PER_SOURCE = 20;
@@ -30,6 +36,9 @@ const SYNC_JOB_MAX_ATTEMPTS = 5;
 const SYNC_JOB_BASE_BACKOFF_MS = 15 * 1000;
 const INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS = 30;
 const INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS = 15 * 60 * 1000;
+// Keep persisted fact identity stable during the fail-closed hourly rollout.
+// The replay version drives a one-time upstream refetch without re-keying every
+// unchanged fact (and its origin receipt) onto a new parser-version identity.
 const GUEST_ACTIVITY_PARSER_VERSION = 'guest-activity-v4';
 
 const SOURCE_GUEST_LOG = 'LANGAME_GUEST_LOG';
@@ -179,6 +188,7 @@ type SyncWindow = {
   to: Date;
   initial: boolean;
   earliestRuleAt: Date | null;
+  parserReplay?: boolean;
 };
 
 type SourceSyncWindow = SyncWindow & {
@@ -359,33 +369,132 @@ export class GuestActivityLedgerService {
 
   async enqueueDueRecoverySyncs(limit = 20, now = new Date()) {
     const retryBefore = new Date(now.getTime() - 5 * 60 * 1_000);
-    const states = await this.prisma.guestActivitySyncState.findMany({
-      where: {
-        status: { in: ['PARTIAL', 'FAILED'] },
-        profileId: { not: null },
-        OR: [
-          { lastFinishedAt: { lte: retryBefore } },
-          { lastFinishedAt: null, updatedAt: { lte: retryBefore } },
-        ],
-      },
-      select: {
-        id: true,
-        profileId: true,
-        guestId: true,
-        storeId: true,
-        tenantId: true,
-        status: true,
-        errorMessage: true,
-        diagnostics: true,
-      },
-      orderBy: { updatedAt: 'asc' },
-      take: Math.max(limit * 3, limit),
-    });
+    const scanLimit = Math.max(limit * 3, limit);
+    const [recoveryStates, hourlyReplayStates] = await Promise.all([
+      this.prisma.guestActivitySyncState.findMany({
+        where: {
+          status: { in: ['PARTIAL', 'FAILED'] },
+          profileId: { not: null },
+          OR: [
+            { lastFinishedAt: { lte: retryBefore } },
+            { lastFinishedAt: null, updatedAt: { lte: retryBefore } },
+          ],
+        },
+        select: {
+          id: true,
+          profileId: true,
+          guestId: true,
+          storeId: true,
+          tenantId: true,
+          status: true,
+          errorMessage: true,
+          diagnostics: true,
+        },
+        orderBy: { updatedAt: 'asc' },
+        take: scanLimit,
+      }),
+      this.prisma.$queryRaw<
+        Array<{
+          id: string;
+          profileId: string;
+          guestId: string | null;
+          storeId: string | null;
+          tenantId: string;
+          status: string;
+          errorMessage: string | null;
+          diagnostics: Prisma.JsonValue | null;
+        }>
+      >(Prisma.sql`
+        SELECT DISTINCT ON (
+          fact."tenantId",
+          fact."externalProvider",
+          fact."externalDomain",
+          fact."externalGuestId"
+        )
+          COALESCE(state."id", 'fact-source:' || fact."id") AS "id",
+          COALESCE(state."profileId", fact."profileId") AS "profileId",
+          COALESCE(state."guestId", fact."guestId") AS "guestId",
+          COALESCE(state."storeId", fact."storeId") AS "storeId",
+          fact."tenantId" AS "tenantId",
+          COALESCE(state."status", 'IDLE') AS "status",
+          state."errorMessage",
+          state."diagnostics"
+        FROM "GuestActivityFact" fact
+        LEFT JOIN "GuestActivitySyncState" state
+          ON state."tenantId" = fact."tenantId"
+          AND state."externalProvider" = fact."externalProvider"
+          AND state."externalDomain" = fact."externalDomain"
+          AND state."externalGuestId" = fact."externalGuestId"
+        WHERE fact."profileId" IS NOT NULL
+          AND fact."externalProvider" = 'LANGAME'
+          AND fact."sourceKind" IN (
+            'LANGAME_GUEST_SESSION',
+            'LANGAME_GUEST_LOG',
+            'GUEST_SESSION',
+            'GUEST_LOG'
+          )
+          AND fact."factType" IN (
+            'SESSION_STARTED',
+            'HOURLY_SESSION_STARTED',
+            'PACKAGE_OR_SUBSCRIPTION_USED',
+            'SESSION_PLAY_TIME_ACCUMULATED',
+            'HOURLY_PLAY_TIME_ACCUMULATED',
+            'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
+          )
+          AND fact."lifecycleStatus" = 'ACTIVE'
+          AND fact."confidence" = 'EXACT'
+          AND fact."supersededAt" IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "GuestActivitySyncJob" job
+            WHERE job."tenantId" = fact."tenantId"
+              AND job."profileId" = COALESCE(
+                state."profileId",
+                fact."profileId"
+              )
+              AND job."status" IN ('PENDING', 'RETRY', 'RUNNING')
+          )
+          AND COALESCE(state."status", 'IDLE') <> 'STALE_BINDING'
+          AND (
+            COALESCE(state."status", 'IDLE') <> 'RUNNING'
+            OR state."lastStartedAt" IS NULL
+            OR state."lastStartedAt" <= ${retryBefore}
+          )
+          AND (
+            state."id" IS NULL
+            OR state."status" <> 'SUCCESS'
+            OR COALESCE(
+              state."diagnostics" ->> 'replayVersion',
+              ''
+            ) <> ${GUEST_ACTIVITY_REPLAY_VERSION}
+          )
+        ORDER BY
+          fact."tenantId",
+          fact."externalProvider",
+          fact."externalDomain",
+          fact."externalGuestId",
+          fact."validFrom" DESC,
+          fact."id" DESC
+        LIMIT ${scanLimit}
+      `),
+    ]);
+    const states = [
+      ...new Map(
+        [...hourlyReplayStates, ...recoveryStates].map((state) => [
+          state.id,
+          state,
+        ]),
+      ).values(),
+    ];
     let queued = 0;
     let skipped = 0;
 
     for (const state of states) {
       if (queued >= limit) break;
+      const requiresHourlySessionReplay = !hourlySessionReplayReady(
+        state.status,
+        state.diagnostics,
+      );
       if (syncStateHasStaleExternalGuest(state)) {
         await this.prisma.guestActivitySyncState.update({
           where: { id: state.id },
@@ -394,7 +503,10 @@ export class GuestActivityLedgerService {
         skipped += 1;
         continue;
       }
-      if (!state.profileId || !isRecoverableSyncState(state)) {
+      if (
+        !state.profileId ||
+        (!isRecoverableSyncState(state) && !requiresHourlySessionReplay)
+      ) {
         skipped += 1;
         continue;
       }
@@ -403,7 +515,9 @@ export class GuestActivityLedgerService {
         profileId: state.profileId,
         guestId: state.guestId,
         storeId: state.storeId,
-        reason: `AUTOMATIC_RECOVERY_${state.status}`,
+        reason: requiresHourlySessionReplay
+          ? 'AUTOMATIC_HOURLY_SESSION_REPLAY'
+          : `AUTOMATIC_RECOVERY_${state.status}`,
       });
       queued += 1;
     }
@@ -572,12 +686,26 @@ export class GuestActivityLedgerService {
       diagnostics: {
         reason: input.reason ?? null,
         startedAt: new Date().toISOString(),
+        parserReplay: window.parserReplay === true,
       },
     });
 
     try {
       const result = await this.fetchAndPersist(context, window);
       await this.reconcileHistoricalSessionFactVersions(context);
+      const genericSessionClassificationRemediation =
+        await drainLegacyGenericSessionClassifications(this.prisma, {
+          tenantId: context.tenantId,
+          limit: 100,
+          maxBatches: 20,
+          includeSessionStart: true,
+          includePlayTime: true,
+        });
+      if (!genericSessionClassificationRemediation.complete) {
+        throw new Error(
+          'Legacy generic session classification remediation must complete before parser replay is acknowledged.',
+        );
+      }
       const status: GuestActivitySyncStatus = result.staleBinding
         ? 'STALE_BINDING'
         : result.partial
@@ -596,7 +724,15 @@ export class GuestActivityLedgerService {
           partial: result.partial,
           staleBinding: result.staleBinding,
           failureClass: result.failureClass,
+          genericSessionClassificationRemediation,
           earliestRuleAt: window.earliestRuleAt?.toISOString() ?? null,
+          parserReplay: window.parserReplay === true,
+          ...(status === 'SUCCESS'
+            ? {
+                parserVersion: GUEST_ACTIVITY_PARSER_VERSION,
+                replayVersion: GUEST_ACTIVITY_REPLAY_VERSION,
+              }
+            : {}),
         },
         errorMessage: result.errorMessage ?? undefined,
       });
@@ -618,6 +754,7 @@ export class GuestActivityLedgerService {
           failedAt: new Date().toISOString(),
           failureClass,
           recoverable: isRecoverableFailureClass(failureClass),
+          parserReplay: window.parserReplay === true,
         },
       });
       if (staleBinding) {
@@ -983,16 +1120,36 @@ export class GuestActivityLedgerService {
 
   private async resolveSyncWindow(
     context: LedgerSyncContext,
-    state: { lastSuccessfulTo: Date | null; syncFrom: Date | null } | null,
+    state: {
+      lastSuccessfulTo: Date | null;
+      syncFrom: Date | null;
+      diagnostics: Prisma.JsonValue | null;
+    } | null,
   ): Promise<SyncWindow> {
     const to = new Date();
 
     if (state?.lastSuccessfulTo) {
+      if (
+        replayVersionFromDiagnostics(state.diagnostics) !==
+        GUEST_ACTIVITY_REPLAY_VERSION
+      ) {
+        return {
+          from: state.syncFrom
+            ? subtractDays(state.syncFrom, SYNC_OVERLAP_DAYS)
+            : subtractDays(to, DEFAULT_BASELINE_DAYS),
+          to,
+          initial: false,
+          earliestRuleAt: state.syncFrom,
+          parserReplay: true,
+        };
+      }
+
       return {
         from: subtractDays(state.lastSuccessfulTo, SYNC_OVERLAP_DAYS),
         to,
         initial: false,
         earliestRuleAt: state.syncFrom,
+        parserReplay: false,
       };
     }
 
@@ -1008,6 +1165,7 @@ export class GuestActivityLedgerService {
       to,
       initial: true,
       earliestRuleAt,
+      parserReplay: false,
     };
   }
 
@@ -1243,6 +1401,28 @@ export class GuestActivityLedgerService {
         normalizationRunId,
       );
     factsCount += inferredPackageUsageFacts;
+
+    // Source watermarks are acknowledged only after every fetched row and the
+    // cross-source inference pass have been persisted. A crash before this
+    // barrier leaves the source RUNNING (or at its previous successful
+    // watermark), so the same window is retried idempotently.
+    await this.checkpointFetchedSource(context, SOURCE_GUEST_LOG, guestLogs);
+    await this.checkpointFetchedSource(context, SOURCE_GUEST_SESSION, sessions);
+    await this.checkpointFetchedSource(
+      context,
+      SOURCE_TRANSACTION,
+      transactions,
+    );
+    await this.checkpointFetchedSource(
+      context,
+      SOURCE_PRODUCT_EXPENSE,
+      productExpenses,
+    );
+    await this.checkpointFetchedSource(
+      context,
+      SOURCE_BALANCE_TOPUP,
+      balanceTopups,
+    );
 
     const sourceResults = {
       guestLogs: sourceResultDiagnostics(guestLogs),
@@ -1544,15 +1724,6 @@ export class GuestActivityLedgerService {
       );
       const status = result.partial ? 'PARTIAL' : 'SUCCESS';
 
-      await this.upsertSourceSyncState(context, sourceKind, window, {
-        status,
-        pagesFetched: result.pagesFetched,
-        rowsFetched: result.rowsFetched,
-        rowsMatched: result.rows.length,
-        nextPage: result.nextPage,
-        errorMessage: null,
-      });
-
       return {
         ...result,
         status,
@@ -1588,6 +1759,25 @@ export class GuestActivityLedgerService {
     }
   }
 
+  private async checkpointFetchedSource<T>(
+    context: LedgerSyncContext,
+    sourceKind: string,
+    result: SourceFetchResult<T>,
+  ) {
+    if (result.status === 'FAILED') {
+      return;
+    }
+
+    await this.upsertSourceSyncState(context, sourceKind, result.window, {
+      status: result.status,
+      pagesFetched: result.pagesFetched,
+      rowsFetched: result.rowsFetched,
+      rowsMatched: result.rows.length,
+      nextPage: result.nextPage,
+      errorMessage: null,
+    });
+  }
+
   private async resolveSourceSyncWindow(
     context: LedgerSyncContext,
     sourceKind: string,
@@ -1604,9 +1794,15 @@ export class GuestActivityLedgerService {
         },
       },
     });
+    const stateReplayVersion = replayVersionFromDiagnostics(state?.diagnostics);
+    const requiresHourlySessionReplay =
+      (sourceKind === SOURCE_GUEST_LOG ||
+        sourceKind === SOURCE_GUEST_SESSION) &&
+      stateReplayVersion !== GUEST_ACTIVITY_REPLAY_VERSION;
 
     if (
       state?.status === 'PARTIAL' &&
+      !requiresHourlySessionReplay &&
       state.nextPage &&
       state.lastRequestedFrom &&
       state.lastRequestedTo
@@ -1617,16 +1813,35 @@ export class GuestActivityLedgerService {
         initial: !state.lastSuccessfulTo,
         earliestRuleAt: state.syncFrom,
         startPage: state.nextPage,
+        parserReplay: jsonObjectRecord(state.diagnostics).parserReplay === true,
       };
     }
 
     if (state?.lastSuccessfulTo) {
+      if (requiresHourlySessionReplay) {
+        return {
+          from:
+            state.syncFrom || fallbackWindow.earliestRuleAt
+              ? subtractDays(
+                  state.syncFrom ?? fallbackWindow.earliestRuleAt!,
+                  SYNC_OVERLAP_DAYS,
+                )
+              : subtractDays(fallbackWindow.to, DEFAULT_BASELINE_DAYS),
+          to: fallbackWindow.to,
+          initial: false,
+          earliestRuleAt: state.syncFrom ?? fallbackWindow.earliestRuleAt,
+          startPage: 1,
+          parserReplay: true,
+        };
+      }
+
       return {
         from: subtractDays(state.lastSuccessfulTo, SYNC_OVERLAP_DAYS),
         to: fallbackWindow.to,
         initial: false,
         earliestRuleAt: state.syncFrom,
         startPage: 1,
+        parserReplay: false,
       };
     }
 
@@ -1676,6 +1891,13 @@ export class GuestActivityLedgerService {
       diagnostics: {
         startPage: window.startPage,
         partial: params.status === 'PARTIAL',
+        parserReplay: window.parserReplay === true,
+        ...(params.status === 'SUCCESS' || params.status === 'PARTIAL'
+          ? {
+              parserVersion: GUEST_ACTIVITY_PARSER_VERSION,
+              replayVersion: GUEST_ACTIVITY_REPLAY_VERSION,
+            }
+          : {}),
       },
       errorMessage: params.errorMessage,
     };
@@ -2227,12 +2449,236 @@ export class GuestActivityLedgerService {
       },
     });
 
+    if (sourceKind === SOURCE_GUEST_SESSION && raw.sessionExternalId) {
+      await this.reconcileSessionStartClassificationVersions(
+        context,
+        raw.sessionExternalId,
+      );
+    }
+
     await this.prisma.guestActivityRawRecord.update({
       where: { id: rawRecordId },
       data: { parseStatus: facts.length > 0 ? 'FACTS_CREATED' : 'NO_FACTS' },
     });
 
     return factsCreated;
+  }
+
+  private async reconcileSessionStartClassificationVersions(
+    context: LedgerSyncContext,
+    sessionExternalId: string,
+  ) {
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await this.prisma.$transaction(
+          (tx) =>
+            this.reconcileSessionStartClassificationVersionsInTransaction(
+              tx,
+              context,
+              sessionExternalId,
+            ),
+          { isolationLevel: 'Serializable' },
+        );
+        return;
+      } catch (error) {
+        if (
+          isGuestActivitySerializationConflict(error) &&
+          attempt < maxAttempts
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new Error('Session start classification reconciliation exhausted.');
+  }
+
+  private async reconcileSessionStartClassificationVersionsInTransaction(
+    tx: Prisma.TransactionClient,
+    context: LedgerSyncContext,
+    sessionExternalId: string,
+  ) {
+    const versions = await tx.guestActivityFact.findMany({
+      where: {
+        tenantId: context.tenantId,
+        profileId: context.profile.id,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: context.externalDomain,
+        sourceKind: SOURCE_GUEST_SESSION,
+        sessionExternalId,
+        factType: {
+          in: [
+            'SESSION_STARTED',
+            'HOURLY_SESSION_STARTED',
+            'PACKAGE_OR_SUBSCRIPTION_USED',
+          ],
+        },
+      },
+      select: {
+        id: true,
+        factType: true,
+        sourceHash: true,
+        lifecycleStatus: true,
+        createdAt: true,
+        evidence: true,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    const canonicalStart = versions.find(
+      (version) =>
+        version.factType === 'SESSION_STARTED' &&
+        version.lifecycleStatus === 'ACTIVE',
+    );
+    if (!canonicalStart) {
+      return;
+    }
+
+    const genericVersions = versions.filter(
+      (version) => version.factType === 'SESSION_STARTED',
+    );
+    const canonicalIndex = genericVersions.findIndex(
+      (version) => version.id === canonicalStart.id,
+    );
+    const typedClassificationsBySourceHash = new Map<
+      string,
+      Set<'HOURLY_SESSION_STARTED' | 'PACKAGE_OR_SUBSCRIPTION_USED'>
+    >();
+    for (const version of versions) {
+      if (
+        version.factType !== 'HOURLY_SESSION_STARTED' &&
+        version.factType !== 'PACKAGE_OR_SUBSCRIPTION_USED'
+      ) {
+        continue;
+      }
+      const classifications =
+        typedClassificationsBySourceHash.get(version.sourceHash) ?? new Set();
+      classifications.add(version.factType);
+      typedClassificationsBySourceHash.set(version.sourceHash, classifications);
+    }
+    let resolvedClassification:
+      | {
+          factType:
+            | 'HOURLY_SESSION_STARTED'
+            | 'PACKAGE_OR_SUBSCRIPTION_USED'
+            | null;
+          sourceHash: string;
+        }
+      | undefined;
+    let sawFailClosedExpandedHourly = false;
+
+    for (const version of genericVersions.slice(canonicalIndex)) {
+      const evidence = jsonObjectRecord(version.evidence);
+      const billingKind = normalizeSearchText(evidence.sessionBillingKind);
+      if (billingKind === 'hourly') {
+        resolvedClassification = {
+          factType: 'HOURLY_SESSION_STARTED',
+          sourceHash: version.sourceHash,
+        };
+        break;
+      }
+      if (billingKind === 'package_or_subscription') {
+        resolvedClassification = {
+          factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+          sourceHash: version.sourceHash,
+        };
+        break;
+      }
+
+      const observedBillingKind = normalizeSearchText(
+        evidence.observedSessionBillingKind,
+      );
+      const failClosedExpandedHourly =
+        parseLangameFlag(evidence.expanded ?? evidence.expand) === true &&
+        observedBillingKind === 'hourly' &&
+        billingKind === 'unknown';
+      if (failClosedExpandedHourly) {
+        sawFailClosedExpandedHourly = true;
+        // A legacy parser could have created a false HOURLY sibling from this
+        // exact expanded payload. Never use that sibling as proof of the
+        // physical start classification.
+        continue;
+      }
+
+      // Older production SESSION_STARTED rows stored only { sourceKind } in
+      // evidence. Their exact classification lived in the typed sibling with
+      // the same sourceHash. Restore that evidence only when it is unique;
+      // conflicting siblings remain fail-closed.
+      const siblingClassifications = typedClassificationsBySourceHash.get(
+        version.sourceHash,
+      );
+      if (siblingClassifications?.size === 1) {
+        const [factType] = siblingClassifications;
+        resolvedClassification = {
+          factType,
+          sourceHash: version.sourceHash,
+        };
+        break;
+      }
+    }
+
+    if (!resolvedClassification && sawFailClosedExpandedHourly) {
+      resolvedClassification = {
+        factType: null,
+        sourceHash: canonicalStart.sourceHash,
+      };
+    }
+
+    if (!resolvedClassification) {
+      return;
+    }
+
+    const matchingTypedVersion =
+      resolvedClassification.factType === null
+        ? null
+        : (versions.find(
+            (version) =>
+              version.factType === resolvedClassification.factType &&
+              version.sourceHash === resolvedClassification.sourceHash,
+          ) ?? null);
+    const staleTypedIds = versions
+      .filter(
+        (version) =>
+          version.lifecycleStatus === 'ACTIVE' &&
+          version.factType !== 'SESSION_STARTED' &&
+          version.id !== matchingTypedVersion?.id,
+      )
+      .map((version) => version.id);
+    const matchingTypedNeedsActivation = Boolean(
+      matchingTypedVersion && matchingTypedVersion.lifecycleStatus !== 'ACTIVE',
+    );
+    if (staleTypedIds.length === 0 && !matchingTypedNeedsActivation) {
+      return;
+    }
+
+    if (staleTypedIds.length > 0) {
+      await tx.guestActivityFact.updateMany({
+        where: {
+          id: { in: staleTypedIds },
+          lifecycleStatus: 'ACTIVE',
+        },
+        data: {
+          lifecycleStatus: 'SUPERSEDED',
+          supersededAt: new Date(),
+        },
+      });
+    }
+
+    if (matchingTypedNeedsActivation && matchingTypedVersion) {
+      const activated = await tx.guestActivityFact.updateMany({
+        where: { id: matchingTypedVersion.id },
+        data: {
+          lifecycleStatus: 'ACTIVE',
+          supersededAt: null,
+        },
+      });
+      if (activated.count !== 1) {
+        throw new Error(
+          'Resolved session start classification disappeared during reconciliation.',
+        );
+      }
+    }
   }
 
   private async reconcileSessionFactVersions(
@@ -2368,8 +2814,14 @@ export class GuestActivityLedgerService {
       // The query is globally ordered inside the scoped physical-session
       // identity. Do not prefer the profile currently being reconciled:
       // replaying a stale profile must not take ownership back from a newer,
-      // corrected binding.
-      const activeVersionId = group[0].id;
+      // corrected binding. An all-superseded group is an intentional tombstone
+      // (for example, an ambiguous expanded session), so never reactivate it.
+      const activeVersionId = group.find(
+        (version) => version.lifecycleStatus === 'ACTIVE',
+      )?.id;
+      if (!activeVersionId) {
+        continue;
+      }
       const staleActiveIds = group
         .filter((version) => version.id !== activeVersionId)
         .filter((version) => version.lifecycleStatus === 'ACTIVE')
@@ -2380,18 +2832,6 @@ export class GuestActivityLedgerService {
           data: {
             lifecycleStatus: 'SUPERSEDED',
             supersededAt,
-          },
-        });
-      }
-      const activeVersion = group.find(
-        (version) => version.id === activeVersionId,
-      );
-      if (activeVersion?.lifecycleStatus !== 'ACTIVE') {
-        await this.prisma.guestActivityFact.updateMany({
-          where: { id: activeVersionId },
-          data: {
-            lifecycleStatus: 'ACTIVE',
-            supersededAt: null,
           },
         });
       }
@@ -2447,7 +2887,7 @@ export class GuestActivityLedgerService {
     };
 
     const hasSessionStart =
-      /старт\s+сесс|начал[аи]?\s+сесс|session\s+start|start\s+session/.test(
+      /старт\s+сесс|начал[аи]?\s+сесс|session[\s_]+start|start[\s_]+session/.test(
         text,
       );
     const hasSessionEnd =
@@ -2462,14 +2902,15 @@ export class GuestActivityLedgerService {
     const hasBonusTopup = /пополнени|начислен|bonus|бонус/.test(text);
     const hasReward = /награда|лутбокс|квест|задани|reward|loot/.test(text);
     const packageLike = isPackageOrSubscriptionText(text);
+    const hourlyLike = isHourlySessionText(text);
 
     if (hasSessionStart) {
       addTextFact('SESSION_STARTED');
 
       if (packageLike) {
         addTextFact('PACKAGE_OR_SUBSCRIPTION_USED', 'package_or_subscription');
-      } else {
-        addTextFact('HOURLY_SESSION_STARTED', 'hourly', 'INFERRED');
+      } else if (hourlyLike) {
+        addTextFact('HOURLY_SESSION_STARTED', 'hourly');
       }
     }
 
@@ -2620,8 +3061,28 @@ export class GuestActivityLedgerService {
     const startedAt = parseLangameDate(firstString(row.date_start), timeZone);
     const stoppedAt = parseLangameDate(firstString(row.date_stop), timeZone);
     const sessionExternalId = firstString(row.id, row.UUID);
-    const tariff = resolveLangameSessionTariff(row.packet, tariffTypeGroups);
+    const observedTariff = resolveLangameSessionTariff(
+      row.packet,
+      tariffTypeGroups,
+    );
+    const expand = parseLangameFlag(row.expand);
+    const tariff =
+      expand === true && observedTariff.kind === 'hourly'
+        ? { ...observedTariff, kind: 'unknown' as const }
+        : observedTariff;
     const playedMinutes = playedDurationMinutes(startedAt, stoppedAt);
+    const tariffEvidence = {
+      sourceKind: SOURCE_GUEST_SESSION,
+      packet: row.packet,
+      expand: row.expand,
+      expanded: expand,
+      tariffGroupId: observedTariff.tariffGroupId,
+      tariffType: observedTariff.tariffType,
+      tariffTypeGroup: observedTariff.tariffType,
+      tariffName: observedTariff.tariffName,
+      observedSessionBillingKind: observedTariff.kind,
+      sessionBillingKind: tariff.kind,
+    };
 
     if (startedAt) {
       facts.push({
@@ -2637,7 +3098,7 @@ export class GuestActivityLedgerService {
         bonusAmount: null,
         durationMinutes: null,
         confidence: 'EXACT',
-        evidence: { sourceKind: SOURCE_GUEST_SESSION },
+        evidence: sanitizeGuestActivityEvidencePayload(tariffEvidence),
       });
       if (tariff.kind === 'package_or_subscription') {
         facts.push({
@@ -2653,13 +3114,7 @@ export class GuestActivityLedgerService {
           bonusAmount: null,
           durationMinutes: null,
           confidence: 'EXACT',
-          evidence: sanitizeGuestActivityEvidencePayload({
-            sourceKind: SOURCE_GUEST_SESSION,
-            packet: row.packet,
-            tariffGroupId: tariff.tariffGroupId,
-            tariffType: tariff.tariffType,
-            tariffName: tariff.tariffName,
-          }),
+          evidence: sanitizeGuestActivityEvidencePayload(tariffEvidence),
         });
       } else if (tariff.kind === 'hourly') {
         facts.push({
@@ -2675,13 +3130,7 @@ export class GuestActivityLedgerService {
           bonusAmount: null,
           durationMinutes: null,
           confidence: 'EXACT',
-          evidence: sanitizeGuestActivityEvidencePayload({
-            sourceKind: SOURCE_GUEST_SESSION,
-            packet: row.packet,
-            tariffGroupId: tariff.tariffGroupId,
-            tariffType: tariff.tariffType,
-            tariffName: tariff.tariffName,
-          }),
+          evidence: sanitizeGuestActivityEvidencePayload(tariffEvidence),
         });
       }
     }
@@ -2700,7 +3149,7 @@ export class GuestActivityLedgerService {
         bonusAmount: null,
         durationMinutes: null,
         confidence: 'EXACT',
-        evidence: { sourceKind: SOURCE_GUEST_SESSION },
+        evidence: sanitizeGuestActivityEvidencePayload(tariffEvidence),
       });
     }
 
@@ -2733,14 +3182,9 @@ export class GuestActivityLedgerService {
         durationMinutes: playedMinutes,
         confidence: 'EXACT',
         evidence: sanitizeGuestActivityEvidencePayload({
-          sourceKind: SOURCE_GUEST_SESSION,
+          ...tariffEvidence,
           startedAt: startedAt?.toISOString() ?? null,
           stoppedAt: stoppedAt?.toISOString() ?? null,
-          packet: row.packet,
-          tariffGroupId: tariff.tariffGroupId,
-          tariffTypeGroup: tariff.tariffType,
-          tariffName: tariff.tariffName,
-          sessionBillingKind: tariff.kind,
           calculation: 'date_stop - date_start',
         }),
       });
@@ -3295,7 +3739,7 @@ function maskPossiblePhone(value: string) {
 }
 
 const RAW_PAYLOAD_ALLOWED_KEY =
-  /^(?:id|uuid|type|status|state|date(?:_normal|_insert|_update|_start|_stop)?|created(?:_at)?|updated(?:_at)?|time|datetime|start(?:ed)?_at|stop(?:ped)?_at|duration(?:_minutes)?|minutes|packet|tarif(?:f)?(?:_id|_name|_title|_type)?|session(?:_id|_type|_packet|_minutes)?|club_id|list_clubs_id|guest_id|real_guest_id|amount|sum|total|balance|bonus(?:_balance|es)?|product(?:_id|_name|_name_resolved)?|goods?(?:_id|_name)?|list_goods_id|category(?:_id|_name)?|external_category(?:_key|_id|_name)?|supplier(?:_id|_name)?|quantity|count|qty|price(?:_sale)?|unit_price|cancel|operation|source|comment|text|message|title|description|data|items|rows|result)$/i;
+  /^(?:id|uuid|type|status|state|date(?:_normal|_insert|_update|_start|_stop)?|created(?:_at)?|updated(?:_at)?|time|datetime|start(?:ed)?_at|stop(?:ped)?_at|duration(?:_minutes)?|minutes|packet|expand|tarif(?:f)?(?:_id|_name|_title|_type)?|session(?:_id|_type|_packet|_minutes)?|club_id|list_clubs_id|guest_id|real_guest_id|amount|sum|total|balance|bonus(?:_balance|es)?|product(?:_id|_name|_name_resolved)?|goods?(?:_id|_name)?|list_goods_id|category(?:_id|_name)?|external_category(?:_key|_id|_name)?|supplier(?:_id|_name)?|quantity|count|qty|price(?:_sale)?|unit_price|cancel|operation|source|comment|text|message|title|description|data|items|rows|result)$/i;
 const RAW_PAYLOAD_SENSITIVE_KEY =
   /(?:phone|тел|mobile|contact|email|mail|fio|full.?name|first.?name|last.?name|middle.?name|passport|document|address|birth|card.?number)/i;
 
@@ -3452,6 +3896,10 @@ function isPackageOrSubscriptionText(text: string) {
     /по\s+тарифу\s+[^.]*\d+\s*час/.test(text) ||
     /\b\d+\s*час(?:ов|а)?\b/.test(text)
   );
+}
+
+function isHourlySessionText(text: string) {
+  return /почас|hourly|pay\s*as\s*you\s*go/.test(text);
 }
 
 function storesMatchOrUnknown(
@@ -3744,8 +4192,15 @@ function sourceResultDiagnostics<T>(result: SourceFetchResult<T>) {
     nextPage: result.nextPage,
     from: result.window.from.toISOString(),
     to: result.window.to.toISOString(),
+    parserReplay: result.window.parserReplay === true,
     errorMessage: result.errorMessage,
   };
+}
+
+function isGuestActivitySerializationConflict(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === 'P2034' || code === '40001' || code === '40P01';
 }
 
 export function classifyGuestActivitySyncFailure(

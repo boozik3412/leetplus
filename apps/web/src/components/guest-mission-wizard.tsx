@@ -20,6 +20,7 @@ import {
   GuestMissionPreview,
   type GuestMissionPreviewData,
 } from "@/components/guest-mission-preview";
+import { HourlySessionSourceNote } from "@/components/hourly-session-source-note";
 
 type Step = "conditions" | "rewards" | "appearance";
 type TaskType = GuestGameMissionWizardTaskType;
@@ -75,13 +76,7 @@ type WizardState = {
   totalRewardLimit: number;
   description: string;
   actionText: string;
-  theme:
-    | "CLASSIC"
-    | "EMERALD"
-    | "VIOLET"
-    | "DARK"
-    | "GOLD"
-    | "BLACK_RED";
+  theme: "CLASSIC" | "EMERALD" | "VIOLET" | "DARK" | "GOLD" | "BLACK_RED";
   icon: string;
   coverUrl: string;
 };
@@ -215,7 +210,8 @@ export function GuestMissionWizard({
           { signal: controller.signal },
         );
         if (!response.ok) throw new Error(await responseMessage(response));
-        const loaded = (await response.json()) as GuestGameMissionWizardLoadResult;
+        const loaded =
+          (await response.json()) as GuestGameMissionWizardLoadResult;
         if (controller.signal.aborted) return;
 
         const hydrated = wizardStateFromDefinition(loaded.definition, stores);
@@ -644,9 +640,7 @@ export function GuestMissionWizard({
           ) : (
             <div className="text-sm">
               <p className="font-semibold">
-                {draftId
-                  ? `Черновик ${draftId.slice(0, 8)}`
-                  : "Новый черновик"}
+                {draftId ? `Черновик ${draftId.slice(0, 8)}` : "Новый черновик"}
               </p>
               <p className="text-xs text-zinc-500">
                 {message ?? saveLabel(saveState)}
@@ -769,12 +763,17 @@ function ConditionsStep(props: {
             <select
               className={fieldClass}
               value={form.taskType}
-              onChange={(event) =>
+              onChange={(event) => {
+                const taskType = event.target.value as TaskType;
                 setForm((state) => ({
                   ...state,
-                  taskType: event.target.value as TaskType,
-                }))
-              }
+                  taskType,
+                  sessionType:
+                    taskType === "PLAY_TIME" || taskType === "CHECK_IN"
+                      ? state.sessionType
+                      : "ANY",
+                }));
+              }}
             >
               <option value="APP_OPEN">Вход в игровой модуль</option>
               <option value="PLAY_TIME">Игровое время</option>
@@ -851,7 +850,8 @@ function ConditionsStep(props: {
           <span>
             <span className="block text-sm font-semibold">Бессрочно</span>
             <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
-              Началом станет момент активации; дата окончания не устанавливается.
+              Началом станет момент активации; дата окончания не
+              устанавливается.
             </span>
           </span>
           <input
@@ -939,21 +939,7 @@ function PlayTimeLogic({ form, setForm }: StateProps) {
   return (
     <div className="space-y-4">
       <div className={subsectionClass}>
-        <SubTitle>Тип сессии</SubTitle>
-        <ChoiceRow
-          values={[
-            { id: "ANY", label: "Любая" },
-            { id: "HOURLY", label: "Почасовая" },
-            { id: "PACKAGE_OR_SUBSCRIPTION", label: "Пакет или абонемент" },
-          ]}
-          value={form.sessionType}
-          onChange={(value) =>
-            setForm((state) => ({
-              ...state,
-              sessionType: value as WizardState["sessionType"],
-            }))
-          }
-        />
+        <SessionTypeChoice form={form} setForm={setForm} />
       </div>
       <div className={subsectionClass}>
         <SubTitle>Метрика прогресса</SubTitle>
@@ -1417,6 +1403,9 @@ function CheckInLogic({ form, setForm }: StateProps) {
   return (
     <div className="space-y-4">
       <div className={subsectionClass}>
+        <SessionTypeChoice form={form} setForm={setForm} />
+      </div>
+      <div className={subsectionClass}>
         <SubTitle>Сценарий чекина</SubTitle>
         <CompactScenarios
           values={[
@@ -1496,6 +1485,29 @@ function CheckInLogic({ form, setForm }: StateProps) {
       </div>
       <CommonSchedule form={form} setForm={setForm} />
     </div>
+  );
+}
+
+function SessionTypeChoice({ form, setForm }: StateProps) {
+  return (
+    <>
+      <SubTitle>Тип сессии</SubTitle>
+      <ChoiceRow
+        values={[
+          { id: "ANY", label: "Любая" },
+          { id: "HOURLY", label: "Почасовая" },
+          { id: "PACKAGE_OR_SUBSCRIPTION", label: "Пакет или абонемент" },
+        ]}
+        value={form.sessionType}
+        onChange={(value) =>
+          setForm((state) => ({
+            ...state,
+            sessionType: value as WizardState["sessionType"],
+          }))
+        }
+      />
+      {form.sessionType === "HOURLY" ? <HourlySessionSourceNote /> : null}
+    </>
   );
 }
 
@@ -2315,41 +2327,41 @@ function buildPreview(
     form.taskType === "APP_OPEN"
       ? 1
       : form.taskType === "PLAY_TIME"
-      ? form.target
-      : form.taskType === "BALANCE_TOPUP"
-        ? form.topupMode === "PERIOD_TOTAL"
-          ? form.totalAmount
-          : form.topupMode === "COUNT"
-            ? form.topupCount
-            : 1
-        : form.taskType === "CHECK_IN"
-          ? form.checkInMode === "STREAK"
-            ? form.checkInDays
-            : form.checkInMode === "SINGLE"
-              ? 1
-              : form.checkInCount
-          : form.productMatch === "ALL"
-            ? Math.max(
-                1,
-                form.purchaseSource === "CATEGORY"
-                  ? productGroups.length
-                  : products.length,
-              )
-            : 1;
+        ? form.target
+        : form.taskType === "BALANCE_TOPUP"
+          ? form.topupMode === "PERIOD_TOTAL"
+            ? form.totalAmount
+            : form.topupMode === "COUNT"
+              ? form.topupCount
+              : 1
+          : form.taskType === "CHECK_IN"
+            ? form.checkInMode === "STREAK"
+              ? form.checkInDays
+              : form.checkInMode === "SINGLE"
+                ? 1
+                : form.checkInCount
+            : form.productMatch === "ALL"
+              ? Math.max(
+                  1,
+                  form.purchaseSource === "CATEGORY"
+                    ? productGroups.length
+                    : products.length,
+                )
+              : 1;
   const unit =
     form.taskType === "APP_OPEN"
       ? "вход"
       : form.taskType === "PLAY_TIME"
-      ? "минут"
-      : form.taskType === "PRODUCT_PURCHASE"
-        ? "покупок"
-        : form.taskType === "BALANCE_TOPUP"
-          ? form.topupMode === "PERIOD_TOTAL"
-            ? "₽"
-            : "пополнений"
-          : form.checkInMode === "STREAK"
-            ? "дней"
-            : "чекинов";
+        ? "минут"
+        : form.taskType === "PRODUCT_PURCHASE"
+          ? "покупок"
+          : form.taskType === "BALANCE_TOPUP"
+            ? form.topupMode === "PERIOD_TOTAL"
+              ? "₽"
+              : "пополнений"
+            : form.checkInMode === "STREAK"
+              ? "дней"
+              : "чекинов";
   return {
     title: form.name || "Новое задание",
     description: form.description || logicSubtitle(form.taskType),
@@ -2391,7 +2403,10 @@ function previewCondition(form: WizardState) {
         ? `Сыграть один час в игровой сессии${sessionRequirement}`
         : `Провести в игре ${form.target} минут${sessionRequirement}`;
 
-    return `${action}${form.minSessionMinutes ? `, минимум ${form.minSessionMinutes} минут за сессию` : ""}`;
+    return withWizardHourlyExtensionNotice(
+      `${action}${form.minSessionMinutes ? `, минимум ${form.minSessionMinutes} минут за сессию` : ""}`,
+      form.sessionType,
+    );
   }
   if (form.taskType === "PRODUCT_PURCHASE") {
     const productCondition =
@@ -2413,22 +2428,50 @@ function previewCondition(form: WizardState) {
       : form.topupMode === "COUNT"
         ? `Пополнить баланс ${form.topupCount} раз, каждый раз ${form.topupComparison === "EXACT" ? "ровно на" : "не менее чем на"} ${form.topupAmount} ₽`
         : `Пополнить баланс ${form.topupComparison === "EXACT" ? "ровно на" : "не менее чем на"} ${form.topupAmount} ₽`;
-  return form.checkInMode === "STREAK"
-    ? `Сделать чекин ${form.checkInDays} дней подряд`
-    : form.checkInMode === "SINGLE"
-      ? "Сделать чекин в клубе"
-      : `Сделать ${form.checkInCount} чекинов`;
+  const checkInAction =
+    form.checkInMode === "STREAK"
+      ? `Сделать чекин ${form.checkInDays} дней подряд`
+      : form.checkInMode === "SINGLE"
+        ? "Сделать чекин в клубе"
+        : `Сделать ${form.checkInCount} чекинов`;
+  const sessionRequirement =
+    form.sessionType === "HOURLY"
+      ? " во время активной почасовой сессии"
+      : form.sessionType === "PACKAGE_OR_SUBSCRIPTION"
+        ? " во время активной сессии по пакету или абонементу"
+        : "";
+
+  return withWizardHourlyExtensionNotice(
+    `${checkInAction}${sessionRequirement}`,
+    form.sessionType,
+  );
 }
+
+const wizardHourlyExtensionNotice =
+  "Продление пакета или абонемента без завершения сессии не засчитывается.";
+
+function withWizardHourlyExtensionNotice(
+  label: string,
+  sessionType: WizardState["sessionType"],
+) {
+  if (sessionType !== "HOURLY" || label.includes(wizardHourlyExtensionNotice)) {
+    return label;
+  }
+
+  const trimmed = label.trim();
+  return `${trimmed}${/[.!?]$/.test(trimmed) ? "" : "."} ${wizardHourlyExtensionNotice}`;
+}
+
 function logicSubtitle(taskType: TaskType) {
   return taskType === "APP_OPEN"
     ? "Условие выполняется при входе гостя в игровой модуль."
     : taskType === "PLAY_TIME"
-    ? "Условие проверяется по игровым сессиям гостя."
-    : taskType === "PRODUCT_PURCHASE"
-      ? "Условие проверяется по положительным фактам покупок, привязанным к гостю."
-      : taskType === "BALANCE_TOPUP"
-        ? "Условие проверяется по успешным пополнениям из игрового журнала."
-        : "Условие проверяется по успешным чекинам с календарём клуба.";
+      ? "Условие проверяется по игровым сессиям гостя."
+      : taskType === "PRODUCT_PURCHASE"
+        ? "Условие проверяется по положительным фактам покупок, привязанным к гостю."
+        : taskType === "BALANCE_TOPUP"
+          ? "Условие проверяется по успешным пополнениям из игрового журнала."
+          : "Условие проверяется по успешным чекинам с календарём клуба.";
 }
 function rewardReady(form: WizardState) {
   return (
@@ -2519,7 +2562,8 @@ function wizardStateFromDefinition(
     defaults.categoryCatalogSource,
   );
   const purchaseSource = enumValue(
-    stringValue(conditions.purchaseSource) ?? stringValue(metric.purchaseSource),
+    stringValue(conditions.purchaseSource) ??
+      stringValue(metric.purchaseSource),
     ["PRODUCT", "CATEGORY"] as const,
     defaults.purchaseSource,
   );
@@ -2546,32 +2590,33 @@ function wizardStateFromDefinition(
         externalProductId: externalProductIds[index] ?? null,
         externalDomain: null,
       }));
-  const selectedProductGroups = categorySelections.map((group) => ({
-    id: stringValue(group.id) ?? "",
-    source: categoryCatalogSource,
-    name: stringValue(group.name) ?? "Выбранная категория",
-    categoryIds: stringListValue(group.categoryIds),
-    productCount: 0,
-    storeCount: 0,
-    storeNames: [],
-    refs: recordListValue(group.refs)
-      .map((ref) => {
-        const externalDomain = stringValue(ref.externalDomain);
-        const externalGroupId = stringValue(ref.externalGroupId);
-        if (!externalDomain || !externalGroupId) return null;
-        return {
-          externalDomain,
-          externalGroupId,
-          productCount: numberValue(ref.productCount, 0),
-          storeIds: stringListValue(ref.storeIds),
-        };
-      })
-      .filter(
-        (
-          ref,
-        ): ref is GuestGameMissionProductGroup["refs"][number] => ref !== null,
-      ),
-  })).filter((group) => Boolean(group.id));
+  const selectedProductGroups = categorySelections
+    .map((group) => ({
+      id: stringValue(group.id) ?? "",
+      source: categoryCatalogSource,
+      name: stringValue(group.name) ?? "Выбранная категория",
+      categoryIds: stringListValue(group.categoryIds),
+      productCount: 0,
+      storeCount: 0,
+      storeNames: [],
+      refs: recordListValue(group.refs)
+        .map((ref) => {
+          const externalDomain = stringValue(ref.externalDomain);
+          const externalGroupId = stringValue(ref.externalGroupId);
+          if (!externalDomain || !externalGroupId) return null;
+          return {
+            externalDomain,
+            externalGroupId,
+            productCount: numberValue(ref.productCount, 0),
+            storeIds: stringListValue(ref.storeIds),
+          };
+        })
+        .filter(
+          (ref): ref is GuestGameMissionProductGroup["refs"][number] =>
+            ref !== null,
+        ),
+    }))
+    .filter((group) => Boolean(group.id));
 
   return {
     form: {
@@ -2582,7 +2627,9 @@ function wizardStateFromDefinition(
         definition.visibility === "HIDDEN" ? "HIDDEN" : defaults.visibility,
       audienceId: definition.audienceId ?? "",
       storeIds:
-        definition.storeIds.length > 0 ? definition.storeIds : defaults.storeIds,
+        definition.storeIds.length > 0
+          ? definition.storeIds
+          : defaults.storeIds,
       indefinite:
         definition.indefinite === true || conditions.indefinite === true,
       periodFrom: localInputFromIso(definition.periodFrom, defaults.periodFrom),
@@ -2717,7 +2764,13 @@ function enumValue<T extends string>(
 function wizardTaskType(value: string, fallback: TaskType) {
   return enumValue(
     value,
-    ["APP_OPEN", "PLAY_TIME", "PRODUCT_PURCHASE", "BALANCE_TOPUP", "CHECK_IN"] as const,
+    [
+      "APP_OPEN",
+      "PLAY_TIME",
+      "PRODUCT_PURCHASE",
+      "BALANCE_TOPUP",
+      "CHECK_IN",
+    ] as const,
     fallback,
   );
 }
@@ -2747,7 +2800,8 @@ function localInputFromIso(value: string | null | undefined, fallback: string) {
 function uniqueSelectedProducts(products: SelectedProduct[]) {
   return products.filter(
     (product, index) =>
-      product.id && products.findIndex((candidate) => candidate.id === product.id) === index,
+      product.id &&
+      products.findIndex((candidate) => candidate.id === product.id) === index,
   );
 }
 

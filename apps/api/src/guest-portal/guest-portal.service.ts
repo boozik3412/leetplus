@@ -18232,6 +18232,8 @@ function normalizeGuestPortalSessionType(value: string | null | undefined) {
   if (
     [
       'packet_hours',
+      'package_or_subscription',
+      'package_or_subscription_session',
       'packet',
       'package',
       'package_hours',
@@ -18246,7 +18248,14 @@ function normalizeGuestPortalSessionType(value: string | null | undefined) {
   }
 
   if (
-    ['regular_session', 'regular', 'common', 'default'].includes(normalized)
+    [
+      'hourly',
+      'hourly_session',
+      'regular_session',
+      'regular',
+      'common',
+      'default',
+    ].includes(normalized)
   ) {
     return 'regular_session';
   }
@@ -18274,16 +18283,19 @@ function guestPortalSessionRequirementLabel(value: string | null | undefined) {
   return null;
 }
 
-function lootBoxWaitingEventMessage(
+export function lootBoxWaitingEventMessage(
   triggerKind: string,
   sessionType?: string | null,
 ) {
   const sessionRequirement = guestPortalSessionRequirementLabel(sessionType);
   const triggerLabel = guestGameTriggerLabel(triggerKind);
 
-  return `Чтобы открыть этот лутбокс, выполните задание: ${triggerLabel}${
-    sessionRequirement ? ` ${sessionRequirement}` : ''
-  }.`;
+  return appendHourlySessionSourceNotice(
+    `Чтобы открыть этот лутбокс, выполните задание: ${triggerLabel}${
+      sessionRequirement ? ` ${sessionRequirement}` : ''
+    }.`,
+    sessionType,
+  );
 }
 
 function buildLootBoxRewardState(
@@ -18611,19 +18623,30 @@ export function guestPortalMissionConditionLabel(
   }
   if (missionType === 'CHECK_IN') {
     const mode = stringField(metric.checkInMode)?.toUpperCase();
-    return mode === 'STREAK'
-      ? `Сделать чекин ${target} дней подряд`
-      : target > 1
-        ? `Сделать ${target} чекинов`
-        : 'Сделать чекин в клубе';
+    const action =
+      mode === 'STREAK'
+        ? `Сделать чекин ${target} дней подряд`
+        : target > 1
+          ? `Сделать ${target} чекинов`
+          : 'Сделать чекин в клубе';
+    const sessionRequirement = guestPortalSessionRequirementLabel(sessionType);
+    return appendHourlySessionSourceNotice(
+      `${action}${
+        sessionRequirement
+          ? ` во время активной сессии ${sessionRequirement}`
+          : ''
+      }`,
+      sessionType,
+    );
   }
   if (missionType === 'APP_OPEN') {
     return 'Открыть игровой модуль';
   }
+  const normalizedSessionType = normalizeGuestPortalSessionType(sessionType);
   const sessionLabel =
-    sessionType === 'HOURLY'
+    normalizedSessionType === 'regular_session'
       ? ' с почасовым тарифом'
-      : sessionType === 'PACKAGE_OR_SUBSCRIPTION'
+      : normalizedSessionType === 'packet_hours'
         ? ' по пакету или абонементу'
         : '';
   const minSessionMinutes = numberField(metric.minSessionMinutes);
@@ -18633,9 +18656,29 @@ export function guestPortalMissionConditionLabel(
       : `Провести в игре ${target} минут`
   }${sessionLabel}`;
 
-  return minSessionMinutes
+  const label = minSessionMinutes
     ? `${action}, минимум ${minSessionMinutes} минут за сессию`
     : action;
+
+  return appendHourlySessionSourceNotice(label, sessionType);
+}
+
+const hourlySessionSourceNotice =
+  'Продление пакета или абонемента без завершения сессии не засчитывается.';
+
+function appendHourlySessionSourceNotice(
+  label: string,
+  sessionType?: string | null,
+) {
+  if (
+    normalizeGuestPortalSessionType(sessionType) !== 'regular_session' ||
+    label.includes(hourlySessionSourceNotice)
+  ) {
+    return label;
+  }
+
+  const trimmed = label.trim();
+  return `${trimmed}${/[.!?]$/.test(trimmed) ? '' : '.'} ${hourlySessionSourceNotice}`;
 }
 
 function buildMissionRewardStatus({
@@ -20276,19 +20319,26 @@ function emptyActivity(): GuestPortalPayload['activity'] {
   };
 }
 
-function mapSessionActivity(row: {
+export function mapSessionActivity(row: {
   id: string;
   startedAt: Date | null;
   stoppedAt: Date | null;
   durationMinutes: number | null;
   normalStop: boolean | null;
   packet: boolean | null;
+  expand?: boolean | null;
   createdAt: Date;
   store: { name: string } | null;
 }): GuestPortalActivityItem {
   const description = [
     row.durationMinutes == null ? null : `${row.durationMinutes} мин`,
-    row.packet ? 'пакет или абонемент' : 'почасовая сессия',
+    row.expand === true && row.packet === false
+      ? 'продление: тип тарифного сегмента не определён'
+      : row.packet === true
+        ? 'пакет или абонемент'
+        : row.packet === false
+          ? 'почасовая сессия'
+          : 'тип тарифа не определён',
     row.normalStop === false ? 'завершена нестандартно' : null,
   ]
     .filter((item): item is string => Boolean(item))
@@ -21280,7 +21330,7 @@ function seasonRewardLabelLooksLikeLootBox(value: string) {
   return /(?:лутбокс|кейс|контейнер|loot\s*box|case|container)/i.test(value);
 }
 
-function seasonLevels(value: Prisma.JsonValue) {
+export function seasonLevels(value: Prisma.JsonValue) {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -21294,16 +21344,37 @@ function seasonLevels(value: Prisma.JsonValue) {
       const row = item as Record<string, unknown>;
       const level = numberField(row.level);
       const requiredXp = numberField(row.xp) ?? 0;
+      const activationRules = jsonRecord(row.activationRules);
+      const taskType = stringField(activationRules.taskType);
+      const sessionType = stringField(activationRules.sessionType);
+      const metric = jsonRecord(activationRules.metric);
+      const savedCondition = stringField(row.condition);
 
       if (level == null) {
         return null;
       }
 
+      const normalizedTaskType = taskType?.toUpperCase() ?? null;
+      const condition =
+        (normalizedTaskType === 'PLAY_TIME' ||
+          normalizedTaskType === 'CHECK_IN') &&
+        normalizeGuestPortalSessionType(sessionType) === 'regular_session'
+          ? appendHourlySessionSourceNotice(
+              savedCondition ??
+                guestPortalMissionConditionLabel(
+                  normalizedTaskType,
+                  metric,
+                  sessionType,
+                ),
+              sessionType,
+            )
+          : savedCondition;
+
       return {
         level,
         xp: requiredXp,
         title: stringField(row.title),
-        condition: stringField(row.condition),
+        condition,
         description: stringField(row.description),
         freeReward: stringField(row.freeReward),
         premiumReward: stringField(row.premiumReward),

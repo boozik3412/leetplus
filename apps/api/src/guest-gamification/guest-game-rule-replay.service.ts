@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { IntegrationProvider, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { hasSessionFactsPendingHourlyReplay } from './guest-activity-hourly-replay';
 import {
   buildGuestGameOriginKey,
   buildGuestGamePlayTimeOriginKey,
@@ -1412,6 +1413,19 @@ export class GuestGameRuleReplayService {
         'The fact external guest identity does not match the selected profile guest identity.',
       );
     }
+    if (
+      await hasSessionFactsPendingHourlyReplay(this.prisma, {
+        tenantId: user.tenantId,
+        factId: factRow.id,
+        factTypes: [factRow.factType],
+        profileId: factRow.profileId,
+        happenedAtGte: factRow.happenedAt,
+      })
+    ) {
+      throw new ConflictException(
+        'The selected session fact predates the hourly-session source replay. Synchronize its source and retry preview.',
+      );
+    }
     const sessionExternalId = normalizedString(factRow.sessionExternalId);
     if (!sessionExternalId) {
       throw new ConflictException(
@@ -1434,7 +1448,7 @@ export class GuestGameRuleReplayService {
       occurredAt: factRow.happenedAt.toISOString(),
       sessionMinutes: factRow.durationMinutes,
       sessionType: expectedSessionType,
-      sessionPacket: expectedSessionType === 'PACKAGE_OR_SUBSCRIPTION',
+      sessionPacket: replaySessionPacket(expectedSessionType),
       sourceFactId: factRow.id,
       sourceFactKind: 'GUEST_SESSION',
       externalProvider: factRow.externalProvider,
@@ -1575,7 +1589,7 @@ export class GuestGameRuleReplayService {
       stableExternalId: prepared.fact.stableExternalId,
       externalEventId: prepared.externalEventId,
       expectedSessionType: prepared.expectedSessionType,
-      sessionPacket: prepared.expectedSessionType === 'PACKAGE_OR_SUBSCRIPTION',
+      sessionPacket: replaySessionPacket(prepared.expectedSessionType),
       originKey: prepared.originKey,
       eventId: prepared.event?.id ?? null,
       receiptId: prepared.receipt?.id ?? null,
@@ -1854,8 +1868,7 @@ export class GuestGameRuleReplayService {
     const payload = jsonRecord(event.payload);
     const input = jsonRecord(payload.input);
     const payloadStore = jsonRecord(payload.store);
-    const expectedPacket =
-      prepared.expectedSessionType === 'PACKAGE_OR_SUBSCRIPTION';
+    const expectedPacket = replaySessionPacket(prepared.expectedSessionType);
     if (
       event.profileId !== prepared.fact.profileId ||
       event.guestId !== prepared.fact.guestId ||
@@ -1965,6 +1978,19 @@ export class GuestGameRuleReplayService {
         'Факт не принадлежит указанному игровому профилю.',
       );
     }
+    if (
+      await hasSessionFactsPendingHourlyReplay(this.prisma, {
+        tenantId: user.tenantId,
+        factId: factRow.id,
+        factTypes: [factRow.factType],
+        profileId: factRow.profileId,
+        happenedAtGte: factRow.happenedAt,
+      })
+    ) {
+      throw new ConflictException(
+        'The selected session fact predates the hourly-session source replay. Synchronize its source and retry preview.',
+      );
+    }
     if (seasonRow.status !== 'ACTIVE') {
       throw new ConflictException(
         'Replay разрешён только для ACTIVE Battle Pass.',
@@ -2040,8 +2066,9 @@ export class GuestGameRuleReplayService {
       occurredAt: factRow.happenedAt.toISOString(),
       sessionMinutes: factRow.durationMinutes,
       sessionType: replaySessionTypeFromFactType(factRow.factType),
-      sessionPacket:
-        factRow.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      sessionPacket: replaySessionPacket(
+        replaySessionTypeFromFactType(factRow.factType),
+      ),
       sourceFactId: factRow.id,
       sourceFactKind: 'GUEST_SESSION',
       externalProvider: factRow.externalProvider,
@@ -2788,6 +2815,16 @@ function replaySessionTypeFromFactType(factType: string) {
     return 'PACKAGE_OR_SUBSCRIPTION' as const;
   }
   throw new BadRequestException('Replay supports only exact play-time facts.');
+}
+
+function replaySessionPacket(
+  sessionType: 'HOURLY' | 'PACKAGE_OR_SUBSCRIPTION' | null,
+) {
+  return sessionType === 'PACKAGE_OR_SUBSCRIPTION'
+    ? true
+    : sessionType === 'HOURLY'
+      ? false
+      : null;
 }
 
 function requiredId(value: unknown, field: string) {

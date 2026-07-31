@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.42                                         |
+| Версия           | 1.43                                         |
 | Дата             | 30.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -248,8 +248,22 @@ enterprise-isolation option и не сокращает shared gates.
     Следующий bounded checkpoint — `BETA-IAM-004J /
     LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1`; production SMTP, worker и routes
     этим acceptance не включены.
+34. [Leased initial-owner mail delivery](./leased-initial-owner-mail-delivery.md) —
+    нормативный контракт `BETA-IAM-004J`: отдельная worker DB-role, tenant
+    enrollment, leases/CAS, ciphertext erase до SMTP, immutable provider
+    marker, post-marker reconciliation, strict TLS, fragment-only invite и
+    обязательный `SENT` barrier для preview/accept. Статус:
+    `LOCAL_ACCEPTANCE_COMPLETE / EXACT_SHA_CI_PENDING / NOT_DEPLOYED /
+    EXTERNAL_PILOT_NO-GO`. Local candidate `CURRENT_176` прошёл clean deploy,
+    populated PostgreSQL delivery smoke, owner issue/activation, RPC-only
+    worker с trusted TLS fake SMTP, negative SMTP matrix, worker/runtime
+    enrollment и full API `112 suites / 2323 passed / 2 todo`; финальный
+    независимый review — `P0/P1/P2=0`. Pending только candidate commit и
+    exact-SHA CI `3/3 PASS`.
 
 Текущий engineering-accepted schema target — `CURRENT_174`.
+Текущий прошедший local acceptance candidate — `CURRENT_176`; он не становится
+accepted target до candidate commit и exact-SHA CI.
 Implementation `2540088076997ef228cd68e42165e857575aad86`, final accepted
 evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`, CI
 [`30592173595`](https://github.com/boozik3412/leetplus/actions/runs/30592173595)

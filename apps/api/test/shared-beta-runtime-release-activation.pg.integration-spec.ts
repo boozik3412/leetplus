@@ -27,12 +27,11 @@ const integrationEnabled =
   process.env.SHARED_BETA_RUNTIME_RELEASE_ACTIVATION_PG_CONFIRM ===
   REQUIRED_CONFIRMATION;
 const describePostgres = integrationEnabled ? describe : describe.skip;
-const DISPOSABLE_DATABASE_PATTERN = /^lp_activation174_pg_test_[0-9a-f]{32}$/u;
+const DISPOSABLE_DATABASE_PATTERN = /^lp_activation176_pg_test_[0-9a-f]{32}$/u;
 const DISPOSABLE_ROLE_PATTERN = /^lp_activation_role_ci_[0-9a-f]{24}$/u;
 const DISPOSABLE_BYSTANDER_ROLE_PATTERN =
   /^lp_activation_bystander_ci_[0-9a-f]{24}$/u;
-const TARGET_MIGRATION =
-  '20260730040000_shared_beta_runtime_release_activation';
+const TARGET_MIGRATION = '20260731020000_initial_owner_mail_delivery_boundary';
 const ACTIVATION_FUNCTION_SIGNATURE =
   'public."shared_beta_tenant_activate_v1"(text,text,text,text,text,text,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)';
 const CATALOG_RELATION_PROBE =
@@ -42,7 +41,7 @@ const LATE_FAULT_FUNCTION_SIGNATURE =
 const LATE_FAULT_TRIGGER = 'SharedBetaActivation_late_fault_trigger';
 const RUNTIME_ENVIRONMENT = 'ci';
 const FINGERPRINT_KEY =
-  'activation-174-postgres-fingerprint-key-aaaaaaaaaaaaaaaa';
+  'activation-176-postgres-fingerprint-key-aaaaaaaaaaaaaaaa';
 const RELEASE_SHA = 'a'.repeat(40);
 const ARTIFACT_DIGEST = 'b'.repeat(64);
 const RELEASE_MANIFEST_DIGEST = 'c'.repeat(64);
@@ -148,7 +147,7 @@ type ActivationInput = {
 jest.setTimeout(300_000);
 
 describePostgres(
-  'shared beta CURRENT_174 atomic tenant activation PostgreSQL boundary',
+  'shared beta CURRENT_176 atomic tenant activation PostgreSQL boundary',
   () => {
     let maintenance: PrismaClient;
     let clusterScopeLock: PrismaClient;
@@ -172,7 +171,7 @@ describePostgres(
     beforeAll(async () => {
       const sourceUrl = assertSafeIntegrationDatabase();
       const suffix = randomUUID().replaceAll('-', '');
-      disposableDatabase = `lp_activation174_pg_test_${suffix}`;
+      disposableDatabase = `lp_activation176_pg_test_${suffix}`;
       activationRoleName = `lp_activation_role_ci_${suffix.slice(0, 24)}`;
       bystanderRoleName = `lp_activation_bystander_ci_${suffix.slice(0, 24)}`;
       activationRolePassword = randomBytes(24).toString('hex');
@@ -239,7 +238,7 @@ describePostgres(
           AND rolled_back_at IS NULL
       `);
       expect(migration).toEqual({
-        migration_count: 174,
+        migration_count: 176,
         latest_migration: TARGET_MIGRATION,
       });
 
@@ -576,7 +575,7 @@ describePostgres(
       const migrationState = await readMigrationState(owner);
       expect(migrationState).toMatchObject({
         schemaHead: TARGET_MIGRATION,
-        migrationCount: 174,
+        migrationCount: 176,
         nonAppliedCount: 0,
         checksumMismatchCount: 0,
       });
@@ -1203,7 +1202,7 @@ async function provisionExactTenantShell(
     confirmation: `PROVISION ${slug}`,
     requestId: randomUUID(),
     reason: 'Exercise atomic shared beta activation on PostgreSQL',
-    supportTicket: 'PG-ACTIVATION-174',
+    supportTicket: 'PG-ACTIVATION-176',
     tenantName: `Activation fixture ${slug}`,
     tenantSlug: slug,
     cohortKey: 'shared-beta-activation-pg',
@@ -1939,6 +1938,7 @@ async function assertAtomicActivationState(
     issue,
     command,
     audit,
+    releaseEvents,
     counts,
   ] = await Promise.all([
     prisma.tenant.findUniqueOrThrow({ where: { id: input.tenantId } }),
@@ -1958,6 +1958,10 @@ async function assertAtomicActivationState(
     }),
     prisma.platformAdminAuditEvent.findUniqueOrThrow({
       where: { id: input.activationCommandId },
+    }),
+    prisma.identityMailDeliveryEvent.findMany({
+      where: { outboxId: input.outboxId },
+      orderBy: { transitionRevision: 'asc' },
     }),
     prisma.$queryRawUnsafe<
       Array<{
@@ -2033,9 +2037,27 @@ async function assertAtomicActivationState(
     inviteId: input.inviteId,
     status: 'PENDING',
     tokenHash: input.tokenHash,
+    attempts: 0,
+    leaseVersion: 0,
+    transitionRevision: 1n,
   });
   expect(outbox.releasedAt?.valueOf()).toBe(tenant.trialStartsAt?.valueOf());
+  expect(outbox.availableAt?.valueOf()).toBe(tenant.trialStartsAt?.valueOf());
+  expect(outbox.updatedAt.valueOf()).toBe(tenant.trialStartsAt?.valueOf());
   expect(Buffer.from(outbox.secretCiphertext)).toEqual(input.secretCiphertext);
+  expect(releaseEvents).toHaveLength(1);
+  expect(releaseEvents[0]).toMatchObject({
+    tenantId: input.tenantId,
+    outboxId: input.outboxId,
+    inviteId: input.inviteId,
+    transitionRevision: 1n,
+    leaseVersion: 0,
+    attemptNumber: 0,
+    eventType: 'RELEASED',
+    fromStatus: 'HOLD',
+    toStatus: 'PENDING',
+    stateReasonCode: null,
+  });
   expect(issue).toMatchObject({
     id: input.issueCommandId,
     tenantId: input.tenantId,
@@ -2435,7 +2457,7 @@ async function restorePublicDatabaseGrants(
 async function acquireClusterScopeLock(prisma: PrismaClient): Promise<boolean> {
   const [row] = await prisma.$queryRaw<Array<{ acquired: boolean }>>(Prisma.sql`
     SELECT pg_catalog.pg_try_advisory_lock(
-      pg_catalog.hashtextextended(${CLUSTER_SCOPE_LOCK_DOMAIN}, 174)
+      pg_catalog.hashtextextended(${CLUSTER_SCOPE_LOCK_DOMAIN}, 176)
     ) AS acquired
   `);
   return row?.acquired === true;
@@ -2444,7 +2466,7 @@ async function acquireClusterScopeLock(prisma: PrismaClient): Promise<boolean> {
 async function releaseClusterScopeLock(prisma: PrismaClient): Promise<boolean> {
   const [row] = await prisma.$queryRaw<Array<{ released: boolean }>>(Prisma.sql`
     SELECT pg_catalog.pg_advisory_unlock(
-      pg_catalog.hashtextextended(${CLUSTER_SCOPE_LOCK_DOMAIN}, 174)
+      pg_catalog.hashtextextended(${CLUSTER_SCOPE_LOCK_DOMAIN}, 176)
     ) AS released
   `);
   return row?.released === true;

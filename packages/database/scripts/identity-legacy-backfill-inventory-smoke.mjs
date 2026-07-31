@@ -36,11 +36,9 @@ const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const ADMIN_CONNECT_TIMEOUT_SECONDS = 10;
 const ADMIN_LOCK_TIMEOUT_MS = 5_000;
 const ADMIN_STATEMENT_TIMEOUT_MS = 120_000;
-const CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS = Object.freeze(
-  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.filter(
-    ({ key }) => key !== "identity_mail_outbox_release_guard_v1",
-  ),
-);
+const CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS = Object.freeze([
+  ...EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
+]);
 assert.equal(
   CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.length,
   20,
@@ -89,7 +87,11 @@ const IDENTITY_FUNCTION_SIGNATURES = Object.freeze([
   'public."identity_email_claim_transition_v2"(text,text,text,text,integer,text,text)',
   'public."identity_email_claim_release_v1"(text,text,text,text,integer)',
   'public."identity_email_claim_release_v2"(text,text,text,text,integer)',
-  'public."identity_mail_outbox_release_guard_v1"()',
+  'public."identity_mail_delivery_event_guard_v1"()',
+  'public."identity_mail_delivery_event_truncate_guard_v1"()',
+  'public."identity_mail_delivery_event_append_v1"()',
+  'public."identity_mail_delivery_worker_assert_v1"(text)',
+  'public."identity_mail_outbox_delivery_guard_v1"()',
   'public."identity_owner_invite_issue_command_immutable_v1"()',
   'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',
   ...SHARED_BETA_ADMISSION_FUNCTIONS.map((entry) => entry.catalogSignature),
@@ -1960,12 +1962,12 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(
       runtimeReleaseDefinitionDrift.report?.database?.catalog
         ?.matchedFunctionCount,
-      41,
+      45,
     );
     assert.equal(
       runtimeReleaseDefinitionDrift.report?.database?.catalog
         ?.actualFunctionCount,
-      42,
+      46,
     );
     await requireCleanCheckpoint();
 
@@ -1989,12 +1991,12 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(
       runtimeReleaseMissingDrift.report?.database?.catalog
         ?.matchedFunctionCount,
-      41,
+      45,
     );
     assert.equal(
       runtimeReleaseMissingDrift.report?.database?.catalog
         ?.actualFunctionCount,
-      42,
+      46,
     );
     await requireCleanCheckpoint();
 
@@ -2025,7 +2027,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(
       runtimeReleaseOverloadDrift.report?.database?.catalog
         ?.actualFunctionCount,
-      43,
+      47,
     );
     await requireCleanCheckpoint();
 
@@ -2043,7 +2045,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(columnDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(
       columnDrift.report?.database?.catalog?.actualExactIdentityColumnCount,
-      111,
+      155,
     );
     await requireCleanCheckpoint();
 
@@ -2062,7 +2064,7 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(constraintDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(
       constraintDrift.report?.database?.catalog?.actualConstraintCount,
-      74,
+      84,
     );
     await requireCleanCheckpoint();
 
@@ -2077,28 +2079,28 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     const indexDrift = await inspect();
     assert.equal(indexDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
-    assert.equal(indexDrift.report?.database?.catalog?.actualIndexCount, 39);
+    assert.equal(indexDrift.report?.database?.catalog?.actualIndexCount, 49);
     await requireCleanCheckpoint();
 
     await admin.$executeRawUnsafe(`
       ALTER TABLE public."IdentityMailOutbox"
-      DISABLE TRIGGER "IdentityMailOutbox_release_guard_trigger"
+      DISABLE TRIGGER "IdentityMailOutbox_delivery_guard_trigger"
     `);
-    registerCleanup("enable identity outbox release guard trigger", () =>
+    registerCleanup("enable identity outbox delivery guard trigger", () =>
       admin.$executeRawUnsafe(`
         ALTER TABLE public."IdentityMailOutbox"
-        ENABLE TRIGGER "IdentityMailOutbox_release_guard_trigger"
+        ENABLE TRIGGER "IdentityMailOutbox_delivery_guard_trigger"
       `),
     );
     const triggerDrift = await inspect();
     assert.equal(triggerDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
     assert.equal(
       triggerDrift.report?.database?.catalog?.matchedTriggerCount,
-      5,
+      8,
     );
     assert.equal(
       triggerDrift.report?.database?.catalog?.actualIdentityTriggerCount,
-      6,
+      9,
     );
     await requireCleanCheckpoint();
 
@@ -2114,8 +2116,8 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     const enumDrift = await inspect();
     assert.equal(enumDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
-    assert.equal(enumDrift.report?.database?.catalog?.matchedEnumLabelCount, 8);
-    assert.equal(enumDrift.report?.database?.catalog?.totalEnumLabelCount, 9);
+    assert.equal(enumDrift.report?.database?.catalog?.matchedEnumLabelCount, 14);
+    assert.equal(enumDrift.report?.database?.catalog?.totalEnumLabelCount, 15);
     await requireCleanCheckpoint();
 
     await admin.$executeRawUnsafe(
@@ -2182,11 +2184,11 @@ async function assertAuthorityAndCatalogDriftRejected(
     assert.equal(riTriggerDrift.report?.summary?.inventoryExecuted, false);
     assert.equal(
       riTriggerDrift.report?.database?.catalog?.matchedRiTriggerCount,
-      43,
+      55,
     );
     assert.equal(
       riTriggerDrift.report?.database?.catalog?.actualRiTriggerCount,
-      44,
+      56,
     );
     await requireCleanCheckpoint();
   } catch (error) {
@@ -2299,10 +2301,10 @@ export function runSelfTest() {
     [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
     [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
   );
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 174);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 176);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260730040000_shared_beta_runtime_release_activation",
+    "20260731020000_initial_owner_mail_delivery_boundary",
   );
   assert.equal(
     IDENTITY_FUNCTION_SIGNATURES.includes(
@@ -2310,7 +2312,13 @@ export function runSelfTest() {
     ),
     true,
   );
-  assert.equal(IDENTITY_FUNCTION_SIGNATURES.length, 42);
+  assert.equal(IDENTITY_FUNCTION_SIGNATURES.length, 46);
+  assert.equal(
+    IDENTITY_FUNCTION_SIGNATURES.includes(
+      'public."identity_mail_delivery_worker_assert_v1"(text)',
+    ),
+    true,
+  );
   assert.equal(
     IDENTITY_FUNCTION_SIGNATURES.includes(
       'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',

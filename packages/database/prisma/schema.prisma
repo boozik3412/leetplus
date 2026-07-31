@@ -204,6 +204,12 @@ enum IdentityMailTemplate {
 enum IdentityMailOutboxStatus {
   HOLD
   PENDING
+  CLAIMED
+  RETRY
+  SENT
+  DEAD
+  CANCELED
+  RECONCILIATION_REQUIRED
 }
 
 enum SharedBetaReleaseGateCode {
@@ -371,6 +377,8 @@ model Tenant {
   identityEmailClaims                  IdentityEmailClaim[]
   identityOwnerInviteIssueCommands     IdentityOwnerInviteIssueCommand[]
   identityMailOutboxEntries            IdentityMailOutbox[]
+  identityMailDeliveryTenantEnrollment IdentityMailDeliveryTenantEnrollment?
+  identityMailDeliveryEvents           IdentityMailDeliveryEvent[]
   admissionDecisions                   TenantAdmissionDecision[]
   sharedBetaActivationCommand          SharedBetaTenantActivationCommand?
   platformAdminAuditEvents             PlatformAdminAuditEvent[]
@@ -605,6 +613,7 @@ model UserInvite {
   revokedBy                User?                              @relation("UserInviteRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
   initialOwnerIssueCommand IdentityOwnerInviteIssueCommand?   @relation("IdentityOwnerInviteIssueCommandInvite")
   identityMailOutbox       IdentityMailOutbox?                @relation("IdentityMailOutboxInvite")
+  identityMailDeliveryEvents IdentityMailDeliveryEvent[]      @relation("IdentityMailDeliveryEventInvite")
   sharedBetaActivation     SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationInvite")
 
   @@unique([tenantId, id], map: "UserInvite_tenantId_id_key")
@@ -676,40 +685,127 @@ model IdentityOwnerInviteIssueCommand {
   @@unique([tenantId, workflowLocator], map: "identity_owner_invite_issue_command_locator_uidx")
 }
 
-/// Dormant encrypted initial-owner invite payload. Migration 173 exposes the
-/// PENDING label but preserves the HOLD-only guard; migration 174 may authorize
-/// only the exact atomic activation transition. Worker leases remain separate.
+/// Encrypted initial-owner invite payload. CURRENT_176 permits only the exact
+/// leased delivery state machine through sealed RPCs. Application and worker
+/// roles receive no direct relation access.
 model IdentityMailOutbox {
-  id                 String                   @id
-  tenantId           String
-  issueCommandId     String
-  inviteId           String
-  workflowLocator    String
-  aadEnvironment     String                   @db.VarChar(64)
-  template           IdentityMailTemplate     @default(INITIAL_OWNER_INVITE)
-  status             IdentityMailOutboxStatus @default(HOLD)
-  messageKey         String
-  issueRequestDigest String                   @db.VarChar(64)
-  tokenHash          String                   @db.VarChar(64)
-  tokenDigestVersion String                   @default("sha256-v1") @db.VarChar(16)
-  secretCiphertext   Bytes
-  envelopeVersion    Int                      @default(1)
-  keyVersion         String                   @default("v1") @db.VarChar(16)
-  expiresAt          DateTime                 @db.Timestamptz(3)
-  releasedAt         DateTime?                @db.Timestamptz(3)
-  createdAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  id                         String                   @id
+  tenantId                   String
+  issueCommandId             String
+  inviteId                   String
+  workflowLocator            String
+  aadEnvironment             String                   @db.VarChar(64)
+  template                   IdentityMailTemplate     @default(INITIAL_OWNER_INVITE)
+  status                     IdentityMailOutboxStatus @default(HOLD)
+  messageKey                 String
+  issueRequestDigest         String                   @db.VarChar(64)
+  tokenHash                  String                   @db.VarChar(64)
+  tokenDigestVersion         String                   @default("sha256-v1") @db.VarChar(16)
+  secretCiphertext           Bytes?
+  envelopeVersion            Int                      @default(1)
+  keyVersion                 String                   @default("v1") @db.VarChar(16)
+  expiresAt                  DateTime                 @db.Timestamptz(3)
+  releasedAt                 DateTime?                @db.Timestamptz(3)
+  attempts                   Int                      @default(0)
+  leaseVersion               Int                      @default(0)
+  transitionRevision         BigInt                   @default(0)
+  availableAt                DateTime?                @db.Timestamptz(3)
+  leaseOwnerDigest           String?                  @db.Char(64)
+  leaseTokenDigest           String?                  @db.Char(64)
+  claimedAt                  DateTime?                @db.Timestamptz(3)
+  leaseExpiresAt             DateTime?                @db.Timestamptz(3)
+  providerAttemptKey         String?                  @db.VarChar(96)
+  providerAttemptedAt        DateTime?                @db.Timestamptz(3)
+  providerAcknowledgeUntil   DateTime?                @db.Timestamptz(3)
+  providerAuthorityDigest    String?                  @db.Char(64)
+  messageIdDigest            String?                  @db.Char(64)
+  providerOutcomeClass       String?                  @db.VarChar(32)
+  providerObservedAt         DateTime?                @db.Timestamptz(3)
+  providerReceiptDigest      String?                  @db.Char(64)
+  terminalAckDigest          String?                  @db.Char(64)
+  ciphertextClearedAt        DateTime?                @db.Timestamptz(3)
+  sentAt                     DateTime?                @db.Timestamptz(3)
+  terminalAt                 DateTime?                @db.Timestamptz(3)
+  stateReasonCode            String?                  @db.VarChar(64)
+  createdAt                  DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt                  DateTime                 @default(now()) @updatedAt @db.Timestamptz(3)
 
   tenant               Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   issueCommand         IdentityOwnerInviteIssueCommand    @relation("IdentityOwnerInviteIssueCommandOutbox", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey")
   invite               UserInvite                         @relation("IdentityMailOutboxInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_invite_fkey")
   sharedBetaActivation SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationOutbox")
+  deliveryEvents       IdentityMailDeliveryEvent[]
 
   @@unique([tenantId, id], map: "identity_mail_outbox_tenant_id_key")
   @@unique([tenantId, issueCommandId], map: "identity_mail_outbox_issue_command_uidx")
   @@unique([tenantId, inviteId], map: "identity_mail_outbox_invite_uidx")
   @@unique([tenantId, workflowLocator], map: "identity_mail_outbox_locator_uidx")
   @@unique([messageKey], map: "identity_mail_outbox_message_key")
+  @@unique([providerAttemptKey], map: "identity_mail_outbox_provider_attempt_key_uidx")
   @@index([tenantId, status, createdAt], map: "identity_mail_outbox_tenant_status_created_idx")
+  @@index([status, availableAt, createdAt, id], map: "identity_mail_outbox_ready_idx")
+  @@index([leaseExpiresAt, id], map: "identity_mail_outbox_unmarked_lease_idx")
+  @@index([providerAcknowledgeUntil, id], map: "identity_mail_outbox_marked_ack_idx")
+  @@index([terminalAt, id], map: "identity_mail_outbox_reconciliation_idx")
+}
+
+/// Empty-by-default canary enrollment bound to the exact worker
+/// session_user name and OID.
+model IdentityMailDeliveryTenantEnrollment {
+  tenantId                String    @id
+  workerRoleName          String    @db.VarChar(63)
+  workerRoleOid           BigInt
+  policyRevision          Int       @default(1)
+  enabled                 Boolean   @default(false)
+  maxAttempts             Int
+  leaseSeconds            Int
+  acknowledgeSeconds      Int
+  baseRetrySeconds        Int
+  maxRetrySeconds         Int
+  providerAuthorityDigest String    @db.Char(64)
+  enabledAt               DateTime? @db.Timestamptz(3)
+  disabledAt              DateTime? @db.Timestamptz(3)
+  createdAt               DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workerRoleName, workerRoleOid, enabled], map: "identity_mail_delivery_enrollment_worker_idx")
+}
+
+/// Append-only PII-free transition evidence. Raw email, token, ciphertext,
+/// Message-ID and provider payloads are deliberately absent.
+model IdentityMailDeliveryEvent {
+  id                      String                    @id
+  tenantId                String
+  outboxId                String
+  inviteId                String
+  transitionRevision      BigInt
+  leaseVersion            Int
+  attemptNumber           Int
+  eventType               String                    @db.VarChar(64)
+  fromStatus              IdentityMailOutboxStatus?
+  toStatus                IdentityMailOutboxStatus
+  leaseOwnerDigest        String?                   @db.Char(64)
+  providerAttemptKey      String?                   @db.VarChar(96)
+  providerAuthorityDigest String?                   @db.Char(64)
+  messageIdDigest         String?                   @db.Char(64)
+  providerOutcomeClass    String?                   @db.VarChar(32)
+  providerReceiptDigest   String?                   @db.Char(64)
+  terminalAckDigest       String?                   @db.Char(64)
+  actorDigest             String?                   @db.Char(64)
+  stateReasonCode         String?                   @db.VarChar(64)
+  eventAt                 DateTime                  @db.Timestamptz(3)
+  createdTransactionId    String                    @db.VarChar(32)
+  eventDigest             String                    @unique(map: "identity_mail_delivery_event_digest_key") @db.Char(64)
+
+  tenant Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  outbox IdentityMailOutbox @relation(fields: [tenantId, outboxId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailDeliveryEvent_outbox_fkey")
+  invite UserInvite         @relation("IdentityMailDeliveryEventInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailDeliveryEvent_invite_fkey")
+
+  @@unique([tenantId, outboxId, transitionRevision], map: "identity_mail_delivery_event_transition_uidx")
+  @@index([tenantId, inviteId, eventAt], map: "identity_mail_delivery_event_invite_idx")
+  @@index([outboxId, eventAt], map: "identity_mail_delivery_event_outbox_idx")
 }
 
 /// Sealed, externally verified Ed25519 provenance for one release gate.

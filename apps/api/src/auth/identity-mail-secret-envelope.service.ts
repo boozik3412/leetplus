@@ -12,6 +12,8 @@ import {
   IDENTITY_MAIL_ENCRYPTION_KEY_VERSION,
   resolveIdentityMailAadEnvironment,
 } from '../config/environment-validation';
+import { isCanonicalIdentityEmail } from '../utilities/canonical-identity-email';
+import { IDENTITY_MAIL_INDEPENDENT_SECRET_KEYS } from './identity-mail-independent-secret-keys';
 
 const ALGORITHM = 'aes-256-gcm';
 const TOKEN_BYTES = 32;
@@ -26,18 +28,8 @@ const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 const IDENTITY_MAIL_AAD_DOMAIN =
   'leetplus:identity-mail-secret-envelope' as const;
-const IDENTITY_MAIL_AAD_SCHEMA_VERSION = 1 as const;
+const IDENTITY_MAIL_AAD_SCHEMA_VERSION = 2 as const;
 const IDENTITY_MAIL_TEMPLATE = 'INITIAL_OWNER_INVITE' as const;
-const INDEPENDENT_SECRET_KEYS = [
-  'JWT_SECRET',
-  'GUEST_PORTAL_JWT_SECRET',
-  'GUEST_GAME_REFERRAL_SECRET',
-  'APP_ENCRYPTION_KEY',
-  'INTEGRATION_ENCRYPTION_KEY',
-  'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY',
-  'SYNC_SERVICE_TOKEN',
-] as const;
-
 export const IDENTITY_MAIL_ENVELOPE_VERSION = 1 as const;
 export const IDENTITY_MAIL_TOKEN_DIGEST_VERSION = 'sha256-v1' as const;
 export const IDENTITY_MAIL_SECRET_ENVELOPE_BYTES = ENVELOPE_BYTES;
@@ -50,6 +42,7 @@ export type IdentityMailSecretBinding = {
   template: typeof IDENTITY_MAIL_TEMPLATE;
   messageKey: string;
   requestDigest: string;
+  recipientEmail: string;
   expiresAt: Date;
 };
 
@@ -278,6 +271,7 @@ export class IdentityMailSecretEnvelopeService {
       binding.template !== IDENTITY_MAIL_TEMPLATE ||
       !this.uuid(binding.messageKey) ||
       !SHA256_HEX_PATTERN.test(binding.requestDigest) ||
+      !isCanonicalIdentityEmail(binding.recipientEmail) ||
       !(binding.expiresAt instanceof Date) ||
       !Number.isFinite(binding.expiresAt.getTime())
     ) {
@@ -292,6 +286,7 @@ export class IdentityMailSecretEnvelopeService {
       template: binding.template,
       messageKey: binding.messageKey,
       requestDigest: binding.requestDigest,
+      recipientEmail: binding.recipientEmail,
       expiresAt: binding.expiresAt.toISOString(),
     };
   }
@@ -315,6 +310,7 @@ export class IdentityMailSecretEnvelopeService {
         template: binding.template,
         messageKey: binding.messageKey,
         requestDigest: binding.requestDigest,
+        recipientEmail: binding.recipientEmail,
         tokenHash,
         digestVersion,
         expiresAt: binding.expiresAt,
@@ -338,7 +334,7 @@ export class IdentityMailSecretEnvelopeService {
       return false;
     }
 
-    return INDEPENDENT_SECRET_KEYS.some((key) => {
+    return IDENTITY_MAIL_INDEPENDENT_SECRET_KEYS.some((key) => {
       const value = this.configService.get<unknown>(key);
       return typeof value === 'string' && value.trim() === configuredKey;
     });

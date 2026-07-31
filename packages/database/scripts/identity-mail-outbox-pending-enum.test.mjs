@@ -36,7 +36,7 @@ test("CURRENT_173 grants no transition, delivery, or table authority", async () 
   assert.doesNotMatch(sql, /\b(?:smtp|nodemailer|sendmail|worker)\b/iu);
 });
 
-test("Prisma exposes PENDING only as the additive enum label", async () => {
+test("Prisma preserves HOLD/PENDING as the historical additive prefix", async () => {
   const schema = await readFile(schemaUrl, "utf8");
   const match = schema.match(/enum IdentityMailOutboxStatus \{([\s\S]*?)\n\}/u);
 
@@ -45,5 +45,6 @@ test("Prisma exposes PENDING only as the additive enum label", async () => {
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter(Boolean);
-  assert.deepEqual(labels, ["HOLD", "PENDING"]);
+  assert.deepEqual(labels.slice(0, 2), ["HOLD", "PENDING"]);
+  assert.equal(labels.filter((label) => label === "PENDING").length, 1);
 });

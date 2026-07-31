@@ -12,8 +12,8 @@ export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
-  "20260730040000_shared_beta_runtime_release_activation";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 174;
+  "20260731020000_initial_owner_mail_delivery_boundary";
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 176;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -77,6 +77,16 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
     securityDefiner: true,
     volatility: "v",
   }),
+  Object.freeze({
+    key: "identityInitialOwnerInviteDeliveryAssertSent",
+    catalogSignature:
+      'public."identity_initial_owner_invite_delivery_assert_sent_v1"(text,text,text)',
+    grantSignature:
+      'public."identity_initial_owner_invite_delivery_assert_sent_v1"(TEXT, TEXT, TEXT)',
+    securityDefiner: true,
+    volatility: "s",
+    language: "sql",
+  }),
 ]);
 
 export const EXCLUDED_WORKER_FUNCTIONS = Object.freeze([
@@ -86,6 +96,56 @@ export const EXCLUDED_WORKER_FUNCTIONS = Object.freeze([
     grantSignature: 'public."guest_game_delivery_record_event_v1"(JSON)',
     securityDefiner: true,
     volatility: "v",
+  }),
+  Object.freeze({
+    key: "identityMailDeliveryWorkerAssert",
+    catalogSignature:
+      'public."identity_mail_delivery_worker_assert_v1"(text)',
+    grantSignature:
+      'public."identity_mail_delivery_worker_assert_v1"(TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityInitialOwnerMailClaim",
+    catalogSignature:
+      'public."identity_initial_owner_mail_claim_v1"(text,text,text,text)',
+    grantSignature:
+      'public."identity_initial_owner_mail_claim_v1"(TEXT, TEXT, TEXT, TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityInitialOwnerMailProviderMark",
+    catalogSignature:
+      'public."identity_initial_owner_mail_provider_mark_v1"(text,integer,text,text,text,text,text)',
+    grantSignature:
+      'public."identity_initial_owner_mail_provider_mark_v1"(TEXT, INTEGER, TEXT, TEXT, TEXT, TEXT, TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityInitialOwnerMailComplete",
+    catalogSignature:
+      'public."identity_initial_owner_mail_complete_v1"(text,integer,text,text,text,text,text)',
+    grantSignature:
+      'public."identity_initial_owner_mail_complete_v1"(TEXT, INTEGER, TEXT, TEXT, TEXT, TEXT, TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityInitialOwnerMailReap",
+    catalogSignature:
+      'public."identity_initial_owner_mail_reap_v1"(text,text,text,integer)',
+    grantSignature:
+      'public."identity_initial_owner_mail_reap_v1"(TEXT, TEXT, TEXT, INTEGER)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
   }),
 ]);
 
@@ -133,6 +193,84 @@ export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
     securityDefiner: true,
     volatility: "v",
   }),
+  Object.freeze({
+    key: "identityMailDeliveryEventGuard",
+    catalogSignature:
+      'public."identity_mail_delivery_event_guard_v1"()',
+    grantSignature: 'public."identity_mail_delivery_event_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityMailDeliveryEventTruncateGuard",
+    catalogSignature:
+      'public."identity_mail_delivery_event_truncate_guard_v1"()',
+    grantSignature:
+      'public."identity_mail_delivery_event_truncate_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityMailDeliveryEnrollmentGuard",
+    catalogSignature:
+      'public."identity_mail_delivery_enrollment_guard_v1"()',
+    grantSignature:
+      'public."identity_mail_delivery_enrollment_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityMailDeliveryEnrollmentTruncateGuard",
+    catalogSignature:
+      'public."identity_mail_delivery_enrollment_truncate_guard_v1"()',
+    grantSignature:
+      'public."identity_mail_delivery_enrollment_truncate_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityMailOutboxDeliveryGuard",
+    catalogSignature:
+      'public."identity_mail_outbox_delivery_guard_v1"()',
+    grantSignature: 'public."identity_mail_outbox_delivery_guard_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityMailDeliveryEventAppend",
+    catalogSignature:
+      'public."identity_mail_delivery_event_append_v1"()',
+    grantSignature:
+      'public."identity_mail_delivery_event_append_v1"()',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityInitialOwnerInviteAcceptSentGuard",
+    catalogSignature:
+      'public."identity_initial_owner_invite_accept_sent_guard_v1"()',
+    grantSignature:
+      'public."identity_initial_owner_invite_accept_sent_guard_v1"()',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "identityInitialOwnerMailReconcile",
+    catalogSignature:
+      'public."identity_initial_owner_mail_reconcile_v1"(text,bigint,text,text,text)',
+    grantSignature:
+      'public."identity_initial_owner_mail_reconcile_v1"(TEXT, BIGINT, TEXT, TEXT, TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+    language: "plpgsql",
+  }),
 ]);
 
 assert.equal(
@@ -177,20 +315,12 @@ assert.deepEqual(
   "CURRENT_174 must retain the exact updated admission decision guard contract.",
 );
 
-// CURRENT_174 creates twenty-one new routines and replaces the admission
-// decision guard already sealed by CURRENT_172. Keep the twenty-one new
-// signatures here and prove the twenty-second exact contract above so
-// enrollment never inspects or
-// revokes the same PostgreSQL routine twice.
+// CURRENT_174 created twenty-one routines and replaced the admission decision
+// guard already sealed by CURRENT_172. CURRENT_176 replaces the old outbox
+// release guard with its delivery-state guard, so twenty CURRENT_174 routines
+// remain in this group and the replacement is sealed with the new delivery
+// internals in EXCLUDED_PENDING_FUNCTIONS.
 export const EXCLUDED_RUNTIME_RELEASE_FUNCTIONS = Object.freeze([
-  Object.freeze({
-    key: "identity_mail_outbox_release_guard_v1",
-    catalogSignature: 'public."identity_mail_outbox_release_guard_v1"()',
-    grantSignature: 'public."identity_mail_outbox_release_guard_v1"()',
-    securityDefiner: false,
-    volatility: "v",
-    language: "plpgsql",
-  }),
   Object.freeze({
     key: "shared_beta_activation_audit_guard_v1",
     catalogSignature: 'public."shared_beta_activation_audit_guard_v1"()',
@@ -370,8 +500,8 @@ export const EXCLUDED_RUNTIME_RELEASE_FUNCTIONS = Object.freeze([
 ]);
 assert.equal(
   EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
-  21,
-  "CURRENT_174 must add exactly twenty-one new runtime-excluded routines.",
+  20,
+  "CURRENT_176 must retain exactly twenty CURRENT_174 runtime-release routines.",
 );
 assert.equal(
   new Set([
@@ -380,8 +510,8 @@ assert.equal(
     ),
     CURRENT_174_UPDATED_ADMISSION_GUARD.catalogSignature,
   ]).size,
-  22,
-  "CURRENT_174 must cover exactly twenty-two unique runtime-excluded routines.",
+  21,
+  "CURRENT_176 must cover twenty retained runtime-release routines plus the updated admission guard.",
 );
 
 const EXCLUDED_RUNTIME_FUNCTIONS = Object.freeze([
@@ -396,8 +526,8 @@ const ALL_RUNTIME_FUNCTIONS = Object.freeze([
 ]);
 assert.equal(
   ALL_RUNTIME_FUNCTIONS.length,
-  43,
-  "Runtime enrollment must inspect exactly 43 CURRENT_174 function contracts.",
+  56,
+  "Runtime enrollment must inspect exactly 56 CURRENT_176 function contracts.",
 );
 assert.equal(
   new Set(ALL_RUNTIME_FUNCTIONS.map(({ catalogSignature }) => catalogSignature))
@@ -471,6 +601,28 @@ const LEGACY_SEALED_RUNTIME_TABLES = Object.freeze([
       "expiresAt",
       "createdAt",
       "releasedAt",
+      "attempts",
+      "leaseVersion",
+      "transitionRevision",
+      "availableAt",
+      "leaseOwnerDigest",
+      "leaseTokenDigest",
+      "claimedAt",
+      "leaseExpiresAt",
+      "providerAttemptKey",
+      "providerAttemptedAt",
+      "providerAcknowledgeUntil",
+      "providerAuthorityDigest",
+      "messageIdDigest",
+      "providerOutcomeClass",
+      "providerObservedAt",
+      "providerReceiptDigest",
+      "terminalAckDigest",
+      "ciphertextClearedAt",
+      "sentAt",
+      "terminalAt",
+      "stateReasonCode",
+      "updatedAt",
     ]),
   }),
 ]);
@@ -664,18 +816,72 @@ export const RUNTIME_RELEASE_SEALED_RUNTIME_TABLES = Object.freeze([
     ]),
   }),
 ]);
+export const IDENTITY_MAIL_DELIVERY_SEALED_RUNTIME_TABLES = Object.freeze([
+  Object.freeze({
+    key: "identityMailDeliveryTenantEnrollment",
+    catalogName: 'public."IdentityMailDeliveryTenantEnrollment"',
+    grantName: 'public."IdentityMailDeliveryTenantEnrollment"',
+    columns: Object.freeze([
+      "tenantId",
+      "workerRoleName",
+      "workerRoleOid",
+      "policyRevision",
+      "enabled",
+      "maxAttempts",
+      "leaseSeconds",
+      "acknowledgeSeconds",
+      "baseRetrySeconds",
+      "maxRetrySeconds",
+      "providerAuthorityDigest",
+      "enabledAt",
+      "disabledAt",
+      "createdAt",
+      "updatedAt",
+    ]),
+  }),
+  Object.freeze({
+    key: "identityMailDeliveryEvent",
+    catalogName: 'public."IdentityMailDeliveryEvent"',
+    grantName: 'public."IdentityMailDeliveryEvent"',
+    columns: Object.freeze([
+      "id",
+      "tenantId",
+      "outboxId",
+      "inviteId",
+      "transitionRevision",
+      "leaseVersion",
+      "attemptNumber",
+      "eventType",
+      "fromStatus",
+      "toStatus",
+      "leaseOwnerDigest",
+      "providerAttemptKey",
+      "providerAuthorityDigest",
+      "actorDigest",
+      "messageIdDigest",
+      "providerOutcomeClass",
+      "providerReceiptDigest",
+      "terminalAckDigest",
+      "stateReasonCode",
+      "eventAt",
+      "createdTransactionId",
+      "eventDigest",
+    ]),
+  }),
+]);
 export const SEALED_RUNTIME_TABLES = Object.freeze([
   ...LEGACY_SEALED_RUNTIME_TABLES,
   ...ADMISSION_SEALED_RUNTIME_TABLES,
   ...RUNTIME_RELEASE_SEALED_RUNTIME_TABLES,
+  ...IDENTITY_MAIL_DELIVERY_SEALED_RUNTIME_TABLES,
 ]);
 assert.equal(
   SEALED_RUNTIME_TABLES.reduce(
     (count, entry) => count + entry.columns.length,
     0,
   ),
-  232,
-  "CURRENT_174 must seal exactly 232 runtime-inaccessible columns.",
+  291,
+  "CURRENT_176 must seal exactly 291 runtime-inaccessible columns.",
 );
 assert.equal(
   SHARED_BETA_ADMISSION_TYPES.length,
@@ -713,7 +919,16 @@ export const SEALED_RUNTIME_TYPES = Object.freeze([
     key: "identityMailOutboxStatus",
     catalogName: 'public."IdentityMailOutboxStatus"',
     grantName: 'public."IdentityMailOutboxStatus"',
-    labels: Object.freeze(["HOLD", "PENDING"]),
+    labels: Object.freeze([
+      "HOLD",
+      "PENDING",
+      "CLAIMED",
+      "RETRY",
+      "SENT",
+      "DEAD",
+      "CANCELED",
+      "RECONCILIATION_REQUIRED",
+    ]),
   }),
   ...ADMISSION_SEALED_RUNTIME_TYPES,
 ]);
@@ -2160,11 +2375,14 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").join("\n");
   assert.equal(
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").length,
-    81 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+    104 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
   );
-  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 7);
+  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 8);
+  assert.equal(EXCLUDED_WORKER_FUNCTIONS.length, 6);
+  assert.equal(EXCLUDED_PENDING_FUNCTIONS.length, 13);
   assert.equal(EXCLUDED_ADMISSION_FUNCTIONS.length, 9);
-  assert.equal(SEALED_RUNTIME_TABLES.length, 12);
+  assert.equal(EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length, 20);
+  assert.equal(SEALED_RUNTIME_TABLES.length, 14);
   assert.equal(SEALED_RUNTIME_TYPES.length, 2);
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
@@ -2175,10 +2393,20 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(sql, /identity_email_claim_transition_v2/u);
   assert.match(sql, /identity_email_claim_release_v2/u);
   assert.match(sql, /identity_owner_invite_issue_hold_v1/u);
+  assert.match(sql, /identity_initial_owner_invite_delivery_assert_sent_v1/u);
+  assert.match(sql, /identity_initial_owner_mail_claim_v1/u);
+  assert.match(sql, /identity_initial_owner_mail_provider_mark_v1/u);
+  assert.match(sql, /identity_initial_owner_mail_complete_v1/u);
+  assert.match(sql, /identity_initial_owner_mail_reap_v1/u);
+  assert.match(sql, /identity_initial_owner_mail_reconcile_v1/u);
+  assert.match(sql, /identity_mail_outbox_delivery_guard_v1/u);
+  assert.doesNotMatch(sql, /identity_mail_outbox_release_guard_v1/u);
   assert.match(sql, /shared_beta_tenant_profile_digest_v1/u);
   assert.match(sql, /SharedBetaReleaseGateCode/u);
   assert.match(sql, /IdentityMailOutboxStatus/u);
   assert.match(sql, /"releasedAt"/u);
+  assert.match(sql, /"transitionRevision"/u);
+  assert.match(sql, /"providerAttemptKey"/u);
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
@@ -2210,6 +2438,14 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaTenantActivationCommand"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityMailDeliveryTenantEnrollment"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityMailDeliveryEvent"/u,
   );
   assert.match(
     sql,

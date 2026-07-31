@@ -52,14 +52,12 @@ const DEFAULT_LOCK_TIMEOUT_MS = 500;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 30_000;
 const DEFAULT_TRANSACTION_TIMEOUT_MS = 120_000;
 const MAX_HMAC_KEY_BYTES = 4_096;
-const CURRENT_174_OUTBOX_RELEASE_GUARD =
-  "identity_mail_outbox_release_guard_v1";
+const CURRENT_176_OUTBOX_DELIVERY_GUARD =
+  "identity_mail_outbox_delivery_guard_v1";
 const CURRENT_174_ADMISSION_DECISION_GUARD =
   "shared_beta_tenant_admission_decision_guard_v1";
 const CURRENT_174_ADMISSION_DECISION_GUARD_DEFINITION_SHA256 =
   "d27ce0e9a3644f39707dab510384805d34def0f68a8ef99dbefa7aadebeea891";
-const CURRENT_174_OUTBOX_CRYPTO_CHECK_DEFINITION_SHA256 =
-  "17b45564316ec0c1211a56ba6d424842ccc1a6a5ca04d4db9f3f1768cb782ad5";
 const CURRENT_174_ADMISSION_DECISION_STATE_CHECK =
   "TenantAdmissionDecision_state_check";
 const CURRENT_174_ADMISSION_DECISION_STATE_CHECK_DEFINITION_SHA256 =
@@ -103,9 +101,7 @@ assert.deepEqual(
   "CURRENT_174 must replace exactly the historical unrevoked admission-decision index.",
 );
 const CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS = Object.freeze(
-  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.filter(
-    ({ key }) => key !== CURRENT_174_OUTBOX_RELEASE_GUARD,
-  ).map(
+  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.map(
     ({
       key,
       catalogSignature,
@@ -448,6 +444,7 @@ const EXPECTED_CATALOG_RELATIONS = Object.freeze([
   "IdentityEmailClaim",
   "IdentityOwnerInviteIssueCommand",
   "IdentityMailOutbox",
+  "IdentityMailDeliveryEvent",
   ...SHARED_BETA_ADMISSION_RELATIONS,
 ]);
 
@@ -455,18 +452,24 @@ const EXACT_IDENTITY_RELATIONS = Object.freeze([
   "IdentityEmailClaim",
   "IdentityOwnerInviteIssueCommand",
   "IdentityMailOutbox",
+  "IdentityMailDeliveryEvent",
   ...SHARED_BETA_ADMISSION_RELATIONS,
 ]);
 
 const DORMANT_IDENTITY_RELATIONS = Object.freeze([
   "IdentityOwnerInviteIssueCommand",
   "IdentityMailOutbox",
+  "IdentityMailDeliveryEvent",
   ...SHARED_BETA_ADMISSION_DORMANT_RELATIONS,
 ]);
 
 const DORMANT_IDENTITY_FUNCTIONS = Object.freeze([
   "identity_owner_invite_issue_command_immutable_v1",
-  CURRENT_174_OUTBOX_RELEASE_GUARD,
+  CURRENT_176_OUTBOX_DELIVERY_GUARD,
+  "identity_mail_delivery_event_guard_v1",
+  "identity_mail_delivery_event_truncate_guard_v1",
+  "identity_mail_delivery_event_append_v1",
+  "identity_mail_delivery_worker_assert_v1",
   "identity_owner_invite_issue_hold_v1",
   ...SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS,
   ...CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.map(
@@ -685,6 +688,204 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "",
     "pg_catalog.default",
   ],
+  [
+    "IdentityMailDeliveryEvent",
+    "id",
+    1,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "tenantId",
+    2,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "outboxId",
+    3,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "inviteId",
+    4,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "transitionRevision",
+    5,
+    "bigint",
+    true,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "leaseVersion",
+    6,
+    "integer",
+    true,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "attemptNumber",
+    7,
+    "integer",
+    true,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "eventType",
+    8,
+    "character varying(64)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "fromStatus",
+    9,
+    '"IdentityMailOutboxStatus"',
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "toStatus",
+    10,
+    '"IdentityMailOutboxStatus"',
+    true,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "leaseOwnerDigest",
+    11,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "providerAttemptKey",
+    12,
+    "character varying(96)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "providerAuthorityDigest",
+    13,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "messageIdDigest",
+    14,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "providerOutcomeClass",
+    15,
+    "character varying(32)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "providerReceiptDigest",
+    16,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "terminalAckDigest",
+    17,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "actorDigest",
+    18,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "stateReasonCode",
+    19,
+    "character varying(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "eventAt",
+    20,
+    "timestamp(3) with time zone",
+    true,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "createdTransactionId",
+    21,
+    "character varying(32)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailDeliveryEvent",
+    "eventDigest",
+    22,
+    "character(64)",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
   ["IdentityMailOutbox", "id", 1, "text", true, "", "pg_catalog.default"],
   [
     "IdentityMailOutbox",
@@ -785,7 +986,7 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "'sha256-v1'::character varying",
     "pg_catalog.default",
   ],
-  ["IdentityMailOutbox", "secretCiphertext", 13, "bytea", true, "", ""],
+  ["IdentityMailOutbox", "secretCiphertext", 13, "bytea", false, "", ""],
   ["IdentityMailOutbox", "envelopeVersion", 14, "integer", true, "1", ""],
   [
     "IdentityMailOutbox",
@@ -821,6 +1022,188 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "timestamp(3) with time zone",
     false,
     "",
+    "",
+  ],
+  ["IdentityMailOutbox", "attempts", 19, "integer", true, "0", ""],
+  ["IdentityMailOutbox", "leaseVersion", 20, "integer", true, "0", ""],
+  [
+    "IdentityMailOutbox",
+    "transitionRevision",
+    21,
+    "bigint",
+    true,
+    "0",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "availableAt",
+    22,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "leaseOwnerDigest",
+    23,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "leaseTokenDigest",
+    24,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "claimedAt",
+    25,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "leaseExpiresAt",
+    26,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "providerAttemptKey",
+    27,
+    "character varying(96)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "providerAttemptedAt",
+    28,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "providerAcknowledgeUntil",
+    29,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "providerAuthorityDigest",
+    30,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "messageIdDigest",
+    31,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "providerOutcomeClass",
+    32,
+    "character varying(32)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "providerObservedAt",
+    33,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "providerReceiptDigest",
+    34,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "terminalAckDigest",
+    35,
+    "character(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "ciphertextClearedAt",
+    36,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "sentAt",
+    37,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "terminalAt",
+    38,
+    "timestamp(3) with time zone",
+    false,
+    "",
+    "",
+  ],
+  [
+    "IdentityMailOutbox",
+    "stateReasonCode",
+    39,
+    "character varying(64)",
+    false,
+    "",
+    "pg_catalog.default",
+  ],
+  [
+    "IdentityMailOutbox",
+    "updatedAt",
+    40,
+    "timestamp(3) with time zone",
+    true,
+    "CURRENT_TIMESTAMP",
     "",
   ],
   [
@@ -1046,7 +1429,7 @@ const EXPECTED_CONSTRAINT_MANIFEST = Object.freeze([
     relation: "IdentityEmailClaim",
     type: "c",
     definitionSha256:
-      "4ec192429d64716e71f0b93a05da688e6398a281cbc1347b402fec74f886a7ad",
+      "abcebbd5b0ea9e9a36afcbdecdab1eed408283728a9d3c934dbf216a32e8a645",
   },
   {
     name: "IdentityEmailClaim_pkey",
@@ -1120,6 +1503,52 @@ const EXPECTED_CONSTRAINT_MANIFEST = Object.freeze([
   },
   ...[
     [
+      "IdentityMailDeliveryEvent_digest_check",
+      "IdentityMailDeliveryEvent",
+      "c",
+      "f7e062b75bbbd5789da016e0a2c56df31356acbc73ebe38dc348dbe3af470df9",
+    ],
+    [
+      "IdentityMailDeliveryEvent_id_check",
+      "IdentityMailDeliveryEvent",
+      "c",
+      "eec325c90dcd48d2fcac582484cd8ea246dbbbc8bbc86d60e2c10e205e3af857",
+    ],
+    [
+      "IdentityMailDeliveryEvent_invite_fkey",
+      "IdentityMailDeliveryEvent",
+      "f",
+      "a66289a7de1e00ffc3d3cfc629be64aff39a30483fd0614022b38b835c34f35b",
+    ],
+    [
+      "IdentityMailDeliveryEvent_outbox_fkey",
+      "IdentityMailDeliveryEvent",
+      "f",
+      "f1754c498a3ef7e406a3552418c72dd260b842fc76f0995136aec36d6125a549",
+    ],
+    [
+      "IdentityMailDeliveryEvent_pkey",
+      "IdentityMailDeliveryEvent",
+      "p",
+      "8c8464f42472e42ee190fc91ca8db79b5351d3a4609040516578d229c56f6fa5",
+    ],
+    [
+      "IdentityMailDeliveryEvent_tenantId_fkey",
+      "IdentityMailDeliveryEvent",
+      "f",
+      "10c53f59767da1037868e70c34767641c6f2ea5cff4ad85c4249247201afdeba",
+    ],
+    [
+      "IdentityMailDeliveryEvent_transition_check",
+      "IdentityMailDeliveryEvent",
+      "c",
+      "6e726345f244c69fdf8cfd5de9596661ae7a3e0a0e88f82d15dbdf2b7e702c61",
+    ],
+  ].map(([name, relation, type, definitionSha256]) =>
+    Object.freeze({ name, relation, type, definitionSha256 }),
+  ),
+  ...[
+    [
       "IdentityMailOutbox_aad_env_check",
       "IdentityMailOutbox",
       "c",
@@ -1132,10 +1561,28 @@ const EXPECTED_CONSTRAINT_MANIFEST = Object.freeze([
       "cb5188a02a3d22443e08790a3f01534d49590fce15a75942d01f91550dd8e61b",
     ],
     [
-      "IdentityMailOutbox_crypto_check",
+      "IdentityMailOutbox_delivery_counter_check",
       "IdentityMailOutbox",
       "c",
-      CURRENT_174_OUTBOX_CRYPTO_CHECK_DEFINITION_SHA256,
+      "e6796790888bc9d937e6cf16e3e4bbf3ef69816f51ff6ce3c230bb4803bec960",
+    ],
+    [
+      "IdentityMailOutbox_delivery_digest_check",
+      "IdentityMailOutbox",
+      "c",
+      "0abd9f9d95f3c98fec5f7d7fd3051b4d592e6be2a589a0c4588f3c7bb8012e1b",
+    ],
+    [
+      "IdentityMailOutbox_delivery_shape_check",
+      "IdentityMailOutbox",
+      "c",
+      "cc00921ee3b6ee66feec020918749528c0cd8f220dd40c98779ae70f52a69947",
+    ],
+    [
+      "IdentityMailOutbox_delivery_state_check",
+      "IdentityMailOutbox",
+      "c",
+      "a4eafeed245bda4dcdde32d16e0ce2d0d7f68d62a126e9ad2a07594f3868ae7c",
     ],
     [
       "IdentityMailOutbox_expiry_check",
@@ -1341,6 +1788,45 @@ const EXPECTED_CONSTRAINT_MANIFEST = Object.freeze([
 ]);
 
 const EXPECTED_INDEX_MANIFEST = Object.freeze([
+  ...[
+    [
+      "IdentityMailDeliveryEvent_pkey",
+      "IdentityMailDeliveryEvent",
+      true,
+      true,
+      "d040653296ce398ac75af6d7f74163785452a9927605815e8db194ddc136978b",
+    ],
+    [
+      "identity_mail_delivery_event_digest_key",
+      "IdentityMailDeliveryEvent",
+      true,
+      false,
+      "b3fe9a17c314b9206c73b2d36df13e848fad36d759b546d190e8d2c15f1e4f4a",
+    ],
+    [
+      "identity_mail_delivery_event_invite_idx",
+      "IdentityMailDeliveryEvent",
+      false,
+      false,
+      "222a709b1f064a4a2a745a26847f0a6b1250a3a33f3989435492b90bbf95fb78",
+    ],
+    [
+      "identity_mail_delivery_event_outbox_idx",
+      "IdentityMailDeliveryEvent",
+      false,
+      false,
+      "19bb57faa3e8fafe1c7f9a4ad58c28362ee7c0d7a8861245350d20c70cef0669",
+    ],
+    [
+      "identity_mail_delivery_event_transition_uidx",
+      "IdentityMailDeliveryEvent",
+      true,
+      false,
+      "f93979185b20ec5db47a755018b405b7f3e340aba9b7b2289bbce6cdb378f615",
+    ],
+  ].map(([name, relation, unique, primary, definitionSha256]) =>
+    Object.freeze({ name, relation, unique, primary, definitionSha256 }),
+  ),
   {
     name: "IdentityEmailClaim_pkey",
     relation: "IdentityEmailClaim",
@@ -1464,6 +1950,41 @@ const EXPECTED_INDEX_MANIFEST = Object.freeze([
       "bf45555229910d0f37bb8cf40f12f62a3ad17222b62a1342ebdb11687e2e13c0",
     ],
     [
+      "identity_mail_outbox_marked_ack_idx",
+      "IdentityMailOutbox",
+      false,
+      false,
+      "fbfa894533b6a6db44685210802645c623246dfcd6a90196fe8de9fd67e172e9",
+    ],
+    [
+      "identity_mail_outbox_provider_attempt_key_uidx",
+      "IdentityMailOutbox",
+      true,
+      false,
+      "6110875a5ec87867655a49da2f1f0a8344f7cd67cd95baae2d51aab5f245d48d",
+    ],
+    [
+      "identity_mail_outbox_ready_idx",
+      "IdentityMailOutbox",
+      false,
+      false,
+      "4c1237f5bb9b88694325cbeedec1de58ad11d51296e0410c020588e3e3c059c8",
+    ],
+    [
+      "identity_mail_outbox_reconciliation_idx",
+      "IdentityMailOutbox",
+      false,
+      false,
+      "34ee245620efee419f5e3f40177a35bb4757afca01b419743afb75614bf95aae",
+    ],
+    [
+      "identity_mail_outbox_unmarked_lease_idx",
+      "IdentityMailOutbox",
+      false,
+      false,
+      "b723c635649ecad202a19fcd346fe1af5dde5937ec492fc69ffcd693ff902640",
+    ],
+    [
       "IdentityOwnerInviteIssueCommand_pkey",
       "IdentityOwnerInviteIssueCommand",
       true,
@@ -1548,6 +2069,40 @@ const EXPECTED_INDEX_MANIFEST = Object.freeze([
 
 const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
   {
+    name: "identity_mail_delivery_event_guard_v1",
+    identityArguments: "",
+    result: "trigger",
+    securityDefiner: false,
+    definitionSha256:
+      "dc6ab1560b01a3395ff1893e4df41bd542b9ffcc26b418909b5653a096ff9466",
+  },
+  {
+    name: "identity_mail_delivery_event_truncate_guard_v1",
+    identityArguments: "",
+    result: "trigger",
+    securityDefiner: false,
+    definitionSha256:
+      "84b20e859e4ae04d430da028d7940d517b178126a144330eb1dda6851598f95a",
+  },
+  {
+    name: "identity_mail_delivery_event_append_v1",
+    identityArguments: "",
+    result: "trigger",
+    securityDefiner: false,
+    definitionSha256:
+      "35bedbeb9b06b060d9b1459784b55769e3773fbf7ceb9d9b92ec992578c1af33",
+  },
+  {
+    name: "identity_mail_delivery_worker_assert_v1",
+    catalogSignature:
+      'public."identity_mail_delivery_worker_assert_v1"(text)',
+    identityArguments: "p_tenant_id text",
+    result: "jsonb",
+    securityDefiner: true,
+    definitionSha256:
+      "c2b5c7c9fd8b5ab0f1398b7a14b997fbed38d00df46c7d9fd6767735a2d8b1bb",
+  },
+  {
     name: "identity_email_claim_assert_invite_v1",
     identityArguments:
       "candidate_email text, expected_tenant_id text, expected_subject_id text, expected_revision integer",
@@ -1571,7 +2126,7 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     result: "text",
     securityDefiner: false,
     definitionSha256:
-      "46207f959ee31fb4c8a14f2d07be89d4596d23416f2f4ece28c4657d56b6f884",
+      "a9a330b5ed46e578cffd7eda8846fe5b04b4c2fd74a0d46c69ae6e3a0002b7bc",
   },
   {
     name: "identity_email_claim_release_v1",
@@ -1636,12 +2191,12 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
       "f2495241681f4dd8be6ca2b36dbd0d487e104e18a2712422f3da5f435f597f62",
   },
   {
-    name: CURRENT_174_OUTBOX_RELEASE_GUARD,
+    name: CURRENT_176_OUTBOX_DELIVERY_GUARD,
     identityArguments: "",
     result: "trigger",
     securityDefiner: false,
     definitionSha256:
-      "0fdb6423260b2f15b0cd3eead0deb8348c1178b024281800ae6c51e794d9fbd7",
+      "fb642a3e117ffe6804f4448a9b850c03ad7c6e1e7d5da05f1d20e19bfa5ddd70",
   },
   {
     name: "identity_owner_invite_issue_command_immutable_v1",
@@ -1695,6 +2250,22 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
 
 const EXPECTED_TRIGGER_MANIFEST = Object.freeze([
   {
+    name: "IdentityMailDeliveryEvent_row_guard_trigger",
+    relation: "IdentityMailDeliveryEvent",
+    functionName: "identity_mail_delivery_event_guard_v1",
+    triggerType: 31,
+    definitionSha256:
+      "97fe3b8b593473183481b5ab9ec5f92ee58614939e4be87b7cf03cb768ccbd6a",
+  },
+  {
+    name: "IdentityMailDeliveryEvent_truncate_guard_trigger",
+    relation: "IdentityMailDeliveryEvent",
+    functionName: "identity_mail_delivery_event_truncate_guard_v1",
+    triggerType: 34,
+    definitionSha256:
+      "5d29fd2f48052f5a84a6855170f127344b93aaf4433a43b71bb852e2b7bedc3b",
+  },
+  {
     name: "IdentityEmailClaim_revision_guard_trigger",
     relation: "IdentityEmailClaim",
     functionName: "identity_email_claim_revision_guard_v1",
@@ -1703,12 +2274,20 @@ const EXPECTED_TRIGGER_MANIFEST = Object.freeze([
       "388dcc06ff27451656b844d302b4a536f7720062f470f0c2b8befd884be9c6a7",
   },
   {
-    name: "IdentityMailOutbox_release_guard_trigger",
+    name: "IdentityMailOutbox_delivery_guard_trigger",
     relation: "IdentityMailOutbox",
-    functionName: CURRENT_174_OUTBOX_RELEASE_GUARD,
-    triggerType: 27,
+    functionName: CURRENT_176_OUTBOX_DELIVERY_GUARD,
+    triggerType: 31,
     definitionSha256:
-      "71c745cba2f40476cc13a24b953a791a49d8f1cd6afcb74e9e03d4187bd6a782",
+      "a135da3dc5eb1651c29d8d64056b5a193be5ce22cd8f0107df5a693aff569b9a",
+  },
+  {
+    name: "IdentityMailOutbox_delivery_event_trigger",
+    relation: "IdentityMailOutbox",
+    functionName: "identity_mail_delivery_event_append_v1",
+    triggerType: 17,
+    definitionSha256:
+      "86bf7510e38ebb157ed884b3bd77033a7c48de941547bb8309816989911f837e",
   },
   {
     name: "IdentityOwnerInviteIssueCommand_immutable_trigger",
@@ -1772,6 +2351,21 @@ function restrictRiTriggerManifest(
 }
 
 const EXPECTED_RI_TRIGGER_MANIFEST = Object.freeze([
+  ...restrictRiTriggerManifest(
+    "IdentityMailDeliveryEvent_invite_fkey",
+    "IdentityMailDeliveryEvent",
+    "UserInvite",
+  ),
+  ...restrictRiTriggerManifest(
+    "IdentityMailDeliveryEvent_outbox_fkey",
+    "IdentityMailDeliveryEvent",
+    "IdentityMailOutbox",
+  ),
+  ...restrictRiTriggerManifest(
+    "IdentityMailDeliveryEvent_tenantId_fkey",
+    "IdentityMailDeliveryEvent",
+    "Tenant",
+  ),
   ...restrictRiTriggerManifest(
     "IdentityMailOutbox_invite_fkey",
     "IdentityMailOutbox",
@@ -1906,6 +2500,36 @@ const EXPECTED_ENUM_MANIFEST = Object.freeze([
     typeName: "IdentityMailOutboxStatus",
     label: "PENDING",
     sortOrder: 2,
+  },
+  {
+    typeName: "IdentityMailOutboxStatus",
+    label: "CLAIMED",
+    sortOrder: 3,
+  },
+  {
+    typeName: "IdentityMailOutboxStatus",
+    label: "RETRY",
+    sortOrder: 4,
+  },
+  {
+    typeName: "IdentityMailOutboxStatus",
+    label: "SENT",
+    sortOrder: 5,
+  },
+  {
+    typeName: "IdentityMailOutboxStatus",
+    label: "DEAD",
+    sortOrder: 6,
+  },
+  {
+    typeName: "IdentityMailOutboxStatus",
+    label: "CANCELED",
+    sortOrder: 7,
+  },
+  {
+    typeName: "IdentityMailOutboxStatus",
+    label: "RECONCILIATION_REQUIRED",
+    sortOrder: 8,
   },
   {
     typeName: "IdentityMailTemplate",
@@ -2456,6 +3080,12 @@ SELECT
         function_row.proname LIKE 'identity_email_claim_%'
         OR function_row.proname LIKE 'identity_owner_invite_%'
         OR function_row.proname LIKE 'identity_mail_outbox_%'
+        OR function_row.proname IN (
+          'identity_mail_delivery_event_guard_v1',
+          'identity_mail_delivery_event_truncate_guard_v1',
+          'identity_mail_delivery_event_append_v1',
+          'identity_mail_delivery_worker_assert_v1'
+        )
         OR function_row.proname LIKE 'shared_beta_%'
       )
   ) AS actual_function_count,

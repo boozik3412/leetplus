@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { IdentityEmailClaimType, Prisma } from '@prisma/client';
 import { createHmac } from 'node:crypto';
+import { isCanonicalIdentityEmail } from '../utilities/canonical-identity-email';
 
 const IDENTITY_EMAIL_FINGERPRINT_KEY = 'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY';
 const IDENTITY_EMAIL_FINGERPRINT_KEY_VERSION =
@@ -15,7 +16,6 @@ const SUPPORTED_FINGERPRINT_KEY_VERSION = 'v1';
 const FINGERPRINT_DOMAIN = 'leetplus:identity-email-fingerprint:v1\0';
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const SAFE_ASCII_EMAIL_PATTERN = /^[^@ ]+@[^@ ]+\.[^@ ]+$/u;
 const MINIMUM_HMAC_KEY_BYTES = 32;
 const MAXIMUM_HMAC_KEY_BYTES = 4096;
 declare const identityEmailClaimTransactionBrand: unique symbol;
@@ -519,7 +519,7 @@ export class IdentityEmailClaimService {
       canonical.length < 3 ||
       canonical.length > 320 ||
       !/^[!-~]+$/u.test(canonical) ||
-      !SAFE_ASCII_EMAIL_PATTERN.test(canonical)
+      !isCanonicalIdentityEmail(canonical)
     ) {
       throw this.invalidEmail();
     }

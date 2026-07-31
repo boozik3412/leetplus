@@ -52,10 +52,10 @@ function compliantSnapshot() {
     migration: {
       completedTargetCount: 1,
       completedRequiredCount: 1,
-      completedCount: 174,
+      completedCount: 176,
       unfinishedCount: 0,
       latestCompletedMigration:
-        "20260730040000_shared_beta_runtime_release_activation",
+        "20260731020000_initial_owner_mail_delivery_boundary",
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -229,7 +229,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260730040000_shared_beta_runtime_release_activation 174$/u,
+    /20260731020000_initial_owner_mail_delivery_boundary 176$/u,
   );
 });
 
@@ -286,16 +286,18 @@ for (const [environment, expectedCode] of [
 test("builds only the exact application grants and sealed exclusions", () => {
   const statements =
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime");
-  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 7);
+  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 8);
+  assert.equal(EXCLUDED_WORKER_FUNCTIONS.length, 6);
+  assert.equal(EXCLUDED_PENDING_FUNCTIONS.length, 13);
   assert.equal(EXCLUDED_ADMISSION_FUNCTIONS.length, 9);
-  assert.equal(EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length, 21);
+  assert.equal(EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length, 20);
   assert.equal(
     APPLICATION_RUNTIME_FUNCTIONS.length +
       EXCLUDED_WORKER_FUNCTIONS.length +
       EXCLUDED_PENDING_FUNCTIONS.length +
       EXCLUDED_ADMISSION_FUNCTIONS.length +
       EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
-    43,
+    56,
   );
   const updatedAdmissionGuard = EXCLUDED_ADMISSION_FUNCTIONS.find(
     (entry) =>
@@ -324,7 +326,7 @@ test("builds only the exact application grants and sealed exclusions", () => {
       ),
       updatedAdmissionGuard.catalogSignature,
     ]).size,
-    22,
+    21,
   );
   const instanceAnchorGuard = EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.find(
     (entry) => entry.key === "shared_beta_runtime_instance_anchor_guard_v1",
@@ -342,13 +344,13 @@ test("builds only the exact application grants and sealed exclusions", () => {
   );
   assert.equal(databaseIdentityDigest?.language, "plpgsql");
   assert.equal(RUNTIME_RELEASE_SEALED_RUNTIME_TABLES.length, 6);
-  assert.equal(SEALED_RUNTIME_TABLES.length, 12);
+  assert.equal(SEALED_RUNTIME_TABLES.length, 14);
   assert.equal(
     SEALED_RUNTIME_TABLES.reduce(
       (count, entry) => count + entry.columns.length,
       0,
     ),
-    232,
+    291,
   );
   const instanceAnchor = RUNTIME_RELEASE_SEALED_RUNTIME_TABLES.find(
     (entry) => entry.key === "sharedBetaRuntimeInstanceAnchor",
@@ -402,29 +404,29 @@ test("builds only the exact application grants and sealed exclusions", () => {
   assert.equal(SEALED_RUNTIME_TYPES.length, 2);
   assert.equal(
     statements.length,
-    81 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+    104 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
   );
   assert.equal(
     statements.filter((statement) => statement.startsWith("GRANT EXECUTE"))
       .length,
-    7,
+    8,
   );
   assert.equal(
     statements.filter((statement) =>
       statement.startsWith("REVOKE GRANT OPTION"),
     ).length,
-    7,
+    8,
   );
   assert.equal(
     statements.filter((statement) => statement.startsWith("REVOKE EXECUTE"))
       .length,
-    15 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+    28 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
   );
   assert.equal(
     statements.filter((statement) =>
       statement.startsWith("REVOKE ALL PRIVILEGES ("),
     ).length,
-    24,
+    28,
   );
   assert.equal(
     statements.filter(
@@ -432,7 +434,7 @@ test("builds only the exact application grants and sealed exclusions", () => {
         statement.startsWith("REVOKE ALL PRIVILEGES ON TABLE") &&
         statement.endsWith("FROM PUBLIC"),
     ).length,
-    12,
+    14,
   );
   assert.equal(
     statements.filter((statement) =>
@@ -454,7 +456,32 @@ test("builds only the exact application grants and sealed exclusions", () => {
   assert.match(sql, /identity_email_claim_release_v1/u);
   assert.match(sql, /identity_email_claim_transition_v2/u);
   assert.match(sql, /identity_email_claim_release_v2/u);
+  assert.match(sql, /identity_initial_owner_invite_delivery_assert_sent_v1/u);
   assert.match(sql, /identity_owner_invite_issue_hold_v1/u);
+  for (const entry of EXCLUDED_WORKER_FUNCTIONS) {
+    assert.ok(
+      statements.includes(
+        `REVOKE EXECUTE ON FUNCTION ${entry.grantSignature} FROM "leetplus_runtime"`,
+      ),
+    );
+    assert.ok(
+      !statements.includes(
+        `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO "leetplus_runtime"`,
+      ),
+    );
+  }
+  for (const entry of EXCLUDED_PENDING_FUNCTIONS) {
+    assert.ok(
+      statements.includes(
+        `REVOKE EXECUTE ON FUNCTION ${entry.grantSignature} FROM "leetplus_runtime"`,
+      ),
+    );
+    assert.ok(
+      !statements.includes(
+        `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO "leetplus_runtime"`,
+      ),
+    );
+  }
   for (const entry of EXCLUDED_ADMISSION_FUNCTIONS) {
     assert.ok(
       statements.includes(
@@ -487,6 +514,18 @@ test("builds only the exact application grants and sealed exclusions", () => {
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityMailOutbox"/u,
   );
   assert.match(sql, /"releasedAt"/u);
+  assert.match(sql, /"providerAcknowledgeUntil"/u);
+  assert.match(sql, /"terminalAckDigest"/u);
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityMailDeliveryTenantEnrollment"/u,
+  );
+  assert.match(
+    sql,
+    /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityMailDeliveryEvent"/u,
+  );
+  assert.match(sql, /"providerAuthorityDigest"/u);
+  assert.match(sql, /"createdTransactionId"/u);
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."SharedBetaBuildProvenance"/u,
@@ -540,6 +579,8 @@ test("builds only the exact application grants and sealed exclusions", () => {
   }
   assert.match(sql, /public\."IdentityMailOutboxStatus"/u);
   assert.match(sql, /public\."SharedBetaReleaseGateCode"/u);
+  assert.match(sql, /identity_mail_outbox_delivery_guard_v1/u);
+  assert.doesNotMatch(sql, /identity_mail_outbox_release_guard_v1/u);
   assert.doesNotMatch(sql, /\bALL FUNCTIONS\b/iu);
   assert.doesNotMatch(sql, /\bALTER DEFAULT PRIVILEGES\b/iu);
   assert.doesNotMatch(sql, /\bTO PUBLIC\b/iu);
@@ -733,7 +774,7 @@ test("rejects every activation-bound role before general enrollment", () => {
   );
 });
 
-test("binds enrollment to exact current migration 174 and exact count 174", () => {
+test("binds enrollment to exact current migration 176 and exact count 176", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

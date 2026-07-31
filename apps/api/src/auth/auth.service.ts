@@ -31,6 +31,7 @@ import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
 import { EmailVerificationService } from './email-verification.service';
 import { IdentityEmailClaimService } from './identity-email-claim.service';
+import { InitialOwnerInviteDeliveryGateService } from './initial-owner-invite-delivery-gate.service';
 import { PasswordService } from './password.service';
 
 type AuthResponse = {
@@ -119,6 +120,12 @@ type InviteAdmissionCandidate = {
   tenant: PersistedTenantExecutionSubject;
 };
 
+type InitialOwnerInviteDeliveryCandidate = InviteAdmissionCandidate & {
+  id: string;
+  tenantId: string;
+  tokenHash: string;
+};
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -130,6 +137,7 @@ export class AuthService {
     private readonly accessScopeService: AccessScopeService,
     private readonly tenantExecutionPolicy: TenantExecutionPolicyService,
     private readonly identityEmailClaim: IdentityEmailClaimService,
+    private readonly initialOwnerInviteDeliveryGate: InitialOwnerInviteDeliveryGateService,
   ) {}
 
   register(dto: RegisterDto): never {
@@ -142,6 +150,7 @@ export class AuthService {
   async getInvite(token: unknown): Promise<UserInvitePreview> {
     const invite = await this.resolveActiveInvite(token);
     this.assertInviteAdmitted(invite);
+    await this.assertInitialOwnerInviteDeliverySent(invite);
     const storeIds = await this.resolveInviteStoreIds(
       invite.tenantId,
       invite.storeIds,
@@ -181,6 +190,7 @@ export class AuthService {
   ): Promise<AuthResponse> {
     const invite = await this.resolveActiveInvite(token);
     this.assertInviteAdmitted(invite);
+    await this.assertInitialOwnerInviteDeliverySent(invite);
     const identityClaimRevision = this.requireInviteIdentityClaimRevision(
       invite.identityClaimRevision,
     );
@@ -239,16 +249,15 @@ export class AuthService {
         where: { tenantId: invite.tenantId },
         select: tenantModuleEntitlementExecutionSelect,
       });
-      this.assertInviteAdmitted(
-        {
-          ...invite,
-          tenant: {
-            ...lockedTenant,
-            moduleEntitlements: lockedEntitlements,
-          },
+      const lockedInvite = {
+        ...invite,
+        tenant: {
+          ...lockedTenant,
+          moduleEntitlements: lockedEntitlements,
         },
-        acceptedAt,
-      );
+      };
+      this.assertInviteAdmitted(lockedInvite, acceptedAt);
+      await this.assertInitialOwnerInviteDeliverySent(lockedInvite, tx);
 
       if (invite.role === UserRole.OWNER) {
         const ownerCount = await tx.user.count({
@@ -568,10 +577,7 @@ export class AuthService {
   }
 
   private async resolveActiveInvite(token: unknown) {
-    if (
-      typeof token !== 'string' ||
-      !OPAQUE_INVITE_TOKEN_PATTERN.test(token)
-    ) {
+    if (typeof token !== 'string' || !OPAQUE_INVITE_TOKEN_PATTERN.test(token)) {
       throw new BadRequestException({
         message: 'Некорректное приглашение',
         reasonCode: 'INVITE_TOKEN_INVALID',
@@ -664,6 +670,32 @@ export class AuthService {
         'Additional owner invites require the owner-transfer workflow',
       );
     }
+  }
+
+  private async assertInitialOwnerInviteDeliverySent(
+    invite: InitialOwnerInviteDeliveryCandidate,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (
+      invite.role !== UserRole.OWNER ||
+      invite.tenant.onboardingStatus !== TenantOnboardingStatus.OWNER_INVITED
+    ) {
+      return;
+    }
+
+    const input = {
+      tenantId: invite.tenantId,
+      inviteId: invite.id,
+      tokenHash: invite.tokenHash,
+    };
+    if (tx) {
+      await this.initialOwnerInviteDeliveryGate.assertSentInTransaction(
+        tx,
+        input,
+      );
+      return;
+    }
+    await this.initialOwnerInviteDeliveryGate.assertSent(input);
   }
 
   private resolveInviteEmail(

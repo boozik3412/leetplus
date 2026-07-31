@@ -41,11 +41,11 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact latest migration 174 and exact completed count 174 are mandatory.
+  - Exact latest migration 176 and exact completed count 176 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
   - Deliberate target-role and PUBLIC function/table/column/type ACL drift is
-    remediated, including all twenty-two unique CURRENT_174 routines.
+    remediated across all fifty-six exact CURRENT_176 routine contracts.
   - Dedicated activation/coordinator roles are rejected, never enrolled.
   - The generated role and every grant are removed in finally.
 `;
@@ -717,7 +717,7 @@ async function runSmoke() {
       admin,
       roleName,
     );
-    assert.equal(preEnrollmentColumnAcl.columns, 232);
+    assert.equal(preEnrollmentColumnAcl.columns, 291);
     assert.ok(preEnrollmentColumnAcl.effective > 0);
     assert.ok(preEnrollmentColumnAcl.directTarget >= 3);
     assert.ok(preEnrollmentColumnAcl.directPublic >= 2);
@@ -735,56 +735,27 @@ async function runSmoke() {
       log: [],
     });
 
-    await expectSqlState(
-      "42501",
-      () => callTransitionKey(runtime),
-      /permission denied for function guest_game_delivery_transition_key_v1/iu,
-    );
-    await expectSqlState(
-      "42501",
-      () => callRewardDeliveryLock(runtime),
-      /permission denied for function guest_game_reward_delivery_lock_v1/iu,
-    );
-    await expectSqlState(
-      "42501",
-      () => callWorkerEventBoundary(runtime),
-      /permission denied for function guest_game_delivery_record_event_v1/iu,
-    );
-    await expectSqlState(
-      "42501",
-      () => callPendingIdentityBoundary(runtime),
-      /permission denied for function identity_email_claim_lock_v1/iu,
-    );
-    await expectSqlState(
-      "42501",
-      () => callIdentityReserveBoundary(runtime),
-      /permission denied for function identity_email_claim_reserve_invite_v2/iu,
-    );
-    await expectSqlState(
-      "42501",
-      () => callIdentityAssertBoundary(runtime),
-      /permission denied for function identity_email_claim_assert_invite_v1/iu,
-    );
-    await expectSqlState(
-      "42501",
-      () => callIdentityLocatorBoundary(runtime),
-      /permission denied for function identity_email_claim_assert_invite_locator_v1/iu,
-    );
-    await expectSqlState(
-      "42501",
-      () => callIdentityTransitionBoundary(runtime),
-      /permission denied for function identity_email_claim_transition_v2/iu,
-    );
-    await expectSqlState(
-      "42501",
-      () => callIdentityReleaseBoundary(runtime),
-      /permission denied for function identity_email_claim_release_v2/iu,
-    );
-    await expectSqlState(
-      "42501",
-      () => callIdentityOwnerInviteHoldBoundary(runtime),
-      /permission denied for function identity_owner_invite_issue_hold_v1/iu,
-    );
+    for (const entry of APPLICATION_RUNTIME_FUNCTIONS) {
+      await expectSqlState(
+        "42501",
+        () => callExcludedFunctionBoundary(runtime, entry),
+        functionNamePattern(entry),
+      );
+    }
+    for (const entry of EXCLUDED_WORKER_FUNCTIONS) {
+      await expectSqlState(
+        "42501",
+        () => callExcludedFunctionBoundary(runtime, entry),
+        functionNamePattern(entry),
+      );
+    }
+    for (const entry of EXCLUDED_PENDING_FUNCTIONS) {
+      await expectSqlState(
+        "42501",
+        () => callExcludedFunctionBoundary(runtime, entry),
+        functionNamePattern(entry),
+      );
+    }
     for (const entry of EXCLUDED_ADMISSION_FUNCTIONS) {
       await expectSqlState(
         "42501",
@@ -806,6 +777,16 @@ async function runSmoke() {
     assert.equal(preEnrollmentCommands.length, 1);
     const preEnrollmentOutbox = await selectIdentityMailOutboxTable(runtime);
     assert.equal(preEnrollmentOutbox.length, 1);
+    for (const entry of EXCLUDED_WORKER_FUNCTIONS) {
+      await admin.$executeRawUnsafe(
+        `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
+      );
+    }
+    for (const entry of EXCLUDED_PENDING_FUNCTIONS) {
+      await admin.$executeRawUnsafe(
+        `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
+      );
+    }
     for (const entry of EXCLUDED_ADMISSION_FUNCTIONS) {
       await admin.$executeRawUnsafe(
         `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
@@ -850,16 +831,16 @@ async function runSmoke() {
     );
     assert.equal(
       applyReceipt.postconditions.sealedTableWithoutRuntimePrivilegesCount,
-      12,
+      14,
     );
     assert.equal(
       applyReceipt.postconditions.sealedPublicTablePrivilegeCount,
       0,
     );
-    assert.equal(applyReceipt.postconditions.sealedColumnCount, 232);
+    assert.equal(applyReceipt.postconditions.sealedColumnCount, 291);
     assert.equal(
       applyReceipt.postconditions.sealedColumnWithoutRuntimePrivilegesCount,
-      232,
+      291,
     );
     assert.equal(
       applyReceipt.postconditions.sealedEffectiveColumnPrivilegeCount,
@@ -884,7 +865,7 @@ async function runSmoke() {
       roleName,
     );
     assert.deepEqual(postEnrollmentColumnAcl, {
-      columns: 232,
+      columns: 291,
       effective: 0,
       directTarget: 0,
       directPublic: 0,
@@ -938,11 +919,33 @@ async function runSmoke() {
       () => callIdentityReleaseBoundary(runtime),
       /claim was not found/iu,
     );
+    const sentAssertionRows = await callExcludedFunctionBoundary(
+      runtime,
+      APPLICATION_RUNTIME_FUNCTIONS.find(
+        (entry) =>
+          entry.key === "identityInitialOwnerInviteDeliveryAssertSent",
+      ),
+    );
+    assert.equal(Object.values(sentAssertionRows[0])[0], false);
     await expectSqlState(
       "42501",
       () => callIdentityOwnerInviteHoldBoundary(runtime),
       /permission denied for function identity_owner_invite_issue_hold_v1/iu,
     );
+    for (const entry of EXCLUDED_WORKER_FUNCTIONS) {
+      await expectSqlState(
+        "42501",
+        () => callExcludedFunctionBoundary(runtime, entry),
+        functionNamePattern(entry),
+      );
+    }
+    for (const entry of EXCLUDED_PENDING_FUNCTIONS) {
+      await expectSqlState(
+        "42501",
+        () => callExcludedFunctionBoundary(runtime, entry),
+        functionNamePattern(entry),
+      );
+    }
     for (const entry of EXCLUDED_ADMISSION_FUNCTIONS) {
       await expectSqlState(
         "42501",
@@ -979,7 +982,7 @@ async function runSmoke() {
       admin,
       roleName,
     );
-    assert.equal(isolatedColumnDrift.columns, 232);
+    assert.equal(isolatedColumnDrift.columns, 291);
     assert.equal(isolatedColumnDrift.directTarget, 1);
     assert.equal(isolatedColumnDrift.directPublic, 1);
     assert.equal(isolatedColumnDrift.effective, 2);
@@ -1017,7 +1020,7 @@ async function runSmoke() {
       0,
     );
     assert.deepEqual(await inspectSealedColumnPrivileges(admin, roleName), {
-      columns: 232,
+      columns: 291,
       effective: 0,
       directTarget: 0,
       directPublic: 0,
@@ -1044,7 +1047,10 @@ async function runSmoke() {
       checkReceipt.applicationFunctions.length,
       APPLICATION_RUNTIME_FUNCTIONS.length,
     );
-    assert.equal(checkReceipt.excludedWorkerFunctions.length, 1);
+    assert.equal(
+      checkReceipt.excludedWorkerFunctions.length,
+      EXCLUDED_WORKER_FUNCTIONS.length,
+    );
     assert.equal(
       checkReceipt.excludedPendingFunctions.length,
       EXCLUDED_PENDING_FUNCTIONS.length,
@@ -1057,7 +1063,7 @@ async function runSmoke() {
       checkReceipt.excludedRuntimeReleaseFunctions.length,
       EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
     );
-    assert.equal(checkReceipt.postconditions.sealedColumnCount, 232);
+    assert.equal(checkReceipt.postconditions.sealedColumnCount, 291);
     assert.equal(
       checkReceipt.postconditions.sealedEffectiveColumnPrivilegeCount,
       0,
@@ -1083,7 +1089,11 @@ async function runSmoke() {
         schemaVersion: 1,
         database: databaseName,
         preEnrollmentPermissionDenials:
-          19 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+          APPLICATION_RUNTIME_FUNCTIONS.length +
+          EXCLUDED_WORKER_FUNCTIONS.length +
+          EXCLUDED_PENDING_FUNCTIONS.length +
+          EXCLUDED_ADMISSION_FUNCTIONS.length +
+          EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
         applicationFunctionGrants: APPLICATION_RUNTIME_FUNCTIONS.length,
         excludedWorkerFunctionGrants: 0,
         excludedWorkerFunctionsDenied: EXCLUDED_WORKER_FUNCTIONS.length,
@@ -1099,8 +1109,8 @@ async function runSmoke() {
         sealedColumnPrivileges: 0,
         sealedDirectColumnPrivileges: 0,
         sealedPublicColumnPrivileges: 0,
-        sealedColumns: 232,
-        sealedTables: 12,
+        sealedColumns: 291,
+        sealedTables: 14,
         sealedTypeRuntimeUsage: 0,
         sealedPublicTypeUsage: 0,
         sealedTypes: 2,

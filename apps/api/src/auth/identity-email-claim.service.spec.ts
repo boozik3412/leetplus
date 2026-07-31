@@ -15,6 +15,19 @@ const RESERVATION_ID = '22222222-2222-4222-8222-222222222222';
 const NEXT_SUBJECT_ID = '33333333-3333-4333-8333-333333333333';
 const EMAIL = 'owner@example.test';
 const HMAC_KEY = 'identity-fingerprint-unit-key-aaaaaaaaaaaaaaaa';
+const LOCAL_64 = 'l'.repeat(64);
+const LOCAL_65 = 'l'.repeat(65);
+const LABEL_63 = 'd'.repeat(63);
+const LABEL_64 = 'd'.repeat(64);
+const DOMAIN_253 = [63, 63, 63, 61]
+  .map((length) => 'd'.repeat(length))
+  .join('.');
+const DOMAIN_254 = [63, 63, 63, 62]
+  .map((length) => 'd'.repeat(length))
+  .join('.');
+const DOMAIN_256 = [63, 63, 63, 61, 2]
+  .map((length) => 'd'.repeat(length))
+  .join('.');
 
 type ClaimTransactionMock = IdentityEmailClaimTransaction & {
   $queryRaw: jest.Mock;
@@ -91,6 +104,17 @@ describe('IdentityEmailClaimService', () => {
     expect(JSON.stringify(lower)).not.toContain(EMAIL);
   });
 
+  it.each([
+    ['numeric top-level label', 'owner@example.123'],
+    ['64-byte local part', `${LOCAL_64}@example.test`],
+    ['63-byte domain label', `owner@${LABEL_63}.test`],
+    ['253-byte domain', `owner@${DOMAIN_253}`],
+  ])('fingerprints the valid producer boundary: %s', (_label, email) => {
+    const result = service().fingerprint(email);
+    expect(result.fingerprint).toMatch(/^[0-9a-f]{64}$/u);
+    expect(result.keyVersion).toBe('v1');
+  });
+
   it('fails closed when the dedicated fingerprint key contract is absent', () => {
     expect(() => service({}).fingerprint(EMAIL)).toThrow(
       ServiceUnavailableException,
@@ -119,6 +143,45 @@ describe('IdentityEmailClaimService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.$queryRaw).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['address list', 'owner@example.test,attacker@example.test'],
+    ['semicolon-delimited list', 'owner@example.test;attacker@example.test'],
+    ['display name', 'Owner <owner@example.test>'],
+    ['quoted display name', '"Owner" <owner@example.test>'],
+    ['quoted local part', '"owner"@example.test'],
+    [
+      'CRLF header injection',
+      'owner@example.test\r\nBcc:attacker@example.test',
+    ],
+    ['line feed', 'owner@example.test\n'],
+    ['tab', 'owner\t@example.test'],
+    ['non-breaking space', 'owner\u00a0@example.test'],
+    ['Unicode', 'владелец@example.test'],
+    ['leading local dot', '.owner@example.test'],
+    ['trailing local dot', 'owner.@example.test'],
+    ['consecutive local dots', 'owner..beta@example.test'],
+    ['leading domain hyphen', 'owner@-example.test'],
+    ['trailing domain hyphen', 'owner@example-.test'],
+    ['empty domain label', 'owner@example..test'],
+    ['65-byte local part', `${LOCAL_65}@example.test`],
+    ['64-byte domain label', `owner@${LABEL_64}.test`],
+    ['254-byte domain', `owner@${DOMAIN_254}`],
+    ['321-byte mailbox', `${LOCAL_64}@${DOMAIN_256}`],
+  ])(
+    'rejects the invalid producer boundary before reserving: %s',
+    async (_label, email) => {
+      const tx = transaction();
+      await expect(
+        service().reserveInvite(tx, {
+          email,
+          tenantId: TENANT_ID,
+          subjectId: RESERVATION_ID,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+    },
+  );
 
   it('validates the fingerprint key before reserving identity state', async () => {
     const tx = transaction();

@@ -23,6 +23,7 @@ import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
 import { IdentityEmailClaimService } from './identity-email-claim.service';
+import { InitialOwnerInviteDeliveryGateService } from './initial-owner-invite-delivery-gate.service';
 
 const BEARER_INVITE_TOKEN = 'A'.repeat(43);
 const OWNER_INVITE_TOKEN = 'B'.repeat(43);
@@ -96,6 +97,11 @@ type IdentityEmailClaimMock = {
   transitionInvite: jest.Mock;
 };
 
+type InitialOwnerInviteDeliveryGateMock = {
+  assertSent: jest.Mock;
+  assertSentInTransaction: jest.Mock;
+};
+
 function createUserWithTenant() {
   return {
     id: 'user-1',
@@ -143,6 +149,7 @@ function createMemberInvite(onboardingStatus = TenantOnboardingStatus.ACTIVE) {
   return {
     id: 'invite-member-1',
     tenantId: 'tenant-1',
+    tokenHash: createHash('sha256').update(MEMBER_INVITE_TOKEN).digest('hex'),
     email: 'invitee@example.test',
     fullName: 'Invitee',
     role: UserRole.CLUB_ADMINISTRATOR,
@@ -164,6 +171,7 @@ function createOwnerInvite() {
   return {
     ...createMemberInvite(TenantOnboardingStatus.OWNER_INVITED),
     id: 'invite-owner-1',
+    tokenHash: createHash('sha256').update(OWNER_INVITE_TOKEN).digest('hex'),
     email: 'owner@club-a.leetplus.ru',
     fullName: 'Owner',
     role: UserRole.OWNER,
@@ -176,6 +184,7 @@ describe('AuthService', () => {
   let jwtService: JwtMock;
   let emailVerificationService: EmailVerificationMock;
   let identityEmailClaim: IdentityEmailClaimMock;
+  let initialOwnerInviteDeliveryGate: InitialOwnerInviteDeliveryGateMock;
   let service: AuthService;
 
   beforeEach(() => {
@@ -255,6 +264,10 @@ describe('AuthService', () => {
         revision: 3,
       }),
     };
+    initialOwnerInviteDeliveryGate = {
+      assertSent: jest.fn().mockResolvedValue(undefined),
+      assertSentInTransaction: jest.fn().mockResolvedValue(undefined),
+    };
     service = new AuthService(
       prisma as unknown as PrismaService,
       passwordService,
@@ -264,6 +277,7 @@ describe('AuthService', () => {
       new AccessScopeService(),
       new TenantExecutionPolicyService(),
       identityEmailClaim as unknown as IdentityEmailClaimService,
+      initialOwnerInviteDeliveryGate as unknown as InitialOwnerInviteDeliveryGateService,
     );
   });
 
@@ -403,10 +417,12 @@ describe('AuthService', () => {
   it('resolves an invite only by the hash of its opaque bearer token', async () => {
     prisma.userInvite.findUnique.mockResolvedValue(createMemberInvite());
 
-    await expect(service.getInvite(BEARER_INVITE_TOKEN)).resolves.toMatchObject({
-      email: 'invitee@example.test',
-      scope: 'NETWORK',
-    });
+    await expect(service.getInvite(BEARER_INVITE_TOKEN)).resolves.toMatchObject(
+      {
+        email: 'invitee@example.test',
+        scope: 'NETWORK',
+      },
+    );
     expect(prisma.userInvite.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -417,6 +433,31 @@ describe('AuthService', () => {
         },
       }),
     );
+    expect(initialOwnerInviteDeliveryGate.assertSent).not.toHaveBeenCalled();
+    expect(
+      initialOwnerInviteDeliveryGate.assertSentInTransaction,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('requires SENT evidence before exposing an initial owner invite', async () => {
+    const ownerInvite = createOwnerInvite();
+    prisma.userInvite.findUnique.mockResolvedValue(ownerInvite);
+
+    await expect(service.getInvite(OWNER_INVITE_TOKEN)).resolves.toMatchObject({
+      email: 'owner@club-a.leetplus.ru',
+      role: UserRole.OWNER,
+      scope: 'NETWORK',
+    });
+
+    expect(initialOwnerInviteDeliveryGate.assertSent).toHaveBeenCalledTimes(1);
+    expect(initialOwnerInviteDeliveryGate.assertSent).toHaveBeenCalledWith({
+      tenantId: ownerInvite.tenantId,
+      inviteId: ownerInvite.id,
+      tokenHash: ownerInvite.tokenHash,
+    });
+    expect(
+      initialOwnerInviteDeliveryGate.assertSentInTransaction,
+    ).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -465,9 +506,9 @@ describe('AuthService', () => {
         },
       });
 
-      await expect(service.getInvite(BEARER_INVITE_TOKEN)).rejects.toBeInstanceOf(
-        UnauthorizedException,
-      );
+      await expect(
+        service.getInvite(BEARER_INVITE_TOKEN),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
     },
   );
 
@@ -571,6 +612,21 @@ describe('AuthService', () => {
       subjectId: 'invite-owner-1',
       expectedRevision: 2,
     });
+    const deliveryAssertionInput = {
+      tenantId: ownerInvite.tenantId,
+      inviteId: ownerInvite.id,
+      tokenHash: ownerInvite.tokenHash,
+    };
+    expect(initialOwnerInviteDeliveryGate.assertSent).toHaveBeenCalledTimes(1);
+    expect(initialOwnerInviteDeliveryGate.assertSent).toHaveBeenCalledWith(
+      deliveryAssertionInput,
+    );
+    expect(
+      initialOwnerInviteDeliveryGate.assertSentInTransaction,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      initialOwnerInviteDeliveryGate.assertSentInTransaction,
+    ).toHaveBeenCalledWith(prisma, deliveryAssertionInput);
     const inviteUpdateMany = prisma.userInvite.updateMany as jest.Mock<
       Promise<unknown>,
       [
@@ -623,6 +679,12 @@ describe('AuthService', () => {
       firstInvocation(prisma.$queryRaw),
     );
     expect(firstInvocation(prisma.$queryRaw)).toBeLessThan(
+      firstInvocation(initialOwnerInviteDeliveryGate.assertSentInTransaction),
+    );
+    expect(
+      firstInvocation(initialOwnerInviteDeliveryGate.assertSentInTransaction),
+    ).toBeLessThan(firstInvocation(prisma.user.count));
+    expect(firstInvocation(prisma.user.count)).toBeLessThan(
       firstInvocation(prisma.user.create),
     );
     expect(firstInvocation(prisma.user.create)).toBeLessThan(
@@ -637,6 +699,64 @@ describe('AuthService', () => {
     expect(firstInvocation(prisma.user.update)).toBeLessThan(
       firstInvocation(prisma.user.findUniqueOrThrow),
     );
+    expect(
+      firstInvocation(initialOwnerInviteDeliveryGate.assertSent),
+    ).toBeLessThan(firstInvocation(passwordService.hash));
+  });
+
+  it('fails before password hashing when the initial owner delivery is not SENT', async () => {
+    const rejection = new UnauthorizedException({
+      message: 'Initial owner invite delivery is not verified',
+      reasonCode: 'INITIAL_OWNER_INVITE_DELIVERY_NOT_SENT',
+    });
+    prisma.userInvite.findUnique.mockResolvedValue(createOwnerInvite());
+    initialOwnerInviteDeliveryGate.assertSent.mockRejectedValue(rejection);
+
+    await expect(
+      service.acceptInvite(OWNER_INVITE_TOKEN, {
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      }),
+    ).rejects.toBe(rejection);
+
+    expect(passwordService.hash).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(identityEmailClaim.assertInvite).not.toHaveBeenCalled();
+    expect(
+      initialOwnerInviteDeliveryGate.assertSentInTransaction,
+    ).not.toHaveBeenCalled();
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  it('rechecks SENT inside the locked acceptance transaction before creating the owner', async () => {
+    const rejection = new UnauthorizedException({
+      message: 'Initial owner invite delivery is not verified',
+      reasonCode: 'INITIAL_OWNER_INVITE_DELIVERY_NOT_SENT',
+    });
+    prisma.userInvite.findUnique.mockResolvedValue(createOwnerInvite());
+    prisma.$queryRaw.mockResolvedValue([
+      createInviteTenant(TenantOnboardingStatus.OWNER_INVITED),
+    ]);
+    prisma.user.findUnique.mockResolvedValue(null);
+    initialOwnerInviteDeliveryGate.assertSentInTransaction.mockRejectedValue(
+      rejection,
+    );
+
+    await expect(
+      service.acceptInvite(OWNER_INVITE_TOKEN, {
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      }),
+    ).rejects.toBe(rejection);
+
+    expect(identityEmailClaim.assertInvite).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(
+      initialOwnerInviteDeliveryGate.assertSentInTransaction,
+    ).toHaveBeenCalledTimes(1);
+    expect(prisma.user.count).not.toHaveBeenCalled();
+    expect(prisma.user.create).not.toHaveBeenCalled();
+    expect(prisma.userInvite.updateMany).not.toHaveBeenCalled();
   });
 
   it('fails closed for a legacy invite without identity provenance before writes', async () => {
@@ -707,6 +827,10 @@ describe('AuthService', () => {
       expect(prisma.user.create).toHaveBeenCalledTimes(1);
       expect(prisma.userInvite.updateMany).toHaveBeenCalledTimes(1);
       expect(identityEmailClaim.transitionInvite).toHaveBeenCalledTimes(1);
+      expect(initialOwnerInviteDeliveryGate.assertSent).not.toHaveBeenCalled();
+      expect(
+        initialOwnerInviteDeliveryGate.assertSentInTransaction,
+      ).not.toHaveBeenCalled();
       expect(prisma.user.update).not.toHaveBeenCalled();
       expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(jwtService.signAsync).not.toHaveBeenCalled();

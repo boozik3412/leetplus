@@ -24,28 +24,31 @@ Additional environment for --apply:
   RUNTIME_FUNCTION_ENROLLMENT_CONFIRM
 
 The exact confirmation value is:
-  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20260730040000_shared_beta_runtime_release_activation 174
+  APPLY_RUNTIME_FUNCTION_ENROLLMENT_V1 <database> <role> 20260731020000_initial_owner_mail_delivery_boundary 176
 
 Safety contract:
   - The command never creates a role, database, schema, table, or function.
   - The migration/admin DATABASE_URL must be different from the target role.
-  - PostgreSQL 16, completed migration 166, exact latest migration 174 and exact count 174 are required.
-  - Only seven exact application functions receive EXECUTE: two delivery
-    helpers and five sealed identity-email boundaries.
-  - The worker-only durable Event writer is explicitly excluded.
+  - PostgreSQL 16, completed migration 166, exact latest migration 176 and exact count 176 are required.
+  - Only eight exact application functions receive EXECUTE: two delivery
+    helpers, five sealed identity-email boundaries, and the PII-free initial
+    OWNER invite SENT assertion.
+  - All six worker-only functions, including the four leased mail delivery
+    RPCs and their role assertion, are explicitly excluded.
   - The raw identity-email lock helper remains excluded.
   - The dormant OWNER invite HOLD writer remains excluded.
   - All nine shared-beta admission provenance functions remain excluded.
-  - All twenty-one new CURRENT_174 build, challenge, marker, state, activation
-    and coordinator functions remain excluded from the general runtime role;
-    the updated admission guard is the twenty-second unique CURRENT_174
-    routine and is covered without duplicate catalog work.
+  - All twenty retained CURRENT_174 build, challenge, marker, state,
+    activation and coordinator functions remain excluded from the general
+    runtime role; CURRENT_176 replaces the obsolete outbox release guard.
+  - All eight CURRENT_176 trigger/helper/reconciliation routines remain
+    excluded from the general runtime role.
   - A role bound to a live activation challenge or an unrevoked runtime marker
     is rejected; dedicated activation roles are never enrolled here.
-  - All table-level privileges on the twelve identity and shared-beta sealed
+  - All table-level privileges on the fourteen identity and shared-beta sealed
     tables are explicitly revoked from both the runtime role and PUBLIC.
   - All SELECT, INSERT, UPDATE, and REFERENCES column privileges are revoked
-    from the runtime role and PUBLIC across all 232 exact sealed columns.
+    from the runtime role and PUBLIC across all 291 exact sealed columns.
   - USAGE on IdentityMailOutboxStatus and SharedBetaReleaseGateCode is revoked
     from the runtime role and PUBLIC; exact enum labels and ACLs are verified.
   - No password, connection URL, token, or function owner is printed.

@@ -651,6 +651,29 @@ describe('SharedTenantProvisioningService shell boundary', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['address list', 'owner@example.test,attacker@example.test'],
+    ['display name', 'Owner <owner@example.test>'],
+    ['quoted local part', '"owner"@example.test'],
+    [
+      'CRLF header injection',
+      'owner@example.test\r\nBcc:attacker@example.test',
+    ],
+    ['invalid domain', 'owner@example..test'],
+  ])(
+    'rejects malformed ownerEmail (%s) before transaction, shell or claim',
+    async (_label, ownerEmail) => {
+      await expect(
+        service.provision(platformAdmin, provisioningDto({ ownerEmail })),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(prisma.$transaction.mock.calls).toHaveLength(0);
+      expect(prisma.tenant.create.mock.calls).toHaveLength(0);
+      expect(prisma.store.create.mock.calls).toHaveLength(0);
+      expect(reserveInvite.mock.calls).toHaveLength(0);
+    },
+  );
+
   it('does not persist audit when the sealed reservation rejects the email', async () => {
     reserveInvite.mockRejectedValue(
       new ConflictException({

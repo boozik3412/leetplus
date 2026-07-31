@@ -151,6 +151,12 @@ jobs:
       - name: Validate dormant OWNER invite HOLD outbox
         run: pnpm --filter database check:identity-owner-invite-hold-outbox
 
+      - name: Validate leased initial-owner mail delivery boundary
+        run: pnpm --filter database check:identity-mail-delivery
+
+      - name: Validate identity-mail worker enrollment boundary
+        run: pnpm --filter database check:identity-mail-worker-enrollment
+
       - name: Validate shared beta admission provenance
         run: pnpm --filter database check:shared-beta-admission-provenance
 
@@ -194,8 +200,17 @@ jobs:
       - name: Lint isolated design-partner runtime boundary
         run: pnpm --filter api lint:ci:design-partner
 
+      - name: Lint identity-mail worker and SENT boundary
+        run: pnpm --filter api lint:ci:identity-mail-worker
+
+      - name: Lint identity-mail PostgreSQL acceptance seams
+        run: pnpm --filter api lint:ci:identity-mail-worker-pg
+
       - name: Test isolated design-partner runtime boundary
         run: pnpm --filter api test:ci:design-partner
+
+      - name: Test identity-mail worker and SENT boundary
+        run: pnpm --filter api test:ci:identity-mail-worker
 
       - name: Run focused API security tests
         run: pnpm --filter api test:ci:focused
@@ -235,8 +250,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260730040000_shared_beta_runtime_release_activation
-          EXPECTED_DATABASE_MIGRATION_COUNT: "174"
+          EXPECTED_DATABASE_MIGRATION: 20260731020000_initial_owner_mail_delivery_boundary
+          EXPECTED_DATABASE_MIGRATION_COUNT: "176"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -366,11 +381,29 @@ jobs:
         env:
           SHARED_BETA_RUNTIME_RELEASE_ACTIVATION_UPGRADE_SMOKE_CONFIRM: run-shared-beta-runtime-release-activation-upgrade-smoke
 
+      - name: Rehearse leased identity-mail delivery CURRENT_174 to CURRENT_176
+        run: pnpm --filter database db:smoke:identity-mail-delivery-upgrade
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_DELIVERY_UPGRADE_SMOKE_CONFIRM: run-identity-mail-delivery-upgrade-smoke
+
+      - name: Verify identity-mail worker role enrollment on a disposable boundary
+        run: pnpm --filter database db:smoke:identity-mail-worker-enrollment-upgrade
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_WORKER_ENROLLMENT_SMOKE_CONFIRM: run-identity-mail-worker-enrollment-upgrade-smoke
+
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg
         env:
           NODE_ENV: test
           IDENTITY_OWNER_INVITE_HOLD_PG_CONFIRM: run-owner-invite-hold-outbox-postgres-fixture
+
+      - name: Verify identity-mail worker through PostgreSQL and trusted TLS SMTP
+        run: pnpm --filter api test:integration:identity-mail-worker:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_WORKER_PG_E2E_CONFIRM: run-identity-mail-worker-postgres-smtp-e2e
 
       - name: Verify sealed identity email claim write boundaries
         run: pnpm --filter database db:smoke:identity-email-claim-boundary

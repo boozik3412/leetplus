@@ -24,6 +24,7 @@ const INVITE_ID = '22222222-2222-4222-8222-222222222222';
 const OUTBOX_ID = '33333333-3333-4333-8333-333333333333';
 const MESSAGE_KEY = '44444444-4444-4444-8444-444444444444';
 const REQUEST_DIGEST = 'a'.repeat(64);
+const RECIPIENT_EMAIL = 'owner@example.test';
 
 function binding(): IdentityMailSecretBinding {
   return {
@@ -34,6 +35,7 @@ function binding(): IdentityMailSecretBinding {
     template: 'INITIAL_OWNER_INVITE',
     messageKey: MESSAGE_KEY,
     requestDigest: REQUEST_DIGEST,
+    recipientEmail: RECIPIENT_EMAIL,
     expiresAt: new Date('2026-08-01T12:34:56.789Z'),
   };
 }
@@ -81,20 +83,31 @@ function typeScriptFiles(directory: string): string[] {
 }
 
 describe('IdentityMailSecretEnvelopeService', () => {
-  it('remains absent from every runtime module, route, service, and worker', () => {
+  it('is referenced only by the standalone identity-mail worker CLI', () => {
     const implementationPath = join(
       __dirname,
       'identity-mail-secret-envelope.service.ts',
     );
-    const unexpectedReferences = typeScriptFiles(join(__dirname, '..'))
-      .filter((path) => path !== implementationPath && path !== __filename)
+    const allowedWorkerPath = join(
+      __dirname,
+      '..',
+      'identity-mail-worker',
+      'identity-mail-worker.cli.ts',
+    );
+    const references = typeScriptFiles(join(__dirname, '..'))
+      .filter(
+        (path) =>
+          path !== implementationPath &&
+          path !== __filename &&
+          !path.endsWith('.spec.ts'),
+      )
       .filter((path) =>
         /IdentityMailSecretEnvelopeService|identity-mail-secret-envelope\.service/u.test(
           readFileSync(path, 'utf8'),
         ),
       );
 
-    expect(unexpectedReferences).toEqual([]);
+    expect(references).toEqual([allowedWorkerPath]);
   });
 
   it('seals and opens the compatible 256-bit invite token contract', () => {
@@ -143,6 +156,29 @@ describe('IdentityMailSecretEnvelopeService', () => {
     expect(second.secretCiphertext).not.toEqual(first.secretCiphertext);
   });
 
+  it.each([
+    'Owner@example.test',
+    ' owner@example.test',
+    'Owner <owner@example.test>',
+    'owner@example.test,attacker@example.test',
+  ])(
+    'rejects non-canonical recipient binding %s before entropy',
+    (recipientEmail) => {
+      const service = createService();
+      const entropy = jest.spyOn(
+        service as unknown as {
+          secureRandomBytes: (size: number) => Buffer;
+        },
+        'secureRandomBytes',
+      );
+
+      expect(() =>
+        service.sealInitialOwnerInviteToken({ ...binding(), recipientEmail }),
+      ).toThrow('Identity mail secret envelope is invalid');
+      expect(entropy).not.toHaveBeenCalled();
+    },
+  );
+
   it('builds deterministic canonical AAD with the fixed domain and schema', () => {
     const service = createService();
     const sealed = service.sealInitialOwnerInviteToken(binding());
@@ -173,7 +209,7 @@ describe('IdentityMailSecretEnvelopeService', () => {
     );
 
     expect(aad.toString('utf8')).toBe(
-      `{"domain":"leetplus:identity-mail-secret-envelope","schemaVersion":1,"environment":"test","tenantId":"${TENANT_ID}","workflowLocator":"${WORKFLOW_LOCATOR}","inviteId":"${INVITE_ID}","outboxId":"${OUTBOX_ID}","template":"INITIAL_OWNER_INVITE","messageKey":"${MESSAGE_KEY}","requestDigest":"${REQUEST_DIGEST}","tokenHash":"${sealed.tokenHash}","digestVersion":"sha256-v1","expiresAt":"2026-08-01T12:34:56.789Z","keyVersion":"v1","envelopeVersion":1}`,
+      `{"domain":"leetplus:identity-mail-secret-envelope","schemaVersion":2,"environment":"test","tenantId":"${TENANT_ID}","workflowLocator":"${WORKFLOW_LOCATOR}","inviteId":"${INVITE_ID}","outboxId":"${OUTBOX_ID}","template":"INITIAL_OWNER_INVITE","messageKey":"${MESSAGE_KEY}","requestDigest":"${REQUEST_DIGEST}","recipientEmail":"${RECIPIENT_EMAIL}","tokenHash":"${sealed.tokenHash}","digestVersion":"sha256-v1","expiresAt":"2026-08-01T12:34:56.789Z","keyVersion":"v1","envelopeVersion":1}`,
     );
     expect(
       internals.canonicalAad(
@@ -197,9 +233,7 @@ describe('IdentityMailSecretEnvelopeService', () => {
       )
       .mockImplementation((size) => {
         if (size === 32) {
-          return Buffer.from(
-            Array.from({ length: 32 }, (_, index) => index),
-          );
+          return Buffer.from(Array.from({ length: 32 }, (_, index) => index));
         }
         if (size === 12) {
           return Buffer.from(
@@ -217,7 +251,7 @@ describe('IdentityMailSecretEnvelopeService', () => {
         'ea866a757e4c38babfa8127cbe9a409d3e1f93a00ff1488ff735fcf917afffd0',
       digestVersion: 'sha256-v1',
       secretCiphertext: Buffer.from(
-        '202122232425262728292a2b36b2ff20b42c80815ac564d00448b6f015d4ebe891be23e9c1a87327c4638557d2ce3cd5ae9a1b742f38e4bc89c0d31aa76acbf2427c2734bd5785',
+        '202122232425262728292a2b36b2ff20b42c80815ac564d00448b6f015d4ebe891be23e9c1a87327c4638557d2ce3cd5ae9a1b742f38e4609d5f465e16a3c8c72384f33459d489',
         'hex',
       ),
       envelopeVersion: 1,
@@ -235,11 +269,7 @@ describe('IdentityMailSecretEnvelopeService', () => {
     const rawToken = service.openInitialOwnerInviteToken(openInput(sealed));
 
     expect(
-      service.verifyTokenHash(
-        rawToken,
-        sealed.tokenHash,
-        sealed.digestVersion,
-      ),
+      service.verifyTokenHash(rawToken, sealed.tokenHash, sealed.digestVersion),
     ).toBe(true);
     expect(
       service.verifyTokenHash(
@@ -255,9 +285,9 @@ describe('IdentityMailSecretEnvelopeService', () => {
         sealed.digestVersion,
       ),
     ).toBe(false);
-    expect(
-      service.verifyTokenHash(rawToken, 'A'.repeat(64), 'sha256-v1'),
-    ).toBe(false);
+    expect(service.verifyTokenHash(rawToken, 'A'.repeat(64), 'sha256-v1')).toBe(
+      false,
+    );
     expect(
       service.verifyTokenHash(rawToken, sealed.tokenHash, 'sha256-v2'),
     ).toBe(false);
@@ -312,6 +342,13 @@ describe('IdentityMailSecretEnvelopeService', () => {
       (input: OpenIdentityMailInviteTokenInput) => ({
         ...input,
         requestDigest: changedHex(input.requestDigest),
+      }),
+    ],
+    [
+      'recipientEmail',
+      (input: OpenIdentityMailInviteTokenInput) => ({
+        ...input,
+        recipientEmail: 'attacker@example.test',
       }),
     ],
     [
@@ -477,10 +514,7 @@ describe('IdentityMailSecretEnvelopeService', () => {
       'reused guest portal JWT key',
       { GUEST_PORTAL_JWT_SECRET: ENCRYPTION_KEY },
     ],
-    [
-      'reused referral key',
-      { GUEST_GAME_REFERRAL_SECRET: ENCRYPTION_KEY },
-    ],
+    ['reused referral key', { GUEST_GAME_REFERRAL_SECRET: ENCRYPTION_KEY }],
     ['reused integration key', { INTEGRATION_ENCRYPTION_KEY: ENCRYPTION_KEY }],
     ['reused scheduler token', { SYNC_SERVICE_TOKEN: ENCRYPTION_KEY }],
   ])('fails closed before entropy use for a %s', (_case, overrides) => {
@@ -518,9 +552,7 @@ describe('IdentityMailSecretEnvelopeService', () => {
       serializedError = JSON.stringify(error);
     }
 
-    expect(serializedError).toContain(
-      'IDENTITY_MAIL_CRYPTOGRAPHY_UNAVAILABLE',
-    );
+    expect(serializedError).toContain('IDENTITY_MAIL_CRYPTOGRAPHY_UNAVAILABLE');
     expect(serializedError).not.toContain('provider-secret-detail');
     expect(entropy).toHaveBeenCalledTimes(1);
   });

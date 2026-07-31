@@ -105,8 +105,8 @@ function appliedMigrationRows(artifact = expectedMigrationArtifact()) {
 
 function catalogRow(overrides = {}) {
   return {
-    expected_relation_count: "10",
-    matched_relation_count: "10",
+    expected_relation_count: "11",
+    matched_relation_count: "11",
     dormant_relation_owner_mismatch_count: "0",
     dormant_relation_nonowner_acl_count: "0",
     dormant_column_nonowner_acl_count: "0",
@@ -114,22 +114,22 @@ function catalogRow(overrides = {}) {
     dormant_function_nonowner_acl_count: "0",
     dormant_type_owner_mismatch_count: "0",
     dormant_type_nonowner_acl_count: "0",
-    expected_column_count: "133",
-    matched_column_count: "133",
-    expected_exact_identity_column_count: "110",
-    actual_exact_identity_column_count: "110",
-    matched_constraint_count: "73",
-    actual_constraint_count: "73",
-    matched_index_count: "38",
-    actual_index_count: "38",
-    matched_function_count: "42",
-    actual_function_count: "42",
-    matched_enum_label_count: "9",
-    total_enum_label_count: "9",
-    matched_trigger_count: "6",
-    actual_identity_trigger_count: "6",
-    matched_ri_trigger_count: "44",
-    actual_ri_trigger_count: "44",
+    expected_column_count: "177",
+    matched_column_count: "177",
+    expected_exact_identity_column_count: "154",
+    actual_exact_identity_column_count: "154",
+    matched_constraint_count: "83",
+    actual_constraint_count: "83",
+    matched_index_count: "48",
+    actual_index_count: "48",
+    matched_function_count: "46",
+    actual_function_count: "46",
+    matched_enum_label_count: "15",
+    total_enum_label_count: "15",
+    matched_trigger_count: "9",
+    actual_identity_trigger_count: "9",
+    matched_ri_trigger_count: "56",
+    actual_ri_trigger_count: "56",
     ...overrides,
   };
 }
@@ -577,10 +577,10 @@ test("timeouts are bounded and embedded in the one-connection read-only URL", ()
 });
 
 test("the manifest exposes exactly two create-only proposal codes and exact column ACL", () => {
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 174);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 176);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260730040000_shared_beta_runtime_release_activation",
+    "20260731020000_initial_owner_mail_delivery_boundary",
   );
   assert.deepEqual(
     Object.entries(FINDING_MANIFEST)
@@ -688,15 +688,15 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     { dormant_function_nonowner_acl_count: "1" },
     { dormant_type_owner_mismatch_count: "1" },
     { dormant_type_nonowner_acl_count: "1" },
-    { matched_column_count: "132" },
-    { actual_exact_identity_column_count: "111" },
-    { matched_constraint_count: "72" },
-    { actual_index_count: "39" },
-    { actual_function_count: "43" },
+    { matched_column_count: "176" },
+    { actual_exact_identity_column_count: "155" },
+    { matched_constraint_count: "82" },
+    { actual_index_count: "49" },
+    { actual_function_count: "47" },
     { total_enum_label_count: "10" },
-    { actual_identity_trigger_count: "7" },
-    { matched_ri_trigger_count: "43" },
-    { actual_ri_trigger_count: "45" },
+    { actual_identity_trigger_count: "10" },
+    { matched_ri_trigger_count: "55" },
+    { actual_ri_trigger_count: "57" },
   ]) {
     assert.equal(buildCatalogState(catalogRow(catalogDrift)).ready, false);
   }
@@ -704,6 +704,14 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(CATALOG_STATE_SQL, /pg_get_function_identity_arguments/iu);
   assert.match(CATALOG_STATE_SQL, /workflowLocator/u);
   assert.match(CATALOG_STATE_SQL, /IdentityEmailClaim_workflow_locator_check/u);
+  assert.match(
+    CATALOG_STATE_SQL,
+    /abcebbd5b0ea9e9a36afcbdecdab1eed408283728a9d3c934dbf216a32e8a645/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /a9a330b5ed46e578cffd7eda8846fe5b04b4c2fd74a0d46c69ae6e3a0002b7bc/u,
+  );
   assert.match(
     CATALOG_STATE_SQL,
     /6e0abd4cccc01c0a8412c04faee92b9ec93984ccc9a840557178b27837422096/u,
@@ -739,6 +747,26 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   );
   assert.match(CATALOG_STATE_SQL, /IdentityOwnerInviteIssueCommand/u);
   assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox/u);
+  assert.match(CATALOG_STATE_SQL, /IdentityMailDeliveryEvent/u);
+  assert.match(CATALOG_STATE_SQL, /actorDigest/u);
+  assert.match(
+    CATALOG_STATE_SQL,
+    /f7e062b75bbbd5789da016e0a2c56df31356acbc73ebe38dc348dbe3af470df9/u,
+  );
+  assert.match(CATALOG_STATE_SQL, /identity_mail_delivery_event_append_v1/u);
+  assert.match(
+    CATALOG_STATE_SQL,
+    /35bedbeb9b06b060d9b1459784b55769e3773fbf7ceb9d9b92ec992578c1af33/u,
+  );
+  assert.match(CATALOG_STATE_SQL, /identity_mail_delivery_worker_assert_v1/u);
+  assert.match(
+    CATALOG_STATE_SQL,
+    /public\."identity_mail_delivery_worker_assert_v1"\(text\)/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /c2b5c7c9fd8b5ab0f1398b7a14b997fbed38d00df46c7d9fd6767735a2d8b1bb/u,
+  );
   assert.match(CATALOG_STATE_SQL, /releasedAt/u);
   assert.match(CATALOG_STATE_SQL, /secretCiphertext/u);
   assert.match(CATALOG_STATE_SQL, /identity_owner_invite_issue_hold_v1/u);
@@ -746,10 +774,10 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     CATALOG_STATE_SQL,
     /787e025ba9fa501fc3d62dde7502c0e82bf01afeac1858031db54a6b2b982533/u,
   );
-  assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox_release_guard_trigger/u);
+  assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox_delivery_guard_trigger/u);
   assert.match(
     CATALOG_STATE_SQL,
-    /0fdb6423260b2f15b0cd3eead0deb8348c1178b024281800ae6c51e794d9fbd7/u,
+    /fb642a3e117ffe6804f4448a9b850c03ad7c6e1e7d5da05f1d20e19bfa5ddd70/u,
   );
   assert.match(
     CATALOG_STATE_SQL,
@@ -757,7 +785,7 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   );
   assert.match(
     CATALOG_STATE_SQL,
-    /17b45564316ec0c1211a56ba6d424842ccc1a6a5ca04d4db9f3f1768cb782ad5/u,
+    /cc00921ee3b6ee66feec020918749528c0cd8f220dd40c98779ae70f52a69947/u,
   );
   assert.match(
     CATALOG_STATE_SQL,
@@ -777,7 +805,7 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   );
   assert.match(
     CATALOG_STATE_SQL,
-    /71c745cba2f40476cc13a24b953a791a49d8f1cd6afcb74e9e03d4187bd6a782/u,
+    /a135da3dc5eb1651c29d8d64056b5a193be5ce22cd8f0107df5a693aff569b9a/u,
   );
   assert.match(
     CATALOG_STATE_SQL,
@@ -811,10 +839,7 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     CATALOG_STATE_SQL,
     /function_row\.oid =\s+pg_catalog\.to_regprocedure\(expected\.catalog_signature\)/iu,
   );
-  const currentRuntimeReleaseFunctions =
-    EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.filter(
-      ({ key }) => key !== "identity_mail_outbox_release_guard_v1",
-    );
+  const currentRuntimeReleaseFunctions = EXCLUDED_RUNTIME_RELEASE_FUNCTIONS;
   assert.equal(currentRuntimeReleaseFunctions.length, 20);
   for (const entry of currentRuntimeReleaseFunctions) {
     assert.equal(CATALOG_STATE_SQL.includes(entry.catalogSignature), true);

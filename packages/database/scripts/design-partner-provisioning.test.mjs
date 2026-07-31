@@ -221,6 +221,44 @@ test("rejects reserved tenants, invalid email, invalid timezone and long access"
   );
 });
 
+test("accepts one canonical mailbox and rejects recipient-list syntax", () => {
+  assert.equal(
+    normalizeDesignPartnerManifest(
+      manifest({ ownerEmail: "OWNER+PILOT@EXAMPLE.COM" }),
+      NOW,
+    ).ownerEmail,
+    "owner+pilot@example.com",
+  );
+  assert.equal(
+    normalizeDesignPartnerManifest(
+      manifest({ ownerEmail: "owner@example.123" }),
+      NOW,
+    ).ownerEmail,
+    "owner@example.123",
+  );
+
+  for (const ownerEmail of [
+    "first@example.com,second@example.com",
+    "Owner <owner@example.com>",
+    ".owner@example.com",
+    "owner..pilot@example.com",
+    "owner@example..com",
+    "owner@-example.com",
+    "owner@example-.com",
+    `owner@${"a".repeat(64)}.com`,
+    `${"a".repeat(65)}@example.com`,
+    "own\ner@example.com",
+    "\nowner@example.com",
+    "owner@example.com\t",
+  ]) {
+    expectCode(
+      () =>
+        normalizeDesignPartnerManifest(manifest({ ownerEmail }), NOW),
+      "INVALID_MANIFEST",
+    );
+  }
+});
+
 test("status and emergency suspend may load an expired access manifest", () => {
   const expired = manifest({
     accessExpiresAt: "2026-07-27T12:00:00.000Z",

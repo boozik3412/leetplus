@@ -618,7 +618,7 @@ test("Prisma exposes every sealed relation and composite provenance edge", async
 
   assert.match(
     schema,
-    /enum IdentityMailOutboxStatus \{\s*HOLD\s+PENDING\s*\}/u,
+    /enum IdentityMailOutboxStatus \{\s*HOLD\s+PENDING\s+CLAIMED\s+RETRY\s+SENT\s+DEAD\s+CANCELED\s+RECONCILIATION_REQUIRED\s*\}/u,
   );
   assert.match(schema, /releasedAt\s+DateTime\?\s+@db\.Timestamptz\(3\)/u);
   for (const model of [

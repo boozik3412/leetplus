@@ -140,9 +140,8 @@ describePostgres(
           AND rolled_back_at IS NULL
       `);
       expect(migrationState).toEqual({
-        migration_count: 174,
-        latest_migration:
-          '20260730040000_shared_beta_runtime_release_activation',
+        migration_count: 176,
+        latest_migration: '20260731020000_initial_owner_mail_delivery_boundary',
       });
 
       encryptionKey = randomBytes(32).toString('base64url');
@@ -272,6 +271,7 @@ describePostgres(
         template: 'INITIAL_OWNER_INVITE',
         messageKey,
         requestDigest,
+        recipientEmail: canonicalEmail,
         expiresAt,
       };
       const sealed = envelopeService.sealInitialOwnerInviteToken(binding);
@@ -411,7 +411,7 @@ describePostgres(
         revision: 2,
       });
 
-      const persistedOpenInput = persistedEnvelopeInput(outbox);
+      const persistedOpenInput = persistedEnvelopeInput(outbox, canonicalEmail);
       const rawToken =
         envelopeService.openInitialOwnerInviteToken(persistedOpenInput);
       expect(rawToken).toMatch(/^[A-Za-z0-9_-]{43}$/u);
@@ -640,6 +640,7 @@ function persistedEnvelopeInput(
   outbox: Awaited<
     ReturnType<PrismaClient['identityMailOutbox']['findUniqueOrThrow']>
   >,
+  recipientEmail: string,
 ): OpenIdentityMailInviteTokenInput {
   expect(outbox.template).toBe('INITIAL_OWNER_INVITE');
   expect(outbox.tokenDigestVersion).toBe(IDENTITY_MAIL_TOKEN_DIGEST_VERSION);
@@ -654,6 +655,7 @@ function persistedEnvelopeInput(
     template: 'INITIAL_OWNER_INVITE',
     messageKey: outbox.messageKey,
     requestDigest: outbox.issueRequestDigest,
+    recipientEmail,
     expiresAt: outbox.expiresAt,
     tokenHash: outbox.tokenHash,
     digestVersion: IDENTITY_MAIL_TOKEN_DIGEST_VERSION,
@@ -681,7 +683,7 @@ function assertExactCanonicalAad(
   expect(aad.toString('utf8')).toBe(
     JSON.stringify({
       domain: 'leetplus:identity-mail-secret-envelope',
-      schemaVersion: 1,
+      schemaVersion: 2,
       environment: input.aadEnvironment,
       tenantId: input.tenantId,
       workflowLocator: input.workflowLocator,
@@ -690,6 +692,7 @@ function assertExactCanonicalAad(
       template: input.template,
       messageKey: input.messageKey,
       requestDigest: input.requestDigest,
+      recipientEmail: input.recipientEmail,
       tokenHash: input.tokenHash,
       digestVersion: input.digestVersion,
       expiresAt: input.expiresAt.toISOString(),

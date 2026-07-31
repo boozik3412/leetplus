@@ -18,7 +18,12 @@ const RESERVED_TENANT_SLUGS = new Set([
   "www",
 ]);
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_LOCAL_PATTERN = /^[a-z0-9!#$%&'*+/=?^_`{|}~.-]+$/;
+const EMAIL_DOMAIN_LABEL_PATTERN =
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const MAX_IDENTITY_EMAIL_LENGTH = 320;
+const MAX_IDENTITY_EMAIL_LOCAL_PART_LENGTH = 64;
+const MAX_IDENTITY_EMAIL_DOMAIN_LENGTH = 253;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ROTATION_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,119}$/;
 const MAX_HMAC_KEY_BYTES = 4096;
@@ -110,6 +115,51 @@ function normalizeExpiry(value, now, allowExpiredAccess) {
   return expiresAt;
 }
 
+function isCanonicalSingleMailbox(value) {
+  if (
+    value.length < 3 ||
+    value.length > MAX_IDENTITY_EMAIL_LENGTH ||
+    value !== value.trim() ||
+    value !== value.toLowerCase() ||
+    !/^[!-~]+$/.test(value)
+  ) {
+    return false;
+  }
+
+  const separator = value.indexOf("@");
+  if (
+    separator < 1 ||
+    separator !== value.lastIndexOf("@") ||
+    separator > MAX_IDENTITY_EMAIL_LOCAL_PART_LENGTH
+  ) {
+    return false;
+  }
+
+  const localPart = value.slice(0, separator);
+  const domain = value.slice(separator + 1);
+  if (
+    !EMAIL_LOCAL_PATTERN.test(localPart) ||
+    localPart.startsWith(".") ||
+    localPart.endsWith(".") ||
+    localPart.includes("..") ||
+    domain.length < 3 ||
+    domain.length > MAX_IDENTITY_EMAIL_DOMAIN_LENGTH
+  ) {
+    return false;
+  }
+
+  const labels = domain.split(".");
+  return (
+    labels.length >= 2 &&
+    labels.every(
+      (label) =>
+        label.length >= 1 &&
+        label.length <= 63 &&
+        EMAIL_DOMAIN_LABEL_PATTERN.test(label),
+    )
+  );
+}
+
 export function normalizeDesignPartnerManifest(
   input,
   now = new Date(),
@@ -129,11 +179,21 @@ export function normalizeDesignPartnerManifest(
     );
   }
 
-  const ownerEmail = requiredText(input.ownerEmail, "ownerEmail", 5, 254)
-    .toLowerCase()
-    .trim();
-  if (!EMAIL_PATTERN.test(ownerEmail)) {
-    fail("INVALID_MANIFEST", "ownerEmail must be a valid email address.");
+  if (typeof input.ownerEmail !== "string") {
+    fail("INVALID_MANIFEST", "ownerEmail is required.");
+  }
+  if (!/^[ -~]+$/.test(input.ownerEmail)) {
+    fail(
+      "INVALID_MANIFEST",
+      "ownerEmail must contain printable ASCII characters only.",
+    );
+  }
+  const ownerEmail = input.ownerEmail.trim().toLowerCase();
+  if (!isCanonicalSingleMailbox(ownerEmail)) {
+    fail(
+      "INVALID_MANIFEST",
+      "ownerEmail must be one canonical email mailbox.",
+    );
   }
 
   const partnerAlias = requiredText(input.partnerAlias, "partnerAlias", 2, 48);

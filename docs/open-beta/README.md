@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.49                                         |
+| Версия           | 1.50                                         |
 | Дата             | 01.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -321,6 +321,10 @@ enterprise-isolation option и не сокращает shared gates.
     PostgreSQL race matrix до любого runtime grant. Provider-mark/complete
     lost-response также требуют event-backed replay либо typed reconcile
     handoff; повторная SMTP-отправка остаётся запрещённой.
+    Exact implementation
+    `abbfe5611b7bf10b223359d601b4665874493671`, GitHub Actions
+    [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)
+    (`run #66`) — `3/3 PASS`, включая полный PostgreSQL CURRENT181 runner.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail

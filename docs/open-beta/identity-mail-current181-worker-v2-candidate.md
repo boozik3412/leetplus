@@ -5,6 +5,7 @@
 | Контракт | `IDENTITY_MAIL_CURRENT181_WORKER_V2_CANDIDATE_BOUNDARY_V1` |
 | Статус | `SHA_PINNED / DISPOSABLE_REHEARSAL_PASSED / NOT_CANONICAL / NOT_DEPLOYABLE` |
 | Audit baseline | `8afe7969ca95fb45e427451dfaec67ad274c0f35` |
+| Implementation evidence | `abbfe5611b7bf10b223359d601b4665874493671`; GitHub Actions [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036) (`run #66`) — `3/3 PASS` |
 | Canonical schema | `CURRENT_179 / 20260731120000_identity_mail_delivery_release_head` |
 | Неканонический prerequisite | `CURRENT_180 / 20260801010000_identity_mail_tenant_enrollment_control_plane` |
 | CURRENT181 candidate | `20260801020000_identity_mail_tenant_lock_drain_worker_v2` |
@@ -383,6 +384,13 @@ Durable runner завершился за 17,8 секунды с решением
 `SKIPPED_DORMANT_GUARD_NO_COORDINATOR_RPC`: обход dormant guard не подменяет
 отсутствующий signed enrollment coordinator.
 
+Exact implementation commit
+`abbfe5611b7bf10b223359d601b4665874493671` принят GitHub Actions
+[`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)
+(`run #66`) — `3/3 PASS`: authority-root gate, application checks и полный
+PostgreSQL migration smoke, включая реальный CURRENT179→CURRENT180→CURRENT181
+runner. Это CI evidence инженерного rehearsal, а не deploy authorization.
+
 CURRENT181 остаётся dormant, если producer/activation ещё v1: worker lock сам
 по себе не закрывает появление нового `HOLD/PENDING` во время drain.
 
@@ -399,7 +407,6 @@ CURRENT181 остаётся dormant, если producer/activation ещё v1: wor
 
 До promotion по-прежнему отсутствуют либо не приняты:
 
-- exact-SHA remote CI evidence и independent final review всего commit;
 - единый tenant-first lock для acceptance/cancel/revoke/reissue и всех
   IdentityEmailClaim transition paths. Сейчас worker v2 после tenant lock
   может удерживать Outbox/UserInvite и ждать email claim, а canonical

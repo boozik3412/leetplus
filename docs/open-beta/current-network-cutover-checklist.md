@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.24.0                                             |
+| Версия          | 1.24.1                                             |
 | Дата            | 01.08.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -86,7 +86,10 @@ admission.
       прошёл semantic static gate и PostgreSQL 16.13
       apply/catalog/ACL/concurrency/timeout/rollback/cleanup rehearsal;
       source остался `179/179`, residue — `0`, grants/enrollment отсутствуют,
-      статус — `NOT_DEPLOYABLE`.
+      статус — `NOT_DEPLOYABLE`. Exact implementation
+      `abbfe5611b7bf10b223359d601b4665874493671`, GitHub Actions
+      [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)
+      (`run #66`) — `3/3 PASS`.
 - [ ] Worker v2 RPC/API, producer tenant lock и crash-resumable drain
       завершены одним atomic release: database worker-v2 rehearsal и race
       matrix уже приняты, но API v2, producer/activation v2, coordinators,
@@ -615,6 +618,13 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.24.1`, 01.08.2026 — exact implementation CURRENT181
+  `abbfe5611b7bf10b223359d601b4665874493671` принят GitHub Actions
+  [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)
+  (`run #66`) — `3/3 PASS`, включая полный PostgreSQL stack runner.
+  Candidate и canonical target не изменены: `CURRENT181` остаётся
+  `NOT_DEPLOYABLE`, фактическая schema — `CURRENT_179/179`; найденные P1/P2,
+  production deploy, cutover и external pilot остаются `NO-GO`.
 - `1.24.0`, 01.08.2026 — добавлен owner-only stacked `CURRENT181` rehearsal
   `20260801020000_identity_mail_tenant_lock_drain_worker_v2`, SQL SHA-256
   `b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455`:

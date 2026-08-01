@@ -28,7 +28,7 @@ const CONFIRMATION_ENVIRONMENT =
 const CLONE_PREFIX = "lp_imtep_";
 const CLONE_PATTERN = /^lp_imtep_[0-9a-f]{32}_ci$/u;
 const SAFE_SOURCE_DATABASE_PATTERN = /^[a-z][a-z0-9_]{0,54}_ci$/u;
-const SAFE_IDENTIFIER_PATTERN = /^[a-z_][a-z0-9_]{0,62}$/u;
+const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/u;
 const SHA_256_PATTERN = /^[0-9a-f]{64}$/u;
 const NONEXISTENT_WORKER_OID = 4_000_000_000;
 
@@ -725,6 +725,10 @@ export function runSelfTest() {
     assert.throws(() => parseSafeSourceDatabaseUrl(unsafe));
   }
   assert.throws(() => quoteIdentifier('unsafe"name'));
+  assert.equal(
+    quoteIdentifier("IdentityMailDeliveryTenantEnrollment"),
+    '"IdentityMailDeliveryTenantEnrollment"',
+  );
 
   const now = new Date("2026-08-01T00:00:00.000Z");
   const policy = {
@@ -760,7 +764,7 @@ export function runSelfTest() {
   assert.deepEqual(config.targetPolicy, policy);
 
   return Object.freeze({
-    checks: 19,
+    checks: 20,
     cloneOnly: true,
     script: SCRIPT_NAME,
     sourceDatabaseWrites: false,

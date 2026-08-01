@@ -16,6 +16,7 @@ import {
   type GuestGameDryRunResult,
   type GuestGameProcessEventDto,
 } from './guest-gamification.service';
+import { hasSessionFactsPendingHourlyReplay } from './guest-activity-hourly-replay';
 import { buildGuestGameOriginKey } from './guest-game-origin-key';
 import { guestGameTriggerMatches } from './guest-game-progress';
 import { guestGameRuleActivationAt } from './guest-game-rule-evaluator';
@@ -363,6 +364,25 @@ export class GuestGameLootBoxSessionRecoveryService {
       liveNotBefore && liveNotBefore > earliestRuleActivation
         ? liveNotBefore
         : earliestRuleActivation;
+    if (
+      await hasSessionFactsPendingHourlyReplay(this.prisma, {
+        tenantId: user.tenantId,
+        profileId,
+        happenedAtGte: cutoff,
+        factTypes: [
+          'SESSION_STARTED',
+          'HOURLY_SESSION_STARTED',
+          'PACKAGE_OR_SUBSCRIPTION_USED',
+        ],
+      })
+    ) {
+      return emptyTenantResult(
+        user.tenantId,
+        user.tenantSlug,
+        'SKIPPED',
+        'Hourly-session source replay is not complete; recovery watermark was not advanced.',
+      );
+    }
     const ruleIdsBySessionClass = new Map<RecoverySessionClass, Set<string>>([
       ['ANY', new Set<string>()],
       ['HOURLY', new Set<string>()],

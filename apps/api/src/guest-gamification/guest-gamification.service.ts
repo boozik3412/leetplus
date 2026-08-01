@@ -112,6 +112,15 @@ import {
   type ExactCanonicalOwnerReconcileOutcome,
 } from './guest-game-exact-owner-reconciler';
 import {
+  genericSessionClassificationRemediationSql,
+  genericSessionClassificationRemediationStatus,
+} from './guest-game-generic-session-remediation';
+import {
+  assertGenericSessionEventMaterializationReadyInTransaction,
+  prepareGenericSessionEventForMaterialization,
+  type GenericSessionMaterializationReadiness,
+} from './guest-game-generic-session-materialization-readiness';
+import {
   guestGameBattlePassStepEvaluationPolicy,
   guestGameBattlePassStepMatchesSessionStart,
   guestGameLootBoxEvaluationPolicy,
@@ -716,6 +725,7 @@ const snapshotSessionSelect = {
   stoppedAt: true,
   durationMinutes: true,
   normalStop: true,
+  expand: true,
   packet: true,
   guest: { select: snapshotGuestSelect },
   store: { select: snapshotStoreSelect },
@@ -2930,6 +2940,7 @@ type CheckInLiveSession = {
     | 'session_marker'
     | 'session_text'
     | 'unknown';
+  expandedHourlyClassificationAmbiguous?: boolean;
   store: { id: string; name: string; timeZone?: string | null } | null;
   raw: LangameGuestSession;
 };
@@ -4051,6 +4062,8 @@ export class GuestGamificationService {
       sessionType: session.sessionType,
       sessionPacket: session.sessionPacket,
       sessionBillingResolvedBy: session.sessionBillingResolvedBy,
+      expandedHourlyClassificationAmbiguous:
+        session.expandedHourlyClassificationAmbiguous === true,
       store: session.store
         ? {
             id: session.store.id,
@@ -11985,6 +11998,7 @@ export class GuestGamificationService {
       idempotencyKey?: string | null;
       claimRequired?: boolean;
       claimExpiresAt?: Date | null;
+      sourceEventId?: string | null;
     } = {},
   ): Promise<GuestGameReward> {
     if (
@@ -12003,6 +12017,32 @@ export class GuestGamificationService {
       canonicalIdentity,
     )) as Prisma.GuestGameRewardUncheckedCreateInput;
     const row = await this.prisma.$transaction(async (tx) => {
+      if (canonicalIdentity.sourceEventId) {
+        const sourceEvents = await tx.$queryRaw<
+          Array<{ payload: Prisma.JsonValue | null }>
+        >(Prisma.sql`
+          SELECT event."payload"
+          FROM "GuestGameEvent" event
+          WHERE event."tenantId" = ${user.tenantId}
+            AND event."id" = ${canonicalIdentity.sourceEventId}
+          FOR SHARE
+        `);
+        if (Array.isArray(sourceEvents)) {
+          const sourceEvent = sourceEvents[0] ?? null;
+          if (!sourceEvent || sourceEvents.length !== 1) {
+            throw new ConflictException(
+              'The reward source event no longer exists.',
+            );
+          }
+          if (
+            genericSessionClassificationRemediationStatus(sourceEvent.payload)
+          ) {
+            throw new ConflictException(
+              'The reward source event requires explicit reconciliation.',
+            );
+          }
+        }
+      }
       const created = await tx.guestGameReward.create({
         data,
         include: rewardInclude,
@@ -13672,6 +13712,11 @@ export class GuestGamificationService {
               };
             }
 
+            await assertGenericSessionEventMaterializationReadyInTransaction(
+              tx,
+              { tenantId: input.tenantId, eventId: input.eventId },
+            );
+
             const activeRule = await tx.guestGameLootBox.findFirst({
               where: {
                 tenantId: input.tenantId,
@@ -14353,6 +14398,12 @@ export class GuestGamificationService {
           'The reward is already linked to another loot-box entitlement.',
         );
       }
+      if (!existingEntitlement) {
+        await assertGenericSessionEventMaterializationReadyInTransaction(tx, {
+          tenantId: user.tenantId,
+          eventId: sourceEventId,
+        });
+      }
       let entitlement =
         existingEntitlement ??
         (await tx.guestGameEntitlement.upsert({
@@ -14951,6 +15002,67 @@ export class GuestGamificationService {
       );
     }
 
+    if (
+      existingEvent &&
+      materializeRewards &&
+      !options.replayRewardScope &&
+      !options.exactReconciliationScope &&
+      !options.sessionStartReclassificationScope
+    ) {
+      const materializationReadiness =
+        await prepareGenericSessionEventForMaterialization(this.prisma, {
+          tenantId: user.tenantId,
+          event: {
+            id: existingEvent.id,
+            eventType: existingEvent.eventType,
+            payload: existingEvent.payload,
+          },
+        });
+      if (materializationReadiness.status !== 'READY') {
+        await this.suspendGenericSessionRewardIntents(
+          user.tenantId,
+          existingEvent.id,
+          [],
+          materializationReadiness,
+        );
+        const existingRewards = await this.findProcessRewardsByReference(
+          user,
+          eventReference,
+          originKey,
+        );
+        for (const reward of existingRewards) {
+          await this.suspendGenericSessionRewardEffects(
+            user.tenantId,
+            reward.id,
+            materializationReadiness,
+          );
+        }
+        const remediatedEvent = await this.prisma.guestGameEvent.findFirst({
+          where: { id: existingEvent.id, tenantId: user.tenantId },
+          include: eventInclude,
+        });
+        if (remediatedEvent) existingEvent = remediatedEvent;
+        const persistedDryRun =
+          processPersistedEventDryRun(existingEvent, dryRun) ?? dryRun;
+        return {
+          processed: true,
+          dryRun: persistedDryRun,
+          event: mapEvent(existingEvent),
+          rewards: existingRewards,
+          summary: {
+            profileCreated: false,
+            appliedXpDelta: 0,
+            createdRewards: 0,
+            queuedRewardAmount: 0,
+            idempotencyKey: originKey ?? eventReference?.externalId ?? null,
+            idempotent: true,
+            langameWrite: false,
+          },
+          note: `Reward materialization is suspended until generic session classification is resolved (${materializationReadiness.reason}).`,
+        };
+      }
+    }
+
     if (existingEvent) {
       const reconciliationKind: CanonicalRuleReconciliationKind | null =
         options.exactReconciliationScope
@@ -15365,6 +15477,61 @@ export class GuestGamificationService {
               'Каноническое событие уже связано с другим гостем или типом действия.',
             );
           }
+          const materializationReadiness = materializeRewards
+            ? await prepareGenericSessionEventForMaterialization(this.prisma, {
+                tenantId: user.tenantId,
+                event: {
+                  id: duplicateEvent.id,
+                  eventType: duplicateEvent.eventType,
+                  payload: duplicateEvent.payload,
+                },
+              })
+            : null;
+          if (
+            materializationReadiness &&
+            materializationReadiness.status !== 'READY'
+          ) {
+            await this.suspendGenericSessionRewardIntents(
+              user.tenantId,
+              duplicateEvent.id,
+              [],
+              materializationReadiness,
+            );
+            const existingRewards = await this.findProcessRewardsByReference(
+              user,
+              eventReference,
+              originKey,
+            );
+            for (const reward of existingRewards) {
+              await this.suspendGenericSessionRewardEffects(
+                user.tenantId,
+                reward.id,
+                materializationReadiness,
+              );
+            }
+            const remediatedEvent = await this.prisma.guestGameEvent.findFirst({
+              where: { id: duplicateEvent.id, tenantId: user.tenantId },
+              include: eventInclude,
+            });
+            if (remediatedEvent) duplicateEvent = remediatedEvent;
+            return {
+              processed: true,
+              dryRun:
+                processPersistedEventDryRun(duplicateEvent, dryRun) ?? dryRun,
+              event: mapEvent(duplicateEvent),
+              rewards: existingRewards,
+              summary: {
+                profileCreated: false,
+                appliedXpDelta: 0,
+                createdRewards: 0,
+                queuedRewardAmount: 0,
+                idempotencyKey: originKey ?? eventReference?.externalId ?? null,
+                idempotent: true,
+                langameWrite: false,
+              },
+              note: `Reward materialization is suspended until generic session classification is resolved (${materializationReadiness.reason}).`,
+            };
+          }
           const immutableMissionCaseDryRun = materializeRewards
             ? automaticMissionCaseRewardRecoveryDryRun(
                 processPersistedEventDryRun(duplicateEvent, dryRun),
@@ -15514,6 +15681,50 @@ export class GuestGamificationService {
       }
 
       throw error;
+    }
+    const newEventMaterializationReadiness = materializeRewards
+      ? await prepareGenericSessionEventForMaterialization(this.prisma, {
+          tenantId: user.tenantId,
+          event: {
+            id: event.id,
+            eventType: event.eventType,
+            payload: event.payload,
+          },
+        })
+      : null;
+    if (
+      newEventMaterializationReadiness &&
+      newEventMaterializationReadiness.status !== 'READY'
+    ) {
+      await this.suspendGenericSessionRewardIntents(
+        user.tenantId,
+        event.id,
+        [],
+        newEventMaterializationReadiness,
+      );
+      const remediatedEventRow = await this.prisma.guestGameEvent.findFirst({
+        where: { id: event.id, tenantId: user.tenantId },
+        include: eventInclude,
+      });
+      const currentEvent = remediatedEventRow
+        ? mapEvent(remediatedEventRow)
+        : event;
+      return {
+        processed: true,
+        dryRun: processPersistedEventDryRun(currentEvent, dryRun) ?? dryRun,
+        event: currentEvent,
+        rewards: [],
+        summary: {
+          profileCreated,
+          appliedXpDelta: currentEvent.xpDelta,
+          createdRewards: 0,
+          queuedRewardAmount: 0,
+          idempotencyKey: originKey ?? eventReference?.externalId ?? null,
+          idempotent: false,
+          langameWrite: false,
+        },
+        note: `Reward materialization is suspended until generic session classification is resolved (${newEventMaterializationReadiness.reason}).`,
+      };
     }
     const materialized = materializeRewards
       ? await this.materializeProcessRewardIntents(
@@ -15848,9 +16059,26 @@ export class GuestGamificationService {
       return result;
     }
 
+    const storedSessionPacket = nullableBooleanValue(input.sessionPacket);
+    const storedSessionType = nullableString(input.sessionType);
+    const storedWasKnown =
+      storedSessionPacket !== null ||
+      storedSessionType === 'regular_session' ||
+      storedSessionType === 'packet_hours';
+    const nextIsUnknown =
+      nextInput.sessionPacket === null &&
+      nextInput.sessionType !== 'regular_session' &&
+      nextInput.sessionType !== 'packet_hours';
+
+    if (storedWasKnown && nextIsUnknown) {
+      // An expanded Langame session carries only its final scalar tariff
+      // marker, not a trustworthy segment history. Do not erase an exact
+      // classification that was already observed at the physical start.
+      return result;
+    }
+
     const storedWasRegular =
-      nullableBooleanValue(input.sessionPacket) === false ||
-      nullableString(input.sessionType) === 'regular_session';
+      storedSessionPacket === false || storedSessionType === 'regular_session';
     const becamePackage =
       nextInput.sessionPacket === true ||
       nextInput.sessionType === 'packet_hours';
@@ -17487,6 +17715,24 @@ export class GuestGamificationService {
       10 * 60_000,
     );
     const maxAttempts = boundedEffectInteger(options.maxAttempts, 5, 1, 20);
+    const materializationReadiness =
+      await prepareGenericSessionEventForMaterialization(this.prisma, {
+        tenantId: user.tenantId,
+        event: {
+          id: event.id,
+          eventType: event.eventType,
+          payload: event.payload ?? null,
+        },
+      });
+    if (materializationReadiness.status !== 'READY') {
+      await this.suspendGenericSessionRewardIntents(
+        user.tenantId,
+        event.id,
+        options.intentIds ?? [],
+        materializationReadiness,
+      );
+      return null;
+    }
     const stats = emptyEffectMaterializeResult();
     const now = new Date();
     const intentIds = Array.from(
@@ -17712,6 +17958,7 @@ export class GuestGamificationService {
         profileId,
         storedReference,
         storedOriginKey,
+        event.id,
         new Map(
           actionable.map(({ claim, plan }) => [
             processRewardIntentPlanKey(plan),
@@ -17826,6 +18073,15 @@ export class GuestGamificationService {
             AND intent."eventId" = ${eventId}
             ${intentFilter}
             AND intent."effectKind" = 'REWARD'
+            AND EXISTS (
+              SELECT 1
+              FROM "GuestGameEvent" source_event
+              WHERE source_event."tenantId" = intent."tenantId"
+                AND source_event."id" = intent."eventId"
+                AND NOT ${genericSessionClassificationRemediationSql(
+                  Prisma.sql`source_event."payload"`,
+                )}
+            )
             AND intent."attempts" < ${maxAttempts}
             AND (
               (
@@ -17933,6 +18189,7 @@ export class GuestGamificationService {
     profileId: string,
     eventReference: ProcessExternalReference | null,
     originKey: string | null,
+    sourceEventId: string,
     rewardIdempotencyKeys: ReadonlyMap<string, string> = new Map(),
   ): Promise<GuestGameReward[]> {
     const guestId = dryRun.guest?.id ?? nullableId(dto.guestId) ?? null;
@@ -18068,6 +18325,7 @@ export class GuestGamificationService {
           {
             originKey,
             idempotencyKey,
+            sourceEventId,
             claimRequired,
             claimExpiresAt: claimRequired
               ? new Date(Date.parse(qualifiedAt) + guestRewardWalletRetentionMs)
@@ -20360,13 +20618,61 @@ export class GuestGamificationService {
     });
     result.deadLettered += exhausted.count;
 
-    const claims = await this.claimRewardEffects(
-      user.tenantId,
-      rewardId,
-      limit,
-      claimLeaseMs,
-      maxAttempts,
-    );
+    const candidateEffects = rewardId
+      ? []
+      : await this.prisma.guestGameRewardEffect.findMany({
+          where: {
+            tenantId: user.tenantId,
+            attempts: { lt: maxAttempts },
+            OR: [
+              {
+                status: { in: ['PENDING', 'FAILED'] },
+                OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+              },
+              {
+                status: 'PROCESSING',
+                OR: [
+                  { claimExpiresAt: null },
+                  { claimExpiresAt: { lte: now } },
+                ],
+              },
+            ],
+          },
+          select: { rewardId: true },
+          orderBy: [
+            { nextAttemptAt: 'asc' },
+            { createdAt: 'asc' },
+            { id: 'asc' },
+          ],
+          take: Math.min(limit * 4, 400),
+        });
+    const claims: ClaimedRewardEffectRow[] = [];
+    for (const candidateRewardId of uniqueStrings(
+      rewardId ? [rewardId] : candidateEffects.map((effect) => effect.rewardId),
+    )) {
+      const materializationReadiness =
+        await this.prepareRewardForGenericSessionMaterialization(
+          user.tenantId,
+          candidateRewardId,
+        );
+      if (materializationReadiness.status !== 'READY') {
+        await this.suspendGenericSessionRewardEffects(
+          user.tenantId,
+          candidateRewardId,
+          materializationReadiness,
+        );
+        continue;
+      }
+      const rewardClaims = await this.claimRewardEffects(
+        user.tenantId,
+        candidateRewardId,
+        limit - claims.length,
+        claimLeaseMs,
+        maxAttempts,
+      );
+      claims.push(...rewardClaims);
+      if (claims.length >= limit) break;
+    }
     result.claimed = claims.length;
 
     for (const claim of claims) {
@@ -20524,61 +20830,99 @@ export class GuestGamificationService {
     if (!profile?.gameActivatedAt) {
       return;
     }
-
     const now = new Date();
     const retentionCutoff = new Date(
       now.getTime() - guestRewardWalletRetentionMs,
     );
-    const rewards = await this.prisma.guestGameReward.findMany({
-      where: {
-        tenantId: user.tenantId,
-        profileId,
-        rewardType: 'LOOT_BOX_ENTITLEMENT',
-        status: { in: ['APPROVED', 'PAID'] },
-        qualifiedAt: { gte: profile.gameActivatedAt },
-        AND: [
-          {
-            OR: [
-              { qualifiedAt: { gt: retentionCutoff } },
-              {
-                evidence: {
-                  path: ['caseRewardLegacyClaim', 'repairedAt'],
-                  not: Prisma.AnyNull,
+    const recoveryLimit = boundedEffectInteger(requestedLimit, 10, 1, 30);
+    const recoveryPageSize = Math.max(100, recoveryLimit);
+    const recoverableRewards: Array<{
+      id: string;
+      qualifiedAt: Date;
+      evidence: Prisma.JsonValue | null;
+    }> = [];
+    let recoveryCursor: string | null = null;
+    while (recoverableRewards.length < recoveryLimit) {
+      const rewards: Array<{
+        id: string;
+        qualifiedAt: Date;
+        evidence: Prisma.JsonValue | null;
+      }> = await this.prisma.guestGameReward.findMany({
+        where: {
+          tenantId: user.tenantId,
+          profileId,
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          status: { in: ['APPROVED', 'PAID'] },
+          qualifiedAt: { gte: profile.gameActivatedAt },
+          AND: [
+            {
+              OR: [
+                { qualifiedAt: { gt: retentionCutoff } },
+                {
+                  evidence: {
+                    path: ['caseRewardLegacyClaim', 'repairedAt'],
+                    not: Prisma.AnyNull,
+                  },
                 },
-              },
-            ],
-          },
-          {
-            OR: [
-              {
-                rewardEffects: {
-                  none: { effectKind: 'LOOT_BOX_ENTITLEMENT' },
+              ],
+            },
+            {
+              OR: [
+                {
+                  rewardEffects: {
+                    none: { effectKind: 'LOOT_BOX_ENTITLEMENT' },
+                  },
                 },
-              },
-              {
-                rewardEffects: {
-                  some: {
-                    effectKind: 'LOOT_BOX_ENTITLEMENT',
-                    status: {
-                      in: ['WAITING_CLAIM', 'PENDING', 'FAILED', 'PROCESSING'],
+                {
+                  rewardEffects: {
+                    some: {
+                      effectKind: 'LOOT_BOX_ENTITLEMENT',
+                      status: {
+                        in: [
+                          'WAITING_CLAIM',
+                          'PENDING',
+                          'FAILED',
+                          'PROCESSING',
+                        ],
+                      },
                     },
                   },
                 },
-              },
-            ],
-          },
-        ],
-      },
-      select: { id: true, qualifiedAt: true, evidence: true },
-      orderBy: [{ qualifiedAt: 'asc' }, { id: 'asc' }],
-      take: boundedEffectInteger(requestedLimit, 10, 1, 30),
-    });
+              ],
+            },
+          ],
+        },
+        select: { id: true, qualifiedAt: true, evidence: true },
+        orderBy: [{ qualifiedAt: 'asc' }, { id: 'asc' }],
+        take: recoveryPageSize,
+        ...(recoveryCursor ? { cursor: { id: recoveryCursor }, skip: 1 } : {}),
+      });
+      if (!rewards.length) break;
+      recoveryCursor = rewards[rewards.length - 1]?.id ?? null;
+      for (const reward of rewards) {
+        const withinRetention =
+          reward.qualifiedAt.getTime() > retentionCutoff.getTime() ||
+          guestGameLegacyCaseClaimRepairIsValid(reward.evidence, now);
+        if (!withinRetention) continue;
+        const materializationReadiness =
+          await this.prepareRewardForGenericSessionMaterialization(
+            user.tenantId,
+            reward.id,
+          );
+        if (materializationReadiness.status !== 'READY') {
+          await this.suspendGenericSessionRewardEffects(
+            user.tenantId,
+            reward.id,
+            materializationReadiness,
+          );
+          continue;
+        }
+        recoverableRewards.push(reward);
+        if (recoverableRewards.length >= recoveryLimit) break;
+      }
+      if (rewards.length < recoveryPageSize) break;
+    }
 
-    const recoverableRewards = rewards.filter(
-      (reward) =>
-        reward.qualifiedAt.getTime() > retentionCutoff.getTime() ||
-        guestGameLegacyCaseClaimRepairIsValid(reward.evidence, now),
-    );
     for (const reward of recoverableRewards) {
       await this.prisma.guestGameRewardEffect.updateMany({
         where: {
@@ -20797,6 +21141,16 @@ export class GuestGamificationService {
       for (const event of events) {
         const remainingRecoveryLimit = recoveryLimit - recoveredIntentCount;
         if (remainingRecoveryLimit <= 0) break;
+        const materializationReadiness =
+          await prepareGenericSessionEventForMaterialization(this.prisma, {
+            tenantId: user.tenantId,
+            event: {
+              id: event.id,
+              eventType: event.eventType,
+              payload: event.payload,
+            },
+          });
+        if (materializationReadiness.status !== 'READY') continue;
         const identityDryRun: GuestGameDryRunResult = {
           dryRun: true,
           eventType: event.eventType,
@@ -20939,6 +21293,48 @@ export class GuestGamificationService {
           FROM "GuestGameRewardEffect" AS effect
           WHERE effect."tenantId" = ${tenantId}
             ${rewardFilter}
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "GuestGameRewardIntent" source_intent
+              JOIN "GuestGameEvent" source_event
+                ON source_event."tenantId" = source_intent."tenantId"
+               AND source_event."id" = source_intent."eventId"
+              WHERE source_intent."tenantId" = effect."tenantId"
+                AND source_intent."rewardId" = effect."rewardId"
+                AND ${genericSessionClassificationRemediationSql(
+                  Prisma.sql`source_event."payload"`,
+                )}
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "GuestGameReward" source_reward
+              JOIN "GuestGameEvent" source_event
+                ON source_event."tenantId" = source_reward."tenantId"
+               AND (
+                 (
+                   source_reward."originKey" IS NOT NULL
+                   AND source_event."originKey" = source_reward."originKey"
+                 )
+                 OR (
+                   source_reward."externalProvider" IS NOT NULL
+                   AND source_reward."externalDomain" IS NOT NULL
+                   AND source_reward."externalId" IS NOT NULL
+                   AND source_event."externalProvider" =
+                     source_reward."externalProvider"
+                   AND source_event."externalDomain" =
+                     source_reward."externalDomain"
+                   AND LEFT(
+                     source_reward."externalId",
+                     LENGTH(source_event."externalId" || ':reward:')
+                   ) = source_event."externalId" || ':reward:'
+                 )
+               )
+              WHERE source_reward."tenantId" = effect."tenantId"
+                AND source_reward."id" = effect."rewardId"
+                AND ${genericSessionClassificationRemediationSql(
+                  Prisma.sql`source_event."payload"`,
+                )}
+            )
             AND effect."attempts" < ${maxAttempts}
             AND (
               (
@@ -21069,9 +21465,66 @@ export class GuestGamificationService {
     user: AuthenticatedUser,
     row: RewardRow,
   ) {
+    const materializationReadiness =
+      await this.prepareRewardForGenericSessionMaterialization(
+        row.tenantId,
+        row.id,
+      );
+    if (materializationReadiness.status !== 'READY') {
+      await this.suspendGenericSessionRewardEffects(
+        row.tenantId,
+        row.id,
+        materializationReadiness,
+      );
+      return;
+    }
     const effects = guestGameRewardEffectPlans(row);
-    if (effects.length > 0) {
-      await this.prisma.guestGameRewardEffect.createMany({
+    let reconciliationRequired = false;
+    await this.prisma.$transaction(async (tx) => {
+      const sourceEvents = await tx.$queryRaw<
+        Array<{ payload: Prisma.JsonValue | null }>
+      >(Prisma.sql`
+        SELECT source_event."payload"
+        FROM "GuestGameReward" source_reward
+        JOIN "GuestGameEvent" source_event
+          ON source_event."tenantId" = source_reward."tenantId"
+         AND (
+           (
+             source_reward."originKey" IS NOT NULL
+             AND source_event."originKey" = source_reward."originKey"
+           )
+           OR (
+             source_reward."externalProvider" IS NOT NULL
+             AND source_reward."externalDomain" IS NOT NULL
+             AND source_reward."externalId" IS NOT NULL
+             AND source_event."externalProvider" =
+               source_reward."externalProvider"
+             AND source_event."externalDomain" = source_reward."externalDomain"
+             AND LEFT(
+               source_reward."externalId",
+               LENGTH(source_event."externalId" || ':reward:')
+             ) = source_event."externalId" || ':reward:'
+           )
+           OR source_event."id" IN (
+             SELECT source_intent."eventId"
+             FROM "GuestGameRewardIntent" source_intent
+             WHERE source_intent."tenantId" = source_reward."tenantId"
+               AND source_intent."rewardId" = source_reward."id"
+           )
+         )
+        WHERE source_reward."tenantId" = ${row.tenantId}
+          AND source_reward."id" = ${row.id}
+        FOR SHARE OF source_event
+      `);
+      reconciliationRequired =
+        Array.isArray(sourceEvents) &&
+        sourceEvents.some((sourceEvent) =>
+          Boolean(
+            genericSessionClassificationRemediationStatus(sourceEvent.payload),
+          ),
+        );
+      if (reconciliationRequired || effects.length === 0) return;
+      await tx.guestGameRewardEffect.createMany({
         data: effects.map((effect) => ({
           tenantId: row.tenantId,
           rewardId: row.id,
@@ -21079,7 +21532,8 @@ export class GuestGamificationService {
         })),
         skipDuplicates: true,
       });
-    }
+    });
+    if (reconciliationRequired) return;
     if (!this.rewardMaterializerClaimsAllowed()) {
       return;
     }
@@ -21098,6 +21552,171 @@ export class GuestGamificationService {
     return guestGameRewardMaterializerClaimsAllowed(
       resolveGuestGameRewardMaterializerPolicy(this.configService),
     );
+  }
+
+  private async rewardSourceEventsForMaterialization(
+    tenantId: string,
+    rewardId: string,
+  ): Promise<
+    Array<{
+      id: string;
+      eventType: string;
+      payload: Prisma.JsonValue | null;
+    }>
+  > {
+    const sourceEvents = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        eventType: string;
+        payload: Prisma.JsonValue | null;
+      }>
+    >(Prisma.sql`
+      SELECT DISTINCT
+        source_event."id",
+        source_event."eventType",
+        source_event."payload"
+      FROM "GuestGameReward" source_reward
+      JOIN "GuestGameEvent" source_event
+        ON source_event."tenantId" = source_reward."tenantId"
+       AND (
+         (
+           source_reward."originKey" IS NOT NULL
+           AND source_event."originKey" = source_reward."originKey"
+         )
+         OR (
+           source_reward."externalProvider" IS NOT NULL
+           AND source_reward."externalDomain" IS NOT NULL
+           AND source_reward."externalId" IS NOT NULL
+           AND source_event."externalProvider" =
+             source_reward."externalProvider"
+           AND source_event."externalDomain" = source_reward."externalDomain"
+           AND LEFT(
+             source_reward."externalId",
+             LENGTH(source_event."externalId" || ':reward:')
+           ) = source_event."externalId" || ':reward:'
+         )
+         OR source_event."id" IN (
+           SELECT source_intent."eventId"
+           FROM "GuestGameRewardIntent" source_intent
+           WHERE source_intent."tenantId" = source_reward."tenantId"
+             AND source_intent."rewardId" = source_reward."id"
+         )
+       )
+      WHERE source_reward."tenantId" = ${tenantId}
+        AND source_reward."id" = ${rewardId}
+    `);
+    if (Array.isArray(sourceEvents)) return sourceEvents;
+
+    // Jest delegates do not execute raw SQL. Production Prisma always returns
+    // an array, while the claim and transactional seeding SQL below keep the
+    // production path fail-closed against a marker written after this preflight.
+    return [];
+  }
+
+  private async prepareRewardForGenericSessionMaterialization(
+    tenantId: string,
+    rewardId: string,
+  ): Promise<GenericSessionMaterializationReadiness> {
+    const sourceEvents = await this.rewardSourceEventsForMaterialization(
+      tenantId,
+      rewardId,
+    );
+    let deferred: GenericSessionMaterializationReadiness | null = null;
+    for (const event of sourceEvents) {
+      const readiness = await prepareGenericSessionEventForMaterialization(
+        this.prisma,
+        { tenantId, event },
+      );
+      if (readiness.status === 'BLOCKED') return readiness;
+      if (readiness.status === 'DEFERRED') deferred = readiness;
+    }
+    return (
+      deferred ?? {
+        status: 'READY',
+        reason: 'NOT_A_LEGACY_TYPED_SESSION',
+      }
+    );
+  }
+
+  private async suspendGenericSessionRewardIntents(
+    tenantId: string,
+    eventId: string,
+    requestedIntentIds: string[],
+    readiness: GenericSessionMaterializationReadiness,
+  ) {
+    const intentIds = uniqueStrings(requestedIntentIds);
+    const now = new Date();
+    const blocked = readiness.status === 'BLOCKED';
+    await this.prisma.guestGameRewardIntent.updateMany({
+      where: {
+        tenantId,
+        eventId,
+        ...(intentIds.length ? { id: { in: intentIds } } : {}),
+        effectKind: 'REWARD',
+        OR: [
+          { status: { in: ['PENDING', 'FAILED'] } },
+          {
+            status: 'PROCESSING',
+            OR: [{ claimExpiresAt: null }, { claimExpiresAt: { lte: now } }],
+          },
+        ],
+      },
+      data: blocked
+        ? {
+            status: 'RECONCILIATION_REQUIRED',
+            claimExpiresAt: null,
+            nextAttemptAt: null,
+            processedAt: now,
+            lastError: `Generic session classification blocked reward materialization: ${readiness.reason}.`,
+          }
+        : {
+            status: 'FAILED',
+            claimExpiresAt: null,
+            nextAttemptAt: new Date(now.getTime() + 60_000),
+            lastError: `Generic session classification replay is pending: ${readiness.reason}.`,
+          },
+    });
+  }
+
+  private async suspendGenericSessionRewardEffects(
+    tenantId: string,
+    rewardId: string,
+    readiness: GenericSessionMaterializationReadiness,
+  ) {
+    const now = new Date();
+    const blocked = readiness.status === 'BLOCKED';
+    await this.prisma.guestGameRewardEffect.updateMany({
+      where: {
+        tenantId,
+        rewardId,
+        OR: [
+          {
+            status: {
+              in: blocked
+                ? ['WAITING_CLAIM', 'PENDING', 'FAILED']
+                : ['PENDING', 'FAILED'],
+            },
+          },
+          {
+            status: 'PROCESSING',
+            OR: [{ claimExpiresAt: null }, { claimExpiresAt: { lte: now } }],
+          },
+        ],
+      },
+      data: blocked
+        ? {
+            status: 'RECONCILIATION_REQUIRED',
+            claimExpiresAt: null,
+            nextAttemptAt: null,
+            lastError: `Generic session classification blocked reward effect: ${readiness.reason}.`,
+          }
+        : {
+            status: 'FAILED',
+            claimExpiresAt: null,
+            nextAttemptAt: new Date(now.getTime() + 60_000),
+            lastError: `Generic session classification replay is pending: ${readiness.reason}.`,
+          },
+    });
   }
 
   private async reconcileCreatedRewardSideEffectsById(
@@ -21558,6 +22177,16 @@ export class GuestGamificationService {
       timeoutMs?: number;
     },
   ): Promise<CheckInLiveSession> {
+    if (session.expandedHourlyClassificationAmbiguous === true) {
+      this.logGuestGameDebug('live-session-type-detected', {
+        source: 'expanded_hourly_marker_ambiguous',
+        apiSource: this.guestGameDebugSource(params.source),
+        externalGuestId: params.externalGuestId,
+        session: this.guestGameDebugSession(session),
+      });
+      return session;
+    }
+
     // The tariff type-group dictionary is the strongest source Langame gives
     // us. In particular, packet=1 is the `basic` hourly group on current
     // installations and must not be promoted to a package by stale balances
@@ -22322,24 +22951,38 @@ export class GuestGamificationService {
       timeZone,
     );
     const tariff = resolveLangameSessionTariff(row.packet, tariffTypeGroups);
-    const billingKind =
+    const detectedBillingKind =
       tariff.kind === 'unknown' && this.checkInSessionLooksLikePacketHours(row)
         ? 'package_or_subscription'
         : tariff.kind;
-    const sessionBillingResolvedBy =
-      tariff.kind !== 'unknown' && tariff.tariffType
-        ? 'tariff_type_group'
-        : tariff.kind !== 'unknown'
-          ? 'session_marker'
-          : billingKind === 'package_or_subscription'
-            ? 'session_text'
-            : 'unknown';
-    const packet =
-      billingKind === 'package_or_subscription'
+    const detectedPacket =
+      detectedBillingKind === 'package_or_subscription'
         ? true
-        : billingKind === 'hourly'
+        : detectedBillingKind === 'hourly'
           ? false
           : null;
+    const packet = failClosedExpandedHourlySessionPacket(
+      detectedPacket,
+      this.checkInBoolean(row.expand),
+    );
+    const expandedHourlyClassificationAmbiguous =
+      detectedPacket === false && packet === null;
+    const billingKind =
+      packet === true
+        ? 'package_or_subscription'
+        : packet === false
+          ? 'hourly'
+          : 'unknown';
+    const sessionBillingResolvedBy =
+      detectedPacket === false && packet === null
+        ? 'unknown'
+        : tariff.kind !== 'unknown' && tariff.tariffType
+          ? 'tariff_type_group'
+          : tariff.kind !== 'unknown'
+            ? 'session_marker'
+            : detectedBillingKind === 'package_or_subscription'
+              ? 'session_text'
+              : 'unknown';
 
     return {
       externalDomain,
@@ -22357,6 +23000,7 @@ export class GuestGamificationService {
             : 'unknown_session',
       sessionPacket: packet,
       sessionBillingResolvedBy,
+      expandedHourlyClassificationAmbiguous,
       store: null,
       raw: row,
     };
@@ -22486,6 +23130,7 @@ export class GuestGamificationService {
         externalUuid: true,
         startedAt: true,
         durationMinutes: true,
+        expand: true,
         packet: true,
         store: { select: { id: true, name: true, timeZone: true } },
       },
@@ -22512,15 +23157,23 @@ export class GuestGamificationService {
       date_start: row.startedAt?.toISOString() ?? null,
       date_stop: null,
       UUID: row.externalUuid,
+      expand: row.expand,
       packet: row.packet,
       list_clubs_id: resolvedExternalClubId,
     };
-    const sessionPacket =
-      row.packet === true || this.guestHasCurrentPacketHours(guest)
+    const expandedHourlyClassificationAmbiguous =
+      row.expand === true && row.packet === false;
+    const resolvedSessionPacket = expandedHourlyClassificationAmbiguous
+      ? null
+      : row.packet === true || this.guestHasCurrentPacketHours(guest)
         ? true
         : this.checkInSessionLooksLikePacketHours(rawSession)
           ? true
           : row.packet;
+    const sessionPacket = failClosedExpandedHourlySessionPacket(
+      resolvedSessionPacket,
+      row.expand,
+    );
 
     return {
       externalDomain: row.externalDomain ?? guest.externalDomain ?? '',
@@ -22530,9 +23183,10 @@ export class GuestGamificationService {
       externalUuid: row.externalUuid,
       startedAt: row.startedAt,
       durationMinutes: row.durationMinutes,
-      sessionType: sessionPacket ? 'packet_hours' : 'regular_session',
+      sessionType: sessionTypeFromPacket(sessionPacket),
       sessionPacket,
       sessionBillingResolvedBy: 'unknown',
+      expandedHourlyClassificationAmbiguous,
       store,
       raw: { ...rawSession, packet: sessionPacket },
     };
@@ -22543,6 +23197,7 @@ export class GuestGamificationService {
     guest: { currentCountHours?: Prisma.Decimal | number | string | null },
   ): CheckInLiveSession {
     if (
+      session.expandedHourlyClassificationAmbiguous === true ||
       session.sessionBillingResolvedBy === 'tariff_type_group' ||
       session.sessionPacket === true ||
       !this.guestHasCurrentPacketHours(guest)
@@ -22556,6 +23211,10 @@ export class GuestGamificationService {
   private markCheckInSessionAsPacket(
     session: CheckInLiveSession,
   ): CheckInLiveSession {
+    if (session.expandedHourlyClassificationAmbiguous === true) {
+      return session;
+    }
+
     return {
       ...session,
       sessionType: 'packet_hours',
@@ -27082,6 +27741,21 @@ function mapEvent(row: EventRow): GuestGameEvent {
   };
 }
 
+function failClosedExpandedHourlySessionPacket(
+  sessionPacket: boolean | null,
+  expanded: boolean | null | undefined,
+) {
+  return expanded === true && sessionPacket === false ? null : sessionPacket;
+}
+
+function sessionTypeFromPacket(sessionPacket: boolean | null) {
+  return sessionPacket === true
+    ? 'packet_hours'
+    : sessionPacket === false
+      ? 'regular_session'
+      : 'unknown_session';
+}
+
 function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
   if (!row.startedAt) {
     return [];
@@ -27096,8 +27770,11 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
   const sessionMinutes = row.stoppedAt
     ? completedMinutes
     : (row.durationMinutes ?? null);
-  const sessionPacket = row.packet ?? null;
-  const sessionType = sessionPacket ? 'packet_hours' : 'regular_session';
+  const sessionPacket = failClosedExpandedHourlySessionPacket(
+    row.packet ?? null,
+    row.expand,
+  );
+  const sessionType = sessionTypeFromPacket(sessionPacket);
   const guestName = snapshotGuestName(row.guest, row.externalGuestId);
   const facts: GuestGameSnapshotFact[] = [];
   const sessionClassificationStable =
@@ -27129,6 +27806,9 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
         row.store?.name,
         sessionMinutes ? `${sessionMinutes} мин` : null,
         row.packet ? 'пакет/абонемент' : null,
+        row.expand === true && row.packet === false
+          ? 'продление: тип сегмента неизвестен'
+          : null,
         row.normalStop === false ? 'нестандартное завершение' : null,
       ]
         .filter(Boolean)
@@ -29037,6 +29717,12 @@ function processPersistedEventDryRun(
   identityDryRun: GuestGameDryRunResult,
 ): GuestGameDryRunResult | null {
   const payload = jsonRecord(event.payload ?? null);
+  if (genericSessionClassificationRemediationStatus(event.payload)) {
+    // A remediated legacy event keeps its original outcome for audit, but its
+    // persisted rules must never reconstruct a typed reward after the source
+    // proved only an ambiguous generic session.
+    return null;
+  }
   if (
     intValue(payload.processSchemaVersion) !== 2 ||
     nullableString(payload.source) !== 'guest_gamification_process_event' ||
@@ -30822,6 +31508,9 @@ function storedEventToProgressEvent(row: {
   const payload = jsonRecord(row.payload);
   const input = jsonRecord(payload.input as Prisma.JsonValue | null);
   const store = jsonRecord(payload.store as Prisma.JsonValue | null);
+  const classificationRemediated = Boolean(
+    genericSessionClassificationRemediationStatus(row.payload),
+  );
 
   return {
     eventType: row.eventType,
@@ -30836,8 +31525,12 @@ function storedEventToProgressEvent(row: {
     externalDomain:
       nullableString(row.externalDomain) ??
       nullableString(payload.externalDomain),
-    sessionType: nullableString(input.sessionType),
-    sessionPacket: nullableBooleanValue(input.sessionPacket),
+    sessionType: classificationRemediated
+      ? null
+      : nullableString(input.sessionType),
+    sessionPacket: classificationRemediated
+      ? null
+      : nullableBooleanValue(input.sessionPacket),
     sessionMinutes: dryRunOptionalNumber(input.sessionMinutes),
     spendAmount: dryRunOptionalNumber(input.spendAmount),
     tariffGroupId: nullableString(input.tariffGroupId),

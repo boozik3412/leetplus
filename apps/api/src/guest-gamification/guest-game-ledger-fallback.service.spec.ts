@@ -5,6 +5,7 @@ import {
 } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import * as exactOwnerReconciler from './guest-game-exact-owner-reconciler';
+import * as genericSessionRemediation from './guest-game-generic-session-remediation';
 import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.service';
 
 const now = new Date('2026-07-18T12:00:00.000Z');
@@ -280,9 +281,20 @@ function createService(options?: {
   validFrom?: Date;
   liveEventId?: string | null;
   receiptGraceUntil?: Date;
+  hourlyReplayPending?: boolean;
 }) {
   const validFrom = options?.validFrom ?? new Date(now.getTime() - 60_000);
   const prisma = {
+    $queryRaw: jest
+      .fn()
+      .mockImplementation((query: { strings?: readonly string[] }) =>
+        Promise.resolve(
+          options?.hourlyReplayPending &&
+            query.strings?.join(' ').includes('GuestActivitySyncState')
+            ? [{ id: 'fact-pending-hourly-replay' }]
+            : [],
+        ),
+      ),
     tenant: {
       findMany: jest.fn().mockResolvedValue([tenant()]),
     },
@@ -501,9 +513,82 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(result.tenants[0]?.reason).toContain(
       'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
     );
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(prisma.guestGameMission.findMany).not.toHaveBeenCalled();
     expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
+    expect(gamification.dryRun).not.toHaveBeenCalled();
     expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('finishes the current tick before dry-run when legacy classification remediation mutates an event', async () => {
+    const remediation = jest
+      .spyOn(
+        genericSessionRemediation,
+        'remediateLegacyGenericSessionClassifications',
+      )
+      .mockResolvedValue({
+        scanned: 1,
+        remediated: 1,
+        quarantined: 0,
+        failed: 0,
+      });
+    const { service, prisma, gamification } = createService();
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        factTypes: ['SESSION_STARTED', 'SESSION_PLAY_TIME_ACCUMULATED'],
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      duplicateFacts: 1,
+      failedFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(remediation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        includeSessionStart: true,
+        includePlayTime: true,
+      }),
+    );
+    expect(prisma.guestGameMission.findMany).not.toHaveBeenCalled();
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not advance fallback while an hourly-session source awaits replay', async () => {
+    const { service, prisma, gamification } = createService({
+      hourlyReplayPending: true,
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        factTypes: ['SESSION_STARTED', 'HOURLY_SESSION_STARTED'],
+      }),
+    ).resolves.toMatchObject({
+      processedTenants: 0,
+      skippedTenants: 1,
+      checkedFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+      tenants: [
+        expect.objectContaining({
+          status: 'SKIPPED',
+          reason: expect.stringContaining('source replay is not complete'),
+        }),
+      ],
+    });
+
+    expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
+    expect(gamification.dryRun).not.toHaveBeenCalled();
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
@@ -896,7 +981,7 @@ describe('GuestGameLedgerFallbackService', () => {
   );
 
   it.each([
-    ['any', 'SESSION_STARTED', null, false],
+    ['any', 'SESSION_STARTED', null, null],
     ['hourly', 'HOURLY_SESSION_STARTED', 'HOURLY', false],
     [
       'package or subscription',
@@ -1277,7 +1362,7 @@ describe('GuestGameLedgerFallbackService', () => {
         eventType: 'PLAY_HOUR',
         sessionMinutes: 75,
         sessionType: null,
-        sessionPacket: false,
+        sessionPacket: null,
         sourceFactKind: 'GUEST_SESSION',
       }),
       expect.any(Object),

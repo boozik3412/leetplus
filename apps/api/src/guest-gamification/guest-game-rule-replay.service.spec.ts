@@ -1,9 +1,17 @@
 import { ConflictException } from '@nestjs/common';
-import { IntegrationProvider } from '@prisma/client';
+import { IntegrationProvider, Prisma } from '@prisma/client';
 import {
   buildGuestGameOriginKey,
   buildGuestGamePlayTimeOriginKey,
 } from './guest-game-origin-key';
+import {
+  GENERIC_SESSION_CLASSIFICATION_REMEDIATION_MARKER,
+  drainLegacyGenericSessionClassifications,
+  genericSessionClassificationRemediationSql,
+  genericSessionClassificationRemediationStatus,
+  remediateLegacyGenericSessionClassificationInTransaction,
+  remediateLegacyGenericSessionClassifications,
+} from './guest-game-generic-session-remediation';
 import { GuestGameRuleReplayService } from './guest-game-rule-replay.service';
 
 const factUpdatedAt = new Date('2026-07-18T12:00:00.000Z');
@@ -195,11 +203,19 @@ function createService(
     intent?: ReturnType<typeof existingIntent> | null;
     receiptEventId?: string | null;
     receiptStatus?: string;
+    hourlyReplayPending?: boolean;
   } = {},
 ) {
   const intent = options.intent ?? null;
   const eventId = options.event === false ? null : 'event-1';
   const prisma = {
+    $queryRaw: jest
+      .fn()
+      .mockResolvedValue(
+        options.hourlyReplayPending
+          ? [{ id: 'fact-pending-hourly-replay' }]
+          : [],
+      ),
     guestActivityFact: { findFirst: jest.fn().mockResolvedValue(fact()) },
     guestGameSeason: { findFirst: jest.fn().mockResolvedValue(season()) },
     store: {
@@ -327,6 +343,7 @@ function createCanonicalizationService(
     event?: ReturnType<typeof canonicalEvent> | null;
     processIdempotent?: boolean;
     claimCount?: number;
+    hourlyReplayPending?: boolean;
   } = {},
 ) {
   const initialReceipt = options.receipt ?? null;
@@ -342,6 +359,13 @@ function createCanonicalizationService(
     guestGameAuditEvent: { create: transactionAuditCreate },
   };
   const prisma = {
+    $queryRaw: jest
+      .fn()
+      .mockResolvedValue(
+        options.hourlyReplayPending
+          ? [{ id: 'fact-pending-hourly-replay' }]
+          : [],
+      ),
     guestActivityFact: { findFirst: jest.fn().mockResolvedValue(fact()) },
     guestGameProfile: {
       findFirst: jest.fn().mockResolvedValue({
@@ -458,6 +482,18 @@ describe('GuestGameRuleReplayService', () => {
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
+  it('rejects BP replay until the selected session source acknowledges hourly replay', async () => {
+    const { service, gamification } = createService({
+      hourlyReplayPending: true,
+    });
+
+    await expect(service.previewBattlePass(user, target)).rejects.toThrow(
+      'predates the hourly-session source replay',
+    );
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
   it('replays a neutral play-time fact with a null session type only for an ANY step', async () => {
     const { service, prisma, gamification } = createService();
     const replaySeason = season();
@@ -491,6 +527,46 @@ describe('GuestGameRuleReplayService', () => {
       expect.objectContaining({
         eventType: 'PLAY_HOUR',
         sessionType: null,
+        sessionPacket: null,
+        sourceFactId: 'fact-270',
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('replays an hourly play-time fact with an explicit false packet marker', async () => {
+    const { service, prisma, gamification } = createService();
+    const replaySeason = season();
+    prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+    });
+    prisma.guestGameSeason.findFirst.mockResolvedValue({
+      ...replaySeason,
+      levels: replaySeason.levels.map((level) =>
+        level.id === 'step-2'
+          ? {
+              ...level,
+              activationRules: {
+                ...level.activationRules,
+                sessionType: 'HOURLY',
+              },
+            }
+          : level,
+      ),
+    });
+
+    await expect(
+      service.previewBattlePass(user, target),
+    ).resolves.toMatchObject({
+      outcome: 'READY',
+      fact: { factType: 'HOURLY_PLAY_TIME_ACCUMULATED' },
+    });
+    expect(gamification.dryRun).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({
+        eventType: 'PLAY_HOUR',
+        sessionType: 'HOURLY',
         sessionPacket: false,
         sourceFactId: 'fact-270',
       }),
@@ -1023,6 +1099,17 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
+  it('rejects exact canonicalization until the selected source acknowledges hourly replay', async () => {
+    const { service, gamification } = createCanonicalizationService({
+      hourlyReplayPending: true,
+    });
+
+    await expect(
+      service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ).rejects.toThrow('predates the hourly-session source replay');
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
   it('keeps exact canonical origin stable across parser source ids', async () => {
     const first = createCanonicalizationService({
       receipt: canonicalReceipt('PROCESSED'),
@@ -1110,7 +1197,7 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
           input: {
             sessionMinutes: 270,
             sessionType: null,
-            sessionPacket: false,
+            sessionPacket: null,
           },
         },
       }),
@@ -1136,7 +1223,7 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
       expect.objectContaining({
         eventType: 'PLAY_HOUR',
         sessionType: null,
-        sessionPacket: false,
+        sessionPacket: null,
         sourceFactId: 'fact-270',
       }),
       expect.any(Object),
@@ -1956,5 +2043,521 @@ describe('GuestGameRuleReplayService loot-box entitlement maintenance', () => {
     });
     expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
     expect(tx.guestGameAuditEvent.createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('legacy generic session classification remediation', () => {
+  const legacyEvent = (
+    rules: unknown[] = [],
+    eventType: 'SESSION_START' | 'PLAY_HOUR' = 'SESSION_START',
+  ) => ({
+    id: 'event-legacy-hourly',
+    profileId: 'profile-0646',
+    guestId: 'guest-0646',
+    lootBoxId: null,
+    missionId: null,
+    seasonId: null,
+    eventType,
+    source: 'API_IMPORT',
+    externalProvider: 'LANGAME',
+    externalDomain: '46.langamepro.ru',
+    externalId: `guest-game:GUEST_SESSION:${eventType}:session-42`,
+    originKey: 'origin-session-42',
+    xpDelta: 0,
+    createdAt: new Date('2026-07-30T15:05:00.000Z'),
+    payload: {
+      processSchemaVersion: 2,
+      source: 'guest_gamification_process_event',
+      sourceFactId: `session:guest-session-row-42:${eventType === 'SESSION_START' ? 'start' : 'play'}`,
+      sourceFactKind: 'GUEST_SESSION',
+      externalId: 'session-42',
+      sessionExternalId: eventType === 'PLAY_HOUR' ? 'session-42' : null,
+      input: {
+        sessionType: 'regular_session',
+        sessionPacket: false,
+        sessionMinutes: 60,
+      },
+      rules,
+      rewardIntents: [],
+    },
+  });
+
+  const expandedSessionProof = {
+    proofKind: 'GUEST_SESSION',
+    id: 'guest-session-row-42',
+    profileId: null,
+    guestId: 'guest-0646',
+    storeId: 'store-1',
+    updatedAt: new Date('2026-07-30T15:00:00.000Z'),
+  };
+
+  const noEffects = {
+    ruleDecisionCount: 0n,
+    xpPostingCount: 0n,
+    rewardIntentCount: 0n,
+    rewardCount: 0n,
+    rewardEffectCount: 0n,
+    entitlementCount: 0n,
+    walletCount: 0n,
+  };
+
+  function remediationTx(options?: {
+    event?: ReturnType<typeof legacyEvent>;
+    sessionProofs?: Array<typeof expandedSessionProof>;
+    factProofs?: Array<typeof expandedSessionProof>;
+    lockedIntents?: Array<{
+      id: string;
+      status: string;
+      claimExpiresAt: Date | null;
+    }>;
+    lockedEffects?: Array<{
+      id: string;
+      status: string;
+      claimExpiresAt: Date | null;
+    }>;
+    receipts?: Array<{
+      id: string;
+      status: string;
+      claimExpiresAt: Date | null;
+    }>;
+    effects?: typeof noEffects;
+  }) {
+    const selectedEvent = options?.event ?? legacyEvent();
+    const queryResults = [
+      [selectedEvent],
+      options?.sessionProofs ?? [expandedSessionProof],
+      options?.factProofs ?? [],
+      options?.lockedIntents ?? [],
+      options?.lockedEffects ?? [],
+      options?.receipts ?? [
+        { id: 'receipt-1', status: 'PROCESSED', claimExpiresAt: null },
+      ],
+      [options?.effects ?? noEffects],
+    ];
+    return {
+      $queryRaw: jest
+        .fn()
+        .mockImplementation(() => Promise.resolve(queryResults.shift() ?? [])),
+      guestGameEvent: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      guestGameOriginReceipt: {
+        updateMany: jest.fn().mockResolvedValue({
+          count: (options?.receipts ?? []).length || 1,
+        }),
+      },
+      guestGameRewardIntent: {
+        updateMany: jest.fn().mockResolvedValue({
+          count: options?.lockedIntents?.length ?? 0,
+        }),
+      },
+      guestGameRewardEffect: {
+        updateMany: jest.fn().mockResolvedValue({
+          count: options?.lockedEffects?.length ?? 0,
+        }),
+      },
+      guestGameAuditEvent: {
+        create: jest.fn().mockResolvedValue({ id: 'audit-1' }),
+      },
+    };
+  }
+
+  it('neutralizes a pristine expanded GuestSession event and records durable evidence', async () => {
+    const tx = remediationTx();
+
+    await expect(
+      remediateLegacyGenericSessionClassificationInTransaction(tx as never, {
+        tenantId: 'tenant-1',
+        eventId: 'event-legacy-hourly',
+      }),
+    ).resolves.toEqual({
+      status: 'REMEDIATED',
+      eventId: 'event-legacy-hourly',
+      changed: true,
+    });
+
+    expect(tx.guestGameEvent.updateMany).toHaveBeenCalledWith({
+      where: { tenantId: 'tenant-1', id: 'event-legacy-hourly' },
+      data: {
+        payload: expect.objectContaining({
+          input: expect.objectContaining({
+            sessionPacket: null,
+            sessionType: null,
+          }),
+          [GENERIC_SESSION_CLASSIFICATION_REMEDIATION_MARKER]:
+            expect.objectContaining({
+              schemaVersion: 1,
+              kind: 'GENERIC_SESSION_FAIL_CLOSED',
+              status: 'REMEDIATED',
+              originalClassification: expect.objectContaining({
+                sessionPacket: false,
+                sessionType: 'regular_session',
+              }),
+            }),
+        }),
+      },
+    });
+    expect(tx.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+    expect(tx.guestGameAuditEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'GENERIC_SESSION_CLASSIFICATION_REMEDIATED',
+        status: 'COMPLETED',
+        reasonCode: 'AMBIGUOUS_EXPANDED_SESSION_FAIL_CLOSED',
+      }),
+    });
+  });
+
+  it('quarantines materialized events without revoking their persisted effects', async () => {
+    const tx = remediationTx({
+      event: legacyEvent([{ id: 'hourly-case', eligible: true }]),
+      effects: { ...noEffects, rewardIntentCount: 1n, walletCount: 1n },
+      lockedIntents: [
+        { id: 'intent-1', status: 'PENDING', claimExpiresAt: null },
+      ],
+      lockedEffects: [
+        { id: 'effect-1', status: 'WAITING_CLAIM', claimExpiresAt: null },
+      ],
+    });
+
+    await expect(
+      remediateLegacyGenericSessionClassificationInTransaction(tx as never, {
+        tenantId: 'tenant-1',
+        eventId: 'event-legacy-hourly',
+      }),
+    ).resolves.toEqual({
+      status: 'RECONCILIATION_REQUIRED',
+      eventId: 'event-legacy-hourly',
+      changed: true,
+    });
+
+    expect(tx.guestGameEvent.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          payload: expect.objectContaining({
+            input: expect.objectContaining({
+              sessionPacket: null,
+              sessionType: null,
+            }),
+            [GENERIC_SESSION_CLASSIFICATION_REMEDIATION_MARKER]:
+              expect.objectContaining({
+                status: 'RECONCILIATION_REQUIRED',
+                materialEffects: expect.objectContaining({
+                  payload: true,
+                  rewardIntents: 1,
+                  walletItems: 1,
+                }),
+              }),
+          }),
+        },
+      }),
+    );
+    expect(tx.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        id: { in: ['receipt-1'] },
+      },
+      data: expect.objectContaining({
+        status: 'QUARANTINED',
+        claimedSource: 'GENERIC_SESSION_CLASSIFICATION_RECONCILIATION',
+        claimExpiresAt: null,
+      }),
+    });
+    expect(tx.guestGameAuditEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'GENERIC_SESSION_CLASSIFICATION_QUARANTINED',
+        status: 'BLOCKED',
+        reasonCode: 'LEGACY_GENERIC_SESSION_MATERIALIZATION',
+      }),
+    });
+    expect(tx.guestGameRewardIntent.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: { in: ['intent-1'] } }),
+      data: expect.objectContaining({
+        status: 'RECONCILIATION_REQUIRED',
+        claimExpiresAt: null,
+        nextAttemptAt: null,
+      }),
+    });
+    expect(tx.guestGameRewardEffect.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: { in: ['effect-1'] } }),
+      data: expect.objectContaining({
+        status: 'RECONCILIATION_REQUIRED',
+        claimExpiresAt: null,
+        nextAttemptAt: null,
+      }),
+    });
+  });
+
+  it('does not neutralize a start when expand became known after event creation', async () => {
+    const tx = remediationTx({ sessionProofs: [], factProofs: [] });
+
+    await expect(
+      remediateLegacyGenericSessionClassificationInTransaction(tx as never, {
+        tenantId: 'tenant-1',
+        eventId: 'event-legacy-hourly',
+      }),
+    ).resolves.toEqual({
+      status: 'NO_MATCH',
+      eventId: 'event-legacy-hourly',
+      changed: false,
+    });
+    expect(tx.guestGameEvent.updateMany).not.toHaveBeenCalled();
+    expect(tx.guestGameAuditEvent.create).not.toHaveBeenCalled();
+    const sessionProofSql = (
+      tx.$queryRaw.mock.calls[1]?.[0] as { strings?: readonly string[] }
+    ).strings?.join(' ');
+    expect(sessionProofSql).toContain('session."updatedAt" <=');
+    expect(
+      (tx.$queryRaw.mock.calls[1]?.[0] as { values?: readonly unknown[] })
+        .values,
+    ).toContainEqual(new Date('2026-07-30T15:05:00.000Z'));
+  });
+
+  it('neutralizes a LIVE start created after the expanded GuestSession snapshot', async () => {
+    const event = legacyEvent();
+    event.payload.sourceFactId = 'session-42';
+    const tx = remediationTx({
+      event,
+      sessionProofs: [
+        {
+          ...expandedSessionProof,
+          proofKind: 'LIVE_GUEST_SESSION_AMBIGUOUS',
+        },
+      ],
+    });
+
+    await expect(
+      remediateLegacyGenericSessionClassificationInTransaction(tx as never, {
+        tenantId: 'tenant-1',
+        eventId: 'event-legacy-hourly',
+      }),
+    ).resolves.toMatchObject({
+      status: 'RECONCILIATION_REQUIRED',
+      changed: true,
+    });
+    const sessionProofQuery = tx.$queryRaw.mock.calls[1]?.[0] as {
+      strings?: readonly string[];
+      values?: readonly unknown[];
+    };
+    expect(sessionProofQuery.strings?.join(' ')).toContain(
+      'session."externalSessionId"',
+    );
+    expect(sessionProofQuery.values).toContain('GUEST_SESSION');
+    expect(sessionProofQuery.values).toContain('session-42');
+    expect(tx.guestGameAuditEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        reasonCode: 'LEGACY_LIVE_SESSION_OBSERVATION_AMBIGUOUS',
+        status: 'BLOCKED',
+      }),
+    });
+  });
+
+  it('defers remediation while an already-claimed materializer lease is active', async () => {
+    const tx = remediationTx({
+      lockedIntents: [
+        {
+          id: 'intent-in-flight',
+          status: 'PROCESSING',
+          claimExpiresAt: new Date(Date.now() + 60_000),
+        },
+      ],
+    });
+
+    await expect(
+      remediateLegacyGenericSessionClassificationInTransaction(tx as never, {
+        tenantId: 'tenant-1',
+        eventId: 'event-legacy-hourly',
+      }),
+    ).resolves.toEqual({
+      status: 'DEFERRED',
+      eventId: 'event-legacy-hourly',
+      changed: false,
+    });
+    expect(tx.guestGameEvent.updateMany).not.toHaveBeenCalled();
+    expect(tx.guestGameRewardIntent.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('neutralizes expanded PLAY_HOUR duration through the same fail-closed path', async () => {
+    const tx = remediationTx({ event: legacyEvent([], 'PLAY_HOUR') });
+
+    await expect(
+      remediateLegacyGenericSessionClassificationInTransaction(tx as never, {
+        tenantId: 'tenant-1',
+        eventId: 'event-legacy-hourly',
+      }),
+    ).resolves.toMatchObject({
+      status: 'REMEDIATED',
+      changed: true,
+    });
+    const factProofSql = (
+      tx.$queryRaw.mock.calls[2]?.[0] as { strings?: readonly string[] }
+    ).strings?.join(' ');
+    const factProofValues = (
+      tx.$queryRaw.mock.calls[2]?.[0] as { values?: readonly unknown[] }
+    ).values;
+    expect(factProofSql).toContain('fact."confidence" <> \'EXACT\'');
+    expect(factProofSql).toContain('superseded_typed_fact');
+    expect(factProofSql).toContain('sourceHash');
+    expect(factProofValues).toContain('SESSION_PLAY_TIME_ACCUMULATED');
+    expect(factProofValues).toContain(
+      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+    );
+    expect(factProofValues).toContain('HOURLY_PLAY_TIME_ACCUMULATED');
+  });
+
+  it('requires a complete trusted marker before persisted readers accept it', () => {
+    const valid = {
+      [GENERIC_SESSION_CLASSIFICATION_REMEDIATION_MARKER]: {
+        schemaVersion: 1,
+        kind: 'GENERIC_SESSION_FAIL_CLOSED',
+        status: 'RECONCILIATION_REQUIRED',
+        semanticClassification: {
+          sessionPacket: null,
+          sessionType: null,
+        },
+      },
+    };
+    expect(genericSessionClassificationRemediationStatus(valid)).toBe(
+      'RECONCILIATION_REQUIRED',
+    );
+    expect(
+      genericSessionClassificationRemediationStatus({
+        [GENERIC_SESSION_CLASSIFICATION_REMEDIATION_MARKER]: {
+          status: 'RECONCILIATION_REQUIRED',
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it('keeps the persisted remediation predicate two-valued when the marker is absent', () => {
+    const predicate = genericSessionClassificationRemediationSql(
+      Prisma.sql`event."payload"`,
+    );
+    const sql = predicate.strings.join(' ');
+
+    expect(sql).toContain('COALESCE((');
+    expect(sql).toContain('), FALSE)');
+    expect(sql).toContain('GENERIC_SESSION_FAIL_CLOSED');
+  });
+
+  it('discovers only temporally and canonically linked ambiguous evidence', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+
+    await remediateLegacyGenericSessionClassifications(
+      { $queryRaw: query } as never,
+      {
+        tenantId: 'tenant-1',
+        limit: 25,
+        includeSessionStart: true,
+        includePlayTime: true,
+      },
+    );
+
+    const sql = (
+      query.mock.calls[0]?.[0] as { strings?: readonly string[] }
+    ).strings?.join(' ');
+    expect(sql).toContain('FROM "GuestSession" session');
+    expect(sql).toContain('session."expand" = true');
+    expect(sql).toContain('session."packet" = false');
+    expect(sql).toContain('session."updatedAt" <= event."createdAt"');
+    expect(sql).toContain("'session:'");
+    expect(sql).toContain(
+      "event.\"payload\" ->> 'sourceFactKind' = 'GUEST_SESSION'",
+    );
+    expect(sql).toContain('session."externalSessionId"');
+    expect(sql).toContain('sessionBillingKind');
+    expect(sql).toContain('observedSessionBillingKind');
+    expect(sql).toContain('superseded_typed_fact');
+    expect(sql).toContain(
+      'superseded_typed_fact."sourceHash" = fact."sourceHash"',
+    );
+    expect(sql).toContain("'SUPERSEDED'");
+    expect(sql).toContain('HOURLY_PLAY_TIME_ACCUMULATED');
+  });
+
+  it('checks every persisted effect family before calling an event pristine', async () => {
+    const tx = remediationTx();
+
+    await remediateLegacyGenericSessionClassificationInTransaction(
+      tx as never,
+      {
+        tenantId: 'tenant-1',
+        eventId: 'event-legacy-hourly',
+      },
+    );
+
+    const effectSql = (
+      tx.$queryRaw.mock.calls[6]?.[0] as { strings?: readonly string[] }
+    ).strings?.join(' ');
+    for (const table of [
+      'GuestGameRuleDecision',
+      'GuestGameXpPosting',
+      'GuestGameRewardIntent',
+      'GuestGameReward',
+      'GuestGameRewardEffect',
+      'GuestGameEntitlement',
+      'GuestGameRewardWalletItem',
+    ]) {
+      expect(effectSql).toContain(table);
+    }
+  });
+
+  it('drains a full page before reporting replay remediation complete', async () => {
+    const candidatePage = Array.from({ length: 3 }, (_, index) => ({
+      eventId: `event-${index + 1}`,
+    }));
+    const prisma = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce(candidatePage)
+        .mockResolvedValueOnce([]),
+      $transaction: jest.fn().mockImplementation(async () => ({
+        status: 'REMEDIATED',
+        eventId: 'event',
+        changed: true,
+      })),
+    };
+
+    await expect(
+      drainLegacyGenericSessionClassifications(prisma as never, {
+        tenantId: 'tenant-1',
+        limit: 2,
+        maxBatches: 5,
+        includeSessionStart: true,
+        includePlayTime: true,
+      }),
+    ).resolves.toMatchObject({
+      batches: 2,
+      scanned: 2,
+      remediated: 2,
+      hasMore: false,
+      complete: true,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps replay acknowledgement blocked for an active materializer lease', async () => {
+    const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([{ eventId: 'event-in-flight' }]),
+      $transaction: jest.fn().mockResolvedValue({
+        status: 'DEFERRED',
+        eventId: 'event-in-flight',
+        changed: false,
+      }),
+    };
+
+    await expect(
+      remediateLegacyGenericSessionClassifications(prisma as never, {
+        tenantId: 'tenant-1',
+        limit: 10,
+        includeSessionStart: true,
+        includePlayTime: true,
+      }),
+    ).resolves.toMatchObject({
+      scanned: 1,
+      deferred: 1,
+      failed: 0,
+      complete: false,
+    });
   });
 });

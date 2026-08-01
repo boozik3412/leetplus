@@ -15,8 +15,11 @@ import {
   guestPortalMissionProgressTarget,
   guestPortalMissionProgressUnitLabel,
   guestPortalVisibleBonusLedgerRows,
+  lootBoxWaitingEventMessage,
+  mapSessionActivity,
   rewardCodeVisibleAfterClaim,
   rewardWalletState,
+  seasonLevels,
 } from './guest-portal.service';
 
 function createPrismaMock() {
@@ -1775,7 +1778,7 @@ describe('GuestPortalService', () => {
           'HOURLY',
         ),
       ).toBe(
-        'Сыграть один час в игровой сессии с почасовым тарифом, минимум 30 минут за сессию',
+        'Сыграть один час в игровой сессии с почасовым тарифом, минимум 30 минут за сессию. Продление пакета или абонемента без завершения сессии не засчитывается.',
       );
       expect(
         guestPortalMissionConditionLabel(
@@ -1811,6 +1814,87 @@ describe('GuestPortalService', () => {
           null,
         ),
       ).toBe('Сделать чекин 7 дней подряд');
+    });
+  });
+
+  describe('hourly session source transparency', () => {
+    it('explains that an in-place package extension is not a separate hourly start', () => {
+      const message = lootBoxWaitingEventMessage('SESSION_START', 'HOURLY');
+
+      expect(message).toContain('с почасовым тарифом');
+      expect(message).toContain(
+        'Продление пакета или абонемента без завершения сессии не засчитывается.',
+      );
+    });
+
+    it.each(['HOURLY', 'regular_session'])(
+      'shows the typed check-in requirement for %s',
+      (sessionType) => {
+        expect(
+          guestPortalMissionConditionLabel(
+            'CHECK_IN',
+            { checkInMode: 'SINGLE', target: 1 },
+            sessionType,
+          ),
+        ).toBe(
+          'Сделать чекин в клубе во время активной сессии с почасовым тарифом. Продление пакета или абонемента без завершения сессии не засчитывается.',
+        );
+      },
+    );
+
+    it.each([
+      [true, false, 'пакет или абонемент'],
+      [false, false, 'почасовая сессия'],
+      [null, false, 'тип тарифа не определён'],
+      [false, true, 'продление: тип тарифного сегмента не определён'],
+    ] as const)(
+      'keeps the activity tariff tri-state for packet=%s expand=%s',
+      (packet, expand, label) => {
+        const activity = mapSessionActivity({
+          id: 'session-1',
+          startedAt: new Date('2026-07-30T12:00:00.000Z'),
+          stoppedAt: new Date('2026-07-30T13:00:00.000Z'),
+          durationMinutes: 60,
+          normalStop: true,
+          packet,
+          expand,
+          createdAt: new Date('2026-07-30T12:00:00.000Z'),
+          store: { name: 'Test club' },
+        });
+
+        expect(activity.description).toContain(label);
+      },
+    );
+
+    it('adds the source limitation to hourly Battle Pass conditions and aliases', () => {
+      const [playLevel, checkInLevel] = seasonLevels([
+        {
+          level: 1,
+          xp: 100,
+          condition: 'Сыграть 60 минут с почасовым тарифом',
+          activationRules: {
+            taskType: 'PLAY_TIME',
+            sessionType: 'REGULAR_SESSION',
+            metric: { target: 60, minSessionMinutes: 30 },
+          },
+        },
+        {
+          level: 2,
+          xp: 200,
+          activationRules: {
+            taskType: 'CHECK_IN',
+            sessionType: 'HOURLY',
+            metric: { checkInMode: 'SINGLE', target: 1 },
+          },
+        },
+      ] as Prisma.JsonValue);
+
+      expect(playLevel?.condition).toBe(
+        'Сыграть 60 минут с почасовым тарифом. Продление пакета или абонемента без завершения сессии не засчитывается.',
+      );
+      expect(checkInLevel?.condition).toBe(
+        'Сделать чекин в клубе во время активной сессии с почасовым тарифом. Продление пакета или абонемента без завершения сессии не засчитывается.',
+      );
     });
   });
 
@@ -3307,7 +3391,7 @@ describe('GuestPortalService', () => {
 
     it('claims a non-ledger reward with a nominal amount immediately', async () => {
       const { prisma, service } = createService();
-      const claimExpiresAt = new Date('2026-08-01T00:00:00.000Z');
+      const claimExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1_000);
       prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue({
         id: 'wallet-promo',
         status: 'PENDING',

@@ -4,6 +4,7 @@ import type { GuestIdentityResolverService } from '../integrations/guest-identit
 import type { LangameClient } from '../integrations/langame.client';
 import type { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import * as genericSessionRemediation from './guest-game-generic-session-remediation';
 import {
   classifyGuestActivitySyncFailure,
   GuestActivityLedgerService,
@@ -101,6 +102,7 @@ describe('GuestActivityLedgerService', () => {
     syncFrom: Date | null;
     rawRecordsCount: number;
     factsCount: number;
+    diagnostics?: unknown;
   };
   type SyncStateUpsertArgs = {
     create: SyncState;
@@ -316,6 +318,10 @@ describe('GuestActivityLedgerService', () => {
     sourceSyncStates = new Map();
     syncJobs = new Map();
     prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      $transaction: jest.fn(
+        (callback: (tx: PrismaService) => unknown): unknown => callback(prisma),
+      ),
       guestGameProfile: {
         findFirst: jest.fn().mockResolvedValue({
           id: profileId,
@@ -691,6 +697,60 @@ describe('GuestActivityLedgerService', () => {
     );
   });
 
+  it('runs generic-session remediation before acknowledging parser replay success', async () => {
+    const remediation = jest
+      .spyOn(
+        genericSessionRemediation,
+        'drainLegacyGenericSessionClassifications',
+      )
+      .mockResolvedValue({
+        scanned: 1,
+        remediated: 1,
+        quarantined: 0,
+        deferred: 0,
+        failed: 0,
+        hasMore: false,
+        complete: true,
+        batches: 1,
+      });
+
+    try {
+      const result = await service.syncProfile({
+        tenantId,
+        profileId,
+        storeId,
+        reason: 'HOURLY_SESSION_EXPAND_REPLAY',
+      });
+
+      expect(result.status).toBe('SUCCESS');
+      expect(remediation).toHaveBeenCalledWith(prisma, {
+        tenantId,
+        limit: 100,
+        maxBatches: 20,
+        includeSessionStart: true,
+        includePlayTime: true,
+      });
+      expect(syncState).toEqual(
+        expect.objectContaining({
+          diagnostics: expect.objectContaining({
+            genericSessionClassificationRemediation: {
+              scanned: 1,
+              remediated: 1,
+              quarantined: 0,
+              deferred: 0,
+              failed: 0,
+              hasMore: false,
+              complete: true,
+              batches: 1,
+            },
+          }),
+        }),
+      );
+    } finally {
+      remediation.mockRestore();
+    }
+  });
+
   it('prefers the active identity link for the selected store domain', async () => {
     const domainGuestId = 'guest-domain-1';
     const domainExternalGuestId = '7331';
@@ -889,6 +949,81 @@ describe('GuestActivityLedgerService', () => {
     );
   });
 
+  it('keeps a technical session start generic without an explicit tariff marker', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([
+      {
+        guest_id: externalGuestId,
+        club_id: '15',
+        date: '07.07.2026 18:16:53',
+        type: 'start_session_on',
+      },
+    ]);
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'TECHNICAL_SESSION_START',
+    });
+
+    const rawRecord = Array.from(rawRecords.values()).find(
+      (record) => record.rawType === 'start_session_on',
+    );
+    const technicalFacts = Array.from(facts.values()).filter(
+      (fact) => fact.rawRecordId === rawRecord?.id,
+    );
+
+    expect(result.status).toBe('SUCCESS');
+    expect(technicalFacts).toEqual([
+      expect.objectContaining({
+        factType: 'SESSION_STARTED',
+        confidence: 'TEXT_MATCH',
+        tariffType: null,
+      }),
+    ]);
+  });
+
+  it('keeps an explicitly hourly text session start typed as hourly', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([
+      {
+        guest_id: externalGuestId,
+        club_id: '15',
+        date: '07.07.2026 18:16:53',
+        type: 'Старт сессии по почасовому тарифу',
+      },
+    ]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'EXPLICIT_HOURLY_SESSION_START',
+    });
+
+    const rawRecord = Array.from(rawRecords.values()).find((record) =>
+      String(record.rawText).includes('почасовому тарифу'),
+    );
+    const explicitFacts = Array.from(facts.values()).filter(
+      (fact) => fact.rawRecordId === rawRecord?.id,
+    );
+
+    expect(explicitFacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ factType: 'SESSION_STARTED' }),
+        expect.objectContaining({
+          factType: 'HOURLY_SESSION_STARTED',
+          confidence: 'TEXT_MATCH',
+          tariffType: 'hourly',
+        }),
+      ]),
+    );
+    expect(
+      explicitFacts.some(
+        (fact) => fact.factType === 'PACKAGE_OR_SUBSCRIPTION_USED',
+      ),
+    ).toBe(false);
+  });
+
   it('normalizes completed hourly sessions into played minutes facts', async () => {
     langameClient.listGuestLogs.mockResolvedValue([]);
     langameClient.listGuestSessions.mockResolvedValue([
@@ -929,6 +1064,248 @@ describe('GuestActivityLedgerService', () => {
     ).toBe(false);
   });
 
+  it('keeps an expanded session generic when its final tariff marker is hourly', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listGuestSessions.mockResolvedValue([
+      {
+        id: 'session-expanded-final-hourly-1',
+        guest_id: externalGuestId,
+        club_id: '15',
+        date_start: '07.07.2026 10:00',
+        date_stop: '07.07.2026 11:35',
+        packet: 1,
+        expand: 1,
+      },
+    ]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'EXPANDED_FINAL_HOURLY',
+    });
+
+    const sessionFacts = Array.from(facts.values()).filter(
+      (fact) => fact.sessionExternalId === 'session-expanded-final-hourly-1',
+    );
+    const playTimeFact = sessionFacts.find(
+      (fact) => fact.factType === 'SESSION_PLAY_TIME_ACCUMULATED',
+    );
+    const rawRecord = Array.from(rawRecords.values()).find(
+      (record) => record.sourceExternalId === 'session-expanded-final-hourly-1',
+    );
+
+    expect(sessionFacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ factType: 'SESSION_STARTED' }),
+        expect.objectContaining({ factType: 'SESSION_ENDED' }),
+        expect.objectContaining({
+          factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+          durationMinutes: 95,
+          tariffType: null,
+        }),
+      ]),
+    );
+    expect(
+      sessionFacts.some((fact) =>
+        [
+          'HOURLY_SESSION_STARTED',
+          'PACKAGE_OR_SUBSCRIPTION_USED',
+          'HOURLY_PLAY_TIME_ACCUMULATED',
+        ].includes(String(fact.factType)),
+      ),
+    ).toBe(false);
+    expect(playTimeFact?.evidence).toEqual(
+      expect.objectContaining({
+        expand: 1,
+        expanded: true,
+        observedSessionBillingKind: 'hourly',
+        sessionBillingKind: 'unknown',
+      }),
+    );
+    expect(rawRecord?.rawPayload).toEqual(
+      expect.objectContaining({ expand: 1, packet: 1 }),
+    );
+  });
+
+  it('keeps a confirmed hourly start while expanded play time stays generic across replay', async () => {
+    const sessionExternalId = 'session-expanded-hourly-history-1';
+    const originalHourlySession = {
+      id: sessionExternalId,
+      guest_id: externalGuestId,
+      club_id: '15',
+      date_start: '07.07.2026 10:00',
+      date_stop: '07.07.2026 11:00',
+      packet: 1,
+      expand: false,
+    };
+    const expandedFinalHourlySession = {
+      ...originalHourlySession,
+      date_stop: '07.07.2026 11:35',
+      expand: true,
+    };
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listGuestSessions
+      .mockResolvedValueOnce([originalHourlySession])
+      .mockResolvedValueOnce([expandedFinalHourlySession])
+      .mockResolvedValueOnce([originalHourlySession]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'ORIGINAL_HOURLY_SESSION',
+    });
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'EXPANDED_FINAL_HOURLY_RECONCILIATION',
+    });
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'REPLAY_ORIGINAL_HOURLY_SESSION',
+    });
+
+    expect(
+      Array.from(facts.values()).some(
+        (fact) =>
+          fact.sessionExternalId === sessionExternalId &&
+          fact.factType === 'HOURLY_SESSION_STARTED' &&
+          fact.lifecycleStatus === 'ACTIVE',
+      ),
+    ).toBe(true);
+    expect(
+      Array.from(facts.values()).filter(
+        (fact) =>
+          fact.sessionExternalId === sessionExternalId &&
+          fact.lifecycleStatus === 'ACTIVE' &&
+          [
+            'SESSION_PLAY_TIME_ACCUMULATED',
+            'HOURLY_PLAY_TIME_ACCUMULATED',
+            'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+          ].includes(String(fact.factType)),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+        tariffType: null,
+      }),
+    ]);
+  });
+
+  it('keeps a confirmed package start when the final expanded marker looks hourly', async () => {
+    const sessionExternalId = 'session-package-expanded-hourly-history-1';
+    const originalPackageSession = {
+      id: sessionExternalId,
+      guest_id: externalGuestId,
+      club_id: '15',
+      date_start: '07.07.2026 10:00',
+      date_stop: '07.07.2026 11:00',
+      packet: 9,
+      expand: false,
+    };
+    const expandedFinalHourlySession = {
+      ...originalPackageSession,
+      date_stop: '07.07.2026 11:35',
+      packet: 1,
+      expand: true,
+    };
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listGuestSessions
+      .mockResolvedValueOnce([originalPackageSession])
+      .mockResolvedValueOnce([expandedFinalHourlySession]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'ORIGINAL_PACKAGE_SESSION',
+    });
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PACKAGE_TO_EXPANDED_FINAL_HOURLY',
+    });
+
+    const activeFacts = Array.from(facts.values()).filter(
+      (fact) =>
+        fact.sessionExternalId === sessionExternalId &&
+        fact.lifecycleStatus === 'ACTIVE',
+    );
+    expect(activeFacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+          tariffType: 'package_or_subscription',
+        }),
+        expect.objectContaining({
+          factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+          tariffType: null,
+        }),
+      ]),
+    );
+    expect(
+      activeFacts.some((fact) => fact.factType === 'HOURLY_SESSION_STARTED'),
+    ).toBe(false);
+  });
+
+  it.each([
+    ['hourly', 1, 'HOURLY_SESSION_STARTED'],
+    ['package', 9, 'PACKAGE_OR_SUBSCRIPTION_USED'],
+  ])(
+    'preserves a known %s start classification when a later unexpanded version omits the tariff',
+    async (_classification, packet, expectedFactType) => {
+      const sessionExternalId = `session-known-${String(_classification)}-1`;
+      const knownSession = {
+        id: sessionExternalId,
+        guest_id: externalGuestId,
+        club_id: '15',
+        date_start: '07.07.2026 10:00',
+        date_stop: '07.07.2026 11:00',
+        packet,
+        expand: 0,
+      };
+      const laterUnknownSession = {
+        id: sessionExternalId,
+        guest_id: externalGuestId,
+        club_id: '15',
+        date_start: '07.07.2026 10:00',
+        date_stop: '07.07.2026 11:05',
+        expand: 0,
+      };
+      langameClient.listGuestLogs.mockResolvedValue([]);
+      langameClient.listGuestSessions
+        .mockResolvedValueOnce([knownSession])
+        .mockResolvedValueOnce([laterUnknownSession]);
+
+      await service.syncProfile({
+        tenantId,
+        profileId,
+        storeId,
+        reason: 'KNOWN_SESSION_CLASSIFICATION',
+      });
+      await service.syncProfile({
+        tenantId,
+        profileId,
+        storeId,
+        reason: 'LATER_UNKNOWN_SESSION_CLASSIFICATION',
+      });
+
+      expect(
+        Array.from(facts.values()).some(
+          (fact) =>
+            fact.sessionExternalId === sessionExternalId &&
+            fact.factType === expectedFactType &&
+            fact.lifecycleStatus === 'ACTIVE',
+        ),
+      ).toBe(true);
+    },
+  );
+
   it('normalizes completed packet sessions into package play minutes facts', async () => {
     langameClient.listGuestLogs.mockResolvedValue([]);
     langameClient.listGuestSessions.mockResolvedValue([
@@ -939,6 +1316,7 @@ describe('GuestActivityLedgerService', () => {
         date_start: '07.07.2026 10:00',
         date_stop: '07.07.2026 12:00',
         packet: 9,
+        expand: 1,
       },
     ]);
 
@@ -968,6 +1346,11 @@ describe('GuestActivityLedgerService', () => {
         durationMinutes: 120,
         tariffType: 'package_or_subscription',
         sourceExternalId: 'session-package-1',
+        evidence: expect.objectContaining({
+          expanded: true,
+          observedSessionBillingKind: 'package_or_subscription',
+          sessionBillingKind: 'package_or_subscription',
+        }),
       }),
     );
   });
@@ -1190,6 +1573,13 @@ describe('GuestActivityLedgerService', () => {
           'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
         ].includes(String(fact.factType)),
     );
+    const typedStartFacts = Array.from(facts.values()).filter(
+      (fact) =>
+        fact.sessionExternalId === sessionWithoutTariff.id &&
+        ['HOURLY_SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED'].includes(
+          String(fact.factType),
+        ),
+    );
 
     expect(playTimeFacts).toHaveLength(3);
     expect(
@@ -1216,6 +1606,14 @@ describe('GuestActivityLedgerService', () => {
         factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
         lifecycleStatus: 'SUPERSEDED',
         supersededAt: expect.any(Date),
+      }),
+    ]);
+    expect(
+      typedStartFacts.filter((fact) => fact.lifecycleStatus === 'ACTIVE'),
+    ).toEqual([
+      expect.objectContaining({
+        factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+        tariffType: 'package_or_subscription',
       }),
     ]);
   });
@@ -1654,6 +2052,458 @@ describe('GuestActivityLedgerService', () => {
     ).toBe(true);
   });
 
+  it('replays the historical source window once when the stored parser version is stale', async () => {
+    const syncFrom = new Date('2026-07-01T05:00:00.000Z');
+    const lastSuccessfulTo = new Date('2026-07-29T05:00:00.000Z');
+    syncState = {
+      status: 'SUCCESS',
+      lastStartedAt: null,
+      lastSuccessfulTo,
+      syncFrom,
+      rawRecordsCount: 12,
+      factsCount: 18,
+      diagnostics: {
+        parserVersion: 'guest-activity-v4',
+        replayVersion: 'legacy-hourly-policy',
+      },
+    };
+    sourceSyncStates.set('LANGAME_GUEST_SESSION', {
+      status: 'SUCCESS',
+      lastSuccessfulTo,
+      syncFrom,
+      diagnostics: {
+        parserVersion: 'guest-activity-v4',
+        replayVersion: 'legacy-hourly-policy',
+      },
+    });
+    sourceSyncStates.set('LANGAME_TRANSACTION', {
+      status: 'SUCCESS',
+      lastSuccessfulTo,
+      syncFrom,
+      diagnostics: {
+        parserVersion: 'guest-activity-v4',
+        replayVersion: 'legacy-hourly-policy',
+      },
+    });
+
+    const first = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PARSER_V5_HISTORICAL_REPLAY',
+    });
+
+    expect(first.status).toBe('SUCCESS');
+    expect(langameClient.listGuestSessions).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ dateFrom: '2026-06-30', page: 1 }),
+    );
+    expect(langameClient.listTransactions).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ dateFrom: '2026-07-28', page: 1 }),
+    );
+    expect(syncState?.diagnostics).toEqual(
+      expect.objectContaining({
+        parserVersion: 'guest-activity-v4',
+        replayVersion: 'hourly-session-expand-v1',
+        parserReplay: true,
+      }),
+    );
+    expect(sourceSyncStates.get('LANGAME_GUEST_SESSION')).toEqual(
+      expect.objectContaining({
+        diagnostics: expect.objectContaining({
+          parserVersion: 'guest-activity-v4',
+          replayVersion: 'hourly-session-expand-v1',
+          parserReplay: true,
+        }),
+      }),
+    );
+
+    langameClient.listGuestSessions.mockClear();
+    const second = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PARSER_V5_INCREMENTAL_SYNC',
+    });
+
+    expect(second.status).toBe('SUCCESS');
+    expect(langameClient.listGuestSessions).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({
+        dateFrom: expect.not.stringMatching(/^2026-06-30$/),
+        page: 1,
+      }),
+    );
+    expect(sourceSyncStates.get('LANGAME_GUEST_SESSION')).toEqual(
+      expect.objectContaining({
+        diagnostics: expect.objectContaining({
+          parserVersion: 'guest-activity-v4',
+          replayVersion: 'hourly-session-expand-v1',
+          parserReplay: false,
+        }),
+      }),
+    );
+  });
+
+  it('does not checkpoint the replay before fetched rows persist and retries it successfully', async () => {
+    const syncFrom = new Date('2026-07-01T05:00:00.000Z');
+    const lastSuccessfulTo = new Date('2026-07-29T05:00:00.000Z');
+    syncState = {
+      status: 'SUCCESS',
+      lastStartedAt: null,
+      lastSuccessfulTo,
+      syncFrom,
+      rawRecordsCount: 4,
+      factsCount: 6,
+      diagnostics: {
+        parserVersion: 'guest-activity-v4',
+        replayVersion: 'legacy-hourly-policy',
+      },
+    };
+    sourceSyncStates.set('LANGAME_GUEST_LOG', {
+      status: 'SUCCESS',
+      lastSuccessfulTo,
+      syncFrom,
+      diagnostics: {
+        parserVersion: 'guest-activity-v4',
+        replayVersion: 'legacy-hourly-policy',
+      },
+    });
+    langameClient.listGuestLogs.mockResolvedValue([
+      {
+        id: 9601,
+        guest_id: externalGuestId,
+        club_id: '15',
+        date: '07.07.2026 18:16:53',
+        type: 'start_session_on',
+      },
+    ]);
+    (
+      prisma.guestActivityRawRecord.upsert as unknown as jest.Mock
+    ).mockRejectedValueOnce(new Error('injected raw persistence failure'));
+
+    await expect(
+      service.syncProfile({
+        tenantId,
+        profileId,
+        storeId,
+        reason: 'REPLAY_PERSISTENCE_FAILURE',
+      }),
+    ).rejects.toThrow('injected raw persistence failure');
+
+    expect(sourceSyncStates.get('LANGAME_GUEST_LOG')).toEqual(
+      expect.objectContaining({
+        status: 'RUNNING',
+        lastSuccessfulTo,
+        diagnostics: expect.not.objectContaining({
+          replayVersion: 'hourly-session-expand-v1',
+        }),
+      }),
+    );
+
+    const retried = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'REPLAY_AFTER_PERSISTENCE_FAILURE',
+    });
+
+    expect(retried.status).toBe('SUCCESS');
+    expect(langameClient.listGuestLogs).toHaveBeenLastCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ dateFrom: '2026-06-30', page: 1 }),
+    );
+    expect(sourceSyncStates.get('LANGAME_GUEST_LOG')).toEqual(
+      expect.objectContaining({
+        status: 'SUCCESS',
+        lastSuccessfulTo: expect.any(Date),
+        diagnostics: expect.objectContaining({
+          parserVersion: 'guest-activity-v4',
+          replayVersion: 'hourly-session-expand-v1',
+          parserReplay: true,
+        }),
+      }),
+    );
+  });
+
+  it('keeps the stable generic fact id while replay supersedes a legacy inferred hourly fact', async () => {
+    const technicalStart = {
+      id: 9501,
+      guest_id: externalGuestId,
+      club_id: '15',
+      date: '07.07.2026 18:16:53',
+      type: 'start_session_on',
+    };
+    langameClient.listGuestLogs.mockResolvedValue([technicalStart]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'SEED_STABLE_TECHNICAL_START',
+    });
+
+    const rawRecord = Array.from(rawRecords.values()).find(
+      (record) => record.rawType === 'start_session_on',
+    );
+    const genericFact = Array.from(facts.values()).find(
+      (fact) =>
+        fact.rawRecordId === rawRecord?.id &&
+        fact.factType === 'SESSION_STARTED',
+    );
+    expect(rawRecord).toBeDefined();
+    expect(genericFact).toBeDefined();
+
+    const legacyHourlyKey = `HOURLY_SESSION_STARTED:${String(rawRecord?.sourceHash)}:guest-activity-v4`;
+    facts.set(legacyHourlyKey, {
+      ...genericFact!,
+      id: 'legacy-inferred-hourly-fact',
+      factType: 'HOURLY_SESSION_STARTED',
+      tariffType: 'hourly',
+      confidence: 'INFERRED',
+      lifecycleStatus: 'ACTIVE',
+      supersededAt: null,
+      createdAt: new Date('2026-07-07T13:17:00.000Z'),
+    });
+    syncState = {
+      ...syncState!,
+      diagnostics: {
+        parserVersion: 'guest-activity-v4',
+        replayVersion: 'legacy-hourly-policy',
+      },
+    };
+    sourceSyncStates.set('LANGAME_GUEST_LOG', {
+      ...sourceSyncStates.get('LANGAME_GUEST_LOG'),
+      diagnostics: {
+        parserVersion: 'guest-activity-v4',
+        replayVersion: 'legacy-hourly-policy',
+      },
+    });
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'REPLAY_TECHNICAL_START_IN_PLACE',
+    });
+
+    const replayedGenericFacts = Array.from(facts.values()).filter(
+      (fact) =>
+        fact.rawRecordId === rawRecord!.id &&
+        fact.factType === 'SESSION_STARTED',
+    );
+    expect(replayedGenericFacts).toHaveLength(1);
+    expect(replayedGenericFacts[0]).toEqual(
+      expect.objectContaining({
+        id: genericFact!.id,
+        parserVersion: 'guest-activity-v4',
+        lifecycleStatus: 'ACTIVE',
+      }),
+    );
+    expect(facts.get(legacyHourlyKey)).toEqual(
+      expect.objectContaining({
+        id: 'legacy-inferred-hourly-fact',
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it('reactivates the confirmed initial typed start after a legacy expanded version superseded it', async () => {
+    const sessionExternalId = 'session-reactivate-initial-hourly-1';
+    const common = {
+      tenantId,
+      profileId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: source.domain,
+      sourceKind: 'LANGAME_GUEST_SESSION',
+      sessionExternalId,
+    };
+    facts.set('generic-expanded', {
+      ...common,
+      id: 'generic-expanded',
+      factType: 'SESSION_STARTED',
+      sourceHash: 'expanded-hash',
+      lifecycleStatus: 'ACTIVE',
+      createdAt: new Date('2026-07-15T05:00:00.000Z'),
+      evidence: {
+        expanded: true,
+        observedSessionBillingKind: 'hourly',
+        sessionBillingKind: 'unknown',
+      },
+    });
+    facts.set('generic-initial', {
+      ...common,
+      id: 'generic-initial',
+      factType: 'SESSION_STARTED',
+      sourceHash: 'initial-hash',
+      lifecycleStatus: 'SUPERSEDED',
+      createdAt: new Date('2026-07-10T05:00:00.000Z'),
+      // Production rows created before tariff evidence was added kept the
+      // exact classification only in the typed sibling with the same hash.
+      evidence: { sourceKind: 'LANGAME_GUEST_SESSION' },
+    });
+    facts.set('typed-expanded-legacy', {
+      ...common,
+      id: 'typed-expanded-legacy',
+      factType: 'HOURLY_SESSION_STARTED',
+      sourceHash: 'expanded-hash',
+      lifecycleStatus: 'ACTIVE',
+      supersededAt: null,
+      createdAt: new Date('2026-07-15T05:00:01.000Z'),
+    });
+    facts.set('typed-initial', {
+      ...common,
+      id: 'typed-initial',
+      factType: 'HOURLY_SESSION_STARTED',
+      sourceHash: 'initial-hash',
+      lifecycleStatus: 'SUPERSEDED',
+      supersededAt: new Date('2026-07-15T05:00:01.000Z'),
+      createdAt: new Date('2026-07-10T05:00:01.000Z'),
+    });
+
+    await (service as any).reconcileSessionStartClassificationVersions(
+      {
+        tenantId,
+        profile: { id: profileId },
+        externalDomain: source.domain,
+      },
+      sessionExternalId,
+    );
+
+    expect(facts.get('typed-initial')).toEqual(
+      expect.objectContaining({
+        lifecycleStatus: 'ACTIVE',
+        supersededAt: null,
+      }),
+    );
+    expect(facts.get('typed-expanded-legacy')).toEqual(
+      expect.objectContaining({
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt: expect.any(Date),
+      }),
+    );
+    expect((prisma as any).$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: 'Serializable' },
+    );
+  });
+
+  it('keeps a first-observed expanded hourly session without an active typed start', async () => {
+    const sessionExternalId = 'session-first-expanded-hourly-1';
+    const common = {
+      tenantId,
+      profileId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: source.domain,
+      sourceKind: 'LANGAME_GUEST_SESSION',
+      sessionExternalId,
+      sourceHash: 'first-expanded-hash',
+    };
+    facts.set('generic-first-expanded', {
+      ...common,
+      id: 'generic-first-expanded',
+      factType: 'SESSION_STARTED',
+      lifecycleStatus: 'ACTIVE',
+      createdAt: new Date('2026-07-15T05:00:00.000Z'),
+      evidence: {
+        expanded: true,
+        observedSessionBillingKind: 'hourly',
+        sessionBillingKind: 'unknown',
+      },
+    });
+    facts.set('typed-first-expanded-legacy', {
+      ...common,
+      id: 'typed-first-expanded-legacy',
+      factType: 'HOURLY_SESSION_STARTED',
+      lifecycleStatus: 'ACTIVE',
+      supersededAt: null,
+      createdAt: new Date('2026-07-15T05:00:01.000Z'),
+    });
+
+    await (service as any).reconcileSessionStartClassificationVersions(
+      {
+        tenantId,
+        profile: { id: profileId },
+        externalDomain: source.domain,
+      },
+      sessionExternalId,
+    );
+
+    expect(facts.get('typed-first-expanded-legacy')).toEqual(
+      expect.objectContaining({
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt: expect.any(Date),
+      }),
+    );
+    expect(
+      Array.from(facts.values()).filter(
+        (fact) =>
+          fact.sessionExternalId === sessionExternalId &&
+          fact.factType !== 'SESSION_STARTED' &&
+          fact.lifecycleStatus === 'ACTIVE',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('does not reactivate an all-superseded historical session classification', async () => {
+    const sessionExternalId = 'session-expanded-tombstone-1';
+    facts.set('legacy-hourly-v3', {
+      id: 'legacy-hourly-v3',
+      tenantId,
+      profileId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: source.domain,
+      sourceKind: 'LANGAME_GUEST_SESSION',
+      sourceHash: 'legacy-hourly-hash-v3',
+      factType: 'HOURLY_SESSION_STARTED',
+      sessionExternalId,
+      lifecycleStatus: 'SUPERSEDED',
+      supersededAt: new Date('2026-07-20T05:00:00.000Z'),
+      createdAt: new Date('2026-07-10T05:00:00.000Z'),
+    });
+    facts.set('legacy-hourly-v4', {
+      id: 'legacy-hourly-v4',
+      tenantId,
+      profileId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: source.domain,
+      sourceKind: 'LANGAME_GUEST_SESSION',
+      sourceHash: 'legacy-hourly-hash-v4',
+      factType: 'HOURLY_SESSION_STARTED',
+      sessionExternalId,
+      lifecycleStatus: 'SUPERSEDED',
+      supersededAt: new Date('2026-07-20T05:00:00.000Z'),
+      createdAt: new Date('2026-07-15T05:00:00.000Z'),
+    });
+
+    await (service as any).reconcileHistoricalSessionFactVersions({
+      tenantId,
+      profile: { id: profileId },
+      externalDomain: source.domain,
+    });
+
+    expect(
+      Array.from(facts.values()).filter(
+        (fact) => fact.sessionExternalId === sessionExternalId,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        id: 'legacy-hourly-v3',
+        lifecycleStatus: 'SUPERSEDED',
+      }),
+      expect.objectContaining({
+        id: 'legacy-hourly-v4',
+        lifecycleStatus: 'SUPERSEDED',
+      }),
+    ]);
+  });
+
   it('continues a partial source from the saved next page without advancing its watermark', async () => {
     const fullPage = Array.from({ length: 200 }, (_, index) => ({
       id: index + 1,
@@ -1874,13 +2724,53 @@ describe('GuestActivityLedgerService', () => {
       expect.objectContaining({
         profileId,
         status: 'PENDING',
-        reason: 'AUTOMATIC_RECOVERY_PARTIAL',
+        reason: 'AUTOMATIC_HOURLY_SESSION_REPLAY',
       }),
     ]);
     expect(syncStateUpdate).toHaveBeenCalledWith({
       where: { id: 'sync-stale' },
       data: { status: 'STALE_BINDING' },
     });
+  });
+
+  it('queues a successful source whose hourly-session replay marker is stale', async () => {
+    (prisma.$queryRaw as jest.Mock).mockResolvedValueOnce([
+      {
+        id: 'sync-success-before-hourly-replay',
+        tenantId,
+        profileId,
+        guestId,
+        storeId,
+        status: 'SUCCESS',
+        errorMessage: null,
+        diagnostics: { replayVersion: 'older-replay' },
+        customerStage: TenantCustomerStage.INTERNAL,
+      },
+    ]);
+
+    const result = await service.enqueueDueRecoverySyncs(10);
+
+    expect(result).toEqual({ scanned: 1, queued: 1, skipped: 0 });
+    expect(Array.from(syncJobs.values())).toEqual([
+      expect.objectContaining({
+        profileId,
+        status: 'PENDING',
+        reason: 'AUTOMATIC_HOURLY_SESSION_REPLAY',
+      }),
+    ]);
+    const replayQuery = (prisma.$queryRaw as jest.Mock).mock.calls[0]?.[0] as {
+      strings: readonly string[];
+      values: readonly unknown[];
+    };
+    expect(replayQuery.strings.join(' ')).toContain('FROM "GuestActivityFact"');
+    expect(replayQuery.strings.join(' ')).toContain(
+      'LEFT JOIN "GuestActivitySyncState"',
+    );
+    expect(replayQuery.strings.join(' ')).toContain('INNER JOIN "Tenant"');
+    expect(replayQuery.strings.join(' ')).toContain('tenant."customerStage"');
+    expect(replayQuery.strings.join(' ')).toContain("'INTERNAL'");
+    expect(replayQuery.strings.join(' ')).toContain('state."id" IS NULL');
+    expect(replayQuery.values).toContain('hourly-session-expand-v1');
   });
 
   it('does not enqueue or mutate recovery state for an external tenant', async () => {
@@ -1895,15 +2785,28 @@ describe('GuestActivityLedgerService', () => {
         errorMessage: 'upstream timeout',
         diagnostics: null,
         tenant: {
-          customerStage: TenantCustomerStage.LIVE,
+          customerStage: TenantCustomerStage.PILOT,
         },
+      },
+    ]);
+    (prisma.$queryRaw as jest.Mock).mockResolvedValueOnce([
+      {
+        id: 'sync-external-hourly-replay',
+        tenantId,
+        profileId,
+        guestId,
+        storeId,
+        status: 'SUCCESS',
+        errorMessage: null,
+        diagnostics: { replayVersion: 'older-replay' },
+        customerStage: TenantCustomerStage.BETA,
       },
     ]);
     const enqueueProfileSync = jest.spyOn(service, 'enqueueProfileSync');
 
     const result = await service.enqueueDueRecoverySyncs(10);
 
-    expect(result).toEqual({ scanned: 1, queued: 0, skipped: 1 });
+    expect(result).toEqual({ scanned: 2, queued: 0, skipped: 2 });
     expect(enqueueProfileSync).not.toHaveBeenCalled();
     expect(syncStateUpdate).not.toHaveBeenCalled();
   });

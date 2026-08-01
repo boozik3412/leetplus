@@ -21,6 +21,11 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { resolveSecuritySecret } from '../config/environment-validation';
 import { GuestDataFoundationService } from '../integrations/guest-data-foundation.service';
 import { LangameClient } from '../integrations/langame.client';
+import {
+  buildLangameTariffTypeGroupIndex,
+  resolveLangameSessionTariff,
+  type LangameTariffTypeGroupIndex,
+} from '../integrations/langame-session-tariff';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { LangameGuestSession } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -594,6 +599,7 @@ export type GuestLiveSessionResult = {
     stoppedAt: string | null;
     durationMinutes: number | null;
     packet: boolean | null;
+    expand: boolean | null;
     normalStop: boolean | null;
   } | null;
   store: {
@@ -620,6 +626,7 @@ type LiveLangameSession = {
   stoppedAt: Date | null;
   durationMinutes: number | null;
   packet: boolean | null;
+  expand: boolean | null;
   normalStop: boolean | null;
   raw: LangameGuestSession;
 };
@@ -633,6 +640,7 @@ type CachedLiveSessionRow = {
   stoppedAt: Date | null;
   durationMinutes: number | null;
   packet: boolean | null;
+  expand: boolean | null;
   normalStop: boolean | null;
   store: {
     id: string;
@@ -2650,7 +2658,11 @@ export class GuestsService {
               startedAt: this.toIsoDateTime(liveSession.startedAt),
               stoppedAt: this.toIsoDateTime(liveSession.stoppedAt),
               durationMinutes: liveSession.durationMinutes,
-              packet: liveSession.packet,
+              packet: this.liveSessionPacketForResponse(
+                liveSession.packet,
+                liveSession.expand,
+              ),
+              expand: liveSession.expand,
               normalStop: liveSession.normalStop,
             },
             store,
@@ -2720,6 +2732,10 @@ export class GuestsService {
   }) {
     const pageLimit = 200;
     const maxPages = 5;
+    const tariffTypeGroups = await this.resolveLiveSessionTariffTypeGroups(
+      params.baseUrl,
+      params.apiKey,
+    );
 
     for (let page = 1; page <= maxPages; page += 1) {
       const rows = await this.langameClient.listGuestSessions(
@@ -2739,7 +2755,7 @@ export class GuestsService {
           this.liveSessionScalar(row.guest_id) === params.externalGuestId &&
           this.isOpenLangameSessionStop(row.date_stop)
         ) {
-          const liveSession = this.toLiveLangameSession(row);
+          const liveSession = this.toLiveLangameSession(row, tariffTypeGroups);
 
           if (liveSession.externalSessionId) {
             return liveSession;
@@ -2755,13 +2771,23 @@ export class GuestsService {
     return null;
   }
 
-  private toLiveLangameSession(row: LangameGuestSession): LiveLangameSession {
+  private toLiveLangameSession(
+    row: LangameGuestSession,
+    tariffTypeGroups: LangameTariffTypeGroupIndex = new Map(),
+  ): LiveLangameSession {
     const startedAt = this.parseLangameDate(
       this.liveSessionScalar(row.date_start),
     );
     const stoppedAt = this.parseLangameDate(
       this.liveSessionScalar(row.date_stop),
     );
+    const tariff = resolveLangameSessionTariff(row.packet, tariffTypeGroups);
+    const packet =
+      tariff.kind === 'package_or_subscription'
+        ? true
+        : tariff.kind === 'hourly'
+          ? false
+          : null;
 
     return {
       externalSessionId: this.liveSessionScalar(row.id) ?? '',
@@ -2771,10 +2797,24 @@ export class GuestsService {
       startedAt,
       stoppedAt,
       durationMinutes: this.durationMinutesBetween(startedAt, stoppedAt),
-      packet: this.liveSessionBoolean(row.packet),
+      packet,
+      expand: this.liveSessionBoolean(row.expand),
       normalStop: this.liveSessionBoolean(row.normal_stop),
       raw: row,
     };
+  }
+
+  private async resolveLiveSessionTariffTypeGroups(
+    baseUrl: string,
+    apiKey: string,
+  ): Promise<LangameTariffTypeGroupIndex> {
+    try {
+      return buildLangameTariffTypeGroupIndex(
+        await this.langameClient.listTariffTypeGroups(baseUrl, apiKey),
+      );
+    } catch {
+      return new Map();
+    }
   }
 
   private async persistLiveSession(params: {
@@ -2809,6 +2849,7 @@ export class GuestsService {
         stoppedAt: params.session.stoppedAt,
         durationMinutes: params.session.durationMinutes,
         normalStop: params.session.normalStop,
+        expand: params.session.expand,
         packet: params.session.packet,
         sourcePayloadHash,
       },
@@ -2822,6 +2863,7 @@ export class GuestsService {
         stoppedAt: params.session.stoppedAt,
         durationMinutes: params.session.durationMinutes,
         normalStop: params.session.normalStop,
+        expand: params.session.expand,
         packet: params.session.packet,
         sourcePayloadHash,
       },
@@ -2918,6 +2960,7 @@ export class GuestsService {
         stoppedAt: true,
         durationMinutes: true,
         packet: true,
+        expand: true,
         normalStop: true,
         store: {
           select: {
@@ -2952,7 +2995,8 @@ export class GuestsService {
         durationMinutes:
           cached.durationMinutes ??
           this.durationMinutesBetween(cached.startedAt, cached.stoppedAt),
-        packet: cached.packet,
+        packet: this.liveSessionPacketForResponse(cached.packet, cached.expand),
+        expand: cached.expand,
         normalStop: cached.normalStop,
       },
       store: cached.store
@@ -2963,6 +3007,13 @@ export class GuestsService {
         : null,
       diagnostics,
     };
+  }
+
+  private liveSessionPacketForResponse(
+    packet: boolean | null,
+    expand: boolean | null,
+  ) {
+    return expand === true && packet === false ? null : packet;
   }
 
   private liveSessionGuestSummary(guest: {

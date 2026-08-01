@@ -12,6 +12,7 @@ import {
   type SetStateAction,
 } from "react";
 import { GuestGamificationVisualEditor } from "@/components/guest-gamification-visual-editor";
+import { HourlySessionSourceNote } from "@/components/hourly-session-source-note";
 import {
   BattlePassStepConditionEditor,
   defaultBattlePassStepCondition,
@@ -1564,10 +1565,7 @@ export function GuestGamificationPanel({
       const [guestPayload, leadPayload] = (await Promise.all([
         guestsResponse.json(),
         leadsResponse.json(),
-      ])) as [
-        { rows?: GuestDashboardRow[] },
-        GuestCrmLead[],
-      ];
+      ])) as [{ rows?: GuestDashboardRow[] }, GuestCrmLead[]];
       setDirectoryGuests(guestPayload.rows ?? []);
       setDirectoryLeads(Array.isArray(leadPayload) ? leadPayload : []);
     } catch (loadError) {
@@ -1758,11 +1756,10 @@ export function GuestGamificationPanel({
         access.canRunRewardMaterializer,
         "Ручной запуск materializer доступен только владельцу или администратору.",
       );
-      const result =
-        await postJson<GuestGameRewardMaterializerManualRunResult>(
-          "/api/guests/gamification/reward-materializer/run",
-          { limit: 100 },
-        );
+      const result = await postJson<GuestGameRewardMaterializerManualRunResult>(
+        "/api/guests/gamification/reward-materializer/run",
+        { limit: 100 },
+      );
       setRewardMaterializerResult(result);
 
       const [nextStatus] = await Promise.all([
@@ -3095,7 +3092,8 @@ export function GuestGamificationPanel({
               legacyActiveMissionCount={
                 workspace.missions.filter(
                   (mission) =>
-                    mission.status === "ACTIVE" && mission.definitionVersion < 2,
+                    mission.status === "ACTIVE" &&
+                    mission.definitionVersion < 2,
                 ).length
               }
               migrationNotice={missionMigrationNotice}
@@ -7735,6 +7733,9 @@ function LootBoxesTab({
                       </option>
                     ))}
                   </select>
+                  {form.sessionType === "regular_session" ? (
+                    <HourlySessionSourceNote />
+                  ) : null}
                 </Field>
               </div>
               <StoreSelect
@@ -7895,255 +7896,257 @@ function MissionsTab({
   return (
     <>
       <RulesLayout
-      canManage={canManage}
-      formTitle={formTitle}
-      formAction={
-        !isFormOpen ? (
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {legacyActiveMissionCount > 0 && canManage ? (
-              <button
-                type="button"
-                className={smallButtonClass}
-                onClick={() => setMigrationConfirmation(true)}
-                disabled={saving === "missions-migrate-wizard"}
+        canManage={canManage}
+        formTitle={formTitle}
+        formAction={
+          !isFormOpen ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {legacyActiveMissionCount > 0 && canManage ? (
+                <button
+                  type="button"
+                  className={smallButtonClass}
+                  onClick={() => setMigrationConfirmation(true)}
+                  disabled={saving === "missions-migrate-wizard"}
+                >
+                  Перевести старые задания
+                </button>
+              ) : null}
+              <Link
+                href="/gamification/missions/wizard"
+                className={`${primaryButtonClass} sm:min-w-64`}
               >
-                Перевести старые задания
-              </button>
-            ) : null}
-            <Link
-              href="/gamification/missions/wizard"
-              className={`${primaryButtonClass} sm:min-w-64`}
-            >
-              Создать задание с помощью мастера
-            </Link>
-          </div>
-        ) : undefined
-      }
-      form={
-        isFormOpen ? (
-          <div className="space-y-3">
-            <RuleCommonFields
-              status={form.status}
-              name={form.name}
-              rewardType={form.rewardType}
-              rewardAmount={form.rewardAmount}
-              rewardLabel={form.rewardLabel}
-              audienceId={form.audienceId}
-              budgetAmount={form.budgetAmount}
-              budgetUnlimited={form.budgetUnlimited}
-              manualApprovalRequired={form.manualApprovalRequired}
-              note={form.note}
-              audiences={audiences}
-              onChange={(patch) => setForm({ ...form, ...patch })}
-            />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Тип задания">
-                <OptionSelect
-                  options={missionTypeOptions}
-                  value={form.missionType}
-                  preservedLabel="Сохраненный тип"
-                  onChange={(missionType) => setForm({ ...form, missionType })}
-                />
-                <OptionHelp>
-                  {missionTypeHelpText[form.missionType] ??
-                    "Тип помогает сотруднику понять сценарий задания. Условия выполнения задаются ниже."}
-                </OptionHelp>
-              </Field>
-              <Field label="Видимость задания">
-                <OptionSelect
-                  options={missionVisibilityOptions}
-                  value={form.visibility}
-                  preservedLabel="Сохраненная видимость"
-                  onChange={(visibility) => setForm({ ...form, visibility })}
-                />
-                <OptionHelp>
-                  {missionVisibilityHelpText[
-                    missionVisibilityValue(form.visibility)
-                  ] ?? missionVisibilityHelpText.VISIBLE}
-                </OptionHelp>
-              </Field>
+                Создать задание с помощью мастера
+              </Link>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="XP">
-                <input
-                  className={fieldClass}
-                  type="number"
-                  value={form.xpReward}
-                  onChange={(event) =>
-                    setForm({ ...form, xpReward: event.target.value })
-                  }
-                />
-                <OptionHelp>
-                  Опыт, который игровой профиль гостя получит после выполнения
-                  задания. XP повышает уровень и не влияет на цель задания.
-                </OptionHelp>
-              </Field>
-              <Field label="Цель">
-                <input
-                  className={fieldClass}
-                  type="number"
-                  value={form.progressTarget}
-                  onChange={(event) =>
-                    setForm({ ...form, progressTarget: event.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Что считаем">
-                <OptionSelect
-                  options={progressUnitOptions}
-                  value={form.progressUnit}
-                  preservedLabel="Сохраненная единица"
-                  onChange={(progressUnit) =>
-                    setForm({
-                      ...form,
-                      ...missionProgressUnitPatch(form, progressUnit),
-                    })
-                  }
-                />
-                <OptionHelp>
-                  Показывается гостю как единица прогресса: визиты, минуты,
-                  покупки или шаги.
-                </OptionHelp>
-              </Field>
-            </div>
-            <StoreSelect
-              stores={stores}
-              value={form.storeIds}
-              onChange={(storeIds) => setForm({ ...form, storeIds })}
-            />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Начало">
-                <input
-                  className={fieldClass}
-                  type="datetime-local"
-                  value={form.periodFrom}
-                  onChange={(event) =>
-                    setForm({ ...form, periodFrom: event.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Окончание">
-                <input
-                  className={fieldClass}
-                  type="datetime-local"
-                  value={form.periodTo}
-                  onChange={(event) =>
-                    setForm({ ...form, periodTo: event.target.value })
-                  }
-                />
-              </Field>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Лимит на гостя">
-                <div className="space-y-2">
-                  <input
-                    className={`${fieldClass} disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-900`}
-                    type="number"
-                    min="1"
-                    value={
-                      form.perGuestLimitUnlimited ? "" : form.perGuestLimit
-                    }
-                    disabled={form.perGuestLimitUnlimited}
-                    placeholder={
-                      form.perGuestLimitUnlimited
-                        ? "Без ограничений"
-                        : undefined
-                    }
-                    onChange={(event) =>
-                      setForm({ ...form, perGuestLimit: event.target.value })
+          ) : undefined
+        }
+        form={
+          isFormOpen ? (
+            <div className="space-y-3">
+              <RuleCommonFields
+                status={form.status}
+                name={form.name}
+                rewardType={form.rewardType}
+                rewardAmount={form.rewardAmount}
+                rewardLabel={form.rewardLabel}
+                audienceId={form.audienceId}
+                budgetAmount={form.budgetAmount}
+                budgetUnlimited={form.budgetUnlimited}
+                manualApprovalRequired={form.manualApprovalRequired}
+                note={form.note}
+                audiences={audiences}
+                onChange={(patch) => setForm({ ...form, ...patch })}
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Тип задания">
+                  <OptionSelect
+                    options={missionTypeOptions}
+                    value={form.missionType}
+                    preservedLabel="Сохраненный тип"
+                    onChange={(missionType) =>
+                      setForm({ ...form, missionType })
                     }
                   />
-                  <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
-                    <span>Безлимит</span>
+                  <OptionHelp>
+                    {missionTypeHelpText[form.missionType] ??
+                      "Тип помогает сотруднику понять сценарий задания. Условия выполнения задаются ниже."}
+                  </OptionHelp>
+                </Field>
+                <Field label="Видимость задания">
+                  <OptionSelect
+                    options={missionVisibilityOptions}
+                    value={form.visibility}
+                    preservedLabel="Сохраненная видимость"
+                    onChange={(visibility) => setForm({ ...form, visibility })}
+                  />
+                  <OptionHelp>
+                    {missionVisibilityHelpText[
+                      missionVisibilityValue(form.visibility)
+                    ] ?? missionVisibilityHelpText.VISIBLE}
+                  </OptionHelp>
+                </Field>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Field label="XP">
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    value={form.xpReward}
+                    onChange={(event) =>
+                      setForm({ ...form, xpReward: event.target.value })
+                    }
+                  />
+                  <OptionHelp>
+                    Опыт, который игровой профиль гостя получит после выполнения
+                    задания. XP повышает уровень и не влияет на цель задания.
+                  </OptionHelp>
+                </Field>
+                <Field label="Цель">
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    value={form.progressTarget}
+                    onChange={(event) =>
+                      setForm({ ...form, progressTarget: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Что считаем">
+                  <OptionSelect
+                    options={progressUnitOptions}
+                    value={form.progressUnit}
+                    preservedLabel="Сохраненная единица"
+                    onChange={(progressUnit) =>
+                      setForm({
+                        ...form,
+                        ...missionProgressUnitPatch(form, progressUnit),
+                      })
+                    }
+                  />
+                  <OptionHelp>
+                    Показывается гостю как единица прогресса: визиты, минуты,
+                    покупки или шаги.
+                  </OptionHelp>
+                </Field>
+              </div>
+              <StoreSelect
+                stores={stores}
+                value={form.storeIds}
+                onChange={(storeIds) => setForm({ ...form, storeIds })}
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Начало">
+                  <input
+                    className={fieldClass}
+                    type="datetime-local"
+                    value={form.periodFrom}
+                    onChange={(event) =>
+                      setForm({ ...form, periodFrom: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Окончание">
+                  <input
+                    className={fieldClass}
+                    type="datetime-local"
+                    value={form.periodTo}
+                    onChange={(event) =>
+                      setForm({ ...form, periodTo: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Лимит на гостя">
+                  <div className="space-y-2">
                     <input
-                      type="checkbox"
-                      checked={form.perGuestLimitUnlimited}
+                      className={`${fieldClass} disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-900`}
+                      type="number"
+                      min="1"
+                      value={
+                        form.perGuestLimitUnlimited ? "" : form.perGuestLimit
+                      }
+                      disabled={form.perGuestLimitUnlimited}
+                      placeholder={
+                        form.perGuestLimitUnlimited
+                          ? "Без ограничений"
+                          : undefined
+                      }
                       onChange={(event) =>
-                        setForm({
-                          ...form,
-                          perGuestLimitUnlimited: event.target.checked,
-                        })
+                        setForm({ ...form, perGuestLimit: event.target.value })
                       }
                     />
-                  </label>
-                </div>
-              </Field>
-              <Field label="Общий лимит">
-                <input
-                  className={fieldClass}
-                  type="number"
-                  value={form.totalRewardLimit}
-                  onChange={(event) =>
-                    setForm({ ...form, totalRewardLimit: event.target.value })
-                  }
-                />
-              </Field>
-            </div>
-            <MissionBusinessRules
-              form={form}
-              missionTemplates={missionTemplates}
-              tariffSnapshots={tariffSnapshots}
-              guestLogCatalog={guestLogCatalog}
-              products={products}
-              onChange={(patch) => setForm({ ...form, ...patch })}
-            />
-            {productsLoading && form.missionType === "PRODUCT_PURCHASE" ? (
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                Загружаем каталог товаров…
-              </p>
-            ) : null}
-            <button
-              type="button"
-              className={primaryButtonClass}
-              disabled={saving === "mission"}
-              onClick={onSave}
-            >
-              {editingId ? "Сохранить" : "Создать задание"}
-            </button>
-            {editingId ? (
+                    <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+                      <span>Безлимит</span>
+                      <input
+                        type="checkbox"
+                        checked={form.perGuestLimitUnlimited}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            perGuestLimitUnlimited: event.target.checked,
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                </Field>
+                <Field label="Общий лимит">
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    value={form.totalRewardLimit}
+                    onChange={(event) =>
+                      setForm({ ...form, totalRewardLimit: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <MissionBusinessRules
+                form={form}
+                missionTemplates={missionTemplates}
+                tariffSnapshots={tariffSnapshots}
+                guestLogCatalog={guestLogCatalog}
+                products={products}
+                onChange={(patch) => setForm({ ...form, ...patch })}
+              />
+              {productsLoading && form.missionType === "PRODUCT_PURCHASE" ? (
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  Загружаем каталог товаров…
+                </p>
+              ) : null}
               <button
                 type="button"
-                className={smallButtonClass}
-                onClick={onReset}
+                className={primaryButtonClass}
+                disabled={saving === "mission"}
+                onClick={onSave}
               >
-                Сбросить выбор
+                {editingId ? "Сохранить" : "Создать задание"}
               </button>
-            ) : null}
-          </div>
-      ) : null
-      }
-      listTitle="Созданные правила заданий"
-      items={missions}
-      layout="stacked"
-      renderItem={(item) => (
-        <RuleCard
-          key={item.id}
-          eyebrow="Сохраненное правило"
-          trackingId={trackingId("TASK", item.id)}
-          title={item.name}
-          status={item.status}
-          subtitle={`${missionTypeLabel(item.missionType)} · ${item.xpReward} XP`}
-          meta={[
-            item.audience?.name ?? "все гости",
-            missionVisibilitySummary(item.conditions),
-            missionAvailabilitySummary(item),
-            `тип: ${sessionTypeLabel(stringRule(item.conditions, "sessionType", ""))}`,
-            tariffRuleSummary(item.conditions),
-            guestLogRuleSummary(item.conditions, item.antiFraudRules),
-            missionMetricSummary(item.conditions),
-            questRuleSummary(item.conditions),
-            `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
-            formatBudgetAmount(item.budgetAmount),
-          ]}
-          details={<MissionQuestStepIdSummary mission={item} />}
-          onEdit={() => setEditorChoice(item)}
-          onStatus={(status) => onStatus("missions", item.id, status)}
-          saving={saving === `missions-${item.id}`}
-          onDelete={() => onDelete("missions", item.id, item.name)}
-          deleteSaving={saving === `missions-delete-${item.id}`}
-          canManage={canManage}
-        />
-      )}
+              {editingId ? (
+                <button
+                  type="button"
+                  className={smallButtonClass}
+                  onClick={onReset}
+                >
+                  Сбросить выбор
+                </button>
+              ) : null}
+            </div>
+          ) : null
+        }
+        listTitle="Созданные правила заданий"
+        items={missions}
+        layout="stacked"
+        renderItem={(item) => (
+          <RuleCard
+            key={item.id}
+            eyebrow="Сохраненное правило"
+            trackingId={trackingId("TASK", item.id)}
+            title={item.name}
+            status={item.status}
+            subtitle={`${missionTypeLabel(item.missionType)} · ${item.xpReward} XP`}
+            meta={[
+              item.audience?.name ?? "все гости",
+              missionVisibilitySummary(item.conditions),
+              missionAvailabilitySummary(item),
+              `тип: ${sessionTypeLabel(stringRule(item.conditions, "sessionType", ""))}`,
+              tariffRuleSummary(item.conditions),
+              guestLogRuleSummary(item.conditions, item.antiFraudRules),
+              missionMetricSummary(item.conditions),
+              questRuleSummary(item.conditions),
+              `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
+              formatBudgetAmount(item.budgetAmount),
+            ]}
+            details={<MissionQuestStepIdSummary mission={item} />}
+            onEdit={() => setEditorChoice(item)}
+            onStatus={(status) => onStatus("missions", item.id, status)}
+            saving={saving === `missions-${item.id}`}
+            onDelete={() => onDelete("missions", item.id, item.name)}
+            deleteSaving={saving === `missions-delete-${item.id}`}
+            canManage={canManage}
+          />
+        )}
       />
       {migrationNotice ? (
         <div
@@ -8161,9 +8164,9 @@ function MissionsTab({
                 Активные задания старого формата: {legacyActiveMissionCount}
               </h3>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-amber-900 dark:text-amber-200">
-                Перевод создаст v2-контракт мастера без смены ID, статуса, сроков,
-                наград, лимитов и даты активации. Накопленный прогресс не будет
-                пересчитан или выдан повторно.
+                Перевод создаст v2-контракт мастера без смены ID, статуса,
+                сроков, наград, лимитов и даты активации. Накопленный прогресс
+                не будет пересчитан или выдан повторно.
               </p>
             </div>
             {canManage ? (
@@ -8204,7 +8207,8 @@ function MissionsTab({
             <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               Будут перенесены все {legacyActiveMissionCount} активных заданий
               старого формата. Сначала сервер проверит, что каждое условие можно
-              выразить через мастер; при любой несовместимости ничего не изменится.
+              выразить через мастер; при любой несовместимости ничего не
+              изменится.
             </p>
             <div className="mt-5 flex flex-wrap justify-end gap-3">
               <button
@@ -8520,6 +8524,9 @@ function CheckInTab({
                     сессии. Выберите пакет/абонемент или почасовую сессию для
                     дополнительного ограничения.
                   </OptionHelp>
+                  {form.sessionType === "regular_session" ? (
+                    <HourlySessionSourceNote />
+                  ) : null}
                 </Field>
               </div>
               <TariffConditionFields
@@ -14380,8 +14387,7 @@ function RewardMaterializerControl({
   const runtimeRunning = status?.runtime.running ?? false;
   const backgroundReady = status?.runtime.backgroundReady ?? false;
   const backgroundAppliesToTenant =
-    backgroundReady &&
-    (status?.runtime.scope.appliesToViewerTenant ?? false);
+    backgroundReady && (status?.runtime.scope.appliesToViewerTenant ?? false);
   const killSwitchEnabled = status?.runtime.killSwitchEnabled ?? false;
   const runDisabled =
     !status ||
@@ -16006,22 +16012,22 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
     taskType === "APP_OPEN"
       ? 1
       : taskType === "PLAY_TIME"
-      ? Math.max(1, condition.target)
-      : taskType === "PRODUCT_PURCHASE"
-        ? condition.amountMode === "PERIOD_TOTAL"
-          ? Math.max(1, condition.totalAmount)
-          : purchaseTarget
-        : taskType === "BALANCE_TOPUP"
-          ? condition.topupMode === "PERIOD_TOTAL"
+        ? Math.max(1, condition.target)
+        : taskType === "PRODUCT_PURCHASE"
+          ? condition.amountMode === "PERIOD_TOTAL"
             ? Math.max(1, condition.totalAmount)
-            : condition.topupMode === "COUNT"
-              ? Math.max(1, condition.topupCount)
-              : 1
-          : condition.checkInMode === "SINGLE"
-            ? 1
-            : condition.checkInMode === "STREAK"
-              ? Math.max(1, condition.checkInDays)
-              : Math.max(1, condition.checkInCount);
+            : purchaseTarget
+          : taskType === "BALANCE_TOPUP"
+            ? condition.topupMode === "PERIOD_TOTAL"
+              ? Math.max(1, condition.totalAmount)
+              : condition.topupMode === "COUNT"
+                ? Math.max(1, condition.topupCount)
+                : 1
+            : condition.checkInMode === "SINGLE"
+              ? 1
+              : condition.checkInMode === "STREAK"
+                ? Math.max(1, condition.checkInDays)
+                : Math.max(1, condition.checkInCount);
   const triggerKinds: Record<BattlePassStepConditionValue["taskType"], string> =
     {
       APP_OPEN: "APP_OPEN",
@@ -16042,36 +16048,36 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
     taskType === "APP_OPEN"
       ? "exists"
       : taskType === "PLAY_TIME"
-      ? "duration"
-      : taskType === "PRODUCT_PURCHASE"
-        ? condition.amountMode === "PERIOD_TOTAL"
-          ? "sum"
-          : "count"
-        : taskType === "BALANCE_TOPUP"
-          ? condition.topupMode === "PERIOD_TOTAL"
+        ? "duration"
+        : taskType === "PRODUCT_PURCHASE"
+          ? condition.amountMode === "PERIOD_TOTAL"
             ? "sum"
-            : condition.topupMode === "SINGLE"
-              ? "exists"
-              : "count"
-          : condition.checkInMode === "STREAK"
-            ? "streak"
-            : "count";
+            : "count"
+          : taskType === "BALANCE_TOPUP"
+            ? condition.topupMode === "PERIOD_TOTAL"
+              ? "sum"
+              : condition.topupMode === "SINGLE"
+                ? "exists"
+                : "count"
+            : condition.checkInMode === "STREAK"
+              ? "streak"
+              : "count";
   const unit =
     taskType === "APP_OPEN"
       ? "открытие"
       : taskType === "PLAY_TIME"
-      ? "минут"
-      : taskType === "PRODUCT_PURCHASE"
-        ? condition.amountMode === "PERIOD_TOTAL"
-          ? "₽"
-          : "покупок"
-        : taskType === "BALANCE_TOPUP"
-          ? condition.topupMode === "PERIOD_TOTAL"
+        ? "минут"
+        : taskType === "PRODUCT_PURCHASE"
+          ? condition.amountMode === "PERIOD_TOTAL"
             ? "₽"
-            : "пополнений"
-          : condition.checkInMode === "STREAK"
-            ? "дней"
-            : "чекинов";
+            : "покупок"
+          : taskType === "BALANCE_TOPUP"
+            ? condition.topupMode === "PERIOD_TOTAL"
+              ? "₽"
+              : "пополнений"
+            : condition.checkInMode === "STREAK"
+              ? "дней"
+              : "чекинов";
   const weekdays =
     taskType === "APP_OPEN" ||
     (taskType === "CHECK_IN" && !condition.specificDayEnabled)
@@ -16090,7 +16096,10 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
     schemaVersion: 2,
     taskType,
     triggerKind: triggerKinds[taskType],
-    sessionType: taskType === "APP_OPEN" ? "ANY" : condition.sessionType,
+    sessionType:
+      taskType === "PLAY_TIME" || taskType === "CHECK_IN"
+        ? condition.sessionType
+        : "ANY",
     periodicity: "NONE",
     purchaseSource:
       taskType === "PRODUCT_PURCHASE" ? condition.purchaseSource : undefined,
@@ -16531,12 +16540,12 @@ function seasonStepConditionFromRules(
       : triggerKind === "APP_OPEN"
         ? "APP_OPEN"
         : triggerKind.includes("PURCHASE")
-        ? "PRODUCT_PURCHASE"
-        : triggerKind.includes("BALANCE")
-          ? "BALANCE_TOPUP"
-          : triggerKind === "CHECK_IN"
-            ? "CHECK_IN"
-            : "PLAY_TIME";
+          ? "PRODUCT_PURCHASE"
+          : triggerKind.includes("BALANCE")
+            ? "BALANCE_TOPUP"
+            : triggerKind === "CHECK_IN"
+              ? "CHECK_IN"
+              : "PLAY_TIME";
   const rawSessionType = recordString(rules, "sessionType")?.toUpperCase();
   const sessionType: BattlePassStepConditionValue["sessionType"] =
     rawSessionType === "HOURLY" || rawSessionType === "REGULAR_SESSION"
@@ -17323,10 +17332,17 @@ function formatBudgetAmount(value: number | null | undefined) {
 
 function missionAvailabilitySummary(mission: GuestGameMission) {
   const now = Date.now();
-  const from = mission.periodFrom ? new Date(mission.periodFrom).getTime() : null;
+  const from = mission.periodFrom
+    ? new Date(mission.periodFrom).getTime()
+    : null;
   const to = mission.periodTo ? new Date(mission.periodTo).getTime() : null;
 
-  if (mission.status === "ACTIVE" && from && Number.isFinite(from) && from > now) {
+  if (
+    mission.status === "ACTIVE" &&
+    from &&
+    Number.isFinite(from) &&
+    from > now
+  ) {
     return `начнётся ${formatDate(mission.periodFrom)}`;
   }
   if (mission.status === "ACTIVE" && to && Number.isFinite(to) && to < now) {
@@ -17543,6 +17559,10 @@ function communicationQueueStatusClass(
 function sessionTypeLabel(value: string | null) {
   const normalized = normalizeUiSessionType(value);
 
+  if (normalized === "unknown" || normalized === "unknown_session") {
+    return "тип сессии неизвестен";
+  }
+
   return (
     sessionTypeOptions.find((option) => option.value === normalized)?.label ??
     value ??
@@ -17566,14 +17586,9 @@ function normalizeUiSessionType(value: string | null | undefined) {
     .replace(/[\s-]+/g, "_");
 
   if (
-    [
-      "any",
-      "all",
-      "any_session",
-      "любая",
-      "любой",
-      "любая_сессия",
-    ].includes(normalized)
+    ["any", "all", "any_session", "любая", "любой", "любая_сессия"].includes(
+      normalized,
+    )
   ) {
     return "";
   }
@@ -17643,7 +17658,7 @@ function packetStateLabel(value: boolean | null) {
   if (value === false) {
     return "почасовая";
   }
-  return "не указано";
+  return "тип не определён";
 }
 
 function tariffSnapshotStatusLabel(status: GuestGameTariffSnapshotStatus) {

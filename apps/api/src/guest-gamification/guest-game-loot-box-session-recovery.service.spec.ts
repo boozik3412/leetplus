@@ -284,6 +284,7 @@ function createService(options?: {
     claimExpiresAt?: Date | null;
   }>;
   watermark?: { factId: string; ledgerFirstSeenAt: Date } | null;
+  hourlyReplayPending?: boolean;
   recordError?: Error;
   decisionResult?: {
     lootBoxEntitlements: Array<{
@@ -302,6 +303,11 @@ function createService(options?: {
   ];
   const prisma = {
     $queryRaw: jest.fn().mockImplementation((query: PrismaSqlQuery) => {
+      if (query.strings.join(' ').includes('GuestActivitySyncState')) {
+        return options?.hourlyReplayPending
+          ? [{ id: 'fact-pending-hourly-replay' }]
+          : [];
+      }
       const receipts = options?.retryReceipts ?? [];
       const knownProfileIds = receipts.flatMap((receipt) =>
         receipt.profileId ? [receipt.profileId] : [],
@@ -612,6 +618,37 @@ describe('GuestGameLootBoxSessionRecoveryService', () => {
     expect(prisma.guestGameLootBox.findMany).not.toHaveBeenCalled();
     expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
+  });
+
+  it('does not advance recovery while an hourly-session source awaits replay', async () => {
+    const { service, gamification, prisma } = createService({
+      hourlyReplayPending: true,
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        limit: 1,
+        graceMs: 0,
+      }),
+    ).resolves.toMatchObject({
+      processedTenants: 0,
+      skippedTenants: 1,
+      checkedSessions: 0,
+      recoveredSessions: 0,
+      tenants: [
+        expect.objectContaining({
+          status: 'SKIPPED',
+          reason: expect.stringContaining('source replay is not complete'),
+        }),
+      ],
+    });
+
+    expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
     expect(gamification.dryRun).not.toHaveBeenCalled();
     expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
   });
@@ -1550,7 +1587,10 @@ describe('GuestGameLootBoxSessionRecoveryService', () => {
         evaluationRunId: 'loot-box-session-recovery:receipt-profile-1:live',
       }),
     );
-    const [retryQuery] = prisma.$queryRaw.mock.calls[0] as [PrismaSqlQuery];
+    const [retryQuery] = prisma.$queryRaw.mock.calls.find(
+      ([query]: [PrismaSqlQuery]) =>
+        query.strings.join(' ').includes('GuestGameOriginReceipt'),
+    ) as [PrismaSqlQuery];
     const retrySql = retryQuery.strings.join(' ');
     expect(retrySql).toContain('FROM "GuestActivityFact" AS fact');
     expect(retrySql).toContain('fact."profileId" =');

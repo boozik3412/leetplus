@@ -761,10 +761,7 @@ export function GameRewardsClient() {
       return;
     }
 
-    const timerId = window.setTimeout(
-      () => setSwitchToastMessage(null),
-      2600,
-    );
+    const timerId = window.setTimeout(() => setSwitchToastMessage(null), 2600);
 
     return () => window.clearTimeout(timerId);
   }, [switchToastMessage]);
@@ -837,8 +834,7 @@ export function GameRewardsClient() {
         }
 
         const result = await openGameRewardWalletLootBox(item.id);
-        const rewardLabel =
-          result.rewards[0]?.rewardLabel ?? item.rewardLabel;
+        const rewardLabel = result.rewards[0]?.rewardLabel ?? item.rewardLabel;
 
         applySummary(result.summary);
         setWalletMessage(`Лутбокс открыт. Ваша награда: ${rewardLabel}.`);
@@ -851,7 +847,9 @@ export function GameRewardsClient() {
 
       const nextSummary = await claimGameRewardWalletItem(item.id);
       applySummary(nextSummary);
-      setWalletMessage(`Награда «${item.rewardLabel}» отправлена на начисление.`);
+      setWalletMessage(
+        `Награда «${item.rewardLabel}» отправлена на начисление.`,
+      );
       return true;
     } catch (error) {
       setWalletMessage(
@@ -1696,8 +1694,7 @@ function ReadyGameView({
         }
 
         const result = await openGameRewardWalletLootBox(item.id);
-        const rewardLabel =
-          result.rewards[0]?.rewardLabel ?? item.rewardLabel;
+        const rewardLabel = result.rewards[0]?.rewardLabel ?? item.rewardLabel;
 
         applySummaryWithCompletionDialogs(result.summary);
         showToast(`Лутбокс открыт. Ваша награда: ${rewardLabel}.`);
@@ -1716,7 +1713,6 @@ function ReadyGameView({
         walletActionPendingRef.current = false;
         setWalletClaimingItemId(null);
       }
-
     }
 
     if (
@@ -2722,10 +2718,7 @@ function HomeLootBoxes({
                       <span className="lp-lootbox-entry-hint">
                         {lootboxCardHint(card)}
                       </span>
-                      <span
-                        className="lp-lootbox-mini-lock"
-                        aria-hidden="true"
-                      >
+                      <span className="lp-lootbox-mini-lock" aria-hidden="true">
                         <LockIcon />
                       </span>
                     </>
@@ -4859,9 +4852,7 @@ function rewardWalletItemActionLabel(item: GuestPortalRewardWalletItem) {
   }
 
   if (item.action === "OPEN_LOOT_BOX") {
-    return item.status === "FAILED"
-      ? "Повторить открытие"
-      : "Открыть лутбокс";
+    return item.status === "FAILED" ? "Повторить открытие" : "Открыть лутбокс";
   }
 
   if (item.action === "CLAIM_REWARD") {
@@ -4879,9 +4870,7 @@ function rewardWalletItemActionLabel(item: GuestPortalRewardWalletItem) {
   return "Ожидает";
 }
 
-function rewardWalletItemPendingActionLabel(
-  item: GuestPortalRewardWalletItem,
-) {
+function rewardWalletItemPendingActionLabel(item: GuestPortalRewardWalletItem) {
   if (item.action === "OPEN_LOOT_BOX") {
     return "Открываем…";
   }
@@ -4964,9 +4953,7 @@ function checkInRewardWalletLabel(item: GuestPortalRewardWalletItem) {
 }
 
 function isRewardWalletItemActionable(item: GuestPortalRewardWalletItem) {
-  return (
-    item.action === "CLAIM_REWARD" || item.action === "OPEN_LOOT_BOX"
-  );
+  return item.action === "CLAIM_REWARD" || item.action === "OPEN_LOOT_BOX";
 }
 
 function isClaimableRewardWalletItem(item: GuestPortalRewardWalletItem) {
@@ -5282,10 +5269,9 @@ function RewardWalletCard({
 }) {
   return (
     <section
-      className={[
-        "lp-club-reward-wallet",
-        pulsing ? "is-pulsing" : "",
-      ].join(" ")}
+      className={["lp-club-reward-wallet", pulsing ? "is-pulsing" : ""].join(
+        " ",
+      )}
       aria-label={`${formatNumber(wallet.pendingCount)} наград ожидают получения`}
     >
       <div className="lp-club-reward-wallet-head">
@@ -5419,8 +5405,7 @@ function RewardWalletInboxPanel({
           </button>
         ) : null}
         <span>
-          Лутбоксы открываются вручную, начисления могут занять некоторое
-          время
+          Лутбоксы открываются вручную, начисления могут занять некоторое время
         </span>
       </div>
     </section>
@@ -5489,8 +5474,7 @@ function PlayerProfilePanel({
   const pendingCheckInItem = selectPreferredRewardWalletItem(
     rewardWallet.items,
     (item) =>
-      item.sourceKind === "CHECK_IN" &&
-      item.storeId === summary.store.id,
+      item.sourceKind === "CHECK_IN" && item.storeId === summary.store.id,
   );
 
   useEffect(() => {
@@ -5989,8 +5973,7 @@ function buildHomeLootCards(
     }
 
     const lootBoxId =
-      item.lootBoxId ??
-      (item.sourceKind === "LOOT_BOX" ? item.sourceId : null);
+      item.lootBoxId ?? (item.sourceKind === "LOOT_BOX" ? item.sourceId : null);
 
     if (!lootBoxId) {
       continue;
@@ -6178,12 +6161,15 @@ function lootBoxUnlockHint(
   sessionType: string | null,
   schedule?: HomeLootCard["schedule"] | null,
 ) {
-  return `Откроется ${[
-    gameRuleUnlockCondition(triggerKind, sessionType),
-    lootBoxScheduleHint(schedule),
-  ]
-    .filter(Boolean)
-    .join(" ")}`;
+  return withHourlySessionExtensionNotice(
+    `Откроется ${[
+      gameRuleUnlockCondition(triggerKind, sessionType),
+      lootBoxScheduleHint(schedule),
+    ]
+      .filter(Boolean)
+      .join(" ")}.`,
+    sessionType,
+  );
 }
 
 function lootBoxGuestRequirementLines(card: HomeLootCard) {
@@ -6329,6 +6315,24 @@ function joinRussianList(value: string[]) {
   return `${items.slice(0, -1).join(", ")} и ${items.at(-1)}`;
 }
 
+const hourlySessionExtensionNotice =
+  "Продление пакета или абонемента без завершения сессии не засчитывается.";
+
+function withHourlySessionExtensionNotice(
+  label: string,
+  sessionType: string | null,
+) {
+  if (
+    normalizeGameRuleSessionType(sessionType) !== "regular_session" ||
+    label.includes(hourlySessionExtensionNotice)
+  ) {
+    return label;
+  }
+
+  const trimmed = label.trim();
+  return `${trimmed}${/[.!?]$/.test(trimmed) ? "" : "."} ${hourlySessionExtensionNotice}`;
+}
+
 function guestActionRequirementLabel(
   triggerKind: string,
   sessionType: string | null,
@@ -6342,7 +6346,10 @@ function guestActionRequirementLabel(
     }
 
     if (normalizedSessionType === "regular_session") {
-      return "Начните игровую сессию с почасовой оплатой.";
+      return withHourlySessionExtensionNotice(
+        "Начните отдельную игровую сессию с почасовой оплатой.",
+        sessionType,
+      );
     }
 
     return "Начните игровую сессию в клубе.";
@@ -6351,12 +6358,26 @@ function guestActionRequirementLabel(
   switch (normalized) {
     case "APP_OPEN":
       return "Откройте игровой модуль.";
-    case "CHECK_IN":
-      return "Сделайте чекин в игровом модуле, находясь в клубе.";
+    case "CHECK_IN": {
+      const sessionRequirement = gameRuleSessionRequirement(sessionType);
+      return withHourlySessionExtensionNotice(
+        `Сделайте чекин в игровом модуле, находясь в клубе${
+          sessionRequirement
+            ? ` во время активной сессии ${sessionRequirement}`
+            : ""
+        }.`,
+        sessionType,
+      );
+    }
     case "VISIT":
       return "Придите в клуб, чтобы система зафиксировала визит.";
     case "PLAY_HOUR":
-      return "Поиграйте нужное время в клубе.";
+      return normalizedSessionType === "regular_session"
+        ? withHourlySessionExtensionNotice(
+            "Поиграйте нужное время в отдельно начатой почасовой сессии.",
+            sessionType,
+          )
+        : "Поиграйте нужное время в клубе.";
     case "BAR_PURCHASE":
       return "Сделайте покупку в баре клуба.";
     case "PRODUCT_PURCHASE":
@@ -6406,10 +6427,7 @@ function gameRuleUnlockCondition(
   sessionType: string | null,
 ) {
   const normalized = normalizeGameRuleTrigger(triggerKind);
-  const sessionRequirement =
-    normalized === "SESSION_START"
-      ? gameRuleSessionRequirement(sessionType)
-      : null;
+  const sessionRequirement = gameRuleSessionRequirement(sessionType);
 
   if (normalized === "SESSION_START") {
     return `при старте сессии${sessionRequirement ? ` ${sessionRequirement}` : ""}`;
@@ -6420,7 +6438,17 @@ function gameRuleUnlockCondition(
   }
 
   if (normalized === "CHECK_IN") {
-    return "после чекина в клубе";
+    return `после чекина в клубе${
+      sessionRequirement
+        ? ` во время активной сессии ${sessionRequirement}`
+        : ""
+    }`;
+  }
+
+  if (normalized === "PLAY_HOUR") {
+    return `после игрового времени${
+      sessionRequirement ? ` в сессии ${sessionRequirement}` : ""
+    }`;
   }
 
   return `после события: ${gameRuleEventLabel(triggerKind)}`;
@@ -6431,13 +6459,33 @@ function gameRuleConditionLabel(
   sessionType: string | null,
 ) {
   const normalized = normalizeGameRuleTrigger(triggerKind);
-  const sessionRequirement =
-    normalized === "SESSION_START"
-      ? gameRuleSessionRequirement(sessionType)
-      : null;
+  const sessionRequirement = gameRuleSessionRequirement(sessionType);
 
   if (normalized === "SESSION_START") {
-    return `старт сессии${sessionRequirement ? ` ${sessionRequirement}` : ""}`;
+    return withHourlySessionExtensionNotice(
+      `старт сессии${sessionRequirement ? ` ${sessionRequirement}` : ""}`,
+      sessionType,
+    );
+  }
+
+  if (normalized === "CHECK_IN") {
+    return withHourlySessionExtensionNotice(
+      `чекин в клубе${
+        sessionRequirement
+          ? ` во время активной сессии ${sessionRequirement}`
+          : ""
+      }`,
+      sessionType,
+    );
+  }
+
+  if (normalized === "PLAY_HOUR") {
+    return withHourlySessionExtensionNotice(
+      `игровое время${
+        sessionRequirement ? ` в сессии ${sessionRequirement}` : ""
+      }`,
+      sessionType,
+    );
   }
 
   return gameRuleEventLabel(triggerKind);
@@ -6446,13 +6494,15 @@ function gameRuleConditionLabel(
 function gameRuleBadgeLabel(triggerKind: string, sessionType: string | null) {
   const normalized = normalizeGameRuleTrigger(triggerKind);
 
-  if (normalized !== "SESSION_START") {
+  if (normalized !== "SESSION_START" && normalized !== "CHECK_IN") {
     return gameRuleEventLabel(triggerKind);
   }
 
   const sessionLabel = gameRuleSessionShortLabel(sessionType);
+  const triggerLabel =
+    normalized === "SESSION_START" ? "старт сессии" : "чекин в клубе";
 
-  return sessionLabel ? `старт сессии · ${sessionLabel}` : "старт сессии";
+  return sessionLabel ? `${triggerLabel} · ${sessionLabel}` : triggerLabel;
 }
 
 function gameRuleEventLabel(triggerKind: string) {
@@ -6524,6 +6574,8 @@ function normalizeGameRuleSessionType(value: string | null) {
   if (
     [
       "packet_hours",
+      "package_or_subscription",
+      "package_or_subscription_session",
       "packet",
       "package",
       "package_hours",
@@ -6538,7 +6590,14 @@ function normalizeGameRuleSessionType(value: string | null) {
   }
 
   if (
-    ["regular_session", "regular", "common", "default"].includes(normalized)
+    [
+      "hourly",
+      "hourly_session",
+      "regular_session",
+      "regular",
+      "common",
+      "default",
+    ].includes(normalized)
   ) {
     return "regular_session";
   }
@@ -6555,8 +6614,7 @@ function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
     const reward = playerQuestReward(mission);
     const walletItem = selectPreferredRewardWalletItem(
       walletItems,
-      (item) =>
-        item.sourceKind === "MISSION" && item.sourceId === mission.id,
+      (item) => item.sourceKind === "MISSION" && item.sourceId === mission.id,
     );
     const preview = gameMissionPreviewData(mission);
 
@@ -7081,19 +7139,34 @@ function playerQuestCondition(
   mission: GameMission,
   progress: PlayerQuest["progress"],
 ) {
+  const isHourlyPlayTime =
+    normalizeGameRuleTrigger(mission.triggerKind) === "PLAY_HOUR" &&
+    normalizeGameRuleSessionType(mission.sessionType) === "regular_session";
   if (mission.conditionLabel) {
-    return mission.conditionLabel;
+    return withHourlySessionExtensionNotice(
+      mission.conditionLabel,
+      isHourlyPlayTime ? mission.sessionType : null,
+    );
   }
 
   if (normalizeGameRuleTrigger(mission.triggerKind) === "PLAY_HOUR") {
     const minutes = progress?.total ?? mission.progressTarget ?? 0;
+    const sessionRequirement = isHourlyPlayTime
+      ? "в отдельно начатой почасовой сессии"
+      : "в игровой сессии";
 
     if (minutes === 60) {
-      return "Сыграйте один час в игровой сессии.";
+      return withHourlySessionExtensionNotice(
+        `Сыграйте один час ${sessionRequirement}.`,
+        isHourlyPlayTime ? mission.sessionType : null,
+      );
     }
 
     if (minutes > 0) {
-      return `Сыграйте ${formatNumber(minutes)} минут в игровой сессии.`;
+      return withHourlySessionExtensionNotice(
+        `Сыграйте ${formatNumber(minutes)} минут ${sessionRequirement}.`,
+        isHourlyPlayTime ? mission.sessionType : null,
+      );
     }
   }
 
@@ -7101,10 +7174,12 @@ function playerQuestCondition(
 }
 
 function missionConditionHint(mission: GameMission) {
-  return `Условие: ${
+  const condition = withHourlySessionExtensionNotice(
     mission.conditionLabel ||
-    gameRuleConditionLabel(mission.triggerKind, mission.sessionType)
-  }.`;
+      gameRuleConditionLabel(mission.triggerKind, mission.sessionType),
+    mission.sessionType,
+  );
+  return `Условие: ${condition}${/[.!?]$/.test(condition.trim()) ? "" : "."}`;
 }
 
 function missionBattlePassDescription(mission: GameMission) {
@@ -8077,8 +8152,7 @@ function RewardJournalPanel({
     () =>
       scopedRewards.filter(
         (item) =>
-          item.walletState === "READY" ||
-          item.walletState === "REDEEMED",
+          item.walletState === "READY" || item.walletState === "REDEEMED",
       ),
     [scopedRewards],
   );
@@ -8097,12 +8171,7 @@ function RewardJournalPanel({
         rarityFilter: activeRarityFilter,
         query: searchQuery,
       }),
-    [
-      activeSourceFilter,
-      activeRarityFilter,
-      scopedRewards,
-      searchQuery,
-    ],
+    [activeSourceFilter, activeRarityFilter, scopedRewards, searchQuery],
   );
   const groupedRewards = useMemo(
     () => groupRewardHistory(filteredRewards, activeGroup),
@@ -9029,12 +9098,13 @@ function LootBoxesPanel({
                   </div>
                 ) : (
                   <p className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-zinc-400">
-                    Лутбокс откроется{" "}
-                    {gameRuleUnlockCondition(
-                      lootBox.triggerKind,
+                    {withHourlySessionExtensionNotice(
+                      `Лутбокс откроется ${gameRuleUnlockCondition(
+                        lootBox.triggerKind,
+                        lootBox.sessionType,
+                      )}.`,
                       lootBox.sessionType,
                     )}
-                    .
                   </p>
                 )}
               </article>
@@ -9663,11 +9733,7 @@ function bonusHistoryWalletState(
     return "REDEEMED";
   }
 
-  if (
-    status === "PENDING" ||
-    status === "PROCESSING" ||
-    status === "UNKNOWN"
-  ) {
+  if (status === "PENDING" || status === "PROCESSING" || status === "UNKNOWN") {
     return "DELIVERY_PROCESSING";
   }
 
@@ -9721,10 +9787,8 @@ function mergeRewardHistoryItems(
     rewardAmount:
       next.rewardAmount === 0 ? current.rewardAmount : next.rewardAmount,
     rewardRarity: next.rewardRarity ?? current.rewardRarity,
-    rewardRarityLabel:
-      next.rewardRarityLabel ?? current.rewardRarityLabel,
-    rewardDropChance:
-      next.rewardDropChance ?? current.rewardDropChance,
+    rewardRarityLabel: next.rewardRarityLabel ?? current.rewardRarityLabel,
+    rewardDropChance: next.rewardDropChance ?? current.rewardDropChance,
     sourceId: next.sourceId ?? current.sourceId,
     sourceLabel: next.sourceLabel ?? current.sourceLabel,
     storeId: next.storeId ?? current.storeId,
@@ -9794,10 +9858,7 @@ function rewardHistoryClubLabel(
 }
 
 function buildRewardHistoryClubOptions(items: GameRewardHistoryItem[]) {
-  const byId = new Map<
-    string,
-    { id: string; label: string; scope: string }
-  >();
+  const byId = new Map<string, { id: string; label: string; scope: string }>();
 
   for (const item of items) {
     const id = rewardHistoryClubKey(item);
@@ -10082,9 +10143,7 @@ function groupRewardHistory(
         Date.parse(
           right.items[0] ? rewardHistoryOccurredAt(right.items[0]) : "",
         ) -
-        Date.parse(
-          left.items[0] ? rewardHistoryOccurredAt(left.items[0]) : "",
-        ),
+        Date.parse(left.items[0] ? rewardHistoryOccurredAt(left.items[0]) : ""),
     );
 }
 
@@ -16484,10 +16543,7 @@ async function acknowledgeGameCompletionNotification(notificationId: string) {
 
   if (!response.ok) {
     throw new Error(
-      await readResponseMessage(
-        response,
-        "Не удалось закрыть уведомление.",
-      ),
+      await readResponseMessage(response, "Не удалось закрыть уведомление."),
     );
   }
 }

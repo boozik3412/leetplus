@@ -360,6 +360,27 @@ function createPrismaMock() {
   } as any;
 }
 
+function mockRewardEffectClaimBatches(
+  prisma: ReturnType<typeof createPrismaMock>,
+  batches: Array<Array<Record<string, unknown>>>,
+) {
+  let claimIndex = 0;
+  prisma.$queryRaw.mockImplementation((query: Prisma.Sql) => {
+    const sql = Array.isArray(query?.strings) ? query.strings.join(' ') : '';
+    if (sql.includes('FROM "GuestGameEvent" event')) {
+      // Unit Prisma delegates do not execute the transactional source-event
+      // fence. Returning a non-array lets the fence use its documented Jest
+      // fallback while production Prisma remains fail-closed.
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(
+      sql.includes('UPDATE "GuestGameRewardEffect" AS effect')
+        ? (batches[claimIndex++] ?? [])
+        : [],
+    );
+  });
+}
+
 function schedulerRuntimeStatus(
   overrides: Partial<GuestBonusLedgerSchedulerRuntimeStatus> = {},
 ): GuestBonusLedgerSchedulerRuntimeStatus {
@@ -3534,7 +3555,7 @@ describe('GuestGamificationService', () => {
         }),
         select: { id: true, qualifiedAt: true, evidence: true },
         orderBy: [{ qualifiedAt: 'asc' }, { id: 'asc' }],
-        take: 2,
+        take: 100,
       });
       expect(prisma.guestGameRewardEffect.updateMany).toHaveBeenCalledTimes(2);
       expect(prisma.guestGameRewardEffect.updateMany).toHaveBeenNthCalledWith(
@@ -3551,6 +3572,58 @@ describe('GuestGamificationService', () => {
       );
       expect(reconcile).toHaveBeenNthCalledWith(1, user, 'case-reward-1');
       expect(reconcile).toHaveBeenNthCalledWith(2, user, 'case-reward-2');
+    });
+
+    it('paginates past remediated rewards instead of starving later legitimate recovery', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        gameActivatedAt: new Date('2026-06-01T00:00:00.000Z'),
+      });
+      const blocked = Array.from({ length: 100 }, (_, index) => ({
+        id: `remediated-case-${index + 1}`,
+        qualifiedAt: new Date(),
+        evidence: null,
+      }));
+      prisma.guestGameReward.findMany
+        .mockResolvedValueOnce(blocked)
+        .mockResolvedValueOnce([
+          { id: 'legitimate-case', qualifiedAt: new Date(), evidence: null },
+        ]);
+      jest
+        .spyOn(service as any, 'prepareRewardForGenericSessionMaterialization')
+        .mockImplementation((_: string, rewardId: string) =>
+          Promise.resolve(
+            rewardId.startsWith('remediated-case-')
+              ? {
+                  status: 'BLOCKED',
+                  reason: 'CLASSIFICATION_REMEDIATED',
+                }
+              : {
+                  status: 'READY',
+                  reason: 'NOT_A_LEGACY_TYPED_SESSION',
+                },
+          ),
+        );
+      const reconcile = jest
+        .spyOn(service as any, 'reconcileCreatedRewardSideEffectsById')
+        .mockResolvedValue(undefined);
+
+      await service.recoverProfileLootBoxRewardEffects(user, 'profile-1', 1);
+
+      expect(prisma.guestGameReward.findMany).toHaveBeenCalledTimes(2);
+      expect(prisma.guestGameReward.findMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          cursor: { id: 'remediated-case-100' },
+          skip: 1,
+        }),
+      );
+      expect(prisma.guestGameRewardEffect.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ rewardId: 'legitimate-case' }),
+        }),
+      );
+      expect(reconcile).toHaveBeenCalledWith(user, 'legitimate-case');
     });
 
     it('does not requeue an ancient unclaimed case effect from guest summary recovery', async () => {
@@ -3788,12 +3861,24 @@ describe('GuestGamificationService', () => {
       ];
 
       prisma.$queryRaw.mockResolvedValue(undefined);
-      prisma.guestGameRewardEffect.findMany.mockResolvedValue(candidates);
-      prisma.guestGameRewardEffect.updateMany
-        .mockResolvedValueOnce({ count: 0 })
-        .mockResolvedValueOnce({ count: 1 })
-        .mockResolvedValueOnce({ count: 0 })
-        .mockResolvedValueOnce({ count: 1 });
+      prisma.guestGameRewardEffect.findMany.mockImplementation(({ where }) =>
+        Promise.resolve(
+          where?.rewardId
+            ? candidates.filter(
+                (candidate) => candidate.rewardId === where.rewardId,
+              )
+            : candidates,
+        ),
+      );
+      prisma.guestGameRewardEffect.updateMany.mockImplementation(({ where }) =>
+        Promise.resolve({
+          count:
+            where?.id === 'effect-winner' ||
+            (where?.id === undefined && where?.attempts?.gte === undefined)
+              ? 1
+              : 0,
+        }),
+      );
       prisma.guestGameReward.findFirst.mockResolvedValue(
         rewardRow({ id: 'reward-pending', status: 'PENDING' }),
       );
@@ -3858,8 +3943,8 @@ describe('GuestGamificationService', () => {
         status: 'PENDING',
       });
 
-      prisma.$queryRaw
-        .mockResolvedValueOnce([
+      mockRewardEffectClaimBatches(prisma, [
+        [
           {
             id: 'effect-notification',
             rewardId: pendingReward.id,
@@ -3868,8 +3953,8 @@ describe('GuestGamificationService', () => {
             attempts: 1,
             leaseVersion: 1,
           },
-        ])
-        .mockResolvedValueOnce([
+        ],
+        [
           {
             id: 'effect-notification',
             rewardId: pendingReward.id,
@@ -3878,7 +3963,8 @@ describe('GuestGamificationService', () => {
             attempts: 2,
             leaseVersion: 2,
           },
-        ]);
+        ],
+      ]);
       prisma.guestGameReward.findFirst.mockResolvedValue(pendingReward);
 
       const failed = await service.materializeRewardEffects(user, {
@@ -3948,13 +4034,7 @@ describe('GuestGamificationService', () => {
         leaseVersion,
       });
 
-      prisma.$queryRaw
-        .mockResolvedValueOnce([claim(1, 1)])
-        .mockResolvedValueOnce([{ id: entitlementReward.id }])
-        .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }])
-        .mockResolvedValueOnce([claim(2, 2)])
-        .mockResolvedValueOnce([{ id: entitlementReward.id }])
-        .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }]);
+      mockRewardEffectClaimBatches(prisma, [[claim(1, 1)], [claim(2, 2)]]);
       prisma.guestGameReward.findFirst.mockResolvedValue(entitlementReward);
       prisma.guestGameLootBox.findFirst.mockResolvedValue({
         id: 'loot-box-template',
@@ -4014,9 +4094,7 @@ describe('GuestGamificationService', () => {
         leaseVersion,
       });
 
-      prisma.$queryRaw
-        .mockResolvedValueOnce([claim(1, 1)])
-        .mockResolvedValueOnce([claim(2, 2)]);
+      mockRewardEffectClaimBatches(prisma, [[claim(1, 1)], [claim(2, 2)]]);
       prisma.guestGameReward.findFirst.mockResolvedValue(bonusReward);
       bonusLedgerService.queueApprovedRewards
         .mockRejectedValueOnce(new Error('ledger unavailable'))
@@ -11881,6 +11959,74 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('keeps an expanded session unknown even when its final tariff marker looks hourly', () => {
+      const { service } = createService();
+
+      const result = (service as any).toCheckInLiveSession(
+        'club-1',
+        {
+          id: 'session-expanded-1',
+          guest_id: 'lg-guest-1',
+          list_clubs_id: 'club-external-1',
+          date_start: '2026-07-13 14:23:00',
+          date_stop: null,
+          packet: 1,
+          expand: 1,
+        },
+        'Europe/Samara',
+        new Map([['1', { id: 1, type: 'basic', name: 'Hourly' }]]),
+      );
+
+      expect(result).toMatchObject({
+        externalSessionId: 'session-expanded-1',
+        sessionType: 'unknown_session',
+        sessionPacket: null,
+        sessionBillingResolvedBy: 'unknown',
+        expandedHourlyClassificationAmbiguous: true,
+      });
+    });
+
+    it('does not let balance or log heuristics reclassify an expanded final-hourly session', async () => {
+      const { service, langameClient } = createService();
+      const session = (service as any).toCheckInLiveSession(
+        'club-1',
+        {
+          id: 'session-expanded-1',
+          guest_id: 'lg-guest-1',
+          list_clubs_id: 'club-external-1',
+          date_start: '2026-07-13 14:23:00',
+          date_stop: null,
+          packet: 1,
+          expand: 1,
+        },
+        'Europe/Samara',
+        new Map([['1', { id: 1, type: 'basic', name: 'Hourly' }]]),
+      );
+
+      const result = await (
+        service as any
+      ).resolveCheckInSessionTypeFromLiveGuestBalance(session, {
+        apiKey: 'api-key',
+        source: { baseUrl: 'https://langame.example' },
+        externalGuestId: 'lg-guest-1',
+        guest: { currentCountHours: '5' },
+      });
+
+      expect(result).toMatchObject({
+        sessionType: 'unknown_session',
+        sessionPacket: null,
+        expandedHourlyClassificationAmbiguous: true,
+      });
+      expect(langameClient.searchGuests).not.toHaveBeenCalled();
+      expect(langameClient.listTransactions).not.toHaveBeenCalled();
+      expect(langameClient.listGuestLogs).not.toHaveBeenCalled();
+      expect(
+        (service as any).resolveCheckInSessionTypeFromGuestBalance(result, {
+          currentCountHours: '5',
+        }),
+      ).toBe(result);
+    });
+
     it('keeps tariff group 1 basic hourly even when the guest has remaining hours', async () => {
       const { service, langameSettingsService, langameClient } =
         createService();
@@ -12042,6 +12188,49 @@ describe('GuestGamificationService', () => {
         }),
       );
     });
+
+    it.each([
+      ['has no tariff marker', null, false, null],
+      ['was expanded and now looks hourly', false, true, '4.25'],
+    ])(
+      'keeps a cached open session unknown when it %s',
+      async (_label, packet, expand, currentCountHours) => {
+        const { service, prisma } = createService();
+        prisma.guestSession.findFirst.mockResolvedValue({
+          externalDomain: 'club-1',
+          externalSessionId: 'session-unknown',
+          externalGuestId: 'lg-guest-1',
+          externalClubId: 'club-external-1',
+          externalUuid: 'uuid-unknown',
+          startedAt: new Date('2026-07-07T07:10:00.000Z'),
+          durationMinutes: 40,
+          expand,
+          packet,
+          store: {
+            id: 'store-1',
+            name: '1337-Пушкинская',
+            timeZone: 'Asia/Yekaterinburg',
+          },
+        });
+
+        const result = await (service as any).findCachedCheckInSession(
+          user.tenantId,
+          {
+            externalDomain: 'club-1',
+            externalGuestId: 'lg-guest-1',
+            currentCountHours,
+          },
+          null,
+        );
+
+        expect(result).toMatchObject({
+          externalSessionId: 'session-unknown',
+          sessionType: 'unknown_session',
+          sessionPacket: null,
+          ...(expand ? { expandedHourlyClassificationAmbiguous: true } : {}),
+        });
+      },
+    );
 
     it('refreshes cached open sessions from Langame balance when an existing abonnement is active', async () => {
       const { service, prisma, langameSettingsService, langameClient } =
@@ -12788,6 +12977,51 @@ describe('GuestGamificationService', () => {
           sessionMinutes: 15,
         },
       });
+    });
+
+    it('does not erase a known start classification when a later expanded snapshot is unknown', async () => {
+      const { service, prisma } = createService();
+      const storedEvent = eventResult({
+        payload: {
+          input: {
+            sessionType: 'packet_hours',
+            sessionPacket: true,
+            sessionMinutes: 15,
+          },
+        },
+      });
+      const idempotent = processResult({
+        dryRun: dryRunResult({
+          input: {
+            sessionType: 'unknown_session',
+            sessionPacket: null,
+            sessionMinutes: 30,
+          },
+        }),
+        event: storedEvent,
+        summary: {
+          ...processResult().summary,
+          idempotent: true,
+        },
+      });
+
+      const result = await (service as any).syncLiveSessionStartResult(
+        user,
+        idempotent,
+        {
+          eventType: 'SESSION_START',
+          occurredAt: '2026-06-10T09:45:00.000Z',
+          sessionType: 'unknown_session',
+          sessionPacket: null,
+          sessionMinutes: 30,
+          sourceFactId: 'session-1',
+          externalId: 'session-1',
+        },
+      );
+
+      expect(result).toBe(idempotent);
+      expect(result.event.payload).toEqual(storedEvent.payload);
+      expect(prisma.guestGameEvent.update).not.toHaveBeenCalled();
     });
 
     it('scopes a late package marker to newly eligible rules without counting a second session', async () => {
@@ -14463,8 +14697,8 @@ describe('GuestGamificationService', () => {
         rewardId: null,
         qualifiedAt: created.qualifiedAt,
       });
-      prisma.$queryRaw
-        .mockResolvedValueOnce([
+      mockRewardEffectClaimBatches(prisma, [
+        [
           {
             id: 'first-case-effect',
             rewardId: created.id,
@@ -14473,9 +14707,8 @@ describe('GuestGamificationService', () => {
             attempts: 1,
             leaseVersion: 1,
           },
-        ])
-        .mockResolvedValueOnce([{ id: created.id }])
-        .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }]);
+        ],
+      ]);
 
       await service.createReward(
         user,
@@ -17043,6 +17276,7 @@ describe('GuestGamificationService', () => {
           externalDomain: 'leetplus-game-app-open',
         }),
         null,
+        'event-existing',
         expect.any(Map),
       );
       expect(result).toMatchObject({
@@ -17285,6 +17519,102 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('never recovers a case from remediated generic session evidence', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const currentRun = noRewardDryRunResult({ eventType: 'PLAY_HOUR' });
+      const persistedRule = {
+        ...dryRunResult().rules[0],
+        id: 'mission-case-ambiguous-session',
+        kind: 'MISSION' as const,
+        name: 'Case for ambiguous minutes',
+        triggerKind: 'PLAY_HOUR',
+        evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+        rewardAmount: 0,
+        rewardLabel: 'Reward case',
+        selectedRewardLabel: 'Reward case',
+        rewardLootBoxId: 'loot-box-case',
+        manualApprovalRequired: false,
+        eligible: true,
+      };
+      const remediatedEvent = {
+        ...eventResult({
+          id: 'event-remediated-generic-session',
+          eventType: 'PLAY_HOUR',
+          occurredAt: now as unknown as string,
+          createdAt: now as unknown as string,
+          payload: {
+            processSchemaVersion: 2,
+            source: 'guest_gamification_process_event',
+            store: {
+              id: 'store-1',
+              name: 'Club',
+              timeZone: 'Asia/Yekaterinburg',
+              externalDomain: 'club-1',
+            },
+            input: {
+              ...currentRun.input,
+              sessionType: null,
+              sessionPacket: null,
+              sessionMinutes: 90,
+            },
+            rules: [persistedRule],
+            rewardIntents: [],
+            genericSessionClassificationRemediation: {
+              schemaVersion: 1,
+              kind: 'GENERIC_SESSION_FAIL_CLOSED',
+              status: 'RECONCILIATION_REQUIRED',
+              semanticClassification: {
+                sessionType: null,
+                sessionPacket: null,
+              },
+            },
+          },
+        }),
+        profileId: profile.id,
+        guestId: 'guest-1',
+        originKey: 'origin-remediated-generic-session',
+      } as any;
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(currentRun);
+      prisma.guestGameEvent.findFirst.mockResolvedValue(remediatedEvent);
+      const ensureMissionCaseIntent = jest.spyOn(
+        service as any,
+        'ensureMatchedMissionRewardIntents',
+      );
+      jest
+        .spyOn(service as any, 'materializeProcessRewardIntents')
+        .mockResolvedValue({ dryRun: currentRun, rewards: [] });
+
+      const result = await service.processEvent(
+        user,
+        {
+          profileId: profile.id,
+          guestId: 'guest-1',
+          eventType: 'PLAY_HOUR',
+          sourceFactKind: 'GUEST_SESSION',
+          sourceFactId: 'fact-remediated-generic-session',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-remediated-generic-session',
+        },
+        { originKey: 'origin-remediated-generic-session' },
+      );
+
+      expect(ensureMissionCaseIntent).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        processed: true,
+        event: { id: remediatedEvent.id },
+        summary: { createdRewards: 0, idempotent: true },
+      });
+      expect(result.dryRun.rules).toEqual([]);
+    });
+
     it('treats a parallel unique event conflict as idempotent without creating duplicate rewards', async () => {
       const { service, prisma } = createService();
       const profile = profileFixture();
@@ -17499,6 +17829,7 @@ describe('GuestGamificationService', () => {
           externalDomain: 'club-1',
         }),
         sessionOriginKey,
+        'event-existing',
         expect.any(Map),
       );
       expect(result).toMatchObject({
@@ -17889,6 +18220,7 @@ describe('GuestGamificationService', () => {
         'profile-1',
         null,
         null,
+        null,
         new Map([['MISSION:mission-1:BONUS', intentIdempotencyKey]]),
       );
 
@@ -17969,6 +18301,47 @@ describe('GuestGamificationService', () => {
           claimExpiresAt: null,
         }),
       );
+    });
+
+    it('keeps remediated legacy generic sessions out of typed progress history', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameEvent.findMany.mockResolvedValue([
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: now,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          payload: {
+            input: {
+              sessionType: 'regular_session',
+              sessionPacket: false,
+              sessionMinutes: 90,
+            },
+            genericSessionClassificationRemediation: {
+              schemaVersion: 1,
+              kind: 'GENERIC_SESSION_FAIL_CLOSED',
+              status: 'RECONCILIATION_REQUIRED',
+              semanticClassification: {
+                sessionType: null,
+                sessionPacket: null,
+              },
+            },
+          },
+        },
+      ]);
+
+      const events = await (service as any).getDryRunProgressEvents(user, {
+        profileId: 'profile-1',
+      });
+
+      expect(events).toEqual([
+        expect.objectContaining({
+          eventType: 'PLAY_HOUR',
+          sessionType: null,
+          sessionPacket: null,
+          sessionMinutes: 90,
+        }),
+      ]);
     });
   });
 
@@ -18977,6 +19350,67 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it.each([
+      ['missing', null, false],
+      ['expanded hourly-looking', false, true],
+    ])(
+      'keeps a %s snapshot tariff unknown instead of treating it as hourly',
+      async (_label, packet, expand) => {
+        const { service, prisma } = createService();
+        prisma.$queryRaw.mockResolvedValue([
+          {
+            id: 'unknown-session-1',
+            needsSessionStart: true,
+            needsPlayHour: true,
+            needsPackageCorrection: false,
+          },
+        ]);
+        prisma.guestSession.findMany.mockResolvedValue([
+          {
+            id: 'unknown-session-1',
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: 'club-1',
+            externalSessionId: 'external-unknown-session-1',
+            externalGuestId: 'guest-external-1',
+            startedAt: now,
+            stoppedAt: new Date(now.getTime() + 60 * 60_000),
+            durationMinutes: 60,
+            normalStop: true,
+            expand,
+            packet,
+            guest: {
+              id: 'guest-1',
+              externalDomain: 'club-1',
+              externalGuestId: 'guest-external-1',
+              fullNameMasked: 'Guest',
+              phoneMasked: '***0646',
+              emailMasked: null,
+            },
+            store: { id: 'store-1', name: 'Club 1' },
+          },
+        ]);
+
+        const facts = await (service as any).loadPendingSessionSnapshotFacts(
+          user,
+          10,
+          new Date(now.getTime() - 24 * 60 * 60_000),
+        );
+
+        expect(facts).toEqual([
+          expect.objectContaining({
+            eventType: 'SESSION_START',
+            sessionType: 'unknown_session',
+            sessionPacket: null,
+          }),
+          expect.objectContaining({
+            eventType: 'PLAY_HOUR',
+            sessionType: 'unknown_session',
+            sessionPacket: null,
+          }),
+        ]);
+      },
+    );
+
     it('loads only the missing terminal fact when session start is already canonical', async () => {
       const { service, prisma } = createService();
       prisma.$queryRaw.mockResolvedValue([
@@ -19671,14 +20105,8 @@ describe('GuestGamificationService', () => {
           leaseVersion,
         });
         configService.get.mockReset();
-        prisma.$queryRaw
-          .mockReset()
-          .mockResolvedValueOnce([claim(1, 1)])
-          .mockResolvedValueOnce([{ id: rewardId }])
-          .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }])
-          .mockResolvedValueOnce([claim(2, 2)])
-          .mockResolvedValueOnce([{ id: rewardId }])
-          .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }]);
+        prisma.$queryRaw.mockReset();
+        mockRewardEffectClaimBatches(prisma, [[claim(1, 1)], [claim(2, 2)]]);
         prisma.guestGameLootBox.findFirst.mockResolvedValue({
           id: lootBoxId,
           name: 'Reward case',

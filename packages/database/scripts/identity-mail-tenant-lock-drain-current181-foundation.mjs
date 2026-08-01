@@ -62,7 +62,7 @@ const EXPECTED_PREDECESSOR_MANIFEST_DIGEST =
 
 const UNPINNED_CANDIDATE_SHA256 = "0".repeat(64);
 const EXPECTED_CANDIDATE_SHA256 =
-  "b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455";
+  "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac";
 
 const MIGRATION_NAME_PATTERN = /^[0-9]{14}_[a-z0-9_]+$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
@@ -1121,27 +1121,29 @@ export function evaluateIdentityMailTenantLockDrainCurrent181Foundation(
       "identity_mail_outbox_delivery_guard_v2",
     );
     add(
-      !hasEveryFragment(outboxGuardBody, [
-        'NEW."transitionRevision" <> OLD."transitionRevision" + 1',
-        'NEW."updatedAt" <= OLD."updatedAt"',
-      ]) ||
+      candidateSql.includes("pg_catalog.greatest(") ||
+        candidateSql.includes("pg_catalog.least(") ||
+        !hasEveryFragment(outboxGuardBody, [
+          'NEW."transitionRevision" <> OLD."transitionRevision" + 1',
+          'NEW."updatedAt" <= OLD."updatedAt"',
+        ]) ||
         !hasEveryFragment(claimBody, [
-          "now_at := pg_catalog.greatest( now_at,",
+          "now_at := GREATEST( now_at,",
           updatedAtIncrementFragment,
           '"updatedAt" = now_at',
         ]) ||
         !hasEveryFragment(providerMarkBody, [
-          `now_at := pg_catalog.greatest( ${monotonicClockFragment},`,
+          `now_at := GREATEST( ${monotonicClockFragment},`,
           updatedAtIncrementFragment,
           '"updatedAt" = now_at',
         ]) ||
         !hasEveryFragment(completeBody, [
-          `now_at := pg_catalog.greatest( ${monotonicClockFragment},`,
+          `now_at := GREATEST( ${monotonicClockFragment},`,
           updatedAtIncrementFragment,
           '"updatedAt" = now_at',
         ]) ||
         !hasEveryFragment(reapBody, [
-          "transition_at := pg_catalog.greatest( now_at,",
+          "transition_at := GREATEST( now_at,",
           updatedAtIncrementFragment,
           '"updatedAt" = transition_at',
         ]),

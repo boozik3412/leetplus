@@ -92,14 +92,14 @@ BEGIN
      OR lexical_migration_head IS DISTINCT FROM
        '20260801020000_identity_mail_tenant_lock_drain_worker_v2'
      OR migration_manifest_digest IS DISTINCT FROM
-       '7db51f4803b9c6c76b9593e5e8e3573b58b165237d44796e6d6efe27a367c110'
+       'ba90c13072d9afb2cc942b3cde1d01a789772605c69b71d3b273a0cb5a6e97f6'
      OR NOT EXISTS (
        SELECT 1
        FROM public."_prisma_migrations" AS migration
        WHERE migration."migration_name" =
          '20260801020000_identity_mail_tenant_lock_drain_worker_v2'
          AND migration."checksum" =
-           'b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455'
+           'c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac'
          AND migration."finished_at" IS NOT NULL
          AND migration."rolled_back_at" IS NULL
      )

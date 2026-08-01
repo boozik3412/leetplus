@@ -39,7 +39,7 @@ const CANONICAL_COUNT = 179;
 const CANONICAL_HEAD = "20260731120000_identity_mail_delivery_release_head";
 const CURRENT181 = "20260801020000_identity_mail_tenant_lock_drain_worker_v2";
 const CURRENT181_SHA256 =
-  "b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455";
+  "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac";
 const CURRENT182 = "20260801030000_identity_mail_tenant_first_claim_protocol";
 const CURRENT182_CONFIRMATION =
   "rehearse-noncanonical-identity-mail-tenant-first-claim-current182";

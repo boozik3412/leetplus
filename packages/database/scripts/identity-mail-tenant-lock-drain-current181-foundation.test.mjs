@@ -458,19 +458,34 @@ test("rejects semantically inert or authority-weakened worker-v2 bodies", async 
 
 test("rejects non-monotonic transition time and session-formatted event evidence", async (t) => {
   for (const [name, marker] of [
-    ["identity_initial_owner_mail_claim_v2", "now_at := pg_catalog.greatest("],
+    ["identity_initial_owner_mail_claim_v2", "now_at := GREATEST("],
     [
       "identity_initial_owner_mail_provider_mark_v2",
-      "now_at := pg_catalog.greatest(",
+      "now_at := GREATEST(",
     ],
-    ["identity_initial_owner_mail_complete_v2", "now_at := pg_catalog.greatest("],
-    ["identity_initial_owner_mail_reap_v2", "transition_at := pg_catalog.greatest("],
+    ["identity_initial_owner_mail_complete_v2", "now_at := GREATEST("],
+    ["identity_initial_owner_mail_reap_v2", "transition_at := GREATEST("],
   ]) {
     await t.test(`non-monotonic ${name}`, () => {
       const value = withCandidateSql();
       mutateFunctionBlock(value, name, (block) =>
-        block.replace(marker, marker.replace("greatest", "least")),
+        block.replace(marker, marker.replace("GREATEST", "LEAST")),
       );
+      expectFinding(value, F.TRANSITION_TIMESTAMP_DRIFT);
+    });
+  }
+
+  for (const [name, marker, qualified] of [
+    ["GREATEST", "now_at := GREATEST(", "now_at := pg_catalog.greatest("],
+    [
+      "LEAST",
+      "deliverable_until := LEAST(",
+      "deliverable_until := pg_catalog.least(",
+    ],
+  ]) {
+    await t.test(`schema-qualified ${name} special form`, () => {
+      const value = withCandidateSql();
+      replaceCandidateFragment(value, marker, qualified);
       expectFinding(value, F.TRANSITION_TIMESTAMP_DRIFT);
     });
   }

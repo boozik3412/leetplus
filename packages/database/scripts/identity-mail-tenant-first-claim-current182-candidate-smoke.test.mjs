@@ -13,7 +13,7 @@ import {
 } from "./identity-mail-tenant-first-claim-current182-candidate-smoke.mjs";
 
 const CURRENT182_SHA256 =
-  "4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22";
+  "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf";
 
 test("CURRENT182 smoke CLI accepts only help, self-test, or real mode", () => {
   assert.deepEqual(parseCurrent182SmokeArguments([]), {
@@ -128,7 +128,7 @@ test("CURRENT182 smoke self-test freezes the 182-entry stack and byte SHA", asyn
     candidateSha256: CURRENT182_SHA256,
     decision: "SELF_TEST_PASSED",
     predecessorManifestDigest:
-      "7db51f4803b9c6c76b9593e5e8e3573b58b165237d44796e6d6efe27a367c110",
+      "ba90c13072d9afb2cc942b3cde1d01a789772605c69b71d3b273a0cb5a6e97f6",
     predecessorMigrationCount: 181,
     runtimeShaSource: "MIGRATION_SQL_BYTES",
   });

@@ -99,14 +99,14 @@ BEGIN
      OR lexical_migration_head IS DISTINCT FROM
        '20260801030000_identity_mail_tenant_first_claim_protocol'
      OR migration_manifest_digest IS DISTINCT FROM
-       'd30a07005d8df4940b05af4b2c6b340704387ed59446f4334e8765c287c71ffd'
+       'd0002b64dd8e6134f20a444c8b1ff70762944ffe057da3cc2fbad46945c06506'
      OR NOT EXISTS (
        SELECT 1
        FROM public."_prisma_migrations" AS migration
        WHERE migration."migration_name" =
          '20260801030000_identity_mail_tenant_first_claim_protocol'
          AND migration."checksum" =
-           '4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22'
+           '5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf'
          AND migration."finished_at" IS NOT NULL
          AND migration."rolled_back_at" IS NULL
      )

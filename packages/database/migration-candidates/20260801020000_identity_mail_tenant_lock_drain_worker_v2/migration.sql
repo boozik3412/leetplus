@@ -1406,7 +1406,7 @@ BEGIN
       USING ERRCODE = '40001';
   END IF;
 
-  now_at := pg_catalog.greatest(
+  now_at := GREATEST(
     now_at,
     outbox_record."updatedAt" + INTERVAL '1 millisecond'
   );
@@ -1629,7 +1629,7 @@ BEGIN
       USING ERRCODE = 'P0002';
   END IF;
 
-  now_at := pg_catalog.greatest(
+  now_at := GREATEST(
     pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp()),
     outbox_record."updatedAt" + INTERVAL '1 millisecond'
   );
@@ -1991,7 +1991,7 @@ BEGIN
       USING ERRCODE = 'P0002';
   END IF;
 
-  now_at := pg_catalog.greatest(
+  now_at := GREATEST(
     pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp()),
     outbox_record."updatedAt" + INTERVAL '1 millisecond'
   );
@@ -2081,7 +2081,7 @@ BEGIN
     AND outbox_record."expiresAt" > now_at;
 
   IF invite_record."id" IS NOT NULL AND tenant_record."id" IS NOT NULL THEN
-    deliverable_until := pg_catalog.least(
+    deliverable_until := LEAST(
       outbox_record."expiresAt",
       invite_record."expiresAt",
       tenant_record."trialEndsAt"
@@ -2828,7 +2828,7 @@ BEGIN
     next_available_at := NULL;
     deliverable_until := NULL;
     invite_live := false;
-    transition_at := pg_catalog.greatest(
+    transition_at := GREATEST(
       now_at,
       outbox_record."updatedAt" + INTERVAL '1 millisecond'
     );
@@ -2982,7 +2982,7 @@ BEGIN
       AND outbox_record."expiresAt" > now_at;
 
     IF invite_record."id" IS NOT NULL AND tenant_record."id" IS NOT NULL THEN
-      deliverable_until := pg_catalog.least(
+      deliverable_until := LEAST(
         outbox_record."expiresAt",
         invite_record."expiresAt",
         tenant_record."trialEndsAt"
@@ -3328,7 +3328,7 @@ BEGIN
     claim_record := NULL;
   END IF;
 
-  now_at := pg_catalog.greatest(
+  now_at := GREATEST(
     pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp()),
     outbox_record."updatedAt" + INTERVAL '1 millisecond'
   );
@@ -3828,31 +3828,31 @@ BEGIN
         'public."identity_initial_owner_mail_claim_v2"(text,text,text,text)',
         true,
         'jsonb',
-        'bc0fe86b7674a69d2a66effa157ba227a50605c630608e1070d6a24390e2039d'
+        '99f96769c953251d52e40baa5d937ff101efba56b32d0e05b021a60948c9e0f1'
       ),
       (
         'public."identity_initial_owner_mail_provider_mark_v2"(text,text,integer,text,text,text,text,text)',
         true,
         'jsonb',
-        '6e1d55c1b34ec31db2a421c5bceacd3575ab65615a837759b0852ba6cecc94ac'
+        '190bb0100186f233cd33f1b4bb4065dd4c401e5156e5b0e9ecb8c7ba190c5754'
       ),
       (
         'public."identity_initial_owner_mail_complete_v2"(text,text,integer,text,text,text,text,text,text)',
         true,
         'jsonb',
-        'bd5974c9704546a94736f3106a4a8998420505c80307e2e97f5a9cbdaebb163d'
+        '2037007f96e0626f46d3f6cfe7504383ac453e12e405c2d2b7ad4fd777cc52fb'
       ),
       (
         'public."identity_initial_owner_mail_reap_v2"(text,text,text,integer)',
         true,
         'jsonb',
-        'b1d39e311fe66d1b8f41214663f036db28fc6647a4d2be21783e74883c3f1fe6'
+        '1f6310957a575d8e9ffe9660c3d0e0a8a507f538193e1a14db6d8a296bb7356d'
       ),
       (
         'public."identity_initial_owner_mail_reconcile_v2"(text,text,bigint,text,text,text)',
         true,
         'jsonb',
-        '3215e114dccf84695bf8ce184d9fa2173f496ec57f86429d2342cef5737cc7eb'
+        '39fc2456da022057b22cf5334f99a1fb777381c16bf807cb96f72bff7d891151'
       ),
       (
         'public."identity_owner_invite_issue_hold_v1"(text,text,text,integer,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)',

@@ -45,7 +45,7 @@ function expectFinding(value, finding) {
   return report;
 }
 
-test("accepts only the exact dormant non-canonical CURRENT180 foundation", () => {
+test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT182 inventory", () => {
   const report = assertIdentityMailTenantEnrollmentFoundation(artifact);
   assert.equal(report.decision, "COMPLIANT");
   assert.equal(report.base.count, 179);
@@ -65,6 +65,7 @@ test("accepts only the exact dormant non-canonical CURRENT180 foundation", () =>
   assert.deepEqual(artifact.candidates.directoryNames, [
     "20260801010000_identity_mail_tenant_enrollment_control_plane",
     "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+    "20260801030000_identity_mail_tenant_first_claim_protocol",
   ]);
   assert.deepEqual(report.findings, []);
   assert.ok(Object.isFrozen(report));
@@ -96,19 +97,38 @@ test("fails closed on canonical position, manifest, candidate head and metadata 
       },
     ],
     [
-      "missing stacked CURRENT181 candidate",
+      "missing stacked CURRENT182 successor",
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
         value.candidates.directoryNames.pop();
       },
     ],
     [
-      "unexpected candidate head",
+      "missing stacked CURRENT181 successor",
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
-        value.candidates.directoryNames.push(
-          "20260801020000_unexpected_candidate",
-        );
+        value.candidates.directoryNames.splice(1, 1);
+      },
+    ],
+    [
+      "reordered exact successors",
+      F.CANDIDATE_HEAD_MISMATCH,
+      (value) => {
+        [
+          value.candidates.directoryNames[1],
+          value.candidates.directoryNames[2],
+        ] = [
+          value.candidates.directoryNames[2],
+          value.candidates.directoryNames[1],
+        ];
+      },
+    ],
+    [
+      "unknown candidate successor",
+      F.CANDIDATE_HEAD_MISMATCH,
+      (value) => {
+        value.candidates.directoryNames[2] =
+          "20260801030000_unexpected_candidate";
       },
     ],
     [

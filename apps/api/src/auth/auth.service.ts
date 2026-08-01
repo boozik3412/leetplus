@@ -215,19 +215,21 @@ export class AuthService {
     }
 
     const passwordHash = await this.passwordService.hash(password);
-    const created = await this.prisma.$transaction(async (tx) => {
-      const identityTransaction = this.identityEmailClaim.bindTransaction(tx);
-      await this.identityEmailClaim.assertInvite(identityTransaction, {
-        email,
-        tenantId: invite.tenantId,
-        subjectId: invite.id,
-        expectedRevision: identityClaimRevision,
-      });
+    const created = await this.identityEmailClaim.runTenantTransaction(
+      this.prisma,
+      invite.tenantId,
+      async (tx, identityTransaction) => {
+        await this.identityEmailClaim.assertInvite(identityTransaction, {
+          email,
+          tenantId: invite.tenantId,
+          subjectId: invite.id,
+          expectedRevision: identityClaimRevision,
+        });
 
-      const acceptedAt = new Date();
-      const lockedTenants = await tx.$queryRaw<
-        Array<PersistedTenantExecutionSubject>
-      >(Prisma.sql`
+        const acceptedAt = new Date();
+        const lockedTenants = await tx.$queryRaw<
+          Array<PersistedTenantExecutionSubject>
+        >(Prisma.sql`
         SELECT
           "id",
           "status",
@@ -241,198 +243,198 @@ export class AuthService {
         WHERE "id" = ${invite.tenantId}
         FOR UPDATE
       `);
-      const lockedTenant = lockedTenants[0];
-      if (!lockedTenant) {
-        throw new ConflictException('Tenant changed while accepting invite');
-      }
-      const lockedEntitlements = await tx.tenantModuleEntitlement.findMany({
-        where: { tenantId: invite.tenantId },
-        select: tenantModuleEntitlementExecutionSelect,
-      });
-      const lockedInvite = {
-        ...invite,
-        tenant: {
-          ...lockedTenant,
-          moduleEntitlements: lockedEntitlements,
-        },
-      };
-      this.assertInviteAdmitted(lockedInvite, acceptedAt);
-      await this.assertInitialOwnerInviteDeliverySent(lockedInvite, tx);
+        const lockedTenant = lockedTenants[0];
+        if (!lockedTenant) {
+          throw new ConflictException('Tenant changed while accepting invite');
+        }
+        const lockedEntitlements = await tx.tenantModuleEntitlement.findMany({
+          where: { tenantId: invite.tenantId },
+          select: tenantModuleEntitlementExecutionSelect,
+        });
+        const lockedInvite = {
+          ...invite,
+          tenant: {
+            ...lockedTenant,
+            moduleEntitlements: lockedEntitlements,
+          },
+        };
+        this.assertInviteAdmitted(lockedInvite, acceptedAt);
+        await this.assertInitialOwnerInviteDeliverySent(lockedInvite, tx);
 
-      if (invite.role === UserRole.OWNER) {
-        const ownerCount = await tx.user.count({
-          where: {
+        if (invite.role === UserRole.OWNER) {
+          const ownerCount = await tx.user.count({
+            where: {
+              tenantId: invite.tenantId,
+              role: UserRole.OWNER,
+            },
+          });
+          if (ownerCount !== 0) {
+            throw new ConflictException(
+              'Initial owner already exists; use the owner-transfer workflow',
+            );
+          }
+        }
+
+        const userId = randomUUID();
+        await tx.user.create({
+          data: {
+            id: userId,
             tenantId: invite.tenantId,
-            role: UserRole.OWNER,
+            email,
+            fullName,
+            passwordHash,
+            role: invite.role,
+            customRoleId: invite.customRoleId,
+            accessScope: inviteAccessScope.mode,
+            isActive: true,
+            emailVerifiedAt: new Date(),
+            identityClaimRevision: null,
           },
         });
-        if (ownerCount !== 0) {
-          throw new ConflictException(
-            'Initial owner already exists; use the owner-transfer workflow',
-          );
+
+        if (storeIds.length > 0) {
+          await tx.userStoreAccess.createMany({
+            data: storeIds.map((storeId) => ({ userId, storeId })),
+            skipDuplicates: true,
+          });
         }
-      }
 
-      const userId = randomUUID();
-      await tx.user.create({
-        data: {
-          id: userId,
-          tenantId: invite.tenantId,
-          email,
-          fullName,
-          passwordHash,
-          role: invite.role,
-          customRoleId: invite.customRoleId,
-          accessScope: inviteAccessScope.mode,
-          isActive: true,
-          emailVerifiedAt: new Date(),
-          identityClaimRevision: null,
-        },
-      });
-
-      if (storeIds.length > 0) {
-        await tx.userStoreAccess.createMany({
-          data: storeIds.map((storeId) => ({ userId, storeId })),
-          skipDuplicates: true,
-        });
-      }
-
-      const accepted = await tx.userInvite.updateMany({
-        where: {
-          id: invite.id,
-          acceptedAt: null,
-          revokedAt: null,
-          expiresAt: { gt: acceptedAt },
-          updatedAt: invite.updatedAt,
-        },
-        data: {
-          acceptedAt,
-          acceptedByUserId: userId,
-        },
-      });
-
-      if (accepted.count !== 1) {
-        throw new ConflictException('Invite changed or was already accepted');
-      }
-
-      if (invite.role === UserRole.OWNER) {
-        const transitioned = await tx.tenant.updateMany({
+        const accepted = await tx.userInvite.updateMany({
           where: {
-            id: invite.tenantId,
-            status: TenantLifecycleStatus.ACTIVE,
-            onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
-            entitlementProfileRevision: lockedTenant.entitlementProfileRevision,
-            executionRevision: lockedTenant.executionRevision,
+            id: invite.id,
+            acceptedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: acceptedAt },
+            updatedAt: invite.updatedAt,
           },
           data: {
-            onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+            acceptedAt,
+            acceptedByUserId: userId,
           },
         });
 
-        if (transitioned.count !== 1) {
-          throw new ConflictException(
-            'Tenant onboarding changed while accepting invite',
-          );
+        if (accepted.count !== 1) {
+          throw new ConflictException('Invite changed or was already accepted');
         }
 
-        const transitionedTenant = await tx.tenant.findUniqueOrThrow({
-          where: { id: invite.tenantId },
-          select: {
-            onboardingStatus: true,
-            executionRevision: true,
-          },
-        });
-        if (
-          transitionedTenant.onboardingStatus !==
-            TenantOnboardingStatus.ONBOARDING ||
-          transitionedTenant.executionRevision !==
-            lockedTenant.executionRevision + 1
-        ) {
-          throw new ConflictException(
-            'Tenant execution revision changed while accepting invite',
-          );
-        }
-
-        await tx.platformAdminAuditEvent.create({
-          data: {
-            tenantId: invite.tenantId,
-            actorUserId: userId,
-            action: 'TENANT_OWNER_INVITE_ACCEPTED',
-            targetType: 'TENANT_ONBOARDING',
-            targetId: invite.tenantId,
-            reason: 'Initial owner accepted the email-bound invite',
-            before: {
+        if (invite.role === UserRole.OWNER) {
+          const transitioned = await tx.tenant.updateMany({
+            where: {
+              id: invite.tenantId,
+              status: TenantLifecycleStatus.ACTIVE,
               onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+              entitlementProfileRevision:
+                lockedTenant.entitlementProfileRevision,
               executionRevision: lockedTenant.executionRevision,
             },
-            after: {
+            data: {
               onboardingStatus: TenantOnboardingStatus.ONBOARDING,
-              executionRevision: transitionedTenant.executionRevision,
             },
-            metadata: {
-              inviteId: invite.id,
-              ownerUserId: userId,
-              executionRevisionBefore: lockedTenant.executionRevision,
-              executionRevisionAfter: transitionedTenant.executionRevision,
-            },
-          },
-        });
-      }
+          });
 
-      const identityTransition = await this.identityEmailClaim.transitionInvite(
-        identityTransaction,
-        {
-          email,
-          tenantId: invite.tenantId,
-          expectedSubjectId: invite.id,
-          expectedRevision: identityClaimRevision,
-          nextClaimType: IdentityEmailClaimType.USER,
-          nextSubjectId: userId,
-        },
-      );
-      await tx.user.update({
-        where: { id: userId },
-        data: { identityClaimRevision: identityTransition.revision },
-      });
+          if (transitioned.count !== 1) {
+            throw new ConflictException(
+              'Tenant onboarding changed while accepting invite',
+            );
+          }
 
-      return tx.user.findUniqueOrThrow({
-        where: { id: userId },
-        include: {
-          tenant: {
+          const transitionedTenant = await tx.tenant.findUniqueOrThrow({
+            where: { id: invite.tenantId },
             select: {
-              slug: true,
-              status: true,
-              customerStage: true,
               onboardingStatus: true,
-              trialStartsAt: true,
-              trialEndsAt: true,
-              entitlementProfileRevision: true,
               executionRevision: true,
-              moduleEntitlements: {
-                select: tenantModuleEntitlementExecutionSelect,
+            },
+          });
+          if (
+            transitionedTenant.onboardingStatus !==
+              TenantOnboardingStatus.ONBOARDING ||
+            transitionedTenant.executionRevision !==
+              lockedTenant.executionRevision + 1
+          ) {
+            throw new ConflictException(
+              'Tenant execution revision changed while accepting invite',
+            );
+          }
+
+          await tx.platformAdminAuditEvent.create({
+            data: {
+              tenantId: invite.tenantId,
+              actorUserId: userId,
+              action: 'TENANT_OWNER_INVITE_ACCEPTED',
+              targetType: 'TENANT_ONBOARDING',
+              targetId: invite.tenantId,
+              reason: 'Initial owner accepted the email-bound invite',
+              before: {
+                onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+                executionRevision: lockedTenant.executionRevision,
+              },
+              after: {
+                onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+                executionRevision: transitionedTenant.executionRevision,
+              },
+              metadata: {
+                inviteId: invite.id,
+                ownerUserId: userId,
+                executionRevisionBefore: lockedTenant.executionRevision,
+                executionRevisionAfter: transitionedTenant.executionRevision,
               },
             },
-          },
-          customRole: {
-            select: {
-              id: true,
-              name: true,
-              permissions: true,
+          });
+        }
+
+        const identityTransition =
+          await this.identityEmailClaim.transitionInvite(identityTransaction, {
+            email,
+            tenantId: invite.tenantId,
+            expectedSubjectId: invite.id,
+            expectedRevision: identityClaimRevision,
+            nextClaimType: IdentityEmailClaimType.USER,
+            nextSubjectId: userId,
+          });
+        await tx.user.update({
+          where: { id: userId },
+          data: { identityClaimRevision: identityTransition.revision },
+        });
+
+        return tx.user.findUniqueOrThrow({
+          where: { id: userId },
+          include: {
+            tenant: {
+              select: {
+                slug: true,
+                status: true,
+                customerStage: true,
+                onboardingStatus: true,
+                trialStartsAt: true,
+                trialEndsAt: true,
+                entitlementProfileRevision: true,
+                executionRevision: true,
+                moduleEntitlements: {
+                  select: tenantModuleEntitlementExecutionSelect,
+                },
+              },
             },
-          },
-          storeAccesses: {
-            select: {
-              storeId: true,
-              store: {
-                select: {
-                  tenantId: true,
+            customRole: {
+              select: {
+                id: true,
+                name: true,
+                permissions: true,
+              },
+            },
+            storeAccesses: {
+              select: {
+                storeId: true,
+                store: {
+                  select: {
+                    tenantId: true,
+                  },
                 },
               },
             },
           },
-        },
-      });
-    });
+        });
+      },
+    );
 
     return this.createAuthResponse(created);
   }

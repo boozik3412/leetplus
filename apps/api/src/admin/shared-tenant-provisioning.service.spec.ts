@@ -15,7 +15,10 @@ import {
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { SHARED_BETA_INITIAL_OWNER_CAPABILITIES } from '../auth/capabilities';
-import { IdentityEmailClaimService } from '../auth/identity-email-claim.service';
+import {
+  IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+  IdentityEmailClaimService,
+} from '../auth/identity-email-claim.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-profile.service';
 import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
@@ -122,6 +125,9 @@ function provisioningDto(overrides: Record<string, unknown> = {}) {
 describe('SharedTenantProvisioningService shell boundary', () => {
   let prisma: SharedProvisioningPrismaMock;
   let identity: IdentityEmailClaimService;
+  let lockTenantTransaction: jest.SpiedFunction<
+    IdentityEmailClaimService['lockTenantTransaction']
+  >;
   let reserveInvite: jest.SpiedFunction<
     IdentityEmailClaimService['reserveInvite']
   >;
@@ -144,6 +150,10 @@ describe('SharedTenantProvisioningService shell boundary', () => {
         return undefined;
       }),
     } as unknown as ConfigService);
+    lockTenantTransaction = jest.spyOn(identity, 'lockTenantTransaction');
+    lockTenantTransaction.mockImplementation((tx) =>
+      Promise.resolve(tx as never),
+    );
     reserveInvite = jest.spyOn(identity, 'reserveInvite');
     reserveInvite.mockImplementation((_tx, input) =>
       Promise.resolve({
@@ -286,6 +296,10 @@ describe('SharedTenantProvisioningService shell boundary', () => {
     }
 
     expect(reserveInvite).toHaveBeenCalledTimes(1);
+    expect(lockTenantTransaction).toHaveBeenCalledWith(
+      prisma,
+      firstCallData(prisma.tenant.create).id,
+    );
     expect(reserveInvite).toHaveBeenCalledWith(
       prisma,
       expect.objectContaining({
@@ -296,6 +310,15 @@ describe('SharedTenantProvisioningService shell boundary', () => {
     );
     expect(reserveInvite.mock.invocationCallOrder[0]).toBeLessThan(
       prisma.platformAdminAuditEvent.create.mock.invocationCallOrder[0],
+    );
+    expect(lockTenantTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.tenant.create.mock.invocationCallOrder[0],
+    );
+    expect(prisma.tenant.findFirst.mock.invocationCallOrder[0]).toBeLessThan(
+      lockTenantTransaction.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(lockTenantTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.user.findMany.mock.invocationCallOrder[0],
     );
 
     const audit = firstCallData(prisma.platformAdminAuditEvent.create);
@@ -331,6 +354,10 @@ describe('SharedTenantProvisioningService shell boundary', () => {
       after: audit.after,
       metadata: audit.metadata,
     });
+    prisma.tenant.findFirst.mockClear();
+    prisma.user.findMany.mockClear();
+    prisma.platformAdminAuditEvent.findUnique.mockClear();
+    lockTenantTransaction.mockClear();
     reserveInvite.mockClear();
 
     await expect(
@@ -346,12 +373,25 @@ describe('SharedTenantProvisioningService shell boundary', () => {
       },
     });
     expect(reserveInvite).not.toHaveBeenCalled();
+    expect(lockTenantTransaction).toHaveBeenCalledWith(prisma, TENANT_ID);
     expect(assertInviteLocator).toHaveBeenCalledWith(
       prisma,
       expect.objectContaining({
         tenantId: TENANT_ID,
         workflowLocator: created.ownerIdentity.reservationId,
       }),
+    );
+    expect(lockTenantTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      assertInviteLocator.mock.invocationCallOrder[0],
+    );
+    expect(prisma.tenant.findFirst.mock.invocationCallOrder[0]).toBeLessThan(
+      lockTenantTransaction.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(lockTenantTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.user.findMany.mock.invocationCallOrder[0],
+    );
+    expect(prisma.user.findMany.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.platformAdminAuditEvent.findUnique.mock.invocationCallOrder[0],
     );
 
     await expect(
@@ -363,6 +403,44 @@ describe('SharedTenantProvisioningService shell boundary', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('locks the tenant before identity assertion in concurrent replay recovery', async () => {
+    const created = await service.provision(platformAdmin, provisioningDto());
+    const audit = firstCallData(prisma.platformAdminAuditEvent.create);
+    prisma.tenant.findFirst.mockResolvedValue({ id: TENANT_ID });
+    prisma.platformAdminAuditEvent.findUnique.mockResolvedValue({
+      after: audit.after,
+      metadata: audit.metadata,
+    });
+    prisma.$transaction.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('serialization conflict', {
+        code: 'P2034',
+        clientVersion: 'test',
+      }),
+    );
+    lockTenantTransaction.mockClear();
+    assertInviteLocator.mockClear();
+
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).resolves.toMatchObject({
+      decision: 'ALREADY_PROVISIONED',
+      replayed: true,
+      ownerIdentity: {
+        reservationId: created.ownerIdentity.reservationId,
+      },
+    });
+
+    expect(lockTenantTransaction).toHaveBeenCalledWith(prisma, TENANT_ID);
+    expect(assertInviteLocator).toHaveBeenCalledTimes(1);
+    expect(lockTenantTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      assertInviteLocator.mock.invocationCallOrder[0],
+    );
+    const transactionCalls = prisma.$transaction.mock.calls as unknown[][];
+    expect(transactionCalls.at(-1)?.[1]).toEqual(
+      IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+    );
   });
 
   it('rechecks actor and support-owner authority before an existing replay', async () => {
@@ -430,9 +508,7 @@ describe('SharedTenantProvisioningService shell boundary', () => {
       service.provision(platformAdmin, provisioningDto()),
     ).rejects.toBeInstanceOf(ForbiddenException);
     const calls = prisma.$transaction.mock.calls as unknown[][];
-    expect(calls.at(-1)?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-    });
+    expect(calls.at(-1)?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
   });
 
   it('retries the complete serializable shell once after P2034 without a replay', async () => {
@@ -459,15 +535,9 @@ describe('SharedTenantProvisioningService shell boundary', () => {
 
     const calls = prisma.$transaction.mock.calls as unknown[][];
     expect(calls).toHaveLength(3);
-    expect(calls[0]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-    });
-    expect(calls[1]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-    });
-    expect(calls[2]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-    });
+    expect(calls[0]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+    expect(calls[1]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+    expect(calls[2]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
     expect(reserveInvite).toHaveBeenCalledTimes(1);
   });
 
@@ -496,15 +566,9 @@ describe('SharedTenantProvisioningService shell boundary', () => {
 
     const calls = prisma.$transaction.mock.calls as unknown[][];
     expect(calls).toHaveLength(3);
-    expect(calls[0]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-    });
-    expect(calls[1]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-    });
-    expect(calls[2]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-    });
+    expect(calls[0]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+    expect(calls[1]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+    expect(calls[2]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
     expect(reserveInvite).toHaveBeenCalledTimes(2);
   });
 
@@ -540,18 +604,10 @@ describe('SharedTenantProvisioningService shell boundary', () => {
 
     const calls = prisma.$transaction.mock.calls as unknown[][];
     expect(calls).toHaveLength(4);
-    expect(calls[0]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-    });
-    expect(calls[1]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-    });
-    expect(calls[2]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-    });
-    expect(calls[3]?.[1]).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-    });
+    expect(calls[0]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+    expect(calls[1]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+    expect(calls[2]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+    expect(calls[3]?.[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
     expect(prisma.tenant.create).not.toHaveBeenCalled();
   });
 
@@ -709,8 +765,6 @@ describe('SharedTenantProvisioningService shell boundary', () => {
 
     const calls = prisma.$transaction.mock.calls as unknown[][];
     const options = calls[0]?.[1];
-    expect(options).toEqual({
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-    });
+    expect(options).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
   });
 });

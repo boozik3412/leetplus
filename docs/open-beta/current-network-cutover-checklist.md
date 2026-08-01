@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.24.1                                             |
+| Версия          | 1.24.2                                             |
 | Дата            | 01.08.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -19,9 +19,10 @@ candidate, который должен включать exact additive migration
 `CURRENT_179`
 admission.
 
-`CURRENT180` и stacked `CURRENT181` candidates
+`CURRENT180`, stacked `CURRENT181` и stacked `CURRENT182` candidates
 `20260801010000_identity_mail_tenant_enrollment_control_plane` /
-`20260801020000_identity_mail_tenant_lock_drain_worker_v2` намеренно не входят
+`20260801020000_identity_mail_tenant_lock_drain_worker_v2` /
+`20260801030000_identity_mail_tenant_first_claim_protocol` намеренно не входят
 в canonical migration chain и не меняют этот target.
 
 ## A. Release identity и authority
@@ -90,14 +91,35 @@ admission.
       `abbfe5611b7bf10b223359d601b4665874493671`, GitHub Actions
       [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)
       (`run #66`) — `3/3 PASS`.
+- [x] Неканонический `CURRENT182` tenant-first claim candidate с exact SQL
+      SHA-256
+      `0aa16e71c52a078d22b977ca8ca8d07be3e61cad59d8ade6fc4b365fbdddf8f1`
+      добавлен поверх frozen CURRENT181. Пять canonical claim entrypoint
+      используют tenant -> email -> relation order, три legacy v1 writer
+      немедленно возвращают `55000`; PUBLIC execute отсутствует. Foundation
+      `15/15`, smoke self-test `5/5`; successor-aware CURRENT180/CURRENT181
+      gates — `84/84` и `85/85`; статус — `NOT_DEPLOYABLE`.
+- [x] Create, reissue/revoke, cancel, accept, shell provisioning/replay и
+      emergency suspend переведены на общий bounded tenant-first protocol.
+      Provisioning берёт fresh platform-authority locks только после tenant
+      lock. Текущий CURRENT179 worker оборачивает tenant-addressed assert,
+      claim и reap в тот же lock; outbox-only marker/completion допускаются
+      только по exact DB-derived `CLAIMED` binding и берут lock по binding
+      tenant. V1 RPC, receipts, migration head/count и authority allowlist не
+      менялись; unit/static evidence локально зелёные.
 - [ ] Worker v2 RPC/API, producer tenant lock и crash-resumable drain
       завершены одним atomic release: database worker-v2 rehearsal и race
       matrix уже приняты, но API v2, producer/activation v2, coordinators,
       grants и реальные ACTIVE/DRAINING fixtures отсутствуют.
-- [ ] Acceptance/cancel/revoke/reissue и все IdentityEmailClaim transition paths
-      берут тот же tenant advisory lock первыми; приняты PostgreSQL races
-      worker-v2 × accept/cancel/revoke/reissue с commit/rollback/timeout,
-      two-tenant progress, zero `40P01` и fail-closed legacy bypass.
+- [ ] Remote PostgreSQL CI принял actual CURRENT179 repository `claimOne`
+      race и relation-level create/accept/cancel/reissue fixtures с
+      commit/rollback/`55P03`/`57014`, two-tenant progress, zero `40P01`,
+      source zero-diff и cleanup. Локально fixture только скомпилирован:
+      PostgreSQL/Docker отсутствуют.
+- [ ] Полный worker-v2 × accept/cancel/revoke/reissue matrix принят для
+      non-empty HOLD/PENDING outbox, ACTIVE/DRAINING coordinator и runtime
+      grants; actual CURRENT179 `EMPTY` claim и synthetic relation order не
+      заменяют этот promotion gate.
 - [ ] `provider_mark_v2` и `complete_v2` имеют event-backed exact replay либо
       однозначный typed handoff в reconcile после committed lost DB response;
       blind SMTP retry остаётся запрещён.
@@ -130,7 +152,7 @@ admission.
       exact persisted command может resume/drain/finalize после 15-минутного
       expiry/lease/ack wait по immutable receipt и `signatureVerifiedAt`,
       expired unaccepted proposal остаётся rejected.
-- [ ] Promotion CURRENT180/CURRENT181 rehearsal в canonical release принят
+- [ ] Promotion CURRENT180/CURRENT181/CURRENT182 rehearsal в canonical release принят
       только в одном
       atomic release с worker v2/runtime attestation, producer/worker tenant
       advisory lock, `DRAINING` zero-secret barrier для secret-bearing
@@ -618,6 +640,17 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.24.2`, 01.08.2026 — реализован CURRENT179-compatible tenant-first
+  protocol для application invite/claim paths, provisioning и suspend;
+  tenant-addressed worker v1 RPC используют тот же lock, а outbox-only
+  mark/complete требуют DB-derived process-local claim binding. Добавлен
+  dormant CURRENT182 SQL candidate
+  `0aa16e71c52a078d22b977ca8ca8d07be3e61cad59d8ade6fc4b365fbdddf8f1`
+  с пятью tenant-first claim entrypoint и тремя fail-closed legacy stubs.
+  Локально foundation/smoke self-tests, API unit/static/typecheck и full
+  regression зелёные; real PostgreSQL CI, DB-enforced worker v2,
+  non-empty outbox/ACTIVE-DRAINING matrix и production promotion остаются
+  отдельными незакрытыми gates.
 - `1.24.1`, 01.08.2026 — exact implementation CURRENT181
   `abbfe5611b7bf10b223359d601b4665874493671` принят GitHub Actions
   [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)

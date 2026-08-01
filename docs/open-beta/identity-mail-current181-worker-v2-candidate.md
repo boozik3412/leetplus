@@ -12,6 +12,16 @@
 | SQL SHA-256 | `b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455` |
 | Дата | `01.08.2026` |
 
+> Successor note, 01.08.2026: подтверждённая ниже P1 lock inversion
+> устранена на CURRENT179-compatible application/current-worker boundary и в
+> dormant CURRENT182 claim candidate. Для outbox-only current v1
+> mark/complete это означает validated process-local `CLAIMED` binding, а не
+> DB-enforced v2 proof после restart. Текущий статус и точная граница
+> доказательства зафиксированы в
+> [tenant-first claim protocol](./identity-mail-current182-tenant-first-claim-protocol.md).
+> CURRENT181 остаётся byte-for-byte frozen; non-empty outbox,
+> ACTIVE/DRAINING/coordinator и P2 lost-response promotion gates не закрыты.
+
 ## 1. Решение
 
 `CURRENT181` — следующий **stacked, неканонический** engineering candidate

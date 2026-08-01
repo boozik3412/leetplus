@@ -32,6 +32,11 @@ const DESIGN_PARTNER_IDENTITY_WRITER_DISABLED_CODE =
   "DESIGN_PARTNER_IDENTITY_WRITER_DISABLED";
 const IDENTITY_WRITER_DISABLED_MESSAGE =
   "Design-partner identity writes are disabled pending the shared sealed identity activation workflow.";
+const IDENTITY_MAIL_TENANT_LOCK_DOMAIN =
+  "leetplus:identity-mail-tenant:v1:";
+const IDENTITY_MAIL_TENANT_LOCK_SEED = 180;
+const IDENTITY_CLAIM_STATEMENT_TIMEOUT = "25s";
+const IDENTITY_CLAIM_LOCK_TIMEOUT = "5s";
 
 export class DesignPartnerProvisioningError extends Error {
   constructor(code, message) {
@@ -43,6 +48,52 @@ export class DesignPartnerProvisioningError extends Error {
 
 function fail(code, message) {
   throw new DesignPartnerProvisioningError(code, message);
+}
+
+async function prepareIdentityMailTenantTransaction(tx) {
+  const [settings] = await tx.$queryRawUnsafe(
+    `SELECT
+       pg_catalog.current_setting('transaction_isolation') AS "isolationLevel",
+       pg_catalog.current_setting('transaction_read_only') AS "readOnly",
+       pg_catalog.set_config('statement_timeout', $1::TEXT, true) AS "statementTimeout",
+       pg_catalog.set_config('lock_timeout', $2::TEXT, true) AS "lockTimeout"`,
+    IDENTITY_CLAIM_STATEMENT_TIMEOUT,
+    IDENTITY_CLAIM_LOCK_TIMEOUT,
+  );
+  if (
+    settings?.isolationLevel !== "serializable" ||
+    settings?.readOnly !== "off" ||
+    settings?.statementTimeout !== IDENTITY_CLAIM_STATEMENT_TIMEOUT ||
+    settings?.lockTimeout !== IDENTITY_CLAIM_LOCK_TIMEOUT
+  ) {
+    fail(
+      "IDENTITY_CLAIM_TRANSACTION_REQUIRED",
+      "Emergency suspend requires a bounded read-write serializable transaction.",
+    );
+  }
+}
+
+async function acquireIdentityMailTenantLock(tx, tenantId) {
+  const [lock] = await tx.$queryRawUnsafe(
+    `WITH tenant_lock AS MATERIALIZED (
+       SELECT pg_catalog.pg_advisory_xact_lock(
+         pg_catalog.hashtextextended($1::TEXT || $2::TEXT, $3::BIGINT)
+       ) AS acquired
+     )
+     SELECT
+       $2::TEXT AS "tenantId",
+       pg_catalog.pg_backend_pid()::INTEGER AS "backendPid"
+     FROM tenant_lock`,
+    IDENTITY_MAIL_TENANT_LOCK_DOMAIN,
+    tenantId,
+    IDENTITY_MAIL_TENANT_LOCK_SEED,
+  );
+  if (lock?.tenantId !== tenantId || !Number.isInteger(lock?.backendPid)) {
+    fail(
+      "IDENTITY_CLAIM_TRANSACTION_REQUIRED",
+      "Emergency suspend could not acquire the identity-mail tenant lock.",
+    );
+  }
 }
 
 function requiredText(value, field, minimum = 1, maximum = 160) {
@@ -889,6 +940,20 @@ export async function suspendDesignPartner(
 
   return client.$transaction(
     async (tx) => {
+      await prepareIdentityMailTenantTransaction(tx);
+      const tenantLocator = await tx.tenant.findUnique({
+        where: { slug: manifest.tenantSlug },
+        select: { id: true },
+      });
+      if (!tenantLocator) {
+        fail(
+          "PROVISIONING_EVIDENCE_MISSING",
+          "Emergency suspend requires the exact tenant and its immutable provisioning marker.",
+        );
+      }
+
+      await acquireIdentityMailTenantLock(tx, tenantLocator.id);
+
       const tenant = await tx.tenant.findUnique({
         where: { slug: manifest.tenantSlug },
         select: {
@@ -996,6 +1061,6 @@ export async function suspendDesignPartner(
         },
       };
     },
-    { isolationLevel: "Serializable" },
+    { isolationLevel: "Serializable", maxWait: 5_000, timeout: 30_000 },
   );
 }

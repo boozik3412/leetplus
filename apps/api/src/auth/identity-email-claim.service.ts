@@ -18,13 +18,31 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MINIMUM_HMAC_KEY_BYTES = 32;
 const MAXIMUM_HMAC_KEY_BYTES = 4096;
-declare const identityEmailClaimTransactionBrand: unique symbol;
+const IDENTITY_MAIL_TENANT_LOCK_DOMAIN = 'leetplus:identity-mail-tenant:v1:';
+const IDENTITY_MAIL_TENANT_LOCK_SEED = 180;
+const IDENTITY_CLAIM_STATEMENT_TIMEOUT = '25s';
+const IDENTITY_CLAIM_LOCK_TIMEOUT = '5s';
+const identityEmailClaimTransactionBrand = Symbol(
+  'identityEmailClaimTransaction',
+);
 
-export type IdentityEmailClaimTransaction = Pick<
-  Prisma.TransactionClient,
-  '$queryRaw'
-> & {
+export const IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  maxWait: 5_000,
+  timeout: 30_000,
+} as const;
+
+export type IdentityEmailClaimTransaction = {
+  readonly client: Pick<Prisma.TransactionClient, '$queryRaw'>;
+  readonly tenantId: string;
   readonly [identityEmailClaimTransactionBrand]: true;
+};
+
+export type IdentityEmailClaimTransactionHost = {
+  $transaction<T>(
+    operation: (tx: Prisma.TransactionClient) => Promise<T>,
+    options: typeof IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+  ): Promise<T>;
 };
 
 export type IdentityEmailFingerprint = {
@@ -126,22 +144,120 @@ type JsonRpcRow = {
   receipt: Prisma.JsonValue;
 };
 
+type IdentityClaimTransactionSettingsRow = {
+  isolationLevel: string;
+  readOnly: string;
+  statementTimeout: string;
+  lockTimeout: string;
+};
+
+type IdentityClaimTenantLockRow = {
+  tenantId: string;
+  backendPid: number;
+};
+
 @Injectable()
 export class IdentityEmailClaimService {
   constructor(private readonly configService: ConfigService) {}
 
-  bindTransaction(tx: Prisma.TransactionClient): IdentityEmailClaimTransaction {
+  async runTenantTransaction<T>(
+    host: IdentityEmailClaimTransactionHost,
+    tenantIdValue: string,
+    operation: (
+      tx: Prisma.TransactionClient,
+      identityTx: IdentityEmailClaimTransaction,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const tenantId = this.uuid(tenantIdValue);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await host.$transaction(async (tx) => {
+          const identityTx = await this.lockTenantTransaction(tx, tenantId);
+          return operation(tx, identityTx);
+        }, IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+      } catch (error) {
+        if (!this.retryableTransactionError(error)) {
+          throw error;
+        }
+        if (attempt === 1) {
+          throw this.boundaryError(error);
+        }
+      }
+    }
+    throw this.transactionProtocolUnavailable();
+  }
+
+  async lockTenantTransaction(
+    tx: Prisma.TransactionClient,
+    tenantIdValue: string,
+  ): Promise<IdentityEmailClaimTransaction> {
     const candidate = tx as unknown as Record<string, unknown>;
     if (
       typeof candidate.$connect === 'function' ||
       typeof candidate.$disconnect === 'function'
     ) {
-      throw new ServiceUnavailableException({
-        message: 'Identity claim command requires an interactive transaction',
-        reasonCode: 'IDENTITY_CLAIM_TRANSACTION_REQUIRED',
-      });
+      throw this.transactionProtocolUnavailable();
     }
-    return tx as unknown as IdentityEmailClaimTransaction;
+    const tenantId = this.uuid(tenantIdValue);
+    try {
+      const settings = await tx.$queryRaw<
+        IdentityClaimTransactionSettingsRow[]
+      >(
+        Prisma.sql`
+          SELECT
+            pg_catalog.current_setting('transaction_isolation') AS "isolationLevel",
+            pg_catalog.current_setting('transaction_read_only') AS "readOnly",
+            pg_catalog.set_config(
+              'statement_timeout',
+              ${IDENTITY_CLAIM_STATEMENT_TIMEOUT},
+              true
+            ) AS "statementTimeout",
+            pg_catalog.set_config(
+              'lock_timeout',
+              ${IDENTITY_CLAIM_LOCK_TIMEOUT},
+              true
+            ) AS "lockTimeout"
+        `,
+      );
+      if (
+        settings.length !== 1 ||
+        settings[0]?.isolationLevel !== 'serializable' ||
+        settings[0]?.readOnly !== 'off' ||
+        settings[0]?.statementTimeout !== IDENTITY_CLAIM_STATEMENT_TIMEOUT ||
+        settings[0]?.lockTimeout !== IDENTITY_CLAIM_LOCK_TIMEOUT
+      ) {
+        throw this.transactionProtocolUnavailable();
+      }
+
+      const locks = await tx.$queryRaw<IdentityClaimTenantLockRow[]>(Prisma.sql`
+        WITH tenant_lock AS MATERIALIZED (
+          SELECT pg_catalog.pg_advisory_xact_lock(
+            pg_catalog.hashtextextended(
+              ${IDENTITY_MAIL_TENANT_LOCK_DOMAIN} || ${tenantId}::TEXT,
+              ${IDENTITY_MAIL_TENANT_LOCK_SEED}
+            )
+          ) AS acquired
+        )
+        SELECT
+          ${tenantId}::TEXT AS "tenantId",
+          pg_catalog.pg_backend_pid()::INTEGER AS "backendPid"
+        FROM tenant_lock
+      `);
+      if (
+        locks.length !== 1 ||
+        locks[0]?.tenantId !== tenantId ||
+        !Number.isInteger(locks[0]?.backendPid)
+      ) {
+        throw this.transactionProtocolUnavailable();
+      }
+      return Object.freeze({
+        client: tx,
+        tenantId,
+        [identityEmailClaimTransactionBrand]: true as const,
+      });
+    } catch (error) {
+      throw this.boundaryError(error);
+    }
   }
 
   fingerprint(email: string): IdentityEmailFingerprint {
@@ -163,10 +279,11 @@ export class IdentityEmailClaimService {
     const canonicalEmail = this.canonicalEmail(input.email);
     const tenantId = this.uuid(input.tenantId);
     const subjectId = this.uuid(input.subjectId);
+    const client = this.tenantBoundClient(tx, tenantId);
     const fingerprint = this.fingerprint(canonicalEmail);
 
     try {
-      const rows = await tx.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
         SELECT public."identity_email_claim_reserve_invite_v2"(
           ${canonicalEmail}::TEXT,
           ${tenantId}::TEXT,
@@ -198,9 +315,10 @@ export class IdentityEmailClaimService {
     const tenantId = this.uuid(input.tenantId);
     const subjectId = this.uuid(input.subjectId);
     const expectedRevision = this.revision(input.expectedRevision);
+    const client = this.tenantBoundClient(tx, tenantId);
 
     try {
-      const rows = await tx.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
         SELECT public."identity_email_claim_assert_invite_v1"(
           ${canonicalEmail}::TEXT,
           ${tenantId}::TEXT,
@@ -230,9 +348,10 @@ export class IdentityEmailClaimService {
     const tenantId = this.uuid(input.tenantId);
     const subjectId = this.uuid(input.subjectId);
     const expectedRevision = this.revision(input.expectedRevision);
+    const client = this.tenantBoundClient(tx, tenantId);
 
     try {
-      const rows = await tx.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
         SELECT public."identity_email_claim_assert_invite_locator_v1"(
           ${workflowLocator}::TEXT,
           ${tenantId}::TEXT,
@@ -264,6 +383,7 @@ export class IdentityEmailClaimService {
     const expectedSubjectId = this.uuid(input.expectedSubjectId);
     const expectedRevision = this.revision(input.expectedRevision);
     const nextSubjectId = this.uuid(input.nextSubjectId);
+    const client = this.tenantBoundClient(tx, tenantId);
     if (expectedSubjectId === nextSubjectId) {
       throw this.invalidCommand();
     }
@@ -275,7 +395,7 @@ export class IdentityEmailClaimService {
     }
 
     try {
-      const rows = await tx.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
         SELECT public."identity_email_claim_transition_v2"(
           ${canonicalEmail}::TEXT,
           ${tenantId}::TEXT,
@@ -309,9 +429,10 @@ export class IdentityEmailClaimService {
     const tenantId = this.uuid(input.tenantId);
     const expectedSubjectId = this.uuid(input.expectedSubjectId);
     const expectedRevision = this.revision(input.expectedRevision);
+    const client = this.tenantBoundClient(tx, tenantId);
 
     try {
-      const rows = await tx.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
         SELECT public."identity_email_claim_release_v2"(
           ${canonicalEmail}::TEXT,
           ${tenantId}::TEXT,
@@ -544,6 +665,21 @@ export class IdentityEmailClaimService {
     return value;
   }
 
+  private tenantBoundClient(
+    tx: IdentityEmailClaimTransaction,
+    tenantId: string,
+  ): Pick<Prisma.TransactionClient, '$queryRaw'> {
+    if (
+      tx[identityEmailClaimTransactionBrand] !== true ||
+      tx.tenantId !== tenantId ||
+      !tx.client ||
+      typeof tx.client.$queryRaw !== 'function'
+    ) {
+      throw this.transactionProtocolUnavailable();
+    }
+    return tx.client;
+  }
+
   private receiptUuid(value: unknown): string {
     if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
       throw this.invalidReceipt();
@@ -597,7 +733,13 @@ export class IdentityEmailClaimService {
     }
     const errorCode = this.errorCode(error);
     const sqlState = this.sqlState(error);
-    if (errorCode === 'P2034' || sqlState === '40001' || sqlState === '40P01') {
+    if (
+      errorCode === 'P2034' ||
+      sqlState === '40001' ||
+      sqlState === '40P01' ||
+      sqlState === '55P03' ||
+      sqlState === '57014'
+    ) {
       return new ConflictException({
         message: 'Identity claim command must be retried',
         reasonCode: 'IDENTITY_CLAIM_RETRY_REQUIRED',
@@ -633,6 +775,33 @@ export class IdentityEmailClaimService {
     return new ServiceUnavailableException({
       message: 'Identity claim boundary is unavailable',
       reasonCode: 'IDENTITY_CLAIM_BOUNDARY_UNAVAILABLE',
+    });
+  }
+
+  private retryableTransactionError(error: unknown): boolean {
+    if (error instanceof ConflictException) {
+      const response = error.getResponse();
+      return (
+        this.record(response) &&
+        response.reasonCode === 'IDENTITY_CLAIM_RETRY_REQUIRED'
+      );
+    }
+    const errorCode = this.errorCode(error);
+    const sqlState = this.sqlState(error);
+    return (
+      errorCode === 'P2034' ||
+      sqlState === '40001' ||
+      sqlState === '40P01' ||
+      sqlState === '55P03' ||
+      sqlState === '57014'
+    );
+  }
+
+  private transactionProtocolUnavailable(): ServiceUnavailableException {
+    return new ServiceUnavailableException({
+      message:
+        'Identity claim command requires a tenant-locked serializable transaction',
+      reasonCode: 'IDENTITY_CLAIM_TRANSACTION_REQUIRED',
     });
   }
 

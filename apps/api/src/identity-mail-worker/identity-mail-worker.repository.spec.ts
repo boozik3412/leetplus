@@ -19,9 +19,17 @@ const PROVIDER_ATTEMPT_KEY = '77777777-7777-4777-8777-777777777777';
 const LEASE_TOKEN = 'L'.repeat(43);
 const MESSAGE_ID = `<initial-owner-${MESSAGE_KEY}@mail.leetplus.ru>`;
 const LEASE_OWNER_DIGEST = 'a'.repeat(64);
-const LEASE_TOKEN_DIGEST = 'b'.repeat(64);
+const LEASE_TOKEN_DIGEST = createHash('sha256')
+  .update(LEASE_TOKEN)
+  .digest('hex');
 const PROVIDER_AUTHORITY_DIGEST = 'c'.repeat(64);
 const PROVIDER_RECEIPT_DIGEST = 'd'.repeat(64);
+const TENANT_TRANSACTION_SETTINGS = {
+  isolationLevel: 'serializable',
+  readOnly: 'off',
+  statementTimeout: '25s',
+  lockTimeout: '5s',
+} as const;
 const ALLOWED_WORKER_RPC_SIGNATURES = [
   'public.identity_initial_owner_mail_claim_v1(text, text, text, text)',
   'public.identity_initial_owner_mail_complete_v1(text, integer, text, text, text, text, text)',
@@ -32,14 +40,35 @@ const ALLOWED_WORKER_RPC_SIGNATURES = [
 
 type PrismaMock = {
   $queryRaw: jest.Mock;
+  $transaction: jest.Mock;
   $disconnect: jest.Mock;
+  transactionQueryRaw: jest.Mock;
+  rpcQueryRaw: jest.Mock;
 };
 
 function prismaMock(): PrismaMock {
-  return {
+  const prisma = {
     $queryRaw: jest.fn(),
+    $transaction: jest.fn(),
     $disconnect: jest.fn().mockResolvedValue(undefined),
+    transactionQueryRaw: jest.fn(),
+    rpcQueryRaw: jest.fn(),
   };
+  prisma.transactionQueryRaw.mockImplementation((query: Prisma.Sql) => {
+    const sql = query.strings.join('');
+    if (sql.includes("current_setting('transaction_isolation')")) {
+      return Promise.resolve([TENANT_TRANSACTION_SETTINGS]);
+    }
+    if (sql.includes('pg_catalog.pg_advisory_xact_lock')) {
+      return Promise.resolve([{ tenantId: TENANT_ID, backendPid: 12_345 }]);
+    }
+    return prisma.rpcQueryRaw(query) as Promise<unknown>;
+  });
+  prisma.$transaction.mockImplementation(
+    (operation: (tx: { $queryRaw: jest.Mock }) => Promise<unknown>) =>
+      operation({ $queryRaw: prisma.transactionQueryRaw }),
+  );
+  return prisma;
 }
 
 function harness() {
@@ -50,6 +79,52 @@ function harness() {
       prisma as unknown as PrismaClient,
     ),
   };
+}
+
+function clearRepositoryMocks(prisma: PrismaMock): void {
+  prisma.$queryRaw.mockClear();
+  prisma.$transaction.mockClear();
+  prisma.transactionQueryRaw.mockClear();
+  prisma.rpcQueryRaw.mockClear();
+}
+
+async function primeClaimBinding(
+  prisma: PrismaMock,
+  repository: PrismaIdentityMailWorkerRepository,
+): Promise<void> {
+  prisma.rpcQueryRaw.mockResolvedValueOnce([{ result: claimResult() }]);
+  await repository.claimOne({
+    tenantId: TENANT_ID,
+    leaseOwnerDigest: LEASE_OWNER_DIGEST,
+    leaseTokenDigest: LEASE_TOKEN_DIGEST,
+    providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+  });
+  clearRepositoryMocks(prisma);
+}
+
+async function primeProviderMarkedBinding(
+  prisma: PrismaMock,
+  repository: PrismaIdentityMailWorkerRepository,
+): Promise<void> {
+  await primeClaimBinding(prisma, repository);
+  prisma.rpcQueryRaw.mockResolvedValueOnce([
+    {
+      result: {
+        schemaVersion: 1,
+        operation: 'MARK_INITIAL_OWNER_MAIL_PROVIDER_ATTEMPT',
+        decision: 'MARKED',
+        reasonCode: null,
+        outboxId: OUTBOX_ID,
+        tenantId: TENANT_ID,
+        inviteId: INVITE_ID,
+        leaseVersion: 1,
+        transitionRevision: 2,
+        providerAttemptKey: PROVIDER_ATTEMPT_KEY,
+      },
+    },
+  ]);
+  await repository.markProviderAttempt(providerAttemptInput());
+  clearRepositoryMocks(prisma);
 }
 
 function readinessInput() {
@@ -182,11 +257,85 @@ function providerAttemptInput(): MarkIdentityMailProviderAttemptInput {
 }
 
 function queryFrom(prisma: PrismaMock): Prisma.Sql {
-  const query = (prisma.$queryRaw.mock.calls as unknown[][])[0]?.[0];
+  const query = (prisma.rpcQueryRaw.mock.calls as unknown[][])[0]?.[0];
   if (!query) {
     throw new Error('Expected a parameterized repository query');
   }
   return query as Prisma.Sql;
+}
+
+function transactionQueryFrom(prisma: PrismaMock, index: number): Prisma.Sql {
+  const query = (prisma.transactionQueryRaw.mock.calls as unknown[][])[
+    index
+  ]?.[0];
+  if (!query) {
+    throw new Error(`Expected tenant transaction query ${index + 1}`);
+  }
+  return query as Prisma.Sql;
+}
+
+function expectTenantRpcEnvelope(
+  prisma: PrismaMock,
+  rpcName: string,
+  rootQueryCount = 0,
+): void {
+  expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  const transactionCall = (prisma.$transaction.mock.calls as unknown[][])[0];
+  expect(transactionCall?.[1]).toEqual({
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 5_000,
+    timeout: 30_000,
+  });
+  expect(prisma.transactionQueryRaw).toHaveBeenCalledTimes(3);
+
+  const settingsQuery = transactionQueryFrom(prisma, 0);
+  const lockQuery = transactionQueryFrom(prisma, 1);
+  const rpcQuery = transactionQueryFrom(prisma, 2);
+  expect(settingsQuery.strings.join('')).toContain(
+    "current_setting('transaction_isolation')",
+  );
+  expect(settingsQuery.strings.join('')).toContain(
+    "current_setting('transaction_read_only')",
+  );
+  expect(settingsQuery.strings.join('')).toContain(
+    "set_config(\n            'statement_timeout'",
+  );
+  expect(settingsQuery.strings.join('')).toContain(
+    "set_config(\n            'lock_timeout'",
+  );
+  expect(settingsQuery.values).toEqual(['25s', '5s']);
+  expect(lockQuery.strings.join('')).toContain(
+    'WITH tenant_lock AS MATERIALIZED',
+  );
+  expect(lockQuery.strings.join('')).toContain(
+    'pg_catalog.pg_advisory_xact_lock',
+  );
+  expect(lockQuery.strings.join('')).toContain('pg_catalog.hashtextextended');
+  expect(lockQuery.values).toEqual([
+    'leetplus:identity-mail-tenant:v1:',
+    TENANT_ID,
+    180,
+    TENANT_ID,
+  ]);
+  expect(rpcQuery.strings.join('')).toContain(rpcName);
+  expect(queryFrom(prisma)).toBe(rpcQuery);
+  expect(prisma.$queryRaw).toHaveBeenCalledTimes(rootQueryCount);
+  if (rootQueryCount > 0) {
+    const rootQuery = (prisma.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
+      | Prisma.Sql
+      | undefined;
+    if (!rootQuery) {
+      throw new Error('Expected the root readiness projection');
+    }
+    expect(rootQuery.strings.join('')).not.toContain(rpcName);
+  }
+
+  const callOrder = [
+    prisma.transactionQueryRaw.mock.invocationCallOrder[0],
+    prisma.transactionQueryRaw.mock.invocationCallOrder[1],
+    prisma.transactionQueryRaw.mock.invocationCallOrder[2],
+  ];
+  expect(callOrder).toEqual([...callOrder].sort((left, right) => left - right));
 }
 
 async function rejectionOf(operation: Promise<unknown>): Promise<unknown> {
@@ -205,23 +354,286 @@ function expectReason(error: unknown, reasonCode: string): void {
   );
 }
 
+type TenantRpcCase = {
+  label: string;
+  rpcName: string;
+  rootQueryCount?: number;
+  binding?: 'CLAIMED' | 'PROVIDER_MARKED';
+  arrange: (prisma: PrismaMock) => void;
+  invoke: (repository: PrismaIdentityMailWorkerRepository) => Promise<unknown>;
+};
+
+const TENANT_RPC_CASES: TenantRpcCase[] = [
+  {
+    label: 'per-tenant readiness assertion',
+    rpcName: 'identity_mail_delivery_worker_assert_v1',
+    rootQueryCount: 1,
+    arrange: (prisma) => {
+      prisma.$queryRaw.mockResolvedValueOnce([readinessRow()]);
+      prisma.rpcQueryRaw.mockResolvedValueOnce([
+        { result: readinessReceipt() },
+      ]);
+    },
+    invoke: (repository) => repository.assertReady(readinessInput()),
+  },
+  {
+    label: 'claim',
+    rpcName: 'identity_initial_owner_mail_claim_v1',
+    arrange: (prisma) => {
+      prisma.rpcQueryRaw.mockResolvedValueOnce([
+        {
+          result: {
+            schemaVersion: 1,
+            operation: 'CLAIM_INITIAL_OWNER_MAIL',
+            decision: 'EMPTY',
+          },
+        },
+      ]);
+    },
+    invoke: (repository) =>
+      repository.claimOne({
+        tenantId: TENANT_ID,
+        leaseOwnerDigest: LEASE_OWNER_DIGEST,
+        leaseTokenDigest: LEASE_TOKEN_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+      }),
+  },
+  {
+    label: 'reap',
+    rpcName: 'identity_initial_owner_mail_reap_v1',
+    arrange: (prisma) => {
+      prisma.rpcQueryRaw.mockResolvedValueOnce([
+        {
+          result: {
+            schemaVersion: 1,
+            operation: 'REAP_INITIAL_OWNER_MAIL',
+            decision: 'COMPLETED',
+            processed: 0,
+          },
+        },
+      ]);
+    },
+    invoke: (repository) =>
+      repository.reapExpired({
+        tenantId: TENANT_ID,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+        workerActorDigest: LEASE_OWNER_DIGEST,
+        batchLimit: 1,
+      }),
+  },
+  {
+    label: 'provider mark',
+    rpcName: 'identity_initial_owner_mail_provider_mark_v1',
+    binding: 'CLAIMED',
+    arrange: (prisma) => {
+      prisma.rpcQueryRaw.mockResolvedValueOnce([
+        {
+          result: {
+            schemaVersion: 1,
+            operation: 'MARK_INITIAL_OWNER_MAIL_PROVIDER_ATTEMPT',
+            decision: 'MARKED',
+            reasonCode: null,
+            outboxId: OUTBOX_ID,
+            tenantId: TENANT_ID,
+            inviteId: INVITE_ID,
+            leaseVersion: 1,
+            transitionRevision: 2,
+            providerAttemptKey: PROVIDER_ATTEMPT_KEY,
+          },
+        },
+      ]);
+    },
+    invoke: (repository) =>
+      repository.markProviderAttempt(providerAttemptInput()),
+  },
+  {
+    label: 'completion',
+    rpcName: 'identity_initial_owner_mail_complete_v1',
+    binding: 'CLAIMED',
+    arrange: (prisma) => {
+      prisma.rpcQueryRaw.mockResolvedValueOnce([
+        {
+          result: {
+            schemaVersion: 1,
+            operation: 'COMPLETE_INITIAL_OWNER_MAIL',
+            decision: 'CANCELED',
+            outboxId: OUTBOX_ID,
+            leaseVersion: 1,
+            transitionRevision: 2,
+          },
+        },
+      ]);
+    },
+    invoke: (repository) =>
+      repository.markPreProviderFailure({
+        ...leaseInput(),
+        reasonCode: 'IDENTITY_MAIL_CLAIM_INVALID',
+      }),
+  },
+];
+
 describe('PrismaIdentityMailWorkerRepository', () => {
+  it.each(TENANT_RPC_CASES)(
+    'executes $label as settings -> tenant lock -> CURRENT179 RPC on one bounded transaction',
+    async ({ arrange, binding, invoke, rootQueryCount, rpcName }) => {
+      const { prisma, repository } = harness();
+      if (binding === 'CLAIMED') {
+        await primeClaimBinding(prisma, repository);
+      } else if (binding === 'PROVIDER_MARKED') {
+        await primeProviderMarkedBinding(prisma, repository);
+      }
+      arrange(prisma);
+
+      await invoke(repository);
+
+      expectTenantRpcEnvelope(prisma, rpcName, rootQueryCount);
+    },
+  );
+
+  it.each([
+    [
+      'claim',
+      (repository: PrismaIdentityMailWorkerRepository) =>
+        repository.claimOne({
+          tenantId: 'NOT-A-UUID',
+          leaseOwnerDigest: LEASE_OWNER_DIGEST,
+          leaseTokenDigest: LEASE_TOKEN_DIGEST,
+          providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+        }),
+    ],
+    [
+      'reap',
+      (repository: PrismaIdentityMailWorkerRepository) =>
+        repository.reapExpired({
+          tenantId: 'NOT-A-UUID',
+          providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+          workerActorDigest: LEASE_OWNER_DIGEST,
+          batchLimit: 1,
+        }),
+    ],
+    [
+      'provider mark',
+      (repository: PrismaIdentityMailWorkerRepository) =>
+        repository.markProviderAttempt({
+          ...providerAttemptInput(),
+          tenantId: 'NOT-A-UUID',
+        }),
+    ],
+    [
+      'completion',
+      (repository: PrismaIdentityMailWorkerRepository) =>
+        repository.markPreProviderFailure({
+          ...leaseInput(),
+          tenantId: 'NOT-A-UUID',
+          reasonCode: 'IDENTITY_MAIL_CLAIM_INVALID',
+        }),
+    ],
+  ] as const)(
+    'rejects an invalid tenant before opening a %s transaction',
+    async (_label, invoke) => {
+      const { prisma, repository } = harness();
+
+      const rejection = await rejectionOf(invoke(repository));
+
+      expectReason(rejection, 'IDENTITY_MAIL_WORKER_TENANT_ID_INVALID');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.transactionQueryRaw).not.toHaveBeenCalled();
+      expect(prisma.rpcQueryRaw).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    },
+  );
+
+  it('requires a DB-derived claim binding and rejects a cross-tenant lease before opening a transaction', async () => {
+    const { prisma, repository } = harness();
+
+    const unbound = await rejectionOf(
+      repository.markProviderAttempt(providerAttemptInput()),
+    );
+    expectReason(unbound, 'IDENTITY_MAIL_WORKER_CLAIM_BINDING_REQUIRED');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+
+    await primeClaimBinding(prisma, repository);
+    const mismatch = await rejectionOf(
+      repository.markProviderAttempt({
+        ...providerAttemptInput(),
+        tenantId: OTHER_TENANT_ID,
+      }),
+    );
+    expectReason(mismatch, 'IDENTITY_MAIL_WORKER_CLAIM_BINDING_MISMATCH');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.transactionQueryRaw).not.toHaveBeenCalled();
+    expect(prisma.rpcQueryRaw).not.toHaveBeenCalled();
+  });
+
+  it('fails before the tenant lock and RPC when transaction settings drift', async () => {
+    const { prisma, repository } = harness();
+    prisma.transactionQueryRaw.mockResolvedValueOnce([
+      { ...TENANT_TRANSACTION_SETTINGS, isolationLevel: 'read committed' },
+    ]);
+
+    const rejection = await rejectionOf(
+      repository.claimOne({
+        tenantId: TENANT_ID,
+        leaseOwnerDigest: LEASE_OWNER_DIGEST,
+        leaseTokenDigest: LEASE_TOKEN_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+      }),
+    );
+
+    expectReason(
+      rejection,
+      'IDENTITY_MAIL_WORKER_TENANT_LOCK_PROTOCOL_INVALID',
+    );
+    expect(prisma.transactionQueryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.rpcQueryRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('fails before the RPC when the tenant lock receipt is invalid', async () => {
+    const { prisma, repository } = harness();
+    prisma.transactionQueryRaw
+      .mockResolvedValueOnce([TENANT_TRANSACTION_SETTINGS])
+      .mockResolvedValueOnce([
+        { tenantId: OTHER_TENANT_ID, backendPid: 12_345 },
+      ]);
+
+    const rejection = await rejectionOf(
+      repository.claimOne({
+        tenantId: TENANT_ID,
+        leaseOwnerDigest: LEASE_OWNER_DIGEST,
+        leaseTokenDigest: LEASE_TOKEN_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+      }),
+    );
+
+    expectReason(
+      rejection,
+      'IDENTITY_MAIL_WORKER_TENANT_LOCK_PROTOCOL_INVALID',
+    );
+    expect(prisma.transactionQueryRaw).toHaveBeenCalledTimes(2);
+    expect(prisma.rpcQueryRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
   it('accepts only the exact least-privilege worker authority projection', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw
-      .mockResolvedValueOnce([readinessRow()])
-      .mockResolvedValueOnce([{ result: readinessReceipt() }]);
+    prisma.$queryRaw.mockResolvedValueOnce([readinessRow()]);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([{ result: readinessReceipt() }]);
 
     await expect(
       repository.assertReady(readinessInput()),
     ).resolves.toBeUndefined();
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
-    const transportProjection = queryFrom(prisma).strings.join('');
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const rootReadinessQuery = (
+      prisma.$queryRaw.mock.calls as unknown[][]
+    )[0]?.[0] as Prisma.Sql | undefined;
+    if (!rootReadinessQuery) {
+      throw new Error('Expected the root readiness projection');
+    }
+    const transportProjection = rootReadinessQuery.strings.join('');
     expect(transportProjection).toContain('pg_catalog.pg_stat_ssl');
     expect(transportProjection).toContain('pg_catalog.pg_backend_pid()');
-    const sealedAssertion = (
-      prisma.$queryRaw.mock.calls as unknown[][]
-    )[1]?.[0] as Prisma.Sql | undefined;
+    const sealedAssertion = queryFrom(prisma);
     if (!sealedAssertion) {
       throw new Error('Expected the sealed readiness RPC');
     }
@@ -230,15 +642,14 @@ describe('PrismaIdentityMailWorkerRepository', () => {
 
   it('allows a proven plaintext session only for a loopback transport policy', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw
-      .mockResolvedValueOnce([
-        readinessRow({
-          transportTls: false,
-          transportTlsVersion: null,
-          transportTlsCipher: null,
-        }),
-      ])
-      .mockResolvedValueOnce([{ result: readinessReceipt() }]);
+    prisma.$queryRaw.mockResolvedValueOnce([
+      readinessRow({
+        transportTls: false,
+        transportTlsVersion: null,
+        transportTlsCipher: null,
+      }),
+    ]);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([{ result: readinessReceipt() }]);
 
     await expect(
       repository.assertReady({
@@ -323,9 +734,10 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     ['extra receipt authority', { unexpected: true }],
   ])('rejects sealed readiness receipt drift: %s', async (_case, override) => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw
-      .mockResolvedValueOnce([readinessRow()])
-      .mockResolvedValueOnce([{ result: readinessReceipt(override) }]);
+    prisma.$queryRaw.mockResolvedValueOnce([readinessRow()]);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
+      { result: readinessReceipt(override) },
+    ]);
 
     const rejection = await rejectionOf(
       repository.assertReady(readinessInput()),
@@ -371,7 +783,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
 
   it('accepts only a fully shaped EMPTY claim response', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValueOnce([
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
       {
         result: {
           schemaVersion: 1,
@@ -390,7 +802,9 @@ describe('PrismaIdentityMailWorkerRepository', () => {
       }),
     ).resolves.toBeNull();
 
-    prisma.$queryRaw.mockResolvedValueOnce([{ result: { decision: 'EMPTY' } }]);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
+      { result: { decision: 'EMPTY' } },
+    ]);
     const rejection = await rejectionOf(
       repository.claimOne({
         tenantId: TENANT_ID,
@@ -423,7 +837,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     'rejects an undeclared field in a %s claim receipt',
     async (_case, result) => {
       const { prisma, repository } = harness();
-      prisma.$queryRaw.mockResolvedValueOnce([{ result }]);
+      prisma.rpcQueryRaw.mockResolvedValueOnce([{ result }]);
 
       const rejection = await rejectionOf(
         repository.claimOne({
@@ -439,7 +853,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
 
   it('parses a bounded claim and rejects a cross-tenant response', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValueOnce([{ result: claimResult() }]);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([{ result: claimResult() }]);
 
     const delivery = await repository.claimOne({
       tenantId: TENANT_ID,
@@ -457,7 +871,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     });
     expect(delivery?.secretCiphertext).toEqual(Buffer.alloc(71, 7));
 
-    prisma.$queryRaw.mockResolvedValueOnce([
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
       { result: claimResult(OTHER_TENANT_ID) },
     ]);
     const rejection = await rejectionOf(
@@ -473,7 +887,8 @@ describe('PrismaIdentityMailWorkerRepository', () => {
 
   it('hashes lease and Message-ID secrets before marking provider intent', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValue([
+    await primeClaimBinding(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValue([
       {
         result: {
           schemaVersion: 1,
@@ -509,7 +924,8 @@ describe('PrismaIdentityMailWorkerRepository', () => {
 
   it('returns the exact NOT_DELIVERABLE cancellation without inventing a marker', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValue([
+    await primeClaimBinding(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValue([
       {
         result: {
           schemaVersion: 1,
@@ -528,11 +944,19 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     await expect(
       repository.markProviderAttempt(providerAttemptInput()),
     ).resolves.toBe('CANCELED');
+
+    clearRepositoryMocks(prisma);
+    const replay = await rejectionOf(
+      repository.markProviderAttempt(providerAttemptInput()),
+    );
+    expectReason(replay, 'IDENTITY_MAIL_WORKER_CLAIM_BINDING_REQUIRED');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed provider cancellation receipt', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValue([
+    await primeClaimBinding(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValue([
       {
         result: {
           schemaVersion: 1,
@@ -556,7 +980,8 @@ describe('PrismaIdentityMailWorkerRepository', () => {
 
   it('rejects a provider marker response bound to another attempt', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValue([
+    await primeClaimBinding(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValue([
       {
         result: {
           schemaVersion: 1,
@@ -581,7 +1006,8 @@ describe('PrismaIdentityMailWorkerRepository', () => {
 
   it('keeps historical completion authority-free and binds its acknowledgement to tenant, outbox, lease and outcome', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValue([
+    await primeProviderMarkedBinding(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValue([
       {
         result: {
           schemaVersion: 1,
@@ -650,7 +1076,8 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     ],
   ])('rejects a completion receipt with %s', async (_case, result) => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValueOnce([{ result }]);
+    await primeProviderMarkedBinding(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([{ result }]);
 
     const rejection = await rejectionOf(
       repository.markSent({
@@ -664,7 +1091,8 @@ describe('PrismaIdentityMailWorkerRepository', () => {
 
   it('preserves a pre-provider CANCELED lifecycle decision', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValue([
+    await primeClaimBinding(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValue([
       {
         result: {
           schemaVersion: 1,
@@ -683,11 +1111,21 @@ describe('PrismaIdentityMailWorkerRepository', () => {
         reasonCode: 'IDENTITY_MAIL_CLAIM_INVALID',
       }),
     ).resolves.toBe('CANCELED');
+
+    clearRepositoryMocks(prisma);
+    const replay = await rejectionOf(
+      repository.markPreProviderFailure({
+        ...leaseInput(),
+        reasonCode: 'IDENTITY_MAIL_CLAIM_INVALID',
+      }),
+    );
+    expectReason(replay, 'IDENTITY_MAIL_WORKER_CLAIM_BINDING_REQUIRED');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('keeps the reaper tenant-scoped and rejects malformed counters', async () => {
     const { prisma, repository } = harness();
-    prisma.$queryRaw.mockResolvedValueOnce([
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
       {
         result: {
           schemaVersion: 1,
@@ -713,7 +1151,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
       3,
     ]);
 
-    prisma.$queryRaw.mockResolvedValueOnce([
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
       {
         result: {
           schemaVersion: 1,
@@ -733,7 +1171,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     );
     expectReason(rejection, 'IDENTITY_MAIL_WORKER_DATABASE_RESPONSE_INVALID');
 
-    prisma.$queryRaw.mockResolvedValueOnce([
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
       {
         result: {
           schemaVersion: 1,

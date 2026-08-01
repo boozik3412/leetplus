@@ -17,8 +17,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { SHARED_BETA_INITIAL_OWNER_CAPABILITIES } from '../auth/capabilities';
 import {
+  IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
   IdentityEmailClaimService,
   type IdentityEmailFingerprint,
+  type IdentityEmailClaimTransaction,
 } from '../auth/identity-email-claim.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-profile.service';
@@ -128,214 +130,215 @@ export class SharedTenantProvisioningService {
 
     for (let attempt = 0; ; attempt += 1) {
       try {
-        const transactionResult = await this.prisma.$transaction(
-          async (tx) => {
-            await this.acquireTenantSlugLock(tx, parsed.tenantSlug);
-            await this.assertFreshPlatformAuthority(
+        const transactionResult = await this.prisma.$transaction(async (tx) => {
+          await this.acquireTenantSlugLock(tx, parsed.tenantSlug);
+          const tenantWithSlug = await tx.tenant.findFirst({
+            where: {
+              slug: {
+                equals: parsed.tenantSlug,
+                mode: 'insensitive',
+              },
+            },
+            select: { id: true },
+          });
+          const tenantId = tenantWithSlug?.id ?? randomUUID();
+          const identityTransaction =
+            await this.identityClaimBoundary.lockTenantTransaction(
               tx,
-              actor.id,
-              parsed.supportOwnerUserId,
+              tenantId,
             );
+          await this.assertFreshPlatformAuthority(
+            tx,
+            actor.id,
+            parsed.supportOwnerUserId,
+          );
 
-            const tenantWithSlug = await tx.tenant.findFirst({
-              where: {
-                slug: {
-                  equals: parsed.tenantSlug,
-                  mode: 'insensitive',
-                },
-              },
-              select: { id: true },
-            });
-            if (tenantWithSlug) {
-              const replay = await this.findProvisioningReplay(
-                tx,
-                tenantWithSlug.id,
-                parsed.requestId,
-              );
-              if (!replay) {
-                throw new ConflictException('Tenant slug is already in use');
-              }
-              return {
-                receipt: await this.validateProvisioningReplay(
-                  tx,
-                  replay,
-                  requestDigest,
-                  parsed,
-                  tenantWithSlug.id,
-                ),
-                created: false,
-              };
+          if (tenantWithSlug) {
+            const replay = await this.findProvisioningReplay(
+              tx,
+              tenantId,
+              parsed.requestId,
+            );
+            if (!replay) {
+              throw new ConflictException('Tenant slug is already in use');
             }
-
-            const now = new Date();
-            const tenant = await tx.tenant.create({
-              data: {
-                name: parsed.tenantName,
-                slug: parsed.tenantSlug,
-                status: TenantLifecycleStatus.SUSPENDED,
-                customerStage: TenantCustomerStage.PILOT,
-                onboardingStatus: TenantOnboardingStatus.PROVISIONING,
-                cohortKey: parsed.cohortKey,
-                supportOwnerUserId: parsed.supportOwnerUserId,
-                trialStartsAt: null,
-                trialEndsAt: null,
-                entitlementProfileRevision: 1,
-                statusChangedAt: now,
-                statusReason: `Awaiting protected shared beta activation: ${parsed.reason}`,
-              },
-              select: {
-                id: true,
-                slug: true,
-                status: true,
-                customerStage: true,
-                onboardingStatus: true,
-                entitlementProfileRevision: true,
-                executionRevision: true,
-                trialStartsAt: true,
-                trialEndsAt: true,
-              },
-            });
-            const store = await tx.store.create({
-              data: {
-                tenantId: tenant.id,
-                name: parsed.storeName,
-                publicSlug: parsed.storePublicSlug,
-                timeZone: parsed.storeTimeZone,
-                isActive: false,
-                gamificationEnabled: false,
-                backgroundExecutionEnabled: false,
-              },
-              select: {
-                id: true,
-                name: true,
-                isActive: true,
-                gamificationEnabled: true,
-                backgroundExecutionEnabled: true,
-              },
-            });
-
-            await tx.userRoleOverride.create({
-              data: {
-                tenantId: tenant.id,
-                role: UserRole.OWNER,
-                permissions: [...SHARED_BETA_INITIAL_OWNER_CAPABILITIES],
-              },
-            });
-            await tx.tenantModuleEntitlement.createMany({
-              data: COMPLETE_TENANT_MODULE_PROFILE.map((module) => ({
-                id: randomUUID(),
-                tenantId: tenant.id,
-                module,
-                readEnabled: true,
-                writeEnabled: true,
-                outboundEnabled: false,
-                validFrom: null,
-                validUntil: null,
-                profileRevision: 1,
-                reason: parsed.reason,
-                createdAt: now,
-                updatedAt: now,
-              })),
-            });
-
-            const reservationId = randomUUID();
-            const identityTransaction =
-              this.identityClaimBoundary.bindTransaction(tx);
-            const identityReservation =
-              await this.identityClaimBoundary.reserveInvite(
+            return {
+              receipt: await this.validateProvisioningReplay(
+                replay,
+                requestDigest,
+                parsed,
+                tenantId,
                 identityTransaction,
-                {
-                  email: parsed.ownerEmail,
-                  tenantId: tenant.id,
-                  subjectId: reservationId,
-                },
-              );
-            if (
-              identityReservation.decision !== 'CREATED' ||
-              identityReservation.tenantId !== tenant.id ||
-              identityReservation.subjectId !== reservationId ||
-              identityReservation.revision !== 1 ||
-              identityReservation.fingerprint !==
-                parsed.ownerIdentity.fingerprint ||
-              identityReservation.keyVersion !== parsed.ownerIdentity.keyVersion
-            ) {
-              throw new ConflictException(
-                'Initial owner identity reservation was not created',
-              );
-            }
-
-            const receipt: ShellProvisioningReceipt = {
-              profileVersion: SHARED_BETA_SHELL_PROFILE_VERSION,
-              tenant: {
-                id: tenant.id,
-                slug: tenant.slug,
-                status: TenantLifecycleStatus.SUSPENDED,
-                customerStage: TenantCustomerStage.PILOT,
-                onboardingStatus: TenantOnboardingStatus.PROVISIONING,
-                profileRevision: 1,
-                executionRevision: tenant.executionRevision,
-                trialStartsAt: null,
-                trialEndsAt: null,
-              },
-              store: {
-                id: store.id,
-                name: store.name,
-                isActive: false,
-                gamificationEnabled: false,
-                backgroundExecutionEnabled: false,
-              },
-              ownerIdentity: {
-                claimType: IdentityEmailClaimType.INVITE,
-                reservationId,
-                claimRevision: 1,
-              },
-              modules: COMPLETE_TENANT_MODULE_PROFILE.map((module) => ({
-                module,
-                readEnabled: true,
-                writeEnabled: true,
-                outboundEnabled: false,
-                profileRevision: 1,
-              })),
+              ),
+              created: false,
             };
+          }
 
-            await tx.platformAdminAuditEvent.create({
-              data: {
+          const now = new Date();
+          const tenant = await tx.tenant.create({
+            data: {
+              id: tenantId,
+              name: parsed.tenantName,
+              slug: parsed.tenantSlug,
+              status: TenantLifecycleStatus.SUSPENDED,
+              customerStage: TenantCustomerStage.PILOT,
+              onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+              cohortKey: parsed.cohortKey,
+              supportOwnerUserId: parsed.supportOwnerUserId,
+              trialStartsAt: null,
+              trialEndsAt: null,
+              entitlementProfileRevision: 1,
+              statusChangedAt: now,
+              statusReason: `Awaiting protected shared beta activation: ${parsed.reason}`,
+            },
+            select: {
+              id: true,
+              slug: true,
+              status: true,
+              customerStage: true,
+              onboardingStatus: true,
+              entitlementProfileRevision: true,
+              executionRevision: true,
+              trialStartsAt: true,
+              trialEndsAt: true,
+            },
+          });
+          const store = await tx.store.create({
+            data: {
+              tenantId: tenant.id,
+              name: parsed.storeName,
+              publicSlug: parsed.storePublicSlug,
+              timeZone: parsed.storeTimeZone,
+              isActive: false,
+              gamificationEnabled: false,
+              backgroundExecutionEnabled: false,
+            },
+            select: {
+              id: true,
+              name: true,
+              isActive: true,
+              gamificationEnabled: true,
+              backgroundExecutionEnabled: true,
+            },
+          });
+
+          await tx.userRoleOverride.create({
+            data: {
+              tenantId: tenant.id,
+              role: UserRole.OWNER,
+              permissions: [...SHARED_BETA_INITIAL_OWNER_CAPABILITIES],
+            },
+          });
+          await tx.tenantModuleEntitlement.createMany({
+            data: COMPLETE_TENANT_MODULE_PROFILE.map((module) => ({
+              id: randomUUID(),
+              tenantId: tenant.id,
+              module,
+              readEnabled: true,
+              writeEnabled: true,
+              outboundEnabled: false,
+              validFrom: null,
+              validUntil: null,
+              profileRevision: 1,
+              reason: parsed.reason,
+              createdAt: now,
+              updatedAt: now,
+            })),
+          });
+
+          const reservationId = randomUUID();
+          const identityReservation =
+            await this.identityClaimBoundary.reserveInvite(
+              identityTransaction,
+              {
+                email: parsed.ownerEmail,
                 tenantId: tenant.id,
-                actorUserId: actor.id,
-                requestId: parsed.requestId,
-                action: SHARED_BETA_SHELL_PROVISION_ACTION,
-                targetType: 'TENANT',
-                targetId: tenant.id,
-                reason: parsed.reason,
-                before: Prisma.JsonNull,
-                after: receipt,
-                metadata: {
-                  profileVersion: SHARED_BETA_SHELL_PROFILE_VERSION,
-                  requestDigest,
-                  supportTicket: parsed.supportTicket,
-                  supportOwnerUserId: parsed.supportOwnerUserId,
-                  ownerEmailFingerprint: identityReservation.fingerprint,
-                  ownerEmailFingerprintKeyVersion:
-                    identityReservation.keyVersion,
-                  initialOwnerRole: UserRole.OWNER,
-                  initialOwnerScopeAfterActivation: 'NETWORK',
-                  ownerIdentityReservationId: reservationId,
-                  initialStoreCount: 1,
-                  moduleCount: COMPLETE_TENANT_MODULE_PROFILE.length,
-                  outboundDefault: 'OFF',
-                  activationRequired: true,
-                  inviteCreated: false,
-                  trialStarted: false,
-                  confirmationRule: 'PROVISION tenant_slug',
-                  executionRevision: tenant.executionRevision,
-                },
+                subjectId: reservationId,
               },
-            });
+            );
+          if (
+            identityReservation.decision !== 'CREATED' ||
+            identityReservation.tenantId !== tenant.id ||
+            identityReservation.subjectId !== reservationId ||
+            identityReservation.revision !== 1 ||
+            identityReservation.fingerprint !==
+              parsed.ownerIdentity.fingerprint ||
+            identityReservation.keyVersion !== parsed.ownerIdentity.keyVersion
+          ) {
+            throw new ConflictException(
+              'Initial owner identity reservation was not created',
+            );
+          }
 
-            return { receipt, created: true };
-          },
-          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-        );
+          const receipt: ShellProvisioningReceipt = {
+            profileVersion: SHARED_BETA_SHELL_PROFILE_VERSION,
+            tenant: {
+              id: tenant.id,
+              slug: tenant.slug,
+              status: TenantLifecycleStatus.SUSPENDED,
+              customerStage: TenantCustomerStage.PILOT,
+              onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+              profileRevision: 1,
+              executionRevision: tenant.executionRevision,
+              trialStartsAt: null,
+              trialEndsAt: null,
+            },
+            store: {
+              id: store.id,
+              name: store.name,
+              isActive: false,
+              gamificationEnabled: false,
+              backgroundExecutionEnabled: false,
+            },
+            ownerIdentity: {
+              claimType: IdentityEmailClaimType.INVITE,
+              reservationId,
+              claimRevision: 1,
+            },
+            modules: COMPLETE_TENANT_MODULE_PROFILE.map((module) => ({
+              module,
+              readEnabled: true,
+              writeEnabled: true,
+              outboundEnabled: false,
+              profileRevision: 1,
+            })),
+          };
+
+          await tx.platformAdminAuditEvent.create({
+            data: {
+              tenantId: tenant.id,
+              actorUserId: actor.id,
+              requestId: parsed.requestId,
+              action: SHARED_BETA_SHELL_PROVISION_ACTION,
+              targetType: 'TENANT',
+              targetId: tenant.id,
+              reason: parsed.reason,
+              before: Prisma.JsonNull,
+              after: receipt,
+              metadata: {
+                profileVersion: SHARED_BETA_SHELL_PROFILE_VERSION,
+                requestDigest,
+                supportTicket: parsed.supportTicket,
+                supportOwnerUserId: parsed.supportOwnerUserId,
+                ownerEmailFingerprint: identityReservation.fingerprint,
+                ownerEmailFingerprintKeyVersion: identityReservation.keyVersion,
+                initialOwnerRole: UserRole.OWNER,
+                initialOwnerScopeAfterActivation: 'NETWORK',
+                ownerIdentityReservationId: reservationId,
+                initialStoreCount: 1,
+                moduleCount: COMPLETE_TENANT_MODULE_PROFILE.length,
+                outboundDefault: 'OFF',
+                activationRequired: true,
+                inviteCreated: false,
+                trialStarted: false,
+                confirmationRule: 'PROVISION tenant_slug',
+                executionRevision: tenant.executionRevision,
+              },
+            },
+          });
+
+          return { receipt, created: true };
+        }, IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
 
         return this.provisioningResult(
           transactionResult.receipt,
@@ -400,43 +403,42 @@ export class SharedTenantProvisioningService {
     parsed: ParsedProvisioning,
     requestDigest: string,
   ): Promise<ShellProvisioningReceipt | null> {
-    return this.prisma.$transaction(
-      async (tx) => {
-        await this.acquireTenantSlugLock(tx, parsed.tenantSlug);
-        await this.assertFreshPlatformAuthority(
-          tx,
-          actorUserId,
-          parsed.supportOwnerUserId,
-        );
-        const tenant = await tx.tenant.findFirst({
-          where: {
-            slug: {
-              equals: parsed.tenantSlug,
-              mode: 'insensitive',
-            },
+    return this.prisma.$transaction(async (tx) => {
+      await this.acquireTenantSlugLock(tx, parsed.tenantSlug);
+      const tenant = await tx.tenant.findFirst({
+        where: {
+          slug: {
+            equals: parsed.tenantSlug,
+            mode: 'insensitive',
           },
-          select: { id: true },
-        });
-        if (!tenant) {
-          return null;
-        }
-        const replay = await this.findProvisioningReplay(
-          tx,
-          tenant.id,
-          parsed.requestId,
-        );
-        return replay
-          ? this.validateProvisioningReplay(
-              tx,
-              replay,
-              requestDigest,
-              parsed,
-              tenant.id,
-            )
-          : null;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
-    );
+        },
+        select: { id: true },
+      });
+      if (!tenant) {
+        return null;
+      }
+      const identityTransaction =
+        await this.identityClaimBoundary.lockTenantTransaction(tx, tenant.id);
+      await this.assertFreshPlatformAuthority(
+        tx,
+        actorUserId,
+        parsed.supportOwnerUserId,
+      );
+      const replay = await this.findProvisioningReplay(
+        tx,
+        tenant.id,
+        parsed.requestId,
+      );
+      return replay
+        ? this.validateProvisioningReplay(
+            replay,
+            requestDigest,
+            parsed,
+            tenant.id,
+            identityTransaction,
+          )
+        : null;
+    }, IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
   }
 
   private async assertFreshPlatformAuthority(
@@ -542,7 +544,6 @@ export class SharedTenantProvisioningService {
   }
 
   private async validateProvisioningReplay(
-    tx: Prisma.TransactionClient,
     event: {
       after: Prisma.JsonValue | null;
       metadata: Prisma.JsonValue | null;
@@ -550,6 +551,7 @@ export class SharedTenantProvisioningService {
     requestDigest: string,
     parsed: ParsedProvisioning,
     expectedTenantId: string,
+    identityTransaction: IdentityEmailClaimTransaction,
   ): Promise<ShellProvisioningReceipt> {
     const receipt = this.replayReceipt(event, requestDigest);
     if (
@@ -560,15 +562,12 @@ export class SharedTenantProvisioningService {
         'Stored shell provisioning receipt is invalid',
       );
     }
-    await this.identityClaimBoundary.assertInviteLocator(
-      this.identityClaimBoundary.bindTransaction(tx),
-      {
-        workflowLocator: receipt.ownerIdentity.reservationId,
-        tenantId: expectedTenantId,
-        subjectId: receipt.ownerIdentity.reservationId,
-        expectedRevision: receipt.ownerIdentity.claimRevision,
-      },
-    );
+    await this.identityClaimBoundary.assertInviteLocator(identityTransaction, {
+      workflowLocator: receipt.ownerIdentity.reservationId,
+      tenantId: expectedTenantId,
+      subjectId: receipt.ownerIdentity.reservationId,
+      expectedRevision: receipt.ownerIdentity.claimRevision,
+    });
     return receipt;
   }
 

@@ -793,23 +793,43 @@ test("emergency suspend cannot revive an archived tenant", async () => {
     wrote = true;
     throw new Error("Archived tenant must not be mutated");
   };
+  let queryIndex = 0;
+  let tenantReadIndex = 0;
   const tx = {
-    tenant: {
-      findUnique: async () => ({
-        id: "tenant-d",
-        slug: normalized.tenantSlug,
-        status: "ARCHIVED",
-        platformAdminAuditEvents: [
-          {
-            metadata: {
-              profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
-              partnerAlias: normalized.partnerAlias,
-              manifestHmacKeyVersion: "v1",
-              manifestDigest,
+    $queryRawUnsafe: async () => {
+      queryIndex += 1;
+      return queryIndex === 1
+        ? [
+            {
+              isolationLevel: "serializable",
+              readOnly: "off",
+              statementTimeout: "25s",
+              lockTimeout: "5s",
             },
-          },
-        ],
-      }),
+          ]
+        : [{ tenantId: "tenant-d", backendPid: 42 }];
+    },
+    tenant: {
+      findUnique: async () => {
+        tenantReadIndex += 1;
+        return tenantReadIndex === 1
+          ? { id: "tenant-d" }
+          : {
+              id: "tenant-d",
+              slug: normalized.tenantSlug,
+              status: "ARCHIVED",
+              platformAdminAuditEvents: [
+                {
+                  metadata: {
+                    profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
+                    partnerAlias: normalized.partnerAlias,
+                    manifestHmacKeyVersion: "v1",
+                    manifestDigest,
+                  },
+                },
+              ],
+            };
+      },
       update: forbiddenWrite,
     },
     store: { updateMany: forbiddenWrite },
@@ -837,4 +857,120 @@ test("emergency suspend cannot revive an archived tenant", async () => {
       error.code === "SUSPEND_STATE_NOT_NARROWING",
   );
   assert.equal(wrote, false);
+});
+
+test("emergency suspend takes the shared tenant lock before invite revocation", async () => {
+  const normalized = normalizeDesignPartnerManifest(manifest(), NOW, {
+    allowExpiredAccess: true,
+  });
+  const manifestDigest = computeDesignPartnerManifestDigest(
+    normalized,
+    MANIFEST_HMAC_KEY,
+  );
+  const order = [];
+  let queryIndex = 0;
+  let tenantReadIndex = 0;
+  let transactionOptions = null;
+  const count = (name) => async () => {
+    order.push(name);
+    return { count: 1 };
+  };
+  const tx = {
+    $queryRawUnsafe: async (sql, ...parameters) => {
+      queryIndex += 1;
+      if (queryIndex === 1) {
+        order.push("settings");
+        assert.match(sql, /set_config\('statement_timeout'/u);
+        assert.deepEqual(parameters, ["25s", "5s"]);
+        return [
+          {
+            isolationLevel: "serializable",
+            readOnly: "off",
+            statementTimeout: "25s",
+            lockTimeout: "5s",
+          },
+        ];
+      }
+      order.push("tenant-lock");
+      assert.match(sql, /pg_advisory_xact_lock/iu);
+      assert.deepEqual(parameters, [
+        "leetplus:identity-mail-tenant:v1:",
+        "tenant-d",
+        180,
+      ]);
+      return [{ tenantId: "tenant-d", backendPid: 42 }];
+    },
+    tenant: {
+      findUnique: async () => {
+        tenantReadIndex += 1;
+        order.push(
+          tenantReadIndex === 1 ? "tenant-locator-read" : "tenant-read",
+        );
+        return tenantReadIndex === 1
+          ? { id: "tenant-d" }
+          : {
+              id: "tenant-d",
+              slug: normalized.tenantSlug,
+              status: "ACTIVE",
+              platformAdminAuditEvents: [
+                {
+                  metadata: {
+                    profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
+                    partnerAlias: normalized.partnerAlias,
+                    manifestHmacKeyVersion: "v1",
+                    manifestDigest,
+                  },
+                },
+              ],
+            };
+      },
+      update: async () => {
+        order.push("tenant-write");
+        return {
+          id: "tenant-d",
+          slug: normalized.tenantSlug,
+          status: "SUSPENDED",
+        };
+      },
+    },
+    store: { updateMany: count("store-write") },
+    integrationSource: { updateMany: count("source-write") },
+    integrationCredential: { updateMany: count("credential-write") },
+    userInvite: { updateMany: count("invite-write") },
+    platformAdminAuditEvent: {
+      create: async () => {
+        order.push("audit-write");
+      },
+    },
+  };
+
+  const result = await suspendDesignPartner(
+    {
+      $transaction: async (operation, options) => {
+        transactionOptions = options;
+        return operation(tx);
+      },
+    },
+    normalized,
+    {
+      now: NOW,
+      confirmation: `SUSPEND ${normalized.tenantSlug}`,
+      manifestHmacKey: MANIFEST_HMAC_KEY,
+      operationReason: "Contain identity mail delivery during rehearsal",
+    },
+  );
+
+  assert.equal(result.decision, "SUSPENDED");
+  assert.deepEqual(transactionOptions, {
+    isolationLevel: "Serializable",
+    maxWait: 5_000,
+    timeout: 30_000,
+  });
+  assert.deepEqual(order.slice(0, 4), [
+    "settings",
+    "tenant-locator-read",
+    "tenant-lock",
+    "tenant-read",
+  ]);
+  assert.ok(order.indexOf("tenant-lock") < order.indexOf("invite-write"));
 });

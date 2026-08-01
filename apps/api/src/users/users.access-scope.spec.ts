@@ -4,6 +4,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { TenantCustomerStage, UserRole } from '@prisma/client';
+import { IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS } from '../auth/identity-email-claim.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { AccessScopeService } from '../tenancy/access-scope.service';
 import { UsersService } from './users.service';
@@ -222,7 +223,17 @@ function createService(overrides: {
     }),
   };
   const identityClaimBoundary = {
-    bindTransaction: jest.fn((tx: unknown) => tx),
+    runTenantTransaction: jest.fn(
+      async (
+        host: typeof prisma,
+        _transactionTenantId: string,
+        operation: (tx: typeof prisma, identityTx: unknown) => Promise<unknown>,
+      ): Promise<unknown> =>
+        (await host.$transaction(
+          (tx: typeof prisma) => operation(tx, tx),
+          IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+        )) as unknown,
+    ),
     reserveInvite: jest.fn(
       (
         _tx: unknown,
@@ -520,7 +531,7 @@ describe('UsersService AccessScope boundary', () => {
       data: Record<string, unknown>;
     }>(prisma.userInvite.update);
     const invocationOrder = [
-      identityClaimBoundary.bindTransaction.mock.invocationCallOrder[0],
+      identityClaimBoundary.runTenantTransaction.mock.invocationCallOrder[0],
       identityClaimBoundary.reserveInvite.mock.invocationCallOrder[0],
       identityClaimBoundary.assertInvite.mock.invocationCallOrder[0],
       prisma.userInvite.create.mock.invocationCallOrder[0],
@@ -531,6 +542,17 @@ describe('UsersService AccessScope boundary', () => {
     expect(invocationOrder).toEqual(
       [...invocationOrder].sort((left, right) => left - right),
     );
+    expect(identityClaimBoundary.runTenantTransaction).toHaveBeenCalledWith(
+      prisma,
+      tenantId,
+      expect.any(Function),
+    );
+    expect(
+      firstMockArgument<typeof IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS>(
+        prisma.$transaction,
+        1,
+      ),
+    ).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
     expect(inviteId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
@@ -626,7 +648,7 @@ describe('UsersService AccessScope boundary', () => {
       data: Record<string, unknown>;
     }>(prisma.userInvite.update);
     const invocationOrder = [
-      identityClaimBoundary.bindTransaction.mock.invocationCallOrder[0],
+      identityClaimBoundary.runTenantTransaction.mock.invocationCallOrder[0],
       identityClaimBoundary.assertInvite.mock.invocationCallOrder[0],
       prisma.userInvite.create.mock.invocationCallOrder[0],
       prisma.userInvite.updateMany.mock.invocationCallOrder[0],
@@ -637,6 +659,17 @@ describe('UsersService AccessScope boundary', () => {
     expect(invocationOrder).toEqual(
       [...invocationOrder].sort((left, right) => left - right),
     );
+    expect(identityClaimBoundary.runTenantTransaction).toHaveBeenCalledWith(
+      prisma,
+      tenantId,
+      expect.any(Function),
+    );
+    expect(
+      firstMockArgument<typeof IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS>(
+        prisma.$transaction,
+        1,
+      ),
+    ).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
     expect(reissuedInviteId).not.toBe(existing.id);
     expect(createArgs.data).toMatchObject({
       id: reissuedInviteId,
@@ -729,7 +762,7 @@ describe('UsersService AccessScope boundary', () => {
     }>(prisma.userInvite.updateMany);
     const releaseInput = identityClaimBoundary.releaseInvite.mock.calls[0]?.[1];
     const invocationOrder = [
-      identityClaimBoundary.bindTransaction.mock.invocationCallOrder[0],
+      identityClaimBoundary.runTenantTransaction.mock.invocationCallOrder[0],
       identityClaimBoundary.assertInvite.mock.invocationCallOrder[0],
       prisma.userInvite.updateMany.mock.invocationCallOrder[0],
       identityClaimBoundary.releaseInvite.mock.invocationCallOrder[0],
@@ -738,6 +771,17 @@ describe('UsersService AccessScope boundary', () => {
     expect(invocationOrder).toEqual(
       [...invocationOrder].sort((left, right) => left - right),
     );
+    expect(identityClaimBoundary.runTenantTransaction).toHaveBeenCalledWith(
+      prisma,
+      tenantId,
+      expect.any(Function),
+    );
+    expect(
+      firstMockArgument<typeof IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS>(
+        prisma.$transaction,
+        1,
+      ),
+    ).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
     expect(revokeArgs.where).toMatchObject({
       id: existing.id,
       tenantId,

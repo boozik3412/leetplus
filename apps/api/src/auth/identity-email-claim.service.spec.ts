@@ -6,11 +6,14 @@ import {
 import type { ConfigService } from '@nestjs/config';
 import { IdentityEmailClaimType, Prisma } from '@prisma/client';
 import {
+  IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
   IdentityEmailClaimService,
   type IdentityEmailClaimTransaction,
+  type IdentityEmailClaimTransactionHost,
 } from './identity-email-claim.service';
 
 const TENANT_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_TENANT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const RESERVATION_ID = '22222222-2222-4222-8222-222222222222';
 const NEXT_SUBJECT_ID = '33333333-3333-4333-8333-333333333333';
 const EMAIL = 'owner@example.test';
@@ -29,14 +32,43 @@ const DOMAIN_256 = [63, 63, 63, 61, 2]
   .map((length) => 'd'.repeat(length))
   .join('.');
 
-type ClaimTransactionMock = IdentityEmailClaimTransaction & {
+type ClaimTransactionClientMock = Pick<
+  Prisma.TransactionClient,
+  '$queryRaw'
+> & {
   $queryRaw: jest.Mock;
 };
 
-function transaction(): ClaimTransactionMock {
+const TRANSACTION_SETTINGS = {
+  isolationLevel: 'serializable',
+  readOnly: 'off',
+  statementTimeout: '25s',
+  lockTimeout: '5s',
+} as const;
+
+function transactionClient(): ClaimTransactionClientMock {
   return {
     $queryRaw: jest.fn(),
-  } as unknown as ClaimTransactionMock;
+  } as ClaimTransactionClientMock;
+}
+
+async function lockedTransaction(
+  boundary: IdentityEmailClaimService,
+  tenantId = TENANT_ID,
+): Promise<{
+  client: ClaimTransactionClientMock;
+  tx: IdentityEmailClaimTransaction;
+}> {
+  const client = transactionClient();
+  client.$queryRaw
+    .mockResolvedValueOnce([TRANSACTION_SETTINGS])
+    .mockResolvedValueOnce([{ tenantId, backendPid: 12_345 }]);
+  const tx = await boundary.lockTenantTransaction(
+    client as Prisma.TransactionClient,
+    tenantId,
+  );
+  client.$queryRaw.mockClear();
+  return { client, tx };
 }
 
 function service(
@@ -83,14 +115,189 @@ function httpResponse(error: unknown): unknown {
   return error;
 }
 
+function mockCalls(mock: { mock: { calls: unknown } }): unknown[][] {
+  if (!Array.isArray(mock.mock.calls)) {
+    throw new Error('Expected Jest mock calls');
+  }
+  return mock.mock.calls as unknown[][];
+}
+
 describe('IdentityEmailClaimService', () => {
-  it('rejects a root Prisma client as a claim transaction', () => {
-    expect(() =>
-      service().bindTransaction({
-        $connect: jest.fn(),
-        $disconnect: jest.fn(),
-      } as unknown as Prisma.TransactionClient),
-    ).toThrow(ServiceUnavailableException);
+  it('rejects a root Prisma client as a claim transaction', async () => {
+    await expect(
+      service().lockTenantTransaction(
+        {
+          $connect: jest.fn(),
+          $disconnect: jest.fn(),
+        } as unknown as Prisma.TransactionClient,
+        TENANT_ID,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'IDENTITY_CLAIM_TRANSACTION_REQUIRED',
+      },
+    });
+  });
+
+  it('prearms exact transaction settings before the canonical tenant advisory lock', async () => {
+    const boundary = service();
+    const client = transactionClient();
+    client.$queryRaw
+      .mockResolvedValueOnce([TRANSACTION_SETTINGS])
+      .mockResolvedValueOnce([{ tenantId: TENANT_ID, backendPid: 12_345 }]);
+
+    const tx = await boundary.lockTenantTransaction(
+      client as Prisma.TransactionClient,
+      TENANT_ID,
+    );
+
+    expect(Object.isFrozen(tx)).toBe(true);
+    expect(tx.tenantId).toBe(TENANT_ID);
+    expect(client.$queryRaw).toHaveBeenCalledTimes(2);
+    const settingsQuery = mockCalls(client.$queryRaw)[0]?.[0] as
+      | Prisma.Sql
+      | undefined;
+    const lockQuery = mockCalls(client.$queryRaw)[1]?.[0] as
+      | Prisma.Sql
+      | undefined;
+    expect(settingsQuery?.strings.join('')).toContain(
+      "current_setting('transaction_isolation')",
+    );
+    expect(settingsQuery?.strings.join('')).toContain(
+      "current_setting('transaction_read_only')",
+    );
+    expect(settingsQuery?.strings.join('')).toContain(
+      "set_config(\n              'statement_timeout'",
+    );
+    expect(settingsQuery?.strings.join('')).toContain(
+      "set_config(\n              'lock_timeout'",
+    );
+    expect(settingsQuery?.values).toEqual(['25s', '5s']);
+    expect(lockQuery?.strings.join('')).toContain(
+      'WITH tenant_lock AS MATERIALIZED',
+    );
+    expect(lockQuery?.strings.join('')).toContain(
+      'pg_catalog.pg_advisory_xact_lock',
+    );
+    expect(lockQuery?.strings.join('')).toContain(
+      'pg_catalog.hashtextextended',
+    );
+    expect(lockQuery?.values).toEqual([
+      'leetplus:identity-mail-tenant:v1:',
+      TENANT_ID,
+      180,
+      TENANT_ID,
+    ]);
+  });
+
+  it('fails closed before advisory acquisition when transaction settings are not exact', async () => {
+    const boundary = service();
+    const client = transactionClient();
+    client.$queryRaw.mockResolvedValueOnce([
+      { ...TRANSACTION_SETTINGS, isolationLevel: 'read committed' },
+    ]);
+
+    await expect(
+      boundary.lockTenantTransaction(
+        client as Prisma.TransactionClient,
+        TENANT_ID,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'IDENTITY_CLAIM_TRANSACTION_REQUIRED',
+      },
+    });
+    expect(client.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['40001', '40P01', '55P03', '57014'] as const)(
+    'runs with exact Serializable bounds, retries %s once and returns a typed terminal conflict',
+    async (sqlState) => {
+      const boundary = service();
+      const clients = [transactionClient(), transactionClient()];
+      for (const client of clients) {
+        client.$queryRaw
+          .mockResolvedValueOnce([TRANSACTION_SETTINGS])
+          .mockResolvedValueOnce([{ tenantId: TENANT_ID, backendPid: 12_345 }]);
+      }
+      const transactionHost = jest.fn<
+        Promise<unknown>,
+        [
+          operation: (tx: Prisma.TransactionClient) => Promise<unknown>,
+          options: typeof IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+        ]
+      >(async (operation, options) => {
+        expect(options).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+        const client = clients.shift();
+        if (!client) {
+          throw new Error('Unexpected third transaction attempt');
+        }
+        return operation(client as Prisma.TransactionClient);
+      });
+      const host = {
+        $transaction: transactionHost,
+      } as unknown as IdentityEmailClaimTransactionHost;
+      const operation = jest.fn().mockRejectedValue(rpcError(sqlState));
+
+      await expect(
+        boundary.runTenantTransaction(host, TENANT_ID, operation),
+      ).rejects.toMatchObject({
+        response: {
+          reasonCode: 'IDENTITY_CLAIM_RETRY_REQUIRED',
+        },
+      });
+
+      expect(transactionHost).toHaveBeenCalledTimes(2);
+      for (const call of mockCalls(transactionHost)) {
+        expect(call[1]).toEqual(IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+      }
+      expect(operation).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([
+    new ConflictException({
+      message: 'Identity email is unavailable',
+      reasonCode: 'IDENTITY_EMAIL_UNAVAILABLE',
+    }),
+    new BadRequestException({
+      message: 'Identity email is invalid',
+      reasonCode: 'IDENTITY_EMAIL_INVALID',
+    }),
+  ])('does not retry a non-retryable domain error', async (domainError) => {
+    const boundary = service();
+    const transactionHost = jest.fn().mockRejectedValue(domainError);
+    const host = {
+      $transaction: transactionHost,
+    } as unknown as IdentityEmailClaimTransactionHost;
+    const operation = jest.fn();
+
+    await expect(
+      boundary.runTenantTransaction(host, TENANT_ID, operation),
+    ).rejects.toBe(domainError);
+    expect(transactionHost).toHaveBeenCalledTimes(1);
+    expect(mockCalls(transactionHost)[0]?.[1]).toEqual(
+      IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+    );
+    expect(operation).not.toHaveBeenCalled();
+  });
+
+  it('rejects a tenant-bound brand when a command targets another tenant', async () => {
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
+
+    await expect(
+      boundary.reserveInvite(tx, {
+        email: EMAIL,
+        tenantId: OTHER_TENANT_ID,
+        subjectId: RESERVATION_ID,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'IDENTITY_CLAIM_TRANSACTION_REQUIRED',
+      },
+    });
+    expect(client.$queryRaw).not.toHaveBeenCalled();
   });
 
   it('creates the same domain-separated fingerprint for case and space variants', () => {
@@ -133,15 +340,16 @@ describe('IdentityEmailClaimService', () => {
   });
 
   it('rejects non-ASCII input before Unicode case folding', async () => {
-    const tx = transaction();
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
     await expect(
-      service().reserveInvite(tx, {
+      boundary.reserveInvite(tx, {
         email: 'K@example.test',
         tenantId: TENANT_ID,
         subjectId: RESERVATION_ID,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(client.$queryRaw).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -171,33 +379,36 @@ describe('IdentityEmailClaimService', () => {
   ])(
     'rejects the invalid producer boundary before reserving: %s',
     async (_label, email) => {
-      const tx = transaction();
+      const boundary = service();
+      const { client, tx } = await lockedTransaction(boundary);
       await expect(
-        service().reserveInvite(tx, {
+        boundary.reserveInvite(tx, {
           email,
           tenantId: TENANT_ID,
           subjectId: RESERVATION_ID,
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(tx.$queryRaw).not.toHaveBeenCalled();
+      expect(client.$queryRaw).not.toHaveBeenCalled();
     },
   );
 
   it('validates the fingerprint key before reserving identity state', async () => {
-    const tx = transaction();
+    const unavailableBoundary = service({});
+    const { client, tx } = await lockedTransaction(unavailableBoundary);
     await expect(
-      service({}).reserveInvite(tx, {
+      unavailableBoundary.reserveInvite(tx, {
         email: EMAIL,
         tenantId: TENANT_ID,
         subjectId: RESERVATION_ID,
       }),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(client.$queryRaw).not.toHaveBeenCalled();
   });
 
   it('reserves through the sealed RPC and never returns the canonical email', async () => {
-    const tx = transaction();
-    tx.$queryRaw.mockResolvedValue([
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
+    client.$queryRaw.mockResolvedValue([
       {
         receipt: {
           schemaVersion: 2,
@@ -211,7 +422,7 @@ describe('IdentityEmailClaimService', () => {
       },
     ]);
 
-    const result = await service().reserveInvite(tx, {
+    const result = await boundary.reserveInvite(tx, {
       email: ' OWNER@EXAMPLE.TEST ',
       tenantId: TENANT_ID,
       subjectId: RESERVATION_ID,
@@ -229,7 +440,7 @@ describe('IdentityEmailClaimService', () => {
     });
     expect(result.fingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(result)).not.toContain(EMAIL);
-    const query = (tx.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
+    const query = (client.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
       | Prisma.Sql
       | undefined;
     if (!query) {
@@ -242,8 +453,9 @@ describe('IdentityEmailClaimService', () => {
   });
 
   it('asserts before a caller creates the next identity subject', async () => {
-    const tx = transaction();
-    tx.$queryRaw.mockResolvedValue([
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
+    client.$queryRaw.mockResolvedValue([
       {
         receipt: {
           schemaVersion: 1,
@@ -258,7 +470,7 @@ describe('IdentityEmailClaimService', () => {
     ]);
 
     await expect(
-      service().assertInvite(tx, {
+      boundary.assertInvite(tx, {
         email: EMAIL,
         tenantId: TENANT_ID,
         subjectId: RESERVATION_ID,
@@ -271,8 +483,9 @@ describe('IdentityEmailClaimService', () => {
   });
 
   it('asserts an exact invite through the PII-free activation locator', async () => {
-    const tx = transaction();
-    tx.$queryRaw.mockResolvedValue([
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
+    client.$queryRaw.mockResolvedValue([
       {
         receipt: {
           schemaVersion: 1,
@@ -287,7 +500,7 @@ describe('IdentityEmailClaimService', () => {
       },
     ]);
 
-    const result = await service().assertInviteLocator(tx, {
+    const result = await boundary.assertInviteLocator(tx, {
       workflowLocator: RESERVATION_ID,
       tenantId: TENANT_ID,
       subjectId: RESERVATION_ID,
@@ -305,7 +518,7 @@ describe('IdentityEmailClaimService', () => {
       revision: 1,
     });
     expect(JSON.stringify(result)).not.toContain(EMAIL);
-    const query = (tx.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
+    const query = (client.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
       | Prisma.Sql
       | undefined;
     expect(query?.strings.join('')).toContain(
@@ -315,8 +528,9 @@ describe('IdentityEmailClaimService', () => {
   });
 
   it('rejects a locator receipt with an undeclared identity-bearing field', async () => {
-    const tx = transaction();
-    tx.$queryRaw.mockResolvedValue([
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
+    client.$queryRaw.mockResolvedValue([
       {
         receipt: {
           schemaVersion: 1,
@@ -333,7 +547,7 @@ describe('IdentityEmailClaimService', () => {
     ]);
 
     await expect(
-      service().assertInviteLocator(tx, {
+      boundary.assertInviteLocator(tx, {
         workflowLocator: RESERVATION_ID,
         tenantId: TENANT_ID,
         subjectId: RESERVATION_ID,
@@ -347,8 +561,9 @@ describe('IdentityEmailClaimService', () => {
   });
 
   it('transitions only from INVITE with a new UUID subject', async () => {
-    const tx = transaction();
-    tx.$queryRaw.mockResolvedValue([
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
+    client.$queryRaw.mockResolvedValue([
       {
         receipt: {
           schemaVersion: 2,
@@ -363,7 +578,7 @@ describe('IdentityEmailClaimService', () => {
     ]);
 
     await expect(
-      service().transitionInvite(tx, {
+      boundary.transitionInvite(tx, {
         email: EMAIL,
         tenantId: TENANT_ID,
         expectedSubjectId: RESERVATION_ID,
@@ -377,7 +592,7 @@ describe('IdentityEmailClaimService', () => {
       claimType: IdentityEmailClaimType.USER,
       revision: 2,
     });
-    const query = (tx.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
+    const query = (client.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
       | Prisma.Sql
       | undefined;
     expect(query?.strings.join('')).toContain(
@@ -385,7 +600,7 @@ describe('IdentityEmailClaimService', () => {
     );
 
     await expect(
-      service().transitionInvite(tx, {
+      boundary.transitionInvite(tx, {
         email: EMAIL,
         tenantId: TENANT_ID,
         expectedSubjectId: RESERVATION_ID,
@@ -397,8 +612,9 @@ describe('IdentityEmailClaimService', () => {
   });
 
   it('releases through the retained-history v2 boundary', async () => {
-    const tx = transaction();
-    tx.$queryRaw.mockResolvedValue([
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
+    client.$queryRaw.mockResolvedValue([
       {
         receipt: {
           schemaVersion: 2,
@@ -412,7 +628,7 @@ describe('IdentityEmailClaimService', () => {
     ]);
 
     await expect(
-      service().releaseInvite(tx, {
+      boundary.releaseInvite(tx, {
         email: EMAIL,
         tenantId: TENANT_ID,
         expectedSubjectId: RESERVATION_ID,
@@ -426,7 +642,7 @@ describe('IdentityEmailClaimService', () => {
       subjectId: RESERVATION_ID,
       releasedRevision: 2,
     });
-    const query = (tx.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
+    const query = (client.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
       | Prisma.Sql
       | undefined;
     expect(query?.strings.join('')).toContain(
@@ -435,8 +651,9 @@ describe('IdentityEmailClaimService', () => {
   });
 
   it('strictly rejects a receipt with an identity-bearing extra field', async () => {
-    const tx = transaction();
-    tx.$queryRaw.mockResolvedValue([
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
+    client.$queryRaw.mockResolvedValue([
       {
         receipt: {
           schemaVersion: 2,
@@ -452,7 +669,7 @@ describe('IdentityEmailClaimService', () => {
     ]);
 
     try {
-      await service().reserveInvite(tx, {
+      await boundary.reserveInvite(tx, {
         email: EMAIL,
         tenantId: TENANT_ID,
         subjectId: RESERVATION_ID,
@@ -465,8 +682,9 @@ describe('IdentityEmailClaimService', () => {
   });
 
   it('rejects receipts that do not match the exact command identity', async () => {
-    const tx = transaction();
-    tx.$queryRaw.mockResolvedValue([
+    const boundary = service();
+    const { client, tx } = await lockedTransaction(boundary);
+    client.$queryRaw.mockResolvedValue([
       {
         receipt: {
           schemaVersion: 1,
@@ -481,7 +699,7 @@ describe('IdentityEmailClaimService', () => {
     ]);
 
     await expect(
-      service().assertInvite(tx, {
+      boundary.assertInvite(tx, {
         email: EMAIL,
         tenantId: TENANT_ID,
         subjectId: RESERVATION_ID,
@@ -503,11 +721,12 @@ describe('IdentityEmailClaimService', () => {
     ['XX000', 'IDENTITY_CLAIM_BOUNDARY_UNAVAILABLE'],
   ] as const) {
     it(`maps PostgreSQL ${sqlState} to a redacted domain error`, async () => {
-      const tx = transaction();
-      tx.$queryRaw.mockRejectedValue(rpcError(sqlState));
+      const boundary = service();
+      const { client, tx } = await lockedTransaction(boundary);
+      client.$queryRaw.mockRejectedValue(rpcError(sqlState));
 
       try {
-        await service().releaseInvite(tx, {
+        await boundary.releaseInvite(tx, {
           email: EMAIL,
           tenantId: TENANT_ID,
           expectedSubjectId: RESERVATION_ID,
@@ -543,11 +762,12 @@ describe('IdentityEmailClaimService', () => {
     ];
 
     for (const conflict of conflicts) {
-      const tx = transaction();
-      tx.$queryRaw.mockRejectedValue(conflict);
+      const boundary = service();
+      const { client, tx } = await lockedTransaction(boundary);
+      client.$queryRaw.mockRejectedValue(conflict);
 
       try {
-        await service().assertInvite(tx, {
+        await boundary.assertInvite(tx, {
           email: EMAIL,
           tenantId: TENANT_ID,
           subjectId: RESERVATION_ID,

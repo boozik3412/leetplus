@@ -2,6 +2,10 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 const ALLOWED_IMPLEMENTATION = 'auth/identity-email-claim.service.ts';
+const ALLOWED_TENANT_LOCK_IMPLEMENTATIONS = new Set([
+  ALLOWED_IMPLEMENTATION,
+  'identity-mail-worker/identity-mail-worker.repository.ts',
+]);
 const ALLOWED_USER_OWNERSHIP_WRITERS = new Set(['auth/auth.service.ts']);
 const ALLOWED_INVITE_WRITERS = new Set([
   'auth/auth.service.ts',
@@ -20,6 +24,7 @@ const FORBIDDEN_BOUNDARY_REFERENCES = [
   'identity_email_claim_transition_v2',
   'identity_email_claim_release_v2',
 ] as const;
+const TENANT_LOCK_DOMAIN = 'leetplus:identity-mail-tenant:v1:';
 
 describe('Identity email claim application boundary', () => {
   it('keeps all claim table and RPC access inside the sealed service', async () => {
@@ -38,9 +43,26 @@ describe('Identity email claim application boundary', () => {
           violations.push(`${path}:${reference}`);
         }
       }
+      if (
+        source.includes(TENANT_LOCK_DOMAIN) &&
+        !ALLOWED_TENANT_LOCK_IMPLEMENTATIONS.has(path)
+      ) {
+        violations.push(`${path}:${TENANT_LOCK_DOMAIN}`);
+      }
     }
 
     expect(violations).toEqual([]);
+  });
+
+  it('shares the exact tenant lock domain only between the claim boundary and worker', async () => {
+    const sourceRoot = join(__dirname, '..');
+
+    for (const path of ALLOWED_TENANT_LOCK_IMPLEMENTATIONS) {
+      const source = await readFile(join(sourceRoot, path), 'utf8');
+      expect(
+        source.match(new RegExp(TENANT_LOCK_DOMAIN, 'gu')) ?? [],
+      ).toHaveLength(1);
+    }
   });
 
   it('keeps User creation and UserInvite mutation inside admitted workflows', async () => {
@@ -73,6 +95,31 @@ describe('Identity email claim application boundary', () => {
     }
 
     expect(violations).toEqual([]);
+  });
+
+  it('routes every active invite transition through the shared tenant transaction adapter', async () => {
+    const sourceRoot = join(__dirname, '..');
+    const admittedCallers = [
+      { path: 'auth/auth.service.ts', expectedCalls: 1 },
+      { path: 'users/users.service.ts', expectedCalls: 3 },
+    ] as const;
+
+    for (const caller of admittedCallers) {
+      const source = await readFile(join(sourceRoot, caller.path), 'utf8');
+      expect(source).not.toContain('.bindTransaction(');
+      expect(source.match(/\.runTenantTransaction\s*\(/gu) ?? []).toHaveLength(
+        caller.expectedCalls,
+      );
+    }
+
+    const provisioningSource = await readFile(
+      join(sourceRoot, 'admin/shared-tenant-provisioning.service.ts'),
+      'utf8',
+    );
+    expect(provisioningSource).not.toContain('.bindTransaction(');
+    expect(
+      provisioningSource.match(/\.lockTenantTransaction\s*\(/gu) ?? [],
+    ).toHaveLength(2);
   });
 });
 

@@ -22,7 +22,10 @@ import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-pr
 import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
-import { IdentityEmailClaimService } from './identity-email-claim.service';
+import {
+  IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+  IdentityEmailClaimService,
+} from './identity-email-claim.service';
 import { InitialOwnerInviteDeliveryGateService } from './initial-owner-invite-delivery-gate.service';
 
 const BEARER_INVITE_TOKEN = 'A'.repeat(43);
@@ -92,7 +95,7 @@ type EmailVerificationMock = {
 };
 
 type IdentityEmailClaimMock = {
-  bindTransaction: jest.Mock;
+  runTenantTransaction: jest.Mock;
   assertInvite: jest.Mock;
   transitionInvite: jest.Mock;
 };
@@ -244,7 +247,17 @@ describe('AuthService', () => {
       resendByEmail: jest.fn(),
     };
     identityEmailClaim = {
-      bindTransaction: jest.fn((tx: PrismaMock) => tx),
+      runTenantTransaction: jest.fn(
+        async (
+          host: PrismaMock,
+          _transactionTenantId: string,
+          operation: (tx: PrismaMock, identityTx: unknown) => Promise<unknown>,
+        ): Promise<unknown> =>
+          (await host.$transaction(
+            (tx: PrismaMock) => operation(tx, tx),
+            IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+          )) as unknown,
+      ),
       assertInvite: jest.fn().mockResolvedValue({
         schemaVersion: 1,
         operation: 'ASSERT_INVITE',
@@ -605,7 +618,15 @@ describe('AuthService', () => {
       'owner@club-a.leetplus.ru',
     );
 
-    expect(identityEmailClaim.bindTransaction).toHaveBeenCalledWith(prisma);
+    expect(identityEmailClaim.runTenantTransaction).toHaveBeenCalledWith(
+      prisma,
+      'tenant-1',
+      expect.any(Function),
+    );
+    const transactionCalls = prisma.$transaction.mock.calls as unknown[][];
+    expect(transactionCalls[0]?.[1]).toEqual(
+      IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+    );
     expect(identityEmailClaim.assertInvite).toHaveBeenCalledWith(prisma, {
       email: 'owner@club-a.leetplus.ru',
       tenantId: 'tenant-1',
@@ -675,6 +696,9 @@ describe('AuthService', () => {
       }
       return invocationOrder;
     };
+    expect(
+      firstInvocation(identityEmailClaim.runTenantTransaction),
+    ).toBeLessThan(firstInvocation(identityEmailClaim.assertInvite));
     expect(firstInvocation(identityEmailClaim.assertInvite)).toBeLessThan(
       firstInvocation(prisma.$queryRaw),
     );
@@ -787,7 +811,7 @@ describe('AuthService', () => {
     expect(JSON.stringify(response)).not.toContain(email);
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(passwordService.hash).not.toHaveBeenCalled();
-    expect(identityEmailClaim.bindTransaction).not.toHaveBeenCalled();
+    expect(identityEmailClaim.runTenantTransaction).not.toHaveBeenCalled();
     expect(identityEmailClaim.assertInvite).not.toHaveBeenCalled();
     expect(identityEmailClaim.transitionInvite).not.toHaveBeenCalled();
     expect(prisma.user.create).not.toHaveBeenCalled();

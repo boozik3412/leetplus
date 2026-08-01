@@ -111,7 +111,7 @@ function expectFinding(value, finding) {
   return report;
 }
 
-test("pins the exact CURRENT179 -> CURRENT180 -> CURRENT181 candidate chain", () => {
+test("pins CURRENT181 with the exact ordered CURRENT180..CURRENT182 inventory", () => {
   const report = evaluateIdentityMailTenantLockDrainCurrent181Foundation(
     artifact,
   );
@@ -136,6 +136,11 @@ test("pins the exact CURRENT179 -> CURRENT180 -> CURRENT181 candidate chain", ()
     report.candidate.name,
     IDENTITY_MAIL_TENANT_LOCK_DRAIN_CURRENT181_CANDIDATE,
   );
+  assert.deepEqual(artifact.candidates.directoryNames, [
+    "20260801010000_identity_mail_tenant_enrollment_control_plane",
+    "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+    "20260801030000_identity_mail_tenant_first_claim_protocol",
+  ]);
 });
 
 test("accepts the exact frozen candidate surface and pinned SQL SHA", () => {
@@ -657,6 +662,33 @@ test("rejects metadata and candidate-chain drift independently", async (t) => {
   await t.test("predecessor bytes", () => {
     const value = structuredClone(artifact);
     value.predecessor.sql += "\n";
+    expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
+  });
+  await t.test("missing CURRENT182 successor", () => {
+    const value = structuredClone(artifact);
+    value.candidates.directoryNames.pop();
+    expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
+  });
+  await t.test("missing CURRENT181 candidate", () => {
+    const value = structuredClone(artifact);
+    value.candidates.directoryNames.splice(1, 1);
+    expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
+  });
+  await t.test("reordered exact successors", () => {
+    const value = structuredClone(artifact);
+    [
+      value.candidates.directoryNames[1],
+      value.candidates.directoryNames[2],
+    ] = [
+      value.candidates.directoryNames[2],
+      value.candidates.directoryNames[1],
+    ];
+    expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
+  });
+  await t.test("unknown successor", () => {
+    const value = structuredClone(artifact);
+    value.candidates.directoryNames[2] =
+      "20260801030000_unexpected_candidate";
     expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
   });
 });

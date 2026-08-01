@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.50                                         |
+| Версия           | 1.51                                         |
 | Дата             | 01.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -325,6 +325,19 @@ enterprise-isolation option и не сокращает shared gates.
     `abbfe5611b7bf10b223359d601b4665874493671`, GitHub Actions
     [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)
     (`run #66`) — `3/3 PASS`, включая полный PostgreSQL CURRENT181 runner.
+38. [Tenant-first claim protocol и CURRENT182 candidate](./identity-mail-current182-tenant-first-claim-protocol.md) —
+    CURRENT179-compatible app и worker boundary для create, reissue/revoke,
+    cancel, accept, provisioning, emergency suspend и всех пяти текущих
+    worker RPC; outbox-only marker/completion допускаются только по
+    DB-derived binding validated `CLAIMED` receipt. Bounded `SERIALIZABLE`
+    transaction берёт exact tenant advisory
+    lock до email/claim/invite/outbox. Stacked CURRENT182 с SQL SHA-256
+    `0aa16e71c52a078d22b977ca8ca8d07be3e61cad59d8ade6fc4b365fbdddf8f1`
+    fence-ит те же пять canonical claim entrypoints на уровне БД и немедленно
+    retire-ит три legacy v1 writer. Candidate остаётся
+    `NOT_CANONICAL / NOT_DEPLOYABLE`; PostgreSQL acceptance включает actual
+    CURRENT179 repository `claimOne` и relation-level synthetic race matrix,
+    но не заменяет non-empty outbox/ACTIVE-DRAINING/coordinator evidence.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
@@ -333,8 +346,8 @@ Merge evidence SHA `9b2f82b2cfdd41b05bf67e71e48df6cdc3e0fda2`, CI
 [`30684863397`](https://github.com/boozik3412/leetplus/actions/runs/30684863397)
 (`run #61`) — `3/3 PASS`; внешний статус остаётся `NO-GO`.
 
-Неканонические candidates не повышают target до `CURRENT_180` или
-`CURRENT_181`.
+Неканонические candidates не повышают target до `CURRENT_180`, `CURRENT_181`
+или `CURRENT_182`.
 Promotion запрещён до единого release с worker v2/runtime attestation,
 producer/worker tenant advisory lock, `DRAINING` zero-secret barrier,
 независимо подписанным apply/rollback/zero-diff, production-like

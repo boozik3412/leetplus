@@ -172,6 +172,12 @@ jobs:
       - name: Validate CURRENT181 disposable rehearsal harness
         run: pnpm --filter database check:identity-mail-tenant-lock-drain-current181-smoke
 
+      - name: Validate dormant non-canonical CURRENT182 tenant-first claim foundation
+        run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-foundation
+
+      - name: Validate CURRENT182 disposable rehearsal harness
+        run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-smoke
+
       - name: Validate independent tenant enrollment command authority
         run: pnpm --filter database check:identity-mail-tenant-enrollment-authority
 
@@ -432,6 +438,18 @@ jobs:
         env:
           NODE_ENV: test
           IDENTITY_MAIL_TENANT_LOCK_DRAIN_CURRENT181_CANDIDATE_SMOKE_CONFIRM: run-identity-mail-tenant-lock-drain-current181-candidate-smoke
+
+      - name: Rehearse dormant non-canonical CURRENT179 through CURRENT182 tenant-first claim candidate
+        run: pnpm --filter database db:smoke:identity-mail-tenant-first-claim-current182-candidate
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_TENANT_FIRST_CLAIM_CURRENT182_CANDIDATE_SMOKE_CONFIRM: run-identity-mail-tenant-first-claim-current182-candidate-smoke
+
+      - name: Verify application and worker tenant-first identity claim races
+        run: pnpm --filter api test:integration:identity-email-tenant-lock-cross-path:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_EMAIL_TENANT_LOCK_PG_E2E_CONFIRM: run-identity-email-tenant-lock-cross-path-postgres-e2e
 
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg

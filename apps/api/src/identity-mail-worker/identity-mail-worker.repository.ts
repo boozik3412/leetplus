@@ -23,6 +23,15 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const IDENTITY_MAIL_TENANT_LOCK_DOMAIN = 'leetplus:identity-mail-tenant:v1:';
+const IDENTITY_MAIL_TENANT_LOCK_SEED = 180;
+const IDENTITY_MAIL_STATEMENT_TIMEOUT = '25s';
+const IDENTITY_MAIL_LOCK_TIMEOUT = '5s';
+const IDENTITY_MAIL_TENANT_TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  maxWait: 5_000,
+  timeout: 30_000,
+} as const;
 const SECRET_ENVELOPE_BYTES = 71;
 const MAX_LEASE_VERSION = 2_147_483_647n;
 const CLAIM_EMPTY_RECEIPT_KEYS = [
@@ -106,6 +115,30 @@ type RpcRow = {
   result: unknown;
 };
 
+type IdentityMailTenantTransactionSettingsRow = {
+  isolationLevel: string;
+  readOnly: string;
+  statementTimeout: string;
+  lockTimeout: string;
+};
+
+type IdentityMailTenantLockRow = {
+  tenantId: string;
+  backendPid: number;
+};
+
+type IdentityMailWorkerRpcClient = Pick<Prisma.TransactionClient, '$queryRaw'>;
+
+type IdentityMailClaimBinding = {
+  readonly tenantId: string;
+  readonly inviteId: string;
+  readonly leaseVersion: bigint;
+  readonly leaseOwnerDigest: string;
+  readonly leaseTokenDigest: string;
+  readonly providerAuthorityDigest: string;
+  readonly transitionRevision: number;
+};
+
 const ALLOWED_WORKER_RPC_SIGNATURES = [
   'public.identity_initial_owner_mail_claim_v1(text, text, text, text)',
   'public.identity_initial_owner_mail_complete_v1(text, integer, text, text, text, text, text)',
@@ -122,6 +155,8 @@ export class IdentityMailWorkerRepositoryError extends Error {
 }
 
 export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRepository {
+  private readonly claimBindings = new Map<string, IdentityMailClaimBinding>();
+
   constructor(private readonly prisma: PrismaClient) {}
 
   async assertReady(input: AssertIdentityMailWorkerReadyInput): Promise<void> {
@@ -449,11 +484,14 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
     }
 
     for (const tenantId of input.canaryTenantIds) {
-      const receipt = await this.rpc(Prisma.sql`
+      const receipt = await this.tenantRpc(
+        tenantId,
+        Prisma.sql`
         SELECT public."identity_mail_delivery_worker_assert_v1"(
           ${tenantId}::TEXT
         ) AS result
-      `);
+      `,
+      );
       assertReadinessReceipt(receipt, tenantId, input);
     }
   }
@@ -461,14 +499,17 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
   async claimOne(
     input: ClaimIdentityMailDeliveryInput,
   ): Promise<ClaimedIdentityMailDelivery | null> {
-    const result = await this.rpc(Prisma.sql`
+    const result = await this.tenantRpc(
+      input.tenantId,
+      Prisma.sql`
       SELECT public."identity_initial_owner_mail_claim_v1"(
         ${input.tenantId}::TEXT,
         ${input.leaseOwnerDigest}::TEXT,
         ${input.leaseTokenDigest}::TEXT,
         ${input.providerAuthorityDigest}::TEXT
       ) AS result
-    `);
+    `,
+    );
     const untrustedRecord = recordValue(result);
     if (untrustedRecord.decision === 'EMPTY') {
       const emptyRecord = exactRecordValue(
@@ -533,18 +574,33 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
       delivery.secretCiphertext.fill(0);
       fail('IDENTITY_MAIL_WORKER_CLAIM_RESPONSE_INVALID');
     }
+    this.claimBindings.set(
+      delivery.outboxId,
+      Object.freeze({
+        tenantId: delivery.tenantId,
+        inviteId: delivery.inviteId,
+        leaseVersion: delivery.leaseVersion,
+        leaseOwnerDigest: input.leaseOwnerDigest,
+        leaseTokenDigest: input.leaseTokenDigest,
+        providerAuthorityDigest: input.providerAuthorityDigest,
+        transitionRevision: delivery.transitionRevision,
+      }),
+    );
     return delivery;
   }
 
   async reapExpired(input: ReapIdentityMailDeliveryInput): Promise<number> {
-    const result = await this.rpc(Prisma.sql`
+    const result = await this.tenantRpc(
+      input.tenantId,
+      Prisma.sql`
       SELECT public."identity_initial_owner_mail_reap_v1"(
         ${input.tenantId}::TEXT,
         ${input.providerAuthorityDigest}::TEXT,
         ${input.workerActorDigest}::TEXT,
         ${input.batchLimit}::INTEGER
       ) AS result
-    `);
+    `,
+    );
     const record = decisionRecord(
       result,
       'REAP_INITIAL_OWNER_MAIL',
@@ -557,7 +613,16 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
   async markProviderAttempt(
     input: MarkIdentityMailProviderAttemptInput,
   ): Promise<IdentityMailProviderAttemptOutcome> {
-    const result = await this.rpc(Prisma.sql`
+    const binding = this.requireClaimBinding(input);
+    if (
+      binding.inviteId !== input.inviteId ||
+      binding.providerAuthorityDigest !== input.providerAuthorityDigest
+    ) {
+      fail('IDENTITY_MAIL_WORKER_CLAIM_BINDING_MISMATCH');
+    }
+    const result = await this.tenantRpc(
+      binding.tenantId,
+      Prisma.sql`
       SELECT public."identity_initial_owner_mail_provider_mark_v1"(
         ${input.outboxId}::TEXT,
         ${leaseVersionNumber(input.leaseVersion)}::INTEGER,
@@ -567,7 +632,8 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
         ${input.providerAuthorityDigest}::TEXT,
         ${digest(input.messageId)}::TEXT
       ) AS result
-    `);
+    `,
+    );
     const untrustedRecord = recordValue(result);
     if (untrustedRecord.decision === 'CANCELED') {
       const canceledRecord = exactRecordValue(
@@ -589,6 +655,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
       if (canceledRecord.reasonCode !== 'NOT_DELIVERABLE') {
         fail('IDENTITY_MAIL_WORKER_DATABASE_RESPONSE_INVALID');
       }
+      this.releaseClaimBinding(input.outboxId, binding);
       return 'CANCELED';
     }
 
@@ -616,6 +683,13 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
     ) {
       fail('IDENTITY_MAIL_WORKER_DATABASE_RESPONSE_INVALID');
     }
+    this.claimBindings.set(
+      input.outboxId,
+      Object.freeze({
+        ...binding,
+        transitionRevision: input.expectedTransitionRevision + 1,
+      }),
+    );
     return 'MARKED';
   }
 
@@ -626,7 +700,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
     ) {
       fail('IDENTITY_MAIL_WORKER_PROVIDER_RECEIPT_INVALID');
     }
-    const result = await this.complete(
+    const { binding, result } = await this.complete(
       input,
       'PROVIDER_ACCEPTED',
       input.providerReceiptDigest,
@@ -639,6 +713,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
       COMPLETION_RECEIPT_KEYS,
     );
     assertLeaseResponse(record, input);
+    this.releaseClaimBinding(input.outboxId, binding);
   }
 
   async markPreProviderFailure(
@@ -647,7 +722,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
     const outcome = permanentPreProviderReason(input.reasonCode)
       ? 'PRE_PROVIDER_DEAD'
       : 'PRE_PROVIDER_RETRY';
-    const result = await this.complete(input, outcome, null, null);
+    const { binding, result } = await this.complete(input, outcome, null, null);
     const record = exactRecordValue(
       result,
       COMPLETION_RECEIPT_KEYS,
@@ -668,6 +743,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
       record.decision === 'DEAD' ||
       record.decision === 'CANCELED'
     ) {
+      this.releaseClaimBinding(input.outboxId, binding);
       return record.decision;
     }
     return fail('IDENTITY_MAIL_WORKER_COMPLETION_RESPONSE_INVALID');
@@ -676,7 +752,7 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
   async markReconciliationRequired(
     input: MarkIdentityMailFailureInput,
   ): Promise<void> {
-    const result = await this.complete(
+    const { binding, result } = await this.complete(
       input,
       'PROVIDER_AMBIGUOUS',
       null,
@@ -689,9 +765,11 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
       COMPLETION_RECEIPT_KEYS,
     );
     assertLeaseResponse(record, input);
+    this.releaseClaimBinding(input.outboxId, binding);
   }
 
   async disconnect(): Promise<void> {
+    this.claimBindings.clear();
     await this.prisma.$disconnect();
   }
 
@@ -704,8 +782,11 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
       | 'PROVIDER_AMBIGUOUS',
     providerReceiptDigest: string | null,
     terminalAck: string | null,
-  ): Promise<unknown> {
-    return this.rpc(Prisma.sql`
+  ): Promise<{ binding: IdentityMailClaimBinding; result: unknown }> {
+    const binding = this.requireClaimBinding(input);
+    const result = await this.tenantRpc(
+      binding.tenantId,
+      Prisma.sql`
       SELECT public."identity_initial_owner_mail_complete_v1"(
         ${input.outboxId}::TEXT,
         ${leaseVersionNumber(input.leaseVersion)}::INTEGER,
@@ -715,11 +796,113 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
         ${providerReceiptDigest}::TEXT,
         ${terminalAck}::TEXT
       ) AS result
-    `);
+    `,
+    );
+    return { binding, result };
   }
 
-  private async rpc(query: Prisma.Sql): Promise<unknown> {
-    const rows = await this.prisma.$queryRaw<RpcRow[]>(query);
+  private requireClaimBinding(
+    input: IdentityMailDeliveryLeaseInput,
+  ): IdentityMailClaimBinding {
+    if (!UUID_PATTERN.test(input.tenantId)) {
+      fail('IDENTITY_MAIL_WORKER_TENANT_ID_INVALID');
+    }
+    if (!UUID_PATTERN.test(input.outboxId)) {
+      fail('IDENTITY_MAIL_WORKER_CLAIM_BINDING_MISMATCH');
+    }
+    const binding = this.claimBindings.get(input.outboxId);
+    if (!binding) {
+      fail('IDENTITY_MAIL_WORKER_CLAIM_BINDING_REQUIRED');
+    }
+    if (
+      binding.tenantId !== input.tenantId ||
+      binding.leaseVersion !== input.leaseVersion ||
+      binding.leaseOwnerDigest !== input.leaseOwnerDigest ||
+      binding.leaseTokenDigest !== digest(input.leaseToken) ||
+      binding.transitionRevision !== input.expectedTransitionRevision
+    ) {
+      fail('IDENTITY_MAIL_WORKER_CLAIM_BINDING_MISMATCH');
+    }
+    return binding;
+  }
+
+  private releaseClaimBinding(
+    outboxId: string,
+    binding: IdentityMailClaimBinding,
+  ): void {
+    if (this.claimBindings.get(outboxId) === binding) {
+      this.claimBindings.delete(outboxId);
+    }
+  }
+
+  private async tenantRpc(
+    tenantId: string,
+    query: Prisma.Sql,
+  ): Promise<unknown> {
+    if (!UUID_PATTERN.test(tenantId)) {
+      fail('IDENTITY_MAIL_WORKER_TENANT_ID_INVALID');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const settings = await tx.$queryRaw<
+        IdentityMailTenantTransactionSettingsRow[]
+      >(Prisma.sql`
+        SELECT
+          pg_catalog.current_setting('transaction_isolation')
+            AS "isolationLevel",
+          pg_catalog.current_setting('transaction_read_only') AS "readOnly",
+          pg_catalog.set_config(
+            'statement_timeout',
+            ${IDENTITY_MAIL_STATEMENT_TIMEOUT},
+            true
+          ) AS "statementTimeout",
+          pg_catalog.set_config(
+            'lock_timeout',
+            ${IDENTITY_MAIL_LOCK_TIMEOUT},
+            true
+          ) AS "lockTimeout"
+      `);
+      if (
+        settings.length !== 1 ||
+        settings[0]?.isolationLevel !== 'serializable' ||
+        settings[0]?.readOnly !== 'off' ||
+        settings[0]?.statementTimeout !== IDENTITY_MAIL_STATEMENT_TIMEOUT ||
+        settings[0]?.lockTimeout !== IDENTITY_MAIL_LOCK_TIMEOUT
+      ) {
+        fail('IDENTITY_MAIL_WORKER_TENANT_LOCK_PROTOCOL_INVALID');
+      }
+
+      const locks = await tx.$queryRaw<IdentityMailTenantLockRow[]>(Prisma.sql`
+        WITH tenant_lock AS MATERIALIZED (
+          SELECT pg_catalog.pg_advisory_xact_lock(
+            pg_catalog.hashtextextended(
+              ${IDENTITY_MAIL_TENANT_LOCK_DOMAIN} || ${tenantId}::TEXT,
+              ${IDENTITY_MAIL_TENANT_LOCK_SEED}
+            )
+          ) AS acquired
+        )
+        SELECT
+          ${tenantId}::TEXT AS "tenantId",
+          pg_catalog.pg_backend_pid()::INTEGER AS "backendPid"
+        FROM tenant_lock
+      `);
+      if (
+        locks.length !== 1 ||
+        locks[0]?.tenantId !== tenantId ||
+        !Number.isInteger(locks[0]?.backendPid)
+      ) {
+        fail('IDENTITY_MAIL_WORKER_TENANT_LOCK_PROTOCOL_INVALID');
+      }
+
+      return this.rpc(tx, query);
+    }, IDENTITY_MAIL_TENANT_TRANSACTION_OPTIONS);
+  }
+
+  private async rpc(
+    client: IdentityMailWorkerRpcClient,
+    query: Prisma.Sql,
+  ): Promise<unknown> {
+    const rows = await client.$queryRaw<RpcRow[]>(query);
     if (rows.length !== 1 || !rows[0]) {
       fail('IDENTITY_MAIL_WORKER_DATABASE_RESPONSE_INVALID');
     }

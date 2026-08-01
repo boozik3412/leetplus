@@ -445,66 +445,68 @@ export class UsersService {
     const rawToken = randomBytes(32).toString('base64url');
     const reservationId = randomUUID();
     const inviteId = randomUUID();
-    const invite = await this.prisma.$transaction(async (tx) => {
-      const identityTransaction =
-        this.identityClaimBoundary.bindTransaction(tx);
-      const reservation = await this.identityClaimBoundary.reserveInvite(
-        identityTransaction,
-        {
-          email,
-          tenantId,
-          subjectId: reservationId,
-        },
-      );
-      if (reservation.decision !== 'CREATED') {
-        throw new ConflictException(
-          'Invite identity reservation was already used',
+    const invite = await this.identityClaimBoundary.runTenantTransaction(
+      this.prisma,
+      tenantId,
+      async (tx, identityTransaction) => {
+        const reservation = await this.identityClaimBoundary.reserveInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            subjectId: reservationId,
+          },
         );
-      }
-      const assertion = await this.identityClaimBoundary.assertInvite(
-        identityTransaction,
-        {
-          email,
-          tenantId,
-          subjectId: reservationId,
-          expectedRevision: reservation.revision,
-        },
-      );
-      await tx.userInvite.create({
-        data: {
-          id: inviteId,
-          tenantId,
-          email,
-          fullName,
-          role,
-          customRoleId: customRole?.id ?? null,
-          accessScope: scope,
-          storeIds,
-          tokenHash: this.hashInviteToken(rawToken),
-          expiresAt,
-          createdByUserId: actor.id,
-          identityClaimRevision: null,
-          revokedAt: null,
-          revokedByUserId: null,
-        },
-      });
-      const transition = await this.identityClaimBoundary.transitionInvite(
-        identityTransaction,
-        {
-          email,
-          tenantId,
-          expectedSubjectId: reservationId,
-          expectedRevision: assertion.revision,
-          nextClaimType: IdentityEmailClaimType.INVITE,
-          nextSubjectId: inviteId,
-        },
-      );
-      return tx.userInvite.update({
-        where: { id: inviteId },
-        data: { identityClaimRevision: transition.revision },
-        include: userInviteInclude,
-      });
-    });
+        if (reservation.decision !== 'CREATED') {
+          throw new ConflictException(
+            'Invite identity reservation was already used',
+          );
+        }
+        const assertion = await this.identityClaimBoundary.assertInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            subjectId: reservationId,
+            expectedRevision: reservation.revision,
+          },
+        );
+        await tx.userInvite.create({
+          data: {
+            id: inviteId,
+            tenantId,
+            email,
+            fullName,
+            role,
+            customRoleId: customRole?.id ?? null,
+            accessScope: scope,
+            storeIds,
+            tokenHash: this.hashInviteToken(rawToken),
+            expiresAt,
+            createdByUserId: actor.id,
+            identityClaimRevision: null,
+            revokedAt: null,
+            revokedByUserId: null,
+          },
+        });
+        const transition = await this.identityClaimBoundary.transitionInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            expectedSubjectId: reservationId,
+            expectedRevision: assertion.revision,
+            nextClaimType: IdentityEmailClaimType.INVITE,
+            nextSubjectId: inviteId,
+          },
+        );
+        return tx.userInvite.update({
+          where: { id: inviteId },
+          data: { identityClaimRevision: transition.revision },
+          include: userInviteInclude,
+        });
+      },
+    );
 
     return this.toInvite(
       invite,
@@ -618,71 +620,73 @@ export class UsersService {
     const rawToken = randomBytes(32).toString('base64url');
     const reissuedInviteId = randomUUID();
     const revokedAt = new Date();
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const identityTransaction =
-        this.identityClaimBoundary.bindTransaction(tx);
-      const assertion = await this.identityClaimBoundary.assertInvite(
-        identityTransaction,
-        {
-          email,
-          tenantId,
-          subjectId: existing.id,
-          expectedRevision: identityClaimRevision,
-        },
-      );
-      await tx.userInvite.create({
-        data: {
-          id: reissuedInviteId,
-          tenantId,
-          email,
-          fullName,
-          role,
-          customRoleId: customRole?.id ?? null,
-          accessScope: scope,
-          storeIds,
-          tokenHash: this.hashInviteToken(rawToken),
-          expiresAt,
-          createdByUserId: actor.id,
-          identityClaimRevision: null,
-          revokedAt: null,
-          revokedByUserId: null,
-        },
-      });
-      const revoked = await tx.userInvite.updateMany({
-        where: {
-          id: existing.id,
-          tenantId,
-          acceptedAt: null,
-          revokedAt: null,
-          expiresAt: { gt: revokedAt },
-          updatedAt: existing.updatedAt,
-        },
-        data: {
-          expiresAt: revokedAt,
-          revokedAt,
-          revokedByUserId: actor.id,
-        },
-      });
-      if (revoked.count !== 1) {
-        throw new ConflictException('Invite changed or was already accepted');
-      }
-      const transition = await this.identityClaimBoundary.transitionInvite(
-        identityTransaction,
-        {
-          email,
-          tenantId,
-          expectedSubjectId: existing.id,
-          expectedRevision: assertion.revision,
-          nextClaimType: IdentityEmailClaimType.INVITE,
-          nextSubjectId: reissuedInviteId,
-        },
-      );
-      return tx.userInvite.update({
-        where: { id: reissuedInviteId },
-        data: { identityClaimRevision: transition.revision },
-        include: userInviteInclude,
-      });
-    });
+    const updated = await this.identityClaimBoundary.runTenantTransaction(
+      this.prisma,
+      tenantId,
+      async (tx, identityTransaction) => {
+        const assertion = await this.identityClaimBoundary.assertInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            subjectId: existing.id,
+            expectedRevision: identityClaimRevision,
+          },
+        );
+        await tx.userInvite.create({
+          data: {
+            id: reissuedInviteId,
+            tenantId,
+            email,
+            fullName,
+            role,
+            customRoleId: customRole?.id ?? null,
+            accessScope: scope,
+            storeIds,
+            tokenHash: this.hashInviteToken(rawToken),
+            expiresAt,
+            createdByUserId: actor.id,
+            identityClaimRevision: null,
+            revokedAt: null,
+            revokedByUserId: null,
+          },
+        });
+        const revoked = await tx.userInvite.updateMany({
+          where: {
+            id: existing.id,
+            tenantId,
+            acceptedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: revokedAt },
+            updatedAt: existing.updatedAt,
+          },
+          data: {
+            expiresAt: revokedAt,
+            revokedAt,
+            revokedByUserId: actor.id,
+          },
+        });
+        if (revoked.count !== 1) {
+          throw new ConflictException('Invite changed or was already accepted');
+        }
+        const transition = await this.identityClaimBoundary.transitionInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            expectedSubjectId: existing.id,
+            expectedRevision: assertion.revision,
+            nextClaimType: IdentityEmailClaimType.INVITE,
+            nextSubjectId: reissuedInviteId,
+          },
+        );
+        return tx.userInvite.update({
+          where: { id: reissuedInviteId },
+          data: { identityClaimRevision: transition.revision },
+          include: userInviteInclude,
+        });
+      },
+    );
     const stores = await this.prisma.store.findMany({
       where: { tenantId },
       select: { id: true, name: true, isActive: true },
@@ -735,42 +739,44 @@ export class UsersService {
       existing.expiresAt.getTime() <= canceledAt.getTime()
         ? existing.expiresAt
         : canceledAt;
-    await this.prisma.$transaction(async (tx) => {
-      const identityTransaction =
-        this.identityClaimBoundary.bindTransaction(tx);
-      const assertion = await this.identityClaimBoundary.assertInvite(
-        identityTransaction,
-        {
+    await this.identityClaimBoundary.runTenantTransaction(
+      this.prisma,
+      tenantId,
+      async (tx, identityTransaction) => {
+        const assertion = await this.identityClaimBoundary.assertInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            subjectId: existing.id,
+            expectedRevision: identityClaimRevision,
+          },
+        );
+        const canceled = await tx.userInvite.updateMany({
+          where: {
+            id: existing.id,
+            tenantId,
+            acceptedAt: null,
+            revokedAt: null,
+            updatedAt: existing.updatedAt,
+          },
+          data: {
+            expiresAt: terminalExpiresAt,
+            revokedAt: canceledAt,
+            revokedByUserId: actor.id,
+          },
+        });
+        if (canceled.count !== 1) {
+          throw new ConflictException('Invite changed or was already accepted');
+        }
+        await this.identityClaimBoundary.releaseInvite(identityTransaction, {
           email,
           tenantId,
-          subjectId: existing.id,
-          expectedRevision: identityClaimRevision,
-        },
-      );
-      const canceled = await tx.userInvite.updateMany({
-        where: {
-          id: existing.id,
-          tenantId,
-          acceptedAt: null,
-          revokedAt: null,
-          updatedAt: existing.updatedAt,
-        },
-        data: {
-          expiresAt: terminalExpiresAt,
-          revokedAt: canceledAt,
-          revokedByUserId: actor.id,
-        },
-      });
-      if (canceled.count !== 1) {
-        throw new ConflictException('Invite changed or was already accepted');
-      }
-      await this.identityClaimBoundary.releaseInvite(identityTransaction, {
-        email,
-        tenantId,
-        expectedSubjectId: existing.id,
-        expectedRevision: assertion.revision,
-      });
-    });
+          expectedSubjectId: existing.id,
+          expectedRevision: assertion.revision,
+        });
+      },
+    );
 
     return { id: existing.id };
   }

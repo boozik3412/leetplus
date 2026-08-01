@@ -1249,6 +1249,7 @@ async function createTenant(
 ): Promise<string> {
   const id = randomUUID();
   const suffix = id.replaceAll('-', '').slice(0, 12);
+  const now = new Date();
   const tenant = await admin.tenant.create({
     data: {
       id,
@@ -1257,7 +1258,9 @@ async function createTenant(
       status: TenantLifecycleStatus.ACTIVE,
       customerStage: TenantCustomerStage.PILOT,
       onboardingStatus: TenantOnboardingStatus.ACTIVE,
-      statusChangedAt: new Date(),
+      trialStartsAt: new Date(now.getTime() - 60_000),
+      trialEndsAt: new Date(now.getTime() + 24 * 60 * 60 * 1_000),
+      statusChangedAt: now,
     },
     select: { id: true },
   });

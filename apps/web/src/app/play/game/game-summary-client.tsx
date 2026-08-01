@@ -31,6 +31,7 @@ import {
   GuestMissionPreview,
   type GuestMissionPreviewData,
 } from "@/components/guest-mission-preview";
+import { appendHourlySessionSourceNotice } from "@/components/hourly-session-source-note";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
@@ -6315,22 +6316,14 @@ function joinRussianList(value: string[]) {
   return `${items.slice(0, -1).join(", ")} и ${items.at(-1)}`;
 }
 
-const hourlySessionExtensionNotice =
-  "Продление пакета или абонемента без завершения сессии не засчитывается.";
-
 function withHourlySessionExtensionNotice(
   label: string,
   sessionType: string | null,
 ) {
-  if (
-    normalizeGameRuleSessionType(sessionType) !== "regular_session" ||
-    label.includes(hourlySessionExtensionNotice)
-  ) {
-    return label;
-  }
-
-  const trimmed = label.trim();
-  return `${trimmed}${/[.!?]$/.test(trimmed) ? "" : "."} ${hourlySessionExtensionNotice}`;
+  return appendHourlySessionSourceNotice(
+    label,
+    normalizeGameRuleSessionType(sessionType) === "regular_session",
+  );
 }
 
 function guestActionRequirementLabel(

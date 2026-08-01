@@ -20,7 +20,10 @@ import {
   GuestMissionPreview,
   type GuestMissionPreviewData,
 } from "@/components/guest-mission-preview";
-import { HourlySessionSourceNote } from "@/components/hourly-session-source-note";
+import {
+  appendHourlySessionSourceNotice,
+  HourlySessionSourceNote,
+} from "@/components/hourly-session-source-note";
 
 type Step = "conditions" | "rewards" | "appearance";
 type TaskType = GuestGameMissionWizardTaskType;
@@ -2447,19 +2450,11 @@ function previewCondition(form: WizardState) {
   );
 }
 
-const wizardHourlyExtensionNotice =
-  "Продление пакета или абонемента без завершения сессии не засчитывается.";
-
 function withWizardHourlyExtensionNotice(
   label: string,
   sessionType: WizardState["sessionType"],
 ) {
-  if (sessionType !== "HOURLY" || label.includes(wizardHourlyExtensionNotice)) {
-    return label;
-  }
-
-  const trimmed = label.trim();
-  return `${trimmed}${/[.!?]$/.test(trimmed) ? "" : "."} ${wizardHourlyExtensionNotice}`;
+  return appendHourlySessionSourceNotice(label, sessionType === "HOURLY");
 }
 
 function logicSubtitle(taskType: TaskType) {

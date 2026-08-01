@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.23.0                                             |
+| Версия          | 1.24.0                                             |
 | Дата            | 01.08.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -19,9 +19,10 @@ candidate, который должен включать exact additive migration
 `CURRENT_179`
 admission.
 
-`CURRENT180` candidate
-`20260801010000_identity_mail_tenant_enrollment_control_plane` намеренно
-не входит в canonical migration chain и не меняет этот target.
+`CURRENT180` и stacked `CURRENT181` candidates
+`20260801010000_identity_mail_tenant_enrollment_control_plane` /
+`20260801020000_identity_mail_tenant_lock_drain_worker_v2` намеренно не входят
+в canonical migration chain и не меняют этот target.
 
 ## A. Release identity и authority
 
@@ -79,13 +80,30 @@ admission.
       owner/operator-only reconcile и `DRAINING` zero-secret/zero-inflight
       barrier зафиксированы в
       [reviewed design](./protected-mail-tenant-lock-drain-v2.md).
+- [x] Неканонический `CURRENT181` worker-v2 rehearsal candidate с exact
+      SQL SHA-256
+      `b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455`
+      прошёл semantic static gate и PostgreSQL 16.13
+      apply/catalog/ACL/concurrency/timeout/rollback/cleanup rehearsal;
+      source остался `179/179`, residue — `0`, grants/enrollment отсутствуют,
+      статус — `NOT_DEPLOYABLE`.
 - [ ] Worker v2 RPC/API, producer tenant lock и crash-resumable drain
-      реализованы в неканоническом candidate и доказаны PostgreSQL race
-      matrix; pure verifier/design сами этот gate не закрывают.
-- [ ] Legacy `identity_owner_invite_issue_hold_v1` и
-      `shared_beta_tenant_activate_v1` удалены либо заменены exact pre-read
-      `55000` stubs; catalog-wide inventory доказывает zero callable legacy
-      secret writer даже для function owner.
+      завершены одним atomic release: database worker-v2 rehearsal и race
+      matrix уже приняты, но API v2, producer/activation v2, coordinators,
+      grants и реальные ACTIVE/DRAINING fixtures отсутствуют.
+- [ ] Acceptance/cancel/revoke/reissue и все IdentityEmailClaim transition paths
+      берут тот же tenant advisory lock первыми; приняты PostgreSQL races
+      worker-v2 × accept/cancel/revoke/reissue с commit/rollback/timeout,
+      two-tenant progress, zero `40P01` и fail-closed legacy bypass.
+- [ ] `provider_mark_v2` и `complete_v2` имеют event-backed exact replay либо
+      однозначный typed handoff в reconcile после committed lost DB response;
+      blind SMTP retry остаётся запрещён.
+- [ ] Canonical atomic release заменяет legacy
+      `identity_owner_invite_issue_hold_v1` и
+      `shared_beta_tenant_activate_v1` exact pre-read `55000` stubs.
+      Неканонический CURRENT181 rehearsal уже доказывает эти stubs и zero
+      callable legacy secret writer даже для function owner, но сам по себе
+      release gate не закрывает.
 - [ ] DB accept под tenant lock доказывает relational rollback: referenced
       command — terminal/current same-tenant `FORWARD`, current configuration
       равна original target, action/configuration соответствуют exact
@@ -94,7 +112,9 @@ admission.
 - [ ] Exact routine ACL matrix реализована и catalog-pinned: owner/security
       mode/search path/language/volatility/parallel/leakproof/null/retset,
       body/signature, role name/OID, hostile default ACL, transitive membership
-      и zero unexpected PUBLIC/direct/grant-option access.
+      и zero unexpected PUBLIC/direct/grant-option access. Owner-only
+      CURRENT181 slice уже pin-ит body/default/overload/membership и ACL;
+      release role name/OID и grants остаются открыты.
 - [ ] Enrollment-coordinator и reconcile-operator exact role name/OID включены
       в независимый signed release authority до выдачи grant; activation role
       получает только activation RPC, private issue producer — zero non-owner
@@ -107,7 +127,8 @@ admission.
       exact persisted command может resume/drain/finalize после 15-минутного
       expiry/lease/ack wait по immutable receipt и `signatureVerifiedAt`,
       expired unaccepted proposal остаётся rejected.
-- [ ] Promotion в canonical `CURRENT_180` принят только в одном
+- [ ] Promotion CURRENT180/CURRENT181 rehearsal в canonical release принят
+      только в одном
       atomic release с worker v2/runtime attestation, producer/worker tenant
       advisory lock, `DRAINING` zero-secret barrier для secret-bearing
       `HOLD/PENDING/RETRY`, independently signed
@@ -594,6 +615,18 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.24.0`, 01.08.2026 — добавлен owner-only stacked `CURRENT181` rehearsal
+  `20260801020000_identity_mail_tenant_lock_drain_worker_v2`, SQL SHA-256
+  `b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455`:
+  tenant advisory lock, worker/reconcile v2, claim authority evidence,
+  tenant-leading indexes и immediate legacy producer stubs. Static
+  `81/81`, self-test `7`, PostgreSQL 16.13 catalog/ACL/race/timeout/rollback/
+  cleanup rehearsal — `PASS`; source сохранён `CURRENT_179/179`, residue —
+  `0`. Candidate остаётся `NOT_CANONICAL / NOT_DEPLOYABLE`; API v2,
+  acceptance/cancel/revoke/reissue tenant lock, cross-path race matrix,
+  provider mark/complete replay, producer/activation/coordinators,
+  grants/runtime attestation,
+  production-like rehearsal, cutover и external pilot остаются `NO-GO`.
 - `1.23.0`, 01.08.2026 — зафиксирован неканонический
   `CURRENT180` candidate
   `20260801010000_identity_mail_tenant_enrollment_control_plane`, SQL SHA-256

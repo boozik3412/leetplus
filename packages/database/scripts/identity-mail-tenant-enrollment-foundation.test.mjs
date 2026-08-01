@@ -62,6 +62,10 @@ test("accepts only the exact dormant non-canonical CURRENT180 foundation", () =>
     report.candidate.sha256,
     "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683",
   );
+  assert.deepEqual(artifact.candidates.directoryNames, [
+    "20260801010000_identity_mail_tenant_enrollment_control_plane",
+    "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+  ]);
   assert.deepEqual(report.findings, []);
   assert.ok(Object.isFrozen(report));
   assert.ok(Object.isFrozen(report.findings));
@@ -92,7 +96,14 @@ test("fails closed on canonical position, manifest, candidate head and metadata 
       },
     ],
     [
-      "candidate head",
+      "missing stacked CURRENT181 candidate",
+      F.CANDIDATE_HEAD_MISMATCH,
+      (value) => {
+        value.candidates.directoryNames.pop();
+      },
+    ],
+    [
+      "unexpected candidate head",
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
         value.candidates.directoryNames.push(

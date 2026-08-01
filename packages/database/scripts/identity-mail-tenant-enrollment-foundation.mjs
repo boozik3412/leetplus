@@ -13,6 +13,11 @@ export const IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_CANDIDATE_ORDINAL = 180;
 export const IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_CANDIDATE =
   "20260801010000_identity_mail_tenant_enrollment_control_plane";
 
+const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
+  IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_CANDIDATE,
+  "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+]);
+
 export const IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_FINDINGS =
   Object.freeze({
     ACL_SURFACE_DRIFT: "ACL_SURFACE_DRIFT",
@@ -578,9 +583,7 @@ export function evaluateIdentityMailTenantEnrollmentFoundation(artifact) {
     F.CANONICAL_MANIFEST_MISMATCH,
   );
   add(
-    !exactArray(candidateDirectories, [
-      IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_CANDIDATE,
-    ]) ||
+    !exactArray(candidateDirectories, EXPECTED_CANDIDATE_DIRECTORIES) ||
       candidateName !== IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_CANDIDATE,
     F.CANDIDATE_HEAD_MISMATCH,
   );

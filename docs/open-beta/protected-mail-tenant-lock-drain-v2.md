@@ -746,25 +746,34 @@ ack/lost-response и полным zero-diff cleanup. Synthetic/unit-only evidenc
 
 ## 13. Promotion blockers
 
+Owner-only implementation checkpoint
+[`CURRENT181`](./identity-mail-current181-worker-v2-candidate.md) материализует
+helper, worker v2, reconcile, legacy stubs и disposable race/catalog evidence.
+Таблица ниже относится к **единому deployable release**, а не отрицает этот
+неканонический rehearsal.
+
 | Severity | Blocker |
 | --- | --- |
-| `P0` | worker v2/runtime attestation, helper и все producer/worker/operator paths не выпущены одним atomic release |
+| `P0` | CURRENT181 helper/worker/reconcile rehearsal не объединён с runtime attestation и producer/operator paths в одном atomic release |
 | `P0` | provider-mark/complete v1 сохраняют reverse outbox-before-enrollment order и не могут settlement в `DRAINING` |
 | `P0` | issue `HOLD` и activation `HOLD -> PENDING` не используют общий tenant lock/state gate |
-| `P0` | legacy `identity_owner_invite_issue_hold_v1` и `shared_beta_tenant_activate_v1` не retired; owner implicit EXECUTE может обойти v2 lock/barrier |
+| `P0` | CURRENT181 ставит exact pre-read `55000` legacy stubs, но они ещё не входят в canonical release вместе с producer/activation v2 |
 | `P0` | current preflight/future finalize не доказывают zero `HOLD/PENDING/RETRY`, zero ciphertext и zero `CLAIMED` одновременно |
 | `P0` | signed apply/resume/finalize/rollback и exact same-command recovery отсутствуют |
 | `P0` | pure verifier доказывает только signed rollback linkage; terminal/current source, exact compensating mapping и one-rollback relational invariant в DB отсутствуют |
-| `P0` | exact routine owner/security/search-path/ACL/default-privilege matrix §6.1 не реализована и не catalog-pinned по role OID |
+| `P0` | CURRENT181 owner-only routine/catalog matrix принята; deploy-specific worker/coordinator/operator role name+OID, grants и hostile default-privilege matrix ещё отсутствуют |
 | `P0` | enrollment-coordinator и reconcile-operator exact role name/OID ещё не связаны независимым signed release authority; deploy-specific grants не имеют authority |
 | `P0` | persisted post-expiry resume/finalize semantics и exact accepted-command replay после lease/ack wait ещё не реализованы PostgreSQL fixture |
-| `P1` | catalog drift inventory, v1 revoke/v2 grants и two-tenant PostgreSQL race matrix не приняты |
+| `P1` | owner-only catalog и two-tenant race matrix CURRENT181 приняты; v1 runtime revoke/v2 grants и реальные ACTIVE/DRAINING fixtures ещё не приняты |
+| `P1` | current cancel/revoke/reissue и IdentityEmailClaim transition paths не берут tenant advisory lock первыми; worker Outbox/UserInvite → email claim имеет достижимую инверсию с cancel/reissue email claim → UserInvite. Acceptance также должен войти в единый protocol и race matrix, хотя SENT-gate не позволяет считать его цикл доказанным. До любого runtime grant требуется cross-path zero-40P01 PostgreSQL matrix |
 | `P1` | process-memory/runtime stop attestation и no-send-after-stale-marker tests не приняты |
-| `P1` | production-like disposable-clone rehearsal и independent security review отсутствуют |
+| `P1` | local disposable CURRENT181 rehearsal и SQL-level security review приняты; production-like stop-v1/apply/grant/start-v2/rollback rehearsal отсутствует |
+| `P2` | provider_mark_v2/complete_v2 после committed lost response не имеют event-backed exact replay: повтор fail-closed даёт stale 40001 и требует typed handoff в reconcile до runtime wiring |
 | `P2` | operator observability не разделяет secret, ready, unmarked claim, marked claim и reconciliation counts |
 
-Пока существует любой `P0` или `P1`, dormant CURRENT180 нельзя копировать в
-`prisma/migrations`, repin-ить worker или использовать для external pilot.
+Пока существует любой `P0` или `P1`, stacked dormant CURRENT180/CURRENT181
+нельзя копировать в `prisma/migrations`, repin-ить worker или использовать для
+external pilot.
 
 ## 14. Явные non-goals
 
@@ -780,8 +789,9 @@ ack/lost-response и полным zero-diff cleanup. Synthetic/unit-only evidenc
   restart, production rehearsal или tester onboarding;
 - разрешает `SHARED BETA GO`, production deploy или внешний доступ.
 
-Следующий engineering slice в принятой последовательности — единый canonical
-candidate, который совместно вводит helper, worker v2 RPC/runtime attestation,
-producer gates и signed crash-resumable drain coordinator, а не отдельный
-частичный repin одного из v1 RPC. Production apply/deploy и `SHARED BETA GO`
-остаются отдельной явно авторизуемой границей.
+Следующий engineering slice в принятой последовательности расширяет принятый
+CURRENT181 rehearsal producer/activation v2, signed crash-resumable enrollment
+coordinators, API adapter и runtime attestation, после чего формируется единый
+canonical candidate. Частичный runtime repin worker по-прежнему запрещён.
+Production apply/deploy и `SHARED BETA GO` остаются отдельной явно
+авторизуемой границей.

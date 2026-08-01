@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.48                                         |
+| Версия           | 1.49                                         |
 | Дата             | 01.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -304,6 +304,23 @@ enterprise-isolation option и не сокращает shared gates.
     frozen empty, runtime verdict не разрешает mutation/send без отдельной
     per-tenant DB readiness. SQL, canonical migration, grant, apply, SMTP и
     tenant data этим срезом не изменяются.
+37. [CURRENT181 worker v2 candidate](./identity-mail-current181-worker-v2-candidate.md) —
+    materialized stacked rehearsal поверх exact dormant CURRENT180:
+    tenant-first advisory lock, пять worker v2 RPC, reconcile replay,
+    ACTIVE/DRAINING claim bindings, tenant-leading indexes и immediate
+    `55000` stubs обоих legacy producer v1. Exact SQL SHA-256 —
+    `b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455`.
+    Semantic static gate и PostgreSQL 16.13 apply/ACL/concurrency/timeout/
+    rollback/cleanup rehearsal приняты; source остался `179/179`, residue —
+    `0`. Candidate не создаёт grants/enrollment и остаётся
+    `NOT_CANONICAL / NOT_DEPLOYABLE`; ACTIVE/DRAINING row fixtures,
+    producer/activation/coordinators, API v2 и signed runtime attestation
+    остаются обязательными следующими этапами. Independent review отдельно
+    зафиксировал P1 cross-path lock inversion: accept/cancel/revoke/reissue должны
+    войти в тот же tenant-first advisory protocol и пройти zero-`40P01`
+    PostgreSQL race matrix до любого runtime grant. Provider-mark/complete
+    lost-response также требуют event-backed replay либо typed reconcile
+    handoff; повторная SMTP-отправка остаётся запрещённой.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
@@ -312,7 +329,8 @@ Merge evidence SHA `9b2f82b2cfdd41b05bf67e71e48df6cdc3e0fda2`, CI
 [`30684863397`](https://github.com/boozik3412/leetplus/actions/runs/30684863397)
 (`run #61`) — `3/3 PASS`; внешний статус остаётся `NO-GO`.
 
-Неканонический candidate не повышает target до `CURRENT_180`.
+Неканонические candidates не повышают target до `CURRENT_180` или
+`CURRENT_181`.
 Promotion запрещён до единого release с worker v2/runtime attestation,
 producer/worker tenant advisory lock, `DRAINING` zero-secret barrier,
 независимо подписанным apply/rollback/zero-diff, production-like

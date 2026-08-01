@@ -8,7 +8,7 @@
 | Каноническая production-схема | `CURRENT_179 / 20260731120000_identity_mail_delivery_release_head` |
 | Stacked prerequisites | dormant `CURRENT180`, dormant `CURRENT181` |
 | CURRENT182 candidate | `20260801030000_identity_mail_tenant_first_claim_protocol` |
-| SQL SHA-256 | `0aa16e71c52a078d22b977ca8ca8d07be3e61cad59d8ade6fc4b365fbdddf8f1` |
+| SQL SHA-256 | `4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22` |
 | Дата | 01.08.2026 |
 
 ## 1. Решение
@@ -121,6 +121,8 @@ Frozen CURRENT181 prerequisite не изменён; его SQL SHA-256 оста�
 - API typecheck и целевые ESLint gates;
 - exact unit/static checks порядка settings -> tenant lock -> RPC;
 - CURRENT182 foundation validator, negative mutation probes и checksum pin;
+- derived exact digest всего ordered CURRENT181 predecessor stack; согласованный
+  ошибочный pin в SQL/metadata/static validator обязан падать offline;
 - successor-aware CURRENT180/CURRENT181 validators с exact ordered
   `[CURRENT180, CURRENT181, CURRENT182]` и fail-closed unknown/reorder cases;
 - CURRENT182 disposable apply/catalog/ACL/rollback/source-zero-diff smoke;
@@ -130,7 +132,7 @@ Frozen CURRENT181 prerequisite не изменён; его SQL SHA-256 оста�
 `138/138`; current worker repository `1/1`, `55/55`; identity-mail worker
 package `8/8`, `243/243`; full API `116/116`, `2510 PASS / 2 todo`. API
 production typecheck, targeted ESLint и build — `PASS`. CURRENT182 foundation
-— `15/15`, smoke self-test — `5/5`; successor-aware CURRENT180/CURRENT181
+— `15/15`, smoke self-test — `6/6`; successor-aware CURRENT180/CURRENT181
 foundation — `84/84` и `85/85`.
 Восемь PostgreSQL cross-path tests компилируются и обнаруживаются, но до
 удалённого CI остаются gated, потому что локальный PostgreSQL не используется.

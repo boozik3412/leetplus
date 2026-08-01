@@ -92,7 +92,7 @@ BEGIN
      OR lexical_migration_head IS DISTINCT FROM
        '20260801020000_identity_mail_tenant_lock_drain_worker_v2'
      OR migration_manifest_digest IS DISTINCT FROM
-       '043fc3aab3a301318b422faec25c73ada513c49bc90b5cb846b64c9322033279'
+       '7db51f4803b9c6c76b9593e5e8e3573b58b165237d44796e6d6efe27a367c110'
      OR NOT EXISTS (
        SELECT 1
        FROM public."_prisma_migrations" AS migration

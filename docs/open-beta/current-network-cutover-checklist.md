@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.24.2                                             |
+| Версия          | 1.24.3                                             |
 | Дата            | 01.08.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -93,11 +93,11 @@ admission.
       (`run #66`) — `3/3 PASS`.
 - [x] Неканонический `CURRENT182` tenant-first claim candidate с exact SQL
       SHA-256
-      `0aa16e71c52a078d22b977ca8ca8d07be3e61cad59d8ade6fc4b365fbdddf8f1`
+      `4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22`
       добавлен поверх frozen CURRENT181. Пять canonical claim entrypoint
       используют tenant -> email -> relation order, три legacy v1 writer
       немедленно возвращают `55000`; PUBLIC execute отсутствует. Foundation
-      `15/15`, smoke self-test `5/5`; successor-aware CURRENT180/CURRENT181
+      `15/15`, smoke self-test `6/6`; successor-aware CURRENT180/CURRENT181
       gates — `84/84` и `85/85`; статус — `NOT_DEPLOYABLE`.
 - [x] Create, reissue/revoke, cancel, accept, shell provisioning/replay и
       emergency suspend переведены на общий bounded tenant-first protocol.
@@ -645,7 +645,7 @@ marker/freshness/blob mismatch.
   tenant-addressed worker v1 RPC используют тот же lock, а outbox-only
   mark/complete требуют DB-derived process-local claim binding. Добавлен
   dormant CURRENT182 SQL candidate
-  `0aa16e71c52a078d22b977ca8ca8d07be3e61cad59d8ade6fc4b365fbdddf8f1`
+  `4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22`
   с пятью tenant-first claim entrypoint и тремя fail-closed legacy stubs.
   Локально foundation/smoke self-tests, API unit/static/typecheck и full
   regression зелёные; real PostgreSQL CI, DB-enforced worker v2,

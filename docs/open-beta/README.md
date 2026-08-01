@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.51                                         |
+| Версия           | 1.52                                         |
 | Дата             | 01.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -332,7 +332,7 @@ enterprise-isolation option и не сокращает shared gates.
     DB-derived binding validated `CLAIMED` receipt. Bounded `SERIALIZABLE`
     transaction берёт exact tenant advisory
     lock до email/claim/invite/outbox. Stacked CURRENT182 с SQL SHA-256
-    `0aa16e71c52a078d22b977ca8ca8d07be3e61cad59d8ade6fc4b365fbdddf8f1`
+    `4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22`
     fence-ит те же пять canonical claim entrypoints на уровне БД и немедленно
     retire-ит три legacy v1 writer. Candidate остаётся
     `NOT_CANONICAL / NOT_DEPLOYABLE`; PostgreSQL acceptance включает actual

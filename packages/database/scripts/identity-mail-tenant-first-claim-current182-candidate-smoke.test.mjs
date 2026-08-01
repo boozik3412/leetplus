@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CURRENT182_SMOKE_CLONE_PATTERN,
+  assertCurrent182PredecessorManifestDigest,
   buildCurrent182SmokeSessionOptions,
   generateCurrent182SmokeCloneName,
   parseCurrent182SmokeArguments,
@@ -11,7 +12,7 @@ import {
 } from "./identity-mail-tenant-first-claim-current182-candidate-smoke.mjs";
 
 const CURRENT182_SHA256 =
-  "0aa16e71c52a078d22b977ca8ca8d07be3e61cad59d8ade6fc4b365fbdddf8f1";
+  "4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22";
 
 test("CURRENT182 smoke CLI accepts only help, self-test, or real mode", () => {
   assert.deepEqual(parseCurrent182SmokeArguments([]), {
@@ -76,6 +77,27 @@ test("CURRENT182 smoke error sanitizer redacts database URLs and long secrets", 
   assert.match(sanitized, /<redacted-secret>/u);
 });
 
+test("CURRENT182 predecessor manifest is derived from the exact ordered stack", () => {
+  const entries = [
+    { name: "20260801010000_first", sha256: "a".repeat(64) },
+    { name: "20260801020000_second", sha256: "b".repeat(64) },
+  ];
+  const expected = assertCurrent182PredecessorManifestDigest(
+    entries,
+    "9754560c0af80eb355b37a4391575cc44050cb0984836690314f9ce51df445b5",
+  );
+  assert.equal(
+    expected,
+    "9754560c0af80eb355b37a4391575cc44050cb0984836690314f9ce51df445b5",
+  );
+  assert.throws(() =>
+    assertCurrent182PredecessorManifestDigest(
+      [{ ...entries[0], sha256: "c".repeat(64) }, entries[1]],
+      expected,
+    ),
+  );
+});
+
 test("CURRENT182 smoke self-test freezes the 182-entry stack and byte SHA", async () => {
   const report = await runCurrent182SmokeSelfTest();
   assert.deepEqual(report, {
@@ -84,6 +106,8 @@ test("CURRENT182 smoke self-test freezes the 182-entry stack and byte SHA", asyn
       "20260801030000_identity_mail_tenant_first_claim_protocol",
     candidateSha256: CURRENT182_SHA256,
     decision: "SELF_TEST_PASSED",
+    predecessorManifestDigest:
+      "7db51f4803b9c6c76b9593e5e8e3573b58b165237d44796e6d6efe27a367c110",
     predecessorMigrationCount: 181,
     runtimeShaSource: "MIGRATION_SQL_BYTES",
   });

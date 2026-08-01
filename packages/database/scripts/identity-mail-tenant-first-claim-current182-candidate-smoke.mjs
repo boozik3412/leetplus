@@ -177,6 +177,29 @@ function digest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export function assertCurrent182PredecessorManifestDigest(entries, expected) {
+  assert.ok(Array.isArray(entries) && entries.length > 0);
+  assert.match(expected, SHA256_PATTERN);
+  for (const entry of entries) {
+    assert.match(entry?.name, /^[0-9]{14}_[a-z0-9_]+$/u);
+    assert.match(entry?.sha256, SHA256_PATTERN);
+  }
+  const actual = digest(
+    Buffer.from(
+      `${entries
+        .map(({ name, sha256 }) => `${name} ${sha256}`)
+        .join("\n")}\n`,
+      "utf8",
+    ),
+  );
+  assert.equal(
+    actual,
+    expected,
+    "CURRENT182 metadata predecessor manifest must match the exact normalized CURRENT181 stack.",
+  );
+  return actual;
+}
+
 function compactSql(value) {
   return String(value ?? "")
     .replaceAll("\r\n", "\n")
@@ -313,6 +336,11 @@ async function readCurrent182SmokePlan() {
     "utf8",
   );
   const metadata = JSON.parse(inputs.candidateMetadataText);
+  const predecessorManifestDigest =
+    assertCurrent182PredecessorManifestDigest(
+      predecessor.stack,
+      metadata.predecessor.manifestDigest,
+    );
   const current182 = Object.freeze({
     content,
     metadata,
@@ -327,6 +355,7 @@ async function readCurrent182SmokePlan() {
   return Object.freeze({
     current182,
     predecessor,
+    predecessorManifestDigest,
     stack: Object.freeze([...predecessor.stack, current182]),
   });
 }
@@ -1005,6 +1034,7 @@ export async function runCurrent182SmokeSelfTest() {
     candidateMigration: CURRENT182,
     candidateSha256: plan.current182.sha256,
     decision: "SELF_TEST_PASSED",
+    predecessorManifestDigest: plan.predecessorManifestDigest,
     predecessorMigrationCount: 181,
     runtimeShaSource: "MIGRATION_SQL_BYTES",
   });

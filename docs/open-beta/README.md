@@ -291,6 +291,19 @@ enterprise-isolation option и не сокращает shared gates.
     независимых PostgreSQL 16.13 smoke — `PASS`, source zero-diff/cleanup
     подтверждены, review P0/P1/P2=`0/0/0`. Candidate не создаёт
     enrollment/role, не имеет apply RPC и не разрешает production mutation.
+    Exact implementation
+    `475e9be4726787db955d895d348af1fc5a7c2db3`, GitHub Actions
+    [`30690147568`](https://github.com/boozik3412/leetplus/actions/runs/30690147568)
+    (`run #64`) — `3/3 PASS`.
+36. [Protected identity-mail tenant lock and drain v2](./protected-mail-tenant-lock-drain-v2.md) —
+    reviewed design-only контракт общего producer/worker advisory lock,
+    worker v2 settlement и crash-resumable `DRAINING` с одновременными
+    zero-secret/zero-inflight predicates. Рядом реализованы pure
+    enrollment-command authority (`12/12`, включая fixture-substituted pinned
+    52-column mapping) и worker runtime-attestation (`12/12`); production roots
+    frozen empty, runtime verdict не разрешает mutation/send без отдельной
+    per-tenant DB readiness. SQL, canonical migration, grant, apply, SMTP и
+    tenant data этим срезом не изменяются.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail

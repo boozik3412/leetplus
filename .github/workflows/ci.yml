@@ -166,6 +166,12 @@ jobs:
       - name: Validate dormant non-canonical CURRENT180 tenant enrollment foundation
         run: pnpm --filter database check:identity-mail-tenant-enrollment-foundation
 
+      - name: Validate independent tenant enrollment command authority
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-authority
+
+      - name: Validate independent identity-mail worker runtime attestation
+        run: pnpm --filter database check:identity-mail-worker-runtime-attestation
+
       - name: Validate shared beta admission provenance
         run: pnpm --filter database check:shared-beta-admission-provenance
 

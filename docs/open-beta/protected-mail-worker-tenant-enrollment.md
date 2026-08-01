@@ -314,6 +314,10 @@ candidate smoke прошли: exact CURRENT179 source остался zero-diff,
 candidate receipt/relation residue отсутствует, disposable clone/temp
 cleanup подтверждён; independent review — P0/P1/P2=`0/0/0`.
 Этот результат не считается promotion и не разрешает production apply.
+Exact implementation:
+`475e9be4726787db955d895d348af1fc5a7c2db3`; GitHub Actions
+[`30690147568`](https://github.com/boozik3412/leetplus/actions/runs/30690147568)
+(`run #64`) — `3/3 PASS`.
 
 Prisma-specific rehearsal diagnostic зафиксирован отдельно: при prerequisite
 reject внутри explicit transaction `migrate deploy` наружу показывает
@@ -330,6 +334,40 @@ tenant advisory lock, `DRAINING` zero-secret barrier для secret-bearing
 подпись и signed apply/rollback/zero-diff, production-like rehearsal и
 отдельный `SHARED BETA GO`.
 
+### 6.2. Pure authority/runtime contracts
+
+Поверх dormant foundation добавлены два pure verifier, не меняющие SQL:
+
+- `identity-mail-tenant-enrollment-authority.mjs` проверяет отдельный
+  `IDENTITY_MAIL_TENANT_ENROLLMENT_COMMAND_V1` Ed25519 domain, exact
+  proposal/envelope/state/revision/config/DB/marker/release bindings и
+  резервирует branded immutable DB arguments только для будущего pinned
+  trust path; synthetic loopback-CI verification имеет отдельный
+  non-persistable brand и обязана совпасть с expected database name;
+- `identity-mail-worker-runtime-attestation.mjs` проверяет отдельный
+  process-level `IDENTITY_MAIL_WORKER_RUNTIME_ATTESTATION_V1`, exact
+  CURRENT180 release/DB/runtime/artifact и sorted max-four tenant bindings.
+
+Оба production root registry намеренно frozen empty. Synthetic roots
+допускаются только explicit loopback CI. Enrollment verifier не имеет I/O,
+accept/apply или persistence. Runtime verdict всегда содержит:
+
+```text
+authorization=false
+canMutate=false
+canSend=false
+databaseReadinessRequiredPerTenant=true
+```
+
+Focused suites проходят `12/12` и `12/12`. Enrollment suite отдельно исполняет
+fixture-substituted pinned trust path, exact frozen 52-column DB mapping,
+canonical JSON/digest parity и brand/copy rejection, не добавляя production
+root-injection API. Точная будущая DB-семантика общего tenant lock, worker v2
+settlement, exact routine ACL, pre-RPC timeout и relational rollback описана в
+[protected tenant lock/drain v2](./protected-mail-tenant-lock-drain-v2.md).
+Статус остаётся
+`DORMANT_PURE_CONTRACTS / REVIEWED_DESIGN_ONLY / NOT_DEPLOYABLE`.
+
 ## 7. Что требуется до apply
 
 Следующие bounded slices обязаны добавить отдельно:
@@ -341,12 +379,18 @@ tenant advisory lock, `DRAINING` zero-secret barrier для secret-bearing
    confirmation;
 4. независимую подпись proposal и привязку к реально установленному
    deployment marker/DB identity;
-5. exact role name/OID, database name/OID и hostile ACL admission;
+5. exact role name/OID, database name/OID, routine
+   owner/security/search-path/volatility/parallel matrix, hostile/default ACL
+   admission и caller-side pre-RPC statement/driver deadline;
 6. request idempotency и optimistic revision;
 7. persisted-command-before-drain и exact same-request resume/finalize после
-   crash;
+   crash либо envelope expiry; initial accept проверяет live timeline, а
+   persisted replay использует immutable receipt/`signatureVerifiedAt`, не
+   current-time verifier;
 8. two-tenant PostgreSQL 16 tests, включая одновременный drain/claim/reap;
-9. zero-diff повтор, stale revision, wrong SHA/DB/role/config и rollback;
+9. zero-diff повтор, stale revision, wrong SHA/DB/role/config и relational
+   rollback: terminal/current same-tenant source, exact compensating mapping,
+   one-rollback uniqueness и rollback-of-rollback rejection;
 10. production-like rehearsal на disposable clone;
 11. отдельный production `GO` на одну точную mutation.
 

@@ -64,6 +64,49 @@ admission.
       exact SQL SHA: legacy fixture и ошибочный fence fail-closed, clean
       `179→candidate 180` принят, source zero-diff и disposable clone/temp
       cleanup подтверждены; independent review P0/P1/P2=`0/0/0`.
+- [x] Exact implementation
+      `475e9be4726787db955d895d348af1fc5a7c2db3`, GitHub Actions
+      [`30690147568`](https://github.com/boozik3412/leetplus/actions/runs/30690147568)
+      (`run #64`) — `3/3 PASS`, включая оба новых CURRENT180 gate.
+- [x] Pure enrollment-command authority verifier и worker runtime-attestation
+      реализованы без I/O/mutation surface: production roots frozen empty,
+      focused suites `12/12` и `12/12`; fixture-substituted pinned test
+      проверяет exact frozen 52-column DB mapping без production root-injection
+      API; runtime verdict остаётся
+      `authorization=false/canMutate=false/canSend=false` до per-tenant DB
+      readiness.
+- [x] Общий producer/worker lock order, пять operational worker v2 RPC,
+      owner/operator-only reconcile и `DRAINING` zero-secret/zero-inflight
+      barrier зафиксированы в
+      [reviewed design](./protected-mail-tenant-lock-drain-v2.md).
+- [ ] Worker v2 RPC/API, producer tenant lock и crash-resumable drain
+      реализованы в неканоническом candidate и доказаны PostgreSQL race
+      matrix; pure verifier/design сами этот gate не закрывают.
+- [ ] Legacy `identity_owner_invite_issue_hold_v1` и
+      `shared_beta_tenant_activate_v1` удалены либо заменены exact pre-read
+      `55000` stubs; catalog-wide inventory доказывает zero callable legacy
+      secret writer даже для function owner.
+- [ ] DB accept под tenant lock доказывает relational rollback: referenced
+      command — terminal/current same-tenant `FORWARD`, current configuration
+      равна original target, action/configuration соответствуют exact
+      compensating mapping,
+      rollback-of-rollback и второй rollback запрещены.
+- [ ] Exact routine ACL matrix реализована и catalog-pinned: owner/security
+      mode/search path/language/volatility/parallel/leakproof/null/retset,
+      body/signature, role name/OID, hostile default ACL, transitive membership
+      и zero unexpected PUBLIC/direct/grant-option access.
+- [ ] Enrollment-coordinator и reconcile-operator exact role name/OID включены
+      в независимый signed release authority до выдачи grant; activation role
+      получает только activation RPC, private issue producer — zero non-owner
+      `EXECUTE`.
+- [ ] Каждый mutating caller до RPC отдельным statement выполняет bounded
+      `SET LOCAL statement_timeout`, имеет driver deadline/cancellation и
+      гарантирует rollback/pool cleanup; внутренний `lock_timeout` ограничивает
+      последующие advisory/row waits.
+- [ ] Envelope timeline/root-at-now проверяются только initial accept/begin;
+      exact persisted command может resume/drain/finalize после 15-минутного
+      expiry/lease/ack wait по immutable receipt и `signatureVerifiedAt`,
+      expired unaccepted proposal остаётся rejected.
 - [ ] Promotion в canonical `CURRENT_180` принят только в одном
       atomic release с worker v2/runtime attestation, producer/worker tenant
       advisory lock, `DRAINING` zero-secret barrier для secret-bearing

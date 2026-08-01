@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CURRENT182_SMOKE_CLONE_PATTERN,
+  CURRENT182_SMOKE_PROBE_QUERIES,
   assertCurrent182PredecessorManifestDigest,
   buildCurrent182SmokeSessionOptions,
   generateCurrent182SmokeCloneName,
@@ -96,6 +97,26 @@ test("CURRENT182 predecessor manifest is derived from the exact ordered stack", 
       expected,
     ),
   );
+});
+
+test("CURRENT182 PostgreSQL probes bind every placeholder to the exact routine type", () => {
+  const queries = Object.values(CURRENT182_SMOKE_PROBE_QUERIES);
+  assert.equal(queries.length, 8);
+  for (const query of queries) {
+    assert.doesNotMatch(query, /\$[1-9](?!::)/u);
+  }
+  assert.match(CURRENT182_SMOKE_PROBE_QUERIES.legacyTransition, /\$5::INTEGER/u);
+  assert.match(CURRENT182_SMOKE_PROBE_QUERIES.legacyRelease, /\$5::INTEGER/u);
+  assert.match(CURRENT182_SMOKE_PROBE_QUERIES.canonicalAssert, /\$4::INTEGER/u);
+  assert.match(
+    CURRENT182_SMOKE_PROBE_QUERIES.canonicalLocatorAssert,
+    /\$4::INTEGER/u,
+  );
+  assert.match(
+    CURRENT182_SMOKE_PROBE_QUERIES.canonicalTransition,
+    /\$5::INTEGER/u,
+  );
+  assert.match(CURRENT182_SMOKE_PROBE_QUERIES.canonicalRelease, /\$5::INTEGER/u);
 });
 
 test("CURRENT182 smoke self-test freezes the 182-entry stack and byte SHA", async () => {

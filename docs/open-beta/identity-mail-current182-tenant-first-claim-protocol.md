@@ -132,7 +132,7 @@ Frozen CURRENT181 prerequisite не изменён; его SQL SHA-256 оста�
 `138/138`; current worker repository `1/1`, `55/55`; identity-mail worker
 package `8/8`, `243/243`; full API `116/116`, `2510 PASS / 2 todo`. API
 production typecheck, targeted ESLint и build — `PASS`. CURRENT182 foundation
-— `15/15`, smoke self-test — `6/6`; successor-aware CURRENT180/CURRENT181
+— `15/15`, smoke self-test — `7/7`; successor-aware CURRENT180/CURRENT181
 foundation — `84/84` и `85/85`.
 Восемь PostgreSQL cross-path tests компилируются и обнаруживаются, но до
 удалённого CI остаются gated, потому что локальный PostgreSQL не используется.

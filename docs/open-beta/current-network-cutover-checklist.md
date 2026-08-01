@@ -97,7 +97,7 @@ admission.
       добавлен поверх frozen CURRENT181. Пять canonical claim entrypoint
       используют tenant -> email -> relation order, три legacy v1 writer
       немедленно возвращают `55000`; PUBLIC execute отсутствует. Foundation
-      `15/15`, smoke self-test `6/6`; successor-aware CURRENT180/CURRENT181
+      `15/15`, smoke self-test `7/7`; successor-aware CURRENT180/CURRENT181
       gates — `84/84` и `85/85`; статус — `NOT_DEPLOYABLE`.
 - [x] Create, reissue/revoke, cancel, accept, shell provisioning/replay и
       emergency suspend переведены на общий bounded tenant-first protocol.

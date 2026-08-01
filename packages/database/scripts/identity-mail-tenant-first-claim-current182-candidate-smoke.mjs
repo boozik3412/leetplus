@@ -148,6 +148,25 @@ const ROUTINES = Object.freeze([
   }),
 ]);
 
+export const CURRENT182_SMOKE_PROBE_QUERIES = Object.freeze({
+  legacyReserve:
+    'SELECT public."identity_email_claim_reserve_invite_v1"($1::TEXT,$2::TEXT,$3::TEXT)',
+  legacyTransition:
+    'SELECT public."identity_email_claim_transition_v1"($1::TEXT,$2::TEXT,$3::TEXT,$4::TEXT,$5::INTEGER,$6::TEXT,$7::TEXT)',
+  legacyRelease:
+    'SELECT public."identity_email_claim_release_v1"($1::TEXT,$2::TEXT,$3::TEXT,$4::TEXT,$5::INTEGER)',
+  canonicalReserve:
+    'SELECT public."identity_email_claim_reserve_invite_v2"($1::TEXT,$2::TEXT,$3::TEXT)',
+  canonicalAssert:
+    'SELECT public."identity_email_claim_assert_invite_v1"($1::TEXT,$2::TEXT,$3::TEXT,$4::INTEGER)',
+  canonicalLocatorAssert:
+    'SELECT public."identity_email_claim_assert_invite_locator_v1"($1::TEXT,$2::TEXT,$3::TEXT,$4::INTEGER)',
+  canonicalTransition:
+    'SELECT public."identity_email_claim_transition_v2"($1::TEXT,$2::TEXT,$3::TEXT,$4::TEXT,$5::INTEGER,$6::TEXT,$7::TEXT)',
+  canonicalRelease:
+    'SELECT public."identity_email_claim_release_v2"($1::TEXT,$2::TEXT,$3::TEXT,$4::TEXT,$5::INTEGER)',
+});
+
 const LEGACY_STUB_BODY =
   "BEGIN RAISE EXCEPTION 'LEGACY_IDENTITY_CLAIM_WRITER_RETIRED' USING ERRCODE = '55000'; END;";
 
@@ -755,7 +774,7 @@ async function assertLegacyStubsReject(client) {
     "55000",
     () =>
       client.$queryRawUnsafe(
-        'SELECT public."identity_email_claim_reserve_invite_v1"($1,$2,$3)',
+        CURRENT182_SMOKE_PROBE_QUERIES.legacyReserve,
         "tester@example.test",
         randomUUID(),
         randomUUID(),
@@ -766,7 +785,7 @@ async function assertLegacyStubsReject(client) {
     "55000",
     () =>
       client.$queryRawUnsafe(
-        'SELECT public."identity_email_claim_transition_v1"($1,$2,$3,$4,$5,$6,$7)',
+        CURRENT182_SMOKE_PROBE_QUERIES.legacyTransition,
         "tester@example.test",
         randomUUID(),
         "INVITE",
@@ -781,7 +800,7 @@ async function assertLegacyStubsReject(client) {
     "55000",
     () =>
       client.$queryRawUnsafe(
-        'SELECT public."identity_email_claim_release_v1"($1,$2,$3,$4,$5)',
+        CURRENT182_SMOKE_PROBE_QUERIES.legacyRelease,
         "tester@example.test",
         randomUUID(),
         "INVITE",
@@ -800,23 +819,23 @@ async function assertCanonicalEntrypointsReachTenantFence(client) {
   const email = "tenant-first@example.test";
   const calls = [
     [
-      'SELECT public."identity_email_claim_reserve_invite_v2"($1,$2,$3)',
+      CURRENT182_SMOKE_PROBE_QUERIES.canonicalReserve,
       [email, tenantId, subjectId],
     ],
     [
-      'SELECT public."identity_email_claim_assert_invite_v1"($1,$2,$3,$4)',
+      CURRENT182_SMOKE_PROBE_QUERIES.canonicalAssert,
       [email, tenantId, subjectId, 1],
     ],
     [
-      'SELECT public."identity_email_claim_assert_invite_locator_v1"($1,$2,$3,$4)',
+      CURRENT182_SMOKE_PROBE_QUERIES.canonicalLocatorAssert,
       [locator, tenantId, subjectId, 1],
     ],
     [
-      'SELECT public."identity_email_claim_transition_v2"($1,$2,$3,$4,$5,$6,$7)',
+      CURRENT182_SMOKE_PROBE_QUERIES.canonicalTransition,
       [email, tenantId, "INVITE", subjectId, 1, "USER", nextSubjectId],
     ],
     [
-      'SELECT public."identity_email_claim_release_v2"($1,$2,$3,$4,$5)',
+      CURRENT182_SMOKE_PROBE_QUERIES.canonicalRelease,
       [email, tenantId, "INVITE", subjectId, 1],
     ],
   ];

@@ -5,8 +5,8 @@
 | Контракт | `PROTECTED_IDENTITY_MAIL_TENANT_LOCK_DRAIN_V2` |
 | Статус | `REVIEWED_DESIGN_ONLY / NOT_CANONICAL / NOT_DEPLOYABLE` |
 | Основание | `codex/open-beta-hardening`, commit `475e9be4726787db955d895d348af1fc5a7c2db3` |
-| Schema baseline | canonical `CURRENT_179`; dormant candidate `CURRENT_180` |
-| Дата | `01.08.2026` |
+| Schema baseline | canonical `CURRENT179`; stacked candidates `CURRENT180..183` |
+| Дата | `02.08.2026` |
 
 ## 1. Решение и граница документа
 
@@ -112,6 +112,24 @@ Read-only preflight сейчас считает только total/unmarked/mark
 Этого недостаточно: `HOLD/PENDING/RETRY` всё ещё обязаны содержать encrypted
 secret.
 
+### 2.4. Реализованные CURRENT181–183 slices
+
+CURRENT181 materializes owner-only helper, пять worker-v2 RPC, reconcile и
+ACTIVE/DRAINING settlement rules. CURRENT182 переводит application claim
+entrypoints в tenant-first order. CURRENT183 исправляет snapshot freshness:
+caller использует `READ COMMITTED`, а settings, tenant-lock и защищённый RPC
+выполняются разными statements. Первый statement после реального ожидания
+lock получает snapshot уже после commit держателя.
+
+Dormant CURRENT183 API adapter pinned к exact `183/183`, вызывает только пять
+tenant-aware v2 RPC и сохраняет DB-derived state/policy/provider bindings.
+Disposable PostgreSQL matrix покрывает непустые
+`ACTIVE|DRAINING × HOLD|PENDING`, observed advisory wait, progress другого
+tenant и least-privilege grants. Initial state rows в этой матрице создаются
+test-owner diagnostic bypass только во временной БД: signed coordinator и
+production authority этим не реализованы. Полный контракт и ограничения:
+[CURRENT183 worker v2 freshness](./identity-mail-current183-worker-v2-freshness.md).
+
 ## 3. Термины и данные barrier
 
 `Secret-bearing row` в этом контракте означает строку, из которой штатный
@@ -144,7 +162,7 @@ labels недостаточно.
 
 ## 4. Общий advisory-lock helper
 
-Future candidate вводит ровно один owner-only helper:
+CURRENT181 вводит, а CURRENT183 уточняет ровно один owner-only helper:
 
 ```text
 public.identity_mail_tenant_lock_v1(p_tenant_id text) -> text
@@ -169,9 +187,10 @@ public.identity_mail_tenant_lock_v1(p_tenant_id text) -> text
 
 Lock является transaction-scoped: commit, rollback или потеря backend session
 освобождают его автоматически. Bounded `statement_timeout` обязан быть armed
-до вызова RPC: caller начинает explicit transaction, отдельной предыдущей
-командой выполняет `SET LOCAL statement_timeout = ...`, устанавливает более
-короткий driver deadline/cancellation и только затем вызывает один RPC.
+до вызова RPC: caller начинает explicit `READ COMMITTED` transaction, отдельным
+statement проверяет/устанавливает timeout, вторым получает tenant lock,
+устанавливает более короткий driver deadline/cancellation и только следующим
+statement вызывает защищённый RPC.
 Изменение `statement_timeout` уже внутри PL/pgSQL не ограничивает тот же внешний
 SQL statement и не считается защитой. RPC до relation read устанавливает
 bounded `lock_timeout` для последующих advisory/row locks и fail closed
@@ -764,14 +783,14 @@ helper, worker v2, reconcile, legacy stubs и disposable race/catalog evidence.
 | `P0` | CURRENT181 owner-only routine/catalog matrix принята; deploy-specific worker/coordinator/operator role name+OID, grants и hostile default-privilege matrix ещё отсутствуют |
 | `P0` | enrollment-coordinator и reconcile-operator exact role name/OID ещё не связаны независимым signed release authority; deploy-specific grants не имеют authority |
 | `P0` | persisted post-expiry resume/finalize semantics и exact accepted-command replay после lease/ack wait ещё не реализованы PostgreSQL fixture |
-| `P1` | owner-only catalog и two-tenant race matrix CURRENT181 приняты; v1 runtime revoke/v2 grants и реальные ACTIVE/DRAINING fixtures ещё не приняты |
-| `P1` | current cancel/revoke/reissue и IdentityEmailClaim transition paths не берут tenant advisory lock первыми; worker Outbox/UserInvite → email claim имеет достижимую инверсию с cancel/reissue email claim → UserInvite. Acceptance также должен войти в единый protocol и race matrix, хотя SENT-gate не позволяет считать его цикл доказанным. До любого runtime grant требуется cross-path zero-40P01 PostgreSQL matrix |
+| `P1` | exact diagnostic five-v2-grant и ACTIVE/DRAINING × HOLD/PENDING matrix принята только на disposable owner-seeded state; signed coordinator transitions, production role OID/runtime attestation и atomic v1 revoke/v2 grant ещё не приняты |
+| `P1` | tenant-first cancel/revoke/reissue/accept и zero-40P01 CURRENT179 PostgreSQL matrix приняты; до promotion остаются v2 non-empty races против реальных signed coordinator `BEGIN_DRAIN/RESUME/FINALIZE`, а diagnostic bypass не является authority evidence |
 | `P1` | process-memory/runtime stop attestation и no-send-after-stale-marker tests не приняты |
 | `P1` | local disposable CURRENT181 rehearsal и SQL-level security review приняты; production-like stop-v1/apply/grant/start-v2/rollback rehearsal отсутствует |
 | `P2` | provider_mark_v2/complete_v2 после committed lost response не имеют event-backed exact replay: повтор fail-closed даёт stale 40001 и требует typed handoff в reconcile до runtime wiring |
 | `P2` | operator observability не разделяет secret, ready, unmarked claim, marked claim и reconciliation counts |
 
-Пока существует любой `P0` или `P1`, stacked dormant CURRENT180/CURRENT181
+Пока существует любой `P0` или `P1`, stacked dormant CURRENT180..CURRENT183
 нельзя копировать в `prisma/migrations`, repin-ить worker или использовать для
 external pilot.
 
@@ -789,9 +808,10 @@ external pilot.
   restart, production rehearsal или tester onboarding;
 - разрешает `SHARED BETA GO`, production deploy или внешний доступ.
 
-Следующий engineering slice в принятой последовательности расширяет принятый
-CURRENT181 rehearsal producer/activation v2, signed crash-resumable enrollment
-coordinators, API adapter и runtime attestation, после чего формируется единый
-canonical candidate. Частичный runtime repin worker по-прежнему запрещён.
+Следующий engineering slice реализует signed crash-resumable enrollment
+coordinators и production-authorized runtime attestation поверх принятых
+CURRENT181–183 rehearsal/adapter/freshness slices, после чего формируется единый
+canonical candidate с producer/activation v2. Частичный runtime repin worker
+по-прежнему запрещён.
 Production apply/deploy и `SHARED BETA GO` остаются отдельной явно
 авторизуемой границей.

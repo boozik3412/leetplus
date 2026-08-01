@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "contract": "IDENTITY_MAIL_WORKER_V2_FRESHNESS_PROTOCOL_CANDIDATE_V1",
+  "candidate": "20260802010000_identity_mail_worker_v2_freshness_protocol",
+  "ordinal": 183,
+  "predecessor": {
+    "count": 182,
+    "head": "20260801030000_identity_mail_tenant_first_claim_protocol",
+    "manifestDigest": "d30a07005d8df4940b05af4b2c6b340704387ed59446f4334e8765c287c71ffd",
+    "headChecksum": "4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22"
+  },
+  "migrationSqlSha256": "dea22bfccc97d1758d887a2818f931ade089c780350c9618ee319aebb97db63e",
+  "authorization": false,
+  "canMutate": false,
+  "status": "NOT_DEPLOYABLE"
+}

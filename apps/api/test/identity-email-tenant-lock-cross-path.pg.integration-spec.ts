@@ -392,6 +392,92 @@ describePostgres(
       }
     });
 
+    it('uses a fresh READ COMMITTED statement snapshot after waiting for the tenant lock', async () => {
+      const tenantId = await createTenant(admin, 'fresh-snapshot');
+      const committedName = `Identity lock fresh committed ${randomUUID().slice(0, 8)}`;
+      const holderLocked = deferred<void>();
+      const releaseHolder = deferred<void>();
+      const clients = await connectClients(disposableDatabaseUrl, 2);
+      const [holderClient, waiterClient] = clients;
+      const waiterPid = await backendPid(waiterClient);
+      let holderOutcomePromise: Promise<Outcome<void>> | undefined;
+      let waiterOutcomePromise:
+        | Promise<Outcome<string | undefined>>
+        | undefined;
+      let waiterAttempts = 0;
+
+      try {
+        holderOutcomePromise = capture(
+          boundary.runTenantTransaction(holderClient, tenantId, async (tx) => {
+            await tx.tenant.update({
+              where: { id: tenantId },
+              data: { name: committedName },
+            });
+            holderLocked.resolve(undefined);
+            await releaseHolder.promise;
+          }),
+        );
+        await Promise.race([
+          holderLocked.promise,
+          holderOutcomePromise.then((outcome) => {
+            if (outcome.status === 'rejected') {
+              throw outcome.reason;
+            }
+            throw new Error('Holder committed before exposing its tenant lock');
+          }),
+        ]);
+
+        waiterOutcomePromise = capture(
+          boundary.runTenantTransaction(
+            countedHost(waiterClient, () => {
+              waiterAttempts += 1;
+            }),
+            tenantId,
+            async (tx) => {
+              const [row] = await tx.$queryRaw<Array<{ name: string }>>(
+                Prisma.sql`
+                  SELECT tenant.name
+                  FROM public."Tenant" AS tenant
+                  WHERE tenant.id = ${tenantId}
+                `,
+              );
+              return row?.name;
+            },
+          ),
+        );
+        const wait = await waitForAdvisoryWait(admin, waiterPid);
+        expect(wait.query).toContain('pg_advisory_xact_lock');
+
+        releaseHolder.resolve(undefined);
+        const [holderOutcome, waiterOutcome] = await Promise.all([
+          holderOutcomePromise,
+          waiterOutcomePromise,
+        ]);
+        if (holderOutcome.status === 'rejected') {
+          assertNotDeadlock(holderOutcome.reason);
+          throw holderOutcome.reason;
+        }
+        if (waiterOutcome.status === 'rejected') {
+          assertNotDeadlock(waiterOutcome.reason);
+          throw waiterOutcome.reason;
+        }
+        expect(waiterOutcome.value).toBe(committedName);
+        expect(waiterAttempts).toBe(1);
+        await assertDeadlocksUnchanged(admin, baselineDeadlocks);
+      } finally {
+        releaseHolder.resolve(undefined);
+        const pending: Promise<unknown>[] = [];
+        if (holderOutcomePromise) {
+          pending.push(holderOutcomePromise);
+        }
+        if (waiterOutcomePromise) {
+          pending.push(waiterOutcomePromise);
+        }
+        await Promise.allSettled(pending);
+        await disconnectClients(clients);
+      }
+    });
+
     it.each([
       ['cancel', 'COMMIT'],
       ['reissue', 'ROLLBACK'],

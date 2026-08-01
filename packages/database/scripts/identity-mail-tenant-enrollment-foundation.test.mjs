@@ -45,7 +45,7 @@ function expectFinding(value, finding) {
   return report;
 }
 
-test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT182 inventory", () => {
+test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT183 inventory", () => {
   const report = assertIdentityMailTenantEnrollmentFoundation(artifact);
   assert.equal(report.decision, "COMPLIANT");
   assert.equal(report.base.count, 179);
@@ -66,6 +66,7 @@ test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT182 inve
     "20260801010000_identity_mail_tenant_enrollment_control_plane",
     "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
     "20260801030000_identity_mail_tenant_first_claim_protocol",
+    "20260802010000_identity_mail_worker_v2_freshness_protocol",
   ]);
   assert.deepEqual(report.findings, []);
   assert.ok(Object.isFrozen(report));
@@ -97,7 +98,7 @@ test("fails closed on canonical position, manifest, candidate head and metadata 
       },
     ],
     [
-      "missing stacked CURRENT182 successor",
+      "missing stacked CURRENT183 successor",
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
         value.candidates.directoryNames.pop();
@@ -115,20 +116,21 @@ test("fails closed on canonical position, manifest, candidate head and metadata 
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
         [
-          value.candidates.directoryNames[1],
           value.candidates.directoryNames[2],
+          value.candidates.directoryNames[3],
         ] = [
+          value.candidates.directoryNames[3],
           value.candidates.directoryNames[2],
-          value.candidates.directoryNames[1],
         ];
       },
     ],
     [
-      "unknown candidate successor",
+      "unknown fifth candidate",
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
-        value.candidates.directoryNames[2] =
-          "20260801030000_unexpected_candidate";
+        value.candidates.directoryNames.push(
+          "20260802020000_unexpected_candidate",
+        );
       },
     ],
     [

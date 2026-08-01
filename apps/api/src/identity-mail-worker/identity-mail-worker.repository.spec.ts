@@ -25,7 +25,7 @@ const LEASE_TOKEN_DIGEST = createHash('sha256')
 const PROVIDER_AUTHORITY_DIGEST = 'c'.repeat(64);
 const PROVIDER_RECEIPT_DIGEST = 'd'.repeat(64);
 const TENANT_TRANSACTION_SETTINGS = {
-  isolationLevel: 'serializable',
+  isolationLevel: 'read committed',
   readOnly: 'off',
   statementTimeout: '25s',
   lockTimeout: '5s',
@@ -282,7 +282,7 @@ function expectTenantRpcEnvelope(
   expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   const transactionCall = (prisma.$transaction.mock.calls as unknown[][])[0];
   expect(transactionCall?.[1]).toEqual({
-    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
     maxWait: 5_000,
     timeout: 30_000,
   });
@@ -297,11 +297,11 @@ function expectTenantRpcEnvelope(
   expect(settingsQuery.strings.join('')).toContain(
     "current_setting('transaction_read_only')",
   );
-  expect(settingsQuery.strings.join('')).toContain(
-    "set_config(\n            'statement_timeout'",
+  expect(settingsQuery.strings.join('')).toMatch(
+    /set_config\(\s*'statement_timeout'/u,
   );
-  expect(settingsQuery.strings.join('')).toContain(
-    "set_config(\n            'lock_timeout'",
+  expect(settingsQuery.strings.join('')).toMatch(
+    /set_config\(\s*'lock_timeout'/u,
   );
   expect(settingsQuery.values).toEqual(['25s', '5s']);
   expect(lockQuery.strings.join('')).toContain(
@@ -345,6 +345,13 @@ async function rejectionOf(operation: Promise<unknown>): Promise<unknown> {
     return error;
   }
   throw new Error('Expected operation to reject');
+}
+
+function retryableDatabaseError(code: string): Error {
+  return Object.assign(
+    new Error(`database error ${code}`),
+    code === 'P2034' ? { code } : { code: 'P2010', meta: { code } },
+  );
 }
 
 function expectReason(error: unknown, reasonCode: string): void {
@@ -490,6 +497,85 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     },
   );
 
+  it.each(['P2034', '40001', '40P01', '55P03', '57014'] as const)(
+    'retries the complete tenant transaction once after %s and succeeds',
+    async (code) => {
+      const { prisma, repository } = harness();
+      prisma.rpcQueryRaw
+        .mockRejectedValueOnce(retryableDatabaseError(code))
+        .mockResolvedValueOnce([
+          {
+            result: {
+              schemaVersion: 1,
+              operation: 'CLAIM_INITIAL_OWNER_MAIL',
+              decision: 'EMPTY',
+            },
+          },
+        ]);
+
+      await expect(
+        repository.claimOne({
+          tenantId: TENANT_ID,
+          leaseOwnerDigest: LEASE_OWNER_DIGEST,
+          leaseTokenDigest: LEASE_TOKEN_DIGEST,
+          providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+        }),
+      ).resolves.toBeNull();
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(prisma.transactionQueryRaw).toHaveBeenCalledTimes(6);
+      expect(prisma.rpcQueryRaw).toHaveBeenCalledTimes(2);
+      for (const call of prisma.$transaction.mock.calls as unknown[][]) {
+        expect(call[1]).toEqual({
+          isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+          maxWait: 5_000,
+          timeout: 30_000,
+        });
+      }
+    },
+  );
+
+  it.each(['P2034', '40001', '40P01', '55P03', '57014'] as const)(
+    'returns a typed terminal retry decision after two %s failures',
+    async (code) => {
+      const { prisma, repository } = harness();
+      prisma.rpcQueryRaw.mockRejectedValue(retryableDatabaseError(code));
+
+      const rejection = await rejectionOf(
+        repository.claimOne({
+          tenantId: TENANT_ID,
+          leaseOwnerDigest: LEASE_OWNER_DIGEST,
+          leaseTokenDigest: LEASE_TOKEN_DIGEST,
+          providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+        }),
+      );
+
+      expectReason(
+        rejection,
+        'IDENTITY_MAIL_WORKER_TRANSACTION_RETRY_REQUIRED',
+      );
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(prisma.rpcQueryRaw).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('does not retry an unknown database failure', async () => {
+    const { prisma, repository } = harness();
+    const databaseError = retryableDatabaseError('XX000');
+    prisma.rpcQueryRaw.mockRejectedValue(databaseError);
+
+    await expect(
+      repository.claimOne({
+        tenantId: TENANT_ID,
+        leaseOwnerDigest: LEASE_OWNER_DIGEST,
+        leaseTokenDigest: LEASE_TOKEN_DIGEST,
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+      }),
+    ).rejects.toBe(databaseError);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.rpcQueryRaw).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     [
       'claim',
@@ -568,7 +654,7 @@ describe('PrismaIdentityMailWorkerRepository', () => {
   it('fails before the tenant lock and RPC when transaction settings drift', async () => {
     const { prisma, repository } = harness();
     prisma.transactionQueryRaw.mockResolvedValueOnce([
-      { ...TENANT_TRANSACTION_SETTINGS, isolationLevel: 'read committed' },
+      { ...TENANT_TRANSACTION_SETTINGS, isolationLevel: 'serializable' },
     ]);
 
     const rejection = await rejectionOf(

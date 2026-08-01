@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.53                                         |
-| Дата             | 01.08.2026                                   |
+| Версия           | 1.54                                         |
+| Дата             | 02.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -329,9 +329,10 @@ enterprise-isolation option и не сокращает shared gates.
     CURRENT179-compatible app и worker boundary для create, reissue/revoke,
     cancel, accept, provisioning, emergency suspend и всех пяти текущих
     worker RPC; outbox-only marker/completion допускаются только по
-    DB-derived binding validated `CLAIMED` receipt. Bounded `SERIALIZABLE`
-    transaction берёт exact tenant advisory
-    lock до email/claim/invite/outbox. Stacked CURRENT182 с SQL SHA-256
+    DB-derived binding validated `CLAIMED` receipt. Runtime boundary теперь
+    использует bounded `READ COMMITTED` и отдельные statements
+    settings -> tenant advisory lock -> protected operation, чтобы первый
+    post-wait read получил свежий snapshot. Stacked CURRENT182 с SQL SHA-256
     `4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22`
     fence-ит те же пять canonical claim entrypoints на уровне БД и немедленно
     retire-ит три legacy v1 writer. Candidate остаётся
@@ -343,6 +344,19 @@ enterprise-isolation option и не сокращает shared gates.
     (`run #72`) — `3/3 PASS`, включая `8/8` cross-path PostgreSQL races,
     zero `40P01`, source zero-diff и cleanup. Это evidence не заменяет
     non-empty outbox/ACTIVE-DRAINING/coordinator matrix.
+39. [CURRENT183 worker v2 freshness](./identity-mail-current183-worker-v2-freshness.md) —
+    stacked successor с SQL SHA-256
+    `dea22bfccc97d1758d887a2818f931ade089c780350c9618ee319aebb97db63e`:
+    shared helper fail closed требует `READ COMMITTED`, а worker-v2 readiness
+    pinned к exact `183/183`. Dormant API adapter вызывает ровно пять v2 RPC,
+    tenantId передаётся первым, receipts фиксируют enrollment-state, policy и
+    provider authority. CURRENT179 freshness regression и disposable
+    PostgreSQL `ACTIVE|DRAINING × HOLD|PENDING` matrix проверяют post-wait
+    state, least-privilege worker role и независимый progress другого tenant.
+    Initial rows матрицы являются diagnostic owner-seeded fixtures только в
+    disposable DB и не заменяют signed coordinator. Candidate не создаёт
+    grants/enrollment, не подключён к DI/CLI и остаётся
+    `NOT_CANONICAL / NOT_DEPLOYABLE`.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
@@ -351,8 +365,8 @@ Merge evidence SHA `9b2f82b2cfdd41b05bf67e71e48df6cdc3e0fda2`, CI
 [`30684863397`](https://github.com/boozik3412/leetplus/actions/runs/30684863397)
 (`run #61`) — `3/3 PASS`; внешний статус остаётся `NO-GO`.
 
-Неканонические candidates не повышают target до `CURRENT_180`, `CURRENT_181`
-или `CURRENT_182`.
+Неканонические candidates не повышают target до `CURRENT_180`, `CURRENT_181`,
+`CURRENT_182` или `CURRENT_183`.
 Promotion запрещён до единого release с worker v2/runtime attestation,
 producer/worker tenant advisory lock, `DRAINING` zero-secret barrier,
 независимо подписанным apply/rollback/zero-diff, production-like

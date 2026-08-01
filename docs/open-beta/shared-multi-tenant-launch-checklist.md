@@ -2,8 +2,8 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.28                                                       |
-| Дата       | 30.07.2026                                                 |
+| Версия     | 1.29                                                       |
+| Дата       | 02.08.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
 | Topology   | `Tenant A/A1..A4` + новый `Tenant B/B1`                    |
@@ -365,6 +365,17 @@ Evidence:
       `3/3 PASS`, review PASS без новых P0; local `168/168`, identity `1/99`
       и shell `2/2` приняты как engineering prerequisites;
 - [ ] email outbox lease/crash/retry drill без утечки raw token;
+- [ ] engineering-only CURRENT183 freshness boundary реализована локально; exact
+      remote PostgreSQL acceptance ожидает CI: bounded
+      `READ COMMITTED`, отдельные settings/tenant-lock/RPC statements, dormant
+      exact-five-RPC worker-v2 adapter и disposable непустая
+      `ACTIVE|DRAINING × HOLD|PENDING`/least-privilege matrix. Initial rows
+      owner-seeded только в disposable DB; checkbox не является deploy,
+      production authority или external-access evidence;
+- [ ] signed enrollment coordinator реально выполняет
+      `ENABLE/BEGIN_DRAIN/RESUME/FINALIZE/rollback`, а production-like
+      stop-v1/apply/grant/start-v2/rollback/zero-diff принят без diagnostic
+      bypass;
 - [ ] delegation/escalation negative matrix;
 - [ ] stale-token и immediate-revoke tests;
 - [ ] owner/network/store browser journeys.

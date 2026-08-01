@@ -175,6 +175,9 @@ jobs:
       - name: Validate dormant non-canonical CURRENT182 tenant-first claim foundation
         run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-foundation
 
+      - name: Validate dormant non-canonical CURRENT183 worker-v2 freshness foundation
+        run: pnpm --filter database check:identity-mail-worker-v2-freshness-current183-foundation
+
       - name: Validate CURRENT182 disposable rehearsal harness
         run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-smoke
 
@@ -450,6 +453,12 @@ jobs:
         env:
           NODE_ENV: test
           IDENTITY_EMAIL_TENANT_LOCK_PG_E2E_CONFIRM: run-identity-email-tenant-lock-cross-path-postgres-e2e
+
+      - name: Verify CURRENT183 non-empty worker-v2 state and freshness matrix
+        run: pnpm --filter api test:integration:identity-mail-worker-v2-current183:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_WORKER_V2_CURRENT183_PG_E2E_CONFIRM: run-identity-mail-worker-v2-current183-postgres-e2e
 
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg

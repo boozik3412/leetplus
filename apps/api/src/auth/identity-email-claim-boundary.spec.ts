@@ -5,6 +5,7 @@ const ALLOWED_IMPLEMENTATION = 'auth/identity-email-claim.service.ts';
 const ALLOWED_TENANT_LOCK_IMPLEMENTATIONS = new Set([
   ALLOWED_IMPLEMENTATION,
   'identity-mail-worker/identity-mail-worker.repository.ts',
+  'identity-mail-worker/identity-mail-worker-v2-candidate.repository.ts',
 ]);
 const ALLOWED_USER_OWNERSHIP_WRITERS = new Set(['auth/auth.service.ts']);
 const ALLOWED_INVITE_WRITERS = new Set([
@@ -54,7 +55,7 @@ describe('Identity email claim application boundary', () => {
     expect(violations).toEqual([]);
   });
 
-  it('shares the exact tenant lock domain only between the claim boundary and worker', async () => {
+  it('shares the exact tenant lock domain only between the claim boundary and workers', async () => {
     const sourceRoot = join(__dirname, '..');
 
     for (const path of ALLOWED_TENANT_LOCK_IMPLEMENTATIONS) {

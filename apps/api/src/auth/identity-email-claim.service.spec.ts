@@ -40,7 +40,7 @@ type ClaimTransactionClientMock = Pick<
 };
 
 const TRANSACTION_SETTINGS = {
-  isolationLevel: 'serializable',
+  isolationLevel: 'read committed',
   readOnly: 'off',
   statementTimeout: '25s',
   lockTimeout: '5s',
@@ -194,7 +194,7 @@ describe('IdentityEmailClaimService', () => {
     const boundary = service();
     const client = transactionClient();
     client.$queryRaw.mockResolvedValueOnce([
-      { ...TRANSACTION_SETTINGS, isolationLevel: 'read committed' },
+      { ...TRANSACTION_SETTINGS, isolationLevel: 'serializable' },
     ]);
 
     await expect(
@@ -211,7 +211,7 @@ describe('IdentityEmailClaimService', () => {
   });
 
   it.each(['40001', '40P01', '55P03', '57014'] as const)(
-    'runs with exact Serializable bounds, retries %s once and returns a typed terminal conflict',
+    'runs with exact Read Committed bounds, retries %s once and returns a typed terminal conflict',
     async (sqlState) => {
       const boundary = service();
       const clients = [transactionClient(), transactionClient()];

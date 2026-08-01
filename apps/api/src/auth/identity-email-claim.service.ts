@@ -26,8 +26,11 @@ const identityEmailClaimTransactionBrand = Symbol(
   'identityEmailClaimTransaction',
 );
 
+// The tenant-lock statement may wait behind a committed tenant mutation. Read
+// Committed makes the following RPC/relation statement start with a fresh
+// snapshot; Serializable would keep the pre-wait snapshot for the transaction.
 export const IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS = {
-  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
   maxWait: 5_000,
   timeout: 30_000,
 } as const;
@@ -221,7 +224,7 @@ export class IdentityEmailClaimService {
       );
       if (
         settings.length !== 1 ||
-        settings[0]?.isolationLevel !== 'serializable' ||
+        settings[0]?.isolationLevel !== 'read committed' ||
         settings[0]?.readOnly !== 'off' ||
         settings[0]?.statementTimeout !== IDENTITY_CLAIM_STATEMENT_TIMEOUT ||
         settings[0]?.lockTimeout !== IDENTITY_CLAIM_LOCK_TIMEOUT
@@ -229,6 +232,8 @@ export class IdentityEmailClaimService {
         throw this.transactionProtocolUnavailable();
       }
 
+      // Keep advisory acquisition in its own statement. Merging the protected
+      // operation here would make it use a snapshot created before lock wait.
       const locks = await tx.$queryRaw<IdentityClaimTenantLockRow[]>(Prisma.sql`
         WITH tenant_lock AS MATERIALIZED (
           SELECT pg_catalog.pg_advisory_xact_lock(
@@ -800,7 +805,7 @@ export class IdentityEmailClaimService {
   private transactionProtocolUnavailable(): ServiceUnavailableException {
     return new ServiceUnavailableException({
       message:
-        'Identity claim command requires a tenant-locked serializable transaction',
+        'Identity claim command requires a tenant-locked read-committed transaction',
       reasonCode: 'IDENTITY_CLAIM_TRANSACTION_REQUIRED',
     });
   }

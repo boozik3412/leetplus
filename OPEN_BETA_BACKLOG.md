@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
-- Дата актуализации: 01.08.2026
-- Версия: 1.82
+- Дата актуализации: 02.08.2026
+- Версия: 1.83
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -3772,7 +3772,8 @@ Candidate находится только в `packages/database/migration-candid
 3. Worker/runtime role name+OID, exact five-function grants и независимая
    CURRENT181 signed runtime attestation; production roots остаются empty.
 4. CURRENT179-compatible API/current-worker adapter реализован в Slice 6:
-   bounded `SERIALIZABLE`, transaction-local timeout и tenant-first lock.
+   bounded `READ COMMITTED`, отдельные settings/tenant-lock/RPC statements и
+   transaction-local timeout.
    Отдельный CURRENT181 worker-v2 runtime adapter, signed attestation и grant
    всё ещё обязательны до promotion.
 5. Acceptance/cancel/revoke/reissue и все IdentityEmailClaim transition paths
@@ -3814,8 +3815,10 @@ status: IMPLEMENTED_IN_BRANCH / NOT_CANONICAL / NOT_DEPLOYABLE
 Slice 6 устраняет подтверждённую инверсию на двух уровнях:
 
 - `IdentityEmailClaimService` выдаёт tenant-bound branded transaction только
-  после exact `SERIALIZABLE`, read-write, `statement_timeout=25s`,
-  `lock_timeout=5s` и общего advisory xact lock;
+  после exact `READ COMMITTED`, read-write, `statement_timeout=25s`,
+  `lock_timeout=5s` и общего advisory xact lock; settings, lock и защищённая
+  операция являются разными statements, поэтому первый read после ожидания
+  получает свежий snapshot;
 - create, reissue/revoke, cancel и accept выполняют invite/User/claim DML
   только внутри этого runner;
 - shell provision/replay соблюдают slug -> tenant locator/new UUID -> tenant
@@ -3869,3 +3872,82 @@ provider-mark/complete lost-response, signed attestation, atomic promotion,
 backfill и production-like apply/rollback/zero-diff остаются открыты. Поэтому
 production остаётся `CURRENT179/179`; deploy, Tenant B/account/invite, SMTP и
 внешний тестовый доступ не выполняются.
+
+### 12.4. `CURRENT183` worker-v2 freshness protocol — 02.08.2026
+
+Точный stacked candidate:
+
+```text
+20260802010000_identity_mail_worker_v2_freshness_protocol
+SQL SHA-256: dea22bfccc97d1758d887a2818f931ade089c780350c9618ee319aebb97db63e
+predecessor: CURRENT182 / 4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22
+status: IMPLEMENTED_IN_BRANCH / NOT_CANONICAL / NOT_DEPLOYABLE
+```
+
+Причина successor-кандидата — snapshot freshness. `SERIALIZABLE` transaction,
+которая прочитала settings до ожидания advisory lock, могла продолжить работу
+с pre-wait snapshot. Новый общий protocol использует короткий bounded
+`READ COMMITTED` transaction и три отдельные фазы:
+
+```text
+settings/timeouts -> tenant advisory xact lock -> protected read/RPC
+```
+
+CURRENT183 меняет только shared tenant-lock helper и worker-v2 readiness:
+
+- helper fail closed требует read-write `READ COMMITTED`, bounded statement
+  timeout и сохраняет прежние domain/seed;
+- `worker_assert_v2` закреплён за exact `CURRENT183/183` receipt и по-прежнему
+  возвращает только `REHEARSAL_READY`, `NOT_DEPLOYABLE`,
+  `authorization=false`, `canSend=false`;
+- exact CURRENT182 predecessor manifest обязателен; candidate применим только
+  в подтверждённой disposable `lp_imtec_<32hex>_ci` БД;
+- relation/schema/role/enrollment/outbox mutation и non-owner grants
+  отсутствуют, CURRENT180 guards сохранены;
+- semantic foundation — `COMPLIANT`, tests `21/21`, self-test содержит шесть
+  fail-closed probes.
+
+Application/current-worker boundary также переведён на `READ COMMITTED` с
+отдельными settings/lock/RPC statements. Whole-transaction retry — максимум
+две попытки всего и только для `P2034/40001/40P01/55P03/57014`; неизвестные
+ошибки не повторяются. CURRENT179 signatures/head/count при этом не меняются.
+CURRENT179 PostgreSQL race дополнен проверкой fresh value после реального
+advisory wait в первой попытке.
+
+Добавлен dormant `PrismaIdentityMailWorkerV2CandidateRepository`, не
+зарегистрированный в DI/config/CLI. Он pinned к exact CURRENT183, вызывает
+ровно пять v2 RPC с tenantId первым, проверяет exact schema-v2 receipts и
+DB-derived state/policy/provider claim bindings. Unit suite — `19/19`; API
+typecheck и targeted ESLint — `PASS`.
+
+Disposable PostgreSQL acceptance содержит реальные непустые
+`ACTIVE|DRAINING × HOLD|PENDING` строки, отдельную least-privilege
+`LOGIN NOINHERIT` worker role, exact five-v2-function allowlist и zero
+v1/helper/reconcile/relation privileges. Freshness race меняет enrollment под
+тем же tenant lock, наблюдает advisory waiter, проверяет committed state в
+первом защищённом RPC, независимый прогресс второго tenant и zero deadlock.
+
+Начальные state-machine строки этой матрицы являются явно диагностическими:
+test-owner создаёт их с локальным bypass triggers/FK только внутри disposable
+БД. Это закрывает worker-v2 state/ACL/freshness evidence, но **не** выдаётся за
+signed coordinator либо production authority. CURRENT180 guards в самом
+candidate не ослаблены.
+
+Документ:
+[CURRENT183 worker v2 freshness](./docs/open-beta/identity-mail-current183-worker-v2-freshness.md).
+
+Открытые P0/P1/P2 после этого slice:
+
+1. independent Ed25519 root/signer и реальные coordinator RPC для signed
+   `ENABLE/BEGIN_DRAIN/RESUME/FINALIZE/rollback`;
+2. zero-secret + zero-inflight finalize, production-history backfill и
+   relational apply/rollback/one-rollback invariants;
+3. event-backed exact replay либо typed reconcile handoff для committed
+   provider-mark/complete lost response;
+4. production-like stop-v1/apply/grant/start-v2/rollback/zero-diff с exact
+   role OID и runtime attestation;
+5. отдельные `PRODUCTION DEPLOY GO` и `SHARED BETA GO`.
+
+Production остаётся `CURRENT179/179`. Четыре текущих клуба остаются
+`Tenant A/Store A1..A4`; `Tenant B/Store B1`, OWNER account/invite, SMTP и
+внешний тестовый доступ не создаются.

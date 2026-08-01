@@ -27,8 +27,11 @@ const IDENTITY_MAIL_TENANT_LOCK_DOMAIN = 'leetplus:identity-mail-tenant:v1:';
 const IDENTITY_MAIL_TENANT_LOCK_SEED = 180;
 const IDENTITY_MAIL_STATEMENT_TIMEOUT = '25s';
 const IDENTITY_MAIL_LOCK_TIMEOUT = '5s';
+// The protected RPC must start after a possibly blocking tenant-lock statement
+// so it observes the lock holder's commit. Read Committed provides that next-
+// statement snapshot while the transaction-scoped advisory lock stays held.
 const IDENTITY_MAIL_TENANT_TRANSACTION_OPTIONS = {
-  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
   maxWait: 5_000,
   timeout: 30_000,
 } as const;
@@ -843,59 +846,75 @@ export class PrismaIdentityMailWorkerRepository implements IdentityMailWorkerRep
       fail('IDENTITY_MAIL_WORKER_TENANT_ID_INVALID');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const settings = await tx.$queryRaw<
-        IdentityMailTenantTransactionSettingsRow[]
-      >(Prisma.sql`
-        SELECT
-          pg_catalog.current_setting('transaction_isolation')
-            AS "isolationLevel",
-          pg_catalog.current_setting('transaction_read_only') AS "readOnly",
-          pg_catalog.set_config(
-            'statement_timeout',
-            ${IDENTITY_MAIL_STATEMENT_TIMEOUT},
-            true
-          ) AS "statementTimeout",
-          pg_catalog.set_config(
-            'lock_timeout',
-            ${IDENTITY_MAIL_LOCK_TIMEOUT},
-            true
-          ) AS "lockTimeout"
-      `);
-      if (
-        settings.length !== 1 ||
-        settings[0]?.isolationLevel !== 'serializable' ||
-        settings[0]?.readOnly !== 'off' ||
-        settings[0]?.statementTimeout !== IDENTITY_MAIL_STATEMENT_TIMEOUT ||
-        settings[0]?.lockTimeout !== IDENTITY_MAIL_LOCK_TIMEOUT
-      ) {
-        fail('IDENTITY_MAIL_WORKER_TENANT_LOCK_PROTOCOL_INVALID');
-      }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          const settings = await tx.$queryRaw<
+            IdentityMailTenantTransactionSettingsRow[]
+          >(Prisma.sql`
+            SELECT
+              pg_catalog.current_setting('transaction_isolation')
+                AS "isolationLevel",
+              pg_catalog.current_setting('transaction_read_only') AS "readOnly",
+              pg_catalog.set_config(
+                'statement_timeout',
+                ${IDENTITY_MAIL_STATEMENT_TIMEOUT},
+                true
+              ) AS "statementTimeout",
+              pg_catalog.set_config(
+                'lock_timeout',
+                ${IDENTITY_MAIL_LOCK_TIMEOUT},
+                true
+              ) AS "lockTimeout"
+          `);
+          if (
+            settings.length !== 1 ||
+            settings[0]?.isolationLevel !== 'read committed' ||
+            settings[0]?.readOnly !== 'off' ||
+            settings[0]?.statementTimeout !== IDENTITY_MAIL_STATEMENT_TIMEOUT ||
+            settings[0]?.lockTimeout !== IDENTITY_MAIL_LOCK_TIMEOUT
+          ) {
+            fail('IDENTITY_MAIL_WORKER_TENANT_LOCK_PROTOCOL_INVALID');
+          }
 
-      const locks = await tx.$queryRaw<IdentityMailTenantLockRow[]>(Prisma.sql`
-        WITH tenant_lock AS MATERIALIZED (
-          SELECT pg_catalog.pg_advisory_xact_lock(
-            pg_catalog.hashtextextended(
-              ${IDENTITY_MAIL_TENANT_LOCK_DOMAIN} || ${tenantId}::TEXT,
-              ${IDENTITY_MAIL_TENANT_LOCK_SEED}
-            )
-          ) AS acquired
-        )
-        SELECT
-          ${tenantId}::TEXT AS "tenantId",
-          pg_catalog.pg_backend_pid()::INTEGER AS "backendPid"
-        FROM tenant_lock
-      `);
-      if (
-        locks.length !== 1 ||
-        locks[0]?.tenantId !== tenantId ||
-        !Number.isInteger(locks[0]?.backendPid)
-      ) {
-        fail('IDENTITY_MAIL_WORKER_TENANT_LOCK_PROTOCOL_INVALID');
-      }
+          // This must remain separate from the RPC below. A single statement
+          // takes its snapshot before an advisory-lock wait begins.
+          const locks = await tx.$queryRaw<IdentityMailTenantLockRow[]>(
+            Prisma.sql`
+              WITH tenant_lock AS MATERIALIZED (
+                SELECT pg_catalog.pg_advisory_xact_lock(
+                  pg_catalog.hashtextextended(
+                    ${IDENTITY_MAIL_TENANT_LOCK_DOMAIN} || ${tenantId}::TEXT,
+                    ${IDENTITY_MAIL_TENANT_LOCK_SEED}
+                  )
+                ) AS acquired
+              )
+              SELECT
+                ${tenantId}::TEXT AS "tenantId",
+                pg_catalog.pg_backend_pid()::INTEGER AS "backendPid"
+              FROM tenant_lock
+            `,
+          );
+          if (
+            locks.length !== 1 ||
+            locks[0]?.tenantId !== tenantId ||
+            !Number.isInteger(locks[0]?.backendPid)
+          ) {
+            fail('IDENTITY_MAIL_WORKER_TENANT_LOCK_PROTOCOL_INVALID');
+          }
 
-      return this.rpc(tx, query);
-    }, IDENTITY_MAIL_TENANT_TRANSACTION_OPTIONS);
+          return this.rpc(tx, query);
+        }, IDENTITY_MAIL_TENANT_TRANSACTION_OPTIONS);
+      } catch (error) {
+        if (!retryableTenantTransactionError(error)) {
+          throw error;
+        }
+        if (attempt === 1) {
+          fail('IDENTITY_MAIL_WORKER_TRANSACTION_RETRY_REQUIRED');
+        }
+      }
+    }
+    return fail('IDENTITY_MAIL_WORKER_TRANSACTION_RETRY_REQUIRED');
   }
 
   private async rpc(
@@ -1179,6 +1198,44 @@ function permanentPreProviderReason(reasonCode: string): boolean {
     reasonCode === 'IDENTITY_MAIL_WORKER_ENTROPY_INVALID' ||
     reasonCode === 'IDENTITY_MAIL_CLAIM_INVALID'
   );
+}
+
+function retryableTenantTransactionError(error: unknown): boolean {
+  const errorCode = databaseErrorCode(error);
+  const sqlState = databaseSqlState(error);
+  return (
+    errorCode === 'P2034' ||
+    sqlState === '40001' ||
+    sqlState === '40P01' ||
+    sqlState === '55P03' ||
+    sqlState === '57014'
+  );
+}
+
+function databaseSqlState(error: unknown): string | null {
+  if (!recordValueOrNull(error)) {
+    return null;
+  }
+  const errorCode = databaseErrorCode(error);
+  if (
+    errorCode === 'P2010' &&
+    recordValueOrNull(error.meta) &&
+    typeof error.meta.code === 'string' &&
+    /^[0-9A-Z]{5}$/u.test(error.meta.code)
+  ) {
+    return error.meta.code;
+  }
+  return errorCode && /^[0-9A-Z]{5}$/u.test(errorCode) ? errorCode : null;
+}
+
+function databaseErrorCode(error: unknown): string | null {
+  return recordValueOrNull(error) && typeof error.code === 'string'
+    ? error.code
+    : null;
+}
+
+function recordValueOrNull(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function fail(reasonCode: string): never {

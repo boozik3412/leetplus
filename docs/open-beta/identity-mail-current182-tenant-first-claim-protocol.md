@@ -9,7 +9,7 @@
 | Stacked prerequisites | dormant `CURRENT180`, dormant `CURRENT181` |
 | CURRENT182 candidate | `20260801030000_identity_mail_tenant_first_claim_protocol` |
 | SQL SHA-256 | `4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22` |
-| Дата | 01.08.2026 |
+| Дата | 02.08.2026 |
 
 ## 1. Решение
 
@@ -18,10 +18,10 @@
 один порядок блокировок:
 
 ```text
-bounded SERIALIZABLE transaction
+bounded READ COMMITTED transaction
   -> transaction-local statement_timeout=25s, lock_timeout=5s
-  -> tenant advisory xact lock
-  -> canonical identity-email advisory lock
+  -> отдельный statement tenant advisory xact lock
+  -> новый statement canonical identity-email lock/read/DML
   -> UserInvite / IdentityEmailClaim / User / outbox relation locks and DML
   -> commit or complete rollback
 ```
@@ -55,9 +55,15 @@ pg_advisory_xact_lock(
 
 Claim API больше не принимает произвольный Prisma transaction client. Он
 принимает только runtime-branded wrapper, созданный после проверки
-`SERIALIZABLE`, read-write режима, локальных timeout и успешного tenant lock.
+`READ COMMITTED`, read-write режима, локальных timeout и успешного tenant lock.
 Wrapper привязан к одному tenant; попытка использовать его для другого tenant
 отклоняется до RPC.
+
+Settings, lock и защищённая операция намеренно являются разными SQL
+statements. В `READ COMMITTED` следующий statement получает snapshot после
+возможного ожидания lock и видит commit держателя. `SERIALIZABLE` сохранял бы
+pre-wait transaction snapshot; объединённый lock+RPC statement также взял бы
+snapshot до ожидания.
 
 Whole-transaction retry ограничен одним повтором. `40001`, `40P01`, `55P03`,
 `57014` и Prisma `P2034` переводятся в типизированный
@@ -112,6 +118,11 @@ PUBLIC execute отозван, новые grants/roles/enrollment не созд�
 
 Frozen CURRENT181 prerequisite не изменён; его SQL SHA-256 остаётся
 `b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455`.
+Его frozen helper исторически требует `SERIALIZABLE`, поэтому CURRENT182
+нельзя связывать с новым runtime изолированно. Stacked successor CURRENT183
+atomically переводит helper на `READ COMMITTED` и repin-ит readiness на
+exact `183/183`; canonical CURRENT179 runtime использует собственный прямой
+advisory-lock statement и не требует candidate helper.
 
 ## 5. Acceptance evidence
 
@@ -127,6 +138,8 @@ Frozen CURRENT181 prerequisite не изменён; его SQL SHA-256 оста�
   `[CURRENT180, CURRENT181, CURRENT182]` и fail-closed unknown/reorder cases;
 - CURRENT182 disposable apply/catalog/ACL/rollback/source-zero-diff smoke;
 - PostgreSQL cross-path fixture на отдельной canonical CURRENT179 clone.
+- post-wait freshness fixture: holder commit обязан быть виден waiter в первой
+  transaction attempt после observed advisory wait.
 
 Текущий локальный результат: application tenant/claim paths `5/5` suites,
 `138/138`; current worker repository `1/1`, `55/55`; identity-mail worker
@@ -149,6 +162,7 @@ PostgreSQL fixture включает:
 - cancel, reissue/revoke и accept против worker lock order;
 - фактический `PrismaIdentityMailWorkerRepository.claimOne()` на CURRENT179;
 - наблюдаемый advisory wait по отдельным backend PID;
+- fresh committed tenant state в первом защищённом read после wait;
 - независимый прогресс Tenant B;
 - application rollback без partial state;
 - реальный recovery после `55P03` и `57014`;
@@ -165,8 +179,9 @@ ACTIVE/DRAINING/coordinator/outbox runtime matrix.
 Этот slice закрывает реализацию общего lock protocol, но сам по себе не даёт
 `SHARED BETA GO` и не разрешает production deploy. До promotion остаются:
 
-1. actual non-empty HOLD/PENDING outbox и ACTIVE/DRAINING worker/coordinator
-   matrix на production-like PostgreSQL;
+1. diagnostic non-empty HOLD/PENDING и ACTIVE/DRAINING worker-v2 matrix
+   реализуется только на disposable PostgreSQL; до promotion всё ещё нужны
+   реальные signed coordinator transitions и production-like acceptance;
 2. P2 provider-mark/complete lost-response replay либо typed reconcile handoff;
 3. signed runtime attestation, exact role OID/grants и enrollment evidence;
 4. backfill, signed apply/rollback/zero-diff, backup/restore и canary;

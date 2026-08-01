@@ -1006,6 +1006,9 @@ async function assertLeastPrivilegeWorkerRole(
     roleConfig: null,
   });
 
+  const allowedRoutineValues = Prisma.join(
+    WORKER_RPC_SIGNATURES.map((signature) => Prisma.sql`(${signature})`),
+  );
   const [surface] = await admin.$queryRaw<
     Array<{
       allowedRoutineCount: number;
@@ -1025,13 +1028,8 @@ async function assertLeastPrivilegeWorkerRole(
     WITH allowed_routine AS (
       SELECT pg_catalog.to_regprocedure(signature)::OID AS oid
       FROM (
-        VALUES
-          ('public."identity_mail_delivery_worker_assert_v2"(text,text)'),
-          ('public."identity_initial_owner_mail_claim_v2"(text,text,text,text)'),
-          ('public."identity_initial_owner_mail_provider_mark_v2"(text,text,integer,text,text,text,text,text)'),
-          ('public."identity_initial_owner_mail_complete_v2"(text,text,integer,text,text,text,text,text,text,text)'),
-          ('public."identity_initial_owner_mail_reap_v2"(text,text,text,integer)')
-        ) AS expected(signature)
+        VALUES ${allowedRoutineValues}
+      ) AS expected(signature)
     ),
     -- Force relkind filtering before has_sequence_privilege; PostgreSQL may
     -- otherwise evaluate it for non-sequence pg_class rows (including TOAST).

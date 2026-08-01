@@ -1031,7 +1031,17 @@ async function assertLeastPrivilegeWorkerRole(
           ('public."identity_initial_owner_mail_provider_mark_v2"(text,text,integer,text,text,text,text,text)'),
           ('public."identity_initial_owner_mail_complete_v2"(text,text,integer,text,text,text,text,text,text,text)'),
           ('public."identity_initial_owner_mail_reap_v2"(text,text,text,integer)')
-      ) AS expected(signature)
+        ) AS expected(signature)
+    ),
+    -- Force relkind filtering before has_sequence_privilege; PostgreSQL may
+    -- otherwise evaluate it for non-sequence pg_class rows (including TOAST).
+    public_sequence AS MATERIALIZED (
+      SELECT sequence.oid
+      FROM pg_catalog.pg_class AS sequence
+      INNER JOIN pg_catalog.pg_namespace AS namespace
+        ON namespace.oid = sequence.relnamespace
+      WHERE namespace.nspname = 'public'
+        AND sequence.relkind = 'S'
     )
     SELECT
       (
@@ -1081,12 +1091,8 @@ async function assertLeastPrivilegeWorkerRole(
       ) AS "columnPrivilegeCount",
       (
         SELECT pg_catalog.count(*)::INTEGER
-        FROM pg_catalog.pg_class AS sequence
-        INNER JOIN pg_catalog.pg_namespace AS namespace
-          ON namespace.oid = sequence.relnamespace
-        WHERE namespace.nspname = 'public'
-          AND sequence.relkind = 'S'
-          AND pg_catalog.has_sequence_privilege(
+        FROM public_sequence AS sequence
+        WHERE pg_catalog.has_sequence_privilege(
             ${roleName},
             sequence.oid,
             'USAGE,SELECT,UPDATE'

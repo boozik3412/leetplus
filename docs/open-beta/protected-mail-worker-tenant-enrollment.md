@@ -2,10 +2,10 @@
 
 Контракт: `PROTECTED_MAIL_WORKER_TENANT_ENROLLMENT_V1`
 Backlog: `BETA-IAM-004K`
-Версия документа: `0.4`
-Дата: `30.07.2026`
-Статус: `FOUNDATION_IMPLEMENTED / READ_ONLY_PREFLIGHT_IMPLEMENTED /
-NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`
+Версия документа: `0.5`
+Дата: `01.08.2026`
+Статус: `DORMANT_SCHEMA_ONLY / NOT_DEPLOYABLE /
+EXTERNAL_PILOT_NO-GO`
 
 ## 1. Назначение
 
@@ -25,9 +25,10 @@ identity-mail worker для ровно одного tenant. Он нужен до
 
 ## 2. Граница текущего slice
 
-Текущий slice не создаёт migration, enrollment row, роль, SMTP credentials,
-production marker, tenant, пользователя или invite. Он содержит только
-неавторизующий `--check`; `apply/rollback` отсутствуют.
+Текущий slice не создаёт canonical migration, enrollment row, роль,
+SMTP credentials, production marker, tenant, пользователя или invite. Он
+содержит неавторизующий `--check` и отдельный неканонический
+schema-candidate; `apply/rollback` отсутствуют.
 
 Реализуется только безопасный фундамент:
 
@@ -286,11 +287,55 @@ pnpm --filter database db:smoke:identity-mail-tenant-enrollment-preflight
 unit/mock-контрактом и остаётся обязательным отдельным gate до реализации
 apply и production-like rehearsal.
 
+### 6.1. Неканонический `CURRENT180` candidate
+
+Для review и disposable rehearsal создан отдельный candidate:
+
+```text
+20260801010000_identity_mail_tenant_enrollment_control_plane
+SQL SHA-256: e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683
+```
+
+Он находится в `packages/database/migration-candidates`, а не в
+`prisma/migrations`. Поэтому canonical target остаётся ровно
+`CURRENT_179 / 179`; historical evidence `BETA-IAM-004J` не
+переписывается.
+
+Candidate добавляет только dormant owner-only foundation:
+
+- `ACTIVE / DRAINING / DISABLED` enrollment state;
+- immutable command envelope без реализации подписи/apply;
+- append-only tenant-wide event chain;
+- fail-closed guards, запрещающие любую запись.
+
+Static contract прошёл `81/81`; self-test проверил `21` probes;
+итоговое решение — `COMPLIANT`. Два независимых PostgreSQL 16.13
+candidate smoke прошли: exact CURRENT179 source остался zero-diff,
+candidate receipt/relation residue отсутствует, disposable clone/temp
+cleanup подтверждён; independent review — P0/P1/P2=`0/0/0`.
+Этот результат не считается promotion и не разрешает production apply.
+
+Prisma-specific rehearsal diagnostic зафиксирован отдельно: при prerequisite
+reject внутри explicit transaction `migrate deploy` наружу показывает
+последующий `25P02`, а failed receipt может остаться без `logs`. Поэтому smoke
+не выводит первичный код из Prisma-ошибки: exact `55000` доказывается
+неизменённым prerequisite-блоком в rollback-only transaction, после чего
+отдельно проверяется failed receipt и обязательный
+`migrate resolve --rolled-back`.
+
+Promotion в canonical `CURRENT_180` запрещён, пока одним atomic
+release не приняты worker v2/runtime attestation, общий producer/worker
+tenant advisory lock, `DRAINING` zero-secret barrier для secret-bearing
+`HOLD/PENDING/RETRY`, независимая
+подпись и signed apply/rollback/zero-diff, production-like rehearsal и
+отдельный `SHARED BETA GO`.
+
 ## 7. Что требуется до apply
 
 Следующие bounded slices обязаны добавить отдельно:
 
-1. additive schema/event migration с `ACTIVE/DRAINING/DISABLED`;
+1. продвинуть неканонический schema/event candidate только
+   вместе с worker v2 и runtime attestation;
 2. append-only PII-free enrollment event ledger;
 3. operator CLI с раздельными `--check`, `--apply`, `--rollback` и exact
    confirmation;
@@ -334,5 +379,5 @@ Role-level enrollment и tenant-level enrollment являются разными
 `SHARED BETA GO` статус остаётся:
 
 ```text
-NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO
+DORMANT_SCHEMA_ONLY / NOT_DEPLOYABLE / EXTERNAL_PILOT_NO-GO
 ```

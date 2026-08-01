@@ -3,11 +3,11 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.22.0                                             |
-| Дата            | 30.07.2026                                         |
+| Версия          | 1.23.0                                             |
+| Дата            | 01.08.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
-| External access | Запрещён до успешного Gate 2                       |
+| External access | Запрещён до Gate 1MT/2 и `SHARED BETA GO`        |
 
 Реальные ID, email, домены интеграций, токены и database URLs в этот файл не
 вносятся. Для них используется защищённая операционная запись; здесь
@@ -18,6 +18,10 @@
 candidate, который должен включать exact additive migrations `163..179` и пройти
 `CURRENT_179`
 admission.
+
+`CURRENT180` candidate
+`20260801010000_identity_mail_tenant_enrollment_control_plane` намеренно
+не входит в canonical migration chain и не меняет этот target.
 
 ## A. Release identity и authority
 
@@ -51,6 +55,20 @@ admission.
       harness-only, no apply, не production deployment.
 - [x] В runtime candidate production authority root registry остаётся exact
       `{}` / `EMPTY / FAIL-CLOSED`; `PRODUCTION_LIKE` остаётся `NO-GO`.
+- [x] Неканонический `CURRENT180` schema-candidate с SQL SHA-256
+      `e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683`
+      прошёл static gate `81/81`, self-test
+      `21` probes и получил `COMPLIANT`; его статус —
+      `DORMANT_SCHEMA_ONLY / NOT_DEPLOYABLE`.
+- [x] Два независимых PostgreSQL 16.13 smoke этого candidate прошли на
+      exact SQL SHA: legacy fixture и ошибочный fence fail-closed, clean
+      `179→candidate 180` принят, source zero-diff и disposable clone/temp
+      cleanup подтверждены; independent review P0/P1/P2=`0/0/0`.
+- [ ] Promotion в canonical `CURRENT_180` принят только в одном
+      atomic release с worker v2/runtime attestation, producer/worker tenant
+      advisory lock, `DRAINING` zero-secret barrier для secret-bearing
+      `HOLD/PENDING/RETRY`, independently signed
+      apply/rollback/zero-diff и production-like rehearsal.
 - [x] Remote PostgreSQL 16 prerequisite `CURRENT_164` зелёный на
       `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI `30423839760`; это
       SYNTHETIC evidence, runtime `CURRENT_164` не принимает.
@@ -499,6 +517,13 @@ admission.
 
 ## I. Internal alpha и решение о внешнем pilot
 
+Этот cutover относится только к существующему
+`Tenant A/Store A1..A4`. Первый внешний клуб создаётся отдельно как
+`Tenant B/Store B1` и получает согласованный scope: геймификация,
+ассортимент/товары, сотрудники целиком, коммуникации, users/roles
+и integrations только внутри своей сети. До отдельного protected
+`SHARED BETA GO` этот доступ остаётся `EXTERNAL_PILOT_NO-GO`.
+
 - [ ] Семь последовательных дней без launch-blocking P0/P1 incident.
 - [ ] Нет cross-tenant/store/PII incident.
 - [ ] Scheduled sync success ≥98%, freshness ≤24h.
@@ -526,6 +551,16 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.23.0`, 01.08.2026 — зафиксирован неканонический
+  `CURRENT180` candidate
+  `20260801010000_identity_mail_tenant_enrollment_control_plane`, SQL SHA-256
+  `e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683`:
+  `DORMANT_SCHEMA_ONLY / NOT_DEPLOYABLE`, static
+  `81/81`, `21` probes, `COMPLIANT`; два независимых PostgreSQL 16.13
+  smoke — `PASS`, source zero-diff/cleanup подтверждены, review
+  P0/P1/P2=`0/0/0`. Canonical target сохранён `CURRENT_179/179`;
+  historical 004J evidence не изменено, cutover и external pilot остаются
+  `NO-GO`.
 - `1.22.0`, 30.07.2026 — living cutover target синхронизирован с terminal
   local candidate `CURRENT_179` (`163..179`, latest
   `20260731120000_identity_mail_delivery_release_head`). Зафиксированы terminal

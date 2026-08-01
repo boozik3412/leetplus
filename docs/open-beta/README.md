@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.47                                         |
-| Дата             | 30.07.2026                                   |
+| Версия           | 1.48                                         |
+| Дата             | 01.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -29,6 +29,9 @@ enterprise-isolation option и не сокращает shared gates.
 - независимая внешняя сеть всегда получает отдельный `Tenant`;
 - первый внешний клуб получает новый `Tenant B` и `Store B1` в общем data
   plane; current `Tenant A/A1..A4` не меняется и не копируется;
+- согласованный scope `Tenant B/B1` включает геймификацию,
+  ассортимент/товары, сотрудников целиком, коммуникации,
+  users/roles и integrations только внутри своей сети;
 - shared web, API, workers, PostgreSQL и Telegram являются целевой topology;
 - OWNER получает email-bound invite, а затем управляет пользователями,
   ролями, клубами и интеграциями только своей сети;
@@ -278,9 +281,16 @@ enterprise-isolation option и не сокращает shared gates.
     file проверяется до Prisma, а database/role/release/tenant/enrollment/drain
     evidence читается одной `READ ONLY REPEATABLE READ` транзакцией.
     Результат всегда `authorization=false/canMutate=false`; signature,
-    runtime-config digest, CURRENT_180 state/event schema и apply/rollback
-    остаются deferred. Slice не создаёт migration/enrollment/role и не
-    разрешает production mutation.
+    runtime-config digest и apply/rollback остаются deferred. Отдельный
+    `CURRENT180` schema-candidate
+    `20260801010000_identity_mail_tenant_enrollment_control_plane` с SQL
+    SHA-256 `e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683`
+    находится вне
+    `prisma/migrations`: `DORMANT_SCHEMA_ONLY / NOT_DEPLOYABLE`. Static gate —
+    `81/81`, self-test — `21` probes, decision — `COMPLIANT`; два
+    независимых PostgreSQL 16.13 smoke — `PASS`, source zero-diff/cleanup
+    подтверждены, review P0/P1/P2=`0/0/0`. Candidate не создаёт
+    enrollment/role, не имеет apply RPC и не разрешает production mutation.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
@@ -288,6 +298,14 @@ checkpoint, а `CURRENT_178` — промежуточным `origin/main` prereq
 Merge evidence SHA `9b2f82b2cfdd41b05bf67e71e48df6cdc3e0fda2`, CI
 [`30684863397`](https://github.com/boozik3412/leetplus/actions/runs/30684863397)
 (`run #61`) — `3/3 PASS`; внешний статус остаётся `NO-GO`.
+
+Неканонический candidate не повышает target до `CURRENT_180`.
+Promotion запрещён до единого release с worker v2/runtime attestation,
+producer/worker tenant advisory lock, `DRAINING` zero-secret barrier,
+независимо подписанным apply/rollback/zero-diff, production-like
+rehearsal и отдельным `SHARED BETA GO`. Historical `004J/CURRENT179`
+evidence остаётся неизменным.
+
 Historical 004I implementation `2540088076997ef228cd68e42165e857575aad86`,
 final accepted evidence head
 `eb056a491bc7ad161addfd8c4d859606231f7f43`, CI

@@ -163,6 +163,9 @@ jobs:
       - name: Validate protected mail-worker tenant enrollment preflight
         run: pnpm --filter database check:identity-mail-tenant-enrollment-preflight
 
+      - name: Validate dormant non-canonical CURRENT180 tenant enrollment foundation
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-foundation
+
       - name: Validate shared beta admission provenance
         run: pnpm --filter database check:shared-beta-admission-provenance
 
@@ -405,6 +408,12 @@ jobs:
         env:
           NODE_ENV: test
           IDENTITY_MAIL_TENANT_ENROLLMENT_PREFLIGHT_SMOKE_CONFIRM: run-identity-mail-tenant-enrollment-preflight-smoke
+
+      - name: Rehearse dormant non-canonical CURRENT179 to CURRENT180 tenant enrollment candidate
+        run: pnpm --filter database db:smoke:identity-mail-tenant-enrollment-current180-candidate
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_TENANT_ENROLLMENT_CURRENT180_CANDIDATE_SMOKE_CONFIRM: run-identity-mail-tenant-enrollment-current180-candidate-smoke
 
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg

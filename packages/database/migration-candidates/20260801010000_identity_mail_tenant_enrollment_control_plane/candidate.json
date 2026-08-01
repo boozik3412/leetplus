@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "contract": "IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_CANDIDATE_V1",
+  "candidate": "20260801010000_identity_mail_tenant_enrollment_control_plane",
+  "ordinal": 180,
+  "predecessor": {
+    "count": 179,
+    "head": "20260731120000_identity_mail_delivery_release_head",
+    "manifestDigest": "3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431",
+    "headChecksum": "c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519"
+  },
+  "migrationSqlSha256": "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683",
+  "authorization": false,
+  "canMutate": false,
+  "status": "DORMANT_SCHEMA_ONLY"
+}

@@ -7,7 +7,7 @@
 | Каноническая production-схема | `CURRENT179 / 179` |
 | Stacked prerequisites | `CURRENT180 -> CURRENT181 -> CURRENT182` |
 | Candidate | `20260802010000_identity_mail_worker_v2_freshness_protocol` |
-| SQL SHA-256 | `dea22bfccc97d1758d887a2818f931ade089c780350c9618ee319aebb97db63e` |
+| SQL SHA-256 | `9c2df1d3462d48d60a90c5f020ca11a8b54faeca3138f77beaa2223c2053e3a1` |
 | Дата | 02.08.2026 |
 
 ## 1. Причина изменения
@@ -135,7 +135,7 @@ COMMITTED helper, CURRENT183 readiness, zero grant/role/DML/schema mutation и
 отсутствие guard-bypass coordinator. PostgreSQL matrix требует явного
 test-only confirmation environment и безопасного PostgreSQL 16 `DATABASE_URL`.
 
-Локальный foundation result: `COMPLIANT`, `21/21`. Exact SQL SHA закреплён
+Локальный foundation result: `COMPLIANT`, `22/22`. Exact SQL SHA закреплён
 не только metadata-файлом, но и самим статическим gate; metadata repin не
 разрешает дополнительный `CREATE`, `ALTER`, `DO` или иной schema drift.
 

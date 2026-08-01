@@ -346,7 +346,7 @@ enterprise-isolation option и не сокращает shared gates.
     non-empty outbox/ACTIVE-DRAINING/coordinator matrix.
 39. [CURRENT183 worker v2 freshness](./identity-mail-current183-worker-v2-freshness.md) —
     stacked successor с SQL SHA-256
-    `dea22bfccc97d1758d887a2818f931ade089c780350c9618ee319aebb97db63e`:
+    `9c2df1d3462d48d60a90c5f020ca11a8b54faeca3138f77beaa2223c2053e3a1`:
     shared helper fail closed требует `READ COMMITTED`, а worker-v2 readiness
     pinned к exact `183/183`. Dormant API adapter вызывает ровно пять v2 RPC,
     tenantId передаётся первым, receipts фиксируют enrollment-state, policy и

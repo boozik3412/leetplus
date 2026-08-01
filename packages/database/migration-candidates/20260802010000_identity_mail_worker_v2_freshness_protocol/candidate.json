@@ -9,7 +9,7 @@
     "manifestDigest": "d30a07005d8df4940b05af4b2c6b340704387ed59446f4334e8765c287c71ffd",
     "headChecksum": "4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22"
   },
-  "migrationSqlSha256": "dea22bfccc97d1758d887a2818f931ade089c780350c9618ee319aebb97db63e",
+  "migrationSqlSha256": "9c2df1d3462d48d60a90c5f020ca11a8b54faeca3138f77beaa2223c2053e3a1",
   "authorization": false,
   "canMutate": false,
   "status": "NOT_DEPLOYABLE"

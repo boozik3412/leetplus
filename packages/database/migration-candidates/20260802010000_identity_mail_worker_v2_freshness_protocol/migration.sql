@@ -447,14 +447,14 @@ BEGIN
         'identity_mail_tenant_lock_v1',
         false,
         'text',
-        'f443f99f51378b16b478238ead767d0beab66acba126444e71abbc6b22c6a702'
+        'c53780aa0df846a4085b01b4c62cbb857f69e0f145a8c72a43ef1af35fafc790'
       ),
       (
         'public."identity_mail_delivery_worker_assert_v2"(text,text)',
         'identity_mail_delivery_worker_assert_v2',
         true,
         'jsonb',
-        'fa0faa75a7ecd332c3dd08ef861489fbb6189aadb6767730c077918433ccad62'
+        '75b529d0e9940fff7ffe6b09fe834b024d0eecc8fb3db40a3a7d9eb24f6d3f63'
       )
   )
   SELECT pg_catalog.count(*)::INTEGER

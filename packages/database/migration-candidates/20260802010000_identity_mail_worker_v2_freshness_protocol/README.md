@@ -24,7 +24,7 @@ that outer sequence is not accepted as freshness evidence.
 The SQL SHA-256 is:
 
 ```text
-dea22bfccc97d1758d887a2818f931ade089c780350c9618ee319aebb97db63e
+9c2df1d3462d48d60a90c5f020ca11a8b54faeca3138f77beaa2223c2053e3a1
 ```
 
 ACTIVE/DRAINING setup is deliberately not fabricated here. Existing

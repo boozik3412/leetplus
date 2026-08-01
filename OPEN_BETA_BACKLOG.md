@@ -3879,7 +3879,7 @@ production остаётся `CURRENT179/179`; deploy, Tenant B/account/invite, S
 
 ```text
 20260802010000_identity_mail_worker_v2_freshness_protocol
-SQL SHA-256: dea22bfccc97d1758d887a2818f931ade089c780350c9618ee319aebb97db63e
+SQL SHA-256: 9c2df1d3462d48d60a90c5f020ca11a8b54faeca3138f77beaa2223c2053e3a1
 predecessor: CURRENT182 / 4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22
 status: IMPLEMENTED_IN_BRANCH / NOT_CANONICAL / NOT_DEPLOYABLE
 ```
@@ -3904,7 +3904,7 @@ CURRENT183 меняет только shared tenant-lock helper и worker-v2 read
   в подтверждённой disposable `lp_imtec_<32hex>_ci` БД;
 - relation/schema/role/enrollment/outbox mutation и non-owner grants
   отсутствуют, CURRENT180 guards сохранены;
-- semantic foundation — `COMPLIANT`, tests `21/21`, self-test содержит шесть
+- semantic foundation — `COMPLIANT`, tests `22/22`, self-test содержит шесть
   fail-closed probes.
 
 Application/current-worker boundary также переведён на `READ COMMITTED` с

@@ -158,6 +158,19 @@ test("rejects extra routine surface", async () => {
   );
 });
 
+test("pins PostgreSQL prosrc hashes with both dollar-quote boundary linefeeds", async () => {
+  const { sql } = await source();
+  await expectFinding(
+    {
+      sql: sql.replace(
+        "c53780aa0df846a4085b01b4c62cbb857f69e0f145a8c72a43ef1af35fafc790",
+        "f443f99f51378b16b478238ead767d0beab66acba126444e71abbc6b22c6a702",
+      ),
+    },
+    F.ROUTINE_SURFACE_DRIFT,
+  );
+});
+
 test("rejects direct relation mutation", async () => {
   const { sql } = await source();
   await expectFinding(

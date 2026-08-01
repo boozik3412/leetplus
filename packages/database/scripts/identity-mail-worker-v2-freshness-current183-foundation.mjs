@@ -39,7 +39,7 @@ const EXPECTED_PREDECESSOR_MANIFEST_DIGEST =
 const EXPECTED_PREDECESSOR_SHA256 =
   "4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22";
 const EXPECTED_CURRENT183_SHA256 =
-  "dea22bfccc97d1758d887a2818f931ade089c780350c9618ee319aebb97db63e";
+  "9c2df1d3462d48d60a90c5f020ca11a8b54faeca3138f77beaa2223c2053e3a1";
 const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
   "20260801010000_identity_mail_tenant_enrollment_control_plane",
   "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
@@ -274,7 +274,9 @@ function inspectSql(sql, findings) {
 
   for (const body of [lockBody, assertBody]) {
     if (body === null) continue;
-    const bodyDigest = sha256(body);
+    // pg_proc.prosrc retains both LF characters inside `AS $$\n...\n$$`.
+    // Pin the catalog representation, not only the text captured between them.
+    const bodyDigest = sha256(`\n${body}\n`);
     if (!sql.includes(`'${bodyDigest}'`)) {
       findings.push(F.ROUTINE_SURFACE_DRIFT);
     }

@@ -101,6 +101,7 @@ describePostgres(
           canCreateDatabase: boolean;
           canCreateRole: boolean;
           canSetSessionReplicationRole: boolean;
+          canReadAllStats: boolean;
         }>
       >(Prisma.sql`
         SELECT
@@ -112,7 +113,12 @@ describePostgres(
             CURRENT_USER,
             'session_replication_role',
             'SET'
-          ) AS "canSetSessionReplicationRole"
+          ) AS "canSetSessionReplicationRole",
+          role.rolsuper OR pg_catalog.pg_has_role(
+            CURRENT_USER,
+            'pg_read_all_stats',
+            'USAGE'
+          ) AS "canReadAllStats"
         FROM pg_catalog.pg_roles AS role
         WHERE role.rolname = CURRENT_USER
       `);
@@ -121,6 +127,7 @@ describePostgres(
         canCreateDatabase: true,
         canCreateRole: true,
         canSetSessionReplicationRole: true,
+        canReadAllStats: true,
       });
 
       await maintenance.$executeRawUnsafe(
@@ -497,7 +504,19 @@ describePostgres(
             timeout: 30_000,
           },
         );
-        await holderLocked.promise;
+        await Promise.race([
+          holderLocked.promise,
+          holderPromise.then(
+            () => {
+              throw new Error(
+                'Holder transaction ended before exposing the tenant lock',
+              );
+            },
+            (error: unknown) => {
+              throw error;
+            },
+          ),
+        ]);
 
         waiterOutcomePromise = capture(
           claim(repository, contended, 'freshness-waiter'),

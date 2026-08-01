@@ -132,7 +132,7 @@ describePostgres(
             AS "postgresMajor",
           role.rolcreatedb OR role.rolsuper AS "canCreateDatabase"
         FROM pg_catalog.pg_roles AS role
-        WHERE role.rolname = pg_catalog.current_user
+        WHERE role.rolname = CURRENT_USER
       `);
       expect(server).toEqual({
         postgresMajor: 16,

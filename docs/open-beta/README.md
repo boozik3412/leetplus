@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.52                                         |
+| Версия           | 1.53                                         |
 | Дата             | 01.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -337,7 +337,12 @@ enterprise-isolation option и не сокращает shared gates.
     retire-ит три legacy v1 writer. Candidate остаётся
     `NOT_CANONICAL / NOT_DEPLOYABLE`; PostgreSQL acceptance включает actual
     CURRENT179 repository `claimOne` и relation-level synthetic race matrix,
-    но не заменяет non-empty outbox/ACTIVE-DRAINING/coordinator evidence.
+    exact evidence SHA `dd8b541727565f2ac5154c1731d9bf73a5744d91`,
+    GitHub Actions
+    [`30709619765`](https://github.com/boozik3412/leetplus/actions/runs/30709619765)
+    (`run #72`) — `3/3 PASS`, включая `8/8` cross-path PostgreSQL races,
+    zero `40P01`, source zero-diff и cleanup. Это evidence не заменяет
+    non-empty outbox/ACTIVE-DRAINING/coordinator matrix.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail

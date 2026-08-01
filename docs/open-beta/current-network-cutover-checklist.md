@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.24.3                                             |
+| Версия          | 1.24.4                                             |
 | Дата            | 01.08.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -111,11 +111,13 @@ admission.
       завершены одним atomic release: database worker-v2 rehearsal и race
       matrix уже приняты, но API v2, producer/activation v2, coordinators,
       grants и реальные ACTIVE/DRAINING fixtures отсутствуют.
-- [ ] Remote PostgreSQL CI принял actual CURRENT179 repository `claimOne`
+- [x] Remote PostgreSQL CI принял actual CURRENT179 repository `claimOne`
       race и relation-level create/accept/cancel/reissue fixtures с
       commit/rollback/`55P03`/`57014`, two-tenant progress, zero `40P01`,
-      source zero-diff и cleanup. Локально fixture только скомпилирован:
-      PostgreSQL/Docker отсутствуют.
+      source zero-diff и cleanup. Exact evidence SHA
+      `dd8b541727565f2ac5154c1731d9bf73a5744d91`, GitHub Actions
+      [`30709619765`](https://github.com/boozik3412/leetplus/actions/runs/30709619765)
+      (`run #72`) — `3/3 PASS`, cross-path fixture — `8/8 PASS`.
 - [ ] Полный worker-v2 × accept/cancel/revoke/reissue matrix принят для
       non-empty HOLD/PENDING outbox, ACTIVE/DRAINING coordinator и runtime
       grants; actual CURRENT179 `EMPTY` claim и synthetic relation order не

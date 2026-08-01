@@ -134,8 +134,14 @@ package `8/8`, `243/243`; full API `116/116`, `2510 PASS / 2 todo`. API
 production typecheck, targeted ESLint и build — `PASS`. CURRENT182 foundation
 — `15/15`, smoke self-test — `7/7`; successor-aware CURRENT180/CURRENT181
 foundation — `84/84` и `85/85`.
-Восемь PostgreSQL cross-path tests компилируются и обнаруживаются, но до
-удалённого CI остаются gated, потому что локальный PostgreSQL не используется.
+Удалённое acceptance evidence: exact SHA
+`dd8b541727565f2ac5154c1731d9bf73a5744d91`, GitHub Actions
+[`30709619765`](https://github.com/boozik3412/leetplus/actions/runs/30709619765)
+(`run #72`) — `3/3 PASS`. PostgreSQL job принял все восемь cross-path tests
+на отдельном disposable canonical CURRENT179 clone; `pg_stat_database.deadlocks`
+не изменился, `40P01` не наблюдался, source database осталась zero-diff,
+временные database и role удалены. Локально fixture по-прежнему только
+компилируется и обнаруживается, потому что локальный PostgreSQL не используется.
 
 PostgreSQL fixture включает:
 

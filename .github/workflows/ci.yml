@@ -160,6 +160,9 @@ jobs:
       - name: Validate protected mail-worker tenant enrollment proposal
         run: pnpm --filter database check:identity-mail-tenant-enrollment-contract
 
+      - name: Validate protected mail-worker tenant enrollment preflight
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-preflight
+
       - name: Validate shared beta admission provenance
         run: pnpm --filter database check:shared-beta-admission-provenance
 
@@ -287,7 +290,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d leetplus_ci"
+          --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -396,6 +399,12 @@ jobs:
         env:
           NODE_ENV: test
           IDENTITY_MAIL_WORKER_ENROLLMENT_SMOKE_CONFIRM: run-identity-mail-worker-enrollment-upgrade-smoke
+
+      - name: Verify read-only two-tenant mail enrollment preflight
+        run: pnpm --filter database db:smoke:identity-mail-tenant-enrollment-preflight
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_TENANT_ENROLLMENT_PREFLIGHT_SMOKE_CONFIRM: run-identity-mail-tenant-enrollment-preflight-smoke
 
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg

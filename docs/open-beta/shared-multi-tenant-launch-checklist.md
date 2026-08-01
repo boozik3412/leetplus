@@ -233,6 +233,11 @@ Evidence:
       как correlation evidence, отдельный versioned encryption key и очищает
       ciphertext после terminal state; ambiguous provider attempt уходит в
       reconciliation без blind resend.
+- [x] Read-only tenant-enrollment preflight проверяет canonical proposal до
+      Prisma и читает database/role/release/tenant/enrollment/drain evidence
+      одной `READ ONLY REPEATABLE READ` транзакцией. Он всегда
+      `authorization=false/canMutate=false`; это engineering evidence, а не
+      разрешение на enrollment, SMTP или invite.
 - [x] Engineering `BETA-IAM-004E` checkpoint принят: exact-head
       `f09383563bbcc22e11e0e67ca597360cf8996f4b`, CI `30488598755`
       (`run #43`) — `3/3 PASS`; independent review — `PASS`. Browser fragment

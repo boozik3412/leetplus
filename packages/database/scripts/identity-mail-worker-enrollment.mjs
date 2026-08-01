@@ -798,14 +798,17 @@ export async function inspectIdentityMailWorkerEnrollment(prisma, config) {
     IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION,
   );
 
-  const [enrollment] = await prisma.$queryRawUnsafe(`
-    SELECT
-      pg_catalog.count(*)::INTEGER AS total_count,
-      pg_catalog.count(*) FILTER (
-        WHERE "enabled" = true
-      )::INTEGER AS enabled_count
-    FROM public."IdentityMailDeliveryTenantEnrollment"
-  `);
+  let enrollment = null;
+  if (config.skipTenantEnrollmentSummary !== true) {
+    [enrollment] = await prisma.$queryRawUnsafe(`
+      SELECT
+        pg_catalog.count(*)::INTEGER AS total_count,
+        pg_catalog.count(*) FILTER (
+          WHERE "enabled" = true
+        )::INTEGER AS enabled_count
+      FROM public."IdentityMailDeliveryTenantEnrollment"
+    `);
+  }
 
   const functions = [];
   for (const entry of ALL_DELIVERY_FUNCTIONS) {

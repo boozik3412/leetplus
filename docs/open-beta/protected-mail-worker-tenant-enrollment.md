@@ -2,10 +2,10 @@
 
 Контракт: `PROTECTED_MAIL_WORKER_TENANT_ENROLLMENT_V1`
 Backlog: `BETA-IAM-004K`
-Версия документа: `0.3`
+Версия документа: `0.4`
 Дата: `30.07.2026`
-Статус: `FOUNDATION_IMPLEMENTED / PROPOSAL_CONTRACT_ONLY / NOT_DEPLOYED /
-EXTERNAL_PILOT_NO-GO`
+Статус: `FOUNDATION_IMPLEMENTED / READ_ONLY_PREFLIGHT_IMPLEMENTED /
+NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`
 
 ## 1. Назначение
 
@@ -26,8 +26,8 @@ identity-mail worker для ровно одного tenant. Он нужен до
 ## 2. Граница текущего slice
 
 Текущий slice не создаёт migration, enrollment row, роль, SMTP credentials,
-production marker, tenant, пользователя или invite. Он не содержит
-`check/apply/rollback` и не является authorization.
+production marker, tenant, пользователя или invite. Он содержит только
+неавторизующий `--check`; `apply/rollback` отсутствуют.
 
 Реализуется только безопасный фундамент:
 
@@ -42,6 +42,9 @@ production marker, tenant, пользователя или invite. Он не с�
 4. future ceremony proposal имеет строгий PII/secret-free parser, но явно
    возвращает `authorization=false` и `canMutate=false`;
 5. production registry остаётся пустым по умолчанию.
+6. read-only preflight сопоставляет proposal с независимо прочитанными
+   database/role/release/tenant/enrollment/drain evidence, но всегда возвращает
+   `authorization=false` и `canMutate=false`.
 
 Исторические SQL-функции и их positional signatures не переименовываются:
 они checksum/prosrc-pinned. Их аргумент с историческим именем
@@ -198,7 +201,92 @@ Parser:
 - возвращает deterministic `contentDigest`;
 - не проверяет production signature и поэтому никогда не авторизует mutation.
 
-## 6. Что требуется до apply
+## 6. Read-only preflight
+
+Контракт `PROTECTED_MAIL_WORKER_TENANT_ENROLLMENT_PREFLIGHT_V1` является
+inspection gate, а не ceremony допуска. CLI принимает только:
+
+```text
+node scripts/identity-mail-tenant-enrollment-preflight.cli.mjs \
+  --check --proposal-file <canonical-json-path>
+```
+
+Файл proposal должен быть regular UTF-8 без BOM/NUL, не больше `64 KiB` и
+содержать canonical JSON без whitespace, duplicate или trailing fields.
+Shape, срок и transition проверяются до импорта Prisma: malformed/expired
+proposal не открывает database connection.
+
+Target provider authority и пять policy-параметров берутся из отдельного
+operator environment, а не копируются из proposal:
+
+```text
+IDENTITY_MAIL_TENANT_ENROLLMENT_PROVIDER_AUTHORITY_DIGEST
+IDENTITY_MAIL_TENANT_ENROLLMENT_POLICY_ACKNOWLEDGE_SECONDS
+IDENTITY_MAIL_TENANT_ENROLLMENT_POLICY_BASE_RETRY_SECONDS
+IDENTITY_MAIL_TENANT_ENROLLMENT_POLICY_LEASE_SECONDS
+IDENTITY_MAIL_TENANT_ENROLLMENT_POLICY_MAX_ATTEMPTS
+IDENTITY_MAIL_TENANT_ENROLLMENT_POLICY_MAX_RETRY_SECONDS
+```
+
+В текущем bounded slice `DATABASE_URL` допускает только exact numeric
+`127.0.0.1` или `[::1]`, safe non-system database и единственный
+`schema=public`. Remote host, `localhost`, normalized IPv4 alias, fragment,
+duplicate/extra option и любой TLS downgrade отклоняются до Prisma. Поэтому
+production-like check запускается локально на целевом DB host; remote
+strict-TLS transport и его фактическое TLS evidence должны приниматься
+отдельным последующим контрактом, а не неявным fallback.
+
+Один `READ ONLY REPEATABLE READ` snapshot проверяет:
+
+- PostgreSQL 16, database name/OID, exact `CURRENT_179` и count `179`;
+- exact worker role name/OID, non-privileged attributes, database/schema ACL,
+  zero table/column/sequence access, ровно пять разрешённых delivery RPC;
+- только указанный tenant, его legacy enrollment и число `CLAIMED`;
+- текущий unrevoked/unexpired deployment marker, build/challenge/database/
+  actual-context bindings и exact release SHA;
+- independently configured provider authority и bounded delivery policy.
+
+Отчёт содержит только PII/secret-free projection, sorted findings и
+deterministic digests. `MATCHED` означает только отсутствие расхождений в
+прочитанном snapshot. Он не является подписью, persisted decision или
+разрешением на mutation. Следующие controls всегда перечислены как deferred:
+
+```text
+APPLY_ROLLBACK
+INDEPENDENT_SIGNATURE
+PERSISTED_REQUEST_REPLAY
+RUNTIME_CONFIG_DIGEST
+STATE_EVENT_MIGRATION
+```
+
+`runtimeConfigDigest` намеренно не сравнивается с самим собой: `CURRENT_179`
+не содержит независимого database source этого process-level evidence.
+CLI возвращает exit `0` только для `MATCHED`, exit `2` для успешно
+сформированного `BLOCKED` report и exit `1` для contract/I/O/database error.
+Ни один из этих кодов не является apply authorization.
+
+Обязательный static/unit gate:
+
+```text
+pnpm --filter database check:identity-mail-tenant-enrollment-preflight
+```
+
+PostgreSQL gate требует явного test-confirmation, клонирует только loopback
+`*_ci` database в случайную disposable `*_ci`, проверяет один `DISABLED` и
+один `ABSENT` tenant, zero-diff protected relations/source и удаляет только
+повторно проверенный clone:
+
+```text
+pnpm --filter database db:smoke:identity-mail-tenant-enrollment-preflight
+```
+
+Текущий PostgreSQL gate намеренно подтверждает fail-closed путь `BLOCKED` при
+отсутствующих exact worker role и release marker. Позитивный real-PostgreSQL
+путь `MATCHED` с точной ролью, пятью RPC и актуальным marker пока покрыт
+unit/mock-контрактом и остаётся обязательным отдельным gate до реализации
+apply и production-like rehearsal.
+
+## 7. Что требуется до apply
 
 Следующие bounded slices обязаны добавить отдельно:
 
@@ -220,7 +308,7 @@ Parser:
 Role-level enrollment и tenant-level enrollment являются разными ceremony.
 Приложение не создаёт worker role и не получает полномочия изменять registry.
 
-## 7. Acceptance matrix
+## 8. Acceptance matrix
 
 До engineering acceptance 004K обязательны:
 
@@ -238,7 +326,7 @@ Role-level enrollment и tenant-level enrollment являются разными
 - independent review не имеет P0/P1/P2;
 - exact-SHA GitHub CI проходит `3/3`.
 
-## 8. Release decision
+## 9. Release decision
 
 Текущий slice не разрешает production deploy или внешний доступ.
 Реальный email тестировщика, пароль, Tenant B, Store B1 и owner invite не

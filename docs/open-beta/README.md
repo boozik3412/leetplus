@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.46                                         |
+| Версия           | 1.47                                         |
 | Дата             | 30.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -273,17 +273,21 @@ enterprise-isolation option и не сокращает shared gates.
     контракт `BETA-IAM-004K`: provider authority отделена от полного runtime
     config, tenant allowlist больше не ротирует authority существующей сети,
     описаны `ACTIVE/DRAINING/DISABLED`, единый lock order и будущая
-    operator-only ceremony. Worker/config foundation реализован; только
-    proposal parser остаётся contract-only. Slice не создаёт
-    migration/enrollment/role, не содержит apply path и не разрешает
-    production mutation.
+    operator-only ceremony. Worker/config foundation и contract-only proposal
+    parser дополнены неавторизующим read-only preflight: bounded canonical
+    file проверяется до Prisma, а database/role/release/tenant/enrollment/drain
+    evidence читается одной `READ ONLY REPEATABLE READ` транзакцией.
+    Результат всегда `authorization=false/canMutate=false`; signature,
+    runtime-config digest, CURRENT_180 state/event schema и apply/rollback
+    остаются deferred. Slice не создаёт migration/enrollment/role и не
+    разрешает production mutation.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
 checkpoint, а `CURRENT_178` — промежуточным `origin/main` prerequisite.
-Exact evidence SHA `4bdad8c2e6a0f2efc86d54c487bfdc9bf2d9c899`, CI
-[`30661123961`](https://github.com/boozik3412/leetplus/actions/runs/30661123961)
-(`run #60`) — `3/3 PASS`; внешний статус остаётся `NO-GO`.
+Merge evidence SHA `9b2f82b2cfdd41b05bf67e71e48df6cdc3e0fda2`, CI
+[`30684863397`](https://github.com/boozik3412/leetplus/actions/runs/30684863397)
+(`run #61`) — `3/3 PASS`; внешний статус остаётся `NO-GO`.
 Historical 004I implementation `2540088076997ef228cd68e42165e857575aad86`,
 final accepted evidence head
 `eb056a491bc7ad161addfd8c4d859606231f7f43`, CI

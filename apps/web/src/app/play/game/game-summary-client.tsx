@@ -2513,6 +2513,7 @@ function QuestDetailsModal({
             data={preview}
             mode="full"
             showLabels={false}
+            className="!p-2 sm:!p-3"
             onAction={() => {
               if (claiming) {
                 return;
@@ -11764,6 +11765,13 @@ const clubHomeCss = `
   background:
     linear-gradient(135deg, rgba(131, 228, 236, 0.1), transparent 44%),
     rgba(5, 12, 14, 0.98);
+}
+
+.lp-quest-details-dialog {
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  padding: 20px;
 }
 
 .lp-lootbox-unavailable-kicker {

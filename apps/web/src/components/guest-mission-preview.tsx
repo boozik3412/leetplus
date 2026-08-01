@@ -326,8 +326,8 @@ export function GuestMissionPreview({
                 {data.description}
               </p>
             </div>
-            <div className="space-y-3 p-4">
-              <PreviewBlock label="Условие" palette={palette}>
+            <div className="space-y-4 p-5">
+              <PreviewBlock label="Условие" palette={palette} variant="plain">
                 <p className="text-sm font-bold text-white">{data.condition}</p>
               </PreviewBlock>
               {data.products?.length ? (
@@ -356,7 +356,7 @@ export function GuestMissionPreview({
                   ) : null}
                 </PreviewBlock>
               ) : null}
-              <PreviewBlock label="Прогресс" palette={palette}>
+              <PreviewBlock label="Прогресс" palette={palette} variant="plain">
                 <div className="flex items-center justify-between gap-3 text-sm font-black">
                   <span>{progress}</span>
                   <span>{Math.round(percent)}%</span>
@@ -395,13 +395,21 @@ function PreviewBlock({
   label,
   children,
   palette,
+  variant = "card",
 }: {
   label: string;
   children: ReactNode;
   palette: MissionPreviewPalette;
+  variant?: "card" | "plain";
 }) {
   return (
-    <div className={`rounded-xl border p-3 ${palette.block}`}>
+    <div
+      className={
+        variant === "plain"
+          ? "px-0 py-2"
+          : `rounded-xl border p-3 ${palette.block}`
+      }
+    >
       <p
         className={`mb-2 text-[10px] font-bold uppercase tracking-[0.14em] ${palette.blockLabel}`}
       >

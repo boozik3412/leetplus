@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.29                                                       |
+| Версия     | 1.30                                                       |
 | Дата       | 02.08.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -365,13 +365,18 @@ Evidence:
       `3/3 PASS`, review PASS без новых P0; local `168/168`, identity `1/99`
       и shell `2/2` приняты как engineering prerequisites;
 - [ ] email outbox lease/crash/retry drill без утечки raw token;
-- [ ] engineering-only CURRENT183 freshness boundary реализована локально; exact
-      remote PostgreSQL acceptance ожидает CI: bounded
-      `READ COMMITTED`, отдельные settings/tenant-lock/RPC statements, dormant
-      exact-five-RPC worker-v2 adapter и disposable непустая
-      `ACTIVE|DRAINING × HOLD|PENDING`/least-privilege matrix. Initial rows
-      owner-seeded только в disposable DB; checkbox не является deploy,
-      production authority или external-access evidence;
+- [x] engineering-only CURRENT183 freshness boundary принята на exact
+      `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`, GitHub Actions
+      [`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)
+      (`run #79`) — `3/3 PASS`: bounded `READ COMMITTED`, отдельные
+      settings/tenant-lock/RPC statements, dormant exact-five-RPC worker-v2
+      adapter и disposable непустая
+      `ACTIVE|DRAINING × HOLD|PENDING`/least-privilege matrix. `ACTIVE/PENDING`
+      claim-ится, `ACTIVE/HOLD` остаётся пустым, оба `DRAINING` варианта fail
+      closed с `42501`; waiter читает свежее состояние после lock, другой
+      tenant продолжает работу, `40P01` отсутствует. Initial rows owner-seeded
+      только в disposable DB; checkbox не является deploy, production
+      authority или external-access evidence;
 - [ ] signed enrollment coordinator реально выполняет
       `ENABLE/BEGIN_DRAIN/RESUME/FINALIZE/rollback`, а production-like
       stop-v1/apply/grant/start-v2/rollback/zero-diff принят без diagnostic

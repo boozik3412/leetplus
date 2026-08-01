@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 02.08.2026
-- Версия: 1.83
+- Версия: 1.84
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -232,7 +232,7 @@
 | BETA-IAM-004H | P0        | Готово        | `SIGNED_ADMISSION_PROVENANCE_ASSERT_V1`                   | Migration 172 создаёт sealed Ed25519-bound gate attestations, tenant admission decision и exact three-gate links. Подпись связывает заявленные release SHA/environment/schema/artifact/policy/database identity, tenant, locator, исходную reservation claim/execution/profile revisions, claimed `shellEvidenceDigest` и deterministic six-module profile digest; assert принимает current identity только как exact `RESERVATION` либо доказанный immutable command + live `OWNER/NETWORK` invite + encrypted `HOLD` outbox (`ISSUED_HOLD`). Сам checkpoint не доказывает, что заявленная database/release identity является фактическим текущим контекстом процесса, а `shellEvidenceDigest` — фактическим Store/OWNER override/provisioning-audit состоянием. Решение допускает только create/assert/revoke; consume запрещён до activation. Production root registry пуст и fail-closed; application/PUBLIC не имеют table/column/function privileges, runtime allowlist остаётся `7`. PG16 clean/populated/hostile ACL/races, exact catalog verify, `seal→one RPC→persisted→open`, LF-stable archive и independent reviews приняты. Migration `58f0ee03...`, catalog snapshot `3f53d6aa...`, implementation `12d574166bffe860205b128dd9d092f4f54514fc`, CI `30509157338` (`run #53`) — `3/3 PASS`, P0/P1/P2=0. `HOLD→PENDING`, independently acquired actual-context/actual-shell binding, SMTP/worker, tenant/trial mutation, route, production deploy и tester account не входят; внешний `NO-GO` не изменён       | BETA-IAM-004G, BETA-TEN-008, BETA-SEC-008..010                              |
 | BETA-IAM-004I | P0        | Готово        | `ACTIVATE_AND_RELEASE_OWNER_INVITE_V1`                    | Sealed activation writer под persisted GO и фиксированным lock order независимо доказывает actual DB/release/environment/schema/artifact/policy context и exact tenant shell, затем одной transaction выполняет dormant OWNER issue, повторный assert, signed finite trial, `ACTIVE/OWNER_INVITED`, GO consume и единственный `HOLD→PENDING`; replay не создаёт новый secret и до возврата receipt повторно проверяет current marker, exact `session_user` name/OID и глобальную coordinator ACL. Trust разделён на admission, CI build и ops deployment; production roots пока пусты. Accepted populated `172→173→174`, clean `174/174`, hostile ACL rollback/retry, `1 ACTIVATED + 99 REPLAYED`, fault rollback, PUBLIC/direct enum-domain type drift, PUBLIC/bystander/recreated-role rejection, exact typed provenance replay и runtime enrollment `7` RPC / `12` tables / `232` columns / `2` sealed types. Implementation `2540088076997ef228cd68e42165e857575aad86`; final accepted evidence head `eb056a491bc7ad161addfd8c4d859606231f7f43`; CI `30592173595` (`run #57`) — `3/3 PASS`; independent reviews P0/P1/P2=0. Runs `30560278803` (`#55`) и `30587233880` (`#56`) отклонены и не являются evidence. Статус: `ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`; product approval trial duration, production root enrollment, production-like rehearsal, delivery worker/SMTP, admin route, deployment и tester invite не входят в checkpoint и остаются закрытыми                               | BETA-IAM-004H, BETA-TEN-008, BETA-OPS-002, BETA-OPS-004                     |
 | BETA-IAM-004J | P0        | Готово        | `LEASED_INITIAL_OWNER_MAIL_DELIVERY_V1`                   | Immutable identity checkpoint `CURRENT_176` интегрирован в accepted terminal `CURRENT_179 / 20260731120000_identity_mail_delivery_release_head`; `CURRENT_178` остаётся промежуточным merged prerequisite. Encrypted leased worker, tenant/provider-bound readiness/claim, CAS/retry/dead/reconciliation, provider marker с удалением ciphertext до SMTP, append-only events, five-RPC worker role, PII-free `SENT` assertion и двойной preview/accept gate приняты. Clean `179/179`, три migration history, tamper/drift/hostile ACL, trusted TLS SMTP, two-tenant canary, full API и independent review проходят. Exact evidence SHA `4bdad8c2e6a0f2efc86d54c487bfdc9bf2d9c899`, CI `30661123961` (`run #60`) — `3/3 PASS`, P0/P1/P2=0. Production SMTP/role/tenant enrollment, admin route, реальная отправка, deploy, restart/drain и tester invite не выполнялись; `ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | BETA-IAM-004I, BETA-SEC-008..010, BETA-OPS-004                              |
-| BETA-IAM-004K | P0        | В работе      | `PROTECTED_MAIL_WORKER_TENANT_ENROLLMENT_V1`              | Slice 1 отделяет per-tenant `providerAuthorityDigest`; Slice 2 даёт read-only preflight на canonical `CURRENT_179/179`; Slice 3 — dormant CURRENT180, implementation `475e9be...`, CI `#64` `3/3 PASS`; Slice 4 — pure Ed25519 command/runtime-attestation verifiers с frozen empty production roots; Slice 5 — dormant CURRENT181 worker-v2/reconcile, SHA `b78b40ce...f455`, implementation `abbfe561...`, CI `#66` `3/3 PASS`. Current Slice 6 устраняет P1 на CURRENT179-compatible runtime: create/reissue/revoke/cancel/accept, provisioning и suspend используют bounded tenant-first transaction; current worker tenant-addressed RPC идут через тот же lock, а outbox-only marker/completion требуют exact DB-derived `CLAIMED` binding до транзакции. Добавлен dormant CURRENT182 `20260801030000_identity_mail_tenant_first_claim_protocol`, SHA `4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22`: пять tenant-first claim bodies, три legacy `55000` stubs, owner-only ACL; foundation `15/15`, smoke self-test `7/7` с derived exact CURRENT181 manifest и typed PostgreSQL probes. API local evidence: application claim paths `138/138`, current worker `55/55`, full `2510 PASS / 2 todo`. Remote real-PG acceptance принята на exact `dd8b541727565f2ac5154c1731d9bf73a5744d91`, CI `#72` `3/3 PASS`: cross-path `8/8`, zero `40P01`, source zero-diff и cleanup; actual CURRENT179 `EMPTY` claim + synthetic relation matrix не заменяют non-empty HOLD/PENDING и ACTIVE/DRAINING coordinator matrix. Promotion/runtime grant по-прежнему запрещены до P2 provider-mark/complete replay/handoff, producer/activation/coordinators, role-OID/grants/runtime attestation, zero-secret/zero-inflight, backfill, signed apply/rollback/zero-diff и production-like rehearsal. Canonical target остаётся `CURRENT_179/179`; deploy, SMTP, Tenant B/Store B1, account и invite не выполняются | BETA-IAM-004J, BETA-OPS-002, BETA-OPS-004, BETA-SEC-008..010                |
+| BETA-IAM-004K | P0        | В работе      | `PROTECTED_MAIL_WORKER_TENANT_ENROLLMENT_V1`              | Slices 1–4 фиксируют per-tenant `providerAuthorityDigest`, read-only CURRENT179 preflight, dormant CURRENT180 и pure Ed25519 command/runtime-attestation verifiers с frozen empty production roots. Revised dormant chain: CURRENT181 worker-v2/reconcile SHA `c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac`; CURRENT182 tenant-first claim SHA `5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf`; CURRENT183 freshness SHA `a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0`. Application create/reissue/revoke/cancel/accept, provisioning, suspend и current-worker tenant-addressed paths используют общий bounded `READ COMMITTED` tenant-first protocol; dormant v2 adapter вызывает exact five tenant-aware DB RPC и не подключён к DI/config/CLI. Exact implementation `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`, CI `#79` — `3/3 PASS`; CURRENT183 PostgreSQL suite `3/3`: `ACTIVE/PENDING → CLAIMED`, `ACTIVE/HOLD → EMPTY`, оба `DRAINING` варианта → `42501`, waiter после lock видит свежее состояние, другой tenant прогрессирует, zero `40P01`; least-privilege role не имеет v1/helper/reconcile/relation/column/sequence privileges. Local foundation: CURRENT181 `87/87` + smoke `10/10`, CURRENT182 `15/15` + smoke `7/7`, CURRENT183 `22/22`; focused API identity `418/418`, typecheck/lint `PASS`. Historical `run #66` и `run #72` относятся к предыдущим bytes/initial matrix и не являются exact evidence revised stack; cancelled `run #78` также не evidence. Diagnostic owner-seeded state закрывает non-empty HOLD/PENDING и ACTIVE/DRAINING freshness/ACL matrix, но не является signed coordinator. Promotion/runtime grant остаются запрещены до independent Ed25519 signer/coordinator, producer/activation, exact runtime role OID/grants/attestation, P2 provider-mark/complete replay/handoff, zero-secret/zero-inflight, backfill, signed apply/rollback/zero-diff и production-like rehearsal. Canonical target остаётся `CURRENT_179/179`; deploy, SMTP, Tenant B/Store B1, account и invite не выполняются | BETA-IAM-004J, BETA-OPS-002, BETA-OPS-004, BETA-SEC-008..010                |
 | BETA-IAM-004L | P0        | Запланировано | `PROTECTED_INITIAL_OWNER_INVITE_CONTROL_V1`               | Protected platform-admin workflow создаёт новый `Tenant B/Store B1`, резервирует canonical owner email и запускает initial `OWNER + NETWORK` activation/delivery без возврата raw token/URL/ciphertext. Reissue атомарно отзывает предыдущий invite и создаёт новый command/message key; revoke и suspend немедленно закрывают preview/accept и delivery; resend не обходит mailbox binding, trial, entitlement, admission или tenant isolation. До rolling deploy вводится явный persisted AAD/envelope schema discriminator либо доказанный producer fence, чтобы producer v1 не мог записать ciphertext после перехода consumer на AAD v2. API/BFF audit, idempotency, concurrent reissue/revoke/accept, rollback, mail-worker `SENT` barrier и A1–A4/Tenant B negative matrix обязательны; route остаётся `503` и tester account не создаётся до protected `SHARED BETA GO`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | BETA-IAM-004J, BETA-IAM-004K, BETA-TEN-001..008, BETA-SEC-008..010          |
 | BETA-IAM-005  | P0        | В работе      | Ограничить особо чувствительное повышение привилегий      | Generic users/invites API не назначает OWNER; добавление/смена OWNER выполняется только отдельным атомарным owner-transfer workflow; Platform Admin нельзя назначить tenant API                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | BETA-IAM-001, BETA-IAM-003                                                  |
 | BETA-IAM-006  | P0        | Запланировано | Свести backend/frontend permission maps                   | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | BETA-IAM-001                                                                |
@@ -3706,7 +3706,7 @@ grant и не запускает SMTP. Worker v2 rehearsal materialized отде
 
 ```text
 20260801020000_identity_mail_tenant_lock_drain_worker_v2
-SQL SHA-256: b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455
+SQL SHA-256: c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac
 predecessor: CURRENT180 / e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683
 status: ENGINEERING_REHEARSAL_ACCEPTED / NOT_CANONICAL / NOT_DEPLOYABLE
 ```
@@ -3731,14 +3731,13 @@ Candidate находится только в `packages/database/migration-candid
 
 Принятое локальное evidence:
 
-- predecessor CURRENT180 foundation gate переведён с предположения
-  «candidate-папка ровно одна» на exact ordered allowlist
-  `[CURRENT180, CURRENT181]`; неизвестный третий candidate остаётся
-  fail-closed, suite — `82/82`, self-test — `21` probe;
+- predecessor CURRENT180 foundation gate использует exact ordered successor
+  allowlist; неизвестный, дублированный или переставленный candidate остаётся
+  fail closed;
 - semantic static gate — `COMPLIANT`; no-op bodies, relation-before-lock,
   ослабление ACTIVE/DRAINING authority, `DRAINING → RETRY`, timestamp,
   event-digest, catalog overload/default и ready-index drift fail closed;
-- CURRENT181 static suite — `81/81`, self-test — `7` fail-closed probe;
+- CURRENT181 semantic foundation — `87/87`; disposable smoke — `10/10`;
 - standalone smoke validator теперь отклоняет unpinned zero-SHA metadata и
   требует exact metadata SHA, равный digest текущих SQL bytes;
 - PostgreSQL 16.13 exact stack `179 → 180 → 181` — `PASS`;
@@ -3750,39 +3749,40 @@ Candidate находится только в `packages/database/migration-candid
 - exact catalog/ACL/prosrc matrix и intended partial-index plans — `PASS`;
 - durable rehearsal harness — `10/10`, source `179/179` zero-diff, оба
   disposable clone удалены, остаток — `0`.
-- independent security review выявил P1 cross-path lock inversion: текущий
-  worker v2 берёт tenant lock, затем Outbox/UserInvite и ждёт email claim, но
-  canonical cancel/reissue tenant lock ещё не берут, удерживают email
-  advisory/IdentityEmailClaim и затем обновляют UserInvite. Acceptance также
-  остаётся вне общего protocol и требует race fixture, хотя SENT-gate не даёт
-  считать его цикл доказанным. Текущая matrix проверяет helper, а не эти
-  consumer paths; runtime grant до исправления запрещён.
-- exact implementation `abbfe5611b7bf10b223359d601b4665874493671`
-  принят GitHub Actions
-  [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)
-  (`run #66`) — `3/3 PASS`, включая full PostgreSQL CURRENT181 rehearsal;
-  это evidence dormant candidate, а не deploy или external-access authority.
+- исходный independent review выявил P1 cross-path lock inversion; successor
+  CURRENT182 перевёл accept/cancel/revoke/reissue и IdentityEmailClaim
+  transitions на общий tenant-first protocol, а CURRENT183 закрепил свежий
+  post-lock snapshot и DB-enforced tenant-aware worker-v2 boundary. Cross-path
+  zero-`40P01` и diagnostic non-empty matrices приняты;
+- exact revised-stack implementation
+  `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9` принят GitHub Actions
+  [`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)
+  (`run #79`) — `3/3 PASS`, включая full PostgreSQL CURRENT181..183 stack;
+  старые `abbfe561...` / `run #66` — historical superseded evidence, а не
+  evidence текущих bytes. Ни один из этих запусков не является deploy или
+  external-access authority.
 
 Открытые P0/P1/P2 до atomic release:
 
 1. Producer v2, activation v2 и четыре signed crash-resumable enrollment
    coordinator RPC под тем же tenant lock.
-2. Реальные ACTIVE/DRAINING row fixtures через coordinator; текущий rehearsal
-   честно возвращает `SKIPPED_DORMANT_GUARD_NO_COORDINATOR_RPC`.
+2. Diagnostic ACTIVE/DRAINING row fixtures приняты в disposable CURRENT183
+   suite; те же строки через independently signed coordinator всё ещё
+   обязательны до promotion.
 3. Worker/runtime role name+OID, exact five-function grants и независимая
    CURRENT181 signed runtime attestation; production roots остаются empty.
 4. CURRENT179-compatible API/current-worker adapter реализован в Slice 6:
    bounded `READ COMMITTED`, отдельные settings/tenant-lock/RPC statements и
    transaction-local timeout.
-   Отдельный CURRENT181 worker-v2 runtime adapter, signed attestation и grant
-   всё ещё обязательны до promotion.
+   Dormant exact-five-RPC worker-v2 adapter реализован в CURRENT183 slice, но
+   не зарегистрирован в DI/config/CLI; signed attestation и grant всё ещё
+   обязательны до promotion.
 5. Acceptance/cancel/revoke/reissue и все IdentityEmailClaim transition paths
-   теперь берут тот же tenant advisory lock первыми. Current-worker `EMPTY`
-   claim и synthetic relation fixtures реализованы; до promotion обязательны
-   PostgreSQL races
-   `claim|mark|complete|reap|reconcile × accept`, `reap/drain × revoke|reissue`,
-   non-empty HOLD/PENDING, ACTIVE/DRAINING, commit/rollback/timeout,
-   two-tenant progress, zero `40P01` и fail-closed old-v1/API bypass.
+   теперь берут тот же tenant advisory lock первыми. Current-worker cross-path
+   races и CURRENT183 non-empty `ACTIVE|DRAINING × HOLD|PENDING` matrix приняты:
+   commit/rollback/timeout, fresh post-lock state, two-tenant progress и zero
+   `40P01` подтверждены. Promotion всё ещё требует повторения state matrix через
+   signed coordinator, exact runtime role/OID/grants и без diagnostic bypass.
 6. `provider_mark_v2`/`complete_v2` должны получить event-backed exact replay
    либо typed handoff в reconcile для committed lost-response; текущий stale
    `40001` fail-closed и не разрешает blind SMTP retry, но неоднозначен для
@@ -3807,8 +3807,8 @@ Candidate находится только в `packages/database/migration-candid
 
 ```text
 20260801030000_identity_mail_tenant_first_claim_protocol
-SQL SHA-256: 4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22
-predecessor: CURRENT181 / b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455
+SQL SHA-256: 5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf
+predecessor: CURRENT181 / c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac
 status: IMPLEMENTED_IN_BRANCH / NOT_CANONICAL / NOT_DEPLOYABLE
 ```
 
@@ -3838,10 +3838,11 @@ Slice 6 устраняет подтверждённую инверсию на д
 
 - CURRENT182 foundation — `COMPLIANT`, `15/15`;
 - disposable smoke self-test — `7/7`; combined database checks — `22/22`;
-- successor-aware frozen CURRENT180/CURRENT181 gates — `84/84` и `85/85`;
+- successor-aware CURRENT180/CURRENT181 gates принимают только exact ordered
+  chain;
   missing/reordered/unknown CURRENT182 successor остаётся fail closed;
-- candidate SQL digest совпадает с metadata; frozen CURRENT181 SHA не
-  изменён;
+- candidate SQL digest совпадает с metadata; revised CURRENT181 predecessor
+  exact pinned;
 - application tenant/claim paths — `5/5` suites, `138/138`; current worker
   repository — `1/1`, `55/55`; identity-mail worker package — `8/8`,
   `243/243`;
@@ -3854,7 +3855,11 @@ Slice 6 устраняет подтверждённую инверсию на д
   disposable canonical CURRENT179 clone: actual least-privilege
   `claimOne()` (`EMPTY`), create/cancel/reissue/accept, commit/rollback,
   `55P03`/`57014`, two-tenant progress, zero `40P01`, source zero-diff и
-  cleanup временных database/role.
+  cleanup временных database/role. Это historical initial CURRENT179 evidence;
+  revised CURRENT181..183 stack принят на exact
+  `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`, GitHub Actions
+  [`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)
+  (`run #79`) — `3/3 PASS`.
 
 Real PostgreSQL acceptance выполняется в CI, потому что локально нет
 PostgreSQL 16, Docker/psql и безопасного `DATABASE_URL`. Принятый fixture создаёт
@@ -3863,11 +3868,11 @@ canonical CURRENT179 disposable DB, отдельную least-privilege worker ro
 create/cancel/reissue/accept relation matrix, observed advisory wait, Tenant B
 progress, rollback, `55P03`/`57014`, zero `40P01`, source/role/database cleanup.
 
-Граница доказательства намеренно узкая: `EMPTY` current-worker claim плюс
-synthetic relation order не являются non-empty HOLD/PENDING outbox,
-ACTIVE/DRAINING coordinator или CURRENT181 runtime-grant matrix. Process-local
-binding закрывает штатный single-process adapter, но не заменяет v2
-DB-enforced tenant proof после restart/при обходе repository. P2
+Historical `EMPTY` current-worker claim и synthetic relation order дополнены в
+CURRENT183 non-empty `ACTIVE|DRAINING × HOLD|PENDING` matrix, DB-enforced
+tenant-aware v2 adapter и freshness contention. Owner-seeded diagnostic rows
+закрывают state/ACL/post-lock evidence, но не заменяют independently signed
+coordinator, runtime role/OID/grants или production wiring. P2
 provider-mark/complete lost-response, signed attestation, atomic promotion,
 backfill и production-like apply/rollback/zero-diff остаются открыты. Поэтому
 production остаётся `CURRENT179/179`; deploy, Tenant B/account/invite, SMTP и
@@ -3879,9 +3884,9 @@ production остаётся `CURRENT179/179`; deploy, Tenant B/account/invite, S
 
 ```text
 20260802010000_identity_mail_worker_v2_freshness_protocol
-SQL SHA-256: 9c2df1d3462d48d60a90c5f020ca11a8b54faeca3138f77beaa2223c2053e3a1
-predecessor: CURRENT182 / 4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22
-status: IMPLEMENTED_IN_BRANCH / NOT_CANONICAL / NOT_DEPLOYABLE
+SQL SHA-256: a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0
+predecessor: CURRENT182 / 5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf
+status: ENGINEERING_ACCEPTED / NOT_CANONICAL / NOT_DEPLOYABLE
 ```
 
 Причина successor-кандидата — snapshot freshness. `SERIALIZABLE` transaction,
@@ -3932,6 +3937,27 @@ test-owner создаёт их с локальным bypass triggers/FK толь
 БД. Это закрывает worker-v2 state/ACL/freshness evidence, но **не** выдаётся за
 signed coordinator либо production authority. CURRENT180 guards в самом
 candidate не ослаблены.
+
+Exact remote acceptance: implementation
+`7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`, GitHub Actions
+[`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)
+(`run #79`) — `3/3 PASS`; CURRENT183 PostgreSQL suite — `3/3 PASS`:
+
+- `ACTIVE + PENDING` → `CLAIMED`, `attempts=1`, `transitionRevision=2`;
+- `ACTIVE + HOLD` → `EMPTY`, row остаётся `HOLD/0/0`;
+- `DRAINING + PENDING|HOLD` → SQLSTATE `42501`, rows не изменены;
+- contention `ACTIVE → DRAINING` подтверждает свежий post-wait snapshot:
+  waiter получает `42501`, а не `40P01`, его `PENDING` row не изменяется;
+  другой tenant прогрессирует независимо, deadlock count не растёт;
+- worker role имеет exact five-v2-RPC EXECUTE и zero
+  v1/helper/reconcile/relation/column/sequence privileges.
+
+Runs `#74` (`30717972329`), `#75` (`30718437341`), `#76`
+(`30718963515`) и `#77` (`30719365669`) отклонены и не являются evidence;
+они выявили соответственно boundary-LF prosrc pins, TOAST sequence probe,
+RPC signature allowlist и реальный PostgreSQL defect со schema-qualified
+`GREATEST/LEAST`. `Run #78` (`30720085318`) отменён новым push и также не
+является release evidence, даже несмотря на завершившуюся в нём matrix.
 
 Документ:
 [CURRENT183 worker v2 freshness](./docs/open-beta/identity-mail-current183-worker-v2-freshness.md).

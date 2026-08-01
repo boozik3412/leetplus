@@ -8,7 +8,7 @@
 | Каноническая production-схема | `CURRENT_179 / 20260731120000_identity_mail_delivery_release_head` |
 | Stacked prerequisites | dormant `CURRENT180`, dormant `CURRENT181` |
 | CURRENT182 candidate | `20260801030000_identity_mail_tenant_first_claim_protocol` |
-| SQL SHA-256 | `4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22` |
+| SQL SHA-256 | `5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf` |
 | Дата | 02.08.2026 |
 
 ## 1. Решение
@@ -116,9 +116,13 @@ email-lock, relation read, row lock или DML. Три устаревших v1 w
 PUBLIC execute отозван, новые grants/roles/enrollment не создаются. Candidate
 имеет `authorization=false`, `canMutate=false`, `status=NOT_DEPLOYABLE`.
 
-Frozen CURRENT181 prerequisite не изменён; его SQL SHA-256 остаётся
-`b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455`.
-Его frozen helper исторически требует `SERIALIZABLE`, поэтому CURRENT182
+CURRENT181 prerequisite repinned после того, как real PostgreSQL выявил
+недопустимое schema qualification special forms `GREATEST/LEAST`; его revised
+SQL SHA-256 —
+`c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac`.
+Старый SHA `b78b40ce...f455` и CI `#66` остаются историей, но не являются
+evidence revised stack. Helper CURRENT181 по-прежнему требует `SERIALIZABLE`,
+поэтому CURRENT182
 нельзя связывать с новым runtime изолированно. Stacked successor CURRENT183
 atomically переводит helper на `READ COMMITTED` и repin-ит readiness на
 exact `183/183`; canonical CURRENT179 runtime использует собственный прямой
@@ -141,20 +145,22 @@ advisory-lock statement и не требует candidate helper.
 - post-wait freshness fixture: holder commit обязан быть виден waiter в первой
   transaction attempt после observed advisory wait.
 
-Текущий локальный результат: application tenant/claim paths `5/5` suites,
-`138/138`; current worker repository `1/1`, `55/55`; identity-mail worker
-package `8/8`, `243/243`; full API `116/116`, `2510 PASS / 2 todo`. API
-production typecheck, targeted ESLint и build — `PASS`. CURRENT182 foundation
-— `15/15`, smoke self-test — `7/7`; successor-aware CURRENT180/CURRENT181
-foundation — `84/84` и `85/85`.
-Удалённое acceptance evidence: exact SHA
+Текущий локальный результат: identity-mail API `14/14` suites, `418/418`;
+production typecheck и targeted ESLint — `PASS`. CURRENT181 foundation —
+`87/87`, smoke — `10/10`; CURRENT182 foundation — `15/15`, smoke self-test —
+`7/7`; CURRENT183 foundation — `22/22`.
+
+Historical canonical-CURRENT179 cross-path evidence: exact SHA
 `dd8b541727565f2ac5154c1731d9bf73a5744d91`, GitHub Actions
 [`30709619765`](https://github.com/boozik3412/leetplus/actions/runs/30709619765)
 (`run #72`) — `3/3 PASS`. PostgreSQL job принял все восемь cross-path tests
 на отдельном disposable canonical CURRENT179 clone; `pg_stat_database.deadlocks`
 не изменился, `40P01` не наблюдался, source database осталась zero-diff,
-временные database и role удалены. Локально fixture по-прежнему только
-компилируется и обнаруживается, потому что локальный PostgreSQL не используется.
+временные database и role удалены. Revised stacked CURRENT181→183 принят на
+exact head `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`, GitHub Actions
+[`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)
+(`run #79`) — `3/3 jobs PASS`; PostgreSQL job повторно принял cross-path
+fixture, CURRENT182 rehearsal и CURRENT183 non-empty/freshness matrix.
 
 PostgreSQL fixture включает:
 
@@ -171,8 +177,9 @@ PostgreSQL fixture включает:
 
 Actual worker fixture использует безопасный `EMPTY` claim. Synthetic relation
 fixture отдельно воспроизводит полный worker order через `UserInvite`, email
-lock и `IdentityEmailClaim`. Эти два доказательства нельзя выдавать за полный
-ACTIVE/DRAINING/coordinator/outbox runtime matrix.
+lock и `IdentityEmailClaim`. Эти два CURRENT182 доказательства сами по себе не
+являются ACTIVE/DRAINING/coordinator/outbox runtime matrix; CURRENT183 добавляет
+diagnostic non-empty state matrix, но также не заменяет signed coordinator.
 
 ## 6. Что остаётся release blocker
 

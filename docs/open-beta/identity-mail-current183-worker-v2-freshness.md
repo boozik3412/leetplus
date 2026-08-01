@@ -3,11 +3,12 @@
 | Поле | Значение |
 | --- | --- |
 | Контракт | `IDENTITY_MAIL_WORKER_V2_FRESHNESS_PROTOCOL_CANDIDATE_V1` |
-| Статус | `IMPLEMENTED_IN_BRANCH / NOT_CANONICAL / NOT_DEPLOYABLE` |
+| Статус | `ENGINEERING_ACCEPTED / NOT_CANONICAL / NOT_DEPLOYABLE` |
 | Каноническая production-схема | `CURRENT179 / 179` |
 | Stacked prerequisites | `CURRENT180 -> CURRENT181 -> CURRENT182` |
 | Candidate | `20260802010000_identity_mail_worker_v2_freshness_protocol` |
-| SQL SHA-256 | `9c2df1d3462d48d60a90c5f020ca11a8b54faeca3138f77beaa2223c2053e3a1` |
+| SQL SHA-256 | `a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0` |
+| Exact evidence | `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`; GitHub Actions [`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891) (`run #79`) — `3/3 jobs PASS` |
 | Дата | 02.08.2026 |
 
 ## 1. Причина изменения
@@ -135,9 +136,41 @@ COMMITTED helper, CURRENT183 readiness, zero grant/role/DML/schema mutation и
 отсутствие guard-bypass coordinator. PostgreSQL matrix требует явного
 test-only confirmation environment и безопасного PostgreSQL 16 `DATABASE_URL`.
 
-Локальный foundation result: `COMPLIANT`, `22/22`. Exact SQL SHA закреплён
-не только metadata-файлом, но и самим статическим gate; metadata repin не
-разрешает дополнительный `CREATE`, `ALTER`, `DO` или иной schema drift.
+После real-PostgreSQL находки `42883` revised stack закреплён exact bytes:
+
+- CURRENT181 — `c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac`;
+- CURRENT182 — `5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf`;
+- CURRENT183 — `a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0`.
+
+В CURRENT181 пять invalid `pg_catalog.greatest` и два
+`pg_catalog.least` заменены на PostgreSQL special forms `GREATEST`/`LEAST`;
+пять затронутых `pg_proc.prosrc` pin пересчитаны с обоими boundary LF.
+Static gate теперь отдельно отклоняет повторное schema qualification.
+
+Локально: CURRENT181 foundation `87/87`, smoke `10/10`; CURRENT182
+foundation `15/15`, smoke `7/7`; CURRENT183 foundation `22/22`; API
+identity-mail suite `418/418`, typecheck и targeted lint — `PASS`. Exact SQL
+SHA закреплены metadata и статическими gates; metadata repin не разрешает
+дополнительный `CREATE`, `ALTER`, `DO` или иной schema drift.
+
+Удалённое acceptance evidence — exact head
+`7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`, GitHub Actions
+[`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)
+(`run #79`) — `3/3 jobs PASS`. PostgreSQL job принял CURRENT181 и CURRENT182
+disposable rehearsals, cross-path races и CURRENT183 matrix `3/3`:
+
+- `ACTIVE + PENDING -> CLAIMED`, `attempts=1`, `transitionRevision=2`;
+- `ACTIVE + HOLD -> EMPTY`, строка остаётся `HOLD/0/0`;
+- `DRAINING + PENDING|HOLD -> 42501`, строки неизменны;
+- waiter после committed `ACTIVE -> DRAINING` видит новое состояние в первом
+  защищённом RPC, получает `42501`, а другой tenant независимо claim-ит;
+- `40P01` отсутствует, deadlock counter не меняется, cleanup проходит.
+
+Runs `#74`–`#77` отклонены и не являются evidence: соответственно неверные
+boundary-LF `prosrc` pins, unsafe sequence privilege probe, рассинхрон
+RPC-signature allowlist и runtime `pg_catalog.greatest` `42883`. Run `#78`
+успел пройти CURRENT183 `3/3`, но был отменён новым exact head и также не
+является release evidence.
 
 ## 5. Что это не разрешает
 

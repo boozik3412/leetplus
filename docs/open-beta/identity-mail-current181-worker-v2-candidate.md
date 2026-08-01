@@ -5,12 +5,12 @@
 | Контракт | `IDENTITY_MAIL_CURRENT181_WORKER_V2_CANDIDATE_BOUNDARY_V1` |
 | Статус | `SHA_PINNED / DISPOSABLE_REHEARSAL_PASSED / NOT_CANONICAL / NOT_DEPLOYABLE` |
 | Audit baseline | `8afe7969ca95fb45e427451dfaec67ad274c0f35` |
-| Implementation evidence | `abbfe5611b7bf10b223359d601b4665874493671`; GitHub Actions [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036) (`run #66`) — `3/3 PASS` |
+| Implementation evidence | `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`; GitHub Actions [`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891) (`run #79`) — `3/3 PASS` |
 | Canonical schema | `CURRENT_179 / 20260731120000_identity_mail_delivery_release_head` |
 | Неканонический prerequisite | `CURRENT_180 / 20260801010000_identity_mail_tenant_enrollment_control_plane` |
 | CURRENT181 candidate | `20260801020000_identity_mail_tenant_lock_drain_worker_v2` |
-| SQL SHA-256 | `b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455` |
-| Дата | `01.08.2026` |
+| SQL SHA-256 | `c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac` |
+| Дата | `02.08.2026` |
 
 > Successor note, 02.08.2026: подтверждённая ниже P1 lock inversion
 > устранена на CURRENT179-compatible application/current-worker boundary и в
@@ -19,8 +19,8 @@
 > DB-enforced v2 proof после restart. CURRENT183 дополнительно переводит
 > caller/helper на freshness-safe `READ COMMITTED`, добавляет dormant exact-five
 > v2 adapter и disposable diagnostic non-empty
-> `ACTIVE|DRAINING × HOLD|PENDING` matrix. CURRENT181 остаётся byte-for-byte
-> frozen; signed coordinator, production runtime grant/attestation и P2
+> `ACTIVE|DRAINING × HOLD|PENDING` matrix. CURRENT181 repinned после исправления
+> PostgreSQL special forms; signed coordinator, production runtime grant/attestation и P2
 > lost-response promotion gates не закрыты. Текущий статус зафиксирован в
 > [tenant-first claim protocol](./identity-mail-current182-tenant-first-claim-protocol.md)
 > и [CURRENT183 freshness](./identity-mail-current183-worker-v2-freshness.md).
@@ -34,12 +34,10 @@
 Metadata связывает ordinal `181` с exact predecessor `CURRENT180`, имеет
 `authorization=false`, `canMutate=false`, `status=NOT_DEPLOYABLE` и pin-ит
 exact SHA-256 SQL bytes. Static gate и disposable PostgreSQL race/rollback
-rehearsal приняты. Independent security review завершён с одним явным P1 и
-одним runtime-operability P2. P1:
-существующие cancel/revoke/reissue paths ещё не входят в tenant advisory lock
-и имеют достижимую инверсию UserInvite ↔ IdentityEmailClaim относительно
-worker v2; acceptance также остаётся вне единого lock protocol и требует
-отдельной race-проверки. P2 — отсутствие exact event-backed replay у
+rehearsal приняты. Найденная исходным independent review P1-инверсия
+UserInvite ↔ IdentityEmailClaim закрыта в CURRENT179-compatible runtime и
+CURRENT182; cross-path и CURRENT183 freshness matrices приняты в CI `#79`.
+Открытый P2 — отсутствие exact event-backed replay у
 provider-mark/complete после committed lost response. Поэтому candidate
 остаётся строго dormant; наличие и pinning SQL не разрешают
 объявлять `181/181` фактическим состоянием какой-либо общей или
@@ -366,7 +364,7 @@ suite не является PostgreSQL или deployment evidence.
   `[CURRENT180, CURRENT181]` и по-прежнему fail-closed блокирует любую
   неизвестную/дублированную candidate-папку; CURRENT180 suite — `82/82`,
   self-test — `21` negative probe;
-- CURRENT181 semantic foundation suite — `81/81`, self-test — `7`
+- CURRENT181 semantic foundation suite — `87/87`, self-test — `7`
   fail-closed probe, итоговый `--check` — `COMPLIANT`;
 - standalone rehearsal validator требует exact metadata SHA, равный runtime
   digest SQL bytes; прежний zero-sentinel отклоняется negative test;
@@ -397,12 +395,14 @@ Durable runner завершился за 17,8 секунды с решением
 `SKIPPED_DORMANT_GUARD_NO_COORDINATOR_RPC`: обход dormant guard не подменяет
 отсутствующий signed enrollment coordinator.
 
-Exact implementation commit
-`abbfe5611b7bf10b223359d601b4665874493671` принят GitHub Actions
-[`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)
-(`run #66`) — `3/3 PASS`: authority-root gate, application checks и полный
-PostgreSQL migration smoke, включая реальный CURRENT179→CURRENT180→CURRENT181
-runner. Это CI evidence инженерного rehearsal, а не deploy authorization.
+Revised candidate принят на exact head
+`7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`, GitHub Actions
+[`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)
+(`run #79`) — `3/3 PASS`: authority-root gate, application checks и полный
+PostgreSQL migration smoke, включая CURRENT181→CURRENT183 stack и CURRENT183
+matrix `3/3`. Старые `abbfe561...` / CI `#66` — historical superseded evidence:
+они не подтверждают revised SQL после устранения runtime `42883`. Это всё ещё
+engineering rehearsal, а не deploy authorization.
 
 CURRENT181 остаётся dormant, если producer/activation ещё v1: worker lock сам
 по себе не закрывает появление нового `HOLD/PENDING` во время drain.
@@ -420,16 +420,10 @@ CURRENT181 остаётся dormant, если producer/activation ещё v1: wor
 
 До promotion по-прежнему отсутствуют либо не приняты:
 
-- единый tenant-first lock для acceptance/cancel/revoke/reissue и всех
-  IdentityEmailClaim transition paths. Сейчас worker v2 после tenant lock
-  может удерживать Outbox/UserInvite и ждать email claim, а canonical
-  cancel/reissue удерживает email advisory/IdentityEmailClaim и затем
-  обновляет UserInvite; без общего advisory lock это достижимая cross-path
-  deadlock-инверсия P1. Acceptance из-за SENT-gate не объявляется доказанным
-  циклом, но также обязана войти в единый protocol и fixture matrix;
-- PostgreSQL races `claim|mark|complete|reap|reconcile × accept` и
-  `reap/drain × revoke|reissue`, включая commit/rollback/timeout, two-tenant
-  progress, zero `40P01` и fail-closed old-v1/API bypass;
+- signed coordinator и production runtime должны применить уже принятый
+  tenant-first lock protocol; application/current-worker cross-path races и
+  diagnostic worker-v2 state/freshness matrix приняты, но не заменяют signed
+  coordinator transitions и runtime grants;
 - event-backed exact replay либо однозначный typed handoff в reconcile для
   `provider_mark_v2` и `complete_v2` после потерянного DB response. Сейчас
   повтор после успешного commit fail-closed возвращает stale `40001`; blind
@@ -440,7 +434,8 @@ CURRENT181 остаётся dormant, если producer/activation ещё v1: wor
   намеренно требует zero `CLAIMED`/attempt history и поэтому не является
   готовым production upgrade для базы с историческими delivery attempts;
 - v2 role/grant/enrollment ceremony;
-- API v2 adapter и receipt types;
+- production DI/config/CLI wiring и deployable receipt package для уже
+  реализованного dormant CURRENT183 v2 adapter;
 - executable/artifact digest acquisition и signed attestation loader;
 - production runtime-attestation roots и live authorization brand;
 - CURRENT181-compatible versioned attestation profile и deployable API/package
@@ -468,11 +463,13 @@ EXTERNAL PILOT = NO-GO
 2. `[x]` Принять disposable PostgreSQL
    apply/catalog/concurrency/timeout/rollback rehearsal, сохранив source
    zero-diff и полный cleanup.
-3. Реализовать dormant API v2 contract/parsers/query builders и перевести
+3. `[x]` Реализовать dormant exact-five-RPC v2 adapter и перевести
    acceptance/cancel/revoke/reissue/IdentityEmailClaim transitions на тот же
    tenant-first lock protocol без production wiring.
-4. Добавить cross-path PostgreSQL deadlock matrix, затем producer/activation v2
-   и enrollment coordinators под тем же tenant lock order.
+4. `[x]` Принять cross-path zero-`40P01` и diagnostic non-empty
+   `ACTIVE|DRAINING × HOLD|PENDING` PostgreSQL matrices. Следующим отдельным
+   шагом реализовать producer/activation v2 и signed enrollment coordinators
+   под тем же tenant lock order.
 5. Добавить event-backed replay/typed reconciliation handoff для
    provider-mark/complete lost-response cases.
 6. Реализовать signed crash-resumable drain/apply/finalize/rollback и

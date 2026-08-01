@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.54                                         |
+| Версия           | 1.55                                         |
 | Дата             | 02.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -309,22 +309,20 @@ enterprise-isolation option и не сокращает shared gates.
     tenant-first advisory lock, пять worker v2 RPC, reconcile replay,
     ACTIVE/DRAINING claim bindings, tenant-leading indexes и immediate
     `55000` stubs обоих legacy producer v1. Exact SQL SHA-256 —
-    `b78b40ce37f48419c8d9e4f6ad8a90ddb9a242128a33d7dbfa76d8439ba0f455`.
+    `c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac`.
     Semantic static gate и PostgreSQL 16.13 apply/ACL/concurrency/timeout/
     rollback/cleanup rehearsal приняты; source остался `179/179`, residue —
     `0`. Candidate не создаёт grants/enrollment и остаётся
-    `NOT_CANONICAL / NOT_DEPLOYABLE`; ACTIVE/DRAINING row fixtures,
-    producer/activation/coordinators, API v2 и signed runtime attestation
-    остаются обязательными следующими этапами. Independent review отдельно
-    зафиксировал P1 cross-path lock inversion: accept/cancel/revoke/reissue должны
-    войти в тот же tenant-first advisory protocol и пройти zero-`40P01`
-    PostgreSQL race matrix до любого runtime grant. Provider-mark/complete
-    lost-response также требуют event-backed replay либо typed reconcile
-    handoff; повторная SMTP-отправка остаётся запрещённой.
-    Exact implementation
-    `abbfe5611b7bf10b223359d601b4665874493671`, GitHub Actions
-    [`30698074036`](https://github.com/boozik3412/leetplus/actions/runs/30698074036)
-    (`run #66`) — `3/3 PASS`, включая полный PostgreSQL CURRENT181 runner.
+    `NOT_CANONICAL / NOT_DEPLOYABLE`; producer/activation/coordinators, signed
+    runtime attestation и production grants остаются обязательными следующими
+    этапами. Ранее найденная P1 cross-path lock inversion закрыта общим
+    tenant-first protocol и zero-`40P01` PostgreSQL matrix. Provider-mark/complete
+    lost-response всё ещё требуют event-backed replay либо typed reconcile
+    handoff; повторная SMTP-отправка остаётся запрещённой. Exact revised-stack
+    implementation `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`, GitHub Actions
+    [`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)
+    (`run #79`) — `3/3 PASS`. Исторические `abbfe561...` / `run #66`
+    относятся к доревизионному candidate и не являются evidence текущих bytes.
 38. [Tenant-first claim protocol и CURRENT182 candidate](./identity-mail-current182-tenant-first-claim-protocol.md) —
     CURRENT179-compatible app и worker boundary для create, reissue/revoke,
     cancel, accept, provisioning, emergency suspend и всех пяти текущих
@@ -333,20 +331,17 @@ enterprise-isolation option и не сокращает shared gates.
     использует bounded `READ COMMITTED` и отдельные statements
     settings -> tenant advisory lock -> protected operation, чтобы первый
     post-wait read получил свежий snapshot. Stacked CURRENT182 с SQL SHA-256
-    `4367c2c50b036ae21c22b88dc0980895c9010abb018c3f7a04d58ed0f00efa22`
+    `5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf`
     fence-ит те же пять canonical claim entrypoints на уровне БД и немедленно
     retire-ит три legacy v1 writer. Candidate остаётся
-    `NOT_CANONICAL / NOT_DEPLOYABLE`; PostgreSQL acceptance включает actual
-    CURRENT179 repository `claimOne` и relation-level synthetic race matrix,
-    exact evidence SHA `dd8b541727565f2ac5154c1731d9bf73a5744d91`,
-    GitHub Actions
-    [`30709619765`](https://github.com/boozik3412/leetplus/actions/runs/30709619765)
-    (`run #72`) — `3/3 PASS`, включая `8/8` cross-path PostgreSQL races,
-    zero `40P01`, source zero-diff и cleanup. Это evidence не заменяет
-    non-empty outbox/ACTIVE-DRAINING/coordinator matrix.
+    `NOT_CANONICAL / NOT_DEPLOYABLE`. Historical exact evidence
+    `dd8b541...` / `run #72` подтвердило initial cross-path matrix; revised
+    CURRENT181..183 stack принят на `7fb3cf9...` / `run #79`, `3/3 PASS`.
+    Non-empty worker-v2 matrix теперь закрыта диагностическими fixtures
+    CURRENT183, но они не заменяют signed coordinator.
 39. [CURRENT183 worker v2 freshness](./identity-mail-current183-worker-v2-freshness.md) —
     stacked successor с SQL SHA-256
-    `9c2df1d3462d48d60a90c5f020ca11a8b54faeca3138f77beaa2223c2053e3a1`:
+    `a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0`:
     shared helper fail closed требует `READ COMMITTED`, а worker-v2 readiness
     pinned к exact `183/183`. Dormant API adapter вызывает ровно пять v2 RPC,
     tenantId передаётся первым, receipts фиксируют enrollment-state, policy и
@@ -356,7 +351,13 @@ enterprise-isolation option и не сокращает shared gates.
     Initial rows матрицы являются diagnostic owner-seeded fixtures только в
     disposable DB и не заменяют signed coordinator. Candidate не создаёт
     grants/enrollment, не подключён к DI/CLI и остаётся
-    `NOT_CANONICAL / NOT_DEPLOYABLE`.
+    `NOT_CANONICAL / NOT_DEPLOYABLE`. Exact implementation
+    `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9` принят GitHub Actions
+    [`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)
+    (`run #79`) — `3/3 PASS`; CURRENT183 PostgreSQL suite — `3/3 PASS`:
+    `ACTIVE/PENDING` claim, `ACTIVE/HOLD` empty, оба `DRAINING` варианта
+    fail closed с `42501`, а waiter после lock видит свежий `DRAINING` без
+    `40P01` и без блокировки другого tenant.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail

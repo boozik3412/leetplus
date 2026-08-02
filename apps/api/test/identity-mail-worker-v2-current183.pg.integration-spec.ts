@@ -923,14 +923,25 @@ async function assertCurrent183DatabaseReadiness(
   client: PrismaClient,
   fixture: DiagnosticFixture,
 ): Promise<void> {
-  const [row] = await client.$queryRaw<
-    Array<{ result: Prisma.JsonValue }>
-  >(Prisma.sql`
-    SELECT public."identity_mail_delivery_worker_assert_v2"(
-      ${fixture.tenantId}::TEXT,
-      ${PROVIDER_AUTHORITY_DIGEST}::TEXT
-    ) AS result
-  `);
+  const row = await client.$transaction(
+    async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '25s'`);
+      const [result] = await tx.$queryRaw<
+        Array<{ result: Prisma.JsonValue }>
+      >(Prisma.sql`
+        SELECT public."identity_mail_delivery_worker_assert_v2"(
+          ${fixture.tenantId}::TEXT,
+          ${PROVIDER_AUTHORITY_DIGEST}::TEXT
+        ) AS result
+      `);
+      return result;
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      maxWait: 5_000,
+      timeout: 30_000,
+    },
+  );
   expect(row?.result).toEqual({
     schemaVersion: 2,
     operation: 'ASSERT_IDENTITY_MAIL_DELIVERY_WORKER_V2',

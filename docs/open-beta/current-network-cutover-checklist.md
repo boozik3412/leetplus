@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.24.5                                             |
+| Версия          | 1.24.6                                             |
 | Дата            | 02.08.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -19,11 +19,12 @@ candidate, который должен включать exact additive migration
 `CURRENT_179`
 admission.
 
-`CURRENT180`, stacked `CURRENT181`, `CURRENT182` и `CURRENT183` candidates
+`CURRENT180`, stacked `CURRENT181`, `CURRENT182`, `CURRENT183` и `CURRENT184` candidates
 `20260801010000_identity_mail_tenant_enrollment_control_plane` /
 `20260801020000_identity_mail_tenant_lock_drain_worker_v2` /
 `20260801030000_identity_mail_tenant_first_claim_protocol` /
-`20260802010000_identity_mail_worker_v2_freshness_protocol` намеренно не входят
+`20260802010000_identity_mail_worker_v2_freshness_protocol` /
+`20260802020000_identity_mail_worker_v2_lost_response_replay` намеренно не входят
 в canonical migration chain и не меняют этот target.
 
 ## A. Release identity и authority
@@ -109,6 +110,13 @@ admission.
       statements. Статус candidate —
       `ENGINEERING_ACCEPTED / NOT_CANONICAL / NOT_DEPLOYABLE`; production
       DI/config/CLI его не регистрируют.
+- [x] Неканонический `CURRENT184` lost-response candidate с exact SQL SHA-256
+      `a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909`
+      добавляет event-backed exact replay только для `provider_mark_v2` и
+      `complete_v2`. Устаревший marker возвращает typed `HANDOFF` до SMTP;
+      claim/reap и SMTP не входят в semantic retry. Foundation CURRENT180–184
+      и focused API tests локально зелёные. Candidate owner-only,
+      `NOT_CANONICAL / NOT_DEPLOYABLE`, без role/grant/DI/config/CLI.
 - [x] Create, reissue/revoke, cancel, accept, shell provisioning/replay и
       emergency suspend переведены на общий bounded tenant-first protocol.
       Provisioning берёт fresh platform-authority locks только после tenant
@@ -658,6 +666,13 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.24.6`, 02.08.2026 — добавлен owner-only CURRENT184 lost-response replay
+  candidate с exact SQL SHA
+  `a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909`.
+  Provider marker и completion получили event-backed exact DB-RPC replay;
+  typed `HANDOFF` блокирует SMTP для устаревшего marker. Runtime/role/grants,
+  signed coordinator, production apply и внешний доступ не включены;
+  canonical target остаётся `CURRENT_179/179`.
 - `1.24.5`, 02.08.2026 — revised CURRENT181/182 и новый CURRENT183 stack принят
   на exact `7fb3cf966d5c612f0f2504f4545151ef3edb8ac9`, GitHub Actions
   [`30720288891`](https://github.com/boozik3412/leetplus/actions/runs/30720288891)

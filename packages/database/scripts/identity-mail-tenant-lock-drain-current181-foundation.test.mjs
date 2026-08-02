@@ -111,7 +111,7 @@ function expectFinding(value, finding) {
   return report;
 }
 
-test("pins CURRENT181 with the exact ordered CURRENT180..CURRENT183 inventory", () => {
+test("pins CURRENT181 with the exact ordered CURRENT180..CURRENT184 inventory", () => {
   const report = evaluateIdentityMailTenantLockDrainCurrent181Foundation(
     artifact,
   );
@@ -141,6 +141,7 @@ test("pins CURRENT181 with the exact ordered CURRENT180..CURRENT183 inventory", 
     "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
     "20260801030000_identity_mail_tenant_first_claim_protocol",
     "20260802010000_identity_mail_worker_v2_freshness_protocol",
+    "20260802020000_identity_mail_worker_v2_lost_response_replay",
   ]);
 });
 
@@ -680,7 +681,7 @@ test("rejects metadata and candidate-chain drift independently", async (t) => {
     value.predecessor.sql += "\n";
     expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
   });
-  await t.test("missing CURRENT183 successor", () => {
+  await t.test("missing CURRENT184 successor", () => {
     const value = structuredClone(artifact);
     value.candidates.directoryNames.pop();
     expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);

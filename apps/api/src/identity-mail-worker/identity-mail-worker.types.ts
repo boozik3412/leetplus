@@ -103,7 +103,10 @@ export type MarkIdentityMailProviderAttemptInput =
     providerAuthorityDigest: string;
   };
 
-export type IdentityMailProviderAttemptOutcome = 'MARKED' | 'CANCELED';
+export type IdentityMailProviderAttemptOutcome =
+  | 'MARKED'
+  | 'CANCELED'
+  | 'HANDOFF';
 
 export type MarkIdentityMailSentInput = IdentityMailDeliveryLeaseInput & {
   providerReceiptDigest: string;
@@ -193,6 +196,7 @@ export type IdentityMailWorkerLogEvent = {
     | 'IDENTITY_MAIL_DELIVERY_RETRY'
     | 'IDENTITY_MAIL_DELIVERY_DEAD'
     | 'IDENTITY_MAIL_DELIVERY_CANCELED'
+    | 'IDENTITY_MAIL_DELIVERY_HANDOFF'
     | 'IDENTITY_MAIL_DELIVERY_RECONCILIATION_REQUIRED';
   reasonCode?: string;
 };

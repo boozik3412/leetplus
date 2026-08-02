@@ -224,6 +224,11 @@ export class IdentityMailWorkerService {
         this.logger.warn({ event: 'IDENTITY_MAIL_DELIVERY_CANCELED' });
         return 'CANCELED';
       }
+      if (providerAttemptOutcome === 'HANDOFF') {
+        providerBoundaryEntered = false;
+        this.logger.warn({ event: 'IDENTITY_MAIL_DELIVERY_HANDOFF' });
+        return 'RECONCILIATION_REQUIRED';
+      }
       if (providerAttemptOutcome !== 'MARKED') {
         throw new IdentityMailWorkerProcessingError(
           'IDENTITY_MAIL_PROVIDER_MARK_RESPONSE_INVALID',

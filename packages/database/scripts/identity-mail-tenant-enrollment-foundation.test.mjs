@@ -45,7 +45,7 @@ function expectFinding(value, finding) {
   return report;
 }
 
-test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT183 inventory", () => {
+test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT184 inventory", () => {
   const report = assertIdentityMailTenantEnrollmentFoundation(artifact);
   assert.equal(report.decision, "COMPLIANT");
   assert.equal(report.base.count, 179);
@@ -67,6 +67,7 @@ test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT183 inve
     "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
     "20260801030000_identity_mail_tenant_first_claim_protocol",
     "20260802010000_identity_mail_worker_v2_freshness_protocol",
+    "20260802020000_identity_mail_worker_v2_lost_response_replay",
   ]);
   assert.deepEqual(report.findings, []);
   assert.ok(Object.isFrozen(report));
@@ -98,7 +99,7 @@ test("fails closed on canonical position, manifest, candidate head and metadata 
       },
     ],
     [
-      "missing stacked CURRENT183 successor",
+      "missing stacked CURRENT184 successor",
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
         value.candidates.directoryNames.pop();

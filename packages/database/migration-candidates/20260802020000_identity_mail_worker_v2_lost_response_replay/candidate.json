@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "contract": "IDENTITY_MAIL_WORKER_V2_LOST_RESPONSE_REPLAY_CANDIDATE_V1",
+  "candidate": "20260802020000_identity_mail_worker_v2_lost_response_replay",
+  "ordinal": 184,
+  "predecessor": {
+    "count": 183,
+    "head": "20260802010000_identity_mail_worker_v2_freshness_protocol",
+    "manifestDigest": "6b11f52e31063c4d05a96a97f4e6710a40f3e01444b1cbeb82ca8e48d502a5fe",
+    "headChecksum": "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0"
+  },
+  "migrationSqlSha256": "a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909",
+  "authorization": false,
+  "canMutate": false,
+  "status": "NOT_DEPLOYABLE"
+}

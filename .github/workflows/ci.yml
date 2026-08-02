@@ -178,6 +178,9 @@ jobs:
       - name: Validate dormant non-canonical CURRENT183 worker-v2 freshness foundation
         run: pnpm --filter database check:identity-mail-worker-v2-freshness-current183-foundation
 
+      - name: Validate dormant non-canonical CURRENT184 lost-response replay foundation
+        run: pnpm --filter database check:identity-mail-worker-v2-replay-current184-foundation
+
       - name: Validate CURRENT182 disposable rehearsal harness
         run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-smoke
 
@@ -459,6 +462,12 @@ jobs:
         env:
           NODE_ENV: test
           IDENTITY_MAIL_WORKER_V2_CURRENT183_PG_E2E_CONFIRM: run-identity-mail-worker-v2-current183-postgres-e2e
+
+      - name: Verify CURRENT184 replay deploy, ACL and settlement semantics
+        run: pnpm --filter api test:integration:identity-mail-worker-v2-current184:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_WORKER_V2_CURRENT184_PG_E2E_CONFIRM: run-identity-mail-worker-v2-current184-postgres-e2e
 
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.55                                         |
+| Версия           | 1.56                                         |
 | Дата             | 02.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -358,6 +358,16 @@ enterprise-isolation option и не сокращает shared gates.
     `ACTIVE/PENDING` claim, `ACTIVE/HOLD` empty, оба `DRAINING` варианта
     fail closed с `42501`, а waiter после lock видит свежий `DRAINING` без
     `40P01` и без блокировки другого tenant.
+40. [CURRENT184 replay потерянного ответа](./identity-mail-current184-lost-response-replay.md) —
+    stacked dormant successor с SQL SHA-256
+    `a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909`.
+    Append-only event хранит domain-separated digest exact settlement request;
+    `provider_mark_v2` возвращает `MARKED` только для текущего живого marker,
+    иначе typed `HANDOFF` запрещает SMTP, а `complete_v2` восстанавливает
+    исходный terminal receipt. Adapter делает не более двух повторов только
+    для неизвестного результата DB-RPC; SMTP, claim и reap не повторяются.
+    Candidate owner-only, не подключён к DI/config/CLI и возвращает
+    `NOT_DEPLOYABLE / authorization=false / canSend=false`.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
@@ -367,7 +377,7 @@ Merge evidence SHA `9b2f82b2cfdd41b05bf67e71e48df6cdc3e0fda2`, CI
 (`run #61`) — `3/3 PASS`; внешний статус остаётся `NO-GO`.
 
 Неканонические candidates не повышают target до `CURRENT_180`, `CURRENT_181`,
-`CURRENT_182` или `CURRENT_183`.
+`CURRENT_182`, `CURRENT_183` или `CURRENT_184`.
 Promotion запрещён до единого release с worker v2/runtime attestation,
 producer/worker tenant advisory lock, `DRAINING` zero-secret barrier,
 независимо подписанным apply/rollback/zero-diff, production-like

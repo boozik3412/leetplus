@@ -5,7 +5,7 @@
 | Контракт | `PROTECTED_IDENTITY_MAIL_TENANT_LOCK_DRAIN_V2` |
 | Статус | `REVIEWED_DESIGN_ONLY / NOT_CANONICAL / NOT_DEPLOYABLE` |
 | Основание | `codex/open-beta-hardening`, commit `475e9be4726787db955d895d348af1fc5a7c2db3` |
-| Schema baseline | canonical `CURRENT179`; stacked candidates `CURRENT180..183` |
+| Schema baseline | canonical `CURRENT179`; stacked candidates `CURRENT180..184` |
 | Дата | `02.08.2026` |
 
 ## 1. Решение и граница документа
@@ -452,7 +452,10 @@ byte-for-byte неизменными и fail closed на новом head; это
 ### 8.1. Begin drain
 
 `ROTATE` и `DISABLE` проходят независимую signature/marker/DB/role/revision
-проверку до mutation. В одной короткой SERIALIZABLE транзакции coordinator:
+проверку до mutation. Coordinator использует короткую bounded `READ COMMITTED`
+транзакцию: отдельными statements устанавливает timeouts, берёт tenant advisory
+lock и только затем вызывает coordinator RPC. Это гарантирует новый snapshot
+после возможного ожидания lock. Внутри той же транзакции RPC:
 
 1. берёт tenant lock и enrollment `FOR UPDATE`;
 2. проверяет exact `ACTIVE`, expected revisions и current configuration;
@@ -518,8 +521,10 @@ DRAINING -> ACTIVE    для ROTATE
 DRAINING -> DISABLED  для DISABLE
 ```
 
-Finalize в одной SERIALIZABLE транзакции берёт tenant lock/enrollment, проверяет
-command identity, zero-secret, zero-inflight, append-ит terminal event и CAS:
+Finalize использует тот же bounded `READ COMMITTED` envelope
+`settings -> tenant lock -> RPC`; RPC повторно проверяет lock, берёт enrollment,
+проверяет command identity, zero-secret, zero-inflight, append-ит terminal event
+и CAS:
 
 - `ROTATE`: устанавливает только target role/authority/policy, очищает
   `activeCommandId`, включает `ACTIVE` и увеличивает monotonic revisions;

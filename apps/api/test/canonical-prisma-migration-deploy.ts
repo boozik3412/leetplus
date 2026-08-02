@@ -54,6 +54,18 @@ const IDENTITY_MAIL_CURRENT183_CANDIDATES = [
   },
 ] as const;
 
+const IDENTITY_MAIL_CURRENT184_CANDIDATES = [
+  ...IDENTITY_MAIL_CURRENT183_CANDIDATES,
+  {
+    name: '20260802020000_identity_mail_worker_v2_lost_response_replay',
+    confirmationGuc:
+      'leetplus.identity_mail_worker_v2_replay_current184_confirmation',
+    confirmation:
+      'rehearse-noncanonical-identity-mail-worker-v2-replay-current184',
+    shaGuc: 'leetplus.identity_mail_worker_v2_replay_current184_sha256',
+  },
+] as const;
+
 export function deployCanonicalPrismaMigrations(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
@@ -96,6 +108,37 @@ export function deployIdentityMailCurrent183CandidateStack(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
 ): void {
+  deployIdentityMailCandidateStack(
+    databaseUrl,
+    options,
+    IDENTITY_MAIL_CURRENT183_CANDIDATES,
+    'CURRENT183',
+  );
+}
+
+export function deployIdentityMailCurrent184CandidateStack(
+  databaseUrl: string,
+  options: CanonicalMigrationDeployOptions,
+): void {
+  deployIdentityMailCandidateStack(
+    databaseUrl,
+    options,
+    IDENTITY_MAIL_CURRENT184_CANDIDATES,
+    'CURRENT184',
+  );
+}
+
+function deployIdentityMailCandidateStack(
+  databaseUrl: string,
+  options: CanonicalMigrationDeployOptions,
+  candidates: ReadonlyArray<{
+    name: string;
+    confirmationGuc: string;
+    confirmation: string;
+    shaGuc: string;
+  }>,
+  candidateLabel: 'CURRENT183' | 'CURRENT184',
+): void {
   const target = new URL(databaseUrl);
   const targetHost = target.hostname.replace(/^\[([^\]]+)\]$/u, '$1');
   const databaseName = decodeURIComponent(
@@ -107,7 +150,7 @@ export function deployIdentityMailCurrent183CandidateStack(
     !/^lp_imtec_[0-9a-f]{32}_ci$/u.test(databaseName)
   ) {
     throw new Error(
-      'CURRENT183 candidate stack requires a local exact disposable test database',
+      `${candidateLabel} candidate stack requires a local exact disposable test database`,
     );
   }
 
@@ -124,7 +167,7 @@ export function deployIdentityMailCurrent183CandidateStack(
     });
     const migrationsDirectory = join(artifactPrismaDirectory, 'migrations');
     const sessionOptions: string[] = [];
-    for (const candidate of IDENTITY_MAIL_CURRENT183_CANDIDATES) {
+    for (const candidate of candidates) {
       const sourceMigration = join(
         candidateRoot,
         candidate.name,

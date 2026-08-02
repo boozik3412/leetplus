@@ -708,6 +708,26 @@ describe('IdentityMailWorkerService', () => {
     });
   });
 
+  it('does not call SMTP or fallback mutation for a durable HANDOFF', async () => {
+    const { service, repository, smtpProvider, logger } = harness();
+    repository.claimOne.mockResolvedValueOnce(claim());
+    repository.markProviderAttempt.mockResolvedValueOnce('HANDOFF');
+
+    await expect(service.runOnce()).resolves.toMatchObject({
+      claimed: 1,
+      sent: 0,
+      retry: 0,
+      reconciliationRequired: 1,
+    });
+    expect(smtpProvider.send.mock.calls).toHaveLength(0);
+    expect(repository.markSent.mock.calls).toHaveLength(0);
+    expect(repository.markPreProviderFailure.mock.calls).toHaveLength(0);
+    expect(repository.markReconciliationRequired.mock.calls).toHaveLength(0);
+    expect(logger.warn.mock.calls).toEqual([
+      [{ event: 'IDENTITY_MAIL_DELIVERY_HANDOFF' }],
+    ]);
+  });
+
   it('quarantines an ambiguous provider-marker response without SMTP retry', async () => {
     const { service, repository, smtpProvider } = harness();
     repository.claimOne.mockResolvedValueOnce(claim());

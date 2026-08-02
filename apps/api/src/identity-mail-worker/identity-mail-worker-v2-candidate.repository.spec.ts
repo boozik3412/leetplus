@@ -4,6 +4,7 @@ import {
   IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION,
   IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION_COUNT,
   IDENTITY_MAIL_WORKER_V2_CANDIDATE_SHA256,
+  IdentityMailWorkerV2AmbiguousSettlementError,
   IdentityMailWorkerV2CandidateRepositoryError,
   PrismaIdentityMailWorkerV2CandidateRepository,
 } from './identity-mail-worker-v2-candidate.repository';
@@ -182,6 +183,23 @@ function providerMarkedReceipt(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function providerHandoffReceipt(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 2,
+    operation: 'MARK_INITIAL_OWNER_MAIL_PROVIDER_ATTEMPT_V2',
+    decision: 'HANDOFF',
+    candidateStatus: 'NOT_DEPLOYABLE',
+    outboxId: OUTBOX_ID,
+    tenantId: TENANT_ID,
+    leaseVersion: 1,
+    transitionRevision: 4,
+    settlementState: 'ACTIVE',
+    handoffReason: 'MARKER_NOT_REUSABLE',
+    durableEvidenceEventId: `${OUTBOX_ID}:3`,
+    ...overrides,
+  };
+}
+
 function completionReceipt(
   decision: string,
   transitionRevision = 3,
@@ -267,6 +285,14 @@ function rpcQuery(prisma: PrismaMock): Prisma.Sql {
   return query as Prisma.Sql;
 }
 
+function rpcQueries(prisma: PrismaMock): Prisma.Sql[] {
+  return (prisma.rpcQueryRaw.mock.calls as unknown[][]).map((call) => {
+    const query = call[0];
+    if (!query) throw new Error('Expected a candidate RPC query');
+    return query as Prisma.Sql;
+  });
+}
+
 function transactionQuery(prisma: PrismaMock, index: number): Prisma.Sql {
   const query = (prisma.transactionQueryRaw.mock.calls as unknown[][])[
     index
@@ -330,7 +356,7 @@ function expectReason(error: unknown, reasonCode: string): void {
 }
 
 describe('PrismaIdentityMailWorkerV2CandidateRepository', () => {
-  it('keeps readiness dormant and invokes only the exact CURRENT183 assert_v2 RPC', async () => {
+  it('keeps readiness dormant and invokes only the exact CURRENT184 assert_v2 RPC', async () => {
     const { prisma, repository } = harness();
     prisma.rpcQueryRaw.mockResolvedValueOnce([{ result: readinessReceipt() }]);
 
@@ -419,6 +445,166 @@ describe('PrismaIdentityMailWorkerV2CandidateRepository', () => {
     ]);
   });
 
+  it('replays the exact provider marker once after a lost DB response', async () => {
+    const { prisma, repository } = harness();
+    await primeClaim(prisma, repository);
+    prisma.rpcQueryRaw
+      .mockRejectedValueOnce({ code: 'P1017' })
+      .mockResolvedValueOnce([{ result: providerMarkedReceipt() }]);
+
+    await expect(
+      repository.markProviderAttempt(providerAttemptInput()),
+    ).resolves.toBe('MARKED');
+
+    const [first, replay] = rpcQueries(prisma);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(first?.strings).toEqual(replay?.strings);
+    expect(first?.values).toEqual(replay?.values);
+
+    clearTransactionMocks(prisma);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
+      { result: completionReceipt('SENT', 4) },
+    ]);
+    await expect(
+      repository.markSent({
+        ...leaseInput(3),
+        providerReceiptDigest: PROVIDER_RECEIPT_DIGEST,
+        providerOutcomeCode: 'SMTP_ACCEPTED',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('throws typed ambiguity without advancing the binding after two unknown marker responses', async () => {
+    const { prisma, repository } = harness();
+    await primeClaim(prisma, repository);
+    prisma.rpcQueryRaw.mockRejectedValue({ code: 'ECONNRESET' });
+
+    const error = await rejectionOf(
+      repository.markProviderAttempt(providerAttemptInput()),
+    );
+    expect(error).toBeInstanceOf(IdentityMailWorkerV2AmbiguousSettlementError);
+    expect(error).toMatchObject({
+      reasonCode: 'IDENTITY_MAIL_WORKER_V2_SETTLEMENT_RESPONSE_UNKNOWN',
+      operation: 'PROVIDER_MARK',
+      attempts: 2,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.rpcQueryRaw).toHaveBeenCalledTimes(2);
+    const [first, replay] = rpcQueries(prisma);
+    expect(first?.strings).toEqual(replay?.strings);
+    expect(first?.values).toEqual(replay?.values);
+
+    clearTransactionMocks(prisma);
+    await expect(
+      repository.markReconciliationRequired({
+        ...leaseInput(3),
+        reasonCode: 'IDENTITY_MAIL_PROVIDER_MARK_RESPONSE_UNKNOWN',
+      }),
+    ).rejects.toMatchObject({
+      reasonCode: 'IDENTITY_MAIL_WORKER_V2_CLAIM_BINDING_MISMATCH',
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
+      { result: providerMarkedReceipt() },
+    ]);
+    await expect(
+      repository.markProviderAttempt(providerAttemptInput()),
+    ).resolves.toBe('MARKED');
+  });
+
+  it.each([
+    ['40P01 then P1017', { code: '40P01' }, { code: 'P1017' }],
+    ['P1017 then 40P01', { code: 'P1017' }, { code: '40P01' }],
+  ])(
+    'shares one two-transaction ambiguity budget for %s',
+    async (_case, firstFailure, secondFailure) => {
+      const { prisma, repository } = harness();
+      await primeClaim(prisma, repository);
+      prisma.rpcQueryRaw
+        .mockRejectedValueOnce(firstFailure)
+        .mockRejectedValueOnce(secondFailure);
+
+      const error = await rejectionOf(
+        repository.markProviderAttempt(providerAttemptInput()),
+      );
+
+      expect(error).toBeInstanceOf(
+        IdentityMailWorkerV2AmbiguousSettlementError,
+      );
+      expect(error).toMatchObject({
+        operation: 'PROVIDER_MARK',
+        attempts: 2,
+      });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(prisma.rpcQueryRaw).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('preserves transaction-retry-required after two known 40P01 failures', async () => {
+    const { prisma, repository } = harness();
+    await primeClaim(prisma, repository);
+    prisma.rpcQueryRaw.mockRejectedValue({ code: '40P01' });
+
+    const error = await rejectionOf(
+      repository.markProviderAttempt(providerAttemptInput()),
+    );
+
+    expect(error).not.toBeInstanceOf(
+      IdentityMailWorkerV2AmbiguousSettlementError,
+    );
+    expectReason(error, 'IDENTITY_MAIL_WORKER_V2_TRANSACTION_RETRY_REQUIRED');
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.rpcQueryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts only a durable provider HANDOFF and releases its process binding', async () => {
+    const { prisma, repository } = harness();
+    await primeClaim(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
+      { result: providerHandoffReceipt() },
+    ]);
+
+    await expect(
+      repository.markProviderAttempt(providerAttemptInput()),
+    ).resolves.toBe('HANDOFF');
+
+    clearTransactionMocks(prisma);
+    await expect(
+      repository.markReconciliationRequired({
+        ...leaseInput(3),
+        reasonCode: 'IDENTITY_MAIL_PROVIDER_MARK_HANDOFF',
+      }),
+    ).rejects.toMatchObject({
+      reasonCode: 'IDENTITY_MAIL_WORKER_V2_CLAIM_BINDING_REQUIRED',
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['extra key', providerHandoffReceipt({ unexpected: true })],
+    [
+      'stale aggregate revision',
+      providerHandoffReceipt({ transitionRevision: 2 }),
+    ],
+    [
+      'wrong evidence event',
+      providerHandoffReceipt({ durableEvidenceEventId: `${OUTBOX_ID}:4` }),
+    ],
+    ['unknown reason', providerHandoffReceipt({ handoffReason: 'UNKNOWN' })],
+  ])('rejects a provider HANDOFF with %s', async (_case, receipt) => {
+    const { prisma, repository } = harness();
+    await primeClaim(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([{ result: receipt }]);
+
+    await expect(
+      repository.markProviderAttempt(providerAttemptInput()),
+    ).rejects.toMatchObject({
+      reasonCode: 'IDENTITY_MAIL_WORKER_V2_PROVIDER_HANDOFF_INVALID',
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
   it('passes DB-enforced tenant authority to complete_v2', async () => {
     const { prisma, repository } = harness();
     await primeClaim(prisma, repository);
@@ -444,6 +630,69 @@ describe('PrismaIdentityMailWorkerV2CandidateRepository', () => {
     ]);
   });
 
+  it('replays the exact completion once without repeating the provider boundary', async () => {
+    const { prisma, repository } = harness();
+    await primeClaim(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
+      { result: providerMarkedReceipt() },
+    ]);
+    await repository.markProviderAttempt(providerAttemptInput());
+    clearTransactionMocks(prisma);
+    prisma.rpcQueryRaw
+      .mockRejectedValueOnce({ code: 'P2010', meta: { code: '08006' } })
+      .mockResolvedValueOnce([{ result: completionReceipt('SENT', 4) }]);
+
+    await expect(
+      repository.markSent({
+        ...leaseInput(3),
+        providerReceiptDigest: PROVIDER_RECEIPT_DIGEST,
+        providerOutcomeCode: 'SMTP_ACCEPTED',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    const [first, replay] = rpcQueries(prisma);
+    expect(first?.strings).toEqual(replay?.strings);
+    expect(first?.values).toEqual(replay?.values);
+  });
+
+  it('keeps the binding for typed reconcile after completion replay is exhausted', async () => {
+    const { prisma, repository } = harness();
+    await primeClaim(prisma, repository);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
+      { result: providerMarkedReceipt() },
+    ]);
+    await repository.markProviderAttempt(providerAttemptInput());
+    clearTransactionMocks(prisma);
+    prisma.rpcQueryRaw.mockRejectedValue({ code: 'P1002' });
+
+    const error = await rejectionOf(
+      repository.markSent({
+        ...leaseInput(3),
+        providerReceiptDigest: PROVIDER_RECEIPT_DIGEST,
+        providerOutcomeCode: 'SMTP_ACCEPTED',
+      }),
+    );
+    expect(error).toBeInstanceOf(IdentityMailWorkerV2AmbiguousSettlementError);
+    expect(error).toMatchObject({
+      reasonCode: 'IDENTITY_MAIL_WORKER_V2_SETTLEMENT_RESPONSE_UNKNOWN',
+      operation: 'COMPLETE',
+      attempts: 2,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+
+    clearTransactionMocks(prisma);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
+      { result: completionReceipt('RECONCILIATION_REQUIRED', 4) },
+    ]);
+    await expect(
+      repository.markReconciliationRequired({
+        ...leaseInput(3),
+        reasonCode: 'IDENTITY_MAIL_COMPLETE_RESPONSE_UNKNOWN',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('passes tenantId first to DRAINING-capable reap_v2', async () => {
     const { prisma, repository } = harness();
     prisma.rpcQueryRaw.mockResolvedValueOnce([{ result: reapReceipt() }]);
@@ -464,6 +713,50 @@ describe('PrismaIdentityMailWorkerV2CandidateRepository', () => {
       WORKER_ACTOR_DIGEST,
       10,
     ]);
+  });
+
+  it.each(['claim', 'reap'] as const)(
+    'does not semantic-retry a lost response from %s',
+    async (operation) => {
+      const { prisma, repository } = harness();
+      prisma.rpcQueryRaw.mockRejectedValue({ code: 'P1017' });
+
+      const result =
+        operation === 'claim'
+          ? repository.claimOne(claimInput())
+          : repository.reapExpired({
+              tenantId: TENANT_ID,
+              providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+              workerActorDigest: WORKER_ACTOR_DIGEST,
+              batchLimit: 10,
+            });
+      await expect(result).rejects.toMatchObject({ code: 'P1017' });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.rpcQueryRaw).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not semantic-retry a provider business or receipt failure', async () => {
+    const databaseFailure = harness();
+    await primeClaim(databaseFailure.prisma, databaseFailure.repository);
+    databaseFailure.prisma.rpcQueryRaw.mockRejectedValue({ code: '42501' });
+
+    await expect(
+      databaseFailure.repository.markProviderAttempt(providerAttemptInput()),
+    ).rejects.toMatchObject({ code: '42501' });
+    expect(databaseFailure.prisma.$transaction).toHaveBeenCalledTimes(1);
+
+    const receiptFailure = harness();
+    await primeClaim(receiptFailure.prisma, receiptFailure.repository);
+    receiptFailure.prisma.rpcQueryRaw.mockResolvedValueOnce([
+      { result: providerMarkedReceipt({ unexpected: true }) },
+    ]);
+    await expect(
+      receiptFailure.repository.markProviderAttempt(providerAttemptInput()),
+    ).rejects.toMatchObject({
+      reasonCode: 'IDENTITY_MAIL_WORKER_V2_DATABASE_RESPONSE_INVALID',
+    });
+    expect(receiptFailure.prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -520,6 +813,7 @@ describe('PrismaIdentityMailWorkerV2CandidateRepository', () => {
     ['readiness', readinessReceipt(), 'candidateStatus'],
     ['claim', claimReceipt(), 'claimPolicyRevision'],
     ['provider marker', providerMarkedReceipt(), 'settlementState'],
+    ['provider handoff', providerHandoffReceipt(), 'handoffReason'],
     ['completion', completionReceipt('SENT'), 'candidateStatus'],
     ['reap', reapReceipt(), 'processed'],
   ])(
@@ -548,6 +842,13 @@ describe('PrismaIdentityMailWorkerV2CandidateRepository', () => {
           return target.repository.claimOne(claimInput());
         }
         if (kind === 'provider marker') {
+          await primeClaim(target.prisma, target.repository);
+          target.prisma.rpcQueryRaw.mockResolvedValueOnce([
+            { result: receipt },
+          ]);
+          return target.repository.markProviderAttempt(providerAttemptInput());
+        }
+        if (kind === 'provider handoff') {
           await primeClaim(target.prisma, target.repository);
           target.prisma.rpcQueryRaw.mockResolvedValueOnce([
             { result: receipt },

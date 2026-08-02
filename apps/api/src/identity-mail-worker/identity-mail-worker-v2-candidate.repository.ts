@@ -15,11 +15,11 @@ import type {
 } from './identity-mail-worker.types';
 
 export const IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION =
-  '20260802010000_identity_mail_worker_v2_freshness_protocol' as const;
-export const IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION_COUNT = 183 as const;
+  '20260802020000_identity_mail_worker_v2_lost_response_replay' as const;
+export const IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION_COUNT = 184 as const;
 
 export const IDENTITY_MAIL_WORKER_V2_CANDIDATE_SHA256 =
-  'a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0' as const;
+  'a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909' as const;
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
@@ -29,7 +29,7 @@ const IDENTITY_MAIL_TENANT_LOCK_DOMAIN = 'leetplus:identity-mail-tenant:v1:';
 const IDENTITY_MAIL_TENANT_LOCK_SEED = 180;
 const IDENTITY_MAIL_STATEMENT_TIMEOUT = '25s';
 const IDENTITY_MAIL_LOCK_TIMEOUT = '5s';
-const IDENTITY_MAIL_TENANT_TRANSACTION_ATTEMPTS = 2;
+const IDENTITY_MAIL_RPC_TRANSACTION_ATTEMPTS = 2;
 const IDENTITY_MAIL_TENANT_TRANSACTION_OPTIONS = {
   isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
   maxWait: 5_000,
@@ -114,6 +114,19 @@ const PROVIDER_MARKED_RECEIPT_KEYS = [
   'providerAttemptKey',
   'settlementState',
 ] as const;
+const PROVIDER_HANDOFF_RECEIPT_KEYS = [
+  'schemaVersion',
+  'operation',
+  'decision',
+  'candidateStatus',
+  'outboxId',
+  'tenantId',
+  'leaseVersion',
+  'transitionRevision',
+  'settlementState',
+  'handoffReason',
+  'durableEvidenceEventId',
+] as const;
 const COMPLETION_RECEIPT_KEYS = [
   'schemaVersion',
   'operation',
@@ -188,8 +201,23 @@ export class IdentityMailWorkerV2CandidateRepositoryError extends Error {
   }
 }
 
+export type IdentityMailWorkerV2AmbiguousSettlementOperation =
+  | 'PROVIDER_MARK'
+  | 'COMPLETE';
+
+export class IdentityMailWorkerV2AmbiguousSettlementError extends IdentityMailWorkerV2CandidateRepositoryError {
+  readonly attempts = IDENTITY_MAIL_RPC_TRANSACTION_ATTEMPTS;
+
+  constructor(
+    readonly operation: IdentityMailWorkerV2AmbiguousSettlementOperation,
+  ) {
+    super('IDENTITY_MAIL_WORKER_V2_SETTLEMENT_RESPONSE_UNKNOWN');
+    this.name = 'IdentityMailWorkerV2AmbiguousSettlementError';
+  }
+}
+
 /**
- * Dormant CURRENT183 adapter. It intentionally has no Injectable decorator,
+ * Dormant CURRENT184 adapter. It intentionally has no Injectable decorator,
  * module provider, config switch or CLI import.
  */
 export class PrismaIdentityMailWorkerV2CandidateRepository implements IdentityMailWorkerRepository {
@@ -453,7 +481,7 @@ export class PrismaIdentityMailWorkerV2CandidateRepository implements IdentityMa
       fail('IDENTITY_MAIL_WORKER_V2_CLAIM_BINDING_MISMATCH');
     }
 
-    const result = await this.tenantRpc(
+    const result = await this.settlementRpc(
       input.tenantId,
       Prisma.sql`
         SELECT public."identity_initial_owner_mail_provider_mark_v2"(
@@ -467,8 +495,19 @@ export class PrismaIdentityMailWorkerV2CandidateRepository implements IdentityMa
           ${digest(input.messageId)}::TEXT
         ) AS result
       `,
+      'PROVIDER_MARK',
     );
     const untrustedRecord = recordValue(result);
+    if (untrustedRecord.decision === 'HANDOFF') {
+      const record = exactRecordValue(
+        untrustedRecord,
+        PROVIDER_HANDOFF_RECEIPT_KEYS,
+        'IDENTITY_MAIL_WORKER_V2_PROVIDER_HANDOFF_INVALID',
+      );
+      assertProviderHandoffReceipt(record, input);
+      this.releaseClaimBinding(input.outboxId, binding);
+      return 'HANDOFF';
+    }
     if (untrustedRecord.decision === 'CANCELED') {
       const record = exactRecordValue(
         untrustedRecord,
@@ -565,7 +604,7 @@ export class PrismaIdentityMailWorkerV2CandidateRepository implements IdentityMa
     terminalAck: string | null,
   ): Promise<{ binding: IdentityMailV2ClaimBinding; result: unknown }> {
     const binding = this.requireClaimBinding(input);
-    const result = await this.tenantRpc(
+    const result = await this.settlementRpc(
       input.tenantId,
       Prisma.sql`
         SELECT public."identity_initial_owner_mail_complete_v2"(
@@ -580,6 +619,7 @@ export class PrismaIdentityMailWorkerV2CandidateRepository implements IdentityMa
           ${terminalAck}::TEXT
         ) AS result
       `,
+      'COMPLETE',
     );
     return { binding, result };
   }
@@ -628,77 +668,120 @@ export class PrismaIdentityMailWorkerV2CandidateRepository implements IdentityMa
 
     for (
       let attempt = 0;
-      attempt < IDENTITY_MAIL_TENANT_TRANSACTION_ATTEMPTS;
+      attempt < IDENTITY_MAIL_RPC_TRANSACTION_ATTEMPTS;
       attempt += 1
     ) {
       try {
-        return await this.prisma.$transaction(async (tx) => {
-          const settings = await tx.$queryRaw<
-            IdentityMailTenantTransactionSettingsRow[]
-          >(Prisma.sql`
-            SELECT
-              pg_catalog.current_setting('transaction_isolation')
-                AS "isolationLevel",
-              pg_catalog.current_setting('transaction_read_only') AS "readOnly",
-              pg_catalog.set_config(
-                'statement_timeout',
-                ${IDENTITY_MAIL_STATEMENT_TIMEOUT},
-                true
-              ) AS "statementTimeout",
-              pg_catalog.set_config(
-                'lock_timeout',
-                ${IDENTITY_MAIL_LOCK_TIMEOUT},
-                true
-              ) AS "lockTimeout"
-          `);
-          if (
-            settings.length !== 1 ||
-            settings[0]?.isolationLevel !== 'read committed' ||
-            settings[0]?.readOnly !== 'off' ||
-            settings[0]?.statementTimeout !== IDENTITY_MAIL_STATEMENT_TIMEOUT ||
-            settings[0]?.lockTimeout !== IDENTITY_MAIL_LOCK_TIMEOUT
-          ) {
-            fail('IDENTITY_MAIL_WORKER_V2_TENANT_LOCK_PROTOCOL_INVALID');
-          }
-
-          // The lock and RPC must remain separate statements. READ COMMITTED
-          // gives the RPC a fresh snapshot after any advisory-lock wait.
-          const locks = await tx.$queryRaw<IdentityMailTenantLockRow[]>(
-            Prisma.sql`
-              WITH tenant_lock AS MATERIALIZED (
-                SELECT pg_catalog.pg_advisory_xact_lock(
-                  pg_catalog.hashtextextended(
-                    ${IDENTITY_MAIL_TENANT_LOCK_DOMAIN} || ${tenantId}::TEXT,
-                    ${IDENTITY_MAIL_TENANT_LOCK_SEED}
-                  )
-                ) AS acquired
-              )
-              SELECT
-                ${tenantId}::TEXT AS "tenantId",
-                pg_catalog.pg_backend_pid()::INTEGER AS "backendPid"
-              FROM tenant_lock
-            `,
-          );
-          if (
-            locks.length !== 1 ||
-            locks[0]?.tenantId !== tenantId ||
-            !Number.isInteger(locks[0]?.backendPid)
-          ) {
-            fail('IDENTITY_MAIL_WORKER_V2_TENANT_LOCK_PROTOCOL_INVALID');
-          }
-
-          return this.rpc(tx, query);
-        }, IDENTITY_MAIL_TENANT_TRANSACTION_OPTIONS);
+        return await this.tenantRpcAttempt(tenantId, query);
       } catch (error) {
         if (!retryableTenantTransactionError(error)) {
           throw error;
         }
-        if (attempt === IDENTITY_MAIL_TENANT_TRANSACTION_ATTEMPTS - 1) {
+        if (attempt === IDENTITY_MAIL_RPC_TRANSACTION_ATTEMPTS - 1) {
           fail('IDENTITY_MAIL_WORKER_V2_TRANSACTION_RETRY_REQUIRED');
         }
       }
     }
     return fail('IDENTITY_MAIL_WORKER_V2_TRANSACTION_RETRY_REQUIRED');
+  }
+
+  private async settlementRpc(
+    tenantId: string,
+    query: Prisma.Sql,
+    operation: IdentityMailWorkerV2AmbiguousSettlementOperation,
+  ): Promise<unknown> {
+    let unknownResponseObserved = false;
+    for (
+      let attempt = 0;
+      attempt < IDENTITY_MAIL_RPC_TRANSACTION_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        return await this.tenantRpcAttempt(tenantId, query);
+      } catch (error) {
+        const responseUnknown = unknownDatabaseResponse(error);
+        const transactionRetryable = retryableTenantTransactionError(error);
+        unknownResponseObserved ||= responseUnknown;
+        if (!responseUnknown && !transactionRetryable) {
+          if (unknownResponseObserved) {
+            throw new IdentityMailWorkerV2AmbiguousSettlementError(operation);
+          }
+          throw error;
+        }
+        if (attempt === IDENTITY_MAIL_RPC_TRANSACTION_ATTEMPTS - 1) {
+          if (unknownResponseObserved) {
+            throw new IdentityMailWorkerV2AmbiguousSettlementError(operation);
+          }
+          fail('IDENTITY_MAIL_WORKER_V2_TRANSACTION_RETRY_REQUIRED');
+        }
+      }
+    }
+    return fail('IDENTITY_MAIL_WORKER_V2_TRANSACTION_RETRY_REQUIRED');
+  }
+
+  private async tenantRpcAttempt(
+    tenantId: string,
+    query: Prisma.Sql,
+  ): Promise<unknown> {
+    if (!UUID_PATTERN.test(tenantId)) {
+      fail('IDENTITY_MAIL_WORKER_V2_TENANT_ID_INVALID');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const settings = await tx.$queryRaw<
+        IdentityMailTenantTransactionSettingsRow[]
+      >(Prisma.sql`
+        SELECT
+          pg_catalog.current_setting('transaction_isolation')
+            AS "isolationLevel",
+          pg_catalog.current_setting('transaction_read_only') AS "readOnly",
+          pg_catalog.set_config(
+            'statement_timeout',
+            ${IDENTITY_MAIL_STATEMENT_TIMEOUT},
+            true
+          ) AS "statementTimeout",
+          pg_catalog.set_config(
+            'lock_timeout',
+            ${IDENTITY_MAIL_LOCK_TIMEOUT},
+            true
+          ) AS "lockTimeout"
+      `);
+      if (
+        settings.length !== 1 ||
+        settings[0]?.isolationLevel !== 'read committed' ||
+        settings[0]?.readOnly !== 'off' ||
+        settings[0]?.statementTimeout !== IDENTITY_MAIL_STATEMENT_TIMEOUT ||
+        settings[0]?.lockTimeout !== IDENTITY_MAIL_LOCK_TIMEOUT
+      ) {
+        fail('IDENTITY_MAIL_WORKER_V2_TENANT_LOCK_PROTOCOL_INVALID');
+      }
+
+      // The lock and RPC must remain separate statements. READ COMMITTED
+      // gives the RPC a fresh snapshot after any advisory-lock wait.
+      const locks = await tx.$queryRaw<IdentityMailTenantLockRow[]>(Prisma.sql`
+        WITH tenant_lock AS MATERIALIZED (
+          SELECT pg_catalog.pg_advisory_xact_lock(
+            pg_catalog.hashtextextended(
+              ${IDENTITY_MAIL_TENANT_LOCK_DOMAIN} || ${tenantId}::TEXT,
+              ${IDENTITY_MAIL_TENANT_LOCK_SEED}
+            )
+          ) AS acquired
+        )
+        SELECT
+          ${tenantId}::TEXT AS "tenantId",
+          pg_catalog.pg_backend_pid()::INTEGER AS "backendPid"
+        FROM tenant_lock
+      `);
+      if (
+        locks.length !== 1 ||
+        locks[0]?.tenantId !== tenantId ||
+        !Number.isInteger(locks[0]?.backendPid)
+      ) {
+        fail('IDENTITY_MAIL_WORKER_V2_TENANT_LOCK_PROTOCOL_INVALID');
+      }
+
+      return this.rpc(tx, query);
+    }, IDENTITY_MAIL_TENANT_TRANSACTION_OPTIONS);
   }
 
   private async rpc(
@@ -776,6 +859,32 @@ function assertProviderMarkerReceipt(
     record.transitionRevision !== input.expectedTransitionRevision + 1
   ) {
     fail('IDENTITY_MAIL_WORKER_V2_DATABASE_RESPONSE_INVALID');
+  }
+}
+
+function assertProviderHandoffReceipt(
+  record: Record<string, unknown>,
+  input: MarkIdentityMailProviderAttemptInput,
+): void {
+  const transitionRevision = positiveInteger(
+    record.transitionRevision,
+    'IDENTITY_MAIL_WORKER_V2_PROVIDER_HANDOFF_INVALID',
+  );
+  if (
+    record.schemaVersion !== 2 ||
+    record.operation !== 'MARK_INITIAL_OWNER_MAIL_PROVIDER_ATTEMPT_V2' ||
+    record.decision !== 'HANDOFF' ||
+    record.candidateStatus !== 'NOT_DEPLOYABLE' ||
+    record.outboxId !== input.outboxId ||
+    record.tenantId !== input.tenantId ||
+    record.leaseVersion !== leaseVersionNumber(input.leaseVersion) ||
+    transitionRevision < input.expectedTransitionRevision + 1 ||
+    !settlementState(record.settlementState) ||
+    record.handoffReason !== 'MARKER_NOT_REUSABLE' ||
+    record.durableEvidenceEventId !==
+      `${input.outboxId}:${input.expectedTransitionRevision + 1}`
+  ) {
+    fail('IDENTITY_MAIL_WORKER_V2_PROVIDER_HANDOFF_INVALID');
   }
 }
 
@@ -988,6 +1097,40 @@ function retryableTenantTransactionError(error: unknown): boolean {
     sqlState === '55P03' ||
     sqlState === '57014'
   );
+}
+
+function unknownDatabaseResponse(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3; depth += 1) {
+    const errorCode = databaseErrorCode(current);
+    const sqlState = databaseSqlState(current);
+    if (
+      errorCode === 'P1001' ||
+      errorCode === 'P1002' ||
+      errorCode === 'P1008' ||
+      errorCode === 'P1017' ||
+      errorCode === 'ECONNABORTED' ||
+      errorCode === 'ECONNRESET' ||
+      errorCode === 'ENETRESET' ||
+      errorCode === 'EPIPE' ||
+      errorCode === 'ETIMEDOUT' ||
+      (sqlState !== null && /^08[0-9A-Z]{3}$/u.test(sqlState)) ||
+      sqlState === '40003' ||
+      sqlState === '57P01' ||
+      sqlState === '57P02' ||
+      sqlState === '57P03'
+    ) {
+      return true;
+    }
+    if (!recordValueOrNull(current)) {
+      return false;
+    }
+    current = current.cause ?? current.originalError;
+    if (current === undefined) {
+      return false;
+    }
+  }
+  return false;
 }
 
 function databaseSqlState(error: unknown): string | null {

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.56                                         |
+| Версия           | 1.57                                         |
 | Дата             | 02.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -377,8 +377,18 @@ enterprise-isolation option и не сокращает shared gates.
     owner-owned RPC capability; structural/proxy/accessor forgeries отклоняются.
     Lost response допускает один exact-object retry, затем typed ambiguous
     outcome. SQL, production root, DB role/grant, DI/config/CLI и runtime wiring
-    отсутствуют; локальный gate — `14/14 PASS`, статус остаётся
-    `DORMANT_APPLICATION_BOUNDARY / NOT_DEPLOYABLE`.
+    отсутствуют; gate — `14/14 PASS`. Exact implementation `5ee3228...`
+    принят GitHub Actions
+    [`30742082348`](https://github.com/boozik3412/leetplus/actions/runs/30742082348);
+    статус остаётся `DORMANT_APPLICATION_BOUNDARY / NOT_DEPLOYABLE`.
+42. [CURRENT185 duty-role authority](./identity-mail-current185-duty-role-authority.md) —
+    dormant exact grants projection и отдельный Ed25519 duty-role manifest.
+    Каталог связывает database/schema/role/routine OID, exact ACL и effective
+    privileges; signed payload дополнительно связывает deployment/actual
+    context и CURRENT184/CURRENT185 chain. Transparent/revoked Proxy и recreate
+    identity fail closed. Grants `12/12`, manifest `16/16`, combined `28/28`;
+    independent reviews — без P0/P1. Production roots, SQL apply, роли, grants и
+    runtime wiring отсутствуют; successor manifest для V2 обязателен.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail

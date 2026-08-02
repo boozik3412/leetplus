@@ -190,6 +190,12 @@ jobs:
       - name: Validate sealed CURRENT185 tenant enrollment coordinator boundary
         run: pnpm --filter database check:identity-mail-tenant-enrollment-coordinator-current185
 
+      - name: Validate CURRENT185 identity-mail duty-role grants catalog
+        run: pnpm --filter database check:identity-mail-duty-role-grants-current185
+
+      - name: Validate CURRENT185 signed identity-mail duty-role manifest
+        run: pnpm --filter database check:identity-mail-duty-role-manifest-current185
+
       - name: Validate independent identity-mail worker runtime attestation
         run: pnpm --filter database check:identity-mail-worker-runtime-attestation
 

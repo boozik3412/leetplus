@@ -84,22 +84,25 @@ ledger этим slice ещё не реализован.
   application checks, authority-root gate и PostgreSQL migration smoke зелёные;
   CURRENT183 и CURRENT184 PostgreSQL suites — по `3/3 PASS`.
 
-Remote CURRENT185 evidence появляется только после CI на exact commit,
-содержащем этот документ и boundary. Локальные проверки не заменяют его.
+Exact CURRENT185 implementation
+`5ee3228931f92d282f82a3607117f3955b973962` принят GitHub Actions
+[`30742082348`](https://github.com/boozik3412/leetplus/actions/runs/30742082348):
+новый CURRENT185 gate, authority-root gate, application checks и PostgreSQL
+migration smoke — green; CURRENT183 и CURRENT184 PostgreSQL steps также green.
 
 ## Почему доступ всё ещё `NO-GO`
 
 Существующий enrollment authority V1 связывает worker role name/OID, но не
 связывает enrollment coordinator role name/OID и exact duty-role grants. Его
-нельзя незаметно расширить новыми полями: нужен новый versioned signature
-domain/profile либо отдельный подписанный duty-role manifest с собственной
-историей ключей.
+нельзя незаметно расширить новыми полями. Отдельный signed duty-role manifest и
+exact grants catalog уже реализованы как dormant boundary, однако authority V2
+и successor manifest, pin-ящий exact V2 artifact/release, ещё отсутствуют.
 
 До внешнего `Tenant B/Store B1` обязательны:
 
-1. signed duty-role manifest и enrollment authority V2, связывающие database
-   identity, coordinator/worker role name и OID, exact grants digest и exact
-   release/candidate chain;
+1. enrollment authority V2 и successor signed duty-role manifest, связывающие
+   database identity, coordinator/worker role name и OID, exact grants digest и
+   exact V2 release/candidate chain;
 2. owner-owned crash-idempotent begin/resume/finalize/rollback ledger и RPC;
 3. отдельные `NOLOGIN` schema owner, application runtime, activation
    coordinator, enrollment coordinator и worker-v2 роли с минимальными grants;
@@ -112,6 +115,33 @@ domain/profile либо отдельный подписанный duty-role mani
    grant → start-v2, затем rollback и zero-diff rehearsal;
 7. отдельные решения `PRODUCTION DEPLOY GO` и `SHARED BETA GO`.
 
+## Целевая двухуровневая RPC-модель
+
+Sealed importer и runtime coordinator нельзя объединять в одну выданную роль:
+PostgreSQL не умеет проверять application `WeakSet` brand или Ed25519, поэтому
+роль с доступом к raw import RPC смогла бы подделать JSON/digest.
+
+Целевой контракт разделяется так:
+
+1. owner-only importer без runtime grant сохраняет уже проверенные branded
+   manifest и command вместе с исходными canonical bytes и signature evidence;
+2. enrollment-coordinator получает только
+   `identity_mail_tenant_enrollment_drive_command_v2(TEXT, TEXT, TEXT, TEXT)` —
+   tenant, command, authorization-envelope digest и duty-manifest digest;
+3. driver загружает immutable command и active non-revoked manifest из ledger,
+   под tenant lock повторно сверяет `SESSION_USER` name/OID и свежий ACL
+   digest, затем idempotently выполняет lifecycle;
+4. первый `ROTATE/DISABLE` может только зафиксировать `DRAINING` и вернуть
+   `PENDING_ZERO_INFLIGHT`; последующий exact вызов либо повторяет pending, либо
+   при zero inflight завершает transition; terminal replay возвращает
+   сохранённый receipt;
+5. rollback является отдельной подписанной command с
+   `intent=ROLLBACK/rollbackOfCommandId`, а не параметром runtime-вызова.
+
+Receipt обязан различать `BEGIN_DRAIN`, `WAIT_ZERO_INFLIGHT`, `FINALIZE` и
+`TERMINAL_REPLAY`: одного boolean `replayed` для multi-step lifecycle
+недостаточно.
+
 Нельзя применять CURRENT180–184 поверх live CURRENT179 без этой церемонии:
 candidate prerequisites требуют owner-only ACL, тогда как текущий runtime уже
 имеет grants. Широкий `REVOKE` из disposable fixture также нельзя переносить в
@@ -120,3 +150,6 @@ production; допустимы только вычисленный manifest и �
 Production остаётся `CURRENT179/179`. Текущие четыре клуба остаются одной сетью
 `Tenant A/Store A1..A4`; внешний tenant, OWNER account/invite и SMTP не
 создаются.
+
+Связанный следующий boundary:
+[CURRENT185 exact duty-role grants и signed manifest](./identity-mail-current185-duty-role-authority.md).

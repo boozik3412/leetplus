@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 02.08.2026
-- Версия: 1.86
+- Версия: 1.87
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -238,6 +238,12 @@
 | BETA-IAM-006  | P0        | Запланировано | Свести backend/frontend permission maps                   | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | BETA-IAM-001                                                                |
 | BETA-IAM-007  | P0        | Запланировано | Добавить журнал доступа и управление сессиями             | Владелец видит активных пользователей и security events своей сети; может блокировать аккаунт и отзывать его сессии                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | BETA-SEC-010                                                                |
 | BETA-IAM-008  | P1        | Запланировано | Принять multi-network identity model                      | Решено, может ли один email состоять в нескольких независимых tenant; глобальная уникальность `User.email` либо сохранена как явное ограничение первого pilot, либо заменена membership-моделью с миграцией                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | BETA-TEN-003                                                                |
+
+Актуализация `BETA-IAM-004K`: после CURRENT185 coordinator принят dormant
+exact grants catalog (`12/12`) и separate-purpose signed duty-role manifest
+(`16/16`), combined `28/28`, independent reviews без P0/P1. Это закрывает
+policy/verifier часть, но не authority V2, successor manifest, DB ledger,
+runtime grants/attestation или rehearsal; подробности — в §12.7.
 
 ### 5.5. CI/CD, БД и эксплуатационная надёжность
 
@@ -4063,9 +4069,11 @@ enrollment coordinator:
 - source-purity gate разрешает один exact import и запрещает production root,
   env lookup, SQL grant/revoke, DB/Nest/HTTP clients, DI/CLI/runtime wiring.
 
-Локальное evidence boundary — `14/14 PASS`. Remote exact-head evidence должно
-быть получено обязательным CI gate
-`check:identity-mail-tenant-enrollment-coordinator-current185`.
+Evidence boundary — `14/14 PASS`. Exact implementation
+`5ee3228931f92d282f82a3607117f3955b973962` принят GitHub Actions
+[`30742082348`](https://github.com/boozik3412/leetplus/actions/runs/30742082348):
+обязательный gate `check:identity-mail-tenant-enrollment-coordinator-current185`,
+authority-root gate, application checks и PostgreSQL migration smoke — green.
 
 CURRENT185 пока не закрывает P0 `BETA-IAM-004K`: существующий enrollment
 authority V1 подписывает worker role name/OID, но не coordinator role name/OID и
@@ -4084,8 +4092,63 @@ slice:
 6. production-like stop/snapshot/targeted-revoke/apply/targeted-grant/start,
    rollback и zero-diff rehearsal.
 
+Зафиксирована двухуровневая RPC-модель: raw signed command/manifest импортирует
+только owner-only sealed importer без runtime grant. Enrollment coordinator
+получает единственный lifecycle driver
+`identity_mail_tenant_enrollment_drive_command_v2(TEXT, TEXT, TEXT, TEXT)`,
+который читает immutable ledger и active manifest, повторно проверяет
+`SESSION_USER` name/OID и выполняет `BEGIN_DRAIN → WAIT_ZERO_INFLIGHT →
+FINALIZE` либо terminal replay. Прямой JSONB importer нельзя выдавать
+coordinator role, потому что PostgreSQL не проверяет Ed25519/Application brand.
+
 Документ:
 [CURRENT185 sealed coordinator boundary](./docs/open-beta/identity-mail-current185-signed-coordinator-boundary.md).
+
+### 12.7. `CURRENT185` exact duty-role grants и signed manifest — 02.08.2026
+
+Статус slice:
+
+```text
+grants contract: IDENTITY_MAIL_DUTY_ROLE_GRANTS_CURRENT185_V1
+manifest contract: IDENTITY_MAIL_DUTY_ROLE_MANIFEST_V1
+status: DORMANT_POLICY_AND_VERIFIER / NOT_DEPLOYABLE
+production roots / SQL / roles / grants / runtime wiring: absent
+```
+
+Реализованы две независимые fail-closed границы:
+
+- deterministic grants projection связывает database/owner identity, три
+  отдельные роли, schema `public`, OID шести routines, exact ACL/grantor и
+  effective privileges; recreate role/schema/routine меняет digest;
+- ровно один coordinator driver и пять worker-v2 RPC, без v1, reconcile,
+  CURRENT183 helper, importer, PUBLIC или extra-grantee EXECUTE;
+- membership, role/database settings, default ACL и unexpected ownership
+  обязаны быть пустыми; массивы имеют ранние exact bounds;
+- transparent/revoked Proxy, accessor, inherited, symbol, sparse, duplicate,
+  oversized и extra-key inputs отклоняются;
+- separate-purpose Ed25519 manifest связывает manifest revision, database,
+  coordinator/worker name+OID, grants digest, deployment/actual context и
+  exact CURRENT184/CURRENT185 chain;
+- production root registry frozen-empty; только `PINNED` brand раскрывает
+  persistable frozen payload, synthetic brand изолирован в loopback CI;
+- timestamp scalar validation выполняется до digest traversal, signature
+  ограничена exact canonical Ed25519 base64url длиной.
+
+Evidence: grants `12/12`, manifest `16/16`, combined `28/28`; artifact test
+заново вычисляет full manifest digest 184 migrations, CURRENT184 checksum и
+CURRENT185 coordinator SHA-256. Два независимых review завершились `PASS` без
+P0/P1. Package/CI gates обязательны; remote exact-head evidence фиксируется
+после push этого slice.
+
+Manifest V1 pin-ит уже принятый CURRENT185 coordinator artifact, поэтому ещё не
+существующий authority/bridge V2 нельзя считать им разрешённым. Следующий slice
+обязан ввести новый V2 command domain/profile и затем successor duty-manifest
+contract/profile, pin-ящий exact V2 artifact/release. V1 schema/constraints и
+authority остаются byte-stable; V2 получает отдельные immutable evidence/command
+tables, owner-only importer и four-text coordinator driver.
+
+Документ:
+[CURRENT185 duty-role authority](./docs/open-beta/identity-mail-current185-duty-role-authority.md).
 
 Release decision остаётся `NO-GO`. Production остаётся `CURRENT179/179`;
 `Tenant A/Store A1..A4`, SMTP и внешний тестер не изменяются.

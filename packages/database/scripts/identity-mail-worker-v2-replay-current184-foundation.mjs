@@ -38,11 +38,11 @@ const EXPECTED_CANONICAL_HEAD =
 const EXPECTED_CANONICAL_MANIFEST_DIGEST =
   "3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431";
 const EXPECTED_PREDECESSOR_MANIFEST_DIGEST =
-  "6b11f52e31063c4d05a96a97f4e6710a40f3e01444b1cbeb82ca8e48d502a5fe";
+  "70f66215bdadf0652ade1640e9dd20cf565d25a81d5d319a4c3d68c4e1c9e256";
 const EXPECTED_PREDECESSOR_SHA256 =
   "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0";
 const EXPECTED_CURRENT184_SHA256 =
-  "a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909";
+  "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424";
 const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
   "20260801010000_identity_mail_tenant_enrollment_control_plane",
   "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
@@ -203,6 +203,25 @@ async function candidateDirectories() {
     .filter((entry) => entry.isDirectory() && MIGRATION_NAME_PATTERN.test(entry.name))
     .map((entry) => entry.name)
     .sort();
+}
+
+async function candidateMigrationEntries(names) {
+  return Promise.all(
+    names.map(async (name) => ({
+      name,
+      checksum: sha256(
+        Buffer.from(
+          normalizeSql(
+            await readFile(
+              join(CANDIDATES_DIRECTORY, name, "migration.sql"),
+              "utf8",
+            ),
+          ),
+          "utf8",
+        ),
+      ),
+    })),
+  );
 }
 
 async function sourceText(directory) {
@@ -468,6 +487,14 @@ export async function inspectIdentityMailWorkerV2ReplayCurrent184Foundation(
   const F = IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_FINDINGS;
   const findings = [];
   const canonical = await migrationEntries(CANONICAL_DIRECTORY);
+  const predecessorEntries = (
+    overrides.predecessorEntries ?? [
+      ...canonical,
+      ...(await candidateMigrationEntries(
+        EXPECTED_CANDIDATE_DIRECTORIES.slice(0, -1),
+      )),
+    ]
+  ).sort((left, right) => left.name.localeCompare(right.name, "en"));
   const directories =
     overrides.candidateDirectories ?? (await candidateDirectories());
   const sql = normalizeSql(
@@ -491,6 +518,15 @@ export async function inspectIdentityMailWorkerV2ReplayCurrent184Foundation(
     JSON.stringify(directories) !== JSON.stringify(EXPECTED_CANDIDATE_DIRECTORIES)
   ) {
     findings.push(F.CANDIDATE_CHAIN_DRIFT);
+  }
+  if (
+    predecessorEntries.length !== 183 ||
+    predecessorEntries.at(-1)?.name !==
+      IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_PREDECESSOR ||
+    predecessorEntries.at(-1)?.checksum !== EXPECTED_PREDECESSOR_SHA256 ||
+    manifestDigest(predecessorEntries) !== EXPECTED_PREDECESSOR_MANIFEST_DIGEST
+  ) {
+    findings.push(F.PREDECESSOR_DRIFT);
   }
 
   let metadata = null;

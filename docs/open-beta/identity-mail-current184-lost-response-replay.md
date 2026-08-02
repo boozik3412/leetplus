@@ -5,7 +5,7 @@
 | Статус | `IMPLEMENTED_CANDIDATE / NOT_CANONICAL / NOT_DEPLOYABLE` |
 | Candidate | `20260802020000_identity_mail_worker_v2_lost_response_replay` |
 | Ordinal | `184` поверх exact `CURRENT183/183` |
-| SQL SHA-256 | `a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909` |
+| SQL SHA-256 | `d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424` |
 | Production authority | `false` |
 | Runtime/SMTP | не подключены |
 

@@ -391,6 +391,15 @@ test("rejects predecessor manifest drift", async () => {
   await expectFinding({ metadataText: JSON.stringify(metadata) }, F.PREDECESSOR_DRIFT);
 });
 
+test("recalculates the frozen predecessor manifest from source bytes", async () => {
+  await expectFinding(
+    {
+      predecessorEntries: [],
+    },
+    F.PREDECESSOR_DRIFT,
+  );
+});
+
 test("rejects metadata authorization", async () => {
   const { metadataText } = await source();
   const metadata = JSON.parse(metadataText);

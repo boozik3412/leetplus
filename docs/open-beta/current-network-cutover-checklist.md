@@ -111,7 +111,7 @@ admission.
       `ENGINEERING_ACCEPTED / NOT_CANONICAL / NOT_DEPLOYABLE`; production
       DI/config/CLI его не регистрируют.
 - [x] Неканонический `CURRENT184` lost-response candidate с exact SQL SHA-256
-      `a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909`
+      `d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424`
       добавляет event-backed exact replay только для `provider_mark_v2` и
       `complete_v2`. Устаревший marker возвращает typed `HANDOFF` до SMTP;
       claim/reap и SMTP не входят в semantic retry. Foundation CURRENT180–184
@@ -668,7 +668,7 @@ marker/freshness/blob mismatch.
 
 - `1.24.6`, 02.08.2026 — добавлен owner-only CURRENT184 lost-response replay
   candidate с exact SQL SHA
-  `a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909`.
+  `d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424`.
   Provider marker и completion получили event-backed exact DB-RPC replay;
   typed `HANDOFF` блокирует SMTP для устаревшего marker. Runtime/role/grants,
   signed coordinator, production apply и внешний доступ не включены;

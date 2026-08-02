@@ -360,7 +360,7 @@ enterprise-isolation option и не сокращает shared gates.
     `40P01` и без блокировки другого tenant.
 40. [CURRENT184 replay потерянного ответа](./identity-mail-current184-lost-response-replay.md) —
     stacked dormant successor с SQL SHA-256
-    `a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909`.
+    `d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424`.
     Append-only event хранит domain-separated digest exact settlement request;
     `provider_mark_v2` возвращает `MARKED` только для текущего живого marker,
     иначе typed `HANDOFF` запрещает SMTP, а `complete_v2` восстанавливает

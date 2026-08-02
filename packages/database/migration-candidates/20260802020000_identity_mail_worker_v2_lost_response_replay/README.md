@@ -33,5 +33,5 @@ no runtime worker, sends no email, and contains no production trust root.
 The SQL SHA-256 is:
 
 ```text
-a89dffad8d610df9e3441e5b0fcdc6f3c2c2b6f9f14d8ca81238f014f6e69909
+d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424
 ```

@@ -95,7 +95,7 @@ BEGIN
      OR lexical_migration_head IS DISTINCT FROM
        '20260802010000_identity_mail_worker_v2_freshness_protocol'
      OR migration_manifest_digest IS DISTINCT FROM
-       '6b11f52e31063c4d05a96a97f4e6710a40f3e01444b1cbeb82ca8e48d502a5fe'
+       '70f66215bdadf0652ade1640e9dd20cf565d25a81d5d319a4c3d68c4e1c9e256'
      OR NOT EXISTS (
        SELECT 1
        FROM public."_prisma_migrations" AS migration

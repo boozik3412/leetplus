@@ -304,7 +304,13 @@ describePostgres(
             'identity_initial_owner_mail_reap_v2',
             'identity_initial_owner_mail_reconcile_v2'
           )
-        ORDER BY signature COLLATE "C"
+        ORDER BY
+          routine.proname COLLATE "C",
+          pg_catalog.replace(
+            pg_catalog.oidvectortypes(routine.proargtypes),
+            ', ',
+            ','
+          ) COLLATE "C"
       `);
       expect(routines.map((routine) => routine.signature)).toEqual(
         EXPECTED_ROUTINES,

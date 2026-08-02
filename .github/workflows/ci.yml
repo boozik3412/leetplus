@@ -205,6 +205,9 @@ jobs:
       - name: Validate two-PINNED identity-mail enrollment composition V2
         run: pnpm --filter database check:identity-mail-tenant-enrollment-manifest-bound-v2
 
+      - name: Validate sealed owner-only enrollment evidence importer V2
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-evidence-importer-v2
+
       - name: Validate independent identity-mail worker runtime attestation
         run: pnpm --filter database check:identity-mail-worker-runtime-attestation
 

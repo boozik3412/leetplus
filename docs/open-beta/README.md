@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.59                                         |
+| Версия           | 1.60                                         |
 | Дата             | 02.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -410,7 +410,18 @@ enterprise-isolation option и не сокращает shared gates.
     Результат раскрывает future-import evidence и exact 69-field DB mapping,
     но сохраняет `authorization/canMutate/canSend=false`; production roots,
     SQL, роли, grants и runtime wiring отсутствуют. Manifest V2 `13/13`,
-    composition `6/6`, объединённый контур `45/45 PASS`.
+    composition `6/6`, объединённый контур `45/45 PASS`. Exact implementation
+    `96c1d93fb2347a2b799997d7fac2c8df895d8f73` принят GitHub Actions
+    [`30753175709`](https://github.com/boozik3412/leetplus/actions/runs/30753175709)
+    (`run #89`), оба новых gate и все три CI jobs — green.
+45. [Enrollment evidence importer V2](./identity-mail-enrollment-evidence-importer-v2.md) —
+    sealed application bridge от exact composed brand к будущему owner-only
+    two-TEXT DB RPC. Canonical bundle включает 69 DB arguments, обе signature
+    evidence и одну grants projection; limit `262144` bytes. Callable
+    capability принимает только module-branded request, lost response имеет
+    один exact retry, а replay ссылается на original persisted receipt.
+    Focused `9/9`, composition+importer `15/15 PASS`; SQL/credential/runtime
+    authority отсутствуют.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail

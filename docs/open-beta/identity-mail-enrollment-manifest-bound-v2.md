@@ -121,8 +121,10 @@ command с FK и rollback-once, а не runtime flag.
   `fbe61dfea464eac9e7a0fd24a7f8d570484e5240d3adb31080f154f3d9f0bce5`;
 - composition module SHA-256:
   `4668c22c17ee573f41d98aeb16130547b7d3422e005a8e0787730006ef5d2ab6`;
-- обязательные package/CI gates добавлены; exact remote evidence фиксируется
-  только после push неизменного commit.
+- exact implementation commit
+  `96c1d93fb2347a2b799997d7fac2c8df895d8f73` принят GitHub Actions
+  [`30753175709`](https://github.com/boozik3412/leetplus/actions/runs/30753175709)
+  (`run #89`): оба новых gate и все три CI jobs — green.
 
 ## Что этот slice не разрешает
 

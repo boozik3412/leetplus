@@ -367,7 +367,18 @@ enterprise-isolation option и не сокращает shared gates.
     исходный terminal receipt. Adapter делает не более двух повторов только
     для неизвестного результата DB-RPC; SMTP, claim и reap не повторяются.
     Candidate owner-only, не подключён к DI/config/CLI и возвращает
-    `NOT_DEPLOYABLE / authorization=false / canSend=false`.
+    `NOT_DEPLOYABLE / authorization=false / canSend=false`. Exact implementation
+    `db154b412a9469f49fab6b27ad2e333426cdfa7f` принят GitHub Actions
+    [`30740155651`](https://github.com/boozik3412/leetplus/actions/runs/30740155651):
+    CURRENT183 и CURRENT184 PostgreSQL suites — по `3/3 PASS`.
+41. [CURRENT185 sealed coordinator boundary](./identity-mail-current185-signed-coordinator-boundary.md) —
+    dormant application-side import только для branded `PINNED` Ed25519
+    authority. Exact frozen 52-column mapping передаётся в одну factory-minted
+    owner-owned RPC capability; structural/proxy/accessor forgeries отклоняются.
+    Lost response допускает один exact-object retry, затем typed ambiguous
+    outcome. SQL, production root, DB role/grant, DI/config/CLI и runtime wiring
+    отсутствуют; локальный gate — `14/14 PASS`, статус остаётся
+    `DORMANT_APPLICATION_BOUNDARY / NOT_DEPLOYABLE`.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
@@ -376,8 +387,9 @@ Merge evidence SHA `9b2f82b2cfdd41b05bf67e71e48df6cdc3e0fda2`, CI
 [`30684863397`](https://github.com/boozik3412/leetplus/actions/runs/30684863397)
 (`run #61`) — `3/3 PASS`; внешний статус остаётся `NO-GO`.
 
-Неканонические candidates не повышают target до `CURRENT_180`, `CURRENT_181`,
-`CURRENT_182`, `CURRENT_183` или `CURRENT_184`.
+Неканонические candidates и application boundaries не повышают target до
+`CURRENT_180`, `CURRENT_181`, `CURRENT_182`, `CURRENT_183`, `CURRENT_184` или
+`CURRENT185`.
 Promotion запрещён до единого release с worker v2/runtime attestation,
 producer/worker tenant advisory lock, `DRAINING` zero-secret barrier,
 независимо подписанным apply/rollback/zero-diff, production-like

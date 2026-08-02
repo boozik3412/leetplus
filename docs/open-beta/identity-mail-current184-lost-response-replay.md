@@ -114,6 +114,12 @@ helper остаются owner-only; helper names запрещены в API runti
 - max-two structured DB replay, zero semantic retry для claim/reap;
 - exact owner-only ACL, source cleanup и отсутствие production residue.
 
+Exact implementation `db154b412a9469f49fab6b27ad2e333426cdfa7f` принят
+GitHub Actions
+[`30740155651`](https://github.com/boozik3412/leetplus/actions/runs/30740155651):
+authority-root gate, application checks и PostgreSQL migration smoke — green;
+CURRENT183 step 29 и CURRENT184 step 30 — по `3/3 PASS`.
+
 ## Что CURRENT184 не закрывает
 
 CURRENT184 не является разрешением тестового доступа. До первого внешнего

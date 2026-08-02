@@ -187,6 +187,9 @@ jobs:
       - name: Validate independent tenant enrollment command authority
         run: pnpm --filter database check:identity-mail-tenant-enrollment-authority
 
+      - name: Validate sealed CURRENT185 tenant enrollment coordinator boundary
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-coordinator-current185
+
       - name: Validate independent identity-mail worker runtime attestation
         run: pnpm --filter database check:identity-mail-worker-runtime-attestation
 

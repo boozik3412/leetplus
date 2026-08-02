@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.58                                         |
+| Версия           | 1.59                                         |
 | Дата             | 02.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -399,6 +399,18 @@ enterprise-isolation option и не сокращает shared gates.
     objects/Proxy и transition drift fail closed, локально `14/14 PASS`.
     Boundary честно не проверяет независимую manifest signature и остаётся
     `NOT_AN_ADMISSION`: следующий slice обязан скомпоновать два `PINNED` brand.
+    Exact implementation
+    `05291a14004fa01d33ca8fc4b360dda4218ceb9a` принят GitHub Actions
+    [`30749331368`](https://github.com/boozik3412/leetplus/actions/runs/30749331368)
+    (`run #88`), все три CI jobs — green.
+44. [Manifest-bound enrollment V2](./identity-mail-enrollment-manifest-bound-v2.md) —
+    successor Manifest V2 и pure two-signer composition. Оба exact-module
+    `PINNED` brand, разные signer fingerprints, database/deployment/context,
+    все 17 duty fields и один normalized grants projection обязаны совпасть.
+    Результат раскрывает future-import evidence и exact 69-field DB mapping,
+    но сохраняет `authorization/canMutate/canSend=false`; production roots,
+    SQL, роли, grants и runtime wiring отсутствуют. Manifest V2 `13/13`,
+    composition `6/6`, объединённый контур `45/45 PASS`.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail

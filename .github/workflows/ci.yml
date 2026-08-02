@@ -199,6 +199,12 @@ jobs:
       - name: Validate manifest-bound identity-mail tenant enrollment authority V2
         run: pnpm --filter database check:identity-mail-tenant-enrollment-authority-v2
 
+      - name: Validate successor identity-mail duty-role Manifest V2
+        run: pnpm --filter database check:identity-mail-duty-role-manifest-v2
+
+      - name: Validate two-PINNED identity-mail enrollment composition V2
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-manifest-bound-v2
+
       - name: Validate independent identity-mail worker runtime attestation
         run: pnpm --filter database check:identity-mail-worker-runtime-attestation
 

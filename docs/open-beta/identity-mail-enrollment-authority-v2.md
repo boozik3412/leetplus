@@ -97,8 +97,10 @@ domain-separated Ed25519 signature. Rollback остаётся отдельной
   все 17 destination-to-source bindings проверяются;
 - unknown key и resigned fingerprint substitution отклоняются;
 - independent scoped reviews: `PASS`, P0/P1 для standalone verifier нет;
-- обязательный package/CI gate добавлен; exact remote evidence фиксируется
-  после push неизменного commit.
+- exact implementation commit
+  `05291a14004fa01d33ca8fc4b360dda4218ceb9a` принят GitHub Actions
+  [`30749331368`](https://github.com/boozik3412/leetplus/actions/runs/30749331368)
+  (`run #88`): V2 gate и все три CI jobs — green.
 
 ## Что этот slice не разрешает
 

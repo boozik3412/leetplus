@@ -49,6 +49,7 @@ const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
   "20260801030000_identity_mail_tenant_first_claim_protocol",
   IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_PREDECESSOR,
   IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_CANDIDATE,
+  "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
 ]);
 const EXPECTED_CREATED_ROUTINES = Object.freeze([
   "identity_mail_delivery_event_append_v2",
@@ -491,7 +492,12 @@ export async function inspectIdentityMailWorkerV2ReplayCurrent184Foundation(
     overrides.predecessorEntries ?? [
       ...canonical,
       ...(await candidateMigrationEntries(
-        EXPECTED_CANDIDATE_DIRECTORIES.slice(0, -1),
+        EXPECTED_CANDIDATE_DIRECTORIES.slice(
+          0,
+          EXPECTED_CANDIDATE_DIRECTORIES.indexOf(
+            IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_CANDIDATE,
+          ),
+        ),
       )),
     ]
   ).sort((left, right) => left.name.localeCompare(right.name, "en"));

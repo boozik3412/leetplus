@@ -20,6 +20,7 @@ const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
   "20260801030000_identity_mail_tenant_first_claim_protocol",
   "20260802010000_identity_mail_worker_v2_freshness_protocol",
   "20260802020000_identity_mail_worker_v2_lost_response_replay",
+  "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
 ]);
 
 export const IDENTITY_MAIL_TENANT_LOCK_DRAIN_CURRENT181_FINDINGS =

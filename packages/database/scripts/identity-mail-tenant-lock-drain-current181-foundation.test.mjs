@@ -111,7 +111,7 @@ function expectFinding(value, finding) {
   return report;
 }
 
-test("pins CURRENT181 with the exact ordered CURRENT180..CURRENT184 inventory", () => {
+test("pins CURRENT181 with the exact ordered CURRENT180..CURRENT185 inventory", () => {
   const report = evaluateIdentityMailTenantLockDrainCurrent181Foundation(
     artifact,
   );
@@ -142,6 +142,7 @@ test("pins CURRENT181 with the exact ordered CURRENT180..CURRENT184 inventory", 
     "20260801030000_identity_mail_tenant_first_claim_protocol",
     "20260802010000_identity_mail_worker_v2_freshness_protocol",
     "20260802020000_identity_mail_worker_v2_lost_response_replay",
+    "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
   ]);
 });
 
@@ -681,7 +682,7 @@ test("rejects metadata and candidate-chain drift independently", async (t) => {
     value.predecessor.sql += "\n";
     expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
   });
-  await t.test("missing CURRENT184 successor", () => {
+  await t.test("missing CURRENT185 successor", () => {
     const value = structuredClone(artifact);
     value.candidates.directoryNames.pop();
     expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
@@ -691,21 +692,21 @@ test("rejects metadata and candidate-chain drift independently", async (t) => {
     value.candidates.directoryNames.splice(1, 1);
     expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
   });
-  await t.test("reordered exact successors", () => {
+  await t.test("reordered exact CURRENT184/CURRENT185 successors", () => {
     const value = structuredClone(artifact);
     [
-      value.candidates.directoryNames[2],
-      value.candidates.directoryNames[3],
+      value.candidates.directoryNames[4],
+      value.candidates.directoryNames[5],
     ] = [
-      value.candidates.directoryNames[3],
-      value.candidates.directoryNames[2],
+      value.candidates.directoryNames[5],
+      value.candidates.directoryNames[4],
     ];
     expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
   });
-  await t.test("unknown fifth candidate", () => {
+  await t.test("unknown successor after CURRENT185", () => {
     const value = structuredClone(artifact);
     value.candidates.directoryNames.push(
-      "20260802020000_unexpected_candidate",
+      "20260803010000_unknown_successor",
     );
     expectFinding(value, F.CANDIDATE_CHAIN_DRIFT);
   });

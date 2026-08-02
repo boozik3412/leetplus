@@ -23,6 +23,14 @@ const CANDIDATE_DIRECTORY = join(
 );
 const SQL_PATH = join(CANDIDATE_DIRECTORY, "migration.sql");
 const METADATA_PATH = join(CANDIDATE_DIRECTORY, "candidate.json");
+const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
+  "20260801010000_identity_mail_tenant_enrollment_control_plane",
+  "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+  "20260801030000_identity_mail_tenant_first_claim_protocol",
+  "20260802010000_identity_mail_worker_v2_freshness_protocol",
+  IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_CANDIDATE,
+  "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+]);
 
 async function source() {
   return {
@@ -46,7 +54,7 @@ function repinMetadata(metadataText, sql) {
   return JSON.stringify(metadata);
 }
 
-test("accepts only the exact dormant CURRENT184 replay foundation", async () => {
+test("accepts CURRENT184 only with the exact ordered CURRENT180..CURRENT185 inventory", async () => {
   const report = await checkIdentityMailWorkerV2ReplayCurrent184Foundation();
   assert.equal(report.contract, IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_CONTRACT);
   assert.equal(report.decision, "CURRENT184_FOUNDATION_COMPLIANT");
@@ -407,14 +415,34 @@ test("rejects metadata authorization", async () => {
   await expectFinding({ metadataText: JSON.stringify(metadata) }, F.METADATA_DRIFT);
 });
 
-test("rejects incomplete candidate inventory", async () => {
+test("rejects a missing CURRENT185 inventory head", async () => {
+  await expectFinding(
+    {
+      candidateDirectories: EXPECTED_CANDIDATE_DIRECTORIES.slice(0, -1),
+    },
+    F.CANDIDATE_CHAIN_DRIFT,
+  );
+});
+
+test("rejects reordered exact CURRENT184/CURRENT185 inventory", async () => {
   await expectFinding(
     {
       candidateDirectories: [
-        "20260801010000_identity_mail_tenant_enrollment_control_plane",
-        "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
-        "20260801030000_identity_mail_tenant_first_claim_protocol",
-        "20260802010000_identity_mail_worker_v2_freshness_protocol",
+        ...EXPECTED_CANDIDATE_DIRECTORIES.slice(0, -2),
+        EXPECTED_CANDIDATE_DIRECTORIES.at(-1),
+        EXPECTED_CANDIDATE_DIRECTORIES.at(-2),
+      ],
+    },
+    F.CANDIDATE_CHAIN_DRIFT,
+  );
+});
+
+test("rejects an unknown successor after CURRENT185", async () => {
+  await expectFinding(
+    {
+      candidateDirectories: [
+        ...EXPECTED_CANDIDATE_DIRECTORIES,
+        "20260803010000_unknown_successor",
       ],
     },
     F.CANDIDATE_CHAIN_DRIFT,

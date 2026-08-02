@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.57                                         |
+| Версия           | 1.58                                         |
 | Дата             | 02.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -387,8 +387,18 @@ enterprise-isolation option и не сокращает shared gates.
     privileges; signed payload дополнительно связывает deployment/actual
     context и CURRENT184/CURRENT185 chain. Transparent/revoked Proxy и recreate
     identity fail closed. Grants `12/12`, manifest `16/16`, combined `28/28`;
-    independent reviews — без P0/P1. Production roots, SQL apply, роли, grants и
-    runtime wiring отсутствуют; successor manifest для V2 обязателен.
+    independent reviews — без P0/P1. Exact implementation `ede6291...` принят
+    GitHub Actions
+    [`30746251082`](https://github.com/boozik3412/leetplus/actions/runs/30746251082)
+    (`run #87`). Production roots, SQL apply, роли, grants и runtime wiring
+    отсутствуют; successor manifest для V2 обязателен.
+43. [Enrollment authority V2](./identity-mail-enrollment-authority-v2.md) —
+    отдельный dormant command verifier с новым domain/profile и successor
+    manifest V2 binding. Все 52 V1 DB fields сохранены, 17 duty fields добавлены
+    exact tail (`69` total); V1 downgrade, cross-domain/root reuse, hostile
+    objects/Proxy и transition drift fail closed, локально `14/14 PASS`.
+    Boundary честно не проверяет независимую manifest signature и остаётся
+    `NOT_AN_ADMISSION`: следующий slice обязан скомпоновать два `PINNED` brand.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail

@@ -196,6 +196,9 @@ jobs:
       - name: Validate CURRENT185 signed identity-mail duty-role manifest
         run: pnpm --filter database check:identity-mail-duty-role-manifest-current185
 
+      - name: Validate manifest-bound identity-mail tenant enrollment authority V2
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-authority-v2
+
       - name: Validate independent identity-mail worker runtime attestation
         run: pnpm --filter database check:identity-mail-worker-runtime-attestation
 

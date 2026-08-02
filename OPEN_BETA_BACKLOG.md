@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 02.08.2026
-- Версия: 1.87
+- Версия: 1.88
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -4137,8 +4137,10 @@ production roots / SQL / roles / grants / runtime wiring: absent
 Evidence: grants `12/12`, manifest `16/16`, combined `28/28`; artifact test
 заново вычисляет full manifest digest 184 migrations, CURRENT184 checksum и
 CURRENT185 coordinator SHA-256. Два независимых review завершились `PASS` без
-P0/P1. Package/CI gates обязательны; remote exact-head evidence фиксируется
-после push этого slice.
+P0/P1. Exact implementation `ede6291b79c30ade1711f447430de545c1cc603e`
+принят GitHub Actions
+[`30746251082`](https://github.com/boozik3412/leetplus/actions/runs/30746251082)
+(`run #87`): оба новых gates и все три CI jobs — green.
 
 Manifest V1 pin-ит уже принятый CURRENT185 coordinator artifact, поэтому ещё не
 существующий authority/bridge V2 нельзя считать им разрешённым. Следующий slice
@@ -4149,6 +4151,49 @@ tables, owner-only importer и four-text coordinator driver.
 
 Документ:
 [CURRENT185 duty-role authority](./docs/open-beta/identity-mail-current185-duty-role-authority.md).
+
+### 12.8. Manifest-bound enrollment command authority V2 — 02.08.2026
+
+Статус slice:
+
+```text
+domain: IDENTITY_MAIL_TENANT_ENROLLMENT_COMMAND_V2
+contract: PROTECTED_MAIL_WORKER_TENANT_ENROLLMENT_V2
+profile: IDENTITY_MAIL_TENANT_ENROLLMENT_AUTHORITY_V2
+status: DORMANT_VERIFIER / NOT_DEPLOYABLE / NOT_AN_ADMISSION
+production roots / SQL / DB / DI / CLI / runtime wiring: absent
+```
+
+Authority V1 и его 52-column/database contract оставлены byte-stable. Новый V2
+verifier сохраняет V1 transition/revision/rollback invariants и добавляет exact
+17-field duty-role binding: successor manifest V2 contract/profile/id/revision,
+manifest digest/key/fingerprint, coordinator/worker name+OID, grants
+profile/digest, CURRENT184 predecessor и manifest-bound application
+contract/release/artifact. Все 52 V1 database arguments сохранены тем же
+порядком, 17 duty fields добавлены в конец; exact mapping содержит 69 полей.
+
+Circular pin исключён: V2 фиксирует новый application contract, но подписанные
+release/artifact только форматно валидируются. Их полномочие появится после
+exact equality с независимо `PINNED` successor manifest, который будет создан
+после принятия V2 artifact. Proposal/envelope release обязан совпадать с duty
+application release, а одинаковый command/manifest fingerprint отклоняется.
+
+Standalone verifier не проверяет manifest signature/brand и не является
+admission: enrollment signer пока может заявить произвольные manifest-binding
+scalars. Verified result остаётся `authorization=false`, `canMutate=false`,
+`canSend=false`; production roots frozen-empty, synthetic brand неперсистируем.
+Следующий composition slice обязан принять оба exact `PINNED` brand, доказать
+разные root histories и сравнить database identity, deployment marker, actual
+context, roles/OID, grants, predecessor и application release/artifact до
+наблюдения importer capability.
+
+Локальное evidence: `14/14 PASS`; V1 downgrade/cross-domain/root reuse,
+hostile/accessor/symbol/transparent+revoked Proxy, timeline/signature/root,
+ENABLE/ROTATE/DISABLE/ROLLBACK и fixture-substituted PINNED 69-field
+projection/evidence проходят. Exact remote evidence фиксируется после push.
+
+Документ:
+[Enrollment authority V2](./docs/open-beta/identity-mail-enrollment-authority-v2.md).
 
 Release decision остаётся `NO-GO`. Production остаётся `CURRENT179/179`;
 `Tenant A/Store A1..A4`, SMTP и внешний тестер не изменяются.

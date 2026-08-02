@@ -78,8 +78,11 @@ PII-free contract error.
 - manifest test заново вычисляет digest нормализованной цепочки 184 миграций,
   CURRENT184 head checksum и SHA-256 coordinator artifact;
 - independent reviews: `PASS`, P0/P1 отсутствуют;
-- обязательные package и GitHub Actions gates добавлены, но exact remote run
-  для этого slice фиксируется только после push его неизменного commit.
+- exact implementation `ede6291b79c30ade1711f447430de545c1cc603e`
+  принят GitHub Actions
+  [`30746251082`](https://github.com/boozik3412/leetplus/actions/runs/30746251082)
+  (`run #87`): оба новых steps, application checks, PostgreSQL migration smoke
+  и authority-root gate — green.
 
 Golden digest `c187b912e5618dcc46b384c91356f0ac8553cbfba7d7269bd1a4719cb9944484`
 относится только к synthetic test fixture. Это не production grants digest и

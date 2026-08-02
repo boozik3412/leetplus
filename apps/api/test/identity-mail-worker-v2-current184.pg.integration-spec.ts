@@ -17,6 +17,7 @@ const describePostgres = integrationEnabled ? describe : describe.skip;
 
 const DISPOSABLE_DATABASE_PATTERN = /^lp_imtec_[0-9a-f]{32}_ci$/u;
 const DISPOSABLE_ROLE_PATTERN = /^lp_imtec_pg_[0-9a-f]{24}$/u;
+const RELEASE_SHA = 'a'.repeat(40);
 const TENANT_LOCK_DOMAIN = 'leetplus:identity-mail-tenant:v1:';
 const TENANT_LOCK_SEED = 180;
 const PROVIDER_AUTHORITY_DIGEST = fixtureDigest(
@@ -380,6 +381,24 @@ describePostgres(
         workerRoleName,
         role.roleOid,
       );
+      await repository.assertReady({
+        expectedDatabase: disposableDatabase,
+        expectedRole: workerRoleName,
+        databaseTlsRequired: false,
+        expectedMigration: IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION,
+        expectedMigrationCount:
+          IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION_COUNT,
+        releaseSha: RELEASE_SHA,
+        canaryTenantIds: [exact.tenantId],
+        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+        expectedPolicy: {
+          maxAttempts: 5,
+          leaseSeconds: 60,
+          minimumAcknowledgeSeconds: 120,
+          baseRetrySeconds: 30,
+          maxRetrySeconds: 300,
+        },
+      });
       const exactLeaseOwnerDigest = fixtureDigest('current184-exact-owner');
       const exactLeaseToken = `current184-exact-token-${randomUUID()}`;
       const exactLeaseTokenDigest = fixtureDigest(exactLeaseToken);

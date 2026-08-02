@@ -1,8 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION,
-  IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION_COUNT,
   PrismaIdentityMailWorkerV2CandidateRepository,
   type ClaimedIdentityMailDeliveryV2Candidate,
 } from '../src/identity-mail-worker/identity-mail-worker-v2-candidate.repository';
@@ -17,7 +15,11 @@ const describePostgres = integrationEnabled ? describe : describe.skip;
 
 const DISPOSABLE_DATABASE_PATTERN = /^lp_imtec_[0-9a-f]{32}_ci$/u;
 const DISPOSABLE_ROLE_PATTERN = /^lp_imtec_pg_[0-9a-f]{24}$/u;
-const RELEASE_SHA = 'a'.repeat(40);
+const CURRENT183_MIGRATION =
+  '20260802010000_identity_mail_worker_v2_freshness_protocol';
+const CURRENT183_MIGRATION_COUNT = 183;
+const CURRENT183_MIGRATION_SHA256 =
+  'a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0';
 const PROVIDER_AUTHORITY_DIGEST = fixtureDigest(
   'current183-provider-authority',
 );
@@ -41,6 +43,7 @@ type DiagnosticFixture = {
   enrollmentState: EnrollmentState;
   enrollmentStateRevision: bigint;
   policyRevision: number;
+  configurationDigest: string;
   ciphertext: Buffer;
 };
 
@@ -159,8 +162,8 @@ describePostgres(
           AND rolled_back_at IS NULL
       `);
       expect(migrationState).toEqual({
-        migrationCount: IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION_COUNT,
-        migrationHead: IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION,
+        migrationCount: CURRENT183_MIGRATION_COUNT,
+        migrationHead: CURRENT183_MIGRATION,
       });
 
       await installLeastPrivilegeWorkerRole(
@@ -357,18 +360,8 @@ describePostgres(
         activeHold.outboxId,
       );
 
-      await repository.assertReady({
-        expectedDatabase: disposableDatabase,
-        expectedRole: workerRoleName,
-        databaseTlsRequired: false,
-        expectedMigration: IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION,
-        expectedMigrationCount:
-          IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION_COUNT,
-        releaseSha: RELEASE_SHA,
-        canaryTenantIds: [activePending.tenantId, activeHold.tenantId],
-        providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
-        expectedPolicy: expectedPolicy(),
-      });
+      await assertCurrent183DatabaseReadiness(workerPrisma, activePending);
+      await assertCurrent183DatabaseReadiness(workerPrisma, activeHold);
 
       const claimed = await claim(repository, activePending, 'matrix-claim');
       expect(claimed).not.toBeNull();
@@ -605,6 +598,7 @@ async function createDiagnosticFixture(
   const issueRequestId = randomUUID();
   const issueRequestDigest = fixtureDigest(`issue:${suffix}`);
   const tokenHash = fixtureDigest(`token:${suffix}`);
+  const configurationDigest = fixtureDigest(`configuration:${suffix}`);
   const ciphertext = Buffer.alloc(71, Number.parseInt(suffix.slice(0, 2), 16));
   const trialStartsAt = new Date();
   const trialEndsAt = new Date(trialStartsAt.valueOf() + 7 * 86_400_000);
@@ -840,7 +834,7 @@ async function createDiagnosticFixture(
         ${enrollmentStateRevision},
         ${activeCommandId},
         ${fixtureDigest(`event:${suffix}`)},
-        ${fixtureDigest(`configuration:${suffix}`)},
+        ${configurationDigest},
         ${nowAt}
       )
     `);
@@ -907,6 +901,7 @@ async function createDiagnosticFixture(
     enrollmentState: input.enrollmentState,
     enrollmentStateRevision,
     policyRevision,
+    configurationDigest,
     ciphertext,
   };
 }
@@ -921,6 +916,38 @@ function claim(
     leaseOwnerDigest: fixtureDigest(`lease-owner:${label}`),
     leaseTokenDigest: fixtureDigest(`lease-token:${label}`),
     providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+  });
+}
+
+async function assertCurrent183DatabaseReadiness(
+  client: PrismaClient,
+  fixture: DiagnosticFixture,
+): Promise<void> {
+  const [row] = await client.$queryRaw<
+    Array<{ result: Prisma.JsonValue }>
+  >(Prisma.sql`
+    SELECT public."identity_mail_delivery_worker_assert_v2"(
+      ${fixture.tenantId}::TEXT,
+      ${PROVIDER_AUTHORITY_DIGEST}::TEXT
+    ) AS result
+  `);
+  expect(row?.result).toEqual({
+    schemaVersion: 2,
+    operation: 'ASSERT_IDENTITY_MAIL_DELIVERY_WORKER_V2',
+    decision: 'REHEARSAL_READY',
+    candidateStatus: 'NOT_DEPLOYABLE',
+    authorization: false,
+    canSend: false,
+    tenantId: fixture.tenantId,
+    migrationHead: CURRENT183_MIGRATION,
+    migrationCount: CURRENT183_MIGRATION_COUNT,
+    candidateChecksum: CURRENT183_MIGRATION_SHA256,
+    state: 'ACTIVE',
+    stateRevision: Number(fixture.enrollmentStateRevision),
+    policyRevision: fixture.policyRevision,
+    currentConfigurationDigest: fixture.configurationDigest,
+    providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
+    ...expectedPolicyReceipt(),
   });
 }
 
@@ -943,11 +970,11 @@ async function expectDeniedAndUnchanged(
   );
 }
 
-function expectedPolicy() {
+function expectedPolicyReceipt() {
   return {
     maxAttempts: 5,
     leaseSeconds: 60,
-    minimumAcknowledgeSeconds: 120,
+    acknowledgeSeconds: 120,
     baseRetrySeconds: 30,
     maxRetrySeconds: 300,
   };

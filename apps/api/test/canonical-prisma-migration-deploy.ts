@@ -66,6 +66,19 @@ const IDENTITY_MAIL_CURRENT184_CANDIDATES = [
   },
 ] as const;
 
+const IDENTITY_MAIL_CURRENT185_CANDIDATES = [
+  ...IDENTITY_MAIL_CURRENT184_CANDIDATES,
+  {
+    name: '20260802030000_identity_mail_enrollment_evidence_ledger_v2',
+    confirmationGuc:
+      'leetplus.identity_mail_enrollment_evidence_ledger_current185_confirmation',
+    confirmation:
+      'rehearse-noncanonical-identity-mail-enrollment-evidence-ledger-current185',
+    shaGuc:
+      'leetplus.identity_mail_enrollment_evidence_ledger_current185_sha256',
+  },
+] as const;
+
 export function deployCanonicalPrismaMigrations(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
@@ -97,8 +110,12 @@ export function deployCanonicalPrismaMigrations(
         timeout: options.timeoutMs,
       },
     );
-  } catch {
-    throw new Error(options.failureMessage);
+  } catch (error) {
+    const detail =
+      error instanceof Error && error.message.trim().length > 0
+        ? error.message.trim()
+        : String(error);
+    throw new Error(`${options.failureMessage}: ${detail}`, { cause: error });
   } finally {
     removeTemporaryArtifact(temporaryRoot);
   }
@@ -128,6 +145,18 @@ export function deployIdentityMailCurrent184CandidateStack(
   );
 }
 
+export function deployIdentityMailCurrent185CandidateStack(
+  databaseUrl: string,
+  options: CanonicalMigrationDeployOptions,
+): void {
+  deployIdentityMailCandidateStack(
+    databaseUrl,
+    options,
+    IDENTITY_MAIL_CURRENT185_CANDIDATES,
+    'CURRENT185',
+  );
+}
+
 function deployIdentityMailCandidateStack(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
@@ -137,7 +166,7 @@ function deployIdentityMailCandidateStack(
     confirmation: string;
     shaGuc: string;
   }>,
-  candidateLabel: 'CURRENT183' | 'CURRENT184',
+  candidateLabel: 'CURRENT183' | 'CURRENT184' | 'CURRENT185',
 ): void {
   const target = new URL(databaseUrl);
   const targetHost = target.hostname.replace(/^\[([^\]]+)\]$/u, '$1');
@@ -212,8 +241,12 @@ function deployIdentityMailCandidateStack(
         timeout: options.timeoutMs,
       },
     );
-  } catch {
-    throw new Error(options.failureMessage);
+  } catch (error) {
+    const detail =
+      error instanceof Error && error.message.trim().length > 0
+        ? error.message.trim()
+        : String(error);
+    throw new Error(`${options.failureMessage}: ${detail}`, { cause: error });
   } finally {
     removeTemporaryArtifact(temporaryRoot);
   }

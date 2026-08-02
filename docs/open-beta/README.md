@@ -415,13 +415,29 @@ enterprise-isolation option и не сокращает shared gates.
     [`30753175709`](https://github.com/boozik3412/leetplus/actions/runs/30753175709)
     (`run #89`), оба новых gate и все три CI jobs — green.
 45. [Enrollment evidence importer V2](./identity-mail-enrollment-evidence-importer-v2.md) —
-    sealed application bridge от exact composed brand к будущему owner-only
-    two-TEXT DB RPC. Canonical bundle включает 69 DB arguments, обе signature
+    sealed application bridge от exact composed brand к owner-only two-TEXT
+    DB RPC из следующего noncanonical candidate. Canonical bundle включает 69 DB arguments, обе signature
     evidence и одну grants projection; limit `262144` bytes. Callable
     capability принимает только module-branded request, lost response имеет
     один exact retry, а replay ссылается на original persisted receipt.
-    Focused `9/9`, composition+importer `15/15 PASS`; SQL/credential/runtime
-    authority отсутствуют.
+    Focused `9/9`, composition+importer `15/15 PASS`; application module не
+    содержит DB credential, DI/CLI/runtime wiring или authority. Exact implementation
+    `cd2a0c576ecdbb1b1c8985d72603c8f0777f0553` принят GitHub Actions
+    [`30754790681`](https://github.com/boozik3412/leetplus/actions/runs/30754790681)
+    (`run #90`), importer gate и все три CI jobs — green.
+46. [CURRENT185 evidence ledger V2](./identity-mail-current185-evidence-ledger-design.md) —
+    noncanonical database candidate version-expands empty command ledger до
+    V2/69, добавляет append-only Manifest V2/revocation evidence и owner-only
+    two-TEXT importer. Все `17` duty fields связаны composite FK; replay до
+    expiry/revocation возвращает original receipt. Exact SQL SHA-256
+    `2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6`;
+    foundation `21/21`, branded fixture `3/3`, PostgreSQL 16 `7/7`, CURRENT184
+    regression `3/3`. GUC INSERT fence — только anti-accident. Отдельный
+    `NOLOGIN` owner, runtime roles/grants/attestation, shared ACL epoch/lock,
+    four-TEXT driver, provider mark/complete lost-response,
+    producer/activation/backfill, zero-secret/zero-inflight и подписанная
+    apply/rollback/zero-diff rehearsal ещё обязательны. Статус:
+    `IMPLEMENTED_CANDIDATE / NONCANONICAL / NOT_DEPLOYABLE`.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail

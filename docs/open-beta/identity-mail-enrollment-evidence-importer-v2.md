@@ -6,9 +6,9 @@
 | Contract | `IDENTITY_MAIL_TENANT_ENROLLMENT_EVIDENCE_IMPORTER_V2` |
 | Profile | `IDENTITY_MAIL_TENANT_ENROLLMENT_EVIDENCE_IMPORTER_V2_PROFILE_V1` |
 | Input | только exact-module manifest-bound composed brand |
-| Future DB RPC | `identity_mail_tenant_enrollment_import_evidence_v2(TEXT, TEXT)` |
+| Candidate DB RPC | `identity_mail_tenant_enrollment_import_evidence_v2(TEXT, TEXT)` |
 | Attempts | максимум `2`, только после branded lost-response |
-| Production roots / SQL / credentials / DI / CLI | отсутствуют |
+| Production roots / credentials / DI / CLI | отсутствуют; SQL существует только в noncanonical CURRENT185 candidate |
 
 ## Назначение границы
 
@@ -16,7 +16,7 @@ PostgreSQL не умеет проверить application `WeakSet` brand и д�
 подписи. Поэтому raw JSON importer нельзя выдавать coordinator, worker или
 обычному application runtime. Этот модуль является узким мостом между уже
 принятой pure `PINNED command × PINNED Manifest V2 × exact grants`
-композицией и будущим owner-only DB RPC.
+композицией и noncanonical owner-only CURRENT185 DB RPC.
 
 Модуль сам не открывает соединение с БД и не содержит credential. Единственная
 допустимая внешняя поверхность создаётся factory-функцией как process-local
@@ -48,7 +48,7 @@ signature.
 Первый успешный owner-only import возвращает `IMPORTED`. Exact повтор тех же
 двух строк возвращает `IMPORT_REPLAY` и ссылается на исходный persisted import
 через неизменные receipt digest, timestamp и transaction id. Same command,
-request, envelope, manifest или bundle id с любым byte drift будущий SQL-layer
+request, envelope, manifest или bundle id с любым byte drift CURRENT185 SQL-layer
 обязан отклонить конфликтом без изменений.
 
 Повтор выполняется только после экземпляра module-branded lost-response error:
@@ -73,22 +73,33 @@ canSend=false
 candidateStatus=NOT_DEPLOYABLE
 ```
 
-## Следующий PostgreSQL слой
+## Реализованный PostgreSQL candidate и следующий слой
 
-Application boundary не доказывает DB ownership и не создаёт ledger. Следующий
-candidate обязан:
+Application boundary сам по себе не доказывает DB ownership и не создаёт
+ledger. Noncanonical CURRENT185 candidate с normalized SQL SHA-256
+`2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6`
+реализовал первые четыре требования:
 
 1. version-expand CURRENT180 V1/52 command contract до отдельного V2/69
    evidence contract;
 2. создать append-only Manifest V2 evidence и revocation ledger;
 3. DB-enforced composite FK связать command с database/context, всеми 17 duty
    fields и exact manifest/grants/application identity;
-4. выдать importer `EXECUTE` только exact DB owner, без grant coordinator,
-   worker, app runtime или `PUBLIC`;
-5. отдельно выдать enrollment coordinator только four-TEXT
+4. оставить importer `EXECUTE` только exact DB owner, без grant coordinator,
+   worker, app runtime или `PUBLIC`.
+
+Следующий role/grants + driver slice обязан:
+
+5. передать owned objects отдельной `NOLOGIN` роли и выдать enrollment
+   coordinator только four-TEXT
    `drive_command_v2`, который не принимает JSON и под tenant lock повторно
    проверяет DB context, `SESSION_USER` name/OID, revocation и свежий grants
    digest.
+
+CURRENT185 принят локально: foundation `21/21`, branded fixture `3/3`,
+PostgreSQL 16 `7/7`, CURRENT184 regression `3/3`. Его transaction-local GUC
+INSERT fence является anti-accident проверкой, а не authorization boundary
+против database owner; поэтому candidate остаётся `NOT_DEPLOYABLE`.
 
 ## Evidence
 
@@ -99,8 +110,10 @@ candidate обязан:
 - test SHA-256:
   `522f1152339523c768b8d2ddce9631b6b2b63650e851872d8e636c0d5bcb9fb7`;
 - independent post-fix review: `PASS`, P0/P1/P2 отсутствуют;
-- package/CI gate добавлен; exact remote evidence фиксируется только после
-  push неизменного commit.
+- exact implementation commit
+  `cd2a0c576ecdbb1b1c8985d72603c8f0777f0553` принят GitHub Actions
+  [`30754790681`](https://github.com/boozik3412/leetplus/actions/runs/30754790681)
+  (`run #90`): importer gate и все три CI jobs — green.
 
 ## Что этот slice не разрешает
 

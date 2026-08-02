@@ -181,6 +181,9 @@ jobs:
       - name: Validate dormant non-canonical CURRENT184 lost-response replay foundation
         run: pnpm --filter database check:identity-mail-worker-v2-replay-current184-foundation
 
+      - name: Validate dormant non-canonical CURRENT185 enrollment evidence ledger foundation
+        run: pnpm --filter database check:identity-mail-enrollment-evidence-ledger-current185-foundation
+
       - name: Validate CURRENT182 disposable rehearsal harness
         run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-smoke
 
@@ -489,6 +492,17 @@ jobs:
         env:
           NODE_ENV: test
           IDENTITY_MAIL_WORKER_V2_CURRENT184_PG_E2E_CONFIRM: run-identity-mail-worker-v2-current184-postgres-e2e
+
+      - name: Verify CURRENT185 branded evidence fixture boundary
+        run: |
+          node --check packages/database/scripts/identity-mail-enrollment-evidence-current185-fixture.mjs
+          node --test packages/database/scripts/identity-mail-enrollment-evidence-current185-fixture.test.mjs
+
+      - name: Verify CURRENT185 owner-only evidence ledger and importer semantics
+        run: pnpm --filter api test:integration:identity-mail-enrollment-evidence-current185:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_ENROLLMENT_EVIDENCE_CURRENT185_PG_E2E_CONFIRM: run-identity-mail-enrollment-evidence-current185-postgres-e2e
 
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg

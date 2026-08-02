@@ -7,6 +7,11 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
+import {
   GuestGamificationService,
   type GuestGameDryRunResult,
   type GuestGameProcessEventDto,
@@ -163,8 +168,9 @@ export class GuestGameLedgerFallbackService {
         id: true,
         slug: true,
         status: true,
+        customerStage: true,
         users: {
-          where: { isActive: true },
+          where: { isActive: true, accessScope: 'NETWORK' },
           select: {
             id: true,
             email: true,
@@ -182,6 +188,21 @@ export class GuestGameLedgerFallbackService {
     const results: GuestGameLedgerFallbackTenantResult[] = [];
 
     for (const tenant of tenants) {
+      const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(tenant.customerStage),
+        jobKind: 'GUEST_GAME_LEDGER_FALLBACK',
+      });
+      if (!executionDecision.allowed) {
+        results.push(
+          emptyTenantResult(
+            tenant.id,
+            tenant.slug,
+            'SKIPPED',
+            tenantBackgroundExecutionNote(executionDecision),
+          ),
+        );
+        continue;
+      }
       if (mode === 'OFF' || tenant.status !== TenantLifecycleStatus.ACTIVE) {
         results.push(
           emptyTenantResult(
@@ -216,6 +237,8 @@ export class GuestGameLedgerFallbackService {
               tenantId: tenant.id,
               tenantSlug: tenant.slug,
               tenantStatus: tenant.status,
+              accessScope: 'NETWORK',
+              allowedStoreIds: [],
             },
             mode,
             factTypes,

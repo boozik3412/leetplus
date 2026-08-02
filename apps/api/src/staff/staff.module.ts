@@ -7,6 +7,7 @@ import { StaffAiAssistantController } from './staff-ai-assistant.controller';
 import { StaffAiAssistantService } from './staff-ai-assistant.service';
 import { StaffAssessmentsController } from './staff-assessments.controller';
 import { StaffAssessmentsService } from './staff-assessments.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 import { StaffAttachmentsController } from './staff-attachments.controller';
 import { StaffAttachmentsService } from './staff-attachments.service';
 import { StaffChecklistTemplatesController } from './staff-checklist-templates.controller';
@@ -37,9 +38,8 @@ import { StaffShiftRegulationsService } from './staff-shift-regulations.service'
 import { StaffShiftReportsController } from './staff-shift-reports.controller';
 import { StaffShiftReportsService } from './staff-shift-reports.service';
 import { StaffShiftWorkspaceController } from './staff-shift-workspace.controller';
+import { StaffTaskCatalogAccessPolicyService } from './staff-task-catalog-access-policy.service';
 import { StaffTaskRecurringRulesController } from './staff-task-recurring-rules.controller';
-import { StaffTaskRecurringRulesScheduledController } from './staff-task-recurring-rules-scheduled.controller';
-import { StaffTaskRecurringRulesSchedulerService } from './staff-task-recurring-rules-scheduler.service';
 import { StaffTaskRecurringRulesService } from './staff-task-recurring-rules.service';
 import { StaffTaskTemplatesController } from './staff-task-templates.controller';
 import { StaffTaskTemplatesService } from './staff-task-templates.service';
@@ -60,7 +60,6 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffDirectoryController,
     StaffTaskTemplatesController,
     StaffTaskRecurringRulesController,
-    StaffTaskRecurringRulesScheduledController,
     StaffKnowledgeBaseController,
     StaffTrainingCoursesController,
     StaffTrainingProfilesController,
@@ -84,9 +83,9 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTasksService,
     StaffAiAssistantService,
     StaffDirectoryService,
+    StaffTaskCatalogAccessPolicyService,
     StaffTaskTemplatesService,
     StaffTaskRecurringRulesService,
-    StaffTaskRecurringRulesSchedulerService,
     StaffKnowledgeBaseService,
     StaffTrainingCoursesService,
     StaffTrainingProfilesService,
@@ -94,6 +93,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffOperationsDashboardService,
     StaffOnboardingPlansService,
     StaffAssessmentsService,
+    StaffAttachmentBindingsService,
     StaffAttachmentsService,
     StaffShiftRegulationsService,
     StaffShiftReportsService,

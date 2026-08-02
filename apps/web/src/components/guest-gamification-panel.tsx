@@ -75,6 +75,7 @@ type Props = {
   access: {
     canManageRules: boolean;
     canApproveRewards: boolean;
+    canOperateLedger: boolean;
     canViewGuestPii: boolean;
     isPlatformAdmin: boolean;
     canRunRewardMaterializer: boolean;
@@ -2433,8 +2434,8 @@ export function GuestGamificationPanel({
   async function queueBonusLedger(options: BonusLedgerActionOptions = {}) {
     await saveAction("bonus-ledger-queue", async () => {
       assertCan(
-        access.canApproveRewards,
-        "Для постановки бонусов в ledger нужно право `Геймификация: награды`.",
+        access.canOperateLedger,
+        "Для постановки бонусов в ledger нужно право `Геймификация: bonus ledger`.",
       );
 
       const result = await postJson<GuestGameBonusLedgerQueueResult>(
@@ -2455,8 +2456,8 @@ export function GuestGamificationPanel({
   ) {
     await saveAction("bonus-ledger-dry-run", async () => {
       assertCan(
-        access.canApproveRewards,
-        "Для проверки bonus ledger dispatch нужно право `Геймификация: награды`.",
+        access.canOperateLedger,
+        "Для проверки dispatch нужно право `Геймификация: bonus ledger`.",
       );
 
       const result = await postJson<GuestGameBonusLedgerDispatchResult>(
@@ -2477,8 +2478,8 @@ export function GuestGamificationPanel({
   async function dispatchBonusLedger() {
     await saveAction("bonus-ledger-dispatch", async () => {
       assertCan(
-        access.canApproveRewards,
-        "Для запуска bonus ledger dispatch нужно право `Геймификация: награды`.",
+        access.canOperateLedger,
+        "Для запуска dispatch нужно право `Геймификация: bonus ledger`.",
       );
 
       const result = await postJson<GuestGameBonusLedgerDispatchResult>(
@@ -2500,8 +2501,8 @@ export function GuestGamificationPanel({
   ) {
     await saveAction("bonus-ledger-canary-dispatch", async () => {
       assertCan(
-        access.canApproveRewards,
-        "Для запуска canary bonus ledger dispatch нужно право `Геймификация: награды`.",
+        access.canOperateLedger,
+        "Для запуска canary нужно право `Геймификация: bonus ledger`.",
       );
 
       const result = await postJson<GuestGameBonusLedgerDispatchResult>(
@@ -2531,8 +2532,8 @@ export function GuestGamificationPanel({
 
     await saveAction(`bonus-ledger-cancel-${entryId}`, async () => {
       assertCan(
-        access.canApproveRewards,
-        "Для отмены bonus ledger записи нужно право `Геймификация: награды`.",
+        access.canOperateLedger,
+        "Для отмены записи нужно право `Геймификация: bonus ledger`.",
       );
 
       const result = await postJson<GuestGameBonusLedgerDispatchItem>(
@@ -3005,6 +3006,7 @@ export function GuestGamificationPanel({
               tenantSlug={tenantSlug}
               stores={stores}
               canApproveRewards={access.canApproveRewards}
+              canOperateLedger={access.canOperateLedger}
               canManageRules={access.canManageRules}
               canViewIntegrationReadiness={access.isPlatformAdmin}
               onPrepareOutbox={prepareDeliveryOutbox}
@@ -4462,6 +4464,7 @@ function OverviewTab({
   tenantSlug,
   stores,
   canApproveRewards,
+  canOperateLedger,
   canManageRules,
   canViewIntegrationReadiness,
   onPrepareOutbox,
@@ -4489,6 +4492,7 @@ function OverviewTab({
   tenantSlug: string;
   stores: Store[];
   canApproveRewards: boolean;
+  canOperateLedger: boolean;
   canManageRules: boolean;
   canViewIntegrationReadiness: boolean;
   onPrepareOutbox: () => void;
@@ -4632,7 +4636,7 @@ function OverviewTab({
       <PilotReadinessCard
         readiness={workspace.pilotReadiness}
         saving={saving}
-        canApproveRewards={canApproveRewards}
+        canApproveRewards={canOperateLedger}
         onOpenDryRun={() => onOpenTab("testRun")}
         onQueueBonusLedger={onQueueBonusLedger}
         onDryRunBonusLedger={onDryRunBonusLedger}
@@ -4647,7 +4651,7 @@ function OverviewTab({
       <BonusLedgerAuditCard
         audit={workspace.bonusLedgerAudit}
         saving={saving}
-        canApproveRewards={canApproveRewards}
+        canApproveRewards={canOperateLedger}
         onQueueBonusLedger={onQueueBonusLedger}
         onDryRunBonusLedger={onDryRunBonusLedger}
         onDispatchBonusLedger={onDispatchBonusLedger}
@@ -5099,7 +5103,7 @@ function PilotReadinessCard({
                   const cancelTitle = !canCancelPreview
                     ? "Эту ledger-запись уже нельзя отменить из preflight."
                     : !canApproveRewards
-                      ? "Для отмены ledger-записи нужно право `Геймификация: награды`."
+                      ? "Для отмены ledger-записи нужно право `Геймификация: bonus ledger`."
                       : saving !== null
                         ? "Дождитесь завершения текущего действия."
                         : "Отменить ledger-запись до начисления в Langame.";
@@ -5240,7 +5244,7 @@ function PilotReadinessCard({
                 const disabledReason = !action.enabled
                   ? action.disabledReason
                   : disabledByAccess
-                    ? "Для ledger-действий нужно право `Геймификация: награды`."
+                    ? "Для ledger-действий нужно право `Геймификация: bonus ledger`."
                     : disabledBySaving
                       ? "Дождитесь завершения текущего действия."
                       : disabledByPilotStore
@@ -5504,8 +5508,8 @@ function BonusLedgerAuditCard({
 
       {!canApproveRewards ? (
         <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-          Для управления ledger нужно право `Геймификация: награды`; журнал и
-          сверка доступны только на просмотр.
+          Для управления ledger нужно право `Геймификация: bonus ledger`;
+          журнал и сверка доступны только на просмотр.
         </p>
       ) : null}
 

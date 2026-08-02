@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -14,7 +15,12 @@ import {
 } from './staff-shift-report-message-metadata';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  AccessScopeService,
+  type ResolvedAccessScope,
+} from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 
 const channelScopes = ['NETWORK', 'STORE', 'ROLE', 'CUSTOM'] as const;
 const messageKinds = ['MESSAGE', 'ANNOUNCEMENT', 'INCIDENT'] as const;
@@ -334,22 +340,41 @@ export class StaffTeamChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly accessScopeService: AccessScopeService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getReport(
     user: AuthenticatedUser,
     query: StaffTeamChatQuery = {},
   ): Promise<StaffTeamChatReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    await this.ensureDefaultChannels(tenantId);
-    const accessWhere = await this.buildAccessibleChannelWhere(user, tenantId);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
     const filters = this.resolveFilters(query);
+    await this.assertExplicitStoreFilterAllowed(
+      user,
+      tenantId,
+      filters.storeId,
+    );
+    await this.ensureDefaultChannels(tenantId);
+    const accessWhere = this.buildAccessibleChannelWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
 
     const channels = await this.prisma.staffChatChannel.findMany({
       where: accessWhere,
       include: channelInclude,
       orderBy: [{ isDefault: 'desc' }, { scope: 'asc' }, { name: 'asc' }],
     });
+
+    if (
+      filters.channelId &&
+      !channels.some((channel) => channel.id === filters.channelId)
+    ) {
+      throw new NotFoundException('Chat channel not found');
+    }
 
     const storeChannel = filters.storeId
       ? channels.find(
@@ -366,17 +391,23 @@ export class StaffTeamChatService {
       channels[0] ??
       null;
 
-    if (activeChannel?.name === STAFF_CHAT_REPORTING_CHANNEL_NAME) {
+    if (
+      accessScope.mode === 'NETWORK' &&
+      activeChannel?.name === STAFF_CHAT_REPORTING_CHANNEL_NAME
+    ) {
       await this.reconcileShiftReportMessages(tenantId, activeChannel.id);
     }
 
-    const audienceWhere = await this.buildMessageAudienceWhere(user, tenantId);
-    const channelIds = channels.map((channel) => channel.id);
+    const audienceWhere = this.buildMessageAudienceWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
     const messagesPromise = activeChannel
       ? this.prisma.staffChatMessage.findMany({
           where: this.buildMessageWhere(
             tenantId,
-            activeChannel.id,
+            activeChannel,
             filters,
             audienceWhere,
           ),
@@ -386,15 +417,15 @@ export class StaffTeamChatService {
         })
       : Promise.resolve([] as StaffChatMessageRow[]);
     const [stats, messages, stores, users] = await Promise.all([
-      this.buildChannelStats(tenantId, user.id, channelIds, audienceWhere),
+      this.buildChannelStats(tenantId, user.id, channels, audienceWhere),
       messagesPromise,
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: this.buildVisibleStoreWhere(tenantId, accessScope),
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
       this.prisma.user.findMany({
-        where: { tenantId, isActive: true },
+        where: this.buildVisibleUserWhere(tenantId, accessScope),
         select: { id: true, email: true, fullName: true, role: true },
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
       }),
@@ -413,6 +444,7 @@ export class StaffTeamChatService {
       }),
       { messages: 0, pinned: 0, unread: 0 },
     );
+    const visibleUserIds = new Set(users.map((visibleUser) => visibleUser.id));
 
     return {
       filters: {
@@ -425,10 +457,15 @@ export class StaffTeamChatService {
       },
       activeChannelId: activeChannel?.id ?? null,
       channels: channels.map((channel) =>
-        this.toChannelResponse(channel, stats.get(channel.id)),
+        this.toChannelResponse(channel, stats.get(channel.id), visibleUserIds),
       ),
       messages: messages.map((message) =>
-        this.toMessageResponse(message, user, acknowledgementMap),
+        this.toMessageResponse(
+          message,
+          user,
+          acknowledgementMap,
+          visibleUserIds,
+        ),
       ),
       stores,
       users,
@@ -448,15 +485,38 @@ export class StaffTeamChatService {
     user: AuthenticatedUser,
     query: StaffTeamChatQuery = {},
   ): Promise<StaffTeamChatLiveState> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const accessWhere = await this.buildAccessibleChannelWhere(user, tenantId);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
     const filters = this.resolveFilters(query);
+    await this.assertExplicitStoreFilterAllowed(
+      user,
+      tenantId,
+      filters.storeId,
+    );
+    const accessWhere = this.buildAccessibleChannelWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
 
     let channels = await this.prisma.staffChatChannel.findMany({
       where: accessWhere,
-      select: { id: true, name: true, updatedAt: true },
+      select: {
+        id: true,
+        name: true,
+        scope: true,
+        storeId: true,
+        updatedAt: true,
+      },
       orderBy: [{ isDefault: 'desc' }, { scope: 'asc' }, { name: 'asc' }],
     });
+    if (
+      filters.channelId &&
+      !channels.some((channel) => channel.id === filters.channelId)
+    ) {
+      throw new NotFoundException('Chat channel not found');
+    }
+
     const reportingChannel = filters.channelId
       ? channels.find(
           (channel) =>
@@ -464,9 +524,10 @@ export class StaffTeamChatService {
             channel.name === STAFF_CHAT_REPORTING_CHANNEL_NAME,
         )
       : null;
-    const reconciledAt = reportingChannel
-      ? await this.reconcileShiftReportMessages(tenantId, reportingChannel.id)
-      : null;
+    const reconciledAt =
+      accessScope.mode === 'NETWORK' && reportingChannel
+        ? await this.reconcileShiftReportMessages(tenantId, reportingChannel.id)
+        : null;
 
     if (reconciledAt) {
       channels = channels.map((channel) =>
@@ -477,11 +538,15 @@ export class StaffTeamChatService {
     }
 
     const channelIds = channels.map((channel) => channel.id);
-    const audienceWhere = await this.buildMessageAudienceWhere(user, tenantId);
+    const audienceWhere = this.buildMessageAudienceWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
     const stats = await this.buildChannelStats(
       tenantId,
       user.id,
-      channelIds,
+      channels,
       audienceWhere,
     );
     const totals = Array.from(stats.values()).reduce(
@@ -520,13 +585,14 @@ export class StaffTeamChatService {
   }
 
   async createChannel(user: AuthenticatedUser, dto: StaffChatChannelDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
 
     if (!this.canManageChannels(user.role)) {
       throw new BadRequestException('Channel management is not allowed');
     }
 
-    const data = await this.normalizeChannelData(tenantId, user, dto);
+    const data = await this.normalizeChannelData(tenantId, dto, accessScope);
     const memberUserIds =
       data.scope === 'CUSTOM'
         ? await this.resolveChannelMemberUserIds(
@@ -579,12 +645,14 @@ export class StaffTeamChatService {
   }
 
   async createMessage(user: AuthenticatedUser, dto: StaffChatMessageDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
     await this.ensureDefaultChannels(tenantId);
     const channel = await this.resolveAccessibleChannel(
       user,
       tenantId,
       dto.channelId,
+      accessScope,
     );
 
     if (channel.name === STAFF_CHAT_NOTIFICATION_CHANNEL_NAME) {
@@ -593,20 +661,20 @@ export class StaffTeamChatService {
       );
     }
 
-    const attachmentIds = await this.resolveMessageAttachmentIds(
-      tenantId,
-      user.id,
+    const attachmentIds = this.normalizeMessageAttachmentIds(
       dto.attachmentIds,
-    );
-    const mentionedUserIds = await this.resolveMentionedUserIds(
-      tenantId,
-      dto.mentionedUserIds,
     );
     const data = await this.normalizeMessageData(
       tenantId,
       channel,
       dto,
       attachmentIds.length > 0,
+      accessScope,
+    );
+    const mentionedUserIds = await this.resolveMentionedUserIds(
+      tenantId,
+      dto.mentionedUserIds,
+      data.storeId ?? null,
     );
 
     const message = await this.prisma.$transaction(async (tx) => {
@@ -621,16 +689,14 @@ export class StaffTeamChatService {
       });
 
       if (attachmentIds.length > 0) {
-        await Promise.all(
-          attachmentIds.map((attachmentId) =>
-            tx.staffChatMessageAttachment.create({
-              data: {
-                tenantId,
-                messageId: created.id,
-                attachmentId,
-              },
-            }),
-          ),
+        await this.staffAttachmentBindingsService.bindPendingChatAttachments(
+          tx,
+          {
+            tenantId,
+            actorUserId: user.id,
+            messageId: created.id,
+            attachmentIds,
+          },
         );
       }
 
@@ -777,31 +843,118 @@ export class StaffTeamChatService {
     return message;
   }
 
+  async canReadAnyAttachmentMessage(
+    user: AuthenticatedUser,
+    messageIds: readonly string[],
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const ids = Array.from(new Set(messageIds.filter(Boolean)));
+
+    if (
+      ids.length === 0 ||
+      (!hasCapability(user, 'view_communications') &&
+        !hasCapability(user, 'manage_communications') &&
+        !hasCapability(user, 'approve_guest_game_rewards'))
+    ) {
+      return false;
+    }
+
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+    const accessWhere = this.buildAccessibleChannelWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
+    const audienceWhere = this.buildMessageAudienceWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
+    const messages = await client.staffChatMessage.findMany({
+      where: {
+        AND: [
+          { id: { in: ids }, tenantId },
+          audienceWhere,
+          { channel: { is: accessWhere } },
+        ],
+      },
+      select: {
+        storeId: true,
+        channel: {
+          select: {
+            scope: true,
+            storeId: true,
+          },
+        },
+      },
+      take: ids.length,
+    });
+
+    return messages.some(
+      (message) =>
+        message.channel.scope !== 'STORE' ||
+        (message.channel.storeId !== null &&
+          message.storeId === message.channel.storeId),
+    );
+  }
+
   async updateMessage(
     user: AuthenticatedUser,
     id: string,
     dto: StaffChatMessageUpdateDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+    const accessWhere = this.buildAccessibleChannelWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
+    const audienceWhere = this.buildMessageAudienceWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
     const message = await this.prisma.staffChatMessage.findFirst({
-      where: { id, tenantId },
-      select: { id: true, channelId: true, authorUserId: true, body: true },
+      where: {
+        AND: [
+          { id, tenantId },
+          audienceWhere,
+          { channel: { is: accessWhere } },
+        ],
+      },
+      select: {
+        id: true,
+        channelId: true,
+        authorUserId: true,
+        storeId: true,
+        body: true,
+        channel: {
+          select: {
+            id: true,
+            name: true,
+            scope: true,
+            storeId: true,
+            roleScope: true,
+          },
+        },
+      },
     });
 
-    if (!message) {
+    if (
+      !message ||
+      (message.channel.scope === 'STORE' &&
+        (!message.channel.storeId ||
+          message.storeId !== message.channel.storeId))
+    ) {
       throw new NotFoundException('Chat message not found');
     }
 
-    const channel = await this.resolveAccessibleChannel(
-      user,
-      tenantId,
-      message.channelId,
-    );
+    const channel = message.channel;
     const updateData: Prisma.StaffChatMessageUncheckedUpdateInput = {};
     const hasBodyUpdate = 'body' in dto;
-    const attachmentIds = await this.resolveMessageAttachmentIds(
-      tenantId,
-      user.id,
+    const attachmentIds = this.normalizeMessageAttachmentIds(
       dto.attachmentIds,
     );
     const hasAttachmentUpdate = attachmentIds.length > 0;
@@ -856,14 +1009,15 @@ export class StaffTeamChatService {
       }
 
       if (hasAttachmentUpdate) {
-        await tx.staffChatMessageAttachment.createMany({
-          data: attachmentIds.map((attachmentId) => ({
+        await this.staffAttachmentBindingsService.bindPendingChatAttachments(
+          tx,
+          {
             tenantId,
+            actorUserId: user.id,
             messageId: message.id,
-            attachmentId,
-          })),
-          skipDuplicates: true,
-        });
+            attachmentIds,
+          },
+        );
       }
 
       const result =
@@ -890,20 +1044,26 @@ export class StaffTeamChatService {
   }
 
   async markRead(user: AuthenticatedUser, dto: StaffChatReadDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
     const channel = await this.resolveAccessibleChannel(
       user,
       tenantId,
       dto.channelId,
+      accessScope,
     );
 
-    const audienceWhere = await this.buildMessageAudienceWhere(user, tenantId);
+    const audienceWhere = this.buildMessageAudienceWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
     const messageId = this.normalizeOptionalString(dto.messageId);
     const messageIds = messageId
       ? [
           await this.resolveMessageId(
             tenantId,
-            channel.id,
+            channel,
             messageId,
             audienceWhere,
           ),
@@ -915,6 +1075,11 @@ export class StaffTeamChatService {
                 {
                   tenantId,
                   channelId: channel.id,
+                  ...(channel.scope === 'STORE'
+                    ? {
+                        storeId: channel.storeId ?? '__invalid_store_channel__',
+                      }
+                    : {}),
                   authorUserId: { not: user.id },
                   readReceipts: { none: { userId: user.id } },
                 },
@@ -1280,10 +1445,11 @@ export class StaffTeamChatService {
     };
   }
 
-  private async buildMessageAudienceWhere(
+  private buildMessageAudienceWhere(
     user: AuthenticatedUser,
     tenantId: string,
-  ): Promise<Prisma.StaffChatMessageWhereInput> {
+    accessScope: ResolvedAccessScope,
+  ): Prisma.StaffChatMessageWhereInput {
     const articleWhere: Prisma.StaffKnowledgeArticleWhereInput = {
       tenantId,
       kind: 'INFORMATION',
@@ -1291,18 +1457,25 @@ export class StaffTeamChatService {
       roleScope: { in: this.visibleKnowledgeRoleScopes(user.role) },
     };
 
-    if (!this.canSeeAllChannels(user.role)) {
-      const storeIds = await this.getUserStoreIds(user.id);
-      articleWhere.OR =
-        storeIds.length > 0
-          ? [{ storeId: null }, { storeId: { in: storeIds } }]
-          : [{ storeId: null }];
+    if (accessScope.mode === 'STORES') {
+      articleWhere.storeId = { in: [...accessScope.allowedStoreIds] };
     }
 
-    return {
+    const knowledgeAudienceWhere: Prisma.StaffChatMessageWhereInput = {
       OR: [
         { knowledgeArticleId: null },
         { knowledgeArticle: { is: articleWhere } },
+      ],
+    };
+
+    if (accessScope.mode === 'NETWORK') {
+      return knowledgeAudienceWhere;
+    }
+
+    return {
+      AND: [
+        { storeId: { in: [...accessScope.allowedStoreIds] } },
+        knowledgeAudienceWhere,
       ],
     };
   }
@@ -1350,11 +1523,17 @@ export class StaffTeamChatService {
 
   private buildMessageWhere(
     tenantId: string,
-    channelId: string,
+    channel: { id: string; scope: string; storeId: string | null },
     filters: StaffTeamChatReport['filters'],
     audienceWhere: Prisma.StaffChatMessageWhereInput,
   ): Prisma.StaffChatMessageWhereInput {
-    const where: Prisma.StaffChatMessageWhereInput = { tenantId, channelId };
+    const where: Prisma.StaffChatMessageWhereInput = {
+      tenantId,
+      channelId: channel.id,
+      ...(channel.scope === 'STORE'
+        ? { storeId: channel.storeId ?? '__invalid_store_channel__' }
+        : {}),
+    };
     const and: Prisma.StaffChatMessageWhereInput[] = [audienceWhere];
 
     if (filters.search) {
@@ -1388,13 +1567,28 @@ export class StaffTeamChatService {
     return where;
   }
 
+  private buildChannelMessageWhere(
+    channels: Array<{ id: string; scope: string; storeId: string | null }>,
+  ): Prisma.StaffChatMessageWhereInput {
+    return {
+      OR: channels.map((channel) => ({
+        channelId: channel.id,
+        ...(channel.scope === 'STORE'
+          ? { storeId: channel.storeId ?? '__invalid_store_channel__' }
+          : {}),
+      })),
+    };
+  }
+
   private async buildChannelStats(
     tenantId: string,
     userId: string,
-    channelIds: string[],
+    channels: Array<{ id: string; scope: string; storeId: string | null }>,
     audienceWhere: Prisma.StaffChatMessageWhereInput,
   ) {
     const stats = new Map<string, ChannelStats>();
+    const channelIds = channels.map((channel) => channel.id);
+    const channelMessageWhere = this.buildChannelMessageWhere(channels);
 
     channelIds.forEach((channelId) => {
       stats.set(channelId, {
@@ -1421,8 +1615,7 @@ export class StaffTeamChatService {
         by: ['channelId'],
         where: {
           tenantId,
-          channelId: { in: channelIds },
-          AND: [audienceWhere],
+          AND: [channelMessageWhere, audienceWhere],
         },
         _count: { _all: true },
       }),
@@ -1430,9 +1623,8 @@ export class StaffTeamChatService {
         by: ['channelId'],
         where: {
           tenantId,
-          channelId: { in: channelIds },
           isPinned: true,
-          AND: [audienceWhere],
+          AND: [channelMessageWhere, audienceWhere],
         },
         _count: { _all: true },
       }),
@@ -1440,10 +1632,9 @@ export class StaffTeamChatService {
         by: ['channelId'],
         where: {
           tenantId,
-          channelId: { in: channelIds },
           OR: [{ authorUserId: null }, { authorUserId: { not: userId } }],
           readReceipts: { none: { userId } },
-          AND: [audienceWhere],
+          AND: [channelMessageWhere, audienceWhere],
         },
         _count: { _all: true },
       }),
@@ -1453,10 +1644,9 @@ export class StaffTeamChatService {
           mentionedUserId: userId,
           message: {
             tenantId,
-            channelId: { in: channelIds },
             OR: [{ authorUserId: null }, { authorUserId: { not: userId } }],
             readReceipts: { none: { userId } },
-            AND: [audienceWhere],
+            AND: [channelMessageWhere, audienceWhere],
           },
         },
         select: { message: { select: { channelId: true } } },
@@ -1464,8 +1654,7 @@ export class StaffTeamChatService {
       this.prisma.staffChatMessage.findMany({
         where: {
           tenantId,
-          channelId: { in: channelIds },
-          AND: [audienceWhere],
+          AND: [channelMessageWhere, audienceWhere],
         },
         distinct: ['channelId'],
         orderBy: [{ channelId: 'asc' }, { createdAt: 'desc' }],
@@ -1850,53 +2039,140 @@ export class StaffTeamChatService {
     });
   }
 
-  private async buildAccessibleChannelWhere(
+  private async assertExplicitStoreFilterAllowed(
     user: AuthenticatedUser,
     tenantId: string,
-  ): Promise<Prisma.StaffChatChannelWhereInput> {
+    storeId: string | null,
+  ) {
+    if (!storeId) {
+      return;
+    }
+
+    this.accessScopeService.assertStoreAllowed(user, storeId);
+    const store = await this.prisma.store.findFirst({
+      where: { id: storeId, tenantId },
+      select: { id: true },
+    });
+
+    if (!store) {
+      throw new ForbiddenException('Store is outside your access scope');
+    }
+  }
+
+  private buildVisibleStoreWhere(
+    tenantId: string,
+    accessScope: ResolvedAccessScope,
+  ): Prisma.StoreWhereInput {
+    return {
+      tenantId,
+      ...(accessScope.mode === 'STORES'
+        ? { id: { in: [...accessScope.allowedStoreIds] } }
+        : {}),
+    };
+  }
+
+  private buildVisibleUserWhere(
+    tenantId: string,
+    accessScope: ResolvedAccessScope,
+  ): Prisma.UserWhereInput {
+    return {
+      tenantId,
+      isActive: true,
+      ...(accessScope.mode === 'STORES'
+        ? {
+            OR: [
+              { accessScope: 'NETWORK' },
+              {
+                accessScope: 'STORES',
+                storeAccesses: {
+                  some: {
+                    storeId: { in: [...accessScope.allowedStoreIds] },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  private buildAccessibleChannelWhere(
+    user: AuthenticatedUser,
+    tenantId: string,
+    accessScope: ResolvedAccessScope,
+  ): Prisma.StaffChatChannelWhereInput {
+    const scopeBoundary: Prisma.StaffChatChannelWhereInput =
+      accessScope.mode === 'NETWORK'
+        ? {}
+        : {
+            OR: [
+              { scope: { not: 'STORE' } },
+              {
+                scope: 'STORE',
+                storeId: { in: [...accessScope.allowedStoreIds] },
+              },
+            ],
+          };
+
     if (
       !hasCapability(user, 'view_communications') &&
       hasCapability(user, 'approve_guest_game_rewards')
     ) {
       return {
-        tenantId,
-        isArchived: false,
-        name: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME,
-        scope: 'CUSTOM',
-        members: { some: { userId: user.id } },
-      };
-    }
-
-    if (this.canSeeAllChannels(user.role)) {
-      return {
-        tenantId,
-        isArchived: false,
-        OR: [
-          { name: { not: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME } },
+        AND: [
           {
+            tenantId,
+            isArchived: false,
             name: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME,
             scope: 'CUSTOM',
             members: { some: { userId: user.id } },
           },
+          scopeBoundary,
         ],
       };
     }
 
-    const storeIds = await this.getUserStoreIds(user.id);
+    if (accessScope.mode === 'NETWORK' && this.canSeeAllChannels(user.role)) {
+      return {
+        AND: [
+          {
+            tenantId,
+            isArchived: false,
+            OR: [
+              { name: { not: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME } },
+              {
+                name: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME,
+                scope: 'CUSTOM',
+                members: { some: { userId: user.id } },
+              },
+            ],
+          },
+          scopeBoundary,
+        ],
+      };
+    }
+
     const roleScopeValues = this.resolveRoleScopeValues(user.role);
-    const storeChannelWhere: Prisma.StaffChatChannelWhereInput =
-      storeIds.length > 0
-        ? { scope: 'STORE', storeId: { in: storeIds } }
-        : { scope: 'STORE' };
+    const storeChannelWhere: Prisma.StaffChatChannelWhereInput = {
+      scope: 'STORE',
+      ...(accessScope.mode === 'STORES'
+        ? { storeId: { in: [...accessScope.allowedStoreIds] } }
+        : {}),
+    };
 
     return {
-      tenantId,
-      isArchived: false,
-      OR: [
-        { scope: 'NETWORK' },
-        storeChannelWhere,
-        { scope: 'ROLE', roleScope: { in: roleScopeValues } },
-        { scope: 'CUSTOM', members: { some: { userId: user.id } } },
+      AND: [
+        {
+          tenantId,
+          isArchived: false,
+          OR: [
+            { scope: 'NETWORK' },
+            storeChannelWhere,
+            { scope: 'ROLE', roleScope: { in: roleScopeValues } },
+            { scope: 'CUSTOM', members: { some: { userId: user.id } } },
+          ],
+        },
+        scopeBoundary,
       ],
     };
   }
@@ -1905,8 +2181,13 @@ export class StaffTeamChatService {
     user: AuthenticatedUser,
     tenantId: string,
     channelId?: string | null,
+    accessScope = this.accessScopeService.resolve(user),
   ) {
-    const accessWhere = await this.buildAccessibleChannelWhere(user, tenantId);
+    const accessWhere = this.buildAccessibleChannelWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
     const targetId =
       this.normalizeOptionalString(channelId) ??
       (await this.ensureDefaultChannels(tenantId));
@@ -1987,15 +2268,26 @@ export class StaffTeamChatService {
 
   private async normalizeChannelData(
     tenantId: string,
-    user: AuthenticatedUser,
     dto: StaffChatChannelDto,
+    accessScope: ResolvedAccessScope,
   ): Promise<Omit<Prisma.StaffChatChannelUncheckedCreateInput, 'tenantId'>> {
     const name = this.normalizeRequiredString(dto.name, 'Channel name', 80);
     const description = this.normalizeOptionalString(dto.description, 240);
     const scope = this.resolveOne(dto.scope, channelScopes, 'NETWORK');
+
+    if (accessScope.mode === 'STORES' && scope !== 'STORE') {
+      throw new ForbiddenException(
+        'Network, role and custom channels require network access',
+      );
+    }
+
     const storeId =
       scope === 'STORE'
-        ? await this.resolveStoreIdForChannel(tenantId, user, dto.storeId)
+        ? await this.resolveStoreIdForChannel(
+            tenantId,
+            accessScope,
+            dto.storeId,
+          )
         : null;
     const roleScope =
       scope === 'ROLE' ? this.resolveRoleScope(dto.roleScope) : null;
@@ -2013,9 +2305,13 @@ export class StaffTeamChatService {
 
   private async normalizeMessageData(
     tenantId: string,
-    channel: { storeId: string | null },
+    channel: {
+      scope: string;
+      storeId: string | null;
+    },
     dto: StaffChatMessageDto,
     hasAttachments = false,
+    accessScope: ResolvedAccessScope,
   ): Promise<Omit<Prisma.StaffChatMessageUncheckedCreateInput, 'tenantId'>> {
     const body = hasAttachments
       ? (this.normalizeOptionalString(dto.body, 4000) ?? 'Вложение')
@@ -2027,9 +2323,45 @@ export class StaffTeamChatService {
       kind === 'INCIDENT' ? 'URGENT' : 'NORMAL',
     );
     const requestedStoreId = this.normalizeOptionalString(dto.storeId);
-    const storeId = requestedStoreId
-      ? await this.resolveStoreId(tenantId, requestedStoreId)
-      : channel.storeId;
+    let storeId: string | null;
+
+    if (channel.scope === 'STORE') {
+      if (!channel.storeId) {
+        throw new NotFoundException('Chat channel not found');
+      }
+
+      if (requestedStoreId && requestedStoreId !== channel.storeId) {
+        throw new BadRequestException(
+          'Store channel messages cannot override the channel store',
+        );
+      }
+
+      storeId = channel.storeId;
+    } else {
+      storeId =
+        requestedStoreId ??
+        (accessScope.mode === 'STORES' &&
+        accessScope.allowedStoreIds.length === 1
+          ? accessScope.allowedStoreIds[0]
+          : null);
+
+      if (accessScope.mode === 'STORES' && !storeId) {
+        throw new BadRequestException(
+          'Store is required for a store-scoped chat message',
+        );
+      }
+    }
+
+    if (storeId) {
+      if (
+        accessScope.mode === 'STORES' &&
+        !accessScope.allowedStoreIds.includes(storeId)
+      ) {
+        throw new ForbiddenException('Store is outside your access scope');
+      }
+
+      storeId = await this.resolveStoreId(tenantId, storeId);
+    }
 
     return {
       body,
@@ -2041,9 +2373,7 @@ export class StaffTeamChatService {
     };
   }
 
-  private async resolveMessageAttachmentIds(
-    tenantId: string,
-    userId: string,
+  private normalizeMessageAttachmentIds(
     values: string[] | null | undefined,
   ) {
     const requestedIds = Array.isArray(values)
@@ -2066,26 +2396,13 @@ export class StaffTeamChatService {
       return [];
     }
 
-    const rows = await this.prisma.staffAttachment.findMany({
-      where: {
-        tenantId,
-        uploadedByUserId: userId,
-        id: { in: requestedIds },
-      },
-      select: { id: true },
-    });
-    const availableIds = new Set(rows.map((row) => row.id));
-
-    if (requestedIds.some((id) => !availableIds.has(id))) {
-      throw new BadRequestException('Attachment is not available');
-    }
-
     return requestedIds;
   }
 
   private async resolveMentionedUserIds(
     tenantId: string,
     values: string[] | null | undefined,
+    storeId: string | null,
   ) {
     const requestedIds = Array.isArray(values)
       ? Array.from(
@@ -2106,7 +2423,22 @@ export class StaffTeamChatService {
     }
 
     const rows = await this.prisma.user.findMany({
-      where: { tenantId, isActive: true, id: { in: requestedIds } },
+      where: {
+        tenantId,
+        isActive: true,
+        id: { in: requestedIds },
+        ...(storeId
+          ? {
+              OR: [
+                { accessScope: 'NETWORK' },
+                {
+                  accessScope: 'STORES',
+                  storeAccesses: { some: { storeId } },
+                },
+              ],
+            }
+          : {}),
+      },
       select: { id: true },
     });
     const availableIds = new Set(rows.map((row) => row.id));
@@ -2164,22 +2496,19 @@ export class StaffTeamChatService {
 
   private async resolveStoreIdForChannel(
     tenantId: string,
-    user: AuthenticatedUser,
+    accessScope: ResolvedAccessScope,
     value?: string | null,
   ) {
     const storeId = await this.resolveStoreId(tenantId, value);
 
-    if (this.canSeeAllChannels(user.role)) {
-      return storeId;
+    if (
+      accessScope.mode === 'STORES' &&
+      !accessScope.allowedStoreIds.includes(storeId)
+    ) {
+      throw new ForbiddenException('Store is outside your access scope');
     }
 
-    const userStoreIds = await this.getUserStoreIds(user.id);
-
-    if (userStoreIds.length === 0 || userStoreIds.includes(storeId)) {
-      return storeId;
-    }
-
-    throw new BadRequestException('Store channel is not available for user');
+    return storeId;
   }
 
   private async resolveChannelMemberUserIds(
@@ -2209,14 +2538,23 @@ export class StaffTeamChatService {
 
   private async resolveMessageId(
     tenantId: string,
-    channelId: string,
+    channel: { id: string; scope: string; storeId: string | null },
     messageId: string,
     audienceWhere?: Prisma.StaffChatMessageWhereInput,
   ) {
     const message = await this.prisma.staffChatMessage.findFirst({
       where: {
         AND: [
-          { id: messageId, tenantId, channelId },
+          {
+            id: messageId,
+            tenantId,
+            channelId: channel.id,
+            ...(channel.scope === 'STORE'
+              ? {
+                  storeId: channel.storeId ?? '__invalid_store_channel__',
+                }
+              : {}),
+          },
           ...(audienceWhere ? [audienceWhere] : []),
         ],
       },
@@ -2299,15 +2637,6 @@ export class StaffTeamChatService {
     ).includes(role);
   }
 
-  private async getUserStoreIds(userId: string) {
-    const accesses = await this.prisma.userStoreAccess.findMany({
-      where: { userId },
-      select: { storeId: true },
-    });
-
-    return accesses.map((access) => access.storeId);
-  }
-
   private buildStoreChannelName(storeName: string, storeId?: string | null) {
     const suffix = storeId ? ` (${storeId.slice(0, 8)})` : '';
     return this.normalizeRequiredString(
@@ -2320,6 +2649,7 @@ export class StaffTeamChatService {
   private toChannelResponse(
     channel: StaffChatChannelRow,
     stats?: ChannelStats,
+    visibleUserIds?: ReadonlySet<string>,
   ): StaffChatChannelResponse {
     return {
       id: channel.id,
@@ -2332,8 +2662,14 @@ export class StaffTeamChatService {
       createdAt: channel.createdAt.toISOString(),
       updatedAt: channel.updatedAt.toISOString(),
       store: channel.store,
-      createdByUser: channel.createdByUser,
-      members: channel.members.map((member) => member.user),
+      createdByUser:
+        channel.createdByUser &&
+        (!visibleUserIds || visibleUserIds.has(channel.createdByUser.id))
+          ? channel.createdByUser
+          : null,
+      members: channel.members
+        .map((member) => member.user)
+        .filter((member) => !visibleUserIds || visibleUserIds.has(member.id)),
       messagesCount: stats?.messagesCount ?? 0,
       unreadCount: stats?.unreadCount ?? 0,
       mentionUnreadCount: stats?.mentionUnreadCount ?? 0,
@@ -2377,6 +2713,7 @@ export class StaffTeamChatService {
     message: StaffChatMessageRow,
     user: AuthenticatedUser,
     acknowledgementMap: Map<string, Date> = new Map(),
+    visibleUserIds?: ReadonlySet<string>,
   ): StaffChatMessageResponse {
     const isShiftReport = this.isShiftReportMessage(
       message.channel,
@@ -2414,7 +2751,11 @@ export class StaffTeamChatService {
       ),
       createdAt: message.createdAt.toISOString(),
       updatedAt: message.updatedAt.toISOString(),
-      authorUser: message.authorUser,
+      authorUser:
+        message.authorUser &&
+        (!visibleUserIds || visibleUserIds.has(message.authorUser.id))
+          ? message.authorUser
+          : null,
       store: message.store,
       attachments: message.attachments.map(({ attachment }) => ({
         id: attachment.id,
@@ -2423,16 +2764,29 @@ export class StaffTeamChatService {
         byteSize: attachment.byteSize,
         url: `/staff/attachments/${attachment.id}`,
         createdAt: attachment.createdAt.toISOString(),
-        uploadedByUser: attachment.uploadedByUser,
+        uploadedByUser:
+          attachment.uploadedByUser &&
+          (!visibleUserIds || visibleUserIds.has(attachment.uploadedByUser.id))
+            ? attachment.uploadedByUser
+            : null,
       })),
       editHistory: message.editHistory.map((event) => ({
         id: event.id,
         previousBody: event.previousBody,
         nextBody: event.nextBody,
         createdAt: event.createdAt.toISOString(),
-        actorUser: event.actorUser,
+        actorUser:
+          event.actorUser &&
+          (!visibleUserIds || visibleUserIds.has(event.actorUser.id))
+            ? event.actorUser
+            : null,
       })),
-      mentions: message.mentions.map((mention) => mention.mentionedUser),
+      mentions: message.mentions
+        .map((mention) => mention.mentionedUser)
+        .filter(
+          (mentionedUser) =>
+            !visibleUserIds || visibleUserIds.has(mentionedUser.id),
+        ),
       knowledgeAnnouncement: announcement
         ? {
             articleId: announcement.id,

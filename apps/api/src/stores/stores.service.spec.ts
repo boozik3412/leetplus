@@ -101,6 +101,7 @@ describe('StoresService', () => {
         yandexMapsUrl: null,
         timeZone: 'Asia/Yekaterinburg',
         gamificationEnabled: false,
+        backgroundExecutionEnabled: false,
       },
     });
   });
@@ -452,7 +453,10 @@ describe('StoresService', () => {
     });
     expect(prisma.store.update).toHaveBeenCalledWith({
       where: { id: 'store-1' },
-      data: { isActive: false },
+      data: {
+        isActive: false,
+        backgroundExecutionEnabled: false,
+      },
     });
   });
 });

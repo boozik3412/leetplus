@@ -10,6 +10,36 @@ import { AuthenticatedRequest } from './auth.types';
 import { AccessCapability, hasCapability } from './capabilities';
 import { ROLES_KEY } from './roles.decorator';
 
+const staffAttachmentCapabilities: readonly AccessCapability[] = [
+  'view_communications',
+  'view_staff_shift_workspace',
+  'view_staff_tasks',
+  'view_staff_standards',
+  'view_staff_training',
+  'view_staff_knowledge',
+  'approve_guest_game_rewards',
+];
+
+const langameIntegrationManagementPaths = new Set([
+  '/integrations/langame/settings',
+  '/integrations/langame/routes-diagnostics',
+  '/integrations/langame/service-diagnostics',
+  '/integrations/langame/endpoint-profile-diagnostics',
+  '/integrations/langame/endpoint-snapshot',
+  '/integrations/langame/guests/search-diagnostics',
+]);
+
+const langameSyncPaths = new Set([
+  '/integrations/langame/business-snapshots/status',
+  '/integrations/langame/business-snapshots/run',
+  '/integrations/langame/sync',
+  '/integrations/langame/guests/foundation/sync',
+  '/integrations/langame/guests/foundation/sync/start',
+  '/integrations/langame/guests/foundation/sync/status',
+]);
+const langameSyncJobDiscrepancyPath =
+  /^\/integrations\/langame\/sync-jobs\/[^/]+\/discrepancy-log$/;
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -20,6 +50,10 @@ export class RolesGuard implements CanActivate {
         context.getHandler(),
         context.getClass(),
       ]) ?? [];
+    const handlerRoles = this.reflector.get<UserRole[]>(
+      ROLES_KEY,
+      context.getHandler(),
+    );
 
     if (allowedRoles.length === 0) {
       return true;
@@ -59,19 +93,57 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
+    if (this.isStaffAttachmentPath(request)) {
+      if (
+        staffAttachmentCapabilities.some((capability) =>
+          hasCapability(user, capability),
+        )
+      ) {
+        return true;
+      }
+
+      throw new ForbiddenException('Insufficient role permissions');
+    }
+
+    const capability = this.resolveRequiredCapability(request, role);
+    const additionalCapabilities =
+      this.resolveAdditionalRequiredCapabilities(request);
+    if (
+      this.isIntegrationPath(request) &&
+      capability === null
+    ) {
+      throw new ForbiddenException('Insufficient role permissions');
+    }
     const mustUseCapabilityDecision = Boolean(
       user?.customRoleId ||
       user?.hasRoleOverride ||
       user?.role === UserRole.TRAINEE,
     );
 
-    if (role && allowedRoles.includes(role) && !mustUseCapabilityDecision) {
-      return true;
+    if (capability) {
+      const roleAllowsCapability =
+        mustUseCapabilityDecision ||
+        !handlerRoles?.length ||
+        Boolean(role && handlerRoles.includes(role));
+
+      if (
+        roleAllowsCapability &&
+        hasCapability(user, capability) &&
+        additionalCapabilities.every((requiredCapability) =>
+          hasCapability(user, requiredCapability),
+        )
+      ) {
+        return true;
+      }
+
+      throw new ForbiddenException('Insufficient role permissions');
     }
 
-    const capability = this.resolveRequiredCapability(request, role);
-
-    if (capability && hasCapability(user, capability)) {
+    if (
+      role &&
+      allowedRoles.includes(role) &&
+      !mustUseCapabilityDecision
+    ) {
       return true;
     }
 
@@ -89,15 +161,12 @@ export class RolesGuard implements CanActivate {
       return 'manage_integrations';
     }
 
-    if (path.startsWith('/integrations/langame/settings')) {
-      return 'manage_integrations';
+    if (path.startsWith('/dashboard')) {
+      return 'view_dashboard';
     }
 
-    if (
-      path.startsWith('/integrations/langame/sync') ||
-      path.startsWith('/integrations/langame/guests/foundation/sync')
-    ) {
-      return 'run_sync';
+    if (path.startsWith('/integrations/langame')) {
+      return this.resolveLangameCapability(path);
     }
 
     if (path.startsWith('/imports')) {
@@ -194,6 +263,49 @@ export class RolesGuard implements CanActivate {
     return this.isReadMethod(method)
       ? 'view_assortment_reports'
       : 'manage_assortment_reports';
+  }
+
+  private resolveLangameCapability(path: string): AccessCapability | null {
+    if (langameIntegrationManagementPaths.has(path)) {
+      return 'manage_integrations';
+    }
+
+    if (
+      langameSyncPaths.has(path) ||
+      langameSyncJobDiscrepancyPath.test(path)
+    ) {
+      return 'run_sync';
+    }
+
+    return null;
+  }
+
+  private resolveAdditionalRequiredCapabilities(
+    request: AuthenticatedRequest,
+  ): readonly AccessCapability[] {
+    const path = this.normalizePath(request);
+    const method = request.method?.toUpperCase() ?? 'GET';
+
+    if (method !== 'POST') {
+      return [];
+    }
+
+    if (path === '/integrations/langame/sync') {
+      return ['import_data'];
+    }
+
+    if (
+      path === '/integrations/langame/guests/foundation/sync' ||
+      path === '/integrations/langame/guests/foundation/sync/start'
+    ) {
+      return ['import_guest_foundation'];
+    }
+
+    if (path === '/integrations/langame/business-snapshots/run') {
+      return ['manage_assortment_reports'];
+    }
+
+    return [];
   }
 
   private resolveGuestCapability(
@@ -329,6 +441,12 @@ export class RolesGuard implements CanActivate {
     path: string,
     method: string,
   ): AccessCapability {
+    if (path.startsWith('/guests/gamification/bonus-ledger')) {
+      return this.isReadMethod(method)
+        ? 'view_guest_gamification'
+        : 'operate_guest_game_ledger';
+    }
+
     if (this.isReadMethod(method)) {
       if (path.startsWith('/guests/gamification/rewards/export')) {
         return 'approve_guest_game_rewards';
@@ -387,6 +505,10 @@ export class RolesGuard implements CanActivate {
 
   private isStaffSalaryPath(request: AuthenticatedRequest) {
     return this.normalizePath(request).startsWith('/staff/salary');
+  }
+
+  private isStaffAttachmentPath(request: AuthenticatedRequest) {
+    return this.normalizePath(request).startsWith('/staff/attachments');
   }
 
   private isStaffSalaryRole(role: UserRole | null | undefined) {
@@ -474,7 +596,20 @@ export class RolesGuard implements CanActivate {
       return '';
     }
 
-    return rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+    const withLeadingSlash = rawPath.startsWith('/')
+      ? rawPath
+      : `/${rawPath}`;
+    return withLeadingSlash.length > 1 && withLeadingSlash.endsWith('/')
+      ? withLeadingSlash.slice(0, -1)
+      : withLeadingSlash;
+  }
+
+  private isIntegrationPath(request: AuthenticatedRequest) {
+    const path = this.normalizePath(request);
+    return (
+      path === '/integrations' ||
+      path.startsWith('/integrations/')
+    );
   }
 
   private isUserAccessPath(request: AuthenticatedRequest) {

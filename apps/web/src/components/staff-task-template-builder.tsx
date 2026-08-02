@@ -4,10 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import { StaffMaterialPreview } from "@/components/staff-material-preview";
-import type {
-  StaffTaskPriority,
-  StaffTaskType,
-} from "@/lib/staff-tasks";
+import type { StaffTaskPriority, StaffTaskType } from "@/lib/staff-tasks";
 import type {
   StaffTaskTemplate,
   StaffTaskTemplateReport,
@@ -167,6 +164,9 @@ export function StaffTaskTemplateBuilder({
   );
   const [launchStoreId, setLaunchStoreId] = useState("");
   const [launchAssignedToUserId, setLaunchAssignedToUserId] = useState("");
+  const [launchObserverUserIds, setLaunchObserverUserIds] = useState<string[]>(
+    [],
+  );
   const [launchDueAt, setLaunchDueAt] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
@@ -253,21 +253,31 @@ export function StaffTaskTemplateBuilder({
       setError("Сначала сохраните шаблон.");
       return;
     }
+    if (selectedTemplate?.status !== "ACTIVE") {
+      setError("Запускать задачи можно только из активного шаблона.");
+      return;
+    }
 
     setIsLaunching(true);
     setError(null);
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/staff/task-templates/${draft.id}/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          storeId: launchStoreId || undefined,
-          assignedToUserId: launchAssignedToUserId || null,
-          dueAt: launchDueAt ? new Date(launchDueAt).toISOString() : undefined,
-        }),
-      });
+      const response = await fetch(
+        `/api/staff/task-templates/${draft.id}/tasks`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            storeId: (selectedTemplate.store?.id ?? launchStoreId) || undefined,
+            assignedToUserId: launchAssignedToUserId || null,
+            observerUserIds: launchObserverUserIds,
+            dueAt: launchDueAt
+              ? new Date(launchDueAt).toISOString()
+              : undefined,
+          }),
+        },
+      );
 
       if (!response.ok) {
         const data = (await response.json().catch(() => null)) as {
@@ -554,8 +564,8 @@ export function StaffTaskTemplateBuilder({
                 {
                   label: "Контур",
                   value: draft.storeId
-                    ? report.stores.find((store) => store.id === draft.storeId)
-                        ?.name ?? "Клуб"
+                    ? (report.stores.find((store) => store.id === draft.storeId)
+                        ?.name ?? "Клуб")
                     : "Вся сеть",
                 },
                 { label: "Статус", value: statusLabels[draft.status] },
@@ -598,27 +608,54 @@ export function StaffTaskTemplateBuilder({
                 <button
                   type="button"
                   onClick={launchTask}
-                  disabled={isLaunching || selectedTemplate.status === "ARCHIVED"}
+                  disabled={isLaunching || selectedTemplate.status !== "ACTIVE"}
                   className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
                 >
                   {isLaunching ? "Создаем..." : "Создать задачу"}
                 </button>
               </div>
 
-              <div className="mt-3 grid gap-3 lg:grid-cols-3">
+              <div className="mt-3 grid gap-3 lg:grid-cols-4">
                 <label className="space-y-1">
                   <span className="text-xs font-bold uppercase text-zinc-500">
                     Клуб
                   </span>
                   <select
-                    value={launchStoreId}
+                    value={selectedTemplate.store?.id ?? launchStoreId}
                     onChange={(event) => setLaunchStoreId(event.target.value)}
+                    disabled={Boolean(selectedTemplate.store)}
                     className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                   >
-                    <option value="">Из шаблона</option>
+                    <option value="">
+                      {selectedTemplate.store ? "Клуб шаблона" : "Вся сеть"}
+                    </option>
                     {report.stores.map((store) => (
                       <option key={store.id} value={store.id}>
                         {store.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-xs font-bold uppercase text-zinc-500">
+                    Подтверждающие
+                  </span>
+                  <select
+                    multiple
+                    value={launchObserverUserIds}
+                    onChange={(event) =>
+                      setLaunchObserverUserIds(
+                        Array.from(event.currentTarget.selectedOptions).map(
+                          (option) => option.value,
+                        ),
+                      )
+                    }
+                    className="min-h-10 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  >
+                    {report.users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.fullName ?? user.email}
                       </option>
                     ))}
                   </select>

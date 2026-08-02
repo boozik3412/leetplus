@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { UsersService } from './users.service';
 
 describe('UsersService role override permissions', () => {
@@ -16,6 +17,8 @@ describe('UsersService role override permissions', () => {
     isActive: true,
     isPlatformAdmin: false,
     permissions: [],
+    accessScope: 'NETWORK',
+    allowedStoreIds: [],
   } satisfies AuthenticatedUser;
 
   function createService() {
@@ -39,13 +42,15 @@ describe('UsersService role override permissions', () => {
       },
     };
     const tenantContextService = {
-      resolve: jest.fn().mockResolvedValue({ tenantId }),
+      resolve: jest.fn().mockReturnValue({ tenantId }),
     };
 
     const service = new UsersService(
       prisma as never,
       {} as never,
-      tenantContextService as never,
+      tenantContextService,
+      {} as never,
+      new AccessScopeService(),
       {} as never,
     );
 
@@ -181,6 +186,23 @@ describe('UsersService role override permissions', () => {
     await expect(
       service.updateSystemRole(actor, UserRole.CLUB_ADMINISTRATOR, {
         permissions: ['view_staff_tasks', 'view_marketing'],
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(prisma.userRoleOverride.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not allow a store-scoped manager to mutate tenant-global roles', async () => {
+    const { prisma, service } = createService();
+    const storeActor = {
+      ...actor,
+      accessScope: 'STORES',
+      allowedStoreIds: ['store-1'],
+    } satisfies AuthenticatedUser;
+
+    await expect(
+      service.updateSystemRole(storeActor, UserRole.CLUB_ADMINISTRATOR, {
+        permissions: ['view_staff_tasks'],
       }),
     ).rejects.toThrow(ForbiddenException);
 

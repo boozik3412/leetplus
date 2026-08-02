@@ -1,0 +1,5 @@
+packages/database/scripts/staff-task-integrity-snapshot-authority-roots.json text eol=lf
+packages/database/scripts/tenant-delivery-claim-base-165-manifest.json text eol=lf
+packages/database/scripts/shared-beta-admission-provenance-catalog.mjs text eol=lf
+packages/database/prisma/migrations/**/migration.sql text eol=lf
+packages/database/migration-candidates/**/migration.sql text eol=lf

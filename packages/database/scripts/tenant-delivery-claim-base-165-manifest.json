@@ -1,0 +1,668 @@
+{
+  "schemaVersion": 1,
+  "migrationCount": 165,
+  "latestMigration": "20260729120000_store_background_execution_fence",
+  "lineEnding": "LF",
+  "migrations": [
+    {
+      "migrationName": "20260427072351_init",
+      "sha256": "d3643e620fb6a87d3603ff043d9b1102b7890219688e84d2397d8afcb210b3a4"
+    },
+    {
+      "migrationName": "20260427103600_email_verification",
+      "sha256": "aeab830d2af65e83cb63fc9dbd166142e23b51e5957e0dd324538584744401fa"
+    },
+    {
+      "migrationName": "20260427110000_import_jobs",
+      "sha256": "1793dda5a4b2555f742793922694d6a7e713b712fe67eef66cb1d93ac3e59676"
+    },
+    {
+      "migrationName": "20260428070000_sales_inventory_facts",
+      "sha256": "829b3debb693d611f08fbe17ff2a9fa16cb3a39391f1b5ae7f589967bb2e6c46"
+    },
+    {
+      "migrationName": "20260428134000_stock_movements",
+      "sha256": "9c62ae3717c5c42ae8109a0a95c35e7d688dcd507d207bde92d1f64427a332a5"
+    },
+    {
+      "migrationName": "20260429061000_langame_integrations",
+      "sha256": "95e47a0ed6e4f4cd9bef0d41018ab02dd93aa97d4cf73dc7691416be40fa1e2c"
+    },
+    {
+      "migrationName": "20260429071000_integration_sync_jobs",
+      "sha256": "7dc317b0fbb9c4eb9ce9fdb42d4175d2707a379123c5a16c90973f1c2d9318bd"
+    },
+    {
+      "migrationName": "20260429073000_sync_discrepancy_logs",
+      "sha256": "314fec6b7d51bc139bf37163420c1de09ec0ab277c36b6d64e6cd0f2ce3db24c"
+    },
+    {
+      "migrationName": "20260429080000_allow_external_sales_duplicates",
+      "sha256": "0164a18b64e0f5f857413c0df1e7fa74b715f128c4f37a02effb2e4dffa3099c"
+    },
+    {
+      "migrationName": "20260429103500_platform_admin_flag",
+      "sha256": "05306d6ccae8067dfe58926663288f8294293c27d40ac4c3843b11771d768d1e"
+    },
+    {
+      "migrationName": "20260429162500_club_revenue_facts",
+      "sha256": "afcc43421190810662fcc38343a6fde6dcbf82b44d461a6a53bc7f74943d474b"
+    },
+    {
+      "migrationName": "20260429172000_network_club_revenue",
+      "sha256": "cfdc503628f94924c7ccac3d48e7ca3620970021c0f1b822061d43da73d5fb3e"
+    },
+    {
+      "migrationName": "20260429183000_product_parsing_utilities",
+      "sha256": "4521ac24328e4f187dad52a04e970d0f34f138ebab841bcd06aea94e3e9ee2a6"
+    },
+    {
+      "migrationName": "20260430043000_canonical_product_variant",
+      "sha256": "1753c2409c6228d8824cb431d2dd877e3896e98c90f4f2d18edea1850af2c9bf"
+    },
+    {
+      "migrationName": "20260430075000_product_oos_exclusions",
+      "sha256": "cfae62ecfa5eedc19fee774aa16b59f055d3083cba9cde9eed25e22d59f82358"
+    },
+    {
+      "migrationName": "20260502072000_sales_history_protection",
+      "sha256": "17bbc3cf0692c1bc1b8eea05d649225f4b5e5c78e1e390581e2dee628fa83f2d"
+    },
+    {
+      "migrationName": "20260504133000_product_parsing_user_rejections",
+      "sha256": "54a3b737ec45c7b64b71c6f6fdbd6952c9428b32cdedf2e684ac8bb40450127c"
+    },
+    {
+      "migrationName": "20260518120000_guest_data_foundation",
+      "sha256": "9816ddb1f9cf9d70005bd7de64286e2020228cc8ff7e312da810bcdaff7fe267"
+    },
+    {
+      "migrationName": "20260519051000_guest_encrypted_contact_fields",
+      "sha256": "ce4c076da2e87d4db098d9716c36fef7db62b97fa4bfba18e730ea241304e5d7"
+    },
+    {
+      "migrationName": "20260519053000_guest_crm_fields",
+      "sha256": "e25d56d5a488a9d2bfc09d53921a390dacee0eb44aff8a639ba760f288cb4268"
+    },
+    {
+      "migrationName": "20260519142000_guest_working_shifts",
+      "sha256": "42133688c0dd7c31906e248e39248e7f33e971ead0798cfed1ecbc5ded04284d"
+    },
+    {
+      "migrationName": "20260520123000_store_computer_count",
+      "sha256": "0cce4c90495f88bf142c7c9df63457f0ae1c3c1809dbcb29f380a2ec6830a702"
+    },
+    {
+      "migrationName": "20260520172000_guest_staff_identity_mapping",
+      "sha256": "83d85ec91e7ae1cee8509649f8c60840633ab066b6d879a5c9f8c052d83de5d9"
+    },
+    {
+      "migrationName": "20260522140500_guest_operation_log_source_fields",
+      "sha256": "60ca58cd92d884b26d2b7e846fcd1833f136dd3871fe19aadf0268dee9bef4ce"
+    },
+    {
+      "migrationName": "20260525100000_guest_saved_filters",
+      "sha256": "ff265fd8481b72f33a9c4364dda5c7eb297d1fa7a6e17ce05f139e2fea29c0d5"
+    },
+    {
+      "migrationName": "20260525110000_guest_audiences",
+      "sha256": "8ced66ae6ace866f234dc4dc4ad45ce4554b28a436a613d27d3423dc5fa2a99d"
+    },
+    {
+      "migrationName": "20260525143000_guest_crm_leads_tasks",
+      "sha256": "5cb722c7aa519008dea79200bf80d89a506ec645a37da687aa0ae85f0e3a6bd7"
+    },
+    {
+      "migrationName": "20260525161000_guest_crm_consents",
+      "sha256": "4cd90da2ae745fc587d743be543403379a4c1dc5fe4ee9491bbc83f05c0bddf5"
+    },
+    {
+      "migrationName": "20260525170000_guest_crm_contact_events",
+      "sha256": "2c5a320cae747567bc37ece7d44d2b0ea4f6818a512b14d8d77662ddaf26eb1d"
+    },
+    {
+      "migrationName": "20260525173000_guest_crm_task_assignees",
+      "sha256": "8d5f891397d4a33d751ccc5673d0d35509ca1a53e9847452f967d7e12f38980b"
+    },
+    {
+      "migrationName": "20260526120000_marketing_campaigns",
+      "sha256": "8b5859667c94a0bf22b1d252a00c105a4e1045ebc40dfc84ada16a10f15956d3"
+    },
+    {
+      "migrationName": "20260526130000_marketing_campaign_crm_task",
+      "sha256": "4d47938df4d63ced96a37326a54e6618b3f21e35e3d6dd8b114ba9bf1f32eb2b"
+    },
+    {
+      "migrationName": "20260526143000_marketing_campaign_contact_attribution",
+      "sha256": "474391eff2109e853de98ffaac16b7d16be86aef388895d7adf69a21ad96ad44"
+    },
+    {
+      "migrationName": "20260527120000_marketing_campaign_mechanic_config",
+      "sha256": "6fd96fe69ad7e53ca86fd9e0c2ef768c489135cc52293ab08fa71d0ab282753a"
+    },
+    {
+      "migrationName": "20260527153000_marketing_promo_bundles",
+      "sha256": "68b3f0741b55207a1827aa6ddc9e0319a474065a4b6db58e427c90aa31d03057"
+    },
+    {
+      "migrationName": "20260528120000_marketing_promo_bundle_launches",
+      "sha256": "b6369d45c33ba398775776384eba39961f63b6123d7320c32f605f11fde89b42"
+    },
+    {
+      "migrationName": "20260528150000_marketing_promo_bundle_usages",
+      "sha256": "08b5d68802c6ef0acc0b5e45cc2d23c58f7af98fe95b3ede29f1280895a8a832"
+    },
+    {
+      "migrationName": "20260529120000_assortment_matrix_fields",
+      "sha256": "e695f67580256118260811a8ec932f880c0639162120756f81d2a7dc6bea29e6"
+    },
+    {
+      "migrationName": "20260529133000_recommendation_workflow",
+      "sha256": "5d9f2256c92dd8e4a47465997fc8023a947b5909dbbbad40e23bbb133069b5bd"
+    },
+    {
+      "migrationName": "20260529150000_report_digest_schedule_runs",
+      "sha256": "723ecde03b3f9183a2228e7671969cc0cb30613866fe689985e0660cf18f2c3c"
+    },
+    {
+      "migrationName": "20260529162000_staff_tasks",
+      "sha256": "45da62c07f0299464b405d5aea658011e13c10132a1af3398c670ee25af42e27"
+    },
+    {
+      "migrationName": "20260529182000_staff_task_comments_audit",
+      "sha256": "16368ee4b1e6771819b790956a83e5812122d2e5f62312e25c7b8440b2de8a40"
+    },
+    {
+      "migrationName": "20260529194000_staff_shift_regulations",
+      "sha256": "e833c37447d03a948dfdff128cddec16fdc9785e9a4601ff883d348c801fd841"
+    },
+    {
+      "migrationName": "20260530001000_staff_checklist_runs",
+      "sha256": "6902fa56859cdfb32b1aa04c454ce28f4db29de30c658a13a91457535ffa2e59"
+    },
+    {
+      "migrationName": "20260530030000_user_roles_accounts",
+      "sha256": "2d379dce203ca41f1aed1b52a878ab6bd6b96befb37a71a64a0a420dcc3cd8ae"
+    },
+    {
+      "migrationName": "20260530190000_standards_manager_role",
+      "sha256": "b79553dcc2cdf1614081a8c1fa1526662ec6391e97a8647a15e14e44374aa714"
+    },
+    {
+      "migrationName": "20260530202000_user_access_roles",
+      "sha256": "d92d83e49a7a604a7a96927170755f74dfc18348eb78903de80d9833b680eb3f"
+    },
+    {
+      "migrationName": "20260530212000_user_invites",
+      "sha256": "f9ba60e9519ba0d56e32c828a600e48596eb6fbc2db45f2ac3b9d166adac56f6"
+    },
+    {
+      "migrationName": "20260530230000_staff_team_chat",
+      "sha256": "f9c1e96ff8693c500d24afd260c1cf7fdac4ab92233c7d54ed4ac0cb7f8ff3ca"
+    },
+    {
+      "migrationName": "20260530233000_staff_chat_channel_members",
+      "sha256": "226c9d38d68f81e2b0ba7130da09bf2206315063d000fe9fa20642912729190d"
+    },
+    {
+      "migrationName": "20260530235500_staff_shift_regulation_acknowledgements",
+      "sha256": "33a66c14d2e9a98089a520caf1e9148ebab953e44733bbf1d91eb347b24a8569"
+    },
+    {
+      "migrationName": "20260531001500_staff_shift_regulation_versions",
+      "sha256": "e4ffaef471d68bcbf71c254e0a95617469eb07f58c9569f77e35dfb26859ffc0"
+    },
+    {
+      "migrationName": "20260531004500_staff_checklist_templates",
+      "sha256": "25bef51535887302bece736c647723da688f3b6563eb1769c1f657a742526393"
+    },
+    {
+      "migrationName": "20260531013000_staff_shift_regulation_attachments",
+      "sha256": "33d7f94a75e7e294b2120b66214cb3f5bfc3ea555d3ed6eb9f7ff37ca6824615"
+    },
+    {
+      "migrationName": "20260531020500_staff_task_templates",
+      "sha256": "99eb0b38ef8076e38f5783f611e15361117658275ca686aa6348b42691a0228b"
+    },
+    {
+      "migrationName": "20260531032000_staff_knowledge_base",
+      "sha256": "fed485c3788ccd4bcc2e6bfd66b1ad23728385ca9d684eec5ecf5864c5803a89"
+    },
+    {
+      "migrationName": "20260531043000_staff_training_courses",
+      "sha256": "a50b656c4fc74eec05ffda8845b886fb4ec825b5ac0abe432aaff04e6078427f"
+    },
+    {
+      "migrationName": "20260531050500_staff_onboarding_plans",
+      "sha256": "a05cfdd8dbd0046bb52b3950358377e29d3974978e5116d8db76d0866367818a"
+    },
+    {
+      "migrationName": "20260531054500_staff_assessments",
+      "sha256": "1c2aaff204d5f2c82c624de0fc538e28a70edff8e70c8007bd944cdbc9fde3ea"
+    },
+    {
+      "migrationName": "20260531063000_staff_regulation_assessment_retake",
+      "sha256": "a123fec610e468cf58ee5a01706fc2c9207faf76ff32c97887c743cfc1a3a421"
+    },
+    {
+      "migrationName": "20260531072000_staff_training_profiles",
+      "sha256": "c33065c15bcb510182a0fec28b002c7e9af6c39182190a90d0fd1f80b04c10fb"
+    },
+    {
+      "migrationName": "20260531113000_staff_discipline_system",
+      "sha256": "f336f9f72963c2d4d9370023428f2515df4d8690cc4d11bdba199786808ac9a5"
+    },
+    {
+      "migrationName": "20260531124500_staff_directory",
+      "sha256": "09bd423f9f16a77943e9ad0309062c3015c826ae138044c89a6809eb99dee9eb"
+    },
+    {
+      "migrationName": "20260531143000_staff_salary_schemes",
+      "sha256": "35cc133facea7cac45206f00c7370fecbf0b434248f8ce6ace83c1f2fd81dd36"
+    },
+    {
+      "migrationName": "20260531165000_staff_attachments",
+      "sha256": "017b3a066e24cce580e5f94b1258c3b32e007f6b22a1280f10a174760deaf0db"
+    },
+    {
+      "migrationName": "20260531194000_staff_knowledge_workflow",
+      "sha256": "9dcfb8719229377258bc66c625ed45b1d71594053dbbf02629bc958c7ff578a8"
+    },
+    {
+      "migrationName": "20260531203000_staff_knowledge_read_receipts",
+      "sha256": "3107929209fe47813d3c2cc3b13b1a4c7ec08a37221588681e8635e992c4584c"
+    },
+    {
+      "migrationName": "20260531213000_staff_task_recurring_rules",
+      "sha256": "25a91247af8440cdfe8be99f108563328f32a7094236c9ec7659555f8418ed3e"
+    },
+    {
+      "migrationName": "20260531224500_staff_task_rule_scheduler",
+      "sha256": "f5bb80950c14109f8b97e1ad594c0bca64c66ab09d25699e74675a0108d78a53"
+    },
+    {
+      "migrationName": "20260531232000_staff_notifications",
+      "sha256": "db5076fdfead1118bc153ee130dde06b33e65978e0e3348ae55002ed03bc934a"
+    },
+    {
+      "migrationName": "20260601001000_staff_task_observers",
+      "sha256": "ab09f738076ae3ea52bf4d70b77f074e9fec93b4d8b80f8990f09136bb25184d"
+    },
+    {
+      "migrationName": "20260601013000_platform_admin_tenant_lifecycle",
+      "sha256": "f39d5301806d217952caa98183e4c640edec7f7b8a41c6174ecb846c7cfb591c"
+    },
+    {
+      "migrationName": "20260601020500_platform_admin_source_support_actions",
+      "sha256": "125ad04a0ed0a5de14e814df2a0a2ba9c324191fe6521e8e1c66e9b48744ba1e"
+    },
+    {
+      "migrationName": "20260601023000_marketing_promo_bundle_launch_audience",
+      "sha256": "435a3bc83b638b917ebca13f07140991cebea13dafcc4ae01a9d7062098b476d"
+    },
+    {
+      "migrationName": "20260601024500_staff_notification_target_user",
+      "sha256": "307f41dff4fba30f4e16e0a7f19c08dd4d73d279a9995d1d0316099448d37acb"
+    },
+    {
+      "migrationName": "20260601033000_staff_knowledge_return_sla",
+      "sha256": "6ff6d3067a75f2deeaa3f616d5ab94033511790fa2905c475ea9f2967f06921d"
+    },
+    {
+      "migrationName": "20260601101000_staff_knowledge_revision_sla_days",
+      "sha256": "9e60756d98e0079965d14b9f36e8d7f7647e8da6c183462d04af86be4830e41e"
+    },
+    {
+      "migrationName": "20260601112000_staff_knowledge_settings",
+      "sha256": "e66d4a460e7f61f09859af3a0d0c48cc299c53fd7a6c7cc1861ab719b003ee50"
+    },
+    {
+      "migrationName": "20260601124500_staff_knowledge_settings_events",
+      "sha256": "07c6cb01ea3ed02103d318c2ccacb3856198393a08e1f11d0448dd7e92cf5d37"
+    },
+    {
+      "migrationName": "20260601133000_marketing_missions",
+      "sha256": "af40ac7cb01e353b8af940178b18e0c8eff87a1a6c1330526b90475b77bdbf10"
+    },
+    {
+      "migrationName": "20260601160000_guest_gamification",
+      "sha256": "f87c61430f8879f21e8364216588da7be3ee2304ee8779cf725ad59a22c73b8d"
+    },
+    {
+      "migrationName": "20260602071500_langame_endpoint_profile_runs",
+      "sha256": "bfe05c50c8a7c1e3069d4f8d2257b3172e17dec60427ebfd9aa2aa55448f3865"
+    },
+    {
+      "migrationName": "20260602090000_langame_endpoint_snapshot_runs",
+      "sha256": "612ad22c8b4c3aa05655ebe08f31a4626eb985f88e58fc199bb780465afb8dc7"
+    },
+    {
+      "migrationName": "20260603110000_guest_portal_otp",
+      "sha256": "8498e8d1b63258218b755ef1ef778a11f555cf6c3d5dc0bcbd224745f3000ef2"
+    },
+    {
+      "migrationName": "20260603143000_langame_tariff_snapshot_items",
+      "sha256": "0cf12356e19dab4b329cff9293ded451a529fb1e246b5bc43b4a3b4508a199b0"
+    },
+    {
+      "migrationName": "20260604103000_store_public_slug",
+      "sha256": "cc677797f8bf4d5254ac9cf4eb6893f98a999460a4fe11eba36b5e2bf8c41754"
+    },
+    {
+      "migrationName": "20260604124500_guest_game_log_type_mappings",
+      "sha256": "25dd7b358f84439a0b5316810645a1c342fed2320058b90b965a73a11dfdb421"
+    },
+    {
+      "migrationName": "20260604152000_guest_game_delivery_outbox",
+      "sha256": "0e21d2837f68293908b8694f355948a885b69f76ec80e464ca926c572a66ea2e"
+    },
+    {
+      "migrationName": "20260604170000_guest_game_telegram_link",
+      "sha256": "ceafd85fa6afcc8cba46514c422dd15956b13ceb90f3c0ec660fa30d67b0fcc6"
+    },
+    {
+      "migrationName": "20260605121000_business_snapshot_runs",
+      "sha256": "9eab6db30997a366118d1745f8fa23c369f8e043c36153ebc71d7ac026d9464d"
+    },
+    {
+      "migrationName": "20260606113000_user_role_overrides",
+      "sha256": "6cbc2f1a15a01ae1adf6ec193802f9b5b047d0601117cd7c919263ef1a4c555a"
+    },
+    {
+      "migrationName": "20260607130000_staff_chat_message_attachments",
+      "sha256": "b69b01c92f654cacf0a2fc94ad6a8c58354e40f90d3eabd84fe8b64807501868"
+    },
+    {
+      "migrationName": "20260608103000_staff_chat_mentions",
+      "sha256": "6c23c2154bcb6d0f57731782f38987531635fcab7de687d22bc139c71abaa45f"
+    },
+    {
+      "migrationName": "20260608121500_trainee_role",
+      "sha256": "5e7c3732482c5d22c7d9189ab96f2766c64be299e775926c7aeded09f75318c5"
+    },
+    {
+      "migrationName": "20260609103000_langame_staff_users",
+      "sha256": "f32c4f1a549a700c9a722cd84f5f81c8e61c8f492118e51bfc799bd7f8cc3a26"
+    },
+    {
+      "migrationName": "20260609160000_daily_data_coverage",
+      "sha256": "f38cbcb0f9a1486c226c8db6c54138a7122b5257df53f037eab06b43f64c0891"
+    },
+    {
+      "migrationName": "20260609183000_guest_bonus_live_ledger",
+      "sha256": "ef75d2abbc5e575e8dcbc0f8f667854d3ce2720a64263d115baf64e23960a190"
+    },
+    {
+      "migrationName": "20260610152000_store_city_timezone",
+      "sha256": "ee007a31d34f0f4e62d06fee763733053e301af4a20327497eb288ff374542a9"
+    },
+    {
+      "migrationName": "20260615120000_store_public_geolocation",
+      "sha256": "a163f5a1c501fa1f436d425647fdff61e15c8a8a7b14b8caf543e56cb5f5ed2c"
+    },
+    {
+      "migrationName": "20260615133000_gamification_store_flag_and_consent",
+      "sha256": "d392c7579001c1de61c4385ef07e071b0b9846aa61a5178a9c78679bb0f58813"
+    },
+    {
+      "migrationName": "20260616120000_guest_game_profile_consent",
+      "sha256": "c323aae079995ff40e48ac0870b0f945b6c62943da3efb719b228e912d63496f"
+    },
+    {
+      "migrationName": "20260617152000_guest_portal_user_call_provider",
+      "sha256": "8d83b493f7a8df5bcb18946a9b0baf4dd22632c857760731ee87a80721f9f041"
+    },
+    {
+      "migrationName": "20260619153000_store_yandex_maps_url",
+      "sha256": "2c9218d3c3aa6bf2f18125890b29eddb5600c22acf8cee2c7ce80ecb51407fa5"
+    },
+    {
+      "migrationName": "20260619190000_guest_game_visual_editor",
+      "sha256": "f8a002c3ab408d0c22ea101c4dde027f235d34060aacfed93ec401eb3b20f5ba"
+    },
+    {
+      "migrationName": "20260621120000_guest_staff_identity_mapping_events",
+      "sha256": "81f50436c41950ac77e1201226ff2d435647fe409fbcbcd6c4de7d599d91bec1"
+    },
+    {
+      "migrationName": "20260622143000_guest_game_profile_phone_encrypted",
+      "sha256": "f559daf6652045651ed85d22d0f062c8b33848da62f63fbd7f079c628561c444"
+    },
+    {
+      "migrationName": "20260623190000_guest_game_staff_test_profiles",
+      "sha256": "338a0e15b0cb805d0a3a4d98d52cfb6bdd96c028d0f906965e15576ad395525f"
+    },
+    {
+      "migrationName": "20260624120000_guest_game_reward_rarity",
+      "sha256": "60b9e40cdb097e2db4fccb67364691dd7de1b0452f361d43bd3cf8f7fb434221"
+    },
+    {
+      "migrationName": "20260630090000_staff_member_compensation",
+      "sha256": "d9fb86799473cb61dabeb2a59279b5bf95b0074466a49b1818f884257c6f0ca9"
+    },
+    {
+      "migrationName": "20260705120000_staff_salary_periods",
+      "sha256": "98c512fb45269b4c3d0dd8bc7879225c3acaaff26032e169d1989b3b2ba76b17"
+    },
+    {
+      "migrationName": "20260708120000_guest_activity_ledger",
+      "sha256": "b9f1e97f329538f9ebca13837b54585e8b3b7f5003d98b6729b3eed17faea3ba"
+    },
+    {
+      "migrationName": "20260708143000_game_module_branding",
+      "sha256": "cd338d88346978e365e17fc81927cb508d070aeff0c96226215e2dc42f344487"
+    },
+    {
+      "migrationName": "20260709120000_guest_loot_box_usage_kind",
+      "sha256": "07c814af883df3d095bb9a632b12e79016582d35bac03c9afaf00e7a0dd49c52"
+    },
+    {
+      "migrationName": "20260710120000_guest_game_audit_event",
+      "sha256": "27725bbf071d2901e69c133599c902530afff3fca61dc07ba2b2116336531a52"
+    },
+    {
+      "migrationName": "20260710133000_repair_langame_credentials",
+      "sha256": "6f0cb90ef0368bfaa37cec7aa8445bf9ae73654b7e70b36bd29f031e3a269ead"
+    },
+    {
+      "migrationName": "20260711143000_guest_game_rule_decisions",
+      "sha256": "36dbbbaa87360073ab95f214278a7ba8776af299b6b5c660c94e759489d4669b"
+    },
+    {
+      "migrationName": "20260711190000_guest_activity_source_sync_state",
+      "sha256": "779aceb27db8106355eafe32890905d8a2a63bdc5cf27e9eb6537b8d36ea10c0"
+    },
+    {
+      "migrationName": "20260711210000_guest_activity_fact_versioning",
+      "sha256": "ba56bc732232600ca2d3628cbda34de5948d7018611241d4ade95a740f5a85ed"
+    },
+    {
+      "migrationName": "20260711223000_guest_game_entitlements",
+      "sha256": "50a93eee46ff430959cf6bc26208a21f6c7862e2fabddb046cb448f953ce5d20"
+    },
+    {
+      "migrationName": "20260712003000_guest_game_data_retention",
+      "sha256": "0c09ebd260ba04422e98463a61ee64f7300963df5af4322d9d07e9a01fbf5a55"
+    },
+    {
+      "migrationName": "20260712011500_guest_game_quality_monitoring",
+      "sha256": "45f48189fff4a32aebfae4052ced584d72df6b053899775d4f389bdc1fee6252"
+    },
+    {
+      "migrationName": "20260714120000_staff_chat_message_edits",
+      "sha256": "2e2e46e74e19a2542a03a3aa88eb669fb05a93a0d1a9117be328c38120bf5a44"
+    },
+    {
+      "migrationName": "20260715140000_product_catalog_latest_stock_index",
+      "sha256": "7771e6e786a71ced0f28905fc61764c54c41599129ec2ab9837b63f9536ca733"
+    },
+    {
+      "migrationName": "20260715173000_guest_game_mission_v2_policy",
+      "sha256": "92b48737665b512cd9a60370307b3e7cc1e895299b20f37815bf82f73898e83d"
+    },
+    {
+      "migrationName": "20260715194500_guest_game_media_asset",
+      "sha256": "17719f47fc273891bcafd4cd1fc23125d813d6ff95804cbc9c2103cddbc470ed"
+    },
+    {
+      "migrationName": "20260716120000_langame_product_groups",
+      "sha256": "8b8c625ce8a13399d0a3b5b1ac80ac8f01bb609c09d4cf0bcdee3b3326f1e440"
+    },
+    {
+      "migrationName": "20260716133000_category_source_mappings",
+      "sha256": "28dad84d6501f8cb31e3d21e3e1a323f79672e752702054e13d1fdac6bb21456"
+    },
+    {
+      "migrationName": "20260718013000_guest_session_pipeline_updated_index",
+      "sha256": "eac0f31c41afd00a6fb613d00b450b416baa2ba2083ddfa21bae06a6afda9615"
+    },
+    {
+      "migrationName": "20260718150000_guest_game_origin_fallback",
+      "sha256": "7949f9b472e0ecec6a23c35227454ba08392091cee6999ae68d918e542dad186"
+    },
+    {
+      "migrationName": "20260718150100_guest_game_event_origin_index",
+      "sha256": "7d0b8a34ddcf58bec50b94f56a8ba311c6815a0f9846b77b29bd6bdbaee183ff"
+    },
+    {
+      "migrationName": "20260718150200_guest_game_reward_idempotency_index",
+      "sha256": "2627ad18bb206947c594a147cf58224f3ba9ad4a669bc40643ff64676ea040d0"
+    },
+    {
+      "migrationName": "20260718150300_guest_game_reward_origin_index",
+      "sha256": "b4b1daaa647089d601ce7f3ac582520eeb169025ec92d1b395a5c197cc1dd89c"
+    },
+    {
+      "migrationName": "20260718150400_guest_game_rule_decision_origin_index",
+      "sha256": "8ecb418725b8340f4a0de305dee585916a91fcfdf92228f93d6a17cb246aee4b"
+    },
+    {
+      "migrationName": "20260718150500_guest_game_entitlement_origin_index",
+      "sha256": "88b755b05d9cdb290db947203fbefab268bcc2faf01358408806ce5aad7b5c5a"
+    },
+    {
+      "migrationName": "20260718150600_guest_activity_raw_external_source_index",
+      "sha256": "5362b8b595654e6fdedc9518c6d37084d955d5629318487985824761f544f145"
+    },
+    {
+      "migrationName": "20260718150700_guest_activity_fact_external_source_index",
+      "sha256": "b0b56c43dbd1ad29391e6ba1d6968104e4fcc5e65e7a5af0fd6fa7c6e03b45c0"
+    },
+    {
+      "migrationName": "20260718150800_guest_activity_fact_fallback_queue_index",
+      "sha256": "c38dda1198338d6b54433a141975673a6ce017dc792a63df765074c53e93f16e"
+    },
+    {
+      "migrationName": "20260718180000_guest_game_effect_postings",
+      "sha256": "adf1b19adc777ff0232a12e9ae2c39c5fadb5c6563defd807062232bbf32baf4"
+    },
+    {
+      "migrationName": "20260718190000_guest_game_reward_effect_outbox",
+      "sha256": "c73fa9bd631cbf8d30e6449899f29a01b8bd79b3dc4c41331ef10c7f363bc28f"
+    },
+    {
+      "migrationName": "20260718190100_staff_chat_message_dedupe_index",
+      "sha256": "f67da50370947cedc20f59a3f235baac4c81bd14e90b6c1a233e8c5f90452737"
+    },
+    {
+      "migrationName": "20260720093000_staff_knowledge_information_messages",
+      "sha256": "0811d41e32a2aa99c86d23bb0c063cb71bbcfc6c9f5fdb7ade686eb25b5568d2"
+    },
+    {
+      "migrationName": "20260721131500_guest_game_completion_notifications",
+      "sha256": "55008a274e70a9a398a9f3849e97ced5db3df8e3ef5c61696792758b5ba5fda0"
+    },
+    {
+      "migrationName": "20260722120000_guest_game_profile_identity_links",
+      "sha256": "1afd948a76e3ec354d8d6b5cf2310b5b7c6b33b31b6d95432b4a550e0acbc900"
+    },
+    {
+      "migrationName": "20260722120100_guest_identity_phone_domain_index",
+      "sha256": "d8d5c7abafd8e1b62288c7e3cb4ce9bbf8e35363ec9c4abf7605d2ce6604c416"
+    },
+    {
+      "migrationName": "20260723090000_guest_call_provider_status",
+      "sha256": "694ae540aaa6000fd12305e941d5ae2c196bc4b5cac627fd546e42cd961eab6a"
+    },
+    {
+      "migrationName": "20260723140000_backfill_guest_game_completion_notifications",
+      "sha256": "3fd4efc625d72f43e962a9cc2bcf2015c6be582a276d6db38e7a869d2b21de24"
+    },
+    {
+      "migrationName": "20260725213500_guest_game_reward_wallet",
+      "sha256": "6a87c9b399e34b3bc90262f32c329b768a5afc9d9afa9087569f3958bd48f922"
+    },
+    {
+      "migrationName": "20260725213600_guest_game_event_profile_activation_xp_index",
+      "sha256": "b7aaf661d606744f0c6e5018fc72e0b26d99d4fd3333564558c5b5d41700465b"
+    },
+    {
+      "migrationName": "20260725213700_guest_game_reward_claim_queue_index",
+      "sha256": "dd9bb4c0aad853a68fc405b89e300dda0a30d9f49af87dc1b66c820513e5acb8"
+    },
+    {
+      "migrationName": "20260726110000_reconcile_completed_reward_wallet",
+      "sha256": "2806b289e8d1afcacfd700947c7dc6a9190f4d9f9f256f47fcca6418996d9ee9"
+    },
+    {
+      "migrationName": "20260727090000_access_scope_expand",
+      "sha256": "69d590b4fb52e4f6d3f2c62c5d38e463827365f9caa8ca5cd646e6d0b0b6544e"
+    },
+    {
+      "migrationName": "20260727110000_staff_attachment_acl_expand",
+      "sha256": "5be192914c99a0c675bb677a7472b5acd6d15469c111ab67a589a6b75ce95f0f"
+    },
+    {
+      "migrationName": "20260727111000_staff_attachment_state_reconcile_index",
+      "sha256": "3231df3c4777d49911faffd56052fe3cb7ec6ec4643f77dcee3f2d58e4d80616"
+    },
+    {
+      "migrationName": "20260727112000_staff_attachment_pending_expiry_index",
+      "sha256": "b7f040d4054b9bfa199b986ce6aee2ac1fa2e74bfaed1f155b5727a7de88d80b"
+    },
+    {
+      "migrationName": "20260727113000_staff_attachment_acl_invariant_hardening",
+      "sha256": "ae979245d17357f63216acd4d0e0d71240d9c8010660280f84bba5bb52be1f02"
+    },
+    {
+      "migrationName": "20260727120000_staff_task_catalog_audit_expand",
+      "sha256": "72d897b9b1a34be3bbaefabf96d0a0c66e4fa9e78b62c3938f0458a15c720852"
+    },
+    {
+      "migrationName": "20260727130100_staff_task_store_tenant_key",
+      "sha256": "1f2b5d4438c1858fe7d7a67d9c38aa17b162f5ff4ddbb1cd30a5a387a0d1a185"
+    },
+    {
+      "migrationName": "20260727130200_staff_task_user_tenant_key",
+      "sha256": "b5b2d42e0dec49548c16dd1900acbb8c84e8d596215fd996f871f2b1d0570bcf"
+    },
+    {
+      "migrationName": "20260727130300_staff_task_template_tenant_key",
+      "sha256": "fe1fd5ab1107288e80d6b12e65c8fe71c3ddb3131cf241cc05ac9145e00cd4b1"
+    },
+    {
+      "migrationName": "20260727130400_staff_task_recurring_rule_tenant_key",
+      "sha256": "c15f387bf64d4897c8180b37fe3ca75f1da78af8a35287bc76fea3c75238a079"
+    },
+    {
+      "migrationName": "20260727130500_staff_task_tenant_key",
+      "sha256": "d55370315054e778c164c4d44957f82f7383eba169041aa7ad6b33ac97d694e9"
+    },
+    {
+      "migrationName": "20260727131000_staff_task_integrity_expand",
+      "sha256": "08c04cf613448f6e354d42e2f446ec15c4725169a0193eba54e289cf0cc0ec03"
+    },
+    {
+      "migrationName": "20260728120000_tenant_execution_control_plane_expand",
+      "sha256": "9aa48a276119c620f004df0134f40e9ec6a4ab24ae786232ecc2c43ffb68cac2"
+    },
+    {
+      "migrationName": "20260728150000_tenant_execution_revision_fence",
+      "sha256": "1c375c5be06b8ee1a9d8fc1143411814da9da5f069e8893fafbc288733759696"
+    },
+    {
+      "migrationName": "20260729120000_store_background_execution_fence",
+      "sha256": "81386e5c8cdff6c1e0d249e5f40a8c7397bf874d32ca0443897a92bde59632ad"
+    }
+  ]
+}

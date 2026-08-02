@@ -18,6 +18,7 @@ import {
   randomBytes,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { resolveSecuritySecret } from '../config/environment-validation';
 import { GuestDataFoundationService } from '../integrations/guest-data-foundation.service';
 import { LangameClient } from '../integrations/langame.client';
 import {
@@ -8748,14 +8749,8 @@ export class GuestsService {
   }
 
   private piiSecret() {
-    const secret =
-      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
-      this.configService.get<string>('JWT_SECRET')?.trim();
-
-    if (!secret) {
-      throw new BadRequestException('APP_ENCRYPTION_KEY is not configured');
-    }
-
-    return secret;
+    return resolveSecuritySecret(this.configService, 'APP_ENCRYPTION_KEY', [
+      'JWT_SECRET',
+    ]);
   }
 }

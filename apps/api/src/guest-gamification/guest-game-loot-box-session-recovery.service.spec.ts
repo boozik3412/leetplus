@@ -1,4 +1,8 @@
-import { IntegrationProvider, TenantLifecycleStatus } from '@prisma/client';
+import {
+  IntegrationProvider,
+  TenantCustomerStage,
+  TenantLifecycleStatus,
+} from '@prisma/client';
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   GuestGameLootBoxSessionRecoveryService,
@@ -44,6 +48,7 @@ function tenant() {
     id: 'tenant-1',
     slug: 'tenant-one',
     status: TenantLifecycleStatus.ACTIVE,
+    customerStage: TenantCustomerStage.INTERNAL,
     users: [
       {
         id: 'user-1',
@@ -582,6 +587,39 @@ describe('GuestGameLootBoxSessionRecoveryService', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it('skips an external tenant before reading or claiming recovery work', async () => {
+    const { service, gamification, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValueOnce([
+      {
+        ...tenant(),
+        customerStage: TenantCustomerStage.BETA,
+      },
+    ]);
+
+    const result = await service.runScheduled({
+      mode: 'SHADOW',
+      tenantId: 'tenant-1',
+      profileId: 'profile-1',
+      limit: 1,
+      graceMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      checkedTenants: 1,
+      processedTenants: 0,
+      skippedTenants: 1,
+      tenants: [{ tenantId: 'tenant-1', status: 'SKIPPED' }],
+    });
+    expect(result.tenants[0]?.reason).toContain(
+      'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+    );
+    expect(prisma.guestGameLootBox.findMany).not.toHaveBeenCalled();
+    expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
   });
 
   it('does not advance recovery while an hourly-session source awaits replay', async () => {

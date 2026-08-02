@@ -4,10 +4,17 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, randomBytes } from 'node:crypto';
-import { Prisma, UserRole } from '@prisma/client';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import {
+  IdentityEmailClaimType,
+  Prisma,
+  TenantCustomerStage,
+  UserAccessScope,
+  UserRole,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   accessCapabilityCatalog,
@@ -17,10 +24,15 @@ import {
   resolveUserCapabilities,
   type AccessCapability,
 } from '../auth/capabilities';
+import { IdentityEmailClaimService } from '../auth/identity-email-claim.service';
 import { PasswordService } from '../auth/password.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  AccessScopeService,
+  type AccessScopeMode,
+  type RequestedAccessScope,
+} from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
-import { createSignedUserInviteToken } from './user-invite-token';
 
 const assignableRolesByActor: Record<UserRole, UserRole[]> = {
   [UserRole.OWNER]: [
@@ -36,7 +48,6 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.TRAINEE,
   ],
   [UserRole.ADMIN]: [
-    UserRole.OWNER,
     UserRole.ADMIN,
     UserRole.MANAGER,
     UserRole.BUYER,
@@ -159,6 +170,7 @@ const userAccountInclude = {
           id: true,
           name: true,
           isActive: true,
+          tenantId: true,
         },
       },
     },
@@ -220,7 +232,7 @@ export type UserAccount = {
   emailVerifiedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  scope: 'NETWORK' | 'STORES';
+  scope: AccessScopeMode;
   stores: UserAccountStore[];
 };
 
@@ -249,7 +261,7 @@ export type UserInviteAccount = {
   role: UserRole;
   customRoleId: string | null;
   customRole: UserAccessRoleAccount | null;
-  scope: 'NETWORK' | 'STORES';
+  scope: AccessScopeMode;
   stores: UserAccountStore[];
   expiresAt: string;
   acceptedAt: string | null;
@@ -273,6 +285,7 @@ export type UserAccountDto = {
   role?: UserRole;
   customRoleId?: string | null;
   isActive?: boolean;
+  scope?: AccessScopeMode;
   storeIds?: string[];
 };
 
@@ -291,6 +304,7 @@ export type UserInviteDto = {
   fullName?: string | null;
   role?: UserRole;
   customRoleId?: string | null;
+  scope?: AccessScopeMode;
   storeIds?: string[];
   expiresInDays?: number;
 };
@@ -302,10 +316,13 @@ export class UsersService {
     private readonly passwordService: PasswordService,
     private readonly tenantContextService: TenantContextService,
     private readonly configService: ConfigService,
+    private readonly accessScopeService: AccessScopeService,
+    private readonly identityClaimBoundary: IdentityEmailClaimService,
   ) {}
 
   async getUsers(user: AuthenticatedUser): Promise<UserAccountsResponse> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const actorScope = this.accessScopeService.resolve(user);
     const [users, stores, customRoles, invites, roleOverrides] =
       await Promise.all([
         this.prisma.user.findMany({
@@ -326,11 +343,11 @@ export class UsersService {
           where: {
             tenantId,
             acceptedAt: null,
+            revokedAt: null,
             expiresAt: { gt: new Date() },
           },
           include: userInviteInclude,
           orderBy: { createdAt: 'desc' },
-          take: 20,
         }),
         this.prisma.userRoleOverride.findMany({
           where: { tenantId },
@@ -343,83 +360,56 @@ export class UsersService {
       ]);
     const storesById = this.createStoreMap(stores);
     const roleOverridesByRole = this.createRoleOverrideMap(roleOverrides);
+    const visibleUsers = users.filter((account) =>
+      this.isVisibleUserTarget(user, account),
+    );
+    const visibleInvites = invites
+      .filter((invite) => this.isVisibleInviteTarget(user, invite, storesById))
+      .slice(0, 20);
+    const visibleStores =
+      actorScope.mode === 'NETWORK'
+        ? stores
+        : stores.filter((store) =>
+            actorScope.allowedStoreIds.includes(store.id),
+          );
 
     return {
-      users: users.map((account) =>
+      users: visibleUsers.map((account) =>
         this.toAccount(account, roleOverridesByRole),
       ),
-      stores,
+      stores: visibleStores,
       roleOptions: this.toRoleOptions(roleOverridesByRole),
       customRoles: customRoles.map((role) => this.toAccessRole(role)),
-      invites: invites.map((invite) =>
-        this.toInvite(
-          invite,
-          storesById,
-          this.registrationUrlForInvite(invite.id),
-        ),
+      invites: visibleInvites.map((invite) =>
+        this.toInvite(invite, storesById),
       ),
       capabilityOptions: accessCapabilityCatalog,
     };
   }
 
-  async createUser(
+  createUser(
     actor: AuthenticatedUser,
     dto: UserAccountDto,
   ): Promise<UserAccount> {
-    const { tenantId } = await this.tenantContextService.resolve(actor);
-    const email = this.normalizeEmail(dto.email);
-    const customRoleId = this.normalizeOptionalId(dto.customRoleId);
-    const role = customRoleId
-      ? UserRole.CLUB_ADMINISTRATOR
-      : this.parseRole(dto.role);
-    const fullName = this.normalizeNullableText(dto.fullName);
-    const password = dto.password?.trim() ?? '';
-
-    this.assertEmail(email);
-    this.assertPassword(password);
-
-    const [existingUser, storeIds, customRole] = await Promise.all([
-      this.prisma.user.findUnique({ where: { email } }),
-      this.resolveStoreIds(tenantId, dto.storeIds),
-      this.resolveCustomRole(tenantId, customRoleId),
-    ]);
-    this.assertCanAssignAccountRole(actor, role, customRole);
-
-    if (existingUser) {
-      throw new ConflictException('Пользователь с таким email уже существует');
-    }
-
-    const passwordHash = await this.passwordService.hash(password);
-    const created = await this.prisma.$transaction(async (tx) => {
-      const account = await tx.user.create({
-        data: {
-          tenantId,
-          email,
-          fullName,
-          passwordHash,
-          role,
-          customRoleId: customRole?.id ?? null,
-          isActive: dto.isActive ?? true,
-          emailVerifiedAt: new Date(),
-        },
-      });
-
-      await this.replaceStoreAccesses(tx, account.id, storeIds);
-
-      return tx.user.findUniqueOrThrow({
-        where: { id: account.id },
-        include: userAccountInclude,
-      });
-    });
-
-    return this.toAccount(created, await this.getRoleOverrideMap(tenantId));
+    void actor;
+    void dto;
+    return Promise.reject(
+      new ForbiddenException({
+        message: 'Direct user creation requires an email-bound invite',
+        reasonCode: 'DIRECT_USER_CREATION_REQUIRES_INVITE',
+      }),
+    );
   }
 
   async createInvite(
     actor: AuthenticatedUser,
     dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
-    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const { tenantId } = this.tenantContextService.resolve(actor);
+    await this.assertGenericIdentityMutationAllowed(
+      tenantId,
+      'invite delivery',
+    );
     const email = this.normalizeOptionalEmail(dto.email);
     const fullName = this.normalizeNullableText(dto.fullName);
     const customRoleId = this.normalizeOptionalId(dto.customRoleId);
@@ -427,9 +417,16 @@ export class UsersService {
       ? UserRole.CLUB_ADMINISTRATOR
       : this.parseRole(dto.role);
     const expiresAt = this.resolveInviteExpiry(dto.expiresInDays);
+    const scope = this.parseAccessScope(dto.scope);
 
-    const [existingUser, storeIds, customRole, stores] = await Promise.all([
-      email ? this.prisma.user.findUnique({ where: { email } }) : null,
+    if (!email) {
+      throw new BadRequestException(
+        'Invite must be bound to a valid email address',
+      );
+    }
+    this.assertOwnerAssignmentUsesTransferWorkflow(role);
+
+    const [storeIds, customRole, stores] = await Promise.all([
       this.resolveStoreIds(tenantId, dto.storeIds),
       this.resolveCustomRole(tenantId, customRoleId),
       this.prisma.store.findMany({
@@ -438,32 +435,83 @@ export class UsersService {
         orderBy: { name: 'asc' },
       }),
     ]);
-    this.assertCanAssignAccountRole(actor, role, customRole);
-
-    if (existingUser) {
-      throw new ConflictException('Пользователь с таким email уже существует');
-    }
+    await this.assertCanAssignAccountRole(actor, role, customRole, tenantId);
+    this.assertNewScope(scope, storeIds);
+    this.accessScopeService.assertCanDelegate(actor, {
+      mode: scope,
+      storeIds,
+    });
 
     const rawToken = randomBytes(32).toString('base64url');
-    const invite = await this.prisma.userInvite.create({
-      data: {
-        tenantId,
-        email,
-        fullName,
-        role,
-        customRoleId: customRole?.id ?? null,
-        storeIds,
-        tokenHash: this.hashInviteToken(rawToken),
-        expiresAt,
-        createdByUserId: actor.id,
+    const reservationId = randomUUID();
+    const inviteId = randomUUID();
+    const invite = await this.identityClaimBoundary.runTenantTransaction(
+      this.prisma,
+      tenantId,
+      async (tx, identityTransaction) => {
+        const reservation = await this.identityClaimBoundary.reserveInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            subjectId: reservationId,
+          },
+        );
+        if (reservation.decision !== 'CREATED') {
+          throw new ConflictException(
+            'Invite identity reservation was already used',
+          );
+        }
+        const assertion = await this.identityClaimBoundary.assertInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            subjectId: reservationId,
+            expectedRevision: reservation.revision,
+          },
+        );
+        await tx.userInvite.create({
+          data: {
+            id: inviteId,
+            tenantId,
+            email,
+            fullName,
+            role,
+            customRoleId: customRole?.id ?? null,
+            accessScope: scope,
+            storeIds,
+            tokenHash: this.hashInviteToken(rawToken),
+            expiresAt,
+            createdByUserId: actor.id,
+            identityClaimRevision: null,
+            revokedAt: null,
+            revokedByUserId: null,
+          },
+        });
+        const transition = await this.identityClaimBoundary.transitionInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            expectedSubjectId: reservationId,
+            expectedRevision: assertion.revision,
+            nextClaimType: IdentityEmailClaimType.INVITE,
+            nextSubjectId: inviteId,
+          },
+        );
+        return tx.userInvite.update({
+          where: { id: inviteId },
+          data: { identityClaimRevision: transition.revision },
+          include: userInviteInclude,
+        });
       },
-      include: userInviteInclude,
-    });
+    );
 
     return this.toInvite(
       invite,
       this.createStoreMap(stores),
-      this.registrationUrlForInvite(invite.id),
+      this.buildInviteUrl(rawToken),
     );
   }
 
@@ -472,9 +520,13 @@ export class UsersService {
     id: string,
     dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
-    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const { tenantId } = this.tenantContextService.resolve(actor);
+    await this.assertGenericIdentityMutationAllowed(
+      tenantId,
+      'invite delivery',
+    );
     const existing = await this.prisma.userInvite.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, revokedAt: null },
       include: userInviteInclude,
     });
 
@@ -489,6 +541,16 @@ export class UsersService {
     if (existing.expiresAt.getTime() <= Date.now()) {
       throw new BadRequestException('Invite is expired');
     }
+
+    const existingStoreIds = await this.resolveStoreIds(
+      tenantId,
+      existing.storeIds,
+    );
+    const existingScope = this.resolveManageableInviteScope(
+      actor,
+      existing,
+      existingStoreIds,
+    );
 
     const email =
       dto.email === undefined
@@ -513,59 +575,135 @@ export class UsersService {
         : existing.role;
     const storeIds =
       dto.storeIds === undefined
-        ? existing.storeIds
+        ? existingStoreIds
         : await this.resolveStoreIds(tenantId, dto.storeIds);
+    const scope =
+      dto.scope === undefined
+        ? existingScope.mode
+        : this.parseAccessScope(dto.scope);
     const expiresAt =
       dto.expiresInDays === undefined
         ? existing.expiresAt
         : this.resolveInviteExpiry(dto.expiresInDays);
 
-    this.assertCanAssignAccountRole(actor, role, customRole);
-
-    if (email && email !== existing.email) {
-      const existingUser = await this.prisma.user.findUnique({
-        where: { email },
-        select: { id: true },
-      });
-
-      if (existingUser) {
-        throw new ConflictException(
-          'Пользователь с таким email уже существует',
-        );
-      }
+    if (!email) {
+      throw new BadRequestException(
+        'Invite must be bound to a valid email address',
+      );
     }
+    const existingEmail = this.normalizeOptionalEmail(existing.email);
+    if (!existingEmail) {
+      throw this.identityInviteProvenanceRequired();
+    }
+    if (email !== existingEmail) {
+      throw new ForbiddenException({
+        message: 'Invite email changes require the dedicated identity workflow',
+        reasonCode: 'INVITE_EMAIL_CHANGE_WORKFLOW_REQUIRED',
+      });
+    }
+    const identityClaimRevision = this.requireIdentityClaimRevision(
+      existing.identityClaimRevision,
+    );
+    this.assertOwnerAssignmentUsesTransferWorkflow(role);
 
-    const [updated, stores] = await Promise.all([
-      this.prisma.userInvite.update({
-        where: { id: existing.id },
-        data: {
-          email,
-          fullName,
-          role,
-          customRoleId: customRole?.id ?? null,
-          storeIds,
-          expiresAt,
-        },
-        include: userInviteInclude,
-      }),
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, name: true, isActive: true },
-        orderBy: { name: 'asc' },
-      }),
-    ]);
+    await this.assertCanAssignAccountRole(actor, role, customRole, tenantId);
+    this.assertNewScope(scope, storeIds);
+    this.accessScopeService.assertCanDelegate(actor, {
+      mode: scope,
+      storeIds,
+    });
+    this.assertInviteScopeNotWidened(existingScope, {
+      mode: scope,
+      storeIds,
+    });
+
+    const rawToken = randomBytes(32).toString('base64url');
+    const reissuedInviteId = randomUUID();
+    const revokedAt = new Date();
+    const updated = await this.identityClaimBoundary.runTenantTransaction(
+      this.prisma,
+      tenantId,
+      async (tx, identityTransaction) => {
+        const assertion = await this.identityClaimBoundary.assertInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            subjectId: existing.id,
+            expectedRevision: identityClaimRevision,
+          },
+        );
+        await tx.userInvite.create({
+          data: {
+            id: reissuedInviteId,
+            tenantId,
+            email,
+            fullName,
+            role,
+            customRoleId: customRole?.id ?? null,
+            accessScope: scope,
+            storeIds,
+            tokenHash: this.hashInviteToken(rawToken),
+            expiresAt,
+            createdByUserId: actor.id,
+            identityClaimRevision: null,
+            revokedAt: null,
+            revokedByUserId: null,
+          },
+        });
+        const revoked = await tx.userInvite.updateMany({
+          where: {
+            id: existing.id,
+            tenantId,
+            acceptedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: revokedAt },
+            updatedAt: existing.updatedAt,
+          },
+          data: {
+            expiresAt: revokedAt,
+            revokedAt,
+            revokedByUserId: actor.id,
+          },
+        });
+        if (revoked.count !== 1) {
+          throw new ConflictException('Invite changed or was already accepted');
+        }
+        const transition = await this.identityClaimBoundary.transitionInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            expectedSubjectId: existing.id,
+            expectedRevision: assertion.revision,
+            nextClaimType: IdentityEmailClaimType.INVITE,
+            nextSubjectId: reissuedInviteId,
+          },
+        );
+        return tx.userInvite.update({
+          where: { id: reissuedInviteId },
+          data: { identityClaimRevision: transition.revision },
+          include: userInviteInclude,
+        });
+      },
+    );
+    const stores = await this.prisma.store.findMany({
+      where: { tenantId },
+      select: { id: true, name: true, isActive: true },
+      orderBy: { name: 'asc' },
+    });
 
     return this.toInvite(
       updated,
       this.createStoreMap(stores),
-      this.registrationUrlForInvite(updated.id),
+      this.buildInviteUrl(rawToken),
     );
   }
 
   async cancelInvite(actor: AuthenticatedUser, id: string) {
-    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const { tenantId } = this.tenantContextService.resolve(actor);
     const existing = await this.prisma.userInvite.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, revokedAt: null },
       include: userInviteInclude,
     });
 
@@ -577,16 +715,68 @@ export class UsersService {
       throw new BadRequestException('Invite is already used');
     }
 
-    this.assertCanAssignAccountRole(actor, existing.role, existing.customRole);
+    const existingStoreIds = await this.resolveStoreIds(
+      tenantId,
+      existing.storeIds,
+    );
+    this.resolveManageableInviteScope(actor, existing, existingStoreIds);
+    await this.assertCanAssignAccountRole(
+      actor,
+      existing.role,
+      existing.customRole,
+      tenantId,
+    );
 
-    if (existing.expiresAt.getTime() <= Date.now()) {
-      return { id: existing.id };
+    const email = this.normalizeOptionalEmail(existing.email);
+    if (!email) {
+      throw this.identityInviteProvenanceRequired();
     }
-
-    await this.prisma.userInvite.update({
-      where: { id: existing.id },
-      data: { expiresAt: new Date() },
-    });
+    const identityClaimRevision = this.requireIdentityClaimRevision(
+      existing.identityClaimRevision,
+    );
+    const canceledAt = new Date();
+    const terminalExpiresAt =
+      existing.expiresAt.getTime() <= canceledAt.getTime()
+        ? existing.expiresAt
+        : canceledAt;
+    await this.identityClaimBoundary.runTenantTransaction(
+      this.prisma,
+      tenantId,
+      async (tx, identityTransaction) => {
+        const assertion = await this.identityClaimBoundary.assertInvite(
+          identityTransaction,
+          {
+            email,
+            tenantId,
+            subjectId: existing.id,
+            expectedRevision: identityClaimRevision,
+          },
+        );
+        const canceled = await tx.userInvite.updateMany({
+          where: {
+            id: existing.id,
+            tenantId,
+            acceptedAt: null,
+            revokedAt: null,
+            updatedAt: existing.updatedAt,
+          },
+          data: {
+            expiresAt: terminalExpiresAt,
+            revokedAt: canceledAt,
+            revokedByUserId: actor.id,
+          },
+        });
+        if (canceled.count !== 1) {
+          throw new ConflictException('Invite changed or was already accepted');
+        }
+        await this.identityClaimBoundary.releaseInvite(identityTransaction, {
+          email,
+          tenantId,
+          expectedSubjectId: existing.id,
+          expectedRevision: assertion.revision,
+        });
+      },
+    );
 
     return { id: existing.id };
   }
@@ -596,7 +786,7 @@ export class UsersService {
     id: string,
     dto: UserAccountDto,
   ): Promise<UserAccount> {
-    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const { tenantId } = this.tenantContextService.resolve(actor);
     const existing = await this.prisma.user.findFirst({
       where: { id, tenantId },
       include: userAccountInclude,
@@ -606,7 +796,8 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    this.assertCanManageExistingUser(actor, existing);
+    const existingScope = this.resolveManageableUserScope(actor, existing);
+    await this.assertCanManageExistingUser(actor, existing, tenantId);
 
     const data: Prisma.UserUpdateInput = {};
     const customRoleId =
@@ -630,7 +821,13 @@ export class UsersService {
       if (existing.id === actor.id) {
         throw new BadRequestException('You cannot change your own role');
       }
-      this.assertCanAssignAccountRole(actor, nextRole, customRole);
+      this.assertOwnerAssignmentUsesTransferWorkflow(nextRole);
+      await this.assertCanAssignAccountRole(
+        actor,
+        nextRole,
+        customRole,
+        tenantId,
+      );
       data.role = nextRole;
       if (customRole) {
         data.customRole = {
@@ -649,20 +846,12 @@ export class UsersService {
       const email = this.normalizeEmail(dto.email);
       this.assertEmail(email);
 
-      if (email !== existing.email) {
-        const emailOwner = await this.prisma.user.findUnique({
-          where: { email },
-          select: { id: true },
+      if (email !== this.normalizeEmail(existing.email)) {
+        throw new ForbiddenException({
+          message:
+            'User email changes require the verified email-change workflow',
+          reasonCode: 'USER_EMAIL_CHANGE_WORKFLOW_REQUIRED',
         });
-
-        if (emailOwner && emailOwner.id !== existing.id) {
-          throw new ConflictException(
-            'Пользователь с таким email уже существует',
-          );
-        }
-
-        data.email = email;
-        data.emailVerifiedAt = new Date();
       }
     }
 
@@ -685,30 +874,119 @@ export class UsersService {
 
     const storeIds =
       dto.storeIds === undefined
-        ? undefined
+        ? existingScope.storeIds
         : await this.resolveStoreIds(tenantId, dto.storeIds);
+    const scope =
+      dto.scope === undefined
+        ? existingScope.mode
+        : this.parseAccessScope(dto.scope);
+    const scopeChanged =
+      scope !== existingScope.mode ||
+      !this.sameStoreIds(storeIds, existingScope.storeIds);
+    const removesActiveNetworkOwner =
+      this.isActiveNetworkOwner(existing) &&
+      !this.isActiveNetworkOwner({
+        role: nextRole,
+        customRoleId: customRole?.id ?? null,
+        accessScope: scope,
+        isActive:
+          dto.isActive === undefined
+            ? existing.isActive
+            : Boolean(dto.isActive),
+      });
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      if (storeIds !== undefined) {
-        await this.replaceStoreAccesses(tx, existing.id, storeIds);
+    if (scopeChanged) {
+      if (existing.id === actor.id) {
+        throw new BadRequestException(
+          'You cannot change your own access scope',
+        );
       }
 
-      return tx.user.update({
-        where: { id: existing.id },
-        data,
-        include: userAccountInclude,
+      this.assertNewScope(scope, storeIds);
+      this.accessScopeService.assertCanDelegate(actor, {
+        mode: scope,
+        storeIds,
       });
-    });
+      data.accessScope = scope;
+    }
+
+    let updated: UserAccountRow;
+
+    try {
+      updated = await this.prisma.$transaction(async (tx) => {
+        await this.lockUserForUpdate(tx, tenantId, existing.id);
+
+        if (removesActiveNetworkOwner) {
+          await this.assertAnotherActiveNetworkOwnerExists(tx, {
+            tenantId,
+            targetUserId: existing.id,
+            expectedUpdatedAt: existing.updatedAt,
+          });
+        }
+
+        if (scopeChanged) {
+          await this.replaceStoreAccesses(tx, existing.id, storeIds);
+        }
+
+        return tx.user.update({
+          where: {
+            id: existing.id,
+            tenantId,
+            updatedAt: existing.updatedAt,
+          },
+          data,
+          include: userAccountInclude,
+        });
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new ConflictException(
+          'User changed while the update was being prepared',
+        );
+      }
+
+      throw error;
+    }
 
     return this.toAccount(updated, await this.getRoleOverrideMap(tenantId));
+  }
+
+  private async assertGenericIdentityMutationAllowed(
+    tenantId: string,
+    operation: 'direct user creation' | 'email change' | 'invite delivery',
+  ): Promise<void> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { customerStage: true },
+    });
+    if (!tenant) {
+      throw new NotFoundException('Tenant was not found');
+    }
+    if (tenant.customerStage === TenantCustomerStage.INTERNAL) {
+      return;
+    }
+
+    const messageByOperation = {
+      'direct user creation':
+        'External tenants must create users through email-bound invites',
+      'invite delivery':
+        'External tenant invitations require the verified email-delivery workflow',
+      'email change':
+        'External tenant email changes require the verified email-change workflow',
+    } satisfies Record<typeof operation, string>;
+    throw new ForbiddenException(messageByOperation[operation]);
   }
 
   async createAccessRole(
     actor: AuthenticatedUser,
     dto: UserAccessRoleDto,
   ): Promise<UserAccessRoleAccount> {
-    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const { tenantId } = this.tenantContextService.resolve(actor);
     this.assertCanManageUsers(actor);
+    this.accessScopeService.assertNetwork(actor);
     const data = this.normalizeAccessRoleDto(dto);
     this.assertCapabilitiesGrantable(actor, data.permissions);
 
@@ -731,8 +1009,9 @@ export class UsersService {
     id: string,
     dto: UserAccessRoleDto,
   ): Promise<UserAccessRoleAccount> {
-    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const { tenantId } = this.tenantContextService.resolve(actor);
     this.assertCanManageUsers(actor);
+    this.accessScopeService.assertNetwork(actor);
     await this.assertAccessRoleExists(tenantId, id);
     const data = this.normalizeAccessRoleDto(dto);
     this.assertCapabilitiesGrantable(actor, data.permissions);
@@ -754,7 +1033,8 @@ export class UsersService {
     roleValue: string,
     dto: UserRoleOverrideDto,
   ): Promise<UserRoleOption> {
-    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const { tenantId } = this.tenantContextService.resolve(actor);
+    this.accessScopeService.assertNetwork(actor);
     const role = this.parseRole(roleValue);
     this.assertCanManageSystemRoleOverride(actor, role);
     const permissions = normalizeCapabilities(dto.permissions);
@@ -785,15 +1065,301 @@ export class UsersService {
     return this.toRoleOption(role, override);
   }
 
-  private assertCanManageExistingUser(
+  private isVisibleUserTarget(
     actor: AuthenticatedUser,
-    target: Pick<UserAccountRow, 'role'>,
-  ) {
-    if (this.getAssignableRoles(actor).includes(target.role)) {
+    target: UserAccountRow,
+  ): boolean {
+    if (target.isPlatformAdmin) {
+      return false;
+    }
+
+    try {
+      return this.accessScopeService.isVisibleTarget(
+        actor,
+        this.resolvePersistedUserScope(target),
+      );
+    } catch (error) {
+      if (
+        error instanceof UnauthorizedException ||
+        error instanceof ForbiddenException
+      ) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  private isVisibleInviteTarget(
+    actor: AuthenticatedUser,
+    target: UserInviteRow,
+    storesById: Map<string, UserAccountStore>,
+  ): boolean {
+    if (
+      new Set(target.storeIds).size !== target.storeIds.length ||
+      target.storeIds.some((storeId) => !storesById.has(storeId))
+    ) {
+      return false;
+    }
+
+    try {
+      return this.accessScopeService.isVisibleTarget(
+        actor,
+        this.resolvePersistedInviteScope(target, target.storeIds),
+      );
+    } catch (error) {
+      if (
+        error instanceof UnauthorizedException ||
+        error instanceof ForbiddenException
+      ) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  private resolvePersistedUserScope(
+    target: UserAccountRow,
+  ): RequestedAccessScope {
+    return this.accessScopeService.fromPersisted({
+      tenantId: target.tenantId,
+      accessScope: target.accessScope,
+      storeAccesses: target.storeAccesses,
+    });
+  }
+
+  private resolvePersistedInviteScope(
+    target: UserInviteRow,
+    storeIds: readonly string[],
+  ): RequestedAccessScope {
+    return this.accessScopeService.fromPersisted({
+      tenantId: target.tenantId,
+      accessScope: target.accessScope,
+      storeAccesses: storeIds.map((storeId) => ({ storeId })),
+    });
+  }
+
+  private resolveManageableUserScope(
+    actor: AuthenticatedUser,
+    target: UserAccountRow,
+  ): RequestedAccessScope {
+    if (target.isPlatformAdmin) {
+      throw new NotFoundException('User not found');
+    }
+
+    try {
+      const scope = this.resolvePersistedUserScope(target);
+      this.accessScopeService.assertCanManageTarget(actor, scope);
+      return scope;
+    } catch (error) {
+      this.rethrowScopeTargetAsNotFound(error, 'User');
+    }
+  }
+
+  private resolveManageableInviteScope(
+    actor: AuthenticatedUser,
+    target: UserInviteRow,
+    storeIds: readonly string[],
+  ): RequestedAccessScope {
+    try {
+      const scope = this.resolvePersistedInviteScope(target, storeIds);
+      this.accessScopeService.assertCanManageTarget(actor, scope);
+      return scope;
+    } catch (error) {
+      this.rethrowScopeTargetAsNotFound(error, 'Invite');
+    }
+  }
+
+  private rethrowScopeTargetAsNotFound(
+    error: unknown,
+    targetLabel: 'User' | 'Invite',
+  ): never {
+    if (
+      error instanceof UnauthorizedException ||
+      error instanceof ForbiddenException
+    ) {
+      throw new NotFoundException(`${targetLabel} not found`);
+    }
+
+    throw error;
+  }
+
+  private parseAccessScope(value: unknown): AccessScopeMode {
+    if (value === 'NETWORK' || value === 'STORES') {
+      return value;
+    }
+
+    throw new BadRequestException('Access scope is required');
+  }
+
+  private assertNewScope(
+    mode: AccessScopeMode,
+    storeIds: readonly string[],
+  ): void {
+    if (mode === 'NETWORK' && storeIds.length > 0) {
+      throw new BadRequestException(
+        'Network access cannot contain explicit stores',
+      );
+    }
+
+    if (mode === 'STORES' && storeIds.length === 0) {
+      throw new BadRequestException(
+        'Store access must contain at least one store',
+      );
+    }
+  }
+
+  private assertInviteScopeNotWidened(
+    current: RequestedAccessScope,
+    next: RequestedAccessScope,
+  ): void {
+    if (current.mode === 'NETWORK') {
       return;
     }
 
-    throw new ForbiddenException('Insufficient role permissions');
+    if (
+      next.mode === 'NETWORK' ||
+      next.storeIds.some((storeId) => !current.storeIds.includes(storeId))
+    ) {
+      throw new BadRequestException(
+        'Issue a new invite to widen its access scope',
+      );
+    }
+  }
+
+  private sameStoreIds(
+    left: readonly string[],
+    right: readonly string[],
+  ): boolean {
+    return (
+      left.length === right.length &&
+      left.every((storeId) => right.includes(storeId))
+    );
+  }
+
+  private isActiveNetworkOwner(account: {
+    role: UserRole;
+    customRoleId: string | null;
+    accessScope: AccessScopeMode | null;
+    isActive: boolean;
+  }): boolean {
+    return (
+      account.role === UserRole.OWNER &&
+      account.customRoleId === null &&
+      account.accessScope === UserAccessScope.NETWORK &&
+      account.isActive
+    );
+  }
+
+  private async assertAnotherActiveNetworkOwnerExists(
+    tx: Prisma.TransactionClient,
+    input: {
+      tenantId: string;
+      targetUserId: string;
+      expectedUpdatedAt: Date;
+    },
+  ): Promise<void> {
+    await tx.$queryRaw(
+      Prisma.sql`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(
+            ${`users:last-active-network-owner:${input.tenantId}`},
+            0
+          )
+        )
+      `,
+    );
+
+    const target = await tx.user.findFirst({
+      where: {
+        id: input.targetUserId,
+        tenantId: input.tenantId,
+      },
+      select: {
+        role: true,
+        customRoleId: true,
+        accessScope: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    if (
+      !target ||
+      target.updatedAt.getTime() !== input.expectedUpdatedAt.getTime() ||
+      !this.isActiveNetworkOwner(target)
+    ) {
+      throw new ConflictException(
+        'User changed while the update was being prepared',
+      );
+    }
+
+    const otherOwnerCount = await tx.user.count({
+      where: {
+        tenantId: input.tenantId,
+        id: { not: input.targetUserId },
+        role: UserRole.OWNER,
+        customRoleId: null,
+        accessScope: UserAccessScope.NETWORK,
+        isActive: true,
+      },
+    });
+
+    if (otherOwnerCount === 0) {
+      throw new ConflictException(
+        'Tenant must retain at least one active NETWORK OWNER',
+      );
+    }
+  }
+
+  private async lockUserForUpdate(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    userId: string,
+  ): Promise<void> {
+    const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT subject."id"
+      FROM "User" AS subject
+      WHERE subject."id" = ${userId}
+        AND subject."tenantId" = ${tenantId}
+      FOR UPDATE
+    `);
+
+    if (lockedUsers.length !== 1) {
+      throw new ConflictException(
+        'User changed while the update was being prepared',
+      );
+    }
+  }
+
+  private async assertCanManageExistingUser(
+    actor: AuthenticatedUser,
+    target: Pick<UserAccountRow, 'role' | 'customRole'>,
+    tenantId: string,
+  ) {
+    if (!this.getAssignableRoles(actor).includes(target.role)) {
+      throw new ForbiddenException('Insufficient role permissions');
+    }
+
+    const roleOverride = target.customRole
+      ? null
+      : await this.prisma.userRoleOverride.findUnique({
+          where: {
+            tenantId_role: {
+              tenantId,
+              role: target.role,
+            },
+          },
+          select: {
+            permissions: true,
+          },
+        });
+
+    this.assertCapabilitiesGrantable(
+      actor,
+      resolveUserCapabilities({ ...target, roleOverride }),
+    );
   }
 
   private assertCanManageUsers(actor: AuthenticatedUser) {
@@ -822,17 +1388,39 @@ export class UsersService {
     throw new ForbiddenException('Insufficient role permissions');
   }
 
-  private assertCanAssignAccountRole(
+  private async assertCanAssignAccountRole(
     actor: AuthenticatedUser,
     role: UserRole,
     customRole: UserAccessRoleRow | null,
+    tenantId: string,
   ) {
     if (customRole) {
       this.assertCanManageUsers(actor);
+      this.assertCapabilitiesGrantable(
+        actor,
+        normalizeCapabilities(customRole.permissions),
+      );
       return;
     }
 
     this.assertCanAssignRole(actor, role);
+    const roleOverride = await this.prisma.userRoleOverride.findUnique({
+      where: {
+        tenantId_role: {
+          tenantId,
+          role,
+        },
+      },
+      select: {
+        permissions: true,
+      },
+    });
+    this.assertCapabilitiesGrantable(
+      actor,
+      roleOverride
+        ? resolveUserCapabilities({ role, roleOverride })
+        : roleCapabilities[role],
+    );
   }
 
   private assertCanAssignRole(actor: AuthenticatedUser, role: UserRole) {
@@ -841,6 +1429,14 @@ export class UsersService {
     }
 
     throw new ForbiddenException('You cannot assign this role');
+  }
+
+  private assertOwnerAssignmentUsesTransferWorkflow(role: UserRole) {
+    if (role === UserRole.OWNER) {
+      throw new ForbiddenException(
+        'OWNER assignment requires the dedicated owner-transfer workflow',
+      );
+    }
   }
 
   private getAssignableRoles(actor: AuthenticatedUser) {
@@ -990,6 +1586,25 @@ export class UsersService {
     return normalizedEmail;
   }
 
+  private requireIdentityClaimRevision(value: unknown): number {
+    if (
+      typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < 1
+    ) {
+      throw this.identityInviteProvenanceRequired();
+    }
+
+    return value;
+  }
+
+  private identityInviteProvenanceRequired(): ConflictException {
+    return new ConflictException({
+      message: 'Invite identity claim provenance is required',
+      reasonCode: 'IDENTITY_INVITE_PROVENANCE_REQUIRED',
+    });
+  }
+
   private normalizeNullableText(value: unknown): string | null {
     if (typeof value !== 'string') {
       return null;
@@ -1034,13 +1649,7 @@ export class UsersService {
       'https://leetplus.ru';
     const base = configuredBase.replace(/\/+$/, '');
 
-    return `${base}/register?invite=${encodeURIComponent(token)}`;
-  }
-
-  private registrationUrlForInvite(inviteId: string) {
-    return this.buildInviteUrl(
-      createSignedUserInviteToken(inviteId, this.configService),
-    );
+    return `${base}/register#invite=${token}`;
   }
 
   private async resolveStoreIds(tenantId: string, storeIds: unknown) {
@@ -1101,7 +1710,7 @@ export class UsersService {
   private async replaceStoreAccesses(
     tx: Prisma.TransactionClient,
     userId: string,
-    storeIds: string[],
+    storeIds: readonly string[],
   ) {
     await tx.userStoreAccess.deleteMany({ where: { userId } });
 
@@ -1118,9 +1727,11 @@ export class UsersService {
   private toRoleOptions(
     roleOverridesByRole: Map<UserRole, UserRoleOverrideRow>,
   ): UserRoleOption[] {
-    return baseRoleOptions.map((option) =>
-      this.toRoleOption(option.role, roleOverridesByRole.get(option.role)),
-    );
+    return baseRoleOptions
+      .filter((option) => option.role !== UserRole.OWNER)
+      .map((option) =>
+        this.toRoleOption(option.role, roleOverridesByRole.get(option.role)),
+      );
   }
 
   private toRoleOption(
@@ -1149,8 +1760,13 @@ export class UsersService {
     account: UserAccountRow,
     roleOverridesByRole: Map<UserRole, UserRoleOverrideRow>,
   ): UserAccount {
+    const accessScope = this.resolvePersistedUserScope(account);
     const stores = account.storeAccesses
-      .map((access) => access.store)
+      .map((access) => ({
+        id: access.store.id,
+        name: access.store.name,
+        isActive: access.store.isActive,
+      }))
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 
     return {
@@ -1171,7 +1787,7 @@ export class UsersService {
       emailVerifiedAt: account.emailVerifiedAt?.toISOString() ?? null,
       createdAt: account.createdAt.toISOString(),
       updatedAt: account.updatedAt.toISOString(),
-      scope: stores.length > 0 ? 'STORES' : 'NETWORK',
+      scope: accessScope.mode,
       stores,
     };
   }
@@ -1192,6 +1808,10 @@ export class UsersService {
     storesById: Map<string, UserAccountStore>,
     registrationUrl?: string,
   ): UserInviteAccount {
+    const accessScope = this.resolvePersistedInviteScope(
+      invite,
+      invite.storeIds,
+    );
     const stores = invite.storeIds
       .map((storeId) => storesById.get(storeId))
       .filter((store): store is UserAccountStore => Boolean(store))
@@ -1206,7 +1826,7 @@ export class UsersService {
       customRole: invite.customRole
         ? this.toAccessRole(invite.customRole)
         : null,
-      scope: stores.length > 0 ? 'STORES' : 'NETWORK',
+      scope: accessScope.mode,
       stores,
       expiresAt: invite.expiresAt.toISOString(),
       acceptedAt: invite.acceptedAt?.toISOString() ?? null,

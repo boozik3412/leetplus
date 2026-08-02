@@ -129,6 +129,7 @@ export class StoresService {
           dto.gamificationEnabled,
           false,
         ),
+        backgroundExecutionEnabled: false,
       },
     });
   }
@@ -670,7 +671,10 @@ export class StoresService {
 
     return this.prisma.store.update({
       where: { id: current.id },
-      data: { isActive: false },
+      data: {
+        isActive: false,
+        backgroundExecutionEnabled: false,
+      },
     });
   }
 

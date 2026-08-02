@@ -1,7 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import {
   StaffOperationsDashboardService,
@@ -130,17 +135,32 @@ export class StaffNotificationsService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly staffOperationsDashboardService: StaffOperationsDashboardService,
+    private readonly accessScopeService: AccessScopeService,
   ) {}
 
   async getReport(
     user: AuthenticatedUser,
     query: StaffNotificationsQuery = {},
   ): Promise<StaffNotificationsReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    await this.syncCurrentSignals(tenantId);
-
+    const { tenantId } = this.tenantContextService.resolve(user);
     const filters = this.resolveFilters(query);
-    const where = this.buildWhere(tenantId, filters, user.id);
+    const scope = this.accessScopeService.resolve(user);
+
+    if (filters.storeId) {
+      await this.assertRequestedStoreAllowed(user, tenantId, filters.storeId);
+    }
+
+    if (scope.mode === 'NETWORK') {
+      await this.syncTenantSignalsForSystem(tenantId);
+    }
+
+    const where = this.buildWhere(tenantId, filters, user);
+    const visibilityWhere = this.buildVisibilityWhere(tenantId, user);
+    const storeOptionsWhere: Prisma.StoreWhereInput = { tenantId };
+
+    if (scope.mode === 'STORES') {
+      storeOptionsWhere.id = { in: [...scope.allowedStoreIds] };
+    }
 
     const [rows, summaryRows, stores] = await Promise.all([
       this.prisma.staffNotification.findMany({
@@ -154,12 +174,12 @@ export class StaffNotificationsService {
         take: filters.pageSize,
       }),
       this.prisma.staffNotification.findMany({
-        where: this.buildVisibilityWhere(tenantId, user.id),
+        where: visibilityWhere,
         select: { status: true, severity: true },
         take: 5000,
       }),
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: storeOptionsWhere,
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
@@ -177,18 +197,27 @@ export class StaffNotificationsService {
   }
 
   async syncSignals(user: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    this.accessScopeService.assertNetwork(user);
 
+    return this.syncTenantSignalsForSystem(tenantId);
+  }
+
+  async syncTenantSignalsForSystem(tenantId: string) {
     return this.syncCurrentSignals(tenantId);
   }
 
   async acknowledge(user: AuthenticatedUser, id: string) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const notification = await this.resolveNotification(tenantId, id, user.id);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const notification = await this.resolveNotification(tenantId, id, user);
     const now = new Date();
 
     const updated = await this.prisma.staffNotification.update({
-      where: { id: notification.id },
+      where: this.buildScopedNotificationUniqueWhere(
+        tenantId,
+        notification.id,
+        user,
+      ),
       data: {
         status:
           notification.status === 'RESOLVED'
@@ -204,12 +233,16 @@ export class StaffNotificationsService {
   }
 
   async resolve(user: AuthenticatedUser, id: string) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const notification = await this.resolveNotification(tenantId, id, user.id);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const notification = await this.resolveNotification(tenantId, id, user);
     const now = new Date();
 
     const updated = await this.prisma.staffNotification.update({
-      where: { id: notification.id },
+      where: this.buildScopedNotificationUniqueWhere(
+        tenantId,
+        notification.id,
+        user,
+      ),
       data: {
         status: 'RESOLVED',
         resolvedAt: notification.resolvedAt ?? now,
@@ -884,10 +917,9 @@ export class StaffNotificationsService {
   private buildWhere(
     tenantId: string,
     filters: NotificationFilters,
-    currentUserId: string,
+    user: AuthenticatedUser,
   ): Prisma.StaffNotificationWhereInput {
-    const where = this.buildVisibilityWhere(tenantId, currentUserId);
-    const and: Prisma.StaffNotificationWhereInput[] = [];
+    const where = this.buildVisibilityWhere(tenantId, user);
 
     if (filters.status !== 'all') {
       where.status = filters.status;
@@ -906,16 +938,20 @@ export class StaffNotificationsService {
     }
 
     if (filters.search) {
-      and.push({
-        OR: [
-          { title: { contains: filters.search, mode: 'insensitive' } },
-          { message: { contains: filters.search, mode: 'insensitive' } },
-        ],
-      });
-    }
-
-    if (and.length > 0) {
-      where.AND = and;
+      const currentAnd = Array.isArray(where.AND)
+        ? where.AND
+        : where.AND
+          ? [where.AND]
+          : [];
+      where.AND = [
+        ...currentAnd,
+        {
+          OR: [
+            { title: { contains: filters.search, mode: 'insensitive' } },
+            { message: { contains: filters.search, mode: 'insensitive' } },
+          ],
+        },
+      ];
     }
 
     return where;
@@ -923,12 +959,59 @@ export class StaffNotificationsService {
 
   private buildVisibilityWhere(
     tenantId: string,
-    currentUserId: string,
+    user: AuthenticatedUser,
   ): Prisma.StaffNotificationWhereInput {
+    const scope = this.accessScopeService.resolve(user);
+    const and: Prisma.StaffNotificationWhereInput[] = [
+      {
+        OR: [{ targetUserId: null }, { targetUserId: user.id }],
+      },
+    ];
+
+    if (scope.mode === 'STORES') {
+      and.push({ storeId: { in: [...scope.allowedStoreIds] } });
+    }
+
     return {
       tenantId,
-      OR: [{ targetUserId: null }, { targetUserId: currentUserId }],
+      AND: and,
     };
+  }
+
+  private buildScopedNotificationUniqueWhere(
+    tenantId: string,
+    id: string,
+    user: AuthenticatedUser,
+  ): Prisma.StaffNotificationWhereUniqueInput {
+    const visibility = this.buildVisibilityWhere(tenantId, user);
+
+    return {
+      id,
+      tenantId,
+      AND: visibility.AND,
+    };
+  }
+
+  private async assertRequestedStoreAllowed(
+    user: AuthenticatedUser,
+    tenantId: string,
+    storeId: string,
+  ) {
+    this.accessScopeService.assertStoreAllowed(user, storeId);
+    const scope = this.accessScopeService.resolve(user);
+
+    if (scope.mode === 'STORES') {
+      return;
+    }
+
+    const store = await this.prisma.store.findFirst({
+      where: { id: storeId, tenantId },
+      select: { id: true },
+    });
+
+    if (!store) {
+      throw new ForbiddenException('Store is outside your access scope');
+    }
   }
 
   private buildSummary(rows: Array<{ status: string; severity: string }>) {
@@ -969,12 +1052,12 @@ export class StaffNotificationsService {
   private async resolveNotification(
     tenantId: string,
     id: string,
-    currentUserId: string,
+    user: AuthenticatedUser,
   ) {
     const notification = await this.prisma.staffNotification.findFirst({
       where: {
         id,
-        ...this.buildVisibilityWhere(tenantId, currentUserId),
+        ...this.buildVisibilityWhere(tenantId, user),
       },
       select: {
         id: true,

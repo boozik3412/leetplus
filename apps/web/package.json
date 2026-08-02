@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:invite-secret-transport": "node --test --experimental-strip-types src/lib/invite-secret.test.mts src/lib/invite-transport-core.test.mts"
   },
   "dependencies": {
     "next": "16.2.4",

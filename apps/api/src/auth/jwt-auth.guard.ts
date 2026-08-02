@@ -1,20 +1,37 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { TenantLifecycleStatus } from '@prisma/client';
+import { TenantCustomerStage } from '@prisma/client';
+import { resolveAccessScopeEnforcementMode } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessScopeService } from '../tenancy/access-scope.service';
+import {
+  isTenantExecutionHttpExempt,
+  resolveTenantExecutionHttpAccess,
+  resolveTenantExecutionHttpRequirements,
+  TENANT_EXECUTION_HTTP_UNCLASSIFIED_REASON,
+} from '../tenancy/tenant-execution-http-policy';
+import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 import { AuthenticatedRequest, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly accessScopeService: AccessScopeService,
+    private readonly tenantExecutionPolicy: TenantExecutionPolicyService,
+    private readonly configService: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -25,7 +42,35 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Authorization bearer token is required');
     }
 
-    request.user = await this.verifyToken(token);
+    const verifiedUser = await this.verifyToken(token);
+    const { tenantExecutionSubject, ...user } = verifiedUser;
+    request.user = user;
+    if (
+      !user.isPlatformAdmin &&
+      user.tenantCustomerStage !== TenantCustomerStage.INTERNAL
+    ) {
+      const moduleAccess = resolveTenantExecutionHttpAccess(request);
+      if (moduleAccess) {
+        if (!tenantExecutionSubject) {
+          throw new UnauthorizedException(
+            'Tenant execution subject is unavailable',
+          );
+        }
+        for (const requirement of resolveTenantExecutionHttpRequirements(
+          request,
+        )) {
+          this.tenantExecutionPolicy.assertModuleAllowed(
+            tenantExecutionSubject,
+            requirement.module,
+            requirement.action,
+          );
+        }
+      } else if (!isTenantExecutionHttpExempt(request)) {
+        throw new ForbiddenException(
+          `Tenant module route is not admitted: ${TENANT_EXECUTION_HTTP_UNCLASSIFIED_REASON}`,
+        );
+      }
+    }
     return true;
   }
 
@@ -38,8 +83,26 @@ export class JwtAuthGuard implements CanActivate {
         include: {
           tenant: {
             select: {
+              id: true,
               slug: true,
               status: true,
+              customerStage: true,
+              onboardingStatus: true,
+              trialStartsAt: true,
+              trialEndsAt: true,
+              entitlementProfileRevision: true,
+              executionRevision: true,
+              moduleEntitlements: {
+                select: {
+                  module: true,
+                  readEnabled: true,
+                  writeEnabled: true,
+                  outboundEnabled: true,
+                  validFrom: true,
+                  validUntil: true,
+                  profileRevision: true,
+                },
+              },
             },
           },
           customRole: {
@@ -49,6 +112,16 @@ export class JwtAuthGuard implements CanActivate {
               permissions: true,
             },
           },
+          storeAccesses: {
+            select: {
+              storeId: true,
+              store: {
+                select: {
+                  tenantId: true,
+                },
+              },
+            },
+          },
         },
       });
 
@@ -56,11 +129,8 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('Invalid authorization token');
       }
 
-      if (
-        user.tenant.status !== TenantLifecycleStatus.ACTIVE &&
-        !user.isPlatformAdmin
-      ) {
-        throw new UnauthorizedException('Invalid authorization token');
+      if (!user.isPlatformAdmin) {
+        this.tenantExecutionPolicy.assertSessionAllowed(user.tenant);
       }
 
       const roleOverride = user.customRole
@@ -76,6 +146,27 @@ export class JwtAuthGuard implements CanActivate {
               permissions: true,
             },
           });
+      const accessScopeEnforcementMode = resolveAccessScopeEnforcementMode(
+        this.configService.get<string>('ACCESS_SCOPE_ENFORCEMENT_MODE'),
+      );
+
+      if (
+        accessScopeEnforcementMode === 'SHADOW' &&
+        user.accessScope === null
+      ) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'access_scope_shadow_unclassified_subject',
+            reasonCode: 'SCOPE_MISSING',
+            decision: 'DENY',
+            userId: user.id,
+            tenantId: user.tenantId,
+            legacyStoreCount: user.storeAccesses.length,
+            releaseSha: this.configService.get<string>('RELEASE_SHA') ?? null,
+          }),
+        );
+      }
+      const accessScope = this.accessScopeService.fromPersisted(user);
 
       return {
         id: user.id,
@@ -91,6 +182,15 @@ export class JwtAuthGuard implements CanActivate {
         tenantId: user.tenantId,
         tenantSlug: user.tenant.slug,
         tenantStatus: user.tenant.status,
+        tenantCustomerStage: user.tenant.customerStage,
+        tenantOnboardingStatus: user.tenant.onboardingStatus,
+        tenantTrialStartsAt: user.tenant.trialStartsAt,
+        tenantTrialEndsAt: user.tenant.trialEndsAt,
+        tenantEntitlementProfileRevision:
+          user.tenant.entitlementProfileRevision,
+        tenantExecutionSubject: user.tenant,
+        accessScope: accessScope.mode,
+        allowedStoreIds: accessScope.storeIds,
       };
     } catch {
       throw new UnauthorizedException('Invalid authorization token');

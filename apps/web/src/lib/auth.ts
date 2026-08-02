@@ -26,6 +26,8 @@ export type AuthUser = {
   isPlatformAdmin: boolean;
   tenantId: string;
   tenantSlug: string;
+  accessScope: "NETWORK" | "STORES";
+  allowedStoreIds: string[];
 };
 
 export type AuthResponse = {

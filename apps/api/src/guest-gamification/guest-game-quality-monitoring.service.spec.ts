@@ -1,11 +1,75 @@
+import { ConfigService } from '@nestjs/config';
+import { TenantCustomerStage } from '@prisma/client';
+import type { PrismaService } from '../prisma/prisma.service';
 import {
   buildShadowRolloutReadiness,
   buildQualityAlerts,
   decisionPairMetrics,
   detectEventMixShift,
+  GuestGameQualityMonitoringService,
   isSyncStateInQualityWindow,
   syncStateLagSeconds,
 } from './guest-game-quality-monitoring.service';
+
+describe('GuestGameQualityMonitoringService', () => {
+  it('keeps quality collection enabled for the INTERNAL network', async () => {
+    const prisma = {
+      tenant: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'tenant-internal',
+            customerStage: TenantCustomerStage.INTERNAL,
+          },
+        ]),
+      },
+    };
+    const service = new GuestGameQualityMonitoringService(
+      prisma as unknown as PrismaService,
+      { get: jest.fn() } as unknown as ConfigService,
+    );
+    const collectTenant = jest.spyOn(service, 'collectTenant').mockResolvedValue({
+      tenantId: 'tenant-internal',
+      status: 'COMPLETE',
+    } as never);
+
+    await expect(service.runAll()).resolves.toMatchObject({
+      tenants: 1,
+      failed: 0,
+      results: [{ tenantId: 'tenant-internal', status: 'COMPLETE' }],
+    });
+    expect(collectTenant).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips an external tenant before collecting or persisting quality data', async () => {
+    const prisma = {
+      tenant: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'tenant-beta',
+            customerStage: TenantCustomerStage.BETA,
+          },
+        ]),
+      },
+    };
+    const service = new GuestGameQualityMonitoringService(
+      prisma as unknown as PrismaService,
+      { get: jest.fn() } as unknown as ConfigService,
+    );
+    const collectTenant = jest.spyOn(service, 'collectTenant');
+
+    const result = await service.runAll();
+
+    expect(result).toMatchObject({
+      tenants: 1,
+      failed: 0,
+      results: [{ tenantId: 'tenant-beta', status: 'SKIPPED' }],
+    });
+    expect(String(result.results[0]?.reason)).toContain(
+      'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+    );
+    expect(collectTenant).not.toHaveBeenCalled();
+  });
+});
 
 describe('guest game quality monitoring', () => {
   it('measures paired coverage and mismatch by run and rule identity', () => {

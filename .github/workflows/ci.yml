@@ -1,0 +1,613 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci?schema=public
+  NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
+  CI_RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  authority-root-trust:
+    name: Authority root trust gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out complete root history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact release checkout
+        shell: bash
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          printf 'CI_RELEASE_SHA=%s\n' "$CI_RELEASE_SHA"
+          test "$actual_sha" = "$CI_RELEASE_SHA"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Validate pinned authority root transition
+        run: >-
+          node
+          packages/database/scripts/staff-task-integrity-snapshot-authority-root-transition.cli.mjs
+          --check-parent
+          --confirm
+          verify-pinned-authority-root-transition
+
+  application:
+    name: Application checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact release checkout
+        shell: bash
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          printf 'CI_RELEASE_SHA=%s\n' "$CI_RELEASE_SHA"
+          test "$actual_sha" = "$CI_RELEASE_SHA"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        run: pnpm --filter database db:validate
+
+      - name: Generate Prisma client
+        run: pnpm --filter database db:generate
+
+      - name: Type-check database scripts
+        run: pnpm --filter database typecheck
+
+      - name: Validate attachment inventory command
+        run: pnpm --filter database check:attachment-inventory
+
+      - name: Validate staff task integrity inventory command
+        run: pnpm --filter database check:staff-task-integrity-inventory
+
+      - name: Validate staff task integrity reconciliation planner
+        run: pnpm --filter database check:staff-task-integrity-reconciliation-plan
+
+      - name: Validate staff task snapshot authority boundary
+        run: pnpm --filter database check:staff-task-integrity-snapshot-authority
+
+      - name: Validate pinned authority root transition
+        run: pnpm --filter database db:check:staff-task-integrity-authority-root-transition
+
+      - name: Validate staff task snapshot admission
+        run: pnpm --filter database check:staff-task-integrity-snapshot-admission
+
+      - name: Validate synthetic staff task reconciliation proposal dry-run
+        run: pnpm --filter database check:staff-task-integrity-reconciliation-proposal-dry-run
+
+      - name: Validate isolated design-partner identity writer boundary
+        run: pnpm --filter database check:design-partner-provisioning
+
+      - name: Validate isolated design-partner PostgreSQL runtime-role smoke
+        run: pnpm --filter database check:design-partner-runtime-role
+
+      - name: Validate staff task integrity EXPAND smoke command
+        run: pnpm --filter database check:staff-task-integrity-expand-smoke
+
+      - name: Validate tenant execution control-plane upgrade smoke
+        run: pnpm --filter database check:tenant-execution-control-plane-upgrade-smoke
+
+      - name: Validate tenant execution revision fence contract
+        run: pnpm --filter database check:tenant-execution-revision-fence
+
+      - name: Validate Store background execution fence contract
+        run: pnpm --filter database check:store-background-execution-fence
+
+      - name: Validate tenant delivery claim contract
+        run: pnpm --filter database check:tenant-delivery-claim
+
+      - name: Validate runtime function ACL enrollment contract
+        run: pnpm --filter database check:runtime-function-enrollment
+
+      - name: Validate identity email claim foundation
+        run: pnpm --filter database check:identity-email-claim
+
+      - name: Validate identity activation locator upgrade smoke
+        run: pnpm --filter database check:identity-activation-locator
+
+      - name: Validate dormant OWNER invite HOLD outbox
+        run: pnpm --filter database check:identity-owner-invite-hold-outbox
+
+      - name: Validate leased initial-owner mail delivery boundary
+        run: pnpm --filter database check:identity-mail-delivery
+
+      - name: Validate identity-mail worker enrollment boundary
+        run: pnpm --filter database check:identity-mail-worker-enrollment
+
+      - name: Validate protected mail-worker tenant enrollment proposal
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-contract
+
+      - name: Validate protected mail-worker tenant enrollment preflight
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-preflight
+
+      - name: Validate dormant non-canonical CURRENT180 tenant enrollment foundation
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-foundation
+
+      - name: Validate dormant non-canonical CURRENT181 tenant lock and drain foundation
+        run: pnpm --filter database check:identity-mail-tenant-lock-drain-current181-foundation
+
+      - name: Validate CURRENT181 disposable rehearsal harness
+        run: pnpm --filter database check:identity-mail-tenant-lock-drain-current181-smoke
+
+      - name: Validate dormant non-canonical CURRENT182 tenant-first claim foundation
+        run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-foundation
+
+      - name: Validate dormant non-canonical CURRENT183 worker-v2 freshness foundation
+        run: pnpm --filter database check:identity-mail-worker-v2-freshness-current183-foundation
+
+      - name: Validate dormant non-canonical CURRENT184 lost-response replay foundation
+        run: pnpm --filter database check:identity-mail-worker-v2-replay-current184-foundation
+
+      - name: Validate dormant non-canonical CURRENT185 enrollment evidence ledger foundation
+        run: pnpm --filter database check:identity-mail-enrollment-evidence-ledger-current185-foundation
+
+      - name: Validate CURRENT182 disposable rehearsal harness
+        run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-smoke
+
+      - name: Validate independent tenant enrollment command authority
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-authority
+
+      - name: Validate sealed CURRENT185 tenant enrollment coordinator boundary
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-coordinator-current185
+
+      - name: Validate CURRENT185 identity-mail duty-role grants catalog
+        run: pnpm --filter database check:identity-mail-duty-role-grants-current185
+
+      - name: Validate CURRENT185 signed identity-mail duty-role manifest
+        run: pnpm --filter database check:identity-mail-duty-role-manifest-current185
+
+      - name: Validate manifest-bound identity-mail tenant enrollment authority V2
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-authority-v2
+
+      - name: Validate successor identity-mail duty-role Manifest V2
+        run: pnpm --filter database check:identity-mail-duty-role-manifest-v2
+
+      - name: Validate two-PINNED identity-mail enrollment composition V2
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-manifest-bound-v2
+
+      - name: Validate sealed owner-only enrollment evidence importer V2
+        run: pnpm --filter database check:identity-mail-tenant-enrollment-evidence-importer-v2
+
+      - name: Validate independent identity-mail worker runtime attestation
+        run: pnpm --filter database check:identity-mail-worker-runtime-attestation
+
+      - name: Validate shared beta admission provenance
+        run: pnpm --filter database check:shared-beta-admission-provenance
+
+      - name: Validate dormant identity mail PENDING enum expansion
+        run: pnpm --filter database check:identity-mail-outbox-pending-enum
+
+      - name: Validate independent build and deployment provenance
+        run: pnpm --filter database check:shared-beta-runtime-release-provenance
+
+      - name: Validate atomic shared beta activation contract
+        run: pnpm --filter database check:shared-beta-runtime-release-activation
+
+      - name: Validate populated runtime activation upgrade rehearsal
+        run: pnpm --filter database check:shared-beta-runtime-release-activation-upgrade
+
+      - name: Validate identity email claim and invite writer boundaries
+        run: pnpm --filter database check:identity-email-claim-boundary
+
+      - name: Validate legacy identity read-only inventory
+        run: pnpm --filter database check:identity-legacy-backfill-inventory
+
+      - name: Verify legacy identity exact-head release artifact
+        env:
+          RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
+        run: >-
+          pnpm --filter database
+          check:identity-legacy-backfill-release-artifact
+
+      - name: Test database seed safety
+        run: pnpm --filter database test:seed-safety
+
+      - name: Lint API security, health, and configuration boundary
+        run: pnpm --filter api lint:ci:boundary
+
+      - name: Lint invite secret transport
+        run: pnpm --filter api lint:ci:invite-secret-transport
+
+      - name: Lint tenant execution admission boundary
+        run: pnpm --filter api lint:ci:tenant-execution
+
+      - name: Lint isolated design-partner runtime boundary
+        run: pnpm --filter api lint:ci:design-partner
+
+      - name: Lint identity-mail worker and SENT boundary
+        run: pnpm --filter api lint:ci:identity-mail-worker
+
+      - name: Lint identity-mail PostgreSQL acceptance seams
+        run: pnpm --filter api lint:ci:identity-mail-worker-pg
+
+      - name: Test isolated design-partner runtime boundary
+        run: pnpm --filter api test:ci:design-partner
+
+      - name: Test identity-mail worker and SENT boundary
+        run: pnpm --filter api test:ci:identity-mail-worker
+
+      - name: Run focused API security tests
+        run: pnpm --filter api test:ci:focused
+
+      - name: Verify invite secret transport routes
+        run: pnpm --filter api test:e2e:invite-secret-transport
+
+      - name: Run tenant execution admission tests
+        run: pnpm --filter api test:ci:tenant-execution
+
+      - name: Run background execution containment tests
+        run: pnpm --filter api test:ci:background-execution
+
+      - name: Run full API test suite
+        run: pnpm --filter api test:ci
+
+      - name: Type-check API
+        run: pnpm --filter api typecheck
+
+      - name: Build API
+        run: pnpm --filter api build
+
+      - name: Validate production startup contract
+        run: pnpm --filter api config:validate:production
+        env:
+          NODE_ENV: production
+          JWT_SECRET: ci-contract-jwt-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          GUEST_PORTAL_JWT_SECRET: ci-contract-guest-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          GUEST_GAME_REFERRAL_SECRET: ci-contract-referral-ddddddddddddddddddddddddddddddd
+          APP_ENCRYPTION_KEY: ci-contract-pii-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          INTEGRATION_ENCRYPTION_KEY: ci-contract-integration-ffffffffffffffffffffffffffffffff
+          IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY: ci-contract-identity-hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
+          IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION: v1
+          IDENTITY_MAIL_ENCRYPTION_KEY: AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA
+          IDENTITY_MAIL_ENCRYPTION_KEY_VERSION: v1
+          IDENTITY_MAIL_AAD_ENVIRONMENT: ci
+          SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
+          RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
+          BUILD_TIME: "2026-07-26T00:00:00Z"
+          EXPECTED_DATABASE_MIGRATION: 20260731120000_identity_mail_delivery_release_head
+          EXPECTED_DATABASE_MIGRATION_COUNT: "179"
+          ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
+          STAFF_ATTACHMENT_ACL_MODE: SHADOW
+
+      - name: Test web invite secret transport
+        run: pnpm --filter web test:invite-secret-transport
+
+      - name: Lint web
+        run: pnpm --filter web lint
+
+      - name: Type-check web
+        run: pnpm --filter web typecheck
+
+      - name: Build web
+        run: pnpm --filter web build
+
+  migration-smoke:
+    name: PostgreSQL migration smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      PGOPTIONS: -c lock_timeout=5000 -c statement_timeout=120000
+
+    services:
+      postgres:
+        image: postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: leetplus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact release checkout
+        shell: bash
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          printf 'CI_RELEASE_SHA=%s\n' "$CI_RELEASE_SHA"
+          test "$actual_sha" = "$CI_RELEASE_SHA"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        run: pnpm --filter database db:validate
+
+      - name: Generate Prisma client
+        run: pnpm --filter database db:generate
+
+      - name: Apply all migrations to a clean database
+        run: pnpm --filter database db:deploy
+
+      - name: Rehearse tenant execution control-plane 162 to 163 upgrade and lock timeout
+        run: pnpm --filter database db:smoke:tenant-execution-control-plane-upgrade
+        env:
+          TENANT_EXECUTION_CONTROL_PLANE_UPGRADE_SMOKE_CONFIRM: run-tenant-execution-control-plane-upgrade-smoke
+
+      - name: Rehearse tenant execution revision fence 163 to 164 upgrade and rollback
+        run: pnpm --filter database db:smoke:tenant-execution-revision-fence-upgrade
+        env:
+          TENANT_EXECUTION_REVISION_FENCE_UPGRADE_SMOKE_CONFIRM: run-tenant-execution-revision-fence-upgrade-smoke
+
+      - name: Rehearse Store background execution fence 164 to 165 upgrade and rollback
+        run: pnpm --filter database db:smoke:store-background-execution-fence-upgrade
+        env:
+          STORE_BACKGROUND_EXECUTION_FENCE_UPGRADE_SMOKE_CONFIRM: run-store-background-execution-fence-upgrade-smoke
+
+      - name: Rehearse tenant delivery claims 165 to 166 upgrade and rollback
+        run: pnpm --filter database db:smoke:tenant-delivery-claim-upgrade
+        env:
+          TENANT_DELIVERY_CLAIM_UPGRADE_SMOKE_CONFIRM: run-tenant-delivery-claim-upgrade-smoke
+
+      - name: Verify database connectivity and migration state
+        run: pnpm --filter database db:smoke
+
+      - name: Verify runtime function ACL enrollment on a disposable role
+        run: pnpm --filter database db:smoke:runtime-function-enrollment
+        env:
+          RUNTIME_FUNCTION_ENROLLMENT_SMOKE_CONFIRM: run-runtime-function-enrollment-smoke
+
+      - name: Verify global identity email claim invariants
+        run: pnpm --filter database db:smoke:identity-email-claim
+        env:
+          IDENTITY_EMAIL_CLAIM_SMOKE_CONFIRM: run-identity-email-claim-smoke
+
+      - name: Rehearse identity activation locator CURRENT_169 to CURRENT_170 upgrade
+        run: pnpm --filter database db:smoke:identity-activation-locator-upgrade
+        env:
+          IDENTITY_ACTIVATION_LOCATOR_UPGRADE_SMOKE_CONFIRM: run-identity-activation-locator-upgrade-smoke
+
+      - name: Rehearse dormant OWNER invite HOLD outbox CURRENT_170 to CURRENT_171 upgrade
+        run: pnpm --filter database db:smoke:identity-owner-invite-hold-outbox-upgrade
+        env:
+          IDENTITY_OWNER_INVITE_HOLD_OUTBOX_UPGRADE_SMOKE_CONFIRM: run-identity-owner-invite-hold-outbox-upgrade-smoke
+
+      - name: Rehearse shared beta admission provenance CURRENT_171 to CURRENT_172 upgrade
+        run: pnpm --filter database db:smoke:shared-beta-admission-provenance-upgrade
+        env:
+          SHARED_BETA_ADMISSION_PROVENANCE_UPGRADE_SMOKE_CONFIRM: run-shared-beta-admission-provenance-upgrade-smoke
+
+      - name: Rehearse populated shared beta runtime release CURRENT_172 to CURRENT_174 upgrade
+        run: pnpm --filter database db:smoke:shared-beta-runtime-release-activation-upgrade
+        env:
+          SHARED_BETA_RUNTIME_RELEASE_ACTIVATION_UPGRADE_SMOKE_CONFIRM: run-shared-beta-runtime-release-activation-upgrade-smoke
+
+      - name: Rehearse leased identity-mail delivery branch and origin/main histories through CURRENT_179
+        run: pnpm --filter database db:smoke:identity-mail-delivery-upgrade
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_DELIVERY_UPGRADE_SMOKE_CONFIRM: run-identity-mail-delivery-upgrade-smoke
+
+      - name: Verify identity-mail worker role enrollment on a disposable boundary
+        run: pnpm --filter database db:smoke:identity-mail-worker-enrollment-upgrade
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_WORKER_ENROLLMENT_SMOKE_CONFIRM: run-identity-mail-worker-enrollment-upgrade-smoke
+
+      - name: Verify read-only two-tenant mail enrollment preflight
+        run: pnpm --filter database db:smoke:identity-mail-tenant-enrollment-preflight
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_TENANT_ENROLLMENT_PREFLIGHT_SMOKE_CONFIRM: run-identity-mail-tenant-enrollment-preflight-smoke
+
+      - name: Rehearse dormant non-canonical CURRENT179 to CURRENT180 tenant enrollment candidate
+        run: pnpm --filter database db:smoke:identity-mail-tenant-enrollment-current180-candidate
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_TENANT_ENROLLMENT_CURRENT180_CANDIDATE_SMOKE_CONFIRM: run-identity-mail-tenant-enrollment-current180-candidate-smoke
+
+      - name: Rehearse dormant non-canonical CURRENT179 through CURRENT181 tenant lock and drain candidate
+        run: pnpm --filter database db:smoke:identity-mail-tenant-lock-drain-current181-candidate
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_TENANT_LOCK_DRAIN_CURRENT181_CANDIDATE_SMOKE_CONFIRM: run-identity-mail-tenant-lock-drain-current181-candidate-smoke
+
+      - name: Rehearse dormant non-canonical CURRENT179 through CURRENT182 tenant-first claim candidate
+        run: pnpm --filter database db:smoke:identity-mail-tenant-first-claim-current182-candidate
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_TENANT_FIRST_CLAIM_CURRENT182_CANDIDATE_SMOKE_CONFIRM: run-identity-mail-tenant-first-claim-current182-candidate-smoke
+
+      - name: Verify application and worker tenant-first identity claim races
+        run: pnpm --filter api test:integration:identity-email-tenant-lock-cross-path:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_EMAIL_TENANT_LOCK_PG_E2E_CONFIRM: run-identity-email-tenant-lock-cross-path-postgres-e2e
+
+      - name: Verify CURRENT183 non-empty worker-v2 state and freshness matrix
+        run: pnpm --filter api test:integration:identity-mail-worker-v2-current183:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_WORKER_V2_CURRENT183_PG_E2E_CONFIRM: run-identity-mail-worker-v2-current183-postgres-e2e
+
+      - name: Verify CURRENT184 replay deploy, ACL and settlement semantics
+        run: pnpm --filter api test:integration:identity-mail-worker-v2-current184:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_WORKER_V2_CURRENT184_PG_E2E_CONFIRM: run-identity-mail-worker-v2-current184-postgres-e2e
+
+      - name: Verify CURRENT185 branded evidence fixture boundary
+        run: |
+          node --check packages/database/scripts/identity-mail-enrollment-evidence-current185-fixture.mjs
+          node --test packages/database/scripts/identity-mail-enrollment-evidence-current185-fixture.test.mjs
+
+      - name: Verify CURRENT185 owner-only evidence ledger and importer semantics
+        run: pnpm --filter api test:integration:identity-mail-enrollment-evidence-current185:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_ENROLLMENT_EVIDENCE_CURRENT185_PG_E2E_CONFIRM: run-identity-mail-enrollment-evidence-current185-postgres-e2e
+
+      - name: Verify OWNER invite HOLD outbox envelope transaction
+        run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_OWNER_INVITE_HOLD_PG_CONFIRM: run-owner-invite-hold-outbox-postgres-fixture
+
+      - name: Verify identity-mail worker through PostgreSQL and trusted TLS SMTP
+        run: pnpm --filter api test:integration:identity-mail-worker:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_WORKER_PG_E2E_CONFIRM: run-identity-mail-worker-postgres-smtp-e2e
+
+      - name: Verify sealed identity email claim write boundaries
+        run: pnpm --filter database db:smoke:identity-email-claim-boundary
+        env:
+          IDENTITY_EMAIL_CLAIM_BOUNDARY_SMOKE_CONFIRM: run-identity-email-claim-boundary-smoke
+
+      - name: Rehearse legacy identity inventory on disposable clones
+        run: pnpm --filter database db:smoke:identity-legacy-backfill-inventory
+        env:
+          RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
+          IDENTITY_LEGACY_INVENTORY_SMOKE_CONFIRM: run-identity-legacy-inventory-smoke
+
+      - name: Verify shared tenant shell provisioning transaction
+        run: pnpm --filter api test:integration:shared-tenant-shell-provisioning:pg
+        env:
+          SHARED_TENANT_SHELL_PROVISIONING_PG_CONFIRM: run-shared-tenant-shell-provisioning-postgres-fixtures
+
+      - name: Verify atomic shared beta tenant activation transaction
+        run: pnpm --filter api test:integration:shared-beta-runtime-release-activation:pg
+        env:
+          NODE_ENV: test
+          SHARED_BETA_RUNTIME_RELEASE_ACTIVATION_PG_CONFIRM: run-shared-beta-runtime-release-activation-postgres-fixture
+          SHARED_BETA_RUNTIME_RELEASE_ACTIVATION_PG_CLUSTER_CONFIRM: isolated-single-purpose-postgresql-cluster-with-restorable-public-connect
+
+      - name: Verify isolated design-partner writer isolation lifecycle
+        run: pnpm --filter database db:smoke:design-partner-provisioning
+        env:
+          DESIGN_PARTNER_PROVISIONING_SMOKE_CONFIRM: run-design-partner-provisioning-smoke
+
+      - name: Verify isolated design-partner API database admission
+        run: pnpm --filter api test:integration:design-partner-runtime-admission:pg
+        env:
+          DESIGN_PARTNER_RUNTIME_ADMISSION_PG_CONFIRM: run-design-partner-runtime-admission-postgres-fixture
+
+      - name: Verify isolated design-partner PostgreSQL runtime-role baseline
+        run: pnpm --filter database db:smoke:design-partner-runtime-role
+        env:
+          DESIGN_PARTNER_RUNTIME_ROLE_SMOKE_CONFIRM: run-design-partner-runtime-role-smoke
+
+      - name: Verify AccessScope database invariants
+        run: pnpm --filter database db:smoke:access-scope
+        env:
+          ACCESS_SCOPE_SMOKE_CONFIRM: run-access-scope-fixtures
+
+      - name: Verify staff attachment ACL database invariants
+        run: pnpm --filter database db:smoke:attachment-acl
+        env:
+          STAFF_ATTACHMENT_ACL_SMOKE_CONFIRM: run-staff-attachment-acl-fixtures
+
+      - name: Verify staff task catalog audit database invariants
+        run: pnpm --filter database db:smoke:staff-task-catalog-audit
+        env:
+          STAFF_TASK_CATALOG_AUDIT_SMOKE_CONFIRM: run-staff-task-catalog-audit-fixtures
+
+      - name: Rehearse staff task same-tenant EXPAND with legacy rows
+        run: pnpm --filter database db:smoke:staff-task-integrity-expand
+        env:
+          STAFF_TASK_INTEGRITY_EXPAND_SMOKE_CONFIRM: run-staff-task-integrity-expand-fixtures
+
+      - name: Rehearse guarded staff task snapshot admission
+        run: pnpm --filter database db:smoke:staff-task-integrity-snapshot-admission
+        env:
+          RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
+          STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_SMOKE_CONFIRM: run-staff-task-integrity-snapshot-admission-smoke
+
+      - name: Verify staff task and recurring-rule transaction security with PostgreSQL
+        run: pnpm --filter api test:integration:staff-task-security:pg
+        env:
+          STAFF_TASK_SECURITY_PG_CONFIRM: run-staff-task-security-postgres-fixtures
+          STAFF_TASK_RECURRING_PG_CONFIRM: run-staff-task-recurring-postgres-fixtures
+
+      - name: Run read-only attachment inventory
+        run: pnpm --filter database db:inventory:attachment-acl
+        env:
+          STAFF_ATTACHMENT_BACKFILL_TARGET: development
+
+      - name: Run read-only staff task integrity inventory
+        run: pnpm --filter database db:inventory:staff-task-integrity
+        env:
+          STAFF_TASK_INTEGRITY_INVENTORY_TARGET: development
+          STAFF_TASK_INTEGRITY_INVENTORY_CONFIRM: run-staff-task-integrity-inventory
+
+      - name: Build read-only staff task reconciliation plan
+        run: pnpm --filter database db:plan:staff-task-integrity-reconciliation
+        env:
+          RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
+          STAFF_TASK_INTEGRITY_RECONCILIATION_TARGET: development
+          STAFF_TASK_INTEGRITY_RECONCILIATION_CONFIRM: run-staff-task-integrity-reconciliation-plan
+          STAFF_TASK_INTEGRITY_RECONCILIATION_HMAC_KEY: ci-reconciliation-plan-hmac-aaaaaaaaaaaaaaaa
+          STAFF_TASK_INTEGRITY_RECONCILIATION_EXPECTED_DATABASE: leetplus_ci
+
+      - name: Reject adversarial staff task catalog drift
+        run: pnpm --filter database db:smoke:staff-task-integrity-reconciliation-catalog
+        env:
+          RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
+          STAFF_TASK_INTEGRITY_RECONCILIATION_CATALOG_SMOKE_CONFIRM: run-staff-task-integrity-reconciliation-catalog-smoke

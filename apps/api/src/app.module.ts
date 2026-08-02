@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
+import { validateEnvironment } from './config/environment-validation';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { GuestGamificationModule } from './guest-gamification/guest-gamification.module';
 import { GuestPortalModule } from './guest-portal/guest-portal.module';
@@ -27,6 +28,7 @@ import { UsersModule } from './users/users.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnvironment,
     }),
     AdminModule,
     PrismaModule,

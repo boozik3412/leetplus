@@ -16,6 +16,7 @@ import {
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
+  TenantModule,
   type GuestGameRewardIntent,
   UserRole,
 } from '@prisma/client';
@@ -37,6 +38,17 @@ import type {
 import type { GuestPortalGameSummary } from '../guest-portal/guest-portal.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StaffTeamChatService } from '../staff/staff-team-chat.service';
+import {
+  TenantExecutionAdmissionService,
+  type TenantExecutionAdmissionDecision,
+  type TenantExecutionRequirement,
+} from '../tenancy/tenant-execution-admission.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundJobKind,
+} from '../tenancy/tenant-background-execution-policy';
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import {
   GuestBonusLedgerSchedulerService,
@@ -46,6 +58,11 @@ import {
   guestGameRewardMaterializerClaimsAllowed,
   resolveGuestGameRewardMaterializerPolicy,
 } from './guest-game-reward-materializer-policy';
+import {
+  evaluateLegacyGuestGameDeliveryProtocolGate,
+  isLegacyGuestGameProviderDeliveryChannel,
+} from './guest-game-delivery-protocol-gate';
+import { acquireGuestGameRewardDeliveryLock } from './guest-game-reward-delivery-lock';
 import {
   GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
   guestGameRewardIsBattlePassCompletionMarker,
@@ -155,6 +172,22 @@ const eventSources = [
   'CHECK_IN',
 ] as const;
 const deliveryChannels = ['TELEGRAM', 'MAX', 'CASHIER', 'MANUAL'] as const;
+const deliveryOutboundRequirements = [
+  {
+    module: TenantModule.GAMIFICATION,
+    action: 'OUTBOUND',
+  },
+  {
+    module: TenantModule.COMMUNICATIONS,
+    action: 'OUTBOUND',
+  },
+] as const satisfies readonly TenantExecutionRequirement[];
+const gamificationWriteRequirements = [
+  {
+    module: TenantModule.GAMIFICATION,
+    action: 'WRITE',
+  },
+] as const satisfies readonly TenantExecutionRequirement[];
 const deliveryStatuses = [
   'READY',
   'BLOCKED',
@@ -1591,6 +1624,7 @@ export type GuestGameDeliveryEvent = {
   fromStatus: string | null;
   toStatus: string | null;
   channel: GuestGameDeliveryChannel | null;
+  stateReasonCode: string | null;
   note: string | null;
   payload: Prisma.JsonValue | null;
   createdAt: string;
@@ -1607,6 +1641,7 @@ export type GuestGameDelivery = {
   channelLabel: string;
   status: GuestGameDeliveryStatus;
   statusLabel: string;
+  stateReasonCode: string | null;
   readinessStatus: GuestGameCommunicationQueueStatus;
   readinessStatusLabel: string;
   recipientMasked: string | null;
@@ -2226,6 +2261,8 @@ export type GuestGameDeliveryPrepareResult = {
   updated: number;
   skipped: number;
   deliveries: GuestGameDelivery[];
+  protocolBlocked?: number;
+  note?: string;
 };
 
 export type GuestGameDeliveryProviderStatus = {
@@ -3913,6 +3950,7 @@ export class GuestGamificationService {
     private readonly bonusLedgerSchedulerService: GuestBonusLedgerSchedulerService,
     private readonly bonusLedgerService: GuestBonusLedgerService,
     private readonly guestIdentityResolver: GuestIdentityResolverService,
+    private readonly tenantExecutionAdmission: TenantExecutionAdmissionService,
     @Optional()
     private readonly staffTeamChatService?: StaffTeamChatService,
     @Optional()
@@ -5109,6 +5147,9 @@ export class GuestGamificationService {
     deliveries: GuestGameDelivery[],
   ): GuestGameIntegrationReadiness {
     const deliveryConfig = deliveryProviderConfig();
+    const deliveryProtocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
+      'LEGACY_DIRECT_PROVIDER',
+    );
     const dispatcher = this.buildDeliveryDispatcherStatus(deliveries);
     const telegramProvider = dispatcher.providers.find(
       (provider) => provider.channel === 'TELEGRAM',
@@ -5459,17 +5500,21 @@ export class GuestGamificationService {
       {
         key: 'TELEGRAM_DELIVERY',
         title: 'Отправка наград в Telegram',
-        status: telegramDeliveryConfigured
-          ? 'READY'
-          : deliveryConfig.realSendEnabled || telegramProvider?.configured
-            ? 'PARTIAL'
-            : 'BLOCKED',
-        statusLabel: telegramDeliveryConfigured
-          ? 'provider готов'
-          : deliveryConfig.realSendEnabled || telegramProvider?.configured
-            ? 'частично'
-            : 'dry-run',
-        ready: telegramDeliveryConfigured,
+        status: !deliveryProtocolGate.allowed
+          ? 'BLOCKED'
+          : telegramDeliveryConfigured
+            ? 'READY'
+            : deliveryConfig.realSendEnabled || telegramProvider?.configured
+              ? 'PARTIAL'
+              : 'BLOCKED',
+        statusLabel: !deliveryProtocolGate.allowed
+          ? 'protocol blocked'
+          : telegramDeliveryConfigured
+            ? 'provider готов'
+            : deliveryConfig.realSendEnabled || telegramProvider?.configured
+              ? 'частично'
+              : 'dry-run',
+        ready: deliveryProtocolGate.allowed && telegramDeliveryConfigured,
         configured: Boolean(telegramProvider?.configured),
         enabled: Boolean(telegramProvider?.enabledByEnv),
         requiredEnv: telegramProvider?.requiredEnv ?? [
@@ -5477,25 +5522,31 @@ export class GuestGamificationService {
           'GUEST_GAME_TELEGRAM_DELIVERY_ENABLED',
           'GUEST_GAME_TELEGRAM_BOT_TOKEN',
         ],
-        note:
-          telegramProvider?.note ??
-          'Telegram delivery provider еще не настроен; dispatcher работает безопасно.',
-        nextAction:
-          'Включать реальную отправку только после согласий, numeric chat_id, bot token и production-аудита outbox.',
+        note: !deliveryProtocolGate.allowed
+          ? deliveryProtocolGate.note
+          : (telegramProvider?.note ??
+            'Telegram delivery provider еще не настроен; dispatcher работает безопасно.'),
+        nextAction: !deliveryProtocolGate.allowed
+          ? 'Deploy and admit delivery protocol v1 coordinator before enabling provider effects.'
+          : 'Включать реальную отправку только после согласий, numeric chat_id, bot token и production-аудита outbox.',
       },
       {
         key: 'MAX_DELIVERY',
         title: 'MAX bot / Mini App',
-        status: maxDeliveryCanAttempt
-          ? 'MANUAL_ONLY'
-          : maxDeliveryConfigured
-            ? 'PARTIAL'
-            : 'BLOCKED',
-        statusLabel: maxDeliveryCanAttempt
-          ? 'canary разрешен'
-          : maxDeliveryConfigured
-            ? 'нужен canary'
-            : 'не настроено',
+        status: !deliveryProtocolGate.allowed
+          ? 'BLOCKED'
+          : maxDeliveryCanAttempt
+            ? 'MANUAL_ONLY'
+            : maxDeliveryConfigured
+              ? 'PARTIAL'
+              : 'BLOCKED',
+        statusLabel: !deliveryProtocolGate.allowed
+          ? 'protocol blocked'
+          : maxDeliveryCanAttempt
+            ? 'canary разрешен'
+            : maxDeliveryConfigured
+              ? 'нужен canary'
+              : 'не настроено',
         ready: false,
         configured: Boolean(maxProvider?.configured),
         enabled: Boolean(maxProvider?.enabledByEnv),
@@ -5506,14 +5557,17 @@ export class GuestGamificationService {
           'GUEST_GAME_MAX_BOT_TOKEN',
           'GUEST_GAME_MAX_DELIVERY_ENDPOINT',
         ],
-        note:
-          maxProvider?.note ??
-          'MAX остается вторым адаптером: нужна юридическая подготовка и подтвержденный API-контракт.',
-        nextAction: maxDeliveryCanAttempt
-          ? 'Провести один MAX canary на согласованном госте и проверить SENT/FAILED/BLOCKED audit без raw payload.'
-          : maxDeliveryConfigured
-            ? 'Включать GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED только после утвержденного endpoint, токена, согласий и обработки отписок.'
-            : 'Не включать автоматизацию MAX до утвержденного endpoint, токена, согласий и обработки отписок.',
+        note: !deliveryProtocolGate.allowed
+          ? deliveryProtocolGate.note
+          : (maxProvider?.note ??
+            'MAX остается вторым адаптером: нужна юридическая подготовка и подтвержденный API-контракт.'),
+        nextAction: !deliveryProtocolGate.allowed
+          ? 'Deploy and admit delivery protocol v1 coordinator before enabling provider effects.'
+          : maxDeliveryCanAttempt
+            ? 'Провести один MAX canary на согласованном госте и проверить SENT/FAILED/BLOCKED audit без raw payload.'
+            : maxDeliveryConfigured
+              ? 'Включать GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED только после утвержденного endpoint, токена, согласий и обработки отписок.'
+              : 'Не включать автоматизацию MAX до утвержденного endpoint, токена, согласий и обработки отписок.',
       },
       bonusLedgerScheduler,
       {
@@ -7141,6 +7195,7 @@ export class GuestGamificationService {
         users: {
           where: {
             isActive: true,
+            accessScope: 'NETWORK',
             role: { in: [...scheduledPipelineActorRoles] },
           },
           select: {
@@ -7166,6 +7221,25 @@ export class GuestGamificationService {
           status: 'SKIPPED',
           reason:
             'Tenant is not active; scheduled Guest Game pipeline skipped.',
+          result: null,
+        });
+        continue;
+      }
+
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        tenant.id,
+        gamificationWriteRequirements,
+      );
+      const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+        admission,
+        'GUEST_GAMIFICATION_SNAPSHOT_PIPELINE',
+      );
+      if (backgroundDenialNote) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason: backgroundDenialNote,
           result: null,
         });
         continue;
@@ -7197,6 +7271,8 @@ export class GuestGamificationService {
             tenantId: tenant.id,
             tenantSlug: tenant.slug,
             tenantStatus: tenant.status,
+            accessScope: 'NETWORK',
+            allowedStoreIds: [],
           },
           dto,
         );
@@ -7243,6 +7319,7 @@ export class GuestGamificationService {
         users: {
           where: {
             isActive: true,
+            accessScope: 'NETWORK',
             role: { in: [...scheduledPipelineActorRoles] },
           },
           select: {
@@ -7275,6 +7352,26 @@ export class GuestGamificationService {
         continue;
       }
 
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        tenant.id,
+        gamificationWriteRequirements,
+      );
+      const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+        admission,
+        'GUEST_GAMIFICATION_SUPPLEMENTAL_PIPELINE',
+      );
+      if (backgroundDenialNote) {
+        results.push(
+          supplementalTenantResult(
+            tenant.id,
+            tenant.slug,
+            'SKIPPED',
+            backgroundDenialNote,
+          ),
+        );
+        continue;
+      }
+
       const actor = this.pickScheduledPipelineActor(tenant.users);
       if (!actor) {
         results.push(
@@ -7301,6 +7398,8 @@ export class GuestGamificationService {
               tenantId: tenant.id,
               tenantSlug: tenant.slug,
               tenantStatus: tenant.status,
+              accessScope: 'NETWORK',
+              allowedStoreIds: [],
             },
             mode,
             factTypes,
@@ -7770,6 +7869,7 @@ export class GuestGamificationService {
         users: {
           where: {
             isActive: true,
+            accessScope: 'NETWORK',
             role: { in: [...scheduledPipelineActorRoles] },
           },
           select: {
@@ -7795,6 +7895,25 @@ export class GuestGamificationService {
           status: 'SKIPPED',
           reason:
             'Tenant is not active; scheduled delivery dispatcher skipped.',
+          result: null,
+        });
+        continue;
+      }
+
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        tenant.id,
+        deliveryOutboundRequirements,
+      );
+      const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+        admission,
+        'GUEST_GAME_DELIVERY_DISPATCH',
+      );
+      if (backgroundDenialNote) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason: backgroundDenialNote,
           result: null,
         });
         continue;
@@ -7826,6 +7945,8 @@ export class GuestGamificationService {
             tenantId: tenant.id,
             tenantSlug: tenant.slug,
             tenantStatus: tenant.status,
+            accessScope: 'NETWORK',
+            allowedStoreIds: [],
           },
           {
             ...dto,
@@ -7857,7 +7978,39 @@ export class GuestGamificationService {
   async pullBotDeliveries(
     dto: GuestGameBotDeliveryPullDto = {},
   ): Promise<GuestGameBotDeliveryPullResult> {
-    const { user, tenantSlug } = await this.resolveScheduledTenantActor(dto);
+    const { user, tenantSlug } = await this.resolveScheduledTenantActor(dto, {
+      allowInactiveTenant: true,
+    });
+    const admission = await this.tenantExecutionAdmission.evaluate(
+      user.tenantId,
+      deliveryOutboundRequirements,
+    );
+    const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+      admission,
+      'GUEST_GAME_DELIVERY_BOT_PULL',
+    );
+    if (backgroundDenialNote) {
+      return {
+        checked: 0,
+        ready: 0,
+        skipped: 0,
+        items: [],
+        note: backgroundDenialNote,
+      };
+    }
+
+    const protocolGate =
+      evaluateLegacyGuestGameDeliveryProtocolGate('LEGACY_BOT_PULL');
+    if (!protocolGate.allowed) {
+      return {
+        checked: 0,
+        ready: 0,
+        skipped: 0,
+        items: [],
+        note: protocolGate.note,
+      };
+    }
+
     const channels = deliveryDispatchChannels(dto.channels);
     const limit = Math.min(50, Math.max(1, intValue(dto.limit) ?? 25));
     const rows = await this.prisma.guestGameDelivery.findMany({
@@ -7895,7 +8048,15 @@ export class GuestGamificationService {
   async ackBotDelivery(
     dto: GuestGameBotDeliveryAckDto,
   ): Promise<GuestGameBotDeliveryAckResult> {
-    const { user } = await this.resolveScheduledTenantActor(dto);
+    const { user } = await this.resolveScheduledTenantActor(dto, {
+      allowInactiveTenant: true,
+    });
+    const protocolGate =
+      evaluateLegacyGuestGameDeliveryProtocolGate('LEGACY_BOT_ACK');
+    if (!protocolGate.allowed) {
+      throw new ConflictException(protocolGate.note);
+    }
+
     const deliveryId = nullableString(dto.deliveryId);
 
     if (!deliveryId) {
@@ -10910,6 +11071,11 @@ export class GuestGamificationService {
       dto.dryRun === undefined ? true : booleanValue(dto.dryRun);
     const config = deliveryProviderConfig();
     const dryRun = requestedDryRun || !config.realSendEnabled;
+    const protocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
+      'LEGACY_DIRECT_PROVIDER',
+    );
+    const protocolForcedDryRun = !dryRun && !protocolGate.allowed;
+    const effectiveDryRun = dryRun || protocolForcedDryRun;
     const rows = await this.prisma.guestGameDelivery.findMany({
       where: {
         tenantId: user.tenantId,
@@ -11090,6 +11256,64 @@ export class GuestGamificationService {
         continue;
       }
 
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        user.tenantId,
+        deliveryOutboundRequirements,
+      );
+      const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+        admission,
+        'GUEST_GAME_DELIVERY_DISPATCH',
+      );
+      if (backgroundDenialNote) {
+        const note = backgroundDenialNote;
+        blocked += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel,
+          status: 'BLOCKED',
+          note,
+        });
+        await this.createDeliveryEvent(user, row.id, row.rewardId, {
+          eventType: 'DELIVERY_DISPATCH_BLOCKED',
+          fromStatus: row.status,
+          toStatus: row.status,
+          channel,
+          note,
+          payload: deliveryDispatchPayload({
+            dryRun,
+            providerConfigured: provider.configured,
+            reason: 'tenant_execution_not_admitted',
+          }),
+        });
+        continue;
+      }
+
+      if (protocolForcedDryRun) {
+        const note = protocolGate.note;
+        skipped += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel,
+          status: 'DRY_RUN',
+          note,
+        });
+        await this.createDeliveryEvent(user, row.id, row.rewardId, {
+          eventType: 'DELIVERY_DISPATCH_DRY_RUN',
+          fromStatus: row.status,
+          toStatus: row.status,
+          channel,
+          note,
+          payload: deliveryDispatchPayload({
+            dryRun: true,
+            providerConfigured: provider.configured,
+            reason: protocolGate.reasonCode,
+          }),
+        });
+        continue;
+      }
+
       try {
         const providerPayload =
           channel === 'TELEGRAM'
@@ -11170,8 +11394,8 @@ export class GuestGamificationService {
     const dispatcher = this.buildDeliveryDispatcherStatus(deliveries);
 
     return {
-      dryRun,
-      realSendEnabled: config.realSendEnabled,
+      dryRun: effectiveDryRun,
+      realSendEnabled: config.realSendEnabled && protocolGate.allowed,
       checked: rows.length,
       sent,
       failed,
@@ -11180,9 +11404,11 @@ export class GuestGamificationService {
       items,
       deliveries: deliveries.slice(0, 12),
       dispatcher,
-      note: dryRun
-        ? 'Dispatcher запущен в безопасном dry-run: события записаны, внешних Telegram/MAX-отправок не было.'
-        : 'Dispatcher обработал готовые Telegram/MAX delivery через настроенные providers.',
+      note: protocolForcedDryRun
+        ? protocolGate.note
+        : dryRun
+          ? 'Dispatcher запущен в безопасном dry-run: события записаны, внешних Telegram/MAX-отправок не было.'
+          : 'Dispatcher обработал готовые Telegram/MAX delivery через настроенные providers.',
     };
   }
 
@@ -11207,19 +11433,33 @@ export class GuestGamificationService {
         : booleanValue(dto.includeBlocked);
     const limit = Math.min(100, Math.max(1, intValue(dto.limit) ?? 50));
     const queue = this.buildCommunicationQueue(profiles, rewards, null);
-    const items = queue.items
+    const protocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
+      'LEGACY_PROVIDER_PREPARE',
+    );
+    const candidates = queue.items
       .filter((item) =>
         requestedRewardIds ? requestedRewardIds.has(item.rewardId) : true,
       )
       .filter(
         (item) =>
           includeBlocked || isReadyDeliveryQueueStatus(item.queueStatus),
+      );
+    const protocolBlocked = protocolGate.allowed
+      ? 0
+      : candidates.filter((item) =>
+          isLegacyGuestGameProviderDeliveryChannel(item.channel),
+        ).length;
+    const items = candidates
+      .filter(
+        (item) =>
+          protocolGate.allowed ||
+          !isLegacyGuestGameProviderDeliveryChannel(item.channel),
       )
       .slice(0, limit);
     const deliveries: GuestGameDelivery[] = [];
     let created = 0;
     let updated = 0;
-    let skipped = 0;
+    let skipped = protocolBlocked;
 
     for (const item of items) {
       const reward = rewardById.get(item.rewardId);
@@ -11257,6 +11497,10 @@ export class GuestGamificationService {
         createdByUserId: actorUserId(user),
         channel: item.channel,
         status,
+        stateReasonCode: preparedDeliveryStateReasonCode(
+          status,
+          item.queueStatus,
+        ),
         readinessStatus: item.queueStatus,
         recipientMasked: item.contactMasked,
         channelIdentityMasked: deliveryChannelIdentityMasked(
@@ -11310,6 +11554,10 @@ export class GuestGamificationService {
         fromStatus: existing?.status ?? null,
         toStatus: row.status,
         channel: row.channel,
+        stateReasonCode: preparedDeliveryStateReasonCode(
+          deliveryStatusValue(row.status),
+          item.queueStatus,
+        ),
         note: item.nextAction,
         payload: deliveryMetadata(item),
       });
@@ -11323,7 +11571,18 @@ export class GuestGamificationService {
       deliveries.push(mapDelivery(row));
     }
 
-    return { created, updated, skipped, deliveries };
+    return {
+      created,
+      updated,
+      skipped,
+      deliveries,
+      ...(protocolBlocked > 0
+        ? {
+            protocolBlocked,
+            note: protocolGate.note,
+          }
+        : {}),
+    };
   }
 
   async updateDelivery(
@@ -11332,12 +11591,21 @@ export class GuestGamificationService {
     dto: GuestGameDeliveryUpdateDto,
   ): Promise<GuestGameDelivery> {
     const current = await this.assertDelivery(user, id);
-    const nextStatus = enumValue(
-      dto.status,
-      deliveryStatuses,
-      deliveryStatusValue(current.status),
-    );
+    const currentChannel = deliveryChannelValue(current.channel, null);
+    if (isLegacyGuestGameProviderDeliveryChannel(currentChannel)) {
+      // Keep provider updates fail-closed until every delivery rebind/batch
+      // writer enters the migration-166 reward boundary before its first DML.
+      const protocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
+        'LEGACY_PROVIDER_UPDATE',
+      );
+      if (!protocolGate.allowed) {
+        throw new ConflictException(protocolGate.note);
+      }
+    }
+
     const currentStatus = deliveryStatusValue(current.status);
+    const nextStatus =
+      enumValue(dto.status, deliveryStatuses, currentStatus) ?? currentStatus;
     const currentReadinessStatus = communicationQueueStatusValue(
       current.readinessStatus,
     );
@@ -11387,20 +11655,32 @@ export class GuestGamificationService {
     }
 
     const now = new Date();
+    const statusChanged = nextStatus !== currentStatus;
+    const stateReasonCode = statusChanged
+      ? manualDeliveryStateReasonCode(nextStatus)
+      : undefined;
     const data = clean({
       status: nextStatus,
       note: nullableString(dto.note),
-      sentAt: nextStatus === 'SENT' ? (current.sentAt ?? now) : null,
-      failedAt: nextStatus === 'FAILED' ? (current.failedAt ?? now) : null,
-      canceledAt:
-        nextStatus === 'CANCELED'
+      stateReasonCode,
+      sentAt: statusChanged
+        ? nextStatus === 'SENT'
+          ? (current.sentAt ?? now)
+          : null
+        : undefined,
+      failedAt: statusChanged
+        ? nextStatus === 'FAILED'
+          ? (current.failedAt ?? now)
+          : null
+        : undefined,
+      canceledAt: statusChanged
+        ? nextStatus === 'CANCELED'
           ? (current.canceledAt ?? now)
-          : nextStatus === 'READY' || nextStatus === 'SENT'
-            ? null
-            : current.canceledAt,
+          : null
+        : undefined,
     });
     const row =
-      nextStatus === 'READY' || nextStatus === 'SENT'
+      statusChanged && (nextStatus === 'READY' || nextStatus === 'SENT')
         ? await this.prisma.$transaction(async (tx) => {
             if (
               !(await this.lockLegacyDeliveryReward(
@@ -11432,6 +11712,10 @@ export class GuestGamificationService {
         fromStatus: current.status,
         toStatus: row.status,
         channel: row.channel,
+        stateReasonCode:
+          statusChanged && stateReasonCode !== undefined
+            ? stateReasonCode
+            : undefined,
         note: nullableString(dto.note),
       });
     }
@@ -11497,19 +11781,22 @@ export class GuestGamificationService {
     tenantId: string,
     rewardId: string,
   ) {
-    const rows = await tx.$queryRaw<
-      Array<{ claimRequired: boolean; rewardType: string }>
-    >(
-      Prisma.sql`
-        SELECT "claimRequired", "rewardType"
-        FROM "GuestGameReward"
-        WHERE "id" = ${rewardId}
-          AND "tenantId" = ${tenantId}
-        FOR UPDATE
-      `,
+    const { claimRequired } = await acquireGuestGameRewardDeliveryLock(
+      tx,
+      tenantId,
+      rewardId,
     );
+    if (claimRequired) {
+      return false;
+    }
+    const reward = await tx.guestGameReward.findFirst({
+      where: { id: rewardId, tenantId },
+      select: { rewardType: true },
+    });
 
-    return rows[0] ? legacyDeliveryRewardEligible(rows[0]) : false;
+    return reward
+      ? legacyDeliveryRewardEligible({ claimRequired, ...reward })
+      : false;
   }
 
   private async createDeliveryEvent(
@@ -11521,6 +11808,7 @@ export class GuestGamificationService {
       fromStatus?: string | null;
       toStatus?: string | null;
       channel?: string | null;
+      stateReasonCode?: string | null;
       note?: string | null;
       payload?: Prisma.InputJsonValue | null;
     },
@@ -11535,6 +11823,7 @@ export class GuestGamificationService {
         fromStatus: data.fromStatus ?? null,
         toStatus: data.toStatus ?? null,
         channel: data.channel ?? null,
+        stateReasonCode: data.stateReasonCode ?? null,
         note: data.note ?? null,
         payload: data.payload ?? Prisma.JsonNull,
       },
@@ -11831,13 +12120,7 @@ export class GuestGamificationService {
     const nextStatus = dto.status;
 
     const row = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`
-        SELECT "id"
-        FROM "GuestGameReward"
-        WHERE "id" = ${id}
-          AND "tenantId" = ${user.tenantId}
-        FOR UPDATE
-      `);
+      await acquireGuestGameRewardDeliveryLock(tx, user.tenantId, id);
       const liveCurrent = await tx.guestGameReward.findFirst({
         where: { id, tenantId: user.tenantId },
       });
@@ -18441,10 +18724,13 @@ export class GuestGamificationService {
     return new Set(rows.map((row) => row.audienceId));
   }
 
-  private async resolveScheduledTenantActor(dto: {
-    tenantId?: string | null;
-    tenantSlug?: string | null;
-  }): Promise<{ user: AuthenticatedUser; tenantSlug: string }> {
+  private async resolveScheduledTenantActor(
+    dto: {
+      tenantId?: string | null;
+      tenantSlug?: string | null;
+    },
+    options: { allowInactiveTenant?: boolean } = {},
+  ): Promise<{ user: AuthenticatedUser; tenantSlug: string }> {
     const tenantId = nullableString(dto.tenantId);
     const tenantSlug = nullableString(dto.tenantSlug);
 
@@ -18464,6 +18750,7 @@ export class GuestGamificationService {
         users: {
           where: {
             isActive: true,
+            accessScope: 'NETWORK',
             role: { in: [...scheduledPipelineActorRoles] },
           },
           select: {
@@ -18483,7 +18770,10 @@ export class GuestGamificationService {
       throw new NotFoundException('Tenant was not found for bot consumer.');
     }
 
-    if (tenant.status !== TenantLifecycleStatus.ACTIVE) {
+    if (
+      !options.allowInactiveTenant &&
+      tenant.status !== TenantLifecycleStatus.ACTIVE
+    ) {
       throw new BadRequestException(
         'Tenant is not active; bot consumer is disabled.',
       );
@@ -18508,6 +18798,8 @@ export class GuestGamificationService {
         tenantId: tenant.id,
         tenantSlug: tenant.slug,
         tenantStatus: tenant.status,
+        accessScope: 'NETWORK',
+        allowedStoreIds: [],
       },
       tenantSlug: tenant.slug,
     };
@@ -18579,10 +18871,14 @@ export class GuestGamificationService {
         Boolean(result),
       );
     const config = deliveryProviderConfig();
+    const protocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
+      'LEGACY_DIRECT_PROVIDER',
+    );
+    const effectiveDryRun = dryRun || !protocolGate.allowed;
 
     return {
-      dryRun,
-      realSendEnabled: config.realSendEnabled,
+      dryRun: effectiveDryRun,
+      realSendEnabled: config.realSendEnabled && protocolGate.allowed,
       checkedTenants: tenants.length,
       processedTenants: processed.length,
       skippedTenants: tenants.filter((tenant) => tenant.status === 'SKIPPED')
@@ -18595,9 +18891,11 @@ export class GuestGamificationService {
       skipped: sum(results.map((result) => result.skipped)),
       blocked: sum(results.map((result) => result.blocked)),
       tenants,
-      note: dryRun
-        ? 'Scheduled delivery dispatcher ran in safe dry-run mode: audit events were recorded, external Telegram/MAX sends were not performed.'
-        : 'Scheduled delivery dispatcher processed ready Telegram/MAX deliveries through configured providers. Langame writes were not performed.',
+      note: !protocolGate.allowed
+        ? protocolGate.note
+        : dryRun
+          ? 'Scheduled delivery dispatcher ran in safe dry-run mode: audit events were recorded, external Telegram/MAX sends were not performed.'
+          : 'Scheduled delivery dispatcher processed ready Telegram/MAX deliveries through configured providers. Langame writes were not performed.',
     };
   }
 
@@ -18768,6 +19066,8 @@ export class GuestGamificationService {
     tenantSlug?: string,
   ): GuestGameBotConsumerStatus {
     const config = botConsumerConfig(tenantSlug);
+    const protocolGate =
+      evaluateLegacyGuestGameDeliveryProtocolGate('LEGACY_BOT_PULL');
     const readyForBot = deliveries.filter(
       (item) =>
         item.status === 'READY' &&
@@ -18792,7 +19092,8 @@ export class GuestGamificationService {
     const requiredEnv = canaryRequired
       ? [...config.requiredEnv, 'GUEST_GAME_BOT_CONSUMER_LIMIT=1']
       : config.requiredEnv;
-    const configured = config.configured && !canaryRequired;
+    const configured =
+      protocolGate.allowed && config.configured && !canaryRequired;
     const mode: GuestGameBotConsumerStatus['mode'] = !configured
       ? 'BLOCKED'
       : config.dryRun
@@ -18801,14 +19102,16 @@ export class GuestGamificationService {
 
     return {
       mode,
-      modeLabel: canaryRequired
-        ? 'нужен canary LIMIT=1'
-        : mode === 'READY'
-          ? 'готов к real-send'
-          : mode === 'DRY_RUN'
-            ? 'dry-run'
-            : 'нужна настройка',
-      dryRun: config.dryRun,
+      modeLabel: !protocolGate.allowed
+        ? 'protocol blocked'
+        : canaryRequired
+          ? 'нужен canary LIMIT=1'
+          : mode === 'READY'
+            ? 'готов к real-send'
+            : mode === 'DRY_RUN'
+              ? 'dry-run'
+              : 'нужна настройка',
+      dryRun: config.dryRun || !protocolGate.allowed,
       configured,
       limit: config.limit,
       canaryLimit: config.canaryLimit,
@@ -18831,13 +19134,17 @@ export class GuestGamificationService {
       ).length,
       lastAckAt,
       preview,
-      nextAction: botConsumerNextAction(
-        config,
-        readyForBot.length,
-        lastAckAt,
-        canaryRequired,
-      ),
-      note: 'Статус собран из API-visible env, текущего outbox и сохраненных ack-событий. Если runner запущен отдельным systemd unit со своим EnvironmentFile, фактический запуск подтверждается по новым ack-событиям.',
+      nextAction: !protocolGate.allowed
+        ? 'Deploy and admit delivery protocol v1 coordinator before enabling bot-consumer effects.'
+        : botConsumerNextAction(
+            config,
+            readyForBot.length,
+            lastAckAt,
+            canaryRequired,
+          ),
+      note: !protocolGate.allowed
+        ? protocolGate.note
+        : 'Статус собран из API-visible env, текущего outbox и сохраненных ack-событий. Если runner запущен отдельным systemd unit со своим EnvironmentFile, фактический запуск подтверждается по новым ack-событиям.',
     };
   }
 
@@ -18873,6 +19180,9 @@ export class GuestGamificationService {
     deliveries: GuestGameDelivery[],
   ): GuestGameDeliveryDispatcherStatus {
     const config = deliveryProviderConfig();
+    const protocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
+      'LEGACY_DIRECT_PROVIDER',
+    );
     const providers = [
       deliveryProviderStatus(
         config,
@@ -18894,12 +19204,23 @@ export class GuestGamificationService {
             item.channel === 'MAX',
         ).length,
       ),
-    ];
+    ].map((provider) =>
+      protocolGate.allowed
+        ? provider
+        : {
+            ...provider,
+            canAttemptSend: false,
+            dryRunOnly: true,
+            note: protocolGate.note,
+          },
+    );
+    const effectiveRealSendEnabled =
+      config.realSendEnabled && protocolGate.allowed;
     const hasReadyProvider = providers.some(
       (provider) => provider.canAttemptSend,
     );
     const mode: GuestGameDeliveryDispatcherStatus['mode'] =
-      !config.realSendEnabled
+      !effectiveRealSendEnabled
         ? 'DRY_RUN'
         : hasReadyProvider
           ? 'READY'
@@ -18913,10 +19234,11 @@ export class GuestGamificationService {
           : mode === 'DRY_RUN'
             ? 'dry-run'
             : 'отключен',
-      realSendEnabled: config.realSendEnabled,
+      realSendEnabled: effectiveRealSendEnabled,
       providers,
-      note:
-        mode === 'READY'
+      note: !protocolGate.allowed
+        ? protocolGate.note
+        : mode === 'READY'
           ? 'Dispatcher может отправлять только готовые Telegram/MAX delivery с подтвержденным numeric chat_id или настроенным provider.'
           : mode === 'DRY_RUN'
             ? 'Безопасный режим: dispatcher проверяет outbox и пишет audit-события, но не отправляет внешние сообщения.'
@@ -25033,6 +25355,7 @@ function mapDeliveryEvent(row: DeliveryEventRow): GuestGameDeliveryEvent {
     fromStatus: row.fromStatus,
     toStatus: row.toStatus,
     channel: deliveryChannelValue(row.channel, null),
+    stateReasonCode: row.stateReasonCode,
     note: row.note,
     payload: row.payload,
     createdAt: row.createdAt.toISOString(),
@@ -25055,6 +25378,7 @@ function mapDelivery(row: DeliveryRow): GuestGameDelivery {
     channelLabel: communicationQueueChannelLabel(channel),
     status,
     statusLabel: deliveryStatusLabel(status),
+    stateReasonCode: row.stateReasonCode,
     readinessStatus,
     readinessStatusLabel: communicationQueueStatusLabel(readinessStatus),
     recipientMasked: row.recipientMasked,
@@ -25653,6 +25977,43 @@ function deliveryStatusFromQueueStatus(
   }
 
   return isReadyDeliveryQueueStatus(status) ? 'READY' : 'BLOCKED';
+}
+
+function preparedDeliveryStateReasonCode(
+  status: GuestGameDeliveryStatus,
+  queueStatus: GuestGameCommunicationQueueStatus,
+): string | null {
+  if (status === 'BLOCKED') {
+    return `DELIVERY_READINESS_${queueStatus}`;
+  }
+
+  if (status === 'FAILED') {
+    return 'DELIVERY_PREPARATION_FAILED';
+  }
+
+  if (status === 'CANCELED') {
+    return 'REWARD_CANCELED';
+  }
+
+  return null;
+}
+
+function manualDeliveryStateReasonCode(
+  status: GuestGameDeliveryStatus,
+): string | null {
+  if (status === 'BLOCKED') {
+    return 'MANUAL_DELIVERY_BLOCKED';
+  }
+
+  if (status === 'FAILED') {
+    return 'MANUAL_DELIVERY_FAILED';
+  }
+
+  if (status === 'CANCELED') {
+    return 'MANUAL_DELIVERY_CANCELED';
+  }
+
+  return null;
 }
 
 function deliveryStatusValue(status: string): GuestGameDeliveryStatus {
@@ -26714,6 +27075,32 @@ function deliveryDispatchPayload(data: {
   providerMessageId?: string | null;
 }): Prisma.InputJsonValue {
   return clean(data);
+}
+
+function deliveryExecutionAdmissionNote(
+  decision: TenantExecutionAdmissionDecision,
+) {
+  const failedRequirement = decision.failedRequirement
+    ? ` (${decision.failedRequirement.module}:${decision.failedRequirement.action})`
+    : '';
+
+  return `Tenant execution admission denied: ${decision.reasonCode}${failedRequirement}.`;
+}
+
+function tenantBackgroundExecutionDenialNote(
+  admission: TenantExecutionAdmissionDecision,
+  jobKind: TenantBackgroundJobKind,
+): string | null {
+  if (!admission.allowed) {
+    return deliveryExecutionAdmissionNote(admission);
+  }
+
+  const decision = evaluateTenantBackgroundExecutionPolicy({
+    stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+    jobKind,
+  });
+
+  return decision.allowed ? null : tenantBackgroundExecutionNote(decision);
 }
 
 function deliveryProviderMessage(row: DeliveryRow) {

@@ -21,6 +21,7 @@ import {
   type StaffDirectoryQuery,
   type StaffDirectoryReport,
   type StaffMemberDto,
+  type StaffMemberResponse,
 } from './staff-directory.service';
 
 @Controller('staff/directory')
@@ -51,6 +52,14 @@ export class StaffDirectoryController {
     @Query() query: StaffActiveShiftQuery,
   ): Promise<StaffActiveShiftCandidatesReport> {
     return this.staffDirectoryService.getActiveShiftCandidates(user, query);
+  }
+
+  @Get(':id')
+  getMember(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<StaffMemberResponse> {
+    return this.staffDirectoryService.getMember(user, id);
   }
 
   @Post()

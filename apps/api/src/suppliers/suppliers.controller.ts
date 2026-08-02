@@ -10,7 +10,6 @@ import {
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '@prisma/client';
@@ -18,13 +17,16 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { SuppliersService } from './suppliers.service';
 import type { CreateSupplierDto, UpdateSupplierDto } from './suppliers.dto';
 
+const TENANT_USER_ROLES = Object.values(UserRole);
+
 @Controller('suppliers')
 export class SuppliersController {
   constructor(private readonly suppliersService: SuppliersService) {}
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get()
-  findAll(@CurrentUser() user?: AuthenticatedUser) {
+  findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.suppliersService.findAll(user);
   }
 

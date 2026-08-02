@@ -10,6 +10,11 @@ import { TenantLifecycleStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
+import {
   type GuestGameEffectMaterializeResult,
   GuestGamificationService,
 } from './guest-gamification.service';
@@ -466,8 +471,9 @@ export class GuestGameRewardMaterializerSchedulerService
           id: true,
           slug: true,
           status: true,
+          customerStage: true,
           users: {
-            where: { isActive: true },
+            where: { isActive: true, accessScope: 'NETWORK' },
             select: {
               id: true,
               email: true,
@@ -485,6 +491,21 @@ export class GuestGameRewardMaterializerSchedulerService
       const results: GuestGameRewardMaterializerTenantResult[] = [];
 
       for (const tenant of tenants) {
+        const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+          stage: tenantBackgroundStageForCustomerStage(tenant.customerStage),
+          jobKind: 'GUEST_GAME_REWARD_MATERIALIZER',
+        });
+        if (!executionDecision.allowed) {
+          results.push(
+            emptyTenantResult(
+              tenant.id,
+              tenant.slug,
+              'SKIPPED',
+              tenantBackgroundExecutionNote(executionDecision),
+            ),
+          );
+          continue;
+        }
         if (tenant.status !== TenantLifecycleStatus.ACTIVE) {
           results.push(
             emptyTenantResult(
@@ -514,6 +535,8 @@ export class GuestGameRewardMaterializerSchedulerService
           tenantId: tenant.id,
           tenantSlug: tenant.slug,
           tenantStatus: tenant.status,
+          accessScope: 'NETWORK' as const,
+          allowedStoreIds: [],
         };
         const dto = {
           limit: this.batchSize(),

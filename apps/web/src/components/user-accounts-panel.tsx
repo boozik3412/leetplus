@@ -40,7 +40,7 @@ function createEmptyForm(defaultRole: UserRole): FormState {
     customRoleId: null,
     isActive: true,
     password: "",
-    scope: "NETWORK",
+    scope: "STORES",
     storeIds: [],
   };
 }
@@ -119,11 +119,7 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
     id: "guests",
     title: "Гости и CRM",
     description: "Клиентская база, сегменты, CRM-задачи и ПДн.",
-    permissions: [
-      "view_guests",
-      "export_guests",
-      "manage_guest_crm",
-    ],
+    permissions: ["view_guests", "export_guests", "manage_guest_crm"],
   },
   {
     id: "gamification",
@@ -359,6 +355,7 @@ export function UserAccountsPanel({
   initialData: UserAccountsResponse;
 }) {
   const assignableRoles = getAssignableRoles(currentUser.role);
+  const canManageGlobalRoles = currentUser.accessScope === "NETWORK";
   const defaultRole = assignableRoles.includes("CLUB_ADMINISTRATOR")
     ? "CLUB_ADMINISTRATOR"
     : (assignableRoles[0] ?? currentUser.role);
@@ -425,7 +422,7 @@ export function UserAccountsPanel({
           selectedSystemRoleOption.permissions,
         )
       : false;
-  const isRoleEditorOpen = roleEditorMode !== "idle";
+  const isRoleEditorOpen = canManageGlobalRoles && roleEditorMode !== "idle";
   const roleEditorKicker =
     roleEditorMode === "custom"
       ? "Изменение клубной роли"
@@ -521,10 +518,14 @@ export function UserAccountsPanel({
       isPlatformAdmin: false,
       tenantId: currentUser.tenantId,
       tenantSlug: currentUser.tenantSlug,
+      accessScope: currentUser.accessScope,
+      allowedStoreIds: currentUser.allowedStoreIds,
     }),
     [
       currentUser.tenantId,
       currentUser.tenantSlug,
+      currentUser.accessScope,
+      currentUser.allowedStoreIds,
       roleEditorMode,
       roleForm.name,
       roleForm.permissions,
@@ -568,6 +569,9 @@ export function UserAccountsPanel({
     : selectedInvite
       ? assignableRoles.includes(selectedInvite.role)
       : true;
+  const canGrantNetwork = canManageGlobalRoles;
+  const hasValidScopeSelection =
+    form.scope === "NETWORK" ? canGrantNetwork : form.storeIds.length > 0;
   const filteredUsers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
@@ -670,6 +674,10 @@ export function UserAccountsPanel({
   }
 
   function startCreateRole() {
+    if (!canManageGlobalRoles) {
+      return;
+    }
+
     setSelectedRoleId(null);
     setSelectedSystemRole(null);
     setRoleEditorMode("new");
@@ -678,6 +686,10 @@ export function UserAccountsPanel({
   }
 
   function startCreateRoleFromSystem(role: UserRoleOption) {
+    if (!canManageGlobalRoles) {
+      return;
+    }
+
     setSelectedRoleId(null);
     setSelectedSystemRole(role.role);
     setRoleEditorMode("system");
@@ -697,6 +709,10 @@ export function UserAccountsPanel({
   }
 
   function startEditRole(role: UserAccessRole) {
+    if (!canManageGlobalRoles) {
+      return;
+    }
+
     setSelectedRoleId(role.id);
     setSelectedSystemRole(null);
     setRoleEditorMode("custom");
@@ -715,6 +731,15 @@ export function UserAccountsPanel({
 
   async function saveAccessRole(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!canManageGlobalRoles) {
+      setRoleStatus({
+        type: "error",
+        message: "Настройка ролей доступна только на уровне сети",
+      });
+      return;
+    }
+
     setIsRoleSaving(true);
     setRoleStatus({ type: "idle", message: "" });
 
@@ -852,6 +877,7 @@ export function UserAccountsPanel({
       customRoleId: form.customRoleId,
       isActive: form.isActive,
       ...(form.password.trim() ? { password: form.password.trim() } : {}),
+      scope: form.scope,
       storeIds: form.scope === "STORES" ? form.storeIds : [],
     };
     if (selectedInvite && accountFormMode === "invite") {
@@ -863,6 +889,7 @@ export function UserAccountsPanel({
           fullName: form.fullName || undefined,
           role: form.role,
           customRoleId: form.customRoleId,
+          scope: form.scope,
           storeIds: payload.storeIds,
         }),
       });
@@ -900,6 +927,7 @@ export function UserAccountsPanel({
           fullName: form.fullName || undefined,
           role: form.role,
           customRoleId: form.customRoleId,
+          scope: form.scope,
           storeIds: payload.storeIds,
           expiresInDays: 7,
         }),
@@ -1235,7 +1263,10 @@ export function UserAccountsPanel({
                 </p>
               </div>
               <div className="inline-flex rounded-md border border-zinc-300 bg-white p-1 text-sm dark:border-zinc-700 dark:bg-zinc-950">
-                {(["NETWORK", "STORES"] as const).map((scope) => (
+                {(canGrantNetwork
+                  ? (["NETWORK", "STORES"] as const)
+                  : (["STORES"] as const)
+                ).map((scope) => (
                   <button
                     key={scope}
                     type="button"
@@ -1372,6 +1403,11 @@ export function UserAccountsPanel({
               Ваша роль не может менять этот доступ.
             </div>
           ) : null}
+          {!hasValidScopeSelection ? (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-200">
+              Выберите хотя бы один доступный клуб.
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap gap-2">
             <button
@@ -1379,7 +1415,8 @@ export function UserAccountsPanel({
               disabled={
                 isSaving ||
                 (roleOptions.length === 0 && customRoles.length === 0) ||
-                !canSaveSelected
+                !canSaveSelected ||
+                !hasValidScopeSelection
               }
               className="inline-flex h-11 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
             >
@@ -1479,17 +1516,6 @@ export function UserAccountsPanel({
                       >
                         Открыть
                       </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          copyInviteUrl(invite.registrationUrl ?? null);
-                        }}
-                        disabled={!invite.registrationUrl}
-                        className="rounded-md bg-zinc-950 px-2 py-1 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
-                      >
-                        Копировать
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -1503,18 +1529,25 @@ export function UserAccountsPanel({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-              Роли клуба
+              Роли сети
             </p>
             <h2 className="mt-1 text-xl font-semibold">Настройка доступов</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Создайте роль под структуру клуба и отметьте только те разделы,
+              Создайте роль под структуру сети и отметьте только те разделы,
               которые сотрудник должен видеть или редактировать.
             </p>
+            {!canManageGlobalRoles ? (
+              <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-100">
+                Роли действуют на всю сеть. В клубном доступе этот раздел
+                доступен только для просмотра.
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
             onClick={startCreateRole}
-            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            disabled={!canManageGlobalRoles}
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
           >
             Создать с нуля
           </button>
@@ -1537,8 +1570,9 @@ export function UserAccountsPanel({
                     key={role.role}
                     type="button"
                     onClick={() => startCreateRoleFromSystem(role)}
+                    disabled={!canManageGlobalRoles}
                     className={[
-                      "w-full rounded-md border px-3 py-2 text-left text-sm transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                      "w-full rounded-md border px-3 py-2 text-left text-sm transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:border-zinc-200 disabled:hover:bg-zinc-50 dark:disabled:hover:border-zinc-800 dark:disabled:hover:bg-zinc-900/60",
                       roleEditorMode === "system" &&
                       selectedSystemRole === role.role
                         ? "border-emerald-500 bg-emerald-500/10"
@@ -1581,8 +1615,9 @@ export function UserAccountsPanel({
                     key={role.id}
                     type="button"
                     onClick={() => startEditRole(role)}
+                    disabled={!canManageGlobalRoles}
                     className={[
-                      "w-full rounded-md border px-3 py-2 text-left text-sm transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                      "w-full rounded-md border px-3 py-2 text-left text-sm transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:border-zinc-200 disabled:hover:bg-zinc-50 dark:disabled:hover:border-zinc-800 dark:disabled:hover:bg-zinc-900/60",
                       selectedRoleId === role.id
                         ? "border-emerald-500 bg-emerald-500/10"
                         : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60",
@@ -1857,7 +1892,8 @@ export function UserAccountsPanel({
                 <button
                   type="button"
                   onClick={startCreateRole}
-                  className="inline-flex h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                  disabled={!canManageGlobalRoles}
+                  className="inline-flex h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
                   Создать с нуля
                 </button>
@@ -1879,7 +1915,8 @@ export function UserAccountsPanel({
               <button
                 type="button"
                 onClick={startCreateRole}
-                className="mt-4 inline-flex h-10 w-fit items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+                disabled={!canManageGlobalRoles}
+                className="mt-4 inline-flex h-10 w-fit items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
               >
                 Создать роль
               </button>

@@ -1,0 +1,531 @@
+# Staff task catalog integrity: inventory и DB-invariant runbook
+
+| Поле                  | Значение                                                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Статус                | Snapshot admission, inventory, aggregate planner и DB EXPAND candidates; production-like admission/inventory не выполнялись |
+| Версия                | 1.14.0                                                                                                                      |
+| Дата                  | 30.07.2026                                                                                                                  |
+| Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                        |
+| Schema target         | `CURRENT_179`; count `179`; head `20260731120000_identity_mail_delivery_release_head`                          |
+| Prior merge-ref baseline | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA                                 |
+| Previous accepted exact-head | `d525b736...` / CI `30447467729` (`run #28`); `3/3 PASS`                                                |
+| Last accepted checkpoint | exact-head `be8c94c4...` / CI `30449026506` (`run #29`); `3/3 PASS`                                          |
+| Current operational gate | non-owner runtime/app DB role admission and explicit `EXECUTE`; provider activation `NO-GO`                 |
+| Historical remote     | `CURRENT_165`: `4bd6a036...` / `30428288353`; `7c20adec...` / `30429463161` PASS                                           |
+| Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)                                            |
+| Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md)                                                  |
+| Следующий checkpoint  | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                      |
+
+Документ задаёт безопасный порядок проверки legacy-данных `StaffTask`,
+`StaffTaskTemplate`, `StaffTaskRecurringRule` и
+`StaffTaskRecurringRuleRun` после schema-only EXPAND и успешного
+`CURRENT_179` admission, но до reconciliation и `VALIDATE`. Reviewed
+StaffTask evidence остаётся привязана к frozen `EXPAND_162` prefix (count
+`162`, head `20260727131000_staff_task_integrity_expand`); current state
+добавляет exact 17-name allowlisted additive tail `163..179` из
+[канонического current release contract](../README.md#канонический-current-release-contract).
+Signed `CURRENT_166` envelope и DB marker — historical evidence только для
+`CURRENT_166`: их нельзя переименовать или reuse для `CURRENT_179`. Для current
+state нужны новый acquisition request, `creationNonce`, state-bound Ed25519
+envelope и marker rotation. Roots `{}` / EMPTY, поэтому production-like
+inventory и внешний beta fail-closed `NO-GO`.
+Он не разрешает автоматическое исправление данных, production migration,
+включение scheduler или выдачу внешнего доступа.
+Production-like scanner можно запускать только после успешного admission
+точного Git-bound snapshot в требуемом состоянии; сам inventory не заменяет
+этот допуск.
+
+Last accepted exact-head
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c` / CI `30449026506`
+(`run #29`) завершился `3/3 PASS`: Application `90566337085`, Authority checks
+`90566337062`, PostgreSQL major `16` job `90566337060`. Authority checks не
+выполняли root enrollment; canonical roots `{}`. Previous accepted exact-head
+— `d525b736d03162a2c58de17cbf7679ba6f515096` / CI `30447467729`
+(`run #28`); prior PR-head-associated merge-ref — `bbef153a...` / CI
+`30443837684`. Run #26 и run #27 rejected.
+
+Structured evidence: `populatedLegacyDeliveries=10`,
+`canonicalStoreBackfills=1`, `legacyQuarantines=6`,
+`preservedFailClosedStores=3`, `committedTransitions=4`,
+`runtimeBoundaryNegatives=9`, `immutableMutationsRejected=7`,
+`finalStateAndEvidenceUnchanged=true`,
+`sourceDatabaseMigrationsApplied=0`; source migration state не изменён, source
+application data не затронуты. Lock evidence:
+`rewardDeliveryLockOrderEvidence={restrictedRuntimeScopeChecks:true,disposableOwnerDmlSessions:2,missingRewardRejected:true,crossTenantRewardRejected:true,waiterObservedOnAdvisoryLock:true,deliveryDeferredTriggerCommitted:true,rewardDeferredTriggerCommitted:true,holderAndWaiterCommitted:true,rawDeadlockOrLockTimeoutErrors:0,stateAndEvidenceUnchanged:true}`
+и `privateSecurityInvokerLockBoundaries=1`. Все четыре engineering
+provider-write P1 закрыты. Это не снимает operational `NO-GO`: actual non-owner
+runtime/app DB role требует admission и explicit `EXECUTE` при revoked
+`PUBLIC`; batch/rebind/future writers fail-closed, interactive actor boundary,
+retention, roots/acquisition и production-like apply/deploy/cutover pending.
+
+## 1. Зафиксированный контекст
+
+- четыре текущих клуба — четыре `Store` одного существующего `Tenant`;
+- текущий `tenantId` сохраняется;
+- независимая внешняя сеть получает отдельный `Tenant`;
+- первый внешний тест включает целиком геймификацию, ассортимент/товары,
+  сотрудников, in-app коммуникации и users/roles только в своём
+  tenant/разрешённых Store;
+- recurring actor HTTP является implementation candidate;
+- scheduler и all-tenant scheduled HTTP не зарегистрированы и остаются
+  `NO-GO`.
+
+## 2. Зачем нужен отдельный inventory
+
+Простые внешние ключи по глобальному `id` подтверждают существование parent
+row, но не подтверждают совпадение `tenantId`. Кроме того,
+`Store.onDelete=SetNull` способен превратить store-bound шаблон, правило или
+задачу в tenant-global resource.
+
+Перед schema enforcement необходимо отдельно доказать:
+
+1. отсутствие cross-tenant ссылок;
+2. совместимость Store у Rule, Template и созданной Task;
+3. корректность assignee и его persisted `NETWORK | STORES` scope;
+4. отсутствие неприемлемых active global/inactive references;
+5. состояние stale/failed scheduler journal;
+6. объём записей, на которые повлияет будущая политика физического удаления
+   Store.
+
+## 3. Safety contract scanner
+
+Каноническая команда:
+
+```text
+pnpm --filter database db:inventory:staff-task-integrity -- --pretty
+```
+
+Перед ней оператор задаёт:
+
+```text
+STAFF_TASK_INTEGRITY_INVENTORY_TARGET=development|staging|production
+STAFF_TASK_INTEGRITY_INVENTORY_CONFIRM=run-staff-task-integrity-inventory
+```
+
+Для production дополнительно требуется exact attestation, напечатанная
+командой `--help`. Она не хранится в runbook execution evidence. Оператор не
+должен копировать `DATABASE_URL`, production ID или полный JSON-дамп в git.
+
+Exit contract:
+
+- `0` — scan завершён, blocking findings нет; review findings возможны;
+- `1` — ошибка CLI/env/safety contract/БД;
+- `2` — scan завершён, найдено хотя бы одно blocking состояние.
+
+Scanner обязан:
+
+- требовать явный target и отдельное подтверждение запуска;
+- для production требовать дополнительную точную attestation;
+- использовать одно соединение;
+- принудительно включать PostgreSQL
+  `default_transaction_read_only=on`;
+- выполнять все запросы в одной `REPEATABLE READ` snapshot transaction;
+- проверять внутри transaction, что `transaction_read_only=on`;
+- иметь ограниченные `lock_timeout`, `statement_timeout` и общий transaction
+  timeout;
+- возвращать только aggregate counts и стабильные reason codes;
+- не возвращать UUID, email, имена, URL, токены, database URL или свободный
+  текст из строк;
+- не выполнять `INSERT`, `UPDATE`, `DELETE`, DDL, backfill или auto-fix;
+- отличать ошибку контракта/БД, blocking findings и review-only findings.
+
+`--help`, `--self-test` и test suite не должны читать БД или требовать
+credentials.
+
+## 4. Классы находок
+
+### Blocking до reconciliation
+
+- cross-tenant Store/User/Template/Rule/Task/Run references;
+- несовместимый текущий Store у Rule и linked Template;
+- `lastCreatedTask` или Run с Task не от ожидаемого Rule;
+- active Rule без Store до появления persisted timezone policy для
+  tenant-global schedules;
+- active Rule без `nextRunAt`, с отсутствующей или невалидной IANA timezone
+  своего Store;
+- active Rule у неактивного Store или неактивного Tenant;
+- Platform Admin, inactive, unresolved-scope или out-of-store assignee у
+  active Rule либо незавершённой Task;
+- `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID`: незавершённая tenant-global Task
+  назначена пользователю с `STORES` scope;
+- stale `STARTED` Run;
+- повторяющиеся `FAILED` Run выше зафиксированного порога.
+
+Любая такая находка означает, что schema `VALIDATE`, background reactivation и
+внешний beta-доступ запрещены.
+
+### Review до migration rehearsal
+
+- active tenant-global Template;
+- историческая Task, Store которой отличается от текущего Store изменяемого
+  Template/Rule, при сохранённой same-tenant source link;
+- количество `StaffTask`, `StaffTaskTemplate` и `StaffTaskRecurringRule`,
+  которое сегодня потеряет `storeId` при физическом удалении Store;
+- иные допустимые legacy-состояния, которые не нарушают authority, но требуют
+  явного business decision.
+
+Review-находка не должна маскироваться как доказательство готовности. Она
+добавляется в evidence с owner и решением.
+
+## 5. Безопасный порядок запуска
+
+1. Зафиксировать exact release SHA, expected migration revision/count и
+   target environment.
+2. Сначала выполнить `--help`, `--self-test`, unit checks и локальный test
+   suite admission/inventory.
+3. Выполнить scanner на чистой CI schema; ожидается zero blocking findings.
+4. По
+   [snapshot admission runbook](./staff-task-integrity-snapshot-admission-runbook.md)
+   учитывать public-only pre-signed pinned-path `LOCAL PASS` на historical test
+   evidence `2341b99937e54cc50d1763a0a794d975816c72ce` только как прежний
+   boundary; для exact current candidate SHA до production-like запуска
+   получить clean remote CI evidence. Экспериментальный Node 22 module mock
+   остаётся P2. Затем отдельным security change выполнить P0
+   reviewed Ed25519 root enrollment и ввести P0 operational signer/approved
+   acquisition/evidence controls. Только после этого отдельно приобрести и
+   восстановить свежий production-like snapshot в loopback clone, подписать
+   отдельный `BASELINE_156` envelope, установить его DB marker и пройти
+   admission. После exact migrations `157..162` выпустить новый state-bound
+   `EXPAND_162` envelope с новым nonce-bound binding, заменить DB marker и
+   пройти второй admission. Затем применить exact 17-name allowlisted tail
+   `163..179` в порядке из
+   [канонического current release contract](../README.md#канонический-current-release-contract),
+   выпустить отдельный `CURRENT_179` envelope с новым `creationNonce`, ещё раз
+   заменить marker и пройти третий admission. Предыдущие envelope/marker,
+   включая historical `CURRENT_166`, не переиспользовать.
+   Текущий пустой production trusted-root registry означает fail-closed
+   `NO-GO`.
+5. Только после успешного `CURRENT_179` admission выполнить scanner на том же
+   неизменённом восстановленном snapshot.
+6. Сохранить только aggregate JSON, SHA, время, target label и exit code в
+   защищённый release evidence.
+7. Назначить owner каждому non-zero reason code.
+8. Запустить отдельный
+   [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md)
+   на exact current schema-first gate: `CURRENT_179`, `migrationCount=179`,
+   latest `20260731120000_identity_mail_delivery_release_head`,
+   `unfinished=0`, `14 composite exact`, `14 simple exact`,
+   `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact`,
+   `0 index mismatch`; подтвердить hidden expected/actual database identity,
+   domain-separated HMAC `databaseIdentityDigest`,
+   `inventoryExecuted === schema.ready`, `8 proposal + 29 operator + 6 review`,
+   actionable cap и HMAC evidence.
+9. На disposable local/CI clone выполнить adversarial catalog smoke для
+   дополнительного конфликтующего FK с другим именем и index с неверным
+   порядком колонок; оба обязаны дать `SCHEMA_MISMATCH`/exit `3` до inventory,
+   не меняя source database.
+10. Не использовать planner proposal, synthetic proposal dry-run,
+    `contentDigest` или `executionDigest` как authorization. Реализованный
+    synthetic row-level proposal применяется только в disposable harness.
+    Production-like row dry-run и отдельный idempotent reconciliation apply
+    требуют protected evidence, explicit approval, locks/recheck, audit,
+    rollback и последующего zero-diff.
+11. Повторять scanner/planner после reconciliation до объяснённого zero
+    critical diff.
+12. Только затем репетировать отдельный `VALIDATE`; `CONTRACT` выполняется
+    после N-1 window.
+
+Production запуск выполняется отдельно операционным владельцем после backup и
+restore rehearsal. Эта ветка его не выполняет.
+
+## 6. DB-invariant lifecycle
+
+Schema-only EXPAND уже реализован как неприменённый candidate: пять parent
+keys создаются concurrent migrations, а 14 composite FK добавляются как
+`NOT VALID`. Три Store relations используют composite `RESTRICT`; под
+прежними именами также создаются три temporary simple Store
+`RESTRICT/RESTRICT NOT VALID`, сохраняющие global existence для legacy
+cross-tenant rows. Одиннадцать paired legacy non-Store FK swap/re-add’ятся как
+`NOT VALID`: сохраняют delete actions, но используют `ON UPDATE RESTRICT`.
+Итого contract содержит 14 composite + 14 simple compatibility `NOT VALID` FK.
+Store/User/Template/Rule/Task identifiers immutable; N/N-1 runtime
+compatibility не включает их update. Полный migration set содержит 162
+migration, latest —
+`20260727131000_staff_task_integrity_expand`.
+
+Точный contract, staged smoke, порядок применения и ограничения описаны в
+[EXPAND runbook](./staff-task-integrity-expand-runbook.md). Это не отменяет
+production-like inventory/reconciliation перед production APPLY и отдельный
+`VALIDATE`.
+
+### EXPAND
+
+- добавить parent keys/indexes, необходимые для same-tenant references;
+- добавить новые ограничения так, чтобы N-1 приложение продолжало работать;
+- критические FK сначала вводить как `NOT VALID`, чтобы новые writes уже
+  проверялись, а legacy rows валидировались отдельно;
+- заменить три Store `SET NULL` временными simple `RESTRICT` параллельно с
+  composite `RESTRICT`, чтобы legacy cross-tenant row не потеряла
+  global-existence protection;
+- swap/re-add 11 non-Store simple FK с прежними delete actions, но
+  `ON UPDATE RESTRICT`; parent identifiers объявить immutable;
+- задать короткий `lock_timeout` и bounded `statement_timeout`;
+- не совмещать длительную index build/validation с application deployment;
+- запретить физическое удаление Store, если существуют store-bound
+  Task/Template/Rule; штатная lifecycle-операция — archive/deactivate;
+- сохранить audit/provenance links: catalog entities и generated tasks
+  архивируются, а не физически удаляются.
+
+Ограничения доступа assignee, зависящие от `isActive`, `isPlatformAdmin` и
+`UserStoreAccess`, не являются статическим FK. Они остаются authoritative
+application/transaction policy и при необходимости подкрепляются отдельным
+constraint-trigger design с concurrency tests.
+
+### VALIDATE
+
+- inventory на том же snapshot/rehearsal dataset даёт zero blocking findings;
+- все новые constraints присутствуют и ещё до validation отклоняют invalid
+  writes;
+- `VALIDATE CONSTRAINT` выполняется отдельным управляемым шагом;
+- проверены lock duration, long transactions, replication/backup health и
+  N/N-1 compatibility;
+- Prisma schema/migration drift объяснён и проверен.
+- future-migration guard подтверждает отсутствие DROP всех 28 DB-native FK;
+  migration создаётся create-only с ручным SQL review, `db push` запрещён.
+
+### CONTRACT
+
+Старые простые FK, временные triggers/indexes и compatibility code удаляются
+только после staging/canary evidence. Rollback приложения не должен требовать
+отката уже принятого same-tenant ограничения и не должен запускать старый seed
+или обновлять immutable parent identifiers.
+
+## 7. Evidence template
+
+```text
+current_release_sha:
+target:
+executed_at:
+historical_snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
+historical_pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
+snapshot_admission_report_schema_version: 2
+snapshot_admission_state: CURRENT_179
+baseline_authority_evidence_ref:
+baseline_marker_install_attestation_ref:
+expand_authority_evidence_ref:
+expand_marker_rotation_attestation_ref:
+current_authority_evidence_ref:
+current_marker_rotation_attestation_ref:
+snapshot_admission_decision:
+snapshot_admission_database_identity_digest:
+snapshot_admission_content_digest:
+snapshot_admission_execution_digest:
+database_revision:
+migration_count:
+scanner_report_schema_version:
+scanner_exit_code:
+blocking_total:
+review_total:
+reason_counts:
+operator:
+evidence_location:
+decision: NO-GO | RECONCILE | READY_FOR_RECONCILIATION_PLANNING
+```
+
+В evidence запрещены production identifiers и credentials. Для текущей сети
+допустима только формулировка `Tenant A / Store A1..A4`.
+
+## 8. Implementation evidence
+
+Для inventory candidate
+`56d615437ecfcb90db252016d3e5b83f3f545578` и текущего EXPAND candidate
+`dc26568d94d76b886f1d1b79c36b1bd9f00ac401` подтверждено:
+
+- syntax/help/self-test и Node contract suite — 9/9;
+- Prisma schema validation и database script typecheck — pass;
+- исходный inventory checkpoint — clean PostgreSQL 156/156 migrations;
+- текущий полный clean path — 162/162 migrations;
+- реальный clean scan — 43 reason code, `PASS`, zero blocking/review;
+- намеренная cross-tenant Template→Store fixture — `BLOCKED`, exit `2`;
+- после безопасной reconciliation той же fixture остался только review
+  Store-deletion candidate и exit `0`;
+- оба отчёта не содержали fixture Tenant/Store/Template identifiers;
+- обе временные test schema удалены; `public` не изменялся;
+- независимый read-only review не нашёл P0/P1.
+- staged real PostgreSQL EXPAND smoke подтвердил пять parent indexes,
+  14 composite + 14 simple compatibility `NOT VALID` FK, 14 benign legacy
+  updates, 14 отклонённых новых invalid writes, три Store
+  `RESTRICT`/archive-first, три legacy Store delete protection, пять UUID и
+  пять tenant move rejection сценариев;
+- offline self-test проверил safe target, migration partition и
+  расширенный future-migration DDL guard; scoped Prisma drift внутри smoke
+  подтвердил `prismaDriftDrops=14` без credentials в argv.
+
+Для aggregate planner candidate
+`2c74c663780b3f183be708a01431c22efe57a723` дополнительно подтверждено:
+
+- planner contract unit suite — `PASS`;
+- clean real PostgreSQL schema 162 вернула `PASS` с exact schema-first
+  catalog: latest migration, unfinished `0`, 14 composite exact, 14 simple
+  exact, `0` expected-FK mismatch, `0` unexpected protected FK, 5 indexes
+  exact и `0` index mismatch;
+- классификация полного манифеста равна
+  `8 proposal + 29 operator + 6 review`;
+- `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` является `BLOCKING`;
+- actionable cap исключает review-only counts;
+- одно соединение/read-only RepeatableRead, strict target/confirmation/
+  production attestation/40-hex SHA/HMAC, expected database binding и exits
+  `0/1/2/3` проверены; expected/actual DB names не выводятся;
+  `databaseIdentityDigest` привязан к database/cluster/OID, а
+  `inventoryExecuted === schema.ready` enforced fail-closed;
+- aggregate-only output не содержит row identifiers; proposal не является
+  authorization, apply path отсутствует; `contentDigest` стабилен по content,
+  `executionDigest` привязан к timestamp, оба не являются row-stable/CAS
+  authorization;
+- adversarial disposable-clone smoke добавляет конфликтующий FK с другим
+  именем при сохранении всех 28 expected FK и отдельно подменяет index column
+  order; оба mismatch отклоняются до inventory, source database не меняется.
+
+EXPAND rehearsal теперь использует populated legacy baseline 156 и применяет
+ровно шесть migrations `157..162`; все пять concurrent indexes строятся на
+заполненных parent-таблицах. После EXPAND остаются 14 legacy rows и проходят
+все существующие проверки 14 composite + 14 simple compatibility FK.
+
+Неавтоматизированные остатки P2:
+
+- CI выполняет реальный clean scan, но ещё не создаёт fixtures для каждого из
+  43 SQL predicate;
+- `REPEATED_FAILED_RUN` пока означает threshold всех `FAILED` за окно, а не
+  только последнюю непрерывную серию; production owner должен принять
+  семантику или изменить её до использования как release gate.
+
+Синтетический snapshot admission evidence boundary
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` прошёл `18` admission unit,
+`9` authority unit, `46` offline checks и `23` PostgreSQL 16.13
+smoke-сценария. Logical allowlist из девяти relations реализован как восемь
+table grants и пять разрешённых колонок `User`; все восемь proposal-кодов дали
+восемь occurrences и семь cases, включая coalescing двух last-task причин в
+один case. Подтверждены parity `10 blocking + 2 review` и cap boundary
+`9 reject / 10 findings`. Admission report использует schema `2`,
+planner/proposal — schema `1`. Trusted-root registry пуст; production-like
+acquisition, root enrollment, restore, admission и inventory не выполнялись.
+Public-only pre-signed pinned-path test имеет отдельный evidence SHA
+`2341b99937e54cc50d1763a0a794d975816c72ce`, повышает admission suite до
+`19/19` и имеет `LOCAL PASS` в isolated child.
+Historical `CURRENT_165` engineering CI
+`4bd6a036...` / `30428288353` и documentation/evidence successor
+`7c20adec...` / `30429463161` прошли. Living schema target — `CURRENT_179`;
+`CURRENT_166` checkpoints в этом evidence paragraph являются historical и не
+разрешают current inventory. Prior
+engineering baseline связан с PR head
+`bbef153a288bfdf1c3573eb704f27c013cc0e856` / `30443837684` (`run #23`),
+выполненным через merge-ref; это не exact-SHA checkout evidence. Baseline —
+`3/3 PASS`; PostgreSQL подтвердил `immutableMutationsRejected=7` и
+`finalStateAndEvidenceUnchanged=true`. `c1fee42c...` / `30442286822`
+сохраняется как historical precursor до legacy quarantine
+delivery-row/lifecycle freeze. Run #26 и run #27 rejected. Previous accepted
+exact-head `d525b736d03162a2c58de17cbf7679ba6f515096` / CI `30447467729`
+(`run #28`) завершился `3/3 PASS`. Last accepted exact-head
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c` / CI `30449026506`
+(`run #29`) завершился `3/3 PASS`: Application `90566337085`, Authority
+checks `90566337062`, PostgreSQL major `16` job `90566337060`. Authority
+checks не выполняли root enrollment; roots `{}`. Полный structured evidence
+зафиксирован выше; все четыре engineering provider-write P1 закрыты. Это не
+production-like inventory/admission и не operational provider activation.
+Experimental Node 22 module mock — P2. Production root enrollment,
+operational signer и approved acquisition остаются P0.
+
+## 9. Exit criteria
+
+Inventory slice считается реализованным, когда:
+
+1. command contract и source-safety tests обязательны в application CI;
+2. clean PostgreSQL migration job выполняет реальный read-only scanner;
+3. scanner доказывает одну `REPEATABLE READ` read-only snapshot;
+4. blocking/review result детерминирован и не раскрывает row identifiers;
+5. clean-schema smoke зелёный;
+6. production-like scanner запускается только после успешного Git-bound
+   `BASELINE_156 → 157..162 → EXPAND_162 → exact 17-name tail 163..179 → CURRENT_179`
+   admission; protected StaffTask evidence остаётся bound к prefix 162;
+7. production-like reconciliation остаётся отдельным явным операционным шагом.
+
+Это повышает только readiness к production-like reconciliation/VALIDATE
+rehearsal.
+Внешний beta остаётся `NO-GO` до полного Gate 2.
+
+## 10. Changelog
+
+- `1.14.0`, 30.07.2026 — living scanner/admission gate переведён на terminal
+  `CURRENT_179` (`179` / `20260731120000_identity_mail_delivery_release_head`)
+  при frozen prefix `EXPAND_162` и exact 17-name tail `163..179`. Signed
+  `CURRENT_166` envelope/marker сохранён только как historical evidence;
+  новый nonce-bound envelope и marker rotation обязательны. Roots `{}` /
+  EMPTY сохраняют production-like inventory и external beta в `NO-GO`.
+
+- `1.13.0`, 29.07.2026 — единая retroactive evidence correction:
+  schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref
+  baseline `bbef153a...` / CI `30443837684` (`run #23`) завершился `3/3
+  PASS`, но не является exact-SHA evidence;
+  PostgreSQL evidence:
+  `immutableMutationsRejected=7`,
+  `finalStateAndEvidenceUnchanged=true`. Legacy quarantine
+  delivery-row/lifecycle P1 закрыт. Run #26 и run #27 rejected. Previous
+  accepted exact-head `d525b736...` / CI `30447467729` (`run #28`) — `3/3
+  PASS`. Last accepted exact-head `be8c94c4...` / CI `30449026506` (`run #29`)
+  — `3/3 PASS`: Application `90566337085`, Authority checks `90566337062`,
+  PostgreSQL major `16` `90566337060`; checks не выполняли enrollment, roots
+  `{}`. Structured lock-order evidence закрыл последний engineering
+  provider-write P1; все четыре закрыты. Non-owner runtime role admission и
+  explicit `EXECUTE`, interactive boundary, retention, roots/acquisition,
+  production-like inventory/apply/deploy и внешний beta остаются `NO-GO`.
+- `1.12.0`, 29.07.2026 — exact-SHA engineering evidence current
+  `CURRENT_166` принято на `c1fee42c...` / CI `30442286822`; PostgreSQL
+  major `16` rehearsal `165 → 166` зелёный. Production-like inventory,
+  root/acquisition, apply/deploy и внешний beta остаются `NO-GO`.
+- `1.11.0`, 29.07.2026 — operational inventory/admission/planner target
+  переведён на implementation candidate `CURRENT_166`: tail `163..166`, count
+  `166`, latest `20260729160000_guest_game_delivery_claim_fence`. Remote
+  exact-SHA/`165 → 166` pending; `CURRENT_165`
+  `4bd6a036...`/`7c20adec...` сохранён как historical evidence.
+  Production-like inventory и root/acquisition остаются `NO-GO`.
+- `1.10.0`, 29.07.2026 — historical `CURRENT_165`
+  inventory/admission engineering
+  gates прошли remote CI `4bd6a036...` / `30428288353`; production-like
+  inventory и root/acquisition gates остаются `NO-GO`.
+- `1.9.0`, 29.07.2026 — exact then-current inventory/planner path переведён на
+  `CURRENT_165`: frozen prefix `EXPAND_162` плюс reviewed additive tail
+  `163..165`; migration count `165`, latest
+  `20260729120000_store_background_execution_fence`.
+- `1.8.0`, 28.07.2026 — exact current inventory/planner path переведён на
+  `CURRENT_164`: к frozen StaffTask prefix `EXPAND_162` допускается только
+  reviewed additive tail migrations 163 и 164; latest migration и
+  migration-count синхронизированы с execution-revision fence.
+- `1.7.0`, 28.07.2026 — protected StaffTask prefix оставлен на
+  `EXPAND_162`, а current inventory/planner path переведён на exact
+  `CURRENT_163` с allowlisted migration 163 и третьим state-bound
+  envelope/marker/admission. Старый candidate SHA помечен historical.
+- `1.6.0`, 28.07.2026 — runtime admission candidate сохранён на
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; test evidence
+  `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
+  admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в isolated
+  child. Remote CI pending, experimental Node 22 module mock — P2. Production
+  roots пусты; root enrollment/signer/acquisition остаются P0, production-like
+  inventory — `NO-GO`. Два state-bound envelopes и DB marker rotation между
+  `BASELINE_156` и `EXPAND_162` сохранены обязательными.
+- `1.5.0`, 28.07.2026 — связан admission schema v2/evidence boundary
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`: exact Git blobs,
+  column-scoped `User`, Ed25519 verifier/DB marker/freshness и exhaustive
+  synthetic proposal matrix прошли 23 PostgreSQL 16.13 сценария. Реестр
+  trusted roots пуст; production-like acquisition/admission/inventory и apply
+  остаются `NO-GO`.
+- `1.4.0`, 27.07.2026 — snapshot admission сделан обязательным
+  production-like prerequisite для inventory/planner; зафиксирован synthetic
+  candidate `7d67333b22f171c6e79f723190647cdd2454b128` с `16` unit, `34` offline и
+  `9` PostgreSQL 16 smoke-сценариями. Production-like контур не запускался.
+- `1.3.0`, 27.07.2026 — planner связан с exact schema-first gate, включая
+  `unexpectedProtectedForeignKeyCount=0`, hidden database identity,
+  `contentDigest`/`executionDigest` и adversarial disposable-clone extra-FK/
+  wrong-index smoke. Output aggregate-only, apply/authorization отсутствуют,
+  внешний beta остаётся `NO-GO`.
+- `1.2.0`, 27.07.2026 — связан aggregate-only reconciliation planner:
+  `8 proposal + 29 operator + 6 review`, exact schema gate, actionable cap,
+  exits `0/1/2/3` и HMAC evidence без
+  apply authorization; EXPAND rehearsal усилена populated baseline
+  `156 → 157..162`.
+- `1.1.0`, 27.07.2026 — связан реализованный schema-only EXPAND candidate:
+  162 migrations, пять concurrent parent indexes, 14 composite + 14 simple
+  compatibility `NOT VALID` FK, immutable parent IDs,
+  global-existence/expanded DDL guards, scoped Prisma drift и staged
+  PostgreSQL smoke;
+  production-like reconciliation/VALIDATE/deploy остаются pending.
+- `1.0.0`, 27.07.2026 — создан guarded read-only inventory contract.

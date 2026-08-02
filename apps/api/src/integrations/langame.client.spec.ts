@@ -296,6 +296,7 @@ describe('LangameClient', () => {
       'https://46.langamepro.ru/master_api/guests/balance/phone',
     );
     expect(init?.method).toBe('POST');
+    expect(init?.signal).toBeDefined();
     expect(init?.headers).toMatchObject({
       'Content-Type': 'application/json',
       'X-Request-Token': 'request-token',
@@ -311,6 +312,49 @@ describe('LangameClient', () => {
         comment: 'LeetPlus test',
       }),
     );
+  });
+
+  it('never lets a Langame balance write disable or exceed the mandatory timeout', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(responseWithBody({ status: true }));
+    const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+    global.fetch = fetchMock as typeof fetch;
+
+    await client.adjustGuestBalanceByPhone(
+      'https://46.langamepro.ru/public_api',
+      'request-token',
+      {
+        phone: '79999999999',
+        type: 'bonus_balance',
+        sum: 10,
+        comment: 'LeetPlus test',
+      },
+      '/guests/balance/phone',
+      { timeoutMs: 0 },
+    );
+    await client.adjustGuestBalanceByPhone(
+      'https://46.langamepro.ru/public_api',
+      'request-token',
+      {
+        phone: '79999999999',
+        type: 'bonus_balance',
+        sum: 10,
+        comment: 'LeetPlus test',
+      },
+      '/guests/balance/phone',
+      { timeoutMs: 60_000 },
+    );
+
+    for (const [, init] of fetchMock.mock.calls as Array<
+      [string | URL, RequestInit?]
+    >) {
+      expect(init?.signal).toBeDefined();
+    }
+    expect(setTimeoutSpy.mock.calls.map(([, delay]) => delay)).toEqual([
+      30_000,
+      30_000,
+    ]);
   });
 
   it('loads active product groups from the domain master API', async () => {

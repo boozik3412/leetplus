@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { ConfigService } from '@nestjs/config';
-import type { Prisma } from '@prisma/client';
+import { TenantCustomerStage, type Prisma } from '@prisma/client';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -22,8 +22,14 @@ const sourceRewardIdField = {
 } as Prisma.GuestGameEntitlementFieldRefs['sourceRewardId'];
 
 type GuestGameDataRetentionServiceTestAccess = {
-  deleteExpiredRewardWalletItemBatches(cutoff: Date): Promise<number>;
-  recoverStaleRewardWalletOpeningBatches(now: Date): Promise<number>;
+  deleteExpiredRewardWalletItemBatches(
+    cutoff: Date,
+    tenantIds: readonly string[],
+  ): Promise<number>;
+  recoverStaleRewardWalletOpeningBatches(
+    now: Date,
+    tenantIds: readonly string[],
+  ): Promise<number>;
 };
 
 function testAccess(
@@ -34,7 +40,14 @@ function testAccess(
 
 function createFixture(configValues: Record<string, string | undefined> = {}) {
   const delegates = {
-    tenant: { findMany: jest.fn().mockResolvedValue([{ id: 'tenant-1' }]) },
+    tenant: {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'tenant-1',
+          customerStage: TenantCustomerStage.INTERNAL,
+        },
+      ]),
+    },
     guestGameDataRetentionPolicy: {
       findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn().mockResolvedValue(null),
@@ -116,6 +129,40 @@ function unopenedEntitlementRewardWhere(
 describe('GuestGameDataRetentionService', () => {
   const now = new Date('2026-07-12T00:00:00.000Z');
 
+  it('skips an external tenant before global cleanup or retention writes', async () => {
+    const { service, delegates } = createFixture();
+    delegates.tenant.findMany.mockResolvedValueOnce([
+      {
+        id: 'tenant-pilot',
+        customerStage: TenantCustomerStage.PILOT,
+      },
+    ]);
+
+    const result = await service.runAll({ now, liveRequested: true });
+
+    expect(result).toMatchObject({
+      walletCleanup: { deleted: 0 },
+      tenants: 1,
+      completed: 0,
+      skipped: 1,
+      results: [
+        expect.objectContaining({
+          tenantId: 'tenant-pilot',
+          status: 'SKIPPED',
+          reason: expect.stringContaining(
+            'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+          ),
+        }),
+      ],
+    });
+    expect(delegates.guestGameRewardWalletItem.findMany).not.toHaveBeenCalled();
+    expect(delegates.guestGameReward.findMany).not.toHaveBeenCalled();
+    expect(
+      delegates.guestGameDataRetentionPolicy.findMany,
+    ).not.toHaveBeenCalled();
+    expect(delegates.guestGameDataRetentionRun.create).not.toHaveBeenCalled();
+  });
+
   it('keeps policy retention in dry-run while deleting expired wallet items', async () => {
     const { service, delegates } = createFixture();
     delegates.guestGameRewardWalletItem.findMany
@@ -156,6 +203,10 @@ describe('GuestGameDataRetentionService', () => {
     expect(delegates.guestGameRewardWalletItem.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
+          tenantId: { in: ['tenant-1'] },
+          tenant: {
+            customerStage: TenantCustomerStage.INTERNAL,
+          },
           status: { in: ['PENDING', 'CLAIMED'] },
           AND: expect.arrayContaining([
             { expiresAt: { lte: now } },
@@ -282,7 +333,9 @@ describe('GuestGameDataRetentionService', () => {
     delegates.guestGameEntitlement.findFirst.mockResolvedValue(null);
 
     await expect(
-      testAccess(service).deleteExpiredRewardWalletItemBatches(now),
+      testAccess(service).deleteExpiredRewardWalletItemBatches(now, [
+        'tenant-1',
+      ]),
     ).resolves.toBe(0);
 
     expect(delegates.guestGameEntitlement.updateMany).toHaveBeenCalledWith({
@@ -392,6 +445,10 @@ describe('GuestGameDataRetentionService', () => {
 
     expect(delegates.guestGameReward.findMany).toHaveBeenCalledWith({
       where: {
+        tenantId: { in: ['tenant-1'] },
+        tenant: {
+          customerStage: TenantCustomerStage.INTERNAL,
+        },
         status: 'APPROVED',
         claimRequired: true,
         deliveryRequestedAt: null,
@@ -632,7 +689,9 @@ describe('GuestGameDataRetentionService', () => {
     });
 
     await expect(
-      testAccess(service).recoverStaleRewardWalletOpeningBatches(now),
+      testAccess(service).recoverStaleRewardWalletOpeningBatches(now, [
+        'tenant-1',
+      ]),
     ).resolves.toBe(1);
 
     expect(delegates.guestGameReward.findFirst).not.toHaveBeenCalled();
@@ -704,7 +763,9 @@ describe('GuestGameDataRetentionService', () => {
     delegates.guestGameReward.findFirst.mockResolvedValue(null);
 
     await expect(
-      testAccess(service).recoverStaleRewardWalletOpeningBatches(now),
+      testAccess(service).recoverStaleRewardWalletOpeningBatches(now, [
+        'tenant-1',
+      ]),
     ).resolves.toBe(0);
 
     expect(delegates.guestGameEvent.findFirst).not.toHaveBeenCalled();

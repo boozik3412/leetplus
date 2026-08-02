@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { assertScheduledHttpAllowed } from '../config/design-partner-runtime-policy';
 import { LangameDailySyncService } from './langame-daily-sync.service';
 import { LangameSyncService } from './langame-sync.service';
 import type { LangameSyncQuery } from './langame.types';
@@ -48,6 +49,8 @@ export class LangameScheduledController {
   }
 
   private assertToken(token: string | undefined) {
+    assertScheduledHttpAllowed(this.configService);
+
     const expectedToken = this.configService
       .get<string>('SYNC_SERVICE_TOKEN')
       ?.trim();

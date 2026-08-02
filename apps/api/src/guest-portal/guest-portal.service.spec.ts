@@ -36,6 +36,7 @@ function createPrismaMock() {
     guest: {
       findFirst: jest.fn(),
       findMany: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestAudienceMember: {
       findMany: jest.fn(),
@@ -43,8 +44,10 @@ function createPrismaMock() {
     guestCrmLead: {
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestCrmEvent: {
+      createMany: jest.fn(),
       findMany: jest.fn(),
     },
     guestGroup: {
@@ -111,7 +114,11 @@ function createPrismaMock() {
       findFirst: jest.fn(),
     },
     guestGameDelivery: {
+      findMany: jest.fn(),
       updateMany: jest.fn(),
+    },
+    guestGameDeliveryEvent: {
+      createMany: jest.fn(),
     },
     guestBonusLedgerEntry: {
       findFirst: jest.fn(),
@@ -274,9 +281,12 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.tenant.findFirst.mockResolvedValue(null);
   prisma.guest.findFirst.mockResolvedValue(null);
   prisma.guest.findMany.mockResolvedValue([]);
+  prisma.guest.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestAudienceMember.findMany.mockResolvedValue([]);
   prisma.guestCrmLead.findFirst.mockResolvedValue(null);
   prisma.guestCrmLead.update.mockResolvedValue({});
+  prisma.guestCrmLead.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestCrmEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guestCrmEvent.findMany.mockResolvedValue([]);
   prisma.guestGroup.findMany.mockResolvedValue([]);
   prisma.integrationCredential.findMany.mockResolvedValue([
@@ -339,7 +349,9 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     count: 0,
   });
   prisma.guestGameReward.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameDelivery.findMany.mockResolvedValue([]);
   prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameDeliveryEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guestBonusLedgerEntry.findMany.mockResolvedValue([]);
   prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestBalanceSnapshot.findFirst.mockResolvedValue(null);
@@ -7916,6 +7928,124 @@ describe('GuestPortalService', () => {
         },
       });
       expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
+    });
+
+    it('updates unsubscribe consent but protocol-blocks legacy Telegram delivery mutations', async () => {
+      const legacyFlagKeys = [
+        'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED',
+        'GUEST_GAME_DELIVERY_TELEGRAM_ENABLED',
+        'GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN',
+      ] as const;
+      const previousLegacyFlags = new Map(
+        legacyFlagKeys.map((key) => [key, process.env[key]]),
+      );
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED = 'true';
+      process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN = 'telegram-token';
+
+      try {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+        prisma.guestGameProfile.findMany.mockResolvedValue([
+          {
+            id: 'profile-1',
+            tenantId: 'tenant-1',
+            guestId: 'guest-1',
+            leadId: 'lead-1',
+          },
+        ]);
+        prisma.guestGameDelivery.findMany.mockResolvedValue([
+          {
+            id: 'delivery-1',
+            tenantId: 'tenant-1',
+            rewardId: 'reward-1',
+            status: 'READY',
+          },
+        ]);
+
+        const result = await service.handleTelegramWebhook(
+          'telegram-secret',
+          {
+            message: {
+              text: '/stop',
+              chat: { id: 123456 },
+              from: { id: 123456 },
+            },
+          },
+        );
+
+        expect(prisma.guest.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: { in: ['guest-1'] } },
+            data: expect.objectContaining({
+              phoneConsentStatus: 'UNSUBSCRIBED',
+              phoneConsentSource: 'telegram_bot',
+              unsubscribedAt: expect.any(Date),
+              crmStatus: 'DO_NOT_CONTACT',
+            }),
+          }),
+        );
+        expect(prisma.guestCrmEvent.createMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: [
+              expect.objectContaining({
+                tenantId: 'tenant-1',
+                guestId: 'guest-1',
+                status: 'DO_NOT_CONTACT',
+              }),
+            ],
+          }),
+        );
+        expect(prisma.guestCrmLead.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: { in: ['lead-1'] } },
+            data: expect.objectContaining({
+              phoneConsentStatus: 'UNSUBSCRIBED',
+              crmStatus: 'DO_NOT_CONTACT',
+            }),
+          }),
+        );
+        expect(prisma.guestGameDelivery.findMany).toHaveBeenCalledWith({
+          where: {
+            profileId: { in: ['profile-1'] },
+            channel: 'TELEGRAM',
+            status: 'READY',
+            readinessStatus: 'READY_FOR_BOT',
+          },
+          select: {
+            id: true,
+            tenantId: true,
+            rewardId: true,
+            status: true,
+          },
+        });
+        expect(prisma.guestGameDelivery.updateMany).not.toHaveBeenCalled();
+        expect(
+          prisma.guestGameDeliveryEvent.createMany,
+        ).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          status: 'UNSUBSCRIBED',
+          action: 'UNSUBSCRIBE',
+          profileId: 'profile-1',
+          profilesAffected: 1,
+          deliveriesBlocked: 0,
+          deliveriesProtocolBlocked: 1,
+          message: expect.stringContaining(
+            'provider delivery rows and events were preserved',
+          ),
+        });
+        expect(JSON.stringify(result)).not.toContain('telegram-token');
+      } finally {
+        for (const key of legacyFlagKeys) {
+          const previousValue = previousLegacyFlags.get(key);
+          if (previousValue === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = previousValue;
+          }
+        }
+      }
     });
 
     it('answers Telegram /status callback with the bot menu', async () => {

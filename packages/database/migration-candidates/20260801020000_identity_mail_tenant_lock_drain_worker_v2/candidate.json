@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "contract": "IDENTITY_MAIL_TENANT_LOCK_DRAIN_WORKER_V2_CANDIDATE_V1",
+  "candidate": "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+  "ordinal": 181,
+  "predecessor": {
+    "count": 180,
+    "head": "20260801010000_identity_mail_tenant_enrollment_control_plane",
+    "manifestDigest": "c41f3854bff364deb4f169f56f31bb5bd7e46249a677c66bc879cb967b6fae58",
+    "headChecksum": "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683"
+  },
+  "migrationSqlSha256": "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac",
+  "authorization": false,
+  "canMutate": false,
+  "status": "NOT_DEPLOYABLE"
+}

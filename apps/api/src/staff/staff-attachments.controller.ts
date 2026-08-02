@@ -3,6 +3,7 @@ import {
   Get,
   Param,
   Post,
+  Res,
   StreamableFile,
   UploadedFile,
   UseGuards,
@@ -10,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UserRole } from '@prisma/client';
+import type { Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -20,6 +22,15 @@ import {
   StaffAttachmentsService,
   type StaffAttachmentUploadFile,
 } from './staff-attachments.service';
+
+const SAFE_INLINE_ATTACHMENT_CONTENT_TYPES = new Set([
+  'application/pdf',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/plain',
+]);
 
 @Controller('staff/attachments')
 @Roles(
@@ -55,20 +66,33 @@ export class StaffAttachmentsController {
   async downloadAttachment(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
+    @Res({ passthrough: true }) response: Response,
   ): Promise<StreamableFile> {
     const file = await this.staffAttachmentsService.getAttachment(user, id);
 
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.setHeader('Pragma', 'no-cache');
+    response.setHeader('Vary', 'Authorization, Cookie');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+
     return new StreamableFile(file.buffer, {
       type: file.contentType,
-      disposition: this.contentDisposition(file.fileName),
+      disposition: this.contentDisposition(file.fileName, file.contentType),
       length: file.buffer.length,
     });
   }
 
-  private contentDisposition(fileName: string) {
+  private contentDisposition(fileName: string, contentType: string) {
     const fallback = fileName.replace(/[^\x20-\x7E]+/g, '_').replace(/"/g, '');
     const encoded = encodeURIComponent(fileName);
+    const normalizedType = contentType.split(';', 1)[0]?.trim().toLowerCase();
+    const mode =
+      normalizedType &&
+      SAFE_INLINE_ATTACHMENT_CONTENT_TYPES.has(normalizedType)
+        ? 'inline'
+        : 'attachment';
 
-    return `inline; filename="${fallback || 'attachment'}"; filename*=UTF-8''${encoded}`;
+    return `${mode}; filename="${fallback || 'attachment'}"; filename*=UTF-8''${encoded}`;
   }
 }

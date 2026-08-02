@@ -12,6 +12,7 @@ type AuthMode = "login" | "register";
 type AuthFormProps = {
   mode: AuthMode;
   inviteToken?: string | null;
+  onInviteAccepted?: () => void;
   returnTo?: string | null;
 };
 
@@ -143,7 +144,12 @@ function getErrorMessage(data: unknown) {
   return "Не удалось выполнить запрос";
 }
 
-export function AuthForm({ mode, inviteToken, returnTo }: AuthFormProps) {
+export function AuthForm({
+  mode,
+  inviteToken,
+  onInviteAccepted,
+  returnTo,
+}: AuthFormProps) {
   const router = useRouter();
   const isRegister = mode === "register";
   const isInviteRegister = isRegister && Boolean(inviteToken);
@@ -185,8 +191,15 @@ export function AuthForm({ mode, inviteToken, returnTo }: AuthFormProps) {
 
     let isCancelled = false;
 
-    fetch(`/api/auth/invites/${encodeURIComponent(inviteToken)}`, {
+    fetch("/api/auth/invites/preview", {
+      method: "POST",
       cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      referrerPolicy: "no-referrer",
+      body: JSON.stringify({ token: inviteToken }),
     })
       .then(async (response) => {
         if (!response.ok) {
@@ -243,12 +256,13 @@ export function AuthForm({ mode, inviteToken, returnTo }: AuthFormProps) {
     let keepLoading = false;
 
     const endpoint = isInviteRegister
-      ? `/api/auth/invites/${encodeURIComponent(inviteToken ?? "")}/accept`
+      ? "/api/auth/invites/accept"
       : isRegister
         ? "/api/auth/register"
         : "/api/auth/login";
     const payload = isInviteRegister
       ? {
+          token: inviteToken,
           email: form.email,
           password: form.password,
           confirmPassword: form.confirmPassword,
@@ -272,9 +286,12 @@ export function AuthForm({ mode, inviteToken, returnTo }: AuthFormProps) {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
         },
+        referrerPolicy: "no-referrer",
         body: JSON.stringify(payload),
       });
 
@@ -286,6 +303,10 @@ export function AuthForm({ mode, inviteToken, returnTo }: AuthFormProps) {
 
       const data = (await response.json()) as { user?: AuthUser };
       const landingPath = data.user ? getDefaultLandingPath(data.user) : "/dashboard";
+
+      if (isInviteRegister) {
+        onInviteAccepted?.();
+      }
 
       if (!isRegister) {
         if (rememberMe) {

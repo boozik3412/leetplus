@@ -42,6 +42,7 @@ type LangameRequestOptions = {
 type LangameBalanceType = 'balance' | 'bonus_balance';
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+const maximumLangameWriteTimeoutMs = 30_000;
 
 @Injectable()
 export class LangameClient {
@@ -549,19 +550,24 @@ export class LangameClient {
       comment: string;
     },
     path = '/guests/balance/phone',
+    options: LangameRequestOptions = {},
   ) {
     const normalizedPath = this.masterApiPath(path);
     const displayPath = `/master_api${normalizedPath}`;
     const url = new URL(`${this.masterApiBaseUrl(baseUrl)}${normalizedPath}`);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Request-Token': requestToken,
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Token': requestToken,
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
+      this.boundedWriteTimeoutMs(options.timeoutMs),
+    );
 
     if (!response.ok) {
       const errorDetails = await this.readErrorDetails(response);
@@ -740,6 +746,21 @@ export class LangameClient {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private boundedWriteTimeoutMs(requestedTimeoutMs?: number) {
+    if (
+      typeof requestedTimeoutMs !== 'number' ||
+      !Number.isFinite(requestedTimeoutMs) ||
+      requestedTimeoutMs <= 0
+    ) {
+      return maximumLangameWriteTimeoutMs;
+    }
+
+    return Math.min(
+      Math.max(1, Math.floor(requestedTimeoutMs)),
+      maximumLangameWriteTimeoutMs,
+    );
   }
 
   private shouldRetryWithEuropeanDates(

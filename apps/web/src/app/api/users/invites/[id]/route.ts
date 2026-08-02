@@ -11,6 +11,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     request,
     `/users/invites/${encodeURIComponent(id)}`,
     "PATCH",
+    { privateNoStore: true },
   );
 }
 
@@ -21,5 +22,6 @@ export async function DELETE(request: Request, context: RouteContext) {
     request,
     `/users/invites/${encodeURIComponent(id)}`,
     "DELETE",
+    { privateNoStore: true },
   );
 }

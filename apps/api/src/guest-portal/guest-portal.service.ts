@@ -29,7 +29,12 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import {
+  isProductionConfig,
+  resolveSecuritySecret,
+} from '../config/environment-validation';
 import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
+import { evaluateLegacyGuestGameDeliveryProtocolGate } from '../guest-gamification/guest-game-delivery-protocol-gate';
 import {
   GuestGamificationService,
   guestGameRewardUsesBonusLedger,
@@ -731,6 +736,7 @@ export type GuestPortalTelegramWebhookResponse = {
   profileId: string | null;
   profilesAffected?: number;
   deliveriesBlocked?: number;
+  deliveriesProtocolBlocked?: number;
   telegramIdentityMasked: string | null;
   message: string;
   reply?: {
@@ -3236,7 +3242,10 @@ export class GuestPortalService {
     void iat;
     void nbf;
 
+    const guestJwtSecret = this.guestPortalJwtSecret();
+
     return this.jwtService.signAsync(signablePayload, {
+      ...(guestJwtSecret ? { secret: guestJwtSecret } : {}),
       expiresIn: (this.configService.get<string>(
         'GUEST_PORTAL_JWT_EXPIRES_IN',
       ) ?? GUEST_TOKEN_EXPIRES_IN) as JwtExpiresIn,
@@ -3859,6 +3868,8 @@ export class GuestPortalService {
             tenantId: payload.tenantId,
             tenantSlug: portal.tenant.slug,
             tenantStatus: TenantLifecycleStatus.ACTIVE,
+            accessScope: 'STORES',
+            allowedStoreIds: [payload.storeId],
           },
           portal.profile.id,
         );
@@ -4196,6 +4207,8 @@ export class GuestPortalService {
       tenantId: payload.tenantId,
       tenantSlug: tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [payload.storeId],
     };
     try {
       await this.guestGamificationService.materializeRewardEffects(actor, {
@@ -5781,7 +5794,7 @@ export class GuestPortalService {
     let cursor: { expiresAt: Date; id: string } | null = null;
 
     for (let batch = 0; batch < maxBatches; batch += 1) {
-      const rows = await this.prisma.guestGameRewardWalletItem.findMany({
+      const rows = (await this.prisma.guestGameRewardWalletItem.findMany({
         where: {
           tenantId,
           profileId,
@@ -5877,7 +5890,14 @@ export class GuestPortalService {
         },
         orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
         take: batchSize,
-      });
+      })) as Array<{
+        id: string;
+        status: string;
+        rewardId: string | null;
+        entitlementId: string | null;
+        eventId: string | null;
+        expiresAt: Date;
+      }>;
       if (rows.length === 0) {
         break;
       }
@@ -6250,6 +6270,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
     const eventExternalId = buildGuestPortalGameExternalId(
       GAME_APP_OPEN_SOURCE_KIND,
@@ -6409,6 +6431,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
 
     const result = await this.guestGamificationService.processLiveSessionStart(
@@ -6857,6 +6881,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
     const prequalifiedLootBoxOpen = {
       tenantId: context.tenant.id,
@@ -7502,6 +7528,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
     let checkIn: Awaited<ReturnType<GuestGamificationService['checkIn']>>;
 
@@ -9001,6 +9029,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
 
     try {
@@ -9493,6 +9523,9 @@ export class GuestPortalService {
     const preferenceNote = `${COMMUNICATION_PREFERENCE_EVENT_PREFIX}UNSUBSCRIBE: Telegram bot stop command.`;
     const deliveryNote =
       'Guest unsubscribed from Telegram bot through webhook stop command.';
+    const deliveryProtocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
+      'LEGACY_PROVIDER_UNSUBSCRIBE',
+    );
 
     const result = await this.prisma.$transaction(async (tx) => {
       if (guestIds.length > 0) {
@@ -9548,7 +9581,7 @@ export class GuestPortalService {
         },
       });
 
-      if (pendingDeliveries.length > 0) {
+      if (pendingDeliveries.length > 0 && deliveryProtocolGate.allowed) {
         await tx.guestGameDelivery.updateMany({
           where: {
             id: { in: pendingDeliveries.map((delivery) => delivery.id) },
@@ -9581,7 +9614,14 @@ export class GuestPortalService {
         });
       }
 
-      return { deliveriesBlocked: pendingDeliveries.length };
+      return {
+        deliveriesBlocked: deliveryProtocolGate.allowed
+          ? pendingDeliveries.length
+          : 0,
+        deliveriesProtocolBlocked: deliveryProtocolGate.allowed
+          ? 0
+          : pendingDeliveries.length,
+      };
     });
 
     return {
@@ -9590,9 +9630,11 @@ export class GuestPortalService {
       profileId: profiles.length === 1 ? profiles[0].id : null,
       profilesAffected: profiles.length,
       deliveriesBlocked: result.deliveriesBlocked,
+      deliveriesProtocolBlocked: result.deliveriesProtocolBlocked,
       telegramIdentityMasked,
-      message:
-        'Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED and pending Telegram deliveries are blocked.',
+      message: result.deliveriesProtocolBlocked
+        ? `Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED. ${deliveryProtocolGate.note}`
+        : 'Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED and pending Telegram deliveries are blocked.',
     };
   }
 
@@ -13208,8 +13250,12 @@ export class GuestPortalService {
     }
 
     try {
+      const guestJwtSecret = this.guestPortalJwtSecret();
       const payload =
-        await this.jwtService.verifyAsync<GuestPortalTokenPayload>(token);
+        await this.jwtService.verifyAsync<GuestPortalTokenPayload>(
+          token,
+          guestJwtSecret ? { secret: guestJwtSecret } : undefined,
+        );
 
       if (payload.purpose !== GUEST_PORTAL_PURPOSE) {
         throw new UnauthorizedException('Invalid guest token');
@@ -13355,7 +13401,7 @@ export class GuestPortalService {
   }
 
   private encryptPhone(phone: GuestPortalPhoneIdentity) {
-    return this.secretEncryptionService.encrypt(phone.normalized);
+    return this.secretEncryptionService.encrypt(phone.normalized, 'pii');
   }
 
   private phoneIdentityFromEncrypted(
@@ -13366,7 +13412,9 @@ export class GuestPortalService {
     }
 
     try {
-      return this.phoneIdentity(this.secretEncryptionService.decrypt(value));
+      return this.phoneIdentity(
+        this.secretEncryptionService.decrypt(value, 'pii'),
+      );
     } catch {
       return null;
     }
@@ -14555,24 +14603,29 @@ export class GuestPortalService {
   }
 
   private piiSecret() {
-    const secret =
-      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
-      this.configService.get<string>('JWT_SECRET')?.trim();
-
-    if (!secret) {
-      throw new BadRequestException('APP_ENCRYPTION_KEY is not configured');
-    }
-
-    return secret;
+    return resolveSecuritySecret(this.configService, 'APP_ENCRYPTION_KEY', [
+      'JWT_SECRET',
+    ]);
   }
 
   private referralSecret() {
-    return (
-      this.configService.get<string>('GUEST_GAME_REFERRAL_SECRET')?.trim() ||
-      this.configService.get<string>('JWT_SECRET')?.trim() ||
-      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
-      'guest-game-referral-local-secret'
+    return resolveSecuritySecret(
+      this.configService,
+      'GUEST_GAME_REFERRAL_SECRET',
+      ['JWT_SECRET', 'APP_ENCRYPTION_KEY'],
     );
+  }
+
+  private guestPortalJwtSecret() {
+    const secret = this.configService
+      .get<string>('GUEST_PORTAL_JWT_SECRET')
+      ?.trim();
+
+    if (!secret && isProductionConfig(this.configService)) {
+      throw new Error('GUEST_PORTAL_JWT_SECRET is required in production');
+    }
+
+    return secret || null;
   }
 
   private publicWebUrl() {

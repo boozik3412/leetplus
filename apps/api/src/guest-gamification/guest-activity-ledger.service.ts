@@ -1,5 +1,9 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { IntegrationProvider, Prisma } from '@prisma/client';
+import {
+  IntegrationProvider,
+  Prisma,
+  TenantCustomerStage,
+} from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
@@ -19,6 +23,10 @@ import type {
   LangameTransaction,
 } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
 import {
   GUEST_ACTIVITY_HOURLY_SESSION_REPLAY_VERSION as GUEST_ACTIVITY_REPLAY_VERSION,
   hourlySessionReplayReady,
@@ -373,6 +381,9 @@ export class GuestActivityLedgerService {
     const [recoveryStates, hourlyReplayStates] = await Promise.all([
       this.prisma.guestActivitySyncState.findMany({
         where: {
+          tenant: {
+            customerStage: TenantCustomerStage.INTERNAL,
+          },
           status: { in: ['PARTIAL', 'FAILED'] },
           profileId: { not: null },
           OR: [
@@ -389,6 +400,11 @@ export class GuestActivityLedgerService {
           status: true,
           errorMessage: true,
           diagnostics: true,
+          tenant: {
+            select: {
+              customerStage: true,
+            },
+          },
         },
         orderBy: { updatedAt: 'asc' },
         take: scanLimit,
@@ -403,6 +419,7 @@ export class GuestActivityLedgerService {
           status: string;
           errorMessage: string | null;
           diagnostics: Prisma.JsonValue | null;
+          customerStage: TenantCustomerStage;
         }>
       >(Prisma.sql`
         SELECT DISTINCT ON (
@@ -418,14 +435,18 @@ export class GuestActivityLedgerService {
           fact."tenantId" AS "tenantId",
           COALESCE(state."status", 'IDLE') AS "status",
           state."errorMessage",
-          state."diagnostics"
+          state."diagnostics",
+          tenant."customerStage" AS "customerStage"
         FROM "GuestActivityFact" fact
+        INNER JOIN "Tenant" tenant
+          ON tenant."id" = fact."tenantId"
         LEFT JOIN "GuestActivitySyncState" state
           ON state."tenantId" = fact."tenantId"
           AND state."externalProvider" = fact."externalProvider"
           AND state."externalDomain" = fact."externalDomain"
           AND state."externalGuestId" = fact."externalGuestId"
         WHERE fact."profileId" IS NOT NULL
+          AND tenant."customerStage" = 'INTERNAL'
           AND fact."externalProvider" = 'LANGAME'
           AND fact."sourceKind" IN (
             'LANGAME_GUEST_SESSION',
@@ -480,10 +501,13 @@ export class GuestActivityLedgerService {
     ]);
     const states = [
       ...new Map(
-        [...hourlyReplayStates, ...recoveryStates].map((state) => [
-          state.id,
-          state,
-        ]),
+        [
+          ...hourlyReplayStates,
+          ...recoveryStates.map((state) => ({
+            ...state,
+            customerStage: state.tenant.customerStage,
+          })),
+        ].map((state) => [state.id, state]),
       ).values(),
     ];
     let queued = 0;
@@ -491,6 +515,14 @@ export class GuestActivityLedgerService {
 
     for (const state of states) {
       if (queued >= limit) break;
+      const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(state.customerStage),
+        jobKind: 'GUEST_ACTIVITY_LEDGER_SYNC',
+      });
+      if (!executionDecision.allowed) {
+        skipped += 1;
+        continue;
+      }
       const requiresHourlySessionReplay = !hourlySessionReplayReady(
         state.status,
         state.diagnostics,
@@ -529,6 +561,9 @@ export class GuestActivityLedgerService {
     const now = new Date();
     const staleAt = new Date(now.getTime() - SYNC_JOB_LOCK_STALE_MS);
     const availableWhere = {
+      tenant: {
+        customerStage: TenantCustomerStage.INTERNAL,
+      },
       OR: [
         {
           status: { in: ['PENDING', 'RETRY'] },
@@ -539,10 +574,26 @@ export class GuestActivityLedgerService {
     };
     const candidate = await this.prisma.guestActivitySyncJob.findFirst({
       where: availableWhere,
+      include: {
+        tenant: {
+          select: {
+            customerStage: true,
+          },
+        },
+      },
       orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
     });
 
     if (!candidate) {
+      return null;
+    }
+    const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+      stage: tenantBackgroundStageForCustomerStage(
+        candidate.tenant.customerStage,
+      ),
+      jobKind: 'GUEST_ACTIVITY_LEDGER_SYNC',
+    });
+    if (!executionDecision.allowed) {
       return null;
     }
 

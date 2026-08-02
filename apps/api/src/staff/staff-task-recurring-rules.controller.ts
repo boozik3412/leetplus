@@ -16,9 +16,9 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import {
   StaffTaskRecurringRulesService,
+  type StaffTaskRecurringRuleActorRunDueDto,
   type StaffTaskRecurringRuleDto,
   type StaffTaskRecurringRuleLaunchDto,
-  type StaffTaskRecurringRuleRunDueDto,
   type StaffTaskRecurringRuleRunDueResult,
   type StaffTaskRecurringRulesQuery,
   type StaffTaskRecurringRulesReport,
@@ -50,7 +50,7 @@ export class StaffTaskRecurringRulesController {
   @Post('run-due')
   runDueRules(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: StaffTaskRecurringRuleRunDueDto,
+    @Body() dto: StaffTaskRecurringRuleActorRunDueDto,
   ): Promise<StaffTaskRecurringRuleRunDueResult> {
     return this.staffTaskRecurringRulesService.runDueRulesForUser(user, dto);
   }

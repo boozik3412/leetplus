@@ -18684,6 +18684,8 @@ export function guestPortalMissionConditionLabel(
   if (missionType === 'PRODUCT_PURCHASE') {
     const mode = stringField(metric.productMatch)?.toUpperCase();
     const purchaseSource = stringField(metric.purchaseSource)?.toUpperCase();
+    const categoryLabels = guestPortalPurchaseCategoryLabels(metric);
+    const categoryList = categoryLabels.join(', ');
     const amountMode = stringField(metric.amountMode)?.toUpperCase();
     const amount =
       amountMode === 'PERIOD_TOTAL'
@@ -18692,10 +18694,14 @@ export function guestPortalMissionConditionLabel(
     return [
       mode === 'ALL'
         ? purchaseSource === 'CATEGORY'
-          ? 'Купить товар из каждой выбранной категории'
+          ? categoryList
+            ? `Купить товар из каждой категории: ${categoryList}`
+            : 'Купить товар из каждой выбранной категории'
           : 'Купить все выбранные товары'
         : purchaseSource === 'CATEGORY'
-          ? 'Купить товар из любой выбранной категории'
+          ? categoryList
+            ? `Купить товар из любой из категорий: ${categoryList}`
+            : 'Купить товар из любой выбранной категории'
           : 'Купить любой выбранный товар',
       amountMode === 'SINGLE_MINIMUM' && amount
         ? `одной покупкой не менее чем на ${amount} ₽`
@@ -18770,6 +18776,20 @@ export function guestPortalMissionConditionLabel(
   return appendHourlySessionSourceNotice(label, sessionType);
 }
 
+function guestPortalPurchaseCategoryLabels(metric: Record<string, unknown>) {
+  const selections = [
+    ...unknownArray(metric.categorySelections),
+    ...unknownArray(metric.categorySelectionLabels),
+  ];
+
+  return uniqueStrings([
+    ...unknownStringArray(metric.categoryLabels).map(stringField),
+    ...selections.map((selection) => stringField(jsonRecord(selection).name)),
+    ...unknownStringArray(metric.categoryNames).map(stringField),
+    stringField(metric.categoryName),
+  ]);
+}
+
 const battlePassExecutionTaskTypes = new Set([
   'APP_OPEN',
   'PLAY_TIME',
@@ -18795,7 +18815,6 @@ function guestPortalBattlePassExecutionCondition(
   const details = [
     guestPortalMissionConditionLabel(normalizedTaskType, metric, sessionType),
   ];
-  const windowDays = numberField(metric.windowDays);
   const weekdays = numberArrayField(metric.weekdays).filter(
     (weekday) => weekday >= 0 && weekday <= 6,
   );
@@ -18803,12 +18822,6 @@ function guestPortalBattlePassExecutionCondition(
     .map((value) => value.trim())
     .filter(Boolean)
     .map((value) => value.replace(/(\d{2}:\d{2})-(\d{2}:\d{2})/g, '$1–$2'));
-
-  if (windowDays !== null && windowDays > 0) {
-    details.push(
-      `Окно выполнения: ${Math.trunc(windowDays)} ${russianDayWord(windowDays)}`,
-    );
-  }
 
   if (weekdays.length) {
     const weekdayLabels = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -18824,22 +18837,6 @@ function guestPortalBattlePassExecutionCondition(
   return details
     .map((detail) => `${detail}${/[.!?]$/.test(detail) ? '' : '.'}`)
     .join(' ');
-}
-
-function russianDayWord(value: number) {
-  const normalized = Math.abs(Math.trunc(value));
-  const modulo100 = normalized % 100;
-  const modulo10 = normalized % 10;
-
-  if (modulo100 >= 11 && modulo100 <= 14) {
-    return 'дней';
-  }
-
-  if (modulo10 === 1) {
-    return 'день';
-  }
-
-  return modulo10 >= 2 && modulo10 <= 4 ? 'дня' : 'дней';
 }
 
 function russianTimeWord(value: number) {
@@ -22518,6 +22515,10 @@ function unknownStringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+function unknownArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? (value as unknown[]) : [];
 }
 
 function numberArrayField(value: unknown) {

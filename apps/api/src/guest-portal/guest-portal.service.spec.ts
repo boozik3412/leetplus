@@ -1958,7 +1958,7 @@ describe('GuestPortalService', () => {
         'Сыграть 60 минут с почасовым тарифом. Продление пакета или абонемента без завершения сессии не засчитывается.',
       );
       expect(playLevel?.executionCondition).toBe(
-        'Сыграть один час в игровой сессии с почасовым тарифом, минимум 30 минут за сессию. Учитывается только полная сессия (продление с изменением типа сессии не учитывается). Окно выполнения: 30 дней. Дни выполнения: Пн, Ср, Пт. Время выполнения: 09:00–21:00.',
+        'Сыграть один час в игровой сессии с почасовым тарифом, минимум 30 минут за сессию. Учитывается только полная сессия (продление с изменением типа сессии не учитывается). Дни выполнения: Пн, Ср, Пт. Время выполнения: 09:00–21:00.',
       );
       expect(checkInLevel?.condition).toBeNull();
       expect(checkInLevel?.executionCondition).toBe(
@@ -1968,7 +1968,34 @@ describe('GuestPortalService', () => {
         'Пополните баланс и получите награду.',
       );
       expect(topUpLevel?.executionCondition).toBe(
-        'Пополнить баланс 3 раза, каждый раз не менее чем на 500 ₽. Окно выполнения: 7 дней.',
+        'Пополнить баланс 3 раза, каждый раз не менее чем на 500 ₽.',
+      );
+    });
+
+    it('lists selected purchase categories without exposing the execution window', () => {
+      const [purchaseLevel] = seasonLevels([
+        {
+          level: 1,
+          xp: 100,
+          activationRules: {
+            taskType: 'PRODUCT_PURCHASE',
+            sessionType: 'ANY',
+            metric: {
+              purchaseSource: 'CATEGORY',
+              productMatch: 'ANY',
+              categoryLabels: ['Напитки', 'Снеки'],
+              target: 1,
+              windowDays: 35_035_035,
+            },
+          },
+        },
+      ] as Prisma.JsonValue);
+
+      expect(purchaseLevel?.executionCondition).toBe(
+        'Купить товар из любой из категорий: Напитки, Снеки.',
+      );
+      expect(purchaseLevel?.executionCondition).not.toContain(
+        'Окно выполнения',
       );
     });
   });

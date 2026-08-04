@@ -88,6 +88,7 @@ type HomeLootCard = {
   dailyLimit: number | null;
   periodicLimitPeriod: "DAILY" | "WEEKLY" | "MONTHLY" | null;
   periodicOpenedCount: number;
+  walletItemId: string | null;
   walletReady: boolean;
   walletStatus: GuestPortalRewardWalletItem["status"] | null;
 };
@@ -1818,8 +1819,12 @@ function ReadyGameView({
 
       showToast("Контейнер активируется.");
 
+      const openRequest =
+        refreshedCard.walletReady && refreshedCard.walletItemId
+          ? openGameRewardWalletLootBox(refreshedCard.walletItemId)
+          : openGameLootBox(refreshedCard.id);
       const [result] = await Promise.all([
-        openGameLootBox(currentCard.id),
+        openRequest,
         wait(LOOTBOX_CHARGE_MIN_MS),
       ]);
 
@@ -1884,7 +1889,7 @@ function ReadyGameView({
         return;
       }
 
-      const message = getErrorMessage(error, "Лутбокс сейчас недоступен.");
+      const message = lootboxOpeningErrorMessage(error);
       setLootboxRoulette(null);
       setLootboxOverlayPhase("ready");
       setLootboxOverlayError(message);
@@ -5681,9 +5686,9 @@ function buildHomeLootCards(
       schedule: lootBox.schedule,
       status: lootboxCardStatus(lootBox, walletReady, walletStatus),
       active: false,
-      openable: lootBox.openable,
-      openState: lootBox.openState,
-      openBlocker: lootBox.openBlocker,
+      openable: walletReady || lootBox.openable,
+      openState: walletReady ? "OPENABLE" : lootBox.openState,
+      openBlocker: walletReady ? null : lootBox.openBlocker,
       rewardLabel: lootBox.rewardLabel,
       caseRarity: normalizeLootboxRarity(lootBox.caseRarity) ?? "common",
       caseRarityLabel:
@@ -5698,6 +5703,7 @@ function buildHomeLootCards(
       dailyLimit: lootBox.dailyLimit,
       periodicLimitPeriod: lootBox.periodicLimitPeriod,
       periodicOpenedCount: lootBox.periodicOpenedCount,
+      walletItemId: walletItem?.id ?? null,
       walletReady,
       walletStatus,
     };
@@ -5728,7 +5734,7 @@ function lootboxCardStatus(
   }
 
   if (walletReady) {
-    return "награда доступна";
+    return "можно открыть";
   }
 
   if (!lootBox.openable && lootBox.openState === "LIMIT_REACHED") {
@@ -5766,7 +5772,31 @@ function lootboxWalletStatusLabel(
     return walletReady ? "Повторить открытие" : "Не удалось открыть";
   }
 
-  return "Награда доступна";
+  return walletReady ? "Открыть кейс" : "Проверяем доступность";
+}
+
+function lootboxOpeningErrorMessage(error: unknown) {
+  const message = getErrorMessage(error, "Кейс сейчас недоступен.");
+  const normalized = message.toLocaleLowerCase("ru-RU");
+
+  if (
+    normalized.includes("уже использовано") ||
+    normalized.includes("уже погашено") ||
+    normalized.includes("срок его хранения истёк") ||
+    normalized.includes("больше недоступно")
+  ) {
+    return "Этот кейс уже открыт или больше недоступен. Обновите игровой модуль.";
+  }
+
+  if (
+    normalized.includes("право на открытие") ||
+    normalized.includes("по праву открытия") ||
+    normalized.includes("право не погашено")
+  ) {
+    return "Кейс пока не открылся, но он остаётся у вас. Нажмите «Попробовать ещё раз».";
+  }
+
+  return message;
 }
 
 function lootboxCardBlockedTooltip(card: HomeLootCard) {
@@ -16289,6 +16319,7 @@ function buildLootboxRouletteState({
         dailyLimit: item.dailyLimit,
         periodicLimitPeriod: item.periodicLimitPeriod,
         periodicOpenedCount: item.periodicOpenedCount,
+        walletItemId: null,
         walletReady: false,
         walletStatus: null,
       },

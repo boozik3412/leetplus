@@ -146,7 +146,9 @@ const REWARD_WALLET_RETENTION_MS =
 const REWARD_EFFECT_GUEST_RETRY_MAX_ATTEMPTS = 5;
 const REWARD_WALLET_OPENING_STALE_MS = 5 * 60 * 1000;
 const GUEST_PORTAL_LOOT_BOX_ENTITLEMENT_REQUIRED_MESSAGE =
-  'Подарочный лутбокс можно открыть только по выданному праву.';
+  'Этот кейс ещё не заработан. Выполните его условие, чтобы открыть.';
+const GUEST_PORTAL_LOOT_BOX_RETRY_MESSAGE =
+  'Кейс пока не открылся, но он остаётся у вас. Нажмите «Попробовать ещё раз».';
 const GAME_PROFILE_STAFF_TEST_REASON_STAFF_PHONE = 'STAFF_PHONE_MATCH';
 const GAME_PROFILE_STAFF_TEST_REASON_LANGAME_STAFF_PHONE =
   'LANGAME_STAFF_PHONE_MATCH';
@@ -4086,7 +4088,7 @@ export class GuestPortalService {
       walletItem.entitlement.id !== walletItem.entitlementId
     ) {
       throw new NotFoundException(
-        'Право на открытие не найдено, уже использовано или срок его хранения истёк.',
+        'Этот кейс уже открыт или срок его хранения истёк. Обновите игровой модуль.',
       );
     }
 
@@ -6665,7 +6667,7 @@ export class GuestPortalService {
     );
     if (requiredEntitlementId && !entitlement) {
       throw new NotFoundException(
-        'Право на открытие не найдено, уже использовано или больше недоступно.',
+        'Этот кейс уже открыт или больше недоступен. Обновите игровой модуль.',
       );
     }
     if (
@@ -6685,7 +6687,7 @@ export class GuestPortalService {
       });
       if (backfilled?.outcome === 'BLOCKED') {
         throw new ServiceUnavailableException(
-          'Право на открытие требует безопасной сверки с историей наград. Повторите попытку позже.',
+          'Проверяем историю этого кейса. Попробуйте открыть его через несколько секунд.',
         );
       }
       entitlement =
@@ -7006,7 +7008,7 @@ export class GuestPortalService {
 
       if (!materializedRewardId) {
         throw new ServiceUnavailableException(
-          'Награда по праву открытия не была сохранена. Повторите попытку: право не погашено.',
+          GUEST_PORTAL_LOOT_BOX_RETRY_MESSAGE,
         );
       }
 
@@ -10717,7 +10719,7 @@ export class GuestPortalService {
       }
       if (reconciliation.outcome === 'BLOCKED') {
         throw new ServiceUnavailableException(
-          'Право на открытие требует безопасной сверки с историей наград. Повторите попытку позже.',
+          'Проверяем историю этого кейса. Попробуйте открыть его через несколько секунд.',
         );
       }
     }
@@ -11339,7 +11341,7 @@ export class GuestPortalService {
       });
       if (reservedWalletItem.count !== 1) {
         throw new NotFoundException(
-          'Право на открытие уже используется, погашено или срок его хранения истёк.',
+          'Кейс уже открывается, был открыт ранее или срок его хранения истёк. Обновите игровой модуль.',
         );
       }
 
@@ -11362,7 +11364,7 @@ export class GuestPortalService {
       });
       if (reservedEntitlement.count !== 1) {
         throw new NotFoundException(
-          'Право на открытие уже используется, погашено или больше недоступно.',
+          'Кейс уже открывается, был открыт ранее или больше недоступен. Обновите игровой модуль.',
         );
       }
     });
@@ -11389,7 +11391,7 @@ export class GuestPortalService {
 
       if (!reward) {
         throw new ServiceUnavailableException(
-          'Награда по праву открытия не найдена в базе. Право осталось доступным.',
+          GUEST_PORTAL_LOOT_BOX_RETRY_MESSAGE,
         );
       }
 
@@ -11465,7 +11467,7 @@ export class GuestPortalService {
       }
 
       throw new BadRequestException(
-        'Право на открытие уже погашено или больше недоступно. Обновите состояние кейса.',
+        'Этот кейс уже открыт или больше недоступен. Обновите игровой модуль.',
       );
     });
   }

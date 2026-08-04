@@ -2549,7 +2549,7 @@ describe('GuestPortalService', () => {
 
       await expect(
         service.openLootBox('Bearer guest-token', 'loot-1'),
-      ).rejects.toThrow('по выданному праву');
+      ).rejects.toThrow('ещё не заработан');
 
       expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
@@ -4916,7 +4916,7 @@ describe('GuestPortalService', () => {
           rewardId: 'reward-missing',
           consumedAt: new Date('2026-07-11T10:00:00.000Z'),
         }),
-      ).rejects.toThrow('Награда по праву открытия не найдена в базе');
+      ).rejects.toThrow('Кейс пока не открылся, но он остаётся у вас');
       expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
     });
 
@@ -6076,7 +6076,7 @@ describe('GuestPortalService', () => {
 
       await expect(
         service.openLootBox('Bearer guest-token', 'loot-audience'),
-      ).rejects.toThrow('по выданному праву');
+      ).rejects.toThrow('ещё не заработан');
 
       expect(prisma.guestAudienceMember.findMany).toHaveBeenCalledWith({
         where: {
@@ -6331,7 +6331,7 @@ describe('GuestPortalService', () => {
 
       await expect(
         service.openLootBox('Bearer guest-token', 'loot-app'),
-      ).rejects.toThrow('по выданному праву');
+      ).rejects.toThrow('ещё не заработан');
 
       expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
@@ -6391,7 +6391,7 @@ describe('GuestPortalService', () => {
       try {
         await expect(
           service.openLootBox('Bearer guest-token', 'loot-app'),
-        ).rejects.toThrow('по выданному праву');
+        ).rejects.toThrow('ещё не заработан');
       } finally {
         jest.useRealTimers();
       }

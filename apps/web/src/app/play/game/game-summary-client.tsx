@@ -4161,7 +4161,7 @@ function BattlePassQuestModal({
 
         <div className="lp-battlepass-detail-lines">
           <div className="lp-battlepass-detail-line">
-            <span>Задача</span>
+            <span>Описание</span>
             <p>{task}</p>
           </div>
 

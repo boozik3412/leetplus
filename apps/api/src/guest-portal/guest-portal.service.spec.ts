@@ -12,6 +12,7 @@ import {
   GuestPortalService,
   guestPortalEffectiveXp,
   guestPortalMissionConditionLabel,
+  guestPortalMissionProgressCurrent,
   guestPortalMissionProgressTarget,
   guestPortalMissionProgressUnitLabel,
   guestPortalVisibleBonusLedgerRows,
@@ -1732,6 +1733,12 @@ describe('GuestPortalService', () => {
   });
 
   describe('mission display values', () => {
+    it('caps completed mission progress at the configured target', () => {
+      expect(guestPortalMissionProgressCurrent(1605, 60)).toBe(60);
+      expect(guestPortalMissionProgressCurrent(-5, 60)).toBe(0);
+      expect(guestPortalMissionProgressCurrent(75, null)).toBe(75);
+    });
+
     it('uses the normalized top-up threshold and metric target', () => {
       expect(
         guestPortalMissionConditionLabel(
@@ -10540,7 +10547,7 @@ describe('GuestPortalService', () => {
         openBlocker: expect.any(String),
       });
     });
-    it('uses live wallet entitlements in OFF mode and hides templates after consumption', async () => {
+    it('keeps entitled reward templates out of the storefront before and after consumption', async () => {
       const { prisma, service } = createService({
         GUEST_GAME_ENTITLEMENT_READ_MODE: 'OFF',
       });
@@ -10688,15 +10695,7 @@ describe('GuestPortalService', () => {
 
       expect(
         portalWithSyntheticLegacyEntitlement.gamification.lootBoxes,
-      ).toHaveLength(1);
-      expect(
-        portalWithSyntheticLegacyEntitlement.gamification.lootBoxes[0],
-      ).toMatchObject({
-        id: 'loot-weekend',
-        openState: 'OPENABLE',
-        openable: true,
-        openBlocker: null,
-      });
+      ).toEqual([]);
       expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
 
       const portal = await (service as any).buildPortalPayload({
@@ -10709,13 +10708,7 @@ describe('GuestPortalService', () => {
         phoneHash: 'phone-hash',
       });
 
-      expect(portal.gamification.lootBoxes).toHaveLength(1);
-      expect(portal.gamification.lootBoxes[0]).toMatchObject({
-        id: 'loot-weekend',
-        openState: 'OPENABLE',
-        openable: true,
-        openBlocker: null,
-      });
+      expect(portal.gamification.lootBoxes).toEqual([]);
       expect(prisma.guestGameEntitlement.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({

@@ -12475,28 +12475,24 @@ export class GuestPortalService {
         }
       });
     }
-    const entitledRuleIds = new Set(
-      entitlementRows.map((entitlement) => entitlement.ruleId),
-    );
     const visibleCatalogLootBoxes = filterLootBoxesByVisualRefs(
       storeLootBoxRows.filter(portalLootBoxVisibleInCatalog),
       publishedVisualLootBoxRefs,
     );
-    const visibleCatalogLootBoxIds = new Set(
-      visibleCatalogLootBoxes.map((lootBox) => lootBox.id),
+    const entitledRuleIds = new Set(
+      entitlementRows.map((entitlement) => entitlement.ruleId),
     );
+    // Entitlements prioritize an earned catalog case, but they must never
+    // promote a gift-only REWARD_TEMPLATE into the public storefront. Gift
+    // cases stay available through the reward wallet and completion history.
     const portalLootBoxRows = [
-      ...storeLootBoxRows.filter((lootBox) => entitledRuleIds.has(lootBox.id)),
+      ...visibleCatalogLootBoxes.filter((lootBox) =>
+        entitledRuleIds.has(lootBox.id),
+      ),
       ...visibleCatalogLootBoxes.filter(
         (lootBox) => !entitledRuleIds.has(lootBox.id),
       ),
-    ]
-      .filter(
-        (lootBox) =>
-          entitledRuleIds.has(lootBox.id) ||
-          visibleCatalogLootBoxIds.has(lootBox.id),
-      )
-      .slice(0, 6);
+    ].slice(0, 6);
     const portalLootBoxes = portalLootBoxRows.map((item) => {
       const liveEntitlements = entitlementRows.filter(
         (entitlement) => entitlement.ruleId === item.id,
@@ -18412,8 +18408,8 @@ function mapMission(
   rewards: GuestPortalRewardRow[] = [],
   bonusLedgerRows: GuestPortalBonusLedgerRow[] = [],
 ): GuestPortalMission {
-  const progressCurrent = progress?.current ?? 0;
-  const questSteps = missionQuestSteps(row.conditions, progressCurrent);
+  const rawProgressCurrent = progress?.current ?? 0;
+  const questSteps = missionQuestSteps(row.conditions, rawProgressCurrent);
   const rawConditions = jsonRecord(row.conditions);
   const effectiveMissionType =
     missionTaskTypeFromConditions(rawConditions, row.missionType) ??
@@ -18441,6 +18437,10 @@ function mapMission(
     : normalizedMetricTarget && normalizedMetricTarget > 0
       ? normalizedMetricTarget
       : guestPortalMissionProgressTarget(row);
+  const progressCurrent = guestPortalMissionProgressCurrent(
+    rawProgressCurrent,
+    progressTarget,
+  );
   const progressPercent = questSteps.length
     ? percent(progressCurrent, progressTarget ?? questSteps.length)
     : (progress?.percent ?? 0);
@@ -18534,6 +18534,17 @@ export function guestPortalMissionProgressTarget(mission: {
   return mission.progressTarget && mission.progressTarget > 0
     ? mission.progressTarget
     : 1;
+}
+
+export function guestPortalMissionProgressCurrent(
+  current: number,
+  target: number | null,
+) {
+  const normalizedCurrent = Number.isFinite(current) ? Math.max(0, current) : 0;
+
+  return target !== null && Number.isFinite(target) && target > 0
+    ? Math.min(normalizedCurrent, target)
+    : normalizedCurrent;
 }
 
 export function guestPortalMissionProgressUnitLabel(

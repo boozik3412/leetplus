@@ -8827,6 +8827,8 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
 }
 
 function gameMissionPreviewData(mission: GameMission): GuestMissionPreviewData {
+  const progress = playerQuestProgress(mission);
+
   return {
     title: mission.name,
     description:
@@ -8840,8 +8842,8 @@ function gameMissionPreviewData(mission: GameMission): GuestMissionPreviewData {
         ? `${mission.xpReward} XP`
         : "Без основной награды"),
     xp: mission.xpReward,
-    progressCurrent: mission.progressCurrent,
-    progressTarget: mission.progressTarget ?? 1,
+    progressCurrent: progress?.current ?? 0,
+    progressTarget: progress?.total ?? 1,
     progressUnit: gameProgressUnitLabel(mission.progressUnit) ?? "",
     actionText: mission.actionText ?? "Подробнее",
     icon: mission.icon,

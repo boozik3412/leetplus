@@ -644,10 +644,6 @@ export function GameRewardsClient() {
   const rewardWallet = summary
     ? gameRewardWallet(summary)
     : EMPTY_REWARD_WALLET;
-  const rewardWalletPulse = useRewardWalletPulse(
-    rewardWallet,
-    summary?.profile.id ?? null,
-  );
   const applySummary = useCallback(
     (nextSummary: GuestPortalGameSummary | null) => {
       summaryEpochRef.current += 1;
@@ -894,15 +890,7 @@ export function GameRewardsClient() {
     <GameShell
       body={
         <div className="lp-club-home lp-reward-standalone-page">
-          <GameModuleTopbar
-            summary={summary}
-            wallet={rewardWallet}
-            walletPulsing={rewardWalletPulse}
-            claimingItemId={walletClaimingItemId}
-            claimAllPending={walletClaimAllPending}
-            onItemAction={handleRewardWalletItem}
-            onClaimAll={handleRewardWalletClaimAll}
-          />
+          <GameModuleTopbar summary={summary} />
           <div className="lp-reward-standalone-shell">
             {walletMessage ? (
               <div
@@ -1014,23 +1002,7 @@ function EmptySessionView({
   );
 }
 
-function GameModuleTopbar({
-  summary,
-  wallet,
-  walletPulsing,
-  claimingItemId,
-  claimAllPending,
-  onItemAction,
-  onClaimAll,
-}: {
-  summary: GuestPortalGameSummary;
-  wallet: GuestPortalRewardWallet;
-  walletPulsing: boolean;
-  claimingItemId: string | null;
-  claimAllPending: boolean;
-  onItemAction: (item: GuestPortalRewardWalletItem) => Promise<boolean>;
-  onClaimAll: () => Promise<boolean>;
-}) {
+function GameModuleTopbar({ summary }: { summary: GuestPortalGameSummary }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const brandLogoUrl = summary.store.gameLogoUrl ?? summary.tenant.gameLogoUrl;
@@ -1109,16 +1081,6 @@ function GameModuleTopbar({
       </div>
 
       <div className="lp-club-header-actions">
-        {wallet.pendingCount > 0 ? (
-          <RewardWalletHeaderIndicator
-            wallet={wallet}
-            pulsing={walletPulsing}
-            claimingItemId={claimingItemId}
-            claimAllPending={claimAllPending}
-            onItemAction={onItemAction}
-            onClaimAll={onClaimAll}
-          />
-        ) : null}
         <div
           className="lp-club-session-state"
           title="Телефон подтвержден, клуб выбран"
@@ -1186,7 +1148,6 @@ function ReadyGameView({
   const [walletClaimingItemId, setWalletClaimingItemId] = useState<
     string | null
   >(null);
-  const [walletClaimAllPending, setWalletClaimAllPending] = useState(false);
   const walletActionPendingRef = useRef(false);
   const rewardWallet = gameRewardWallet(summary);
   const rewardWalletPulse = useRewardWalletPulse(
@@ -1654,11 +1615,7 @@ function ReadyGameView({
     }
 
     if (item.action === "OPEN_LOOT_BOX") {
-      if (
-        walletActionPendingRef.current ||
-        walletClaimingItemId ||
-        walletClaimAllPending
-      ) {
+      if (walletActionPendingRef.current || walletClaimingItemId) {
         return false;
       }
 
@@ -1689,8 +1646,7 @@ function ReadyGameView({
     if (
       item.action !== "CLAIM_REWARD" ||
       walletActionPendingRef.current ||
-      walletClaimingItemId ||
-      walletClaimAllPending
+      walletClaimingItemId
     ) {
       return false;
     }
@@ -1715,44 +1671,6 @@ function ReadyGameView({
     } finally {
       walletActionPendingRef.current = false;
       setWalletClaimingItemId(null);
-    }
-  }
-
-  async function handleRewardWalletClaimAll(): Promise<boolean> {
-    if (
-      !gameRewardWallet(summary).items.some(isClaimableRewardWalletItem) ||
-      walletActionPendingRef.current ||
-      walletClaimingItemId ||
-      walletClaimAllPending
-    ) {
-      return false;
-    }
-
-    walletActionPendingRef.current = true;
-    setWalletClaimAllPending(true);
-
-    try {
-      const nextSummary = await claimAllGameRewardWalletItems();
-      const nextWallet = gameRewardWallet(nextSummary);
-
-      applySummaryWithCompletionDialogs(nextSummary);
-      showToast(
-        nextWallet.pendingCount > 0
-          ? "Доступные награды отправлены. Остальные остаются в кошельке со своим статусом."
-          : "Все доступные награды получены.",
-      );
-      return true;
-    } catch (error) {
-      showToast(
-        getErrorMessage(
-          error,
-          "Не удалось получить награды. Попробуйте ещё раз.",
-        ),
-      );
-      return false;
-    } finally {
-      walletActionPendingRef.current = false;
-      setWalletClaimAllPending(false);
     }
   }
 
@@ -2138,15 +2056,7 @@ function ReadyGameView({
 
   return (
     <div className="lp-club-home">
-      <GameModuleTopbar
-        summary={summary}
-        wallet={rewardWallet}
-        walletPulsing={rewardWalletPulse}
-        claimingItemId={walletClaimingItemId}
-        claimAllPending={walletClaimAllPending}
-        onItemAction={handleRewardWalletItem}
-        onClaimAll={handleRewardWalletClaimAll}
-      />
+      <GameModuleTopbar summary={summary} />
 
       <div
         ref={shellRef}
@@ -5019,214 +4929,6 @@ function WalletCaseIcon() {
       height={24}
       aria-hidden="true"
     />
-  );
-}
-
-function RewardWalletHeaderIndicator({
-  wallet,
-  pulsing,
-  claimingItemId,
-  claimAllPending,
-  onItemAction,
-  onClaimAll,
-}: {
-  wallet: GuestPortalRewardWallet;
-  pulsing: boolean;
-  claimingItemId: string | null;
-  claimAllPending: boolean;
-  onItemAction: (item: GuestPortalRewardWalletItem) => Promise<boolean>;
-  onClaimAll: () => Promise<boolean>;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const visibleItems = orderedRewardWalletItems(wallet.items).slice(0, 4);
-  const hasClaimableItems = wallet.items.some(isClaimableRewardWalletItem);
-  const hiddenItemCount = Math.max(
-    0,
-    wallet.pendingCount - visibleItems.length,
-  );
-  const closeAndRestoreFocus = useCallback(() => {
-    const trigger = triggerRef.current;
-    const previouslyFocused =
-      document.activeElement instanceof HTMLElement &&
-      document.activeElement !== document.body
-        ? document.activeElement
-        : null;
-    setOpen(false);
-    window.requestAnimationFrame(() => {
-      const fallbackSelectors = [
-        "#rewards .lp-club-ghost-link",
-        "#rewards select",
-        ".lp-club-menu-button",
-        ".lp-club-switch",
-      ];
-      const candidates = [
-        trigger,
-        previouslyFocused,
-        ...fallbackSelectors.map((selector) =>
-          document.querySelector<HTMLElement>(selector),
-        ),
-      ];
-
-      for (const candidate of candidates) {
-        if (
-          !candidate?.isConnected ||
-          candidate.matches(":disabled, [aria-disabled='true']")
-        ) {
-          continue;
-        }
-
-        candidate.focus();
-        if (document.activeElement === candidate) {
-          return;
-        }
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      if (
-        event.target instanceof Node &&
-        !rootRef.current?.contains(event.target)
-      ) {
-        setOpen(false);
-      }
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        closeAndRestoreFocus();
-      }
-    }
-
-    window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [closeAndRestoreFocus, open]);
-
-  return (
-    <div ref={rootRef} className="lp-reward-wallet-header">
-      <button
-        ref={triggerRef}
-        type="button"
-        className={[
-          "lp-reward-wallet-trigger",
-          pulsing ? "is-pulsing" : "",
-        ].join(" ")}
-        aria-label={`Награды ждут вас: ${formatNumber(wallet.pendingCount)}`}
-        aria-expanded={open}
-        aria-controls="rewardWalletDropdown"
-        onClick={() => setOpen((value) => !value)}
-      >
-        <WalletCaseIcon />
-        <span>{formatNumber(wallet.pendingCount)}</span>
-      </button>
-
-      {open ? (
-        <section
-          id="rewardWalletDropdown"
-          className="lp-reward-wallet-dropdown"
-          aria-label="Награды, ожидающие получения"
-          aria-live="polite"
-        >
-          <header>
-            <span className="lp-club-small-label">Награды</span>
-            <strong>{formatNumber(wallet.pendingCount)}</strong>
-          </header>
-
-          <div className="lp-reward-wallet-dropdown-list">
-            {visibleItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={item.status === "FAILED" ? "is-failed" : ""}
-                title={rewardWalletItemStatusHint(item)}
-                disabled={
-                  !isRewardWalletItemActionable(item) ||
-                  claimAllPending ||
-                  claimingItemId === item.id ||
-                  Boolean(claimingItemId)
-                }
-                onClick={() => {
-                  void onItemAction(item)
-                    .then((succeeded) => {
-                      if (succeeded) {
-                        closeAndRestoreFocus();
-                      }
-                    })
-                    .catch(() => undefined);
-                }}
-              >
-                <span className="lp-reward-wallet-item-icon" aria-hidden="true">
-                  <WalletCaseIcon />
-                </span>
-                <span>
-                  <small>{rewardWalletSourceCaption(item)}</small>
-                  <strong>{item.title}</strong>
-                  <em>
-                    {item.rewardLabel} · {rewardWalletItemStatusLabel(item)}
-                  </em>
-                  <small className="lp-reward-wallet-item-hint">
-                    {rewardWalletItemStatusHint(item)}
-                  </small>
-                </span>
-                <b>
-                  {claimingItemId === item.id
-                    ? rewardWalletItemPendingActionLabel(item)
-                    : rewardWalletItemActionLabel(item)}
-                </b>
-              </button>
-            ))}
-          </div>
-
-          {hiddenItemCount > 0 ? (
-            <p className="lp-reward-wallet-more">
-              Ещё {formatNumber(hiddenItemCount)} в кошельке
-            </p>
-          ) : null}
-
-          {hasClaimableItems ? (
-            <button
-              type="button"
-              className="lp-reward-wallet-claim-all"
-              disabled={claimAllPending || Boolean(claimingItemId)}
-              onClick={() => {
-                void onClaimAll()
-                  .then((succeeded) => {
-                    if (succeeded) {
-                      closeAndRestoreFocus();
-                    }
-                  })
-                  .catch(() => undefined);
-              }}
-            >
-              {claimAllPending ? "Отправляем…" : "Забрать начисления"}
-            </button>
-          ) : (
-            <p className="lp-reward-wallet-open-note">
-              Остальные награды уже обрабатываются или открываются вручную
-            </p>
-          )}
-          <Link
-            href="/game/rewards"
-            className="lp-reward-wallet-history-link"
-            onClick={() => setOpen(false)}
-          >
-            История наград
-          </Link>
-        </section>
-      ) : null}
-    </div>
   );
 }
 
@@ -10683,188 +10385,6 @@ const clubHomeCss = `
   gap: 10px;
 }
 
-.lp-reward-wallet-header {
-  position: relative;
-}
-
-.lp-reward-wallet-trigger {
-  appearance: none;
-  display: inline-flex;
-  min-width: 66px;
-  height: 44px;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  padding: 0 11px;
-  border: 1px solid rgba(131, 228, 236, 0.58);
-  border-radius: 8px;
-  color: var(--cyan);
-  cursor: pointer;
-  background:
-    linear-gradient(135deg, rgba(131, 228, 236, 0.12), transparent 62%),
-    rgba(7, 12, 16, 0.72);
-  box-shadow: inset 0 0 0 1px rgba(131, 228, 236, 0.04);
-  transition:
-    border-color 180ms ease,
-    background 180ms ease,
-    transform 180ms ease;
-}
-
-.lp-reward-wallet-trigger:hover,
-.lp-reward-wallet-trigger:focus-visible {
-  border-color: rgba(131, 228, 236, 0.9);
-  outline: none;
-  background: rgba(131, 228, 236, 0.13);
-  transform: translateY(-1px);
-}
-
-.lp-reward-wallet-trigger svg,
-.lp-reward-wallet-trigger img {
-  width: 19px;
-  height: 19px;
-  object-fit: contain;
-}
-
-.lp-reward-wallet-trigger > span {
-  display: grid;
-  min-width: 22px;
-  height: 22px;
-  place-items: center;
-  padding: 0 6px;
-  border-radius: 999px;
-  color: #fff2c8;
-  font-size: 11px;
-  font-weight: 900;
-  background: #987411;
-  box-shadow: 0 0 18px rgba(218, 171, 50, 0.28);
-}
-
-.lp-reward-wallet-dropdown {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  z-index: 50;
-  width: min(360px, calc(100vw - 28px));
-  max-height: calc(100dvh - 84px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 14px;
-  border: 1px solid rgba(131, 228, 236, 0.4);
-  border-radius: 10px;
-  background:
-    linear-gradient(135deg, rgba(131, 228, 236, 0.1), transparent 34%),
-    rgba(4, 10, 13, 0.985);
-  box-shadow:
-    0 28px 90px rgba(0, 0, 0, 0.68),
-    0 0 34px rgba(131, 228, 236, 0.1);
-}
-
-.lp-reward-wallet-dropdown > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 11px;
-  border-bottom: 1px solid rgba(196, 224, 225, 0.12);
-}
-
-.lp-reward-wallet-dropdown > header strong {
-  display: grid;
-  min-width: 28px;
-  height: 24px;
-  place-items: center;
-  padding: 0 7px;
-  border-radius: 999px;
-  color: #fff2c8;
-  font-size: 11px;
-  background: rgba(152, 116, 17, 0.72);
-}
-
-.lp-reward-wallet-dropdown-list {
-  display: grid;
-  gap: 7px;
-  margin-top: 10px;
-}
-
-.lp-reward-wallet-dropdown-list > button {
-  appearance: none;
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px;
-  border: 1px solid rgba(196, 224, 225, 0.12);
-  border-radius: 8px;
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-  background: rgba(196, 224, 225, 0.035);
-  transition:
-    border-color 180ms ease,
-    background 180ms ease;
-}
-
-.lp-reward-wallet-dropdown-list > button:hover,
-.lp-reward-wallet-dropdown-list > button:focus-visible {
-  border-color: rgba(131, 228, 236, 0.42);
-  outline: none;
-  background: rgba(131, 228, 236, 0.07);
-}
-
-.lp-reward-wallet-dropdown-list > button:disabled {
-  cursor: wait;
-  opacity: 0.64;
-}
-
-.lp-reward-wallet-dropdown-list > button.is-failed {
-  border-color: rgba(251, 113, 133, 0.42);
-  background: rgba(159, 18, 57, 0.09);
-}
-
-.lp-reward-wallet-dropdown-list > button > span:nth-child(2) {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.lp-reward-wallet-dropdown-list small,
-.lp-reward-wallet-dropdown-list em {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10px;
-  font-style: normal;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lp-reward-wallet-dropdown-list strong {
-  overflow: hidden;
-  font-size: 12px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lp-reward-wallet-dropdown-list .lp-reward-wallet-item-hint {
-  color: rgba(196, 224, 225, 0.68);
-}
-
-.lp-reward-wallet-dropdown-list > button.is-failed
-  .lp-reward-wallet-item-hint {
-  color: #fda4af;
-}
-
-.lp-reward-wallet-dropdown-list b {
-  color: var(--cyan);
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
 .lp-reward-wallet-item-icon {
   display: grid;
   width: 34px;
@@ -10881,56 +10401,6 @@ const clubHomeCss = `
   width: 17px;
   height: 17px;
   object-fit: contain;
-}
-
-.lp-reward-wallet-more {
-  margin: 9px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-  text-align: center;
-}
-
-.lp-reward-wallet-open-note {
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.4;
-  text-align: center;
-}
-
-.lp-reward-wallet-claim-all,
-.lp-reward-wallet-history-link {
-  display: flex;
-  width: 100%;
-  min-height: 38px;
-  align-items: center;
-  justify-content: center;
-  margin-top: 10px;
-  border-radius: 7px;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-align: center;
-  text-decoration: none;
-  text-transform: uppercase;
-}
-
-.lp-reward-wallet-claim-all {
-  border: 1px solid rgba(131, 228, 236, 0.45);
-  color: #001012;
-  cursor: pointer;
-  background: linear-gradient(135deg, #83e4ec, #94d6b8);
-}
-
-.lp-reward-wallet-claim-all:disabled {
-  cursor: wait;
-  opacity: 0.62;
-}
-
-.lp-reward-wallet-history-link {
-  border: 1px solid rgba(131, 228, 236, 0.22);
-  color: var(--cyan);
-  background: rgba(196, 224, 225, 0.035);
 }
 
 .lp-club-shell {
@@ -11470,7 +10940,6 @@ const clubHomeCss = `
     transform: translateY(2px);
   }
 
-  .lp-reward-wallet-trigger.is-pulsing,
   .lp-club-reward-wallet.is-pulsing {
     animation: none;
   }
@@ -14436,7 +13905,6 @@ const clubHomeCss = `
   text-align: center;
 }
 
-.lp-reward-wallet-trigger.is-pulsing,
 .lp-club-reward-wallet.is-pulsing {
   animation: lp-reward-wallet-pulse 1050ms ease-out 1;
 }
@@ -16260,19 +15728,6 @@ const clubHomeCss = `
 
   .lp-club-header-actions {
     gap: 6px;
-  }
-
-  .lp-reward-wallet-trigger {
-    min-width: 54px;
-    height: 42px;
-    gap: 6px;
-    padding: 0 8px;
-  }
-
-  .lp-reward-wallet-trigger > span {
-    min-width: 20px;
-    height: 20px;
-    padding: 0 5px;
   }
 
   .lp-reward-wallet-inbox-head {

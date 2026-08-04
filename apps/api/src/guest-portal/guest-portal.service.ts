@@ -6518,7 +6518,7 @@ export class GuestPortalService {
       where: {
         id,
         tenantId: context.tenant.id,
-        status: 'ACTIVE',
+        ...(exactWalletOpen ? {} : { status: 'ACTIVE' }),
       },
     });
 
@@ -6549,7 +6549,7 @@ export class GuestPortalService {
       throw new NotFoundException('Лутбокс не найден.');
     }
 
-    if (!matchesStore(lootBox.storeIds, context.store.id)) {
+    if (!exactWalletOpen && !matchesStore(lootBox.storeIds, context.store.id)) {
       this.recordGameAuditEvent({
         tenantId: context.tenant.id,
         profileId: profile.id,

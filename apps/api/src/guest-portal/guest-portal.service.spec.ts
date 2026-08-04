@@ -4005,6 +4005,137 @@ describe('GuestPortalService', () => {
       );
     });
 
+    it('opens a durable wallet entitlement after its template is inactive and no longer scoped to the source store', async () => {
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      const { processLiveSessionStartForPayload, tokenPayload } =
+        mockGameSummarySession(service, portal);
+      const sourceStore = {
+        id: 'store-archived',
+        publicSlug: 'archived',
+        name: 'Archived source club',
+        address: null,
+        externalDomain: null,
+        integrationSourceId: null,
+        timeZone: 'Asia/Yekaterinburg',
+      };
+      jest
+        .spyOn(service as any, 'getTenantStoreByIdsIncludingInactive')
+        .mockResolvedValue({
+          tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+          store: sourceStore,
+        });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+        gameActivatedAt: new Date('2026-07-01T00:00:00.000Z'),
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-entitled',
+        tenantId: 'tenant-1',
+        name: 'Historical reward template',
+        status: 'INACTIVE',
+        usageKind: 'REWARD_TEMPLATE',
+        storeIds: ['store-removed'],
+        triggerKind: 'SESSION_START',
+        sessionType: 'packet_hours',
+        limits: { periodicLimit: 'DAILY' },
+        periodRules: {},
+      });
+      const entitlement = availablePortalLootBoxEntitlement(
+        'loot-entitled',
+        '2026-07-05T01:49:00.000Z',
+        {
+          id: 'entitlement-exact',
+          storeId: sourceStore.id,
+          validUntil: new Date('2026-08-05T01:49:00.000Z'),
+        },
+      );
+      jest
+        .spyOn(service as any, 'findReconciledPortalLootBoxEntitlement')
+        .mockResolvedValue(entitlement);
+      jest
+        .spyOn(service as any, 'getPublishedVisualLootBoxRefs')
+        .mockResolvedValue(null);
+      jest.spyOn(service as any, 'findPortalRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'findPortalLootBoxUnlockEvents')
+        .mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'findPortalAudienceMemberIds')
+        .mockResolvedValue(new Set());
+      jest
+        .spyOn(service as any, 'reservePortalLootBoxEntitlement')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service as any, 'finalizePortalLootBoxEntitlement')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'getGameReferralStats').mockResolvedValue({});
+      jest
+        .spyOn(service as any, 'getPendingCompletionNotifications')
+        .mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getRewardWallet')
+        .mockResolvedValue({ pendingCount: 0, items: [] });
+      guestGamificationService.dryRun.mockResolvedValue({
+        rules: [
+          {
+            kind: 'LOOT_BOX',
+            id: 'loot-entitled',
+            eligible: true,
+            blockers: [],
+          },
+        ],
+      });
+      guestGamificationService.processEvent.mockResolvedValue({
+        summary: {
+          idempotent: false,
+          createdRewards: 1,
+          queuedRewardAmount: 200,
+        },
+        rewards: [
+          { id: 'reward-1', rewardLabel: '200 bonuses', rewardType: 'BONUS' },
+        ],
+      });
+
+      const result = await (service as any).openLootBoxForPayload(
+        tokenPayload,
+        'loot-entitled',
+        entitlement.id,
+        'wallet-exact',
+        sourceStore.id,
+      );
+
+      expect(processLiveSessionStartForPayload).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.findFirst.mock.calls[0][0].where).toEqual({
+        id: 'loot-entitled',
+        tenantId: 'tenant-1',
+      });
+      expect(guestGamificationService.dryRun).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          lootBoxId: 'loot-entitled',
+          storeId: sourceStore.id,
+        }),
+        {
+          prequalifiedLootBoxOpen: {
+            tenantId: 'tenant-1',
+            entitlementId: entitlement.id,
+            ruleId: 'loot-entitled',
+            profileId: 'profile-1',
+            storeId: sourceStore.id,
+          },
+        },
+      );
+      expect(result).toMatchObject({ processed: true, createdRewards: 1 });
+    });
+
     it('does not open a missing, foreign, or already consumed wallet entitlement', async () => {
       const { prisma, service } = createService();
       jest.spyOn(service as any, 'verifyGuestToken').mockResolvedValue({

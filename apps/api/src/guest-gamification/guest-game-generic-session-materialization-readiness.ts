@@ -320,6 +320,17 @@ function isPotentialLegacyTypedSession(
   payload: Record<string, unknown>,
   processInput = jsonRecord(payload.input),
 ) {
+  if (
+    payload.materializationQualification ===
+      'PREQUALIFIED_LOOT_BOX_ENTITLEMENT' &&
+    normalizedString(payload.sourceFactKind) === 'GUEST_LOOT_BOX_OPEN' &&
+    normalizedString(payload.sourceFactId)?.startsWith(
+      'guest-game-entitlement:',
+    )
+  ) {
+    return false;
+  }
+
   return (
     ['SESSION_START', 'PLAY_HOUR'].includes(eventType) &&
     normalizedString(payload.source) === 'guest_gamification_process_event' &&

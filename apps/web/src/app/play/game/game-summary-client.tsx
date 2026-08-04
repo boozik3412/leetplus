@@ -14,7 +14,6 @@ import type {
 } from "react";
 import type {
   GuestPortalCheckInResponse,
-  GuestPortalClubSelectResponse,
   GuestPortalGameSummary,
   GuestPortalLootBoxRarity,
   GuestPortalRewardWallet,
@@ -817,23 +816,9 @@ export function GameRewardsClient() {
     walletActionPendingRef.current = true;
     setWalletClaimingItemId(item.id);
     setWalletMessage(null);
-    let switchedStoreName: string | null = null;
 
     try {
       if (item.action === "OPEN_LOOT_BOX") {
-        const storeSelection = await selectRewardWalletItemStore(
-          currentSummary,
-          item,
-        );
-
-        if (storeSelection.switched) {
-          switchedStoreName = storeSelection.summary.store.name;
-          applySummary(storeSelection.summary);
-          setSwitchToastMessage(
-            `Переключились на клуб «${switchedStoreName}». Открываем ваш лутбокс.`,
-          );
-        }
-
         const result = await openGameRewardWalletLootBox(item.id);
         const rewardLabel = result.rewards[0]?.rewardLabel ?? item.rewardLabel;
 
@@ -856,9 +841,7 @@ export function GameRewardsClient() {
       setWalletMessage(
         getErrorMessage(
           error,
-          switchedStoreName
-            ? `Клуб «${switchedStoreName}» выбран, но открыть лутбокс не удалось. Попробуйте ещё раз.`
-            : "Не удалось получить награду. Попробуйте ещё раз.",
+          "Не удалось получить награду. Попробуйте ещё раз.",
         ),
       );
       return false;
@@ -1681,19 +1664,8 @@ function ReadyGameView({
 
       walletActionPendingRef.current = true;
       setWalletClaimingItemId(item.id);
-      let switchedStoreName: string | null = null;
 
       try {
-        const storeSelection = await selectRewardWalletItemStore(summary, item);
-
-        if (storeSelection.switched) {
-          switchedStoreName = storeSelection.summary.store.name;
-          applySummaryWithCompletionDialogs(storeSelection.summary);
-          showToast(
-            `Переключились на клуб «${switchedStoreName}». Открываем ваш лутбокс.`,
-          );
-        }
-
         const result = await openGameRewardWalletLootBox(item.id);
         const rewardLabel = result.rewards[0]?.rewardLabel ?? item.rewardLabel;
 
@@ -1704,9 +1676,7 @@ function ReadyGameView({
         showToast(
           getErrorMessage(
             error,
-            switchedStoreName
-              ? `Клуб «${switchedStoreName}» выбран, но открыть лутбокс не удалось. Попробуйте ещё раз.`
-              : "Не удалось открыть лутбокс. Попробуйте ещё раз.",
+            "Не удалось открыть лутбокс. Попробуйте ещё раз.",
           ),
         );
         return false;
@@ -16710,53 +16680,6 @@ async function openGameLootBox(
   });
 
   return result;
-}
-
-async function selectRewardWalletItemStore(
-  summary: GuestPortalGameSummary,
-  item: GuestPortalRewardWalletItem,
-): Promise<{
-  summary: GuestPortalGameSummary;
-  switched: boolean;
-}> {
-  if (!item.storeId || item.storeId === summary.store.id) {
-    return { summary, switched: false };
-  }
-
-  const response = await fetch("/api/guest-portal/session/select-club", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      tenantSlug: summary.tenant.slug,
-      storeId: item.storeId,
-    }),
-    cache: "no-store",
-  });
-
-  if (response.status === 401) {
-    throw new EmptySessionError(
-      "Сессия входа истекла. Подтвердите телефон заново.",
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      await readResponseMessage(
-        response,
-        "Не удалось переключиться на клуб, где доступен этот лутбокс.",
-      ),
-    );
-  }
-
-  const result = (await response.json()) as GuestPortalClubSelectResponse;
-
-  if (result.summary.store.id !== item.storeId) {
-    throw new Error(
-      "Клуб для этого лутбокса не был выбран. Обновите кошелёк и повторите попытку.",
-    );
-  }
-
-  return { summary: result.summary, switched: true };
 }
 
 async function openGameRewardWalletLootBox(

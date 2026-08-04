@@ -14681,7 +14681,12 @@ export class GuestGamificationService {
       derivedOriginKeys.legacy ??
       null;
     const materializeRewards = options.materializeRewards !== false;
-    const processPayload = buildProcessPayload(dto, dryRun, materializeRewards);
+    const processPayload = buildProcessPayload(
+      dto,
+      dryRun,
+      materializeRewards,
+      Boolean(options.prequalifiedLootBoxOpen),
+    );
     let existingEvent: EventRow | null = null;
     for (const candidateOriginKey of originCandidates) {
       existingEvent = await this.findProcessEventByOriginKey(
@@ -28385,6 +28390,7 @@ function buildProcessPayload(
   dto: GuestGameProcessEventDto,
   dryRun: GuestGameDryRunResult,
   includeRewardMaterialization = true,
+  prequalifiedLootBoxEntitlementOpen = false,
 ): Prisma.InputJsonObject {
   const extraPayload = dto.payload ?? null;
 
@@ -28399,6 +28405,11 @@ function buildProcessPayload(
     externalId: nullableString(dto.externalId),
     sourceKind: nullableString(dto.sourceKind),
     sessionExternalId: nullableString(dto.sessionExternalId),
+    ...(prequalifiedLootBoxEntitlementOpen
+      ? {
+          materializationQualification: 'PREQUALIFIED_LOOT_BOX_ENTITLEMENT',
+        }
+      : {}),
     ...(extraPayload ? { extra: extraPayload } : {}),
     store: dryRun.store,
     input: dryRun.input,
@@ -31363,20 +31374,21 @@ function evaluateLootBoxDryRun(
     context.prequalifiedLootBoxOpen.storeId === context.storeId;
 
   appendDryRunProfileCheck(context, blockers, reasons);
-  appendDryRunStatusCheck(rule.status, blockers, reasons);
+  let scopedContext: DryRunContext | null = context;
   if (!prequalified) {
+    appendDryRunStatusCheck(rule.status, blockers, reasons);
     appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
     appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
     appendDryRunAudienceCheck(rule, context, blockers, reasons);
+    scopedContext = appendDryRunStoreCheck(
+      rule.id,
+      rule.storeIds,
+      guestGameStringArray(jsonRecord(rule.periodRules).externalDomains),
+      context,
+      blockers,
+      reasons,
+    );
   }
-  const scopedContext = appendDryRunStoreCheck(
-    rule.id,
-    rule.storeIds,
-    guestGameStringArray(jsonRecord(rule.periodRules).externalDomains),
-    context,
-    blockers,
-    reasons,
-  );
   if (scopedContext && !prequalified) {
     appendDryRunPeriodRules(
       rule.periodRules,
@@ -31414,6 +31426,7 @@ function evaluateLootBoxDryRun(
   if (prequalified) {
     reasons.push(
       'The exact reward-wallet entitlement was prequalified at issuance.',
+      'Mutable template status and store scope are not re-evaluated for the durable entitlement.',
     );
   } else {
     appendDryRunBudgetCheck(

@@ -66,6 +66,38 @@ describe('generic session materialization readiness', () => {
     expect(queryRaw).not.toHaveBeenCalled();
   });
 
+  it('does not reclassify a session-shaped event used only to open a prequalified entitlement', async () => {
+    const queryRaw = jest.fn<Promise<unknown[]>, [unknown]>();
+    const remediation = jest.spyOn(
+      genericSessionRemediation,
+      'remediateLegacyGenericSessionClassification',
+    );
+
+    await expect(
+      prepareGenericSessionEventForMaterialization(
+        { $queryRaw: queryRaw } as never,
+        {
+          tenantId,
+          event: event({
+            payload: {
+              source: 'guest_gamification_process_event',
+              processSchemaVersion: 2,
+              sourceFactId: 'guest-game-entitlement:entitlement-1',
+              sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+              materializationQualification: 'PREQUALIFIED_LOOT_BOX_ENTITLEMENT',
+              input: { sessionPacket: false, sessionType: 'HOURLY' },
+            },
+          }),
+        },
+      ),
+    ).resolves.toEqual({
+      status: 'READY',
+      reason: 'NOT_A_LEGACY_TYPED_SESSION',
+    });
+    expect(remediation).not.toHaveBeenCalled();
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       {
@@ -356,6 +388,30 @@ describe('transactional generic session materialization fence', () => {
       assertGenericSessionEventMaterializationReadyInTransaction(
         { $queryRaw: queryRaw } as never,
         { tenantId, eventId: 'purchase-event-1' },
+      ),
+    ).resolves.toBeUndefined();
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a transaction to materialize a prequalified entitlement open without a session fact', async () => {
+    const queryRaw = jest.fn().mockResolvedValue([
+      {
+        eventType: 'SESSION_START',
+        payload: {
+          source: 'guest_gamification_process_event',
+          processSchemaVersion: 2,
+          sourceFactId: 'guest-game-entitlement:entitlement-1',
+          sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+          materializationQualification: 'PREQUALIFIED_LOOT_BOX_ENTITLEMENT',
+          input: { sessionPacket: false, sessionType: 'HOURLY' },
+        },
+      },
+    ]);
+
+    await expect(
+      assertGenericSessionEventMaterializationReadyInTransaction(
+        { $queryRaw: queryRaw } as never,
+        { tenantId, eventId: 'entitlement-open-event-1' },
       ),
     ).resolves.toBeUndefined();
     expect(queryRaw).toHaveBeenCalledTimes(1);

@@ -8963,11 +8963,12 @@ describe('GuestGamificationService', () => {
       ]);
     });
 
-    it('treats an exact wallet entitlement as authoritative after qualification', async () => {
+    it('keeps an exact wallet entitlement authoritative after template status and store scope change', async () => {
       const { service, prisma } = createService();
       const changedRule = activeLootBox({
         id: 'loot-entitled',
-        storeIds: ['store-1'],
+        status: 'INACTIVE',
+        storeIds: ['store-removed'],
         triggerKind: 'PLAY_HOUR',
         sessionType: 'packet_hours',
         audience: {
@@ -9054,6 +9055,7 @@ describe('GuestGamificationService', () => {
         blockers: [],
         reasons: expect.arrayContaining([
           'The exact reward-wallet entitlement was prequalified at issuance.',
+          'Mutable template status and store scope are not re-evaluated for the durable entitlement.',
         ]),
       });
     });
@@ -16548,6 +16550,107 @@ describe('GuestGamificationService', () => {
           }),
         ],
       });
+    });
+
+    it('marks a prequalified wallet case open so hourly session remediation cannot block its prize', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const lootBoxRun = dryRunResult({
+        eventType: 'SESSION_START',
+        input: {
+          sessionType: 'HOURLY',
+          sessionPacket: false,
+          sessionMinutes: 60,
+          spendAmount: null,
+          tariffGroupId: null,
+          tariffPeriodId: null,
+          tariffTypeId: null,
+          guestLogType: null,
+          productId: null,
+          externalProductId: null,
+          categoryId: null,
+          productName: null,
+          categoryName: null,
+          supplierName: null,
+          quantity: null,
+        },
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            id: 'loot-entitled',
+            kind: 'LOOT_BOX',
+            xpDelta: 0,
+          },
+        ],
+      });
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(lootBoxRun);
+      prisma.guestGameEvent.findFirst.mockResolvedValue(null);
+      const createProcessEvent = jest
+        .spyOn(service as any, 'createProcessEvent')
+        .mockImplementation((_user, input) =>
+          Promise.resolve(
+            eventResult({
+              eventType: 'SESSION_START',
+              xpDelta: 0,
+              payload: input.payload,
+            }),
+          ),
+        );
+      const materialize = jest
+        .spyOn(service as any, 'materializeProcessRewardIntents')
+        .mockResolvedValue({ dryRun: lootBoxRun, rewards: [rewardResult()] });
+      jest.spyOn(service, 'recordRuleDecisions').mockResolvedValue({
+        decisionsPersisted: true,
+        lootBoxEntitlements: [],
+      });
+
+      await service.processEvent(
+        user,
+        {
+          profileId: profile.id,
+          guestId: 'guest-1',
+          storeId: 'store-1',
+          eventType: 'SESSION_START',
+          occurredAt: isoNow,
+          sessionType: 'HOURLY',
+          sessionPacket: false,
+          sessionMinutes: 60,
+          sourceFactId: 'guest-game-entitlement:entitlement-1',
+          sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+          lootBoxId: 'loot-entitled',
+        },
+        {
+          prequalifiedLootBoxOpen: {
+            tenantId: 'tenant-1',
+            entitlementId: 'entitlement-1',
+            ruleId: 'loot-entitled',
+            profileId: profile.id,
+            storeId: 'store-1',
+          },
+        },
+      );
+
+      expect(createProcessEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+            materializationQualification: 'PREQUALIFIED_LOOT_BOX_ENTITLEMENT',
+            input: expect.objectContaining({
+              sessionType: 'HOURLY',
+              sessionPacket: false,
+            }),
+          }),
+        }),
+        null,
+        'store-1',
+      );
+      expect(materialize).toHaveBeenCalledTimes(1);
     });
 
     it('routes primary, supplemental and fallback rules into disjoint execution lanes', async () => {

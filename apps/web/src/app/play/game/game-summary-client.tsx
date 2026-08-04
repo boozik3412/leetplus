@@ -264,6 +264,7 @@ type BattlePassRewardCard = {
   title: string;
   subtitle: string;
   condition?: string | null;
+  executionCondition?: string | null;
   description?: string | null;
   plannedReward?: string | null;
   type: BattlePassRewardType;
@@ -3868,11 +3869,18 @@ function BattlePassQuestModal({
     null;
   const statusLabel =
     quest?.status ?? battlePassRewardStatusLabel(reward.status);
-  const condition = stripBattlePassDetailPrefix(
+  const task = stripBattlePassDetailPrefix(
     quest?.condition ??
       reward.condition ??
       reward.description ??
       reward.subtitle,
+    "Условие",
+  );
+  const executionCondition = stripBattlePassDetailPrefix(
+    reward.executionCondition ??
+      mission?.conditionLabel ??
+      quest?.condition ??
+      task,
     "Условие",
   );
   const plannedReward = stripBattlePassDetailPrefix(
@@ -3894,7 +3902,7 @@ function BattlePassQuestModal({
   const progress = battlePassDetailProgress(
     summary,
     reward,
-    condition,
+    task,
     quest,
     mission,
     activeStep,
@@ -3934,7 +3942,12 @@ function BattlePassQuestModal({
         <div className="lp-battlepass-detail-lines">
           <div className="lp-battlepass-detail-line">
             <span>Задача</span>
-            <p>{condition}</p>
+            <p>{task}</p>
+          </div>
+
+          <div className="lp-battlepass-detail-line">
+            <span>Условия выполнения</span>
+            <p>{executionCondition}</p>
           </div>
 
           {activeStep ? (
@@ -4356,6 +4369,7 @@ function battlePassRewardFromLevel(
       level.description ??
       battlePassRewardSubtitle(level, type),
     condition: level.condition,
+    executionCondition: level.executionCondition,
     description: level.description,
     plannedReward: rewardLabel,
     type,

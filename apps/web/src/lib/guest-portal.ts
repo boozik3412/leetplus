@@ -422,6 +422,7 @@ export type GuestPortalPayload = {
         xp: number;
         title: string | null;
         condition: string | null;
+        executionCondition: string | null;
         description: string | null;
         freeReward: string | null;
         premiumReward: string | null;
@@ -875,6 +876,7 @@ export type GuestPortalGameSummary = {
               | "xp"
               | "title"
               | "condition"
+              | "executionCondition"
               | "description"
               | "freeReward"
               | "premiumReward"

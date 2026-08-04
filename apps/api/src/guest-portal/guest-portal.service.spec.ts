@@ -1801,7 +1801,7 @@ describe('GuestPortalService', () => {
           },
           null,
         ),
-      ).toBe('Пополнить баланс 3 раз, каждый раз ровно на 500 ₽');
+      ).toBe('Пополнить баланс 3 раза, каждый раз ровно на 500 ₽');
       expect(
         guestPortalMissionConditionLabel(
           'CHECK_IN',
@@ -1861,8 +1861,8 @@ describe('GuestPortalService', () => {
       },
     );
 
-    it('adds the source limitation to hourly Battle Pass conditions and aliases', () => {
-      const [playLevel, checkInLevel] = seasonLevels([
+    it('keeps the authored Battle Pass task and derives execution conditions from activation rules', () => {
+      const [playLevel, checkInLevel, topUpLevel] = seasonLevels([
         {
           level: 1,
           xp: 100,
@@ -1871,7 +1871,13 @@ describe('GuestPortalService', () => {
           activationRules: {
             taskType: 'PLAY_TIME',
             sessionType: 'REGULAR_SESSION',
-            metric: { target: 60, minSessionMinutes: 30 },
+            metric: {
+              target: 60,
+              minSessionMinutes: 30,
+              windowDays: 30,
+              weekdays: [1, 3, 5],
+              hours: ['09:00-21:00'],
+            },
           },
         },
         {
@@ -1883,13 +1889,39 @@ describe('GuestPortalService', () => {
             metric: { checkInMode: 'SINGLE', target: 1 },
           },
         },
+        {
+          level: 3,
+          xp: 300,
+          condition: 'Пополните баланс и получите награду.',
+          activationRules: {
+            taskType: 'BALANCE_TOPUP',
+            sessionType: 'ANY',
+            metric: {
+              topupMode: 'COUNT',
+              amountComparison: 'AT_LEAST',
+              amount: 500,
+              target: 3,
+              windowDays: 7,
+            },
+          },
+        },
       ] as Prisma.JsonValue);
 
       expect(playLevel?.condition).toBe(
-        'Сыграть 60 минут с почасовым тарифом. Учитывается только полная сессия (продление с изменением типа сессии не учитывается).',
+        'Сыграть 60 минут с почасовым тарифом. Продление пакета или абонемента без завершения сессии не засчитывается.',
       );
-      expect(checkInLevel?.condition).toBe(
+      expect(playLevel?.executionCondition).toBe(
+        'Сыграть один час в игровой сессии с почасовым тарифом, минимум 30 минут за сессию. Учитывается только полная сессия (продление с изменением типа сессии не учитывается). Окно выполнения: 30 дней. Дни выполнения: Пн, Ср, Пт. Время выполнения: 09:00–21:00.',
+      );
+      expect(checkInLevel?.condition).toBeNull();
+      expect(checkInLevel?.executionCondition).toBe(
         'Сделать чекин в клубе во время активной сессии с почасовым тарифом. Учитывается только полная сессия (продление с изменением типа сессии не учитывается).',
+      );
+      expect(topUpLevel?.condition).toBe(
+        'Пополните баланс и получите награду.',
+      );
+      expect(topUpLevel?.executionCondition).toBe(
+        'Пополнить баланс 3 раза, каждый раз не менее чем на 500 ₽. Окно выполнения: 7 дней.',
       );
     });
   });

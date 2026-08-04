@@ -1504,6 +1504,7 @@ export type GuestPortalSeason = {
     xp: number;
     title: string | null;
     condition: string | null;
+    executionCondition: string | null;
     description: string | null;
     freeReward: string | null;
     premiumReward: string | null;
@@ -18630,7 +18631,7 @@ export function guestPortalMissionConditionLabel(
       return `Пополнить баланс суммарно не менее чем на ${target} ₽`;
     }
     if (topupMode === 'COUNT') {
-      return `Пополнить баланс ${target} раз${amount ? `, каждый раз ${comparison} ${amount} ₽` : ''}`;
+      return `Пополнить баланс ${target} ${russianTimeWord(target)}${amount ? `, каждый раз ${comparison} ${amount} ₽` : ''}`;
     }
     return `Пополнить баланс ${comparison} ${amount || target} ₽`;
   }
@@ -18674,6 +18675,94 @@ export function guestPortalMissionConditionLabel(
     : action;
 
   return appendHourlySessionSourceNotice(label, sessionType);
+}
+
+const battlePassExecutionTaskTypes = new Set([
+  'APP_OPEN',
+  'PLAY_TIME',
+  'PRODUCT_PURCHASE',
+  'BALANCE_TOPUP',
+  'CHECK_IN',
+]);
+
+function guestPortalBattlePassExecutionCondition(
+  taskType: string | null,
+  metric: Record<string, unknown>,
+  sessionType: string | null,
+) {
+  const normalizedTaskType = taskType?.toUpperCase() ?? null;
+
+  if (
+    !normalizedTaskType ||
+    !battlePassExecutionTaskTypes.has(normalizedTaskType)
+  ) {
+    return null;
+  }
+
+  const details = [
+    guestPortalMissionConditionLabel(normalizedTaskType, metric, sessionType),
+  ];
+  const windowDays = numberField(metric.windowDays);
+  const weekdays = numberArrayField(metric.weekdays).filter(
+    (weekday) => weekday >= 0 && weekday <= 6,
+  );
+  const hours = unknownStringArray(metric.hours)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => value.replace(/(\d{2}:\d{2})-(\d{2}:\d{2})/g, '$1–$2'));
+
+  if (windowDays !== null && windowDays > 0) {
+    details.push(
+      `Окно выполнения: ${Math.trunc(windowDays)} ${russianDayWord(windowDays)}`,
+    );
+  }
+
+  if (weekdays.length) {
+    const weekdayLabels = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    details.push(
+      `Дни выполнения: ${weekdays.map((weekday) => weekdayLabels[weekday]).join(', ')}`,
+    );
+  }
+
+  if (hours.length) {
+    details.push(`Время выполнения: ${hours.join(', ')}`);
+  }
+
+  return details
+    .map((detail) => `${detail}${/[.!?]$/.test(detail) ? '' : '.'}`)
+    .join(' ');
+}
+
+function russianDayWord(value: number) {
+  const normalized = Math.abs(Math.trunc(value));
+  const modulo100 = normalized % 100;
+  const modulo10 = normalized % 10;
+
+  if (modulo100 >= 11 && modulo100 <= 14) {
+    return 'дней';
+  }
+
+  if (modulo10 === 1) {
+    return 'день';
+  }
+
+  return modulo10 >= 2 && modulo10 <= 4 ? 'дня' : 'дней';
+}
+
+function russianTimeWord(value: number) {
+  const normalized = Math.abs(Math.trunc(value));
+  const modulo100 = normalized % 100;
+  const modulo10 = normalized % 10;
+
+  if (modulo100 >= 11 && modulo100 <= 14) {
+    return 'раз';
+  }
+
+  if (modulo10 === 1) {
+    return 'раз';
+  }
+
+  return modulo10 >= 2 && modulo10 <= 4 ? 'раза' : 'раз';
 }
 
 const hourlySessionSourceNotice =
@@ -21375,27 +21464,19 @@ export function seasonLevels(value: Prisma.JsonValue) {
         return null;
       }
 
-      const normalizedTaskType = taskType?.toUpperCase() ?? null;
-      const condition =
-        (normalizedTaskType === 'PLAY_TIME' ||
-          normalizedTaskType === 'CHECK_IN') &&
-        normalizeGuestPortalSessionType(sessionType) === 'regular_session'
-          ? appendHourlySessionSourceNotice(
-              savedCondition ??
-                guestPortalMissionConditionLabel(
-                  normalizedTaskType,
-                  metric,
-                  sessionType,
-                ),
-              sessionType,
-            )
-          : savedCondition;
+      const executionCondition =
+        guestPortalBattlePassExecutionCondition(
+          taskType,
+          metric,
+          sessionType,
+        ) ?? savedCondition;
 
       return {
         level,
         xp: requiredXp,
         title: stringField(row.title),
-        condition,
+        condition: savedCondition,
+        executionCondition,
         description: stringField(row.description),
         freeReward: stringField(row.freeReward),
         premiumReward: stringField(row.premiumReward),

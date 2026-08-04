@@ -30,6 +30,7 @@ import {
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
+import { GuestBonusLedgerSchedulerService } from '../guest-gamification/guest-bonus-ledger-scheduler.service';
 import {
   GuestGamificationService,
   guestGameRewardUsesBonusLedger,
@@ -94,6 +95,12 @@ const LOOTBOX_CASE_RARITY_LABELS = {
   epic: 'Эпический',
   legendary: 'Легендарный',
 } as const;
+const LOOTBOX_REWARD_RARITY_LABELS = {
+  common: 'Обычная',
+  rare: 'Редкая',
+  epic: 'Эпическая',
+  legendary: 'Легендарная',
+} as const;
 
 type GuestPortalLootBoxCaseRarity = keyof typeof LOOTBOX_CASE_RARITY_LABELS;
 type GuestPortalLootBoxPeriodicLimitPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
@@ -143,6 +150,7 @@ const GUEST_PORTAL_PROCESS_EVENT_ORIGIN_PREFIX = 'ggo:v1:';
 const REWARD_WALLET_RETENTION_DAYS = 30;
 const REWARD_WALLET_RETENTION_MS =
   REWARD_WALLET_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const REWARD_WALLET_CLAIM_CONCURRENCY = 8;
 const REWARD_EFFECT_GUEST_RETRY_MAX_ATTEMPTS = 5;
 const REWARD_WALLET_OPENING_STALE_MS = 5 * 60 * 1000;
 const GUEST_PORTAL_LOOT_BOX_ENTITLEMENT_REQUIRED_MESSAGE =
@@ -1034,6 +1042,7 @@ export type GuestPortalGameSummary = {
         | 'schedule'
         | 'rewardLabel'
         | 'rewardType'
+        | 'possibleRewards'
         | 'caseRarity'
         | 'caseRarityLabel'
         | 'openState'
@@ -1363,6 +1372,7 @@ export type GuestPortalLootBox = {
   schedule: GuestPortalLootBoxSchedule;
   rewardLabel: string | null;
   rewardType: string;
+  possibleRewards: GuestPortalLootBoxPossibleReward[];
   caseRarity: GuestPortalLootBoxCaseRarity;
   caseRarityLabel: string;
   manualApprovalRequired: boolean;
@@ -1381,6 +1391,13 @@ export type GuestPortalLootBox = {
   waitingApprovalRewards: number;
   redeemedRewards: number;
   latestReward: GuestPortalLootBoxReward | null;
+};
+
+export type GuestPortalLootBoxPossibleReward = {
+  rewardLabel: string;
+  chancePercent: number;
+  rarity: GuestPortalLootBoxCaseRarity;
+  rarityLabel: string;
 };
 
 export type GuestPortalLootBoxSchedule = {
@@ -1794,6 +1811,7 @@ export class GuestPortalService {
     private readonly langameSettingsService: LangameSettingsService,
     private readonly guestGamificationService: GuestGamificationService,
     private readonly guestActivityLedgerService: GuestActivityLedgerService,
+    private readonly guestBonusLedgerSchedulerService: GuestBonusLedgerSchedulerService,
     private readonly secretEncryptionService: SecretEncryptionService,
     private readonly guestIdentityResolver: GuestIdentityResolverService,
   ) {}
@@ -4135,23 +4153,33 @@ export class GuestPortalService {
       orderBy: [{ availableAt: 'asc' }, { id: 'asc' }],
       take: 1000,
     });
-    for (const item of claimable) {
-      try {
-        await this.claimRewardWalletItemForProfile(
-          payload,
-          profile.id,
-          item.id,
-        );
-      } catch (error) {
-        if (
-          error instanceof NotFoundException ||
-          error instanceof BadRequestException ||
-          error instanceof ServiceUnavailableException
-        ) {
-          continue;
-        }
-        throw error;
-      }
+    for (
+      let offset = 0;
+      offset < claimable.length;
+      offset += REWARD_WALLET_CLAIM_CONCURRENCY
+    ) {
+      await Promise.all(
+        claimable
+          .slice(offset, offset + REWARD_WALLET_CLAIM_CONCURRENCY)
+          .map(async (item) => {
+            try {
+              await this.claimRewardWalletItemForProfile(
+                payload,
+                profile.id,
+                item.id,
+              );
+            } catch (error) {
+              if (
+                error instanceof NotFoundException ||
+                error instanceof BadRequestException ||
+                error instanceof ServiceUnavailableException
+              ) {
+                return;
+              }
+              throw error;
+            }
+          }),
+      );
     }
 
     return this.getGameSummary(authorization);
@@ -4245,6 +4273,7 @@ export class GuestPortalService {
       walletItemId,
       accepted.rewardId,
     );
+    this.guestBonusLedgerSchedulerService.requestRun();
   }
 
   private async acceptRewardWalletClaim(
@@ -15308,6 +15337,7 @@ function buildGameSummaryFromPortal(
       schedule: lootBox.schedule,
       rewardLabel: lootBox.rewardLabel,
       rewardType: lootBox.rewardType,
+      possibleRewards: lootBox.possibleRewards,
       caseRarity: lootBox.caseRarity,
       caseRarityLabel: lootBox.caseRarityLabel,
       openState: lootBox.openState,
@@ -17563,6 +17593,10 @@ function mapLootBox(
     schedule: mapLootBoxSchedule(row.periodRules),
     rewardLabel: row.rewardLabel,
     rewardType: row.rewardType,
+    possibleRewards: mapLootBoxPossibleRewards(
+      row.probabilityRules,
+      row.rewardLabel ?? row.name,
+    ),
     caseRarity,
     caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS[caseRarity],
     manualApprovalRequired: row.manualApprovalRequired,
@@ -17570,6 +17604,65 @@ function mapLootBox(
     ...openState,
     ...rewardState,
   };
+}
+
+export function mapLootBoxPossibleRewards(
+  value: Prisma.JsonValue | null,
+  fallbackLabel: string,
+): GuestPortalLootBoxPossibleReward[] {
+  const rules = jsonRecord(value);
+  const sourcePrizes = Array.isArray(rules.prizes)
+    ? rules.prizes
+    : Array.isArray(rules.items)
+      ? rules.items
+      : [];
+  const prizes = sourcePrizes
+    .map((item) => {
+      const prize = jsonRecord(item);
+      const weight = Math.max(
+        0,
+        numberField(prize.chancePercent) ??
+          numberField(prize.weight) ??
+          numberField(prize.probability) ??
+          0,
+      );
+      const rewardLabel =
+        stringField(prize.rewardLabel) ??
+        stringField(prize.label) ??
+        fallbackLabel;
+
+      return { rewardLabel, weight };
+    })
+    .filter((prize) => prize.weight > 0);
+  const weightedPrizes = prizes.length
+    ? prizes
+    : [{ rewardLabel: fallbackLabel, weight: 1 }];
+  const totalWeight = weightedPrizes.reduce(
+    (total, prize) => total + prize.weight,
+    0,
+  );
+
+  return weightedPrizes.map((prize) => {
+    const chancePercent =
+      Math.round((prize.weight / totalWeight) * 10_000) / 100;
+    const rarity = lootBoxPossibleRewardRarity(chancePercent);
+
+    return {
+      rewardLabel: prize.rewardLabel,
+      chancePercent,
+      rarity,
+      rarityLabel: LOOTBOX_REWARD_RARITY_LABELS[rarity],
+    };
+  });
+}
+
+function lootBoxPossibleRewardRarity(
+  chancePercent: number,
+): GuestPortalLootBoxCaseRarity {
+  if (chancePercent <= 1) return 'legendary';
+  if (chancePercent <= 4) return 'epic';
+  if (chancePercent <= 15) return 'rare';
+  return 'common';
 }
 
 function mapLootBoxSchedule(

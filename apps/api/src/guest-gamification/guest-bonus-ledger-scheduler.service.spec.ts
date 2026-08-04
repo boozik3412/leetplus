@@ -194,4 +194,34 @@ describe('GuestBonusLedgerSchedulerService', () => {
       lastResult: { checked: 1 },
     });
   });
+
+  it('coalesces claim-triggered wakeups into one follow-up run', async () => {
+    const { service, bonusLedgerService } = createService({
+      GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: 'true',
+    });
+    let resolveFirstDispatch:
+      | ((result: GuestGameScheduledBonusLedgerDispatchResult) => void)
+      | null = null;
+
+    bonusLedgerService.runScheduledDispatch
+      .mockReturnValueOnce(
+        new Promise<GuestGameScheduledBonusLedgerDispatchResult>((resolve) => {
+          resolveFirstDispatch = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(scheduledResult({ checked: 3 }));
+    service.onModuleInit();
+    service.requestRun();
+    service.requestRun();
+
+    expect(bonusLedgerService.runScheduledDispatch).toHaveBeenCalledTimes(1);
+
+    resolveFirstDispatch?.(scheduledResult({ checked: 1 }));
+    await Promise.resolve();
+    jest.runAllTicks();
+    await Promise.resolve();
+
+    expect(bonusLedgerService.runScheduledDispatch).toHaveBeenCalledTimes(2);
+    service.onModuleDestroy();
+  });
 });

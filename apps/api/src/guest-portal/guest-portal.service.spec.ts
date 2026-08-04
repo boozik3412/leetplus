@@ -17,6 +17,7 @@ import {
   guestPortalMissionProgressUnitLabel,
   guestPortalVisibleBonusLedgerRows,
   lootBoxWaitingEventMessage,
+  mapLootBoxPossibleRewards,
   mapSessionActivity,
   rewardCodeVisibleAfterClaim,
   rewardWalletState,
@@ -240,6 +241,9 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   const guestActivityLedgerService = {
     scheduleProfileSync: jest.fn(),
   };
+  const guestBonusLedgerSchedulerService = {
+    requestRun: jest.fn(),
+  };
   const secretEncryptionService = {
     encrypt: jest.fn((value: string) => `encrypted:${value}`),
     decrypt: jest.fn(),
@@ -268,6 +272,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     langameSettingsService as any,
     guestGamificationService as any,
     guestActivityLedgerService as any,
+    guestBonusLedgerSchedulerService as any,
     secretEncryptionService as any,
     guestIdentityResolver as any,
   );
@@ -449,6 +454,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   return {
     guestGamificationService,
     guestActivityLedgerService,
+    guestBonusLedgerSchedulerService,
     guestIdentityResolver,
     jwtService,
     langameSettingsService,
@@ -1311,6 +1317,47 @@ describe('rewardCodeVisibleAfterClaim', () => {
         walletItems: [],
       }),
     ).toBe(false);
+  });
+});
+
+describe('mapLootBoxPossibleRewards', () => {
+  it('normalizes configured weights into public drop percentages', () => {
+    expect(
+      mapLootBoxPossibleRewards(
+        {
+          type: 'weighted',
+          prizes: [
+            { rewardLabel: '50 бонусов', weight: 85 },
+            { rewardLabel: '100 бонусов', weight: 15 },
+          ],
+        },
+        'Бонусы',
+      ),
+    ).toEqual([
+      {
+        rewardLabel: '50 бонусов',
+        chancePercent: 85,
+        rarity: 'common',
+        rarityLabel: 'Обычная',
+      },
+      {
+        rewardLabel: '100 бонусов',
+        chancePercent: 15,
+        rarity: 'rare',
+        rarityLabel: 'Редкая',
+      },
+    ]);
+  });
+
+  it('publishes a guaranteed fallback when a case has one reward', () => {
+    expect(mapLootBoxPossibleRewards(null, '50 бонусов')).toEqual([
+      {
+        rewardLabel: '50 бонусов',
+        chancePercent: 100,
+        rarity: 'common',
+        rarityLabel: 'Обычная',
+      },
+    ]);
   });
 });
 
@@ -3022,6 +3069,41 @@ describe('GuestPortalService', () => {
         }
       },
     );
+
+    it('wakes the bonus ledger scheduler after a claim is durably materialized', async () => {
+      const {
+        guestBonusLedgerSchedulerService,
+        guestGamificationService,
+        prisma,
+        service,
+      } = createService();
+      const payload = {
+        sub: 'guest-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+      };
+      jest.spyOn(service as any, 'acceptRewardWalletClaim').mockResolvedValue({
+        rewardId: 'reward-1',
+        materialize: true,
+      });
+      jest
+        .spyOn(service as any, 'synchronizeRewardWalletDeliveryState')
+        .mockResolvedValue(undefined);
+      prisma.tenant.findUnique.mockResolvedValue({ slug: 'leet' });
+      guestGamificationService.materializeRewardEffects.mockResolvedValue({});
+
+      await (service as any).claimRewardWalletItemForProfile(
+        payload,
+        'profile-1',
+        'wallet-1',
+      );
+
+      expect(guestBonusLedgerSchedulerService.requestRun).toHaveBeenCalledTimes(
+        1,
+      );
+    });
 
     it('keeps the wallet item failed when a balance reward effect could not create a durable ledger entry', async () => {
       const { prisma, service } = createService();

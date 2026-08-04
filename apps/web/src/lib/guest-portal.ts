@@ -321,6 +321,12 @@ export type GuestPortalPayload = {
       schedule: GuestPortalLootBoxSchedule;
       rewardLabel: string | null;
       rewardType: string;
+      possibleRewards: Array<{
+        rewardLabel: string;
+        chancePercent: number;
+        rarity: GuestPortalLootBoxRarity;
+        rarityLabel: string;
+      }>;
       caseRarity: GuestPortalLootBoxRarity;
       caseRarityLabel: string;
       manualApprovalRequired: boolean;
@@ -771,6 +777,7 @@ export type GuestPortalGameSummary = {
         | "schedule"
         | "rewardLabel"
         | "rewardType"
+        | "possibleRewards"
         | "caseRarity"
         | "caseRarityLabel"
         | "openState"

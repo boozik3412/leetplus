@@ -13,6 +13,7 @@ Bonus ledger не оценивает условия миссии, Battle Pass, �
 - для claim-required reward требует связанный wallet item `PROCESSING` или безопасно повторяемый `FAILED`; один статус `APPROVED` больше не разрешает доставку;
 - claim-ит готовые ledger-записи и отправляет бонусы в Langame через `POST /master_api/guests/balance/phone`;
 - пропускает пересекающиеся запуски и пишет только агрегаты: tenant, queued, confirmed, failed, blocked, skipped;
+- после явного guest claim получает немедленный wake-up; несколько одновременных claim объединяются в один дополнительный безопасный запуск, а interval остаётся резервным контуром;
 - не логирует raw phone, токены, `langameRequest`, `langameResponse` или полный Langame payload.
 
 До гостевого claim effect имеет состояние `WAITING_CLAIM`, reward не попадает в dispatcher, а код/claim payload не раскрывается. После принятия claim история показывает `DELIVERY_PROCESSING`. Закрытие completion-модалки — read-only ACK и не меняет эту границу.
@@ -84,6 +85,8 @@ sudo journalctl -u leetplus-api.service -n 100 --no-pager
 5. Для canary включить `LANGAME_BONUS_ACCRUAL_ENABLED=true`, оставить `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=true` и сначала выполнить ручной canary live dispatch из пилотного runbook Guest Game Hub. Ручной путь обязан пройти тот же claim gate; он не может отправить `WAITING_CLAIM`. Это проверяет ровно одну запись и не даёт scheduler случайно забрать лишний batch.
 6. После успешной сверки canary поставить `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=false`, оставить `LIMIT=1` на первый tick и снова проверить Guest Game Hub: confirmed ledger, wallet `CLAIMED`, `GuestBonusBalanceCurrent` и свежий `GuestBonusBalanceSnapshot`.
 7. После production-наблюдения увеличить `LIMIT` и убрать tenant scope только если все подключенные клубы имеют согласованные правила, Langame-ключи и политику бонусов.
+
+Для рабочего production-контура после canary рекомендуется `INTERVAL_MS=30000` и `LIMIT=50`: явный claim всё равно будит worker сразу, а 30-секундный tick подхватывает запись после рестарта или кратковременного overlap.
 
 ## Откат
 

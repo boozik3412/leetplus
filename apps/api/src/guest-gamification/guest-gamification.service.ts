@@ -35300,6 +35300,38 @@ function buildVisualEditorPreviewSummary(
         })(),
         rewardLabel: item.rewardLabel,
         rewardType: canonicalLootBoxRewardType(item.rewardType),
+        possibleRewards: (() => {
+          const prizes = visualLootBoxPrizes({
+            rewardType: canonicalLootBoxRewardType(item.rewardType),
+            rewardAmount: item.rewardAmount,
+            rewardLabel: item.rewardLabel,
+            prizes: item.prizes,
+          });
+          const resolvedPrizes = prizes.length
+            ? prizes
+            : [
+                {
+                  id: 'preview-prize-fallback',
+                  rewardType: canonicalLootBoxRewardType(item.rewardType),
+                  rewardAmount: item.rewardAmount,
+                  rewardLabel: item.rewardLabel,
+                  chancePercent: 100,
+                },
+              ];
+
+          return resolvedPrizes.map((prize) => {
+            const rarity = lootBoxRewardRarityFromChance(
+              prize.chancePercent,
+            );
+
+            return {
+              rewardLabel: prize.rewardLabel,
+              chancePercent: prize.chancePercent,
+              rarity,
+              rarityLabel: lootBoxRewardRarityLabels[rarity],
+            };
+          });
+        })(),
         caseRarity: visualLootBoxCaseRarity({ caseRarity: item.caseRarity }),
         caseRarityLabel:
           lootBoxCaseRarityLabels[

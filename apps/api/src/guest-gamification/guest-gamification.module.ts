@@ -62,6 +62,7 @@ import { GuestGamificationService } from './guest-gamification.service';
     GuestGamificationLogService,
     GuestActivityLedgerService,
     GuestGameQualityMonitoringService,
+    GuestBonusLedgerSchedulerService,
   ],
 })
 export class GuestGamificationModule {}

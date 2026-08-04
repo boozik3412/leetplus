@@ -369,6 +369,16 @@ export function validateMissionWizard(
   }
 
   const rewardType = stringValue(reward.type)?.toUpperCase() ?? 'NONE';
+  const maxPendingRewards = numberValue(reward.maxPendingRewards ?? 1);
+  if (
+    maxPendingRewards == null ||
+    !Number.isInteger(maxPendingRewards) ||
+    maxPendingRewards < 1
+  ) {
+    blockers.push(
+      'Максимальное количество накопленных наград должно быть целым числом не меньше 1.',
+    );
+  }
   if (rewardType === 'LOOTBOX' && !stringValue(reward.lootBoxId)) {
     blockers.push('Выберите наградной лутбокс.');
   }
@@ -389,7 +399,7 @@ export function validateMissionWizard(
         ? 'Игровой журнал, второй боевой слой'
         : evaluationPolicy === 'LIVE_WITH_LEDGER_FALLBACK'
           ? 'Боевой pipeline с резервным слоем игрового журнала'
-        : 'Текущий боевой pipeline',
+          : 'Текущий боевой pipeline',
     blockers,
     warnings,
   };

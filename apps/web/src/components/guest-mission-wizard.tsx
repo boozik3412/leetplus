@@ -77,6 +77,7 @@ type WizardState = {
   perGuestLimitUnlimited: boolean;
   perGuestLimit: number;
   totalRewardLimit: number;
+  maxPendingRewards: number;
   description: string;
   actionText: string;
   theme: "CLASSIC" | "EMERALD" | "VIOLET" | "DARK" | "GOLD" | "BLACK_RED";
@@ -1785,6 +1786,21 @@ function RewardsStep({
               }
             />
           ) : null}
+          <div className="sm:col-span-2">
+            <NumberField
+              label="Максимальное количество накопленных наград для получения"
+              value={form.maxPendingRewards}
+              min={1}
+              onChange={(maxPendingRewards) =>
+                setForm((state) => ({ ...state, maxPendingRewards }))
+              }
+            />
+            <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              Сколько незабранных наград этого задания гость может хранить
+              одновременно. После получения награды или открытия кейса слот
+              освобождается.
+            </p>
+          </div>
         </div>
       </section>
     </>
@@ -1986,10 +2002,12 @@ function Field({
 function NumberField({
   label,
   value,
+  min = 0,
   onChange,
 }: {
   label: string;
   value: number;
+  min?: number;
   onChange: (value: number) => void;
 }) {
   return (
@@ -1997,10 +2015,10 @@ function NumberField({
       <input
         className={fieldClass}
         type="number"
-        min="0"
+        min={min}
         value={value}
         onChange={(event) =>
-          onChange(Math.max(0, Number(event.target.value) || 0))
+          onChange(Math.max(min, Number(event.target.value) || min))
         }
       />
     </Field>
@@ -2296,6 +2314,7 @@ function buildWizardDto(
       perGuestLimitUnlimited: form.perGuestLimitUnlimited,
       perGuestLimit: form.perGuestLimit,
       totalRewardLimit: form.totalRewardLimit,
+      maxPendingRewards: form.maxPendingRewards,
       periodicity: form.periodicity,
     },
     appearance: {
@@ -2699,6 +2718,10 @@ function wizardStateFromDefinition(
         reward.totalRewardLimit,
         defaults.totalRewardLimit,
       ),
+      maxPendingRewards: Math.max(
+        1,
+        numberValue(reward.maxPendingRewards, defaults.maxPendingRewards),
+      ),
       description: stringValue(appearance.description) ?? defaults.description,
       actionText: stringValue(appearance.actionText) ?? defaults.actionText,
       theme: enumValue(
@@ -2850,6 +2873,7 @@ function initialState(
     perGuestLimitUnlimited: false,
     perGuestLimit: 1,
     totalRewardLimit: 1000,
+    maxPendingRewards: 1,
     description: "Выполни условие задания и получи награду.",
     actionText: "Играть",
     theme: "CLASSIC",

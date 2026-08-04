@@ -1171,6 +1171,18 @@ function LootBoxInspector({
                     }
                   />
                 ) : null}
+                <NumberField
+                  label="Максимальное количество накопленных наград для получения"
+                  value={item.maxPendingRewards}
+                  min={1}
+                  disabled={disabled}
+                  onChange={(maxPendingRewards) =>
+                    update({ ...item, maxPendingRewards })
+                  }
+                />
+                <EditorHint>
+                  После открытия кейса слот освобождается.
+                </EditorHint>
               </div>
               <div className="mt-3">
                 <LootBoxPrizeDistribution prizes={item.prizes} />
@@ -1287,6 +1299,18 @@ function MissionInspector({
             disabled={disabled}
             onChange={(progressUnit) => update({ ...item, progressUnit })}
           />
+          <NumberField
+            label="Максимальное количество накопленных наград для получения"
+            value={item.maxPendingRewards}
+            min={1}
+            disabled={disabled}
+            onChange={(maxPendingRewards) =>
+              update({ ...item, maxPendingRewards })
+            }
+          />
+          <EditorHint>
+            После получения награды или открытия кейса слот освобождается.
+          </EditorHint>
           <TextField
             label="Награда"
             value={item.rewardLabel}
@@ -2498,6 +2522,7 @@ function createVisualLootBox(): GuestGameVisualEditorLootBox {
     ],
     condition: visualTriggerLabel("SESSION_START"),
     limitPerGuest: 1,
+    maxPendingRewards: 1,
     periodicLimitEnabled: false,
     periodicLimitPeriod: "DAILY",
     timeWindowMode: "ANY",
@@ -2521,6 +2546,7 @@ function createVisualMission(): GuestGameVisualEditorMission {
     rewardLabel: "Промокод бара",
     progressTarget: 1,
     progressUnit: "step",
+    maxPendingRewards: 1,
     questSteps: [{ id: "step-1", title: "Выполнить шаг", target: 1 }],
   };
 }
@@ -2637,6 +2663,7 @@ function visualLootBoxFromTemplate(
     limitPerGuest: templateNumberOrNull(
       limits.perGuest ?? limits.perGuestPerWeek,
     ),
+    maxPendingRewards: templateInt(limits.maxPendingRewards, 1, 1, 1000),
     periodicLimitEnabled: periodicLimit != null,
     periodicLimitPeriod: periodicLimit ?? "DAILY",
     timeWindowMode: templateTimeWindowMode(
@@ -2680,6 +2707,7 @@ function visualMissionFromTemplate(
     rewardLabel: mission.rewardLabel ?? mission.name,
     progressTarget: mission.progressTarget,
     progressUnit: mission.progressUnit,
+    maxPendingRewards: mission.maxPendingRewards,
     questSteps: questSteps.length
       ? questSteps
       : [{ id: "step-1", title: mission.name, target: 1 }],
@@ -3170,6 +3198,7 @@ function fallbackLootBoxes(): GuestGameVisualEditorLootBox[] {
       ],
       condition: "Визит в клуб",
       limitPerGuest: 1,
+      maxPendingRewards: 1,
       periodicLimitEnabled: false,
       periodicLimitPeriod: "DAILY",
       timeWindowMode: "ANY",
@@ -3195,6 +3224,7 @@ function fallbackMissions(): GuestGameVisualEditorMission[] {
       rewardLabel: "XP",
       progressTarget: 1,
       progressUnit: null,
+      maxPendingRewards: 1,
       questSteps: [{ id: "step-1", title: "Сыграть 2 часа", target: 1 }],
     },
   ];

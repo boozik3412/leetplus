@@ -1783,6 +1783,7 @@ model GuestGameMission {
   budgetAmount           Decimal?  @db.Decimal(12, 2)
   perGuestLimit          Int?
   totalRewardLimit       Int?
+  maxPendingRewards      Int       @default(1)
   antiFraudRules         Json?
   manualApprovalRequired Boolean   @default(true)
   definitionVersion      Int       @default(1)

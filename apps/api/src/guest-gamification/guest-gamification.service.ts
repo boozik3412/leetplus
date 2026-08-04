@@ -989,6 +989,7 @@ export type GuestGameMission = GuestGameRuleBase & {
   periodTo: string | null;
   perGuestLimit: number | null;
   totalRewardLimit: number | null;
+  maxPendingRewards: number;
   antiFraudRules: Prisma.JsonValue | null;
 };
 
@@ -1119,6 +1120,7 @@ export type GuestGameVisualEditorLootBox = {
   prizes: GuestGameVisualEditorLootBoxPrize[];
   condition: string;
   limitPerGuest: number | null;
+  maxPendingRewards: number;
   periodicLimitEnabled: boolean;
   periodicLimitPeriod: LootBoxPeriodicLimitPeriod;
   timeWindowMode: string;
@@ -1140,6 +1142,7 @@ export type GuestGameVisualEditorMission = {
   rewardLabel: string;
   progressTarget: number | null;
   progressUnit: string | null;
+  maxPendingRewards: number;
   questSteps: Array<{ id: string; title: string; target: number }>;
 };
 
@@ -2095,6 +2098,7 @@ export type GuestGameMissionDto = {
   budgetAmount?: number | string | null;
   perGuestLimit?: number | string | null;
   totalRewardLimit?: number | string | null;
+  maxPendingRewards?: number | string | null;
   antiFraudRules?: Prisma.InputJsonValue | null;
   manualApprovalRequired?: boolean;
   note?: string | null;
@@ -8864,6 +8868,10 @@ export class GuestGamificationService {
         rewardType === 'LOOT_BOX_ENTITLEMENT' && reward.budgetUnlimited !== true
           ? intValue(reward.budgetAmount)
           : intValue(reward.totalRewardLimit),
+      maxPendingRewards:
+        reward.maxPendingRewards === undefined
+          ? 1
+          : positiveRewardAccumulationLimit(reward.maxPendingRewards),
       manualApprovalRequired: reward.delivery === 'ADMIN_APPROVAL',
       note: nullableString(dto.note),
     };
@@ -12579,6 +12587,7 @@ export class GuestGamificationService {
         antiFraudRules: Prisma.JsonValue | null;
         perGuestLimit: number | null;
         totalRewardLimit: number | null;
+        maxPendingRewards: number;
         budgetAmount: Prisma.Decimal | null;
         rewardAmount: Prisma.Decimal | null;
       } | null
@@ -12609,6 +12618,7 @@ export class GuestGamificationService {
             antiFraudRules: true,
             perGuestLimit: true,
             totalRewardLimit: true,
+            maxPendingRewards: true,
             budgetAmount: true,
             rewardAmount: true,
           },
@@ -12648,13 +12658,21 @@ export class GuestGamificationService {
             guestId: true,
             qualifiedAt: true,
             rewardAmount: true,
+            status: true,
+            rewardType: true,
+            walletItems: {
+              select: { status: true },
+            },
+            sourceEntitlements: {
+              select: { status: true },
+            },
           },
         }),
         tx.guestGameEntitlement.findMany({
           where: {
             tenantId: input.tenantId,
             ruleType: 'LOOT_BOX',
-            status: { in: ['AVAILABLE', 'CONSUMED'] },
+            status: { in: ['AVAILABLE', 'OPENING', 'CONSUMED'] },
             OR: [
               {
                 sourceReward: {
@@ -12675,6 +12693,7 @@ export class GuestGamificationService {
             eventId: true,
             rewardId: true,
             sourceRewardId: true,
+            status: true,
             profileId: true,
             guestId: true,
             qualifiedAt: true,
@@ -12732,6 +12751,7 @@ export class GuestGamificationService {
         periodicity: lootBoxPeriodicLimitPeriod(rewardConfig.periodicity),
         perGuestLimit: mission.perGuestLimit,
         totalRewardLimit: mission.totalRewardLimit,
+        maxPendingRewards: mission.maxPendingRewards,
         budgetAmount: numberOrNull(mission.budgetAmount),
         projectedAmount: numberOrNull(mission.rewardAmount) ?? 0,
         profileId: input.profileId,
@@ -13484,10 +13504,13 @@ export class GuestGamificationService {
                       tenantId: input.tenantId,
                       ruleType: 'LOOT_BOX',
                       ruleId: input.rule.id,
-                      status: { in: ['AVAILABLE', 'CONSUMED'] },
-                      qualifiedAt: {
-                        gte: earliestRelevantAt,
-                      },
+                      OR: [
+                        {
+                          status: 'CONSUMED',
+                          qualifiedAt: { gte: earliestRelevantAt },
+                        },
+                        { status: { in: ['AVAILABLE', 'OPENING'] } },
+                      ],
                     },
                     select: {
                       id: true,
@@ -18349,7 +18372,7 @@ export class GuestGamificationService {
       where: {
         tenantId: user.tenantId,
         ruleType: 'LOOT_BOX',
-        status: { in: ['AVAILABLE', 'CONSUMED'] },
+        status: { in: ['AVAILABLE', 'OPENING', 'CONSUMED'] },
         OR: [
           {
             sourceReward: {
@@ -18402,11 +18425,19 @@ export class GuestGamificationService {
         tenantId: user.tenantId,
         ruleType: 'LOOT_BOX',
         ruleId: { in: ruleIds },
-        status: { in: ['AVAILABLE', 'CONSUMED'] },
-        qualifiedAt: {
-          gte: earliestRelevantAt,
-          lte: occurredAt,
-        },
+        OR: [
+          {
+            status: 'CONSUMED',
+            qualifiedAt: {
+              gte: earliestRelevantAt,
+              lte: occurredAt,
+            },
+          },
+          {
+            status: { in: ['AVAILABLE', 'OPENING'] },
+            qualifiedAt: { lte: occurredAt },
+          },
+        ],
       },
       select: {
         id: true,
@@ -19632,7 +19663,12 @@ export class GuestGamificationService {
       statusValues,
       isCreate ? 'DRAFT' : undefined,
     );
-    const limits = jsonValue(dto.limits);
+    const limits =
+      dto.limits === undefined
+        ? isCreate
+          ? rewardAccumulationLimits(null)
+          : undefined
+        : rewardAccumulationLimits(dto.limits);
 
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
@@ -19718,6 +19754,12 @@ export class GuestGamificationService {
       budgetAmount: decimalValue(dto.budgetAmount),
       perGuestLimit: intValue(dto.perGuestLimit),
       totalRewardLimit: intValue(dto.totalRewardLimit),
+      maxPendingRewards:
+        dto.maxPendingRewards === undefined
+          ? isCreate
+            ? 1
+            : undefined
+          : positiveRewardAccumulationLimit(dto.maxPendingRewards),
       antiFraudRules: jsonValue(dto.antiFraudRules),
       manualApprovalRequired:
         dto.manualApprovalRequired ?? (isCreate ? true : undefined),
@@ -23649,7 +23691,7 @@ function mapLootBox(row: LootBoxRow): GuestGameLootBox {
         periodRules,
       ),
     },
-    limits: row.limits,
+    limits: rewardAccumulationLimits(row.limits) as Prisma.JsonValue,
     probabilityRules: row.probabilityRules,
     budgetAmount: numberOrNull(row.budgetAmount),
     antiFraudRules: row.antiFraudRules,
@@ -23702,6 +23744,7 @@ function mapMission(row: MissionRow): GuestGameMission {
     budgetAmount: numberOrNull(row.budgetAmount),
     perGuestLimit: row.perGuestLimit,
     totalRewardLimit: row.totalRewardLimit,
+    maxPendingRewards: row.maxPendingRewards,
     antiFraudRules: row.antiFraudRules,
     manualApprovalRequired: row.manualApprovalRequired,
     definitionVersion: row.definitionVersion,
@@ -23749,6 +23792,7 @@ function missionRowToWizardDto(row: MissionRow): GuestGameMissionWizardDto {
       perGuestLimit: row.perGuestLimit,
       perGuestLimitUnlimited: row.perGuestLimit === null,
       totalRewardLimit: row.totalRewardLimit,
+      maxPendingRewards: row.maxPendingRewards,
       budgetAmount: numberOrNull(row.budgetAmount),
       budgetUnlimited: row.budgetAmount === null,
       delivery: row.manualApprovalRequired ? 'ADMIN_APPROVAL' : 'AUTOMATIC',
@@ -28622,6 +28666,7 @@ type AtomicMissionIssuance = {
   guestId: string | null;
   qualifiedAt: Date;
   amount: number;
+  pending: boolean;
 };
 
 function processRewardRuleSnapshot(
@@ -29700,12 +29745,17 @@ function atomicMissionIssuances(input: {
     guestId: string | null;
     qualifiedAt: Date;
     rewardAmount: Prisma.Decimal;
+    status: string;
+    rewardType: string;
+    walletItems: Array<{ status: string }>;
+    sourceEntitlements: Array<{ status: string }>;
   }>;
   entitlements: Array<{
     id: string;
     eventId: string | null;
     rewardId: string | null;
     sourceRewardId: string | null;
+    status: string;
     profileId: string | null;
     guestId: string | null;
     qualifiedAt: Date;
@@ -29733,17 +29783,17 @@ function atomicMissionIssuances(input: {
           ? previous.qualifiedAt
           : value.qualifiedAt,
       amount: Math.max(previous.amount, value.amount),
+      pending: value.pending,
     });
   };
 
-  for (const intent of input.intents) {
+  for (const intent of input.intents.filter(
+    (row) => row.effectKind === 'QUALIFICATION',
+  )) {
     const qualifiedAt = dryRunDateOrNull(intent.qualifiedAt);
     const isQualification =
       intent.effectKind === 'QUALIFICATION' && intent.status === 'APPLIED';
-    const isRewardReservation =
-      intent.effectKind === 'REWARD' &&
-      ['PENDING', 'PROCESSING', 'FAILED', 'APPLIED'].includes(intent.status);
-    if (!qualifiedAt || (!isQualification && !isRewardReservation)) continue;
+    if (!qualifiedAt || !isQualification) continue;
     const key = `event:${intent.eventId}`;
     if (intent.rewardId) rewardEventKeys.set(intent.rewardId, key);
     add(key, {
@@ -29751,6 +29801,28 @@ function atomicMissionIssuances(input: {
       guestId: null,
       qualifiedAt,
       amount: parseProcessRewardIntentPlan(intent.plan)?.rule.rewardAmount ?? 0,
+      pending: true,
+    });
+  }
+
+  for (const intent of input.intents.filter(
+    (row) => row.effectKind === 'REWARD',
+  )) {
+    const qualifiedAt = dryRunDateOrNull(intent.qualifiedAt);
+    if (
+      !qualifiedAt ||
+      !['PENDING', 'PROCESSING', 'FAILED', 'APPLIED'].includes(intent.status)
+    ) {
+      continue;
+    }
+    const key = `event:${intent.eventId}`;
+    if (intent.rewardId) rewardEventKeys.set(intent.rewardId, key);
+    add(key, {
+      profileId: intent.profileId,
+      guestId: null,
+      qualifiedAt,
+      amount: parseProcessRewardIntentPlan(intent.plan)?.rule.rewardAmount ?? 0,
+      pending: intent.status !== 'APPLIED',
     });
   }
 
@@ -29763,6 +29835,7 @@ function atomicMissionIssuances(input: {
       guestId: reward.guestId,
       qualifiedAt,
       amount: Number(reward.rewardAmount),
+      pending: atomicMissionRewardIsPending(reward),
     });
   }
 
@@ -29781,6 +29854,7 @@ function atomicMissionIssuances(input: {
       guestId: entitlement.guestId,
       qualifiedAt,
       amount: 0,
+      pending: ['AVAILABLE', 'OPENING'].includes(entitlement.status),
     });
   }
 
@@ -29792,6 +29866,7 @@ function atomicMissionLimitGuard(input: {
   periodicity: LootBoxPeriodicLimitPeriod | null;
   perGuestLimit: number | null;
   totalRewardLimit: number | null;
+  maxPendingRewards: number;
   budgetAmount: number | null;
   projectedAmount: number;
   profileId: string | null;
@@ -29804,17 +29879,23 @@ function atomicMissionLimitGuard(input: {
     (input.profileId != null && issuance.profileId === input.profileId) ||
     (input.guestId != null && issuance.guestId === input.guestId);
   const guestIssuances = input.issuances.filter(matchesGuest);
+  const pendingGuestIssuances = guestIssuances.filter(
+    (issuance) => issuance.pending,
+  );
   const codes: string[] = [];
   const spentAmount = sum(input.issuances.map((issuance) => issuance.amount));
   const counts: Record<string, number | string | null> = {
     totalCount: input.issuances.length,
     guestCount: guestIssuances.length,
+    pendingGuestCount: pendingGuestIssuances.length,
+    maxPendingRewards: input.maxPendingRewards,
     spentAmount,
   };
   const needsGuest =
     input.denySameDayRepeat ||
     input.periodicity != null ||
-    input.perGuestLimit != null;
+    input.perGuestLimit != null ||
+    input.maxPendingRewards > 0;
 
   if (needsGuest && !input.profileId && !input.guestId) {
     codes.push('GUEST_IDENTITY_MISSING');
@@ -29847,6 +29928,12 @@ function atomicMissionLimitGuard(input: {
       codes.push('PER_GUEST_LIMIT_EXHAUSTED');
     }
   }
+  if (
+    (input.profileId || input.guestId) &&
+    pendingGuestIssuances.length >= input.maxPendingRewards
+  ) {
+    codes.push('MAX_PENDING_REWARDS_EXHAUSTED');
+  }
   if (input.totalRewardLimit != null) {
     counts.totalRewardLimit = input.totalRewardLimit;
     if (input.issuances.length >= input.totalRewardLimit) {
@@ -29866,6 +29953,31 @@ function atomicMissionLimitGuard(input: {
   }
 
   return { exhausted: codes.length > 0, codes, counts };
+}
+
+function atomicMissionRewardIsPending(reward: {
+  status: string;
+  rewardType: string;
+  walletItems: Array<{ status: string }>;
+  sourceEntitlements: Array<{ status: string }>;
+}) {
+  if (reward.status === 'PENDING') return true;
+  if (reward.rewardType === 'LOOT_BOX_ENTITLEMENT') {
+    return (
+      reward.sourceEntitlements.length === 0 ||
+      reward.sourceEntitlements.some((entitlement) =>
+        ['AVAILABLE', 'OPENING'].includes(entitlement.status),
+      )
+    );
+  }
+  if (reward.status === 'PAID') return false;
+
+  return (
+    reward.walletItems.length === 0 ||
+    reward.walletItems.some((item) =>
+      ['PENDING', 'PROCESSING'].includes(item.status),
+    )
+  );
 }
 
 function parseProcessRewardIntentPlan(
@@ -32463,6 +32575,10 @@ function appendDryRunLootBoxLimits(
   const periodicLimit = lootBoxPeriodicLimitPeriod(limits.periodicLimit);
   const perGuestPerWeek = dryRunOptionalNumber(limits.perGuestPerWeek);
   const totalPerDay = dryRunOptionalNumber(limits.totalPerDay);
+  const maxPendingRewards = Math.max(
+    1,
+    Math.trunc(dryRunOptionalNumber(limits.maxPendingRewards) ?? 1),
+  );
   const restartedAt = dryRunDateOrNull(limits.restartedAt);
   const limitRewards = restartedAt
     ? rewards.filter(
@@ -32475,12 +32591,25 @@ function appendDryRunLootBoxLimits(
         (entitlement) => entitlement.qualifiedAt >= restartedAt,
       )
     : entitlements;
-  const needsGuest = periodicLimit != null || perGuestPerWeek != null;
+  const needsGuest = true;
   const guestRewards = needsGuest
     ? limitRewards.filter((reward) => dryRunRewardMatchesGuest(reward, context))
     : [];
   const guestEntitlements = needsGuest
     ? limitEntitlements.filter((entitlement) => {
+        const matches =
+          (context.profile && entitlement.profileId === context.profile.id) ||
+          (context.guest && entitlement.guestId === context.guest.id);
+        const gameActivatedAt = dryRunProfileGameActivatedAt(context.profile);
+        return (
+          Boolean(matches) &&
+          (!gameActivatedAt ||
+            entitlement.qualifiedAt.getTime() >= gameActivatedAt.getTime())
+        );
+      })
+    : [];
+  const pendingGuestEntitlements = needsGuest
+    ? entitlements.filter((entitlement) => {
         const matches =
           (context.profile && entitlement.profileId === context.profile.id) ||
           (context.guest && entitlement.guestId === context.guest.id);
@@ -32569,6 +32698,21 @@ function appendDryRunLootBoxLimits(
     }
   }
 
+  if (context.profile || context.guest) {
+    const pendingCount = pendingGuestEntitlements.filter((entitlement) =>
+      ['AVAILABLE', 'OPENING'].includes(entitlement.status),
+    ).length;
+    if (pendingCount >= maxPendingRewards) {
+      blockers.push(
+        `Нельзя накопить больше незабранных наград: ${pendingCount}/${maxPendingRewards}`,
+      );
+    } else {
+      reasons.push(
+        `Накопленные незабранные награды: ${pendingCount}/${maxPendingRewards}`,
+      );
+    }
+  }
+
   if (totalPerDay != null) {
     const dayCount = allIssuanceTimes.filter((qualifiedAt) =>
       dryRunIsSameDay(qualifiedAt, context.limitOccurredAt, context.timeZone),
@@ -32609,6 +32753,10 @@ function lootBoxEntitlementLimitGuard(input: {
   const periodicLimit = lootBoxPeriodicLimitPeriod(input.limits.periodicLimit);
   const perGuestPerWeek = dryRunOptionalNumber(input.limits.perGuestPerWeek);
   const totalPerDay = dryRunOptionalNumber(input.limits.totalPerDay);
+  const maxPendingRewards = Math.max(
+    1,
+    Math.trunc(dryRunOptionalNumber(input.limits.maxPendingRewards) ?? 1),
+  );
   const restartedAt = dryRunDateOrNull(input.limits.restartedAt);
   const rewards = restartedAt
     ? input.rewards.filter(
@@ -32631,6 +32779,11 @@ function lootBoxEntitlementLimitGuard(input: {
     !input.gameActivatedAt ||
     qualifiedAt.getTime() >= input.gameActivatedAt.getTime();
   const guestEntitlements = entitlements.filter(
+    (entitlement) =>
+      matchesGuest(entitlement) &&
+      happenedAfterGameActivation(entitlement.qualifiedAt),
+  );
+  const pendingGuestEntitlements = input.entitlements.filter(
     (entitlement) =>
       matchesGuest(entitlement) &&
       happenedAfterGameActivation(entitlement.qualifiedAt),
@@ -32660,7 +32813,7 @@ function lootBoxEntitlementLimitGuard(input: {
   ];
   const codes: string[] = [];
   const counts: Record<string, number | string | null> = {};
-  const needsGuest = periodicLimit != null || perGuestPerWeek != null;
+  const needsGuest = true;
 
   if (needsGuest && !input.profileId && !input.guestId) {
     codes.push('GUEST_IDENTITY_MISSING');
@@ -32687,6 +32840,16 @@ function lootBoxEntitlementLimitGuard(input: {
     counts.perGuestWeeklyLimit = perGuestPerWeek;
     if (weeklyCount >= perGuestPerWeek) {
       codes.push('PER_GUEST_WEEKLY_LIMIT_EXHAUSTED');
+    }
+  }
+  if (input.profileId || input.guestId) {
+    const pendingCount = pendingGuestEntitlements.filter((entitlement) =>
+      ['AVAILABLE', 'OPENING'].includes(entitlement.status),
+    ).length;
+    counts.pendingGuestCount = pendingCount;
+    counts.maxPendingRewards = maxPendingRewards;
+    if (pendingCount >= maxPendingRewards) {
+      codes.push('MAX_PENDING_REWARDS_EXHAUSTED');
     }
   }
   if (totalPerDay != null) {
@@ -32802,6 +32965,27 @@ function appendDryRunMissionLimits(
     } else {
       reasons.push(
         `Лимит задания на гостя: ${guestCount}/${rule.perGuestLimit}`,
+      );
+    }
+  }
+
+  if (!context.profile && !context.guest) {
+    blockers.push('Для проверки накопленных наград выберите профиль или гостя');
+  } else {
+    const pendingRewardCount =
+      distinctGuestRewards.filter((reward) =>
+        ['PENDING', 'APPROVED'].includes(reward.status),
+      ).length +
+      guestEntitlements.filter((entitlement) =>
+        ['AVAILABLE', 'OPENING'].includes(entitlement.status),
+      ).length;
+    if (pendingRewardCount >= rule.maxPendingRewards) {
+      blockers.push(
+        `Нельзя накопить больше незабранных наград этого задания: ${pendingRewardCount}/${rule.maxPendingRewards}`,
+      );
+    } else {
+      reasons.push(
+        `Накопленные незабранные награды этого задания: ${pendingRewardCount}/${rule.maxPendingRewards}`,
       );
     }
   }
@@ -34086,6 +34270,31 @@ function intValue(value: unknown) {
   return Math.trunc(number);
 }
 
+function positiveRewardAccumulationLimit(value: unknown) {
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number < 1) {
+    throw new BadRequestException(
+      'Максимальное количество накопленных наград должно быть целым числом не меньше 1',
+    );
+  }
+
+  return number;
+}
+
+function rewardAccumulationLimits(value: unknown): Prisma.InputJsonObject {
+  const limits = isRecord(value) ? value : {};
+  const maxPendingRewards =
+    limits.maxPendingRewards === undefined || limits.maxPendingRewards === null
+      ? 1
+      : positiveRewardAccumulationLimit(limits.maxPendingRewards);
+
+  return {
+    ...(limits as Prisma.InputJsonObject),
+    maxPendingRewards,
+  };
+}
+
 function decimalValue(value: unknown) {
   if (value === null || value === undefined || value === '') {
     return undefined;
@@ -34476,6 +34685,12 @@ function normalizeVisualEditorPayload(
           prizes: visualLootBoxPrizes(itemRecord),
           condition: visualString(itemRecord.condition, 'Активность в клубе'),
           limitPerGuest: visualIntOrNull(itemRecord.limitPerGuest, 1, 1000),
+          maxPendingRewards: visualInt(
+            itemRecord.maxPendingRewards,
+            1,
+            1,
+            1000,
+          ),
           periodicLimitEnabled: visualBool(
             itemRecord.periodicLimitEnabled,
             false,
@@ -34521,6 +34736,12 @@ function normalizeVisualEditorPayload(
           ),
           progressTarget: visualIntOrNull(itemRecord.progressTarget, 1, 100000),
           progressUnit: visualNullableString(itemRecord.progressUnit),
+          maxPendingRewards: visualInt(
+            itemRecord.maxPendingRewards,
+            1,
+            1,
+            1000,
+          ),
           questSteps: visualArray(itemRecord.questSteps)
             .map((step, index) => {
               const stepRecord = visualRecord(step);
@@ -34647,6 +34868,7 @@ function visualLootBoxFromRule(
       1,
       1000,
     ),
+    maxPendingRewards: visualInt(limits.maxPendingRewards, 1, 1, 1000),
     periodicLimitEnabled: periodicLimit != null,
     periodicLimitPeriod: periodicLimit ?? 'DAILY',
     timeWindowMode: visualTimeWindowMode(
@@ -34678,6 +34900,7 @@ function visualMissionFromRule(
     rewardLabel: rule.rewardLabel ?? rule.name,
     progressTarget: rule.progressTarget,
     progressUnit: rule.progressUnit,
+    maxPendingRewards: rule.maxPendingRewards,
     questSteps: visualArray(conditions.questSteps)
       .map((item, index) => {
         const record = visualRecord(item);
@@ -34867,6 +35090,7 @@ function buildVisualLootBoxData(
   delete preservedOperationalLimits.periodicLimit;
   delete preservedOperationalLimits.perGuest;
   delete preservedOperationalLimits.perGuestPerWeek;
+  delete preservedOperationalLimits.maxPendingRewards;
   const hasActivationBoundary = Boolean(
     dryRunDateOrNull(preservedOperationalLimits.restartedAt) ??
     dryRunDateOrNull(preservedOperationalLimits.activatedAt),
@@ -34926,6 +35150,7 @@ function buildVisualLootBoxData(
             perGuestPerWeek: item.limitPerGuest,
           }
         : {}),
+      maxPendingRewards: item.maxPendingRewards,
     },
     probabilityRules: {
       type: probabilityType,
@@ -34968,6 +35193,7 @@ function buildVisualMissionData(
     xpReward: item.xpReward,
     progressTarget: item.progressTarget,
     progressUnit: item.progressUnit,
+    maxPendingRewards: item.maxPendingRewards,
     storeIds,
     conditions: {
       source: 'visual_editor',
@@ -35320,9 +35546,7 @@ function buildVisualEditorPreviewSummary(
               ];
 
           return resolvedPrizes.map((prize) => {
-            const rarity = lootBoxRewardRarityFromChance(
-              prize.chancePercent,
-            );
+            const rarity = lootBoxRewardRarityFromChance(prize.chancePercent);
 
             return {
               rewardLabel: prize.rewardLabel,

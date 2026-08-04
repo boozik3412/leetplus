@@ -196,6 +196,7 @@ export type GuestGameMission = {
   budgetAmount: number | null;
   perGuestLimit: number | null;
   totalRewardLimit: number | null;
+  maxPendingRewards: number;
   antiFraudRules: unknown;
   manualApprovalRequired: boolean;
   note: string | null;
@@ -357,6 +358,7 @@ export type GuestGameVisualEditorLootBox = {
   prizes: GuestGameVisualEditorLootBoxPrize[];
   condition: string;
   limitPerGuest: number | null;
+  maxPendingRewards: number;
   periodicLimitEnabled: boolean;
   periodicLimitPeriod: "DAILY" | "WEEKLY" | "MONTHLY";
   timeWindowMode: string;
@@ -378,6 +380,7 @@ export type GuestGameVisualEditorMission = {
   rewardLabel: string;
   progressTarget: number | null;
   progressUnit: string | null;
+  maxPendingRewards: number;
   questSteps: Array<{ id: string; title: string; target: number }>;
 };
 

@@ -232,8 +232,28 @@ describe('guest mission wizard contract', () => {
       ready: true,
       evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
       source: 'LIVE',
-      sourceLabel: expect.stringContaining('резервным слоем'),
     });
+    expect(readiness.sourceLabel).toContain('резервным слоем');
+  });
+
+  it('defaults the accumulated reward limit to one and rejects invalid values', () => {
+    const defaulted = validateMissionWizard({
+      ...common,
+      taskType: 'APP_OPEN',
+      conditions: { metric: { target: 1 } },
+    });
+    const invalid = validateMissionWizard({
+      ...common,
+      taskType: 'APP_OPEN',
+      conditions: { metric: { target: 1 } },
+      reward: { type: 'NONE', maxPendingRewards: 0 },
+    });
+
+    expect(defaulted.ready).toBe(true);
+    expect(invalid.ready).toBe(false);
+    expect(invalid.blockers).toContain(
+      'Максимальное количество накопленных наград должно быть целым числом не меньше 1.',
+    );
   });
 
   it('keeps the selected category catalog explicit in the v2 contract', () => {

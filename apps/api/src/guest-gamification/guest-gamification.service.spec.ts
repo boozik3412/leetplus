@@ -1450,7 +1450,7 @@ function installAtomicLootBoxEntitlementStore(
         (row) =>
           row.tenantId === where?.tenantId &&
           row.ruleId === where?.ruleId &&
-          ['AVAILABLE', 'CONSUMED'].includes(row.status),
+          ['AVAILABLE', 'OPENING', 'CONSUMED'].includes(row.status),
       ),
     ),
   );
@@ -1546,6 +1546,7 @@ function activeMission(
     periodTo: null,
     perGuestLimit: null,
     totalRewardLimit: null,
+    maxPendingRewards: 1,
     antiFraudRules: null,
     definitionVersion: 1,
     evaluationPolicy: 'LIVE_PRIMARY',
@@ -1583,6 +1584,7 @@ function missionRow(overrides: Record<string, unknown> = {}) {
     budgetAmount: null,
     perGuestLimit: null,
     totalRewardLimit: null,
+    maxPendingRewards: 1,
     antiFraudRules: null,
     manualApprovalRequired: false,
     definitionVersion: 2,
@@ -8672,6 +8674,108 @@ describe('GuestGamificationService', () => {
         isolationLevel: 'Serializable',
       });
     });
+
+    it('blocks a second mission reward while the first is unclaimed and frees the slot after claim', async () => {
+      const { service, prisma } = createService();
+      const missionId = 'mission-max-pending';
+      prisma.$queryRaw.mockResolvedValue([]);
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: missionId,
+          status: 'ACTIVE',
+          conditions: { reward: {} },
+          antiFraudRules: null,
+          perGuestLimit: null,
+          totalRewardLimit: null,
+          maxPendingRewards: 1,
+          budgetAmount: null,
+          rewardAmount: new Prisma.Decimal(50),
+        },
+      ]);
+      prisma.guestGameRewardIntent.findMany.mockResolvedValue([
+        {
+          id: 'qualification-1',
+          eventId: 'event-1',
+          ruleId: missionId,
+          effectKind: 'QUALIFICATION',
+          status: 'APPLIED',
+          rewardId: null,
+          profileId: 'profile-1',
+          qualifiedAt: now,
+          plan: {},
+        },
+        {
+          id: 'reward-intent-1',
+          eventId: 'event-1',
+          ruleId: missionId,
+          effectKind: 'REWARD',
+          status: 'APPLIED',
+          rewardId: 'reward-1',
+          profileId: 'profile-1',
+          qualifiedAt: now,
+          plan: {},
+        },
+      ]);
+      prisma.guestGameEntitlement.findMany.mockResolvedValue([]);
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-1',
+          missionId,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          qualifiedAt: now,
+          rewardAmount: new Prisma.Decimal(50),
+          status: 'APPROVED',
+          rewardType: 'BONUS_BALANCE',
+          walletItems: [{ status: 'PENDING' }],
+          sourceEntitlements: [],
+        },
+      ]);
+
+      const evaluate = () =>
+        (service as any).atomicMissionQualificationOutcomes(prisma, {
+          tenantId: user.tenantId,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          occurredAt: now,
+          timeZone: 'Asia/Yekaterinburg',
+          rules: [{ id: missionId }],
+        });
+
+      await expect(evaluate()).resolves.toEqual([
+        expect.objectContaining({
+          allowed: false,
+          codes: ['MAX_PENDING_REWARDS_EXHAUSTED'],
+          counts: expect.objectContaining({
+            pendingGuestCount: 1,
+            maxPendingRewards: 1,
+          }),
+        }),
+      ]);
+
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-1',
+          missionId,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          qualifiedAt: now,
+          rewardAmount: new Prisma.Decimal(50),
+          status: 'PAID',
+          rewardType: 'BONUS_BALANCE',
+          walletItems: [{ status: 'CLAIMED' }],
+          sourceEntitlements: [],
+        },
+      ]);
+
+      await expect(evaluate()).resolves.toEqual([
+        expect.objectContaining({
+          allowed: true,
+          codes: [],
+          counts: expect.objectContaining({ pendingGuestCount: 0 }),
+        }),
+      ]);
+    });
   });
 
   describe('lootbox session type normalization', () => {
@@ -13991,7 +14095,7 @@ describe('GuestGamificationService', () => {
       };
       const stored = installAtomicLootBoxEntitlementStore(prisma, {
         ruleId: rule.id,
-        limits: { perGuestPerWeek: 1 },
+        limits: { perGuestPerWeek: 1, maxPendingRewards: 2 },
       });
 
       const results = await Promise.all([
@@ -14015,6 +14119,61 @@ describe('GuestGamificationService', () => {
             limitCodes: ['PER_GUEST_WEEKLY_LIMIT_EXHAUSTED'],
           }),
         ]),
+      );
+    });
+
+    it('limits accumulated unopened cases and frees the slot after opening', async () => {
+      const { service, prisma } = createService();
+      const baseRule = dryRunResult().rules[0];
+      const rule = {
+        ...baseRule,
+        id: 'loot-box-max-pending',
+        kind: 'LOOT_BOX' as const,
+        name: 'One unopened case',
+        xpDelta: 0,
+      };
+      const limits: Record<string, unknown> = { maxPendingRewards: 1 };
+      const stored = installAtomicLootBoxEntitlementStore(prisma, {
+        ruleId: rule.id,
+        limits,
+      });
+
+      const first = await service.recordRuleDecisions(
+        user,
+        dryRunResult({ rules: [rule] }),
+        { eventId: 'event-max-pending-1' },
+      );
+      limits.restartedAt = new Date(now.getTime() + 1_000).toISOString();
+      const second = await service.recordRuleDecisions(
+        user,
+        dryRunResult({ rules: [rule] }),
+        { eventId: 'event-max-pending-2' },
+      );
+
+      expect(first.lootBoxEntitlements).toEqual([
+        expect.objectContaining({ status: 'PERSISTED' }),
+      ]);
+      expect(second.lootBoxEntitlements).toEqual([
+        expect.objectContaining({
+          status: 'LIMIT_EXHAUSTED',
+          limitCodes: ['MAX_PENDING_REWARDS_EXHAUSTED'],
+        }),
+      ]);
+
+      const available = stored.find((row) => row.status === 'AVAILABLE');
+      expect(available).toBeDefined();
+      available!.status = 'CONSUMED';
+
+      const third = await service.recordRuleDecisions(
+        user,
+        dryRunResult({ rules: [rule] }),
+        { eventId: 'event-max-pending-3' },
+      );
+      expect(third.lootBoxEntitlements).toEqual([
+        expect.objectContaining({ status: 'PERSISTED' }),
+      ]);
+      expect(stored.filter((row) => row.status === 'AVAILABLE')).toHaveLength(
+        1,
       );
     });
 
@@ -14044,7 +14203,7 @@ describe('GuestGamificationService', () => {
         const issuedAt = new Date('2026-06-10T09:00:00.000Z');
         const stored = installAtomicLootBoxEntitlementStore(prisma, {
           ruleId: rule.id,
-          limits: { totalPerDay: 2 },
+          limits: { totalPerDay: 2, maxPendingRewards: 2 },
           rewards: [
             {
               id: 'case-parent-reward',

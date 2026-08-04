@@ -232,6 +232,7 @@ type LootBoxForm = {
   periodicLimitEnabled: boolean;
   periodicLimitPeriod: LootBoxPeriodicLimitPeriod;
   totalPerDay: string;
+  maxPendingRewards: string;
   prizes: LootBoxPrizeForm[];
   requireCashierConfirmation: boolean;
   oneDevicePerGuest: boolean;
@@ -1045,6 +1046,7 @@ const defaultLootBoxForm: LootBoxForm = {
   periodicLimitEnabled: false,
   periodicLimitPeriod: "DAILY",
   totalPerDay: "30",
+  maxPendingRewards: "1",
   prizes: defaultLootBoxPrizes,
   requireCashierConfirmation: true,
   oneDevicePerGuest: true,
@@ -1057,6 +1059,7 @@ const defaultLootBoxForm: LootBoxForm = {
   limitsText: jsonText({
     perGuestPerWeek: 1,
     totalPerDay: 30,
+    maxPendingRewards: 1,
   }),
   probabilityRulesText: jsonText({
     type: "weighted",
@@ -10412,6 +10415,25 @@ function LootBoxBusinessRules({
             нужен.
           </p>
         </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 lg:col-span-2">
+          <label className="block text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+            Максимальное количество накопленных наград для получения
+            <input
+              className={fieldClass}
+              type="number"
+              min="1"
+              step="1"
+              value={form.maxPendingRewards}
+              onChange={(event) =>
+                onChange({ maxPendingRewards: event.target.value })
+              }
+            />
+          </label>
+          <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            Сколько неоткрытых кейсов этого лутбокса гость может хранить
+            одновременно. После открытия кейса слот освобождается.
+          </p>
+        </div>
       </div>
       <LootBoxPrizesEditor prizes={form.prizes} onChange={updatePrizes} />
     </BusinessRuleSection>
@@ -14723,6 +14745,11 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
       lootBoxPeriodicLimitPeriod(asRecord(lootBox.limits).periodicLimit) ??
       "DAILY",
     totalPerDay: numberRule(lootBox.limits, "totalPerDay", "30"),
+    maxPendingRewards: numberRule(
+      lootBox.limits,
+      "maxPendingRewards",
+      "1",
+    ),
     prizes: lootBoxPrizesToForm(lootBox.probabilityRules, {
       rewardType: lootBox.rewardType,
       rewardAmount: moneyFormValue(lootBox.rewardAmount),
@@ -15699,6 +15726,10 @@ function buildLootBoxLimits(form: LootBoxForm) {
     ? null
     : (optionalNumber(form.perGuestPerWeek) ?? 1);
   const totalPerDay = optionalNumber(form.totalPerDay);
+  const maxPendingRewards = Math.max(
+    1,
+    Math.trunc(optionalNumber(form.maxPendingRewards) ?? 1),
+  );
 
   return {
     source: "business_controls",
@@ -15707,6 +15738,7 @@ function buildLootBoxLimits(form: LootBoxForm) {
       : {}),
     ...(perGuestPerWeek == null ? {} : { perGuestPerWeek }),
     ...(totalPerDay == null ? {} : { totalPerDay }),
+    maxPendingRewards,
   };
 }
 

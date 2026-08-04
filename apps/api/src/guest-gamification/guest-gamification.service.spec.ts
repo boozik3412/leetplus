@@ -356,6 +356,7 @@ function createPrismaMock() {
         : Promise.all(operation);
     }),
     $queryRaw: jest.fn(),
+    $executeRaw: jest.fn().mockResolvedValue(1),
   } as any;
 }
 
@@ -16651,6 +16652,133 @@ describe('GuestGamificationService', () => {
         'store-1',
       );
       expect(materialize).toHaveBeenCalledTimes(1);
+    });
+
+    it('restores the trusted qualification when an existing wallet case open is retried', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const sourceFactId = 'guest-game-entitlement:entitlement-1';
+      const oldPayload = {
+        source: 'guest_gamification_process_event',
+        sourceFactId,
+        sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+        store: { id: 'store-1', name: 'Club 1' },
+        input: {
+          sessionType: 'HOURLY',
+          sessionPacket: false,
+          sessionMinutes: 60,
+        },
+        rewardIntents: [],
+      };
+      const existingEvent = {
+        ...eventResult({
+          eventType: 'SESSION_START',
+          externalDomain: 'leetplus-game',
+          externalId: `guest-game:GUEST_LOOT_BOX_OPEN:SESSION_START:${sourceFactId}`,
+          xpDelta: 0,
+          occurredAt: now as unknown as string,
+          createdAt: now as unknown as string,
+          payload: oldPayload,
+        }),
+        tenantId: user.tenantId,
+        profileId: profile.id,
+        guestId: 'guest-1',
+        lootBoxId: 'loot-entitled',
+        missionId: null,
+        seasonId: null,
+        createdByUserId: null,
+        originKey: null,
+      };
+      const lootBoxRun = dryRunResult({
+        eventType: 'SESSION_START',
+        input: {
+          sessionType: 'HOURLY',
+          sessionPacket: false,
+          sessionMinutes: 60,
+          spendAmount: null,
+          tariffGroupId: null,
+          tariffPeriodId: null,
+          tariffTypeId: null,
+          guestLogType: null,
+          productId: null,
+          externalProductId: null,
+          categoryId: null,
+          productName: null,
+          categoryName: null,
+          supplierName: null,
+          quantity: null,
+        },
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            id: 'loot-entitled',
+            kind: 'LOOT_BOX',
+            xpDelta: 0,
+          },
+        ],
+      });
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(lootBoxRun);
+      prisma.guestGameEvent.findFirst.mockResolvedValue(existingEvent);
+      const materialize = jest
+        .spyOn(service as any, 'materializeProcessRewardIntents')
+        .mockResolvedValue({ dryRun: lootBoxRun, rewards: [rewardResult()] });
+      jest.spyOn(service, 'recordRuleDecisions').mockResolvedValue({
+        decisionsPersisted: true,
+        lootBoxEntitlements: [],
+      });
+
+      const result = await service.processEvent(
+        user,
+        {
+          profileId: profile.id,
+          guestId: 'guest-1',
+          storeId: 'store-1',
+          eventType: 'SESSION_START',
+          occurredAt: isoNow,
+          sessionType: 'HOURLY',
+          sessionPacket: false,
+          sessionMinutes: 60,
+          sourceFactId,
+          sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+          externalDomain: 'leetplus-game',
+          lootBoxId: 'loot-entitled',
+        },
+        {
+          prequalifiedLootBoxOpen: {
+            tenantId: user.tenantId,
+            entitlementId: 'entitlement-1',
+            ruleId: 'loot-entitled',
+            profileId: profile.id,
+            storeId: 'store-1',
+          },
+        },
+      );
+
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(materialize).toHaveBeenCalledWith(
+        user,
+        expect.any(Object),
+        expect.any(Object),
+        expect.objectContaining({
+          id: existingEvent.id,
+          payload: expect.objectContaining({
+            materializationQualification: 'PREQUALIFIED_LOOT_BOX_ENTITLEMENT',
+          }),
+        }),
+        profile.id,
+        expect.any(Object),
+        null,
+        undefined,
+      );
+      expect(result.summary).toMatchObject({
+        idempotent: true,
+        createdRewards: 1,
+      });
     });
 
     it('routes primary, supplemental and fallback rules into disjoint execution lanes', async () => {

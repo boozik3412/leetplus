@@ -99,6 +99,7 @@ import {
   genericSessionClassificationRemediationStatus,
 } from './guest-game-generic-session-remediation';
 import {
+  PREQUALIFIED_LOOT_BOX_ENTITLEMENT_MATERIALIZATION,
   assertGenericSessionEventMaterializationReadyInTransaction,
   prepareGenericSessionEventForMaterialization,
   type GenericSessionMaterializationReadiness,
@@ -14724,6 +14725,15 @@ export class GuestGamificationService {
       );
     }
 
+    if (existingEvent && options.prequalifiedLootBoxOpen) {
+      existingEvent = await this.qualifyExistingPrequalifiedLootBoxOpenEvent(
+        user,
+        dto,
+        existingEvent,
+        options.prequalifiedLootBoxOpen,
+      );
+    }
+
     if (
       existingEvent &&
       materializeRewards &&
@@ -15198,6 +15208,15 @@ export class GuestGamificationService {
             throw new ConflictException(
               'Каноническое событие уже связано с другим гостем или типом действия.',
             );
+          }
+          if (options.prequalifiedLootBoxOpen) {
+            duplicateEvent =
+              await this.qualifyExistingPrequalifiedLootBoxOpenEvent(
+                user,
+                dto,
+                duplicateEvent,
+                options.prequalifiedLootBoxOpen,
+              );
           }
           const materializationReadiness = materializeRewards
             ? await prepareGenericSessionEventForMaterialization(this.prisma, {
@@ -16232,6 +16251,72 @@ export class GuestGamificationService {
       },
       include: eventInclude,
     });
+  }
+
+  private async qualifyExistingPrequalifiedLootBoxOpenEvent(
+    user: AuthenticatedUser,
+    dto: GuestGameProcessEventDto,
+    event: EventRow,
+    scope: GuestGamePrequalifiedLootBoxOpen,
+  ): Promise<EventRow> {
+    const payload = jsonRecord(event.payload);
+    const storedStore = jsonRecord(payload.store as Prisma.JsonValue);
+    const sourceFactId = `guest-game-entitlement:${scope.entitlementId}`;
+    const exactScopeMatches =
+      scope.tenantId === user.tenantId &&
+      event.profileId === scope.profileId &&
+      event.lootBoxId === scope.ruleId &&
+      nullableId(dto.profileId) === scope.profileId &&
+      nullableId(dto.storeId) === scope.storeId &&
+      nullableId(dto.lootBoxId) === scope.ruleId &&
+      nullableString(dto.sourceFactId) === sourceFactId &&
+      nullableString(dto.sourceFactKind) === 'GUEST_LOOT_BOX_OPEN' &&
+      nullableString(payload.sourceFactId) === sourceFactId &&
+      nullableString(payload.sourceFactKind) === 'GUEST_LOOT_BOX_OPEN' &&
+      nullableId(storedStore.id) === scope.storeId;
+
+    if (!exactScopeMatches) {
+      throw new ConflictException(
+        'The existing loot-box open event does not match the exact wallet entitlement.',
+      );
+    }
+
+    if (
+      payload.materializationQualification ===
+      PREQUALIFIED_LOOT_BOX_ENTITLEMENT_MATERIALIZATION
+    ) {
+      return event;
+    }
+
+    const updated = await this.prisma.$executeRaw(Prisma.sql`
+      UPDATE "GuestGameEvent"
+      SET "payload" = jsonb_set(
+        COALESCE("payload", '{}'::jsonb),
+        '{materializationQualification}',
+        to_jsonb(${PREQUALIFIED_LOOT_BOX_ENTITLEMENT_MATERIALIZATION}::text),
+        TRUE
+      )
+      WHERE "tenantId" = ${user.tenantId}
+        AND "id" = ${event.id}
+        AND "profileId" = ${scope.profileId}
+        AND "lootBoxId" = ${scope.ruleId}
+        AND "payload" ->> 'sourceFactId' = ${sourceFactId}
+        AND "payload" ->> 'sourceFactKind' = 'GUEST_LOOT_BOX_OPEN'
+    `);
+    if (updated !== 1) {
+      throw new ConflictException(
+        'The existing loot-box open event changed before its entitlement qualification could be restored.',
+      );
+    }
+
+    return {
+      ...event,
+      payload: {
+        ...payload,
+        materializationQualification:
+          PREQUALIFIED_LOOT_BOX_ENTITLEMENT_MATERIALIZATION,
+      },
+    };
   }
 
   private findProcessEventByOriginKey(
@@ -28407,7 +28492,8 @@ function buildProcessPayload(
     sessionExternalId: nullableString(dto.sessionExternalId),
     ...(prequalifiedLootBoxEntitlementOpen
       ? {
-          materializationQualification: 'PREQUALIFIED_LOOT_BOX_ENTITLEMENT',
+          materializationQualification:
+            PREQUALIFIED_LOOT_BOX_ENTITLEMENT_MATERIALIZATION,
         }
       : {}),
     ...(extraPayload ? { extra: extraPayload } : {}),

@@ -13926,9 +13926,9 @@ const clubHomeCss = `
 
 .lp-club-battlepass-progress {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: 18px;
+  gap: 10px;
   width: 100%;
   min-width: min(100%, 420px);
   margin-top: 22px;
@@ -13955,8 +13955,8 @@ const clubHomeCss = `
   display: grid;
   justify-items: end;
   gap: 3px;
-  min-width: 150px;
-  max-width: min(360px, 42vw);
+  min-width: 0;
+  max-width: none;
   color: var(--cyan);
   text-align: right;
 }

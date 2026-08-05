@@ -222,6 +222,7 @@ export function GuestMissionPreview({
   mode = "both",
   showLabels = true,
   onAction,
+  onHeroIconAction,
   rewardDetails,
   className = "",
 }: {
@@ -229,6 +230,7 @@ export function GuestMissionPreview({
   mode?: "both" | "compact" | "full";
   showLabels?: boolean;
   onAction?: () => void;
+  onHeroIconAction?: () => void;
   rewardDetails?: ReactNode;
   className?: string;
 }) {
@@ -315,13 +317,24 @@ export function GuestMissionPreview({
                   >
                     Квест в процессе
                   </span>
-                  <div
-                    className={`absolute right-5 top-5 grid h-12 w-12 place-items-center rounded-xl border ${palette.badge}`}
-                    role="img"
-                    aria-label={`Иконка задания: ${missionIconLabel(data.icon)}`}
-                  >
-                    <GuestMissionIcon icon={data.icon} className="h-6 w-6" />
-                  </div>
+                  {onHeroIconAction ? (
+                    <button
+                      type="button"
+                      className={`absolute right-5 top-5 grid h-12 w-12 place-items-center rounded-xl border ${palette.badge}`}
+                      aria-label="Закрыть подробности задания"
+                      onClick={onHeroIconAction}
+                    >
+                      <GuestMissionIcon icon={data.icon} className="h-6 w-6" />
+                    </button>
+                  ) : (
+                    <div
+                      className={`absolute right-5 top-5 grid h-12 w-12 place-items-center rounded-xl border ${palette.badge}`}
+                      role="img"
+                      aria-label={`Иконка задания: ${missionIconLabel(data.icon)}`}
+                    >
+                      <GuestMissionIcon icon={data.icon} className="h-6 w-6" />
+                    </div>
+                  )}
                   <h3 className="mt-4 max-w-md text-2xl font-black leading-tight">
                     {data.title}
                   </h3>

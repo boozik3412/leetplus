@@ -2636,6 +2636,18 @@ function QuestDetailsModal({
     quest.walletItem && !isRewardWalletItemActionable(quest.walletItem),
   );
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
     <div
       className="lp-quest-complete-overlay lp-lootbox-unavailable-overlay"
@@ -2654,14 +2666,6 @@ function QuestDetailsModal({
           quest.rewardLootBox ? "has-lootbox-preview" : "",
         ].join(" ")}
       >
-        <button
-          type="button"
-          className="lp-quest-complete-close"
-          aria-label="Закрыть подробности задания"
-          onClick={onClose}
-        >
-          ×
-        </button>
         <h3 id="questDetailsTitle" className="sr-only">
           {quest.title}
         </h3>
@@ -2675,6 +2679,7 @@ function QuestDetailsModal({
             mode="full"
             showLabels={false}
             className="!p-0"
+            onHeroIconAction={onClose}
             rewardDetails={
               quest.rewardLootBox ? (
                 <RewardLootBoxPreview lootBox={quest.rewardLootBox} />
@@ -11706,13 +11711,6 @@ const clubHomeCss = `
   border: 0;
   background: transparent;
   box-shadow: 0 34px 110px rgba(0, 0, 0, 0.62);
-}
-
-.lp-quest-details-dialog .lp-quest-complete-close {
-  z-index: 3;
-  color: var(--text);
-  background: rgba(5, 12, 14, 0.78);
-  backdrop-filter: blur(8px);
 }
 
 .lp-lootbox-unavailable-kicker {

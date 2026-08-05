@@ -35333,6 +35333,7 @@ function buildVisualEditorPreviewSummary(
     triggerKind: mission.triggerKind,
     sessionType: null,
     rewardLabel: mission.rewardLabel,
+    rewardLootBox: null,
     xpReward: mission.xpReward,
     progressCurrent: 0,
     progressTarget: mission.progressTarget,

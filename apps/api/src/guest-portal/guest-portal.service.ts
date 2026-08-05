@@ -1076,6 +1076,7 @@ export type GuestPortalGameSummary = {
         | 'triggerKind'
         | 'sessionType'
         | 'rewardLabel'
+        | 'rewardLootBox'
         | 'xpReward'
         | 'progressCurrent'
         | 'progressTarget'
@@ -1104,6 +1105,7 @@ export type GuestPortalGameSummary = {
         | 'triggerKind'
         | 'sessionType'
         | 'rewardLabel'
+        | 'rewardLootBox'
         | 'xpReward'
         | 'progressCurrent'
         | 'progressTarget'
@@ -15784,7 +15786,7 @@ function toBase64Url(value: Buffer) {
     .replace(/=+$/g, '');
 }
 
-function mapGameSummaryMission(
+export function mapGameSummaryMission(
   mission: GuestPortalMission,
 ): GuestPortalGameSummary['missions']['featured'][number] {
   return {
@@ -15793,6 +15795,7 @@ function mapGameSummaryMission(
     triggerKind: mission.triggerKind,
     sessionType: mission.sessionType,
     rewardLabel: mission.rewardLabel,
+    rewardLootBox: mission.rewardLootBox,
     xpReward: mission.xpReward,
     progressCurrent: mission.progressCurrent,
     progressTarget: mission.progressTarget,

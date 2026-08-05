@@ -18,6 +18,7 @@ import {
   guestPortalVisibleBonusLedgerRows,
   lootBoxWaitingEventMessage,
   mapLootBoxPossibleRewards,
+  mapGameSummaryMission,
   mapMission,
   mapSessionActivity,
   rewardCodeVisibleAfterClaim,
@@ -2096,6 +2097,9 @@ describe('GuestPortalService', () => {
       );
 
       expect(mission.rewardLootBox).toEqual(rewardLootBox);
+      expect(mapGameSummaryMission(mission).rewardLootBox).toEqual(
+        rewardLootBox,
+      );
     });
   });
 

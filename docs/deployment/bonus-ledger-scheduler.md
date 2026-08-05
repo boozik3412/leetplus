@@ -1,5 +1,13 @@
 # Bonus ledger scheduler для геймификации
 
+## Текущий production-контракт (05.08.2026)
+
+- Входящее пополнение для условий заданий обрабатывается отдельным tenant-scoped `LEDGER_SUPPLEMENTAL` только как `BALANCE_TOPUP`; наличие игровой сессии не требуется.
+- Автономный reward materializer включён для tenant `demo` и последовательно обрабатывает immutable intent, затем effect. Он не выполняет внешний Langame write.
+- Bonus-ledger scheduler и Langame write gate разрешают все поддерживаемые балансные награды: `BONUS`, `BONUS_POINTS`, `BONUS_BALANCE`, `LOYALTY_BONUS` отправляются как `bonus_balance`; `BALANCE`, `MONEY_BALANCE`, `CASH_BALANCE`, `DEPOSIT`, `WALLET_BALANCE`, `LANGAME_BALANCE` — как `balance`.
+- `BALANCE_WRITE_OFF` и `BONUS_TOPUP` могут присутствовать в activity ledger для диагностики, но не являются доступными типами условия mission v2. Их нельзя добавлять в supplemental allow-list до появления отдельного versioned evaluator-контракта.
+- Все контуры остаются tenant-scoped, используют claim/idempotency, а неоднозначный внешний POST переводится в `RECONCILIATION_REQUIRED` без автоматического повтора.
+
 > Актуальный контракт от 30.07.2026: этот scheduler доставляет legacy non-claim rewards и обычные claim-required rewards только после своевременного явного claim гостя. `GuestGamificationPipelineSchedulerService` автоматически фиксирует квалификацию Battle Pass/заданий/check-in/event, но не начисляет бонус и не обходит 30-дневный кошелёк. Completion ACK не является claim; завершённые и ожидающие результаты остаются доступны через reward wallet/history.
 
 Этот runbook включает API-side scheduler `GuestBonusLedgerSchedulerService`, который без админского клика вызывает защищенный контур `POST /guests/gamification/scheduled/bonus-ledger/dispatch`. Scheduler работает внутри `leetplus-api.service`, поэтому отдельный systemd unit не нужен.

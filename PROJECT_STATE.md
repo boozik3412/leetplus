@@ -1,11 +1,12 @@
 # LeetPlus Project State
 
-## Current gamification state (31.07.2026)
+## Current gamification state (05.08.2026)
 
 - The canonical manager route is `/gamification`, diagnostics live at `/gamification/log`, missions are created and edited only in `/gamification/missions/wizard`, and the guest flow is `/game/auth -> /game/clubs -> /game` with reward history at `/game/rewards`.
 - Mission v2 and Battle Pass share the same condition family: `APP_OPEN`, `PLAY_TIME`, `PRODUCT_PURCHASE`, `BALANCE_TOPUP`, and `CHECK_IN`. Loot boxes accept `ANY`, `HOURLY`, or `PACKAGE_OR_SUBSCRIPTION`.
 - Source policy is intentionally layered. `APP_OPEN` and check-in remain direct LIVE-only facts. Session start and play time can use sequential `LIVE_WITH_LEDGER_FALLBACK`. Purchases remain LIVE-primary with Ledger in SHADOW. Balance top-up uses the isolated `LEDGER_SUPPLEMENTAL` path.
 - Fallback/supplemental/materializer availability in code is not proof that it is enabled on production. Runtime env/status and `/gamification/log` are authoritative for mode, tenant scope, cutoff, fact allow-list, lag, retries, and dead letters.
+- Production `LEDGER_SUPPLEMENTAL` was verified and enabled on 05.08.2026 in tenant-scoped `LIVE` mode for tenant slug `demo`, with the fact allow-list restricted to `BALANCE_TOPUP`, the kill switch disabled, a 15-second interval, and a batch size of 30. Before this change the variables were absent, so the safe `OFF` default accepted normalized top-up facts but never evaluated them. A sessionless, guest-bound exact top-up fact was then processed once through a `PROCESSED` receipt and the shared evaluator, advancing the active count mission to `1/10`; an active game session is not required for a balance top-up.
 - Completion notifications for missions and Battle Pass are durable and return after reload until the guest explicitly acknowledges them. ACK is read-only and is separate from wallet claim/open.
 - The reward wallet and `/game/rewards` keep pending and completed outcomes visible. Ordinary reward and XP are claimed independently; a loot box is an entitlement and rolls a prize only on manual open.
 - A loot box configured as the reward for a mission, Battle Pass step, or another activity follows the durable `event -> reward intent -> reward effect -> entitlement -> wallet` path. Its parent reward does not wait for an ordinary claim or claim deadline; the only guest action is the exact manual open. `sourceRewardId` preserves the granting activity while `rewardId` records only the opened outcome after the two-wave expand/contract cutover. Profile-scoped summary recovery and a replay-safe migration repair both missing legacy intents and rewards that were parked before entitlement materialization.
@@ -34,7 +35,7 @@
 - The ordinary LIVE snapshot window remains the primary path. Historical anti-join recovery for guest-bound sessions and purchases is independently gated by `GUEST_GAME_PIPELINE_BACKFILL_MODE=OFF|SHADOW|LIVE` and defaults to `OFF`, where it executes no anti-join SQL. Every enabled mode requires an exact tenant and an explicitly false kill switch; `LIVE` also requires a timezone-qualified cutoff plus an exact profile unless tenant-wide rollout is explicitly allowed. `SHADOW` records diagnostic decisions only and cannot create event, XP, reward or entitlement. `PLAY_HOUR` is emitted only after a session has stopped, so an intermediate duration cannot seal a stale event before the final 60-minute boundary. The Ledger recovery lane remains secondary and acts only after the primary grace window.
 - Standalone cases, mission-target cases and Battle Pass lootbox rewards share entitlement limits and opening semantics. `STANDALONE` is directly earnable, `REWARD_TEMPLATE` is only granted by a mission or Battle Pass target, and `BOTH` supports both paths. Qualification never selects a random prize; the guest's manual open action does that exactly once.
 
-Last updated: 2026-07-31
+Last updated: 2026-08-05
 
 ## Current Workflow
 

@@ -222,12 +222,14 @@ export function GuestMissionPreview({
   mode = "both",
   showLabels = true,
   onAction,
+  rewardDetails,
   className = "",
 }: {
   data: GuestMissionPreviewData;
   mode?: "both" | "compact" | "full";
   showLabels?: boolean;
   onAction?: () => void;
+  rewardDetails?: ReactNode;
   className?: string;
 }) {
   const percent = Math.max(
@@ -239,6 +241,7 @@ export function GuestMissionPreview({
   );
   const progress = `${data.progressCurrent} из ${data.progressTarget} ${data.progressUnit}`;
   const palette = missionPreviewPalettes[data.theme ?? "CLASSIC"];
+  const hasCover = Boolean(data.coverUrl?.trim());
 
   return (
     <div
@@ -294,37 +297,41 @@ export function GuestMissionPreview({
             className={`${showLabels ? "mt-2" : ""} overflow-hidden rounded-2xl border shadow-2xl ${palette.modal}`}
           >
             <div
-              className={`relative min-h-44 p-5 ${palette.hero}`}
+              className={`relative min-h-44 sm:min-h-52 ${hasCover ? "" : "p-5"} ${palette.hero}`}
               style={
-                data.coverUrl
+                hasCover
                   ? {
-                      backgroundImage: `${palette.coverOverlay}, url("${data.coverUrl}")`,
+                      backgroundImage: `url("${data.coverUrl}")`,
                       backgroundPosition: "center",
                       backgroundSize: "cover",
                     }
                   : undefined
               }
             >
-              <span
-                className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${palette.status}`}
-              >
-                Квест в процессе
-              </span>
-              <div
-                className={`absolute right-5 top-5 grid h-12 w-12 place-items-center rounded-xl border ${palette.badge}`}
-                role="img"
-                aria-label={`Иконка задания: ${missionIconLabel(data.icon)}`}
-              >
-                <GuestMissionIcon icon={data.icon} className="h-6 w-6" />
-              </div>
-              <h3 className="mt-4 max-w-md text-2xl font-black leading-tight">
-                {data.title}
-              </h3>
-              <p
-                className={`mt-2 max-w-md text-sm leading-6 ${palette.description}`}
-              >
-                {data.description}
-              </p>
+              {!hasCover ? (
+                <>
+                  <span
+                    className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${palette.status}`}
+                  >
+                    Квест в процессе
+                  </span>
+                  <div
+                    className={`absolute right-5 top-5 grid h-12 w-12 place-items-center rounded-xl border ${palette.badge}`}
+                    role="img"
+                    aria-label={`Иконка задания: ${missionIconLabel(data.icon)}`}
+                  >
+                    <GuestMissionIcon icon={data.icon} className="h-6 w-6" />
+                  </div>
+                  <h3 className="mt-4 max-w-md text-2xl font-black leading-tight">
+                    {data.title}
+                  </h3>
+                  <p
+                    className={`mt-2 max-w-md text-sm leading-6 ${palette.description}`}
+                  >
+                    {data.description}
+                  </p>
+                </>
+              ) : null}
             </div>
             <div className="space-y-4 p-5">
               <PreviewBlock label="Условие" palette={palette} variant="plain">
@@ -375,6 +382,7 @@ export function GuestMissionPreview({
                     Дополнительно: +{data.xp} XP
                   </p>
                 ) : null}
+                {rewardDetails ? <div className="mt-3">{rewardDetails}</div> : null}
               </PreviewBlock>
               <button
                 type="button"

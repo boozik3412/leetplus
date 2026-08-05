@@ -2674,7 +2674,12 @@ function QuestDetailsModal({
             data={preview}
             mode="full"
             showLabels={false}
-            className="!p-2 sm:!p-3"
+            className="!p-0"
+            rewardDetails={
+              quest.rewardLootBox ? (
+                <RewardLootBoxPreview lootBox={quest.rewardLootBox} />
+              ) : null
+            }
             onAction={() => {
               if (claiming) {
                 return;
@@ -2693,9 +2698,6 @@ function QuestDetailsModal({
             }}
           />
         </fieldset>
-        {quest.rewardLootBox ? (
-          <RewardLootBoxPreview lootBox={quest.rewardLootBox} />
-        ) : null}
       </div>
     </div>
   );
@@ -11699,7 +11701,18 @@ const clubHomeCss = `
   width: min(560px, 100%);
   max-height: calc(100dvh - 28px);
   overflow-y: auto;
-  padding: 20px;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: 0 34px 110px rgba(0, 0, 0, 0.62);
+}
+
+.lp-quest-details-dialog .lp-quest-complete-close {
+  z-index: 3;
+  color: var(--text);
+  background: rgba(5, 12, 14, 0.78);
+  backdrop-filter: blur(8px);
 }
 
 .lp-lootbox-unavailable-kicker {

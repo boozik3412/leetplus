@@ -43,6 +43,20 @@ export type GuestPortalGamificationClubDirectory = {
 
 export type GuestPortalLootBoxRarity = "common" | "rare" | "epic" | "legendary";
 
+export type GuestPortalRewardLootBoxPreview = {
+  id: string;
+  name: string;
+  rewardLabel: string | null;
+  caseRarity: GuestPortalLootBoxRarity;
+  caseRarityLabel: string;
+  possibleRewards: Array<{
+    rewardLabel: string;
+    chancePercent: number;
+    rarity: GuestPortalLootBoxRarity;
+    rarityLabel: string;
+  }>;
+};
+
 export type GuestPortalLootBoxSchedule = {
   timeWindowMode: "ANY" | "QUIET_HOURS" | "CUSTOM";
   weekdayMode: "ANY" | "WEEKDAYS" | "WEEKENDS" | "CUSTOM";
@@ -371,6 +385,7 @@ export type GuestPortalPayload = {
       triggerKind: string;
       sessionType: string | null;
       rewardLabel: string | null;
+      rewardLootBox: GuestPortalRewardLootBoxPreview | null;
       xpReward: number;
       progressCurrent: number;
       progressTarget: number | null;
@@ -432,6 +447,8 @@ export type GuestPortalPayload = {
         description: string | null;
         freeReward: string | null;
         premiumReward: string | null;
+        freeRewardLootBox: GuestPortalRewardLootBoxPreview | null;
+        premiumRewardLootBox: GuestPortalRewardLootBoxPreview | null;
         reached: boolean;
         current: boolean;
         next: boolean;
@@ -811,6 +828,7 @@ export type GuestPortalGameSummary = {
         | "triggerKind"
         | "sessionType"
         | "rewardLabel"
+        | "rewardLootBox"
         | "xpReward"
         | "progressCurrent"
         | "progressTarget"
@@ -839,6 +857,7 @@ export type GuestPortalGameSummary = {
         | "triggerKind"
         | "sessionType"
         | "rewardLabel"
+        | "rewardLootBox"
         | "xpReward"
         | "progressCurrent"
         | "progressTarget"
@@ -887,6 +906,8 @@ export type GuestPortalGameSummary = {
               | "description"
               | "freeReward"
               | "premiumReward"
+              | "freeRewardLootBox"
+              | "premiumRewardLootBox"
               | "reached"
               | "current"
               | "next"

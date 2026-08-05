@@ -1400,6 +1400,15 @@ export type GuestPortalLootBoxPossibleReward = {
   rarityLabel: string;
 };
 
+export type GuestPortalRewardLootBoxPreview = {
+  id: string;
+  name: string;
+  rewardLabel: string | null;
+  caseRarity: GuestPortalLootBoxCaseRarity;
+  caseRarityLabel: string;
+  possibleRewards: GuestPortalLootBoxPossibleReward[];
+};
+
 export type GuestPortalLootBoxSchedule = {
   timeWindowMode: GuestPortalLootBoxTimeWindowMode;
   weekdayMode: GuestPortalLootBoxWeekdayMode;
@@ -1434,6 +1443,7 @@ export type GuestPortalMission = {
   sessionType: string | null;
   missionType: string;
   rewardLabel: string | null;
+  rewardLootBox: GuestPortalRewardLootBoxPreview | null;
   xpReward: number;
   progressCurrent: number;
   progressTarget: number | null;
@@ -1525,6 +1535,8 @@ export type GuestPortalSeason = {
     description: string | null;
     freeReward: string | null;
     premiumReward: string | null;
+    freeRewardLootBox: GuestPortalRewardLootBoxPreview | null;
+    premiumRewardLootBox: GuestPortalRewardLootBoxPreview | null;
     reached: boolean;
     current: boolean;
     next: boolean;
@@ -12547,12 +12559,19 @@ export class GuestPortalService {
             openBlocker: GUEST_PORTAL_LOOT_BOX_ENTITLEMENT_REQUIRED_MESSAGE,
           };
     });
+    const rewardLootBoxesById = new Map(
+      storeLootBoxRows.map((lootBox) => [
+        lootBox.id,
+        guestPortalRewardLootBoxPreview(lootBox),
+      ]),
+    );
     const portalMissions = visibleMissions.map((item) =>
       mapMission(
         item,
         missionProgress.get(item.id),
         rewards,
         visibleBonusLedgerRows,
+        rewardLootBoxesById,
       ),
     );
     const portalSeasons = seasons
@@ -17656,6 +17675,27 @@ export function mapLootBoxPossibleRewards(
   });
 }
 
+export function guestPortalRewardLootBoxPreview(row: {
+  id: string;
+  name: string;
+  rewardLabel: string | null;
+  probabilityRules: Prisma.JsonValue | null;
+}): GuestPortalRewardLootBoxPreview {
+  const caseRarity = lootBoxCaseRarity(row.probabilityRules);
+
+  return {
+    id: row.id,
+    name: row.name,
+    rewardLabel: row.rewardLabel,
+    caseRarity,
+    caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS[caseRarity],
+    possibleRewards: mapLootBoxPossibleRewards(
+      row.probabilityRules,
+      row.rewardLabel ?? row.name,
+    ),
+  };
+}
+
 function lootBoxPossibleRewardRarity(
   chancePercent: number,
 ): GuestPortalLootBoxCaseRarity {
@@ -18484,12 +18524,13 @@ export function guestPortalVisibleBonusLedgerRows<
   );
 }
 
-function mapMission(
+export function mapMission(
   row: {
     id: string;
     name: string;
     triggerKind: string;
     missionType: string;
+    rewardType: string;
     rewardLabel: string | null;
     xpReward: number;
     progressTarget: number | null;
@@ -18501,6 +18542,10 @@ function mapMission(
   progress?: GuestPortalMissionProgress,
   rewards: GuestPortalRewardRow[] = [],
   bonusLedgerRows: GuestPortalBonusLedgerRow[] = [],
+  rewardLootBoxesById: ReadonlyMap<
+    string,
+    GuestPortalRewardLootBoxPreview
+  > = new Map(),
 ): GuestPortalMission {
   const rawProgressCurrent = progress?.current ?? 0;
   const questSteps = missionQuestSteps(row.conditions, rawProgressCurrent);
@@ -18545,6 +18590,14 @@ function mapMission(
   const productNames = productRefs
     .map((item) => stringField(item.name))
     .filter((item): item is string => Boolean(item));
+  const rewardDetails = jsonRecord(conditions.reward);
+  const rewardLootBoxId = stringField(rewardDetails.lootBoxId);
+  const rewardType = row.rewardType.trim().toUpperCase();
+  const rewardLootBox =
+    rewardLootBoxId &&
+    (rewardType === 'LOOT_BOX' || rewardType === 'LOOT_BOX_ENTITLEMENT')
+      ? (rewardLootBoxesById.get(rewardLootBoxId) ?? null)
+      : null;
 
   return {
     id: row.id,
@@ -18553,6 +18606,7 @@ function mapMission(
     sessionType: effectiveSessionType,
     missionType: effectiveMissionType,
     rewardLabel: row.rewardLabel,
+    rewardLootBox,
     xpReward: row.xpReward,
     progressCurrent,
     progressTarget,
@@ -19181,7 +19235,7 @@ function mapSeason(
     probabilityRules: Prisma.JsonValue;
   }>,
 ): GuestPortalSeason {
-  const levels = seasonLevels(row.levels);
+  const levels = seasonLevels(row.levels, lootBoxes);
   const progress = buildSeasonProgress(levels, xp, rewards, row);
 
   return {
@@ -21530,10 +21584,25 @@ function seasonRewardLabelLooksLikeLootBox(value: string) {
   return /(?:лутбокс|кейс|контейнер|loot\s*box|case|container)/i.test(value);
 }
 
-export function seasonLevels(value: Prisma.JsonValue) {
+export function seasonLevels(
+  value: Prisma.JsonValue,
+  lootBoxes: Array<{
+    id: string;
+    name: string;
+    rewardLabel: string | null;
+    probabilityRules: Prisma.JsonValue | null;
+  }> = [],
+) {
   if (!Array.isArray(value)) {
     return [];
   }
+
+  const rewardLootBoxesById = new Map(
+    lootBoxes.map((lootBox) => [
+      lootBox.id,
+      guestPortalRewardLootBoxPreview(lootBox),
+    ]),
+  );
 
   return value
     .map((item) => {
@@ -21549,6 +21618,8 @@ export function seasonLevels(value: Prisma.JsonValue) {
       const sessionType = stringField(activationRules.sessionType);
       const metric = jsonRecord(activationRules.metric);
       const savedCondition = stringField(row.condition);
+      const freeRewardDetails = jsonRecord(row.freeRewardDetails);
+      const premiumRewardDetails = jsonRecord(row.premiumRewardDetails);
 
       if (level == null) {
         return null;
@@ -21570,6 +21641,14 @@ export function seasonLevels(value: Prisma.JsonValue) {
         description: stringField(row.description),
         freeReward: stringField(row.freeReward),
         premiumReward: stringField(row.premiumReward),
+        freeRewardLootBox: seasonRewardLootBoxPreview(
+          freeRewardDetails,
+          rewardLootBoxesById,
+        ),
+        premiumRewardLootBox: seasonRewardLootBoxPreview(
+          premiumRewardDetails,
+          rewardLootBoxesById,
+        ),
         reached: false,
         current: false,
         next: false,
@@ -21578,6 +21657,21 @@ export function seasonLevels(value: Prisma.JsonValue) {
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .sort((left, right) => left.level - right.level)
     .slice(0, 12);
+}
+
+function seasonRewardLootBoxPreview(
+  details: Record<string, unknown>,
+  rewardLootBoxesById: ReadonlyMap<string, GuestPortalRewardLootBoxPreview>,
+) {
+  const rewardType = stringField(details.type)?.trim().toUpperCase();
+  const lootBox = jsonRecord(details.lootBox);
+  const lootBoxId = stringField(lootBox.id) ?? stringField(details.lootBoxId);
+
+  if (rewardType !== 'LOOT_BOX' || !lootBoxId) {
+    return null;
+  }
+
+  return rewardLootBoxesById.get(lootBoxId) ?? null;
 }
 
 function buildSeasonProgress(

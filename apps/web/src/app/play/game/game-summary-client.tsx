@@ -16,6 +16,7 @@ import type {
   GuestPortalCheckInResponse,
   GuestPortalGameSummary,
   GuestPortalLootBoxRarity,
+  GuestPortalRewardLootBoxPreview,
   GuestPortalRewardWallet,
   GuestPortalRewardWalletHistoryItem,
   GuestPortalRewardWalletItem,
@@ -272,6 +273,7 @@ type BattlePassRewardCard = {
   rarity: GuestPortalLootBoxRarity;
   status: BattlePassRewardStatus;
   image?: string;
+  lootBoxPreview?: GuestPortalRewardLootBoxPreview | null;
   rewardValue?: string;
   xpThreshold?: number;
   previousXpThreshold?: number;
@@ -415,6 +417,7 @@ type PlayerQuest = {
     value: string | number;
   };
   walletItem: GuestPortalRewardWalletItem | null;
+  rewardLootBox: GuestPortalRewardLootBoxPreview | null;
   preview: GuestMissionPreviewData;
 };
 type QuestCompletionDialog = {
@@ -423,6 +426,7 @@ type QuestCompletionDialog = {
   rewardLabel: string;
   statusLabel: string;
   receivedAt: string;
+  rewardLootBox: GuestPortalRewardLootBoxPreview | null;
 };
 type BattlePassLevelCompletionDialog = {
   seasonId: string;
@@ -433,6 +437,7 @@ type BattlePassLevelCompletionDialog = {
   nextLevel: number | null;
   nextTitle: string | null;
   nextCondition: string | null;
+  rewardLootBox: GuestPortalRewardLootBoxPreview | null;
 };
 type CheckInCompletionDialog = {
   id: string;
@@ -2467,15 +2472,7 @@ function LootboxUnavailableModal({
 
         <div className="lp-lootbox-unavailable-drops">
           <span>Что может выпасть</span>
-          <ul>
-            {card.possibleRewards.map((reward) => (
-              <li key={`${reward.rewardLabel}:${reward.chancePercent}`}>
-                <span data-rarity={reward.rarity} aria-hidden="true" />
-                <strong>{reward.rewardLabel}</strong>
-                <em>{formatChancePercent(reward.chancePercent)}</em>
-              </li>
-            ))}
-          </ul>
+          <LootBoxDropChanceList possibleRewards={card.possibleRewards} />
         </div>
 
         {message ? (
@@ -2506,6 +2503,51 @@ function LootboxUnavailableModal({
   );
 }
 
+function LootBoxDropChanceList({
+  possibleRewards,
+}: {
+  possibleRewards: GuestPortalRewardLootBoxPreview["possibleRewards"];
+}) {
+  return (
+    <ul className="lp-lootbox-drop-chance-list">
+      {possibleRewards.map((reward) => (
+        <li key={`${reward.rewardLabel}:${reward.chancePercent}`}>
+          <span data-rarity={reward.rarity} aria-hidden="true" />
+          <strong>{reward.rewardLabel}</strong>
+          <em>{formatChancePercent(reward.chancePercent)}</em>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RewardLootBoxPreview({
+  lootBox,
+}: {
+  lootBox: GuestPortalRewardLootBoxPreview;
+}) {
+  return (
+    <div className="lp-reward-lootbox-preview">
+      <div className="lp-reward-lootbox-media">
+        <Image
+          src={lootboxSkinForRarity(lootBox.caseRarity)}
+          alt={`Кейс ${lootBox.name}`}
+          width={1024}
+          height={1024}
+          sizes="(max-width: 520px) 148px, 180px"
+          draggable={false}
+        />
+        <span>{lootBox.caseRarityLabel} кейс</span>
+        <strong>{lootBox.name}</strong>
+      </div>
+      <div className="lp-lootbox-unavailable-drops lp-reward-lootbox-drops">
+        <span>Что может выпасть</span>
+        <LootBoxDropChanceList possibleRewards={lootBox.possibleRewards} />
+      </div>
+    </div>
+  );
+}
+
 function QuestCompletionModal({
   completion,
   acknowledging,
@@ -2524,13 +2566,21 @@ function QuestCompletionModal({
       aria-modal="true"
       aria-labelledby="questCompleteTitle"
     >
-      <div className="lp-quest-complete-dialog">
+      <div
+        className={[
+          "lp-quest-complete-dialog",
+          completion.rewardLootBox ? "has-lootbox-preview" : "",
+        ].join(" ")}
+      >
         <span className="lp-quest-complete-kicker">Квест выполнен</span>
         <h3 id="questCompleteTitle">{completion.title}</h3>
         <div className="lp-quest-complete-reward">
           <span>Награда</span>
           <strong>{completion.rewardLabel}</strong>
         </div>
+        {completion.rewardLootBox ? (
+          <RewardLootBoxPreview lootBox={completion.rewardLootBox} />
+        ) : null}
         <div className="lp-quest-complete-meta">
           <span>{completion.statusLabel}</span>
           <span>{formatDate(completion.receivedAt)}</span>
@@ -2598,7 +2648,12 @@ function QuestDetailsModal({
         }
       }}
     >
-      <div className="lp-quest-complete-dialog lp-quest-details-dialog">
+      <div
+        className={[
+          "lp-quest-complete-dialog lp-quest-details-dialog",
+          quest.rewardLootBox ? "has-lootbox-preview" : "",
+        ].join(" ")}
+      >
         <button
           type="button"
           className="lp-quest-complete-close"
@@ -2638,6 +2693,9 @@ function QuestDetailsModal({
             }}
           />
         </fieldset>
+        {quest.rewardLootBox ? (
+          <RewardLootBoxPreview lootBox={quest.rewardLootBox} />
+        ) : null}
       </div>
     </div>
   );
@@ -3884,7 +3942,12 @@ function BattlePassLevelCompletionModal({
       aria-modal="true"
       aria-labelledby="battlePassLevelCompleteTitle"
     >
-      <div className="lp-quest-complete-dialog lp-battlepass-detail-dialog lp-battlepass-level-complete-dialog">
+      <div
+        className={[
+          "lp-quest-complete-dialog lp-battlepass-detail-dialog lp-battlepass-level-complete-dialog",
+          completion.rewardLootBox ? "has-lootbox-preview" : "",
+        ].join(" ")}
+      >
         <span className="lp-quest-complete-kicker">Уровень пройден</span>
         <span className="lp-battlepass-level-complete-mark" aria-hidden="true">
           {formatNumber(completion.completedLevel)}
@@ -3900,6 +3963,9 @@ function BattlePassLevelCompletionModal({
           <div className="lp-battlepass-detail-line is-reward">
             <span>Награда уровня</span>
             <strong>{completion.rewardLabel}</strong>
+            {completion.rewardLootBox ? (
+              <RewardLootBoxPreview lootBox={completion.rewardLootBox} />
+            ) : null}
           </div>
 
           {hasNextLevel ? (
@@ -4107,6 +4173,8 @@ function BattlePassQuestModal({
     quest?.reward ?? reward.plannedReward ?? reward.title,
     "Награда",
   );
+  const plannedRewardLootBox =
+    reward.lootBoxPreview ?? mission?.rewardLootBox ?? null;
   const fallbackRewardStatus = mission?.rewardStatus ?? null;
   const fallbackRewardLabel =
     fallbackRewardStatus?.rewardLabel ??
@@ -4135,7 +4203,12 @@ function BattlePassQuestModal({
       aria-modal="true"
       aria-labelledby="battlePassQuestTitle"
     >
-      <div className="lp-quest-complete-dialog lp-battlepass-detail-dialog">
+      <div
+        className={[
+          "lp-quest-complete-dialog lp-battlepass-detail-dialog",
+          plannedRewardLootBox ? "has-lootbox-preview" : "",
+        ].join(" ")}
+      >
         <button
           type="button"
           className="lp-quest-complete-close"
@@ -4181,6 +4254,9 @@ function BattlePassQuestModal({
           <div className="lp-battlepass-detail-line is-reward">
             <span>Награда</span>
             <strong>{plannedReward}</strong>
+            {plannedRewardLootBox ? (
+              <RewardLootBoxPreview lootBox={plannedRewardLootBox} />
+            ) : null}
           </div>
         </div>
 
@@ -4596,6 +4672,7 @@ function battlePassRewardFromLevel(
     rarity,
     status: battlePassRewardStatus(level),
     image: type === "lootbox" ? lootboxSkinForRarity(rarity) : undefined,
+    lootBoxPreview: battlePassLevelLootBoxPreview(level, rewardLabel),
     rewardValue: battlePassRewardValue(rewardLabel, type, level.level),
     xpThreshold: 0,
     previousXpThreshold: previousLevel ? 0 : 0,
@@ -4643,6 +4720,29 @@ function battlePassRewardStatus(
   }
 
   return "locked";
+}
+
+function battlePassLevelLootBoxPreview(
+  level: HomeBattlePassLevel,
+  rewardLabel?: string | null,
+) {
+  const normalizedRewardLabel = rewardLabel?.trim() ?? "";
+
+  if (
+    normalizedRewardLabel &&
+    normalizedRewardLabel === level.premiumReward?.trim()
+  ) {
+    return level.premiumRewardLootBox;
+  }
+
+  if (
+    normalizedRewardLabel &&
+    normalizedRewardLabel === level.freeReward?.trim()
+  ) {
+    return level.freeRewardLootBox;
+  }
+
+  return level.freeRewardLootBox ?? level.premiumRewardLootBox ?? null;
 }
 
 function battlePassRewardEventDetail(
@@ -6650,6 +6750,7 @@ function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
       progress,
       reward,
       walletItem,
+      rewardLootBox: mission.rewardLootBox,
       preview: walletItem
         ? {
             ...preview,
@@ -6772,6 +6873,10 @@ function completionDialogsFromPendingNotifications(
       summary.completionNotifications?.pending ?? []
     ).flatMap<CompletionDialogQueueItem>((notification) => {
       if (notification.kind === "MISSION") {
+        const mission = [
+          ...summary.missions.featured,
+          ...summary.missions.history,
+        ].find((item) => item.id === notification.sourceId);
         return [
           {
             key: `quest:${notification.sourceId}:${notification.occurredAt}`,
@@ -6784,12 +6889,16 @@ function completionDialogsFromPendingNotifications(
               rewardLabel: notification.rewardLabel,
               statusLabel: notification.statusLabel,
               receivedAt: notification.occurredAt,
+              rewardLootBox: mission?.rewardLootBox ?? null,
             },
           },
         ];
       }
 
       const completedLevel = notification.completedLevel ?? 1;
+      const rewardLootBox = summary.battlePass.active?.levels.find(
+        (level) => level.level === completedLevel,
+      );
 
       return [
         {
@@ -6806,6 +6915,12 @@ function completionDialogsFromPendingNotifications(
             nextLevel: notification.nextLevel,
             nextTitle: notification.nextTitle,
             nextCondition: notification.nextCondition,
+            rewardLootBox: rewardLootBox
+              ? battlePassLevelLootBoxPreview(
+                  rewardLootBox,
+                  notification.rewardLabel,
+                )
+              : null,
           },
         },
       ];
@@ -6915,6 +7030,7 @@ function findNewQuestCompletions(
       rewardLabel: missionCompletionRewardLabel(mission),
       statusLabel: mission.rewardStatus.label,
       receivedAt: mission.rewardStatus.occurredAt ?? nextSummary.generatedAt,
+      rewardLootBox: mission.rewardLootBox,
     });
   }
 
@@ -6970,6 +7086,12 @@ function findNewBattlePassLevelCompletions(
             "Условие",
           )
         : null,
+      rewardLootBox: battlePassLevelLootBoxPreview(
+        completedLevel,
+        completedLevel.freeReward?.trim() ||
+          completedLevel.premiumReward?.trim() ||
+          null,
+      ),
     };
   });
 }
@@ -7124,7 +7246,10 @@ function playerQuestReward(mission: GameMission): PlayerQuest["reward"] {
   const rewardLabel = mission.rewardLabel?.trim() ?? "";
   const rewardLabelLower = rewardLabel.toLocaleLowerCase("ru-RU");
 
-  if (rewardLabelLower.includes("лутбокс")) {
+  if (
+    mission.rewardLootBox ||
+    /лутбокс|кейс|контейнер/.test(rewardLabelLower)
+  ) {
     return { type: "lootbox", value: rewardLabel };
   }
 
@@ -11761,6 +11886,75 @@ const clubHomeCss = `
   font-style: normal;
   font-weight: 860;
   text-align: center;
+}
+
+.lp-quest-complete-dialog.has-lootbox-preview,
+.lp-battlepass-detail-dialog.has-lootbox-preview,
+.lp-quest-details-dialog.has-lootbox-preview {
+  width: min(680px, 100%);
+}
+
+.lp-reward-lootbox-preview {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
+  border: 1px solid rgba(131, 228, 236, 0.2);
+  border-radius: 10px;
+  padding: 12px;
+  background:
+    radial-gradient(circle at 18% 35%, rgba(131, 228, 236, 0.12), transparent 34%),
+    rgba(2, 8, 10, 0.42);
+}
+
+.lp-reward-lootbox-media {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  min-width: 0;
+  padding: 2px 8px 8px;
+  text-align: center;
+}
+
+.lp-reward-lootbox-media img {
+  width: min(180px, 100%);
+  height: auto;
+  margin: -12px 0 -15px;
+  object-fit: contain;
+  filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.44));
+}
+
+.lp-reward-lootbox-media > span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lp-reward-lootbox-media > strong {
+  margin-top: 4px;
+  color: var(--cyan);
+  font-size: 14px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.lp-reward-lootbox-drops {
+  align-self: stretch;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+@media (max-width: 560px) {
+  .lp-reward-lootbox-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-reward-lootbox-media img {
+    width: 148px;
+  }
 }
 
 .lp-lootbox-unavailable-status {

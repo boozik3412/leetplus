@@ -18,6 +18,7 @@ import {
   guestPortalVisibleBonusLedgerRows,
   lootBoxWaitingEventMessage,
   mapLootBoxPossibleRewards,
+  mapMission,
   mapSessionActivity,
   rewardCodeVisibleAfterClaim,
   rewardWalletState,
@@ -1997,6 +1998,104 @@ describe('GuestPortalService', () => {
       expect(purchaseLevel?.executionCondition).not.toContain(
         'Окно выполнения',
       );
+    });
+
+    it('publishes the linked case artwork contract and exact drop chances for a Battle Pass reward', () => {
+      const [level] = seasonLevels(
+        [
+          {
+            level: 4,
+            xp: 400,
+            freeReward: 'КЕЙС «WEEKEND»',
+            freeRewardDetails: {
+              type: 'LOOT_BOX',
+              lootBox: { id: 'weekend-case' },
+            },
+          },
+        ] as Prisma.JsonValue,
+        [
+          {
+            id: 'weekend-case',
+            name: 'КЕЙС «WEEKEND»',
+            rewardLabel: 'Бонусы клуба',
+            probabilityRules: {
+              caseRarity: 'rare',
+              prizes: [
+                { rewardLabel: '50 бонусов', weight: 85 },
+                { rewardLabel: '150 бонусов', weight: 15 },
+              ],
+            },
+          },
+        ],
+      );
+
+      expect(level?.freeRewardLootBox).toEqual({
+        id: 'weekend-case',
+        name: 'КЕЙС «WEEKEND»',
+        rewardLabel: 'Бонусы клуба',
+        caseRarity: 'rare',
+        caseRarityLabel: 'Редкий',
+        possibleRewards: [
+          {
+            rewardLabel: '50 бонусов',
+            chancePercent: 85,
+            rarity: 'common',
+            rarityLabel: 'Обычная',
+          },
+          {
+            rewardLabel: '150 бонусов',
+            chancePercent: 15,
+            rarity: 'rare',
+            rarityLabel: 'Редкая',
+          },
+        ],
+      });
+      expect(level?.premiumRewardLootBox).toBeNull();
+    });
+
+    it('publishes the linked case preview for a mission reward without adding it to the storefront', () => {
+      const rewardLootBox = {
+        id: 'mission-case',
+        name: 'КЕЙС «КАМБЭК»',
+        rewardLabel: 'Бонусы клуба',
+        caseRarity: 'common' as const,
+        caseRarityLabel: 'Обычный',
+        possibleRewards: [
+          {
+            rewardLabel: '100 бонусов',
+            chancePercent: 100,
+            rarity: 'common' as const,
+            rarityLabel: 'Обычная',
+          },
+        ],
+      };
+      const mission = mapMission(
+        {
+          id: 'mission-1',
+          name: 'МЕНЯЕМ МИНУТЫ НА КЕЙС',
+          triggerKind: 'PLAY_HOUR',
+          missionType: 'PLAY_TIME',
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          rewardLabel: 'КЕЙС «КАМБЭК»',
+          xpReward: 50,
+          progressTarget: 60,
+          progressUnit: 'минут',
+          conditions: {
+            taskType: 'PLAY_TIME',
+            sessionType: 'ANY',
+            metric: { target: 60, unit: 'минут' },
+            reward: { type: 'LOOT_BOX', lootBoxId: rewardLootBox.id },
+          },
+          periodTo: null,
+          manualApprovalRequired: false,
+        },
+        undefined,
+        [],
+        [],
+        new Map([[rewardLootBox.id, rewardLootBox]]),
+      );
+
+      expect(mission.rewardLootBox).toEqual(rewardLootBox);
     });
   });
 

@@ -12559,8 +12559,13 @@ export class GuestPortalService {
             openBlocker: GUEST_PORTAL_LOOT_BOX_ENTITLEMENT_REQUIRED_MESSAGE,
           };
     });
+    // Reward previews follow the explicit mission link, not storefront
+    // visibility. A gift-only REWARD_TEMPLATE can legitimately belong to a
+    // different catalog scope while still being the configured mission prize.
+    // Keeping this map tenant-wide exposes it only inside the linked reward;
+    // portalLootBoxRows below still controls what appears in the storefront.
     const rewardLootBoxesById = new Map(
-      storeLootBoxRows.map((lootBox) => [
+      lootBoxes.map((lootBox) => [
         lootBox.id,
         guestPortalRewardLootBoxPreview(lootBox),
       ]),

@@ -296,7 +296,7 @@ export function GuestMissionPreview({
             </p>
           ) : null}
           <div
-            className={`${showLabels ? "mt-2" : ""} overflow-hidden rounded-2xl border shadow-2xl ${palette.modal}`}
+            className={`${showLabels ? "mt-2" : ""} ${hasCover ? "pt-4" : ""} overflow-hidden rounded-2xl border shadow-2xl ${palette.modal}`}
           >
             <div
               className={`relative min-h-44 sm:min-h-52 ${hasCover ? "" : "p-5"} ${palette.hero}`}

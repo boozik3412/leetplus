@@ -14,6 +14,7 @@ import type {
 } from "react";
 import type {
   GuestPortalCheckInResponse,
+  GuestPortalGameMissionPage,
   GuestPortalGameSummary,
   GuestPortalLootBoxRarity,
   GuestPortalRewardLootBoxPreview,
@@ -49,7 +50,7 @@ type GameRewardHistoryItem = Omit<
 };
 type GameBonusHistoryItem =
   GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number];
-type GameMission = GuestPortalGameSummary["missions"]["featured"][number];
+type GameMission = GuestPortalGameMissionPage["items"][number];
 type GameMissionHistoryItem =
   GuestPortalGameSummary["missions"]["history"][number];
 type GameProgressTimelineItem =
@@ -484,6 +485,8 @@ const GUEST_GAME_AUTH_REQUIRED_MESSAGE =
   "Сессия входа не найдена или истекла. Подтвердите телефон заново.";
 
 class EmptySessionError extends Error {}
+
+const QUEST_BOARD_PAGE_SIZE = 10;
 
 export function GameSummaryClient() {
   const [summary, setSummary] = useState<GuestPortalGameSummary | null>(null);
@@ -1315,8 +1318,13 @@ function ReadyGameView({
     useState<UnavailableLootboxMessage>(null);
   const [nicknamePending, setNicknamePending] = useState(false);
   const [questsExpanded, setQuestsExpanded] = useState(false);
+  const [questBoardPage, setQuestBoardPage] =
+    useState<GuestPortalGameMissionPage | null>(null);
+  const [questBoardLoading, setQuestBoardLoading] = useState(false);
+  const [questBoardError, setQuestBoardError] = useState<string | null>(null);
   const [questDetailsId, setQuestDetailsId] = useState<string | null>(null);
   const [questBoardStyle, setQuestBoardStyle] = useState<QuestBoardStyle>({});
+  const questBoardRequestRef = useRef(0);
   const [completionDialogQueue, setCompletionDialogQueue] = useState<
     CompletionDialogQueueItem[]
   >([]);
@@ -1342,17 +1350,24 @@ function ReadyGameView({
   const lootCards = buildHomeLootCards(summary, selectedLootId);
   const battleQuests = buildHomeBattleQuests(summary);
   const playerQuests = useMemo(() => buildPlayerQuests(summary), [summary]);
+  const questBoardQuests = useMemo(
+    () => buildPlayerQuests(summary, questBoardPage?.items),
+    [questBoardPage?.items, summary],
+  );
   const questDetails = questDetailsId
-    ? (playerQuests.find((quest) => quest.id === questDetailsId) ?? null)
+    ? (questBoardQuests.find((quest) => quest.id === questDetailsId) ??
+      playerQuests.find((quest) => quest.id === questDetailsId) ??
+      null)
     : null;
   const checkInAction =
     summary.nextActions.find((action) => action.kind === "CHECK_IN") ?? null;
   const checkInSummary = summary.checkIn ?? null;
   const checkInAvailable = isCheckInAvailable(summary);
-  const completedQuestCount = playerQuests.filter(
-    (quest) => quest.status === "done",
-  ).length;
-  const questTotalCount = playerQuests.length;
+  const completedQuestCount = Math.min(
+    summary.progress.summary.missionsCompleted,
+    summary.missions.total,
+  );
+  const questTotalCount = summary.missions.total;
   const battlePassProgress = clampPercent(
     summary.battlePass.active?.progressPercent ??
       summary.journey.summary.readyPercent,
@@ -1402,6 +1417,13 @@ function ReadyGameView({
 
     return () => window.clearTimeout(timerId);
   }, [toastMessage]);
+
+  useEffect(() => {
+    questBoardRequestRef.current += 1;
+    setQuestBoardPage(null);
+    setQuestBoardLoading(false);
+    setQuestBoardError(null);
+  }, [summary.generatedAt]);
 
   useEffect(() => {
     if (lootboxOverlayPhase !== "open") {
@@ -1667,15 +1689,93 @@ function ReadyGameView({
     }
   }
 
-  function toggleQuestsExpanded() {
+  async function loadQuestBoardPage(offset: number, append: boolean) {
+    if (questBoardLoading) {
+      return;
+    }
+
+    const requestId = questBoardRequestRef.current + 1;
+    questBoardRequestRef.current = requestId;
+    setQuestBoardLoading(true);
+    setQuestBoardError(null);
+
+    try {
+      const page = await loadGameMissionPage({
+        offset,
+        limit: QUEST_BOARD_PAGE_SIZE,
+      });
+
+      if (requestId !== questBoardRequestRef.current) {
+        return;
+      }
+
+      setQuestBoardPage((currentPage) => {
+        if (!append || !currentPage) {
+          return page;
+        }
+
+        const knownMissionIds = new Set(
+          currentPage.items.map((mission) => mission.id),
+        );
+        const addedItems = page.items.filter((mission) => {
+          if (knownMissionIds.has(mission.id)) {
+            return false;
+          }
+
+          knownMissionIds.add(mission.id);
+          return true;
+        });
+
+        return {
+          ...page,
+          offset: 0,
+          items: [...currentPage.items, ...addedItems],
+        };
+      });
+    } catch (error) {
+      if (requestId !== questBoardRequestRef.current) {
+        return;
+      }
+
+      if (error instanceof EmptySessionError) {
+        startNavigationFeedback();
+        router.push("/game/auth");
+        return;
+      }
+
+      setQuestBoardError(
+        getErrorMessage(
+          error,
+          "Не удалось загрузить остальные задания. Попробуйте ещё раз.",
+        ),
+      );
+    } finally {
+      if (requestId === questBoardRequestRef.current) {
+        setQuestBoardLoading(false);
+      }
+    }
+  }
+
+  async function toggleQuestsExpanded() {
     const nextExpanded = !questsExpanded;
 
     if (nextExpanded) {
       syncQuestBoardBounds();
+      setQuestsExpanded(true);
+      showToast("Открыт экран квестов.");
+
+      if (
+        !questBoardPage &&
+        summary.missions.total > summary.missions.featured.length
+      ) {
+        await loadQuestBoardPage(0, false);
+      }
+
+      return;
     }
 
-    setQuestsExpanded(nextExpanded);
-    showToast(nextExpanded ? "Открыт экран квестов." : "Квесты свернуты.");
+    setQuestsExpanded(false);
+    showToast("Квесты свернуты.");
   }
 
   function closeQuestBoard() {
@@ -2338,11 +2438,21 @@ function ReadyGameView({
         />
 
         <QuestBoard
-          quests={playerQuests}
+          quests={questBoardQuests}
+          total={questBoardPage?.total ?? summary.missions.total}
+          loading={questBoardLoading}
+          error={questBoardError}
+          nextOffset={questBoardPage?.nextOffset ?? null}
           expanded={questsExpanded}
           style={questBoardStyle}
           onClose={closeQuestBoard}
           onQuestClick={handleQuestClick}
+          onLoadMore={() => {
+            void loadQuestBoardPage(
+              questBoardPage?.nextOffset ?? 0,
+              Boolean(questBoardPage),
+            );
+          }}
         />
       </div>
 
@@ -5759,16 +5869,26 @@ function PlayerProfilePanel({
 
 function QuestBoard({
   quests,
+  total,
+  loading,
+  error,
+  nextOffset,
   expanded,
   style,
   onClose,
   onQuestClick,
+  onLoadMore,
 }: {
   quests: PlayerQuest[];
+  total: number;
+  loading: boolean;
+  error: string | null;
+  nextOffset: number | null;
   expanded: boolean;
   style: QuestBoardStyle;
   onClose: () => void;
   onQuestClick: (quest: PlayerQuest) => void;
+  onLoadMore: () => void;
 }) {
   const groups = buildQuestGroups(quests);
 
@@ -5788,8 +5908,8 @@ function QuestBoard({
           <span className="lp-club-small-label">Квесты</span>
           <h2>Экран задач</h2>
           <p>
-            {formatNumber(quests.length)} задач клуба, сгруппированных по
-            состоянию.
+            Показано {formatNumber(quests.length)} из {formatNumber(total)}
+            {" "}задач клуба, сгруппированных по состоянию.
           </p>
         </div>
         <button
@@ -5848,6 +5968,22 @@ function QuestBoard({
             )}
           </section>
         ))}
+
+        <div className="lp-club-quest-board-pagination">
+          {error ? <p role="alert">{error}</p> : null}
+          {nextOffset !== null || error ? (
+            <button
+              type="button"
+              className="lp-club-quest-board-load-more"
+              disabled={!expanded || loading}
+              onClick={onLoadMore}
+            >
+              {loading ? "Загружаем…" : error ? "Повторить" : "Показать ещё"}
+            </button>
+          ) : loading ? (
+            <p role="status">Загружаем задания…</p>
+          ) : null}
+        </div>
       </div>
     </section>
   );
@@ -6735,10 +6871,13 @@ function normalizeGameRuleSessionType(value: string | null) {
   return normalized;
 }
 
-function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
+function buildPlayerQuests(
+  summary: GuestPortalGameSummary,
+  missions: GameMission[] = summary.missions.featured,
+): PlayerQuest[] {
   const walletItems = gameRewardWallet(summary).items;
 
-  return summary.missions.featured.map((mission) => {
+  return missions.map((mission) => {
     const status = playerQuestStatus(mission);
     const progress = playerQuestProgress(mission);
     const reward = playerQuestReward(mission);
@@ -14998,6 +15137,51 @@ const clubHomeCss = `
   text-transform: uppercase;
 }
 
+.lp-club-quest-board-pagination {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 4px 0 8px;
+}
+
+.lp-club-quest-board-pagination p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.lp-club-quest-board-pagination p[role="alert"] {
+  color: #f1b8b8;
+}
+
+.lp-club-quest-board-load-more {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgba(131, 228, 236, 0.42);
+  border-radius: 8px;
+  color: var(--cyan);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: rgba(131, 228, 236, 0.08);
+}
+
+.lp-club-quest-board-load-more:hover:not(:disabled),
+.lp-club-quest-board-load-more:focus-visible {
+  border-color: rgba(131, 228, 236, 0.82);
+  background: rgba(131, 228, 236, 0.16);
+  outline: none;
+}
+
+.lp-club-quest-board-load-more:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
 .lp-club-quest-full-card {
   display: block;
   width: 100%;
@@ -16579,6 +16763,38 @@ async function loadGameSummary() {
   debugGuestGame("api-summary-data", debugSummarySnapshot(summary));
 
   return summary;
+}
+
+async function loadGameMissionPage({
+  offset,
+  limit,
+}: {
+  offset: number;
+  limit: number;
+}): Promise<GuestPortalGameMissionPage> {
+  const search = new URLSearchParams({
+    offset: String(Math.max(0, offset)),
+    limit: String(Math.max(1, limit)),
+  });
+  const response = await fetch(
+    `/api/guest-portal/session/game-missions?${search.toString()}`,
+    { cache: "no-store" },
+  );
+
+  if (response.status === 401) {
+    throw new EmptySessionError(GUEST_GAME_AUTH_REQUIRED_MESSAGE);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(
+        response,
+        "Не удалось загрузить остальные задания.",
+      ),
+    );
+  }
+
+  return (await response.json()) as GuestPortalGameMissionPage;
 }
 
 async function acknowledgeGameCompletionNotification(notificationId: string) {

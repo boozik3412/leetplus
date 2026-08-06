@@ -966,6 +966,14 @@ export type GuestPortalGameSummary = {
   };
 };
 
+export type GuestPortalGameMissionPage = {
+  total: number;
+  offset: number;
+  limit: number;
+  nextOffset: number | null;
+  items: GuestPortalGameSummary["missions"]["featured"];
+};
+
 export type GuestPortalSeasonRewardOverview = {
   ranges: Array<{
     type: string;

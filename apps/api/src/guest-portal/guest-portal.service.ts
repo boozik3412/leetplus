@@ -129,6 +129,8 @@ const GAME_PROFILE_LANGAME_AUTO_MATCH_SOURCE =
   'GUEST_PORTAL_LANGAME_AUTO_MATCH';
 const GAME_SUMMARY_MISSION_LIMIT = 10;
 const GAME_SUMMARY_MISSION_HISTORY_LIMIT = 12;
+const GAME_MISSION_PAGE_DEFAULT_LIMIT = 10;
+const GAME_MISSION_PAGE_MAX_LIMIT = 50;
 const GUEST_GAME_REFERRAL_CODE_PREFIX = 'lp_ref_';
 const GAME_REFERRAL_ACCEPTED_EVENT_TYPE = 'GAME_REFERRAL_ACCEPTED';
 const GAME_REFERRAL_EVENT_SOURCE = 'GUEST_PORTAL_REFERRAL';
@@ -1206,6 +1208,14 @@ export type GuestPortalGameSummary = {
       'connected' | 'readyForRewards' | 'status'
     >;
   };
+};
+
+export type GuestPortalGameMissionPage = {
+  total: number;
+  offset: number;
+  limit: number;
+  nextOffset: number | null;
+  items: GuestPortalGameSummary['missions']['featured'];
 };
 
 export type GuestPortalGameProgressTimelineItem = {
@@ -3851,6 +3861,106 @@ export class GuestPortalService {
     authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
     const traceId = this.gameDebugTraceId('summary');
+    const { payload, portal, liveSessionStartResult } =
+      await this.prepareGameSummaryPortal(authorization, traceId);
+    const [referralStats, completionNotifications, rewardWallet] =
+      await Promise.all([
+        this.getGameReferralStats(payload.tenantId, portal.profile.id),
+        this.getPendingCompletionNotifications(
+          payload.tenantId,
+          portal.profile.id,
+        ),
+        this.getRewardWallet(payload.tenantId, portal.profile.id),
+      ]);
+
+    const summary = buildGameSummaryFromPortal(portal, {
+      referralSecret: this.referralSecret(),
+      webUrl: this.publicWebUrl(),
+      referralStats,
+      completionNotifications,
+      rewardWallet,
+    });
+
+    this.logGuestGameDebug('summary-result', {
+      traceId,
+      ...this.guestGameDebugPortalScope(payload, portal),
+      liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+      portalLootBoxes: portal.gamification.lootBoxes.map(
+        guestGameDebugLootBoxState,
+      ),
+      featuredLootBoxes: summary.lootBoxes.featured.map(
+        guestGameDebugLootBoxState,
+      ),
+      nextActions: summary.nextActions.map((action) => ({
+        kind: action.kind,
+        title: action.title,
+        statusLabel: action.statusLabel,
+        progressPercent: action.progressPercent,
+        anchor: action.anchor,
+      })),
+    });
+
+    this.recordGameAuditEvent({
+      tenantId: payload.tenantId,
+      profileId: portal.profile.id,
+      guestId: payload.guestId ?? null,
+      storeId: payload.storeId,
+      entityType: 'GAME_SUMMARY',
+      action: 'GAME_SUMMARY',
+      status: 'SUCCESS',
+      traceId,
+      payload: {
+        lootBoxes: summary.lootBoxes.featured.length,
+        nextActions: summary.nextActions.length,
+        rewards: summary.rewards.recent.length,
+        liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+      },
+    });
+
+    return summary;
+  }
+
+  async getGameMissions(
+    authorization: string | undefined,
+    page: { offset?: unknown; limit?: unknown } = {},
+  ): Promise<GuestPortalGameMissionPage> {
+    const traceId = this.gameDebugTraceId('missions-page');
+    const payload = await this.verifyGuestToken(authorization);
+    const portal = await this.buildPortalPayload(payload);
+    const offset = gameMissionPageOffset(page.offset);
+    const limit = gameMissionPageLimit(page.limit);
+    const missions = [...portal.gamification.missions]
+      .sort(gameSummaryMissionSort)
+      .slice(offset, offset + limit)
+      .map(mapGameSummaryMission);
+    const nextOffset =
+      offset + missions.length < portal.gamification.missions.length
+        ? offset + missions.length
+        : null;
+
+    this.logGuestGameDebug('missions-page-result', {
+      traceId,
+      ...this.guestGameDebugPortalScope(payload, portal),
+      offset,
+      limit,
+      returned: missions.length,
+      total: portal.gamification.missions.length,
+      nextOffset,
+    });
+
+    return {
+      total: portal.gamification.missions.length,
+      offset,
+      limit,
+      nextOffset,
+      items: missions,
+    };
+  }
+
+  private async prepareGameSummaryPortal(
+    authorization: string | undefined,
+    traceId: string,
+  ) {
     const payload = await this.verifyGuestToken(authorization);
     const activationProfile = payload.profileId
       ? await this.prisma.guestGameProfile.findFirst({
@@ -3908,61 +4018,7 @@ export class GuestPortalService {
       portal.profile.id,
       'GAME_SUMMARY',
     );
-    const [referralStats, completionNotifications, rewardWallet] =
-      await Promise.all([
-        this.getGameReferralStats(payload.tenantId, portal.profile.id),
-        this.getPendingCompletionNotifications(
-          payload.tenantId,
-          portal.profile.id,
-        ),
-        this.getRewardWallet(payload.tenantId, portal.profile.id),
-      ]);
-
-    const summary = buildGameSummaryFromPortal(portal, {
-      referralSecret: this.referralSecret(),
-      webUrl: this.publicWebUrl(),
-      referralStats,
-      completionNotifications,
-      rewardWallet,
-    });
-
-    this.logGuestGameDebug('summary-result', {
-      traceId,
-      ...this.guestGameDebugPortalScope(payload, portal),
-      liveSession: guestGameDebugProcessResult(liveSessionStartResult),
-      portalLootBoxes: portal.gamification.lootBoxes.map(
-        guestGameDebugLootBoxState,
-      ),
-      featuredLootBoxes: summary.lootBoxes.featured.map(
-        guestGameDebugLootBoxState,
-      ),
-      nextActions: summary.nextActions.map((action) => ({
-        kind: action.kind,
-        title: action.title,
-        statusLabel: action.statusLabel,
-        progressPercent: action.progressPercent,
-        anchor: action.anchor,
-      })),
-    });
-
-    this.recordGameAuditEvent({
-      tenantId: payload.tenantId,
-      profileId: portal.profile.id,
-      guestId: payload.guestId ?? null,
-      storeId: payload.storeId,
-      entityType: 'GAME_SUMMARY',
-      action: 'GAME_SUMMARY',
-      status: 'SUCCESS',
-      traceId,
-      payload: {
-        lootBoxes: summary.lootBoxes.featured.length,
-        nextActions: summary.nextActions.length,
-        rewards: summary.rewards.recent.length,
-        liveSession: guestGameDebugProcessResult(liveSessionStartResult),
-      },
-    });
-
-    return summary;
+    return { payload, portal, liveSessionStartResult };
   }
 
   async acknowledgeCompletionNotification(
@@ -15382,7 +15438,7 @@ function buildGameSummaryFromPortal(
       latestReward: lootBox.latestReward,
     }));
   const featuredMissions = [...portal.gamification.missions]
-    .sort((left, right) => right.progressPercent - left.progressPercent)
+    .sort(gameSummaryMissionSort)
     .slice(0, GAME_SUMMARY_MISSION_LIMIT)
     .map(mapGameSummaryMission);
   const missionHistory = [...portal.gamification.missions]
@@ -15815,6 +15871,31 @@ export function mapGameSummaryMission(
     productMode: mission.productMode,
     minimumAmount: mission.minimumAmount,
   };
+}
+
+function gameSummaryMissionSort(
+  left: GuestPortalMission,
+  right: GuestPortalMission,
+) {
+  const progressDiff = right.progressPercent - left.progressPercent;
+
+  return progressDiff !== 0 ? progressDiff : left.id.localeCompare(right.id);
+}
+
+function gameMissionPageOffset(value: unknown) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function gameMissionPageLimit(value: unknown) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return GAME_MISSION_PAGE_DEFAULT_LIMIT;
+  }
+
+  return Math.min(parsed, GAME_MISSION_PAGE_MAX_LIMIT);
 }
 
 function missionHistorySort(

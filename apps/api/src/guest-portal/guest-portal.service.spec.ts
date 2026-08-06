@@ -6932,6 +6932,41 @@ describe('GuestPortalService', () => {
         'mission-10',
       ]);
     });
+
+    it('paginates every mission for the full quest board', async () => {
+      const { service } = createService();
+      const portal = portalPayloadFixture();
+      const baseMission = portal.gamification.missions[0];
+      portal.gamification.missions = Array.from({ length: 11 }, (_, index) => ({
+        ...baseMission,
+        id: `mission-${index + 1}`,
+        name: `Mission ${index + 1}`,
+        progressCurrent: 12 - index,
+        progressPercent: 100 - index * 8,
+        questSteps: baseMission.questSteps.map((step) => ({
+          ...step,
+          id: `${step.id}-${index + 1}`,
+        })),
+      }));
+      mockGameSummarySession(service, portal);
+
+      const firstPage = await service.getGameMissions('Bearer guest-token', {
+        offset: '0',
+        limit: '10',
+      });
+      const secondPage = await service.getGameMissions('Bearer guest-token', {
+        offset: String(firstPage.nextOffset),
+        limit: '10',
+      });
+
+      expect(firstPage.total).toBe(11);
+      expect(firstPage.items).toHaveLength(10);
+      expect(firstPage.nextOffset).toBe(10);
+      expect(secondPage.items.map((mission) => mission.id)).toEqual([
+        'mission-11',
+      ]);
+      expect(secondPage.nextOffset).toBeNull();
+    });
   });
 
   describe('selectGameClub', () => {

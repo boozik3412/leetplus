@@ -78,6 +78,99 @@ describe('guest game progress trigger matching', () => {
     });
   });
 
+  it('keeps unfinished daily progress across the club midnight', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'APP_OPEN',
+        progressTarget: 2,
+        timeZone: 'Asia/Yekaterinburg',
+        repeatPeriodicity: 'DAILY',
+        conditions: {
+          metric: { aggregation: 'count', eventTypes: ['APP_OPEN'], target: 2 },
+        },
+      },
+      {
+        eventType: 'APP_OPEN',
+        occurredAt: new Date('2026-06-10T19:01:00.000Z'),
+      },
+      [
+        {
+          eventType: 'APP_OPEN',
+          occurredAt: new Date('2026-06-10T18:50:00.000Z'),
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 2,
+      completed: true,
+      repeatCycleReset: false,
+    });
+  });
+
+  it.each([
+    {
+      name: 'daily',
+      periodicity: 'DAILY' as const,
+      timeZone: 'Asia/Yekaterinburg',
+      completedAt: '2026-06-10T18:55:00.000Z',
+      previousEventAt: '2026-06-10T18:50:00.000Z',
+      currentEventAt: '2026-06-10T19:01:00.000Z',
+    },
+    {
+      name: 'weekly',
+      periodicity: 'WEEKLY' as const,
+      timeZone: 'Asia/Yekaterinburg',
+      completedAt: '2026-06-01T10:00:00.000Z',
+      previousEventAt: '2026-06-01T09:50:00.000Z',
+      currentEventAt: '2026-06-08T10:01:00.000Z',
+    },
+    {
+      name: 'monthly',
+      periodicity: 'MONTHLY' as const,
+      timeZone: 'Asia/Yekaterinburg',
+      completedAt: '2026-06-30T18:55:00.000Z',
+      previousEventAt: '2026-06-30T18:50:00.000Z',
+      currentEventAt: '2026-06-30T19:01:00.000Z',
+    },
+  ])(
+    'starts a new $name repeat cycle only after the previous task was completed',
+    ({ periodicity, timeZone, completedAt, previousEventAt, currentEventAt }) => {
+      const result = evaluateGuestGameProgress(
+        {
+          triggerKind: 'APP_OPEN',
+          progressTarget: 2,
+          timeZone,
+          repeatPeriodicity: periodicity,
+          repeatCompletedAt: new Date(completedAt),
+          conditions: {
+            metric: {
+              aggregation: 'count',
+              eventTypes: ['APP_OPEN'],
+              target: 2,
+            },
+          },
+        },
+        {
+          eventType: 'APP_OPEN',
+          occurredAt: new Date(currentEventAt),
+        },
+        [
+          {
+            eventType: 'APP_OPEN',
+            occurredAt: new Date(previousEventAt),
+          },
+        ],
+      );
+
+      expect(result).toMatchObject({
+        current: 1,
+        completed: false,
+        repeatCycleReset: true,
+      });
+    },
+  );
+
   it('accepts the legacy balance top-up token inside metric event types', () => {
     const result = evaluateGuestGameProgress(
       {

@@ -8,6 +8,11 @@ export type GuestGameProgressAggregation =
   | 'exists'
   | 'streak';
 
+export type GuestGameProgressPeriodicity =
+  | 'DAILY'
+  | 'WEEKLY'
+  | 'MONTHLY';
+
 export type GuestGameProgressEvent = {
   eventType: string;
   occurredAt: Date;
@@ -46,6 +51,8 @@ export type GuestGameProgressRule = {
   periodFrom?: Date | string | null;
   periodTo?: Date | string | null;
   timeZone?: string | null;
+  repeatPeriodicity?: GuestGameProgressPeriodicity | null;
+  repeatCompletedAt?: Date | string | null;
 };
 
 export type GuestGameProgressResult = {
@@ -58,6 +65,7 @@ export type GuestGameProgressResult = {
   matchedEvents: number;
   unit: string | null;
   windowDays: number | null;
+  repeatCycleReset: boolean;
 };
 
 const DEFAULT_WINDOW_DAYS = 365;
@@ -75,6 +83,18 @@ export function evaluateGuestGameProgress(
     rule.progressTarget ??
     null;
   const hasMetric = Object.keys(metric).length > 0;
+  const referenceEvent =
+    currentEvent ??
+    ({
+      eventType: '__REFERENCE__',
+      occurredAt: new Date(),
+    } satisfies GuestGameProgressEvent);
+  const repeatCycleReset = guestGameRepeatCycleReset(
+    rule.repeatCompletedAt,
+    referenceEvent.occurredAt,
+    rule.repeatPeriodicity,
+    rule.timeZone,
+  );
 
   if (!hasMetric && (!target || target <= 1)) {
     return {
@@ -87,6 +107,7 @@ export function evaluateGuestGameProgress(
       matchedEvents: 0,
       unit: rule.progressUnit ?? null,
       windowDays: null,
+      repeatCycleReset,
     };
   }
 
@@ -107,17 +128,12 @@ export function evaluateGuestGameProgress(
     conditions.eventTypes,
     conditions.eventType,
   );
-  const referenceEvent =
-    currentEvent ??
-    ({
-      eventType: '__REFERENCE__',
-      occurredAt: new Date(),
-    } satisfies GuestGameProgressEvent);
   const allEvents = dedupeProgressEvents(currentEvent, historyEvents).filter(
     (event) =>
       matchesProgressEvent(rule, conditions, metric, event, referenceEvent, {
         eventTypes,
         windowDays,
+        repeatCycleReset,
       }),
   );
   const current = progressValue(
@@ -143,6 +159,7 @@ export function evaluateGuestGameProgress(
     matchedEvents: allEvents.length,
     unit: rule.progressUnit ?? progressString(metric.unit) ?? null,
     windowDays,
+    repeatCycleReset,
   };
 }
 
@@ -324,7 +341,11 @@ function matchesProgressEvent(
   metric: Record<string, unknown>,
   event: GuestGameProgressEvent,
   reference: GuestGameProgressEvent,
-  options: { eventTypes: string[]; windowDays: number },
+  options: {
+    eventTypes: string[];
+    windowDays: number;
+    repeatCycleReset: boolean;
+  },
 ) {
   if (options.eventTypes.length) {
     const actual = normalizeProgressToken(event.eventType);
@@ -348,6 +369,18 @@ function matchesProgressEvent(
       event.occurredAt,
       reference.occurredAt,
       options.windowDays,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    options.repeatCycleReset &&
+    !guestGameProgressEventInRepeatPeriod(
+      event.occurredAt,
+      reference.occurredAt,
+      rule.repeatPeriodicity,
+      rule.timeZone,
     )
   ) {
     return false;
@@ -783,6 +816,59 @@ function dateWithinLastDays(value: Date, reference: Date, days: number) {
   return diffMs >= 0 && diffMs <= days * 24 * 60 * 60 * 1000;
 }
 
+export function guestGameProgressPeriodicity(
+  value: unknown,
+): GuestGameProgressPeriodicity | null {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+
+  return normalized === 'DAILY' ||
+    normalized === 'WEEKLY' ||
+    normalized === 'MONTHLY'
+    ? normalized
+    : null;
+}
+
+export function guestGameRepeatCycleReset(
+  completedAtValue: Date | string | null | undefined,
+  reference: Date,
+  periodicity: GuestGameProgressPeriodicity | null | undefined,
+  timeZone?: string | null,
+) {
+  const completedAt = dateValue(completedAtValue);
+
+  return Boolean(
+    completedAt &&
+      periodicity &&
+      !guestGameProgressEventInRepeatPeriod(
+        completedAt,
+        reference,
+        periodicity,
+        timeZone,
+      ),
+  );
+}
+
+function guestGameProgressEventInRepeatPeriod(
+  value: Date,
+  reference: Date,
+  periodicity: GuestGameProgressPeriodicity | null | undefined,
+  timeZone?: string | null,
+) {
+  if (!periodicity || value.getTime() > reference.getTime()) {
+    return false;
+  }
+
+  if (periodicity === 'DAILY') {
+    return localDateKey(value, timeZone) === localDateKey(reference, timeZone);
+  }
+
+  if (periodicity === 'MONTHLY') {
+    return localMonthKey(value, timeZone) === localMonthKey(reference, timeZone);
+  }
+
+  return reference.getTime() - value.getTime() < 7 * 24 * 60 * 60 * 1000;
+}
+
 function progressAggregation(
   value: string | null,
   checkInMode: string | null,
@@ -908,6 +994,10 @@ function localDateKey(value: Date, timeZone?: string | null) {
     month: '2-digit',
     day: '2-digit',
   }).format(value);
+}
+
+function localMonthKey(value: Date, timeZone?: string | null) {
+  return localDateKey(value, timeZone).slice(0, 7);
 }
 
 function localWeekday(value: Date, timeZone?: string | null) {

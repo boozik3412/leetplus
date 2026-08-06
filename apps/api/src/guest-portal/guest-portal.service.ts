@@ -51,6 +51,7 @@ import { GuestIdentityResolverService } from '../integrations/guest-identity-res
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import {
   evaluateGuestGameProgress,
+  guestGameProgressPeriodicity,
   guestGameTriggerMatches,
   type GuestGameProgressEvent,
 } from '../guest-gamification/guest-game-progress';
@@ -12785,6 +12786,7 @@ export class GuestPortalService {
 
     const progressEvents = eventRows.map(portalEventToProgressEvent);
     const rewardCounts = new Map<string, number>();
+    const latestRewardAt = new Map<string, Date>();
 
     rewardRows.forEach((row) => {
       if (!row.missionId) {
@@ -12800,12 +12802,17 @@ export class GuestPortalService {
         row.missionId,
         (rewardCounts.get(row.missionId) ?? 0) + 1,
       );
+      const latest = latestRewardAt.get(row.missionId);
+      if (!latest || row.qualifiedAt > latest) {
+        latestRewardAt.set(row.missionId, row.qualifiedAt);
+      }
     });
 
     const progress = new Map<string, GuestPortalMissionProgress>();
 
     missions.forEach((mission) => {
       const target = guestPortalMissionProgressTarget(mission);
+      const reward = jsonRecord(jsonRecord(mission.conditions).reward);
       const metricProgress = evaluateGuestGameProgress(
         {
           triggerKind: mission.triggerKind,
@@ -12819,14 +12826,20 @@ export class GuestPortalService {
           periodFrom: portalMissionProgressStart(mission),
           periodTo: mission.periodTo,
           timeZone,
+          repeatPeriodicity: guestGameProgressPeriodicity(reward.periodicity),
+          repeatCompletedAt: latestRewardAt.get(mission.id) ?? null,
         },
         null,
         progressEvents,
       );
-      const current = Math.max(
-        metricProgress.applicable ? metricProgress.current : 0,
-        rewardCounts.get(mission.id) ?? 0,
-      );
+      const current = metricProgress.repeatCycleReset
+        ? metricProgress.applicable
+          ? metricProgress.current
+          : 0
+        : Math.max(
+            metricProgress.applicable ? metricProgress.current : 0,
+            rewardCounts.get(mission.id) ?? 0,
+          );
 
       progress.set(mission.id, {
         current,

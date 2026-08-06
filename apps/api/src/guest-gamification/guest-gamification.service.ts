@@ -63,6 +63,7 @@ import {
 } from './guest-game-rule-evaluator';
 import {
   evaluateGuestGameProgress,
+  guestGameProgressPeriodicity,
   guestGameTriggerMatches,
   type GuestGameProgressEvent,
   type GuestGameProgressResult,
@@ -31820,7 +31821,14 @@ function evaluateMissionDryRun(
     appendDryRunMissionConditions(rule, scopedContext, blockers, reasons);
   }
   const progress = scopedContext
-    ? appendDryRunMissionProgress(rule, scopedContext, blockers, reasons)
+    ? appendDryRunMissionProgress(
+        rule,
+        scopedContext,
+        ruleRewards,
+        ruleEntitlements,
+        blockers,
+        reasons,
+      )
     : null;
   appendDryRunBudgetCheck(
     rule.budgetAmount,
@@ -32571,6 +32579,8 @@ function appendDryRunMissionConditions(
 function appendDryRunMissionProgress(
   rule: GuestGameMission,
   context: DryRunContext,
+  rewards: GuestGameReward[],
+  entitlements: DryRunMissionRewardEntitlement[],
   blockers: string[],
   reasons: string[],
 ) {
@@ -32590,6 +32600,13 @@ function appendDryRunMissionProgress(
     (!configuredProgressFrom || gameActivatedAt > configuredProgressFrom)
       ? gameActivatedAt
       : configuredProgressFrom;
+  const reward = dryRunRecord(dryRunRecord(rule.conditions).reward);
+  const repeatPeriodicity = guestGameProgressPeriodicity(reward.periodicity);
+  const repeatCompletedAt = latestMissionCompletionAt(
+    rewards,
+    entitlements,
+    context,
+  );
   const progress = evaluateGuestGameProgress(
     {
       triggerKind: rule.triggerKind,
@@ -32605,6 +32622,8 @@ function appendDryRunMissionProgress(
       periodFrom: progressFrom,
       periodTo,
       timeZone: context.timeZone,
+      repeatPeriodicity,
+      repeatCompletedAt,
     },
     currentEventToProgressEvent(context),
     context.progressEvents,
@@ -32629,6 +32648,30 @@ function appendDryRunMissionProgress(
   }
 
   return progress;
+}
+
+function latestMissionCompletionAt(
+  rewards: GuestGameReward[],
+  entitlements: DryRunMissionRewardEntitlement[],
+  context: DryRunContext,
+) {
+  const dates = [
+    ...rewards
+      .filter((reward) => dryRunRewardMatchesGuest(reward, context))
+      .map((reward) => dryRunDateOrNull(reward.qualifiedAt)),
+    ...entitlements
+      .filter(
+        (entitlement) =>
+          (context.profile && entitlement.profileId === context.profile.id) ||
+          (context.guest && entitlement.guestId === context.guest.id),
+      )
+      .map((entitlement) => dryRunDateOrNull(entitlement.qualifiedAt)),
+  ].filter((value): value is Date => Boolean(value));
+
+  return dates.reduce<Date | null>(
+    (latest, value) => (!latest || value > latest ? value : latest),
+    null,
+  );
 }
 
 function appendDryRunBudgetCheck(

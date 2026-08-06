@@ -850,6 +850,34 @@ describe('guest game progress trigger matching', () => {
     });
   });
 
+  it('matches any positive purchase when the selector is explicitly ANY', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PRODUCT_PURCHASE',
+        progressTarget: 1,
+        conditions: {
+          purchaseSource: 'ANY',
+          metric: {
+            aggregation: 'count',
+            eventTypes: ['PRODUCT_PURCHASE'],
+            purchaseSource: 'ANY',
+            productMatch: 'ANY',
+            target: 1,
+          },
+        },
+      },
+      {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+        productId: 'unlisted-product',
+        spendAmount: 199,
+      },
+      [],
+    );
+
+    expect(result).toMatchObject({ current: 1, completed: true });
+  });
+
   it('matches a club-scoped Langame category by domain and group id', () => {
     const result = evaluateGuestGameProgress(
       {

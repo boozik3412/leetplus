@@ -19,7 +19,7 @@ export type BattlePassStepConditionValue = {
   hours: string;
   weekdays: number[];
   minSessionMinutes: number;
-  purchaseSource: "PRODUCT" | "CATEGORY";
+  purchaseSource: "ANY" | "PRODUCT" | "CATEGORY";
   categoryCatalogSource: "LANGAME" | "LEETPLUS";
   productMatch: "ANY" | "ALL";
   amountMode: "NONE" | "SINGLE_MINIMUM" | "PERIOD_TOTAL";
@@ -289,20 +289,25 @@ export function BattlePassStepConditionEditor({
                 <select
                   className={fieldClass}
                   value={value.purchaseSource}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const purchaseSource = event.target
+                      .value as BattlePassStepConditionValue["purchaseSource"];
                     patch({
-                      purchaseSource: event.target
-                        .value as BattlePassStepConditionValue["purchaseSource"],
+                      purchaseSource,
+                      productMatch:
+                        purchaseSource === "ANY" ? "ANY" : value.productMatch,
                       productIds: [],
                       categorySelectionIds: [],
                       categorySelectionLabels: [],
-                    })
-                  }
+                    });
+                  }}
                 >
+                  <option value="ANY">Любые товары</option>
                   <option value="PRODUCT">Конкретные товары</option>
                   <option value="CATEGORY">Категории товаров</option>
                 </select>
               </Field>
+              {value.purchaseSource !== "ANY" ? (
               <Field label="Как сопоставлять">
                 <select
                   className={fieldClass}
@@ -318,6 +323,7 @@ export function BattlePassStepConditionEditor({
                   <option value="ALL">Все выбранные за период</option>
                 </select>
               </Field>
+              ) : null}
               <Field label="Условие по сумме">
                 <select
                   className={fieldClass}
@@ -360,7 +366,13 @@ export function BattlePassStepConditionEditor({
             ) : null}
           </div>
 
-          {value.purchaseSource === "PRODUCT" ? (
+          {value.purchaseSource === "ANY" ? (
+            <div className={subClass}>
+              <Hint>
+                Засчитывается любая положительная покупка, привязанная к гостю.
+              </Hint>
+            </div>
+          ) : value.purchaseSource === "PRODUCT" ? (
             <div className={subClass}>
               <SectionTitle>Товары выбранных клубов</SectionTitle>
               <input

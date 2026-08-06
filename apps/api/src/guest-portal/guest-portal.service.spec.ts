@@ -1841,6 +1841,13 @@ describe('GuestPortalService', () => {
       );
       expect(
         guestPortalMissionConditionLabel(
+          'PRODUCT_PURCHASE',
+          { purchaseSource: 'ANY', target: 1 },
+          null,
+        ),
+      ).toBe('Купить любой товар');
+      expect(
+        guestPortalMissionConditionLabel(
           'BALANCE_TOPUP',
           {
             topupMode: 'COUNT',

@@ -130,8 +130,8 @@ export function normalizeMissionWizardConditions(
   const appearance = objectValue(dto.appearance);
   const productMatch = enumValue(metric.productMatch, ['ANY', 'ALL'], 'ANY');
   const purchaseSource = enumValue(
-    source.purchaseSource,
-    ['PRODUCT', 'CATEGORY'],
+    source.purchaseSource ?? metric.purchaseSource,
+    ['ANY', 'PRODUCT', 'CATEGORY'],
     'PRODUCT',
   );
   const categoryCatalogSource = enumValue(
@@ -166,7 +166,8 @@ export function normalizeMissionWizardConditions(
     normalizedMetric.purchaseSource = purchaseSource;
     normalizedMetric.categoryCatalogSource =
       purchaseSource === 'CATEGORY' ? categoryCatalogSource : null;
-    normalizedMetric.productMatch = productMatch;
+    normalizedMetric.productMatch =
+      purchaseSource === 'ANY' ? 'ANY' : productMatch;
     normalizedMetric.amountMode = amountMode;
     normalizedMetric.productIds =
       purchaseSource === 'PRODUCT' ? stringArray(metric.productIds) : [];
@@ -187,7 +188,7 @@ export function normalizeMissionWizardConditions(
     if (amountMode === 'PERIOD_TOTAL') {
       normalizedMetric.target =
         numberValue(metric.totalAmount) ?? numberValue(metric.target) ?? 1;
-    } else if (productMatch === 'ALL') {
+    } else if (purchaseSource !== 'ANY' && productMatch === 'ALL') {
       normalizedMetric.target = Math.max(
         1,
         purchaseSource === 'CATEGORY'
@@ -336,12 +337,14 @@ export function validateMissionWizard(
   if (taskType === 'PRODUCT_PURCHASE') {
     const purchaseSource = stringValue(conditions.purchaseSource);
     const selection =
-      purchaseSource === 'CATEGORY'
-        ? stringArray(metric.categoryIds)
-        : [
-            ...stringArray(metric.productIds),
-            ...stringArray(metric.externalProductIds),
-          ];
+      purchaseSource === 'ANY'
+        ? ['any']
+        : purchaseSource === 'CATEGORY'
+          ? stringArray(metric.categoryIds)
+          : [
+              ...stringArray(metric.productIds),
+              ...stringArray(metric.externalProductIds),
+            ];
     if (!selection.length) {
       blockers.push(
         purchaseSource === 'CATEGORY'

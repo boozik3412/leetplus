@@ -57,6 +57,21 @@ describe('guest mission wizard contract', () => {
     expect(conditions.presentation).toMatchObject({ theme: 'BLACK_RED' });
   });
 
+  it('keeps a prepared cover in the public media route across wizard saves', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'APP_OPEN',
+      conditions: { metric: { target: 1 } },
+      appearance: {
+        coverUrl: '/api/guest-game/media/cover-asset-1',
+      },
+    });
+
+    expect(conditions.presentation).toMatchObject({
+      coverUrl: '/api/guest-game/media/cover-asset-1',
+    });
+  });
+
   it('accepts an indefinite mission without dates and preserves the mode', () => {
     const readiness = validateMissionWizard({
       ...common,
@@ -216,6 +231,41 @@ describe('guest mission wizard contract', () => {
 
     expect(category.ready).toBe(true);
     expect(tariff.ready).toBe(false);
+  });
+
+  it('accepts any positive guest-bound purchase without a product selector', () => {
+    const readiness = validateMissionWizard({
+      ...common,
+      taskType: 'PRODUCT_PURCHASE',
+      conditions: {
+        purchaseSource: 'ANY',
+        metric: {
+          purchaseSource: 'ANY',
+          productMatch: 'ALL',
+          target: 99,
+        },
+      },
+    });
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'PRODUCT_PURCHASE',
+      conditions: {
+        purchaseSource: 'ANY',
+        metric: { purchaseSource: 'ANY', productMatch: 'ALL' },
+      },
+    });
+
+    expect(readiness.ready).toBe(true);
+    expect(conditions).toMatchObject({
+      purchaseSource: 'ANY',
+      metric: {
+        purchaseSource: 'ANY',
+        productMatch: 'ANY',
+        productIds: [],
+        categoryIds: [],
+        target: 1,
+      },
+    });
   });
 
   it('labels play-time readiness as LIVE with a ledger fallback', () => {

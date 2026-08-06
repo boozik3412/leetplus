@@ -16028,7 +16028,7 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
   const condition = step.conditionV2 ?? defaultBattlePassStepCondition;
   const taskType = condition.taskType;
   const purchaseTarget =
-    condition.productMatch === "ALL"
+    condition.purchaseSource !== "ANY" && condition.productMatch === "ALL"
       ? Math.max(
           1,
           condition.purchaseSource === "CATEGORY"
@@ -16582,11 +16582,15 @@ function seasonStepConditionFromRules(
           rawSessionType === "PACKET_HOURS"
         ? "PACKAGE_OR_SUBSCRIPTION"
         : "ANY";
+  const rawPurchaseSource =
+    recordString(rules, "purchaseSource")?.toUpperCase() ??
+    recordString(metric, "purchaseSource")?.toUpperCase();
   const purchaseSource =
-    recordString(rules, "purchaseSource")?.toUpperCase() === "CATEGORY" ||
-    recordString(metric, "purchaseSource")?.toUpperCase() === "CATEGORY"
+    rawPurchaseSource === "CATEGORY"
       ? "CATEGORY"
-      : "PRODUCT";
+      : rawPurchaseSource === "ANY"
+        ? "ANY"
+        : "PRODUCT";
   const categoryCatalogSource =
     recordString(rules, "categoryCatalogSource")?.toUpperCase() ===
       "LEETPLUS" ||

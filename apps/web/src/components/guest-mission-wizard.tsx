@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { GuestAudience } from "@/lib/guests";
 import type {
   GuestGameLootBox,
@@ -48,7 +54,7 @@ type WizardState = {
   hours: string;
   weekdays: number[];
   minSessionMinutes: number;
-  purchaseSource: "PRODUCT" | "CATEGORY";
+  purchaseSource: "ANY" | "PRODUCT" | "CATEGORY";
   categoryCatalogSource: "LANGAME" | "LEETPLUS";
   productMatch: "ANY" | "ALL";
   amountMode: "NONE" | "SINGLE_MINIMUM" | "PERIOD_TOTAL";
@@ -97,6 +103,18 @@ const productGroupCatalogCache = new Map<
   string,
   GuestGameMissionProductGroupCatalog
 >();
+const missionCoverWidth = 1200;
+const missionCoverHeight = 640;
+const missionCoverMaxBytes = 2 * 1024 * 1024;
+const missionCoverJpegQualities = [0.9, 0.84, 0.78, 0.72] as const;
+
+type MissionCoverDragState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  offsetX: number;
+  offsetY: number;
+};
 
 export function GuestMissionWizard({
   stores,
@@ -502,9 +520,10 @@ export function GuestMissionWizard({
       const asset = (await response.json()) as { url: string };
       setForm((current) => ({ ...current, coverUrl: asset.url }));
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Не удалось загрузить обложку",
-      );
+      const uploadError =
+        error instanceof Error ? error : new Error("Не удалось загрузить обложку");
+      setMessage(uploadError.message);
+      throw uploadError;
     } finally {
       setUploading(false);
     }
@@ -989,6 +1008,7 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
         <SubTitle>Что считается покупкой</SubTitle>
         <ChoiceRow
           values={[
+            { id: "ANY", label: "Любые товары" },
             { id: "PRODUCT", label: "Конкретные товары" },
             { id: "CATEGORY", label: "Категории товаров" },
           ]}
@@ -997,6 +1017,7 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
             setForm((state) => ({
               ...state,
               purchaseSource: value as WizardState["purchaseSource"],
+              productMatch: value === "ANY" ? "ANY" : state.productMatch,
             }))
           }
         />
@@ -1005,7 +1026,16 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
           возвраты и продажи без гостя не засчитываются.
         </p>
       </div>
-      {form.purchaseSource === "PRODUCT" ? (
+      {form.purchaseSource === "ANY" ? (
+        <div className={subsectionClass}>
+          <SubTitle>Любая покупка</SubTitle>
+          <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            Подойдёт любая положительная покупка, привязанная к гостю. Можно
+            дополнительно указать минимальную сумму или накопленную сумму за
+            период ниже.
+          </p>
+        </div>
+      ) : form.purchaseSource === "PRODUCT" ? (
         <div className={subsectionClass}>
           <div className="flex items-center justify-between gap-3">
             <SubTitle>Товары выбранных клубов</SubTitle>
@@ -1116,6 +1146,7 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
       ) : (
         <CategoryPicker {...props} />
       )}
+      {form.purchaseSource !== "ANY" ? (
       <div className={subsectionClass}>
         <SubTitle>Как сопоставлять выбранное</SubTitle>
         <ChoiceRow
@@ -1139,6 +1170,7 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
           в течение периода задания — один чек не требуется.
         </p>
       </div>
+      ) : null}
       <div className={subsectionClass}>
         <SubTitle>Сумма покупки</SubTitle>
         <ChoiceRow
@@ -1814,7 +1846,7 @@ function AppearanceStep({
   uploadCover,
 }: StateProps & {
   uploading: boolean;
-  uploadCover: (file: File | null) => void;
+  uploadCover: (file: File | null) => Promise<void>;
 }) {
   return (
     <>
@@ -1901,32 +1933,274 @@ function AppearanceStep({
           />
         </div>
         <div className="mt-5">
-          <Field label="Обложка">
-            <input
-              className={fieldClass}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              disabled={uploading}
-              onChange={(event) => uploadCover(event.target.files?.[0] ?? null)}
-            />
-            <p className="mt-2 text-xs text-zinc-500">
-              JPG, PNG или WebP, до 2 МБ. Рекомендуемый размер 1200 × 640 px.
-              Изображение используется в верхней части полного модального окна
-              квеста; компактная карточка остаётся текстовой.
-            </p>
-            {form.coverUrl ? (
-              <button
-                type="button"
-                onClick={() => setForm((state) => ({ ...state, coverUrl: "" }))}
-                className="mt-2 text-xs font-bold text-red-600"
-              >
-                Удалить обложку
-              </button>
-            ) : null}
-          </Field>
+          <MissionCoverEditor
+            coverUrl={form.coverUrl}
+            disabled={uploading}
+            onChange={(coverUrl) =>
+              setForm((state) => ({ ...state, coverUrl }))
+            }
+            onPersist={uploadCover}
+          />
         </div>
       </section>
     </>
+  );
+}
+
+function MissionCoverEditor({
+  coverUrl,
+  disabled,
+  onChange,
+  onPersist,
+}: {
+  coverUrl: string;
+  disabled: boolean;
+  onChange: (coverUrl: string) => void;
+  onPersist: (file: File | null) => Promise<void>;
+}) {
+  const [source, setSource] = useState("");
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [offsetX, setOffsetX] = useState(0);
+  const [offsetY, setOffsetY] = useState(0);
+  const [dragState, setDragState] = useState<MissionCoverDragState | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  function resetCrop() {
+    setScale(1);
+    setOffsetX(0);
+    setOffsetY(0);
+  }
+
+  function openEditor(nextSource: string) {
+    if (!nextSource) return;
+    setError(null);
+    setSource(nextSource);
+    resetCrop();
+    setEditorOpen(true);
+  }
+
+  function handleFile(file: File | null) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Выберите изображение JPG, PNG или WebP.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") openEditor(reader.result);
+    };
+    reader.onerror = () =>
+      setError("Не удалось прочитать файл обложки. Выберите другой файл.");
+    reader.readAsDataURL(file);
+  }
+
+  function updateScale(value: number) {
+    setScale(clampMissionCoverScale(value));
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragState({
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX,
+      offsetY,
+    });
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setOffsetX(
+      clampMissionCoverOffset(
+        dragState.offsetX +
+          ((event.clientX - dragState.startX) / rect.width) * 100,
+      ),
+    );
+    setOffsetY(
+      clampMissionCoverOffset(
+        dragState.offsetY +
+          ((event.clientY - dragState.startY) / rect.height) * 100,
+      ),
+    );
+  }
+
+  function handlePointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (dragState?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDragState(null);
+  }
+
+  async function applyCrop() {
+    if (!source) return;
+    setError(null);
+    try {
+      const file = await renderMissionCoverFile(source, scale, offsetX, offsetY);
+      await onPersist(file);
+      setSource("");
+      setEditorOpen(false);
+    } catch (cropError) {
+      setError(
+        cropError instanceof Error
+          ? cropError.message
+          : "Не удалось подготовить обложку.",
+      );
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Field label="Обложка">
+        <input
+          className={fieldClass}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          disabled={disabled}
+          onChange={(event) => handleFile(event.target.files?.[0] ?? null)}
+        />
+      </Field>
+      <p className="text-xs leading-5 text-zinc-500">
+        Обложка готовится в соотношении 15:8 (1200 × 640 px), затем сохраняется
+        в медиахранилище. Масштабируйте и перетаскивайте изображение, чтобы
+        выбрать кадр. Компактная карточка остаётся текстовой.
+      </p>
+      {coverUrl ? (
+        <div className="flex flex-wrap items-start gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            alt="Текущая обложка задания"
+            className="aspect-[15/8] w-40 rounded-md object-cover"
+            src={coverUrl}
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-bold dark:border-zinc-700"
+              disabled={disabled}
+              onClick={() => openEditor(coverUrl)}
+            >
+              Изменить кадр
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-red-300 px-3 py-2 text-xs font-bold text-red-600"
+              disabled={disabled}
+              onClick={() => {
+                setSource("");
+                onChange("");
+              }}
+            >
+              Удалить обложку
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {error ? <p className="text-xs font-semibold text-red-600">{error}</p> : null}
+
+      {editorOpen && source ? (
+        <div
+          aria-label="Редактирование обложки задания"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/75 p-4 backdrop-blur-sm"
+          role="dialog"
+        >
+          <div className="w-full max-w-4xl rounded-xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                  Редактирование кадра
+                </p>
+                <h3 className="text-lg font-black">Обложка задания</h3>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-bold dark:border-zinc-700"
+                disabled={disabled}
+                onClick={() => {
+                  setEditorOpen(false);
+                  setSource("");
+                  setError(null);
+                }}
+              >
+                Закрыть
+              </button>
+            </div>
+            <div className="mt-4 flex justify-center">
+              <div
+                className={`relative aspect-[15/8] w-full max-w-3xl touch-none select-none overflow-hidden rounded-lg bg-zinc-950 ${dragState ? "cursor-grabbing" : "cursor-grab"}`}
+                onPointerCancel={handlePointerEnd}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerEnd}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  alt="Предпросмотр кадра обложки"
+                  className="absolute inset-0 h-full w-full object-cover"
+                  draggable={false}
+                  src={source}
+                  style={{
+                    transform: `translate(${offsetX}%, ${offsetY}%) scale(${scale})`,
+                  }}
+                />
+                <div className="pointer-events-none absolute inset-0 ring-2 ring-emerald-300/90 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950" />
+              </div>
+            </div>
+            <div className="mt-4 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="grid h-9 w-9 place-items-center rounded-lg border border-zinc-200 text-lg font-bold dark:border-zinc-700"
+                  onClick={() => updateScale(scale - 0.1)}
+                >
+                  −
+                </button>
+                <input
+                  aria-label="Масштаб обложки"
+                  className="min-w-0 flex-1 accent-emerald-500"
+                  max="3"
+                  min="1"
+                  step="0.01"
+                  type="range"
+                  value={scale}
+                  onChange={(event) => updateScale(Number(event.target.value))}
+                />
+                <button
+                  type="button"
+                  className="grid h-9 w-9 place-items-center rounded-lg border border-zinc-200 text-lg font-bold dark:border-zinc-700"
+                  onClick={() => updateScale(scale + 0.1)}
+                >
+                  +
+                </button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-bold dark:border-zinc-700"
+                  onClick={resetCrop}
+                >
+                  Сбросить кадр
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  disabled={disabled}
+                  onClick={() => void applyCrop()}
+                >
+                  {disabled ? "Сохраняем…" : "Применить и сохранить"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -2362,7 +2636,7 @@ function buildPreview(
               : form.checkInMode === "SINGLE"
                 ? 1
                 : form.checkInCount
-            : form.productMatch === "ALL"
+            : form.purchaseSource !== "ANY" && form.productMatch === "ALL"
               ? Math.max(
                   1,
                   form.purchaseSource === "CATEGORY"
@@ -2404,7 +2678,9 @@ function buildPreview(
       form.taskType === "PRODUCT_PURCHASE"
         ? form.purchaseSource === "CATEGORY"
           ? productGroups.map((group) => group.name)
-          : products.map((product) => product.name)
+          : form.purchaseSource === "PRODUCT"
+            ? products.map((product) => product.name)
+            : []
         : [],
     productMode: form.productMatch,
     minimumAmount:
@@ -2432,7 +2708,9 @@ function previewCondition(form: WizardState) {
   }
   if (form.taskType === "PRODUCT_PURCHASE") {
     const productCondition =
-      form.productMatch === "ALL"
+      form.purchaseSource === "ANY"
+        ? "Купить любой товар"
+        : form.productMatch === "ALL"
         ? `Купить ${form.purchaseSource === "CATEGORY" ? "товар из каждой выбранной категории" : "все выбранные товары"}`
         : `Купить ${form.purchaseSource === "CATEGORY" ? "товар из любой выбранной категории" : "любой выбранный товар"}`;
     const amountCondition =
@@ -2578,7 +2856,7 @@ function wizardStateFromDefinition(
   const purchaseSource = enumValue(
     stringValue(conditions.purchaseSource) ??
       stringValue(metric.purchaseSource),
-    ["PRODUCT", "CATEGORY"] as const,
+    ["ANY", "PRODUCT", "CATEGORY"] as const,
     defaults.purchaseSource,
   );
   const selectedProducts = productRefs.length
@@ -2820,6 +3098,69 @@ function uniqueSelectedProducts(products: SelectedProduct[]) {
     (product, index) =>
       product.id &&
       products.findIndex((candidate) => candidate.id === product.id) === index,
+  );
+}
+
+function clampMissionCoverScale(value: number) {
+  return Number.isFinite(value) ? Math.min(3, Math.max(1, value)) : 1;
+}
+
+function clampMissionCoverOffset(value: number) {
+  return Number.isFinite(value) ? Math.min(45, Math.max(-45, value)) : 0;
+}
+
+async function renderMissionCoverFile(
+  source: string,
+  scale: number,
+  offsetX: number,
+  offsetY: number,
+) {
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const nextImage = new window.Image();
+    nextImage.onload = () => resolve(nextImage);
+    nextImage.onerror = () =>
+      reject(new Error("Не удалось загрузить изображение для обрезки."));
+    nextImage.src = source;
+  });
+  if (!image.naturalWidth || !image.naturalHeight) {
+    throw new Error("Не удалось определить размер изображения.");
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = missionCoverWidth;
+  canvas.height = missionCoverHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Не удалось подготовить обложку.");
+
+  const coverScale =
+    Math.max(
+      missionCoverWidth / image.naturalWidth,
+      missionCoverHeight / image.naturalHeight,
+    ) * clampMissionCoverScale(scale);
+  const drawWidth = image.naturalWidth * coverScale;
+  const drawHeight = image.naturalHeight * coverScale;
+  const drawX =
+    (missionCoverWidth - drawWidth) / 2 +
+    (clampMissionCoverOffset(offsetX) / 100) * missionCoverWidth;
+  const drawY =
+    (missionCoverHeight - drawHeight) / 2 +
+    (clampMissionCoverOffset(offsetY) / 100) * missionCoverHeight;
+
+  context.fillStyle = "#061113";
+  context.fillRect(0, 0, missionCoverWidth, missionCoverHeight);
+  context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+
+  for (const quality of missionCoverJpegQualities) {
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", quality),
+    );
+    if (blob && blob.size <= missionCoverMaxBytes) {
+      return new File([blob], "mission-cover.jpg", { type: "image/jpeg" });
+    }
+  }
+
+  throw new Error(
+    "Не удалось уменьшить обложку до 2 МБ. Выберите изображение меньшего размера.",
   );
 }
 

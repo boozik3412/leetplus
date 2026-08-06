@@ -18835,17 +18835,19 @@ export function guestPortalMissionConditionLabel(
         ? (numberField(metric.totalAmount) ?? target)
         : numberField(metric.minSpendAmount);
     return [
-      mode === 'ALL'
-        ? purchaseSource === 'CATEGORY'
-          ? categoryList
-            ? `Купить товар из каждой категории: ${categoryList}`
-            : 'Купить товар из каждой выбранной категории'
-          : 'Купить все выбранные товары'
-        : purchaseSource === 'CATEGORY'
-          ? categoryList
-            ? `Купить товар из любой из категорий: ${categoryList}`
-            : 'Купить товар из любой выбранной категории'
-          : 'Купить любой выбранный товар',
+      purchaseSource === 'ANY'
+        ? 'Купить любой товар'
+        : mode === 'ALL'
+          ? purchaseSource === 'CATEGORY'
+            ? categoryList
+              ? `Купить товар из каждой категории: ${categoryList}`
+              : 'Купить товар из каждой выбранной категории'
+            : 'Купить все выбранные товары'
+          : purchaseSource === 'CATEGORY'
+            ? categoryList
+              ? `Купить товар из любой из категорий: ${categoryList}`
+              : 'Купить товар из любой выбранной категории'
+            : 'Купить любой выбранный товар',
       amountMode === 'SINGLE_MINIMUM' && amount
         ? `одной покупкой не менее чем на ${amount} ₽`
         : amountMode === 'PERIOD_TOTAL' && amount

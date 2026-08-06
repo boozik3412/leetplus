@@ -8711,10 +8711,15 @@ export class GuestGamificationService {
       selectedStores.map((store) => store.externalDomain ?? ''),
     );
     if (taskType === 'PRODUCT_PURCHASE') {
+      const rawPurchaseSource = nullableString(
+        conditions.purchaseSource,
+      )?.toUpperCase();
       const purchaseSource =
-        nullableString(conditions.purchaseSource)?.toUpperCase() === 'CATEGORY'
+        rawPurchaseSource === 'CATEGORY'
           ? 'CATEGORY'
-          : 'PRODUCT';
+          : rawPurchaseSource === 'ANY'
+            ? 'ANY'
+            : 'PRODUCT';
       if (purchaseSource === 'CATEGORY') {
         const categoryCatalogSource =
           nullableString(conditions.categoryCatalogSource)?.toUpperCase() ===
@@ -8777,7 +8782,7 @@ export class GuestGamificationService {
               ? Math.max(1, selectedCategories.length)
               : 1,
         };
-      } else {
+      } else if (purchaseSource === 'PRODUCT') {
         const selectedProductIds = uniqueStrings(
           guestGameStringArray(metric.productIds),
         );
@@ -8819,6 +8824,20 @@ export class GuestGamificationService {
             externalProductId: product.externalProductId,
             externalDomain: product.externalDomain,
           })),
+        };
+      } else {
+        metric = {
+          ...metric,
+          categoryCatalogSource: null,
+          categoryIds: [],
+          categorySelectionIds: [],
+          categoryLabels: [],
+          categorySelections: [],
+          externalCategoryKeys: [],
+          productIds: [],
+          externalProductIds: [],
+          productRefs: [],
+          productMatch: 'ANY',
         };
       }
       conditions = {
@@ -19887,11 +19906,15 @@ export class GuestGamificationService {
         );
 
         if (taskType === 'PRODUCT_PURCHASE') {
+          const rawPurchaseSource = nullableString(
+            conditions.purchaseSource,
+          )?.toUpperCase();
           const purchaseSource =
-            nullableString(conditions.purchaseSource)?.toUpperCase() ===
-            'CATEGORY'
+            rawPurchaseSource === 'CATEGORY'
               ? 'CATEGORY'
-              : 'PRODUCT';
+              : rawPurchaseSource === 'ANY'
+                ? 'ANY'
+                : 'PRODUCT';
 
           if (purchaseSource === 'CATEGORY') {
             const categoryCatalogSource =
@@ -19961,7 +19984,7 @@ export class GuestGamificationService {
                   ? Math.max(1, selected.length)
                   : 1,
             };
-          } else {
+          } else if (purchaseSource === 'PRODUCT') {
             const productIds = uniqueStrings(
               guestGameStringArray(metric.productIds),
             );
@@ -20003,6 +20026,20 @@ export class GuestGamificationService {
                 externalProductId: product.externalProductId,
                 externalDomain: product.externalDomain,
               })),
+            };
+          } else {
+            metric = {
+              ...metric,
+              categoryCatalogSource: null,
+              categoryIds: [],
+              categorySelectionIds: [],
+              categoryLabels: [],
+              categorySelections: [],
+              externalCategoryKeys: [],
+              productIds: [],
+              externalProductIds: [],
+              productRefs: [],
+              productMatch: 'ANY',
             };
           }
           conditions = {
@@ -23991,10 +24028,15 @@ function legacyMissionWizardMetric(
   }
 
   if (taskType === 'PRODUCT_PURCHASE') {
+    const rawPurchaseSource = nullableString(
+      source.purchaseSource,
+    )?.toUpperCase();
     const purchaseSource =
-      nullableString(source.purchaseSource)?.toUpperCase() === 'CATEGORY'
+      rawPurchaseSource === 'CATEGORY'
         ? 'CATEGORY'
-        : 'PRODUCT';
+        : rawPurchaseSource === 'ANY'
+          ? 'ANY'
+          : 'PRODUCT';
     const productMatch =
       nullableString(metric.productMatch)?.toUpperCase() === 'ALL'
         ? 'ALL'
@@ -24024,7 +24066,7 @@ function legacyMissionWizardMetric(
         purchaseSource === 'CATEGORY'
           ? (nullableString(source.categoryCatalogSource) ?? 'LANGAME')
           : null,
-      productMatch,
+      productMatch: purchaseSource === 'ANY' ? 'ANY' : productMatch,
       amountMode,
       minSpendAmount:
         amountMode === 'NONE' ? undefined : (legacyMinimumAmount ?? undefined),

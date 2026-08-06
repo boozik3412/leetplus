@@ -19618,13 +19618,63 @@ describe('GuestGamificationService', () => {
         checkedFacts: 1,
         processedFacts: 1,
       });
-      expect(service.dryRun).toHaveBeenCalledWith(
-        user,
-        expect.objectContaining({ sourceFactId: 'fact-pending' }),
-      );
+      // Canonical session and purchase facts delegate the one authoritative
+      // evaluation to processEvent. A speculative dry-run here would repeat
+      // all rule/progress reads before processEvent performs them again.
+      expect(service.dryRun).not.toHaveBeenCalled();
       expect(service.processEvent).toHaveBeenCalledWith(
         user,
         expect.objectContaining({ sourceFactId: 'fact-pending' }),
+      );
+    });
+
+    it('reserves part of an unscoped batch for purchases without a duplicate preflight', async () => {
+      const { service } = createService();
+      const purchase = snapshotFact('fact-purchase', {
+        source: 'PRODUCT_EXPENSE',
+        eventType: 'PRODUCT_PURCHASE',
+        sessionType: null,
+        sessionPacket: null,
+        sessionMinutes: null,
+        spendAmount: 100,
+      });
+      const logOne = snapshotFact('fact-log-1', {
+        source: 'GUEST_LOG',
+        eventType: 'APP_OPEN',
+      });
+      const logTwo = snapshotFact('fact-log-2', {
+        source: 'GUEST_LOG',
+        eventType: 'APP_OPEN',
+      });
+
+      jest
+        .spyOn(service, 'getSnapshotFacts')
+        .mockResolvedValue(snapshotFactsResult([logOne, logTwo, purchase]));
+      const dryRunSpy = jest
+        .spyOn(service, 'dryRun')
+        .mockResolvedValue(dryRunResult());
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue(processResult());
+
+      const result = await service.runSnapshotPipeline(user, { limit: 3 });
+
+      expect(result.facts.map((fact) => fact.factId)).toEqual([
+        'fact-purchase',
+        'fact-log-1',
+        'fact-log-2',
+      ]);
+      expect(processEventSpy).toHaveBeenNthCalledWith(
+        1,
+        user,
+        expect.objectContaining({
+          sourceFactId: 'fact-purchase',
+          activeRulesOnly: true,
+        }),
+      );
+      expect(dryRunSpy).not.toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({ sourceFactId: 'fact-purchase' }),
       );
     });
 

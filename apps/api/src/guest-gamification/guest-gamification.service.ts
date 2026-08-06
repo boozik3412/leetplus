@@ -3201,6 +3201,35 @@ function interleaveSnapshotFacts(groups: GuestGameSnapshotFact[][]) {
   return result;
 }
 
+/**
+ * The snapshot pipeline is intentionally a single sequential LIVE handler.
+ * Within that handler, however, a busy source (for example guest logs) must
+ * not push guest-bound product purchases out of every bounded batch. Reserve
+ * up to one third of an unscoped run for purchases, then fill the rest with
+ * all other facts. Explicit source runs retain their exact requested source.
+ */
+function takeSnapshotPipelineCandidates(
+  facts: GuestGameSnapshotFact[],
+  limit: number,
+  source: GuestGameSnapshotFact['source'] | null,
+) {
+  if (source || !facts.length) {
+    return facts.slice(0, limit);
+  }
+
+  const purchaseQuota = Math.max(1, Math.ceil(limit / 3));
+  const purchases = facts.filter((fact) => fact.source === 'PRODUCT_EXPENSE');
+  const otherFacts = facts.filter((fact) => fact.source !== 'PRODUCT_EXPENSE');
+  const selectedPurchases = purchases.slice(0, purchaseQuota);
+  const selectedOthers = otherFacts.slice(0, limit - selectedPurchases.length);
+
+  return [
+    ...selectedPurchases,
+    ...selectedOthers,
+    ...purchases.slice(selectedPurchases.length, limit - selectedOthers.length),
+  ];
+}
+
 function maxDate(left: Date | null, right: Date | null) {
   if (!left) {
     return right;
@@ -6222,14 +6251,21 @@ export class GuestGamificationService {
       );
     });
 
-    const facts = [
-      ...sessions.flatMap(mapSessionFacts),
-      ...logs.flatMap(mapLogFact),
-      ...transactions.flatMap(mapTransactionFact),
-      ...operationLogs.flatMap(mapOperationLogFact),
-      ...balances.flatMap(mapBalanceFact),
-      ...bonusBalances.flatMap(mapBonusBalanceFact),
-      ...loyaltyGuests.flatMap((guest) =>
+    // Keep one representative page from every live source instead of a
+    // global newest-first cut. Under busy guest logs or transactions, a
+    // purchase could otherwise fall below the first 90 facts and never reach
+    // the canonical purchase evaluator.
+    const factGroups = [
+      productExpenses.flatMap((row) =>
+        mapProductExpenseFact(row, productCategoryMappings),
+      ),
+      sessions.flatMap(mapSessionFacts),
+      logs.flatMap(mapLogFact),
+      transactions.flatMap(mapTransactionFact),
+      operationLogs.flatMap(mapOperationLogFact),
+      balances.flatMap(mapBalanceFact),
+      bonusBalances.flatMap(mapBonusBalanceFact),
+      loyaltyGuests.flatMap((guest) =>
         mapLoyaltyGroupFact(
           guest,
           guest.externalGuestTypeId
@@ -6243,17 +6279,16 @@ export class GuestGamificationService {
             : null,
         ),
       ),
-      ...productExpenses.flatMap((row) =>
-        mapProductExpenseFact(row, productCategoryMappings),
-      ),
-      ...referralFacts,
-    ]
-      .sort(
-        (left, right) =>
-          new Date(right.occurredAt).getTime() -
-          new Date(left.occurredAt).getTime(),
-      )
-      .slice(0, 90);
+      referralFacts,
+    ];
+    const facts = interleaveSnapshotFacts(factGroups).slice(0, 90);
+    const latestAt = factGroups.flat().reduce<Date | null>((latest, fact) => {
+      const occurredAt = new Date(fact.occurredAt);
+      if (!Number.isFinite(occurredAt.getTime())) return latest;
+      return !latest || occurredAt.getTime() > latest.getTime()
+        ? occurredAt
+        : latest;
+    }, null);
 
     return {
       facts,
@@ -6267,7 +6302,7 @@ export class GuestGamificationService {
         loyaltyGroups: loyaltyGuests.length,
         productExpenses: productExpenses.length,
         referrals: referralFacts.length,
-        latestAt: facts[0]?.occurredAt ?? null,
+        latestAt: latestAt?.toISOString() ?? null,
       },
     };
   }
@@ -6932,7 +6967,7 @@ export class GuestGamificationService {
               )
               .slice(0, limit),
           ]
-        : orderedCandidates.slice(0, limit);
+        : takeSnapshotPipelineCandidates(orderedCandidates, limit, source);
     const facts: GuestGamePipelineFactResult[] = [];
 
     for (const fact of candidates) {
@@ -6970,6 +7005,33 @@ export class GuestGamificationService {
             reason: process.summary.idempotent
               ? 'РЈС‚РѕС‡РЅРµРЅРёРµ РїР°РєРµС‚РЅРѕР№ СЃРµСЃСЃРёРё СѓР¶Рµ РѕР±СЂР°Р±РѕС‚Р°РЅРѕ.'
               : `${process.summary.createdRewards} РЅР°РіСЂР°Рґ РІ РѕС‡РµСЂРµРґРё РїРѕСЃР»Рµ СѓС‚РѕС‡РЅРµРЅРёСЏ С‚РёРїР° СЃРµСЃСЃРёРё, XP ${process.summary.appliedXpDelta}.`,
+            dryRun: process.dryRun,
+            process,
+          });
+          continue;
+        }
+
+        const persistCanonicalPrimaryFact =
+          fact.source === 'GUEST_SESSION' || fact.source === 'PRODUCT_EXPENSE';
+
+        // SESSION and PRODUCT snapshot facts must be stored canonically even
+        // when the current rule set has no reward. processEvent already owns
+        // the authoritative dry-run, validation and idempotency path. Calling
+        // dryRun here first duplicated all its heavy reads for every fresh
+        // canonical fact and was the main cause of batches running for hours.
+        if (persistCanonicalPrimaryFact && !dryRunOnly && !shadowBackfillOnly) {
+          const process = await this.processEvent(user, {
+            ...processDto,
+            activeRulesOnly: true,
+            suppressLootBoxRewards: true,
+            note: 'РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРёР№ batch pipeline РѕР±СЂР°Р±РѕС‚Р°Р» СЃРѕС…СЂР°РЅРµРЅРЅС‹Р№ LeetPlus/Langame С„Р°РєС‚ РІРЅСѓС‚СЂРё LeetPlus. Р—Р°РїРёСЊ РІ Langame РЅРµ РІС‹РїРѕР»РЅСЏР»Р°СЊ.',
+          });
+          facts.push({
+            ...pipelineFactBase(fact),
+            status: process.summary.idempotent ? 'DUPLICATE' : 'PROCESSED',
+            reason: process.summary.idempotent
+              ? 'Snapshot-С„Р°РєС‚ СѓР¶Рµ Р±С‹Р» РѕР±СЂР°Р±РѕС‚Р°РЅ СЂР°РЅРµРµ.'
+              : `${process.summary.createdRewards} РЅР°РіСЂР°Рґ РІ РѕС‡РµСЂРµРґРё, XP ${process.summary.appliedXpDelta}.`,
             dryRun: process.dryRun,
             process,
           });
@@ -7025,9 +7087,6 @@ export class GuestGamificationService {
           });
           continue;
         }
-
-        const persistCanonicalPrimaryFact =
-          fact.source === 'GUEST_SESSION' || fact.source === 'PRODUCT_EXPENSE';
 
         if (
           !activeEligibleRules.length &&

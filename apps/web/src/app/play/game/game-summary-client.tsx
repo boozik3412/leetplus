@@ -11842,14 +11842,23 @@ const clubHomeCss = `
 }
 
 .lp-quest-details-dialog {
-  width: min(560px, 100%);
+  width: min(500px, 100%);
+  max-width: 100%;
   max-height: calc(100dvh - 28px);
+  overflow-x: hidden;
   overflow-y: auto;
   gap: 0;
   padding: 0;
   border: 0;
   background: transparent;
   box-shadow: 0 34px 110px rgba(0, 0, 0, 0.62);
+}
+
+.lp-quest-details-dialog > fieldset,
+.lp-quest-details-dialog > fieldset > div {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .lp-lootbox-unavailable-kicker {

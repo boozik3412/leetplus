@@ -185,6 +185,12 @@ export function normalizeMissionWizardConditions(
       amountMode === 'PERIOD_TOTAL'
         ? 'sum'
         : (stringValue(metric.aggregation) ?? 'count');
+    const categorySelectionCount = Math.max(
+      recordArray(metric.categorySelections).length,
+      stringArray(metric.categorySelectionIds).length,
+      stringArray(metric.categoryIds).length,
+      stringArray(metric.externalCategoryKeys).length,
+    );
     if (amountMode === 'PERIOD_TOTAL') {
       normalizedMetric.target =
         numberValue(metric.totalAmount) ?? numberValue(metric.target) ?? 1;
@@ -192,7 +198,7 @@ export function normalizeMissionWizardConditions(
       normalizedMetric.target = Math.max(
         1,
         purchaseSource === 'CATEGORY'
-          ? stringArray(metric.categoryIds).length
+          ? categorySelectionCount
           : stringArray(metric.productIds).length,
         purchaseSource === 'CATEGORY'
           ? 0
@@ -336,11 +342,21 @@ export function validateMissionWizard(
 
   if (taskType === 'PRODUCT_PURCHASE') {
     const purchaseSource = stringValue(conditions.purchaseSource);
+    const categorySelections = recordArray(metric.categorySelections);
     const selection =
       purchaseSource === 'ANY'
         ? ['any']
         : purchaseSource === 'CATEGORY'
-          ? stringArray(metric.categoryIds)
+          ? [
+              ...stringArray(metric.categoryIds),
+              ...stringArray(metric.categorySelectionIds),
+              ...stringArray(metric.externalCategoryKeys),
+              ...categorySelections.flatMap((category) => [
+                stringValue(category.id),
+                ...stringArray(category.categoryIds),
+                ...stringArray(category.externalCategoryKeys),
+              ]),
+            ].filter((item): item is string => Boolean(item))
           : [
               ...stringArray(metric.productIds),
               ...stringArray(metric.externalProductIds),
@@ -412,6 +428,10 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function recordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.map(objectValue) : [];
 }
 
 function jsonObject(value: Record<string, unknown>): Prisma.InputJsonObject {

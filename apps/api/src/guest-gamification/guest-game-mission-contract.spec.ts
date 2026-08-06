@@ -211,13 +211,25 @@ describe('guest mission wizard contract', () => {
     expect(topup.warnings).toHaveLength(1);
   });
 
-  it('accepts synced category selections and keeps exact tariff dictionaries blocked', () => {
+  it('accepts persisted Langame category selections and keeps exact tariff dictionaries blocked', () => {
     const category = validateMissionWizard({
       ...common,
       taskType: 'PRODUCT_PURCHASE',
       conditions: {
         purchaseSource: 'CATEGORY',
-        metric: { categoryIds: ['category-1'], target: 1 },
+        metric: {
+          categoryIds: [],
+          categorySelectionIds: ['langame-devices'],
+          externalCategoryKeys: ['46.langamepro.ru:16'],
+          categorySelections: [
+            {
+              id: 'langame-devices',
+              categoryIds: [],
+              externalCategoryKeys: ['46.langamepro.ru:16'],
+            },
+          ],
+          target: 1,
+        },
       },
     });
     const tariff = validateMissionWizard({
@@ -231,6 +243,38 @@ describe('guest mission wizard contract', () => {
 
     expect(category.ready).toBe(true);
     expect(tariff.ready).toBe(false);
+  });
+
+  it('preserves the count of persisted Langame categories for an ALL purchase rule', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'PRODUCT_PURCHASE',
+      conditions: {
+        purchaseSource: 'CATEGORY',
+        categoryCatalogSource: 'LANGAME',
+        metric: {
+          productMatch: 'ALL',
+          categoryIds: [],
+          categorySelectionIds: ['devices', 'accessories'],
+          externalCategoryKeys: ['46.langamepro.ru:16', '46.langamepro.ru:17'],
+          categorySelections: [
+            { id: 'devices', externalCategoryKeys: ['46.langamepro.ru:16'] },
+            {
+              id: 'accessories',
+              externalCategoryKeys: ['46.langamepro.ru:17'],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(conditions).toMatchObject({
+      metric: {
+        categoryIds: [],
+        productMatch: 'ALL',
+        target: 2,
+      },
+    });
   });
 
   it('accepts any positive guest-bound purchase without a product selector', () => {

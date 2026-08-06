@@ -12732,8 +12732,10 @@ const clubHomeCss = `
 .lp-lootbox-dialog {
   position: relative;
   width: min(900px, 100%);
-  max-height: min(780px, calc(100dvh - 40px));
-  overflow: visible;
+  max-height: calc(100dvh - 32px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: clamp(20px, 3vw, 32px);
   border: 1px solid rgba(131, 228, 236, 0.3);
   border-radius: var(--radius);

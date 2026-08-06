@@ -72,6 +72,25 @@ describe('guest mission wizard contract', () => {
     });
   });
 
+  it('preserves a saved cover while normalizing a balance-topup mission for the game portal', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'BALANCE_TOPUP',
+      conditions: {
+        presentation: {
+          coverUrl: '/api/guest-game/media/cover-asset-1',
+          theme: 'EMERALD',
+        },
+        metric: { topupMode: 'COUNT', count: 10, target: 10 },
+      },
+    });
+
+    expect(conditions.presentation).toMatchObject({
+      coverUrl: '/api/guest-game/media/cover-asset-1',
+      theme: 'EMERALD',
+    });
+  });
+
   it('accepts an indefinite mission without dates and preserves the mode', () => {
     const readiness = validateMissionWizard({
       ...common,

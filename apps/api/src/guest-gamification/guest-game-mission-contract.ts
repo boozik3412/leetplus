@@ -127,7 +127,10 @@ export function normalizeMissionWizardConditions(
   const source = objectValue(dto.conditions);
   const indefinite = dto.indefinite === true || source.indefinite === true;
   const metric = objectValue(source.metric);
-  const appearance = objectValue(dto.appearance);
+  const appearance = {
+    ...objectValue(source.presentation),
+    ...objectValue(dto.appearance),
+  };
   const productMatch = enumValue(metric.productMatch, ['ANY', 'ALL'], 'ANY');
   const purchaseSource = enumValue(
     source.purchaseSource ?? metric.purchaseSource,

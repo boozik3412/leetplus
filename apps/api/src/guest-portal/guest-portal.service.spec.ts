@@ -1337,16 +1337,24 @@ describe('mapLootBoxPossibleRewards', () => {
       ),
     ).toEqual([
       {
+        rewardType: '',
         rewardLabel: '50 бонусов',
         chancePercent: 85,
         rarity: 'common',
         rarityLabel: 'Обычная',
+        visualMode: 'AUTO',
+        iconKey: 'gift',
+        imageUrl: null,
       },
       {
+        rewardType: '',
         rewardLabel: '100 бонусов',
         chancePercent: 15,
         rarity: 'rare',
         rarityLabel: 'Редкая',
+        visualMode: 'AUTO',
+        iconKey: 'gift',
+        imageUrl: null,
       },
     ]);
   });
@@ -1354,10 +1362,45 @@ describe('mapLootBoxPossibleRewards', () => {
   it('publishes a guaranteed fallback when a case has one reward', () => {
     expect(mapLootBoxPossibleRewards(null, '50 бонусов')).toEqual([
       {
+        rewardType: '',
         rewardLabel: '50 бонусов',
         chancePercent: 100,
         rarity: 'common',
         rarityLabel: 'Обычная',
+        visualMode: 'AUTO',
+        iconKey: 'gift',
+        imageUrl: null,
+      },
+    ]);
+  });
+
+  it('publishes tenant media and a safe icon for roulette cards', () => {
+    expect(
+      mapLootBoxPossibleRewards(
+        {
+          prizes: [
+            {
+              rewardType: 'BONUS_BALANCE',
+              rewardLabel: '500 бонусов',
+              chancePercent: 100,
+              visualMode: 'IMAGE',
+              iconKey: 'coins',
+              imageUrl: '/api/guest-game/media/prize-asset-1',
+            },
+          ],
+        },
+        'Бонусы',
+      ),
+    ).toEqual([
+      {
+        rewardType: 'BONUS_BALANCE',
+        rewardLabel: '500 бонусов',
+        chancePercent: 100,
+        rarity: 'common',
+        rarityLabel: 'Обычная',
+        visualMode: 'IMAGE',
+        iconKey: 'coins',
+        imageUrl: '/api/guest-game/media/prize-asset-1',
       },
     ]);
   });
@@ -2046,15 +2089,23 @@ describe('GuestPortalService', () => {
         possibleRewards: [
           {
             rewardLabel: '50 бонусов',
+            rewardType: '',
             chancePercent: 85,
             rarity: 'common',
             rarityLabel: 'Обычная',
+            visualMode: 'AUTO',
+            iconKey: 'gift',
+            imageUrl: null,
           },
           {
             rewardLabel: '150 бонусов',
+            rewardType: '',
             chancePercent: 15,
             rarity: 'rare',
             rarityLabel: 'Редкая',
+            visualMode: 'AUTO',
+            iconKey: 'gift',
+            imageUrl: null,
           },
         ],
       });
@@ -2071,9 +2122,13 @@ describe('GuestPortalService', () => {
         possibleRewards: [
           {
             rewardLabel: '100 бонусов',
+            rewardType: 'LANGAME_BONUS',
             chancePercent: 100,
             rarity: 'common' as const,
             rarityLabel: 'Обычная',
+            visualMode: 'AUTO' as const,
+            iconKey: 'coins' as const,
+            imageUrl: null,
           },
         ],
       };
@@ -2934,7 +2989,22 @@ describe('GuestPortalService', () => {
           createdRewards: 1,
           queuedRewardAmount: 200,
         },
-        rewards: [{ id: 'reward-loot-packet', rewardLabel: '200 бонусов' }],
+        rewards: [
+          {
+            id: 'reward-loot-packet',
+            rewardType: 'BONUS_BALANCE',
+            rewardLabel: '200 бонусов',
+            evidence: {
+              rule: {
+                selectedReward: {
+                  visualMode: 'IMAGE',
+                  iconKey: 'coins',
+                  imageUrl: '/api/guest-game/media/reward-snapshot-1',
+                },
+              },
+            },
+          },
+        ],
       });
 
       const result = await service.openLootBox(
@@ -2990,6 +3060,14 @@ describe('GuestPortalService', () => {
         idempotent: false,
         createdRewards: 1,
         queuedRewardAmount: 200,
+        rewards: [
+          {
+            id: 'reward-loot-packet',
+            visualMode: 'IMAGE',
+            iconKey: 'coins',
+            imageUrl: '/api/guest-game/media/reward-snapshot-1',
+          },
+        ],
       });
     });
 

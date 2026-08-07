@@ -50,10 +50,14 @@ export type GuestPortalRewardLootBoxPreview = {
   caseRarity: GuestPortalLootBoxRarity;
   caseRarityLabel: string;
   possibleRewards: Array<{
+    rewardType: string;
     rewardLabel: string;
     chancePercent: number;
     rarity: GuestPortalLootBoxRarity;
     rarityLabel: string;
+    visualMode: "AUTO" | "ICON" | "IMAGE";
+    iconKey: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+    imageUrl: string | null;
   }>;
 };
 
@@ -336,10 +340,14 @@ export type GuestPortalPayload = {
       rewardLabel: string | null;
       rewardType: string;
       possibleRewards: Array<{
+        rewardType: string;
         rewardLabel: string;
         chancePercent: number;
         rarity: GuestPortalLootBoxRarity;
         rarityLabel: string;
+        visualMode: "AUTO" | "ICON" | "IMAGE";
+        iconKey: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+        imageUrl: string | null;
       }>;
       caseRarity: GuestPortalLootBoxRarity;
       caseRarityLabel: string;
@@ -372,6 +380,9 @@ export type GuestPortalPayload = {
         rewardRarity: GuestPortalLootBoxRarity | null;
         rewardRarityLabel: string | null;
         rewardDropChance: number | null;
+        visualMode?: "AUTO" | "ICON" | "IMAGE";
+        iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+        imageUrl?: string | null;
         rewardCode: string | null;
         claimPayload: string | null;
         qualifiedAt: string;
@@ -405,13 +416,7 @@ export type GuestPortalPayload = {
       description: string | null;
       actionText: string | null;
       icon: string;
-      theme:
-        | "CLASSIC"
-        | "EMERALD"
-        | "VIOLET"
-        | "DARK"
-        | "GOLD"
-        | "BLACK_RED";
+      theme: "CLASSIC" | "EMERALD" | "VIOLET" | "DARK" | "GOLD" | "BLACK_RED";
       coverUrl: string | null;
       conditionLabel: string;
       productNames: string[];
@@ -491,6 +496,9 @@ export type GuestPortalPayload = {
       rewardRarity: GuestPortalLootBoxRarity | null;
       rewardRarityLabel: string | null;
       rewardDropChance: number | null;
+      visualMode?: "AUTO" | "ICON" | "IMAGE";
+      iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+      imageUrl?: string | null;
       sourceId: string | null;
       sourceKind:
         | "CHECK_IN"
@@ -663,12 +671,7 @@ export type GuestPortalCompletionNotification = {
 export type GuestPortalRewardWalletItem = {
   id: string;
   kind: "REWARD" | "LOOT_BOX_ENTITLEMENT";
-  sourceKind:
-    | "CHECK_IN"
-    | "MISSION"
-    | "BATTLE_PASS"
-    | "LOOT_BOX"
-    | "MANUAL";
+  sourceKind: "CHECK_IN" | "MISSION" | "BATTLE_PASS" | "LOOT_BOX" | "MANUAL";
   sourceId: string | null;
   storeId: string | null;
   storeName: string | null;
@@ -757,6 +760,9 @@ export type GuestPortalGameSummary = {
         | "rewardRarity"
         | "rewardRarityLabel"
         | "rewardDropChance"
+        | "visualMode"
+        | "iconKey"
+        | "imageUrl"
         | "sourceId"
         | "sourceKind"
         | "sourceLabel"

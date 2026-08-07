@@ -33,6 +33,7 @@ import {
   type GuestMissionPreviewData,
 } from "@/components/guest-mission-preview";
 import { appendHourlySessionSourceNotice } from "@/components/hourly-session-source-note";
+import { LootBoxPrizeVisual } from "@/components/lootbox-prize-visual";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
@@ -108,10 +109,14 @@ type GuestPortalLootBoxOpenResponse = {
   createdRewards: number;
   queuedRewardAmount: number;
   rewards: Array<{
+    rewardType?: string | null;
     rewardLabel?: string | null;
     rewardRarity?: GuestPortalLootBoxRarity | null;
     rewardRarityLabel?: string | null;
     rewardDropChance?: number | null;
+    visualMode?: "AUTO" | "ICON" | "IMAGE";
+    iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+    imageUrl?: string | null;
   }>;
   summary: GuestPortalGameSummary;
   message: string;
@@ -124,6 +129,10 @@ type LootboxRouletteReward = {
   rarity: GuestPortalLootBoxRarity | null;
   rarityLabel: string | null;
   dropChance: number | null;
+  rewardType: string | null;
+  visualMode: "AUTO" | "ICON" | "IMAGE";
+  iconKey: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+  imageUrl: string | null;
   isWinner?: boolean;
 };
 type LootboxRouletteState = {
@@ -378,6 +387,10 @@ const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
     rarity: "common",
     rarityLabel: LOOTBOX_RARITY_LABELS.common,
     dropChance: 85,
+    rewardType: "BONUS_BALANCE",
+    visualMode: "AUTO",
+    iconKey: "coins",
+    imageUrl: null,
   },
   {
     reward: "100 бонусов",
@@ -385,6 +398,10 @@ const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
     rarity: "rare",
     rarityLabel: LOOTBOX_RARITY_LABELS.rare,
     dropChance: 8,
+    rewardType: "BONUS_BALANCE",
+    visualMode: "AUTO",
+    iconKey: "coins",
+    imageUrl: null,
   },
   {
     reward: "200 бонусов",
@@ -392,6 +409,10 @@ const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
     rarity: "epic",
     rarityLabel: LOOTBOX_RARITY_LABELS.epic,
     dropChance: 4,
+    rewardType: "BONUS_BALANCE",
+    visualMode: "AUTO",
+    iconKey: "coins",
+    imageUrl: null,
   },
   {
     reward: "Промокод",
@@ -399,6 +420,10 @@ const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
     rarity: "legendary",
     rarityLabel: LOOTBOX_RARITY_LABELS.legendary,
     dropChance: 1,
+    rewardType: "PROMOCODE",
+    visualMode: "AUTO",
+    iconKey: "ticket",
+    imageUrl: null,
   },
 ];
 type PlayerQuest = {
@@ -853,6 +878,7 @@ export function GameRewardsClient() {
     setLootboxOverlayPhase("charging");
     emitLootboxEvent("overlay-open", { lootBoxId: currentCard.id });
     emitLootboxEvent("charge-start", { lootBoxId: currentCard.id });
+    const imageWarmup = preloadLootboxPrizeImages(currentCard.possibleRewards);
 
     try {
       const [result] = await Promise.all([
@@ -872,6 +898,14 @@ export function GameRewardsClient() {
         result,
         runId,
       });
+      await Promise.all([
+        imageWarmup,
+        preloadLootboxPrizeImages(result.rewards),
+      ]);
+
+      if (lootboxOpenRunRef.current !== runId) {
+        return false;
+      }
 
       applySummary(result.summary);
       setLootboxOverlayCard(nextCard);
@@ -1917,6 +1951,7 @@ function ReadyGameView({
     emitLootboxEvent("overlay-open", { lootBoxId: currentCard.id });
     emitLootboxEvent("charge-start", { lootBoxId: currentCard.id });
     showToast("Контейнер активируется.");
+    const imageWarmup = preloadLootboxPrizeImages(currentCard.possibleRewards);
 
     try {
       const [result] = await Promise.all([
@@ -1936,6 +1971,14 @@ function ReadyGameView({
         result,
         runId,
       });
+      await Promise.all([
+        imageWarmup,
+        preloadLootboxPrizeImages(result.rewards),
+      ]);
+
+      if (lootboxOpenRunRef.current !== runId) {
+        return false;
+      }
 
       applySummaryWithCompletionDialogs(result.summary);
       setLootboxOverlayCard(nextCard);
@@ -2145,6 +2188,9 @@ function ReadyGameView({
       }
 
       showToast("Контейнер активируется.");
+      const imageWarmup = preloadLootboxPrizeImages(
+        refreshedCard.possibleRewards,
+      );
 
       const openRequest =
         refreshedCard.walletReady && refreshedCard.walletItemId
@@ -2167,6 +2213,14 @@ function ReadyGameView({
         result,
         runId,
       });
+      await Promise.all([
+        imageWarmup,
+        preloadLootboxPrizeImages(result.rewards),
+      ]);
+
+      if (lootboxOpenRunRef.current !== runId) {
+        return;
+      }
 
       applySummaryWithCompletionDialogs(result.summary);
       setLootboxOverlayCard(nextCard);
@@ -3337,7 +3391,13 @@ function LootboxOpeningOverlay({
                       }}
                     >
                       <strong>{item.reward}</strong>
-                      <i aria-hidden="true" />
+                      <LootBoxPrizeVisual
+                        alt=""
+                        className="lp-lootbox-roulette-visual"
+                        imageUrl={item.imageUrl}
+                        iconKey={item.iconKey}
+                        rewardType={item.rewardType}
+                      />
                       <span>{itemCaption}</span>
                     </button>
                   );
@@ -5908,8 +5968,8 @@ function QuestBoard({
           <span className="lp-club-small-label">Квесты</span>
           <h2>Экран задач</h2>
           <p>
-            Показано {formatNumber(quests.length)} из {formatNumber(total)}
-            {" "}задач клуба, сгруппированных по состоянию.
+            Показано {formatNumber(quests.length)} из {formatNumber(total)}{" "}
+            задач клуба, сгруппированных по состоянию.
           </p>
         </div>
         <button
@@ -13057,16 +13117,33 @@ const clubHomeCss = `
   text-transform: uppercase;
 }
 
-.lp-lootbox-roulette-card i {
+.lp-lootbox-roulette-visual {
   justify-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 38px;
   height: 48px;
+  overflow: hidden;
   border: 1px solid rgb(var(--card-rgb) / 0.5);
   border-radius: 7px;
+  color: rgb(var(--card-rgb));
   background:
     linear-gradient(180deg, rgb(var(--card-rgb) / 0.26), transparent),
     rgba(0, 0, 0, 0.26);
   box-shadow: 0 0 18px rgb(var(--card-rgb) / 0.15);
+}
+
+.lp-lootbox-roulette-visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.lp-lootbox-roulette-visual svg {
+  width: 28px;
+  height: 28px;
+  filter: drop-shadow(0 0 8px rgb(var(--card-rgb) / 0.3));
 }
 
 .lp-lootbox-roulette-marker {
@@ -17053,6 +17130,44 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function preloadLootboxPrizeImages(
+  rewards: Array<{ imageUrl?: string | null }>,
+) {
+  const urls = Array.from(
+    new Set(
+      rewards
+        .map((reward) => reward.imageUrl)
+        .filter((url): url is string => Boolean(url)),
+    ),
+  );
+
+  if (!urls.length || typeof window === "undefined") {
+    return Promise.resolve();
+  }
+
+  return Promise.all(
+    urls.map(
+      (url) =>
+        new Promise<void>((resolve) => {
+          const image = new window.Image();
+          const timeout = window.setTimeout(resolve, 1200);
+          const finish = () => {
+            window.clearTimeout(timeout);
+            resolve();
+          };
+
+          image.onload = finish;
+          image.onerror = finish;
+          image.src = url;
+
+          if (image.complete) {
+            finish();
+          }
+        }),
+    ),
+  ).then(() => undefined);
+}
+
 function emitLootboxEvent(name: string, detail: Record<string, unknown> = {}) {
   window.dispatchEvent(
     new CustomEvent(`leetplus:lootbox:${name}`, {
@@ -17121,6 +17236,10 @@ function buildLootboxRouletteState({
       rarity: item.rarity,
       rarityLabel: item.rarityLabel,
       dropChance: item.chancePercent,
+      rewardType: item.rewardType,
+      visualMode: item.visualMode,
+      iconKey: item.iconKey,
+      imageUrl: item.imageUrl,
     }),
   );
   const lootBoxRewards = result.summary.lootBoxes.featured.map((item, index) =>
@@ -17240,6 +17359,7 @@ function lootboxRouletteRewardFromOpenReward(
   const dropChance = reward?.rewardDropChance ?? card.rewardDropChance ?? null;
   const rewardLabel =
     reward?.rewardLabel ?? card.rewardLabel ?? card.description;
+  const configuredVisual = lootboxConfiguredPrizeVisual(card, rewardLabel);
 
   return {
     id,
@@ -17248,6 +17368,10 @@ function lootboxRouletteRewardFromOpenReward(
     rarity,
     rarityLabel,
     dropChance,
+    rewardType: reward?.rewardType ?? configuredVisual?.rewardType ?? null,
+    visualMode: reward?.visualMode ?? configuredVisual?.visualMode ?? "AUTO",
+    iconKey: reward?.iconKey ?? configuredVisual?.iconKey ?? "gift",
+    imageUrl: reward?.imageUrl ?? configuredVisual?.imageUrl ?? null,
   };
 }
 
@@ -17270,6 +17394,10 @@ function lootboxRouletteRewardFromHistory(
     rarity,
     rarityLabel,
     dropChance: item.rewardDropChance,
+    rewardType: item.rewardType,
+    visualMode: item.visualMode ?? "AUTO",
+    iconKey: item.iconKey ?? "gift",
+    imageUrl: item.imageUrl ?? null,
   };
 }
 
@@ -17280,6 +17408,10 @@ function lootboxRouletteRewardFromCard(
   const rarity = normalizeLootboxRarity(card.rewardRarity);
   const rarityLabel =
     card.rewardRarityLabel ?? (rarity ? LOOTBOX_RARITY_LABELS[rarity] : null);
+  const configuredVisual = lootboxConfiguredPrizeVisual(
+    card,
+    card.rewardLabel ?? card.description,
+  );
 
   return {
     id,
@@ -17292,7 +17424,19 @@ function lootboxRouletteRewardFromCard(
     rarity,
     rarityLabel,
     dropChance: card.rewardDropChance ?? null,
+    rewardType: configuredVisual?.rewardType ?? null,
+    visualMode: configuredVisual?.visualMode ?? "AUTO",
+    iconKey: configuredVisual?.iconKey ?? "gift",
+    imageUrl: configuredVisual?.imageUrl ?? null,
   };
+}
+
+function lootboxConfiguredPrizeVisual(card: HomeLootCard, rewardLabel: string) {
+  return (
+    card.possibleRewards.find((item) => item.rewardLabel === rewardLabel) ??
+    card.possibleRewards[0] ??
+    null
+  );
 }
 
 function lootboxRouletteCaption(

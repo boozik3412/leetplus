@@ -104,6 +104,14 @@ const LOOTBOX_REWARD_RARITY_LABELS = {
 } as const;
 
 type GuestPortalLootBoxCaseRarity = keyof typeof LOOTBOX_CASE_RARITY_LABELS;
+type GuestPortalLootBoxPrizeVisualMode = 'AUTO' | 'ICON' | 'IMAGE';
+type GuestPortalLootBoxPrizeIconKey =
+  | 'coins'
+  | 'discount'
+  | 'ticket'
+  | 'clock'
+  | 'gift'
+  | 'merch';
 type GuestPortalLootBoxPeriodicLimitPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 type GuestPortalLootBoxTimeWindowMode = 'ANY' | 'QUIET_HOURS' | 'CUSTOM';
 type GuestPortalLootBoxWeekdayMode = 'ANY' | 'WEEKDAYS' | 'WEEKENDS' | 'CUSTOM';
@@ -1010,6 +1018,9 @@ export type GuestPortalGameSummary = {
         | 'rewardRarity'
         | 'rewardRarityLabel'
         | 'rewardDropChance'
+        | 'visualMode'
+        | 'iconKey'
+        | 'imageUrl'
         | 'sourceId'
         | 'sourceKind'
         | 'sourceLabel'
@@ -1407,10 +1418,14 @@ export type GuestPortalLootBox = {
 };
 
 export type GuestPortalLootBoxPossibleReward = {
+  rewardType: string;
   rewardLabel: string;
   chancePercent: number;
   rarity: GuestPortalLootBoxCaseRarity;
   rarityLabel: string;
+  visualMode: GuestPortalLootBoxPrizeVisualMode;
+  iconKey: GuestPortalLootBoxPrizeIconKey;
+  imageUrl: string | null;
 };
 
 export type GuestPortalRewardLootBoxPreview = {
@@ -1443,6 +1458,9 @@ export type GuestPortalLootBoxReward = {
   rewardRarity: string | null;
   rewardRarityLabel: string | null;
   rewardDropChance: number | null;
+  visualMode?: GuestPortalLootBoxPrizeVisualMode;
+  iconKey?: GuestPortalLootBoxPrizeIconKey;
+  imageUrl?: string | null;
   rewardCode: string | null;
   claimPayload: string | null;
   qualifiedAt: string;
@@ -1594,6 +1612,9 @@ export type GuestPortalReward = {
   rewardRarity: string | null;
   rewardRarityLabel: string | null;
   rewardDropChance: number | null;
+  visualMode?: GuestPortalLootBoxPrizeVisualMode;
+  iconKey?: GuestPortalLootBoxPrizeIconKey;
+  imageUrl?: string | null;
   sourceId: string | null;
   sourceKind: 'LOOT_BOX' | 'MISSION' | 'BATTLE_PASS' | 'MANUAL';
   sourceLabel: string | null;
@@ -1722,6 +1743,9 @@ export type GuestPortalLootBoxOpenReward = Pick<
   | 'rewardRarity'
   | 'rewardRarityLabel'
   | 'rewardDropChance'
+  | 'visualMode'
+  | 'iconKey'
+  | 'imageUrl'
   | 'rewardCode'
   | 'claimPayload'
   | 'qualifiedAt'
@@ -7218,7 +7242,7 @@ export class GuestPortalService {
       idempotent: processResult.summary.idempotent,
       createdRewards: processResult.summary.createdRewards,
       queuedRewardAmount: processResult.summary.queuedRewardAmount,
-      rewards: processResult.rewards,
+      rewards: processResult.rewards.map(mapGuestPortalLootBoxOpenReward),
       portal,
       summary,
       message: processResult.summary.idempotent
@@ -15401,6 +15425,9 @@ function buildGameSummaryFromPortal(
       rewardRarity: reward.rewardRarity,
       rewardRarityLabel: reward.rewardRarityLabel,
       rewardDropChance: reward.rewardDropChance,
+      visualMode: reward.visualMode,
+      iconKey: reward.iconKey,
+      imageUrl: reward.imageUrl,
       sourceId: reward.sourceId,
       sourceKind: reward.sourceKind,
       sourceLabel: reward.sourceLabel,
@@ -17751,13 +17778,35 @@ export function mapLootBoxPossibleRewards(
         stringField(prize.rewardLabel) ??
         stringField(prize.label) ??
         fallbackLabel;
+      const rewardType = stringField(prize.rewardType) ?? '';
+      const visualMode = guestPortalLootBoxPrizeVisualMode(prize.visualMode);
+      const imageUrl =
+        visualMode === 'IMAGE'
+          ? guestPortalLootBoxPrizeImageUrl(prize.imageUrl)
+          : null;
 
-      return { rewardLabel, weight };
+      return {
+        rewardType,
+        rewardLabel,
+        weight,
+        visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
+        iconKey: guestPortalLootBoxPrizeIconKey(prize.iconKey, rewardType),
+        imageUrl,
+      };
     })
     .filter((prize) => prize.weight > 0);
   const weightedPrizes = prizes.length
     ? prizes
-    : [{ rewardLabel: fallbackLabel, weight: 1 }];
+    : [
+        {
+          rewardLabel: fallbackLabel,
+          rewardType: '',
+          weight: 1,
+          visualMode: 'AUTO' as const,
+          iconKey: 'gift' as const,
+          imageUrl: null,
+        },
+      ];
   const totalWeight = weightedPrizes.reduce(
     (total, prize) => total + prize.weight,
     0,
@@ -17770,11 +17819,66 @@ export function mapLootBoxPossibleRewards(
 
     return {
       rewardLabel: prize.rewardLabel,
+      rewardType: prize.rewardType,
       chancePercent,
       rarity,
       rarityLabel: LOOTBOX_REWARD_RARITY_LABELS[rarity],
+      visualMode: prize.visualMode,
+      iconKey: prize.iconKey,
+      imageUrl: prize.imageUrl,
     };
   });
+}
+
+function guestPortalLootBoxPrizeVisualMode(
+  value: unknown,
+): GuestPortalLootBoxPrizeVisualMode {
+  const normalized = stringField(value)?.toUpperCase();
+  return normalized === 'ICON' || normalized === 'IMAGE' ? normalized : 'AUTO';
+}
+
+function guestPortalLootBoxPrizeIconKey(
+  value: unknown,
+  rewardType: unknown,
+): GuestPortalLootBoxPrizeIconKey {
+  const normalized = stringField(value)?.toLowerCase();
+  if (
+    normalized === 'coins' ||
+    normalized === 'discount' ||
+    normalized === 'ticket' ||
+    normalized === 'clock' ||
+    normalized === 'gift' ||
+    normalized === 'merch'
+  ) {
+    return normalized;
+  }
+
+  switch (stringField(rewardType)?.toUpperCase()) {
+    case 'BONUS':
+    case 'BONUS_POINTS':
+    case 'BONUS_BALANCE':
+    case 'LOYALTY_BONUS':
+    case 'CASHBACK':
+    case 'XP':
+      return 'coins';
+    case 'DISCOUNT':
+    case 'DISCOUNT_PERCENT':
+      return 'discount';
+    case 'PROMOCODE':
+    case 'CASHIER_CODE':
+      return 'ticket';
+    case 'FREE_HOURS':
+      return 'clock';
+    case 'MERCH':
+      return 'merch';
+    default:
+      return 'gift';
+  }
+}
+
+function guestPortalLootBoxPrizeImageUrl(value: unknown) {
+  const url = stringField(value);
+  return url?.startsWith('/api/guest-game/media/') ? url : null;
 }
 
 export function guestPortalRewardLootBoxPreview(row: {
@@ -18555,6 +18659,9 @@ function buildLootBoxRewardState(
   const latestState = latest
     ? rewardWalletState(latest.status, latest.expiresAt, latest)
     : null;
+  const latestVisual = latest
+    ? guestPortalRewardPrizeVisual(latest.evidence, latest.rewardType)
+    : null;
 
   return {
     openedCount: lootBoxRewards.length,
@@ -18573,6 +18680,7 @@ function buildLootBoxRewardState(
             rewardRarity: latest.rewardRarity,
             rewardRarityLabel: latest.rewardRarityLabel,
             rewardDropChance: decimalNumber(latest.rewardDropChance),
+            ...(latestVisual ?? {}),
             rewardCode: rewardCodeVisibleAfterClaim(latest)
               ? latest.rewardCode
               : null,
@@ -19408,6 +19516,9 @@ function mapReward(row: GuestPortalRewardRow): GuestPortalReward {
   const authoritativeExpiresAt = row.claimRequired
     ? row.claimExpiresAt
     : row.expiresAt;
+  const prizeVisual = row.lootBoxId
+    ? guestPortalRewardPrizeVisual(row.evidence, row.rewardType)
+    : {};
 
   return {
     id: row.id,
@@ -19419,6 +19530,7 @@ function mapReward(row: GuestPortalRewardRow): GuestPortalReward {
     rewardRarity: row.rewardRarity,
     rewardRarityLabel: row.rewardRarityLabel,
     rewardDropChance: decimalNumber(row.rewardDropChance),
+    ...prizeVisual,
     sourceId: row.lootBoxId ?? row.missionId ?? row.seasonId ?? null,
     sourceKind: source.sourceKind,
     sourceLabel: source.sourceLabel,
@@ -19433,6 +19545,57 @@ function mapReward(row: GuestPortalRewardRow): GuestPortalReward {
     claimedAt: iso(claimedAt),
     expiresAt: iso(authoritativeExpiresAt),
   };
+}
+
+function mapGuestPortalLootBoxOpenReward(
+  reward: GuestGameProcessEventResult['rewards'][number],
+): GuestPortalLootBoxOpenReward {
+  const prizeVisual = guestPortalRewardPrizeVisual(
+    reward.evidence,
+    reward.rewardType,
+  );
+
+  return {
+    id: reward.id,
+    walletState: reward.walletState,
+    rewardType: reward.rewardType,
+    rewardAmount: reward.rewardAmount,
+    rewardLabel: reward.rewardLabel,
+    rewardRarity: reward.rewardRarity,
+    rewardRarityLabel: reward.rewardRarityLabel,
+    rewardDropChance: reward.rewardDropChance,
+    ...prizeVisual,
+    rewardCode: reward.rewardCode,
+    claimPayload: reward.claimPayload,
+    qualifiedAt: reward.qualifiedAt,
+    expiresAt: reward.expiresAt,
+  };
+}
+
+function guestPortalRewardPrizeVisual(
+  evidence: Prisma.JsonValue | null,
+  rewardType: string,
+) {
+  const source = jsonRecord(evidence);
+  const rule = jsonRecord(source.rule);
+  const selectedReward = jsonRecord(
+    Object.keys(jsonRecord(rule.selectedReward)).length
+      ? rule.selectedReward
+      : source.selectedReward,
+  );
+  const visualMode = guestPortalLootBoxPrizeVisualMode(
+    selectedReward.visualMode,
+  );
+  const imageUrl =
+    visualMode === 'IMAGE'
+      ? guestPortalLootBoxPrizeImageUrl(selectedReward.imageUrl)
+      : null;
+
+  return {
+    visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
+    iconKey: guestPortalLootBoxPrizeIconKey(selectedReward.iconKey, rewardType),
+    imageUrl,
+  } as const;
 }
 
 function buildRewardSummary(

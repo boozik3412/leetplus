@@ -336,6 +336,9 @@ export type GuestGameVisualEditorLootBoxPrize = {
   visualMode?: "AUTO" | "ICON" | "IMAGE";
   iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
   imageUrl?: string | null;
+  borderColor?: string | null;
+  textColor?: string | null;
+  backgroundColor?: string | null;
 };
 
 export type GuestGameVisualEditorBattlePass = {

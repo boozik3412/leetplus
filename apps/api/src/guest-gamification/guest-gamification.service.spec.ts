@@ -6405,6 +6405,9 @@ describe('GuestGamificationService', () => {
                 rewardAmount: 50,
                 rewardLabel: '50 бонусов',
                 chancePercent: 80,
+                borderColor: '#12ABEF',
+                textColor: '#F0F0F0',
+                backgroundColor: '#081014',
               },
               {
                 id: 'promo-1000',
@@ -6486,6 +6489,9 @@ describe('GuestGamificationService', () => {
                   rewardLabel: '50 бонусов',
                   weight: 80,
                   chancePercent: 80,
+                  borderColor: '#12ABEF',
+                  textColor: '#F0F0F0',
+                  backgroundColor: '#081014',
                 }),
                 expect.objectContaining({
                   rewardType: 'PROMOCODE',

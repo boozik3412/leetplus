@@ -22,6 +22,10 @@ import type {
   GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
 import { lootboxSkinForRarity } from "@/lib/lootbox-assets";
+import {
+  normalizeLootBoxPrizeColor,
+  normalizeLootBoxPrizeIconKey,
+} from "@/components/lootbox-prize-visual";
 import type { Store } from "@/lib/stores";
 
 type Props = {
@@ -2915,6 +2919,28 @@ function visualLootBoxPrizesFromRules(
           record.chancePercent ?? record.weight ?? record.probability,
           source.length > 1 ? 0 : 100,
         ),
+        visualMode:
+          record.visualMode === "ICON" || record.visualMode === "IMAGE"
+            ? record.visualMode
+            : ("AUTO" as GuestGameVisualEditorLootBoxPrize["visualMode"]),
+        iconKey: normalizeLootBoxPrizeIconKey(
+          typeof record.iconKey === "string" ? record.iconKey : null,
+          templateString(record.rewardType ?? record.type, fallbackType),
+        ),
+        imageUrl:
+          typeof record.imageUrl === "string" ? record.imageUrl : null,
+        borderColor:
+          typeof record.borderColor === "string"
+            ? normalizeLootBoxPrizeColor(record.borderColor)
+            : null,
+        textColor:
+          typeof record.textColor === "string"
+            ? normalizeLootBoxPrizeColor(record.textColor)
+            : null,
+        backgroundColor:
+          typeof record.backgroundColor === "string"
+            ? normalizeLootBoxPrizeColor(record.backgroundColor)
+            : null,
       };
     })
     .filter(

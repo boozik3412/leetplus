@@ -1426,6 +1426,9 @@ export type GuestPortalLootBoxPossibleReward = {
   visualMode: GuestPortalLootBoxPrizeVisualMode;
   iconKey: GuestPortalLootBoxPrizeIconKey;
   imageUrl: string | null;
+  borderColor: string | null;
+  textColor: string | null;
+  backgroundColor: string | null;
 };
 
 export type GuestPortalRewardLootBoxPreview = {
@@ -1461,6 +1464,9 @@ export type GuestPortalLootBoxReward = {
   visualMode?: GuestPortalLootBoxPrizeVisualMode;
   iconKey?: GuestPortalLootBoxPrizeIconKey;
   imageUrl?: string | null;
+  borderColor?: string | null;
+  textColor?: string | null;
+  backgroundColor?: string | null;
   rewardCode: string | null;
   claimPayload: string | null;
   qualifiedAt: string;
@@ -1615,6 +1621,9 @@ export type GuestPortalReward = {
   visualMode?: GuestPortalLootBoxPrizeVisualMode;
   iconKey?: GuestPortalLootBoxPrizeIconKey;
   imageUrl?: string | null;
+  borderColor?: string | null;
+  textColor?: string | null;
+  backgroundColor?: string | null;
   sourceId: string | null;
   sourceKind: 'LOOT_BOX' | 'MISSION' | 'BATTLE_PASS' | 'MANUAL';
   sourceLabel: string | null;
@@ -15428,6 +15437,9 @@ function buildGameSummaryFromPortal(
       visualMode: reward.visualMode,
       iconKey: reward.iconKey,
       imageUrl: reward.imageUrl,
+      borderColor: reward.borderColor,
+      textColor: reward.textColor,
+      backgroundColor: reward.backgroundColor,
       sourceId: reward.sourceId,
       sourceKind: reward.sourceKind,
       sourceLabel: reward.sourceLabel,
@@ -17792,6 +17804,9 @@ export function mapLootBoxPossibleRewards(
         visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
         iconKey: guestPortalLootBoxPrizeIconKey(prize.iconKey, rewardType),
         imageUrl,
+        borderColor: guestPortalLootBoxPrizeColor(prize.borderColor),
+        textColor: guestPortalLootBoxPrizeColor(prize.textColor),
+        backgroundColor: guestPortalLootBoxPrizeColor(prize.backgroundColor),
       };
     })
     .filter((prize) => prize.weight > 0);
@@ -17805,6 +17820,9 @@ export function mapLootBoxPossibleRewards(
           visualMode: 'AUTO' as const,
           iconKey: 'gift' as const,
           imageUrl: null,
+          borderColor: null,
+          textColor: null,
+          backgroundColor: null,
         },
       ];
   const totalWeight = weightedPrizes.reduce(
@@ -17826,6 +17844,9 @@ export function mapLootBoxPossibleRewards(
       visualMode: prize.visualMode,
       iconKey: prize.iconKey,
       imageUrl: prize.imageUrl,
+      borderColor: prize.borderColor,
+      textColor: prize.textColor,
+      backgroundColor: prize.backgroundColor,
     };
   });
 }
@@ -17874,6 +17895,11 @@ function guestPortalLootBoxPrizeIconKey(
     default:
       return 'gift';
   }
+}
+
+function guestPortalLootBoxPrizeColor(value: unknown): string | null {
+  const normalized = stringField(value)?.trim().toUpperCase() ?? '';
+  return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : null;
 }
 
 function guestPortalLootBoxPrizeImageUrl(value: unknown) {
@@ -19595,6 +19621,11 @@ function guestPortalRewardPrizeVisual(
     visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
     iconKey: guestPortalLootBoxPrizeIconKey(selectedReward.iconKey, rewardType),
     imageUrl,
+    borderColor: guestPortalLootBoxPrizeColor(selectedReward.borderColor),
+    textColor: guestPortalLootBoxPrizeColor(selectedReward.textColor),
+    backgroundColor: guestPortalLootBoxPrizeColor(
+      selectedReward.backgroundColor,
+    ),
   } as const;
 }
 

@@ -1099,6 +1099,9 @@ export type GuestGameVisualEditorLootBoxPrize = {
   visualMode?: GuestGameLootBoxPrizeVisualMode;
   iconKey?: GuestGameLootBoxPrizeIconKey;
   imageUrl?: string | null;
+  borderColor?: string | null;
+  textColor?: string | null;
+  backgroundColor?: string | null;
 };
 
 export type GuestGameVisualEditorBattlePass = {
@@ -2490,6 +2493,9 @@ export type GuestGameSelectedReward = {
   visualMode?: GuestGameLootBoxPrizeVisualMode;
   iconKey?: GuestGameLootBoxPrizeIconKey;
   imageUrl?: string | null;
+  borderColor?: string | null;
+  textColor?: string | null;
+  backgroundColor?: string | null;
 };
 
 export type GuestGameRewardRarity = 'common' | 'rare' | 'epic' | 'legendary';
@@ -30384,6 +30390,9 @@ function parseProcessSelectedReward(
     visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
     iconKey: lootBoxPrizeIconKey(value.iconKey, rewardType),
     imageUrl,
+    borderColor: lootBoxPrizeColor(value.borderColor),
+    textColor: lootBoxPrizeColor(value.textColor),
+    backgroundColor: lootBoxPrizeColor(value.backgroundColor),
   };
 }
 
@@ -33810,6 +33819,9 @@ function lootBoxRewardFromPrize(
     visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
     iconKey: lootBoxPrizeIconKey(record.iconKey, rewardType),
     imageUrl,
+    borderColor: lootBoxPrizeColor(record.borderColor),
+    textColor: lootBoxPrizeColor(record.textColor),
+    backgroundColor: lootBoxPrizeColor(record.backgroundColor),
   };
 }
 
@@ -33857,6 +33869,11 @@ function lootBoxPrizeIconKey(
     default:
       return 'gift';
   }
+}
+
+function lootBoxPrizeColor(value: unknown): string | null {
+  const normalized = dryRunString(value)?.toUpperCase() ?? '';
+  return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : null;
 }
 
 function lootBoxPrizeImageUrl(value: unknown) {
@@ -35337,6 +35354,9 @@ function buildVisualLootBoxData(
           visualMode: 'AUTO' as const,
           iconKey: lootBoxPrizeIconKey(null, rewardType),
           imageUrl: null,
+          borderColor: null,
+          textColor: null,
+          backgroundColor: null,
         },
       ];
   const totalChancePercent = probabilityPrizes.reduce(
@@ -35395,6 +35415,9 @@ function buildVisualLootBoxData(
           prize.visualMode === 'IMAGE'
             ? lootBoxPrizeImageUrl(prize.imageUrl)
             : null,
+        borderColor: lootBoxPrizeColor(prize.borderColor),
+        textColor: lootBoxPrizeColor(prize.textColor),
+        backgroundColor: lootBoxPrizeColor(prize.backgroundColor),
       })),
       items: probabilityPrizes.map((prize) => ({
         label: prize.rewardLabel,
@@ -35778,6 +35801,9 @@ function buildVisualEditorPreviewSummary(
                   visualMode: 'AUTO' as const,
                   iconKey: lootBoxPrizeIconKey(null, item.rewardType),
                   imageUrl: null,
+                  borderColor: null,
+                  textColor: null,
+                  backgroundColor: null,
                 },
               ];
 
@@ -35794,6 +35820,9 @@ function buildVisualEditorPreviewSummary(
               iconKey:
                 prize.iconKey ?? lootBoxPrizeIconKey(null, prize.rewardType),
               imageUrl: prize.imageUrl ?? null,
+              borderColor: prize.borderColor ?? null,
+              textColor: prize.textColor ?? null,
+              backgroundColor: prize.backgroundColor ?? null,
             };
           });
         })(),
@@ -36180,6 +36209,9 @@ function visualLootBoxPrizes(
         visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
         iconKey: lootBoxPrizeIconKey(record.iconKey, rewardType),
         imageUrl,
+        borderColor: lootBoxPrizeColor(record.borderColor),
+        textColor: lootBoxPrizeColor(record.textColor),
+        backgroundColor: lootBoxPrizeColor(record.backgroundColor),
       };
     })
     .filter(
@@ -36204,6 +36236,9 @@ function visualLootBoxPrizes(
       visualMode: 'AUTO',
       iconKey: lootBoxPrizeIconKey(null, fallbackType),
       imageUrl: null,
+      borderColor: null,
+      textColor: null,
+      backgroundColor: null,
     },
   ];
 }

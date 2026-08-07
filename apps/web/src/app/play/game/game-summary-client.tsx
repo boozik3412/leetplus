@@ -33,7 +33,10 @@ import {
   type GuestMissionPreviewData,
 } from "@/components/guest-mission-preview";
 import { appendHourlySessionSourceNotice } from "@/components/hourly-session-source-note";
-import { LootBoxPrizeVisual } from "@/components/lootbox-prize-visual";
+import {
+  LootBoxPrizeVisual,
+  lootBoxPrizeCardColorStyle,
+} from "@/components/lootbox-prize-visual";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
@@ -117,6 +120,9 @@ type GuestPortalLootBoxOpenResponse = {
     visualMode?: "AUTO" | "ICON" | "IMAGE";
     iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
     imageUrl?: string | null;
+    borderColor?: string | null;
+    textColor?: string | null;
+    backgroundColor?: string | null;
   }>;
   summary: GuestPortalGameSummary;
   message: string;
@@ -133,6 +139,9 @@ type LootboxRouletteReward = {
   visualMode: "AUTO" | "ICON" | "IMAGE";
   iconKey: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
   imageUrl: string | null;
+  borderColor: string | null;
+  textColor: string | null;
+  backgroundColor: string | null;
   isWinner?: boolean;
 };
 type LootboxRouletteState = {
@@ -391,6 +400,9 @@ const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
     visualMode: "AUTO",
     iconKey: "coins",
     imageUrl: null,
+    borderColor: null,
+    textColor: null,
+    backgroundColor: null,
   },
   {
     reward: "100 бонусов",
@@ -402,6 +414,9 @@ const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
     visualMode: "AUTO",
     iconKey: "coins",
     imageUrl: null,
+    borderColor: null,
+    textColor: null,
+    backgroundColor: null,
   },
   {
     reward: "200 бонусов",
@@ -413,6 +428,9 @@ const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
     visualMode: "AUTO",
     iconKey: "coins",
     imageUrl: null,
+    borderColor: null,
+    textColor: null,
+    backgroundColor: null,
   },
   {
     reward: "Промокод",
@@ -424,6 +442,9 @@ const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
     visualMode: "AUTO",
     iconKey: "ticket",
     imageUrl: null,
+    borderColor: null,
+    textColor: null,
+    backgroundColor: null,
   },
 ];
 type PlayerQuest = {
@@ -3375,6 +3396,7 @@ function LootboxOpeningOverlay({
                       ].join(" ")}
                       data-rarity={itemRarity}
                       data-winning={isWinner ? "true" : undefined}
+                      style={lootBoxPrizeCardColorStyle(item)}
                       disabled={!canCollect}
                       tabIndex={canCollect ? 0 : -1}
                       aria-label={
@@ -13018,17 +13040,19 @@ const clubHomeCss = `
   --card-rgb: 158 181 183;
   flex: 0 0 104px;
   display: grid;
-  align-content: space-between;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: stretch;
+  gap: 4px;
   height: 132px;
-  padding: 10px;
-  border: 1px solid rgb(var(--card-rgb) / 0.32);
+  padding: 4px;
+  border: 1px solid var(--prize-border-color, rgb(var(--card-rgb) / 0.32));
   border-radius: 7px;
-  color: var(--text);
+  color: var(--prize-text-color, var(--text));
   text-align: left;
   background:
     radial-gradient(circle at 50% 12%, rgb(var(--card-rgb) / 0.2), transparent 42%),
     linear-gradient(160deg, rgb(var(--card-rgb) / 0.11), transparent 52%),
-    rgba(5, 13, 16, 0.96);
+    var(--prize-background-color, rgba(5, 13, 16, 0.96));
   box-shadow:
     inset 0 0 0 1px rgb(var(--card-rgb) / 0.05),
     0 14px 30px rgba(0, 0, 0, 0.28);
@@ -13059,7 +13083,7 @@ const clubHomeCss = `
 }
 
 .lp-lootbox-roulette-card.is-winning {
-  border-color: rgb(var(--card-rgb) / 0.86);
+  border-color: var(--prize-border-color, rgb(var(--card-rgb) / 0.86));
   box-shadow:
     0 0 34px rgb(var(--card-rgb) / 0.28),
     0 20px 44px rgba(0, 0, 0, 0.42),
@@ -13079,7 +13103,7 @@ const clubHomeCss = `
 
 .lp-lootbox-roulette-card.can-collect:hover,
 .lp-lootbox-roulette-card.can-collect:focus-visible {
-  border-color: rgb(var(--card-rgb) / 0.98);
+  border-color: var(--prize-border-color, rgb(var(--card-rgb) / 0.98));
   outline: none;
   box-shadow:
     0 0 44px rgb(var(--card-rgb) / 0.34),
@@ -13097,20 +13121,22 @@ const clubHomeCss = `
   opacity: 1;
 }
 
-.lp-lootbox-roulette-card strong,
-.lp-lootbox-roulette-card span {
+.lp-lootbox-roulette-card > strong,
+.lp-lootbox-roulette-card > span {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.lp-lootbox-roulette-card strong {
-  font-size: 14px;
+.lp-lootbox-roulette-card > strong {
+  padding: 2px 3px 0;
+  font-size: 12px;
   line-height: 1.1;
 }
 
-.lp-lootbox-roulette-card span {
-  color: rgb(var(--card-rgb));
+.lp-lootbox-roulette-card > span:not(.lp-prize-visual) {
+  padding: 0 3px 2px;
+  color: var(--prize-text-color, rgb(var(--card-rgb)));
   font-size: 9px;
   font-weight: 860;
   letter-spacing: 0;
@@ -13118,19 +13144,21 @@ const clubHomeCss = `
 }
 
 .lp-lootbox-roulette-visual {
-  justify-self: center;
+  align-self: stretch;
+  justify-self: stretch;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 48px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
-  border: 1px solid rgb(var(--card-rgb) / 0.5);
+  border: 1px solid var(--prize-border-color, rgb(var(--card-rgb) / 0.5));
   border-radius: 7px;
-  color: rgb(var(--card-rgb));
+  color: var(--prize-text-color, rgb(var(--card-rgb)));
   background:
     linear-gradient(180deg, rgb(var(--card-rgb) / 0.26), transparent),
-    rgba(0, 0, 0, 0.26);
+    color-mix(in srgb, var(--prize-background-color, #050d10) 78%, transparent);
   box-shadow: 0 0 18px rgb(var(--card-rgb) / 0.15);
 }
 
@@ -13141,8 +13169,10 @@ const clubHomeCss = `
 }
 
 .lp-lootbox-roulette-visual svg {
-  width: 28px;
-  height: 28px;
+  width: 58px;
+  height: 58px;
+  max-width: 82%;
+  max-height: 82%;
   filter: drop-shadow(0 0 8px rgb(var(--card-rgb) / 0.3));
 }
 
@@ -17240,6 +17270,9 @@ function buildLootboxRouletteState({
       visualMode: item.visualMode,
       iconKey: item.iconKey,
       imageUrl: item.imageUrl,
+      borderColor: item.borderColor,
+      textColor: item.textColor,
+      backgroundColor: item.backgroundColor,
     }),
   );
   const lootBoxRewards = result.summary.lootBoxes.featured.map((item, index) =>
@@ -17372,6 +17405,11 @@ function lootboxRouletteRewardFromOpenReward(
     visualMode: reward?.visualMode ?? configuredVisual?.visualMode ?? "AUTO",
     iconKey: reward?.iconKey ?? configuredVisual?.iconKey ?? "gift",
     imageUrl: reward?.imageUrl ?? configuredVisual?.imageUrl ?? null,
+    borderColor:
+      reward?.borderColor ?? configuredVisual?.borderColor ?? null,
+    textColor: reward?.textColor ?? configuredVisual?.textColor ?? null,
+    backgroundColor:
+      reward?.backgroundColor ?? configuredVisual?.backgroundColor ?? null,
   };
 }
 
@@ -17398,6 +17436,9 @@ function lootboxRouletteRewardFromHistory(
     visualMode: item.visualMode ?? "AUTO",
     iconKey: item.iconKey ?? "gift",
     imageUrl: item.imageUrl ?? null,
+    borderColor: item.borderColor ?? null,
+    textColor: item.textColor ?? null,
+    backgroundColor: item.backgroundColor ?? null,
   };
 }
 
@@ -17428,6 +17469,9 @@ function lootboxRouletteRewardFromCard(
     visualMode: configuredVisual?.visualMode ?? "AUTO",
     iconKey: configuredVisual?.iconKey ?? "gift",
     imageUrl: configuredVisual?.imageUrl ?? null,
+    borderColor: configuredVisual?.borderColor ?? null,
+    textColor: configuredVisual?.textColor ?? null,
+    backgroundColor: configuredVisual?.backgroundColor ?? null,
   };
 }
 

@@ -58,6 +58,9 @@ export type GuestPortalRewardLootBoxPreview = {
     visualMode: "AUTO" | "ICON" | "IMAGE";
     iconKey: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
     imageUrl: string | null;
+    borderColor: string | null;
+    textColor: string | null;
+    backgroundColor: string | null;
   }>;
 };
 
@@ -348,6 +351,9 @@ export type GuestPortalPayload = {
         visualMode: "AUTO" | "ICON" | "IMAGE";
         iconKey: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
         imageUrl: string | null;
+        borderColor: string | null;
+        textColor: string | null;
+        backgroundColor: string | null;
       }>;
       caseRarity: GuestPortalLootBoxRarity;
       caseRarityLabel: string;
@@ -383,6 +389,9 @@ export type GuestPortalPayload = {
         visualMode?: "AUTO" | "ICON" | "IMAGE";
         iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
         imageUrl?: string | null;
+        borderColor?: string | null;
+        textColor?: string | null;
+        backgroundColor?: string | null;
         rewardCode: string | null;
         claimPayload: string | null;
         qualifiedAt: string;
@@ -499,6 +508,9 @@ export type GuestPortalPayload = {
       visualMode?: "AUTO" | "ICON" | "IMAGE";
       iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
       imageUrl?: string | null;
+      borderColor?: string | null;
+      textColor?: string | null;
+      backgroundColor?: string | null;
       sourceId: string | null;
       sourceKind:
         | "CHECK_IN"
@@ -763,6 +775,9 @@ export type GuestPortalGameSummary = {
         | "visualMode"
         | "iconKey"
         | "imageUrl"
+        | "borderColor"
+        | "textColor"
+        | "backgroundColor"
         | "sourceId"
         | "sourceKind"
         | "sourceLabel"

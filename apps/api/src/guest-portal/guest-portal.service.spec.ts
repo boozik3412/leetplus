@@ -1345,6 +1345,9 @@ describe('mapLootBoxPossibleRewards', () => {
         visualMode: 'AUTO',
         iconKey: 'gift',
         imageUrl: null,
+        borderColor: null,
+        textColor: null,
+        backgroundColor: null,
       },
       {
         rewardType: '',
@@ -1355,6 +1358,9 @@ describe('mapLootBoxPossibleRewards', () => {
         visualMode: 'AUTO',
         iconKey: 'gift',
         imageUrl: null,
+        borderColor: null,
+        textColor: null,
+        backgroundColor: null,
       },
     ]);
   });
@@ -1370,6 +1376,9 @@ describe('mapLootBoxPossibleRewards', () => {
         visualMode: 'AUTO',
         iconKey: 'gift',
         imageUrl: null,
+        borderColor: null,
+        textColor: null,
+        backgroundColor: null,
       },
     ]);
   });
@@ -1386,6 +1395,9 @@ describe('mapLootBoxPossibleRewards', () => {
               visualMode: 'IMAGE',
               iconKey: 'coins',
               imageUrl: '/api/guest-game/media/prize-asset-1',
+              borderColor: '#12ABEF',
+              textColor: '#F0F0F0',
+              backgroundColor: '#081014',
             },
           ],
         },
@@ -1401,6 +1413,9 @@ describe('mapLootBoxPossibleRewards', () => {
         visualMode: 'IMAGE',
         iconKey: 'coins',
         imageUrl: '/api/guest-game/media/prize-asset-1',
+        borderColor: '#12ABEF',
+        textColor: '#F0F0F0',
+        backgroundColor: '#081014',
       },
     ]);
   });
@@ -2096,6 +2111,9 @@ describe('GuestPortalService', () => {
             visualMode: 'AUTO',
             iconKey: 'gift',
             imageUrl: null,
+            borderColor: null,
+            textColor: null,
+            backgroundColor: null,
           },
           {
             rewardLabel: '150 бонусов',
@@ -2106,6 +2124,9 @@ describe('GuestPortalService', () => {
             visualMode: 'AUTO',
             iconKey: 'gift',
             imageUrl: null,
+            borderColor: null,
+            textColor: null,
+            backgroundColor: null,
           },
         ],
       });
@@ -2129,6 +2150,9 @@ describe('GuestPortalService', () => {
             visualMode: 'AUTO' as const,
             iconKey: 'coins' as const,
             imageUrl: null,
+            borderColor: null,
+            textColor: null,
+            backgroundColor: null,
           },
         ],
       };
@@ -3000,6 +3024,9 @@ describe('GuestPortalService', () => {
                   visualMode: 'IMAGE',
                   iconKey: 'coins',
                   imageUrl: '/api/guest-game/media/reward-snapshot-1',
+                  borderColor: '#12ABEF',
+                  textColor: '#F0F0F0',
+                  backgroundColor: '#081014',
                 },
               },
             },
@@ -3066,6 +3093,9 @@ describe('GuestPortalService', () => {
             visualMode: 'IMAGE',
             iconKey: 'coins',
             imageUrl: '/api/guest-game/media/reward-snapshot-1',
+            borderColor: '#12ABEF',
+            textColor: '#F0F0F0',
+            backgroundColor: '#081014',
           },
         ],
       });

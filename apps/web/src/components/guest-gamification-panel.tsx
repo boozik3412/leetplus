@@ -16,9 +16,12 @@ import { GuestGamificationVisualEditor } from "@/components/guest-gamification-v
 import { HourlySessionSourceNote } from "@/components/hourly-session-source-note";
 import {
   LootBoxPrizeVisual,
+  defaultLootBoxPrizeColors,
   defaultLootBoxPrizeIconKey,
+  lootBoxPrizeCardColorStyle,
   lootBoxPrizeIconOptions,
   lootBoxPrizeVisualModeOptions,
+  normalizeLootBoxPrizeColor,
   normalizeLootBoxPrizeIconKey,
   type LootBoxPrizeIconKey,
   type LootBoxPrizeVisualMode,
@@ -209,6 +212,9 @@ type LootBoxPrizeForm = {
   visualMode: LootBoxPrizeVisualMode;
   iconKey: LootBoxPrizeIconKey;
   imageUrl: string;
+  borderColor: string;
+  textColor: string;
+  backgroundColor: string;
 };
 
 type LootBoxTimeWindowMode = "ANY" | "QUIET_HOURS" | "CUSTOM";
@@ -1009,6 +1015,9 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     visualMode: "AUTO",
     iconKey: "coins",
     imageUrl: "",
+    borderColor: "",
+    textColor: "",
+    backgroundColor: "",
   },
   {
     id: "default-bonus-100",
@@ -1019,6 +1028,9 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     visualMode: "AUTO",
     iconKey: "coins",
     imageUrl: "",
+    borderColor: "",
+    textColor: "",
+    backgroundColor: "",
   },
   {
     id: "default-bonus-200",
@@ -1029,6 +1041,9 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     visualMode: "AUTO",
     iconKey: "coins",
     imageUrl: "",
+    borderColor: "",
+    textColor: "",
+    backgroundColor: "",
   },
   {
     id: "default-promo-1000",
@@ -1039,6 +1054,9 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     visualMode: "AUTO",
     iconKey: "ticket",
     imageUrl: "",
+    borderColor: "",
+    textColor: "",
+    backgroundColor: "",
   },
 ];
 
@@ -1098,6 +1116,9 @@ const defaultLootBoxForm: LootBoxForm = {
       visualMode: prize.visualMode,
       iconKey: prize.iconKey,
       imageUrl: prize.imageUrl || null,
+      borderColor: normalizeLootBoxPrizeColor(prize.borderColor),
+      textColor: normalizeLootBoxPrizeColor(prize.textColor),
+      backgroundColor: normalizeLootBoxPrizeColor(prize.backgroundColor),
     })),
     items: defaultLootBoxPrizes.map((prize) => ({
       label: prize.rewardLabel,
@@ -10782,6 +10803,9 @@ function LootBoxPrizesEditor({
         visualMode: "AUTO",
         iconKey: "coins",
         imageUrl: "",
+        borderColor: "",
+        textColor: "",
+        backgroundColor: "",
       },
     ]);
 
@@ -11021,6 +11045,63 @@ function LootBoxPrizesEditor({
                     : "Иконка используется в рулетке и остаётся резервом, если изображение недоступно."}
               </p>
             </div>
+
+            <div className="mt-3 grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 sm:grid-cols-3">
+              <LootBoxPrizeColorField
+                label="Рамка карточки"
+                value={prize.borderColor}
+                fallback={
+                  lootBoxPrizeEditorRarity(
+                    Math.max(0, numeric(prize.chancePercent, 0)),
+                  ).colors.borderColor
+                }
+                onChange={(borderColor) =>
+                  updatePrize(index, { borderColor })
+                }
+              />
+              <LootBoxPrizeColorField
+                label="Текст карточки"
+                value={prize.textColor}
+                fallback={
+                  lootBoxPrizeEditorRarity(
+                    Math.max(0, numeric(prize.chancePercent, 0)),
+                  ).colors.textColor
+                }
+                onChange={(textColor) => updatePrize(index, { textColor })}
+              />
+              <LootBoxPrizeColorField
+                label="Фон карточки"
+                value={prize.backgroundColor}
+                fallback={
+                  lootBoxPrizeEditorRarity(
+                    Math.max(0, numeric(prize.chancePercent, 0)),
+                  ).colors.backgroundColor
+                }
+                onChange={(backgroundColor) =>
+                  updatePrize(index, { backgroundColor })
+                }
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2 sm:col-span-3">
+                <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                  Пустое значение использует автоматическую палитру редкости.
+                </p>
+                {prize.borderColor || prize.textColor || prize.backgroundColor ? (
+                  <button
+                    type="button"
+                    className={smallButtonClass}
+                    onClick={() =>
+                      updatePrize(index, {
+                        borderColor: "",
+                        textColor: "",
+                        backgroundColor: "",
+                      })
+                    }
+                  >
+                    Сбросить цвета
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
         ))}
       </div>
@@ -11032,6 +11113,47 @@ function LootBoxPrizesEditor({
 
       <LootBoxRouletteEditorPreview prizes={prizes} />
     </div>
+  );
+}
+
+function LootBoxPrizeColorField({
+  label,
+  value,
+  fallback,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  fallback: string;
+  onChange: (value: string) => void;
+}) {
+  const selectedColor = normalizeLootBoxPrizeColor(value) ?? fallback;
+
+  return (
+    <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      {label}
+      <span className="mt-1 flex items-center gap-2">
+        <input
+          className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-zinc-200 bg-white p-1 dark:border-zinc-700 dark:bg-zinc-900"
+          type="color"
+          value={selectedColor}
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+        />
+        <input
+          className={fieldClass}
+          value={value}
+          maxLength={7}
+          placeholder={fallback}
+          spellCheck={false}
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+          onBlur={() => {
+            if (value && !normalizeLootBoxPrizeColor(value)) {
+              onChange("");
+            }
+          }}
+        />
+      </span>
+    </label>
   );
 }
 
@@ -11072,23 +11194,35 @@ function LootBoxRouletteEditorPreview({
               <div
                 key={`${prize.id}-preview-${index}`}
                 className={[
-                  "grid h-36 w-28 shrink-0 content-between rounded-lg border bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_60%)] p-2 shadow-xl",
+                  "grid h-40 w-32 shrink-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-1 rounded-lg border bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_60%)] p-1 shadow-xl",
                   rarity.className,
                 ].join(" ")}
+                style={{
+                  ...lootBoxPrizeCardColorStyle(prize),
+                  borderColor:
+                    normalizeLootBoxPrizeColor(prize.borderColor) ??
+                    rarity.colors.borderColor,
+                  color:
+                    normalizeLootBoxPrizeColor(prize.textColor) ??
+                    rarity.colors.textColor,
+                  backgroundColor:
+                    normalizeLootBoxPrizeColor(prize.backgroundColor) ??
+                    rarity.colors.backgroundColor,
+                }}
               >
-                <strong className="line-clamp-2 text-xs leading-tight">
+                <strong className="line-clamp-2 px-1 pt-1 text-xs leading-tight">
                   {prize.rewardLabel || "Награда"}
                 </strong>
                 <LootBoxPrizeVisual
                   alt=""
-                  className="mx-auto flex h-14 w-14 items-center justify-center overflow-hidden rounded-md [&_img]:h-full [&_img]:w-full [&_img]:object-contain [&_svg]:h-9 [&_svg]:w-9"
+                  className="flex h-full min-h-0 w-full items-center justify-center overflow-hidden rounded-md border border-current/30 [&_img]:h-full [&_img]:w-full [&_img]:object-contain [&_svg]:h-14 [&_svg]:w-14"
                   imageUrl={
                     prize.visualMode === "IMAGE" ? prize.imageUrl : null
                   }
                   iconKey={prize.visualMode === "AUTO" ? null : prize.iconKey}
                   rewardType={prize.rewardType}
                 />
-                <span className="text-[9px] font-black uppercase tracking-wide opacity-90">
+                <span className="px-1 pb-1 text-[9px] font-black uppercase tracking-wide opacity-90">
                   {rarity.label} · {formatChanceNumber(chance)}%
                 </span>
               </div>
@@ -11105,23 +11239,43 @@ function lootBoxPrizeEditorRarity(chancePercent: number) {
     return {
       label: "Легендарная",
       className: "border-amber-300/80 text-amber-100 shadow-amber-500/20",
+      colors: {
+        borderColor: "#FCD34D",
+        textColor: "#FEF3C7",
+        backgroundColor: "#1C1405",
+      },
     };
   }
   if (chancePercent <= 4) {
     return {
       label: "Эпическая",
       className: "border-violet-300/80 text-violet-100 shadow-violet-500/20",
+      colors: {
+        borderColor: "#C4B5FD",
+        textColor: "#EDE9FE",
+        backgroundColor: "#160D2B",
+      },
     };
   }
   if (chancePercent <= 15) {
     return {
       label: "Редкая",
       className: "border-cyan-300/80 text-cyan-100 shadow-cyan-500/20",
+      colors: {
+        borderColor: defaultLootBoxPrizeColors.borderColor,
+        textColor: defaultLootBoxPrizeColors.textColor,
+        backgroundColor: defaultLootBoxPrizeColors.backgroundColor,
+      },
     };
   }
   return {
     label: "Обычная",
     className: "border-zinc-500/80 text-zinc-100 shadow-black/20",
+    colors: {
+      borderColor: "#9EB5B7",
+      textColor: "#F4F4F5",
+      backgroundColor: "#050D10",
+    },
   };
 }
 
@@ -16031,6 +16185,9 @@ function buildLootBoxProbabilityRules(form: LootBoxForm) {
         iconKey: normalizeLootBoxPrizeIconKey(prize.iconKey, rewardType),
         imageUrl:
           prize.visualMode === "IMAGE" ? nullable(prize.imageUrl) : null,
+        borderColor: normalizeLootBoxPrizeColor(prize.borderColor),
+        textColor: normalizeLootBoxPrizeColor(prize.textColor),
+        backgroundColor: normalizeLootBoxPrizeColor(prize.backgroundColor),
       };
     })
     .filter(
@@ -16049,6 +16206,9 @@ function buildLootBoxProbabilityRules(form: LootBoxForm) {
           visualMode: "AUTO" as const,
           iconKey: defaultLootBoxPrizeIconKey(form.rewardType),
           imageUrl: null,
+          borderColor: null,
+          textColor: null,
+          backgroundColor: null,
         },
       ];
   const totalChancePercent = safePrizes.reduce(
@@ -17402,6 +17562,9 @@ function lootBoxPrizesToForm(
         visualMode: "AUTO",
         iconKey: defaultLootBoxPrizeIconKey(fallback.rewardType),
         imageUrl: "",
+        borderColor: "",
+        textColor: "",
+        backgroundColor: "",
       },
     ];
   }
@@ -17449,6 +17612,18 @@ function lootBoxPrizeFromRuleItem(
       typeof record.imageUrl === "string" &&
       record.imageUrl.startsWith("/api/guest-game/media/")
         ? record.imageUrl
+        : "",
+    borderColor:
+      typeof record.borderColor === "string"
+        ? normalizeLootBoxPrizeColor(record.borderColor) ?? ""
+        : "",
+    textColor:
+      typeof record.textColor === "string"
+        ? normalizeLootBoxPrizeColor(record.textColor) ?? ""
+        : "",
+    backgroundColor:
+      typeof record.backgroundColor === "string"
+        ? normalizeLootBoxPrizeColor(record.backgroundColor) ?? ""
         : "",
   };
 }

@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 export type LootBoxPrizeVisualMode = "AUTO" | "ICON" | "IMAGE";
 
 export type LootBoxPrizeIconKey =
@@ -7,6 +9,41 @@ export type LootBoxPrizeIconKey =
   | "clock"
   | "gift"
   | "merch";
+
+export type LootBoxPrizeColorConfig = {
+  borderColor?: string | null;
+  textColor?: string | null;
+  backgroundColor?: string | null;
+};
+
+export const defaultLootBoxPrizeColors = {
+  borderColor: "#83E4EC",
+  textColor: "#D8F8F9",
+  backgroundColor: "#071215",
+} as const;
+
+export function normalizeLootBoxPrizeColor(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim().toUpperCase() ?? "";
+  return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : null;
+}
+
+export function lootBoxPrizeCardColorStyle(
+  colors: LootBoxPrizeColorConfig,
+): CSSProperties {
+  const borderColor = normalizeLootBoxPrizeColor(colors.borderColor);
+  const textColor = normalizeLootBoxPrizeColor(colors.textColor);
+  const backgroundColor = normalizeLootBoxPrizeColor(colors.backgroundColor);
+
+  return {
+    ...(borderColor ? { "--prize-border-color": borderColor } : {}),
+    ...(textColor ? { "--prize-text-color": textColor } : {}),
+    ...(backgroundColor
+      ? { "--prize-background-color": backgroundColor }
+      : {}),
+  } as CSSProperties;
+}
 
 export const lootBoxPrizeVisualModeOptions = [
   { value: "AUTO", label: "Автоматически" },

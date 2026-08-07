@@ -80,6 +80,22 @@ export class AdminController {
     });
   }
 
+  @Post('shared-beta/tenants/:tenantId/activate')
+  activateSharedBetaInitialOwner(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    void user;
+    void tenantId;
+    void body;
+    throw new ServiceUnavailableException({
+      message:
+        'Shared beta initial-owner activation is disabled until cluster admission, production role enrollment and launch GO are accepted',
+      reasonCode: 'SHARED_BETA_INITIAL_OWNER_COORDINATOR_DORMANT',
+    });
+  }
+
   @Post('tenants/:tenantId/initial-owner-invite/revoke')
   revokeSharedBetaInitialOwnerInvite(
     @CurrentUser() user: AuthenticatedUser,

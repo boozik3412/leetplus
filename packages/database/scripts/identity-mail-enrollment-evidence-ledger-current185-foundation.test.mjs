@@ -22,6 +22,16 @@ const CHECKER_PATH = join(
   SCRIPT_DIRECTORY,
   "identity-mail-enrollment-evidence-ledger-current185-foundation.mjs",
 );
+const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
+  "20260801010000_identity_mail_tenant_enrollment_control_plane",
+  "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+  "20260801030000_identity_mail_tenant_first_claim_protocol",
+  "20260802010000_identity_mail_worker_v2_freshness_protocol",
+  "20260802020000_identity_mail_worker_v2_lost_response_replay",
+  IDENTITY_MAIL_ENROLLMENT_EVIDENCE_LEDGER_CURRENT185_CANDIDATE,
+  "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+  "20260805020000_langame_onboarding_staged_receipt_current188",
+]);
 
 async function source() {
   return { metadataText: await readFile(METADATA_PATH, "utf8"), sql: await readFile(SQL_PATH, "utf8") };
@@ -39,7 +49,7 @@ async function expectFinding(overrides, finding) {
   assert.ok(report.findings.includes(finding), JSON.stringify(report));
 }
 
-test("accepts only the independently pinned CURRENT185 foundation", async () => {
+test("accepts CURRENT185 only with the exact ordered CURRENT180..CURRENT188 inventory", async () => {
   const report =
     await inspectIdentityMailEnrollmentEvidenceLedgerCurrent185Foundation();
   assert.equal(report.decision, "CURRENT185_EVIDENCE_LEDGER_FOUNDATION_COMPLIANT");
@@ -51,6 +61,38 @@ test("accepts only the independently pinned CURRENT185 foundation", async () => 
     report.migrationSqlSha256,
     "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6",
   );
+});
+
+test("rejects missing, reordered, or unknown successor inventory", async (t) => {
+  await t.test("missing CURRENT188", async () => {
+    await expectFinding(
+      { candidateDirectories: EXPECTED_CANDIDATE_DIRECTORIES.slice(0, -1) },
+      F.CANDIDATE_CHAIN_DRIFT,
+    );
+  });
+  await t.test("reordered CURRENT185/CURRENT186", async () => {
+    await expectFinding(
+      {
+        candidateDirectories: [
+          ...EXPECTED_CANDIDATE_DIRECTORIES.slice(0, -2),
+          EXPECTED_CANDIDATE_DIRECTORIES.at(-1),
+          EXPECTED_CANDIDATE_DIRECTORIES.at(-2),
+        ],
+      },
+      F.CANDIDATE_CHAIN_DRIFT,
+    );
+  });
+  await t.test("unknown successor after CURRENT188", async () => {
+    await expectFinding(
+      {
+        candidateDirectories: [
+          ...EXPECTED_CANDIDATE_DIRECTORIES,
+          "20260805030000_unknown_successor",
+        ],
+      },
+      F.CANDIDATE_CHAIN_DRIFT,
+    );
+  });
 });
 
 test("self-test exercises the bounded fail-closed probes", async () => {

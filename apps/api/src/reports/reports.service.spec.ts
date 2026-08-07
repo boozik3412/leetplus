@@ -1,7 +1,9 @@
+import { ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { ReportsService } from './reports.service';
 
 type ReportsPrismaMock = {
@@ -34,6 +36,11 @@ type ReportsPrismaMock = {
 
 type TenantContextMock = {
   resolve: jest.Mock;
+};
+
+type FreshStoreScopeMock = {
+  assertNetwork: jest.Mock;
+  resolveRequestedStoreIds: jest.Mock;
 };
 
 type RecommendationStateCreateArgs = {
@@ -106,6 +113,7 @@ function createPrismaMock(): ReportsPrismaMock {
 describe('ReportsService', () => {
   let prisma: ReportsPrismaMock;
   let tenantContext: TenantContextMock;
+  let freshStoreScope: FreshStoreScopeMock;
   let service: ReportsService;
 
   beforeEach(() => {
@@ -116,9 +124,32 @@ describe('ReportsService', () => {
         tenantSlug: 'club-a',
       }),
     };
+    freshStoreScope = {
+      assertNetwork: jest.fn().mockResolvedValue({
+        userId: 'user-1',
+        tenantId: 'tenant-1',
+        tenantSlug: 'club-a',
+        mode: 'NETWORK',
+        allowedStoreIds: [],
+      }),
+      resolveRequestedStoreIds: jest
+        .fn()
+        .mockImplementation(
+          (_user: AuthenticatedUser, requested?: readonly string[]) =>
+            Promise.resolve({
+              userId: 'user-1',
+              tenantId: 'tenant-1',
+              tenantSlug: 'club-a',
+              mode: 'NETWORK',
+              allowedStoreIds: [],
+              effectiveStoreIds: requested ?? null,
+            }),
+        ),
+    };
     service = new ReportsService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
+      freshStoreScope as unknown as FreshStoreScopeService,
     );
   });
 
@@ -213,6 +244,31 @@ describe('ReportsService', () => {
       supplierBreakdown: [],
       lowMarginProducts: [],
     });
+  });
+
+  it('scopes assortment inventory to the fresh club-owner allow-list', async () => {
+    freshStoreScope.resolveRequestedStoreIds.mockResolvedValueOnce({
+      userId: 'user-1',
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      mode: 'STORES',
+      allowedStoreIds: ['store-1'],
+      effectiveStoreIds: ['store-1'],
+    });
+    prisma.product.count.mockResolvedValue(0);
+    prisma.product.findMany.mockResolvedValue([]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([]);
+
+    await service.getAssortmentReport(user);
+
+    expect(prisma.inventorySnapshot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId: 'tenant-1',
+          storeId: { in: ['store-1'] },
+        },
+      }),
+    );
   });
 
   it('builds operational report from sales and latest stock', async () => {
@@ -432,7 +488,9 @@ describe('ReportsService', () => {
   });
 
   it('rejects unknown store filter for operational report', async () => {
-    prisma.store.findFirst.mockResolvedValue(null);
+    freshStoreScope.resolveRequestedStoreIds.mockRejectedValueOnce(
+      new ForbiddenException('Store is outside your tenant'),
+    );
 
     await expect(
       service.getOperationalReport(user, {
@@ -440,7 +498,7 @@ describe('ReportsService', () => {
         to: '2026-04-10',
         storeId: 'missing-store',
       }),
-    ).rejects.toThrow('Store not found');
+    ).rejects.toThrow('Store is outside your tenant');
   });
 
   it('builds inventory turnover report for slow and frozen stock', async () => {

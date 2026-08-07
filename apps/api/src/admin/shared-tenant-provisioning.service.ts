@@ -371,6 +371,65 @@ export class SharedTenantProvisioningService {
     }
   }
 
+  /**
+   * Recovers only the immutable, PII-free provisioning receipt for the
+   * protected activation coordinator. Unlike normal shell replay it does not
+   * require the claim to remain at reservation revision 1: a committed
+   * activation has already progressed it to the issued invite. The activation
+   * RPC remains the sole authority for accepting that progressed state.
+   */
+  async recoverProtectedActivationShell(
+    actor: AuthenticatedUser,
+    dto: unknown,
+  ): Promise<ShellProvisioningResult> {
+    this.assertPlatformAdmin(actor);
+    const parsed = this.parseProvisioning(dto);
+    this.assertConfirmation(dto, `PROVISION ${parsed.tenantSlug}`);
+    const requestDigest = this.provisioningRequestDigest(parsed);
+
+    const receipt = await this.prisma.$transaction(async (tx) => {
+      await this.acquireTenantSlugLock(tx, parsed.tenantSlug);
+      const tenant = await tx.tenant.findFirst({
+        where: {
+          slug: {
+            equals: parsed.tenantSlug,
+            mode: 'insensitive',
+          },
+        },
+        select: { id: true },
+      });
+      if (!tenant) {
+        throw new ConflictException(
+          'Shared beta shell is unavailable for protected activation',
+        );
+      }
+      await this.identityClaimBoundary.lockTenantTransaction(tx, tenant.id);
+      await this.assertFreshPlatformAuthority(
+        tx,
+        actor.id,
+        parsed.supportOwnerUserId,
+      );
+      const replay = await this.findProvisioningReplay(
+        tx,
+        tenant.id,
+        parsed.requestId,
+      );
+      if (!replay) {
+        throw new ConflictException(
+          'Shared beta shell is unavailable for protected activation',
+        );
+      }
+      return this.validateProvisioningReceiptBinding(
+        replay,
+        requestDigest,
+        parsed,
+        tenant.id,
+      );
+    }, IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+
+    return this.provisioningResult(receipt, 'ALREADY_PROVISIONED', true);
+  }
+
   private recoverableProvisioningRace(error: unknown): boolean {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -553,6 +612,30 @@ export class SharedTenantProvisioningService {
     expectedTenantId: string,
     identityTransaction: IdentityEmailClaimTransaction,
   ): Promise<ShellProvisioningReceipt> {
+    const receipt = this.validateProvisioningReceiptBinding(
+      event,
+      requestDigest,
+      parsed,
+      expectedTenantId,
+    );
+    await this.identityClaimBoundary.assertInviteLocator(identityTransaction, {
+      workflowLocator: receipt.ownerIdentity.reservationId,
+      tenantId: expectedTenantId,
+      subjectId: receipt.ownerIdentity.reservationId,
+      expectedRevision: receipt.ownerIdentity.claimRevision,
+    });
+    return receipt;
+  }
+
+  private validateProvisioningReceiptBinding(
+    event: {
+      after: Prisma.JsonValue | null;
+      metadata: Prisma.JsonValue | null;
+    },
+    requestDigest: string,
+    parsed: ParsedProvisioning,
+    expectedTenantId: string,
+  ): ShellProvisioningReceipt {
     const receipt = this.replayReceipt(event, requestDigest);
     if (
       receipt.tenant.id !== expectedTenantId ||
@@ -562,12 +645,6 @@ export class SharedTenantProvisioningService {
         'Stored shell provisioning receipt is invalid',
       );
     }
-    await this.identityClaimBoundary.assertInviteLocator(identityTransaction, {
-      workflowLocator: receipt.ownerIdentity.reservationId,
-      tenantId: expectedTenantId,
-      subjectId: receipt.ownerIdentity.reservationId,
-      expectedRevision: receipt.ownerIdentity.claimRevision,
-    });
     return receipt;
   }
 

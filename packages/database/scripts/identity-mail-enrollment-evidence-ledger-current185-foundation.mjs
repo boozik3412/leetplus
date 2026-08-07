@@ -171,6 +171,8 @@ const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
   "20260802010000_identity_mail_worker_v2_freshness_protocol",
   IDENTITY_MAIL_ENROLLMENT_EVIDENCE_LEDGER_CURRENT185_PREDECESSOR,
   IDENTITY_MAIL_ENROLLMENT_EVIDENCE_LEDGER_CURRENT185_CANDIDATE,
+  "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+  "20260805020000_langame_onboarding_staged_receipt_current188",
 ]);
 const EXPECTED_PREDECESSOR_COLUMN_MANIFEST = Object.freeze(
   `1|id|text|true|false
@@ -1663,7 +1665,14 @@ export async function inspectIdentityMailEnrollmentEvidenceLedgerCurrent185Found
   const predecessorEntries = (
     overrides.predecessorEntries ?? [
       ...canonical,
-      ...(await candidateMigrationEntries(EXPECTED_CANDIDATE_DIRECTORIES.slice(0, -1))),
+      ...(await candidateMigrationEntries(
+        EXPECTED_CANDIDATE_DIRECTORIES.slice(
+          0,
+          EXPECTED_CANDIDATE_DIRECTORIES.indexOf(
+            IDENTITY_MAIL_ENROLLMENT_EVIDENCE_LEDGER_CURRENT185_CANDIDATE,
+          ),
+        ),
+      )),
     ]
   ).sort((left, right) => left.name.localeCompare(right.name, "en"));
   const directories = overrides.candidateDirectories ?? await candidateDirectories();

@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { FreshStoreScopeGuard } from '../tenancy/fresh-store-scope.guard';
 import {
   STAFF_ATTACHMENT_MAX_BYTES,
   StaffAttachmentsService,
@@ -43,7 +44,7 @@ const SAFE_INLINE_ATTACHMENT_CONTENT_TYPES = new Set([
   UserRole.CLUB_ADMINISTRATOR,
   UserRole.TRAINEE,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshStoreScopeGuard)
 export class StaffAttachmentsController {
   constructor(
     private readonly staffAttachmentsService: StaffAttachmentsService,
@@ -88,8 +89,7 @@ export class StaffAttachmentsController {
     const encoded = encodeURIComponent(fileName);
     const normalizedType = contentType.split(';', 1)[0]?.trim().toLowerCase();
     const mode =
-      normalizedType &&
-      SAFE_INLINE_ATTACHMENT_CONTENT_TYPES.has(normalizedType)
+      normalizedType && SAFE_INLINE_ATTACHMENT_CONTENT_TYPES.has(normalizedType)
         ? 'inline'
         : 'attachment';
 

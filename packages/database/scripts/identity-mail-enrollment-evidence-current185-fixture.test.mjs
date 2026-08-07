@@ -77,6 +77,98 @@ test("fails closed on extra keys and non-disposable database identities", async 
     }),
     /databaseName is not an exact disposable database/u,
   );
+  await assert.rejects(
+    buildIdentityMailEnrollmentEvidenceCurrent185Fixture({
+      ...INPUT,
+      scenario: "DRAIN_ACTIVE",
+    }),
+    /scenario is invalid/u,
+  );
+  await assert.rejects(
+    buildIdentityMailEnrollmentEvidenceCurrent185Fixture({
+      ...INPUT,
+      reuseCommandId: "66666666-6666-4666-8666-666666666666",
+    }),
+    /reuseRequestId is invalid/u,
+  );
+  await assert.rejects(
+    buildIdentityMailEnrollmentEvidenceCurrent185Fixture({
+      ...INPUT,
+      reuseCommandId: INPUT.commandId,
+      reuseRequestId: "77777777-7777-4777-8777-777777777777",
+      scenario: "DISABLE_ACTIVE",
+    }),
+    /manifest-reuse command identities must be distinct/u,
+  );
+  await assert.rejects(
+    buildIdentityMailEnrollmentEvidenceCurrent185Fixture({
+      ...INPUT,
+      reuseCommandId: "not-a-uuid",
+      reuseRequestId: "77777777-7777-4777-8777-777777777777",
+      scenario: "ROTATE_ACTIVE",
+    }),
+    /reuseCommandId is invalid/u,
+  );
+  await assert.rejects(
+    buildIdentityMailEnrollmentEvidenceCurrent185Fixture({
+      ...INPUT,
+      grantsProjection: { password: "forbidden" },
+    }),
+    /grantsProjection is invalid/u,
+  );
+});
+
+test("mints exact signed ROTATE_ACTIVE and DISABLE_ACTIVE command evidence", async () => {
+  for (const [scenario, action, targetState] of [
+    ["ROTATE_ACTIVE", "ROTATE", "ACTIVE"],
+    ["DISABLE_ACTIVE", "DISABLE", "DISABLED"],
+  ]) {
+    const fixture =
+      await buildIdentityMailEnrollmentEvidenceCurrent185Fixture({
+        ...INPUT,
+        commandId:
+          action === "ROTATE"
+            ? "88888888-8888-4888-8888-888888888888"
+            : "99999999-9999-4999-8999-999999999999",
+        requestId:
+          action === "ROTATE"
+            ? "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
+            : "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
+        scenario,
+      });
+    const bundle = JSON.parse(fixture.bundleCanonicalJson);
+    const command = bundle.commandDatabaseArguments;
+    assert.equal(command.action, action);
+    assert.equal(command.expectedState, "ACTIVE");
+    assert.equal(command.targetState, targetState);
+    assert.equal(command.expectedPolicyRevision, 1);
+    assert.equal(command.nextPolicyRevision, 2);
+    assert.equal(command.stateRevisionBefore, 1);
+    assert.equal(command.drainStateRevision, 2);
+    assert.equal(command.finalStateRevision, 3);
+  }
+});
+
+test("binds an explicitly supplied exact grants projection", async () => {
+  const baseline =
+    await buildIdentityMailEnrollmentEvidenceCurrent185Fixture({ ...INPUT });
+  const baselineBundle = JSON.parse(baseline.bundleCanonicalJson);
+  const rebound =
+    await buildIdentityMailEnrollmentEvidenceCurrent185Fixture({
+      ...INPUT,
+      commandId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      grantsProjection: baselineBundle.exactGrantsProjection,
+      requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    });
+  const reboundBundle = JSON.parse(rebound.bundleCanonicalJson);
+  assert.deepEqual(
+    reboundBundle.exactGrantsProjection,
+    baselineBundle.exactGrantsProjection,
+  );
+  assert.equal(
+    rebound.bundle.exactGrantsDigest,
+    baseline.bundle.exactGrantsDigest,
+  );
 });
 
 test("mints a second signed command against the exact same manifest without exporting key material", async () => {

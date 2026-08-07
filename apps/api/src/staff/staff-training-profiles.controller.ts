@@ -13,6 +13,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   StaffTrainingProfilesService,
   type StaffTrainingProfilesExportQuery,
@@ -31,7 +32,7 @@ import {
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
 export class StaffTrainingProfilesController {
   constructor(
     private readonly staffTrainingProfilesService: StaffTrainingProfilesService,

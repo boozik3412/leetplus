@@ -16,6 +16,11 @@ const UUID_PATTERN =
 const DATABASE_PATTERN = /^lp_imtec_[0-9a-f]{32}_ci$/u;
 const ROLE_PATTERN = /^[a-z_][a-z0-9_]{2,62}$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
+const SCENARIOS = new Set([
+  "ENABLE_ABSENT",
+  "ROTATE_ACTIVE",
+  "DISABLE_ACTIVE",
+]);
 
 function fail(message) {
   throw new Error(`CURRENT185 fixture rejected: ${message}`);
@@ -47,20 +52,35 @@ function requireExactObject(value) {
     "workerRoleName",
     "workerRoleOid",
   ].sort();
-  const expectedWithReuse = [
-    ...expected,
+  const optional = new Set([
+    "grantsProjection",
     "reuseCommandId",
     "reuseRequestId",
-  ].sort();
+    "scenario",
+  ]);
   const actual = Object.keys(value).sort();
   if (
-    ![expected, expectedWithReuse].some(
-      (candidate) =>
-        actual.length === candidate.length &&
-        actual.every((key, index) => key === candidate[index]),
-    )
+    expected.some((key) => !Object.hasOwn(value, key)) ||
+    actual.some((key) => !expected.includes(key) && !optional.has(key))
   ) {
     fail("input keys are not exact");
+  }
+  if (value.scenario !== undefined && !SCENARIOS.has(value.scenario)) {
+    fail("scenario is invalid");
+  }
+  if (value.grantsProjection !== undefined) {
+    if (
+      value.grantsProjection === null ||
+      typeof value.grantsProjection !== "object" ||
+      Array.isArray(value.grantsProjection) ||
+      Object.getPrototypeOf(value.grantsProjection) !== Object.prototype ||
+      JSON.stringify(value.grantsProjection).length > 65_536 ||
+      /(?:@|email|phone|password|privateKey|secret|accessToken|refreshToken|providerMessageId)/iu.test(
+        JSON.stringify(value.grantsProjection),
+      )
+    ) {
+      fail("grantsProjection is invalid");
+    }
   }
   for (const key of [
     "tenantId",
@@ -73,7 +93,7 @@ function requireExactObject(value) {
       fail(`${key} is invalid`);
     }
   }
-  if (actual.length === expectedWithReuse.length) {
+  if (value.reuseCommandId !== undefined || value.reuseRequestId !== undefined) {
     for (const key of ["reuseCommandId", "reuseRequestId"]) {
       if (typeof value[key] !== "string" || !UUID_PATTERN.test(value[key])) {
         fail(`${key} is invalid`);
@@ -206,6 +226,14 @@ async function loadScenarioFactory(input) {
     `validUntil: new Date(now + ${input.validForMs}).toISOString(),`,
     "fixture validity",
   );
+  if (input.grantsProjection !== undefined) {
+    helper = replaceExact(
+      helper,
+      "  const grants = grantsSnapshot();",
+      `  const grants = Object.freeze(${JSON.stringify(input.grantsProjection)});`,
+      "exact grants projection",
+    );
+  }
   helper = replaceExact(
     helper,
     "  dutyOverrides = {},\n  envelopeOverrides = {},\n) {",
@@ -265,8 +293,79 @@ async function loadScenarioFactory(input) {
   return { helperPath, module: await import(pathToFileURL(helperPath).href) };
 }
 
+function scenarioCommand(module, scenario, scenarioName, identityOverrides = {}) {
+  if (scenarioName === "ENABLE_ABSENT") {
+    if (Object.keys(identityOverrides).length === 0) return scenario.command;
+    return module.commandDocument(
+      scenario.commandMaterial,
+      scenario.times,
+      scenario.manifest,
+      scenario.grantsDigest,
+      {},
+      identityOverrides,
+      { requestId: identityOverrides.requestId },
+    );
+  }
+
+  const previousConfiguration = {
+    ...scenario.command.authorizationEnvelope.targetConfiguration,
+  };
+  const action = scenarioName === "ROTATE_ACTIVE" ? "ROTATE" : "DISABLE";
+  const targetConfiguration =
+    action === "ROTATE"
+      ? {
+          ...previousConfiguration,
+          configurationDigest: "7".repeat(64),
+          maxAttempts: previousConfiguration.maxAttempts + 1,
+          providerAuthorityDigest: "8".repeat(64),
+        }
+      : { ...previousConfiguration };
+  const proposalOverrides = {
+    action,
+    expectedRevision: 1,
+    expectedState: "ACTIVE",
+    nextRevision: 2,
+    policy: {
+      acknowledgeSeconds: targetConfiguration.acknowledgeSeconds,
+      baseRetrySeconds: targetConfiguration.baseRetrySeconds,
+      leaseSeconds: targetConfiguration.leaseSeconds,
+      maxAttempts: targetConfiguration.maxAttempts,
+      maxRetrySeconds: targetConfiguration.maxRetrySeconds,
+    },
+    providerAuthorityDigest: targetConfiguration.providerAuthorityDigest,
+    workerRoleName: targetConfiguration.workerRoleName,
+    workerRoleOid: targetConfiguration.workerRoleOid,
+    ...(identityOverrides.requestId === undefined
+      ? {}
+      : { requestId: identityOverrides.requestId }),
+  };
+  const envelopeOverrides = {
+    action,
+    drainStateRevision: 2,
+    expectedPolicyRevision: 1,
+    expectedState: "ACTIVE",
+    finalStateRevision: 3,
+    nextPolicyRevision: 2,
+    previousConfiguration,
+    stateRevisionBefore: 1,
+    targetConfiguration,
+    targetState: action === "ROTATE" ? "ACTIVE" : "DISABLED",
+    ...identityOverrides,
+  };
+  return module.commandDocument(
+    scenario.commandMaterial,
+    scenario.times,
+    scenario.manifest,
+    scenario.grantsDigest,
+    {},
+    envelopeOverrides,
+    proposalOverrides,
+  );
+}
+
 async function buildFixture(inputValue) {
   const input = requireExactObject(inputValue);
+  const scenarioName = input.scenario ?? "ENABLE_ABSENT";
   const originalNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "test";
   let loaded;
@@ -274,9 +373,14 @@ async function buildFixture(inputValue) {
     loaded = await loadScenarioFactory(input);
     const scenario = await loaded.module.pinnedScenario();
     const { authority, composition, importer, manifest } = scenario.modules;
+    const commandDocument = scenarioCommand(
+      loaded.module,
+      scenario,
+      scenarioName,
+    );
     const command =
       authority.verifyPinnedIdentityMailTenantEnrollmentCommandAuthorityV2(
-        scenario.command,
+        commandDocument,
       );
     const dutyManifest =
       manifest.verifyPinnedIdentityMailDutyRoleManifestV2Envelope(
@@ -307,21 +411,18 @@ async function buildFixture(inputValue) {
       bundle: { ...bundle },
       bundleCanonicalJson: databaseArguments[0],
       bundleDigest: databaseArguments[1],
-      expiresAt: scenario.command.authorizationEnvelope.expiresAt,
+      expiresAt: commandDocument.authorizationEnvelope.expiresAt,
     };
     if (input.reuseCommandId === undefined) return result;
 
-    const reuseDocument = loaded.module.commandDocument(
-      scenario.commandMaterial,
-      scenario.times,
-      scenario.manifest,
-      scenario.grantsDigest,
-      {},
+    const reuseDocument = scenarioCommand(
+      loaded.module,
+      scenario,
+      scenarioName,
       {
         commandId: input.reuseCommandId,
         requestId: input.reuseRequestId,
       },
-      { requestId: input.reuseRequestId },
     );
     const reuseCommand =
       authority.verifyPinnedIdentityMailTenantEnrollmentCommandAuthorityV2(
@@ -376,7 +477,7 @@ async function readStandardInput() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
   const source = Buffer.concat(chunks).toString("utf8");
-  if (Buffer.byteLength(source, "utf8") > 16_384) {
+  if (Buffer.byteLength(source, "utf8") > 96 * 1_024) {
     fail("input is too large");
   }
   return JSON.parse(source);

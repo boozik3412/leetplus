@@ -218,23 +218,56 @@ function createHarness(options?: {
 
     return Promise.all(input as Promise<unknown>[]);
   });
-  const tenantContextService = {
-    resolve: jest.fn().mockReturnValue({
-      tenantId,
-      tenantSlug: 'tenant-a',
-    }),
-  };
   const staffAttachmentBindingsService = {
     bindPendingChatAttachments: jest.fn(),
   };
+  const accessScopeService = new AccessScopeService();
+  const freshStoreScopeService = {
+    resolve: jest.fn((user: AuthenticatedUser) =>
+      Promise.resolve({
+        userId: user.id,
+        ...accessScopeService.resolve(user),
+      }),
+    ),
+    resolveRequestedStoreIds: jest.fn(
+      (user: AuthenticatedUser, requestedStoreIds: readonly string[]) => {
+        const scope = accessScopeService.resolve(user);
+        const foundStoreIds = new Set(
+          stores
+            .filter((store) => requestedStoreIds.includes(store.id))
+            .map((store) => store.id),
+        );
+
+        if (
+          requestedStoreIds.some((storeId) => !foundStoreIds.has(storeId)) ||
+          (scope.mode === 'STORES' &&
+            requestedStoreIds.some(
+              (storeId) => !scope.allowedStoreIds.includes(storeId),
+            ))
+        ) {
+          throw new ForbiddenException('Store is outside your access scope');
+        }
+
+        return Promise.resolve({
+          userId: user.id,
+          ...scope,
+          effectiveStoreIds: requestedStoreIds,
+        });
+      },
+    ),
+  };
   const service = new StaffTeamChatService(
     prisma as never,
-    tenantContextService,
-    new AccessScopeService(),
+    freshStoreScopeService as never,
     staffAttachmentBindingsService as never,
   );
 
-  return { prisma, service, staffAttachmentBindingsService };
+  return {
+    prisma,
+    service,
+    freshStoreScopeService,
+    staffAttachmentBindingsService,
+  };
 }
 
 type RecordedMock = {
@@ -260,6 +293,38 @@ function serializedCall(
 }
 
 describe('StaffTeamChatService AccessScope boundary', () => {
+  it('fails closed before chat queries when fresh PostgreSQL scope cannot be re-attested', async () => {
+    const { freshStoreScopeService, prisma, service } = createHarness();
+    freshStoreScopeService.resolve.mockRejectedValueOnce(
+      new ForbiddenException('Fresh scope denied'),
+    );
+
+    await expect(service.getReport(storeActor)).rejects.toThrow(
+      'Fresh scope denied',
+    );
+
+    expect(freshStoreScopeService.resolve).toHaveBeenCalledWith(storeActor);
+    expect(prisma.staffChatChannel.upsert).not.toHaveBeenCalled();
+    expect(prisma.staffChatChannel.findMany).not.toHaveBeenCalled();
+    expect(prisma.staffChatMessage.findMany).not.toHaveBeenCalled();
+  });
+
+  it('re-attests an explicit store before applying it to live-state selectors', async () => {
+    const channels = [channelRow('store-a1', 'STORE', 'a1')];
+    const { freshStoreScopeService, prisma, service } = createHarness({
+      channels,
+    });
+
+    await service.getLiveState(storeActor, { storeId: 'a1' });
+
+    expect(
+      freshStoreScopeService.resolveRequestedStoreIds,
+    ).toHaveBeenCalledWith(storeActor, ['a1']);
+    expect(serializedCall(prisma.staffChatChannel.findMany, 0)).toContain(
+      '"storeId":{"in":["a1"]}',
+    );
+  });
+
   it('preserves tenant-wide channel and message predicates for NETWORK', async () => {
     const channels = [
       channelRow('network', 'NETWORK'),

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "contract": "GUEST_PORTAL_SESSION_CURRENT190_V1",
+  "candidate": "20260805040000_guest_portal_session_current190",
+  "ordinal": 190,
+  "predecessor": {
+    "requiredContract": "IDENTITY_EMPLOYEE_INVITE_CURRENT189_V1",
+    "resolved": false
+  },
+  "migrationSqlSha256": "d23c0e8fbdfddd0eb9ec7a73d877e7bbcde8c170683247a66f43530cca3867d5",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "canServePublicMedia": false,
+  "canSendOtp": false,
+  "canCallTelegram": false,
+  "canCallMessenger": false,
+  "canCallLangame": false,
+  "canRunSchedulers": false,
+  "applicationRoleAllowlistBound": false,
+  "productionApplyAuthorized": false,
+  "status": "NOT_DEPLOYABLE"
+}

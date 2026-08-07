@@ -1196,7 +1196,8 @@ function permanentPreProviderReason(reasonCode: string): boolean {
   return (
     reasonCode.endsWith('_INVALID') ||
     reasonCode === 'IDENTITY_MAIL_WORKER_ENTROPY_INVALID' ||
-    reasonCode === 'IDENTITY_MAIL_CLAIM_INVALID'
+    reasonCode === 'IDENTITY_MAIL_CLAIM_INVALID' ||
+    reasonCode === 'IDENTITY_MAIL_WORKER_EMERGENCY_STOP_PRE_PROVIDER'
   );
 }
 

@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { StockMovementType } from '@prisma/client';
+import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../auth/auth.types';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 export type DashboardPeriod =
   | 'day'
@@ -279,19 +279,25 @@ export type DashboardRevenueDiagnostics = {
 export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
   async getSummary(
-    user?: AuthenticatedUser,
+    user: AuthenticatedUser,
     query: DashboardQuery = {},
   ): Promise<DashboardSummary> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const requestedStoreIds = this.resolveStoreIds(query.storeIds);
+    const { tenantId, tenantSlug, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(
+        user,
+        requestedStoreIds,
+      );
     const period = this.resolvePeriod(query);
-    const selectedStoreIds = this.resolveStoreIds(query.storeIds);
-    const storeFilter =
-      selectedStoreIds.length > 0 ? { storeId: { in: selectedStoreIds } } : {};
+    const selectedStoreIds = effectiveStoreIds ? [...effectiveStoreIds] : [];
+    const storeFilter = effectiveStoreIds
+      ? { storeId: { in: [...effectiveStoreIds] } }
+      : {};
+    const productVisibility = this.productVisibility(effectiveStoreIds);
     const skuGrouping = query.skuGrouping === 'club' ? 'club' : 'network';
     const demandPeriod = this.resolveDemandPeriod();
     const activeSkuPeriod = this.resolveActiveSkuPeriod();
@@ -343,11 +349,27 @@ export class DashboardService {
           name: 'asc',
         },
       }),
-      this.prisma.product.count({ where: { tenantId } }),
-      this.prisma.category.count({ where: { tenantId } }),
-      this.prisma.supplier.count({ where: { tenantId } }),
+      this.prisma.product.count({
+        where: { tenantId, ...productVisibility },
+      }),
+      this.prisma.category.count({
+        where: {
+          tenantId,
+          ...(effectiveStoreIds
+            ? { products: { some: productVisibility } }
+            : {}),
+        },
+      }),
+      this.prisma.supplier.count({
+        where: {
+          tenantId,
+          ...(effectiveStoreIds
+            ? { products: { some: productVisibility } }
+            : {}),
+        },
+      }),
       this.prisma.product.findMany({
-        where: { tenantId, isActive: true },
+        where: { tenantId, isActive: true, ...productVisibility },
         select: {
           id: true,
           article: true,
@@ -615,7 +637,7 @@ export class DashboardService {
           refundsCashless: true,
         },
       }),
-      selectedStoreIds.length === 0
+      effectiveStoreIds === null
         ? this.prisma.businessSnapshotRun.findFirst({
             where: {
               tenantId,
@@ -635,21 +657,23 @@ export class DashboardService {
             },
           })
         : Promise.resolve(null),
-      this.prisma.businessSnapshotRun.findFirst({
-        where: {
-          tenantId,
-          type: 'REVENUE',
-        },
-        orderBy: { startedAt: 'desc' },
-        select: {
-          status: true,
-          finishedAt: true,
-          periodFrom: true,
-          periodTo: true,
-          sourceCounts: true,
-          summary: true,
-        },
-      }),
+      effectiveStoreIds === null
+        ? this.prisma.businessSnapshotRun.findFirst({
+            where: {
+              tenantId,
+              type: 'REVENUE',
+            },
+            orderBy: { startedAt: 'desc' },
+            select: {
+              status: true,
+              finishedAt: true,
+              periodFrom: true,
+              periodTo: true,
+              sourceCounts: true,
+              summary: true,
+            },
+          })
+        : Promise.resolve(null),
     ]);
 
     let averageMarginPercent = 0;
@@ -925,15 +949,20 @@ export class DashboardService {
   }
 
   async getRevenueDiagnostics(
-    user?: AuthenticatedUser,
+    user: AuthenticatedUser,
     query: DashboardQuery = {},
   ): Promise<DashboardRevenueDiagnostics> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const requestedStoreIds = this.resolveStoreIds(query.storeIds);
+    const { tenantId, tenantSlug, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(
+        user,
+        requestedStoreIds,
+      );
     const period = this.resolvePeriod(query);
-    const selectedStoreIds = this.resolveStoreIds(query.storeIds);
-    const storeFilter =
-      selectedStoreIds.length > 0 ? { storeId: { in: selectedStoreIds } } : {};
+    const selectedStoreIds = effectiveStoreIds ? [...effectiveStoreIds] : [];
+    const storeFilter = effectiveStoreIds
+      ? { storeId: { in: [...effectiveStoreIds] } }
+      : {};
     const [
       tenant,
       stores,
@@ -1040,7 +1069,7 @@ export class DashboardService {
           refundsCashless: true,
         },
       }),
-      selectedStoreIds.length === 0
+      effectiveStoreIds === null
         ? this.prisma.businessSnapshotRun.findFirst({
             where: {
               tenantId,
@@ -1060,21 +1089,23 @@ export class DashboardService {
             },
           })
         : Promise.resolve(null),
-      this.prisma.businessSnapshotRun.findFirst({
-        where: {
-          tenantId,
-          type: 'REVENUE',
-        },
-        orderBy: { startedAt: 'desc' },
-        select: {
-          status: true,
-          finishedAt: true,
-          periodFrom: true,
-          periodTo: true,
-          sourceCounts: true,
-          summary: true,
-        },
-      }),
+      effectiveStoreIds === null
+        ? this.prisma.businessSnapshotRun.findFirst({
+            where: {
+              tenantId,
+              type: 'REVENUE',
+            },
+            orderBy: { startedAt: 'desc' },
+            select: {
+              status: true,
+              finishedAt: true,
+              periodFrom: true,
+              periodTo: true,
+              sourceCounts: true,
+              summary: true,
+            },
+          })
+        : Promise.resolve(null),
     ]);
 
     const rows = this.buildRevenueDiagnosticsRows(
@@ -1290,14 +1321,35 @@ export class DashboardService {
     );
   }
 
-  private resolveStoreIds(storeIds?: string | string[]) {
-    if (!storeIds) {
-      return [];
+  private resolveStoreIds(
+    storeIds?: string | string[],
+  ): readonly string[] | undefined {
+    if (storeIds === undefined) {
+      return undefined;
     }
 
     const values = Array.isArray(storeIds) ? storeIds : storeIds.split(',');
 
-    return values.map((value) => value.trim()).filter(Boolean);
+    return values.map((value) => value.trim());
+  }
+
+  private productVisibility(
+    storeIds: readonly string[] | null,
+  ): Prisma.ProductWhereInput {
+    if (!storeIds) {
+      return {};
+    }
+
+    const inScope = { in: [...storeIds] };
+
+    return {
+      OR: [
+        { inventorySnapshots: { some: { storeId: inScope } } },
+        { salesFacts: { some: { storeId: inScope } } },
+        { stockMovements: { some: { storeId: inScope } } },
+        { langameClubConfigurations: { some: { storeId: inScope } } },
+      ],
+    };
   }
 
   private resolveDemandPeriod() {

@@ -415,6 +415,20 @@ describe('UsersService AccessScope boundary', () => {
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
+  it('keeps external invite cancellation on the same verified delivery boundary', async () => {
+    const { identityClaimBoundary, prisma, service } = createService({
+      tenantCustomerStage: TenantCustomerStage.PILOT,
+    });
+
+    await expect(
+      service.cancelInvite(networkOwnerActor, 'external-invite'),
+    ).rejects.toThrow(
+      'External tenant invitations require the verified email-delivery workflow',
+    );
+    expect(prisma.userInvite.findFirst).not.toHaveBeenCalled();
+    expect(identityClaimBoundary.releaseInvite).not.toHaveBeenCalled();
+  });
+
   it('keeps every real user email change fail-closed until mailbox verification is available', async () => {
     const target = userRow('employee-a1', 'STORES', ['a1']);
     const { prisma, service } = createService({

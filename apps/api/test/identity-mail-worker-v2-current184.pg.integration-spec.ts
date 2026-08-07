@@ -387,7 +387,7 @@ describePostgres(
         workerRoleName,
         role.roleOid,
       );
-      await repository.assertReady({
+      await repository.assertDiagnosticReady({
         expectedDatabase: disposableDatabase,
         expectedRole: workerRoleName,
         databaseTlsRequired: false,

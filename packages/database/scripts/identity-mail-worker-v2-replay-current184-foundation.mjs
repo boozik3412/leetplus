@@ -50,6 +50,8 @@ const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
   IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_PREDECESSOR,
   IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_CANDIDATE,
   "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+  "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+  "20260805020000_langame_onboarding_staged_receipt_current188",
 ]);
 const EXPECTED_CREATED_ROUTINES = Object.freeze([
   "identity_mail_delivery_event_append_v2",

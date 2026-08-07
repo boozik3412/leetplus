@@ -19,6 +19,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { StrictRoles } from '../auth/strict-roles.decorator';
 import { StrictRolesGuard } from '../auth/strict-roles.guard';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   GuestBonusLedgerService,
   type GuestGameBonusLedgerCancelDto,
@@ -131,7 +132,7 @@ import {
   UserRole.MARKETER,
   UserRole.CLUB_MANAGER,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
 export class GuestGamificationController {
   constructor(
     private readonly gamificationService: GuestGamificationService,

@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.60                                         |
-| Дата             | 02.08.2026                                   |
+| Версия           | 1.73                                         |
+| Дата             | 07.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -47,6 +47,70 @@ enterprise-isolation option и не сокращает shared gates.
 
 ## Канонические документы
 
+Сначала читать:
+[актуальный статус открытого теста на 07.08.2026](./open-beta-current-status-2026-08-07.md) —
+единый вердикт по текущей задаче, release gates, фактическим blockers и пути до
+первого `Tenant B/Store B1`.
+
+Текущая source-синхронизация:
+[canonicalization manifest 07.08.2026](./canonicalization-manifest-2026-08-07.md) —
+исходные SHA, точная staging boundary, exclusions, recovery strategy и место
+для final commit/CI evidence.
+
+0. [Implementation checkpoint 05.08.2026](./implementation-checkpoint-2026-08-05.md) —
+   фактический статус CURRENT186–190, Gate 1MT, неизменность production и
+   строгий остаток до первого `Tenant B/Store B1`.
+   0a. [Gate 1MT pilot HTTP surface](./gate-1mt-pilot-http-surface.md) — полный
+   controller inventory, fresh tenant/store authority, 26 assortment reads,
+   29 assortment mutations, 77 NETWORK-only in-app gamification handlers и
+   точный fail-closed остаток.
+   0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
+   tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
+   PostgreSQL race evidence, dormant bounded runtime/health boundary;
+   noncanonical и route-closed.
+   0b.1. [CURRENT189 dormant route policy](./employee-invite-current189-dormant-route-policy.md) —
+   exact three-route issue/reissue/revoke binding, safe response projection и
+   AST-доказательство, что production UsersController остаётся legacy/BLOCKED.
+   0b.2. [CURRENT189 dormant HTTP/BFF candidate](./employee-invite-current189-http-bff-candidate.md) —
+   exact Nest transport, cookie-backed same-origin Web boundary, bounded safe
+   receipts и доказательство отсутствия module/Route Handler wiring.
+   0c. [CURRENT190 persisted guest session boundary](./guest-portal-current190-persisted-session-boundary.md) —
+   persisted guest JWT lifecycle, tenant/store/media isolation, permanent
+   tenant revoke-all fence, bounded audit-complete batches и lock-freshness
+   evidence; dormant fresh-Platform-Admin revoke orchestrator and all public
+   routes remain closed.
+   0d. [CURRENT190 dormant route policy](./guest-portal-current190-dormant-route-policy.md) —
+   exact 30-handler READ/WRITE/OUTBOUND/PUBLIC_BOOTSTRAP inventory, fail-closed
+   candidate adapter, unregistered persisted-logout/private-media Nest
+   controller, private/no-store media boundary and explicit legacy cutover
+   blocker.
+   0d.1. [CURRENT190 dormant Web BFF candidate](./guest-portal-current190-bff-candidate.md) —
+   exact revoke-before-cookie-clear and tenant-media transport contract,
+   bounded private responses and an explicit proof that no active Route
+   Handler imports it.
+   0e. [CURRENT188 dormant Langame Web BFF candidate](./langame-current188-bff-candidate.md) —
+   exact preview/activate transport и явные blockers для отсутствующих status,
+   reconcile и initial read-only sync contracts.
+   0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
+   fail-closed доказательство несовместимого Prisma order, database guards и
+   unresolved predecessor chain до любого deploy или подключения к БД.
+   0g. [CURRENT180–190 materialization plan](./current180-current190-release-materialization-plan.md) —
+   deny-only двухконтурный план: schema lane с отдельным CURRENT187 admission
+   anchor и изолированный CURRENT187-E evidence lane; assembly/deploy всё ещё
+   запрещены.
+   0h. [CURRENT180–190 immutable refreeze proposal](./current180-current190-release-refreeze-proposal.md) —
+   exact proposal-only anchor, полный byte-level manifest и fail-closed
+   verifier; canonical apply и assembly не разрешены.
+   0i. [CURRENT180–190 in-memory release assembler](./current180-current190-disposable-release-assembler.md) —
+   immutable 179+11 assembly без filesystem write, process spawn, database/network
+   access и без права на runner consumption, deploy или production apply.
+   0j. [CURRENT180–190 disposable PostgreSQL rehearsal](./current180-current190-disposable-postgresql-rehearsal.md) —
+   единый fail-closed runbook для planning contract, полного SQL fingerprint,
+   file-backed coordinator, restart-safe system-temp materialization, signed
+   journal и reviewed runner/runtime. Два финальных локальных PG16.13 цикла
+   приняты с одинаковым source fingerprint, zero target/artifact/journal
+   residue и независимым `P0=0/P1=0`; до canonical promotion и restored-copy
+   rehearsal production DDL и test access запрещены.
 1. [Специальный launch backlog](../../OPEN_BETA_BACKLOG.md) — приоритеты,
    зависимости, Gate 0–3, метрики и последовательность разработки.
 2. [Shared multi-tenant beta profile](./shared-multi-tenant-beta-profile.md) —
@@ -432,12 +496,71 @@ enterprise-isolation option и не сокращает shared gates.
     expiry/revocation возвращает original receipt. Exact SQL SHA-256
     `2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6`;
     foundation `21/21`, branded fixture `3/3`, PostgreSQL 16 `7/7`, CURRENT184
-    regression `3/3`. GUC INSERT fence — только anti-accident. Отдельный
+    regression `3/3`. Exact implementation `0688b6ef...` и inventory
+    compatibility head `23cd1470...` приняты GitHub Actions
+    [`30765750662`](https://github.com/boozik3412/leetplus/actions/runs/30765750662)
+    (`run #92`), все три CI jobs — green. GUC INSERT fence — только
+    anti-accident. Отдельный
     `NOLOGIN` owner, runtime roles/grants/attestation, shared ACL epoch/lock,
     four-TEXT driver, provider mark/complete lost-response,
     producer/activation/backfill, zero-secret/zero-inflight и подписанная
     apply/rollback/zero-diff rehearsal ещё обязательны. Статус:
     `IMPLEMENTED_CANDIDATE / NONCANONICAL / NOT_DEPLOYABLE`.
+47. [CURRENT186 runtime role boundary](./identity-mail-current186-runtime-role-boundary.md) —
+    реализован database-local candidate: `9` definition relations, `13`
+    ACL/ownership relations, `38` ACL objects, `22` owner routines, `21`
+    triggers, `110` constraints и `56` indexes. Support surface содержит `39`
+    column-authority rows на `36` relationOid+attnum-bound columns плюс один
+    helper `EXECUTE`. Owner-only
+    four-TEXT driver, append-only ACL epoch/lock, 39-key epoch payload
+    с 20-key/4-MiB durable before-image sidecar и controller с шестью режимами
+    `check/plan/apply/rollback/attest/emergency` реализованы. Controller требует
+    прямой superuser session exact database-owner OID; rollback ремонтирует
+    только owner-granted/non-grantable ACL pinned duty OID либо PUBLIC и
+    доказывает canonical non-owner semantics, не raw `relacl/proacl` bytes.
+    Exact APPLY
+    lost-response replay и emergency phase 1 с common ACL lock, максимум тремя
+    попытками/terminal `UNCONFIRMED`, terminal `NOLOGIN` и финальной
+    zero-session recheck реализованы. Scope остаётся
+    `CURRENT_DATABASE_ONLY`; cross-database, future creator default privileges,
+    application-role allowlist и production apply имеют false flags. Два
+    независимых PostgreSQL 16 прогона финальных bytes дали `28/28 PASS`
+    (`325.812 s`, `320.49 s`) и residue `0/0/0`; CURRENT185 regression сверяет
+    exact `16` command и `14` unique manifest provenance rows. Статус:
+    `IMPLEMENTED_CANDIDATE / ENGINEERING_ACCEPTED / NONCANONICAL / NOT_DEPLOYABLE`;
+    test access — `NO-GO`.
+48. [CURRENT187 cluster/application admission successor](./identity-mail-current187-cluster-application-admission.md) —
+    обязательный successor. Первые deny-only slices реализованы: separate-purpose
+    authority, [pure exhaustive planner](./identity-mail-current187-cluster-inventory-planner.md),
+    [read-only multi-DB acquisition](./identity-mail-current187-read-only-cluster-acquisition.md)
+    и [independent signed DDL-fence attestation](./identity-mail-current187-independent-ddl-fence-attestation.md).
+    [Persisted consumption/revocation ledger](./identity-mail-current187-persisted-ddl-fence-ledger.md)
+    закрывает exact replay, revoke/expiry races и least-privilege ACL как
+    `25/25` + PostgreSQL `1/1`; fresh-after-lock SQL pin —
+    `dd5f4db5aecef2c537251bc5262063c1012a1383aec0d0137e7d8b9536f8bb63`.
+    Production roots остаются frozen-empty. Дальше требуются post-Green
+    production root enrollment и отдельный deployment GO, actual
+    LOGIN/HBA/pooler/service mapping,
+    application/migration/creator role name+OID, exact current/default ACL,
+    host-side fence executor, hostile second-DB matrix,
+    rollback/emergency/zero-diff и зависимости от
+    provider mark/complete recovery и outbound kill-switch. Он также не снимает
+    отдельный CURRENT186/follow-up gate полного definition coverage для
+    `pg_attribute`, column defaults и RLS policies. Статус:
+    `IN PROGRESS / DENY-ONLY / NONCANONICAL / NOT_DEPLOYABLE`. Любой CURRENT187 receipt имеет
+    `testAccessAuthorized=false`; после Engineering Green всё ещё обязательны
+    production enrollment/deploy GO, protected OWNER workflow, полный
+    AccessScope/module scope, Gate 1MT, Gate 2, canary и отдельный post-green
+    `SHARED BETA GO`. Production остаётся `CURRENT179/179`; четыре текущих
+    клуба одной сети и внешний тестер не изменены.
+49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
+    единый acceptance contract для at-most-one SMTP invocation на durable
+    attempt, provider mark/complete lost-response, ambiguous-result quarantine,
+    global/tenant kill-drain и zero-secret-bearing/zero-process-inflight
+    evidence. Deterministic actual-service + CURRENT184-adapter + strict-SMTP
+    harness принят как `ENGINEERING_ACCEPTED / DORMANT`; обычный candidate
+    `assertReady` остаётся fail-closed `NOT_DEPLOYABLE`. Это не доказывает
+    exactly-once SMTP delivery и не меняет production/shared-beta `NO-GO`.
 
 Текущий engineering-accepted schema target — `CURRENT_179`;
 `CURRENT_176` остаётся его отдельно доказанным immutable identity-mail
@@ -448,12 +571,14 @@ Merge evidence SHA `9b2f82b2cfdd41b05bf67e71e48df6cdc3e0fda2`, CI
 
 Неканонические candidates и application boundaries не повышают target до
 `CURRENT_180`, `CURRENT_181`, `CURRENT_182`, `CURRENT_183`, `CURRENT_184` или
-`CURRENT185`.
+`CURRENT185`, `CURRENT186` или `CURRENT187`.
 Promotion запрещён до единого release с worker v2/runtime attestation,
 producer/worker tenant advisory lock, `DRAINING` zero-secret barrier,
-независимо подписанным apply/rollback/zero-diff, production-like
-rehearsal и отдельным `SHARED BETA GO`. Historical `004J/CURRENT179`
-evidence остаётся неизменным.
+CURRENT187 cluster/application admission, provider mark/complete
+lost-response recovery, outbound kill-switch, независимо подписанным
+apply/rollback/zero-diff, production-like rehearsal, protected OWNER workflow,
+полным AccessScope/module scope, Gate 1MT/Gate 2 и отдельным post-green
+`SHARED BETA GO`. Historical `004J/CURRENT179` evidence остаётся неизменным.
 
 Historical 004I implementation `2540088076997ef228cd68e42165e857575aad86`,
 final accepted evidence head

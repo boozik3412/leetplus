@@ -1,7 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { DashboardService, type DashboardPeriod } from './dashboard.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import type { AuthenticatedUser } from '../auth/auth.types';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 type DashboardPrismaMock = {
   tenant: {
@@ -49,8 +50,8 @@ type DashboardPrismaMock = {
   };
 };
 
-type TenantContextMock = {
-  resolve: jest.Mock;
+type FreshStoreScopeMock = {
+  resolveRequestedStoreIds: jest.Mock;
 };
 
 type SalesFactFindManyCall = [
@@ -169,16 +170,33 @@ function createPrismaMock(): DashboardPrismaMock {
 
 describe('DashboardService', () => {
   let prisma: DashboardPrismaMock;
-  let tenantContext: TenantContextMock;
+  let freshStoreScope: FreshStoreScopeMock;
   let service: DashboardService;
+  const user = {
+    id: 'user-1',
+    tenantId: 'tenant-demo',
+    tenantSlug: 'demo',
+    isPlatformAdmin: false,
+    accessScope: 'NETWORK',
+    allowedStoreIds: [],
+  } as AuthenticatedUser;
 
   beforeEach(() => {
     prisma = createPrismaMock();
-    tenantContext = {
-      resolve: jest.fn().mockResolvedValue({
-        tenantId: 'tenant-demo',
-        tenantSlug: 'demo',
-      }),
+    freshStoreScope = {
+      resolveRequestedStoreIds: jest
+        .fn()
+        .mockImplementation(
+          (_user: AuthenticatedUser, requested?: readonly string[]) =>
+            Promise.resolve({
+              userId: 'user-1',
+              tenantId: 'tenant-demo',
+              tenantSlug: 'demo',
+              mode: 'NETWORK',
+              allowedStoreIds: [],
+              effectiveStoreIds: requested ?? null,
+            }),
+        ),
     };
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'Demo Cyber Club',
@@ -197,7 +215,7 @@ describe('DashboardService', () => {
     prisma.businessSnapshotRun.findFirst.mockResolvedValue(null);
     service = new DashboardService(
       prisma as unknown as PrismaService,
-      tenantContext as unknown as TenantContextService,
+      freshStoreScope as unknown as FreshStoreScopeService,
     );
   });
 
@@ -302,7 +320,7 @@ describe('DashboardService', () => {
       },
     ]);
 
-    const summary = await service.getSummary(undefined, { period: 'day' });
+    const summary = await service.getSummary(user, { period: 'day' });
 
     expect(summary).toMatchObject({
       tenantId: 'tenant-demo',
@@ -363,7 +381,10 @@ describe('DashboardService', () => {
       },
     ]);
 
-    expect(tenantContext.resolve).toHaveBeenCalledWith(undefined);
+    expect(freshStoreScope.resolveRequestedStoreIds).toHaveBeenCalledWith(
+      user,
+      undefined,
+    );
     expect(prisma.product.count).toHaveBeenNthCalledWith(1, {
       where: { tenantId: 'tenant-demo' },
     });
@@ -378,7 +399,7 @@ describe('DashboardService', () => {
   it('returns zero averages when tenant has no products', async () => {
     mockEmptyDashboardData();
 
-    const summary = await service.getSummary();
+    const summary = await service.getSummary(user);
 
     expect(summary).toMatchObject({
       averageMarginPercent: 0,
@@ -387,6 +408,31 @@ describe('DashboardService', () => {
       topSkuByRevenue: [],
     });
     expect(summary.salesTrend).toHaveLength(8);
+  });
+
+  it('uses the fresh club-owner allow-list and never reads network snapshots', async () => {
+    mockEmptyDashboardData();
+    freshStoreScope.resolveRequestedStoreIds.mockResolvedValueOnce({
+      userId: 'user-1',
+      tenantId: 'tenant-demo',
+      tenantSlug: 'demo',
+      mode: 'STORES',
+      allowedStoreIds: ['store-1'],
+      effectiveStoreIds: ['store-1'],
+    });
+
+    const summary = await service.getSummary(user, { period: 'day' });
+
+    expect(summary.selectedStoreIds).toEqual(['store-1']);
+    expect(prisma.store.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: 'tenant-demo', id: { in: ['store-1'] } },
+      }),
+    );
+    for (const [query] of prisma.salesFact.findMany.mock.calls) {
+      expect(query.where.storeId).toEqual({ in: ['store-1'] });
+    }
+    expect(prisma.businessSnapshotRun.findFirst).not.toHaveBeenCalled();
   });
 
   it('compares the latest full day with the previous 30 full-day average', async () => {
@@ -414,7 +460,7 @@ describe('DashboardService', () => {
         ])
         .mockResolvedValueOnce([]);
 
-      const summary = await service.getSummary(undefined, {
+      const summary = await service.getSummary(user, {
         period: 'full-day',
       });
 
@@ -479,7 +525,7 @@ describe('DashboardService', () => {
         },
       ]);
 
-    const summary = await service.getSummary(undefined, { period: 'day' });
+    const summary = await service.getSummary(user, { period: 'day' });
 
     expect(summary.adjustedGrossProfit).toBe(450);
     expect(summary.previousAdjustedGrossProfit).toBe(250);
@@ -533,7 +579,7 @@ describe('DashboardService', () => {
       },
     ]);
 
-    const summary = await service.getSummary();
+    const summary = await service.getSummary(user);
 
     expect(summary.totalRevenue).toBe(0);
     expect(summary.clubRevenue).toBe(57200);
@@ -616,7 +662,7 @@ describe('DashboardService', () => {
       },
     ]);
 
-    const diagnostics = await service.getRevenueDiagnostics(undefined, {
+    const diagnostics = await service.getRevenueDiagnostics(user, {
       period: 'full-day',
     });
 
@@ -669,7 +715,7 @@ describe('DashboardService', () => {
       try {
         mockEmptyDashboardData();
 
-        const summary = await service.getSummary(undefined, { period });
+        const summary = await service.getSummary(user, { period });
 
         expect(summary.salesTrend.map((segment) => segment.label)).toEqual(
           labels,
@@ -748,7 +794,7 @@ describe('DashboardService', () => {
       ]);
       prisma.stockMovement.findMany.mockResolvedValue([]);
 
-      const summary = await service.getSummary(undefined, { period: 'day' });
+      const summary = await service.getSummary(user, { period: 'day' });
 
       expect(summary.totalRevenue).toBe(300);
       expect(summary.soldQuantity).toBe(3);

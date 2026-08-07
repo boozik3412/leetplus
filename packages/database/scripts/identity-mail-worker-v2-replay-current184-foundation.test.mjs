@@ -30,6 +30,8 @@ const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
   "20260802010000_identity_mail_worker_v2_freshness_protocol",
   IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_CANDIDATE,
   "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+  "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+  "20260805020000_langame_onboarding_staged_receipt_current188",
 ]);
 
 async function source() {
@@ -54,7 +56,7 @@ function repinMetadata(metadataText, sql) {
   return JSON.stringify(metadata);
 }
 
-test("accepts CURRENT184 only with the exact ordered CURRENT180..CURRENT185 inventory", async () => {
+test("accepts CURRENT184 only with the exact ordered CURRENT180..CURRENT188 inventory", async () => {
   const report = await checkIdentityMailWorkerV2ReplayCurrent184Foundation();
   assert.equal(report.contract, IDENTITY_MAIL_WORKER_V2_REPLAY_CURRENT184_CONTRACT);
   assert.equal(report.decision, "CURRENT184_FOUNDATION_COMPLIANT");
@@ -415,7 +417,7 @@ test("rejects metadata authorization", async () => {
   await expectFinding({ metadataText: JSON.stringify(metadata) }, F.METADATA_DRIFT);
 });
 
-test("rejects a missing CURRENT185 inventory head", async () => {
+test("rejects a missing CURRENT188 inventory head", async () => {
   await expectFinding(
     {
       candidateDirectories: EXPECTED_CANDIDATE_DIRECTORIES.slice(0, -1),
@@ -424,7 +426,7 @@ test("rejects a missing CURRENT185 inventory head", async () => {
   );
 });
 
-test("rejects reordered exact CURRENT184/CURRENT185 inventory", async () => {
+test("rejects reordered exact CURRENT185/CURRENT186 inventory", async () => {
   await expectFinding(
     {
       candidateDirectories: [
@@ -437,12 +439,12 @@ test("rejects reordered exact CURRENT184/CURRENT185 inventory", async () => {
   );
 });
 
-test("rejects an unknown successor after CURRENT185", async () => {
+test("rejects an unknown successor after CURRENT188", async () => {
   await expectFinding(
     {
       candidateDirectories: [
         ...EXPECTED_CANDIDATE_DIRECTORIES,
-        "20260803010000_unknown_successor",
+        "20260805030000_unknown_successor",
       ],
     },
     F.CANDIDATE_CHAIN_DRIFT,

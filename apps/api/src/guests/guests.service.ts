@@ -2048,7 +2048,7 @@ export class GuestsService {
       ? await this.resolveCrmTaskAssignee(tenantId, dto.assignedToUserId)
       : undefined;
     const row = await this.prisma.guestCrmTask.update({
-      where: { id },
+      where: { id, tenantId },
       data: {
         status,
         ...(shouldUpdateAssignee ? { assignedToUserId } : {}),

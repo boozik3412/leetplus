@@ -37,6 +37,9 @@ describe('CategoriesService', () => {
     const service = new CategoriesService(
       prisma as never,
       tenantContextService as never,
+      {
+        assertNetwork: jest.fn().mockResolvedValue({ tenantId: 'tenant-1' }),
+      } as never,
     );
 
     const result = await service.merge(
@@ -57,6 +60,7 @@ describe('CategoriesService', () => {
       productsUpdated: 174,
       mappingsUpdated: 1,
     });
+    expect(tenantContextService.resolve).toHaveBeenCalledTimes(1);
     expect(transaction.product.updateMany).toHaveBeenCalledWith({
       where: {
         tenantId: 'tenant-1',

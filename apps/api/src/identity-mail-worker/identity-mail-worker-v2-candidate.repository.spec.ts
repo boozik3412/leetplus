@@ -360,10 +360,25 @@ describe('PrismaIdentityMailWorkerV2CandidateRepository', () => {
     const { prisma, repository } = harness();
     prisma.rpcQueryRaw.mockResolvedValueOnce([{ result: readinessReceipt() }]);
 
-    await repository.assertReady(readinessInput());
+    await expect(
+      repository.assertReady(readinessInput()),
+    ).rejects.toMatchObject({
+      reasonCode: 'IDENTITY_MAIL_WORKER_V2_CANDIDATE_NOT_DEPLOYABLE',
+    });
 
     expectTenantEnvelope(prisma, 'identity_mail_delivery_worker_assert_v2');
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes diagnostic readiness without granting service send authority', async () => {
+    const { prisma, repository } = harness();
+    prisma.rpcQueryRaw.mockResolvedValueOnce([{ result: readinessReceipt() }]);
+
+    await expect(
+      repository.assertDiagnosticReady(readinessInput()),
+    ).resolves.toBeUndefined();
+
+    expectTenantEnvelope(prisma, 'identity_mail_delivery_worker_assert_v2');
   });
 
   it('parses the exact claim authority binding and keeps tenantId first', async () => {

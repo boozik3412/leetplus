@@ -259,6 +259,9 @@ describe('RolesGuard', () => {
   it.each([
     ['GET', '/integrations/langame/settings'],
     ['PUT', '/integrations/langame/settings'],
+    ['POST', '/integrations/langame/settings/preview'],
+    ['POST', '/integrations/langame/onboarding/preview'],
+    ['POST', '/integrations/langame/onboarding/activate'],
     ['GET', '/integrations/langame/routes-diagnostics'],
     ['GET', '/integrations/langame/service-diagnostics'],
     ['POST', '/integrations/langame/endpoint-profile-diagnostics'],
@@ -1002,14 +1005,87 @@ describe('RolesGuard', () => {
     ).toBe(true);
   });
 
-  it('keeps CRM contact tasks behind guest access', () => {
+  it.each([
+    '/guests/crm/tasks',
+    '/guests/crm/tasks/report',
+    '/guests/crm/tasks/export',
+    '/guests/crm/users',
+    '/guests/crm/contact-events',
+  ])('maps bounded CRM contact-task read %s to communications only', (path) => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path,
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_communications'],
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path,
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_guests'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it.each([
+    ['POST', '/guests/crm/tasks'],
+    ['POST', '/guests/crm/contact-events'],
+    ['PATCH', '/guests/crm/tasks/task-1'],
+  ])(
+    'maps bounded CRM contact-task write %s %s to communications management only',
+    (method, path) => {
+      reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method,
+            path,
+            user: {
+              role: UserRole.CLUB_ADMINISTRATOR,
+              permissions: ['manage_communications'],
+            },
+          }),
+        ),
+      ).toBe(true);
+
+      expect(() =>
+        guard.canActivate(
+          createContext({
+            method,
+            path,
+            user: {
+              role: UserRole.CLUB_ADMINISTRATOR,
+              permissions: ['manage_guest_crm'],
+            },
+          }),
+        ),
+      ).toThrow(ForbiddenException);
+    },
+  );
+
+  it('keeps broad guest CRM outside the communications capability', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 
     expect(() =>
       guard.canActivate(
         createContext({
           method: 'GET',
-          path: '/guests/crm/tasks',
+          path: '/guests/crm/leads',
           user: {
             role: UserRole.CLUB_ADMINISTRATOR,
             permissions: ['view_communications'],

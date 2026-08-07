@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "contract": "CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_V2",
+  "status": "IN_MEMORY_ASSEMBLY_ONLY",
+  "source": {
+    "refreezeManifestContract": "CURRENT180_CURRENT190_RELEASE_REFREEZE_MANIFEST_V1",
+    "refreezeManifestSha256": "184d1cfb46b1443a8487329382fdf2937656a8dd3ac15cbddad617009cefda98",
+    "materializationPlanDigest": "fb2582650a839a8fbe637fadfc671a680e0d944d6c96b9d9831c0c985cec721d",
+    "frozenSourceBytesMayChange": false,
+    "frozenSourceSqlTransformation": "BYTE_EXACT_COPY_ONLY"
+  },
+  "canonicalBase": {
+    "count": 179,
+    "head": "20260731120000_identity_mail_delivery_release_head",
+    "headChecksum": "c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519",
+    "manifestDigest": "3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431",
+    "migrationLockSha256": "99836963713b4f5b269ad49af0ed3d7b0b2e336115c2f92dc9ac683d139d0900",
+    "artifactLineEndings": "LF",
+    "sourceLineEndingNormalization": "CRLF_OR_LF_TO_LF"
+  },
+  "artifact": {
+    "migrationCount": 190,
+    "head": "20260805040000_guest_portal_session_current190",
+    "headChecksum": "d23c0e8fbdfddd0eb9ec7a73d877e7bbcde8c170683247a66f43530cca3867d5",
+    "migrationManifestDigest": "61c9de5adc0e4673c6eedb69d7d8f42933fc075398fa0ecf1cb2e2ff365e4f55",
+    "layout": "IN_MEMORY_PRISMA_MIGRATIONS_V1",
+    "schemaEntry": "schema.prisma",
+    "migrationLockEntry": "migrations/migration_lock.toml",
+    "entryContentEncoding": "UTF8_TEXT_LF",
+    "canonicalSourceLineEndingNormalization": "CONSISTENT_CRLF_OR_LF_TO_LF",
+    "frozenSourceSqlTransformation": "BYTE_EXACT_COPY_ONLY"
+  },
+  "assemblyBoundary": {
+    "outputKind": "FROZEN_IN_MEMORY_UTF8_TEXT",
+    "callerSuppliedOutputPathAccepted": false,
+    "filesystemWriteAllowed": false,
+    "filesystemCleanupAllowed": false,
+    "databaseConnectionAllowed": false,
+    "processSpawnAllowed": false,
+    "networkCallAllowed": false,
+    "immutableResultRequired": true,
+    "repositorySourceProvenanceRequired": true,
+    "transitiveInspectorSourcePinRequired": true
+  },
+  "authorization": {
+    "canInspectFrozenRepositorySources": true,
+    "canAssembleInMemoryArtifact": true,
+    "canMaterializeDisposableTempArtifact": false,
+    "canCleanupOwnedDisposableTempArtifact": false,
+    "canApplyDatabase": false,
+    "canConnectDatabase": false,
+    "canSpawnProcess": false,
+    "canCallNetwork": false,
+    "canCallExternalProviders": false,
+    "canProvisionRoles": false,
+    "canMutateGrants": false,
+    "canActivateRoutes": false,
+    "canMutateCanonicalMigrations": false,
+    "canMutateMigrationCandidates": false,
+    "canMutateReleaseProposals": false,
+    "canMutateProduction": false,
+    "canDeploy": false,
+    "canResolveMigration": false,
+    "productionApplyAuthorized": false
+  },
+  "schemaLane": [
+    {
+      "ordinal": 180,
+      "targetDirectory": "20260801010000_identity_mail_tenant_enrollment_control_plane",
+      "sourceDirectory": "packages/database/migration-candidates/20260801010000_identity_mail_tenant_enrollment_control_plane",
+      "migrationSqlSha256": "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683"
+    },
+    {
+      "ordinal": 181,
+      "targetDirectory": "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+      "sourceDirectory": "packages/database/migration-candidates/20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+      "migrationSqlSha256": "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac"
+    },
+    {
+      "ordinal": 182,
+      "targetDirectory": "20260801030000_identity_mail_tenant_first_claim_protocol",
+      "sourceDirectory": "packages/database/migration-candidates/20260801030000_identity_mail_tenant_first_claim_protocol",
+      "migrationSqlSha256": "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf"
+    },
+    {
+      "ordinal": 183,
+      "targetDirectory": "20260802010000_identity_mail_worker_v2_freshness_protocol",
+      "sourceDirectory": "packages/database/migration-candidates/20260802010000_identity_mail_worker_v2_freshness_protocol",
+      "migrationSqlSha256": "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0"
+    },
+    {
+      "ordinal": 184,
+      "targetDirectory": "20260802020000_identity_mail_worker_v2_lost_response_replay",
+      "sourceDirectory": "packages/database/migration-candidates/20260802020000_identity_mail_worker_v2_lost_response_replay",
+      "migrationSqlSha256": "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424"
+    },
+    {
+      "ordinal": 185,
+      "targetDirectory": "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+      "sourceDirectory": "packages/database/migration-candidates/20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+      "migrationSqlSha256": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6"
+    },
+    {
+      "ordinal": 186,
+      "targetDirectory": "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+      "sourceDirectory": "packages/database/migration-candidates/20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+      "migrationSqlSha256": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4"
+    },
+    {
+      "ordinal": 187,
+      "targetDirectory": "20260805010000_identity_mail_cluster_application_admission_current187",
+      "sourceDirectory": "packages/database/release-proposals/current180-current190/20260805010000_identity_mail_cluster_application_admission_current187",
+      "migrationSqlSha256": "dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3"
+    },
+    {
+      "ordinal": 188,
+      "targetDirectory": "20260805020000_langame_onboarding_staged_receipt_current188",
+      "sourceDirectory": "packages/database/migration-candidates/20260805020000_langame_onboarding_staged_receipt_current188",
+      "migrationSqlSha256": "e76ed2c1b7e913bbfa9a9779cd0c860b120534c83eba504a0510469ff26f0c60"
+    },
+    {
+      "ordinal": 189,
+      "targetDirectory": "20260805030000_identity_employee_invite_mail_boundary_current189",
+      "sourceDirectory": "packages/database/migration-candidates/20260805030000_identity_employee_invite_mail_boundary_current189",
+      "migrationSqlSha256": "4bbf4d49847b82731aa2e235796b4b1a898914768c1f4f4e2cb7a8b084e5c751"
+    },
+    {
+      "ordinal": 190,
+      "targetDirectory": "20260805040000_guest_portal_session_current190",
+      "sourceDirectory": "packages/database/migration-candidates/20260805040000_guest_portal_session_current190",
+      "migrationSqlSha256": "d23c0e8fbdfddd0eb9ec7a73d877e7bbcde8c170683247a66f43530cca3867d5"
+    }
+  ],
+  "excludedAuxiliaryEvidenceLane": {
+    "ordinal": 187,
+    "targetDirectory": "20260805050000_identity_mail_ddl_fence_ledger_current187",
+    "contract": "CURRENT187_DDL_FENCE_LEDGER_SYNTHETIC_CI_V1",
+    "mustNeverEnterSchemaLane": true,
+    "databaseBoundary": "SEPARATE_LP_C187E_LOOPBACK_CI_ONLY"
+  }
+}

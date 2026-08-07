@@ -184,6 +184,73 @@ jobs:
       - name: Validate dormant non-canonical CURRENT185 enrollment evidence ledger foundation
         run: pnpm --filter database check:identity-mail-enrollment-evidence-ledger-current185-foundation
 
+      - name: Validate dormant non-canonical CURRENT186 duty-role runtime foundation
+        run: pnpm --filter database check:identity-mail-duty-role-current186-foundation
+
+      - name: Validate CURRENT186 exhaustive duty-role catalog
+        run: pnpm --filter database check:identity-mail-duty-role-catalog-current186
+
+      - name: Validate CURRENT186 privileged deployment controller
+        run: pnpm --filter database check:identity-mail-duty-role-deployment-current186
+
+      - name: Validate independent CURRENT186 runtime-role attestation
+        run: pnpm --filter database check:identity-mail-duty-role-runtime-attestation-v2
+
+      - name: Validate CURRENT187 pre-Green cluster/application authority contract
+        run: pnpm --filter database check:identity-mail-cluster-application-admission-current187-authority
+
+      - name: Validate CURRENT187 pure cluster inventory planner
+        run: pnpm --filter database check:identity-mail-cluster-inventory-current187-planner
+
+      - name: Validate CURRENT187 read-only cluster acquisition adapter
+        run: pnpm --filter database check:identity-mail-cluster-acquisition-current187
+        env:
+          NODE_ENV: test
+
+      - name: Validate CURRENT187 independent technical DDL-fence attestor
+        run: pnpm --filter database check:identity-mail-ddl-fence-attestation-current187
+        env:
+          NODE_ENV: test
+
+      - name: Validate CURRENT187 persisted DDL-fence consumption and revocation ledger
+        run: pnpm --filter database check:identity-mail-ddl-fence-ledger-current187
+        env:
+          NODE_ENV: test
+
+      - name: Validate dormant CURRENT188 Langame onboarding receipt contract
+        run: pnpm --filter database check:langame-onboarding-staged-receipt-current188
+
+      - name: Validate dormant CURRENT189 employee invitation contract
+        run: pnpm --filter database check:identity-employee-invite-mail-current189
+
+      - name: Validate dormant CURRENT190 persisted guest session contract
+        run: pnpm --filter database check:guest-portal-session-current190
+
+      - name: Prove CURRENT180-CURRENT190 release rehearsal remains fail-closed
+        run: pnpm --filter database check:current180-current190-release-rehearsal-blocker
+        env:
+          NODE_ENV: test
+
+      - name: Validate deny-only CURRENT180-CURRENT190 materialization plan
+        run: pnpm --filter database check:current180-current190-release-materialization-planner
+        env:
+          NODE_ENV: test
+
+      - name: Verify immutable CURRENT180-CURRENT190 refreeze proposal
+        run: pnpm --filter database check:current180-current190-release-refreeze-manifest
+        env:
+          NODE_ENV: test
+
+      - name: Assemble and verify frozen CURRENT180-CURRENT190 release in memory
+        run: pnpm --filter database check:current180-current190-disposable-release-assembler
+        env:
+          NODE_ENV: test
+
+      - name: Validate fail-closed CURRENT180-CURRENT190 disposable PostgreSQL rehearsal
+        run: pnpm --filter database check:current180-current190-disposable-postgresql-rehearsal
+        env:
+          NODE_ENV: test
+
       - name: Validate CURRENT182 disposable rehearsal harness
         run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-smoke
 
@@ -263,14 +330,89 @@ jobs:
       - name: Lint identity-mail PostgreSQL acceptance seams
         run: pnpm --filter api lint:ci:identity-mail-worker-pg
 
+      - name: Lint Langame staged onboarding boundary
+        run: pnpm --filter api lint:ci:langame-onboarding
+
+      - name: Lint CURRENT189 employee invitation boundary
+        run: pnpm --filter api lint:ci:employee-invite-current189
+
+      - name: Lint dormant CURRENT189 employee invitation route policy
+        run: pnpm --filter api lint:ci:employee-invite-current189-route-policy
+
+      - name: Lint dormant CURRENT189 employee invitation HTTP candidate
+        run: pnpm --filter api lint:ci:employee-invite-current189-http-candidate
+
+      - name: Lint dormant CURRENT189 employee invitation worker
+        run: pnpm --filter api lint:ci:employee-invite-worker-current189
+
+      - name: Lint dormant CURRENT189 employee invitation runtime
+        run: pnpm --filter api lint:ci:employee-invite-runtime-current189
+
+      - name: Lint CURRENT190 persisted guest session boundary
+        run: pnpm --filter api lint:ci:guest-portal-current190
+
+      - name: Lint dormant CURRENT190 application route policy
+        run: pnpm --filter api lint:ci:guest-portal-current190-route-policy
+
+      - name: Lint dormant CURRENT190 application controller
+        run: pnpm --filter api lint:ci:guest-portal-current190-application
+
+      - name: Lint Gate 1MT pilot HTTP and fresh store-scope boundary
+        run: pnpm --filter api lint:ci:pilot-http-surface
+
+      - name: Lint Gate 1MT team-chat PostgreSQL matrix
+        run: pnpm --filter api lint:ci:pilot-team-chat-pg
+
+      - name: Lint Gate 1MT CRM communications boundary
+        run: pnpm --filter api lint:ci:pilot-crm-communications
+
+      - name: Lint Gate 1MT CRM communications PostgreSQL matrix
+        run: pnpm --filter api lint:ci:pilot-crm-communications-pg
+
       - name: Test isolated design-partner runtime boundary
         run: pnpm --filter api test:ci:design-partner
 
       - name: Test identity-mail worker and SENT boundary
         run: pnpm --filter api test:ci:identity-mail-worker
 
+      - name: Test dormant CURRENT184 provider lost-response boundary
+        run: pnpm --filter api test:ci:identity-mail-provider-boundary
+
+      - name: Test dormant CURRENT188 Langame onboarding adapter
+        run: pnpm --filter api test:ci:langame-onboarding
+
+      - name: Test dormant CURRENT189 employee invitation boundary
+        run: pnpm --filter api test:ci:employee-invite-current189
+
+      - name: Test dormant CURRENT189 employee invitation route policy
+        run: pnpm --filter api test:ci:employee-invite-current189-route-policy
+
+      - name: Test dormant CURRENT189 employee invitation HTTP candidate
+        run: pnpm --filter api test:ci:employee-invite-current189-http-candidate
+
+      - name: Test dormant CURRENT189 employee invitation worker
+        run: pnpm --filter api test:ci:employee-invite-worker-current189
+
+      - name: Test dormant CURRENT189 employee invitation runtime
+        run: pnpm --filter api test:ci:employee-invite-runtime-current189
+
+      - name: Test dormant CURRENT190 persisted guest session boundary
+        run: pnpm --filter api test:ci:guest-portal-current190
+
+      - name: Test dormant CURRENT190 application route policy
+        run: pnpm --filter api test:ci:guest-portal-current190-route-policy
+
+      - name: Test dormant CURRENT190 application controller
+        run: pnpm --filter api test:ci:guest-portal-current190-application
+
       - name: Run focused API security tests
         run: pnpm --filter api test:ci:focused
+
+      - name: Test Gate 1MT pilot HTTP and fresh store-scope boundary
+        run: pnpm --filter api test:ci:pilot-http-surface
+
+      - name: Test Gate 1MT CRM communications boundary
+        run: pnpm --filter api test:ci:pilot-crm-communications
 
       - name: Verify invite secret transport routes
         run: pnpm --filter api test:e2e:invite-secret-transport
@@ -314,6 +456,24 @@ jobs:
 
       - name: Test web invite secret transport
         run: pnpm --filter web test:invite-secret-transport
+
+      - name: Test pilot BFF authentication and cache boundary
+        run: pnpm --filter web test:pilot-bff-boundary
+
+      - name: Test reproducible web build boundary
+        run: pnpm --filter web test:release-build-boundary
+
+      - name: Test guest session HttpOnly transport boundary
+        run: pnpm --filter web test:guest-session-transport
+
+      - name: Test dormant CURRENT190 Web BFF cutover candidate
+        run: pnpm --filter web test:guest-session-current190-bff-candidate
+
+      - name: Test dormant CURRENT188 Langame Web BFF candidate
+        run: pnpm --filter web test:langame-current188-bff-candidate
+
+      - name: Test dormant CURRENT189 employee invitation Web BFF candidate
+        run: pnpm --filter web test:employee-invite-current189-bff-candidate
 
       - name: Lint web
         run: pnpm --filter web lint
@@ -504,6 +664,25 @@ jobs:
           NODE_ENV: test
           IDENTITY_MAIL_ENROLLMENT_EVIDENCE_CURRENT185_PG_E2E_CONFIRM: run-identity-mail-enrollment-evidence-current185-postgres-e2e
 
+      - name: Verify CURRENT186 duty-role controller, ACL and lifecycle semantics
+        run: pnpm --filter api test:integration:identity-mail-duty-role-current186:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_DUTY_ROLE_CURRENT186_PG_E2E_CONFIRM: run-identity-mail-duty-role-current186-postgres-e2e
+          IDENTITY_MAIL_DUTY_ROLE_CURRENT186_PG_PROFILE: github-actions-ci
+
+      - name: Verify CURRENT187 read-only multi-database catalog acquisition
+        run: pnpm --filter database test:integration:identity-mail-cluster-acquisition-current187:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_CLUSTER_ACQUISITION_CURRENT187_PG_E2E_CONFIRM: run-current187-read-only-cluster-acquisition-postgres-e2e
+
+      - name: Verify CURRENT187 persisted DDL-fence ledger ACL, replay, expiry and revocation races
+        run: pnpm --filter database test:integration:identity-mail-ddl-fence-ledger-current187:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_DDL_FENCE_LEDGER_CURRENT187_PG_E2E_CONFIRM: run-current187e-ddl-fence-ledger-postgres-e2e
+
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg
         env:
@@ -585,6 +764,22 @@ jobs:
         env:
           STAFF_TASK_SECURITY_PG_CONFIRM: run-staff-task-security-postgres-fixtures
           STAFF_TASK_RECURRING_PG_CONFIRM: run-staff-task-recurring-postgres-fixtures
+
+      - name: Verify Gate 1MT assortment tenant and store isolation with PostgreSQL
+        run: pnpm --filter api test:integration:pilot-assortment-store-scope:pg
+        env:
+          PILOT_ASSORTMENT_SCOPE_PG_CONFIRM: run-pilot-assortment-store-scope-postgres-fixtures
+
+      - name: Verify Gate 1MT team-chat tenant and store isolation with PostgreSQL
+        run: pnpm --filter api test:integration:pilot-team-chat-fresh-scope:pg
+        env:
+          PILOT_TEAM_CHAT_SCOPE_PG_CONFIRM: run-pilot-team-chat-fresh-scope-postgres-fixtures
+
+      - name: Verify Gate 1MT CRM communications tenant isolation with PostgreSQL
+        run: pnpm --filter api test:integration:pilot-crm-communications:pg
+        env:
+          NODE_ENV: test
+          PILOT_CRM_COMMUNICATIONS_PG_CONFIRM: run-pilot-crm-communications-postgres-fixtures
 
       - name: Run read-only attachment inventory
         run: pnpm --filter database db:inventory:attachment-acl

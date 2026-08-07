@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import type { CreateSupplierDto, UpdateSupplierDto } from './suppliers.dto';
 
 @Injectable()
@@ -15,10 +16,11 @@ export class SuppliersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
-  async findAll(user?: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+  async findAll(user: AuthenticatedUser) {
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
 
     return this.prisma.supplier.findMany({
       where: { tenantId },
@@ -34,6 +36,7 @@ export class SuppliersService {
   }
 
   async create(dto: CreateSupplierDto, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const data = this.normalizeData(dto);
     const name = this.normalizeName(dto.name);
@@ -53,6 +56,7 @@ export class SuppliersService {
   }
 
   async update(id: string, dto: UpdateSupplierDto, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
     const data = this.normalizeData(dto);
@@ -69,6 +73,7 @@ export class SuppliersService {
   }
 
   async archive(id: string, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
 

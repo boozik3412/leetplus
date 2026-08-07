@@ -207,6 +207,35 @@ export interface IdentityMailWorkerLogger {
   error(event: IdentityMailWorkerLogEvent): void;
 }
 
+export type IdentityMailWorkerExecutionMode = 'ACTIVE' | 'DRAINING' | 'KILLED';
+
+export type IdentityMailWorkerExecutionBoundary =
+  | 'BEFORE_CYCLE'
+  | 'BEFORE_TENANT_READINESS'
+  | 'BEFORE_SMTP_VERIFY'
+  | 'BEFORE_REAP'
+  | 'BEFORE_CLAIM'
+  | 'AFTER_CLAIM'
+  | 'BEFORE_PROVIDER_MARK'
+  | 'AFTER_PROVIDER_MARK'
+  | 'AFTER_SMTP_ACCEPTED';
+
+export type IdentityMailWorkerExecutionContext = {
+  readonly boundary: IdentityMailWorkerExecutionBoundary;
+  readonly tenantId: string | null;
+  readonly outboxId?: string;
+};
+
+/**
+ * Dormant control seam for deterministic acceptance and a future signed
+ * runtime policy. The production CLI deliberately does not construct one.
+ */
+export interface IdentityMailWorkerExecutionControl {
+  modeAt(
+    context: IdentityMailWorkerExecutionContext,
+  ): IdentityMailWorkerExecutionMode;
+}
+
 export type IdentityMailWorkerRunResult = {
   claimed: number;
   sent: number;

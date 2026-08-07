@@ -3,6 +3,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { ProductParsingService } from './product-parsing.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 type PrismaMock = {
   product: {
@@ -132,6 +133,7 @@ function createPrismaMock(): PrismaMock {
 describe('ProductParsingService', () => {
   let prisma: PrismaMock;
   let tenantContext: TenantContextMock;
+  let freshStoreScope: { assertNetwork: jest.Mock };
   let service: ProductParsingService;
 
   beforeEach(() => {
@@ -142,9 +144,16 @@ describe('ProductParsingService', () => {
         tenantSlug: 'demo',
       }),
     };
+    freshStoreScope = {
+      assertNetwork: jest.fn().mockResolvedValue({
+        tenantId: 'tenant-1',
+        tenantSlug: 'demo',
+      }),
+    };
     service = new ProductParsingService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
+      freshStoreScope as unknown as FreshStoreScopeService,
     );
     prisma.productParsingSuggestion.findMany.mockResolvedValue([]);
   });

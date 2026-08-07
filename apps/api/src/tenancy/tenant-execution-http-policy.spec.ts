@@ -25,9 +25,7 @@ describe('tenant execution HTTP policy', () => {
     ['/integrations/langame/settings', TenantModule.INTEGRATIONS],
     ['/settings/workspace', TenantModule.INTEGRATIONS],
   ])('maps %s to %s', (path, module) => {
-    expect(
-      resolveTenantExecutionHttpAccess({ method: 'GET', path }),
-    ).toEqual({
+    expect(resolveTenantExecutionHttpAccess({ method: 'GET', path })).toEqual({
       module,
       action: 'READ',
       path,
@@ -35,14 +33,39 @@ describe('tenant execution HTTP policy', () => {
   });
 
   it.each([
+    ['GET', '/guests/crm/tasks', 'READ'],
+    ['GET', '/guests/crm/tasks/report', 'READ'],
+    ['GET', '/guests/crm/tasks/export', 'READ'],
+    ['GET', '/guests/crm/users', 'READ'],
+    ['GET', '/guests/crm/contact-events', 'READ'],
+    ['POST', '/guests/crm/tasks', 'WRITE'],
+    ['POST', '/guests/crm/contact-events', 'WRITE'],
+    ['PATCH', '/guests/crm/tasks/task-1', 'WRITE'],
+  ] as const)(
+    'classifies the bounded contact-task surface %s %s as COMMUNICATIONS/%s',
+    (method, path, action) => {
+      expect(resolveTenantExecutionHttpAccess({ method, path })).toEqual({
+        module: TenantModule.COMMUNICATIONS,
+        action,
+        path,
+      });
+    },
+  );
+
+  it.each([
+    ['GET', '/stores/address-suggestions'],
+    ['GET', '/stores/address-geocode'],
+    ['GET', '/stores/yandex-maps-geocode'],
+    ['POST', '/stores/address-geocode/missing'],
+    ['POST', '/categories/langame/refresh'],
     ['POST', '/reports/email'],
     ['POST', '/reports/digests/email'],
     ['POST', '/guests/gamification/deliveries/dispatch'],
     ['POST', '/guests/gamification/bonus-ledger/dispatch'],
+    ['POST', '/guests/gamification/log/profiles/profile-1/sync'],
+    ['POST', '/guests/gamification/log/profiles/profile-1/relink'],
   ])('classifies %s %s as OUTBOUND', (method, path) => {
-    expect(
-      resolveTenantExecutionHttpAccess({ method, path }),
-    ).toMatchObject({
+    expect(resolveTenantExecutionHttpAccess({ method, path })).toMatchObject({
       action: 'OUTBOUND',
     });
   });
@@ -50,11 +73,11 @@ describe('tenant execution HTTP policy', () => {
   it.each([
     ['GET', '/integrations/langame/routes-diagnostics'],
     ['GET', '/integrations/langame/service-diagnostics'],
+    ['POST', '/integrations/langame/settings/preview'],
+    ['POST', '/integrations/langame/onboarding/preview'],
     ['POST', '/integrations/langame/guests/search-diagnostics'],
   ])('keeps read-only diagnostic %s %s at READ', (method, path) => {
-    expect(
-      resolveTenantExecutionHttpAccess({ method, path }),
-    ).toMatchObject({
+    expect(resolveTenantExecutionHttpAccess({ method, path })).toMatchObject({
       module: TenantModule.INTEGRATIONS,
       action: 'READ',
     });
@@ -85,35 +108,20 @@ describe('tenant execution HTTP policy', () => {
   });
 
   it.each([
+    ['/integrations/langame/onboarding/activate', TenantModule.INTEGRATIONS],
     ['/integrations/langame/sync', TenantModule.INTEGRATIONS],
-    [
-      '/integrations/langame/business-snapshots/run',
-      TenantModule.INTEGRATIONS,
-    ],
-    [
-      '/integrations/langame/guests/foundation/sync',
-      TenantModule.INTEGRATIONS,
-    ],
+    ['/integrations/langame/business-snapshots/run', TenantModule.INTEGRATIONS],
+    ['/integrations/langame/guests/foundation/sync', TenantModule.INTEGRATIONS],
     [
       '/integrations/langame/guests/foundation/sync/start',
       TenantModule.INTEGRATIONS,
     ],
     [
-      '/guests/gamification/log/profiles/profile-1/sync',
-      TenantModule.GAMIFICATION,
-    ],
-    [
       '/guests/gamification/visual-editor/events/sync',
       TenantModule.GAMIFICATION,
     ],
-    [
-      '/guests/gamification/rewards/redeem',
-      TenantModule.GAMIFICATION,
-    ],
-    [
-      '/guests/gamification/bonus-ledger/queue',
-      TenantModule.GAMIFICATION,
-    ],
+    ['/guests/gamification/rewards/redeem', TenantModule.GAMIFICATION],
+    ['/guests/gamification/bonus-ledger/queue', TenantModule.GAMIFICATION],
   ])('keeps manual pull or in-app mutation %s at WRITE', (path, module) => {
     expect(
       resolveTenantExecutionHttpAccess({ method: 'POST', path }),
@@ -147,10 +155,7 @@ describe('tenant execution HTTP policy', () => {
   it.each([
     [
       '/integrations/langame/sync',
-      [
-        TenantModule.INTEGRATIONS,
-        TenantModule.ASSORTMENT,
-      ],
+      [TenantModule.INTEGRATIONS, TenantModule.ASSORTMENT],
     ],
     [
       '/integrations/langame/guests/foundation/sync',
@@ -226,6 +231,18 @@ describe('tenant execution HTTP policy', () => {
     expect(
       resolveTenantExecutionHttpAccess({ method: 'GET', path: '/guests' }),
     ).toBeNull();
+    expect(
+      resolveTenantExecutionHttpAccess({
+        method: 'GET',
+        path: '/guests/crm/leads',
+      }),
+    ).toBeNull();
+    expect(
+      resolveTenantExecutionHttpAccess({
+        method: 'DELETE',
+        path: '/guests/crm/tasks/task-1',
+      }),
+    ).toBeNull();
   });
 
   it('exempts only the authenticated session self-read from module classification', () => {
@@ -247,8 +264,8 @@ describe('tenant execution HTTP policy', () => {
     expect(
       isTenantExecutionHttpExempt({ method: 'POST', path: '/auth/me' }),
     ).toBe(false);
-    expect(
-      isTenantExecutionHttpExempt({ method: 'GET', path: '/admin' }),
-    ).toBe(false);
+    expect(isTenantExecutionHttpExempt({ method: 'GET', path: '/admin' })).toBe(
+      false,
+    );
   });
 });

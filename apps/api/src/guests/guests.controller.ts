@@ -16,6 +16,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   GuestsService,
   type GuestAudience,
@@ -79,6 +80,7 @@ export class GuestsController {
   constructor(private readonly guestsService: GuestsService) {}
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('staff-control/filter-options')
   getStaffControlFilterOptions(
     @CurrentUser() user: AuthenticatedUser,
@@ -188,6 +190,7 @@ export class GuestsController {
     return this.guestsService.updateGuestCrmLead(user, id, dto);
   }
 
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('crm/tasks')
   getGuestCrmTasks(
     @CurrentUser() user: AuthenticatedUser,
@@ -195,6 +198,7 @@ export class GuestsController {
     return this.guestsService.getGuestCrmTasks(user);
   }
 
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('crm/tasks/report')
   getGuestCrmTaskReport(
     @CurrentUser() user: AuthenticatedUser,
@@ -203,6 +207,7 @@ export class GuestsController {
     return this.guestsService.getGuestCrmTaskReport(user, query);
   }
 
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('crm/tasks/export')
   async exportGuestCrmTasks(
     @CurrentUser() user: AuthenticatedUser,
@@ -220,6 +225,7 @@ export class GuestsController {
     });
   }
 
+  @UseGuards(FreshNetworkScopeGuard)
   @Post('crm/tasks')
   createGuestCrmTask(
     @CurrentUser() user: AuthenticatedUser,
@@ -228,6 +234,7 @@ export class GuestsController {
     return this.guestsService.createGuestCrmTask(user, dto);
   }
 
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('crm/users')
   getGuestCrmUsers(
     @CurrentUser() user: AuthenticatedUser,
@@ -235,6 +242,7 @@ export class GuestsController {
     return this.guestsService.getGuestCrmUsers(user);
   }
 
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('crm/contact-events')
   getGuestCrmContactEvents(
     @CurrentUser() user: AuthenticatedUser,
@@ -242,6 +250,7 @@ export class GuestsController {
     return this.guestsService.getGuestCrmContactEvents(user);
   }
 
+  @UseGuards(FreshNetworkScopeGuard)
   @Post('crm/contact-events')
   createGuestCrmContactEvent(
     @CurrentUser() user: AuthenticatedUser,
@@ -250,6 +259,7 @@ export class GuestsController {
     return this.guestsService.createGuestCrmContactEvent(user, dto);
   }
 
+  @UseGuards(FreshNetworkScopeGuard)
   @Patch('crm/tasks/:id')
   updateGuestCrmTask(
     @CurrentUser() user: AuthenticatedUser,
@@ -277,6 +287,7 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('staff-control')
   getStaffControl(
     @CurrentUser() user: AuthenticatedUser,
@@ -286,6 +297,7 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('staff-control/operators')
   getStaffOperators(
     @CurrentUser() user: AuthenticatedUser,
@@ -295,6 +307,7 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('staff-control/operators/export')
   async exportStaffOperators(
     @CurrentUser() user: AuthenticatedUser,
@@ -313,6 +326,7 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('staff-control/operations')
   getStaffOperations(
     @CurrentUser() user: AuthenticatedUser,
@@ -322,6 +336,7 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('staff-control/operations/export')
   async exportStaffOperations(
     @CurrentUser() user: AuthenticatedUser,
@@ -338,6 +353,7 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Post('staff-control/identity-mappings')
   mapStaffIdentity(
     @CurrentUser() user: AuthenticatedUser,
@@ -347,6 +363,7 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Get('staff-control/identity-mappings/events')
   getStaffIdentityMappingEvents(
     @CurrentUser() user: AuthenticatedUser,
@@ -356,6 +373,7 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Post('staff-control/identity-mappings/events/:id/rollback')
   rollbackStaffIdentityMappingEvent(
     @CurrentUser() user: AuthenticatedUser,
@@ -366,6 +384,7 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @UseGuards(FreshNetworkScopeGuard)
   @Delete('staff-control/identity-mappings/:id')
   unmapStaffIdentity(
     @CurrentUser() user: AuthenticatedUser,

@@ -4,8 +4,11 @@ import { join, relative } from 'node:path';
 const ALLOWED_IMPLEMENTATION = 'auth/identity-email-claim.service.ts';
 const ALLOWED_TENANT_LOCK_IMPLEMENTATIONS = new Set([
   ALLOWED_IMPLEMENTATION,
+  'guest-portal/guest-portal-current190-tenant-revoke.coordinator.ts',
   'identity-mail-worker/identity-mail-worker.repository.ts',
   'identity-mail-worker/identity-mail-worker-v2-candidate.repository.ts',
+  'users/employee-invite-delivery-coordinator.ts',
+  'users/employee-invite-mail-worker-current189.repository.ts',
 ]);
 const ALLOWED_USER_OWNERSHIP_WRITERS = new Set(['auth/auth.service.ts']);
 const ALLOWED_INVITE_WRITERS = new Set([
@@ -55,7 +58,7 @@ describe('Identity email claim application boundary', () => {
     expect(violations).toEqual([]);
   });
 
-  it('shares the exact tenant lock domain only between the claim boundary and workers', async () => {
+  it('shares the exact tenant lock domain only across admitted cross-path implementations', async () => {
     const sourceRoot = join(__dirname, '..');
 
     for (const path of ALLOWED_TENANT_LOCK_IMPLEMENTATIONS) {
@@ -118,9 +121,10 @@ describe('Identity email claim application boundary', () => {
       'utf8',
     );
     expect(provisioningSource).not.toContain('.bindTransaction(');
+    expect(provisioningSource).toContain('recoverProtectedActivationShell(');
     expect(
       provisioningSource.match(/\.lockTenantTransaction\s*\(/gu) ?? [],
-    ).toHaveLength(2);
+    ).toHaveLength(3);
   });
 });
 

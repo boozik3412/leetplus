@@ -229,6 +229,16 @@ export class PrismaIdentityMailWorkerV2CandidateRepository implements IdentityMa
   constructor(private readonly prisma: PrismaClient) {}
 
   async assertReady(input: AssertIdentityMailWorkerReadyInput): Promise<void> {
+    await this.assertDiagnosticReady(input);
+    // The CURRENT184 receipt is explicitly authorization=false/canSend=false.
+    // A future wiring mistake must not turn diagnostic readiness into SMTP
+    // authority merely because IdentityMailWorkerRepository returns void.
+    fail('IDENTITY_MAIL_WORKER_V2_CANDIDATE_NOT_DEPLOYABLE');
+  }
+
+  async assertDiagnosticReady(
+    input: AssertIdentityMailWorkerReadyInput,
+  ): Promise<void> {
     if (
       input.expectedMigration !== IDENTITY_MAIL_WORKER_V2_CANDIDATE_MIGRATION ||
       input.expectedMigrationCount !==
@@ -1083,7 +1093,8 @@ function permanentPreProviderReason(reasonCode: string): boolean {
   return (
     reasonCode === 'ENVELOPE_INVALID' ||
     reasonCode === 'ENVELOPE_BINDING_MISMATCH' ||
-    reasonCode === 'RECIPIENT_INVALID'
+    reasonCode === 'RECIPIENT_INVALID' ||
+    reasonCode === 'IDENTITY_MAIL_WORKER_EMERGENCY_STOP_PRE_PROVIDER'
   );
 }
 

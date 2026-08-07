@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "contract": "LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1",
+  "candidate": "20260805020000_langame_onboarding_staged_receipt_current188",
+  "ordinal": 188,
+  "predecessor": {
+    "requiredContract": "IDENTITY_MAIL_CLUSTER_APPLICATION_ADMISSION_CURRENT187_V1",
+    "resolved": false
+  },
+  "migrationSqlSha256": "e76ed2c1b7e913bbfa9a9779cd0c860b120534c83eba504a0510469ff26f0c60",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "canStartSync": false,
+  "canWriteProvider": false,
+  "applicationRoleAllowlistBound": false,
+  "productionApplyAuthorized": false,
+  "status": "NOT_DEPLOYABLE"
+}

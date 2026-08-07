@@ -43,6 +43,7 @@ type LangameBalanceType = 'balance' | 'bonus_balance';
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 const maximumLangameWriteTimeoutMs = 30_000;
+const maximumLangameDiagnosticTimeoutMs = 10_000;
 
 @Injectable()
 export class LangameClient {
@@ -410,6 +411,7 @@ export class LangameClient {
     apiKey: string,
     path: string,
     params: LangameQueryParams = {},
+    options: LangameRequestOptions = {},
   ) {
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
     const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${normalizedPath}`);
@@ -418,12 +420,16 @@ export class LangameClient {
       url.searchParams.set(key, value);
     });
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-API-KEY': apiKey,
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method: 'GET',
+        headers: {
+          'X-API-KEY': apiKey,
+        },
       },
-    });
+      this.boundedDiagnosticTimeoutMs(options.timeoutMs),
+    );
 
     if (!response.ok) {
       const errorDetails = await this.readErrorDetails(response);
@@ -760,6 +766,21 @@ export class LangameClient {
     return Math.min(
       Math.max(1, Math.floor(requestedTimeoutMs)),
       maximumLangameWriteTimeoutMs,
+    );
+  }
+
+  private boundedDiagnosticTimeoutMs(requestedTimeoutMs?: number) {
+    if (
+      typeof requestedTimeoutMs !== 'number' ||
+      !Number.isFinite(requestedTimeoutMs) ||
+      requestedTimeoutMs <= 0
+    ) {
+      return maximumLangameDiagnosticTimeoutMs;
+    }
+
+    return Math.min(
+      Math.max(1, Math.floor(requestedTimeoutMs)),
+      maximumLangameDiagnosticTimeoutMs,
     );
   }
 

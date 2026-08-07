@@ -9,6 +9,7 @@ import { GuestIdentityResolverService } from './guest-identity-resolver.service'
 import { LangameClient } from './langame.client';
 import { LangameController } from './langame.controller';
 import { LangameDailySyncService } from './langame-daily-sync.service';
+import { LangameOnboardingStagedService } from './langame-onboarding-staged.service';
 import { LangameScheduledController } from './langame-scheduled.controller';
 import { LangameSettingsService } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
@@ -23,6 +24,7 @@ import { SecretEncryptionService } from './secret-encryption.service';
     GuestDataFoundationService,
     GuestIdentityResolverService,
     LangameDailySyncService,
+    LangameOnboardingStagedService,
     LangameSettingsService,
     LangameSyncService,
     SecretEncryptionService,

@@ -4,6 +4,8 @@ import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
 import { STRICT_ROLES_KEY } from '../auth/strict-roles.decorator';
 import { StrictRolesGuard } from '../auth/strict-roles.guard';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
+import { GuestGameMediaController } from './guest-game-media.controller';
 import { GuestGamificationController } from './guest-gamification.controller';
 
 type StrictOwnerAdminHandlerName =
@@ -39,6 +41,17 @@ const ledgerHandlerNames: LedgerHandlerName[] = [
   'dispatchBonusLedger',
   'cancelBonusLedgerEntry',
 ];
+
+describe('Gate 1MT gamification network boundary', () => {
+  it.each([GuestGamificationController, GuestGameMediaController])(
+    'requires fresh NETWORK authority on %p',
+    (controller) => {
+      expect(Reflect.getMetadata(GUARDS_METADATA, controller)).toContain(
+        FreshNetworkScopeGuard,
+      );
+    },
+  );
+});
 
 function strictOwnerAdminContext(
   methodName: StrictOwnerAdminHandlerName,

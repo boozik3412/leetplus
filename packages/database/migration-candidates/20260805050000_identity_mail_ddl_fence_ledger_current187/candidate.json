@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "contract": "CURRENT187_DDL_FENCE_LEDGER_SYNTHETIC_CI_V1",
+  "candidate": "20260805050000_identity_mail_ddl_fence_ledger_current187",
+  "ordinal": 187,
+  "predecessor": {
+    "requiredContract": "CURRENT187_INDEPENDENT_TECHNICAL_DDL_FENCE_ATTESTATION_V1",
+    "resolved": false
+  },
+  "migrationSqlSha256": "dd5f4db5aecef2c537251bc5262063c1012a1383aec0d0137e7d8b9536f8bb63",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "canConsumeProductionAttestation": false,
+  "canRevokeProductionAttestation": false,
+  "canSend": false,
+  "testAccessAuthorized": false,
+  "sharedBetaAccess": false,
+  "productionRootEnrolled": false,
+  "productionRootsFrozenEmpty": true,
+  "applicationRoleAllowlistBound": false,
+  "productionApplyAuthorized": false,
+  "status": "NOT_DEPLOYABLE"
+}

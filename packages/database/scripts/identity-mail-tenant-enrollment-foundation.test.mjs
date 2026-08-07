@@ -45,7 +45,7 @@ function expectFinding(value, finding) {
   return report;
 }
 
-test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT185 inventory", () => {
+test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT188 inventory", () => {
   const report = assertIdentityMailTenantEnrollmentFoundation(artifact);
   assert.equal(report.decision, "COMPLIANT");
   assert.equal(report.base.count, 179);
@@ -69,6 +69,8 @@ test("accepts CURRENT180 only with the exact ordered CURRENT180..CURRENT185 inve
     "20260802010000_identity_mail_worker_v2_freshness_protocol",
     "20260802020000_identity_mail_worker_v2_lost_response_replay",
     "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+    "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+    "20260805020000_langame_onboarding_staged_receipt_current188",
   ]);
   assert.deepEqual(report.findings, []);
   assert.ok(Object.isFrozen(report));
@@ -100,7 +102,7 @@ test("fails closed on canonical position, manifest, candidate head and metadata 
       },
     ],
     [
-      "missing stacked CURRENT185 successor",
+      "missing stacked CURRENT188 successor",
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
         value.candidates.directoryNames.pop();
@@ -114,24 +116,24 @@ test("fails closed on canonical position, manifest, candidate head and metadata 
       },
     ],
     [
-      "reordered exact CURRENT184/CURRENT185 successors",
+      "reordered exact CURRENT185/CURRENT186 successors",
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
         [
-          value.candidates.directoryNames[4],
           value.candidates.directoryNames[5],
+          value.candidates.directoryNames[6],
         ] = [
+          value.candidates.directoryNames[6],
           value.candidates.directoryNames[5],
-          value.candidates.directoryNames[4],
         ];
       },
     ],
     [
-      "unknown successor after CURRENT185",
+      "unknown successor after CURRENT188",
       F.CANDIDATE_HEAD_MISMATCH,
       (value) => {
         value.candidates.directoryNames.push(
-          "20260803010000_unknown_successor",
+          "20260805030000_unknown_successor",
         );
       },
     ],

@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   StaffShiftRegulationsService,
   type StaffShiftRegulationAcknowledgementDto,
@@ -34,7 +35,7 @@ import {
   UserRole.CLUB_ADMINISTRATOR,
   UserRole.TRAINEE,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
 export class StaffShiftRegulationsController {
   constructor(
     private readonly staffShiftRegulationsService: StaffShiftRegulationsService,

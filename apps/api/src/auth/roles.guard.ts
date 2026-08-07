@@ -22,6 +22,9 @@ const staffAttachmentCapabilities: readonly AccessCapability[] = [
 
 const langameIntegrationManagementPaths = new Set([
   '/integrations/langame/settings',
+  '/integrations/langame/settings/preview',
+  '/integrations/langame/onboarding/preview',
+  '/integrations/langame/onboarding/activate',
   '/integrations/langame/routes-diagnostics',
   '/integrations/langame/service-diagnostics',
   '/integrations/langame/endpoint-profile-diagnostics',
@@ -213,6 +216,12 @@ export class RolesGuard implements CanActivate {
         : 'manage_staff_control';
     }
 
+    const guestCommunicationsCapability =
+      this.resolveGuestCommunicationsCapability(path, method);
+    if (guestCommunicationsCapability) {
+      return guestCommunicationsCapability;
+    }
+
     if (path.startsWith('/guests')) {
       return this.resolveGuestCapability(path, method);
     }
@@ -317,6 +326,30 @@ export class RolesGuard implements CanActivate {
     }
 
     return this.isReadMethod(method) ? 'view_guests' : 'manage_guest_crm';
+  }
+
+  private resolveGuestCommunicationsCapability(
+    path: string,
+    method: string,
+  ): AccessCapability | null {
+    const isReadRoute =
+      method === 'GET' &&
+      (path === '/guests/crm/tasks' ||
+        path === '/guests/crm/tasks/report' ||
+        path === '/guests/crm/tasks/export' ||
+        path === '/guests/crm/users' ||
+        path === '/guests/crm/contact-events');
+    if (isReadRoute) {
+      return 'view_communications';
+    }
+
+    const isWriteRoute =
+      (method === 'POST' &&
+        (path === '/guests/crm/tasks' ||
+          path === '/guests/crm/contact-events')) ||
+      (method === 'PATCH' && /^\/guests\/crm\/tasks\/[^/]+$/.test(path));
+
+    return isWriteRoute ? 'manage_communications' : null;
   }
 
   private resolveStaffCapability(

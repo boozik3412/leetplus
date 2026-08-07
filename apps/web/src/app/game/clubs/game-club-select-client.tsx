@@ -131,7 +131,7 @@ export function GameClubSelectClient({
               const handoff =
                 (await handoffResponse.json()) as GuestPortalTelegramAuthStatusResponse;
 
-              if (handoff.status === "CONFIRMED" && handoff.token) {
+              if (handoff.status === "CONFIRMED") {
                 const summaryResponse = await fetch(
                   "/api/guest-portal/session/game-summary",
                   { cache: "no-store" },

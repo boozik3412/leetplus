@@ -16,6 +16,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshStoreScopeGuard } from '../tenancy/fresh-store-scope.guard';
 import {
   StaffTeamChatService,
   type StaffChatChannelDto,
@@ -37,7 +38,7 @@ const TEAM_CHAT_EVENTS_INTERVAL_MS = 5_000;
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshStoreScopeGuard)
 export class StaffTeamChatController {
   constructor(private readonly staffTeamChatService: StaffTeamChatService) {}
 

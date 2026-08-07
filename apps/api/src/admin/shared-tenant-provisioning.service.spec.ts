@@ -405,6 +405,47 @@ describe('SharedTenantProvisioningService shell boundary', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('recovers only the exact PII-free shell receipt for progressed activation replay', async () => {
+    const created = await service.provision(platformAdmin, provisioningDto());
+    const audit = firstCallData(prisma.platformAdminAuditEvent.create);
+    prisma.tenant.findFirst.mockResolvedValue({ id: TENANT_ID });
+    prisma.platformAdminAuditEvent.findUnique.mockResolvedValue({
+      after: audit.after,
+      metadata: audit.metadata,
+    });
+    assertInviteLocator.mockRejectedValue(
+      new ConflictException({
+        message: 'Identity claim state changed',
+        reasonCode: 'IDENTITY_CLAIM_STATE_MISMATCH',
+      }),
+    );
+    lockTenantTransaction.mockClear();
+    assertInviteLocator.mockClear();
+
+    await expect(
+      service.recoverProtectedActivationShell(platformAdmin, provisioningDto()),
+    ).resolves.toMatchObject({
+      decision: 'ALREADY_PROVISIONED',
+      replayed: true,
+      activationRequired: true,
+      tenant: { id: TENANT_ID },
+      ownerIdentity: {
+        reservationId: created.ownerIdentity.reservationId,
+        claimRevision: 1,
+      },
+    });
+    expect(lockTenantTransaction).toHaveBeenCalledWith(prisma, TENANT_ID);
+    expect(assertInviteLocator).not.toHaveBeenCalled();
+    expect(reserveInvite).toHaveBeenCalledTimes(1);
+
+    await expect(
+      service.recoverProtectedActivationShell(
+        platformAdmin,
+        provisioningDto({ reason: 'A different activation shell reason' }),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
   it('locks the tenant before identity assertion in concurrent replay recovery', async () => {
     const created = await service.provision(platformAdmin, provisioningDto());
     const audit = firstCallData(prisma.platformAdminAuditEvent.create);

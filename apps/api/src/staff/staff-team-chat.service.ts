@@ -15,11 +15,8 @@ import {
 } from './staff-shift-report-message-metadata';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  AccessScopeService,
-  type ResolvedAccessScope,
-} from '../tenancy/access-scope.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import { type ResolvedAccessScope } from '../tenancy/access-scope.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 
 const channelScopes = ['NETWORK', 'STORE', 'ROLE', 'CUSTOM'] as const;
@@ -339,8 +336,7 @@ type ChannelStats = {
 export class StaffTeamChatService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
-    private readonly accessScopeService: AccessScopeService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
     private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
@@ -348,14 +344,12 @@ export class StaffTeamChatService {
     user: AuthenticatedUser,
     query: StaffTeamChatQuery = {},
   ): Promise<StaffTeamChatReport> {
-    const { tenantId } = this.tenantContextService.resolve(user);
-    const accessScope = this.accessScopeService.resolve(user);
     const filters = this.resolveFilters(query);
-    await this.assertExplicitStoreFilterAllowed(
+    const accessScope = await this.resolveFreshAccessScope(
       user,
-      tenantId,
       filters.storeId,
     );
+    const { tenantId } = accessScope;
     await this.ensureDefaultChannels(tenantId);
     const accessWhere = this.buildAccessibleChannelWhere(
       user,
@@ -485,14 +479,12 @@ export class StaffTeamChatService {
     user: AuthenticatedUser,
     query: StaffTeamChatQuery = {},
   ): Promise<StaffTeamChatLiveState> {
-    const { tenantId } = this.tenantContextService.resolve(user);
-    const accessScope = this.accessScopeService.resolve(user);
     const filters = this.resolveFilters(query);
-    await this.assertExplicitStoreFilterAllowed(
+    const accessScope = await this.resolveFreshAccessScope(
       user,
-      tenantId,
       filters.storeId,
     );
+    const { tenantId } = accessScope;
     const accessWhere = this.buildAccessibleChannelWhere(
       user,
       tenantId,
@@ -585,8 +577,8 @@ export class StaffTeamChatService {
   }
 
   async createChannel(user: AuthenticatedUser, dto: StaffChatChannelDto) {
-    const { tenantId } = this.tenantContextService.resolve(user);
-    const accessScope = this.accessScopeService.resolve(user);
+    const accessScope = await this.resolveFreshAccessScope(user);
+    const { tenantId } = accessScope;
 
     if (!this.canManageChannels(user.role)) {
       throw new BadRequestException('Channel management is not allowed');
@@ -645,8 +637,8 @@ export class StaffTeamChatService {
   }
 
   async createMessage(user: AuthenticatedUser, dto: StaffChatMessageDto) {
-    const { tenantId } = this.tenantContextService.resolve(user);
-    const accessScope = this.accessScopeService.resolve(user);
+    const accessScope = await this.resolveFreshAccessScope(user);
+    const { tenantId } = accessScope;
     await this.ensureDefaultChannels(tenantId);
     const channel = await this.resolveAccessibleChannel(
       user,
@@ -859,8 +851,8 @@ export class StaffTeamChatService {
       return false;
     }
 
-    const { tenantId } = this.tenantContextService.resolve(user);
-    const accessScope = this.accessScopeService.resolve(user);
+    const accessScope = await this.resolveFreshAccessScope(user);
+    const { tenantId } = accessScope;
     const accessWhere = this.buildAccessibleChannelWhere(
       user,
       tenantId,
@@ -904,8 +896,8 @@ export class StaffTeamChatService {
     id: string,
     dto: StaffChatMessageUpdateDto,
   ) {
-    const { tenantId } = this.tenantContextService.resolve(user);
-    const accessScope = this.accessScopeService.resolve(user);
+    const accessScope = await this.resolveFreshAccessScope(user);
+    const { tenantId } = accessScope;
     const accessWhere = this.buildAccessibleChannelWhere(
       user,
       tenantId,
@@ -1044,8 +1036,8 @@ export class StaffTeamChatService {
   }
 
   async markRead(user: AuthenticatedUser, dto: StaffChatReadDto) {
-    const { tenantId } = this.tenantContextService.resolve(user);
-    const accessScope = this.accessScopeService.resolve(user);
+    const accessScope = await this.resolveFreshAccessScope(user);
+    const { tenantId } = accessScope;
     const channel = await this.resolveAccessibleChannel(
       user,
       tenantId,
@@ -2039,24 +2031,17 @@ export class StaffTeamChatService {
     });
   }
 
-  private async assertExplicitStoreFilterAllowed(
+  private async resolveFreshAccessScope(
     user: AuthenticatedUser,
-    tenantId: string,
-    storeId: string | null,
-  ) {
+    storeId?: string | null,
+  ): Promise<ResolvedAccessScope & { userId: string }> {
     if (!storeId) {
-      return;
+      return this.freshStoreScopeService.resolve(user);
     }
 
-    this.accessScopeService.assertStoreAllowed(user, storeId);
-    const store = await this.prisma.store.findFirst({
-      where: { id: storeId, tenantId },
-      select: { id: true },
-    });
-
-    if (!store) {
-      throw new ForbiddenException('Store is outside your access scope');
-    }
+    return this.freshStoreScopeService.resolveRequestedStoreIds(user, [
+      storeId,
+    ]);
   }
 
   private buildVisibleStoreWhere(
@@ -2181,8 +2166,11 @@ export class StaffTeamChatService {
     user: AuthenticatedUser,
     tenantId: string,
     channelId?: string | null,
-    accessScope = this.accessScopeService.resolve(user),
+    accessScope?: ResolvedAccessScope,
   ) {
+    if (!accessScope) {
+      throw new ForbiddenException('Fresh store scope is required');
+    }
     const accessWhere = this.buildAccessibleChannelWhere(
       user,
       tenantId,

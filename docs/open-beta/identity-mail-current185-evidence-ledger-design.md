@@ -165,9 +165,16 @@ worker denial под реальными ролями, fresh grants attestation �
 - CURRENT184 PostgreSQL regression: `3/3 PASS`;
 - API/database production typecheck и targeted ESLint: `PASS`.
 
-Это локальное engineering evidence candidate, а не production admission.
-Remote immutable commit/CI evidence фиксируется отдельно после push того же
-проверенного SQL SHA.
+Это engineering evidence candidate, а не production admission. Exact
+implementation `0688b6ef7b3f3e595f2a76e6ce91848c52a237fa` и historical
+inventory compatibility head
+`23cd1470c330da027fcd259a9186d77870e9e7d6` приняты GitHub Actions
+[`30765750662`](https://github.com/boozik3412/leetplus/actions/runs/30765750662)
+(`run #92`): Application checks, PostgreSQL migration smoke и Authority root
+trust gate — `3/3 green`. Предыдущий `run #91` отклонён как release evidence:
+он корректно выявил отсутствующий CURRENT185 successor в exact inventories
+исторических CURRENT180/181/183/184 foundation gates; исправление не меняет
+SQL SHA или исторические predecessor manifests.
 
 ## Запрет на promotion
 

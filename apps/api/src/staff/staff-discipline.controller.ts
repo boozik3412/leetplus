@@ -15,6 +15,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   StaffDisciplineService,
   type StaffAdministratorRatingsQuery,
@@ -35,7 +36,7 @@ import {
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
 export class StaffDisciplineController {
   constructor(
     private readonly staffDisciplineService: StaffDisciplineService,
@@ -98,7 +99,7 @@ export class StaffDisciplineController {
   UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
 export class StaffAdministratorRatingsController {
   constructor(
     private readonly staffDisciplineService: StaffDisciplineService,

@@ -79,6 +79,18 @@ const IDENTITY_MAIL_CURRENT185_CANDIDATES = [
   },
 ] as const;
 
+const IDENTITY_MAIL_CURRENT186_CANDIDATES = [
+  ...IDENTITY_MAIL_CURRENT185_CANDIDATES,
+  {
+    name: '20260803010000_identity_mail_duty_role_runtime_boundary_v2',
+    confirmationGuc:
+      'leetplus.identity_mail_duty_role_runtime_current186_confirmation',
+    confirmation:
+      'rehearse-noncanonical-identity-mail-duty-role-runtime-current186',
+    shaGuc: 'leetplus.identity_mail_duty_role_runtime_current186_sha256',
+  },
+] as const;
+
 export function deployCanonicalPrismaMigrations(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
@@ -157,6 +169,18 @@ export function deployIdentityMailCurrent185CandidateStack(
   );
 }
 
+export function deployIdentityMailCurrent186CandidateStack(
+  databaseUrl: string,
+  options: CanonicalMigrationDeployOptions,
+): void {
+  deployIdentityMailCandidateStack(
+    databaseUrl,
+    options,
+    IDENTITY_MAIL_CURRENT186_CANDIDATES,
+    'CURRENT186',
+  );
+}
+
 function deployIdentityMailCandidateStack(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
@@ -166,7 +190,7 @@ function deployIdentityMailCandidateStack(
     confirmation: string;
     shaGuc: string;
   }>,
-  candidateLabel: 'CURRENT183' | 'CURRENT184' | 'CURRENT185',
+  candidateLabel: 'CURRENT183' | 'CURRENT184' | 'CURRENT185' | 'CURRENT186',
 ): void {
   const target = new URL(databaseUrl);
   const targetHost = target.hostname.replace(/^\[([^\]]+)\]$/u, '$1');

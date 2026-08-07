@@ -88,8 +88,18 @@ Dormant adapter закреплён за exact `CURRENT184/184` и SQL SHA выш
   fallback mutation, цикл завершается с reconciliation-required outcome.
 
 Adapter по-прежнему не имеет `Injectable`, DI/config/CLI registration и
-production credential. Readiness возвращает
-`NOT_DEPLOYABLE / authorization=false / canSend=false`.
+production credential. Диагностическая readiness проверяет receipt
+`NOT_DEPLOYABLE / authorization=false / canSend=false`, а обычный
+`IdentityMailWorkerRepository.assertReady()` после этой проверки всегда
+fail-closed возвращает
+`IDENTITY_MAIL_WORKER_V2_CANDIDATE_NOT_DEPLOYABLE`. Поэтому случайный импорт
+adapter в service не может превратить diagnostic receipt в send authority.
+Отдельный `assertDiagnosticReady()` используется только dormant acceptance
+harness и не подключён к production runtime.
+
+Сквозная service/adapter/strict-SMTP проверка и точные ограничения SMTP
+зафиксированы в
+[provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md).
 
 ## ACL и dormancy
 

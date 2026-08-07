@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getApiUrl, readApiError } from "@/lib/api";
 import { GUEST_AUTH_COOKIE_NAME } from "@/lib/guest-portal";
+import { sanitizeGuestSessionResponse } from "@/lib/guest-session-transport";
 
 type RouteContext = {
   params: Promise<{ path: string[] }>;
@@ -116,8 +117,8 @@ export async function POST(request: Request, { params }: RouteContext) {
     );
   }
 
-  const data = await response.json();
-  const nextResponse = NextResponse.json(data);
+  const data = (await response.json()) as unknown;
+  const nextResponse = NextResponse.json(sanitizeGuestSessionResponse(data));
 
   if (
     ((path.length === 4 &&
@@ -131,18 +132,27 @@ export async function POST(request: Request, { params }: RouteContext) {
       (path.length === 2 &&
         path[0] === "session" &&
         path[1] === "select-club")) &&
-    typeof data?.token === "string"
+    isRecord(data) &&
+    typeof data.token === "string"
   ) {
     nextResponse.cookies.set(GUEST_AUTH_COOKIE_NAME, data.token, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
-      maxAge: 60 * 60 * 24 * 7,
+      maxAge: 60 * 60,
+      priority: "high",
     });
   }
 
+  nextResponse.headers.set("Cache-Control", "private, no-store, max-age=0");
+  nextResponse.headers.set("Pragma", "no-cache");
+
   return nextResponse;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function maybeBuildMiniAppEdgePayload(path: string[], body: string) {

@@ -702,6 +702,10 @@ export class UsersService {
 
   async cancelInvite(actor: AuthenticatedUser, id: string) {
     const { tenantId } = this.tenantContextService.resolve(actor);
+    await this.assertGenericIdentityMutationAllowed(
+      tenantId,
+      'invite delivery',
+    );
     const existing = await this.prisma.userInvite.findFirst({
       where: { id, tenantId, revokedAt: null },
       include: userInviteInclude,

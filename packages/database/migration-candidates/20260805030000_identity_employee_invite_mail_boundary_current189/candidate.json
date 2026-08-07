@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "contract": "IDENTITY_EMPLOYEE_INVITE_CURRENT189_V1",
+  "candidate": "20260805030000_identity_employee_invite_mail_boundary_current189",
+  "ordinal": 189,
+  "predecessor": {
+    "requiredContract": "LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1",
+    "resolved": false
+  },
+  "migrationSqlSha256": "4bbf4d49847b82731aa2e235796b4b1a898914768c1f4f4e2cb7a8b084e5c751",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "canAcceptEmployeeInvite": false,
+  "canSendProvider": false,
+  "applicationRoleAllowlistBound": false,
+  "workerRoleEnrolled": false,
+  "productionApplyAuthorized": false,
+  "status": "NOT_DEPLOYABLE"
+}

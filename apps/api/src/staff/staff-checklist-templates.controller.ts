@@ -15,6 +15,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   StaffChecklistTemplatesService,
   type StaffChecklistTemplateDto,
@@ -33,7 +34,7 @@ import {
   UserRole.CLUB_ADMINISTRATOR,
   UserRole.TRAINEE,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
 export class StaffChecklistTemplatesController {
   constructor(
     private readonly staffChecklistTemplatesService: StaffChecklistTemplatesService,

@@ -263,6 +263,30 @@ describe('LangameClient', () => {
     });
   });
 
+  it('bounds diagnostic timeout and performs exactly one request', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      responseWithBody({
+        status: true,
+        data: [],
+      }),
+    );
+    const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+    global.fetch = fetchMock as typeof fetch;
+
+    await client.getDiagnosticEndpoint(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      '/clubs/list',
+      {},
+      { timeoutMs: 60_000 },
+    );
+
+    const calls = fetchMock.mock.calls as Array<[string | URL, RequestInit?]>;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(calls[0][1]?.signal).toBeDefined();
+    expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(10_000);
+  });
+
   it('posts master balance updates by phone with X-Request-Token and no public API key header', async () => {
     const fetchMock = jest.fn().mockResolvedValueOnce(
       responseWithBody({

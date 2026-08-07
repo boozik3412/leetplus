@@ -24,8 +24,14 @@ import {
 import {
   LangameSettingsService,
   type LangameSettingsDto,
+  type LangameSettingsPreviewDto,
 } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
+import {
+  LangameOnboardingStagedService,
+  type LangameOnboardingActivationDto,
+  type LangameOnboardingStagedPreviewDto,
+} from './langame-onboarding-staged.service';
 import type {
   LangameEndpointProfileQuery,
   LangameGuestSearchQuery,
@@ -38,6 +44,7 @@ import type {
 export class LangameController {
   constructor(
     private readonly langameSettingsService: LangameSettingsService,
+    private readonly langameOnboardingStagedService: LangameOnboardingStagedService,
     private readonly langameSyncService: LangameSyncService,
     private readonly guestDataFoundationService: GuestDataFoundationService,
     private readonly businessSnapshotService: BusinessSnapshotService,
@@ -104,6 +111,30 @@ export class LangameController {
     @Body() dto: LangameSettingsDto,
   ) {
     return this.langameSettingsService.saveSettings(user, dto);
+  }
+
+  @Post('settings/preview')
+  previewSettings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: LangameSettingsPreviewDto,
+  ) {
+    return this.langameSettingsService.previewSettings(user, dto);
+  }
+
+  @Post('onboarding/preview')
+  previewOnboarding(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: LangameOnboardingStagedPreviewDto,
+  ) {
+    return this.langameOnboardingStagedService.preview(user, dto);
+  }
+
+  @Post('onboarding/activate')
+  activateOnboarding(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: LangameOnboardingActivationDto,
+  ) {
+    return this.langameOnboardingStagedService.activate(user, dto);
   }
 
   @Get('sync-jobs/:id/discrepancy-log')

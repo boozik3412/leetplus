@@ -49,17 +49,53 @@ const MODULE_PREFIXES: ReadonlyArray<{
   { prefix: '/utilities', module: TenantModule.ASSORTMENT },
 ];
 
+const EXACT_MODULE_REQUESTS: ReadonlyArray<{
+  method: string;
+  path: RegExp;
+  module: TenantModule;
+}> = [
+  {
+    method: 'GET',
+    path: /^\/guests\/crm\/(?:tasks(?:\/(?:report|export))?|users|contact-events)$/,
+    module: TenantModule.COMMUNICATIONS,
+  },
+  {
+    method: 'POST',
+    path: /^\/guests\/crm\/(?:tasks|contact-events)$/,
+    module: TenantModule.COMMUNICATIONS,
+  },
+  {
+    method: 'PATCH',
+    path: /^\/guests\/crm\/tasks\/[^/]+$/,
+    module: TenantModule.COMMUNICATIONS,
+  },
+];
+
 const OUTBOUND_REQUESTS: readonly RegExp[] = [
+  /^\/stores\/address-suggestions$/,
+  /^\/stores\/address-geocode$/,
+  /^\/stores\/yandex-maps-geocode$/,
+  /^\/stores\/address-geocode\/missing$/,
+  /^\/categories\/langame\/refresh$/,
   /^\/reports\/email$/,
   /^\/reports\/digests\/email$/,
   /^\/guests\/gamification\/deliveries\/dispatch$/,
   /^\/guests\/gamification\/bonus-ledger\/dispatch$/,
+  /^\/guests\/gamification\/log\/profiles\/[^/]+\/(?:sync|relink)$/,
 ];
 
 const READ_REQUESTS: ReadonlyArray<{
   method: string;
   path: RegExp;
 }> = [
+  {
+    method: 'POST',
+    path: /^\/integrations\/langame\/settings\/preview$/,
+  },
+  {
+    method: 'POST',
+    path: /^\/integrations\/langame\/onboarding\/preview$/,
+  },
   {
     method: 'GET',
     path: /^\/integrations\/langame\/routes-diagnostics$/,
@@ -122,17 +158,21 @@ export function resolveTenantExecutionHttpAccess(
   request: TenantExecutionHttpRequest,
 ): TenantExecutionHttpAccess | null {
   const path = normalizeRequestPath(request);
-  const match = MODULE_PREFIXES.find(({ prefix }) =>
+  const method = (request.method ?? 'GET').toUpperCase();
+  const exactMatch = EXACT_MODULE_REQUESTS.find(
+    (candidate) => candidate.method === method && candidate.path.test(path),
+  );
+  const prefixMatch = MODULE_PREFIXES.find(({ prefix }) =>
     matchesPrefix(path, prefix),
   );
-  if (!match) {
+  const module = exactMatch?.module ?? prefixMatch?.module;
+  if (!module) {
     return null;
   }
 
-  const method = (request.method ?? 'GET').toUpperCase();
   const action = resolveAction(path, method);
   return {
-    module: match.module,
+    module,
     action,
     path,
   };
@@ -168,17 +208,13 @@ export function isTenantExecutionHttpExempt(
   return methods?.has((request.method ?? 'GET').toUpperCase()) ?? false;
 }
 
-function resolveAction(
-  path: string,
-  method: string,
-): TenantExecutionAction {
+function resolveAction(path: string, method: string): TenantExecutionAction {
   if (OUTBOUND_REQUESTS.some((pattern) => pattern.test(path))) {
     return 'OUTBOUND';
   }
   if (
     READ_REQUESTS.some(
-      (request) =>
-        request.method === method && request.path.test(path),
+      (request) => request.method === method && request.path.test(path),
     )
   ) {
     return 'READ';
@@ -191,8 +227,7 @@ function matchesPrefix(path: string, prefix: string): boolean {
 }
 
 function normalizeRequestPath(request: TenantExecutionHttpRequest): string {
-  const rawPath =
-    request.path ?? request.originalUrl ?? request.url ?? '/';
+  const rawPath = request.path ?? request.originalUrl ?? request.url ?? '/';
   const withoutQuery = rawPath.split('?', 1)[0] || '/';
   const withLeadingSlash = withoutQuery.startsWith('/')
     ? withoutQuery

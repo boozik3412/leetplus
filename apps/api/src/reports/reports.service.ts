@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
+  Prisma,
   ProductAssortmentRole,
   ProductOosExclusionType,
   RecommendationRole,
@@ -9,6 +10,7 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import {
   buildProductCostBasis,
   type ProductCostBasis,
@@ -718,18 +720,21 @@ export class ReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
   async getAssortmentReport(
     user: AuthenticatedUser,
   ): Promise<AssortmentReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter, productVisibility } =
+      await this.resolveStoreReadScope(user);
 
     const [totalSku, activeProducts, inventorySnapshots] = await Promise.all([
-      this.prisma.product.count({ where: { tenantId } }),
+      this.prisma.product.count({
+        where: { tenantId, ...productVisibility },
+      }),
       this.prisma.product.findMany({
-        where: { tenantId, isActive: true },
+        where: { tenantId, isActive: true, ...productVisibility },
         select: {
           id: true,
           article: true,
@@ -753,7 +758,7 @@ export class ReportsService {
         orderBy: { name: 'asc' },
       }),
       this.prisma.inventorySnapshot.findMany({
-        where: { tenantId },
+        where: { tenantId, ...storeFilter },
         select: {
           storeId: true,
           productId: true,
@@ -828,22 +833,10 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<OperationalReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter } =
+      await this.resolveStoreReadScope(user, query.storeId);
     const period = this.resolvePeriod(query);
-    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
     const demandPeriod = this.resolveDemandPeriod();
-
-    if (query.storeId) {
-      const store = await this.prisma.store.findFirst({
-        where: { id: query.storeId, tenantId, isActive: true },
-        select: { id: true },
-      });
-
-      if (!store) {
-        throw new BadRequestException('Store not found');
-      }
-    }
 
     const [
       salesFacts,
@@ -1132,21 +1125,9 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<InventoryTurnoverReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter } =
+      await this.resolveStoreReadScope(user, query.storeId);
     const period = this.resolvePeriod(query);
-    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
-
-    if (query.storeId) {
-      const store = await this.prisma.store.findFirst({
-        where: { id: query.storeId, tenantId, isActive: true },
-        select: { id: true },
-      });
-
-      if (!store) {
-        throw new BadRequestException('Store not found');
-      }
-    }
 
     const [salesFacts, inventorySnapshots, lastSalesFacts] = await Promise.all([
       this.prisma.salesFact.findMany({
@@ -1267,13 +1248,9 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<AssortmentMatrixReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter, storeWhere, productVisibility } =
+      await this.resolveStoreReadScope(user, query.storeId);
     const period = this.resolvePeriod(query);
-    const storeWhere = query.storeId
-      ? { id: query.storeId, tenantId, isActive: true }
-      : { tenantId, isActive: true };
-    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
 
     const [stores, products, inventorySnapshots, salesFacts] =
       await Promise.all([
@@ -1287,7 +1264,7 @@ export class ReportsService {
           orderBy: { name: 'asc' },
         }),
         this.prisma.product.findMany({
-          where: { tenantId, isActive: true },
+          where: { tenantId, isActive: true, ...productVisibility },
           select: {
             id: true,
             canonicalProductId: true,
@@ -1339,10 +1316,6 @@ export class ReportsService {
           },
         }),
       ]);
-
-    if (query.storeId && stores.length === 0) {
-      throw new BadRequestException('Store not found');
-    }
 
     const periodDays = this.periodDays(period.fromDate, period.toDate);
     const matrixProducts = products.map((product) => ({
@@ -1493,22 +1466,10 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<PlanFactReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter } =
+      await this.resolveStoreReadScope(user, query.storeId);
     const period = this.resolvePeriod(query);
     const planPeriod = this.resolvePreviousPlanPeriod(period);
-    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
-
-    if (query.storeId) {
-      const store = await this.prisma.store.findFirst({
-        where: { id: query.storeId, tenantId, isActive: true },
-        select: { id: true },
-      });
-
-      if (!store) {
-        throw new BadRequestException('Store not found');
-      }
-    }
 
     const [currentSalesFacts, planSalesFacts, currentSnapshots, planSnapshots] =
       await Promise.all([
@@ -1622,21 +1583,9 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<SalesDetailReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter } =
+      await this.resolveStoreReadScope(user, query.storeId);
     const period = this.resolvePeriod(query);
-    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
-
-    if (query.storeId) {
-      const store = await this.prisma.store.findFirst({
-        where: { id: query.storeId, tenantId, isActive: true },
-        select: { id: true },
-      });
-
-      if (!store) {
-        throw new BadRequestException('Store not found');
-      }
-    }
 
     const [salesFacts, inventorySnapshots] = await Promise.all([
       this.prisma.salesFact.findMany({
@@ -1752,21 +1701,9 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<SkuPerformanceReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter } =
+      await this.resolveStoreReadScope(user, query.storeId);
     const period = this.resolvePeriod(query);
-    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
-
-    if (query.storeId) {
-      const store = await this.prisma.store.findFirst({
-        where: { id: query.storeId, tenantId, isActive: true },
-        select: { id: true },
-      });
-
-      if (!store) {
-        throw new BadRequestException('Store not found');
-      }
-    }
 
     const [salesFacts, inventorySnapshots] = await Promise.all([
       this.prisma.salesFact.findMany({
@@ -1973,21 +1910,9 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<SuppliersPerformanceReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter, productVisibility } =
+      await this.resolveStoreReadScope(user, query.storeId);
     const period = this.resolvePeriod(query);
-    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
-
-    if (query.storeId) {
-      const store = await this.prisma.store.findFirst({
-        where: { id: query.storeId, tenantId, isActive: true },
-        select: { id: true },
-      });
-
-      if (!store) {
-        throw new BadRequestException('Store not found');
-      }
-    }
 
     const [salesFacts, activeProducts, inventorySnapshots, stockMovements] =
       await Promise.all([
@@ -2026,7 +1951,7 @@ export class ReportsService {
           },
         }),
         this.prisma.product.findMany({
-          where: { tenantId, isActive: true },
+          where: { tenantId, isActive: true, ...productVisibility },
           select: {
             supplierId: true,
             supplier: {
@@ -2337,27 +2262,15 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: OperationalReportQuery,
   ): Promise<ReplenishmentReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter, productVisibility } =
+      await this.resolveStoreReadScope(user, query.storeId);
     const period = this.resolvePeriod(query);
-    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
     const demandPeriod = this.resolveDemandPeriod();
-
-    if (query.storeId) {
-      const store = await this.prisma.store.findFirst({
-        where: { id: query.storeId, tenantId, isActive: true },
-        select: { id: true },
-      });
-
-      if (!store) {
-        throw new BadRequestException('Store not found');
-      }
-    }
 
     const [activeProducts, inventorySnapshots, salesFacts, oosExclusions] =
       await Promise.all([
         this.prisma.product.findMany({
-          where: { tenantId, isActive: true },
+          where: { tenantId, isActive: true, ...productVisibility },
           select: {
             id: true,
             article: true,
@@ -2530,25 +2443,13 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: Pick<OperationalReportQuery, 'storeId'> = {},
   ): Promise<NewProductsReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter, productVisibility } =
+      await this.resolveStoreReadScope(user, query.storeId);
     const period = this.resolveNewProductsPeriod();
-    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
-
-    if (query.storeId) {
-      const store = await this.prisma.store.findFirst({
-        where: { id: query.storeId, tenantId, isActive: true },
-        select: { id: true },
-      });
-
-      if (!store) {
-        throw new BadRequestException('Store not found');
-      }
-    }
 
     const [products, inventorySnapshots] = await Promise.all([
       this.prisma.product.findMany({
-        where: { tenantId, isActive: true },
+        where: { tenantId, isActive: true, ...productVisibility },
         select: {
           id: true,
           purchasePrice: true,
@@ -2697,8 +2598,8 @@ export class ReportsService {
     user: AuthenticatedUser,
     query: LflReportQuery = {},
   ): Promise<LflReport> {
-    const { tenantId, tenantSlug } =
-      await this.tenantContextService.resolve(user);
+    const { tenantId, tenantSlug, storeFilter } =
+      await this.resolveStoreReadScope(user);
     const period = this.resolveLflPeriod(query.period);
     const [
       currentSalesFacts,
@@ -2709,6 +2610,7 @@ export class ReportsService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           isCanceled: false,
           saleDate: {
             gte: period.currentFromDate,
@@ -2732,6 +2634,7 @@ export class ReportsService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           isCanceled: false,
           saleDate: {
             gte: period.previousFromDate,
@@ -2755,6 +2658,7 @@ export class ReportsService {
       this.prisma.inventorySnapshot.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           snapshotDate: { lte: period.currentToDate },
         },
         select: {
@@ -2769,6 +2673,7 @@ export class ReportsService {
       this.prisma.inventorySnapshot.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           snapshotDate: { lte: period.previousToDate },
         },
         select: {
@@ -2818,7 +2723,7 @@ export class ReportsService {
   async getOosExclusions(
     user: AuthenticatedUser,
   ): Promise<ProductOosExclusionRow[]> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
     const rows = await this.prisma.productOosExclusion.findMany({
       where: { tenantId },
       orderBy: { createdAt: 'desc' },
@@ -2847,6 +2752,7 @@ export class ReportsService {
     user: AuthenticatedUser,
     dto: ProductOosExclusionDto,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
 
     if (!Object.values(ProductOosExclusionType).includes(dto.type)) {
@@ -2881,6 +2787,7 @@ export class ReportsService {
   }
 
   async deleteOosExclusion(user: AuthenticatedUser, id: string) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const row = await this.prisma.productOosExclusion.findFirst({
       where: { id, tenantId },
@@ -2899,6 +2806,7 @@ export class ReportsService {
     recommendationKey: string,
     dto: UpdateRecommendationStateDto,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const status = this.parseRecommendationStatus(dto.status);
     const role = dto.role ? this.parseRecommendationRole(dto.role) : undefined;
@@ -2939,6 +2847,59 @@ export class ReportsService {
     });
 
     return this.serializeRecommendationState(state);
+  }
+
+  private async resolveStoreReadScope(
+    user: AuthenticatedUser,
+    requestedStoreId?: string,
+  ) {
+    const scope = await this.freshStoreScopeService.resolveRequestedStoreIds(
+      user,
+      requestedStoreId === undefined ? undefined : [requestedStoreId],
+    );
+    const storeFilter = scope.effectiveStoreIds
+      ? { storeId: { in: [...scope.effectiveStoreIds] } }
+      : {};
+    const productVisibility: Prisma.ProductWhereInput = scope.effectiveStoreIds
+      ? {
+          OR: [
+            {
+              inventorySnapshots: {
+                some: { storeId: { in: [...scope.effectiveStoreIds] } },
+              },
+            },
+            {
+              salesFacts: {
+                some: { storeId: { in: [...scope.effectiveStoreIds] } },
+              },
+            },
+            {
+              stockMovements: {
+                some: { storeId: { in: [...scope.effectiveStoreIds] } },
+              },
+            },
+            {
+              langameClubConfigurations: {
+                some: { storeId: { in: [...scope.effectiveStoreIds] } },
+              },
+            },
+          ],
+        }
+      : {};
+
+    return {
+      tenantId: scope.tenantId,
+      tenantSlug: scope.tenantSlug,
+      storeFilter,
+      productVisibility,
+      storeWhere: {
+        tenantId: scope.tenantId,
+        isActive: true,
+        ...(scope.effectiveStoreIds
+          ? { id: { in: [...scope.effectiveStoreIds] } }
+          : {}),
+      },
+    };
   }
 
   private saleCost(

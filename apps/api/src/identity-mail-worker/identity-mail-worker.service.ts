@@ -13,6 +13,9 @@ import type {
   ClaimedIdentityMailDelivery,
   EnabledIdentityMailWorkerConfig,
   IdentityMailDeliveryLeaseInput,
+  IdentityMailWorkerExecutionBoundary,
+  IdentityMailWorkerExecutionControl,
+  IdentityMailWorkerExecutionMode,
   IdentityMailPreProviderFailureOutcome,
   IdentityMailSecretOpener,
   IdentityMailSmtpProvider,
@@ -84,8 +87,14 @@ export class IdentityMailWorkerService {
   }
 
   async runOnce(
-    shouldStop: () => boolean = neverStop,
+    shouldStopOrControl:
+      | (() => boolean)
+      | IdentityMailWorkerExecutionControl = neverStop,
   ): Promise<IdentityMailWorkerRunResult> {
+    if (typeof shouldStopOrControl !== 'function') {
+      return this.runOnceControlled(shouldStopOrControl);
+    }
+    const shouldStop = shouldStopOrControl;
     const result: IdentityMailWorkerRunResult = {
       claimed: 0,
       sent: 0,
@@ -175,6 +184,96 @@ export class IdentityMailWorkerService {
     return result;
   }
 
+  private async runOnceControlled(
+    control: IdentityMailWorkerExecutionControl,
+  ): Promise<IdentityMailWorkerRunResult> {
+    const result = emptyRunResult();
+    if (this.executionMode(control, 'BEFORE_CYCLE', null) === 'KILLED') {
+      return result;
+    }
+
+    // Controlled admission is deliberately tenant-isolated. A tenant placed
+    // in DRAINING is excluded from ACTIVE readiness/SMTP admission while its
+    // DB-only reaper may still settle expired work. KILLED tenants perform no
+    // repository or provider operation in a new cycle.
+    for (const tenantId of this.config.canaryTenantIds) {
+      if (
+        this.executionMode(control, 'BEFORE_TENANT_READINESS', tenantId) !==
+        'ACTIVE'
+      ) {
+        continue;
+      }
+      await this.repository.assertReady({
+        ...this.readinessInput(),
+        canaryTenantIds: [tenantId],
+      });
+    }
+
+    const smtpRequired = this.config.canaryTenantIds.some(
+      (tenantId) =>
+        this.executionMode(control, 'BEFORE_SMTP_VERIFY', tenantId) ===
+        'ACTIVE',
+    );
+    if (smtpRequired) {
+      await this.smtpProvider.verify();
+    }
+
+    for (const tenantId of this.config.canaryTenantIds) {
+      const mode = this.executionMode(control, 'BEFORE_REAP', tenantId);
+      if (mode === 'KILLED') {
+        continue;
+      }
+      await this.repository.reapExpired({
+        tenantId,
+        providerAuthorityDigest: this.providerAuthorityDigest,
+        workerActorDigest: this.leaseOwnerDigest,
+        batchLimit: this.config.batchSize,
+      });
+    }
+
+    for (const tenantId of this.config.canaryTenantIds) {
+      let tenantClaimed = 0;
+      while (tenantClaimed < this.config.batchSize) {
+        if (
+          this.executionMode(control, 'BEFORE_CLAIM', tenantId) !== 'ACTIVE'
+        ) {
+          break;
+        }
+        const leaseToken = this.entropy.randomBytes(32).toString('base64url');
+        if (!TOKEN_PATTERN.test(leaseToken)) {
+          throw new IdentityMailWorkerProcessingError(
+            'IDENTITY_MAIL_WORKER_ENTROPY_INVALID',
+          );
+        }
+        const claim = await this.repository.claimOne({
+          tenantId,
+          leaseOwnerDigest: this.leaseOwnerDigest,
+          leaseTokenDigest: createHash('sha256')
+            .update(leaseToken)
+            .digest('hex'),
+          providerAuthorityDigest: this.providerAuthorityDigest,
+        });
+        if (!claim) {
+          break;
+        }
+        result.claimed += 1;
+        tenantClaimed += 1;
+        const outcome = await this.processClaim(
+          tenantId,
+          claim,
+          leaseToken,
+          control,
+        );
+        recordOutcome(result, outcome);
+        if (outcome === 'RECONCILIATION_REQUIRED') {
+          return result;
+        }
+      }
+    }
+
+    return result;
+  }
+
   close(): void {
     this.smtpProvider.close();
   }
@@ -183,6 +282,7 @@ export class IdentityMailWorkerService {
     expectedTenantId: string,
     claim: ClaimedIdentityMailDelivery,
     leaseToken: string,
+    control?: IdentityMailWorkerExecutionControl,
   ): Promise<DeliveryOutcome> {
     let providerBoundaryEntered = false;
     const lease = this.leaseInput(claim, leaseToken);
@@ -193,6 +293,19 @@ export class IdentityMailWorkerService {
 
     try {
       this.assertClaim(expectedTenantId, claim);
+      if (
+        control &&
+        this.executionMode(
+          control,
+          'AFTER_CLAIM',
+          claim.tenantId,
+          claim.outboxId,
+        ) === 'KILLED'
+      ) {
+        throw new IdentityMailWorkerProcessingError(
+          'IDENTITY_MAIL_WORKER_EMERGENCY_STOP_PRE_PROVIDER',
+        );
+      }
       const token = this.secretOpener.openInitialOwnerInviteToken(claim);
       const message = buildInitialOwnerInviteMessage({
         recipientEmail: claim.recipientEmail,
@@ -205,6 +318,19 @@ export class IdentityMailWorkerService {
       if (!UUID_PATTERN.test(providerAttemptKey)) {
         throw new IdentityMailWorkerProcessingError(
           'IDENTITY_MAIL_WORKER_ENTROPY_INVALID',
+        );
+      }
+      if (
+        control &&
+        this.executionMode(
+          control,
+          'BEFORE_PROVIDER_MARK',
+          claim.tenantId,
+          claim.outboxId,
+        ) === 'KILLED'
+      ) {
+        throw new IdentityMailWorkerProcessingError(
+          'IDENTITY_MAIL_WORKER_EMERGENCY_STOP_PRE_PROVIDER',
         );
       }
 
@@ -234,7 +360,31 @@ export class IdentityMailWorkerService {
           'IDENTITY_MAIL_PROVIDER_MARK_RESPONSE_INVALID',
         );
       }
+      if (
+        control &&
+        this.executionMode(
+          control,
+          'AFTER_PROVIDER_MARK',
+          claim.tenantId,
+          claim.outboxId,
+        ) === 'KILLED'
+      ) {
+        throw new IdentityMailWorkerProcessingError(
+          'IDENTITY_MAIL_WORKER_EMERGENCY_STOP_AFTER_PROVIDER_MARK',
+        );
+      }
       const smtpReceipt = await this.smtpProvider.send(message);
+      // Once SMTP has been entered, a kill cannot prove whether the provider
+      // accepted the message. A confirmed acceptance must still be completed;
+      // an exception is quarantined by the catch path and is never resent.
+      if (control) {
+        this.executionMode(
+          control,
+          'AFTER_SMTP_ACCEPTED',
+          claim.tenantId,
+          claim.outboxId,
+        );
+      }
       await this.repository.markSent({
         ...providerLease,
         providerReceiptDigest: smtpReceipt.receiptDigest,
@@ -326,6 +476,21 @@ export class IdentityMailWorkerService {
     };
   }
 
+  private executionMode(
+    control: IdentityMailWorkerExecutionControl,
+    boundary: IdentityMailWorkerExecutionBoundary,
+    tenantId: string | null,
+    outboxId?: string,
+  ): IdentityMailWorkerExecutionMode {
+    const mode = control.modeAt({ boundary, tenantId, outboxId });
+    if (mode !== 'ACTIVE' && mode !== 'DRAINING' && mode !== 'KILLED') {
+      throw new IdentityMailWorkerProcessingError(
+        'IDENTITY_MAIL_WORKER_CONTROL_RESPONSE_INVALID',
+      );
+    }
+    return mode;
+  }
+
   private assertClaim(
     expectedTenantId: string,
     claim: ClaimedIdentityMailDelivery,
@@ -361,6 +526,34 @@ export class IdentityMailWorkerService {
         'IDENTITY_MAIL_CLAIM_INVALID',
       );
     }
+  }
+}
+
+function emptyRunResult(): IdentityMailWorkerRunResult {
+  return {
+    claimed: 0,
+    sent: 0,
+    retry: 0,
+    dead: 0,
+    canceled: 0,
+    reconciliationRequired: 0,
+  };
+}
+
+function recordOutcome(
+  result: IdentityMailWorkerRunResult,
+  outcome: DeliveryOutcome,
+): void {
+  if (outcome === 'SENT') {
+    result.sent += 1;
+  } else if (outcome === 'RETRY') {
+    result.retry += 1;
+  } else if (outcome === 'DEAD') {
+    result.dead += 1;
+  } else if (outcome === 'CANCELED') {
+    result.canceled += 1;
+  } else {
+    result.reconciliationRequired += 1;
   }
 }
 

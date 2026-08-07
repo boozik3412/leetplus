@@ -9,6 +9,7 @@ describe('AdminController shared beta provisioning boundary', () => {
   function controller() {
     const sharedTenantProvisioningService = {
       provision: jest.fn(),
+      activateInitialOwner: jest.fn(),
       revokeInitialOwnerInvite: jest.fn(),
     };
     return {
@@ -42,6 +43,30 @@ describe('AdminController shared beta provisioning boundary', () => {
       });
     }
     expect(sharedTenantProvisioningService.provision).not.toHaveBeenCalled();
+  });
+
+  it('keeps the protected activation coordinator dormant', () => {
+    const { controller: adminController, sharedTenantProvisioningService } =
+      controller();
+    const user = {
+      id: 'platform-admin',
+      isPlatformAdmin: true,
+    } as AuthenticatedUser;
+
+    try {
+      adminController.activateSharedBetaInitialOwner(user, 'tenant-id', {});
+      throw new Error('Expected activation boundary to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect(
+        (error as ServiceUnavailableException).getResponse(),
+      ).toMatchObject({
+        reasonCode: 'SHARED_BETA_INITIAL_OWNER_COORDINATOR_DORMANT',
+      });
+    }
+    expect(
+      sharedTenantProvisioningService.activateInitialOwner,
+    ).not.toHaveBeenCalled();
   });
 
   it('keeps the legacy initial-owner revoke route fail-closed', () => {

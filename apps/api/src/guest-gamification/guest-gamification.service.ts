@@ -1096,6 +1096,9 @@ export type GuestGameVisualEditorLootBoxPrize = {
   rewardAmount: number | null;
   rewardLabel: string;
   chancePercent: number;
+  visualMode?: GuestGameLootBoxPrizeVisualMode;
+  iconKey?: GuestGameLootBoxPrizeIconKey;
+  imageUrl?: string | null;
 };
 
 export type GuestGameVisualEditorBattlePass = {
@@ -2484,9 +2487,20 @@ export type GuestGameSelectedReward = {
   chancePercent: number;
   rewardRarity: GuestGameRewardRarity;
   rewardRarityLabel: string;
+  visualMode?: GuestGameLootBoxPrizeVisualMode;
+  iconKey?: GuestGameLootBoxPrizeIconKey;
+  imageUrl?: string | null;
 };
 
 export type GuestGameRewardRarity = 'common' | 'rare' | 'epic' | 'legendary';
+export type GuestGameLootBoxPrizeVisualMode = 'AUTO' | 'ICON' | 'IMAGE';
+export type GuestGameLootBoxPrizeIconKey =
+  | 'coins'
+  | 'discount'
+  | 'ticket'
+  | 'clock'
+  | 'gift'
+  | 'merch';
 
 type GuestGameLootBoxRewardCandidate = Omit<
   GuestGameSelectedReward,
@@ -30355,6 +30369,9 @@ function parseProcessSelectedReward(
   ) {
     return null;
   }
+  const visualMode = lootBoxPrizeVisualMode(value.visualMode);
+  const imageUrl =
+    visualMode === 'IMAGE' ? lootBoxPrizeImageUrl(value.imageUrl) : null;
 
   return {
     rewardType,
@@ -30364,6 +30381,9 @@ function parseProcessSelectedReward(
     chancePercent: finiteJsonNumber(value.chancePercent) ?? 0,
     rewardRarity,
     rewardRarityLabel: nullableString(value.rewardRarityLabel) ?? rewardRarity,
+    visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
+    iconKey: lootBoxPrizeIconKey(value.iconKey, rewardType),
+    imageUrl,
   };
 }
 
@@ -33762,13 +33782,18 @@ function lootBoxRewardFromPrize(
     return null;
   }
 
+  const rewardType = canonicalLootBoxRewardType(
+    dryRunString(record.rewardType) ??
+      dryRunString(record.type) ??
+      rule.rewardType ??
+      'PROMOCODE',
+  );
+  const visualMode = lootBoxPrizeVisualMode(record.visualMode);
+  const imageUrl =
+    visualMode === 'IMAGE' ? lootBoxPrizeImageUrl(record.imageUrl) : null;
+
   return {
-    rewardType: canonicalLootBoxRewardType(
-      dryRunString(record.rewardType) ??
-        dryRunString(record.type) ??
-        rule.rewardType ??
-        'PROMOCODE',
-    ),
+    rewardType,
     rewardAmount:
       dryRunOptionalNumber(record.rewardAmount) ??
       dryRunOptionalNumber(record.amount) ??
@@ -33782,7 +33807,61 @@ function lootBoxRewardFromPrize(
         dryRunOptionalNumber(record.probability) ??
         0,
     ),
+    visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
+    iconKey: lootBoxPrizeIconKey(record.iconKey, rewardType),
+    imageUrl,
   };
+}
+
+function lootBoxPrizeVisualMode(
+  value: unknown,
+): GuestGameLootBoxPrizeVisualMode {
+  const normalized = dryRunString(value)?.toUpperCase();
+  return normalized === 'ICON' || normalized === 'IMAGE' ? normalized : 'AUTO';
+}
+
+function lootBoxPrizeIconKey(
+  value: unknown,
+  rewardType: string,
+): GuestGameLootBoxPrizeIconKey {
+  const normalized = dryRunString(value)?.toLowerCase();
+  if (
+    normalized === 'coins' ||
+    normalized === 'discount' ||
+    normalized === 'ticket' ||
+    normalized === 'clock' ||
+    normalized === 'gift' ||
+    normalized === 'merch'
+  ) {
+    return normalized;
+  }
+
+  switch (rewardType.toUpperCase()) {
+    case 'BONUS':
+    case 'BONUS_POINTS':
+    case 'BONUS_BALANCE':
+    case 'LOYALTY_BONUS':
+    case 'CASHBACK':
+    case 'XP':
+      return 'coins';
+    case 'DISCOUNT':
+    case 'DISCOUNT_PERCENT':
+      return 'discount';
+    case 'PROMOCODE':
+    case 'CASHIER_CODE':
+      return 'ticket';
+    case 'FREE_HOURS':
+      return 'clock';
+    case 'MERCH':
+      return 'merch';
+    default:
+      return 'gift';
+  }
+}
+
+function lootBoxPrizeImageUrl(value: unknown) {
+  const url = dryRunString(value);
+  return url?.startsWith('/api/guest-game/media/') ? url : null;
 }
 
 function lootBoxRewardFromLegacyItem(
@@ -35255,6 +35334,9 @@ function buildVisualLootBoxData(
           rewardAmount: item.rewardAmount,
           rewardLabel: item.rewardLabel,
           chancePercent: 100,
+          visualMode: 'AUTO' as const,
+          iconKey: lootBoxPrizeIconKey(null, rewardType),
+          imageUrl: null,
         },
       ];
   const totalChancePercent = probabilityPrizes.reduce(
@@ -35307,6 +35389,12 @@ function buildVisualLootBoxData(
         rewardLabel: prize.rewardLabel,
         weight: prize.chancePercent,
         chancePercent: prize.chancePercent,
+        visualMode: prize.visualMode ?? 'AUTO',
+        iconKey: prize.iconKey ?? lootBoxPrizeIconKey(null, prize.rewardType),
+        imageUrl:
+          prize.visualMode === 'IMAGE'
+            ? lootBoxPrizeImageUrl(prize.imageUrl)
+            : null,
       })),
       items: probabilityPrizes.map((prize) => ({
         label: prize.rewardLabel,
@@ -35687,6 +35775,9 @@ function buildVisualEditorPreviewSummary(
                   rewardAmount: item.rewardAmount,
                   rewardLabel: item.rewardLabel,
                   chancePercent: 100,
+                  visualMode: 'AUTO' as const,
+                  iconKey: lootBoxPrizeIconKey(null, item.rewardType),
+                  imageUrl: null,
                 },
               ];
 
@@ -35694,10 +35785,15 @@ function buildVisualEditorPreviewSummary(
             const rarity = lootBoxRewardRarityFromChance(prize.chancePercent);
 
             return {
+              rewardType: prize.rewardType,
               rewardLabel: prize.rewardLabel,
               chancePercent: prize.chancePercent,
               rarity,
               rarityLabel: lootBoxRewardRarityLabels[rarity],
+              visualMode: prize.visualMode ?? 'AUTO',
+              iconKey:
+                prize.iconKey ?? lootBoxPrizeIconKey(null, prize.rewardType),
+              imageUrl: prize.imageUrl ?? null,
             };
           });
         })(),
@@ -36063,12 +36159,16 @@ function visualLootBoxPrizes(
         record.rewardLabel ?? record.label,
         fallbackLabel,
       );
+      const rewardType = canonicalLootBoxRewardType(
+        visualString(record.rewardType ?? record.type, fallbackType),
+      );
+      const visualMode = lootBoxPrizeVisualMode(record.visualMode);
+      const imageUrl =
+        visualMode === 'IMAGE' ? lootBoxPrizeImageUrl(record.imageUrl) : null;
 
       return {
         id: visualString(record.id, `prize-${index + 1}`),
-        rewardType: canonicalLootBoxRewardType(
-          visualString(record.rewardType ?? record.type, fallbackType),
-        ),
+        rewardType,
         rewardAmount: visualNumberOrNull(
           record.rewardAmount ?? record.amount ?? fallbackAmount,
         ),
@@ -36077,6 +36177,9 @@ function visualLootBoxPrizes(
           record.chancePercent ?? record.weight ?? record.probability,
           source.length > 1 ? 0 : 100,
         ),
+        visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
+        iconKey: lootBoxPrizeIconKey(record.iconKey, rewardType),
+        imageUrl,
       };
     })
     .filter(
@@ -36098,6 +36201,9 @@ function visualLootBoxPrizes(
       rewardAmount: fallbackAmount,
       rewardLabel: fallbackLabel,
       chancePercent: 100,
+      visualMode: 'AUTO',
+      iconKey: lootBoxPrizeIconKey(null, fallbackType),
+      imageUrl: null,
     },
   ];
 }

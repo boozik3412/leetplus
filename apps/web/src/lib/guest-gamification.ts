@@ -333,6 +333,9 @@ export type GuestGameVisualEditorLootBoxPrize = {
   rewardAmount: number | null;
   rewardLabel: string;
   chancePercent: number;
+  visualMode?: "AUTO" | "ICON" | "IMAGE";
+  iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+  imageUrl?: string | null;
 };
 
 export type GuestGameVisualEditorBattlePass = {

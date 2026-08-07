@@ -57,6 +57,40 @@ describe('guest mission wizard contract', () => {
     expect(conditions.presentation).toMatchObject({ theme: 'BLACK_RED' });
   });
 
+  it('keeps a prepared cover in the public media route across wizard saves', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'APP_OPEN',
+      conditions: { metric: { target: 1 } },
+      appearance: {
+        coverUrl: '/api/guest-game/media/cover-asset-1',
+      },
+    });
+
+    expect(conditions.presentation).toMatchObject({
+      coverUrl: '/api/guest-game/media/cover-asset-1',
+    });
+  });
+
+  it('preserves a saved cover while normalizing a balance-topup mission for the game portal', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'BALANCE_TOPUP',
+      conditions: {
+        presentation: {
+          coverUrl: '/api/guest-game/media/cover-asset-1',
+          theme: 'EMERALD',
+        },
+        metric: { topupMode: 'COUNT', count: 10, target: 10 },
+      },
+    });
+
+    expect(conditions.presentation).toMatchObject({
+      coverUrl: '/api/guest-game/media/cover-asset-1',
+      theme: 'EMERALD',
+    });
+  });
+
   it('accepts an indefinite mission without dates and preserves the mode', () => {
     const readiness = validateMissionWizard({
       ...common,
@@ -196,13 +230,25 @@ describe('guest mission wizard contract', () => {
     expect(topup.warnings).toHaveLength(1);
   });
 
-  it('accepts synced category selections and keeps exact tariff dictionaries blocked', () => {
+  it('accepts persisted Langame category selections and keeps exact tariff dictionaries blocked', () => {
     const category = validateMissionWizard({
       ...common,
       taskType: 'PRODUCT_PURCHASE',
       conditions: {
         purchaseSource: 'CATEGORY',
-        metric: { categoryIds: ['category-1'], target: 1 },
+        metric: {
+          categoryIds: [],
+          categorySelectionIds: ['langame-devices'],
+          externalCategoryKeys: ['46.langamepro.ru:16'],
+          categorySelections: [
+            {
+              id: 'langame-devices',
+              categoryIds: [],
+              externalCategoryKeys: ['46.langamepro.ru:16'],
+            },
+          ],
+          target: 1,
+        },
       },
     });
     const tariff = validateMissionWizard({
@@ -216,6 +262,73 @@ describe('guest mission wizard contract', () => {
 
     expect(category.ready).toBe(true);
     expect(tariff.ready).toBe(false);
+  });
+
+  it('preserves the count of persisted Langame categories for an ALL purchase rule', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'PRODUCT_PURCHASE',
+      conditions: {
+        purchaseSource: 'CATEGORY',
+        categoryCatalogSource: 'LANGAME',
+        metric: {
+          productMatch: 'ALL',
+          categoryIds: [],
+          categorySelectionIds: ['devices', 'accessories'],
+          externalCategoryKeys: ['46.langamepro.ru:16', '46.langamepro.ru:17'],
+          categorySelections: [
+            { id: 'devices', externalCategoryKeys: ['46.langamepro.ru:16'] },
+            {
+              id: 'accessories',
+              externalCategoryKeys: ['46.langamepro.ru:17'],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(conditions).toMatchObject({
+      metric: {
+        categoryIds: [],
+        productMatch: 'ALL',
+        target: 2,
+      },
+    });
+  });
+
+  it('accepts any positive guest-bound purchase without a product selector', () => {
+    const readiness = validateMissionWizard({
+      ...common,
+      taskType: 'PRODUCT_PURCHASE',
+      conditions: {
+        purchaseSource: 'ANY',
+        metric: {
+          purchaseSource: 'ANY',
+          productMatch: 'ALL',
+          target: 99,
+        },
+      },
+    });
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'PRODUCT_PURCHASE',
+      conditions: {
+        purchaseSource: 'ANY',
+        metric: { purchaseSource: 'ANY', productMatch: 'ALL' },
+      },
+    });
+
+    expect(readiness.ready).toBe(true);
+    expect(conditions).toMatchObject({
+      purchaseSource: 'ANY',
+      metric: {
+        purchaseSource: 'ANY',
+        productMatch: 'ANY',
+        productIds: [],
+        categoryIds: [],
+        target: 1,
+      },
+    });
   });
 
   it('labels play-time readiness as LIVE with a ledger fallback', () => {
@@ -232,8 +345,28 @@ describe('guest mission wizard contract', () => {
       ready: true,
       evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
       source: 'LIVE',
-      sourceLabel: expect.stringContaining('резервным слоем'),
     });
+    expect(readiness.sourceLabel).toContain('резервным слоем');
+  });
+
+  it('defaults the accumulated reward limit to one and rejects invalid values', () => {
+    const defaulted = validateMissionWizard({
+      ...common,
+      taskType: 'APP_OPEN',
+      conditions: { metric: { target: 1 } },
+    });
+    const invalid = validateMissionWizard({
+      ...common,
+      taskType: 'APP_OPEN',
+      conditions: { metric: { target: 1 } },
+      reward: { type: 'NONE', maxPendingRewards: 0 },
+    });
+
+    expect(defaulted.ready).toBe(true);
+    expect(invalid.ready).toBe(false);
+    expect(invalid.blockers).toContain(
+      'Максимальное количество накопленных наград должно быть целым числом не меньше 1.',
+    );
   });
 
   it('keeps the selected category catalog explicit in the v2 contract', () => {

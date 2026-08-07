@@ -43,6 +43,27 @@ export type GuestPortalGamificationClubDirectory = {
 
 export type GuestPortalLootBoxRarity = "common" | "rare" | "epic" | "legendary";
 
+export type GuestPortalRewardLootBoxPreview = {
+  id: string;
+  name: string;
+  rewardLabel: string | null;
+  caseRarity: GuestPortalLootBoxRarity;
+  caseRarityLabel: string;
+  possibleRewards: Array<{
+    rewardType: string;
+    rewardLabel: string;
+    chancePercent: number;
+    rarity: GuestPortalLootBoxRarity;
+    rarityLabel: string;
+    visualMode: "AUTO" | "ICON" | "IMAGE";
+    iconKey: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+    imageUrl: string | null;
+    borderColor: string | null;
+    textColor: string | null;
+    backgroundColor: string | null;
+  }>;
+};
+
 export type GuestPortalLootBoxSchedule = {
   timeWindowMode: "ANY" | "QUIET_HOURS" | "CUSTOM";
   weekdayMode: "ANY" | "WEEKDAYS" | "WEEKENDS" | "CUSTOM";
@@ -321,6 +342,19 @@ export type GuestPortalPayload = {
       schedule: GuestPortalLootBoxSchedule;
       rewardLabel: string | null;
       rewardType: string;
+      possibleRewards: Array<{
+        rewardType: string;
+        rewardLabel: string;
+        chancePercent: number;
+        rarity: GuestPortalLootBoxRarity;
+        rarityLabel: string;
+        visualMode: "AUTO" | "ICON" | "IMAGE";
+        iconKey: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+        imageUrl: string | null;
+        borderColor: string | null;
+        textColor: string | null;
+        backgroundColor: string | null;
+      }>;
       caseRarity: GuestPortalLootBoxRarity;
       caseRarityLabel: string;
       manualApprovalRequired: boolean;
@@ -352,6 +386,12 @@ export type GuestPortalPayload = {
         rewardRarity: GuestPortalLootBoxRarity | null;
         rewardRarityLabel: string | null;
         rewardDropChance: number | null;
+        visualMode?: "AUTO" | "ICON" | "IMAGE";
+        iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+        imageUrl?: string | null;
+        borderColor?: string | null;
+        textColor?: string | null;
+        backgroundColor?: string | null;
         rewardCode: string | null;
         claimPayload: string | null;
         qualifiedAt: string;
@@ -365,6 +405,7 @@ export type GuestPortalPayload = {
       triggerKind: string;
       sessionType: string | null;
       rewardLabel: string | null;
+      rewardLootBox: GuestPortalRewardLootBoxPreview | null;
       xpReward: number;
       progressCurrent: number;
       progressTarget: number | null;
@@ -384,13 +425,7 @@ export type GuestPortalPayload = {
       description: string | null;
       actionText: string | null;
       icon: string;
-      theme:
-        | "CLASSIC"
-        | "EMERALD"
-        | "VIOLET"
-        | "DARK"
-        | "GOLD"
-        | "BLACK_RED";
+      theme: "CLASSIC" | "EMERALD" | "VIOLET" | "DARK" | "GOLD" | "BLACK_RED";
       coverUrl: string | null;
       conditionLabel: string;
       productNames: string[];
@@ -422,9 +457,12 @@ export type GuestPortalPayload = {
         xp: number;
         title: string | null;
         condition: string | null;
+        executionCondition: string | null;
         description: string | null;
         freeReward: string | null;
         premiumReward: string | null;
+        freeRewardLootBox: GuestPortalRewardLootBoxPreview | null;
+        premiumRewardLootBox: GuestPortalRewardLootBoxPreview | null;
         reached: boolean;
         current: boolean;
         next: boolean;
@@ -467,6 +505,12 @@ export type GuestPortalPayload = {
       rewardRarity: GuestPortalLootBoxRarity | null;
       rewardRarityLabel: string | null;
       rewardDropChance: number | null;
+      visualMode?: "AUTO" | "ICON" | "IMAGE";
+      iconKey?: "coins" | "discount" | "ticket" | "clock" | "gift" | "merch";
+      imageUrl?: string | null;
+      borderColor?: string | null;
+      textColor?: string | null;
+      backgroundColor?: string | null;
       sourceId: string | null;
       sourceKind:
         | "CHECK_IN"
@@ -639,12 +683,7 @@ export type GuestPortalCompletionNotification = {
 export type GuestPortalRewardWalletItem = {
   id: string;
   kind: "REWARD" | "LOOT_BOX_ENTITLEMENT";
-  sourceKind:
-    | "CHECK_IN"
-    | "MISSION"
-    | "BATTLE_PASS"
-    | "LOOT_BOX"
-    | "MANUAL";
+  sourceKind: "CHECK_IN" | "MISSION" | "BATTLE_PASS" | "LOOT_BOX" | "MANUAL";
   sourceId: string | null;
   storeId: string | null;
   storeName: string | null;
@@ -733,6 +772,12 @@ export type GuestPortalGameSummary = {
         | "rewardRarity"
         | "rewardRarityLabel"
         | "rewardDropChance"
+        | "visualMode"
+        | "iconKey"
+        | "imageUrl"
+        | "borderColor"
+        | "textColor"
+        | "backgroundColor"
         | "sourceId"
         | "sourceKind"
         | "sourceLabel"
@@ -770,6 +815,7 @@ export type GuestPortalGameSummary = {
         | "schedule"
         | "rewardLabel"
         | "rewardType"
+        | "possibleRewards"
         | "caseRarity"
         | "caseRarityLabel"
         | "openState"
@@ -803,6 +849,7 @@ export type GuestPortalGameSummary = {
         | "triggerKind"
         | "sessionType"
         | "rewardLabel"
+        | "rewardLootBox"
         | "xpReward"
         | "progressCurrent"
         | "progressTarget"
@@ -831,6 +878,7 @@ export type GuestPortalGameSummary = {
         | "triggerKind"
         | "sessionType"
         | "rewardLabel"
+        | "rewardLootBox"
         | "xpReward"
         | "progressCurrent"
         | "progressTarget"
@@ -875,9 +923,12 @@ export type GuestPortalGameSummary = {
               | "xp"
               | "title"
               | "condition"
+              | "executionCondition"
               | "description"
               | "freeReward"
               | "premiumReward"
+              | "freeRewardLootBox"
+              | "premiumRewardLootBox"
               | "reached"
               | "current"
               | "next"
@@ -934,6 +985,14 @@ export type GuestPortalGameSummary = {
       "connected" | "readyForRewards" | "status"
     >;
   };
+};
+
+export type GuestPortalGameMissionPage = {
+  total: number;
+  offset: number;
+  limit: number;
+  nextOffset: number | null;
+  items: GuestPortalGameSummary["missions"]["featured"];
 };
 
 export type GuestPortalSeasonRewardOverview = {

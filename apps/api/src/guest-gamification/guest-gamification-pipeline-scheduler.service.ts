@@ -23,6 +23,7 @@ export class GuestGamificationPipelineSchedulerService
   );
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private runStartedAt: number | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -53,35 +54,36 @@ export class GuestGamificationPipelineSchedulerService
 
   async runOnce(): Promise<GuestGameScheduledPipelineRunResult | null> {
     if (this.running) {
+      const runningForMs = this.runStartedAt
+        ? Date.now() - this.runStartedAt
+        : null;
       this.logger.warn(
-        'Guest gamification pipeline scheduler tick skipped: still running.',
+        `Guest gamification pipeline scheduler tick skipped: still running${
+          runningForMs === null ? '' : ` for ${runningForMs}ms`
+        }.`,
       );
       return null;
     }
 
     this.running = true;
+    this.runStartedAt = Date.now();
+    const dto = this.pipelineDto();
 
     try {
       const result =
-        await this.gamificationService.runSnapshotPipelineScheduled(
-          this.pipelineDto(),
-        );
+        await this.gamificationService.runSnapshotPipelineScheduled(dto);
+      const durationMs = Date.now() - this.runStartedAt;
 
-      if (
-        result.processedFacts > 0 ||
-        result.erroredFacts > 0 ||
-        result.queuedRewards > 0
-      ) {
-        this.logger.log(
-          [
-            'Guest gamification pipeline scheduler finished:',
-            `tenants=${result.processedTenants}/${result.checkedTenants}`,
-            `facts=${result.processedFacts}/${result.checkedFacts}`,
-            `rewards=${result.queuedRewards}`,
-            `errors=${result.erroredFacts}`,
-          ].join(' '),
-        );
-      }
+      this.logger.log(
+        [
+          'Guest gamification pipeline scheduler finished:',
+          `tenants=${result.processedTenants}/${result.checkedTenants}`,
+          `facts=${result.processedFacts}/${result.checkedFacts}`,
+          `rewards=${result.queuedRewards}`,
+          `errors=${result.erroredFacts}`,
+          `duration=${durationMs}ms`,
+        ].join(' '),
+      );
 
       return result;
     } catch (error) {
@@ -92,6 +94,7 @@ export class GuestGamificationPipelineSchedulerService
       return null;
     } finally {
       this.running = false;
+      this.runStartedAt = null;
     }
   }
 

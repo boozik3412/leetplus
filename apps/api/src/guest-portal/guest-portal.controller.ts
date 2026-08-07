@@ -14,6 +14,7 @@ import {
   type GuestPortalCommunicationPreferenceResponse,
   type GuestPortalCompletionNotificationAcknowledgeResponse,
   type GuestPortalGamificationClubDirectory,
+  type GuestPortalGameMissionPage,
   type GuestPortalGameSummary,
   type GuestPortalIncomingCallLast4StartResponse,
   type GuestPortalIncomingCallLast4VerifyResponse,
@@ -165,6 +166,18 @@ export class GuestPortalController {
     @Headers('authorization') authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
     return this.guestPortalService.getGameSummary(authorization);
+  }
+
+  @Get('session/game-missions')
+  getGameMissions(
+    @Headers('authorization') authorization: string | undefined,
+    @Query('offset') offset?: string,
+    @Query('limit') limit?: string,
+  ): Promise<GuestPortalGameMissionPage> {
+    return this.guestPortalService.getGameMissions(authorization, {
+      offset,
+      limit,
+    });
   }
 
   @Post('session/app-open')

@@ -24,6 +24,9 @@ export type GenericSessionMaterializationReadiness = {
     | 'NO_AMBIGUOUS_SOURCE_PROOF';
 };
 
+export const PREQUALIFIED_LOOT_BOX_ENTITLEMENT_MATERIALIZATION =
+  'PREQUALIFIED_LOOT_BOX_ENTITLEMENT';
+
 type PersistedMaterializationEvent = {
   id: string;
   eventType: string;
@@ -320,6 +323,17 @@ function isPotentialLegacyTypedSession(
   payload: Record<string, unknown>,
   processInput = jsonRecord(payload.input),
 ) {
+  if (
+    payload.materializationQualification ===
+      PREQUALIFIED_LOOT_BOX_ENTITLEMENT_MATERIALIZATION &&
+    normalizedString(payload.sourceFactKind) === 'GUEST_LOOT_BOX_OPEN' &&
+    normalizedString(payload.sourceFactId)?.startsWith(
+      'guest-game-entitlement:',
+    )
+  ) {
+    return false;
+  }
+
   return (
     ['SESSION_START', 'PLAY_HOUR'].includes(eventType) &&
     normalizedString(payload.source) === 'guest_gamification_process_event' &&

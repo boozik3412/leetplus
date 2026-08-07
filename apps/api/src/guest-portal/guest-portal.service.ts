@@ -34,6 +34,7 @@ import {
   resolveSecuritySecret,
 } from '../config/environment-validation';
 import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
+import { GuestBonusLedgerSchedulerService } from '../guest-gamification/guest-bonus-ledger-scheduler.service';
 import { evaluateLegacyGuestGameDeliveryProtocolGate } from '../guest-gamification/guest-game-delivery-protocol-gate';
 import {
   GuestGamificationService,
@@ -55,6 +56,7 @@ import { GuestIdentityResolverService } from '../integrations/guest-identity-res
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import {
   evaluateGuestGameProgress,
+  guestGameProgressPeriodicity,
   guestGameTriggerMatches,
   type GuestGameProgressEvent,
 } from '../guest-gamification/guest-game-progress';
@@ -99,8 +101,22 @@ const LOOTBOX_CASE_RARITY_LABELS = {
   epic: 'Эпический',
   legendary: 'Легендарный',
 } as const;
+const LOOTBOX_REWARD_RARITY_LABELS = {
+  common: 'Обычная',
+  rare: 'Редкая',
+  epic: 'Эпическая',
+  legendary: 'Легендарная',
+} as const;
 
 type GuestPortalLootBoxCaseRarity = keyof typeof LOOTBOX_CASE_RARITY_LABELS;
+type GuestPortalLootBoxPrizeVisualMode = 'AUTO' | 'ICON' | 'IMAGE';
+type GuestPortalLootBoxPrizeIconKey =
+  | 'coins'
+  | 'discount'
+  | 'ticket'
+  | 'clock'
+  | 'gift'
+  | 'merch';
 type GuestPortalLootBoxPeriodicLimitPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 type GuestPortalLootBoxTimeWindowMode = 'ANY' | 'QUIET_HOURS' | 'CUSTOM';
 type GuestPortalLootBoxWeekdayMode = 'ANY' | 'WEEKDAYS' | 'WEEKENDS' | 'CUSTOM';
@@ -127,6 +143,8 @@ const GAME_PROFILE_LANGAME_AUTO_MATCH_SOURCE =
   'GUEST_PORTAL_LANGAME_AUTO_MATCH';
 const GAME_SUMMARY_MISSION_LIMIT = 10;
 const GAME_SUMMARY_MISSION_HISTORY_LIMIT = 12;
+const GAME_MISSION_PAGE_DEFAULT_LIMIT = 10;
+const GAME_MISSION_PAGE_MAX_LIMIT = 50;
 const GUEST_GAME_REFERRAL_CODE_PREFIX = 'lp_ref_';
 const GAME_REFERRAL_ACCEPTED_EVENT_TYPE = 'GAME_REFERRAL_ACCEPTED';
 const GAME_REFERRAL_EVENT_SOURCE = 'GUEST_PORTAL_REFERRAL';
@@ -148,10 +166,13 @@ const GUEST_PORTAL_PROCESS_EVENT_ORIGIN_PREFIX = 'ggo:v1:';
 const REWARD_WALLET_RETENTION_DAYS = 30;
 const REWARD_WALLET_RETENTION_MS =
   REWARD_WALLET_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const REWARD_WALLET_CLAIM_CONCURRENCY = 8;
 const REWARD_EFFECT_GUEST_RETRY_MAX_ATTEMPTS = 5;
 const REWARD_WALLET_OPENING_STALE_MS = 5 * 60 * 1000;
 const GUEST_PORTAL_LOOT_BOX_ENTITLEMENT_REQUIRED_MESSAGE =
-  'Подарочный лутбокс можно открыть только по выданному праву.';
+  'Этот кейс ещё не заработан. Выполните его условие, чтобы открыть.';
+const GUEST_PORTAL_LOOT_BOX_RETRY_MESSAGE =
+  'Кейс пока не открылся, но он остаётся у вас. Нажмите «Попробовать ещё раз».';
 const GAME_PROFILE_STAFF_TEST_REASON_STAFF_PHONE = 'STAFF_PHONE_MATCH';
 const GAME_PROFILE_STAFF_TEST_REASON_LANGAME_STAFF_PHONE =
   'LANGAME_STAFF_PHONE_MATCH';
@@ -1003,6 +1024,9 @@ export type GuestPortalGameSummary = {
         | 'rewardRarity'
         | 'rewardRarityLabel'
         | 'rewardDropChance'
+        | 'visualMode'
+        | 'iconKey'
+        | 'imageUrl'
         | 'sourceId'
         | 'sourceKind'
         | 'sourceLabel'
@@ -1038,6 +1062,7 @@ export type GuestPortalGameSummary = {
         | 'schedule'
         | 'rewardLabel'
         | 'rewardType'
+        | 'possibleRewards'
         | 'caseRarity'
         | 'caseRarityLabel'
         | 'openState'
@@ -1071,6 +1096,7 @@ export type GuestPortalGameSummary = {
         | 'triggerKind'
         | 'sessionType'
         | 'rewardLabel'
+        | 'rewardLootBox'
         | 'xpReward'
         | 'progressCurrent'
         | 'progressTarget'
@@ -1099,6 +1125,7 @@ export type GuestPortalGameSummary = {
         | 'triggerKind'
         | 'sessionType'
         | 'rewardLabel'
+        | 'rewardLootBox'
         | 'xpReward'
         | 'progressCurrent'
         | 'progressTarget'
@@ -1199,6 +1226,14 @@ export type GuestPortalGameSummary = {
       'connected' | 'readyForRewards' | 'status'
     >;
   };
+};
+
+export type GuestPortalGameMissionPage = {
+  total: number;
+  offset: number;
+  limit: number;
+  nextOffset: number | null;
+  items: GuestPortalGameSummary['missions']['featured'];
 };
 
 export type GuestPortalGameProgressTimelineItem = {
@@ -1367,6 +1402,7 @@ export type GuestPortalLootBox = {
   schedule: GuestPortalLootBoxSchedule;
   rewardLabel: string | null;
   rewardType: string;
+  possibleRewards: GuestPortalLootBoxPossibleReward[];
   caseRarity: GuestPortalLootBoxCaseRarity;
   caseRarityLabel: string;
   manualApprovalRequired: boolean;
@@ -1385,6 +1421,29 @@ export type GuestPortalLootBox = {
   waitingApprovalRewards: number;
   redeemedRewards: number;
   latestReward: GuestPortalLootBoxReward | null;
+};
+
+export type GuestPortalLootBoxPossibleReward = {
+  rewardType: string;
+  rewardLabel: string;
+  chancePercent: number;
+  rarity: GuestPortalLootBoxCaseRarity;
+  rarityLabel: string;
+  visualMode: GuestPortalLootBoxPrizeVisualMode;
+  iconKey: GuestPortalLootBoxPrizeIconKey;
+  imageUrl: string | null;
+  borderColor: string | null;
+  textColor: string | null;
+  backgroundColor: string | null;
+};
+
+export type GuestPortalRewardLootBoxPreview = {
+  id: string;
+  name: string;
+  rewardLabel: string | null;
+  caseRarity: GuestPortalLootBoxCaseRarity;
+  caseRarityLabel: string;
+  possibleRewards: GuestPortalLootBoxPossibleReward[];
 };
 
 export type GuestPortalLootBoxSchedule = {
@@ -1408,6 +1467,12 @@ export type GuestPortalLootBoxReward = {
   rewardRarity: string | null;
   rewardRarityLabel: string | null;
   rewardDropChance: number | null;
+  visualMode?: GuestPortalLootBoxPrizeVisualMode;
+  iconKey?: GuestPortalLootBoxPrizeIconKey;
+  imageUrl?: string | null;
+  borderColor?: string | null;
+  textColor?: string | null;
+  backgroundColor?: string | null;
   rewardCode: string | null;
   claimPayload: string | null;
   qualifiedAt: string;
@@ -1421,6 +1486,7 @@ export type GuestPortalMission = {
   sessionType: string | null;
   missionType: string;
   rewardLabel: string | null;
+  rewardLootBox: GuestPortalRewardLootBoxPreview | null;
   xpReward: number;
   progressCurrent: number;
   progressTarget: number | null;
@@ -1508,9 +1574,12 @@ export type GuestPortalSeason = {
     xp: number;
     title: string | null;
     condition: string | null;
+    executionCondition: string | null;
     description: string | null;
     freeReward: string | null;
     premiumReward: string | null;
+    freeRewardLootBox: GuestPortalRewardLootBoxPreview | null;
+    premiumRewardLootBox: GuestPortalRewardLootBoxPreview | null;
     reached: boolean;
     current: boolean;
     next: boolean;
@@ -1555,6 +1624,12 @@ export type GuestPortalReward = {
   rewardRarity: string | null;
   rewardRarityLabel: string | null;
   rewardDropChance: number | null;
+  visualMode?: GuestPortalLootBoxPrizeVisualMode;
+  iconKey?: GuestPortalLootBoxPrizeIconKey;
+  imageUrl?: string | null;
+  borderColor?: string | null;
+  textColor?: string | null;
+  backgroundColor?: string | null;
   sourceId: string | null;
   sourceKind: 'LOOT_BOX' | 'MISSION' | 'BATTLE_PASS' | 'MANUAL';
   sourceLabel: string | null;
@@ -1683,6 +1758,9 @@ export type GuestPortalLootBoxOpenReward = Pick<
   | 'rewardRarity'
   | 'rewardRarityLabel'
   | 'rewardDropChance'
+  | 'visualMode'
+  | 'iconKey'
+  | 'imageUrl'
   | 'rewardCode'
   | 'claimPayload'
   | 'qualifiedAt'
@@ -1797,6 +1875,7 @@ export class GuestPortalService {
     private readonly langameSettingsService: LangameSettingsService,
     private readonly guestGamificationService: GuestGamificationService,
     private readonly guestActivityLedgerService: GuestActivityLedgerService,
+    private readonly guestBonusLedgerSchedulerService: GuestBonusLedgerSchedulerService,
     private readonly secretEncryptionService: SecretEncryptionService,
     private readonly guestIdentityResolver: GuestIdentityResolverService,
   ) {}
@@ -3825,6 +3904,106 @@ export class GuestPortalService {
     authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
     const traceId = this.gameDebugTraceId('summary');
+    const { payload, portal, liveSessionStartResult } =
+      await this.prepareGameSummaryPortal(authorization, traceId);
+    const [referralStats, completionNotifications, rewardWallet] =
+      await Promise.all([
+        this.getGameReferralStats(payload.tenantId, portal.profile.id),
+        this.getPendingCompletionNotifications(
+          payload.tenantId,
+          portal.profile.id,
+        ),
+        this.getRewardWallet(payload.tenantId, portal.profile.id),
+      ]);
+
+    const summary = buildGameSummaryFromPortal(portal, {
+      referralSecret: this.referralSecret(),
+      webUrl: this.publicWebUrl(),
+      referralStats,
+      completionNotifications,
+      rewardWallet,
+    });
+
+    this.logGuestGameDebug('summary-result', {
+      traceId,
+      ...this.guestGameDebugPortalScope(payload, portal),
+      liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+      portalLootBoxes: portal.gamification.lootBoxes.map(
+        guestGameDebugLootBoxState,
+      ),
+      featuredLootBoxes: summary.lootBoxes.featured.map(
+        guestGameDebugLootBoxState,
+      ),
+      nextActions: summary.nextActions.map((action) => ({
+        kind: action.kind,
+        title: action.title,
+        statusLabel: action.statusLabel,
+        progressPercent: action.progressPercent,
+        anchor: action.anchor,
+      })),
+    });
+
+    this.recordGameAuditEvent({
+      tenantId: payload.tenantId,
+      profileId: portal.profile.id,
+      guestId: payload.guestId ?? null,
+      storeId: payload.storeId,
+      entityType: 'GAME_SUMMARY',
+      action: 'GAME_SUMMARY',
+      status: 'SUCCESS',
+      traceId,
+      payload: {
+        lootBoxes: summary.lootBoxes.featured.length,
+        nextActions: summary.nextActions.length,
+        rewards: summary.rewards.recent.length,
+        liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+      },
+    });
+
+    return summary;
+  }
+
+  async getGameMissions(
+    authorization: string | undefined,
+    page: { offset?: unknown; limit?: unknown } = {},
+  ): Promise<GuestPortalGameMissionPage> {
+    const traceId = this.gameDebugTraceId('missions-page');
+    const payload = await this.verifyGuestToken(authorization);
+    const portal = await this.buildPortalPayload(payload);
+    const offset = gameMissionPageOffset(page.offset);
+    const limit = gameMissionPageLimit(page.limit);
+    const missions = [...portal.gamification.missions]
+      .sort(gameSummaryMissionSort)
+      .slice(offset, offset + limit)
+      .map(mapGameSummaryMission);
+    const nextOffset =
+      offset + missions.length < portal.gamification.missions.length
+        ? offset + missions.length
+        : null;
+
+    this.logGuestGameDebug('missions-page-result', {
+      traceId,
+      ...this.guestGameDebugPortalScope(payload, portal),
+      offset,
+      limit,
+      returned: missions.length,
+      total: portal.gamification.missions.length,
+      nextOffset,
+    });
+
+    return {
+      total: portal.gamification.missions.length,
+      offset,
+      limit,
+      nextOffset,
+      items: missions,
+    };
+  }
+
+  private async prepareGameSummaryPortal(
+    authorization: string | undefined,
+    traceId: string,
+  ) {
     const payload = await this.verifyGuestToken(authorization);
     const activationProfile = payload.profileId
       ? await this.prisma.guestGameProfile.findFirst({
@@ -3884,61 +4063,7 @@ export class GuestPortalService {
       portal.profile.id,
       'GAME_SUMMARY',
     );
-    const [referralStats, completionNotifications, rewardWallet] =
-      await Promise.all([
-        this.getGameReferralStats(payload.tenantId, portal.profile.id),
-        this.getPendingCompletionNotifications(
-          payload.tenantId,
-          portal.profile.id,
-        ),
-        this.getRewardWallet(payload.tenantId, portal.profile.id),
-      ]);
-
-    const summary = buildGameSummaryFromPortal(portal, {
-      referralSecret: this.referralSecret(),
-      webUrl: this.publicWebUrl(),
-      referralStats,
-      completionNotifications,
-      rewardWallet,
-    });
-
-    this.logGuestGameDebug('summary-result', {
-      traceId,
-      ...this.guestGameDebugPortalScope(payload, portal),
-      liveSession: guestGameDebugProcessResult(liveSessionStartResult),
-      portalLootBoxes: portal.gamification.lootBoxes.map(
-        guestGameDebugLootBoxState,
-      ),
-      featuredLootBoxes: summary.lootBoxes.featured.map(
-        guestGameDebugLootBoxState,
-      ),
-      nextActions: summary.nextActions.map((action) => ({
-        kind: action.kind,
-        title: action.title,
-        statusLabel: action.statusLabel,
-        progressPercent: action.progressPercent,
-        anchor: action.anchor,
-      })),
-    });
-
-    this.recordGameAuditEvent({
-      tenantId: payload.tenantId,
-      profileId: portal.profile.id,
-      guestId: payload.guestId ?? null,
-      storeId: payload.storeId,
-      entityType: 'GAME_SUMMARY',
-      action: 'GAME_SUMMARY',
-      status: 'SUCCESS',
-      traceId,
-      payload: {
-        lootBoxes: summary.lootBoxes.featured.length,
-        nextActions: summary.nextActions.length,
-        rewards: summary.rewards.recent.length,
-        liveSession: guestGameDebugProcessResult(liveSessionStartResult),
-      },
-    });
-
-    return summary;
+    return { payload, portal, liveSessionStartResult };
   }
 
   async acknowledgeCompletionNotification(
@@ -4097,7 +4222,7 @@ export class GuestPortalService {
       walletItem.entitlement.id !== walletItem.entitlementId
     ) {
       throw new NotFoundException(
-        'Право на открытие не найдено, уже использовано или срок его хранения истёк.',
+        'Этот кейс уже открыт или срок его хранения истёк. Обновите игровой модуль.',
       );
     }
 
@@ -4143,23 +4268,33 @@ export class GuestPortalService {
       orderBy: [{ availableAt: 'asc' }, { id: 'asc' }],
       take: 1000,
     });
-    for (const item of claimable) {
-      try {
-        await this.claimRewardWalletItemForProfile(
-          payload,
-          profile.id,
-          item.id,
-        );
-      } catch (error) {
-        if (
-          error instanceof NotFoundException ||
-          error instanceof BadRequestException ||
-          error instanceof ServiceUnavailableException
-        ) {
-          continue;
-        }
-        throw error;
-      }
+    for (
+      let offset = 0;
+      offset < claimable.length;
+      offset += REWARD_WALLET_CLAIM_CONCURRENCY
+    ) {
+      await Promise.all(
+        claimable
+          .slice(offset, offset + REWARD_WALLET_CLAIM_CONCURRENCY)
+          .map(async (item) => {
+            try {
+              await this.claimRewardWalletItemForProfile(
+                payload,
+                profile.id,
+                item.id,
+              );
+            } catch (error) {
+              if (
+                error instanceof NotFoundException ||
+                error instanceof BadRequestException ||
+                error instanceof ServiceUnavailableException
+              ) {
+                return;
+              }
+              throw error;
+            }
+          }),
+      );
     }
 
     return this.getGameSummary(authorization);
@@ -4255,6 +4390,7 @@ export class GuestPortalService {
       walletItemId,
       accepted.rewardId,
     );
+    this.guestBonusLedgerSchedulerService.requestRun();
   }
 
   private async acceptRewardWalletClaim(
@@ -6542,7 +6678,7 @@ export class GuestPortalService {
       where: {
         id,
         tenantId: context.tenant.id,
-        status: 'ACTIVE',
+        ...(exactWalletOpen ? {} : { status: 'ACTIVE' }),
       },
     });
 
@@ -6573,7 +6709,7 @@ export class GuestPortalService {
       throw new NotFoundException('Лутбокс не найден.');
     }
 
-    if (!matchesStore(lootBox.storeIds, context.store.id)) {
+    if (!exactWalletOpen && !matchesStore(lootBox.storeIds, context.store.id)) {
       this.recordGameAuditEvent({
         tenantId: context.tenant.id,
         profileId: profile.id,
@@ -6689,7 +6825,7 @@ export class GuestPortalService {
     );
     if (requiredEntitlementId && !entitlement) {
       throw new NotFoundException(
-        'Право на открытие не найдено, уже использовано или больше недоступно.',
+        'Этот кейс уже открыт или больше недоступен. Обновите игровой модуль.',
       );
     }
     if (
@@ -6709,7 +6845,7 @@ export class GuestPortalService {
       });
       if (backfilled?.outcome === 'BLOCKED') {
         throw new ServiceUnavailableException(
-          'Право на открытие требует безопасной сверки с историей наград. Повторите попытку позже.',
+          'Проверяем историю этого кейса. Попробуйте открыть его через несколько секунд.',
         );
       }
       entitlement =
@@ -7032,7 +7168,7 @@ export class GuestPortalService {
 
       if (!materializedRewardId) {
         throw new ServiceUnavailableException(
-          'Награда по праву открытия не была сохранена. Повторите попытку: право не погашено.',
+          GUEST_PORTAL_LOOT_BOX_RETRY_MESSAGE,
         );
       }
 
@@ -7141,7 +7277,7 @@ export class GuestPortalService {
       idempotent: processResult.summary.idempotent,
       createdRewards: processResult.summary.createdRewards,
       queuedRewardAmount: processResult.summary.queuedRewardAmount,
-      rewards: processResult.rewards,
+      rewards: processResult.rewards.map(mapGuestPortalLootBoxOpenReward),
       portal,
       summary,
       message: processResult.summary.idempotent
@@ -10759,7 +10895,7 @@ export class GuestPortalService {
       }
       if (reconciliation.outcome === 'BLOCKED') {
         throw new ServiceUnavailableException(
-          'Право на открытие требует безопасной сверки с историей наград. Повторите попытку позже.',
+          'Проверяем историю этого кейса. Попробуйте открыть его через несколько секунд.',
         );
       }
     }
@@ -11381,7 +11517,7 @@ export class GuestPortalService {
       });
       if (reservedWalletItem.count !== 1) {
         throw new NotFoundException(
-          'Право на открытие уже используется, погашено или срок его хранения истёк.',
+          'Кейс уже открывается, был открыт ранее или срок его хранения истёк. Обновите игровой модуль.',
         );
       }
 
@@ -11404,7 +11540,7 @@ export class GuestPortalService {
       });
       if (reservedEntitlement.count !== 1) {
         throw new NotFoundException(
-          'Право на открытие уже используется, погашено или больше недоступно.',
+          'Кейс уже открывается, был открыт ранее или больше недоступен. Обновите игровой модуль.',
         );
       }
     });
@@ -11431,7 +11567,7 @@ export class GuestPortalService {
 
       if (!reward) {
         throw new ServiceUnavailableException(
-          'Награда по праву открытия не найдена в базе. Право осталось доступным.',
+          GUEST_PORTAL_LOOT_BOX_RETRY_MESSAGE,
         );
       }
 
@@ -11507,7 +11643,7 @@ export class GuestPortalService {
       }
 
       throw new BadRequestException(
-        'Право на открытие уже погашено или больше недоступно. Обновите состояние кейса.',
+        'Этот кейс уже открыт или больше недоступен. Обновите игровой модуль.',
       );
     });
   }
@@ -12515,28 +12651,24 @@ export class GuestPortalService {
         }
       });
     }
-    const entitledRuleIds = new Set(
-      entitlementRows.map((entitlement) => entitlement.ruleId),
-    );
     const visibleCatalogLootBoxes = filterLootBoxesByVisualRefs(
       storeLootBoxRows.filter(portalLootBoxVisibleInCatalog),
       publishedVisualLootBoxRefs,
     );
-    const visibleCatalogLootBoxIds = new Set(
-      visibleCatalogLootBoxes.map((lootBox) => lootBox.id),
+    const entitledRuleIds = new Set(
+      entitlementRows.map((entitlement) => entitlement.ruleId),
     );
+    // Entitlements prioritize an earned catalog case, but they must never
+    // promote a gift-only REWARD_TEMPLATE into the public storefront. Gift
+    // cases stay available through the reward wallet and completion history.
     const portalLootBoxRows = [
-      ...storeLootBoxRows.filter((lootBox) => entitledRuleIds.has(lootBox.id)),
+      ...visibleCatalogLootBoxes.filter((lootBox) =>
+        entitledRuleIds.has(lootBox.id),
+      ),
       ...visibleCatalogLootBoxes.filter(
         (lootBox) => !entitledRuleIds.has(lootBox.id),
       ),
-    ]
-      .filter(
-        (lootBox) =>
-          entitledRuleIds.has(lootBox.id) ||
-          visibleCatalogLootBoxIds.has(lootBox.id),
-      )
-      .slice(0, 6);
+    ].slice(0, 6);
     const portalLootBoxes = portalLootBoxRows.map((item) => {
       const liveEntitlements = entitlementRows.filter(
         (entitlement) => entitlement.ruleId === item.id,
@@ -12561,12 +12693,24 @@ export class GuestPortalService {
             openBlocker: GUEST_PORTAL_LOOT_BOX_ENTITLEMENT_REQUIRED_MESSAGE,
           };
     });
+    // Reward previews follow the explicit mission link, not storefront
+    // visibility. A gift-only REWARD_TEMPLATE can legitimately belong to a
+    // different catalog scope while still being the configured mission prize.
+    // Keeping this map tenant-wide exposes it only inside the linked reward;
+    // portalLootBoxRows below still controls what appears in the storefront.
+    const rewardLootBoxesById = new Map(
+      lootBoxes.map((lootBox) => [
+        lootBox.id,
+        guestPortalRewardLootBoxPreview(lootBox),
+      ]),
+    );
     const portalMissions = visibleMissions.map((item) =>
       mapMission(
         item,
         missionProgress.get(item.id),
         rewards,
         visibleBonusLedgerRows,
+        rewardLootBoxesById,
       ),
     );
     const portalSeasons = seasons
@@ -12717,6 +12861,7 @@ export class GuestPortalService {
 
     const progressEvents = eventRows.map(portalEventToProgressEvent);
     const rewardCounts = new Map<string, number>();
+    const latestRewardAt = new Map<string, Date>();
 
     rewardRows.forEach((row) => {
       if (!row.missionId) {
@@ -12732,12 +12877,17 @@ export class GuestPortalService {
         row.missionId,
         (rewardCounts.get(row.missionId) ?? 0) + 1,
       );
+      const latest = latestRewardAt.get(row.missionId);
+      if (!latest || row.qualifiedAt > latest) {
+        latestRewardAt.set(row.missionId, row.qualifiedAt);
+      }
     });
 
     const progress = new Map<string, GuestPortalMissionProgress>();
 
     missions.forEach((mission) => {
       const target = guestPortalMissionProgressTarget(mission);
+      const reward = jsonRecord(jsonRecord(mission.conditions).reward);
       const metricProgress = evaluateGuestGameProgress(
         {
           triggerKind: mission.triggerKind,
@@ -12751,14 +12901,20 @@ export class GuestPortalService {
           periodFrom: portalMissionProgressStart(mission),
           periodTo: mission.periodTo,
           timeZone,
+          repeatPeriodicity: guestGameProgressPeriodicity(reward.periodicity),
+          repeatCompletedAt: latestRewardAt.get(mission.id) ?? null,
         },
         null,
         progressEvents,
       );
-      const current = Math.max(
-        metricProgress.applicable ? metricProgress.current : 0,
-        rewardCounts.get(mission.id) ?? 0,
-      );
+      const current = metricProgress.repeatCycleReset
+        ? metricProgress.applicable
+          ? metricProgress.current
+          : 0
+        : Math.max(
+            metricProgress.applicable ? metricProgress.current : 0,
+            rewardCounts.get(mission.id) ?? 0,
+          );
 
       progress.set(mission.id, {
         current,
@@ -15331,6 +15487,12 @@ function buildGameSummaryFromPortal(
       rewardRarity: reward.rewardRarity,
       rewardRarityLabel: reward.rewardRarityLabel,
       rewardDropChance: reward.rewardDropChance,
+      visualMode: reward.visualMode,
+      iconKey: reward.iconKey,
+      imageUrl: reward.imageUrl,
+      borderColor: reward.borderColor,
+      textColor: reward.textColor,
+      backgroundColor: reward.backgroundColor,
       sourceId: reward.sourceId,
       sourceKind: reward.sourceKind,
       sourceLabel: reward.sourceLabel,
@@ -15362,6 +15524,7 @@ function buildGameSummaryFromPortal(
       schedule: lootBox.schedule,
       rewardLabel: lootBox.rewardLabel,
       rewardType: lootBox.rewardType,
+      possibleRewards: lootBox.possibleRewards,
       caseRarity: lootBox.caseRarity,
       caseRarityLabel: lootBox.caseRarityLabel,
       openState: lootBox.openState,
@@ -15380,7 +15543,7 @@ function buildGameSummaryFromPortal(
       latestReward: lootBox.latestReward,
     }));
   const featuredMissions = [...portal.gamification.missions]
-    .sort((left, right) => right.progressPercent - left.progressPercent)
+    .sort(gameSummaryMissionSort)
     .slice(0, GAME_SUMMARY_MISSION_LIMIT)
     .map(mapGameSummaryMission);
   const missionHistory = [...portal.gamification.missions]
@@ -15784,7 +15947,7 @@ function toBase64Url(value: Buffer) {
     .replace(/=+$/g, '');
 }
 
-function mapGameSummaryMission(
+export function mapGameSummaryMission(
   mission: GuestPortalMission,
 ): GuestPortalGameSummary['missions']['featured'][number] {
   return {
@@ -15793,6 +15956,7 @@ function mapGameSummaryMission(
     triggerKind: mission.triggerKind,
     sessionType: mission.sessionType,
     rewardLabel: mission.rewardLabel,
+    rewardLootBox: mission.rewardLootBox,
     xpReward: mission.xpReward,
     progressCurrent: mission.progressCurrent,
     progressTarget: mission.progressTarget,
@@ -15812,6 +15976,31 @@ function mapGameSummaryMission(
     productMode: mission.productMode,
     minimumAmount: mission.minimumAmount,
   };
+}
+
+function gameSummaryMissionSort(
+  left: GuestPortalMission,
+  right: GuestPortalMission,
+) {
+  const progressDiff = right.progressPercent - left.progressPercent;
+
+  return progressDiff !== 0 ? progressDiff : left.id.localeCompare(right.id);
+}
+
+function gameMissionPageOffset(value: unknown) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function gameMissionPageLimit(value: unknown) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return GAME_MISSION_PAGE_DEFAULT_LIMIT;
+  }
+
+  return Math.min(parsed, GAME_MISSION_PAGE_MAX_LIMIT);
 }
 
 function missionHistorySort(
@@ -17617,6 +17806,10 @@ function mapLootBox(
     schedule: mapLootBoxSchedule(row.periodRules),
     rewardLabel: row.rewardLabel,
     rewardType: row.rewardType,
+    possibleRewards: mapLootBoxPossibleRewards(
+      row.probabilityRules,
+      row.rewardLabel ?? row.name,
+    ),
     caseRarity,
     caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS[caseRarity],
     manualApprovalRequired: row.manualApprovalRequired,
@@ -17624,6 +17817,177 @@ function mapLootBox(
     ...openState,
     ...rewardState,
   };
+}
+
+export function mapLootBoxPossibleRewards(
+  value: Prisma.JsonValue | null,
+  fallbackLabel: string,
+): GuestPortalLootBoxPossibleReward[] {
+  const rules = jsonRecord(value);
+  const sourcePrizes = Array.isArray(rules.prizes)
+    ? rules.prizes
+    : Array.isArray(rules.items)
+      ? rules.items
+      : [];
+  const prizes = sourcePrizes
+    .map((item) => {
+      const prize = jsonRecord(item);
+      const weight = Math.max(
+        0,
+        numberField(prize.chancePercent) ??
+          numberField(prize.weight) ??
+          numberField(prize.probability) ??
+          0,
+      );
+      const rewardLabel =
+        stringField(prize.rewardLabel) ??
+        stringField(prize.label) ??
+        fallbackLabel;
+      const rewardType = stringField(prize.rewardType) ?? '';
+      const visualMode = guestPortalLootBoxPrizeVisualMode(prize.visualMode);
+      const imageUrl =
+        visualMode === 'IMAGE'
+          ? guestPortalLootBoxPrizeImageUrl(prize.imageUrl)
+          : null;
+
+      return {
+        rewardType,
+        rewardLabel,
+        weight,
+        visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
+        iconKey: guestPortalLootBoxPrizeIconKey(prize.iconKey, rewardType),
+        imageUrl,
+        borderColor: guestPortalLootBoxPrizeColor(prize.borderColor),
+        textColor: guestPortalLootBoxPrizeColor(prize.textColor),
+        backgroundColor: guestPortalLootBoxPrizeColor(prize.backgroundColor),
+      };
+    })
+    .filter((prize) => prize.weight > 0);
+  const weightedPrizes = prizes.length
+    ? prizes
+    : [
+        {
+          rewardLabel: fallbackLabel,
+          rewardType: '',
+          weight: 1,
+          visualMode: 'AUTO' as const,
+          iconKey: 'gift' as const,
+          imageUrl: null,
+          borderColor: null,
+          textColor: null,
+          backgroundColor: null,
+        },
+      ];
+  const totalWeight = weightedPrizes.reduce(
+    (total, prize) => total + prize.weight,
+    0,
+  );
+
+  return weightedPrizes.map((prize) => {
+    const chancePercent =
+      Math.round((prize.weight / totalWeight) * 10_000) / 100;
+    const rarity = lootBoxPossibleRewardRarity(chancePercent);
+
+    return {
+      rewardLabel: prize.rewardLabel,
+      rewardType: prize.rewardType,
+      chancePercent,
+      rarity,
+      rarityLabel: LOOTBOX_REWARD_RARITY_LABELS[rarity],
+      visualMode: prize.visualMode,
+      iconKey: prize.iconKey,
+      imageUrl: prize.imageUrl,
+      borderColor: prize.borderColor,
+      textColor: prize.textColor,
+      backgroundColor: prize.backgroundColor,
+    };
+  });
+}
+
+function guestPortalLootBoxPrizeVisualMode(
+  value: unknown,
+): GuestPortalLootBoxPrizeVisualMode {
+  const normalized = stringField(value)?.toUpperCase();
+  return normalized === 'ICON' || normalized === 'IMAGE' ? normalized : 'AUTO';
+}
+
+function guestPortalLootBoxPrizeIconKey(
+  value: unknown,
+  rewardType: unknown,
+): GuestPortalLootBoxPrizeIconKey {
+  const normalized = stringField(value)?.toLowerCase();
+  if (
+    normalized === 'coins' ||
+    normalized === 'discount' ||
+    normalized === 'ticket' ||
+    normalized === 'clock' ||
+    normalized === 'gift' ||
+    normalized === 'merch'
+  ) {
+    return normalized;
+  }
+
+  switch (stringField(rewardType)?.toUpperCase()) {
+    case 'BONUS':
+    case 'BONUS_POINTS':
+    case 'BONUS_BALANCE':
+    case 'LOYALTY_BONUS':
+    case 'CASHBACK':
+    case 'XP':
+      return 'coins';
+    case 'DISCOUNT':
+    case 'DISCOUNT_PERCENT':
+      return 'discount';
+    case 'PROMOCODE':
+    case 'CASHIER_CODE':
+      return 'ticket';
+    case 'FREE_HOURS':
+      return 'clock';
+    case 'MERCH':
+      return 'merch';
+    default:
+      return 'gift';
+  }
+}
+
+function guestPortalLootBoxPrizeColor(value: unknown): string | null {
+  const normalized = stringField(value)?.trim().toUpperCase() ?? '';
+  return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : null;
+}
+
+function guestPortalLootBoxPrizeImageUrl(value: unknown) {
+  const url = stringField(value);
+  return url?.startsWith('/api/guest-game/media/') ? url : null;
+}
+
+export function guestPortalRewardLootBoxPreview(row: {
+  id: string;
+  name: string;
+  rewardLabel: string | null;
+  probabilityRules: Prisma.JsonValue | null;
+}): GuestPortalRewardLootBoxPreview {
+  const caseRarity = lootBoxCaseRarity(row.probabilityRules);
+
+  return {
+    id: row.id,
+    name: row.name,
+    rewardLabel: row.rewardLabel,
+    caseRarity,
+    caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS[caseRarity],
+    possibleRewards: mapLootBoxPossibleRewards(
+      row.probabilityRules,
+      row.rewardLabel ?? row.name,
+    ),
+  };
+}
+
+function lootBoxPossibleRewardRarity(
+  chancePercent: number,
+): GuestPortalLootBoxCaseRarity {
+  if (chancePercent <= 1) return 'legendary';
+  if (chancePercent <= 4) return 'epic';
+  if (chancePercent <= 15) return 'rare';
+  return 'common';
 }
 
 function mapLootBoxSchedule(
@@ -18374,6 +18738,9 @@ function buildLootBoxRewardState(
   const latestState = latest
     ? rewardWalletState(latest.status, latest.expiresAt, latest)
     : null;
+  const latestVisual = latest
+    ? guestPortalRewardPrizeVisual(latest.evidence, latest.rewardType)
+    : null;
 
   return {
     openedCount: lootBoxRewards.length,
@@ -18392,6 +18759,7 @@ function buildLootBoxRewardState(
             rewardRarity: latest.rewardRarity,
             rewardRarityLabel: latest.rewardRarityLabel,
             rewardDropChance: decimalNumber(latest.rewardDropChance),
+            ...(latestVisual ?? {}),
             rewardCode: rewardCodeVisibleAfterClaim(latest)
               ? latest.rewardCode
               : null,
@@ -18445,12 +18813,13 @@ export function guestPortalVisibleBonusLedgerRows<
   );
 }
 
-function mapMission(
+export function mapMission(
   row: {
     id: string;
     name: string;
     triggerKind: string;
     missionType: string;
+    rewardType: string;
     rewardLabel: string | null;
     xpReward: number;
     progressTarget: number | null;
@@ -18462,9 +18831,13 @@ function mapMission(
   progress?: GuestPortalMissionProgress,
   rewards: GuestPortalRewardRow[] = [],
   bonusLedgerRows: GuestPortalBonusLedgerRow[] = [],
+  rewardLootBoxesById: ReadonlyMap<
+    string,
+    GuestPortalRewardLootBoxPreview
+  > = new Map(),
 ): GuestPortalMission {
-  const progressCurrent = progress?.current ?? 0;
-  const questSteps = missionQuestSteps(row.conditions, progressCurrent);
+  const rawProgressCurrent = progress?.current ?? 0;
+  const questSteps = missionQuestSteps(row.conditions, rawProgressCurrent);
   const rawConditions = jsonRecord(row.conditions);
   const effectiveMissionType =
     missionTaskTypeFromConditions(rawConditions, row.missionType) ??
@@ -18492,6 +18865,10 @@ function mapMission(
     : normalizedMetricTarget && normalizedMetricTarget > 0
       ? normalizedMetricTarget
       : guestPortalMissionProgressTarget(row);
+  const progressCurrent = guestPortalMissionProgressCurrent(
+    rawProgressCurrent,
+    progressTarget,
+  );
   const progressPercent = questSteps.length
     ? percent(progressCurrent, progressTarget ?? questSteps.length)
     : (progress?.percent ?? 0);
@@ -18502,6 +18879,14 @@ function mapMission(
   const productNames = productRefs
     .map((item) => stringField(item.name))
     .filter((item): item is string => Boolean(item));
+  const rewardDetails = jsonRecord(conditions.reward);
+  const rewardLootBoxId = stringField(rewardDetails.lootBoxId);
+  const rewardType = row.rewardType.trim().toUpperCase();
+  const rewardLootBox =
+    rewardLootBoxId &&
+    (rewardType === 'LOOT_BOX' || rewardType === 'LOOT_BOX_ENTITLEMENT')
+      ? (rewardLootBoxesById.get(rewardLootBoxId) ?? null)
+      : null;
 
   return {
     id: row.id,
@@ -18510,6 +18895,7 @@ function mapMission(
     sessionType: effectiveSessionType,
     missionType: effectiveMissionType,
     rewardLabel: row.rewardLabel,
+    rewardLootBox,
     xpReward: row.xpReward,
     progressCurrent,
     progressTarget,
@@ -18587,6 +18973,17 @@ export function guestPortalMissionProgressTarget(mission: {
     : 1;
 }
 
+export function guestPortalMissionProgressCurrent(
+  current: number,
+  target: number | null,
+) {
+  const normalizedCurrent = Number.isFinite(current) ? Math.max(0, current) : 0;
+
+  return target !== null && Number.isFinite(target) && target > 0
+    ? Math.min(normalizedCurrent, target)
+    : normalizedCurrent;
+}
+
 export function guestPortalMissionProgressUnitLabel(
   value: string | null | undefined,
 ) {
@@ -18630,19 +19027,27 @@ export function guestPortalMissionConditionLabel(
   if (missionType === 'PRODUCT_PURCHASE') {
     const mode = stringField(metric.productMatch)?.toUpperCase();
     const purchaseSource = stringField(metric.purchaseSource)?.toUpperCase();
+    const categoryLabels = guestPortalPurchaseCategoryLabels(metric);
+    const categoryList = categoryLabels.join(', ');
     const amountMode = stringField(metric.amountMode)?.toUpperCase();
     const amount =
       amountMode === 'PERIOD_TOTAL'
         ? (numberField(metric.totalAmount) ?? target)
         : numberField(metric.minSpendAmount);
     return [
-      mode === 'ALL'
-        ? purchaseSource === 'CATEGORY'
-          ? 'Купить товар из каждой выбранной категории'
-          : 'Купить все выбранные товары'
-        : purchaseSource === 'CATEGORY'
-          ? 'Купить товар из любой выбранной категории'
-          : 'Купить любой выбранный товар',
+      purchaseSource === 'ANY'
+        ? 'Купить любой товар'
+        : mode === 'ALL'
+          ? purchaseSource === 'CATEGORY'
+            ? categoryList
+              ? `Купить товар из каждой категории: ${categoryList}`
+              : 'Купить товар из каждой выбранной категории'
+            : 'Купить все выбранные товары'
+          : purchaseSource === 'CATEGORY'
+            ? categoryList
+              ? `Купить товар из любой из категорий: ${categoryList}`
+              : 'Купить товар из любой выбранной категории'
+            : 'Купить любой выбранный товар',
       amountMode === 'SINGLE_MINIMUM' && amount
         ? `одной покупкой не менее чем на ${amount} ₽`
         : amountMode === 'PERIOD_TOTAL' && amount
@@ -18670,7 +19075,7 @@ export function guestPortalMissionConditionLabel(
       return `Пополнить баланс суммарно не менее чем на ${target} ₽`;
     }
     if (topupMode === 'COUNT') {
-      return `Пополнить баланс ${target} раз${amount ? `, каждый раз ${comparison} ${amount} ₽` : ''}`;
+      return `Пополнить баланс ${target} ${russianTimeWord(target)}${amount ? `, каждый раз ${comparison} ${amount} ₽` : ''}`;
     }
     return `Пополнить баланс ${comparison} ${amount || target} ₽`;
   }
@@ -18716,22 +19121,109 @@ export function guestPortalMissionConditionLabel(
   return appendHourlySessionSourceNotice(label, sessionType);
 }
 
+function guestPortalPurchaseCategoryLabels(metric: Record<string, unknown>) {
+  const selections = [
+    ...unknownArray(metric.categorySelections),
+    ...unknownArray(metric.categorySelectionLabels),
+  ];
+
+  return uniqueStrings([
+    ...unknownStringArray(metric.categoryLabels).map(stringField),
+    ...selections.map((selection) => stringField(jsonRecord(selection).name)),
+    ...unknownStringArray(metric.categoryNames).map(stringField),
+    stringField(metric.categoryName),
+  ]);
+}
+
+const battlePassExecutionTaskTypes = new Set([
+  'APP_OPEN',
+  'PLAY_TIME',
+  'PRODUCT_PURCHASE',
+  'BALANCE_TOPUP',
+  'CHECK_IN',
+]);
+
+function guestPortalBattlePassExecutionCondition(
+  taskType: string | null,
+  metric: Record<string, unknown>,
+  sessionType: string | null,
+) {
+  const normalizedTaskType = taskType?.toUpperCase() ?? null;
+
+  if (
+    !normalizedTaskType ||
+    !battlePassExecutionTaskTypes.has(normalizedTaskType)
+  ) {
+    return null;
+  }
+
+  const details = [
+    guestPortalMissionConditionLabel(normalizedTaskType, metric, sessionType),
+  ];
+  const weekdays = numberArrayField(metric.weekdays).filter(
+    (weekday) => weekday >= 0 && weekday <= 6,
+  );
+  const hours = unknownStringArray(metric.hours)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => value.replace(/(\d{2}:\d{2})-(\d{2}:\d{2})/g, '$1–$2'));
+
+  if (weekdays.length) {
+    const weekdayLabels = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    details.push(
+      `Дни выполнения: ${weekdays.map((weekday) => weekdayLabels[weekday]).join(', ')}`,
+    );
+  }
+
+  if (hours.length) {
+    details.push(`Время выполнения: ${hours.join(', ')}`);
+  }
+
+  return details
+    .map((detail) => `${detail}${/[.!?]$/.test(detail) ? '' : '.'}`)
+    .join(' ');
+}
+
+function russianTimeWord(value: number) {
+  const normalized = Math.abs(Math.trunc(value));
+  const modulo100 = normalized % 100;
+  const modulo10 = normalized % 10;
+
+  if (modulo100 >= 11 && modulo100 <= 14) {
+    return 'раз';
+  }
+
+  if (modulo10 === 1) {
+    return 'раз';
+  }
+
+  return modulo10 >= 2 && modulo10 <= 4 ? 'раза' : 'раз';
+}
+
 const hourlySessionSourceNotice =
-  'Продление пакета или абонемента без завершения сессии не засчитывается.';
+  'Учитывается только полная сессия (продление с изменением типа сессии не учитывается).';
+
+const legacyHourlySessionSourceNotices = [
+  'Продление пакета или абонемента без завершения сессии не засчитывается.',
+  'Почасовой тип подтверждается только для отдельно начатой почасовой сессии. Продление пакета или абонемента без завершения текущей сессии Langame не передаёт как отдельный тарифный сегмент, поэтому такое продление не засчитывается.',
+] as const;
 
 function appendHourlySessionSourceNotice(
   label: string,
   sessionType?: string | null,
 ) {
-  if (
-    normalizeGuestPortalSessionType(sessionType) !== 'regular_session' ||
-    label.includes(hourlySessionSourceNotice)
-  ) {
+  if (normalizeGuestPortalSessionType(sessionType) !== 'regular_session') {
     return label;
   }
 
-  const trimmed = label.trim();
-  return `${trimmed}${/[.!?]$/.test(trimmed) ? '' : '.'} ${hourlySessionSourceNotice}`;
+  const normalized = legacyHourlySessionSourceNotices
+    .reduce((value, notice) => value.replace(notice, ''), label)
+    .trim();
+  if (normalized.includes(hourlySessionSourceNotice)) {
+    return normalized;
+  }
+
+  return `${normalized}${/[.!?]$/.test(normalized) ? '' : '.'} ${hourlySessionSourceNotice}`;
 }
 
 function buildMissionRewardStatus({
@@ -19034,7 +19526,7 @@ function mapSeason(
     probabilityRules: Prisma.JsonValue;
   }>,
 ): GuestPortalSeason {
-  const levels = seasonLevels(row.levels);
+  const levels = seasonLevels(row.levels, lootBoxes);
   const progress = buildSeasonProgress(levels, xp, rewards, row);
 
   return {
@@ -19103,6 +19595,9 @@ function mapReward(row: GuestPortalRewardRow): GuestPortalReward {
   const authoritativeExpiresAt = row.claimRequired
     ? row.claimExpiresAt
     : row.expiresAt;
+  const prizeVisual = row.lootBoxId
+    ? guestPortalRewardPrizeVisual(row.evidence, row.rewardType)
+    : {};
 
   return {
     id: row.id,
@@ -19114,6 +19609,7 @@ function mapReward(row: GuestPortalRewardRow): GuestPortalReward {
     rewardRarity: row.rewardRarity,
     rewardRarityLabel: row.rewardRarityLabel,
     rewardDropChance: decimalNumber(row.rewardDropChance),
+    ...prizeVisual,
     sourceId: row.lootBoxId ?? row.missionId ?? row.seasonId ?? null,
     sourceKind: source.sourceKind,
     sourceLabel: source.sourceLabel,
@@ -19128,6 +19624,62 @@ function mapReward(row: GuestPortalRewardRow): GuestPortalReward {
     claimedAt: iso(claimedAt),
     expiresAt: iso(authoritativeExpiresAt),
   };
+}
+
+function mapGuestPortalLootBoxOpenReward(
+  reward: GuestGameProcessEventResult['rewards'][number],
+): GuestPortalLootBoxOpenReward {
+  const prizeVisual = guestPortalRewardPrizeVisual(
+    reward.evidence,
+    reward.rewardType,
+  );
+
+  return {
+    id: reward.id,
+    walletState: reward.walletState,
+    rewardType: reward.rewardType,
+    rewardAmount: reward.rewardAmount,
+    rewardLabel: reward.rewardLabel,
+    rewardRarity: reward.rewardRarity,
+    rewardRarityLabel: reward.rewardRarityLabel,
+    rewardDropChance: reward.rewardDropChance,
+    ...prizeVisual,
+    rewardCode: reward.rewardCode,
+    claimPayload: reward.claimPayload,
+    qualifiedAt: reward.qualifiedAt,
+    expiresAt: reward.expiresAt,
+  };
+}
+
+function guestPortalRewardPrizeVisual(
+  evidence: Prisma.JsonValue | null,
+  rewardType: string,
+) {
+  const source = jsonRecord(evidence);
+  const rule = jsonRecord(source.rule);
+  const selectedReward = jsonRecord(
+    Object.keys(jsonRecord(rule.selectedReward)).length
+      ? rule.selectedReward
+      : source.selectedReward,
+  );
+  const visualMode = guestPortalLootBoxPrizeVisualMode(
+    selectedReward.visualMode,
+  );
+  const imageUrl =
+    visualMode === 'IMAGE'
+      ? guestPortalLootBoxPrizeImageUrl(selectedReward.imageUrl)
+      : null;
+
+  return {
+    visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
+    iconKey: guestPortalLootBoxPrizeIconKey(selectedReward.iconKey, rewardType),
+    imageUrl,
+    borderColor: guestPortalLootBoxPrizeColor(selectedReward.borderColor),
+    textColor: guestPortalLootBoxPrizeColor(selectedReward.textColor),
+    backgroundColor: guestPortalLootBoxPrizeColor(
+      selectedReward.backgroundColor,
+    ),
+  } as const;
 }
 
 function buildRewardSummary(
@@ -21383,10 +21935,25 @@ function seasonRewardLabelLooksLikeLootBox(value: string) {
   return /(?:лутбокс|кейс|контейнер|loot\s*box|case|container)/i.test(value);
 }
 
-export function seasonLevels(value: Prisma.JsonValue) {
+export function seasonLevels(
+  value: Prisma.JsonValue,
+  lootBoxes: Array<{
+    id: string;
+    name: string;
+    rewardLabel: string | null;
+    probabilityRules: Prisma.JsonValue | null;
+  }> = [],
+) {
   if (!Array.isArray(value)) {
     return [];
   }
+
+  const rewardLootBoxesById = new Map(
+    lootBoxes.map((lootBox) => [
+      lootBox.id,
+      guestPortalRewardLootBoxPreview(lootBox),
+    ]),
+  );
 
   return value
     .map((item) => {
@@ -21402,35 +21969,37 @@ export function seasonLevels(value: Prisma.JsonValue) {
       const sessionType = stringField(activationRules.sessionType);
       const metric = jsonRecord(activationRules.metric);
       const savedCondition = stringField(row.condition);
+      const freeRewardDetails = jsonRecord(row.freeRewardDetails);
+      const premiumRewardDetails = jsonRecord(row.premiumRewardDetails);
 
       if (level == null) {
         return null;
       }
 
-      const normalizedTaskType = taskType?.toUpperCase() ?? null;
-      const condition =
-        (normalizedTaskType === 'PLAY_TIME' ||
-          normalizedTaskType === 'CHECK_IN') &&
-        normalizeGuestPortalSessionType(sessionType) === 'regular_session'
-          ? appendHourlySessionSourceNotice(
-              savedCondition ??
-                guestPortalMissionConditionLabel(
-                  normalizedTaskType,
-                  metric,
-                  sessionType,
-                ),
-              sessionType,
-            )
-          : savedCondition;
+      const executionCondition =
+        guestPortalBattlePassExecutionCondition(
+          taskType,
+          metric,
+          sessionType,
+        ) ?? savedCondition;
 
       return {
         level,
         xp: requiredXp,
         title: stringField(row.title),
-        condition,
+        condition: savedCondition,
+        executionCondition,
         description: stringField(row.description),
         freeReward: stringField(row.freeReward),
         premiumReward: stringField(row.premiumReward),
+        freeRewardLootBox: seasonRewardLootBoxPreview(
+          freeRewardDetails,
+          rewardLootBoxesById,
+        ),
+        premiumRewardLootBox: seasonRewardLootBoxPreview(
+          premiumRewardDetails,
+          rewardLootBoxesById,
+        ),
         reached: false,
         current: false,
         next: false,
@@ -21439,6 +22008,21 @@ export function seasonLevels(value: Prisma.JsonValue) {
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .sort((left, right) => left.level - right.level)
     .slice(0, 12);
+}
+
+function seasonRewardLootBoxPreview(
+  details: Record<string, unknown>,
+  rewardLootBoxesById: ReadonlyMap<string, GuestPortalRewardLootBoxPreview>,
+) {
+  const rewardType = stringField(details.type)?.trim().toUpperCase();
+  const lootBox = jsonRecord(details.lootBox);
+  const lootBoxId = stringField(lootBox.id) ?? stringField(details.lootBoxId);
+
+  if (rewardType !== 'LOOT_BOX' || !lootBoxId) {
+    return null;
+  }
+
+  return rewardLootBoxesById.get(lootBoxId) ?? null;
 }
 
 function buildSeasonProgress(
@@ -22376,6 +22960,10 @@ function unknownStringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+function unknownArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? (value as unknown[]) : [];
 }
 
 function numberArrayField(value: unknown) {

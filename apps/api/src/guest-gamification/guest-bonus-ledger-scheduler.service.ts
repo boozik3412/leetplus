@@ -11,7 +11,7 @@ import {
   type GuestGameScheduledBonusLedgerDispatchResult,
 } from './guest-bonus-ledger.service';
 
-const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_INTERVAL_MS = 30_000;
 const DEFAULT_LIMIT = 50;
 
 export type GuestBonusLedgerSchedulerRunOutcome = 'SUCCESS' | 'ERROR';
@@ -52,6 +52,7 @@ export class GuestBonusLedgerSchedulerService
   private readonly logger = new Logger(GuestBonusLedgerSchedulerService.name);
   private timer: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
+  private runAfterCurrent = false;
   private enabled = false;
   private intervalMs: number | null = null;
   private lastStartedAt: string | null = null;
@@ -84,15 +85,30 @@ export class GuestBonusLedgerSchedulerService
       `Guest bonus ledger scheduler is enabled with ${this.intervalMs}ms interval`,
     );
 
-    void this.runOnce();
-    this.timer = setInterval(() => void this.runOnce(), this.intervalMs);
+    this.requestRun();
+    this.timer = setInterval(() => this.requestRun(), this.intervalMs);
   }
 
   onModuleDestroy() {
+    this.enabled = false;
+    this.runAfterCurrent = false;
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
+  }
+
+  requestRun() {
+    if (!this.enabled) {
+      return;
+    }
+
+    if (this.isRunning) {
+      this.runAfterCurrent = true;
+      return;
+    }
+
+    void this.runOnce();
   }
 
   getRuntimeStatus(): GuestBonusLedgerSchedulerRuntimeStatus {
@@ -159,6 +175,11 @@ export class GuestBonusLedgerSchedulerService
     } finally {
       this.lastFinishedAt = new Date().toISOString();
       this.isRunning = false;
+
+      if (this.runAfterCurrent && this.enabled) {
+        this.runAfterCurrent = false;
+        queueMicrotask(() => this.requestRun());
+      }
     }
   }
 

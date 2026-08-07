@@ -222,12 +222,16 @@ export function GuestMissionPreview({
   mode = "both",
   showLabels = true,
   onAction,
+  onHeroIconAction,
+  rewardDetails,
   className = "",
 }: {
   data: GuestMissionPreviewData;
   mode?: "both" | "compact" | "full";
   showLabels?: boolean;
   onAction?: () => void;
+  onHeroIconAction?: () => void;
+  rewardDetails?: ReactNode;
   className?: string;
 }) {
   const percent = Math.max(
@@ -239,6 +243,7 @@ export function GuestMissionPreview({
   );
   const progress = `${data.progressCurrent} из ${data.progressTarget} ${data.progressUnit}`;
   const palette = missionPreviewPalettes[data.theme ?? "CLASSIC"];
+  const hasCover = Boolean(data.coverUrl?.trim());
 
   return (
     <div
@@ -291,43 +296,58 @@ export function GuestMissionPreview({
             </p>
           ) : null}
           <div
-            className={`${showLabels ? "mt-2" : ""} overflow-hidden rounded-2xl border shadow-2xl ${palette.modal}`}
+            className={`${showLabels ? "mt-2" : ""} ${hasCover ? "pt-4" : ""} overflow-hidden rounded-2xl border shadow-2xl ${palette.modal}`}
           >
             <div
-              className={`relative min-h-44 p-5 ${palette.hero}`}
+              className={`relative min-h-44 sm:min-h-52 ${hasCover ? "" : "p-5"} ${palette.hero}`}
               style={
-                data.coverUrl
+                hasCover
                   ? {
-                      backgroundImage: `${palette.coverOverlay}, url("${data.coverUrl}")`,
+                      backgroundImage: `url("${data.coverUrl}")`,
                       backgroundPosition: "center",
                       backgroundSize: "cover",
                     }
                   : undefined
               }
             >
-              <span
-                className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${palette.status}`}
-              >
-                Квест в процессе
-              </span>
-              <div
-                className={`absolute right-5 top-5 grid h-12 w-12 place-items-center rounded-xl border ${palette.badge}`}
-                role="img"
-                aria-label={`Иконка задания: ${missionIconLabel(data.icon)}`}
-              >
-                <GuestMissionIcon icon={data.icon} className="h-6 w-6" />
-              </div>
-              <h3 className="mt-4 max-w-md text-2xl font-black leading-tight">
-                {data.title}
-              </h3>
-              <p
-                className={`mt-2 max-w-md text-sm leading-6 ${palette.description}`}
-              >
-                {data.description}
-              </p>
+              {!hasCover ? (
+                <>
+                  <span
+                    className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${palette.status}`}
+                  >
+                    Квест в процессе
+                  </span>
+                  {onHeroIconAction ? (
+                    <button
+                      type="button"
+                      className={`absolute right-5 top-5 grid h-12 w-12 place-items-center rounded-xl border ${palette.badge}`}
+                      aria-label="Закрыть подробности задания"
+                      onClick={onHeroIconAction}
+                    >
+                      <GuestMissionIcon icon={data.icon} className="h-6 w-6" />
+                    </button>
+                  ) : (
+                    <div
+                      className={`absolute right-5 top-5 grid h-12 w-12 place-items-center rounded-xl border ${palette.badge}`}
+                      role="img"
+                      aria-label={`Иконка задания: ${missionIconLabel(data.icon)}`}
+                    >
+                      <GuestMissionIcon icon={data.icon} className="h-6 w-6" />
+                    </div>
+                  )}
+                  <h3 className="mt-4 max-w-md text-2xl font-black leading-tight">
+                    {data.title}
+                  </h3>
+                  <p
+                    className={`mt-2 max-w-md text-sm leading-6 ${palette.description}`}
+                  >
+                    {data.description}
+                  </p>
+                </>
+              ) : null}
             </div>
-            <div className="space-y-3 p-4">
-              <PreviewBlock label="Условие" palette={palette}>
+            <div className="space-y-4 p-5">
+              <PreviewBlock label="Условие" palette={palette} variant="plain">
                 <p className="text-sm font-bold text-white">{data.condition}</p>
               </PreviewBlock>
               {data.products?.length ? (
@@ -356,7 +376,7 @@ export function GuestMissionPreview({
                   ) : null}
                 </PreviewBlock>
               ) : null}
-              <PreviewBlock label="Прогресс" palette={palette}>
+              <PreviewBlock label="Прогресс" palette={palette} variant="plain">
                 <div className="flex items-center justify-between gap-3 text-sm font-black">
                   <span>{progress}</span>
                   <span>{Math.round(percent)}%</span>
@@ -375,6 +395,7 @@ export function GuestMissionPreview({
                     Дополнительно: +{data.xp} XP
                   </p>
                 ) : null}
+                {rewardDetails ? <div className="mt-3">{rewardDetails}</div> : null}
               </PreviewBlock>
               <button
                 type="button"
@@ -395,13 +416,21 @@ function PreviewBlock({
   label,
   children,
   palette,
+  variant = "card",
 }: {
   label: string;
   children: ReactNode;
   palette: MissionPreviewPalette;
+  variant?: "card" | "plain";
 }) {
   return (
-    <div className={`rounded-xl border p-3 ${palette.block}`}>
+    <div
+      className={
+        variant === "plain"
+          ? "px-0 py-2"
+          : `rounded-xl border p-3 ${palette.block}`
+      }
+    >
       <p
         className={`mb-2 text-[10px] font-bold uppercase tracking-[0.14em] ${palette.blockLabel}`}
       >

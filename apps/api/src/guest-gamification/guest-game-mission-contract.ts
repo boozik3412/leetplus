@@ -127,11 +127,14 @@ export function normalizeMissionWizardConditions(
   const source = objectValue(dto.conditions);
   const indefinite = dto.indefinite === true || source.indefinite === true;
   const metric = objectValue(source.metric);
-  const appearance = objectValue(dto.appearance);
+  const appearance = {
+    ...objectValue(source.presentation),
+    ...objectValue(dto.appearance),
+  };
   const productMatch = enumValue(metric.productMatch, ['ANY', 'ALL'], 'ANY');
   const purchaseSource = enumValue(
-    source.purchaseSource,
-    ['PRODUCT', 'CATEGORY'],
+    source.purchaseSource ?? metric.purchaseSource,
+    ['ANY', 'PRODUCT', 'CATEGORY'],
     'PRODUCT',
   );
   const categoryCatalogSource = enumValue(
@@ -166,7 +169,8 @@ export function normalizeMissionWizardConditions(
     normalizedMetric.purchaseSource = purchaseSource;
     normalizedMetric.categoryCatalogSource =
       purchaseSource === 'CATEGORY' ? categoryCatalogSource : null;
-    normalizedMetric.productMatch = productMatch;
+    normalizedMetric.productMatch =
+      purchaseSource === 'ANY' ? 'ANY' : productMatch;
     normalizedMetric.amountMode = amountMode;
     normalizedMetric.productIds =
       purchaseSource === 'PRODUCT' ? stringArray(metric.productIds) : [];
@@ -184,14 +188,20 @@ export function normalizeMissionWizardConditions(
       amountMode === 'PERIOD_TOTAL'
         ? 'sum'
         : (stringValue(metric.aggregation) ?? 'count');
+    const categorySelectionCount = Math.max(
+      recordArray(metric.categorySelections).length,
+      stringArray(metric.categorySelectionIds).length,
+      stringArray(metric.categoryIds).length,
+      stringArray(metric.externalCategoryKeys).length,
+    );
     if (amountMode === 'PERIOD_TOTAL') {
       normalizedMetric.target =
         numberValue(metric.totalAmount) ?? numberValue(metric.target) ?? 1;
-    } else if (productMatch === 'ALL') {
+    } else if (purchaseSource !== 'ANY' && productMatch === 'ALL') {
       normalizedMetric.target = Math.max(
         1,
         purchaseSource === 'CATEGORY'
-          ? stringArray(metric.categoryIds).length
+          ? categorySelectionCount
           : stringArray(metric.productIds).length,
         purchaseSource === 'CATEGORY'
           ? 0
@@ -335,13 +345,25 @@ export function validateMissionWizard(
 
   if (taskType === 'PRODUCT_PURCHASE') {
     const purchaseSource = stringValue(conditions.purchaseSource);
+    const categorySelections = recordArray(metric.categorySelections);
     const selection =
-      purchaseSource === 'CATEGORY'
-        ? stringArray(metric.categoryIds)
-        : [
-            ...stringArray(metric.productIds),
-            ...stringArray(metric.externalProductIds),
-          ];
+      purchaseSource === 'ANY'
+        ? ['any']
+        : purchaseSource === 'CATEGORY'
+          ? [
+              ...stringArray(metric.categoryIds),
+              ...stringArray(metric.categorySelectionIds),
+              ...stringArray(metric.externalCategoryKeys),
+              ...categorySelections.flatMap((category) => [
+                stringValue(category.id),
+                ...stringArray(category.categoryIds),
+                ...stringArray(category.externalCategoryKeys),
+              ]),
+            ].filter((item): item is string => Boolean(item))
+          : [
+              ...stringArray(metric.productIds),
+              ...stringArray(metric.externalProductIds),
+            ];
     if (!selection.length) {
       blockers.push(
         purchaseSource === 'CATEGORY'
@@ -369,6 +391,16 @@ export function validateMissionWizard(
   }
 
   const rewardType = stringValue(reward.type)?.toUpperCase() ?? 'NONE';
+  const maxPendingRewards = numberValue(reward.maxPendingRewards ?? 1);
+  if (
+    maxPendingRewards == null ||
+    !Number.isInteger(maxPendingRewards) ||
+    maxPendingRewards < 1
+  ) {
+    blockers.push(
+      'Максимальное количество накопленных наград должно быть целым числом не меньше 1.',
+    );
+  }
   if (rewardType === 'LOOTBOX' && !stringValue(reward.lootBoxId)) {
     blockers.push('Выберите наградной лутбокс.');
   }
@@ -389,7 +421,7 @@ export function validateMissionWizard(
         ? 'Игровой журнал, второй боевой слой'
         : evaluationPolicy === 'LIVE_WITH_LEDGER_FALLBACK'
           ? 'Боевой pipeline с резервным слоем игрового журнала'
-        : 'Текущий боевой pipeline',
+          : 'Текущий боевой pipeline',
     blockers,
     warnings,
   };
@@ -399,6 +431,10 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function recordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.map(objectValue) : [];
 }
 
 function jsonObject(value: Record<string, unknown>): Prisma.InputJsonObject {

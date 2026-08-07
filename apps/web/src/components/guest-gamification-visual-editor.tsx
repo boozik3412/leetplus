@@ -22,6 +22,10 @@ import type {
   GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
 import { lootboxSkinForRarity } from "@/lib/lootbox-assets";
+import {
+  normalizeLootBoxPrizeColor,
+  normalizeLootBoxPrizeIconKey,
+} from "@/components/lootbox-prize-visual";
 import type { Store } from "@/lib/stores";
 
 type Props = {
@@ -1171,6 +1175,18 @@ function LootBoxInspector({
                     }
                   />
                 ) : null}
+                <NumberField
+                  label="Максимальное количество накопленных наград для получения"
+                  value={item.maxPendingRewards}
+                  min={1}
+                  disabled={disabled}
+                  onChange={(maxPendingRewards) =>
+                    update({ ...item, maxPendingRewards })
+                  }
+                />
+                <EditorHint>
+                  После открытия кейса слот освобождается.
+                </EditorHint>
               </div>
               <div className="mt-3">
                 <LootBoxPrizeDistribution prizes={item.prizes} />
@@ -1287,6 +1303,18 @@ function MissionInspector({
             disabled={disabled}
             onChange={(progressUnit) => update({ ...item, progressUnit })}
           />
+          <NumberField
+            label="Максимальное количество накопленных наград для получения"
+            value={item.maxPendingRewards}
+            min={1}
+            disabled={disabled}
+            onChange={(maxPendingRewards) =>
+              update({ ...item, maxPendingRewards })
+            }
+          />
+          <EditorHint>
+            После получения награды или открытия кейса слот освобождается.
+          </EditorHint>
           <TextField
             label="Награда"
             value={item.rewardLabel}
@@ -2498,6 +2526,7 @@ function createVisualLootBox(): GuestGameVisualEditorLootBox {
     ],
     condition: visualTriggerLabel("SESSION_START"),
     limitPerGuest: 1,
+    maxPendingRewards: 1,
     periodicLimitEnabled: false,
     periodicLimitPeriod: "DAILY",
     timeWindowMode: "ANY",
@@ -2521,6 +2550,7 @@ function createVisualMission(): GuestGameVisualEditorMission {
     rewardLabel: "Промокод бара",
     progressTarget: 1,
     progressUnit: "step",
+    maxPendingRewards: 1,
     questSteps: [{ id: "step-1", title: "Выполнить шаг", target: 1 }],
   };
 }
@@ -2637,6 +2667,7 @@ function visualLootBoxFromTemplate(
     limitPerGuest: templateNumberOrNull(
       limits.perGuest ?? limits.perGuestPerWeek,
     ),
+    maxPendingRewards: templateInt(limits.maxPendingRewards, 1, 1, 1000),
     periodicLimitEnabled: periodicLimit != null,
     periodicLimitPeriod: periodicLimit ?? "DAILY",
     timeWindowMode: templateTimeWindowMode(
@@ -2680,6 +2711,7 @@ function visualMissionFromTemplate(
     rewardLabel: mission.rewardLabel ?? mission.name,
     progressTarget: mission.progressTarget,
     progressUnit: mission.progressUnit,
+    maxPendingRewards: mission.maxPendingRewards,
     questSteps: questSteps.length
       ? questSteps
       : [{ id: "step-1", title: mission.name, target: 1 }],
@@ -2887,6 +2919,28 @@ function visualLootBoxPrizesFromRules(
           record.chancePercent ?? record.weight ?? record.probability,
           source.length > 1 ? 0 : 100,
         ),
+        visualMode:
+          record.visualMode === "ICON" || record.visualMode === "IMAGE"
+            ? record.visualMode
+            : ("AUTO" as GuestGameVisualEditorLootBoxPrize["visualMode"]),
+        iconKey: normalizeLootBoxPrizeIconKey(
+          typeof record.iconKey === "string" ? record.iconKey : null,
+          templateString(record.rewardType ?? record.type, fallbackType),
+        ),
+        imageUrl:
+          typeof record.imageUrl === "string" ? record.imageUrl : null,
+        borderColor:
+          typeof record.borderColor === "string"
+            ? normalizeLootBoxPrizeColor(record.borderColor)
+            : null,
+        textColor:
+          typeof record.textColor === "string"
+            ? normalizeLootBoxPrizeColor(record.textColor)
+            : null,
+        backgroundColor:
+          typeof record.backgroundColor === "string"
+            ? normalizeLootBoxPrizeColor(record.backgroundColor)
+            : null,
       };
     })
     .filter(
@@ -3170,6 +3224,7 @@ function fallbackLootBoxes(): GuestGameVisualEditorLootBox[] {
       ],
       condition: "Визит в клуб",
       limitPerGuest: 1,
+      maxPendingRewards: 1,
       periodicLimitEnabled: false,
       periodicLimitPeriod: "DAILY",
       timeWindowMode: "ANY",
@@ -3195,6 +3250,7 @@ function fallbackMissions(): GuestGameVisualEditorMission[] {
       rewardLabel: "XP",
       progressTarget: 1,
       progressUnit: null,
+      maxPendingRewards: 1,
       questSteps: [{ id: "step-1", title: "Сыграть 2 часа", target: 1 }],
     },
   ];

@@ -12,10 +12,14 @@ import {
   GuestPortalService,
   guestPortalEffectiveXp,
   guestPortalMissionConditionLabel,
+  guestPortalMissionProgressCurrent,
   guestPortalMissionProgressTarget,
   guestPortalMissionProgressUnitLabel,
   guestPortalVisibleBonusLedgerRows,
   lootBoxWaitingEventMessage,
+  mapLootBoxPossibleRewards,
+  mapGameSummaryMission,
+  mapMission,
   mapSessionActivity,
   rewardCodeVisibleAfterClaim,
   rewardWalletState,
@@ -246,6 +250,9 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   const guestActivityLedgerService = {
     scheduleProfileSync: jest.fn(),
   };
+  const guestBonusLedgerSchedulerService = {
+    requestRun: jest.fn(),
+  };
   const secretEncryptionService = {
     encrypt: jest.fn((value: string) => `encrypted:${value}`),
     decrypt: jest.fn(),
@@ -274,6 +281,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     langameSettingsService as any,
     guestGamificationService as any,
     guestActivityLedgerService as any,
+    guestBonusLedgerSchedulerService as any,
     secretEncryptionService as any,
     guestIdentityResolver as any,
   );
@@ -460,6 +468,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   return {
     guestGamificationService,
     guestActivityLedgerService,
+    guestBonusLedgerSchedulerService,
     guestIdentityResolver,
     jwtService,
     langameSettingsService,
@@ -1325,6 +1334,105 @@ describe('rewardCodeVisibleAfterClaim', () => {
   });
 });
 
+describe('mapLootBoxPossibleRewards', () => {
+  it('normalizes configured weights into public drop percentages', () => {
+    expect(
+      mapLootBoxPossibleRewards(
+        {
+          type: 'weighted',
+          prizes: [
+            { rewardLabel: '50 бонусов', weight: 85 },
+            { rewardLabel: '100 бонусов', weight: 15 },
+          ],
+        },
+        'Бонусы',
+      ),
+    ).toEqual([
+      {
+        rewardType: '',
+        rewardLabel: '50 бонусов',
+        chancePercent: 85,
+        rarity: 'common',
+        rarityLabel: 'Обычная',
+        visualMode: 'AUTO',
+        iconKey: 'gift',
+        imageUrl: null,
+        borderColor: null,
+        textColor: null,
+        backgroundColor: null,
+      },
+      {
+        rewardType: '',
+        rewardLabel: '100 бонусов',
+        chancePercent: 15,
+        rarity: 'rare',
+        rarityLabel: 'Редкая',
+        visualMode: 'AUTO',
+        iconKey: 'gift',
+        imageUrl: null,
+        borderColor: null,
+        textColor: null,
+        backgroundColor: null,
+      },
+    ]);
+  });
+
+  it('publishes a guaranteed fallback when a case has one reward', () => {
+    expect(mapLootBoxPossibleRewards(null, '50 бонусов')).toEqual([
+      {
+        rewardType: '',
+        rewardLabel: '50 бонусов',
+        chancePercent: 100,
+        rarity: 'common',
+        rarityLabel: 'Обычная',
+        visualMode: 'AUTO',
+        iconKey: 'gift',
+        imageUrl: null,
+        borderColor: null,
+        textColor: null,
+        backgroundColor: null,
+      },
+    ]);
+  });
+
+  it('publishes tenant media and a safe icon for roulette cards', () => {
+    expect(
+      mapLootBoxPossibleRewards(
+        {
+          prizes: [
+            {
+              rewardType: 'BONUS_BALANCE',
+              rewardLabel: '500 бонусов',
+              chancePercent: 100,
+              visualMode: 'IMAGE',
+              iconKey: 'coins',
+              imageUrl: '/api/guest-game/media/prize-asset-1',
+              borderColor: '#12ABEF',
+              textColor: '#F0F0F0',
+              backgroundColor: '#081014',
+            },
+          ],
+        },
+        'Бонусы',
+      ),
+    ).toEqual([
+      {
+        rewardType: 'BONUS_BALANCE',
+        rewardLabel: '500 бонусов',
+        chancePercent: 100,
+        rarity: 'common',
+        rarityLabel: 'Обычная',
+        visualMode: 'IMAGE',
+        iconKey: 'coins',
+        imageUrl: '/api/guest-game/media/prize-asset-1',
+        borderColor: '#12ABEF',
+        textColor: '#F0F0F0',
+        backgroundColor: '#081014',
+      },
+    ]);
+  });
+});
+
 describe('case reward public contract', () => {
   it('keeps the parent out of ordinary claim actions after entitlement delivery', () => {
     const walletState = rewardWalletState('APPROVED', null, {
@@ -1744,6 +1852,12 @@ describe('GuestPortalService', () => {
   });
 
   describe('mission display values', () => {
+    it('caps completed mission progress at the configured target', () => {
+      expect(guestPortalMissionProgressCurrent(1605, 60)).toBe(60);
+      expect(guestPortalMissionProgressCurrent(-5, 60)).toBe(0);
+      expect(guestPortalMissionProgressCurrent(75, null)).toBe(75);
+    });
+
     it('uses the normalized top-up threshold and metric target', () => {
       expect(
         guestPortalMissionConditionLabel(
@@ -1778,7 +1892,7 @@ describe('GuestPortalService', () => {
           'HOURLY',
         ),
       ).toBe(
-        'Сыграть один час в игровой сессии с почасовым тарифом, минимум 30 минут за сессию. Продление пакета или абонемента без завершения сессии не засчитывается.',
+        'Сыграть один час в игровой сессии с почасовым тарифом, минимум 30 минут за сессию. Учитывается только полная сессия (продление с изменением типа сессии не учитывается).',
       );
       expect(
         guestPortalMissionConditionLabel(
@@ -1797,6 +1911,13 @@ describe('GuestPortalService', () => {
       );
       expect(
         guestPortalMissionConditionLabel(
+          'PRODUCT_PURCHASE',
+          { purchaseSource: 'ANY', target: 1 },
+          null,
+        ),
+      ).toBe('Купить любой товар');
+      expect(
+        guestPortalMissionConditionLabel(
           'BALANCE_TOPUP',
           {
             topupMode: 'COUNT',
@@ -1806,7 +1927,7 @@ describe('GuestPortalService', () => {
           },
           null,
         ),
-      ).toBe('Пополнить баланс 3 раз, каждый раз ровно на 500 ₽');
+      ).toBe('Пополнить баланс 3 раза, каждый раз ровно на 500 ₽');
       expect(
         guestPortalMissionConditionLabel(
           'CHECK_IN',
@@ -1823,7 +1944,7 @@ describe('GuestPortalService', () => {
 
       expect(message).toContain('с почасовым тарифом');
       expect(message).toContain(
-        'Продление пакета или абонемента без завершения сессии не засчитывается.',
+        'Учитывается только полная сессия (продление с изменением типа сессии не учитывается).',
       );
     });
 
@@ -1837,7 +1958,7 @@ describe('GuestPortalService', () => {
             sessionType,
           ),
         ).toBe(
-          'Сделать чекин в клубе во время активной сессии с почасовым тарифом. Продление пакета или абонемента без завершения сессии не засчитывается.',
+          'Сделать чекин в клубе во время активной сессии с почасовым тарифом. Учитывается только полная сессия (продление с изменением типа сессии не учитывается).',
         );
       },
     );
@@ -1866,16 +1987,23 @@ describe('GuestPortalService', () => {
       },
     );
 
-    it('adds the source limitation to hourly Battle Pass conditions and aliases', () => {
-      const [playLevel, checkInLevel] = seasonLevels([
+    it('keeps the authored Battle Pass task and derives execution conditions from activation rules', () => {
+      const [playLevel, checkInLevel, topUpLevel] = seasonLevels([
         {
           level: 1,
           xp: 100,
-          condition: 'Сыграть 60 минут с почасовым тарифом',
+          condition:
+            'Сыграть 60 минут с почасовым тарифом. Продление пакета или абонемента без завершения сессии не засчитывается.',
           activationRules: {
             taskType: 'PLAY_TIME',
             sessionType: 'REGULAR_SESSION',
-            metric: { target: 60, minSessionMinutes: 30 },
+            metric: {
+              target: 60,
+              minSessionMinutes: 30,
+              windowDays: 30,
+              weekdays: [1, 3, 5],
+              hours: ['09:00-21:00'],
+            },
           },
         },
         {
@@ -1887,13 +2015,188 @@ describe('GuestPortalService', () => {
             metric: { checkInMode: 'SINGLE', target: 1 },
           },
         },
+        {
+          level: 3,
+          xp: 300,
+          condition: 'Пополните баланс и получите награду.',
+          activationRules: {
+            taskType: 'BALANCE_TOPUP',
+            sessionType: 'ANY',
+            metric: {
+              topupMode: 'COUNT',
+              amountComparison: 'AT_LEAST',
+              amount: 500,
+              target: 3,
+              windowDays: 7,
+            },
+          },
+        },
       ] as Prisma.JsonValue);
 
       expect(playLevel?.condition).toBe(
         'Сыграть 60 минут с почасовым тарифом. Продление пакета или абонемента без завершения сессии не засчитывается.',
       );
-      expect(checkInLevel?.condition).toBe(
-        'Сделать чекин в клубе во время активной сессии с почасовым тарифом. Продление пакета или абонемента без завершения сессии не засчитывается.',
+      expect(playLevel?.executionCondition).toBe(
+        'Сыграть один час в игровой сессии с почасовым тарифом, минимум 30 минут за сессию. Учитывается только полная сессия (продление с изменением типа сессии не учитывается). Дни выполнения: Пн, Ср, Пт. Время выполнения: 09:00–21:00.',
+      );
+      expect(checkInLevel?.condition).toBeNull();
+      expect(checkInLevel?.executionCondition).toBe(
+        'Сделать чекин в клубе во время активной сессии с почасовым тарифом. Учитывается только полная сессия (продление с изменением типа сессии не учитывается).',
+      );
+      expect(topUpLevel?.condition).toBe(
+        'Пополните баланс и получите награду.',
+      );
+      expect(topUpLevel?.executionCondition).toBe(
+        'Пополнить баланс 3 раза, каждый раз не менее чем на 500 ₽.',
+      );
+    });
+
+    it('lists selected purchase categories without exposing the execution window', () => {
+      const [purchaseLevel] = seasonLevels([
+        {
+          level: 1,
+          xp: 100,
+          activationRules: {
+            taskType: 'PRODUCT_PURCHASE',
+            sessionType: 'ANY',
+            metric: {
+              purchaseSource: 'CATEGORY',
+              productMatch: 'ANY',
+              categoryLabels: ['Напитки', 'Снеки'],
+              target: 1,
+              windowDays: 35_035_035,
+            },
+          },
+        },
+      ] as Prisma.JsonValue);
+
+      expect(purchaseLevel?.executionCondition).toBe(
+        'Купить товар из любой из категорий: Напитки, Снеки.',
+      );
+      expect(purchaseLevel?.executionCondition).not.toContain(
+        'Окно выполнения',
+      );
+    });
+
+    it('publishes the linked case artwork contract and exact drop chances for a Battle Pass reward', () => {
+      const [level] = seasonLevels(
+        [
+          {
+            level: 4,
+            xp: 400,
+            freeReward: 'КЕЙС «WEEKEND»',
+            freeRewardDetails: {
+              type: 'LOOT_BOX',
+              lootBox: { id: 'weekend-case' },
+            },
+          },
+        ] as Prisma.JsonValue,
+        [
+          {
+            id: 'weekend-case',
+            name: 'КЕЙС «WEEKEND»',
+            rewardLabel: 'Бонусы клуба',
+            probabilityRules: {
+              caseRarity: 'rare',
+              prizes: [
+                { rewardLabel: '50 бонусов', weight: 85 },
+                { rewardLabel: '150 бонусов', weight: 15 },
+              ],
+            },
+          },
+        ],
+      );
+
+      expect(level?.freeRewardLootBox).toEqual({
+        id: 'weekend-case',
+        name: 'КЕЙС «WEEKEND»',
+        rewardLabel: 'Бонусы клуба',
+        caseRarity: 'rare',
+        caseRarityLabel: 'Редкий',
+        possibleRewards: [
+          {
+            rewardLabel: '50 бонусов',
+            rewardType: '',
+            chancePercent: 85,
+            rarity: 'common',
+            rarityLabel: 'Обычная',
+            visualMode: 'AUTO',
+            iconKey: 'gift',
+            imageUrl: null,
+            borderColor: null,
+            textColor: null,
+            backgroundColor: null,
+          },
+          {
+            rewardLabel: '150 бонусов',
+            rewardType: '',
+            chancePercent: 15,
+            rarity: 'rare',
+            rarityLabel: 'Редкая',
+            visualMode: 'AUTO',
+            iconKey: 'gift',
+            imageUrl: null,
+            borderColor: null,
+            textColor: null,
+            backgroundColor: null,
+          },
+        ],
+      });
+      expect(level?.premiumRewardLootBox).toBeNull();
+    });
+
+    it('publishes the linked case preview for a mission reward without adding it to the storefront', () => {
+      const rewardLootBox = {
+        id: 'mission-case',
+        name: 'КЕЙС «КАМБЭК»',
+        rewardLabel: 'Бонусы клуба',
+        caseRarity: 'common' as const,
+        caseRarityLabel: 'Обычный',
+        possibleRewards: [
+          {
+            rewardLabel: '100 бонусов',
+            rewardType: 'LANGAME_BONUS',
+            chancePercent: 100,
+            rarity: 'common' as const,
+            rarityLabel: 'Обычная',
+            visualMode: 'AUTO' as const,
+            iconKey: 'coins' as const,
+            imageUrl: null,
+            borderColor: null,
+            textColor: null,
+            backgroundColor: null,
+          },
+        ],
+      };
+      const mission = mapMission(
+        {
+          id: 'mission-1',
+          name: 'МЕНЯЕМ МИНУТЫ НА КЕЙС',
+          triggerKind: 'PLAY_HOUR',
+          missionType: 'PLAY_TIME',
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          rewardLabel: 'КЕЙС «КАМБЭК»',
+          xpReward: 50,
+          progressTarget: 60,
+          progressUnit: 'минут',
+          conditions: {
+            taskType: 'PLAY_TIME',
+            sessionType: 'ANY',
+            metric: { target: 60, unit: 'минут' },
+            reward: { type: 'LOOT_BOX', lootBoxId: rewardLootBox.id },
+          },
+          periodTo: null,
+          manualApprovalRequired: false,
+        },
+        undefined,
+        [],
+        [],
+        new Map([[rewardLootBox.id, rewardLootBox]]),
+      );
+
+      expect(mission.rewardLootBox).toEqual(rewardLootBox);
+      expect(mapGameSummaryMission(mission).rewardLootBox).toEqual(
+        rewardLootBox,
       );
     });
   });
@@ -2560,7 +2863,7 @@ describe('GuestPortalService', () => {
 
       await expect(
         service.openLootBox('Bearer guest-token', 'loot-1'),
-      ).rejects.toThrow('по выданному праву');
+      ).rejects.toThrow('ещё не заработан');
 
       expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
@@ -2722,7 +3025,25 @@ describe('GuestPortalService', () => {
           createdRewards: 1,
           queuedRewardAmount: 200,
         },
-        rewards: [{ id: 'reward-loot-packet', rewardLabel: '200 бонусов' }],
+        rewards: [
+          {
+            id: 'reward-loot-packet',
+            rewardType: 'BONUS_BALANCE',
+            rewardLabel: '200 бонусов',
+            evidence: {
+              rule: {
+                selectedReward: {
+                  visualMode: 'IMAGE',
+                  iconKey: 'coins',
+                  imageUrl: '/api/guest-game/media/reward-snapshot-1',
+                  borderColor: '#12ABEF',
+                  textColor: '#F0F0F0',
+                  backgroundColor: '#081014',
+                },
+              },
+            },
+          },
+        ],
       });
 
       const result = await service.openLootBox(
@@ -2778,6 +3099,17 @@ describe('GuestPortalService', () => {
         idempotent: false,
         createdRewards: 1,
         queuedRewardAmount: 200,
+        rewards: [
+          {
+            id: 'reward-loot-packet',
+            visualMode: 'IMAGE',
+            iconKey: 'coins',
+            imageUrl: '/api/guest-game/media/reward-snapshot-1',
+            borderColor: '#12ABEF',
+            textColor: '#F0F0F0',
+            backgroundColor: '#081014',
+          },
+        ],
       });
     });
 
@@ -2994,6 +3326,41 @@ describe('GuestPortalService', () => {
         }
       },
     );
+
+    it('wakes the bonus ledger scheduler after a claim is durably materialized', async () => {
+      const {
+        guestBonusLedgerSchedulerService,
+        guestGamificationService,
+        prisma,
+        service,
+      } = createService();
+      const payload = {
+        sub: 'guest-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+      };
+      jest.spyOn(service as any, 'acceptRewardWalletClaim').mockResolvedValue({
+        rewardId: 'reward-1',
+        materialize: true,
+      });
+      jest
+        .spyOn(service as any, 'synchronizeRewardWalletDeliveryState')
+        .mockResolvedValue(undefined);
+      prisma.tenant.findUnique.mockResolvedValue({ slug: 'leet' });
+      guestGamificationService.materializeRewardEffects.mockResolvedValue({});
+
+      await (service as any).claimRewardWalletItemForProfile(
+        payload,
+        'profile-1',
+        'wallet-1',
+      );
+
+      expect(guestBonusLedgerSchedulerService.requestRun).toHaveBeenCalledTimes(
+        1,
+      );
+    });
 
     it('keeps the wallet item failed when a balance reward effect could not create a durable ledger entry', async () => {
       const { prisma, service } = createService();
@@ -4016,6 +4383,137 @@ describe('GuestPortalService', () => {
       );
     });
 
+    it('opens a durable wallet entitlement after its template is inactive and no longer scoped to the source store', async () => {
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      const { processLiveSessionStartForPayload, tokenPayload } =
+        mockGameSummarySession(service, portal);
+      const sourceStore = {
+        id: 'store-archived',
+        publicSlug: 'archived',
+        name: 'Archived source club',
+        address: null,
+        externalDomain: null,
+        integrationSourceId: null,
+        timeZone: 'Asia/Yekaterinburg',
+      };
+      jest
+        .spyOn(service as any, 'getTenantStoreByIdsIncludingInactive')
+        .mockResolvedValue({
+          tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+          store: sourceStore,
+        });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+        gameActivatedAt: new Date('2026-07-01T00:00:00.000Z'),
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-entitled',
+        tenantId: 'tenant-1',
+        name: 'Historical reward template',
+        status: 'INACTIVE',
+        usageKind: 'REWARD_TEMPLATE',
+        storeIds: ['store-removed'],
+        triggerKind: 'SESSION_START',
+        sessionType: 'packet_hours',
+        limits: { periodicLimit: 'DAILY' },
+        periodRules: {},
+      });
+      const entitlement = availablePortalLootBoxEntitlement(
+        'loot-entitled',
+        '2026-07-05T01:49:00.000Z',
+        {
+          id: 'entitlement-exact',
+          storeId: sourceStore.id,
+          validUntil: new Date('2026-08-05T01:49:00.000Z'),
+        },
+      );
+      jest
+        .spyOn(service as any, 'findReconciledPortalLootBoxEntitlement')
+        .mockResolvedValue(entitlement);
+      jest
+        .spyOn(service as any, 'getPublishedVisualLootBoxRefs')
+        .mockResolvedValue(null);
+      jest.spyOn(service as any, 'findPortalRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'findPortalLootBoxUnlockEvents')
+        .mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'findPortalAudienceMemberIds')
+        .mockResolvedValue(new Set());
+      jest
+        .spyOn(service as any, 'reservePortalLootBoxEntitlement')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service as any, 'finalizePortalLootBoxEntitlement')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'getGameReferralStats').mockResolvedValue({});
+      jest
+        .spyOn(service as any, 'getPendingCompletionNotifications')
+        .mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getRewardWallet')
+        .mockResolvedValue({ pendingCount: 0, items: [] });
+      guestGamificationService.dryRun.mockResolvedValue({
+        rules: [
+          {
+            kind: 'LOOT_BOX',
+            id: 'loot-entitled',
+            eligible: true,
+            blockers: [],
+          },
+        ],
+      });
+      guestGamificationService.processEvent.mockResolvedValue({
+        summary: {
+          idempotent: false,
+          createdRewards: 1,
+          queuedRewardAmount: 200,
+        },
+        rewards: [
+          { id: 'reward-1', rewardLabel: '200 bonuses', rewardType: 'BONUS' },
+        ],
+      });
+
+      const result = await (service as any).openLootBoxForPayload(
+        tokenPayload,
+        'loot-entitled',
+        entitlement.id,
+        'wallet-exact',
+        sourceStore.id,
+      );
+
+      expect(processLiveSessionStartForPayload).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.findFirst.mock.calls[0][0].where).toEqual({
+        id: 'loot-entitled',
+        tenantId: 'tenant-1',
+      });
+      expect(guestGamificationService.dryRun).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          lootBoxId: 'loot-entitled',
+          storeId: sourceStore.id,
+        }),
+        {
+          prequalifiedLootBoxOpen: {
+            tenantId: 'tenant-1',
+            entitlementId: entitlement.id,
+            ruleId: 'loot-entitled',
+            profileId: 'profile-1',
+            storeId: sourceStore.id,
+          },
+        },
+      );
+      expect(result).toMatchObject({ processed: true, createdRewards: 1 });
+    });
+
     it('does not open a missing, foreign, or already consumed wallet entitlement', async () => {
       const { prisma, service } = createService();
       jest.spyOn(service as any, 'verifyGuestToken').mockResolvedValue({
@@ -4796,7 +5294,7 @@ describe('GuestPortalService', () => {
           rewardId: 'reward-missing',
           consumedAt: new Date('2026-07-11T10:00:00.000Z'),
         }),
-      ).rejects.toThrow('Награда по праву открытия не найдена в базе');
+      ).rejects.toThrow('Кейс пока не открылся, но он остаётся у вас');
       expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
     });
 
@@ -5956,7 +6454,7 @@ describe('GuestPortalService', () => {
 
       await expect(
         service.openLootBox('Bearer guest-token', 'loot-audience'),
-      ).rejects.toThrow('по выданному праву');
+      ).rejects.toThrow('ещё не заработан');
 
       expect(prisma.guestAudienceMember.findMany).toHaveBeenCalledWith({
         where: {
@@ -6211,7 +6709,7 @@ describe('GuestPortalService', () => {
 
       await expect(
         service.openLootBox('Bearer guest-token', 'loot-app'),
-      ).rejects.toThrow('по выданному праву');
+      ).rejects.toThrow('ещё не заработан');
 
       expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
@@ -6271,7 +6769,7 @@ describe('GuestPortalService', () => {
       try {
         await expect(
           service.openLootBox('Bearer guest-token', 'loot-app'),
-        ).rejects.toThrow('по выданному праву');
+        ).rejects.toThrow('ещё не заработан');
       } finally {
         jest.useRealTimers();
       }
@@ -6560,6 +7058,41 @@ describe('GuestPortalService', () => {
         'mission-9',
         'mission-10',
       ]);
+    });
+
+    it('paginates every mission for the full quest board', async () => {
+      const { service } = createService();
+      const portal = portalPayloadFixture();
+      const baseMission = portal.gamification.missions[0];
+      portal.gamification.missions = Array.from({ length: 11 }, (_, index) => ({
+        ...baseMission,
+        id: `mission-${index + 1}`,
+        name: `Mission ${index + 1}`,
+        progressCurrent: 12 - index,
+        progressPercent: 100 - index * 8,
+        questSteps: baseMission.questSteps.map((step) => ({
+          ...step,
+          id: `${step.id}-${index + 1}`,
+        })),
+      }));
+      mockGameSummarySession(service, portal);
+
+      const firstPage = await service.getGameMissions('Bearer guest-token', {
+        offset: '0',
+        limit: '10',
+      });
+      const secondPage = await service.getGameMissions('Bearer guest-token', {
+        offset: String(firstPage.nextOffset),
+        limit: '10',
+      });
+
+      expect(firstPage.total).toBe(11);
+      expect(firstPage.items).toHaveLength(10);
+      expect(firstPage.nextOffset).toBe(10);
+      expect(secondPage.items.map((mission) => mission.id)).toEqual([
+        'mission-11',
+      ]);
+      expect(secondPage.nextOffset).toBeNull();
     });
   });
 
@@ -10538,7 +11071,7 @@ describe('GuestPortalService', () => {
         openBlocker: expect.any(String),
       });
     });
-    it('uses live wallet entitlements in OFF mode and hides templates after consumption', async () => {
+    it('keeps entitled reward templates out of the storefront before and after consumption', async () => {
       const { prisma, service } = createService({
         GUEST_GAME_ENTITLEMENT_READ_MODE: 'OFF',
       });
@@ -10686,15 +11219,7 @@ describe('GuestPortalService', () => {
 
       expect(
         portalWithSyntheticLegacyEntitlement.gamification.lootBoxes,
-      ).toHaveLength(1);
-      expect(
-        portalWithSyntheticLegacyEntitlement.gamification.lootBoxes[0],
-      ).toMatchObject({
-        id: 'loot-weekend',
-        openState: 'OPENABLE',
-        openable: true,
-        openBlocker: null,
-      });
+      ).toEqual([]);
       expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
 
       const portal = await (service as any).buildPortalPayload({
@@ -10707,13 +11232,7 @@ describe('GuestPortalService', () => {
         phoneHash: 'phone-hash',
       });
 
-      expect(portal.gamification.lootBoxes).toHaveLength(1);
-      expect(portal.gamification.lootBoxes[0]).toMatchObject({
-        id: 'loot-weekend',
-        openState: 'OPENABLE',
-        openable: true,
-        openBlocker: null,
-      });
+      expect(portal.gamification.lootBoxes).toEqual([]);
       expect(prisma.guestGameEntitlement.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -13,6 +14,18 @@ import {
 } from "react";
 import { GuestGamificationVisualEditor } from "@/components/guest-gamification-visual-editor";
 import { HourlySessionSourceNote } from "@/components/hourly-session-source-note";
+import {
+  LootBoxPrizeVisual,
+  defaultLootBoxPrizeColors,
+  defaultLootBoxPrizeIconKey,
+  lootBoxPrizeCardColorStyle,
+  lootBoxPrizeIconOptions,
+  lootBoxPrizeVisualModeOptions,
+  normalizeLootBoxPrizeColor,
+  normalizeLootBoxPrizeIconKey,
+  type LootBoxPrizeIconKey,
+  type LootBoxPrizeVisualMode,
+} from "@/components/lootbox-prize-visual";
 import {
   BattlePassStepConditionEditor,
   defaultBattlePassStepCondition,
@@ -197,6 +210,12 @@ type LootBoxPrizeForm = {
   rewardAmount: string;
   rewardLabel: string;
   chancePercent: string;
+  visualMode: LootBoxPrizeVisualMode;
+  iconKey: LootBoxPrizeIconKey;
+  imageUrl: string;
+  borderColor: string;
+  textColor: string;
+  backgroundColor: string;
 };
 
 type LootBoxTimeWindowMode = "ANY" | "QUIET_HOURS" | "CUSTOM";
@@ -233,6 +252,7 @@ type LootBoxForm = {
   periodicLimitEnabled: boolean;
   periodicLimitPeriod: LootBoxPeriodicLimitPeriod;
   totalPerDay: string;
+  maxPendingRewards: string;
   prizes: LootBoxPrizeForm[];
   requireCashierConfirmation: boolean;
   oneDevicePerGuest: boolean;
@@ -993,6 +1013,12 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     rewardAmount: "50",
     rewardLabel: "50 бонусов",
     chancePercent: "85",
+    visualMode: "AUTO",
+    iconKey: "coins",
+    imageUrl: "",
+    borderColor: "",
+    textColor: "",
+    backgroundColor: "",
   },
   {
     id: "default-bonus-100",
@@ -1000,6 +1026,12 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     rewardAmount: "100",
     rewardLabel: "100 бонусов",
     chancePercent: "5",
+    visualMode: "AUTO",
+    iconKey: "coins",
+    imageUrl: "",
+    borderColor: "",
+    textColor: "",
+    backgroundColor: "",
   },
   {
     id: "default-bonus-200",
@@ -1007,6 +1039,12 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     rewardAmount: "200",
     rewardLabel: "200 бонусов",
     chancePercent: "2",
+    visualMode: "AUTO",
+    iconKey: "coins",
+    imageUrl: "",
+    borderColor: "",
+    textColor: "",
+    backgroundColor: "",
   },
   {
     id: "default-promo-1000",
@@ -1014,6 +1052,12 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     rewardAmount: "1000",
     rewardLabel: "Промокод на 1000 рублей",
     chancePercent: "1",
+    visualMode: "AUTO",
+    iconKey: "ticket",
+    imageUrl: "",
+    borderColor: "",
+    textColor: "",
+    backgroundColor: "",
   },
 ];
 
@@ -1046,6 +1090,7 @@ const defaultLootBoxForm: LootBoxForm = {
   periodicLimitEnabled: false,
   periodicLimitPeriod: "DAILY",
   totalPerDay: "30",
+  maxPendingRewards: "1",
   prizes: defaultLootBoxPrizes,
   requireCashierConfirmation: true,
   oneDevicePerGuest: true,
@@ -1058,6 +1103,7 @@ const defaultLootBoxForm: LootBoxForm = {
   limitsText: jsonText({
     perGuestPerWeek: 1,
     totalPerDay: 30,
+    maxPendingRewards: 1,
   }),
   probabilityRulesText: jsonText({
     type: "weighted",
@@ -1068,6 +1114,12 @@ const defaultLootBoxForm: LootBoxForm = {
       rewardLabel: prize.rewardLabel,
       chancePercent: Number(prize.chancePercent),
       weight: Number(prize.chancePercent),
+      visualMode: prize.visualMode,
+      iconKey: prize.iconKey,
+      imageUrl: prize.imageUrl || null,
+      borderColor: normalizeLootBoxPrizeColor(prize.borderColor),
+      textColor: normalizeLootBoxPrizeColor(prize.textColor),
+      backgroundColor: normalizeLootBoxPrizeColor(prize.backgroundColor),
     })),
     items: defaultLootBoxPrizes.map((prize) => ({
       label: prize.rewardLabel,
@@ -10416,6 +10468,25 @@ function LootBoxBusinessRules({
             нужен.
           </p>
         </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 lg:col-span-2">
+          <label className="block text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+            Максимальное количество накопленных наград для получения
+            <input
+              className={fieldClass}
+              type="number"
+              min="1"
+              step="1"
+              value={form.maxPendingRewards}
+              onChange={(event) =>
+                onChange({ maxPendingRewards: event.target.value })
+              }
+            />
+          </label>
+          <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            Сколько неоткрытых кейсов этого лутбокса гость может хранить
+            одновременно. После открытия кейса слот освобождается.
+          </p>
+        </div>
       </div>
       <LootBoxPrizesEditor prizes={form.prizes} onChange={updatePrizes} />
     </BusinessRuleSection>
@@ -10635,6 +10706,12 @@ function LootBoxPrizesEditor({
   prizes: LootBoxPrizeForm[];
   onChange: (prizes: LootBoxPrizeForm[]) => void;
 }) {
+  const prizesRef = useRef(prizes);
+  const [uploadingPrizeId, setUploadingPrizeId] = useState<string | null>(null);
+  const [visualError, setVisualError] = useState<string | null>(null);
+  useEffect(() => {
+    prizesRef.current = prizes;
+  }, [prizes]);
   const chanceTotal = prizes.reduce(
     (total, prize) => total + Math.max(0, numeric(prize.chancePercent, 0)),
     0,
@@ -10662,6 +10739,55 @@ function LootBoxPrizesEditor({
       ),
     );
   };
+  const updatePrizeById = (
+    prizeId: string,
+    patch: Partial<LootBoxPrizeForm>,
+  ) => {
+    onChange(
+      prizesRef.current.map((prize) =>
+        prize.id === prizeId ? { ...prize, ...patch } : prize,
+      ),
+    );
+  };
+  const uploadPrizeImage = async (prizeId: string, file: File | null) => {
+    if (!file) return;
+    if (!/^(image\/png|image\/jpeg|image\/webp)$/.test(file.type)) {
+      setVisualError("Для приза выберите изображение JPG, PNG или WebP.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setVisualError("Изображение приза должно быть не больше 2 МБ.");
+      return;
+    }
+
+    setVisualError(null);
+    setUploadingPrizeId(prizeId);
+    try {
+      const body = new FormData();
+      body.set("file", file);
+      const asset = await fetchJson<{ url?: string }>("/api/guest-game/media", {
+        method: "POST",
+        body,
+      });
+
+      if (!asset.url) {
+        throw new Error("Медиахранилище не вернуло адрес изображения.");
+      }
+
+      updatePrizeById(prizeId, {
+        visualMode: "IMAGE",
+        imageUrl: asset.url,
+      });
+    } catch (error) {
+      setVisualError(
+        error instanceof Error
+          ? error.message
+          : "Не удалось загрузить изображение приза.",
+      );
+    } finally {
+      setUploadingPrizeId(null);
+    }
+  };
   const removePrize = (index: number) => {
     if (prizes.length <= 1) {
       return;
@@ -10678,6 +10804,12 @@ function LootBoxPrizesEditor({
         rewardAmount: "50",
         rewardLabel: "Новый приз",
         chancePercent: "0",
+        visualMode: "AUTO",
+        iconKey: "coins",
+        imageUrl: "",
+        borderColor: "",
+        textColor: "",
+        backgroundColor: "",
       },
     ]);
 
@@ -10778,62 +10910,377 @@ function LootBoxPrizesEditor({
         {prizes.map((prize, index) => (
           <div
             key={prize.id}
-            className="grid gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50 lg:grid-cols-[minmax(150px,1fr)_minmax(110px,0.6fr)_minmax(190px,1.2fr)_minmax(110px,0.55fr)_auto] lg:items-end"
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"
           >
-            <Field label="Тип награды">
-              <OptionSelect
-                options={lootBoxRewardTypeOptions}
-                value={prize.rewardType}
-                preservedLabel="Сохраненный тип награды"
-                onChange={(rewardType) => updatePrize(index, { rewardType })}
-              />
-            </Field>
-            <Field label="Сумма">
-              <input
-                className={fieldClass}
-                type="number"
-                min="0"
-                value={prize.rewardAmount}
-                onChange={(event) =>
-                  updatePrize(index, { rewardAmount: event.target.value })
+            <div className="grid gap-2 lg:grid-cols-[minmax(150px,1fr)_minmax(110px,0.6fr)_minmax(190px,1.2fr)_minmax(110px,0.55fr)_auto] lg:items-end">
+              <Field label="Тип награды">
+                <OptionSelect
+                  options={lootBoxRewardTypeOptions}
+                  value={prize.rewardType}
+                  preservedLabel="Сохраненный тип награды"
+                  onChange={(rewardType) =>
+                    updatePrize(index, {
+                      rewardType,
+                      ...(prize.visualMode === "AUTO"
+                        ? { iconKey: defaultLootBoxPrizeIconKey(rewardType) }
+                        : {}),
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Сумма">
+                <input
+                  className={fieldClass}
+                  type="number"
+                  min="0"
+                  value={prize.rewardAmount}
+                  onChange={(event) =>
+                    updatePrize(index, { rewardAmount: event.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Название приза">
+                <input
+                  className={fieldClass}
+                  value={prize.rewardLabel}
+                  onChange={(event) =>
+                    updatePrize(index, { rewardLabel: event.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Шанс, %">
+                <input
+                  className={fieldClass}
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={prize.chancePercent}
+                  onChange={(event) =>
+                    updatePrize(index, { chancePercent: event.target.value })
+                  }
+                />
+              </Field>
+              <button
+                type="button"
+                className={`${smallButtonClass} justify-center lg:h-10`}
+                disabled={prizes.length <= 1}
+                onClick={() => removePrize(index)}
+              >
+                Удалить
+              </button>
+            </div>
+
+            <div className="mt-3 grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-[112px_minmax(180px,0.8fr)_minmax(240px,1.2fr)] md:items-end">
+              <div className="row-span-2 flex min-h-28 items-center justify-center rounded-lg border border-cyan-200 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.16),transparent_68%)] text-cyan-700 dark:border-cyan-900 dark:text-cyan-200">
+                <LootBoxPrizeVisual
+                  alt={`Визуал приза ${prize.rewardLabel || index + 1}`}
+                  className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-lg [&_img]:h-full [&_img]:w-full [&_img]:object-contain [&_svg]:h-14 [&_svg]:w-14"
+                  imageUrl={
+                    prize.visualMode === "IMAGE" ? prize.imageUrl : null
+                  }
+                  iconKey={prize.visualMode === "AUTO" ? null : prize.iconKey}
+                  rewardType={prize.rewardType}
+                />
+              </div>
+              <Field label="Визуал награды">
+                <OptionSelect
+                  options={lootBoxPrizeVisualModeOptions}
+                  value={prize.visualMode}
+                  preservedLabel="Сохраненный режим визуала"
+                  onChange={(visualMode) =>
+                    updatePrize(index, {
+                      visualMode: visualMode as LootBoxPrizeVisualMode,
+                    })
+                  }
+                />
+              </Field>
+              {prize.visualMode === "IMAGE" ? (
+                <Field label="Собственное изображение">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      className={`${fieldClass} min-w-0 flex-1`}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      disabled={uploadingPrizeId === prize.id}
+                      onChange={(event) => {
+                        void uploadPrizeImage(
+                          prize.id,
+                          event.target.files?.[0] ?? null,
+                        );
+                        event.target.value = "";
+                      }}
+                    />
+                    {prize.imageUrl ? (
+                      <button
+                        type="button"
+                        className={smallButtonClass}
+                        onClick={() => updatePrize(index, { imageUrl: "" })}
+                      >
+                        Убрать
+                      </button>
+                    ) : null}
+                  </div>
+                </Field>
+              ) : (
+                <Field label="Стандартная иконка">
+                  <OptionSelect
+                    options={lootBoxPrizeIconOptions}
+                    value={
+                      prize.visualMode === "AUTO"
+                        ? defaultLootBoxPrizeIconKey(prize.rewardType)
+                        : prize.iconKey
+                    }
+                    preservedLabel="Сохраненная иконка"
+                    onChange={(iconKey) =>
+                      updatePrize(index, {
+                        visualMode: "ICON",
+                        iconKey: iconKey as LootBoxPrizeIconKey,
+                      })
+                    }
+                  />
+                </Field>
+              )}
+              <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400 md:col-start-2 md:col-end-4">
+                {uploadingPrizeId === prize.id
+                  ? "Загружаем изображение…"
+                  : prize.visualMode === "IMAGE"
+                    ? "JPG, PNG или WebP до 2 МБ. Изображение вписывается в карточку без обрезки."
+                    : "Иконка используется в рулетке и остаётся резервом, если изображение недоступно."}
+              </p>
+            </div>
+
+            <div className="mt-3 grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 sm:grid-cols-3">
+              <LootBoxPrizeColorField
+                label="Рамка карточки"
+                value={prize.borderColor}
+                fallback={
+                  lootBoxPrizeEditorRarity(
+                    Math.max(0, numeric(prize.chancePercent, 0)),
+                  ).colors.borderColor
+                }
+                onChange={(borderColor) =>
+                  updatePrize(index, { borderColor })
                 }
               />
-            </Field>
-            <Field label="Название приза">
-              <input
-                className={fieldClass}
-                value={prize.rewardLabel}
-                onChange={(event) =>
-                  updatePrize(index, { rewardLabel: event.target.value })
+              <LootBoxPrizeColorField
+                label="Текст карточки"
+                value={prize.textColor}
+                fallback={
+                  lootBoxPrizeEditorRarity(
+                    Math.max(0, numeric(prize.chancePercent, 0)),
+                  ).colors.textColor
+                }
+                onChange={(textColor) => updatePrize(index, { textColor })}
+              />
+              <LootBoxPrizeColorField
+                label="Фон карточки"
+                value={prize.backgroundColor}
+                fallback={
+                  lootBoxPrizeEditorRarity(
+                    Math.max(0, numeric(prize.chancePercent, 0)),
+                  ).colors.backgroundColor
+                }
+                onChange={(backgroundColor) =>
+                  updatePrize(index, { backgroundColor })
                 }
               />
-            </Field>
-            <Field label="Шанс, %">
-              <input
-                className={fieldClass}
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={prize.chancePercent}
-                onChange={(event) =>
-                  updatePrize(index, { chancePercent: event.target.value })
-                }
-              />
-            </Field>
-            <button
-              type="button"
-              className={`${smallButtonClass} justify-center lg:h-10`}
-              disabled={prizes.length <= 1}
-              onClick={() => removePrize(index)}
-            >
-              Удалить
-            </button>
+              <div className="flex flex-wrap items-center justify-between gap-2 sm:col-span-3">
+                <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                  Пустое значение использует автоматическую палитру редкости.
+                </p>
+                {prize.borderColor || prize.textColor || prize.backgroundColor ? (
+                  <button
+                    type="button"
+                    className={smallButtonClass}
+                    onClick={() =>
+                      updatePrize(index, {
+                        borderColor: "",
+                        textColor: "",
+                        backgroundColor: "",
+                      })
+                    }
+                  >
+                    Сбросить цвета
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
         ))}
       </div>
+      {visualError ? (
+        <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+          {visualError}
+        </p>
+      ) : null}
+
+      <LootBoxRouletteEditorPreview prizes={prizes} />
     </div>
   );
+}
+
+function LootBoxPrizeColorField({
+  label,
+  value,
+  fallback,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  fallback: string;
+  onChange: (value: string) => void;
+}) {
+  const selectedColor = normalizeLootBoxPrizeColor(value) ?? fallback;
+
+  return (
+    <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      {label}
+      <span className="mt-1 flex items-center gap-2">
+        <input
+          className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-zinc-200 bg-white p-1 dark:border-zinc-700 dark:bg-zinc-900"
+          type="color"
+          value={selectedColor}
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+        />
+        <input
+          className={fieldClass}
+          value={value}
+          maxLength={7}
+          placeholder={fallback}
+          spellCheck={false}
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+          onBlur={() => {
+            if (value && !normalizeLootBoxPrizeColor(value)) {
+              onChange("");
+            }
+          }}
+        />
+      </span>
+    </label>
+  );
+}
+
+function LootBoxRouletteEditorPreview({
+  prizes,
+}: {
+  prizes: LootBoxPrizeForm[];
+}) {
+  const stripPrizes = prizes.length
+    ? Array.from(
+        { length: Math.max(8, prizes.length * 2) },
+        (_, index) => prizes[index % prizes.length]!,
+      )
+    : [];
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-xl border border-zinc-800 bg-[#03090b] p-4 text-white shadow-inner">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-bold">Предпросмотр рулетки</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-400">
+            Карточки обновляются сразу. В игровом модуле полоса движется, а
+            рамка победителя подсвечивается по редкости.
+          </p>
+        </div>
+        <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-cyan-200">
+          Live preview
+        </span>
+      </div>
+      <div className="relative mt-4 overflow-hidden rounded-lg border border-white/10 bg-black/40 p-3">
+        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 w-px bg-cyan-200 shadow-[0_0_18px_rgba(103,232,249,0.9)]" />
+        <div className="flex min-w-max gap-2">
+          {stripPrizes.map((prize, index) => {
+            const chance = Math.max(0, numeric(prize.chancePercent, 0));
+            const rarity = lootBoxPrizeEditorRarity(chance);
+
+            return (
+              <div
+                key={`${prize.id}-preview-${index}`}
+                className={[
+                  "grid h-40 w-32 shrink-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-1 rounded-lg border bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_60%)] p-1 shadow-xl",
+                  rarity.className,
+                ].join(" ")}
+                style={{
+                  ...lootBoxPrizeCardColorStyle(prize),
+                  borderColor:
+                    normalizeLootBoxPrizeColor(prize.borderColor) ??
+                    rarity.colors.borderColor,
+                  color:
+                    normalizeLootBoxPrizeColor(prize.textColor) ??
+                    rarity.colors.textColor,
+                  backgroundColor:
+                    normalizeLootBoxPrizeColor(prize.backgroundColor) ??
+                    rarity.colors.backgroundColor,
+                }}
+              >
+                <strong className="line-clamp-2 px-1 pt-1 text-xs leading-tight">
+                  {prize.rewardLabel || "Награда"}
+                </strong>
+                <LootBoxPrizeVisual
+                  alt=""
+                  className="flex h-full min-h-0 w-full items-center justify-center overflow-hidden rounded-md border border-current/30 [&_img]:h-full [&_img]:w-full [&_img]:object-contain [&_svg]:h-14 [&_svg]:w-14"
+                  imageUrl={
+                    prize.visualMode === "IMAGE" ? prize.imageUrl : null
+                  }
+                  iconKey={prize.visualMode === "AUTO" ? null : prize.iconKey}
+                  rewardType={prize.rewardType}
+                />
+                <span className="px-1 pb-1 text-[9px] font-black uppercase tracking-wide opacity-90">
+                  {rarity.label} · {formatChanceNumber(chance)}%
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function lootBoxPrizeEditorRarity(chancePercent: number) {
+  if (chancePercent <= 1) {
+    return {
+      label: "Легендарная",
+      className: "border-amber-300/80 text-amber-100 shadow-amber-500/20",
+      colors: {
+        borderColor: "#FCD34D",
+        textColor: "#FEF3C7",
+        backgroundColor: "#1C1405",
+      },
+    };
+  }
+  if (chancePercent <= 4) {
+    return {
+      label: "Эпическая",
+      className: "border-violet-300/80 text-violet-100 shadow-violet-500/20",
+      colors: {
+        borderColor: "#C4B5FD",
+        textColor: "#EDE9FE",
+        backgroundColor: "#160D2B",
+      },
+    };
+  }
+  if (chancePercent <= 15) {
+    return {
+      label: "Редкая",
+      className: "border-cyan-300/80 text-cyan-100 shadow-cyan-500/20",
+      colors: {
+        borderColor: defaultLootBoxPrizeColors.borderColor,
+        textColor: defaultLootBoxPrizeColors.textColor,
+        backgroundColor: defaultLootBoxPrizeColors.backgroundColor,
+      },
+    };
+  }
+  return {
+    label: "Обычная",
+    className: "border-zinc-500/80 text-zinc-100 shadow-black/20",
+    colors: {
+      borderColor: "#9EB5B7",
+      textColor: "#F4F4F5",
+      backgroundColor: "#050D10",
+    },
+  };
 }
 
 function LootBoxRulePrizeSummary({ lootBox }: { lootBox: GuestGameLootBox }) {
@@ -14727,6 +15174,7 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
       lootBoxPeriodicLimitPeriod(asRecord(lootBox.limits).periodicLimit) ??
       "DAILY",
     totalPerDay: numberRule(lootBox.limits, "totalPerDay", "30"),
+    maxPendingRewards: numberRule(lootBox.limits, "maxPendingRewards", "1"),
     prizes: lootBoxPrizesToForm(lootBox.probabilityRules, {
       rewardType: lootBox.rewardType,
       rewardAmount: moneyFormValue(lootBox.rewardAmount),
@@ -15703,6 +16151,10 @@ function buildLootBoxLimits(form: LootBoxForm) {
     ? null
     : (optionalNumber(form.perGuestPerWeek) ?? 1);
   const totalPerDay = optionalNumber(form.totalPerDay);
+  const maxPendingRewards = Math.max(
+    1,
+    Math.trunc(optionalNumber(form.maxPendingRewards) ?? 1),
+  );
 
   return {
     source: "business_controls",
@@ -15711,6 +16163,7 @@ function buildLootBoxLimits(form: LootBoxForm) {
       : {}),
     ...(perGuestPerWeek == null ? {} : { perGuestPerWeek }),
     ...(totalPerDay == null ? {} : { totalPerDay }),
+    maxPendingRewards,
   };
 }
 
@@ -15732,6 +16185,13 @@ function buildLootBoxProbabilityRules(form: LootBoxForm) {
           "Награда лутбокса",
         chancePercent,
         weight: chancePercent,
+        visualMode: prize.visualMode,
+        iconKey: normalizeLootBoxPrizeIconKey(prize.iconKey, rewardType),
+        imageUrl:
+          prize.visualMode === "IMAGE" ? nullable(prize.imageUrl) : null,
+        borderColor: normalizeLootBoxPrizeColor(prize.borderColor),
+        textColor: normalizeLootBoxPrizeColor(prize.textColor),
+        backgroundColor: normalizeLootBoxPrizeColor(prize.backgroundColor),
       };
     })
     .filter(
@@ -15747,6 +16207,12 @@ function buildLootBoxProbabilityRules(form: LootBoxForm) {
             optionalNumber(primaryLootBoxPrize(form).rewardAmount) ?? 0,
           chancePercent: 100,
           weight: 100,
+          visualMode: "AUTO" as const,
+          iconKey: defaultLootBoxPrizeIconKey(form.rewardType),
+          imageUrl: null,
+          borderColor: null,
+          textColor: null,
+          backgroundColor: null,
         },
       ];
   const totalChancePercent = safePrizes.reduce(
@@ -16000,7 +16466,7 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
   const condition = step.conditionV2 ?? defaultBattlePassStepCondition;
   const taskType = condition.taskType;
   const purchaseTarget =
-    condition.productMatch === "ALL"
+    condition.purchaseSource !== "ANY" && condition.productMatch === "ALL"
       ? Math.max(
           1,
           condition.purchaseSource === "CATEGORY"
@@ -16554,11 +17020,15 @@ function seasonStepConditionFromRules(
           rawSessionType === "PACKET_HOURS"
         ? "PACKAGE_OR_SUBSCRIPTION"
         : "ANY";
+  const rawPurchaseSource =
+    recordString(rules, "purchaseSource")?.toUpperCase() ??
+    recordString(metric, "purchaseSource")?.toUpperCase();
   const purchaseSource =
-    recordString(rules, "purchaseSource")?.toUpperCase() === "CATEGORY" ||
-    recordString(metric, "purchaseSource")?.toUpperCase() === "CATEGORY"
+    rawPurchaseSource === "CATEGORY"
       ? "CATEGORY"
-      : "PRODUCT";
+      : rawPurchaseSource === "ANY"
+        ? "ANY"
+        : "PRODUCT";
   const categoryCatalogSource =
     recordString(rules, "categoryCatalogSource")?.toUpperCase() ===
       "LEETPLUS" ||
@@ -17093,6 +17563,12 @@ function lootBoxPrizesToForm(
         rewardAmount: fallback.rewardAmount || "0",
         rewardLabel: fallback.rewardLabel || "Награда лутбокса",
         chancePercent: "100",
+        visualMode: "AUTO",
+        iconKey: defaultLootBoxPrizeIconKey(fallback.rewardType),
+        imageUrl: "",
+        borderColor: "",
+        textColor: "",
+        backgroundColor: "",
       },
     ];
   }
@@ -17131,7 +17607,33 @@ function lootBoxPrizeFromRuleItem(
     chancePercent: numberFormValue(
       record.chancePercent ?? record.weight ?? record.probability ?? "0",
     ),
+    visualMode: lootBoxPrizeVisualMode(record.visualMode),
+    iconKey: normalizeLootBoxPrizeIconKey(
+      typeof record.iconKey === "string" ? record.iconKey : null,
+      String(record.rewardType ?? record.type ?? fallback.rewardType ?? ""),
+    ),
+    imageUrl:
+      typeof record.imageUrl === "string" &&
+      record.imageUrl.startsWith("/api/guest-game/media/")
+        ? record.imageUrl
+        : "",
+    borderColor:
+      typeof record.borderColor === "string"
+        ? normalizeLootBoxPrizeColor(record.borderColor) ?? ""
+        : "",
+    textColor:
+      typeof record.textColor === "string"
+        ? normalizeLootBoxPrizeColor(record.textColor) ?? ""
+        : "",
+    backgroundColor:
+      typeof record.backgroundColor === "string"
+        ? normalizeLootBoxPrizeColor(record.backgroundColor) ?? ""
+        : "",
   };
+}
+
+function lootBoxPrizeVisualMode(value: unknown): LootBoxPrizeVisualMode {
+  return value === "ICON" || value === "IMAGE" ? value : "AUTO";
 }
 
 function lootBoxCaseRarity(value: unknown): LootBoxCaseRarity {

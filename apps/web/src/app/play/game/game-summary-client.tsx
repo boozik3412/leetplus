@@ -8722,7 +8722,6 @@ function RewardJournalPanel({
 function RewardAchievementCard({ item }: { item: GameRewardHistoryItem }) {
   const source = rewardHistorySource(item);
   const rarity = rewardHistoryRarity(item);
-  const claimCode = rewardHistoryClaimCode(item);
   const occurredAt = rewardHistoryOccurredAt(item);
 
   return (
@@ -8745,12 +8744,6 @@ function RewardAchievementCard({ item }: { item: GameRewardHistoryItem }) {
       </span>
       <span className="lp-reward-achievement-main">
         <strong>{item.rewardLabel}</strong>
-        {claimCode ? (
-          <span className="lp-reward-claim-code">
-            <small>{claimCode.label}</small>
-            <code>{claimCode.value}</code>
-          </span>
-        ) : null}
       </span>
       <span className="lp-reward-rarity-label">
         <span aria-hidden="true" />
@@ -15581,38 +15574,6 @@ const clubHomeCss = `
   color: var(--text);
   font-size: 13px;
   line-height: 1.3;
-}
-
-.lp-reward-achievement-main .lp-reward-claim-code {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 7px;
-  border: 1px dashed rgba(131, 228, 236, 0.34);
-  border-radius: 5px;
-  color: var(--cyan);
-  background: rgba(131, 228, 236, 0.05);
-}
-
-.lp-reward-achievement-main .lp-reward-claim-code small {
-  overflow: hidden;
-  color: rgba(196, 224, 225, 0.62);
-  font-size: 8px;
-  font-weight: 760;
-  letter-spacing: 0.05em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.lp-reward-achievement-main .lp-reward-claim-code code {
-  overflow-wrap: anywhere;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
 }
 
 .lp-reward-value {

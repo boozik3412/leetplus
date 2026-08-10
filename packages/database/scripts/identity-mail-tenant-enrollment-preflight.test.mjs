@@ -650,6 +650,7 @@ test("module is pure and reports contain no recursively prohibited data", async 
   assert.deepEqual(importSpecifiers, [
     "node:crypto",
     "./identity-mail-tenant-enrollment-contract.mjs",
+    "./staff-task-integrity-migration-state.mjs",
   ]);
   assert.doesNotMatch(
     source,

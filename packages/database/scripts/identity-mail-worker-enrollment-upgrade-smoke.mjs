@@ -27,7 +27,7 @@ Usage:
 
 Required environment:
   NODE_ENV=test
-  DATABASE_URL=<loopback PostgreSQL 16 dedicated *_ci database at CURRENT_179>
+  DATABASE_URL=<loopback PostgreSQL 16 dedicated *_ci database at CURRENT_180>
   IDENTITY_MAIL_WORKER_ENROLLMENT_SMOKE_CONFIRM=${REQUIRED_CONFIRMATION}
 
 The smoke creates one disposable LOGIN NOINHERIT role and one disposable
@@ -47,8 +47,7 @@ function parseSafeDatabaseUrl(raw) {
     "Smoke requires PostgreSQL.",
   );
   assert.ok(
-    parsed.hostname === "127.0.0.1" ||
-      parsed.hostname === "[::1]",
+    parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]",
     "Smoke requires loopback PostgreSQL.",
   );
   const databaseName = decodeURIComponent(parsed.pathname.replace(/^\/+/u, ""));
@@ -327,10 +326,7 @@ async function runSmoke() {
       /IDENTITY_MAIL_WORKER_ENROLLMENT_PRECONDITION_FAILED/u,
     );
     assert.match(hostilePublicAuthority.stderr, /DATABASE_CREATE_PRESENT/u);
-    assert.match(
-      hostilePublicAuthority.stderr,
-      /DATABASE_TEMPORARY_PRESENT/u,
-    );
+    assert.match(hostilePublicAuthority.stderr, /DATABASE_TEMPORARY_PRESENT/u);
     await admin.$executeRawUnsafe(
       `REVOKE CREATE, TEMPORARY ON DATABASE ${quoteIdentifier(
         databaseName,
@@ -351,10 +347,7 @@ async function runSmoke() {
       /IDENTITY_MAIL_WORKER_ENROLLMENT_PRECONDITION_FAILED/u,
     );
     assert.match(hostileDirectAuthority.stderr, /DATABASE_CREATE_PRESENT/u);
-    assert.match(
-      hostileDirectAuthority.stderr,
-      /DATABASE_TEMPORARY_PRESENT/u,
-    );
+    assert.match(hostileDirectAuthority.stderr, /DATABASE_TEMPORARY_PRESENT/u);
     await admin.$executeRawUnsafe(
       `REVOKE CREATE, TEMPORARY ON DATABASE ${quoteIdentifier(
         databaseName,
@@ -465,16 +458,13 @@ async function runSmoke() {
       datasources: { db: { url: workerUrl(parsed, roleName, password) } },
       log: [],
     });
-    await expectSqlState(
-      "42501",
-      () =>
-        worker.$executeRawUnsafe(
-          `CREATE TEMP TABLE "identity_mail_worker_temp_probe" ("id" INTEGER)`,
-        ),
+    await expectSqlState("42501", () =>
+      worker.$executeRawUnsafe(
+        `CREATE TEMP TABLE "identity_mail_worker_temp_probe" ("id" INTEGER)`,
+      ),
     );
-    await expectSqlState(
-      "42501",
-      () => worker.$queryRawUnsafe(`SELECT * FROM ${schema}."probe"`),
+    await expectSqlState("42501", () =>
+      worker.$queryRawUnsafe(`SELECT * FROM ${schema}."probe"`),
     );
     await expectSqlState(
       "42501",
@@ -533,7 +523,7 @@ async function runSmoke() {
       `${JSON.stringify({
         ok: true,
         decision: "SMOKE_PASSED",
-        migrationCount: 179,
+        migrationCount: 180,
         workerRpcGrants: 5,
         deniedDeliveryRoutines: 9,
         tenantEnrollmentRows: 0,

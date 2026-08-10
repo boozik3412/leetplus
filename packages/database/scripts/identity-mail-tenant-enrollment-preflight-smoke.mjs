@@ -50,7 +50,7 @@ const HELP = `
 ${SCRIPT_NAME}
 
 Read-only PostgreSQL 16 evidence for the protected mail-worker tenant
-enrollment preflight. The smoke clones an exact CURRENT_179 loopback *_ci
+enrollment preflight. The smoke clones an exact CURRENT_180 loopback *_ci
 database, creates two PII-free tenant fixtures only in that clone, and proves:
   - one DISABLED enrollment and one ABSENT enrollment are tenant-isolated;
   - inspect/check use REPEATABLE READ and READ ONLY transaction metadata;
@@ -66,7 +66,7 @@ Usage:
 
 Required for the real smoke:
   NODE_ENV=test
-  DATABASE_URL=<numeric-loopback PostgreSQL 16 dedicated *_ci CURRENT_179>
+  DATABASE_URL=<numeric-loopback PostgreSQL 16 dedicated *_ci CURRENT_180>
   ${CONFIRMATION_ENVIRONMENT}=${REQUIRED_CONFIRMATION}
 
 The connection must be the source database owner and a disposable test
@@ -93,10 +93,7 @@ function parseArguments(argv) {
 }
 
 function quoteIdentifier(value) {
-  if (
-    typeof value !== "string" ||
-    !SAFE_IDENTIFIER_PATTERN.test(value)
-  ) {
+  if (typeof value !== "string" || !SAFE_IDENTIFIER_PATTERN.test(value)) {
     contractError("DATABASE_IDENTIFIER_INVALID");
   }
   return `"${value}"`;
@@ -590,14 +587,13 @@ async function verifyTargetPreflight(target, targetUrl, targetState, suffix) {
 
   const now = new Date();
   const deploymentMarkerDigest = sha256(`deployment-marker:${suffix}`);
-  const disabledConfig =
-    parseIdentityMailTenantEnrollmentPreflightConfig(
-      policyEnvironment(
-        targetUrl,
-        fixture.disabled.providerAuthorityDigest,
-        fixture.disabled.policy,
-      ),
-    );
+  const disabledConfig = parseIdentityMailTenantEnrollmentPreflightConfig(
+    policyEnvironment(
+      targetUrl,
+      fixture.disabled.providerAuthorityDigest,
+      fixture.disabled.policy,
+    ),
+  );
   const absentConfig = parseIdentityMailTenantEnrollmentPreflightConfig(
     policyEnvironment(
       targetUrl,
@@ -640,12 +636,11 @@ async function verifyTargetPreflight(target, targetUrl, targetState, suffix) {
     absentProposal,
     { now },
   );
-  const collectedDisabled =
-    await inspectIdentityMailTenantEnrollmentPreflight(
-      target,
-      parsedDisabled,
-      disabledConfig,
-    );
+  const collectedDisabled = await inspectIdentityMailTenantEnrollmentPreflight(
+    target,
+    parsedDisabled,
+    disabledConfig,
+  );
   const checkedDisabled = await checkIdentityMailTenantEnrollmentPreflight(
     target,
     disabledProposal,
@@ -710,10 +705,7 @@ export function runSelfTest() {
   );
   assert.equal(safe.databaseName, "leetplus_ci");
   assert.equal(
-    databaseUrlFor(
-      safe.parsed,
-      "lp_imtep_0123456789abcdef0123456789abcdef_ci",
-    ),
+    databaseUrlFor(safe.parsed, "lp_imtep_0123456789abcdef0123456789abcdef_ci"),
     "postgresql://operator@127.0.0.1/lp_imtep_0123456789abcdef0123456789abcdef_ci?schema=public",
   );
   for (const unsafe of [
@@ -887,9 +879,7 @@ export async function runSmoke(environment = process.env) {
           `,
           cloneDatabaseName,
         );
-        const cloneDatabaseCount = Number(
-          cloneState?.database_count ?? -1,
-        );
+        const cloneDatabaseCount = Number(cloneState?.database_count ?? -1);
         assert.ok(cloneDatabaseCount === 0 || cloneDatabaseCount === 1);
         if (cloneDatabaseCount === 1) {
           assert.equal(cloneState.safe_generated_target, true);
@@ -931,9 +921,7 @@ export async function runSmoke(environment = process.env) {
     } catch (error) {
       cleanupErrors.push(error);
     }
-    await maintenance
-      .$disconnect()
-      .catch((error) => cleanupErrors.push(error));
+    await maintenance.$disconnect().catch((error) => cleanupErrors.push(error));
   }
 
   if (primaryError !== null && cleanupErrors.length > 0) {
@@ -989,7 +977,9 @@ export async function main(
   } catch {
     process.stderr.write(
       `${JSON.stringify({
-        error: { code: "IDENTITY_MAIL_TENANT_ENROLLMENT_PREFLIGHT_SMOKE_FAILED" },
+        error: {
+          code: "IDENTITY_MAIL_TENANT_ENROLLMENT_PREFLIGHT_SMOKE_FAILED",
+        },
         script: SCRIPT_NAME,
         status: "ERROR",
       })}\n`,

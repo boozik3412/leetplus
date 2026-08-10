@@ -41,7 +41,7 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact terminal migration 179 and exact completed count 179 are mandatory.
+  - Exact terminal migration 180 and exact completed count 180 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
   - Deliberate target-role and PUBLIC function/table/column/type ACL drift is
@@ -916,8 +916,7 @@ async function runSmoke() {
     const sentAssertionRows = await callExcludedFunctionBoundary(
       runtime,
       APPLICATION_RUNTIME_FUNCTIONS.find(
-        (entry) =>
-          entry.key === "identityInitialOwnerInviteDeliveryAssertSent",
+        (entry) => entry.key === "identityInitialOwnerInviteDeliveryAssertSent",
       ),
     );
     assert.equal(Object.values(sentAssertionRows[0])[0], false);

@@ -22,7 +22,7 @@ import { parseIdentityMailTenantEnrollmentProposal } from "./identity-mail-tenan
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 const NOW = new Date("2026-08-01T08:00:00.000Z");
-const MIGRATION = "20260731120000_identity_mail_delivery_release_head";
+const MIGRATION = "20260804120000_guest_game_max_pending_rewards";
 const TENANT_ID = "11111111-1111-4111-8111-111111111111";
 const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
 const DATABASE_OID = 16_384;
@@ -66,8 +66,7 @@ function environment(overrides = {}) {
   return {
     DATABASE_URL:
       "postgresql://operator:password@127.0.0.1:5432/leetplus_beta?schema=public",
-    IDENTITY_MAIL_TENANT_ENROLLMENT_PROVIDER_AUTHORITY_DIGEST:
-      PROVIDER_DIGEST,
+    IDENTITY_MAIL_TENANT_ENROLLMENT_PROVIDER_AUTHORITY_DIGEST: PROVIDER_DIGEST,
     IDENTITY_MAIL_TENANT_ENROLLMENT_POLICY_ACKNOWLEDGE_SECONDS: "120",
     IDENTITY_MAIL_TENANT_ENROLLMENT_POLICY_BASE_RETRY_SECONDS: "30",
     IDENTITY_MAIL_TENANT_ENROLLMENT_POLICY_LEASE_SECONDS: "300",
@@ -113,7 +112,7 @@ function createReadOnlyPrismaMock({ roleExists = true } = {}) {
           {
             database_name: "leetplus_beta",
             database_oid: BigInt(DATABASE_OID),
-            migration_count: 179,
+            migration_count: 180,
             migration_head: MIGRATION,
             server_version_number: 160_013,
             transaction_isolation: "repeatable read",
@@ -180,7 +179,7 @@ function createReadOnlyPrismaMock({ roleExists = true } = {}) {
       if (source.includes("AS completed_target_count")) {
         return [
           {
-            completed_count: 179,
+            completed_count: 180,
             completed_target_count: 1,
             latest_completed_migration: MIGRATION,
             unfinished_count: 0,
@@ -214,7 +213,7 @@ function createReadOnlyPrismaMock({ roleExists = true } = {}) {
             database_identity_matches: true,
             marker_current: true,
             marker_id: "33333333-3333-4333-8333-333333333333",
-            marker_migration_count: 179,
+            marker_migration_count: 180,
             marker_migration_head: MIGRATION,
             marker_payload_digest: MARKER_DIGEST,
             marker_revoked_at: null,
@@ -244,8 +243,7 @@ function createReadOnlyPrismaMock({ roleExists = true } = {}) {
 test("config requires independently supplied provider authority and policy", () => {
   const config = parseIdentityMailTenantEnrollmentPreflightConfig(
     environment({
-      IDENTITY_MAIL_TENANT_ENROLLMENT_PROVIDER_AUTHORITY_DIGEST:
-        "e".repeat(64),
+      IDENTITY_MAIL_TENANT_ENROLLMENT_PROVIDER_AUTHORITY_DIGEST: "e".repeat(64),
       IDENTITY_MAIL_TENANT_ENROLLMENT_POLICY_MAX_ATTEMPTS: "7",
     }),
   );
@@ -310,7 +308,8 @@ test("config rejects non-canonical and out-of-range policy", () => {
 
 test("inspection uses one repeatable-read transaction and makes it read-only first", async () => {
   const { calls, prisma } = createReadOnlyPrismaMock();
-  const config = parseIdentityMailTenantEnrollmentPreflightConfig(environment());
+  const config =
+    parseIdentityMailTenantEnrollmentPreflightConfig(environment());
   const parsed = parseIdentityMailTenantEnrollmentProposal(proposal(), {
     now: NOW,
   });
@@ -412,8 +411,7 @@ test("CLI accepts only help or the exact check/proposal-file shape", () => {
     { mode: "help", proposalFile: null },
   );
   assert.throws(
-    () =>
-      parseIdentityMailTenantEnrollmentPreflightCliArguments(["--apply"]),
+    () => parseIdentityMailTenantEnrollmentPreflightCliArguments(["--apply"]),
     { code: /_ARGUMENTS_INVALID$/u },
   );
   assert.throws(
@@ -446,26 +444,25 @@ test("CLI exits nonzero for a BLOCKED inspection without treating it as an error
     ["MATCHED", 0],
     ["BLOCKED", 2],
   ]) {
-    const execution =
-      await executeIdentityMailTenantEnrollmentPreflightCli(
-        ["--check", "--proposal-file", proposalPath],
-        environment(),
-        {
-          adapterLoader: async () => ({
-            checkIdentityMailTenantEnrollmentPreflight: async () => ({
-              result: {
-                authorization: false,
-                canMutate: false,
-                inspectionDecision,
-              },
-            }),
-            parseIdentityMailTenantEnrollmentPreflightConfig: () => ({
-              databaseUrl: environment().DATABASE_URL,
-            }),
+    const execution = await executeIdentityMailTenantEnrollmentPreflightCli(
+      ["--check", "--proposal-file", proposalPath],
+      environment(),
+      {
+        adapterLoader: async () => ({
+          checkIdentityMailTenantEnrollmentPreflight: async () => ({
+            result: {
+              authorization: false,
+              canMutate: false,
+              inspectionDecision,
+            },
           }),
-          now: NOW,
-          prismaLoader: async () => ({ PrismaClient: PrismaClientStub }),
-        },
+          parseIdentityMailTenantEnrollmentPreflightConfig: () => ({
+            databaseUrl: environment().DATABASE_URL,
+          }),
+        }),
+        now: NOW,
+        prismaLoader: async () => ({ PrismaClient: PrismaClientStub }),
+      },
     );
     assert.equal(execution.exitCode, exitCode);
     assert.equal(

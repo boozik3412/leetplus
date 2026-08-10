@@ -204,8 +204,6 @@ jobs:
 
       - name: Prove frozen foundation pins and CURRENT180-CURRENT190 rehearsal remain fail-closed
         run: pnpm --filter database check:current180-current190-release-rehearsal-blocker
-        env:
-          NODE_ENV: test
 
       - name: Validate deny-only CURRENT180-CURRENT190 materialization plan
         run: pnpm --filter database check:current180-current190-release-materialization-planner

@@ -7,13 +7,18 @@ import {
   SHARED_BETA_ADMISSION_RELATIONS,
   SHARED_BETA_ADMISSION_TYPES,
 } from "./shared-beta-admission-provenance-catalog.mjs";
+import {
+  CURRENT_EXPECTED_LATEST_MIGRATION,
+  CURRENT_EXPECTED_MIGRATION_COUNT,
+} from "./staff-task-integrity-migration-state.mjs";
 
 export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
-  "20260731120000_identity_mail_delivery_release_head";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 179;
+  CURRENT_EXPECTED_LATEST_MIGRATION;
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT =
+  CURRENT_EXPECTED_MIGRATION_COUNT;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -99,10 +104,8 @@ export const EXCLUDED_WORKER_FUNCTIONS = Object.freeze([
   }),
   Object.freeze({
     key: "identityMailDeliveryWorkerAssert",
-    catalogSignature:
-      'public."identity_mail_delivery_worker_assert_v1"(text)',
-    grantSignature:
-      'public."identity_mail_delivery_worker_assert_v1"(TEXT)',
+    catalogSignature: 'public."identity_mail_delivery_worker_assert_v1"(text)',
+    grantSignature: 'public."identity_mail_delivery_worker_assert_v1"(TEXT)',
     securityDefiner: true,
     volatility: "v",
     language: "plpgsql",
@@ -195,8 +198,7 @@ export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
   }),
   Object.freeze({
     key: "identityMailDeliveryEventGuard",
-    catalogSignature:
-      'public."identity_mail_delivery_event_guard_v1"()',
+    catalogSignature: 'public."identity_mail_delivery_event_guard_v1"()',
     grantSignature: 'public."identity_mail_delivery_event_guard_v1"()',
     securityDefiner: false,
     volatility: "v",
@@ -206,18 +208,15 @@ export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
     key: "identityMailDeliveryEventTruncateGuard",
     catalogSignature:
       'public."identity_mail_delivery_event_truncate_guard_v1"()',
-    grantSignature:
-      'public."identity_mail_delivery_event_truncate_guard_v1"()',
+    grantSignature: 'public."identity_mail_delivery_event_truncate_guard_v1"()',
     securityDefiner: false,
     volatility: "v",
     language: "plpgsql",
   }),
   Object.freeze({
     key: "identityMailDeliveryEnrollmentGuard",
-    catalogSignature:
-      'public."identity_mail_delivery_enrollment_guard_v1"()',
-    grantSignature:
-      'public."identity_mail_delivery_enrollment_guard_v1"()',
+    catalogSignature: 'public."identity_mail_delivery_enrollment_guard_v1"()',
+    grantSignature: 'public."identity_mail_delivery_enrollment_guard_v1"()',
     securityDefiner: false,
     volatility: "v",
     language: "plpgsql",
@@ -234,8 +233,7 @@ export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
   }),
   Object.freeze({
     key: "identityMailOutboxDeliveryGuard",
-    catalogSignature:
-      'public."identity_mail_outbox_delivery_guard_v1"()',
+    catalogSignature: 'public."identity_mail_outbox_delivery_guard_v1"()',
     grantSignature: 'public."identity_mail_outbox_delivery_guard_v1"()',
     securityDefiner: false,
     volatility: "v",
@@ -243,10 +241,8 @@ export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
   }),
   Object.freeze({
     key: "identityMailDeliveryEventAppend",
-    catalogSignature:
-      'public."identity_mail_delivery_event_append_v1"()',
-    grantSignature:
-      'public."identity_mail_delivery_event_append_v1"()',
+    catalogSignature: 'public."identity_mail_delivery_event_append_v1"()',
+    grantSignature: 'public."identity_mail_delivery_event_append_v1"()',
     securityDefiner: false,
     volatility: "v",
     language: "plpgsql",

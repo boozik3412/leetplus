@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
+import {
+  CURRENT_EXPECTED_LATEST_MIGRATION,
+  CURRENT_EXPECTED_MIGRATION_COUNT,
+} from "./staff-task-integrity-migration-state.mjs";
+
 export const IDENTITY_MAIL_WORKER_ENROLLMENT_SCHEMA_VERSION = 1;
 export const IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION =
-  "20260731120000_identity_mail_delivery_release_head";
-export const IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT = 179;
+  CURRENT_EXPECTED_LATEST_MIGRATION;
+export const IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT =
+  CURRENT_EXPECTED_MIGRATION_COUNT;
 
 export const IDENTITY_MAIL_WORKER_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -303,9 +309,7 @@ export function parseIdentityMailWorkerEnrollmentConfig(environment, mode) {
   }
   let databaseName;
   try {
-    databaseName = decodeURIComponent(
-      parsed.pathname.replace(/^\/+/u, ""),
-    );
+    databaseName = decodeURIComponent(parsed.pathname.replace(/^\/+/u, ""));
   } catch {
     fail(
       "IDENTITY_MAIL_WORKER_ENROLLMENT_DATABASE_INVALID",
@@ -436,10 +440,7 @@ export function identityMailWorkerEnrollmentContractDigest() {
           temporary: false,
         },
         schemaUsage: "public",
-        transportPolicies: [
-          "LOOPBACK_PLAINTEXT",
-          "REMOTE_STRICT_TLS",
-        ],
+        transportPolicies: ["LOOPBACK_PLAINTEXT", "REMOTE_STRICT_TLS"],
         granted: IDENTITY_MAIL_WORKER_FUNCTIONS.map(
           ({ key, catalogSignature }) => ({ key, catalogSignature }),
         ),
@@ -827,13 +828,9 @@ export async function inspectIdentityMailWorkerEnrollment(prisma, config) {
       serverVersionNumber: server?.server_version_number ?? null,
       tlsActive: server?.tls_active === true,
       tlsVersion:
-        typeof server?.tls_version === "string"
-          ? server.tls_version
-          : null,
+        typeof server?.tls_version === "string" ? server.tls_version : null,
       tlsCipher:
-        typeof server?.tls_cipher === "string"
-          ? server.tls_cipher
-          : null,
+        typeof server?.tls_cipher === "string" ? server.tls_cipher : null,
     },
     role:
       role === undefined
@@ -966,12 +963,10 @@ export function identityMailWorkerEnrollmentPreconditionViolations(
   }
   if (
     config.transportPolicy === "REMOTE_STRICT_TLS" &&
-    (
-      typeof snapshot.server.tlsVersion !== "string" ||
+    (typeof snapshot.server.tlsVersion !== "string" ||
       snapshot.server.tlsVersion.length === 0 ||
       typeof snapshot.server.tlsCipher !== "string" ||
-      snapshot.server.tlsCipher.length === 0
-    )
+      snapshot.server.tlsCipher.length === 0)
   ) {
     violations.push("REMOTE_TLS_EVIDENCE_MISSING");
   }
@@ -1085,8 +1080,7 @@ export function identityMailWorkerEnrollmentComplianceViolations(snapshot) {
     violations.push("DIRECT_FUNCTION_ALLOWLIST_MISMATCH");
   }
   if (
-    role.effectiveFunctionExecuteCount !==
-    IDENTITY_MAIL_WORKER_FUNCTIONS.length
+    role.effectiveFunctionExecuteCount !== IDENTITY_MAIL_WORKER_FUNCTIONS.length
   ) {
     violations.push("EFFECTIVE_FUNCTION_ALLOWLIST_MISMATCH");
   }
@@ -1322,10 +1316,8 @@ function receipt(config, snapshot, decision, changed) {
       (entry) => !entry.directExecute && !entry.effectiveExecute,
     ).length,
     tenantEnrollmentCount: snapshot.enrollment.totalCount,
-    databaseCreatePrivilege:
-      snapshot.role?.databaseCreate ?? null,
-    databaseTemporaryPrivilege:
-      snapshot.role?.databaseTemporary ?? null,
+    databaseCreatePrivilege: snapshot.role?.databaseCreate ?? null,
+    databaseTemporaryPrivilege: snapshot.role?.databaseTemporary ?? null,
     directRelationPrivilegeCount:
       snapshot.role?.directRelationPrivilegeCount ?? null,
     effectiveRelationPrivilegeCount:

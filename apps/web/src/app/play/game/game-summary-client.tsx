@@ -15486,8 +15486,6 @@ const clubHomeCss = `
   padding: 7px 16px 7px 24px;
   border-bottom: 1px solid rgba(196, 224, 225, 0.09);
   background: transparent;
-  content-visibility: auto;
-  contain-intrinsic-size: 48px;
   transition: background 160ms ease;
 }
 

@@ -964,24 +964,25 @@ describePostgres(
       ] as const;
       const diagnosticResults = await Promise.all(
         diagnosticContexts.map(({ createHostileShadow, searchPath }) =>
-          admin.$transaction(async (transaction) => {
-            if (createHostileShadow) {
-              await transaction.$executeRawUnsafe(`
+          admin.$transaction(
+            async (transaction) => {
+              if (createHostileShadow) {
+                await transaction.$executeRawUnsafe(`
                 CREATE TEMPORARY TABLE "UserInvite" (
                   "tenantId" TEXT NOT NULL,
                   "id" TEXT NOT NULL
                 ) ON COMMIT DROP
               `);
-            }
-            await transaction.$executeRawUnsafe(
-              `SET LOCAL search_path = ${searchPath}`,
-            );
-            const [beforePath] = await transaction.$queryRawUnsafe<
-              Array<{ value: string }>
-            >(`SELECT pg_catalog.current_setting('search_path') AS value`);
-            const [rawConstraint] = await transaction.$queryRawUnsafe<
-              Array<{ definition: string }>
-            >(`
+              }
+              await transaction.$executeRawUnsafe(
+                `SET LOCAL search_path = ${searchPath}`,
+              );
+              const [beforePath] = await transaction.$queryRawUnsafe<
+                Array<{ value: string }>
+              >(`SELECT pg_catalog.current_setting('search_path') AS value`);
+              const [rawConstraint] = await transaction.$queryRawUnsafe<
+                Array<{ definition: string }>
+              >(`
               SELECT pg_catalog.pg_get_constraintdef(
                 constraint_entry.oid, false
               ) AS definition
@@ -990,27 +991,32 @@ describePostgres(
                   'public."IdentityMailOutbox"'::pg_catalog.regclass
                 AND constraint_entry.conname =
                   'IdentityMailOutbox_invite_fkey'
-            `);
-            const [diagnosticRow] = await transaction.$queryRawUnsafe<
-              Array<{ catalog: unknown }>
-            >(
-              catalogModule.IDENTITY_MAIL_DUTY_ROLE_CATALOG_CURRENT186_READ_SQL,
-              ...diagnosticRequest.parameters,
-            );
-            const [afterPath] = await transaction.$queryRawUnsafe<
-              Array<{ value: string }>
-            >(`SELECT pg_catalog.current_setting('search_path') AS value`);
-            return {
-              afterPath: afterPath?.value,
-              beforePath: beforePath?.value,
-              catalog: requireRecord(
-                diagnosticRow?.catalog,
-                `CURRENT186 ${searchPath} diagnostic catalog`,
-              ),
-              rawConstraint: rawConstraint?.definition,
-              searchPath,
-            };
-          }),
+              `);
+              const [diagnosticRow] = await transaction.$queryRawUnsafe<
+                Array<{ catalog: unknown }>
+              >(
+                catalogModule.IDENTITY_MAIL_DUTY_ROLE_CATALOG_CURRENT186_READ_SQL,
+                ...diagnosticRequest.parameters,
+              );
+              const [afterPath] = await transaction.$queryRawUnsafe<
+                Array<{ value: string }>
+              >(`SELECT pg_catalog.current_setting('search_path') AS value`);
+              return {
+                afterPath: afterPath?.value,
+                beforePath: beforePath?.value,
+                catalog: requireRecord(
+                  diagnosticRow?.catalog,
+                  `CURRENT186 ${searchPath} diagnostic catalog`,
+                ),
+                rawConstraint: rawConstraint?.definition,
+                searchPath,
+              };
+            },
+            {
+              maxWait: 10_000,
+              timeout: 120_000,
+            },
+          ),
         ),
       );
       const [publicDiagnostic, pgCatalogDiagnostic, hostileDiagnostic] =

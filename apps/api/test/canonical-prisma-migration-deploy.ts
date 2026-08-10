@@ -99,6 +99,21 @@ export function deployCanonicalPrismaMigrations(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
 ): void {
+  deployCanonicalPrismaMigrationArtifact(databaseUrl, options, false);
+}
+
+export function deployIdentityMailCurrent179CanonicalPrefix(
+  databaseUrl: string,
+  options: CanonicalMigrationDeployOptions,
+): void {
+  deployCanonicalPrismaMigrationArtifact(databaseUrl, options, true);
+}
+
+function deployCanonicalPrismaMigrationArtifact(
+  databaseUrl: string,
+  options: CanonicalMigrationDeployOptions,
+  retainIdentityMailCurrent179Prefix: boolean,
+): void {
   const repositoryRoot = resolve(__dirname, '../../..');
   const databasePackage = join(repositoryRoot, 'packages', 'database');
   const sourcePrismaDirectory = join(databasePackage, 'prisma');
@@ -109,7 +124,11 @@ export function deployCanonicalPrismaMigrations(
     cpSync(sourcePrismaDirectory, artifactPrismaDirectory, {
       recursive: true,
     });
-    normalizeMigrationLineEndings(join(artifactPrismaDirectory, 'migrations'));
+    const migrationsDirectory = join(artifactPrismaDirectory, 'migrations');
+    if (retainIdentityMailCurrent179Prefix) {
+      retainLegacyIdentityMailCanonicalPrefix(migrationsDirectory);
+    }
+    normalizeMigrationLineEndings(migrationsDirectory);
     execFileSync(
       process.execPath,
       [

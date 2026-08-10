@@ -37,8 +37,8 @@ function enabledEnvironment(): IdentityMailWorkerEnvironment {
     IDENTITY_MAIL_WORKER_EXPECTED_DATABASE: 'leetplus_beta',
     IDENTITY_MAIL_WORKER_EXPECTED_ROLE: 'leetplus_identity_mail_worker',
     IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION:
-      '20260804120000_guest_game_max_pending_rewards',
-    IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_COUNT: '180',
+      '20260731120000_identity_mail_delivery_release_head',
+    IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_COUNT: '179',
     IDENTITY_MAIL_WORKER_RELEASE_SHA: 'a'.repeat(40),
     IDENTITY_MAIL_WORKER_CANARY_TENANT_IDS: TENANT_ID,
     IDENTITY_MAIL_PUBLIC_WEB_ORIGIN: 'https://leetplus.ru',

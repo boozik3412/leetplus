@@ -120,6 +120,12 @@ export function evaluateCurrent187ClusterPolicy(
     reasons.add("CURRENT187_CLUSTER_POLICY_DDL_FENCE_NOT_ATTESTED");
   }
   if (
+    plannerReceipt?.semanticRiskFactsStatus !== "FACTS_EXTRACTED_DENY_ONLY" ||
+    !current187AdmissionValidDigest(plannerReceipt?.semanticRiskFactsDigest)
+  ) {
+    reasons.add("CURRENT187_CLUSTER_POLICY_SEMANTIC_RISK_FACTS_UNAVAILABLE");
+  }
+  if (
     payload.purpose !== CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE ||
     payload.environment !== "production"
   ) {
@@ -166,6 +172,8 @@ export function evaluateCurrent187ClusterPolicy(
     slice: CURRENT187_CLUSTER_POLICY_SLICE,
     sourceAcquisitionDigest: acquisitionReceipt.acquisitionDigest,
     sourceAuthorityPayloadDigest: authorityReceipt.envelope.payloadDigest,
+    sourceSemanticRiskFactsDigest:
+      plannerReceipt?.semanticRiskFactsDigest ?? null,
     testAccessAuthorized: false,
   };
   const receipt = current187AdmissionDeepFreeze({

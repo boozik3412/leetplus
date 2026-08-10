@@ -120,6 +120,18 @@ signed DDL-fence receipt и branded purpose-bound deployment envelope, посл�
 runtime attestation. Контракт и оставшиеся ограничения описаны в
 [CURRENT187-F signed cluster policy binding](./identity-mail-current187-signed-policy-binding.md).
 
+## CURRENT187-G: semantic risk facts
+
+Acquisition теперь перед удалением raw catalog rows передаёт двенадцать exact
+canonical role/ACL surfaces в pure extractor. Наружу выходят только counts и
+category digests; raw names/OID/settings/identities в receipt не попадают.
+Per-database semantic digest агрегируется planner и входит в
+`clusterCatalogDigest`, уже связанный CURRENT187-F с signed envelope.
+
+Это только факты, а не allowlist: `policyAllowlistEvaluated=false`, решение
+safe/GO отсутствует. Полный контракт:
+[CURRENT187-G semantic risk facts](./identity-mail-current187-semantic-risk-facts.md).
+
 ## Оставшиеся блокеры CURRENT187
 
 1. Persisted consumption/revocation CURRENT187-D, production root enrollment
@@ -132,10 +144,10 @@ runtime attestation. Контракт и оставшиеся ограничен
 4. Hostile PostgreSQL matrix: unknown third DB во время scan, drop/recreate,
    non-connectable DB, second-DB ACL/default-ACL drift, fault injection и
    повторный zero-residue proof.
-5. Semantic policy evaluator опасных role attributes, memberships,
-   ownership, current/default ACL и system privilege baseline. CURRENT187-F
-   уже связывает scoped fingerprints с signed envelope, но намеренно не
-   объявляет fingerprint equality semantic approval.
+5. Independently approved signed semantic allowlist и fail-closed evaluator
+   поверх risk facts CURRENT187-G. Извлечение privileged role attributes,
+   memberships, ownership, current/default ACL и effective privileges уже
+   реализовано deny-only, но semantic approval намеренно отсутствует.
 6. Provider mark/complete recovery, outbound kill-switch evidence и
    production-like apply/rollback/emergency rehearsal.
 

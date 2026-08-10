@@ -28,6 +28,10 @@ import {
   CURRENT187_DATABASE_SNAPSHOT_SQL,
   CURRENT187_PER_DATABASE_CATALOG_SURFACES,
 } from "./identity-mail-cluster-acquisition-current187-sql.mjs";
+import {
+  CURRENT187_SEMANTIC_RISK_SURFACES,
+  extractCurrent187SemanticRiskFacts,
+} from "./identity-mail-cluster-semantic-risk-current187.mjs";
 
 export const CURRENT187_CLUSTER_ACQUISITION_SLICE =
   "CURRENT187_C_READ_ONLY_POSTGRES_ACQUISITION_ADAPTER";
@@ -825,13 +829,17 @@ function digestCatalogSurface(surface, rows) {
     return current187AdmissionCanonicalJson(parsed);
   });
   canonicalRows.sort();
-  return Object.freeze({
-    digest: digestCurrent187Value(CURRENT187_CATALOG_SURFACE_DIGEST_DOMAIN, {
-      rows: canonicalRows,
+  const frozenCanonicalRows = Object.freeze(canonicalRows);
+  return current187AdmissionDeepFreeze({
+    canonicalRows: frozenCanonicalRows,
+    publicSurface: {
+      digest: digestCurrent187Value(CURRENT187_CATALOG_SURFACE_DIGEST_DOMAIN, {
+        rows: frozenCanonicalRows,
+        surface: surface.name,
+      }),
+      rowCount: frozenCanonicalRows.length,
       surface: surface.name,
-    }),
-    rowCount: canonicalRows.length,
-    surface: surface.name,
+    },
   });
 }
 
@@ -865,6 +873,9 @@ async function acquirePerDatabaseCatalog(dependencies, request, database) {
         database,
       );
       const surfaces = [];
+      const semanticRows = Object.fromEntries(
+        CURRENT187_SEMANTIC_RISK_SURFACES.map((surface) => [surface, null]),
+      );
       for (const surface of CURRENT187_PER_DATABASE_CATALOG_SURFACES) {
         const rows = await queryRows(
           client,
@@ -873,9 +884,13 @@ async function acquirePerDatabaseCatalog(dependencies, request, database) {
           CURRENT187_CLUSTER_ACQUISITION_MAX_ROWS_PER_SURFACE,
           "CURRENT187_CLUSTER_ACQUISITION_CATALOG_SURFACE_PARTIAL",
         );
-        surfaces.push(digestCatalogSurface(surface, rows));
+        const digested = digestCatalogSurface(surface, rows);
+        surfaces.push(digested.publicSurface);
+        if (Object.hasOwn(semanticRows, surface.name)) {
+          semanticRows[surface.name] = digested.canonicalRows;
+        }
       }
-      return current187AdmissionDeepFreeze({ backend, surfaces });
+      return current187AdmissionDeepFreeze({ backend, semanticRows, surfaces });
     },
   );
   const completedAt = canonicalIso(
@@ -908,6 +923,9 @@ async function acquirePerDatabaseCatalog(dependencies, request, database) {
     acquired.surfaces,
     DEFAULT_ACL_POLICY_SURFACES,
   );
+  const semanticRiskFacts = extractCurrent187SemanticRiskFacts(
+    acquired.semanticRows,
+  );
   return current187AdmissionDeepFreeze({
     catalogDigest,
     catalogSurfaceStatus: "COMPLETE",
@@ -928,9 +946,12 @@ async function acquirePerDatabaseCatalog(dependencies, request, database) {
         catalogDigest,
         completedAt,
         databaseIdentityDigest,
+        semanticRiskFactsDigest: semanticRiskFacts.semanticRiskFactsDigest,
         startedAt,
       },
     ),
+    semanticRiskFactsDigest: semanticRiskFacts.semanticRiskFactsDigest,
+    semanticRiskFactsStatus: semanticRiskFacts.semanticRiskStatus,
     startedAt,
   });
 }

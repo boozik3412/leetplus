@@ -184,6 +184,8 @@ function plannerRequest() {
         ddlFenceDigest: fenceDigest,
         roleBindingsDigest: digest("postgres-role-bindings"),
         scanEvidenceDigest: digest("postgres-scan"),
+        semanticRiskFactsDigest: digest("postgres-semantic-risk-facts"),
+        semanticRiskFactsStatus: "FACTS_EXTRACTED_DENY_ONLY",
         startedAt: "2026-08-05T10:00:20.000Z",
       },
     ],

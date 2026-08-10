@@ -549,6 +549,12 @@ enterprise-isolation option и не сокращает shared gates.
     `15/15`; exact-SHA CI `31391874407` на `b64abfe5…` — `3/3 SUCCESS`.
     `BINDINGS_MATCHED` остаётся deny-only и не является semantic allowlist либо
     deployment GO. Evidence: [CURRENT187-F CI](./identity-mail-current187-f-ci-evidence-2026-08-10.md).
+    [CURRENT187-G semantic risk facts](./identity-mail-current187-semantic-risk-facts.md)
+    теперь детерминированно извлекает secret-free counts/digests для опасных
+    role attributes, LOGIN, memberships, settings, ownership, current/default
+    ACL, `PUBLIC`/grantable grants и effective privileges. Cluster-wide
+    semantic digest включён в уже подписываемый `clusterCatalogDigest`, но
+    `policyAllowlistEvaluated=false` и все launch/effect flags остаются false.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

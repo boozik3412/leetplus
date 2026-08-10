@@ -47,6 +47,8 @@ export const CURRENT187_DEFAULT_ACL_POLICY_DIGEST_DOMAIN =
   "LEETPLUS_CURRENT187_DEFAULT_ACL_POLICY_V1";
 export const CURRENT187_CLUSTER_CATALOG_POLICY_DIGEST_DOMAIN =
   "LEETPLUS_CURRENT187_CLUSTER_CATALOG_POLICY_V1";
+export const CURRENT187_SEMANTIC_RISK_FACTS_POLICY_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_CLUSTER_SEMANTIC_RISK_FACTS_POLICY_V1";
 
 export const CURRENT187_CLUSTER_INVENTORY_MAX_FENCE_LIFETIME_MS =
   30 * 60 * 1_000;
@@ -132,6 +134,8 @@ const PER_DATABASE_SCAN_KEYS = [
   "ddlFenceDigest",
   "roleBindingsDigest",
   "scanEvidenceDigest",
+  "semanticRiskFactsDigest",
+  "semanticRiskFactsStatus",
   "startedAt",
 ];
 
@@ -511,16 +515,27 @@ function normalizePerDatabaseScan(value) {
       !current187AdmissionValidDigest(scan.defaultAclPolicyDigest)) ||
     (scan.roleBindingsDigest !== null &&
       !current187AdmissionValidDigest(scan.roleBindingsDigest)) ||
+    (scan.semanticRiskFactsDigest !== null &&
+      !current187AdmissionValidDigest(scan.semanticRiskFactsDigest)) ||
+    ![
+      "FACTS_EXTRACTED_DENY_ONLY",
+      "NOT_EXTRACTED_NON_CONNECTABLE_ALLOWLIST",
+    ].includes(scan.semanticRiskFactsStatus) ||
     (scan.connectionStatus === "CONNECTED" &&
       (!current187AdmissionValidDigest(scan.catalogDigest) ||
         !current187AdmissionValidDigest(scan.currentAclPolicyDigest) ||
         !current187AdmissionValidDigest(scan.defaultAclPolicyDigest) ||
-        !current187AdmissionValidDigest(scan.roleBindingsDigest))) ||
+        !current187AdmissionValidDigest(scan.roleBindingsDigest) ||
+        !current187AdmissionValidDigest(scan.semanticRiskFactsDigest) ||
+        scan.semanticRiskFactsStatus !== "FACTS_EXTRACTED_DENY_ONLY")) ||
     (scan.connectionStatus === "NON_CONNECTABLE_PROVEN" &&
       (scan.catalogDigest !== null ||
         scan.currentAclPolicyDigest !== null ||
         scan.defaultAclPolicyDigest !== null ||
-        scan.roleBindingsDigest !== null))
+        scan.roleBindingsDigest !== null ||
+        scan.semanticRiskFactsDigest !== null ||
+        scan.semanticRiskFactsStatus !==
+          "NOT_EXTRACTED_NON_CONNECTABLE_ALLOWLIST"))
   ) {
     current187AdmissionFail(
       "CURRENT187_CLUSTER_INVENTORY_SCAN_INVALID",
@@ -920,6 +935,15 @@ export function planCurrent187ClusterInventoryAdmission(requestValue) {
       }),
     ),
   );
+  const semanticRiskFactsProjection = Object.freeze(
+    publicScans.map((scan) =>
+      Object.freeze({
+        databaseIdentityDigest: scan.databaseIdentityDigest,
+        semanticRiskFactsDigest: scan.semanticRiskFactsDigest,
+        semanticRiskFactsStatus: scan.semanticRiskFactsStatus,
+      }),
+    ),
+  );
   const perDatabaseCatalogDigest = digestCurrent187Value(
     CURRENT187_PER_DATABASE_CATALOG_POLICY_DIGEST_DOMAIN,
     stableCatalogProjection,
@@ -936,6 +960,17 @@ export function planCurrent187ClusterInventoryAdmission(requestValue) {
     CURRENT187_DEFAULT_ACL_POLICY_DIGEST_DOMAIN,
     defaultAclProjection,
   );
+  const semanticRiskFactsDigest = digestCurrent187Value(
+    CURRENT187_SEMANTIC_RISK_FACTS_POLICY_DIGEST_DOMAIN,
+    semanticRiskFactsProjection,
+  );
+  const semanticRiskFactsStatus = publicScans.every(
+    (scan) =>
+      scan.connectionStatus === "CONNECTED" &&
+      scan.semanticRiskFactsStatus === "FACTS_EXTRACTED_DENY_ONLY",
+  )
+    ? "FACTS_EXTRACTED_DENY_ONLY"
+    : "INCOMPLETE_DENIED";
   const clusterCatalogDigest = digestCurrent187Value(
     CURRENT187_CLUSTER_CATALOG_POLICY_DIGEST_DOMAIN,
     {
@@ -945,6 +980,7 @@ export function planCurrent187ClusterInventoryAdmission(requestValue) {
       expectedDatabaseUniverseDigest,
       perDatabaseCatalogDigest,
       roleBindingsDigest,
+      semanticRiskFactsDigest,
     },
   );
   const ddlFenceStateDigest = digestCurrent187Value(
@@ -1006,6 +1042,8 @@ export function planCurrent187ClusterInventoryAdmission(requestValue) {
     reasonCodes,
     roleBindingsDigest,
     schemaVersion: CURRENT187_ADMISSION_SCHEMA_VERSION,
+    semanticRiskFactsDigest,
+    semanticRiskFactsStatus,
     sharedBetaAccess: false,
     slice: CURRENT187_CLUSTER_INVENTORY_SLICE,
     sourceIoPerformed: false,

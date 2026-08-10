@@ -7,7 +7,7 @@ import { isProxy } from "node:util/types";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_V2";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_MANIFEST_SHA256 =
-  "f38c4c6720db79c02f546620679870e85dad129ce27c7592a48d3937cea09664";
+  "2732b821f52442349d2f9c78ac3ee421d485b0ca70153f95207f995625a7ffb2";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_PLAN_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_PLAN_V2";
 export const CURRENT180_CURRENT190_IN_MEMORY_ARTIFACT_CONTRACT =
@@ -16,7 +16,7 @@ export const CURRENT180_CURRENT190_IN_MEMORY_ARTIFACT_CONTRACT =
 const CURRENT180_CURRENT190_REFREEZE_MANIFEST_CONTRACT =
   "CURRENT180_CURRENT190_RELEASE_REFREEZE_MANIFEST_V1";
 const CURRENT180_CURRENT190_REFREEZE_MANIFEST_SHA256 =
-  "6c66243e745d1fa48a6a5b67af62bf25b1db951dd5fce094ace2c14541e78186";
+  "f70dec3cac034ce0cd7d8aee220337b04d2ff55c3329bbb467036c0575c1de6c";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "../../..");
@@ -51,7 +51,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-refreeze-manifest.mjs",
-    sha256: "6dc1006bf6ed93881eced94941aaecf489ae2c301d160b086cf7821abc4928bf",
+    sha256: "df31c99da8b98be4f988a0f4b709a3349276521e3ff73862c6b2f65ff6fe967c",
   }),
   Object.freeze({
     path: join(
@@ -61,7 +61,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-materialization-planner.mjs",
-    sha256: "e3ba734ec408aba3fa5785a148d444dec67968c0e751a953de2d56f530a6c81d",
+    sha256: "9313b88f48f3878a318a40770e25a6214565e4621c483bae00151e8a051f687e",
   }),
   Object.freeze({
     path: join(
@@ -71,7 +71,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-rehearsal-blocker.mjs",
-    sha256: "519bf11d7f82d4dd95c168863f84134049eb5a21f4d5068cc5ddebdfa403923e",
+    sha256: "0ac73005e2ed78ec601fdda76fabc52c2c6058af4f7a191c41c10d37528e77fa",
   }),
 ]);
 const MIGRATION_DIRECTORY_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
@@ -487,7 +487,7 @@ function assertAllowManifest(manifest, findings) {
     manifest?.source?.refreezeManifestSha256 !==
       CURRENT180_CURRENT190_REFREEZE_MANIFEST_SHA256 ||
     manifest?.source?.materializationPlanDigest !==
-      "f9d21bc342492a5aa4d0afcf304f64e3f3d4d0afc7d4f8dd6389017113b62cd6" ||
+      "bda57d40570852f616f5ac1212457ca3f2c68a19b016d39fe88c7cc5e94d8843" ||
     manifest?.source?.frozenSourceBytesMayChange !== false ||
     manifest?.source?.frozenSourceSqlTransformation !== "BYTE_EXACT_COPY_ONLY"
   ) {

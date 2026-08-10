@@ -30,15 +30,19 @@ const EXPECTED_CURRENT187_TOOLING = deepFreeze([
   },
   {
     file: "identity-mail-cluster-inventory-current187-planner.mjs",
-    sha256: "6136e2f7a3ed05c81b8622a80ecd3b91148e5ee1e87a8987f87255196510dc23",
+    sha256: "dd0d757b746106a9ce6ba92e0217285a6f1a59d8b61f584751078f6b2a829dbc",
   },
   {
     file: "identity-mail-cluster-acquisition-current187.mjs",
-    sha256: "ee45f2504a332fea00ee69c73492212d8b78be199c344f26b4864d1c4a59e9f2",
+    sha256: "4828b5ae3173a4217c2cb4430588d8c135d8078d8063e29ea6bc742d113fa19f",
   },
   {
     file: "identity-mail-cluster-policy-current187.mjs",
-    sha256: "c4a4d63ffefcdcd09e01fca8b2f4334b72b5f78d334d8692652e0b5e93922d5f",
+    sha256: "db9c88f6a64b632bb4400f6ed1c583e6153fd8c80b05069b3849162fa8843ccc",
+  },
+  {
+    file: "identity-mail-cluster-semantic-risk-current187.mjs",
+    sha256: "cc0eb928a1dc491137cfae7b1c6ed22d8de13cf415bd162154ecf35624e37597",
   },
   {
     file: "identity-mail-ddl-fence-attestation-current187-contract.mjs",

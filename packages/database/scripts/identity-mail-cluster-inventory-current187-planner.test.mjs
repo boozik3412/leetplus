@@ -31,6 +31,8 @@ const DIGESTS = Object.freeze({
   roleBindingsPostgres: "d".repeat(64),
   scanApp: "5".repeat(64),
   scanPostgres: "6".repeat(64),
+  semanticRiskApp: "e".repeat(64),
+  semanticRiskPostgres: "f".repeat(64),
   topology: "7".repeat(64),
 });
 
@@ -149,6 +151,14 @@ function scanFor(database, overrides = {}) {
       : null,
     scanEvidenceDigest:
       database.name === "postgres" ? DIGESTS.scanPostgres : DIGESTS.scanApp,
+    semanticRiskFactsDigest: isConnected
+      ? isPostgres
+        ? DIGESTS.semanticRiskPostgres
+        : DIGESTS.semanticRiskApp
+      : null,
+    semanticRiskFactsStatus: isConnected
+      ? "FACTS_EXTRACTED_DENY_ONLY"
+      : "NOT_EXTRACTED_NON_CONNECTABLE_ALLOWLIST",
     startedAt: "2026-08-05T10:01:00.000Z",
     ...overrides,
   };
@@ -265,6 +275,7 @@ test("digests are stable across caller array ordering", () => {
   assert.equal(second.currentAclPolicyDigest, first.currentAclPolicyDigest);
   assert.equal(second.defaultAclPolicyDigest, first.defaultAclPolicyDigest);
   assert.equal(second.perDatabaseCatalogDigest, first.perDatabaseCatalogDigest);
+  assert.equal(second.semanticRiskFactsDigest, first.semanticRiskFactsDigest);
 });
 
 test("stable policy digests exclude acquisition timestamps and scan transport evidence", () => {
@@ -288,6 +299,7 @@ test("stable policy digests exclude acquisition timestamps and scan transport ev
   assert.equal(second.currentAclPolicyDigest, first.currentAclPolicyDigest);
   assert.equal(second.defaultAclPolicyDigest, first.defaultAclPolicyDigest);
   assert.equal(second.perDatabaseCatalogDigest, first.perDatabaseCatalogDigest);
+  assert.equal(second.semanticRiskFactsDigest, first.semanticRiskFactsDigest);
 });
 
 test("an unknown non-template database fails closed even when both snapshots contain it", () => {
@@ -417,6 +429,8 @@ test("unread catalog for a connectable database fails closed", () => {
           currentAclPolicyDigest: null,
           defaultAclPolicyDigest: null,
           roleBindingsDigest: null,
+          semanticRiskFactsDigest: null,
+          semanticRiskFactsStatus: "NOT_EXTRACTED_NON_CONNECTABLE_ALLOWLIST",
         }
       : scan,
   );

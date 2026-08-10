@@ -71,7 +71,9 @@ Fingerprint equality не является semantic allowlist evaluator. CURRENT
 До Engineering Green всё ещё обязательны:
 
 - semantic evaluator опасных role attributes, memberships, ownership,
-  current/default ACL и system privilege baseline;
+  current/default ACL и system privilege baseline: deterministic secret-free
+  risk-facts extraction уже реализован CURRENT187-G, но independently signed
+  allowlist и решение safe/deny ещё отсутствуют;
 - independently approved/persisted production allowlist и root enrollment;
 - host-side DDL fence executor;
 - actual TCP/TLS/HBA/pooler/service-account positive и negative probes;

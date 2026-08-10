@@ -238,6 +238,155 @@ function surfaceName(sql) {
   return match?.[1];
 }
 
+function semanticSurfaceRows(name, databaseName, payload) {
+  const label = payload ?? `semantic-${name}`;
+  const rows = {
+    column_acl_all_grantees: {
+      columnName: "email",
+      columnNumber: 2,
+      grantable: false,
+      granteeName: "PUBLIC",
+      granteeOid: "0",
+      grantorName: "owner_role",
+      grantorOid: "10",
+      privilege: "SELECT",
+      relationName: label,
+      relationOid: "200",
+      schemaName: "public",
+    },
+    database_security: {
+      databaseName,
+      databaseOid: "100",
+      grantable: false,
+      granteeName: "PUBLIC",
+      granteeOid: "0",
+      grantorName: "owner_role",
+      grantorOid: "10",
+      kind: "DIRECT",
+      ownerName: "owner_role",
+      ownerOid: "10",
+      privilege: "CONNECT",
+    },
+    default_acl_all_grantees: {
+      grantable: false,
+      granteeName: "PUBLIC",
+      granteeOid: "0",
+      grantorName: "owner_role",
+      grantorOid: "10",
+      objectType: label,
+      ownerName: "owner_role",
+      ownerOid: "10",
+      privilege: "SELECT",
+      schemaName: null,
+      schemaOid: "0",
+    },
+    effective_object_privileges: {
+      kind: "TYPE",
+      objectName: label,
+      objectOid: "400",
+      roleName: "app_role",
+      roleOid: "20",
+      schemaName: "public",
+      usage: true,
+    },
+    memberships: {
+      adminOption: false,
+      grantorName: "owner_role",
+      grantorOid: "10",
+      inheritOption: true,
+      kind: "DIRECT",
+      memberName: "app_role",
+      memberOid: "20",
+      roleName: label,
+      roleOid: "21",
+      setOption: false,
+    },
+    owned_objects: {
+      classOid: "1259",
+      databaseName,
+      databaseOid: "100",
+      dependencyType: "o",
+      identity: label,
+      objectOid: "200",
+      objectSubId: 0,
+      ownerName: "owner_role",
+      ownerOid: "10",
+    },
+    relation_acl_all_grantees: {
+      grantable: false,
+      granteeName: "PUBLIC",
+      granteeOid: "0",
+      grantorName: "owner_role",
+      grantorOid: "10",
+      ownerOid: "10",
+      privilege: "SELECT",
+      relationKind: "r",
+      relationName: label,
+      relationOid: "200",
+      schemaName: "public",
+    },
+    role_database_settings: {
+      databaseName,
+      databaseOid: "100",
+      roleName: "app_role",
+      roleOid: "20",
+      setting: label,
+    },
+    roles: {
+      bypassRls: false,
+      canLogin: true,
+      config: null,
+      connectionLimit: 10,
+      createDatabase: false,
+      createRole: false,
+      inherit: true,
+      name: label,
+      oid: "20",
+      replication: false,
+      superuser: false,
+      validUntil: null,
+    },
+    routine_acl_all_grantees: {
+      grantable: false,
+      granteeName: "PUBLIC",
+      granteeOid: "0",
+      grantorName: "owner_role",
+      grantorOid: "10",
+      identityArguments: "",
+      ownerOid: "10",
+      privilege: "EXECUTE",
+      routineName: label,
+      routineOid: "300",
+      schemaName: "public",
+    },
+    schema_acl_all_grantees: {
+      grantable: false,
+      granteeName: "PUBLIC",
+      granteeOid: "0",
+      grantorName: "owner_role",
+      grantorOid: "10",
+      ownerOid: "10",
+      privilege: "USAGE",
+      schemaName: label,
+      schemaOid: "2200",
+    },
+    type_acl_all_grantees: {
+      grantable: false,
+      granteeName: "PUBLIC",
+      granteeOid: "0",
+      grantorName: "owner_role",
+      grantorOid: "10",
+      ownerOid: "10",
+      privilege: "USAGE",
+      schemaName: "public",
+      typeName: label,
+      typeOid: "400",
+    },
+  };
+  const row = rows[name];
+  return row ? [{ evidence: JSON.stringify(row) }] : null;
+}
+
 function fakeDependencies(options = {}) {
   const queryLog = [];
   const connectLog = [];
@@ -290,6 +439,14 @@ function fakeDependencies(options = {}) {
         }
         const name = surfaceName(sql);
         if (name) {
+          const semanticRows = semanticSurfaceRows(
+            name,
+            databaseName,
+            options.surfacePayloadByName?.[name] ?? options.surfacePayload,
+          );
+          if (semanticRows) {
+            return semanticRows;
+          }
           return [
             {
               evidence: JSON.stringify({
@@ -347,6 +504,14 @@ test("acquires every allowlisted database and returns only a deny-only matched r
   assert.equal(receipt.productionRootEnrolled, false);
   assert.equal(receipt.externalDdlFenceAttested, false);
   assert.equal(receipt.topologyExternallyAttested, false);
+  assert.equal(
+    receipt.plannerReceipt.semanticRiskFactsStatus,
+    "FACTS_EXTRACTED_DENY_ONLY",
+  );
+  assert.match(
+    receipt.plannerReceipt.semanticRiskFactsDigest,
+    /^[a-f0-9]{64}$/u,
+  );
   assert.equal(Object.isFrozen(receipt), true);
   assert.equal(isVerifiedCurrent187ClusterAcquisitionReceipt(receipt), true);
   assert.equal(
@@ -654,6 +819,10 @@ test("signed deployment policy matches stable role, ACL, and multi-database cata
   assert.equal(receipt.productionRootEnrolled, false);
   assert.equal(receipt.testAccessAuthorized, false);
   assert.equal(receipt.sharedBetaAccess, false);
+  assert.equal(
+    receipt.sourceSemanticRiskFactsDigest,
+    attested.plannerReceipt.semanticRiskFactsDigest,
+  );
   assert.equal(Object.isFrozen(receipt), true);
   assert.equal(isVerifiedCurrent187ClusterPolicyReceipt(receipt), true);
   assert.equal(isVerifiedCurrent187ClusterPolicyReceipt({ ...receipt }), false);
@@ -920,6 +1089,10 @@ test("stable policy digests are scoped to role, current ACL, and default ACL sur
     assert.notEqual(
       changed.plannerReceipt.clusterCatalogDigest,
       baselinePlan.clusterCatalogDigest,
+    );
+    assert.notEqual(
+      changed.plannerReceipt.semanticRiskFactsDigest,
+      baselinePlan.semanticRiskFactsDigest,
     );
   }
 });

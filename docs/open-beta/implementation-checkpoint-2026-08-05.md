@@ -46,7 +46,7 @@ production root enrollment, создание внешнего tenant, учётн
   `3bbf04f88643d94076be96c3ae714c441454e6a7fcd6107af5bd194dca579ed6`.
 - Статус: `ENGINEERING ACCEPTED / NONCANONICAL / NOT DEPLOYABLE`.
 
-### CURRENT187 A–E: cluster/application admission foundation
+### CURRENT187 A–G: cluster/application admission foundation
 
 - A: три независимых Ed25519 purpose domain, exact canonical shapes,
   frozen-empty production roots и synthetic loopback test roots — `13/13 PASS`.
@@ -68,6 +68,14 @@ production root enrollment, создание внешнего tenant, учётн
   `dd5f4db5aecef2c537251bc5262063c1012a1383aec0d0137e7d8b9536f8bb63`.
 - Disposable PostgreSQL 16 two-database acceptance C повторно принят:
   `1/1 PASS`; residue database/role/session — `0/0/0`.
+- F: stable role/current-ACL/default-ACL/catalog fingerprints связаны с exact
+  purpose-bound deployment envelope; exact-SHA CI `31391874407` — `3/3 PASS`.
+- G: pure secret-free semantic risk-facts extractor валидирует 12 exact
+  catalog surfaces и считает privileged role attributes, LOGIN, memberships,
+  settings, ownership, current/default ACL, `PUBLIC`/grantable grants и
+  effective privileges. Per-database digest агрегируется в
+  `clusterCatalogDigest`; focused checkpoint `7/7 PASS`. Signed allowlist и
+  semantic approval не реализованы, все authority/effect flags остаются false.
 - Все receipts по-прежнему deny-only. Host-side fence executor,
   HBA/TLS/pooler/service-account evidence, production roots и hostile
   concurrent multi-DB matrix ещё не закрыты.
@@ -343,9 +351,11 @@ production root enrollment, создание внешнего tenant, учётн
 
 Порядок нельзя переставлять или обходить ручным созданием пользователя:
 
-1. Довести CURRENT187 до Engineering Green: host-side DDL fence executor,
-   HBA/TLS/pooler probes, signed baseline/policy/consumption ledger, hostile
-   multi-DB race matrix и independent review.
+1. Довести CURRENT187 до Engineering Green: поверх CURRENT187-G risk facts
+   добавить independently approved signed allowlist/evaluator, host-side DDL
+   fence executor, HBA/TLS/pooler probes, signed
+   baseline/policy/consumption ledger, hostile multi-DB race matrix и
+   independent review.
 2. Перенести локально принятый provider recovery в канонический release и
    production-like restored-snapshot PG rehearsal; добавить DB aggregate
    zero-inflight/zero-secret-bearing finalize barrier, signed runtime kill state

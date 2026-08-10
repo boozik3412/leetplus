@@ -9,6 +9,11 @@
 > `11/11`; exact SHA `b64abfe5…` принят CI `31391874407` как `3/3 SUCCESS`.
 > Это не semantic allowlist и не production authority. Evidence:
 > `identity-mail-current187-f-ci-evidence-2026-08-10.md`.
+>
+> Текущий локальный срез CURRENT187-G добавил secret-free semantic risk facts
+> для privileged roles, memberships, settings, ownership, current/default ACL,
+> `PUBLIC`/grantable grants и effective privileges. Facts digest включён в
+> signed-bound `clusterCatalogDigest`, но allowlist/GO всё ещё отсутствуют.
 
 ## Итоговый вердикт
 
@@ -50,6 +55,7 @@
 | Runtime adapter                  | `ACCEPTED LOCALLY`                 | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission                                 |
 | Runner/janitor                   | `ACCEPTED LOCALLY`                 | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                                     |
 | CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3` |
+| CURRENT187-G semantic risk facts | `IMPLEMENTED LOCALLY / DENY-ONLY`  | secret-free counts/category digests по 12 surfaces; focused `7/7`; signed allowlist ещё не реализован                      |
 | Единый gate                      | `PASS`                             | `163/163`, `0` failures                                                                                                    |
 | Независимая latest-byte проверка | `PASS`                             | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                 |
 
@@ -138,9 +144,11 @@ ready только после canonical merge, production-like evidence, tenant/
 
 ## Критический путь до первого внешнего клуба
 
-1. Завершить CURRENT187 semantic allowlist, infrastructure admission/provider
-   recovery и exact production runtime roles/grants/attestation; затем
-   выполнить reviewed canonical promotion CURRENT180–190.
+1. Поверх реализованного CURRENT187-G risk-facts receipt добавить независимо
+   утверждённый signed semantic allowlist и fail-closed evaluator; затем
+   закрыть infrastructure admission/provider recovery и exact production
+   runtime roles/grants/attestation и выполнить reviewed canonical promotion
+   CURRENT180–190.
 2. Закрыть Gate 1MT по полному согласованному модульному scope: оставшиеся HTTP
    и BFF paths, files/exports/jobs/SSE/Telegram, users/roles и outbound fences.
 3. На восстановленной production-like копии выполнить signed backup/restore,
@@ -167,7 +175,9 @@ friendly-сетей, 14-дневного окна и выполнения Gate 3
 ## Следующее действие разработки
 
 Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CURRENT187-F связал
-stable multi-DB fingerprints с signed deployment envelope, сохранив все launch
-flags false, и принят exact-SHA CI. Ближайший этап — semantic
-role/ACL/default-ACL evaluator, host/TLS/HBA/pooler runtime admission и только
-после них reviewed canonical promotion/restored-copy rehearsal.
+stable multi-DB fingerprints с signed deployment envelope. CURRENT187-G уже
+извлекает secret-free semantic role/ACL/default-ACL risk facts и включает их
+digest в `clusterCatalogDigest`, сохраняя все launch flags false. Ближайший этап
+— independently signed allowlist и его fail-closed evaluator, затем
+host/TLS/HBA/pooler runtime admission и reviewed canonical
+promotion/restored-copy rehearsal.

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
@@ -281,7 +282,6 @@ export function GameClubSelectClient({
           <ChevronLeftIcon />
         </Link>
         <div className="lp-club-brand">
-          <span className="lp-club-brand-mark" aria-hidden="true" />
           <span>
             <strong>LeetPlus Game</strong>
             <em>выбор клуба</em>
@@ -789,9 +789,7 @@ function ClubCard({
     >
       <div>
         <div className="lp-club-title">
-          <span className="lp-club-card-icon" aria-hidden="true">
-            <ClubIcon />
-          </span>
+          <ClubNetworkMark club={club} />
           <span>
             <strong>{club.store.name}</strong>
             <span>{formatClubLocation(club)}</span>
@@ -818,6 +816,25 @@ function ClubCard({
         </button>
       </div>
     </article>
+  );
+}
+
+function ClubNetworkMark({ club }: { club: GuestPortalGamificationClub }) {
+  const logoUrl = club.store.gameLogoUrl ?? club.tenant.gameLogoUrl;
+
+  return (
+    <span
+      className={[
+        "lp-club-card-network-logo",
+        logoUrl ? "is-custom-logo" : "",
+      ].join(" ")}
+      title={club.tenant.name}
+      aria-hidden="true"
+    >
+      {logoUrl ? (
+        <Image src={logoUrl} alt="" width={34} height={34} unoptimized />
+      ) : null}
+    </span>
   );
 }
 
@@ -1065,16 +1082,6 @@ function MapPinIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
       <path d="M12 21s7-5.3 7-11a7 7 0 0 0-14 0c0 5.7 7 11 7 11Z" />
       <circle cx="12" cy="10" r="2.5" />
-    </svg>
-  );
-}
-
-function ClubIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-      <path d="M4 9h16" />
-      <path d="M6 9v10h12V9" />
-      <path d="M8 9V6a4 4 0 0 1 8 0v3" />
     </svg>
   );
 }
@@ -1597,7 +1604,8 @@ function ClubSelectStyles() {
   gap: 10px;
   min-width: 0;
 }
-.lp-club-card-icon {
+.lp-club-card-network-logo {
+  position: relative;
   display: grid;
   place-items: center;
   width: 42px;
@@ -1607,6 +1615,34 @@ function ClubSelectStyles() {
   border-radius: 7px;
   color: var(--cyan);
   background: rgba(196, 224, 225, 0.045);
+}
+.lp-club-card-network-logo::before,
+.lp-club-card-network-logo::after {
+  content: "";
+  position: absolute;
+  inset: 11px;
+  border: 1px solid rgba(131, 228, 236, 0.62);
+  transform: rotate(45deg);
+}
+.lp-club-card-network-logo::after {
+  inset: 17px;
+  border-color: var(--amber);
+}
+.lp-club-card-network-logo.is-custom-logo {
+  overflow: hidden;
+  border-color: rgba(196, 224, 225, 0.18);
+  background: rgba(0, 0, 0, 0.26);
+}
+.lp-club-card-network-logo.is-custom-logo::before,
+.lp-club-card-network-logo.is-custom-logo::after {
+  display: none;
+}
+.lp-club-card-network-logo img {
+  display: block;
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+  object-fit: contain;
+  object-position: center;
 }
 .lp-club-title strong,
 .lp-club-title span span {

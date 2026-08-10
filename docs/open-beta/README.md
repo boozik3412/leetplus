@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.74                                         |
+| Версия           | 1.75                                         |
 | Дата             | 07.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -571,10 +571,15 @@ enterprise-isolation option и не сокращает shared gates.
     [CURRENT187-I persisted semantic approval ledger](./identity-mail-current187-persisted-semantic-approval-ledger.md)
     добавляет explicit verification provenance, canonical one-time consumption
     и scoped revocation contracts; F теперь принимает только branded persisted
-    I receipt. Foundation и policy gate реализованы локально, но PostgreSQL
-    append-only/RLS/RPC ledger и hostile race matrix ещё не готовы. Поэтому I
-    остаётся `DATABASE LEDGER PENDING / DENY-ONLY / NOT DEPLOYABLE`, а внешний
-    доступ — `NO-GO`.
+    I receipt. Foundation SHA `340e6f05…` принят CI `31411596083` как
+    `3/3 SUCCESS`; [CI evidence](./identity-mail-current187-i-ci-evidence-2026-08-10.md).
+    Noncanonical PostgreSQL candidate `53ebadcd…` реализует append-only/FORCE
+    RLS/execute-only RPC ledger и exact canonical-JSON reconstruction; static
+    `7/7`, два независимых PostgreSQL 16.13 hostile run — `1/1 PASS`, включая
+    duplicate-key/reordered JSON attacks, postflight `0/0/0`. Candidate ещё не canonical,
+    production roots/runtime attestation отсутствуют. Поэтому I остаётся
+    `LOCAL PG ACCEPTED / DENY-ONLY / NOT DEPLOYABLE`, а внешний доступ —
+    `NO-GO`.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

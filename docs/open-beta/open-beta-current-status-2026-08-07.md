@@ -30,9 +30,14 @@
 > canonical one-time consumption и scoped revocation bundles. Policy F теперь
 > требует branded persisted I receipt и отклоняет raw/cloned H. Focused
 > `31/31`, release acceptance `133/133`, official sequential materializer
-> `24/24`, journal `24/24`, runner `14/14`, runtime `27/27`. PostgreSQL
-> ledger/RLS/RPC и hostile race
-> matrix ещё не готовы; статус внешнего доступа не изменился: `NO-GO`.
+> `24/24`, journal `24/24`, runner `14/14`, runtime `27/27`. Foundation SHA
+> `340e6f05…` принят CI `31411596083` — `3/3 SUCCESS`, artifact
+> `sha256:95afdce0…31ee3`. Noncanonical PostgreSQL candidate `53ebadcd…` теперь
+> реализует append-only/FORCE-RLS/execute-only RPC ledger с exact canonical-JSON
+> reconstruction; static `7/7`, два независимых hostile PG16.13 run — `1/1 PASS`,
+> включая duplicate-key/reordered JSON attacks, postflight `0/0/0`.
+> Canonical promotion и production runtime admission ещё не готовы; статус
+> внешнего доступа не изменился: `NO-GO`.
 
 ## Итоговый вердикт
 
@@ -64,21 +69,21 @@
 
 ## Состояние текущей инженерной задачи
 
-| Контур                           | Статус                             | Подтверждение                                                                                                              |
-| -------------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Planning state machine           | `ACCEPTED LOCALLY`                 | `33/33`                                                                                                                    |
-| SQL semantic fingerprint         | `ACCEPTED LOCALLY`                 | `26/26`; schema/data/sequences, ACL, cluster role attributes, password-verifier hashes и memberships                       |
-| Persistent coordinator           | `ACCEPTED LOCALLY`                 | `6/6`; внешний pinned Ed25519 trust root                                                                                   |
-| Materializer/recovery            | `ACCEPTED LOCALLY`                 | `24/24`; bounded descriptor reads, exact tree/inode provenance, signed restart locator                                     |
-| Signed journal                   | `ACCEPTED LOCALLY`                 | `24/24`; public-only verification, signed lifecycle, lost unlink/rmdir recovery                                            |
-| Runtime adapter                  | `ACCEPTED LOCALLY`                 | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission                                 |
-| Runner/janitor                   | `ACCEPTED LOCALLY`                 | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                                     |
-| CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3` |
-| CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY` | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H               |
-| CURRENT187-H semantic allowlist  | `ENGINEERING ACCEPTED / DENY-ONLY` | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`            |
-| CURRENT187-I persisted approval  | `FOUNDATION / DB LEDGER PENDING`   | provenance + one-time consume/revoke contracts; F requires persisted brand; focused `31/31`; all access/effect flags false |
-| Единый gate                      | `PASS`                             | `163/163`, `0` failures                                                                                                    |
-| Независимая latest-byte проверка | `PASS`                             | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                 |
+| Контур                           | Статус                             | Подтверждение                                                                                                                 |
+| -------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Planning state machine           | `ACCEPTED LOCALLY`                 | `33/33`                                                                                                                       |
+| SQL semantic fingerprint         | `ACCEPTED LOCALLY`                 | `26/26`; schema/data/sequences, ACL, cluster role attributes, password-verifier hashes и memberships                          |
+| Persistent coordinator           | `ACCEPTED LOCALLY`                 | `6/6`; внешний pinned Ed25519 trust root                                                                                      |
+| Materializer/recovery            | `ACCEPTED LOCALLY`                 | `24/24`; bounded descriptor reads, exact tree/inode provenance, signed restart locator                                        |
+| Signed journal                   | `ACCEPTED LOCALLY`                 | `24/24`; public-only verification, signed lifecycle, lost unlink/rmdir recovery                                               |
+| Runtime adapter                  | `ACCEPTED LOCALLY`                 | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission                                    |
+| Runner/janitor                   | `ACCEPTED LOCALLY`                 | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                                        |
+| CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3`    |
+| CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY` | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H                  |
+| CURRENT187-H semantic allowlist  | `ENGINEERING ACCEPTED / DENY-ONLY` | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`               |
+| CURRENT187-I persisted approval  | `LOCAL PG ACCEPTED / NONCANONICAL` | persisted brand required; candidate `53ebadcd…`; static `7/7`, PG16.13 `2 × 1/1`, zero residue; all access/effect flags false |
+| Единый gate                      | `PASS`                             | `163/163`, `0` failures                                                                                                       |
+| Независимая latest-byte проверка | `PASS`                             | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                    |
 
 Закрыты важные failure modes:
 
@@ -165,8 +170,8 @@ ready только после canonical merge, production-like evidence, tenant/
 
 ## Критический путь до первого внешнего клуба
 
-1. Завершить PostgreSQL persisted semantic approval
-   consumption/revocation/expiry/replay ledger для CURRENT187-I; затем закрыть infrastructure
+1. Принять CURRENT187-I candidate независимой latest-byte проверкой и exact-head
+   CI с hostile PostgreSQL fixture; затем закрыть infrastructure
    admission/provider recovery и exact production runtime
    roles/grants/attestation и выполнить reviewed canonical promotion
    CURRENT180–190.
@@ -199,7 +204,6 @@ Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CUR
 exact-SHA CI. CURRENT187-H реализовал независимо подписанный allowlist,
 fail-closed facts evaluator и обязательную связь с F; все launch flags false,
 полный disposable gate `163/163`, exact-SHA CI `31403020215` — `3/3 SUCCESS`.
-Ближайший этап — PostgreSQL append-only/RLS/RPC реализация для уже введённого
-CURRENT187-I persisted approval contract, затем hostile race/expiry/revoke
-acceptance, host/TLS/HBA/pooler runtime admission и reviewed canonical
-promotion/restored-copy rehearsal.
+Ближайший этап — independent latest-byte review и exact-head CI для уже
+реализованного CURRENT187-I PostgreSQL candidate, затем host/TLS/HBA/pooler
+runtime admission и reviewed canonical promotion/restored-copy rehearsal.

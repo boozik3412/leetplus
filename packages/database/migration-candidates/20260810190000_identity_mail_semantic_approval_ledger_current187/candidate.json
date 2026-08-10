@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "contract": "CURRENT187_SEMANTIC_APPROVAL_LEDGER_SYNTHETIC_CI_V1",
+  "candidate": "20260810190000_identity_mail_semantic_approval_ledger_current187",
+  "ordinal": "187-I",
+  "predecessor": {
+    "requiredContract": "CURRENT187_H_SIGNED_SEMANTIC_ALLOWLIST_EVALUATOR",
+    "resolved": false
+  },
+  "migrationSqlSha256": "53ebadcdaf1b26751fd2fde836343791c31121161bf776b7991ee94b4e847ec1",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "canConsumeProductionApproval": false,
+  "canRevokeProductionApproval": false,
+  "canSend": false,
+  "testAccessAuthorized": false,
+  "sharedBetaAccess": false,
+  "productionRootEnrolled": false,
+  "productionRootsFrozenEmpty": true,
+  "applicationRoleAllowlistBound": false,
+  "productionApplyAuthorized": false,
+  "status": "NOT_DEPLOYABLE"
+}

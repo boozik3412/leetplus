@@ -25,6 +25,14 @@
 > принят CI `31403020215` как `3/3 SUCCESS`, artifact digest
 > `sha256:94eb8908…c61b7`. H остаётся deny-only; deploy/test-access GO не
 > выдаётся. Evidence: `identity-mail-current187-h-ci-evidence-2026-08-10.md`.
+>
+> CURRENT187-I foundation добавил explicit authority verification provenance,
+> canonical one-time consumption и scoped revocation bundles. Policy F теперь
+> требует branded persisted I receipt и отклоняет raw/cloned H. Focused
+> `31/31`, release acceptance `133/133`, official sequential materializer
+> `24/24`, journal `24/24`, runner `14/14`, runtime `27/27`. PostgreSQL
+> ledger/RLS/RPC и hostile race
+> matrix ещё не готовы; статус внешнего доступа не изменился: `NO-GO`.
 
 ## Итоговый вердикт
 
@@ -68,6 +76,7 @@
 | CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3` |
 | CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY` | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H               |
 | CURRENT187-H semantic allowlist  | `ENGINEERING ACCEPTED / DENY-ONLY` | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`            |
+| CURRENT187-I persisted approval  | `FOUNDATION / DB LEDGER PENDING`   | provenance + one-time consume/revoke contracts; F requires persisted brand; focused `31/31`; all access/effect flags false |
 | Единый gate                      | `PASS`                             | `163/163`, `0` failures                                                                                                    |
 | Независимая latest-byte проверка | `PASS`                             | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                 |
 
@@ -156,8 +165,8 @@ ready только после canonical merge, production-like evidence, tenant/
 
 ## Критический путь до первого внешнего клуба
 
-1. Добавить persisted one-time semantic approval
-   consumption/revocation/expiry/replay поверх принятого CURRENT187-H; затем закрыть infrastructure
+1. Завершить PostgreSQL persisted semantic approval
+   consumption/revocation/expiry/replay ledger для CURRENT187-I; затем закрыть infrastructure
    admission/provider recovery и exact production runtime
    roles/grants/attestation и выполнить reviewed canonical promotion
    CURRENT180–190.
@@ -190,6 +199,7 @@ Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CUR
 exact-SHA CI. CURRENT187-H реализовал независимо подписанный allowlist,
 fail-closed facts evaluator и обязательную связь с F; все launch flags false,
 полный disposable gate `163/163`, exact-SHA CI `31403020215` — `3/3 SUCCESS`.
-Ближайший этап — persisted one-time consumption/revocation semantic approval,
-затем host/TLS/HBA/pooler runtime admission и reviewed canonical
+Ближайший этап — PostgreSQL append-only/RLS/RPC реализация для уже введённого
+CURRENT187-I persisted approval contract, затем hostile race/expiry/revoke
+acceptance, host/TLS/HBA/pooler runtime admission и reviewed canonical
 promotion/restored-copy rehearsal.

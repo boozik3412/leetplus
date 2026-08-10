@@ -26,7 +26,7 @@ const EXPECTED_CURRENT187_TOOLING = deepFreeze([
   },
   {
     file: "identity-mail-cluster-application-admission-current187-authority.mjs",
-    sha256: "dafa0d28aa87ad5be7170ff826cbb126d7b52cdc7336417bc60f928f911aca1c",
+    sha256: "65ba10e96d68024ea4c92359fd10c2aba94696f9ef61517a0f9523e62a523b91",
   },
   {
     file: "identity-mail-cluster-inventory-current187-planner.mjs",
@@ -38,11 +38,15 @@ const EXPECTED_CURRENT187_TOOLING = deepFreeze([
   },
   {
     file: "identity-mail-cluster-policy-current187.mjs",
-    sha256: "6da6a3c434abde0af9605c728f56006636990885290201726e5dfc5b81783773",
+    sha256: "da1fd62f3666fc79b2f076a2544b2f5091659b34b86bdcfc59fa1767f7135a41",
+  },
+  {
+    file: "identity-mail-cluster-semantic-approval-ledger-current187.mjs",
+    sha256: "8faaab8d111bcfbf192c2c19e817c8166dd888d0d60638a201d8f575f5f2d350",
   },
   {
     file: "identity-mail-cluster-semantic-allowlist-current187.mjs",
-    sha256: "e75b21b66b704042f881f6c61d802980b45c191288101f5ad6d12620bec55c42",
+    sha256: "39dbcfd6b42039d69c1069d379a92c54d883eb727099e7e4c8d1714e2dec5ad2",
   },
   {
     file: "identity-mail-cluster-semantic-risk-current187.mjs",

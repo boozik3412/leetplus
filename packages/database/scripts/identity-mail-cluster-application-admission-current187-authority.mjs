@@ -38,6 +38,11 @@ const CI_DATABASE_PATTERN = /_(?:ci|test)$/u;
 const PRODUCTION_DATABASE_PATTERN = /(?:^|_)(?:live|prod|production)(?:_|$)/u;
 const SYSTEM_DATABASES = new Set(["postgres", "template0", "template1"]);
 
+export const CURRENT187_ADMISSION_VERIFICATION_MODE_PINNED_PRODUCTION =
+  "PINNED_PRODUCTION";
+export const CURRENT187_ADMISSION_VERIFICATION_MODE_SYNTHETIC_LOOPBACK_CI =
+  "SYNTHETIC_LOOPBACK_CI";
+
 const VERIFIED_CURRENT187_ADMISSION_RECEIPTS = new WeakSet();
 
 function canonicalIsoEpoch(value, reasonCode, label) {
@@ -310,6 +315,7 @@ function verifyAgainstRoots(
   expectedValue,
   registries,
   now,
+  verificationMode,
 ) {
   const definition = current187AdmissionPurposeDefinition(purpose);
   void definition;
@@ -393,6 +399,7 @@ function verifyAgainstRoots(
     sharedBetaAccess: false,
     testAccessAuthorized: false,
     verifiedAt: new Date(nowMs).toISOString(),
+    verificationMode,
   });
   VERIFIED_CURRENT187_ADMISSION_RECEIPTS.add(verified);
   return verified;
@@ -419,6 +426,7 @@ export function verifyPinnedCurrent187AdmissionEnvelope(
     expectedBinding,
     registries,
     new Date().toISOString(),
+    CURRENT187_ADMISSION_VERIFICATION_MODE_PINNED_PRODUCTION,
   );
 }
 
@@ -444,6 +452,7 @@ export function verifySyntheticCurrent187AdmissionEnvelope(
     expectedBinding,
     registries,
     now,
+    CURRENT187_ADMISSION_VERIFICATION_MODE_SYNTHETIC_LOOPBACK_CI,
   );
 }
 

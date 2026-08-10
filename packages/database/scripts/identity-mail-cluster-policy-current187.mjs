@@ -12,7 +12,7 @@ import {
 import { isVerifiedCurrent187AdmissionReceipt } from "./identity-mail-cluster-application-admission-current187-authority.mjs";
 import { isVerifiedCurrent187ClusterAcquisitionReceipt } from "./identity-mail-cluster-acquisition-current187.mjs";
 import { isVerifiedCurrent187ClusterInventoryReceipt } from "./identity-mail-cluster-inventory-current187-planner.mjs";
-import { isVerifiedCurrent187SemanticAllowlistReceipt } from "./identity-mail-cluster-semantic-allowlist-current187.mjs";
+import { isVerifiedPersistedCurrent187SemanticApprovalReceipt } from "./identity-mail-cluster-semantic-approval-ledger-current187.mjs";
 
 export const CURRENT187_CLUSTER_POLICY_SLICE =
   "CURRENT187_F_SIGNED_CLUSTER_POLICY_EVALUATOR";
@@ -88,10 +88,14 @@ function assertBrandedInputs(
       "The cluster policy evaluator requires an exact branded purpose-bound authority receipt.",
     );
   }
-  if (!isVerifiedCurrent187SemanticAllowlistReceipt(semanticAllowlistReceipt)) {
+  if (
+    !isVerifiedPersistedCurrent187SemanticApprovalReceipt(
+      semanticAllowlistReceipt,
+    )
+  ) {
     current187AdmissionFail(
-      "CURRENT187_CLUSTER_POLICY_SEMANTIC_ALLOWLIST_RECEIPT_INVALID",
-      "The cluster policy evaluator requires an exact branded independent semantic allowlist receipt.",
+      "CURRENT187_CLUSTER_POLICY_PERSISTED_SEMANTIC_APPROVAL_REQUIRED",
+      "The cluster policy evaluator requires an exact one-time persisted semantic approval receipt.",
     );
   }
 }
@@ -144,6 +148,7 @@ export function evaluateCurrent187ClusterPolicy(
   if (
     semanticAllowlistReceipt.semanticAllowlistStatus !== "MATCHED_DENY_ONLY" ||
     semanticAllowlistReceipt.semanticAllowlistMatched !== true ||
+    semanticAllowlistReceipt.persistedConsumptionVerified !== true ||
     semanticAllowlistReceipt.policyAllowlistEvaluated !== true ||
     semanticAllowlistReceipt.sourceSemanticRiskFactsDigest !==
       plannerReceipt?.semanticRiskFactsDigest ||

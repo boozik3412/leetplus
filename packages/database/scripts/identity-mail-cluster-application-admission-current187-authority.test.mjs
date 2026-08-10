@@ -29,6 +29,7 @@ import {
   normalizeCurrent187AdmissionPayload,
 } from "./identity-mail-cluster-application-admission-current187-contract.mjs";
 import {
+  CURRENT187_ADMISSION_VERIFICATION_MODE_SYNTHETIC_LOOPBACK_CI,
   current187AdmissionPayloadDigest,
   current187AdmissionPublicKeyFingerprint,
   isVerifiedCurrent187AdmissionReceipt,
@@ -299,6 +300,10 @@ test("verifies all four purpose domains into deep-frozen deny-only receipts", ()
     assert.equal(verified.canMutate, false);
     assert.equal(verified.canSend, false);
     assert.equal(verified.testAccessAuthorized, false);
+    assert.equal(
+      verified.verificationMode,
+      CURRENT187_ADMISSION_VERIFICATION_MODE_SYNTHETIC_LOOPBACK_CI,
+    );
     assert.equal(verified.sharedBetaAccess, false);
     assert.equal(verified.productionRootEnrolled, false);
     assert.equal(verified.persistedConsumptionVerified, false);

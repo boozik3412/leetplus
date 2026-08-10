@@ -42,7 +42,7 @@ const EXPECTED_LOGICAL_ORDER = Object.freeze([
   180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190,
 ]);
 const EXPECTED_PLAN_DIGEST =
-  "6c9b9289b1d04b60709430ba5b81c5fbf37531c72afa7828ec370ce073c9d48a";
+  "55fc45e1d284c82fd738ddde8d3c7f9028fc8c8a955f546f7af2f13d4ee9763c";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");

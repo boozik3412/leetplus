@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.73                                         |
+| Версия           | 1.74                                         |
 | Дата             | 07.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -568,6 +568,13 @@ enterprise-isolation option и не сокращает shared gates.
     — `3/3 SUCCESS`, artifact digest `sha256:94eb8908…c61b7`; evidence:
     [CURRENT187-H CI](./identity-mail-current187-h-ci-evidence-2026-08-10.md).
     Статус H — `ENGINEERING ACCEPTED / DENY-ONLY / NONCANONICAL / NOT_DEPLOYABLE`.
+    [CURRENT187-I persisted semantic approval ledger](./identity-mail-current187-persisted-semantic-approval-ledger.md)
+    добавляет explicit verification provenance, canonical one-time consumption
+    и scoped revocation contracts; F теперь принимает только branded persisted
+    I receipt. Foundation и policy gate реализованы локально, но PostgreSQL
+    append-only/RLS/RPC ledger и hostile race matrix ещё не готовы. Поэтому I
+    остаётся `DATABASE LEDGER PENDING / DENY-ONLY / NOT DEPLOYABLE`, а внешний
+    доступ — `NO-GO`.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

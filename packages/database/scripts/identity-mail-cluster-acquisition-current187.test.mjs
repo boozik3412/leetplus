@@ -70,6 +70,16 @@ import {
   evaluateCurrent187SemanticAllowlist,
   isVerifiedCurrent187SemanticAllowlistReceipt,
 } from "./identity-mail-cluster-semantic-allowlist-current187.mjs";
+import {
+  CURRENT187_SEMANTIC_APPROVAL_REVOCATION_CONFIRMATION,
+  attachPersistedCurrent187SemanticApprovalConsumption,
+  attachPersistedCurrent187SemanticApprovalRevocation,
+  createCurrent187SemanticApprovalConsumptionBundle,
+  createSyntheticCurrent187SemanticApprovalRevocationBundle,
+  current187SemanticApprovalLedgerDatabaseArguments,
+  isVerifiedPersistedCurrent187SemanticApprovalReceipt,
+  isVerifiedPersistedCurrent187SemanticApprovalRevocationReceipt,
+} from "./identity-mail-cluster-semantic-approval-ledger-current187.mjs";
 
 const DIGESTS = Object.freeze({
   fence: "1".repeat(64),
@@ -78,6 +88,13 @@ const DIGESTS = Object.freeze({
 
 function digest(label) {
   return createHash("sha256").update(label, "utf8").digest("hex");
+}
+
+function domainDigest(domain, value) {
+  return createHash("sha256")
+    .update(`${domain}\n`, "utf8")
+    .update(value, "utf8")
+    .digest("hex");
 }
 
 const DATABASES = Object.freeze({
@@ -830,6 +847,48 @@ function semanticAllowlistFixture(
   };
 }
 
+function persistSemanticApprovalForPolicy(receipt) {
+  const bundle = createCurrent187SemanticApprovalConsumptionBundle(
+    receipt,
+    "2026-08-05T10:03:10.000Z",
+  );
+  const persistedBase = {
+    approvalDigest: bundle.command.approvalDigest,
+    authorization: false,
+    canApply: false,
+    canMutate: false,
+    canSend: false,
+    commandDigest: bundle.commandDigest,
+    consumedAt: "2026-08-05T10:03:11.000Z",
+    documentDigest: bundle.command.documentDigest,
+    evaluationDigest: bundle.command.evaluationDigest,
+    kind: "CURRENT187_SEMANTIC_APPROVAL_CONSUMPTION_RECEIPT",
+    nonce: bundle.command.nonce,
+    noncanonical: true,
+    operationId: bundle.command.operationId,
+    persistedConsumptionVerified: true,
+    productionRootEnrolled: false,
+    publicKeyFingerprint: bundle.command.publicKeyFingerprint,
+    sharedBetaAccess: false,
+    status: "CONSUMED",
+    syntheticLoopbackCiOnly: true,
+    testAccessAuthorized: false,
+    transactionId: "41",
+  };
+  const persisted = {
+    ...persistedBase,
+    receiptDigest: domainDigest(
+      "LEETPLUS_CURRENT187_SEMANTIC_APPROVAL_LEDGER_RECEIPT_V1",
+      current187AdmissionCanonicalJson(persistedBase),
+    ),
+  };
+  return attachPersistedCurrent187SemanticApprovalConsumption(
+    receipt,
+    bundle,
+    JSON.stringify(persisted),
+  );
+}
+
 test("only a signed independent fence receipt can attest the exact branded acquisition", async () => {
   const { acquisition, attestation, attested } =
     await attestedAcquisitionFixture();
@@ -865,10 +924,11 @@ test("signed deployment policy matches stable role, ACL, and multi-database cata
   const { attested } = await attestedAcquisitionFixture();
   const authority = deploymentAuthorityFixture(attested);
   const semantic = semanticAllowlistFixture(attested);
+  const persistedSemantic = persistSemanticApprovalForPolicy(semantic.receipt);
   const receipt = evaluateCurrent187ClusterPolicy(
     attested,
     authority,
-    semantic.receipt,
+    persistedSemantic,
   );
 
   assert.equal(receipt.policyStatus, "BINDINGS_MATCHED");
@@ -894,10 +954,181 @@ test("signed deployment policy matches stable role, ACL, and multi-database cata
   assert.equal(isVerifiedCurrent187ClusterPolicyReceipt({ ...receipt }), false);
   assert.equal(semantic.receipt.semanticAllowlistStatus, "MATCHED_DENY_ONLY");
   assert.equal(semantic.receipt.semanticAllowlistMatched, true);
+  assert.equal(
+    semantic.receipt.sourceAuthorityVerificationMode,
+    "SYNTHETIC_LOOPBACK_CI",
+  );
+  assert.equal(
+    semantic.receipt.sourceOperationId,
+    "88888888-8888-4888-8888-888888888888",
+  );
+  assert.equal(
+    semantic.receipt.sourceNonce,
+    digest("semantic-allowlist-nonce"),
+  );
   assert.equal(semantic.receipt.authorization, false);
   assert.equal(
     isVerifiedCurrent187SemanticAllowlistReceipt(semantic.receipt),
     true,
+  );
+});
+
+test("semantic approval ledger binds one-time consumption and scoped revocation deny-only", async () => {
+  const { attested } = await attestedAcquisitionFixture();
+  const semantic = semanticAllowlistFixture(attested);
+  const bundle = createCurrent187SemanticApprovalConsumptionBundle(
+    semantic.receipt,
+    "2026-08-05T10:03:10.000Z",
+  );
+  const [commandCanonicalJson, commandDigest] =
+    current187SemanticApprovalLedgerDatabaseArguments(bundle);
+  assert.equal(commandCanonicalJson, bundle.commandCanonicalJson);
+  assert.equal(commandDigest, bundle.commandDigest);
+  assert.equal(bundle.command.operationId, semantic.receipt.sourceOperationId);
+  assert.equal(bundle.command.nonce, semantic.receipt.sourceNonce);
+  assert.equal(bundle.command.syntheticVerification, true);
+  assert.equal(bundle.command.environment, "ci");
+
+  const persistedBase = {
+    approvalDigest: bundle.command.approvalDigest,
+    authorization: false,
+    canApply: false,
+    canMutate: false,
+    canSend: false,
+    commandDigest,
+    consumedAt: "2026-08-05T10:03:11.000Z",
+    documentDigest: bundle.command.documentDigest,
+    evaluationDigest: bundle.command.evaluationDigest,
+    kind: "CURRENT187_SEMANTIC_APPROVAL_CONSUMPTION_RECEIPT",
+    nonce: bundle.command.nonce,
+    noncanonical: true,
+    operationId: bundle.command.operationId,
+    persistedConsumptionVerified: true,
+    productionRootEnrolled: false,
+    publicKeyFingerprint: bundle.command.publicKeyFingerprint,
+    sharedBetaAccess: false,
+    status: "CONSUMED",
+    syntheticLoopbackCiOnly: true,
+    testAccessAuthorized: false,
+    transactionId: "42",
+  };
+  const persisted = {
+    ...persistedBase,
+    receiptDigest: domainDigest(
+      "LEETPLUS_CURRENT187_SEMANTIC_APPROVAL_LEDGER_RECEIPT_V1",
+      current187AdmissionCanonicalJson(persistedBase),
+    ),
+  };
+  const attached = attachPersistedCurrent187SemanticApprovalConsumption(
+    semantic.receipt,
+    bundle,
+    JSON.stringify(persisted),
+  );
+  assert.equal(attached.persistedConsumptionVerified, true);
+  assert.equal(attached.authorization, false);
+  assert.equal(attached.canApply, false);
+  assert.equal(
+    isVerifiedPersistedCurrent187SemanticApprovalReceipt(attached),
+    true,
+  );
+  assert.equal(
+    isVerifiedPersistedCurrent187SemanticApprovalReceipt({ ...attached }),
+    false,
+  );
+
+  const revocation = createSyntheticCurrent187SemanticApprovalRevocationBundle(
+    semantic.receipt,
+    {
+      actorDigest: digest("semantic-revocation-actor"),
+      eventId: "99999999-9999-4999-8999-999999999999",
+      explicitConfirmation:
+        CURRENT187_SEMANTIC_APPROVAL_REVOCATION_CONFIRMATION,
+      reasonDigest: digest("semantic-revocation-reason"),
+      revokedAt: "2026-08-05T10:03:20.000Z",
+      scope: "DOCUMENT",
+    },
+  );
+  assert.equal(
+    revocation.command.scopeDigest,
+    semantic.receipt.sourceDocumentDigest,
+  );
+  const revocationBase = {
+    approvalDigest: revocation.command.approvalDigest,
+    authorization: false,
+    canApply: false,
+    canMutate: false,
+    canSend: false,
+    commandDigest: revocation.commandDigest,
+    documentDigest: revocation.command.documentDigest,
+    evaluationDigest: revocation.command.evaluationDigest,
+    eventId: revocation.command.eventId,
+    kind: "CURRENT187_SEMANTIC_APPROVAL_REVOCATION_RECEIPT",
+    noncanonical: true,
+    persistedRevocationVerified: true,
+    productionRootEnrolled: false,
+    publicKeyFingerprint: revocation.command.publicKeyFingerprint,
+    revokedAt: revocation.command.revokedAt,
+    scope: revocation.command.scope,
+    scopeDigest: revocation.command.scopeDigest,
+    sharedBetaAccess: false,
+    status: "REVOKED",
+    syntheticLoopbackCiOnly: true,
+    testAccessAuthorized: false,
+    transactionId: "43",
+  };
+  const revocationReceipt = {
+    ...revocationBase,
+    receiptDigest: domainDigest(
+      "LEETPLUS_CURRENT187_SEMANTIC_APPROVAL_REVOCATION_RECEIPT_V1",
+      current187AdmissionCanonicalJson(revocationBase),
+    ),
+  };
+  const attachedRevocation =
+    attachPersistedCurrent187SemanticApprovalRevocation(
+      revocation,
+      JSON.stringify(revocationReceipt),
+    );
+  assert.equal(
+    isVerifiedPersistedCurrent187SemanticApprovalRevocationReceipt(
+      attachedRevocation,
+    ),
+    true,
+  );
+
+  assert.throws(() =>
+    createCurrent187SemanticApprovalConsumptionBundle(
+      { ...semantic.receipt },
+      "2026-08-05T10:03:10.000Z",
+    ),
+  );
+  assert.throws(() =>
+    createCurrent187SemanticApprovalConsumptionBundle(
+      semantic.receipt,
+      "2026-08-06T10:03:10.000Z",
+    ),
+  );
+  assert.throws(() =>
+    attachPersistedCurrent187SemanticApprovalConsumption(
+      semantic.receipt,
+      bundle,
+      JSON.stringify({ ...persisted, commandDigest: digest("forged") }),
+    ),
+  );
+  const otherSemantic = semanticAllowlistFixture(attested, {
+    reviewEvidenceDigest: digest("other-valid-semantic-review"),
+  });
+  const otherBundle = createCurrent187SemanticApprovalConsumptionBundle(
+    otherSemantic.receipt,
+    "2026-08-05T10:03:10.000Z",
+  );
+  assert.throws(
+    () =>
+      attachPersistedCurrent187SemanticApprovalConsumption(
+        semantic.receipt,
+        otherBundle,
+        "{}",
+      ),
+    /does not belong to the supplied semantic approval receipt/u,
   );
 });
 
@@ -907,10 +1138,11 @@ test("signed policy drift and cloned receipts fail closed", async () => {
     roleBindingsDigest: digest("hostile-role-binding-drift"),
   });
   const semantic = semanticAllowlistFixture(attested);
+  const persistedSemantic = persistSemanticApprovalForPolicy(semantic.receipt);
   const denied = evaluateCurrent187ClusterPolicy(
     attested,
     driftedAuthority,
-    semantic.receipt,
+    persistedSemantic,
   );
   assert.equal(denied.policyStatus, "DENIED");
   assert.equal(denied.policyBindingsMatched, false);
@@ -924,19 +1156,19 @@ test("signed policy drift and cloned receipts fail closed", async () => {
     evaluateCurrent187ClusterPolicy(
       { ...attested },
       exactAuthority,
-      semantic.receipt,
+      persistedSemantic,
     ),
   );
   assert.throws(() =>
     evaluateCurrent187ClusterPolicy(
       attested,
       { ...exactAuthority },
-      semantic.receipt,
+      persistedSemantic,
     ),
   );
   assert.throws(() =>
     evaluateCurrent187ClusterPolicy(attested, exactAuthority, {
-      ...semantic.receipt,
+      ...persistedSemantic,
     }),
   );
 });
@@ -952,17 +1184,15 @@ test("semantic allowlist drift is denied and cannot become deployment policy", a
     "CURRENT187_SEMANTIC_ALLOWLIST_FACTS_DIGEST_MISMATCH",
   ]);
 
-  const deployment = evaluateCurrent187ClusterPolicy(
-    attested,
-    deploymentAuthorityFixture(attested),
-    semantic.receipt,
+  assert.throws(
+    () =>
+      evaluateCurrent187ClusterPolicy(
+        attested,
+        deploymentAuthorityFixture(attested),
+        semantic.receipt,
+      ),
+    /one-time persisted semantic approval/u,
   );
-  assert.equal(deployment.policyStatus, "DENIED");
-  assert.deepEqual(deployment.reasonCodes, [
-    "CURRENT187_CLUSTER_POLICY_SEMANTIC_ALLOWLIST_NOT_MATCHED",
-  ]);
-  assert.equal(deployment.authorization, false);
-  assert.equal(deployment.deploymentGoConsumable, false);
 });
 
 test("semantic allowlist document, authority, timeline, and brands fail closed", async () => {

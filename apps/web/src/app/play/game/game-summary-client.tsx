@@ -15201,6 +15201,7 @@ const clubHomeCss = `
 .lp-reward-journal {
   display: grid;
   gap: 24px;
+  align-content: start;
   min-width: 0;
   padding: clamp(24px, 3vw, 42px);
   overflow: hidden;

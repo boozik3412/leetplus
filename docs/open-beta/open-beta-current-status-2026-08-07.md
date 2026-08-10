@@ -40,6 +40,15 @@
 > artifact digest `sha256:9c46d1d6…a2fe0f`. Canonical promotion и production
 > runtime admission ещё не готовы; статус
 > внешнего доступа не изменился: `NO-GO`.
+>
+> CURRENT187-J локально добавил synthetic deny-only foundation фактического
+> network/runtime admission: разные branded receipts для четырёх service-path
+> probes и host/control-plane evidence, exact endpoint/TLS/HBA/pooler/
+> service-account digests, запрет trust/wildcard/user collapse и обязательные
+> positive/negative probes. Standalone `10/10`, общий CURRENT187 gate `42/42`.
+> J не выполняет реальные TCP/TLS/HBA/PgBouncer probes, не имеет production
+> root/signer и сохраняет все access/effect flags false. Evidence:
+> `identity-mail-current187-j-network-runtime-attestation-foundation.md`.
 
 ## Итоговый вердикт
 
@@ -84,6 +93,7 @@
 | CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY`      | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H                                                  |
 | CURRENT187-H semantic allowlist  | `ENGINEERING ACCEPTED / DENY-ONLY`      | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`                                               |
 | CURRENT187-I persisted approval  | `EXACT-HEAD CI ACCEPTED / NONCANONICAL` | persisted brand required; candidate `daf5a98f…`; static `7/7`, PG16.13 `2 × 1/1`, CI `31416609580` `3/3 SUCCESS`, zero residue; all access/effect flags false |
+| CURRENT187-J network/runtime     | `IMPLEMENTED LOCALLY / SYNTHETIC-ONLY`  | four exact service paths + separate host-control brand; endpoint/TLS/HBA/pooler/service-account digests; `10/10`, aggregate CURRENT187 `42/42`; all access/effect flags false |
 | Единый gate                      | `PASS`                                  | `163/163`, `0` failures                                                                                                                                       |
 | Независимая latest-byte проверка | `PASS`                                  | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                                                    |
 
@@ -173,8 +183,9 @@ ready только после canonical merge, production-like evidence, tenant/
 ## Критический путь до первого внешнего клуба
 
 1. Принять CURRENT187-I candidate независимой latest-byte проверкой; exact-head
-   CI с hostile PostgreSQL fixture уже принят. Затем закрыть infrastructure
-   admission/provider recovery и exact production runtime
+   CI с hostile PostgreSQL fixture уже принят. Затем заменить synthetic
+   CURRENT187-J на independently signed actual TCP/TLS/HBA/pooler collectors,
+   закрыть infrastructure admission/provider recovery и exact production runtime
    roles/grants/attestation и выполнить reviewed canonical promotion
    CURRENT180–190.
 2. Закрыть Gate 1MT по полному согласованному модульному scope: оставшиеся HTTP
@@ -206,6 +217,9 @@ Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CUR
 exact-SHA CI. CURRENT187-H реализовал независимо подписанный allowlist,
 fail-closed facts evaluator и обязательную связь с F; все launch flags false,
 полный disposable gate `163/163`, exact-SHA CI `31403020215` — `3/3 SUCCESS`.
-Ближайший этап — independent latest-byte review уже принятого exact-head CI
-CURRENT187-I PostgreSQL candidate, затем host/TLS/HBA/pooler runtime admission
-и reviewed canonical promotion/restored-copy rehearsal.
+CURRENT187-J foundation теперь локально фиксирует четыре service purpose, две
+branded evidence boundary и пять production deployment digest; J `10/10`,
+aggregate CURRENT187 `42/42`. Ближайший этап — independent latest-byte review
+уже принятого exact-head CI CURRENT187-I PostgreSQL candidate, затем реальные
+capability-bearing TCP/TLS/HBA/PgBouncer collectors, production signer/root и
+reviewed canonical promotion/restored-copy rehearsal.

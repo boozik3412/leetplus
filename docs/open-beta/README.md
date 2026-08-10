@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.75                                         |
+| Версия           | 1.76                                         |
 | Дата             | 07.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -582,6 +582,14 @@ enterprise-isolation option и не сокращает shared gates.
     attestation отсутствуют. Поэтому I остаётся
     `EXACT-HEAD CI ACCEPTED / DENY-ONLY / NOT DEPLOYABLE`, а внешний доступ —
     `NO-GO`.
+    [CURRENT187-J network/runtime attestation foundation](./identity-mail-current187-j-network-runtime-attestation-foundation.md)
+    фиксирует exact deny-only контракт для четырёх service identities и пяти
+    deployment digest: endpoint, TLS, HBA, pooler и service-account mapping.
+    Host/control-plane и network probe имеют разные branded границы; trust,
+    wildcard, user collapse, неверный pool mode и incomplete negative probes
+    fail closed. Локально J `10/10`, общий CURRENT187 gate `42/42`. Это только
+    `SYNTHETIC-CI-ONLY`: actual TCP/TLS/HBA/PgBouncer collectors, production
+    signer/root, persisted consumption и связь с F ещё не реализованы.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

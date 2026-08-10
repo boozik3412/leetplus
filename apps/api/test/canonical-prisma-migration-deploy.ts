@@ -20,6 +20,7 @@ type CanonicalMigrationDeployOptions = {
 };
 
 const TEMPORARY_ARTIFACT_PREFIX = 'leetplus-canonical-prisma-';
+const FAILED_MIGRATION_LOG_LIMIT = 12_000;
 const LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT = 179;
 const LEGACY_IDENTITY_MAIL_BASE_MIGRATION =
   '20260731120000_identity_mail_delivery_release_head';
@@ -133,6 +134,60 @@ export function deployCanonicalPrismaMigrations(
     throw new Error(`${options.failureMessage}: ${detail}`, { cause: error });
   } finally {
     removeTemporaryArtifact(temporaryRoot);
+  }
+}
+
+function readFailedMigrationLog(
+  databasePackage: string,
+  databaseUrl: string,
+  migrationName: string,
+): string {
+  if (migrationName.length === 0) {
+    return '';
+  }
+  const diagnosticScript = String.raw`
+const { PrismaClient } = require(process.env.LEETPLUS_PRISMA_CLIENT_PATH);
+const client = new PrismaClient({
+  datasources: { db: { url: process.env.DATABASE_URL } },
+});
+(async () => {
+  try {
+    const rows = await client.$queryRawUnsafe(
+      'SELECT logs FROM public."_prisma_migrations" WHERE migration_name = $1 ORDER BY started_at DESC LIMIT 1',
+      process.env.LEETPLUS_FAILED_MIGRATION_NAME,
+    );
+    const logs = rows.length === 1 && typeof rows[0].logs === 'string'
+      ? rows[0].logs
+      : '';
+    process.stdout.write(logs);
+  } finally {
+    await client.$disconnect();
+  }
+})().catch(() => process.exit(1));
+`;
+  try {
+    const logs = execFileSync(process.execPath, ['-e', diagnosticScript], {
+      cwd: databasePackage,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+        LEETPLUS_FAILED_MIGRATION_NAME: migrationName,
+        LEETPLUS_PRISMA_CLIENT_PATH: join(
+          databasePackage,
+          'node_modules',
+          '@prisma',
+          'client',
+        ),
+      },
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 15_000,
+    }).trim();
+    return logs.length === 0
+      ? ''
+      : `\nOriginal failed-migration log:\n${logs.slice(0, FAILED_MIGRATION_LOG_LIMIT)}`;
+  } catch {
+    return '\nOriginal failed-migration log: unavailable';
   }
 }
 
@@ -274,7 +329,15 @@ function deployIdentityMailCandidateStack(
       error instanceof Error && error.message.trim().length > 0
         ? error.message.trim()
         : String(error);
-    throw new Error(`${options.failureMessage}: ${detail}`, { cause: error });
+    const failedMigrationLog = readFailedMigrationLog(
+      databasePackage,
+      target.toString(),
+      candidates.at(-1)?.name ?? '',
+    );
+    throw new Error(
+      `${options.failureMessage}: ${detail}${failedMigrationLog}`,
+      { cause: error },
+    );
   } finally {
     removeTemporaryArtifact(temporaryRoot);
   }

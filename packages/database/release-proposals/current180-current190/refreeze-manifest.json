@@ -6,7 +6,7 @@
   "logicalOrder": [180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190],
   "materializationPlanner": {
     "contract": "CURRENT180_CURRENT190_RELEASE_MATERIALIZATION_PLAN_V1",
-    "planDigest": "cb0ecd967878bb7d1d10ce539118297ce1806466b74827cf564123574339b569",
+    "planDigest": "f9d21bc342492a5aa4d0afcf304f64e3f3d4d0afc7d4f8dd6389017113b62cd6",
     "sourceArtifactSetDigest": "7b2d29eb70674dd62450c322f33b2a689f64dd110a4c85e123b8bc517887919a"
   },
   "authorization": {

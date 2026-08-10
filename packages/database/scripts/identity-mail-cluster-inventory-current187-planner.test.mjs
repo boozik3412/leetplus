@@ -22,7 +22,13 @@ const DIGESTS = Object.freeze({
   catalogApp: "1".repeat(64),
   catalogPostgres: "2".repeat(64),
   clusterFence: "3".repeat(64),
+  currentAclApp: "8".repeat(64),
+  currentAclPostgres: "9".repeat(64),
+  defaultAclApp: "a".repeat(64),
+  defaultAclPostgres: "b".repeat(64),
   endpoint: "4".repeat(64),
+  roleBindingsApp: "c".repeat(64),
+  roleBindingsPostgres: "d".repeat(64),
   scanApp: "5".repeat(64),
   scanPostgres: "6".repeat(64),
   topology: "7".repeat(64),
@@ -109,9 +115,10 @@ function databaseIdentityDigest(database) {
 
 function scanFor(database, overrides = {}) {
   const isConnected = database.datallowconn;
+  const isPostgres = database.name === "postgres";
   return {
     catalogDigest: isConnected
-      ? database.name === "postgres"
+      ? isPostgres
         ? DIGESTS.catalogPostgres
         : DIGESTS.catalogApp
       : null,
@@ -121,10 +128,25 @@ function scanFor(database, overrides = {}) {
     clusterIdentityDigest: clusterIdentityDigest(),
     completedAt: "2026-08-05T10:02:00.000Z",
     connectionStatus: isConnected ? "CONNECTED" : "NON_CONNECTABLE_PROVEN",
+    currentAclPolicyDigest: isConnected
+      ? isPostgres
+        ? DIGESTS.currentAclPostgres
+        : DIGESTS.currentAclApp
+      : null,
     databaseIdentityDigest: databaseIdentityDigest(database),
     databaseName: database.name,
     databaseOid: database.oid,
+    defaultAclPolicyDigest: isConnected
+      ? isPostgres
+        ? DIGESTS.defaultAclPostgres
+        : DIGESTS.defaultAclApp
+      : null,
     ddlFenceDigest: DIGESTS.clusterFence,
+    roleBindingsDigest: isConnected
+      ? isPostgres
+        ? DIGESTS.roleBindingsPostgres
+        : DIGESTS.roleBindingsApp
+      : null,
     scanEvidenceDigest:
       database.name === "postgres" ? DIGESTS.scanPostgres : DIGESTS.scanApp,
     startedAt: "2026-08-05T10:01:00.000Z",
@@ -238,6 +260,34 @@ test("digests are stable across caller array ordering", () => {
     first.expectedDatabaseUniverseDigest,
   );
   assert.equal(second.perDatabaseScanSetDigest, first.perDatabaseScanSetDigest);
+  assert.equal(second.clusterCatalogDigest, first.clusterCatalogDigest);
+  assert.equal(second.roleBindingsDigest, first.roleBindingsDigest);
+  assert.equal(second.currentAclPolicyDigest, first.currentAclPolicyDigest);
+  assert.equal(second.defaultAclPolicyDigest, first.defaultAclPolicyDigest);
+  assert.equal(second.perDatabaseCatalogDigest, first.perDatabaseCatalogDigest);
+});
+
+test("stable policy digests exclude acquisition timestamps and scan transport evidence", () => {
+  const first = plan();
+  const replay = baseRequest();
+  replay.perDatabaseScans = replay.perDatabaseScans.map((scan, index) => ({
+    ...scan,
+    completedAt: "2026-08-05T10:03:00.000Z",
+    scanEvidenceDigest: index === 0 ? "e".repeat(64) : "f".repeat(64),
+    startedAt: "2026-08-05T10:02:00.000Z",
+  }));
+  const second = planCurrent187ClusterInventoryAdmission(replay);
+
+  assert.notEqual(second.planDigest, first.planDigest);
+  assert.notEqual(
+    second.perDatabaseScanSetDigest,
+    first.perDatabaseScanSetDigest,
+  );
+  assert.equal(second.clusterCatalogDigest, first.clusterCatalogDigest);
+  assert.equal(second.roleBindingsDigest, first.roleBindingsDigest);
+  assert.equal(second.currentAclPolicyDigest, first.currentAclPolicyDigest);
+  assert.equal(second.defaultAclPolicyDigest, first.defaultAclPolicyDigest);
+  assert.equal(second.perDatabaseCatalogDigest, first.perDatabaseCatalogDigest);
 });
 
 test("an unknown non-template database fails closed even when both snapshots contain it", () => {
@@ -364,6 +414,9 @@ test("unread catalog for a connectable database fails closed", () => {
           catalogDigest: null,
           catalogSurfaceStatus: "NOT_READ_NON_CONNECTABLE_ALLOWLIST",
           connectionStatus: "NON_CONNECTABLE_PROVEN",
+          currentAclPolicyDigest: null,
+          defaultAclPolicyDigest: null,
+          roleBindingsDigest: null,
         }
       : scan,
   );

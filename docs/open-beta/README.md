@@ -542,6 +542,12 @@ enterprise-isolation option и не сокращает shared gates.
     закрывает exact replay, revoke/expiry races и least-privilege ACL как
     `25/25` + PostgreSQL `1/1`; fresh-after-lock SQL pin —
     `dd5f4db5aecef2c537251bc5262063c1012a1383aec0d0137e7d8b9536f8bb63`.
+    [Signed cluster policy binding](./identity-mail-current187-signed-policy-binding.md)
+    добавляет стабильные scoped fingerprints ролей, current/default ACL и
+    полного multi-DB catalog, затем fail-closed связывает их с exact
+    purpose-bound deployment envelope. Локально planner `16/16`,
+    acquisition/binding `15/15`; `BINDINGS_MATCHED` остаётся deny-only и не
+    является semantic allowlist либо deployment GO.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

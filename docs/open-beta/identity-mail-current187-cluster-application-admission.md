@@ -4,8 +4,8 @@
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | Рабочее имя       | `CURRENT187_CLUSTER_APPLICATION_ADMISSION_V1`                                                                                           |
 | Predecessor       | CURRENT186 runtime role boundary                                                                                                        |
-| Статус            | `PLANNED / NONCANONICAL / NOT_DEPLOYABLE`                                                                                               |
-| Тип               | detailed design; код и database candidate отсутствуют                                                                                   |
+| Статус            | `IN PROGRESS / DENY-ONLY / NONCANONICAL / NOT_DEPLOYABLE`                                                                               |
+| Тип               | design + engineering slices A–F; production roots/runtime wiring отсутствуют                                                            |
 | Production target | неизменно `CURRENT179/179`                                                                                                              |
 | Внешний доступ    | `NO-GO`                                                                                                                                 |
 | Scope             | cluster-wide admission, application identity admission, pre-Green root bootstrap, post-Green production root enrollment и deployment GO |
@@ -93,6 +93,14 @@ testAccessAuthorized=false
 sharedBetaAccess=false
 productionRootEnrolled=false
 ```
+
+Реализованные pre-Green slices включают purpose-bound authority, pure
+multi-database planner, read-only 24-surface acquisition, independent signed
+DDL-fence attestation, persisted synthetic consumption/revocation ledger и
+[stable signed policy binding](./identity-mail-current187-signed-policy-binding.md).
+Последний связывает exact role/current-ACL/default-ACL/catalog fingerprints с
+deployment envelope, но намеренно не выдаёт semantic approval или production
+authority.
 
 Pure verifier не заявляет persisted one-time consumption: до отдельного
 append-only ledger slice он только проверяет подписанный envelope и возвращает

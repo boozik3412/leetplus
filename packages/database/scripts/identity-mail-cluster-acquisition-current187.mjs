@@ -56,6 +56,12 @@ const CURRENT187_CATALOG_SURFACE_DIGEST_DOMAIN =
   "LEETPLUS_CURRENT187_PER_DATABASE_CATALOG_SURFACE_V1";
 const CURRENT187_CATALOG_DIGEST_DOMAIN =
   "LEETPLUS_CURRENT187_PER_DATABASE_CATALOG_V1";
+const CURRENT187_ROLE_BINDINGS_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_PER_DATABASE_ROLE_BINDINGS_V1";
+const CURRENT187_CURRENT_ACL_POLICY_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_PER_DATABASE_CURRENT_ACL_POLICY_V1";
+const CURRENT187_DEFAULT_ACL_POLICY_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_PER_DATABASE_DEFAULT_ACL_POLICY_V1";
 const CURRENT187_SCAN_EVIDENCE_DIGEST_DOMAIN =
   "LEETPLUS_CURRENT187_PER_DATABASE_SCAN_EVIDENCE_V1";
 const CURRENT187_ACQUISITION_RECEIPT_DIGEST_DOMAIN =
@@ -143,6 +149,24 @@ const CI_DATABASE_PATTERN = /_(?:ci|test)$/u;
 const PRODUCTION_DATABASE_PATTERN = /(?:^|_)(?:live|prod|production)(?:_|$)/u;
 const SYSTEM_DATABASES = new Set(["postgres", "template0", "template1"]);
 const VERIFIED_CURRENT187_CLUSTER_ACQUISITION_RECEIPTS = new WeakSet();
+
+const ROLE_BINDING_SURFACES = new Set([
+  "effectiveObjectPrivileges",
+  "memberships",
+  "ownedObjects",
+  "roleDatabaseSettings",
+  "roles",
+]);
+const CURRENT_ACL_POLICY_SURFACES = new Set([
+  "columnAclAllGrantees",
+  "databaseSecurity",
+  "effectiveObjectPrivileges",
+  "relationAclAllGrantees",
+  "routineAclAllGrantees",
+  "schemaAclAllGrantees",
+  "typeAclAllGrantees",
+]);
+const DEFAULT_ACL_POLICY_SURFACES = new Set(["defaultAclAllGrantees"]);
 
 class Current187ClusterAcquisitionError extends Error {
   constructor(reasonCode) {
@@ -811,6 +835,14 @@ function digestCatalogSurface(surface, rows) {
   });
 }
 
+function digestCatalogPolicySurfaceGroup(domain, surfaces, allowlist) {
+  const selected = surfaces.filter((surface) => allowlist.has(surface.surface));
+  if (selected.length !== allowlist.size) {
+    acquisitionFail("CURRENT187_CLUSTER_ACQUISITION_POLICY_SURFACE_PARTIAL");
+  }
+  return digestCurrent187Value(domain, selected);
+}
+
 async function acquirePerDatabaseCatalog(dependencies, request, database) {
   const startedAt = canonicalIso(
     dependencies.now(),
@@ -861,16 +893,34 @@ async function acquirePerDatabaseCatalog(dependencies, request, database) {
       surfaces: acquired.surfaces,
     },
   );
+  const roleBindingsDigest = digestCatalogPolicySurfaceGroup(
+    CURRENT187_ROLE_BINDINGS_DIGEST_DOMAIN,
+    acquired.surfaces,
+    ROLE_BINDING_SURFACES,
+  );
+  const currentAclPolicyDigest = digestCatalogPolicySurfaceGroup(
+    CURRENT187_CURRENT_ACL_POLICY_DIGEST_DOMAIN,
+    acquired.surfaces,
+    CURRENT_ACL_POLICY_SURFACES,
+  );
+  const defaultAclPolicyDigest = digestCatalogPolicySurfaceGroup(
+    CURRENT187_DEFAULT_ACL_POLICY_DIGEST_DOMAIN,
+    acquired.surfaces,
+    DEFAULT_ACL_POLICY_SURFACES,
+  );
   return current187AdmissionDeepFreeze({
     catalogDigest,
     catalogSurfaceStatus: "COMPLETE",
     clusterIdentityDigest: null,
     completedAt,
     connectionStatus: "CONNECTED",
+    currentAclPolicyDigest,
     databaseIdentityDigest,
     databaseName: database.name,
     databaseOid: database.oid,
+    defaultAclPolicyDigest,
     ddlFenceDigest: request.externalDdlFenceReceipt.fence.evidenceDigest,
+    roleBindingsDigest,
     scanEvidenceDigest: digestCurrent187Value(
       CURRENT187_SCAN_EVIDENCE_DIGEST_DOMAIN,
       {

@@ -59,7 +59,7 @@ test("pins all CURRENT180-CURRENT190 bytes and returns a deny-only blocker repor
   );
   assert.equal(
     value.current187ToolingDigest,
-    "8483555d7f1d5cb50a683ef0426d4cb6d61fb65e7866a57b2c1dbbdef3456aa4",
+    "18e22d885af8d1642bc5ee54b93c5c4e07995092ca4d42756ae5acb5a0aefe70",
   );
   assert.equal(
     value.previousFoundationToolingDigest,

@@ -106,6 +106,20 @@ loopback `*_ci`/`*_test` cluster. Сам acquisition adapter исполняет 
 `BEGIN ... READ ONLY`, `SET LOCAL`, catalog `SELECT/WITH`, `COMMIT` и аварийный
 `ROLLBACK`.
 
+## CURRENT187-F: stable signed policy binding
+
+Acquisition дополнен стабильными scoped fingerprints для role bindings,
+current ACL, default ACL и полного per-database catalog. В отличие от
+операционного scan evidence они не включают timestamps и transport evidence.
+Новый pure evaluator принимает только branded acquisition с independently
+signed DDL-fence receipt и branded purpose-bound deployment envelope, после
+чего сравнивает exact cluster/database/live-scan/fence/policy bindings.
+
+Результат `BINDINGS_MATCHED` остаётся deny-only. Он не анализирует, безопасно ли
+само содержимое catalog, не потребляет deployment GO и не является production
+runtime attestation. Контракт и оставшиеся ограничения описаны в
+[CURRENT187-F signed cluster policy binding](./identity-mail-current187-signed-policy-binding.md).
+
 ## Оставшиеся блокеры CURRENT187
 
 1. Persisted consumption/revocation CURRENT187-D, production root enrollment
@@ -118,8 +132,10 @@ loopback `*_ci`/`*_test` cluster. Сам acquisition adapter исполняет 
 4. Hostile PostgreSQL matrix: unknown third DB во время scan, drop/recreate,
    non-connectable DB, second-DB ACL/default-ACL drift, fault injection и
    повторный zero-residue proof.
-5. Exact policy evaluator поверх полученных role/ACL/default-ACL/system
-   digests; CURRENT187-C только собирает evidence.
+5. Semantic policy evaluator опасных role attributes, memberships,
+   ownership, current/default ACL и system privilege baseline. CURRENT187-F
+   уже связывает scoped fingerprints с signed envelope, но намеренно не
+   объявляет fingerprint equality semantic approval.
 6. Provider mark/complete recovery, outbound kill-switch evidence и
    production-like apply/rollback/emergency rehearsal.
 

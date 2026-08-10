@@ -7,7 +7,7 @@ import { isProxy } from "node:util/types";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_V2";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_MANIFEST_SHA256 =
-  "1b9f7e57f1227dbc86b7141e471a677e7e3f6b7e28bc886348396cf288c930b2";
+  "f38c4c6720db79c02f546620679870e85dad129ce27c7592a48d3937cea09664";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_PLAN_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_PLAN_V2";
 export const CURRENT180_CURRENT190_IN_MEMORY_ARTIFACT_CONTRACT =
@@ -16,7 +16,7 @@ export const CURRENT180_CURRENT190_IN_MEMORY_ARTIFACT_CONTRACT =
 const CURRENT180_CURRENT190_REFREEZE_MANIFEST_CONTRACT =
   "CURRENT180_CURRENT190_RELEASE_REFREEZE_MANIFEST_V1";
 const CURRENT180_CURRENT190_REFREEZE_MANIFEST_SHA256 =
-  "8c964fd5d5afcffba7394c30f09b7d77e25a4c59580a46134ba26befbdea2482";
+  "6c66243e745d1fa48a6a5b67af62bf25b1db951dd5fce094ace2c14541e78186";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "../../..");
@@ -51,7 +51,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-refreeze-manifest.mjs",
-    sha256: "bc0d244aa0d436f608020620921f3d908ff2a48c1cf1dbc1702e0932eaac23d2",
+    sha256: "6dc1006bf6ed93881eced94941aaecf489ae2c301d160b086cf7821abc4928bf",
   }),
   Object.freeze({
     path: join(
@@ -61,7 +61,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-materialization-planner.mjs",
-    sha256: "bddf17ee0bd616366b87630e297fe13889371de6ce6ee21d916a0b6b1a88d1a2",
+    sha256: "e3ba734ec408aba3fa5785a148d444dec67968c0e751a953de2d56f530a6c81d",
   }),
   Object.freeze({
     path: join(
@@ -71,14 +71,13 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-rehearsal-blocker.mjs",
-    sha256: "86447fe7903eae7cda79c73cd327b6120c89fa60bb030584efc7e9f35ffe0f37",
+    sha256: "519bf11d7f82d4dd95c168863f84134049eb5a21f4d5068cc5ddebdfa403923e",
   }),
 ]);
 const MIGRATION_DIRECTORY_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const EXPECTED_CANONICAL_COUNT = 180;
-const EXPECTED_CANONICAL_HEAD =
-  "20260804120000_guest_game_max_pending_rewards";
+const EXPECTED_CANONICAL_HEAD = "20260804120000_guest_game_max_pending_rewards";
 const EXPECTED_CANONICAL_HEAD_SHA256 =
   "40587bc93c34875edf6064f9848e42ce0194b321165ac494750987533cef21ef";
 const EXPECTED_CANONICAL_MANIFEST_DIGEST =
@@ -488,7 +487,7 @@ function assertAllowManifest(manifest, findings) {
     manifest?.source?.refreezeManifestSha256 !==
       CURRENT180_CURRENT190_REFREEZE_MANIFEST_SHA256 ||
     manifest?.source?.materializationPlanDigest !==
-      "cb0ecd967878bb7d1d10ce539118297ce1806466b74827cf564123574339b569" ||
+      "f9d21bc342492a5aa4d0afcf304f64e3f3d4d0afc7d4f8dd6389017113b62cd6" ||
     manifest?.source?.frozenSourceBytesMayChange !== false ||
     manifest?.source?.frozenSourceSqlTransformation !== "BYTE_EXACT_COPY_ONLY"
   ) {

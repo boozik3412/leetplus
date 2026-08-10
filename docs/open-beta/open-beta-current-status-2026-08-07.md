@@ -3,6 +3,11 @@
 > Обновление 10.08.2026: Gate 0 закрыт exact synchronized SHA и зелёным
 > SHA-bound CI artifact. Актуальное evidence вынесено в
 > `gate-0-ci-artifact-2026-08-10.md`; остальные launch gates сохраняют `NO-GO`.
+>
+> Локальное дополнение 10.08.2026: CURRENT187-F добавил stable signed policy
+> binding foundation. Planner `16/16`, acquisition/binding `15/15`, DDL-fence
+> authority `11/11`; remote exact-SHA CI ещё не получено. Это не semantic
+> allowlist и не production authority.
 
 ## Итоговый вердикт
 
@@ -34,17 +39,18 @@
 
 ## Состояние текущей инженерной задачи
 
-| Контур                           | Статус             | Подтверждение                                                                                        |
-| -------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- |
-| Planning state machine           | `ACCEPTED LOCALLY` | `33/33`                                                                                              |
-| SQL semantic fingerprint         | `ACCEPTED LOCALLY` | `26/26`; schema/data/sequences, ACL, cluster role attributes, password-verifier hashes и memberships |
-| Persistent coordinator           | `ACCEPTED LOCALLY` | `6/6`; внешний pinned Ed25519 trust root                                                             |
-| Materializer/recovery            | `ACCEPTED LOCALLY` | `24/24`; bounded descriptor reads, exact tree/inode provenance, signed restart locator               |
-| Signed journal                   | `ACCEPTED LOCALLY` | `24/24`; public-only verification, signed lifecycle, lost unlink/rmdir recovery                      |
-| Runtime adapter                  | `ACCEPTED LOCALLY` | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission           |
-| Runner/janitor                   | `ACCEPTED LOCALLY` | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup               |
-| Единый gate                      | `PASS`             | `163/163`, `0` failures                                                                              |
-| Независимая latest-byte проверка | `PASS`             | `P0=0`, `P1=0` для этого rehearsal-контура                                                           |
+| Контур                           | Статус                            | Подтверждение                                                                                          |
+| -------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Planning state machine           | `ACCEPTED LOCALLY`                | `33/33`                                                                                                |
+| SQL semantic fingerprint         | `ACCEPTED LOCALLY`                | `26/26`; schema/data/sequences, ACL, cluster role attributes, password-verifier hashes и memberships   |
+| Persistent coordinator           | `ACCEPTED LOCALLY`                | `6/6`; внешний pinned Ed25519 trust root                                                               |
+| Materializer/recovery            | `ACCEPTED LOCALLY`                | `24/24`; bounded descriptor reads, exact tree/inode provenance, signed restart locator                 |
+| Signed journal                   | `ACCEPTED LOCALLY`                | `24/24`; public-only verification, signed lifecycle, lost unlink/rmdir recovery                        |
+| Runtime adapter                  | `ACCEPTED LOCALLY`                | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission             |
+| Runner/janitor                   | `ACCEPTED LOCALLY`                | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                 |
+| CURRENT187-F policy binding      | `IMPLEMENTED LOCALLY / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15` |
+| Единый gate                      | `PASS`                            | `163/163`, `0` failures                                                                                |
+| Независимая latest-byte проверка | `PASS`                            | `P0=0`, `P1=0` для этого rehearsal-контура                                                             |
 
 Закрыты важные failure modes:
 
@@ -105,14 +111,14 @@ ready только после canonical merge, production-like evidence, tenant/
 
 ### Release gates
 
-| Gate                                     | Состояние     | Почему не закрыт                                                                                                                                                                                                                                                                                           |
-| ---------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gate                                     | Состояние     | Почему не закрыт                                                                                                                                                                                                                                                            |
+| ---------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Gate 0 — canonical source                | `PASS`        | Exact SHA `183270f6d7b26196844210fc428639945a081cd5`; latest `origin/main` влит `05a23cd9`, behind `0`; GitHub CI `31385942115` — `3/3 SUCCESS`; artifact `leetplus-release-183270…`, digest `sha256:1e28b8…a4966`. Подробное evidence: `gate-0-ci-artifact-2026-08-10.md`. |
-| Gate 1 — safe platform                   | `NO-GO`       | Не завершены все P0 security/tenant/IAM; anonymous operational boundary, startup/secrets, PII/export и full two-tenant enforcement ещё не приняты как production release                                                                                                                                   |
-| Gate 1MT — shared multi-tenant admission | `NO-GO`       | Из `294` HTTP handlers `54` ещё blocked; BFF CURRENT188–190 остаются dormant/unregistered; store-scope и background/browser matrix неполные                                                                                                                                                                |
-| Gate 2A — cutover текущей сети           | `NOT STARTED` | Нет production-like restore/apply/rollback evidence, change window и `CUTOVER GO`                                                                                                                                                                                                                          |
-| Gate 2 — первый внешний invite           | `NOT STARTED` | `Tenant A/A1..A4` не переведён in place и не прошёл 7 суток stable internal alpha                                                                                                                                                                                                                          |
-| Gate 3 — открытый заявочный тест         | `NOT STARTED` | Нужны две friendly-сети, 14 дней, отсутствие P0/P1 и принятые SLO/incident/offboarding evidence                                                                                                                                                                                                            |
+| Gate 1 — safe platform                   | `NO-GO`       | Не завершены все P0 security/tenant/IAM; anonymous operational boundary, startup/secrets, PII/export и full two-tenant enforcement ещё не приняты как production release                                                                                                    |
+| Gate 1MT — shared multi-tenant admission | `NO-GO`       | Из `294` HTTP handlers `54` ещё blocked; BFF CURRENT188–190 остаются dormant/unregistered; store-scope и background/browser matrix неполные                                                                                                                                 |
+| Gate 2A — cutover текущей сети           | `NOT STARTED` | Нет production-like restore/apply/rollback evidence, change window и `CUTOVER GO`                                                                                                                                                                                           |
+| Gate 2 — первый внешний invite           | `NOT STARTED` | `Tenant A/A1..A4` не переведён in place и не прошёл 7 суток stable internal alpha                                                                                                                                                                                           |
+| Gate 3 — открытый заявочный тест         | `NOT STARTED` | Нужны две friendly-сети, 14 дней, отсутствие P0/P1 и принятые SLO/incident/offboarding evidence                                                                                                                                                                             |
 
 ### Что уже существует, но ещё не разрешено к production wiring
 
@@ -131,9 +137,9 @@ ready только после canonical merge, production-like evidence, tenant/
 
 ## Критический путь до первого внешнего клуба
 
-1. Выполнить reviewed canonical promotion CURRENT180–190; завершить CURRENT187
-   infrastructure admission/provider recovery и exact production runtime
-   roles/grants/attestation.
+1. Завершить CURRENT187 semantic allowlist, infrastructure admission/provider
+   recovery и exact production runtime roles/grants/attestation; затем
+   выполнить reviewed canonical promotion CURRENT180–190.
 2. Закрыть Gate 1MT по полному согласованному модульному scope: оставшиеся HTTP
    и BFF paths, files/exports/jobs/SSE/Telegram, users/roles и outbound fences.
 3. На восстановленной production-like копии выполнить signed backup/restore,
@@ -159,7 +165,8 @@ friendly-сетей, 14-дневного окна и выполнения Gate 3
 
 ## Следующее действие разработки
 
-Gate 0 закрыт exact SHA и воспроизводимым CI artifact. Ближайший этап — не
-production deploy, а reviewed canonical/runtime promotion и перенос принятого
-rehearsal в restored-copy lane: exact runtime roles/grants/attestation,
-Gate 1MT и signed apply/repeat/rollback/zero-diff без потери provenance.
+Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CURRENT187-F локально
+связал stable multi-DB fingerprints с signed deployment envelope, сохранив все
+launch flags false. Ближайший этап — remote exact-SHA CI этого slice, затем
+semantic role/ACL/default-ACL evaluator, host/TLS/HBA/pooler runtime admission
+и только после них reviewed canonical promotion/restored-copy rehearsal.

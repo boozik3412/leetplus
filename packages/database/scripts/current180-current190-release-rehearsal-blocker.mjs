@@ -30,11 +30,15 @@ const EXPECTED_CURRENT187_TOOLING = deepFreeze([
   },
   {
     file: "identity-mail-cluster-inventory-current187-planner.mjs",
-    sha256: "e0176dc80c26ea8bfaa22f5a4d00217ea96072fae22d64d0cf841f6d6cfc2125",
+    sha256: "6136e2f7a3ed05c81b8622a80ecd3b91148e5ee1e87a8987f87255196510dc23",
   },
   {
     file: "identity-mail-cluster-acquisition-current187.mjs",
-    sha256: "98438538b881cc78a0a63c3cfac660030f6c78cad237fa1c0e3a1030b4804777",
+    sha256: "ee45f2504a332fea00ee69c73492212d8b78be199c344f26b4864d1c4a59e9f2",
+  },
+  {
+    file: "identity-mail-cluster-policy-current187.mjs",
+    sha256: "c4a4d63ffefcdcd09e01fca8b2f4334b72b5f78d334d8692652e0b5e93922d5f",
   },
   {
     file: "identity-mail-ddl-fence-attestation-current187-contract.mjs",
@@ -766,7 +770,14 @@ export async function inspectCurrent180Current190ReleaseRehearsal(options) {
     current187ToolingDigest,
     previousFoundationToolingDigest,
     artifacts: artifacts.map(
-      ({ contract, directory, metadata, ordinal, sqlSha256, targetDirectory }) => ({
+      ({
+        contract,
+        directory,
+        metadata,
+        ordinal,
+        sqlSha256,
+        targetDirectory,
+      }) => ({
         contract,
         directory,
         ordinal,

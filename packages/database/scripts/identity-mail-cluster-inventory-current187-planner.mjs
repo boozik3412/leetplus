@@ -37,6 +37,16 @@ export const CURRENT187_CLUSTER_CATALOG_SNAPSHOT_DIGEST_DOMAIN =
   "LEETPLUS_CURRENT187_CLUSTER_CATALOG_SNAPSHOT_V1";
 export const CURRENT187_DDL_FENCE_STATE_DIGEST_DOMAIN =
   "LEETPLUS_CURRENT187_DDL_FENCE_STATE_V1";
+export const CURRENT187_PER_DATABASE_CATALOG_POLICY_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_PER_DATABASE_CATALOG_POLICY_V1";
+export const CURRENT187_ROLE_BINDINGS_POLICY_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_ROLE_BINDINGS_POLICY_V1";
+export const CURRENT187_CURRENT_ACL_POLICY_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_CURRENT_ACL_POLICY_V1";
+export const CURRENT187_DEFAULT_ACL_POLICY_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_DEFAULT_ACL_POLICY_V1";
+export const CURRENT187_CLUSTER_CATALOG_POLICY_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_CLUSTER_CATALOG_POLICY_V1";
 
 export const CURRENT187_CLUSTER_INVENTORY_MAX_FENCE_LIFETIME_MS =
   30 * 60 * 1_000;
@@ -114,10 +124,13 @@ const PER_DATABASE_SCAN_KEYS = [
   "clusterIdentityDigest",
   "completedAt",
   "connectionStatus",
+  "currentAclPolicyDigest",
   "databaseIdentityDigest",
   "databaseName",
   "databaseOid",
+  "defaultAclPolicyDigest",
   "ddlFenceDigest",
+  "roleBindingsDigest",
   "scanEvidenceDigest",
   "startedAt",
 ];
@@ -491,7 +504,23 @@ function normalizePerDatabaseScan(value) {
       scan.catalogSurfaceStatus,
     ) ||
     (scan.catalogDigest !== null &&
-      !current187AdmissionValidDigest(scan.catalogDigest))
+      !current187AdmissionValidDigest(scan.catalogDigest)) ||
+    (scan.currentAclPolicyDigest !== null &&
+      !current187AdmissionValidDigest(scan.currentAclPolicyDigest)) ||
+    (scan.defaultAclPolicyDigest !== null &&
+      !current187AdmissionValidDigest(scan.defaultAclPolicyDigest)) ||
+    (scan.roleBindingsDigest !== null &&
+      !current187AdmissionValidDigest(scan.roleBindingsDigest)) ||
+    (scan.connectionStatus === "CONNECTED" &&
+      (!current187AdmissionValidDigest(scan.catalogDigest) ||
+        !current187AdmissionValidDigest(scan.currentAclPolicyDigest) ||
+        !current187AdmissionValidDigest(scan.defaultAclPolicyDigest) ||
+        !current187AdmissionValidDigest(scan.roleBindingsDigest))) ||
+    (scan.connectionStatus === "NON_CONNECTABLE_PROVEN" &&
+      (scan.catalogDigest !== null ||
+        scan.currentAclPolicyDigest !== null ||
+        scan.defaultAclPolicyDigest !== null ||
+        scan.roleBindingsDigest !== null))
   ) {
     current187AdmissionFail(
       "CURRENT187_CLUSTER_INVENTORY_SCAN_INVALID",
@@ -857,6 +886,67 @@ export function planCurrent187ClusterInventoryAdmission(requestValue) {
     CURRENT187_PER_DATABASE_SCAN_DIGEST_DOMAIN,
     publicScans,
   );
+  const stableCatalogProjection = Object.freeze(
+    publicScans.map((scan) =>
+      Object.freeze({
+        catalogDigest: scan.catalogDigest,
+        catalogSurfaceStatus: scan.catalogSurfaceStatus,
+        connectionStatus: scan.connectionStatus,
+        databaseIdentityDigest: scan.databaseIdentityDigest,
+      }),
+    ),
+  );
+  const roleBindingsProjection = Object.freeze(
+    publicScans.map((scan) =>
+      Object.freeze({
+        databaseIdentityDigest: scan.databaseIdentityDigest,
+        roleBindingsDigest: scan.roleBindingsDigest,
+      }),
+    ),
+  );
+  const currentAclProjection = Object.freeze(
+    publicScans.map((scan) =>
+      Object.freeze({
+        currentAclPolicyDigest: scan.currentAclPolicyDigest,
+        databaseIdentityDigest: scan.databaseIdentityDigest,
+      }),
+    ),
+  );
+  const defaultAclProjection = Object.freeze(
+    publicScans.map((scan) =>
+      Object.freeze({
+        databaseIdentityDigest: scan.databaseIdentityDigest,
+        defaultAclPolicyDigest: scan.defaultAclPolicyDigest,
+      }),
+    ),
+  );
+  const perDatabaseCatalogDigest = digestCurrent187Value(
+    CURRENT187_PER_DATABASE_CATALOG_POLICY_DIGEST_DOMAIN,
+    stableCatalogProjection,
+  );
+  const roleBindingsDigest = digestCurrent187Value(
+    CURRENT187_ROLE_BINDINGS_POLICY_DIGEST_DOMAIN,
+    roleBindingsProjection,
+  );
+  const currentAclPolicyDigest = digestCurrent187Value(
+    CURRENT187_CURRENT_ACL_POLICY_DIGEST_DOMAIN,
+    currentAclProjection,
+  );
+  const defaultAclPolicyDigest = digestCurrent187Value(
+    CURRENT187_DEFAULT_ACL_POLICY_DIGEST_DOMAIN,
+    defaultAclProjection,
+  );
+  const clusterCatalogDigest = digestCurrent187Value(
+    CURRENT187_CLUSTER_CATALOG_POLICY_DIGEST_DOMAIN,
+    {
+      clusterIdentityDigest,
+      currentAclPolicyDigest,
+      defaultAclPolicyDigest,
+      expectedDatabaseUniverseDigest,
+      perDatabaseCatalogDigest,
+      roleBindingsDigest,
+    },
+  );
   const ddlFenceStateDigest = digestCurrent187Value(
     CURRENT187_DDL_FENCE_STATE_DIGEST_DOMAIN,
     publicDdlFence,
@@ -884,13 +974,16 @@ export function planCurrent187ClusterInventoryAdmission(requestValue) {
     authorization: false,
     canMutate: false,
     canSend: false,
+    clusterCatalogDigest,
     clusterIdentityDigest,
     contract: CURRENT187_ADMISSION_CONTRACT,
+    currentAclPolicyDigest,
     ddlFenceEpoch: ddlFence.fenceEpoch,
     ddlFenceEvidenceDigest: ddlFence.evidenceDigest,
     ddlFenceStateDigest,
     ddlFenceValidFrom: ddlFence.validFrom,
     ddlFenceValidUntil: ddlFence.validUntil,
+    defaultAclPolicyDigest,
     environment: request.environment,
     externalDdlFenceAttestationDigest: null,
     externalDdlFenceAttested: false,
@@ -905,11 +998,13 @@ export function planCurrent187ClusterInventoryAdmission(requestValue) {
     nonTemplateAllowlistDigest,
     nonTemplateDatabaseCount: expectedCatalog.nonTemplateDatabases.length,
     perDatabaseScanCount: scans.length,
+    perDatabaseCatalogDigest,
     perDatabaseScanSetDigest,
     persistedConsumptionVerified: false,
     planDigest,
     productionRootEnrolled: false,
     reasonCodes,
+    roleBindingsDigest,
     schemaVersion: CURRENT187_ADMISSION_SCHEMA_VERSION,
     sharedBetaAccess: false,
     slice: CURRENT187_CLUSTER_INVENTORY_SLICE,

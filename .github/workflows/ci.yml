@@ -699,8 +699,33 @@ jobs:
           IDENTITY_MAIL_DUTY_ROLE_CURRENT186_PG_PROFILE: github-actions-ci
 
       - name: Verify CURRENT187 read-only multi-database catalog acquisition
-        run: pnpm --filter database test:integration:identity-mail-cluster-acquisition-current187:pg
+        shell: bash
+        run: |
+          test -n "$POSTGRES_SERVICE_CONTAINER_ID"
+          [[ "$POSTGRES_SERVICE_CONTAINER_ID" =~ ^[0-9a-f]{64}$ ]]
+          postgres_pid="$(docker inspect --format '{{.State.Pid}}' "$POSTGRES_SERVICE_CONTAINER_ID")"
+          [[ "$postgres_pid" =~ ^[1-9][0-9]*$ ]]
+          test -e "/proc/$postgres_pid/ns/net"
+          pnpm_bin="$(command -v pnpm)"
+          test -x "$pnpm_bin"
+          sudo -n nsenter \
+            --target "$postgres_pid" \
+            --net \
+            --setuid "$(id -u)" \
+            --setgid "$(id -g)" \
+            -- \
+            env \
+              DATABASE_URL="$DATABASE_URL" \
+              HOME="$HOME" \
+              IDENTITY_MAIL_CLUSTER_ACQUISITION_CURRENT187_PG_E2E_CONFIRM="$IDENTITY_MAIL_CLUSTER_ACQUISITION_CURRENT187_PG_E2E_CONFIRM" \
+              NODE_ENV="$NODE_ENV" \
+              PATH="$PATH" \
+              PGOPTIONS="$PGOPTIONS" \
+              "$pnpm_bin" \
+              --filter database \
+              test:integration:identity-mail-cluster-acquisition-current187:pg
         env:
+          POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
           NODE_ENV: test
           IDENTITY_MAIL_CLUSTER_ACQUISITION_CURRENT187_PG_E2E_CONFIRM: run-current187-read-only-cluster-acquisition-postgres-e2e
 

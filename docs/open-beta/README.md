@@ -111,6 +111,10 @@ enterprise-isolation option и не сокращает shared gates.
    приняты с одинаковым source fingerprint, zero target/artifact/journal
    residue и независимым `P0=0/P1=0`; до canonical promotion и restored-copy
    rehearsal production DDL и test access запрещены.
+   [Gate 0 CI artifact evidence, 10.08.2026](./gate-0-ci-artifact-2026-08-10.md) —
+   exact synchronized SHA, зелёный GitHub CI `3/3` и принятый SHA-bound
+   release artifact; документ отдельно фиксирует, что это не production/tester
+   GO.
 1. [Специальный launch backlog](../../OPEN_BETA_BACKLOG.md) — приоритеты,
    зависимости, Gate 0–3, метрики и последовательность разработки.
 2. [Shared multi-tenant beta profile](./shared-multi-tenant-beta-profile.md) —

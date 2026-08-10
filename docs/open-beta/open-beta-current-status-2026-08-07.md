@@ -1,13 +1,16 @@
 # LeetPlus open beta — текущее состояние на 07.08.2026
 
+> Обновление 10.08.2026: Gate 0 закрыт exact synchronized SHA и зелёным
+> SHA-bound CI artifact. Актуальное evidence вынесено в
+> `gate-0-ci-artifact-2026-08-10.md`; остальные launch gates сохраняют `NO-GO`.
+
 ## Итоговый вердикт
 
 - Fail-closed runner/janitor, signed journal, materializer recovery и SQL
-  semantic fingerprint приняты локально. Два PostgreSQL
-  apply/repeat/rollback/zero-diff цикла относятся к прежнему canonical head из
-  `179` миграций. После добавления upstream-миграции № 180 release lane
-  перезаморожен, его static/runtime tests зелёные, но реальный PostgreSQL цикл
-  на новом head ещё должен быть повторён.
+  semantic fingerprint приняты. Release lane перезаморожен поверх canonical
+  head № 180; exact SHA `183270…` прошёл GitHub CI `3/3 SUCCESS`, включая
+  PostgreSQL CURRENT183–187, worker/TLS SMTP и tenant/store security gates.
+  Production-like restored-copy rehearsal остаётся отдельным следующим gate.
 - Внешний invite-only тест пока имеет решение `NO-GO`.
 - Production, текущий `Tenant A` с четырьмя `Store A1..A4` и будущий тестер не
   изменялись. Учётная запись для `gr1mmphone1@gmail.com` не создавалась, пароль
@@ -104,7 +107,7 @@ ready только после canonical merge, production-like evidence, tenant/
 
 | Gate                                     | Состояние     | Почему не закрыт                                                                                                                                                                                                                                                                                           |
 | ---------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gate 0 — canonical source                | `IN PROGRESS` | Snapshot `b42a799bc18b5f8aa802baba98d39232203463ae` сохранён; `origin/main` влит merge-коммитом `4ff8f0a72e3beb473fcbaaef53b7281bbc6eeabd`, отставание от `origin/main` равно `0`. Release lane перезаморожен поверх canonical migration № 180; осталось принять clean GitHub CI SHA и SHA-bound artifact. |
+| Gate 0 — canonical source                | `PASS`        | Exact SHA `183270f6d7b26196844210fc428639945a081cd5`; latest `origin/main` влит `05a23cd9`, behind `0`; GitHub CI `31385942115` — `3/3 SUCCESS`; artifact `leetplus-release-183270…`, digest `sha256:1e28b8…a4966`. Подробное evidence: `gate-0-ci-artifact-2026-08-10.md`. |
 | Gate 1 — safe platform                   | `NO-GO`       | Не завершены все P0 security/tenant/IAM; anonymous operational boundary, startup/secrets, PII/export и full two-tenant enforcement ещё не приняты как production release                                                                                                                                   |
 | Gate 1MT — shared multi-tenant admission | `NO-GO`       | Из `294` HTTP handlers `54` ещё blocked; BFF CURRENT188–190 остаются dormant/unregistered; store-scope и background/browser matrix неполные                                                                                                                                                                |
 | Gate 2A — cutover текущей сети           | `NOT STARTED` | Нет production-like restore/apply/rollback evidence, change window и `CUTOVER GO`                                                                                                                                                                                                                          |
@@ -119,31 +122,28 @@ ready только после canonical merge, production-like evidence, tenant/
   CURRENT188–190 HTTP/BFF candidates остаются noncanonical/dormant;
 - provider lost-response handling принят локально, но production runtime
   roles/grants/attestation и restored-snapshot rehearsal ещё обязательны;
-- web build получает стабильный build ID из exact release SHA; CI собирает
-  API/Web/Prisma bundle, нормализует tar metadata, добавляет per-file
-  `SHA256SUMS` и публикует SHA-bound artifact. До зелёного GitHub run этот gate
-  остаётся незакрытым;
+- web build получает стабильный build ID из exact release SHA; CI собрал
+  API/Web/Prisma bundle, нормализовал tar metadata, добавил per-file
+  `SHA256SUMS` и опубликовал принятый SHA-bound artifact;
 - основные assortment, gamification, staff и communications boundaries имеют
   значительное локальное покрытие, но полный API/BFF/files/export/jobs/SSE/
   Telegram/browser Gate 1MT не завершён.
 
 ## Критический путь до первого внешнего клуба
 
-1. Сохранить текущую работу и получить один clean canonical candidate SHA:
-   разобрать ahead/behind, review scope, merge и reproducible CI artifact.
-2. Выполнить reviewed canonical promotion CURRENT180–190; завершить CURRENT187
+1. Выполнить reviewed canonical promotion CURRENT180–190; завершить CURRENT187
    infrastructure admission/provider recovery и exact production runtime
    roles/grants/attestation.
-3. Закрыть Gate 1MT по полному согласованному модульному scope: оставшиеся HTTP
+2. Закрыть Gate 1MT по полному согласованному модульному scope: оставшиеся HTTP
    и BFF paths, files/exports/jobs/SSE/Telegram, users/roles и outbound fences.
-4. На восстановленной production-like копии выполнить signed backup/restore,
+3. На восстановленной production-like копии выполнить signed backup/restore,
    apply/repeat/rollback/emergency/zero-diff rehearsal и принять отдельные
    production root/deploy GO.
-5. Выполнить controlled canary и in-place cutover `Tenant A/A1..A4`, закрыть
+4. Выполнить controlled canary и in-place cutover `Tenant A/A1..A4`, закрыть
    anonymous operational demo boundary и сверить все четыре клуба.
-6. Выдержать минимум семь стабильных суток internal alpha без launch P0/P1 и
+5. Выдержать минимум семь стабильных суток internal alpha без launch P0/P1 и
    stop condition.
-7. Принять отдельный persisted `SHARED BETA GO`; только после него штатный
+6. Принять отдельный persisted `SHARED BETA GO`; только после него штатный
    workflow создаёт `Tenant B/Store B1` и отправляет mailbox-bound OWNER invite.
 
 ## Прямой ответ по доступу
@@ -159,8 +159,7 @@ friendly-сетей, 14-дневного окна и выполнения Gate 3
 
 ## Следующее действие разработки
 
-Ближайший этап — не production deploy, а canonicalization текущего worktree:
-выделить точный release scope, сохранить все изменения, устранить расхождение с
-`origin/main`, получить clean SHA и воспроизводимый CI artifact. После этого
-можно переносить уже принятый rehearsal в canonical/runtime/restored-copy lane
-без потери provenance.
+Gate 0 закрыт exact SHA и воспроизводимым CI artifact. Ближайший этап — не
+production deploy, а reviewed canonical/runtime promotion и перенос принятого
+rehearsal в restored-copy lane: exact runtime roles/grants/attestation,
+Gate 1MT и signed apply/repeat/rollback/zero-diff без потери provenance.

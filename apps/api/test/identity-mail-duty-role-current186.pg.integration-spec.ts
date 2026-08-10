@@ -5061,8 +5061,8 @@ async function waitForAdvisoryWait(
       WHERE (${pid}::INTEGER IS NULL OR activity.pid = ${pid})
         AND activity.datname = pg_catalog.current_database()
         AND activity.pid <> pg_catalog.pg_backend_pid()
-        AND activity.query LIKE
-          '%identity_mail_duty_role_acl_lock_v1%'
+        AND activity.wait_event_type = 'Lock'
+        AND activity.wait_event = 'advisory'
       ORDER BY activity.pid
       LIMIT 1
     `);

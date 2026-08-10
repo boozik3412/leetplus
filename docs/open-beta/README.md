@@ -576,9 +576,11 @@ enterprise-isolation option и не сокращает shared gates.
     Noncanonical PostgreSQL candidate `daf5a98f…` реализует append-only/FORCE
     RLS/execute-only RPC ledger и exact canonical-JSON reconstruction; static
     `7/7`, два независимых PostgreSQL 16.13 hostile run — `1/1 PASS`, включая
-    duplicate-key/reordered JSON attacks, postflight `0/0/0`. Candidate ещё не canonical,
-    production roots/runtime attestation отсутствуют. Поэтому I остаётся
-    `LOCAL PG ACCEPTED / DENY-ONLY / NOT DEPLOYABLE`, а внешний доступ —
+    duplicate-key/reordered JSON attacks, postflight `0/0/0`. Exact candidate
+    SHA `8e2a25ec…` принят CI `31416609580` как `3/3 SUCCESS`, artifact digest
+    `sha256:9c46d1d6…a2fe0f`. Candidate ещё не canonical, production roots/runtime
+    attestation отсутствуют. Поэтому I остаётся
+    `EXACT-HEAD CI ACCEPTED / DENY-ONLY / NOT DEPLOYABLE`, а внешний доступ —
     `NO-GO`.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual

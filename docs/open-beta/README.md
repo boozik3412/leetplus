@@ -557,6 +557,15 @@ enterprise-isolation option и не сокращает shared gates.
     `policyAllowlistEvaluated=false` и все launch/effect flags остаются false.
     Exact-SHA CI `31397844858` на `3804792e…` — `3/3 SUCCESS`; evidence:
     [CURRENT187-G CI](./identity-mail-current187-g-ci-evidence-2026-08-10.md).
+    [CURRENT187-H signed semantic allowlist](./identity-mail-current187-semantic-allowlist.md)
+    локально добавляет четвёртый независимый Ed25519 purpose, exact secret-free
+    allowlist document и fail-closed `facts + allowlist` evaluator. F теперь
+    требует exact branded H receipt; успешный результат остаётся только
+    `MATCHED_DENY_ONLY`, а `deploymentGoConsumable`, `testAccessAuthorized` и
+    `sharedBetaAccess` остаются false. Локальные gates: authority `13/13`,
+    acquisition/risk/allowlist/policy `24/24`, DDL fence `11/11`, полный
+    disposable rehearsal `163/163`. До exact-SHA CI статус H —
+    `PRE-GREEN / DENY-ONLY / NONCANONICAL / NOT_DEPLOYABLE`.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

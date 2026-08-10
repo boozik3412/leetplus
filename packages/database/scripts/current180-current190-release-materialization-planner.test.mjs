@@ -80,7 +80,7 @@ test("builds the exact deny-only two-lane refreeze plan from frozen sources", as
   assert.equal(value.status, "PLAN_COMPLETE_REFREEZE_REQUIRED");
   assert.equal(
     value.materializationPlanDigest,
-    "eddb22f3587046db5ca88fd333046482389e41e7a9683babc23b59c9ea2eb564",
+    "8d3605a49988acbb4b8e012505648c6e7af5ca9b1d64fc4ce37f44afa208bf1f",
   );
   assert.deepEqual(
     value.schemaLane.map(({ ordinal }) => ordinal),

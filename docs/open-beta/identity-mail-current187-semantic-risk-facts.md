@@ -30,9 +30,10 @@ CURRENT187-G закрывает первую половину semantic boundary:
 4. возвращает только counts и category digests без имён, OID и object identity;
 5. оставляет `policyAllowlistEvaluated=false` и все launch/effect flags false.
 
-Отдельный следующий slice должен сравнить этот receipt с независимо
-утверждённым signed allowlist. Сам CURRENT187-G никогда не принимает решение
-`SAFE` или `GO`.
+Следующий slice CURRENT187-H теперь локально сравнивает этот receipt с
+независимо утверждённым signed allowlist. Сам CURRENT187-G по-прежнему никогда
+не принимает решение `SAFE` или `GO`; H возвращает только deny-only match.
+См. [CURRENT187-H semantic allowlist](./identity-mail-current187-semantic-allowlist.md).
 
 ## Покрытые catalog surfaces
 
@@ -99,10 +100,9 @@ Focused локальный checkpoint: semantic facts `7/7`, planner
 
 ## Что остаётся
 
-1. Независимо утверждённый signed semantic allowlist с exact role name/OID,
-   memberships, ownership, settings, current/default ACL и system baseline.
-2. Отдельный fail-closed evaluator `facts + allowlist`, persisted consumption,
-   revoke/expiry/replay и production root enrollment.
+1. Persisted consumption/revoke/expiry/replay для уже реализованного локального
+   signed semantic approval и production root enrollment.
+2. Независимый review и exact-SHA CI CURRENT187-H.
 3. Host-side DDL fence executor, HBA/TLS/pooler/service-account probes и
    hostile concurrent multi-database matrix.
 4. Production-like restore/apply/repeat/rollback/emergency/zero-diff rehearsal,

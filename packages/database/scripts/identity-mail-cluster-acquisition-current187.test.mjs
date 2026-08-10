@@ -16,6 +16,7 @@ import {
   CURRENT187_ADMISSION_SLICE,
   CURRENT187_ADMISSION_SYNTHETIC_CONFIRMATION,
   CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE,
+  CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE,
   current187AdmissionBindingProjection,
   current187AdmissionCanonicalJson,
   normalizeCurrent187AdmissionPayload,
@@ -61,6 +62,14 @@ import {
   evaluateCurrent187ClusterPolicy,
   isVerifiedCurrent187ClusterPolicyReceipt,
 } from "./identity-mail-cluster-policy-current187.mjs";
+import {
+  CURRENT187_SEMANTIC_ALLOWLIST_DOCUMENT_KIND,
+  CURRENT187_SEMANTIC_ALLOWLIST_DOCUMENT_PROFILE,
+  CURRENT187_SEMANTIC_ALLOWLIST_SLICE,
+  current187SemanticAllowlistDocumentDigest,
+  evaluateCurrent187SemanticAllowlist,
+  isVerifiedCurrent187SemanticAllowlistReceipt,
+} from "./identity-mail-cluster-semantic-allowlist-current187.mjs";
 
 const DIGESTS = Object.freeze({
   fence: "1".repeat(64),
@@ -647,7 +656,7 @@ async function attestedAcquisitionFixture() {
   return { acquisition, attestation, attested };
 }
 
-function deploymentAuthorityFixture(attested, bindingOverrides = {}) {
+function signedAdmissionAuthorityFixture(purpose, binding) {
   const signers = Object.fromEntries(
     CURRENT187_ADMISSION_PURPOSES.map((purpose, index) => {
       const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -687,45 +696,6 @@ function deploymentAuthorityFixture(attested, bindingOverrides = {}) {
       ];
     }),
   );
-  const planner = attested.plannerReceipt;
-  const binding = {
-    beforeImageDigest: digest("policy-before-image"),
-    clusterCatalogDigest: planner.clusterCatalogDigest,
-    clusterIdentityDigest: planner.clusterIdentityDigest,
-    currentAclPolicyDigest: planner.currentAclPolicyDigest,
-    databaseUniverseDigest: planner.expectedDatabaseUniverseDigest,
-    ddlFenceDigest: attested.externalDdlFenceAttestationDigest,
-    defaultAclPolicyDigest: planner.defaultAclPolicyDigest,
-    emergencyPlanDigest: digest("policy-emergency-plan"),
-    enrollmentReceiptDigest: digest("policy-enrollment-receipt"),
-    environment: "production",
-    executableDigest: digest("policy-executable"),
-    expectedPriorAuthorityEpoch: "1",
-    hbaDigest: digest("policy-hba"),
-    immutableArtifactDigest: digest("policy-immutable-artifact"),
-    liveScanDigest: attested.acquisitionDigest,
-    migrationManifestDigest: digest("policy-migration-manifest"),
-    networkEndpointDigest: digest("policy-network-endpoint"),
-    nonce: digest("policy-deploy-nonce"),
-    normalizedSqlDigest: digest("policy-normalized-sql"),
-    operationId: "77777777-7777-4777-8777-777777777777",
-    outboundKillSwitchEvidenceDigest: digest("policy-outbound-kill-switch"),
-    perDatabaseCatalogDigest: planner.perDatabaseCatalogDigest,
-    poolerDigest: digest("policy-pooler"),
-    postgresMajorVersion: 16,
-    predecessorChainDigest: digest("policy-predecessor-chain"),
-    providerRecoveryEvidenceDigest: digest("policy-provider-recovery"),
-    purpose: CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE,
-    releaseSha: "c".repeat(40),
-    roleBindingsDigest: planner.roleBindingsDigest,
-    rollbackPlanDigest: digest("policy-rollback-plan"),
-    runtimeConfigDigest: digest("policy-runtime-config"),
-    serviceAccountMappingDigest: digest("policy-service-account-mapping"),
-    tlsDigest: digest("policy-tls"),
-    zeroDiffProofDigest: digest("policy-zero-diff"),
-    ...bindingOverrides,
-  };
-  const purpose = CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE;
   const definition = CURRENT187_ADMISSION_PURPOSE_DEFINITIONS[purpose];
   const signer = signers[purpose];
   const payload = {
@@ -770,6 +740,96 @@ function deploymentAuthorityFixture(attested, bindingOverrides = {}) {
   );
 }
 
+function deploymentAuthorityFixture(attested, bindingOverrides = {}) {
+  const planner = attested.plannerReceipt;
+  const binding = {
+    beforeImageDigest: digest("policy-before-image"),
+    clusterCatalogDigest: planner.clusterCatalogDigest,
+    clusterIdentityDigest: planner.clusterIdentityDigest,
+    currentAclPolicyDigest: planner.currentAclPolicyDigest,
+    databaseUniverseDigest: planner.expectedDatabaseUniverseDigest,
+    ddlFenceDigest: attested.externalDdlFenceAttestationDigest,
+    defaultAclPolicyDigest: planner.defaultAclPolicyDigest,
+    emergencyPlanDigest: digest("policy-emergency-plan"),
+    enrollmentReceiptDigest: digest("policy-enrollment-receipt"),
+    environment: "production",
+    executableDigest: digest("policy-executable"),
+    expectedPriorAuthorityEpoch: "1",
+    hbaDigest: digest("policy-hba"),
+    immutableArtifactDigest: digest("policy-immutable-artifact"),
+    liveScanDigest: attested.acquisitionDigest,
+    migrationManifestDigest: digest("policy-migration-manifest"),
+    networkEndpointDigest: digest("policy-network-endpoint"),
+    nonce: digest("policy-deploy-nonce"),
+    normalizedSqlDigest: digest("policy-normalized-sql"),
+    operationId: "77777777-7777-4777-8777-777777777777",
+    outboundKillSwitchEvidenceDigest: digest("policy-outbound-kill-switch"),
+    perDatabaseCatalogDigest: planner.perDatabaseCatalogDigest,
+    poolerDigest: digest("policy-pooler"),
+    postgresMajorVersion: 16,
+    predecessorChainDigest: digest("policy-predecessor-chain"),
+    providerRecoveryEvidenceDigest: digest("policy-provider-recovery"),
+    purpose: CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE,
+    releaseSha: "c".repeat(40),
+    roleBindingsDigest: planner.roleBindingsDigest,
+    rollbackPlanDigest: digest("policy-rollback-plan"),
+    runtimeConfigDigest: digest("policy-runtime-config"),
+    serviceAccountMappingDigest: digest("policy-service-account-mapping"),
+    tlsDigest: digest("policy-tls"),
+    zeroDiffProofDigest: digest("policy-zero-diff"),
+    ...bindingOverrides,
+  };
+  return signedAdmissionAuthorityFixture(
+    CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE,
+    binding,
+  );
+}
+
+function semanticAllowlistFixture(
+  attested,
+  documentOverrides = {},
+  bindingOverrides = {},
+) {
+  const planner = attested.plannerReceipt;
+  const document = {
+    approvedAt: "2026-08-05T09:00:00.000Z",
+    clusterIdentityDigest: planner.clusterIdentityDigest,
+    contract: CURRENT187_ADMISSION_CONTRACT,
+    databaseUniverseDigest: planner.expectedDatabaseUniverseDigest,
+    kind: CURRENT187_SEMANTIC_ALLOWLIST_DOCUMENT_KIND,
+    policyRevision: 1,
+    profile: CURRENT187_SEMANTIC_ALLOWLIST_DOCUMENT_PROFILE,
+    reviewEvidenceDigest: digest("semantic-allowlist-review-evidence"),
+    schemaVersion: CURRENT187_ADMISSION_SCHEMA_VERSION,
+    semanticRiskFactsDigest: planner.semanticRiskFactsDigest,
+    slice: CURRENT187_SEMANTIC_ALLOWLIST_SLICE,
+    validUntil: "2026-08-06T09:00:00.000Z",
+    ...documentOverrides,
+  };
+  const binding = {
+    clusterIdentityDigest: document.clusterIdentityDigest,
+    databaseUniverseDigest: document.databaseUniverseDigest,
+    environment: "production",
+    nonce: digest("semantic-allowlist-nonce"),
+    operationId: "88888888-8888-4888-8888-888888888888",
+    purpose: CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE,
+    reviewEvidenceDigest: document.reviewEvidenceDigest,
+    semanticAllowlistDocumentDigest:
+      current187SemanticAllowlistDocumentDigest(document),
+    semanticRiskFactsDigest: document.semanticRiskFactsDigest,
+    ...bindingOverrides,
+  };
+  const authority = signedAdmissionAuthorityFixture(
+    CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE,
+    binding,
+  );
+  return {
+    authority,
+    document,
+    receipt: evaluateCurrent187SemanticAllowlist(planner, document, authority),
+  };
+}
+
 test("only a signed independent fence receipt can attest the exact branded acquisition", async () => {
   const { acquisition, attestation, attested } =
     await attestedAcquisitionFixture();
@@ -804,7 +864,12 @@ test("only a signed independent fence receipt can attest the exact branded acqui
 test("signed deployment policy matches stable role, ACL, and multi-database catalog digests deny-only", async () => {
   const { attested } = await attestedAcquisitionFixture();
   const authority = deploymentAuthorityFixture(attested);
-  const receipt = evaluateCurrent187ClusterPolicy(attested, authority);
+  const semantic = semanticAllowlistFixture(attested);
+  const receipt = evaluateCurrent187ClusterPolicy(
+    attested,
+    authority,
+    semantic.receipt,
+  );
 
   assert.equal(receipt.policyStatus, "BINDINGS_MATCHED");
   assert.equal(receipt.policyBindingsMatched, true);
@@ -815,6 +880,7 @@ test("signed deployment policy matches stable role, ACL, and multi-database cata
   assert.equal(receipt.canSend, false);
   assert.equal(receipt.deploymentGoConsumable, false);
   assert.equal(receipt.persistedConsumptionVerified, false);
+  assert.equal(receipt.policyAllowlistEvaluated, true);
   assert.equal(receipt.productionRuntimeAttested, false);
   assert.equal(receipt.productionRootEnrolled, false);
   assert.equal(receipt.testAccessAuthorized, false);
@@ -826,6 +892,13 @@ test("signed deployment policy matches stable role, ACL, and multi-database cata
   assert.equal(Object.isFrozen(receipt), true);
   assert.equal(isVerifiedCurrent187ClusterPolicyReceipt(receipt), true);
   assert.equal(isVerifiedCurrent187ClusterPolicyReceipt({ ...receipt }), false);
+  assert.equal(semantic.receipt.semanticAllowlistStatus, "MATCHED_DENY_ONLY");
+  assert.equal(semantic.receipt.semanticAllowlistMatched, true);
+  assert.equal(semantic.receipt.authorization, false);
+  assert.equal(
+    isVerifiedCurrent187SemanticAllowlistReceipt(semantic.receipt),
+    true,
+  );
 });
 
 test("signed policy drift and cloned receipts fail closed", async () => {
@@ -833,7 +906,12 @@ test("signed policy drift and cloned receipts fail closed", async () => {
   const driftedAuthority = deploymentAuthorityFixture(attested, {
     roleBindingsDigest: digest("hostile-role-binding-drift"),
   });
-  const denied = evaluateCurrent187ClusterPolicy(attested, driftedAuthority);
+  const semantic = semanticAllowlistFixture(attested);
+  const denied = evaluateCurrent187ClusterPolicy(
+    attested,
+    driftedAuthority,
+    semantic.receipt,
+  );
   assert.equal(denied.policyStatus, "DENIED");
   assert.equal(denied.policyBindingsMatched, false);
   assert.deepEqual(denied.reasonCodes, [
@@ -843,10 +921,113 @@ test("signed policy drift and cloned receipts fail closed", async () => {
 
   const exactAuthority = deploymentAuthorityFixture(attested);
   assert.throws(() =>
-    evaluateCurrent187ClusterPolicy({ ...attested }, exactAuthority),
+    evaluateCurrent187ClusterPolicy(
+      { ...attested },
+      exactAuthority,
+      semantic.receipt,
+    ),
   );
   assert.throws(() =>
-    evaluateCurrent187ClusterPolicy(attested, { ...exactAuthority }),
+    evaluateCurrent187ClusterPolicy(
+      attested,
+      { ...exactAuthority },
+      semantic.receipt,
+    ),
+  );
+  assert.throws(() =>
+    evaluateCurrent187ClusterPolicy(attested, exactAuthority, {
+      ...semantic.receipt,
+    }),
+  );
+});
+
+test("semantic allowlist drift is denied and cannot become deployment policy", async () => {
+  const { attested } = await attestedAcquisitionFixture();
+  const semantic = semanticAllowlistFixture(attested, {
+    semanticRiskFactsDigest: digest("hostile-semantic-facts-drift"),
+  });
+  assert.equal(semantic.receipt.semanticAllowlistStatus, "DENIED");
+  assert.equal(semantic.receipt.semanticAllowlistMatched, false);
+  assert.deepEqual(semantic.receipt.reasonCodes, [
+    "CURRENT187_SEMANTIC_ALLOWLIST_FACTS_DIGEST_MISMATCH",
+  ]);
+
+  const deployment = evaluateCurrent187ClusterPolicy(
+    attested,
+    deploymentAuthorityFixture(attested),
+    semantic.receipt,
+  );
+  assert.equal(deployment.policyStatus, "DENIED");
+  assert.deepEqual(deployment.reasonCodes, [
+    "CURRENT187_CLUSTER_POLICY_SEMANTIC_ALLOWLIST_NOT_MATCHED",
+  ]);
+  assert.equal(deployment.authorization, false);
+  assert.equal(deployment.deploymentGoConsumable, false);
+});
+
+test("semantic allowlist document, authority, timeline, and brands fail closed", async () => {
+  const { attested } = await attestedAcquisitionFixture();
+  const baseline = semanticAllowlistFixture(attested);
+  const reviewDrift = semanticAllowlistFixture(
+    attested,
+    {},
+    {
+      reviewEvidenceDigest: digest("hostile-independent-review-drift"),
+    },
+  );
+  assert.deepEqual(reviewDrift.receipt.reasonCodes, [
+    "CURRENT187_SEMANTIC_ALLOWLIST_REVIEW_EVIDENCE_MISMATCH",
+  ]);
+
+  const inactive = semanticAllowlistFixture(attested, {
+    approvedAt: "2026-08-05T08:00:00.000Z",
+    validUntil: "2026-08-05T09:30:00.000Z",
+  });
+  assert.deepEqual(inactive.receipt.reasonCodes, [
+    "CURRENT187_SEMANTIC_ALLOWLIST_DOCUMENT_INACTIVE",
+  ]);
+
+  assert.throws(() =>
+    evaluateCurrent187SemanticAllowlist(
+      { ...attested.plannerReceipt },
+      baseline.document,
+      baseline.authority,
+    ),
+  );
+  assert.throws(() =>
+    evaluateCurrent187SemanticAllowlist(
+      attested.plannerReceipt,
+      { ...baseline.document, extra: true },
+      baseline.authority,
+    ),
+  );
+  assert.throws(() =>
+    evaluateCurrent187SemanticAllowlist(
+      attested.plannerReceipt,
+      baseline.document,
+      { ...baseline.authority },
+    ),
+  );
+
+  let getterCalls = 0;
+  const accessor = { ...baseline.document };
+  Object.defineProperty(accessor, "clusterIdentityDigest", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return baseline.document.clusterIdentityDigest;
+    },
+  });
+  assert.throws(() => current187SemanticAllowlistDocumentDigest(accessor));
+  assert.equal(getterCalls, 0);
+  assert.throws(() =>
+    current187SemanticAllowlistDocumentDigest(
+      new Proxy(baseline.document, {
+        ownKeys() {
+          throw new Error("proxy trap must not become policy input");
+        },
+      }),
+    ),
   );
 });
 
@@ -1159,4 +1340,17 @@ test("adapter has no URL, password, provider, tenant, invite, or outbound integr
     /(?:node:fs|node:child_process|DATABASE_URL|postgresql:\/\/|password|smtp|providerPayload|secretManager|fetch\s*\(|process\.env)/iu,
   );
   assert.doesNotMatch(policySource, /(?:tenant|invite|tester)/iu);
+
+  const allowlistSource = await readFile(
+    new URL(
+      "./identity-mail-cluster-semantic-allowlist-current187.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    allowlistSource,
+    /(?:node:fs|node:child_process|DATABASE_URL|postgresql:\/\/|password|smtp|providerPayload|secretManager|fetch\s*\(|process\.env)/iu,
+  );
+  assert.doesNotMatch(allowlistSource, /(?:tenant|invite|tester)/iu);
 });

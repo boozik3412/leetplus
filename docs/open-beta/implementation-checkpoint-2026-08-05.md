@@ -46,7 +46,7 @@ production root enrollment, создание внешнего tenant, учётн
   `3bbf04f88643d94076be96c3ae714c441454e6a7fcd6107af5bd194dca579ed6`.
 - Статус: `ENGINEERING ACCEPTED / NONCANONICAL / NOT DEPLOYABLE`.
 
-### CURRENT187 A–G: cluster/application admission foundation
+### CURRENT187 A–H: cluster/application admission foundation
 
 - A: три независимых Ed25519 purpose domain, exact canonical shapes,
   frozen-empty production roots и synthetic loopback test roots — `13/13 PASS`.
@@ -75,8 +75,14 @@ production root enrollment, создание внешнего tenant, учётн
   settings, ownership, current/default ACL, `PUBLIC`/grantable grants и
   effective privileges. Per-database digest агрегируется в
   `clusterCatalogDigest`; focused checkpoint `7/7 PASS`, exact-SHA CI
-  `31397844858` на `3804792e…` — `3/3 PASS`. Signed allowlist и semantic
-  approval не реализованы, все authority/effect flags остаются false.
+  `31397844858` на `3804792e…` — `3/3 PASS`.
+- H: четвёртый independent Ed25519 purpose подписывает exact secret-free
+  semantic allowlist document; branded evaluator связывает cluster/universe,
+  review evidence и CURRENT187-G facts, а F требует exact matched H receipt.
+  Authority `13/13`, acquisition/risk/allowlist/policy `24/24`, DDL fence
+  `11/11`, полный disposable rehearsal `163/163`. Статус до exact-SHA CI:
+  `IMPLEMENTED LOCALLY / DENY-ONLY / PRE-GREEN / NOT DEPLOYABLE`; все
+  authority/effect/test-access flags остаются false.
 - Все receipts по-прежнему deny-only. Host-side fence executor,
   HBA/TLS/pooler/service-account evidence, production roots и hostile
   concurrent multi-DB matrix ещё не закрыты.
@@ -352,11 +358,10 @@ production root enrollment, создание внешнего tenant, учётн
 
 Порядок нельзя переставлять или обходить ручным созданием пользователя:
 
-1. Довести CURRENT187 до Engineering Green: поверх CURRENT187-G risk facts
-   добавить independently approved signed allowlist/evaluator, host-side DDL
-   fence executor, HBA/TLS/pooler probes, signed
-   baseline/policy/consumption ledger, hostile multi-DB race matrix и
-   independent review.
+1. Довести CURRENT187 до Engineering Green: принять CURRENT187-H exact-SHA CI,
+   добавить persisted semantic-approval consumption/revocation/expiry/replay,
+   host-side DDL fence executor, HBA/TLS/pooler probes, signed baseline/policy
+   ledger, hostile multi-DB race matrix и independent review.
 2. Перенести локально принятый provider recovery в канонический release и
    production-like restored-snapshot PG rehearsal; добавить DB aggregate
    zero-inflight/zero-secret-bearing finalize barrier, signed runtime kill state

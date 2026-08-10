@@ -19,6 +19,8 @@ export const CURRENT187_PRODUCTION_ROOT_ENROLLMENT_GO_PURPOSE =
   "CURRENT187_PRODUCTION_ROOT_ENROLLMENT_GO_V1";
 export const CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE =
   "CURRENT187_PRODUCTION_DEPLOY_GO_V1";
+export const CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE =
+  "CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_V1";
 
 const PURPOSE_DEFINITIONS_MUTABLE = {
   [CURRENT187_PRE_GREEN_ROOT_BOOTSTRAP_REHEARSAL_PURPOSE]: {
@@ -38,6 +40,12 @@ const PURPOSE_DEFINITIONS_MUTABLE = {
     profile: "CURRENT187_PRODUCTION_DEPLOY_GO_PROFILE_V1",
     trustDomain:
       "LEETPLUS_CURRENT187_ENROLLED_PRODUCTION_DEPLOYMENT_AUTHORITY_V1",
+  },
+  [CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE]: {
+    kind: "CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL",
+    profile: "CURRENT187_SECRET_FREE_SEMANTIC_ALLOWLIST_APPROVAL_V1",
+    trustDomain:
+      "LEETPLUS_CURRENT187_INDEPENDENT_SEMANTIC_ALLOWLIST_AUTHORITY_V1",
   },
 };
 
@@ -121,6 +129,14 @@ const PURPOSE_BINDING_KEYS_MUTABLE = {
     "serviceAccountMappingDigest",
     "tlsDigest",
     "zeroDiffProofDigest",
+  ],
+  [CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE]: [
+    "clusterIdentityDigest",
+    "databaseUniverseDigest",
+    "environment",
+    "reviewEvidenceDigest",
+    "semanticAllowlistDocumentDigest",
+    "semanticRiskFactsDigest",
   ],
 };
 
@@ -232,11 +248,7 @@ export function current187AdmissionExactDataRecord(
   return Object.freeze(snapshot);
 }
 
-export function current187AdmissionDataOnlyEntries(
-  value,
-  reasonCode,
-  message,
-) {
+export function current187AdmissionDataOnlyEntries(value, reasonCode, message) {
   if (
     !value ||
     Array.isArray(value) ||
@@ -268,9 +280,7 @@ export function current187AdmissionDataOnlyEntries(
   ) {
     current187AdmissionFail(reasonCode, message);
   }
-  return keys
-    .sort(compareStrings)
-    .map((key) => [key, descriptors[key].value]);
+  return keys.sort(compareStrings).map((key) => [key, descriptors[key].value]);
 }
 
 function deepFreezeCurrent187Value(value, seen) {
@@ -306,7 +316,10 @@ export const CURRENT187_ADMISSION_BINDING_KEYS_BY_PURPOSE =
     Object.fromEntries(
       CURRENT187_ADMISSION_PURPOSES.map((purpose) => [
         purpose,
-        [...COMMON_BINDING_KEYS, ...PURPOSE_BINDING_KEYS_MUTABLE[purpose]].sort(),
+        [
+          ...COMMON_BINDING_KEYS,
+          ...PURPOSE_BINDING_KEYS_MUTABLE[purpose],
+        ].sort(),
       ]),
     ),
   );
@@ -316,7 +329,10 @@ export const CURRENT187_ADMISSION_PAYLOAD_KEYS_BY_PURPOSE =
     Object.fromEntries(
       CURRENT187_ADMISSION_PURPOSES.map((purpose) => [
         purpose,
-        [...COMMON_PAYLOAD_KEYS, ...PURPOSE_BINDING_KEYS_MUTABLE[purpose]].sort(),
+        [
+          ...COMMON_PAYLOAD_KEYS,
+          ...PURPOSE_BINDING_KEYS_MUTABLE[purpose],
+        ].sort(),
       ]),
     ),
   );
@@ -394,8 +410,7 @@ function validatePurposeBindings(purpose, value, reasonCode) {
     validateDigestFields(
       value,
       PURPOSE_BINDING_KEYS_MUTABLE[purpose].filter(
-        (key) =>
-          key !== "environment" && key !== "expectedPriorAuthorityEpoch",
+        (key) => key !== "environment" && key !== "expectedPriorAuthorityEpoch",
       ),
       reasonCode,
     );
@@ -415,8 +430,24 @@ function validatePurposeBindings(purpose, value, reasonCode) {
     validateDigestFields(
       value,
       PURPOSE_BINDING_KEYS_MUTABLE[purpose].filter(
-        (key) =>
-          key !== "environment" && key !== "expectedPriorAuthorityEpoch",
+        (key) => key !== "environment" && key !== "expectedPriorAuthorityEpoch",
+      ),
+      reasonCode,
+    );
+    return;
+  }
+
+  if (purpose === CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE) {
+    if (value.environment !== "production") {
+      current187AdmissionFail(
+        reasonCode,
+        "The independent semantic allowlist approval binding is invalid.",
+      );
+    }
+    validateDigestFields(
+      value,
+      PURPOSE_BINDING_KEYS_MUTABLE[purpose].filter(
+        (key) => key !== "environment",
       ),
       reasonCode,
     );

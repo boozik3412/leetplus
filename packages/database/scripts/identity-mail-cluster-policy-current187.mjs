@@ -12,6 +12,7 @@ import {
 import { isVerifiedCurrent187AdmissionReceipt } from "./identity-mail-cluster-application-admission-current187-authority.mjs";
 import { isVerifiedCurrent187ClusterAcquisitionReceipt } from "./identity-mail-cluster-acquisition-current187.mjs";
 import { isVerifiedCurrent187ClusterInventoryReceipt } from "./identity-mail-cluster-inventory-current187-planner.mjs";
+import { isVerifiedCurrent187SemanticAllowlistReceipt } from "./identity-mail-cluster-semantic-allowlist-current187.mjs";
 
 export const CURRENT187_CLUSTER_POLICY_SLICE =
   "CURRENT187_F_SIGNED_CLUSTER_POLICY_EVALUATOR";
@@ -70,7 +71,11 @@ function digestPolicyReceipt(value) {
     .digest("hex");
 }
 
-function assertBrandedInputs(acquisitionReceipt, authorityReceipt) {
+function assertBrandedInputs(
+  acquisitionReceipt,
+  authorityReceipt,
+  semanticAllowlistReceipt,
+) {
   if (!isVerifiedCurrent187ClusterAcquisitionReceipt(acquisitionReceipt)) {
     current187AdmissionFail(
       "CURRENT187_CLUSTER_POLICY_ACQUISITION_RECEIPT_INVALID",
@@ -83,19 +88,30 @@ function assertBrandedInputs(acquisitionReceipt, authorityReceipt) {
       "The cluster policy evaluator requires an exact branded purpose-bound authority receipt.",
     );
   }
+  if (!isVerifiedCurrent187SemanticAllowlistReceipt(semanticAllowlistReceipt)) {
+    current187AdmissionFail(
+      "CURRENT187_CLUSTER_POLICY_SEMANTIC_ALLOWLIST_RECEIPT_INVALID",
+      "The cluster policy evaluator requires an exact branded independent semantic allowlist receipt.",
+    );
+  }
 }
 
 export function evaluateCurrent187ClusterPolicy(
   acquisitionReceipt,
   authorityReceipt,
+  semanticAllowlistReceipt,
 ) {
-  if (arguments.length !== 2) {
+  if (arguments.length !== 3) {
     current187AdmissionFail(
       "CURRENT187_CLUSTER_POLICY_ARGUMENTS_INVALID",
-      "Cluster policy evaluation requires acquisition and authority receipts.",
+      "Cluster policy evaluation requires acquisition, deployment authority, and semantic allowlist receipts.",
     );
   }
-  assertBrandedInputs(acquisitionReceipt, authorityReceipt);
+  assertBrandedInputs(
+    acquisitionReceipt,
+    authorityReceipt,
+    semanticAllowlistReceipt,
+  );
 
   const reasons = new Set();
   const plannerReceipt = acquisitionReceipt.plannerReceipt;
@@ -124,6 +140,19 @@ export function evaluateCurrent187ClusterPolicy(
     !current187AdmissionValidDigest(plannerReceipt?.semanticRiskFactsDigest)
   ) {
     reasons.add("CURRENT187_CLUSTER_POLICY_SEMANTIC_RISK_FACTS_UNAVAILABLE");
+  }
+  if (
+    semanticAllowlistReceipt.semanticAllowlistStatus !== "MATCHED_DENY_ONLY" ||
+    semanticAllowlistReceipt.semanticAllowlistMatched !== true ||
+    semanticAllowlistReceipt.policyAllowlistEvaluated !== true ||
+    semanticAllowlistReceipt.sourceSemanticRiskFactsDigest !==
+      plannerReceipt?.semanticRiskFactsDigest ||
+    semanticAllowlistReceipt.sourceClusterIdentityDigest !==
+      plannerReceipt?.clusterIdentityDigest ||
+    semanticAllowlistReceipt.sourceDatabaseUniverseDigest !==
+      plannerReceipt?.expectedDatabaseUniverseDigest
+  ) {
+    reasons.add("CURRENT187_CLUSTER_POLICY_SEMANTIC_ALLOWLIST_NOT_MATCHED");
   }
   if (
     payload.purpose !== CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE ||
@@ -162,6 +191,8 @@ export function evaluateCurrent187ClusterPolicy(
       acquisitionReceipt.externalDdlFenceAttested === true,
     kind: CURRENT187_CLUSTER_POLICY_RECEIPT_KIND,
     persistedConsumptionVerified: false,
+    policyAllowlistEvaluated:
+      semanticAllowlistReceipt.policyAllowlistEvaluated === true,
     policyBindingsMatched: reasonCodes.length === 0,
     policyStatus: reasonCodes.length === 0 ? "BINDINGS_MATCHED" : "DENIED",
     productionRootEnrolled: false,
@@ -172,6 +203,8 @@ export function evaluateCurrent187ClusterPolicy(
     slice: CURRENT187_CLUSTER_POLICY_SLICE,
     sourceAcquisitionDigest: acquisitionReceipt.acquisitionDigest,
     sourceAuthorityPayloadDigest: authorityReceipt.envelope.payloadDigest,
+    sourceSemanticAllowlistEvaluationDigest:
+      semanticAllowlistReceipt.semanticAllowlistEvaluationDigest,
     sourceSemanticRiskFactsDigest:
       plannerReceipt?.semanticRiskFactsDigest ?? null,
     testAccessAuthorized: false,

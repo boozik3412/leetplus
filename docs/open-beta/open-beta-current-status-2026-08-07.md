@@ -14,8 +14,15 @@
 > для privileged roles, memberships, settings, ownership, current/default ACL,
 > `PUBLIC`/grantable grants и effective privileges. Facts digest включён в
 > signed-bound `clusterCatalogDigest`; exact-SHA CI `31397844858` на
-> `3804792e…` — `3/3 SUCCESS`. Allowlist/GO всё ещё отсутствуют. Evidence:
+> `3804792e…` — `3/3 SUCCESS`. На момент приёмки G allowlist/GO отсутствовали. Evidence:
 > `identity-mail-current187-g-ci-evidence-2026-08-10.md`.
+>
+> CURRENT187-H локально добавил independently signed semantic allowlist и
+> fail-closed evaluator. Четвёртый purpose связывает exact cluster/universe,
+> review evidence, document и risk-facts digests; F теперь требует matched H
+> receipt. Authority `13/13`, acquisition/risk/allowlist/policy `24/24`, DDL
+> fence `11/11`, полный disposable rehearsal `163/163`. До exact-SHA CI H
+> остаётся `PRE-GREEN / DENY-ONLY`; deploy/test-access GO не выдаётся.
 
 ## Итоговый вердикт
 
@@ -57,7 +64,8 @@
 | Runtime adapter                  | `ACCEPTED LOCALLY`                 | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission                                 |
 | Runner/janitor                   | `ACCEPTED LOCALLY`                 | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                                     |
 | CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3` |
-| CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY` | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; signed allowlist ещё не реализован  |
+| CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY` | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H               |
+| CURRENT187-H semantic allowlist  | `IMPLEMENTED LOCALLY / PRE-GREEN`  | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; rehearsal `163/163`           |
 | Единый gate                      | `PASS`                             | `163/163`, `0` failures                                                                                                    |
 | Независимая latest-byte проверка | `PASS`                             | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                 |
 
@@ -146,10 +154,10 @@ ready только после canonical merge, production-like evidence, tenant/
 
 ## Критический путь до первого внешнего клуба
 
-1. Поверх реализованного CURRENT187-G risk-facts receipt добавить независимо
-   утверждённый signed semantic allowlist и fail-closed evaluator; затем
-   закрыть infrastructure admission/provider recovery и exact production
-   runtime roles/grants/attestation и выполнить reviewed canonical promotion
+1. Принять CURRENT187-H exact-SHA CI и добавить persisted one-time semantic
+   approval consumption/revocation/expiry/replay; затем закрыть infrastructure
+   admission/provider recovery и exact production runtime
+   roles/grants/attestation и выполнить reviewed canonical promotion
    CURRENT180–190.
 2. Закрыть Gate 1MT по полному согласованному модульному scope: оставшиеся HTTP
    и BFF paths, files/exports/jobs/SSE/Telegram, users/roles и outbound fences.
@@ -176,11 +184,9 @@ friendly-сетей, 14-дневного окна и выполнения Gate 3
 
 ## Следующее действие разработки
 
-Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CURRENT187-F связал
-stable multi-DB fingerprints с signed deployment envelope. CURRENT187-G уже
-извлекает secret-free semantic role/ACL/default-ACL risk facts и включает их
-digest в `clusterCatalogDigest`, сохраняет все launch flags false и принят
-exact-SHA CI `31397844858` (`3/3 SUCCESS`). Ближайший этап
-— independently signed allowlist и его fail-closed evaluator, затем
-host/TLS/HBA/pooler runtime admission и reviewed canonical
-promotion/restored-copy rehearsal.
+Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CURRENT187-F/G приняты
+exact-SHA CI. CURRENT187-H локально реализовал независимо подписанный allowlist,
+fail-closed facts evaluator и обязательную связь с F; все launch flags false,
+полный disposable gate `163/163`. Ближайший этап — exact-SHA CI H и persisted
+one-time consumption/revocation semantic approval, затем host/TLS/HBA/pooler
+runtime admission и reviewed canonical promotion/restored-copy rehearsal.

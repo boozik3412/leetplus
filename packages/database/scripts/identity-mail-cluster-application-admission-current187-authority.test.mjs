@@ -21,6 +21,7 @@ import {
   CURRENT187_PRE_GREEN_ROOT_BOOTSTRAP_REHEARSAL_PURPOSE,
   CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE,
   CURRENT187_PRODUCTION_ROOT_ENROLLMENT_GO_PURPOSE,
+  CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE,
   Current187AdmissionContractError,
   PINNED_CURRENT187_PRODUCTION_ROOTS_BY_PURPOSE,
   current187AdmissionBindingProjection,
@@ -60,6 +61,7 @@ const PURPOSE_ALIASES = Object.freeze({
   [CURRENT187_PRE_GREEN_ROOT_BOOTSTRAP_REHEARSAL_PURPOSE]: "rehearsal",
   [CURRENT187_PRODUCTION_ROOT_ENROLLMENT_GO_PURPOSE]: "enrollment",
   [CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE]: "deploy",
+  [CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE]: "semantic",
 });
 
 const OPERATION_IDS = Object.freeze({
@@ -69,6 +71,8 @@ const OPERATION_IDS = Object.freeze({
     "22222222-2222-4222-8222-222222222222",
   [CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE]:
     "33333333-3333-4333-8333-333333333333",
+  [CURRENT187_SEMANTIC_ALLOWLIST_APPROVAL_PURPOSE]:
+    "44444444-4444-4444-8444-444444444444",
 });
 
 function digest(label) {
@@ -175,7 +179,7 @@ function bindingFor(purpose, overrides) {
       trustedRootSetDigest: digest("trusted-root-set"),
       verifierArtifactDigest: digest("enrollment-verifier"),
     };
-  } else {
+  } else if (purpose === CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE) {
     specific = {
       beforeImageDigest: digest("before-image"),
       clusterCatalogDigest: digest("cluster-catalog"),
@@ -208,6 +212,15 @@ function bindingFor(purpose, overrides) {
       serviceAccountMappingDigest: digest("service-account-mapping"),
       tlsDigest: digest("tls"),
       zeroDiffProofDigest: digest("zero-diff-proof"),
+    };
+  } else {
+    specific = {
+      clusterIdentityDigest: digest("semantic-cluster"),
+      databaseUniverseDigest: digest("semantic-database-universe"),
+      environment: "production",
+      reviewEvidenceDigest: digest("semantic-review-evidence"),
+      semanticAllowlistDocumentDigest: digest("semantic-allowlist-document"),
+      semanticRiskFactsDigest: digest("semantic-risk-facts"),
     };
   }
   return { ...common, ...specific, ...overrides };
@@ -278,7 +291,7 @@ function verify(value) {
   );
 }
 
-test("verifies all three purpose domains into deep-frozen deny-only receipts", () => {
+test("verifies all four purpose domains into deep-frozen deny-only receipts", () => {
   const observedFingerprints = new Set();
   for (const purpose of CURRENT187_ADMISSION_PURPOSES) {
     const verified = verify(fixture(purpose));
@@ -303,7 +316,7 @@ test("verifies all three purpose domains into deep-frozen deny-only receipts", (
     assert(Object.isFrozen(verified.envelope.payload));
     observedFingerprints.add(verified.envelope.publicKeyFingerprint);
   }
-  assert.equal(observedFingerprints.size, 3);
+  assert.equal(observedFingerprints.size, 4);
   assert.equal(isVerifiedCurrent187AdmissionReceipt(null), false);
   assert.equal(isVerifiedCurrent187AdmissionReceipt({}, true), false);
 });
@@ -320,7 +333,10 @@ test("canonical JSON ignores key order while exact shapes reject drift", () => {
     CURRENT187_PRE_GREEN_ROOT_BOOTSTRAP_REHEARSAL_PURPOSE,
   );
   extraPayload.envelope.payload.extra = true;
-  expectCode(() => verify(extraPayload), "CURRENT187_ADMISSION_PAYLOAD_INVALID");
+  expectCode(
+    () => verify(extraPayload),
+    "CURRENT187_ADMISSION_PAYLOAD_INVALID",
+  );
 
   const missingPayload = fixture(
     CURRENT187_PRE_GREEN_ROOT_BOOTSTRAP_REHEARSAL_PURPOSE,
@@ -388,10 +404,7 @@ test("rejects prototype, accessor, proxy, symbol and array inputs without readin
 
   const symbol = fixture(CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE);
   symbol.envelope[Symbol("extra")] = true;
-  expectCode(
-    () => verify(symbol),
-    "CURRENT187_ADMISSION_ENVELOPE_INVALID",
-  );
+  expectCode(() => verify(symbol), "CURRENT187_ADMISSION_ENVELOPE_INVALID");
 
   const arrayRoots = fixture(CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE);
   arrayRoots.roots = [];
@@ -412,7 +425,7 @@ test("every purpose binding is signed, canonical and mutation-sensitive", () => 
             ? CURRENT187_PRE_GREEN_ROOT_BOOTSTRAP_REHEARSAL_PURPOSE
             : CURRENT187_PRODUCTION_DEPLOY_GO_PURPOSE;
       } else if (field === "operationId") {
-        payload[field] = "44444444-4444-4444-8444-444444444444";
+        payload[field] = "99999999-9999-4999-8999-999999999999";
       } else if (field === "environment") {
         payload[field] = payload[field] === "ci" ? "production" : "ci";
       } else if (field === "expectedPriorAuthorityEpoch") {
@@ -576,9 +589,7 @@ test("timeline and explicit verification time are bounded and canonical", () => 
 });
 
 test("synthetic roots require exact loopback test/CI context", () => {
-  const value = fixture(
-    CURRENT187_PRE_GREEN_ROOT_BOOTSTRAP_REHEARSAL_PURPOSE,
-  );
+  const value = fixture(CURRENT187_PRE_GREEN_ROOT_BOOTSTRAP_REHEARSAL_PURPOSE);
   for (const override of [
     { databaseName: "postgres" },
     { databaseName: "leetplus_prod_ci" },
@@ -747,7 +758,9 @@ test("pure source has no database, framework, network, provider or filesystem I/
 
 test("receipts remain PII/secret-free and never claim persisted one-time semantics", () => {
   for (const purpose of CURRENT187_ADMISSION_PURPOSES) {
-    const serialized = current187AdmissionCanonicalJson(verify(fixture(purpose)));
+    const serialized = current187AdmissionCanonicalJson(
+      verify(fixture(purpose)),
+    );
     assert.doesNotMatch(
       serialized,
       /@|email|password|connectionUrl|token|ciphertext|providerPayload|secretManagerReference/iu,

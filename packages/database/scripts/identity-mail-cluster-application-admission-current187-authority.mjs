@@ -35,8 +35,7 @@ export { Current187AdmissionContractError };
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const SAFE_POSTGRES_DATABASE_PATTERN = /^[a-z][a-z0-9_]{0,62}$/u;
 const CI_DATABASE_PATTERN = /_(?:ci|test)$/u;
-const PRODUCTION_DATABASE_PATTERN =
-  /(?:^|_)(?:live|prod|production)(?:_|$)/u;
+const PRODUCTION_DATABASE_PATTERN = /(?:^|_)(?:live|prod|production)(?:_|$)/u;
 const SYSTEM_DATABASES = new Set(["postgres", "template0", "template1"]);
 
 const VERIFIED_CURRENT187_ADMISSION_RECEIPTS = new WeakSet();
@@ -174,7 +173,7 @@ function validateRootRegistries(registriesValue, requireEveryPurpose) {
     registriesValue,
     CURRENT187_ADMISSION_PURPOSES,
     "CURRENT187_ADMISSION_ROOT_REGISTRIES_INVALID",
-    "CURRENT187 root registries must contain exactly three purpose domains.",
+    "CURRENT187 root registries must contain exactly four purpose domains.",
   );
   const fingerprints = new Set();
   const normalized = Object.create(null);
@@ -343,12 +342,7 @@ function verifyAgainstRoots(
     );
   }
 
-  const root = selectRoot(
-    registries,
-    purpose,
-    envelope.signingKeyId,
-    nowMs,
-  );
+  const root = selectRoot(registries, purpose, envelope.signingKeyId, nowMs);
   if (root.publicKeyFingerprint !== envelope.publicKeyFingerprint) {
     current187AdmissionFail(
       "CURRENT187_ADMISSION_AUTHORITY_KEY_NOT_TRUSTED",
@@ -443,10 +437,7 @@ export function verifySyntheticCurrent187AdmissionEnvelope(
     );
   }
   assertSyntheticContext(syntheticContext);
-  const registries = validateRootRegistries(
-    syntheticRootRegistries,
-    true,
-  );
+  const registries = validateRootRegistries(syntheticRootRegistries, true);
   return verifyAgainstRoots(
     envelope,
     purpose,

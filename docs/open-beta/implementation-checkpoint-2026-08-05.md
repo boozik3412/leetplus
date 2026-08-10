@@ -74,8 +74,9 @@ production root enrollment, создание внешнего tenant, учётн
   catalog surfaces и считает privileged role attributes, LOGIN, memberships,
   settings, ownership, current/default ACL, `PUBLIC`/grantable grants и
   effective privileges. Per-database digest агрегируется в
-  `clusterCatalogDigest`; focused checkpoint `7/7 PASS`. Signed allowlist и
-  semantic approval не реализованы, все authority/effect flags остаются false.
+  `clusterCatalogDigest`; focused checkpoint `7/7 PASS`, exact-SHA CI
+  `31397844858` на `3804792e…` — `3/3 PASS`. Signed allowlist и semantic
+  approval не реализованы, все authority/effect flags остаются false.
 - Все receipts по-прежнему deny-only. Host-side fence executor,
   HBA/TLS/pooler/service-account evidence, production roots и hostile
   concurrent multi-DB matrix ещё не закрыты.

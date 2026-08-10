@@ -2,7 +2,13 @@
 
 ## Статус
 
-`IMPLEMENTED LOCALLY / DENY-ONLY / NOT AN ALLOWLIST / NONCANONICAL / NOT DEPLOYABLE`.
+`ENGINEERING ACCEPTED / DENY-ONLY / NOT AN ALLOWLIST / NONCANONICAL / NOT DEPLOYABLE`.
+
+Exact implementation `3804792e673583e40231257ec6d027549db86468` принят GitHub
+Actions run `31397844858`: `3/3 SUCCESS`. SHA-bound artifact digest —
+`sha256:83c1b1628ab5fbc9e8e7f8b4e511ff0caeb2b574c993234363b0e5d85fb01846`.
+Подробное evidence:
+[CURRENT187-G CI](./identity-mail-current187-g-ci-evidence-2026-08-10.md).
 
 Этот slice превращает canonical catalog rows CURRENT187-C в детерминированные
 семантические факты о ролях и правах. Он не решает, допустимы ли найденные

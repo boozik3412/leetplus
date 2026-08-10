@@ -555,6 +555,8 @@ enterprise-isolation option и не сокращает shared gates.
     ACL, `PUBLIC`/grantable grants и effective privileges. Cluster-wide
     semantic digest включён в уже подписываемый `clusterCatalogDigest`, но
     `policyAllowlistEvaluated=false` и все launch/effect flags остаются false.
+    Exact-SHA CI `31397844858` на `3804792e…` — `3/3 SUCCESS`; evidence:
+    [CURRENT187-G CI](./identity-mail-current187-g-ci-evidence-2026-08-10.md).
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

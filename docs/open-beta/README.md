@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.76                                         |
+| Версия           | 1.77                                         |
 | Дата             | 07.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -587,9 +587,11 @@ enterprise-isolation option и не сокращает shared gates.
     deployment digest: endpoint, TLS, HBA, pooler и service-account mapping.
     Host/control-plane и network probe имеют разные branded границы; trust,
     wildcard, user collapse, неверный pool mode и incomplete negative probes
-    fail closed. Локально J `10/10`, общий CURRENT187 gate `42/42`. Это только
-    `SYNTHETIC-CI-ONLY`: actual TCP/TLS/HBA/PgBouncer collectors, production
-    signer/root, persisted consumption и связь с F ещё не реализованы.
+    fail closed. J `10/10`, общий CURRENT187 gate `42/42`; exact SHA
+    `04ffff27…` принят CI `31420665364` как `3/3 SUCCESS`, artifact digest
+    `sha256:0cb6ac6e…bd337`. Это только `SYNTHETIC-CI-ONLY`: actual
+    TCP/TLS/HBA/PgBouncer collectors, production signer/root, persisted
+    consumption и связь с F ещё не реализованы.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

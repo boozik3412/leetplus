@@ -1,7 +1,7 @@
 # CURRENT187-J: network/runtime attestation foundation
 
 Дата фиксации: 10.08.2026
-Статус: `IMPLEMENTED LOCALLY / SYNTHETIC-CI-ONLY / DENY-ONLY / NOT DEPLOYABLE`
+Статус: `EXACT-HEAD CI ACCEPTED / SYNTHETIC-CI-ONLY / DENY-ONLY / NOT DEPLOYABLE`
 
 ## Зачем нужен этот слой
 
@@ -65,12 +65,18 @@ probe-стороны. Backend identity, pooler mapping, secret reference и
   `productionRootEnrolled=false`, `productionRuntimeAttested=false`,
   `testAccessAuthorized=false`, `sharedBetaAccess=false`.
 
-## Принятое локальное evidence
+## Принятое evidence
 
 - standalone syntax + unit: `10/10`;
 - обязательный CURRENT187 acquisition/semantic/policy gate после включения J:
   `42/42`, `0` failures;
 - Prettier: green;
+- exact candidate commit: `04ffff278f944423228d9f39cdf396d5e9ffec5c`;
+- GitHub CI run `31420665364`: `3/3 SUCCESS` — authority root trust gate,
+  PostgreSQL migration smoke `60/60` и Application checks `122/122`;
+- artifact `leetplus-release-04ffff278f944423228d9f39cdf396d5e9ffec5c`,
+  ID `9075501569`, digest
+  `sha256:0cb6ac6ebeaa0fd03e249cbda84d12fe2dc937bc6db065b0b9648b12738bd337`;
 - production, `Tenant A/A1..A4` и внешний tester не изменялись.
 
 ## Что J пока намеренно не делает

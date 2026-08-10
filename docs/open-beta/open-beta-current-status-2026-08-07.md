@@ -45,9 +45,11 @@
 > network/runtime admission: разные branded receipts для четырёх service-path
 > probes и host/control-plane evidence, exact endpoint/TLS/HBA/pooler/
 > service-account digests, запрет trust/wildcard/user collapse и обязательные
-> positive/negative probes. Standalone `10/10`, общий CURRENT187 gate `42/42`.
-> J не выполняет реальные TCP/TLS/HBA/PgBouncer probes, не имеет production
-> root/signer и сохраняет все access/effect flags false. Evidence:
+> positive/negative probes. Standalone `10/10`, общий CURRENT187 gate `42/42`;
+> exact SHA `04ffff27…` принят CI `31420665364` как `3/3 SUCCESS`, artifact
+> digest `sha256:0cb6ac6e…bd337`. J не выполняет реальные
+> TCP/TLS/HBA/PgBouncer probes, не имеет production root/signer и сохраняет все
+> access/effect flags false. Evidence:
 > `identity-mail-current187-j-network-runtime-attestation-foundation.md`.
 
 ## Итоговый вердикт
@@ -93,7 +95,7 @@
 | CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY`      | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H                                                  |
 | CURRENT187-H semantic allowlist  | `ENGINEERING ACCEPTED / DENY-ONLY`      | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`                                               |
 | CURRENT187-I persisted approval  | `EXACT-HEAD CI ACCEPTED / NONCANONICAL` | persisted brand required; candidate `daf5a98f…`; static `7/7`, PG16.13 `2 × 1/1`, CI `31416609580` `3/3 SUCCESS`, zero residue; all access/effect flags false |
-| CURRENT187-J network/runtime     | `IMPLEMENTED LOCALLY / SYNTHETIC-ONLY`  | four exact service paths + separate host-control brand; endpoint/TLS/HBA/pooler/service-account digests; `10/10`, aggregate CURRENT187 `42/42`; all access/effect flags false |
+| CURRENT187-J network/runtime     | `EXACT-HEAD CI ACCEPTED / SYNTHETIC-ONLY` | four exact service paths + separate host-control brand; endpoint/TLS/HBA/pooler/service-account digests; `10/10`, aggregate CURRENT187 `42/42`, CI `31420665364` `3/3 SUCCESS`; all access/effect flags false |
 | Единый gate                      | `PASS`                                  | `163/163`, `0` failures                                                                                                                                       |
 | Независимая latest-byte проверка | `PASS`                                  | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                                                    |
 
@@ -217,9 +219,9 @@ Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CUR
 exact-SHA CI. CURRENT187-H реализовал независимо подписанный allowlist,
 fail-closed facts evaluator и обязательную связь с F; все launch flags false,
 полный disposable gate `163/163`, exact-SHA CI `31403020215` — `3/3 SUCCESS`.
-CURRENT187-J foundation теперь локально фиксирует четыре service purpose, две
-branded evidence boundary и пять production deployment digest; J `10/10`,
-aggregate CURRENT187 `42/42`. Ближайший этап — independent latest-byte review
+CURRENT187-J foundation теперь фиксирует четыре service purpose, две branded
+evidence boundary и пять production deployment digest; J `10/10`, aggregate
+CURRENT187 `42/42`, exact-head CI `31420665364` — `3/3 SUCCESS`. Ближайший этап — independent latest-byte review
 уже принятого exact-head CI CURRENT187-I PostgreSQL candidate, затем реальные
 capability-bearing TCP/TLS/HBA/PgBouncer collectors, production signer/root и
 reviewed canonical promotion/restored-copy rehearsal.

@@ -2440,7 +2440,6 @@ describePostgres(
         | undefined;
       try {
         await observer.$connect();
-        const emergencyPid = await readBackendPid(secondaryAdmin);
         applyOutcomePromise = captureOutcome(
           runController('apply', config, controllerAdapter(admin, applyFault)),
         );
@@ -2466,7 +2465,7 @@ describePostgres(
         );
         const advisoryWait = await waitForAdvisoryWait(
           observer,
-          emergencyPid,
+          null,
           emergencyOutcomePromise,
         );
         expect(advisoryWait).toMatchObject({
@@ -2605,7 +2604,6 @@ describePostgres(
         | undefined;
       try {
         await observer.$connect();
-        const emergencyPid = await readBackendPid(secondaryAdmin);
         attestationOutcomePromise = captureOutcome(
           runController(
             'attest',
@@ -2634,11 +2632,7 @@ describePostgres(
           ),
         );
         expect(
-          await waitForAdvisoryWait(
-            observer,
-            emergencyPid,
-            emergencyOutcomePromise,
-          ),
+          await waitForAdvisoryWait(observer, null, emergencyOutcomePromise),
         ).toMatchObject({
           state: 'active',
           waitEvent: 'advisory',
@@ -5037,7 +5031,7 @@ async function readBackendPid(client: PrismaClient): Promise<number> {
 
 async function waitForAdvisoryWait(
   observer: PrismaClient,
-  pid: number,
+  pid: number | null,
   earlyOutcome?: Promise<
     | { status: 'fulfilled'; value: unknown }
     | { reason: unknown; status: 'rejected' }
@@ -5064,7 +5058,13 @@ async function waitForAdvisoryWait(
         activity.wait_event AS "waitEvent",
         activity.wait_event_type AS "waitEventType"
       FROM pg_catalog.pg_stat_activity AS activity
-      WHERE activity.pid = ${pid}
+      WHERE (${pid}::INTEGER IS NULL OR activity.pid = ${pid})
+        AND activity.datname = pg_catalog.current_database()
+        AND activity.pid <> pg_catalog.pg_backend_pid()
+        AND activity.query LIKE
+          '%identity_mail_duty_role_acl_lock_v1%'
+      ORDER BY activity.pid
+      LIMIT 1
     `);
     if (row?.waitEventType === 'Lock' && row.waitEvent === 'advisory') {
       return row;

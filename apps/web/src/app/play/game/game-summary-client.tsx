@@ -354,6 +354,13 @@ const REWARD_HISTORY_SOURCE_LABELS: Record<RewardHistorySource, string> = {
   quest: "Квесты",
   promo: "Другие награды",
 };
+const REWARD_HISTORY_SOURCE_ROW_LABELS: Record<RewardHistorySource, string> = {
+  checkin: "Чекин",
+  lootbox: "Лутбокс",
+  battlepass: "Боевой пропуск",
+  quest: "Квест",
+  promo: "Награда",
+};
 const REWARD_HISTORY_RARITY_ORDER: GuestPortalLootBoxRarity[] = [
   "common",
   "rare",
@@ -365,6 +372,15 @@ const REWARD_HISTORY_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
   rare: "Редкие",
   epic: "Эпические",
   legendary: "Легендарные",
+};
+const REWARD_HISTORY_RARITY_ROW_LABELS: Record<
+  GuestPortalLootBoxRarity,
+  string
+> = {
+  common: "Обычное",
+  rare: "Редкое",
+  epic: "Эпическое",
+  legendary: "Легендарное",
 };
 const REWARD_HISTORY_SOURCE_TONES: Record<RewardHistorySource, string> = {
   checkin: "129 230 176",
@@ -8660,27 +8676,18 @@ function RewardJournalPanel({
       </div>
 
       <section className="lp-reward-list-panel" aria-label="Список наград">
-        <div className="lp-reward-list-toolbar">
-          <strong>Награды</strong>
-          <span>
-            {formatNumber(visibleRewards.length)} из{" "}
-            {formatNumber(filteredRewards.length)}
-          </span>
-        </div>
         {filteredRewards.length ? (
           <div className="lp-reward-list">
             {groupedRewards.map((group) => (
               <section key={group.key} className="lp-reward-group">
                 <header className="lp-reward-group-head">
                   <h3>{group.title}</h3>
-                  <span>
-                    {formatNumber(group.items.length)}{" "}
-                    {pluralRewards(group.items.length)}
-                  </span>
                 </header>
-                {group.items.map((item) => (
-                  <RewardAchievementCard key={item.id} item={item} />
-                ))}
+                <div className="lp-reward-group-entries">
+                  {group.items.map((item) => (
+                    <RewardAchievementCard key={item.id} item={item} />
+                  ))}
+                </div>
               </section>
             ))}
             {hasMoreRewards ? (
@@ -8721,25 +8728,23 @@ function RewardAchievementCard({ item }: { item: GameRewardHistoryItem }) {
   return (
     <article
       className={`lp-reward-achievement-card rarity-${rarity}`}
+      title={`${item.sourceLabel ?? REWARD_HISTORY_SOURCE_ROW_LABELS[source]} · ${rewardHistoryClubLabel(item)} · ${walletStateLabel(item.walletState)}`}
       style={
         {
           "--source-tone": REWARD_HISTORY_SOURCE_TONES[source],
         } as CSSProperties
       }
     >
+      <span className="lp-reward-timeline-dot" aria-hidden="true" />
       <time dateTime={occurredAt} className="lp-reward-achievement-time">
         {formatRewardHistoryTime(occurredAt)}
       </time>
-      <span className="lp-reward-achievement-icon" aria-hidden="true">
-        <RewardSourceIcon source={source} />
+      <span className="lp-reward-achievement-source">
+        <span aria-hidden="true" />
+        {REWARD_HISTORY_SOURCE_ROW_LABELS[source]}
       </span>
       <span className="lp-reward-achievement-main">
-        <small>
-          {item.sourceLabel ?? REWARD_HISTORY_SOURCE_LABELS[source]} ·{" "}
-          {rewardHistoryClubLabel(item)}
-        </small>
         <strong>{item.rewardLabel}</strong>
-        <span>{walletStateLabel(item.walletState)}</span>
         {claimCode ? (
           <span className="lp-reward-claim-code">
             <small>{claimCode.label}</small>
@@ -8747,12 +8752,11 @@ function RewardAchievementCard({ item }: { item: GameRewardHistoryItem }) {
           </span>
         ) : null}
       </span>
-      <span className="lp-reward-achievement-meta">
-        <span className={`lp-reward-rarity-chip rarity-${rarity}`}>
-          {REWARD_HISTORY_RARITY_LABELS[rarity]}
-        </span>
-        <span className="lp-reward-value">{rewardHistoryValue(item)}</span>
+      <span className="lp-reward-rarity-label">
+        <span aria-hidden="true" />
+        {REWARD_HISTORY_RARITY_ROW_LABELS[rarity]}
       </span>
+      <span className="lp-reward-value">{rewardHistoryValue(item)}</span>
     </article>
   );
 }
@@ -8779,69 +8783,6 @@ function rewardHistoryClaimCode(
       : null;
 
   return label ? { label, value } : null;
-}
-
-function RewardSourceIcon({ source }: { source: RewardHistorySource }) {
-  if (source === "checkin") {
-    return <ClubIcon />;
-  }
-
-  if (source === "battlepass") {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        aria-hidden="true"
-      >
-        <path d="M6 5h12v14H6z" />
-        <path d="M9 9h6" />
-        <path d="M9 13h4" />
-      </svg>
-    );
-  }
-
-  if (source === "quest") {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        aria-hidden="true"
-      >
-        <path d="M5 5h14v14H5z" />
-        <path d="m8 12 2.5 2.5L16 9" />
-      </svg>
-    );
-  }
-
-  if (source === "promo") {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        aria-hidden="true"
-      >
-        <path d="M4 8h16v8H4z" />
-        <path d="M8 8v8" />
-        <path d="M16 8v8" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M5 8h14v10H5z" />
-      <path d="m7 6 10 0 2 2H5z" />
-      <path d="M12 8v10" />
-    </svg>
-  );
 }
 
 function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
@@ -10233,21 +10174,6 @@ function groupRewardHistory(items: GameRewardHistoryItem[]) {
         ) -
         Date.parse(left.items[0] ? rewardHistoryOccurredAt(left.items[0]) : ""),
     );
-}
-
-function pluralRewards(count: number) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-
-  if (mod10 === 1 && mod100 !== 11) {
-    return "награда";
-  }
-
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return "награды";
-  }
-
-  return "наград";
 }
 
 function formatRewardChance(value: number) {
@@ -15493,15 +15419,9 @@ const clubHomeCss = `
 }
 
 .lp-reward-list-panel {
-  display: grid;
   min-width: 0;
-  overflow: hidden;
-  border: 1px solid rgba(196, 224, 225, 0.11);
-  border-radius: 10px;
-  background: rgba(2, 8, 11, 0.28);
 }
 
-.lp-reward-list-toolbar,
 .lp-reward-group-head {
   display: flex;
   align-items: center;
@@ -15509,13 +15429,6 @@ const clubHomeCss = `
   gap: 12px;
 }
 
-.lp-reward-list-toolbar {
-  min-height: 54px;
-  padding: 0 18px;
-  border-bottom: 1px solid rgba(196, 224, 225, 0.09);
-}
-
-.lp-reward-list-toolbar strong,
 .lp-reward-group-head h3 {
   color: var(--text);
   font-size: 11px;
@@ -15524,50 +15437,62 @@ const clubHomeCss = `
   text-transform: uppercase;
 }
 
-.lp-reward-list-toolbar span,
-.lp-reward-group-head span {
-  color: var(--cyan);
-  font-size: 9px;
-  font-weight: 820;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
 .lp-reward-list {
   display: grid;
-  gap: 26px;
-  padding: 18px;
+  gap: 18px;
 }
 
 .lp-reward-group {
   display: grid;
+  gap: 8px;
   min-width: 0;
 }
 
 .lp-reward-group-head {
-  min-height: 34px;
-  padding: 0 4px 10px;
+  min-height: 24px;
+  padding: 0;
+}
+
+.lp-reward-group-entries {
+  position: relative;
+  min-width: 0;
+  margin-left: 24px;
+  border: 1px solid rgba(196, 224, 225, 0.12);
+  border-radius: 7px;
+  background: rgba(2, 8, 11, 0.22);
+}
+
+.lp-reward-group-entries::before {
+  position: absolute;
+  top: 24px;
+  bottom: 24px;
+  left: -17px;
+  width: 1px;
+  background: rgba(158, 181, 183, 0.34);
+  content: "";
 }
 
 .lp-reward-achievement-card {
   --rarity: #9eb5b7;
   --source-tone: 131 228 236;
+  position: relative;
   display: grid;
-  grid-template-columns: 58px 38px minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-columns: 132px 160px minmax(180px, 1fr) 150px auto;
+  grid-template-areas: "time source reward rarity value";
+  gap: 16px;
   align-items: center;
   min-width: 0;
-  min-height: 78px;
-  padding: 12px 10px;
-  border-top: 1px solid rgba(196, 224, 225, 0.09);
+  min-height: 48px;
+  padding: 7px 16px 7px 24px;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.09);
   background: transparent;
   content-visibility: auto;
-  contain-intrinsic-size: 78px;
+  contain-intrinsic-size: 48px;
   transition: background 160ms ease;
 }
 
 .lp-reward-achievement-card:last-child {
-  border-bottom: 1px solid rgba(196, 224, 225, 0.09);
+  border-bottom: 0;
 }
 
 .lp-reward-achievement-card:hover {
@@ -15591,118 +15516,121 @@ const clubHomeCss = `
 }
 
 .lp-reward-achievement-time {
+  grid-area: time;
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-.lp-reward-achievement-icon {
-  display: inline-grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid rgb(var(--source-tone) / 0.34);
-  border-radius: 7px;
-  color: rgb(var(--source-tone));
-  background: rgb(var(--source-tone) / 0.07);
+.lp-reward-timeline-dot {
+  position: absolute;
+  top: 50%;
+  left: -23px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(213, 232, 233, 0.78);
+  border-radius: 50%;
+  background: #60757a;
+  box-shadow: 0 0 0 3px #071014;
+  transform: translateY(-50%);
 }
 
-.lp-reward-achievement-icon svg {
-  width: 17px;
-  height: 17px;
-  stroke-width: 1.5;
+.lp-reward-achievement-source,
+.lp-reward-rarity-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.lp-reward-achievement-source {
+  grid-area: source;
+}
+
+.lp-reward-achievement-source > span,
+.lp-reward-rarity-label > span {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--source-tone));
+}
+
+.lp-reward-rarity-label {
+  grid-area: rarity;
+  color: var(--rarity);
+}
+
+.lp-reward-rarity-label > span {
+  background: var(--rarity);
 }
 
 .lp-reward-achievement-main {
-  display: grid;
+  grid-area: reward;
+  display: flex;
   min-width: 0;
-  gap: 3px;
-}
-
-.lp-reward-achievement-main small {
-  overflow: hidden;
-  color: var(--quiet);
-  font-size: 9px;
-  font-weight: 790;
-  letter-spacing: 0.07em;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
+  align-items: center;
+  gap: 10px;
 }
 
 .lp-reward-achievement-main strong {
   overflow-wrap: anywhere;
   color: var(--text);
-  font-size: 15px;
-  line-height: 1.25;
-}
-
-.lp-reward-achievement-main > span {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.3;
 }
 
 .lp-reward-achievement-main .lp-reward-claim-code {
-  width: fit-content;
-  max-width: 100%;
-  margin-top: 6px;
-  padding: 7px 9px;
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
   border: 1px dashed rgba(131, 228, 236, 0.34);
-  border-radius: 6px;
+  border-radius: 5px;
   color: var(--cyan);
   background: rgba(131, 228, 236, 0.05);
 }
 
 .lp-reward-achievement-main .lp-reward-claim-code small {
+  overflow: hidden;
   color: rgba(196, 224, 225, 0.62);
-  white-space: normal;
-}
-
-.lp-reward-achievement-main .lp-reward-claim-code code {
-  display: block;
-  overflow-wrap: anywhere;
-  margin-top: 3px;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-}
-
-.lp-reward-achievement-meta {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 7px;
-  max-width: 270px;
-}
-
-.lp-reward-value,
-.lp-reward-rarity-chip {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  border-radius: 6px;
-  padding: 0 9px;
-  font-size: 9px;
-  font-weight: 840;
-  letter-spacing: 0.06em;
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.05em;
+  text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
-.lp-reward-value {
-  border: 1px solid rgba(196, 224, 225, 0.13);
+.lp-reward-achievement-main .lp-reward-claim-code code {
+  overflow-wrap: anywhere;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.035);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
 }
 
-.lp-reward-rarity-chip {
-  color: var(--rarity);
-  background: color-mix(in srgb, var(--rarity) 10%, transparent);
+.lp-reward-value {
+  grid-area: value;
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  padding: 0 10px;
+  border: 1px solid rgba(196, 224, 225, 0.15);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 840;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .lp-reward-load-more {
@@ -15764,6 +15692,21 @@ const clubHomeCss = `
   .lp-reward-reset {
     justify-self: start;
   }
+
+  .lp-reward-achievement-card {
+    grid-template-columns: 92px 136px minmax(160px, 1fr) 124px auto;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 980px) {
+  .lp-reward-achievement-card {
+    grid-template-columns: 74px 126px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "time source reward value"
+      "time source rarity value";
+    row-gap: 3px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -15785,13 +15728,14 @@ const clubHomeCss = `
   }
 
   .lp-reward-achievement-card {
-    grid-template-columns: 48px 34px minmax(0, 1fr);
-  }
-
-  .lp-reward-achievement-meta {
-    grid-column: 2 / -1;
-    justify-content: flex-start;
-    max-width: none;
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "time source value"
+      ". reward reward"
+      ". rarity rarity";
+    gap: 5px 10px;
+    min-height: 72px;
+    padding: 10px 12px 10px 16px;
   }
 }
 
@@ -15805,8 +15749,7 @@ const clubHomeCss = `
     font-size: 34px;
   }
 
-  .lp-reward-filter-panel,
-  .lp-reward-list {
+  .lp-reward-filter-panel {
     padding: 12px;
   }
 
@@ -15815,27 +15758,37 @@ const clubHomeCss = `
     padding: 0 9px;
   }
 
+  .lp-reward-group-entries {
+    margin-left: 18px;
+  }
+
+  .lp-reward-group-entries::before {
+    left: -13px;
+  }
+
   .lp-reward-achievement-card {
-    grid-template-columns: 42px minmax(0, 1fr);
-    gap: 9px;
-    padding: 12px 4px;
+    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-areas:
+      "time source"
+      ". reward"
+      ". rarity"
+      ". value";
+    gap: 6px 8px;
+    padding: 10px 10px 10px 14px;
   }
 
-  .lp-reward-achievement-time {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .lp-reward-achievement-icon {
-    display: none;
+  .lp-reward-timeline-dot {
+    left: -19px;
   }
 
   .lp-reward-achievement-main {
-    grid-column: 2;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
   }
 
-  .lp-reward-achievement-meta {
-    grid-column: 2;
+  .lp-reward-value {
+    justify-self: start;
   }
 }
 .lp-club-detail-stack {

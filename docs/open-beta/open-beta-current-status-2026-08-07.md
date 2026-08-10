@@ -4,10 +4,11 @@
 > SHA-bound CI artifact. Актуальное evidence вынесено в
 > `gate-0-ci-artifact-2026-08-10.md`; остальные launch gates сохраняют `NO-GO`.
 >
-> Локальное дополнение 10.08.2026: CURRENT187-F добавил stable signed policy
-> binding foundation. Planner `16/16`, acquisition/binding `15/15`, DDL-fence
-> authority `11/11`; remote exact-SHA CI ещё не получено. Это не semantic
-> allowlist и не production authority.
+> Дополнение 10.08.2026: CURRENT187-F добавил stable signed policy binding
+> foundation. Planner `16/16`, acquisition/binding `15/15`, DDL-fence authority
+> `11/11`; exact SHA `b64abfe5…` принят CI `31391874407` как `3/3 SUCCESS`.
+> Это не semantic allowlist и не production authority. Evidence:
+> `identity-mail-current187-f-ci-evidence-2026-08-10.md`.
 
 ## Итоговый вердикт
 
@@ -39,18 +40,18 @@
 
 ## Состояние текущей инженерной задачи
 
-| Контур                           | Статус                            | Подтверждение                                                                                          |
-| -------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Planning state machine           | `ACCEPTED LOCALLY`                | `33/33`                                                                                                |
-| SQL semantic fingerprint         | `ACCEPTED LOCALLY`                | `26/26`; schema/data/sequences, ACL, cluster role attributes, password-verifier hashes и memberships   |
-| Persistent coordinator           | `ACCEPTED LOCALLY`                | `6/6`; внешний pinned Ed25519 trust root                                                               |
-| Materializer/recovery            | `ACCEPTED LOCALLY`                | `24/24`; bounded descriptor reads, exact tree/inode provenance, signed restart locator                 |
-| Signed journal                   | `ACCEPTED LOCALLY`                | `24/24`; public-only verification, signed lifecycle, lost unlink/rmdir recovery                        |
-| Runtime adapter                  | `ACCEPTED LOCALLY`                | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission             |
-| Runner/janitor                   | `ACCEPTED LOCALLY`                | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                 |
-| CURRENT187-F policy binding      | `IMPLEMENTED LOCALLY / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15` |
-| Единый gate                      | `PASS`                            | `163/163`, `0` failures                                                                                |
-| Независимая latest-byte проверка | `PASS`                            | `P0=0`, `P1=0` для этого rehearsal-контура                                                             |
+| Контур                           | Статус                             | Подтверждение                                                                                                              |
+| -------------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Planning state machine           | `ACCEPTED LOCALLY`                 | `33/33`                                                                                                                    |
+| SQL semantic fingerprint         | `ACCEPTED LOCALLY`                 | `26/26`; schema/data/sequences, ACL, cluster role attributes, password-verifier hashes и memberships                       |
+| Persistent coordinator           | `ACCEPTED LOCALLY`                 | `6/6`; внешний pinned Ed25519 trust root                                                                                   |
+| Materializer/recovery            | `ACCEPTED LOCALLY`                 | `24/24`; bounded descriptor reads, exact tree/inode provenance, signed restart locator                                     |
+| Signed journal                   | `ACCEPTED LOCALLY`                 | `24/24`; public-only verification, signed lifecycle, lost unlink/rmdir recovery                                            |
+| Runtime adapter                  | `ACCEPTED LOCALLY`                 | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission                                 |
+| Runner/janitor                   | `ACCEPTED LOCALLY`                 | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                                     |
+| CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3` |
+| Единый gate                      | `PASS`                             | `163/163`, `0` failures                                                                                                    |
+| Независимая latest-byte проверка | `PASS`                             | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                 |
 
 Закрыты важные failure modes:
 
@@ -165,8 +166,8 @@ friendly-сетей, 14-дневного окна и выполнения Gate 3
 
 ## Следующее действие разработки
 
-Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CURRENT187-F локально
-связал stable multi-DB fingerprints с signed deployment envelope, сохранив все
-launch flags false. Ближайший этап — remote exact-SHA CI этого slice, затем
-semantic role/ACL/default-ACL evaluator, host/TLS/HBA/pooler runtime admission
-и только после них reviewed canonical promotion/restored-copy rehearsal.
+Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CURRENT187-F связал
+stable multi-DB fingerprints с signed deployment envelope, сохранив все launch
+flags false, и принят exact-SHA CI. Ближайший этап — semantic
+role/ACL/default-ACL evaluator, host/TLS/HBA/pooler runtime admission и только
+после них reviewed canonical promotion/restored-copy rehearsal.

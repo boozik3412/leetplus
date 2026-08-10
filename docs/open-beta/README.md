@@ -545,9 +545,10 @@ enterprise-isolation option и не сокращает shared gates.
     [Signed cluster policy binding](./identity-mail-current187-signed-policy-binding.md)
     добавляет стабильные scoped fingerprints ролей, current/default ACL и
     полного multi-DB catalog, затем fail-closed связывает их с exact
-    purpose-bound deployment envelope. Локально planner `16/16`,
-    acquisition/binding `15/15`; `BINDINGS_MATCHED` остаётся deny-only и не
-    является semantic allowlist либо deployment GO.
+    purpose-bound deployment envelope. Planner `16/16`, acquisition/binding
+    `15/15`; exact-SHA CI `31391874407` на `b64abfe5…` — `3/3 SUCCESS`.
+    `BINDINGS_MATCHED` остаётся deny-only и не является semantic allowlist либо
+    deployment GO. Evidence: [CURRENT187-F CI](./identity-mail-current187-f-ci-evidence-2026-08-10.md).
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

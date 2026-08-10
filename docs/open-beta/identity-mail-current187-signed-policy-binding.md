@@ -2,7 +2,7 @@
 
 ## Статус
 
-`IMPLEMENTED LOCALLY / PRE-GREEN / DENY-ONLY / NONCANONICAL / NOT DEPLOYABLE`.
+`ENGINEERING ACCEPTED / PRE-GREEN / DENY-ONLY / NONCANONICAL / NOT DEPLOYABLE`.
 
 CURRENT187-C уже получает read-only multi-database catalog evidence, но его
 операционный `scanEvidenceDigest` включает время и backend evidence. Такой digest
@@ -90,7 +90,11 @@ pnpm --filter database check:identity-mail-ddl-fence-attestation-current187
 ```
 
 Результат: planner `16/16`, acquisition/policy binding `15/15`, independent
-DDL-fence authority `11/11`. Remote exact-SHA CI evidence ещё не получено.
+DDL-fence authority `11/11`. Exact SHA
+`b64abfe5c5d86a00ed657a96790a4395a11db21d` принят GitHub CI `31391874407`:
+`3/3 SUCCESS`; SHA-bound artifact digest —
+`sha256:e623fd73130d8a3fc52e3d350b9ff2f50dd87a2e65321465a21369e2a974d51d`.
+Полное evidence: [CURRENT187-F CI](./identity-mail-current187-f-ci-evidence-2026-08-10.md).
 
 Production, `Tenant A/Store A1..A4`, внешний tester, account, password и invite
 не изменялись.

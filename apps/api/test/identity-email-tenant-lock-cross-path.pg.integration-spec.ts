@@ -26,8 +26,8 @@ const integrationEnabled =
   process.env.IDENTITY_EMAIL_TENANT_LOCK_PG_E2E_CONFIRM ===
   REQUIRED_CONFIRMATION;
 const describePostgres = integrationEnabled ? describe : describe.skip;
-const CURRENT_MIGRATION = '20260731120000_identity_mail_delivery_release_head';
-const CURRENT_MIGRATION_COUNT = 179;
+const CURRENT_MIGRATION = '20260804120000_guest_game_max_pending_rewards';
+const CURRENT_MIGRATION_COUNT = 180;
 const IDENTITY_MAIL_TENANT_LOCK_DOMAIN = 'leetplus:identity-mail-tenant:v1:';
 const IDENTITY_MAIL_TENANT_LOCK_SEED = 180;
 const IDENTITY_FINGERPRINT_KEY =
@@ -43,7 +43,8 @@ const WORKER_RPC_SIGNATURES = [
   'public."identity_initial_owner_mail_reap_v1"(TEXT, TEXT, TEXT, INTEGER)',
 ] as const;
 
-// This is intentionally an application/locking seam on canonical CURRENT179.
+// This is intentionally an application/locking seam for the CURRENT179
+// identity-mail RPCs on the canonical CURRENT180 database head.
 // One least-privilege repository case executes real claim_v1 and proves the
 // EMPTY decision waits on the shared tenant lock. The synthetic worker retains
 // relation-order coverage. Neither case claims ACTIVE/DRAINING coordinator or
@@ -94,7 +95,7 @@ type ContendedPathInput<T> = {
 jest.setTimeout(240_000);
 
 describePostgres(
-  'IdentityEmailClaim CURRENT179 tenant-lock cross-path PostgreSQL seam',
+  'IdentityEmailClaim tenant-lock cross-path PostgreSQL seam on canonical CURRENT180',
   () => {
     let maintenance: PrismaClient;
     let admin: PrismaClient;

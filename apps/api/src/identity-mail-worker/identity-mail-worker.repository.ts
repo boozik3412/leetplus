@@ -15,8 +15,8 @@ import type {
 } from './identity-mail-worker.types';
 
 const CURRENT_MIGRATION =
-  '20260731120000_identity_mail_delivery_release_head' as const;
-const CURRENT_MIGRATION_COUNT = 179 as const;
+  '20260804120000_guest_game_max_pending_rewards' as const;
+const CURRENT_MIGRATION_COUNT = 180 as const;
 const PRETERMINAL_MIGRATION_MANIFEST_DIGEST =
   '7f9867971a39e010b2dac03be18fc083dabe67b98d1d6ed15a0cc4540a8cfd14' as const;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;

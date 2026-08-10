@@ -20,6 +20,9 @@ type CanonicalMigrationDeployOptions = {
 };
 
 const TEMPORARY_ARTIFACT_PREFIX = 'leetplus-canonical-prisma-';
+const LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT = 179;
+const LEGACY_IDENTITY_MAIL_BASE_MIGRATION =
+  '20260731120000_identity_mail_delivery_release_head';
 const IDENTITY_MAIL_CURRENT183_CANDIDATES = [
   {
     name: '20260801010000_identity_mail_tenant_enrollment_control_plane',
@@ -219,6 +222,7 @@ function deployIdentityMailCandidateStack(
       recursive: true,
     });
     const migrationsDirectory = join(artifactPrismaDirectory, 'migrations');
+    retainLegacyIdentityMailCanonicalPrefix(migrationsDirectory);
     const sessionOptions: string[] = [];
     for (const candidate of candidates) {
       const sourceMigration = join(
@@ -273,6 +277,37 @@ function deployIdentityMailCandidateStack(
     throw new Error(`${options.failureMessage}: ${detail}`, { cause: error });
   } finally {
     removeTemporaryArtifact(temporaryRoot);
+  }
+}
+
+function retainLegacyIdentityMailCanonicalPrefix(
+  migrationsDirectory: string,
+): void {
+  const migrationDirectories = readdirSync(migrationsDirectory, {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+  const retained = migrationDirectories.slice(
+    0,
+    LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT,
+  );
+  if (
+    retained.length !== LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT ||
+    retained.at(-1) !== LEGACY_IDENTITY_MAIL_BASE_MIGRATION
+  ) {
+    throw new Error(
+      'Legacy identity-mail candidate stack canonical prefix drifted',
+    );
+  }
+  for (const migrationName of migrationDirectories.slice(
+    LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT,
+  )) {
+    rmSync(join(migrationsDirectory, migrationName), {
+      recursive: true,
+      force: true,
+    });
   }
 }
 

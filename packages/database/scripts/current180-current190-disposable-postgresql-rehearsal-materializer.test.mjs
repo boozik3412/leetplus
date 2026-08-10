@@ -12,7 +12,7 @@ import {
   symlink,
   unlink,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
@@ -49,6 +49,14 @@ const MATERIALIZER_PATH = join(
 const ROOT_NAME_PATTERN = /^lp-c180190-[0-9a-f]{64}-[A-Za-z0-9]{6}$/u;
 
 let artifact;
+
+async function removeDirectoryLink(path) {
+  if (platform() === "win32") {
+    await rmdir(path);
+    return;
+  }
+  await unlink(path);
+}
 let initialOwnedRoots;
 const coordinatorAuthority =
   createCurrent180Current190PostgresqlRehearsalCoordinatorAuthorityForTestOnly();
@@ -429,7 +437,7 @@ test("failure cleanup refuses a swapped parent junction and never unlinks outsid
     assert.equal(await readFile(sentinelPath, "utf8"), "must-survive\n");
     assert.equal((await lstat(migrationsPath)).isSymbolicLink(), true);
 
-    await rmdir(migrationsPath);
+    await removeDirectoryLink(migrationsPath);
     await rename(heldMigrationsPath, migrationsPath);
     heldMigrationsPath = undefined;
     const recovery =
@@ -440,7 +448,7 @@ test("failure cleanup refuses a swapped parent junction and never unlinks outsid
     manualReceipt = undefined;
   } finally {
     if (heldMigrationsPath !== undefined) {
-      await rmdir(migrationsPath).catch(() => undefined);
+      await removeDirectoryLink(migrationsPath).catch(() => undefined);
       await rename(heldMigrationsPath, migrationsPath).catch(() => undefined);
     }
     if (manualReceipt !== undefined) {
@@ -770,14 +778,14 @@ test("cleanup rejects extras and symlinks before removing any owned entry", asyn
     assert.equal((await readFile(receipt.schemaPath, "utf8")).length > 0, true);
     if (extraIsDirectoryLink) {
       assert.equal((await lstat(extraPath)).isSymbolicLink(), true);
-      await rmdir(extraPath);
+      await removeDirectoryLink(extraPath);
     } else {
       await unlink(extraPath);
     }
     extraCreated = false;
   } finally {
     if (extraCreated) {
-      const remover = extraIsDirectoryLink ? rmdir : unlink;
+      const remover = extraIsDirectoryLink ? removeDirectoryLink : unlink;
       await remover(extraPath).catch(() => undefined);
     }
     await cleanupCurrent180Current190DisposablePostgresqlArtifact(receipt);
@@ -822,7 +830,7 @@ test("cleanup rechecks the full parent chain immediately before unlink", async (
       "must-survive-cleanup\n",
     );
     assert.equal((await lstat(receipt.schemaPath)).isFile(), true);
-    await rmdir(migrationsPath);
+    await removeDirectoryLink(migrationsPath);
     await rename(heldMigrationsPath, migrationsPath);
     swapped = false;
     await cleanupCurrent180Current190DisposablePostgresqlArtifactForTestOnly(
@@ -831,7 +839,7 @@ test("cleanup rechecks the full parent chain immediately before unlink", async (
     cleaned = true;
   } finally {
     if (swapped) {
-      await rmdir(migrationsPath).catch(() => undefined);
+      await removeDirectoryLink(migrationsPath).catch(() => undefined);
       await rename(heldMigrationsPath, migrationsPath).catch(() => undefined);
     }
     if (!cleaned) {

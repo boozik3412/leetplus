@@ -15,13 +15,12 @@ import { FreshNetworkScopeGuard } from '../src/tenancy/fresh-network-scope.guard
 import { FreshStoreScopeService } from '../src/tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../src/tenancy/tenant-context.service';
 
-const CURRENT179_COUNT = 179;
-const CURRENT179_HEAD = '20260731120000_identity_mail_delivery_release_head';
+const CURRENT_MIGRATION_COUNT = 180;
+const CURRENT_MIGRATION_HEAD = '20260804120000_guest_game_max_pending_rewards';
 const integrationConfirmation =
   'run-pilot-crm-communications-postgres-fixtures';
 const integrationEnabled =
-  process.env.PILOT_CRM_COMMUNICATIONS_PG_CONFIRM ===
-  integrationConfirmation;
+  process.env.PILOT_CRM_COMMUNICATIONS_PG_CONFIRM === integrationConfirmation;
 const describePostgres = integrationEnabled ? describe : describe.skip;
 
 type Fixture = {
@@ -72,7 +71,9 @@ describePostgres(
             where: { slug: { startsWith: 'pilot-crm-communications-' } },
           }),
           prisma.user.count({
-            where: { email: { endsWith: '@crm-communications.integration.invalid' } },
+            where: {
+              email: { endsWith: '@crm-communications.integration.invalid' },
+            },
           }),
           prisma.guestCrmTask.count({
             where: { title: { startsWith: 'PG CRM communications ' } },
@@ -104,8 +105,8 @@ describePostgres(
         ORDER BY migration_name
       `;
 
-      expect(migrations).toHaveLength(CURRENT179_COUNT);
-      expect(migrations.at(-1)?.migration_name).toBe(CURRENT179_HEAD);
+      expect(migrations).toHaveLength(CURRENT_MIGRATION_COUNT);
+      expect(migrations.at(-1)?.migration_name).toBe(CURRENT_MIGRATION_HEAD);
     });
 
     it('executes all eight service paths with A/B NETWORK isolation and denies cross-tenant IDs before mutation', async () => {
@@ -115,43 +116,31 @@ describePostgres(
       const userA = buildUser(fixture, 'A_NETWORK');
       const userB = buildUser(fixture, 'B_NETWORK');
 
-      const createdTaskA = await executeNetwork(
-        boundary,
-        userA,
-        (service) =>
-          service.createGuestCrmTask(userA, {
-            guestId: fixture.guestAId,
-            title: `PG CRM communications created A ${fixture.marker}`,
-          }),
+      const createdTaskA = await executeNetwork(boundary, userA, (service) =>
+        service.createGuestCrmTask(userA, {
+          guestId: fixture.guestAId,
+          title: `PG CRM communications created A ${fixture.marker}`,
+        }),
       );
-      const createdTaskB = await executeNetwork(
-        boundary,
-        userB,
-        (service) =>
-          service.createGuestCrmTask(userB, {
-            guestId: fixture.guestBId,
-            title: `PG CRM communications created B ${fixture.marker}`,
-          }),
+      const createdTaskB = await executeNetwork(boundary, userB, (service) =>
+        service.createGuestCrmTask(userB, {
+          guestId: fixture.guestBId,
+          title: `PG CRM communications created B ${fixture.marker}`,
+        }),
       );
-      const createdEventA = await executeNetwork(
-        boundary,
-        userA,
-        (service) =>
-          service.createGuestCrmContactEvent(userA, {
-            guestId: fixture.guestAId,
-            channel: 'phone',
-            note: `PG CRM communications created event A ${fixture.marker}`,
-          }),
+      const createdEventA = await executeNetwork(boundary, userA, (service) =>
+        service.createGuestCrmContactEvent(userA, {
+          guestId: fixture.guestAId,
+          channel: 'phone',
+          note: `PG CRM communications created event A ${fixture.marker}`,
+        }),
       );
-      const createdEventB = await executeNetwork(
-        boundary,
-        userB,
-        (service) =>
-          service.createGuestCrmContactEvent(userB, {
-            guestId: fixture.guestBId,
-            channel: 'phone',
-            note: `PG CRM communications created event B ${fixture.marker}`,
-          }),
+      const createdEventB = await executeNetwork(boundary, userB, (service) =>
+        service.createGuestCrmContactEvent(userB, {
+          guestId: fixture.guestBId,
+          channel: 'phone',
+          note: `PG CRM communications created event B ${fixture.marker}`,
+        }),
       );
 
       const tasksA = await executeNetwork(boundary, userA, (service) =>
@@ -269,13 +258,10 @@ describePostgres(
         ),
       ).rejects.toBeInstanceOf(NotFoundException);
 
-      const updatedTaskA = await executeNetwork(
-        boundary,
-        userA,
-        (service) =>
-          service.updateGuestCrmTask(userA, fixture.taskAId, {
-            status: 'IN_PROGRESS',
-          }),
+      const updatedTaskA = await executeNetwork(boundary, userA, (service) =>
+        service.updateGuestCrmTask(userA, fixture.taskAId, {
+          status: 'IN_PROGRESS',
+        }),
       );
       expect(updatedTaskA.status).toBe('IN_PROGRESS');
 
@@ -286,13 +272,10 @@ describePostgres(
         }),
       ).resolves.toEqual({ tenantId: fixture.tenantBId, status: 'OPEN' });
 
-      const updatedTaskB = await executeNetwork(
-        boundary,
-        userB,
-        (service) =>
-          service.updateGuestCrmTask(userB, fixture.taskBId, {
-            status: 'IN_PROGRESS',
-          }),
+      const updatedTaskB = await executeNetwork(boundary, userB, (service) =>
+        service.updateGuestCrmTask(userB, fixture.taskBId, {
+          status: 'IN_PROGRESS',
+        }),
       );
       expect(updatedTaskB.status).toBe('IN_PROGRESS');
       expect(
@@ -658,8 +641,9 @@ function assertSafeIntegrationDatabase() {
   const databaseName = parsed.pathname.replace(/^\/+/, '').toLowerCase();
   const schemaName = parsed.searchParams.get('schema')?.toLowerCase() ?? '';
   const safeDatabaseName = /(?:^|[_-])(ci|test)(?:$|[_-])/.test(databaseName);
-  const safeTemporarySchema =
-    /^pilot_crm_communications_test_[a-z0-9_]+$/.test(schemaName);
+  const safeTemporarySchema = /^pilot_crm_communications_test_[a-z0-9_]+$/.test(
+    schemaName,
+  );
 
   if (
     process.env.NODE_ENV === 'production' ||

@@ -30,7 +30,8 @@ const DISPOSABLE_DATABASE_PATTERN = /^lp_activation176_pg_test_[0-9a-f]{32}$/u;
 const DISPOSABLE_ROLE_PATTERN = /^lp_activation_role_ci_[0-9a-f]{24}$/u;
 const DISPOSABLE_BYSTANDER_ROLE_PATTERN =
   /^lp_activation_bystander_ci_[0-9a-f]{24}$/u;
-const TARGET_MIGRATION = '20260731120000_identity_mail_delivery_release_head';
+const TARGET_MIGRATION = '20260804120000_guest_game_max_pending_rewards';
+const TARGET_MIGRATION_COUNT = 180;
 const ACTIVATION_FUNCTION_SIGNATURE =
   'public."shared_beta_tenant_activate_v1"(text,text,text,text,text,text,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)';
 const CATALOG_RELATION_PROBE =
@@ -237,7 +238,7 @@ describePostgres(
           AND rolled_back_at IS NULL
       `);
       expect(migration).toEqual({
-        migration_count: 179,
+        migration_count: TARGET_MIGRATION_COUNT,
         latest_migration: TARGET_MIGRATION,
       });
 
@@ -574,7 +575,7 @@ describePostgres(
       const migrationState = await readMigrationState(owner);
       expect(migrationState).toMatchObject({
         schemaHead: TARGET_MIGRATION,
-        migrationCount: 179,
+        migrationCount: TARGET_MIGRATION_COUNT,
         nonAppliedCount: 0,
         checksumMismatchCount: 0,
       });

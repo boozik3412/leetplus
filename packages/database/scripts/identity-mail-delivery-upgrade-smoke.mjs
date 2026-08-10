@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  createHash,
-  randomBytes,
-  randomUUID,
-} from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   copyFile,
   readFile,
@@ -28,18 +24,14 @@ const CURRENT_176_COUNT = 176;
 const CURRENT_177_COUNT = 177;
 const CURRENT_178_COUNT = 178;
 const CURRENT_179_COUNT = 179;
-const CURRENT_174 =
-  "20260730040000_shared_beta_runtime_release_activation";
-const CURRENT_175 =
-  "20260731010000_identity_mail_delivery_status_expand";
-const CURRENT_176 =
-  "20260731020000_initial_owner_mail_delivery_boundary";
-const CURRENT_177 =
-  "20260731090000_guest_game_case_reward_lifecycle";
-const CURRENT_178 =
-  "20260731110000_guest_game_case_reward_contract";
-const CURRENT_179 =
-  "20260731120000_identity_mail_delivery_release_head";
+const CURRENT_180_COUNT = 180;
+const CURRENT_174 = "20260730040000_shared_beta_runtime_release_activation";
+const CURRENT_175 = "20260731010000_identity_mail_delivery_status_expand";
+const CURRENT_176 = "20260731020000_initial_owner_mail_delivery_boundary";
+const CURRENT_177 = "20260731090000_guest_game_case_reward_lifecycle";
+const CURRENT_178 = "20260731110000_guest_game_case_reward_contract";
+const CURRENT_179 = "20260731120000_identity_mail_delivery_release_head";
+const CURRENT_180 = "20260804120000_guest_game_max_pending_rewards";
 const MERGE_BASE_REF = "226667f07da6001757589c4777c8bd2aebb84c3d";
 const ORIGIN_MAIN_REF = "c5d29360d2c46be2be27a905b460908d811f6855";
 const IDENTITY_176_REF = "339be7fe7eaad3c9d28104803858baaa8da7bd2d";
@@ -58,8 +50,7 @@ const SAFE_SOURCE_DATABASE_PATTERN =
   /(?:^|[_-])(?:ci|test|testing|004j)(?:$|[_-])/iu;
 const DATABASE_PATTERN =
   /^lp_identity_mail_(?:upgrade|origin|clean|legacy_reject|claim_reject|acl_reject)_ci_[a-f0-9]{16}$/u;
-const ROLE_PATTERN =
-  /^lp_identity_mail_(?:worker|hostile|app)_[a-f0-9]{16}$/u;
+const ROLE_PATTERN = /^lp_identity_mail_(?:worker|hostile|app)_[a-f0-9]{16}$/u;
 const TEMP_ROOT_PREFIX = "leetplus-identity-mail-delivery-";
 const MIGRATION_TIMEOUT_MS = 10 * 60 * 1000;
 const CLUSTER_LOCK_CLASS = 1_281_176_000;
@@ -115,7 +106,8 @@ then proves: (1) exact CURRENT_176 -> separate case expand -> synthetic
 source-aware application wave/drain -> case contract -> terminal CURRENT_179;
 (2) exact origin/main CURRENT_152, where case migrations already finished,
 then 26 identity migrations with started_at head CURRENT_176 -> terminal
-CURRENT_179; and (3) a clean CURRENT_179 deploy. The origin/main path proves
+CURRENT_179; and (3) a clean historical CURRENT_179-prefix deploy extracted
+from the exact canonical CURRENT_180 manifest. The origin/main path proves
 the enrolled worker fails before and becomes READY after the terminal migration
 without re-enrollment. Every generated database and role is removed in finally.
 
@@ -175,19 +167,14 @@ function parseSafeSourceDatabaseUrl(rawValue) {
   } catch {
     contractError("DATABASE_URL_INVALID");
   }
-  if (
-    parsed.protocol !== "postgresql:" &&
-    parsed.protocol !== "postgres:"
-  ) {
+  if (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:") {
     contractError("POSTGRESQL_URL_REQUIRED");
   }
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
   if (!new Set(["127.0.0.1", "localhost", "::1"]).has(hostname)) {
     contractError("LOOPBACK_POSTGRESQL_REQUIRED");
   }
-  const databaseName = decodeURIComponent(
-    parsed.pathname.replace(/^\/+/u, ""),
-  );
+  const databaseName = decodeURIComponent(parsed.pathname.replace(/^\/+/u, ""));
   if (
     databaseName === "postgres" ||
     !SAFE_SOURCE_DATABASE_PATTERN.test(databaseName)
@@ -344,12 +331,7 @@ async function readWorkingMigrationManifest(sourcePrismaDir) {
   const entries = [];
   for (const name of migrationDirectories) {
     assert.ok(MIGRATION_PATTERN.test(name));
-    const path = join(
-      sourcePrismaDir,
-      "migrations",
-      name,
-      "migration.sql",
-    );
+    const path = join(sourcePrismaDir, "migrations", name, "migration.sql");
     const worktreeContent = await readFile(path);
     const worktreeText = worktreeContent.toString("utf8");
     const gitCleanText = worktreeText.replace(/\r\n/gu, "\n");
@@ -377,7 +359,11 @@ async function readWorkingMigrationManifest(sourcePrismaDir) {
 }
 
 function assertPinnedManifest(manifest, count, digestValue) {
-  assert.equal(manifest.count, count, `${manifest.ref} migration count drifted.`);
+  assert.equal(
+    manifest.count,
+    count,
+    `${manifest.ref} migration count drifted.`,
+  );
   assert.equal(
     manifest.digest,
     digestValue,
@@ -396,18 +382,11 @@ async function readMigrationPlan() {
   const mergeBaseManifest = readGitMigrationManifest(MERGE_BASE_REF);
   const originMainManifest = readGitMigrationManifest(ORIGIN_MAIN_REF);
   const identity176Manifest = readGitMigrationManifest(IDENTITY_176_REF);
-  const workingManifest = await readWorkingMigrationManifest(sourcePrismaDir);
+  const currentReleaseManifest =
+    await readWorkingMigrationManifest(sourcePrismaDir);
 
-  assertPinnedManifest(
-    mergeBaseManifest,
-    150,
-    MERGE_BASE_MANIFEST_DIGEST,
-  );
-  assertPinnedManifest(
-    originMainManifest,
-    152,
-    ORIGIN_MAIN_MANIFEST_DIGEST,
-  );
+  assertPinnedManifest(mergeBaseManifest, 150, MERGE_BASE_MANIFEST_DIGEST);
+  assertPinnedManifest(originMainManifest, 152, ORIGIN_MAIN_MANIFEST_DIGEST);
   assertPinnedManifest(
     identity176Manifest,
     CURRENT_176_COUNT,
@@ -415,6 +394,25 @@ async function readMigrationPlan() {
   );
   assert.equal(identity176Manifest.head, CURRENT_176);
   assert.equal(originMainManifest.head, CURRENT_178);
+  assert.equal(currentReleaseManifest.count, CURRENT_180_COUNT);
+  assert.equal(currentReleaseManifest.head, CURRENT_180);
+
+  const historicalEntries = Object.freeze(
+    currentReleaseManifest.entries.slice(0, CURRENT_179_COUNT),
+  );
+  const historicalManifestBytes = Buffer.from(
+    `${historicalEntries
+      .map(({ name, sha256 }) => `${name} ${sha256}`)
+      .join("\n")}\n`,
+    "utf8",
+  );
+  const workingManifest = Object.freeze({
+    ref: "WORKTREE_CURRENT_179_PREFIX",
+    count: historicalEntries.length,
+    head: historicalEntries.at(-1)?.name ?? null,
+    digest: digest(historicalManifestBytes),
+    entries: historicalEntries,
+  });
   assert.equal(workingManifest.count, CURRENT_179_COUNT);
   assert.equal(workingManifest.head, CURRENT_179);
 
@@ -480,10 +478,7 @@ async function readMigrationPlan() {
   });
   assert.equal(merged178Manifest.count, CURRENT_178_COUNT);
   assert.equal(merged178Manifest.head, CURRENT_178);
-  assert.equal(
-    merged178Manifest.digest,
-    PRETERMINAL_178_MANIFEST_DIGEST,
-  );
+  assert.equal(merged178Manifest.digest, PRETERMINAL_178_MANIFEST_DIGEST);
   const expectedWorkingNames = new Set([
     ...identity176Manifest.entries.map(({ name }) => name),
     ...originMainManifest.entries.map(({ name }) => name),
@@ -495,7 +490,9 @@ async function readMigrationPlan() {
     [...expectedWorkingNames].sort(),
   );
   assert.deepEqual(
-    workingNames.filter((name) => !identityNames.has(name) && !originNames.has(name)),
+    workingNames.filter(
+      (name) => !identityNames.has(name) && !originNames.has(name),
+    ),
     [CURRENT_179],
   );
   assert.deepEqual(
@@ -512,6 +509,7 @@ async function readMigrationPlan() {
     mergeBaseManifest,
     originMainManifest,
     identity176Manifest,
+    currentReleaseManifest,
     workingManifest,
     merged178Manifest,
     identityPendingOnOrigin,
@@ -625,10 +623,7 @@ function runSqlFileExpectFailure(
   assert.equal(result.error, undefined);
   assert.notEqual(result.status, 0, "Hostile migration unexpectedly passed.");
   const output = `${result.stdout}\n${result.stderr}`;
-  assert.doesNotMatch(
-    output,
-    /postgres(?:ql)?:\/\//iu,
-  );
+  assert.doesNotMatch(output, /postgres(?:ql)?:\/\//iu);
   assert.match(output, expectedPattern);
   return result.status;
 }
@@ -1068,10 +1063,7 @@ async function insertTenant(client, fixture) {
   );
 }
 
-async function assertPost176HoldWriterCompatibility(
-  databaseAdmin,
-  suffix,
-) {
+async function assertPost176HoldWriterCompatibility(databaseAdmin, suffix) {
   const fixture = deliveryFixture(
     randomUUID(),
     `${suffix}-post176-hold-writer`,
@@ -1343,12 +1335,7 @@ async function insertOrdinaryInvite(client, tenantId, suffix) {
 
 async function insertBareInvite(
   client,
-  {
-    tenantId,
-    suffix,
-    role = "MANAGER",
-    acceptedAt = null,
-  },
+  { tenantId, suffix, role = "MANAGER", acceptedAt = null },
 ) {
   const inviteId = randomUUID();
   await client.$executeRawUnsafe(
@@ -1516,13 +1503,7 @@ function callSentAssertion(client, fixture) {
 
 function callReconcile(
   client,
-  {
-    outboxId,
-    transitionRevision,
-    resolution,
-    actorDigest,
-    evidenceDigest,
-  },
+  { outboxId, transitionRevision, resolution, actorDigest, evidenceDigest },
 ) {
   return client
     .$queryRawUnsafe(
@@ -1744,14 +1725,10 @@ async function insertEnrollment(
 
 async function assertNoDirectTableAccess(client) {
   for (const tableName of SEALED_TABLES) {
-    await expectSqlState(
-      "42501",
-      () =>
-        client.$queryRawUnsafe(
-          `SELECT pg_catalog.count(*) FROM public.${quoteIdentifier(
-            tableName,
-          )}`,
-        ),
+    await expectSqlState("42501", () =>
+      client.$queryRawUnsafe(
+        `SELECT pg_catalog.count(*) FROM public.${quoteIdentifier(tableName)}`,
+      ),
     );
   }
 }
@@ -1868,52 +1845,44 @@ async function assertAclBoundary(
   await assertNoDirectTableAccess(hostile);
   await assertNoDirectTableAccess(app);
 
-  await expectSqlState(
-    "42501",
-    () =>
-      worker.$executeRawUnsafe(
-        `CREATE TEMP TABLE "identity_mail_delivery_temp_probe" (
+  await expectSqlState("42501", () =>
+    worker.$executeRawUnsafe(
+      `CREATE TEMP TABLE "identity_mail_delivery_temp_probe" (
            "id" INTEGER
          )`,
-      ),
+    ),
   );
-  await expectSqlState(
-    "42501",
-    () =>
-      hostile.$queryRawUnsafe(
-        `SELECT public."identity_initial_owner_mail_claim_v1"(
+  await expectSqlState("42501", () =>
+    hostile.$queryRawUnsafe(
+      `SELECT public."identity_initial_owner_mail_claim_v1"(
            $1::TEXT, $2::TEXT, $3::TEXT, $4::TEXT
          )`,
-        tenantId,
-        "1".repeat(64),
-        "2".repeat(64),
-        CONFIG_DIGEST,
-      ),
+      tenantId,
+      "1".repeat(64),
+      "2".repeat(64),
+      CONFIG_DIGEST,
+    ),
   );
-  await expectSqlState(
-    "42501",
-    () =>
-      app.$queryRawUnsafe(
-        `SELECT public."identity_initial_owner_mail_claim_v1"(
+  await expectSqlState("42501", () =>
+    app.$queryRawUnsafe(
+      `SELECT public."identity_initial_owner_mail_claim_v1"(
            $1::TEXT, $2::TEXT, $3::TEXT, $4::TEXT
          )`,
-        tenantId,
-        "1".repeat(64),
-        "2".repeat(64),
-        CONFIG_DIGEST,
-      ),
+      tenantId,
+      "1".repeat(64),
+      "2".repeat(64),
+      CONFIG_DIGEST,
+    ),
   );
-  await expectSqlState(
-    "42501",
-    () =>
-      worker.$queryRawUnsafe(
-        `SELECT public."identity_initial_owner_invite_delivery_assert_sent_v1"(
+  await expectSqlState("42501", () =>
+    worker.$queryRawUnsafe(
+      `SELECT public."identity_initial_owner_invite_delivery_assert_sent_v1"(
            $1::TEXT, $2::TEXT, $3::TEXT
          )`,
-        tenantId,
-        randomUUID(),
-        "3".repeat(64),
-      ),
+      tenantId,
+      randomUUID(),
+      "3".repeat(64),
+    ),
   );
 
   for (const signature of [...WORKER_SIGNATURES, SENT_ASSERT_SIGNATURE]) {
@@ -1924,7 +1893,10 @@ async function assertAclBoundary(
            pg_catalog.to_regprocedure($1),
            'EXECUTE'
          ) AS public_execute`,
-      signature.toLowerCase().replaceAll("text", "text").replaceAll("integer", "integer"),
+      signature
+        .toLowerCase()
+        .replaceAll("text", "text")
+        .replaceAll("integer", "integer"),
     );
     assert.equal(acl?.public_execute, false);
   }
@@ -2023,7 +1995,10 @@ async function assertEnumIsolation(client, fixture) {
     await relationExists(client, "IdentityMailDeliveryTenantEnrollment"),
     false,
   );
-  assert.equal(await relationExists(client, "IdentityMailDeliveryEvent"), false);
+  assert.equal(
+    await relationExists(client, "IdentityMailDeliveryEvent"),
+    false,
+  );
   const [state] = await client.$queryRawUnsafe(
     `SELECT
        (SELECT pg_catalog.count(*)::INTEGER
@@ -2134,11 +2109,7 @@ async function callIdentityEmailReserve(
   return row?.receipt;
 }
 
-async function assertCanonicalEmailParity(
-  databaseAdmin,
-  tenantId,
-  suffix,
-) {
+async function assertCanonicalEmailParity(databaseAdmin, tenantId, suffix) {
   const [constraint] = await databaseAdmin.$queryRawUnsafe(
     `SELECT
        target_constraint.convalidated,
@@ -2277,10 +2248,7 @@ async function assertCanonicalEmailParity(
       randomUUID(),
     ),
   );
-  assert.equal(
-    await identityClaimCount(databaseAdmin, tenantId),
-    directBefore,
-  );
+  assert.equal(await identityClaimCount(databaseAdmin, tenantId), directBefore);
 
   const v1Receipt = await callIdentityEmailReserve(
     databaseAdmin,
@@ -2438,10 +2406,7 @@ async function exerciseMaximumRetryPolicy({
   );
   assert.equal(highAttemptReap.decision, "COMPLETED");
   assert.equal(highAttemptReap.processed, 1);
-  const reaperState = await readOutbox(
-    databaseAdmin,
-    reaperFixture.outboxId,
-  );
+  const reaperState = await readOutbox(databaseAdmin, reaperFixture.outboxId);
   assert.equal(reaperState.status, "RETRY");
   assert.equal(reaperState.attempts, 20);
   assert.equal(reaperState.state_reason_code, "LEASE_EXPIRED_BEFORE_PROVIDER");
@@ -2488,44 +2453,38 @@ async function runDeliveryMatrix({
     CONFIG_B_DIGEST,
   );
 
-  assert.deepEqual(
-    await callWorkerAssert(workerA, primaryFixture.tenantId),
-    {
-      schemaVersion: 1,
-      operation: "ASSERT_IDENTITY_MAIL_DELIVERY_WORKER",
-      decision: "READY",
-      tenantId: primaryFixture.tenantId,
-      migrationHead: CURRENT_179,
-      migrationCount: CURRENT_179_COUNT,
-      preterminalManifestDigest: PRETERMINAL_178_MANIFEST_DIGEST,
-      policyRevision: 1,
-      maxAttempts: 3,
-      leaseSeconds: 10,
-      acknowledgeSeconds: 10,
-      baseRetrySeconds: 1,
-      maxRetrySeconds: 2,
-      providerAuthorityDigest: CONFIG_DIGEST,
-    },
-  );
-  assert.deepEqual(
-    await callWorkerAssert(workerA, tenantBFixture.tenantId),
-    {
-      schemaVersion: 1,
-      operation: "ASSERT_IDENTITY_MAIL_DELIVERY_WORKER",
-      decision: "READY",
-      tenantId: tenantBFixture.tenantId,
-      migrationHead: CURRENT_179,
-      migrationCount: CURRENT_179_COUNT,
-      preterminalManifestDigest: PRETERMINAL_178_MANIFEST_DIGEST,
-      policyRevision: 1,
-      maxAttempts: 3,
-      leaseSeconds: 10,
-      acknowledgeSeconds: 10,
-      baseRetrySeconds: 1,
-      maxRetrySeconds: 2,
-      providerAuthorityDigest: CONFIG_B_DIGEST,
-    },
-  );
+  assert.deepEqual(await callWorkerAssert(workerA, primaryFixture.tenantId), {
+    schemaVersion: 1,
+    operation: "ASSERT_IDENTITY_MAIL_DELIVERY_WORKER",
+    decision: "READY",
+    tenantId: primaryFixture.tenantId,
+    migrationHead: CURRENT_179,
+    migrationCount: CURRENT_179_COUNT,
+    preterminalManifestDigest: PRETERMINAL_178_MANIFEST_DIGEST,
+    policyRevision: 1,
+    maxAttempts: 3,
+    leaseSeconds: 10,
+    acknowledgeSeconds: 10,
+    baseRetrySeconds: 1,
+    maxRetrySeconds: 2,
+    providerAuthorityDigest: CONFIG_DIGEST,
+  });
+  assert.deepEqual(await callWorkerAssert(workerA, tenantBFixture.tenantId), {
+    schemaVersion: 1,
+    operation: "ASSERT_IDENTITY_MAIL_DELIVERY_WORKER",
+    decision: "READY",
+    tenantId: tenantBFixture.tenantId,
+    migrationHead: CURRENT_179,
+    migrationCount: CURRENT_179_COUNT,
+    preterminalManifestDigest: PRETERMINAL_178_MANIFEST_DIGEST,
+    policyRevision: 1,
+    maxAttempts: 3,
+    leaseSeconds: 10,
+    acknowledgeSeconds: 10,
+    baseRetrySeconds: 1,
+    maxRetrySeconds: 2,
+    providerAuthorityDigest: CONFIG_B_DIGEST,
+  });
 
   await expectSqlState(
     "42501",
@@ -2568,10 +2527,7 @@ async function runDeliveryMatrix({
     /configuration is not enrolled/iu,
   );
   assert.deepEqual(
-    await readTenantStateFingerprint(
-      databaseAdmin,
-      tenantBFixture.tenantId,
-    ),
+    await readTenantStateFingerprint(databaseAdmin, tenantBFixture.tenantId),
     tenantBBeforeWrongReap,
   );
 
@@ -2623,10 +2579,7 @@ async function runDeliveryMatrix({
   assert.equal(tenantBState.secret_ciphertext, null);
   assert.equal(tenantBState.state_reason_code, "INVITE_NOT_DELIVERABLE");
   assert.deepEqual(
-    await readTenantStateFingerprint(
-      databaseAdmin,
-      primaryFixture.tenantId,
-    ),
+    await readTenantStateFingerprint(databaseAdmin, primaryFixture.tenantId),
     primaryBeforeTenantB,
   );
 
@@ -2658,10 +2611,10 @@ async function runDeliveryMatrix({
       ),
     ),
   );
-  assert.deepEqual(
-    claimReceipts.map((receipt) => receipt.decision).sort(),
-    ["CLAIMED", "EMPTY"],
-  );
+  assert.deepEqual(claimReceipts.map((receipt) => receipt.decision).sort(), [
+    "CLAIMED",
+    "EMPTY",
+  ]);
   const winnerIndex = claimReceipts.findIndex(
     (receipt) => receipt.decision === "CLAIMED",
   );
@@ -2730,10 +2683,7 @@ async function runDeliveryMatrix({
     }),
   );
   assert.deepEqual(
-    await readTenantStateFingerprint(
-      databaseAdmin,
-      primaryFixture.tenantId,
-    ),
+    await readTenantStateFingerprint(databaseAdmin, primaryFixture.tenantId),
     beforeNullInputMatrix,
   );
 
@@ -3049,9 +2999,7 @@ async function runDeliveryMatrix({
     primaryFixture.inviteId,
   );
   assert.ok(accepted?.accepted_at instanceof Date);
-  assert.ok(
-    accepted.accepted_at.getTime() >= acceptanceClock.db_now.getTime(),
-  );
+  assert.ok(accepted.accepted_at.getTime() >= acceptanceClock.db_now.getTime());
   assert.notEqual(
     accepted.accepted_at.getTime(),
     submittedAcceptedAt.getTime(),
@@ -3132,9 +3080,7 @@ async function runDeliveryMatrix({
   assert.equal(ambiguousMarked.secret_ciphertext, null);
   const acknowledgeDelay = Math.max(
     0,
-    ambiguousMarked.provider_acknowledge_until.getTime() -
-      Date.now() +
-      250,
+    ambiguousMarked.provider_acknowledge_until.getTime() - Date.now() + 250,
   );
   await wait(acknowledgeDelay);
   const reapReceipt = await callReap(
@@ -3206,10 +3152,7 @@ async function runDeliveryMatrix({
   );
   assert.equal(pendingPoisonClaim.decision, "EMPTY");
   assert.deepEqual(
-    await readTenantStateFingerprint(
-      databaseAdmin,
-      primaryFixture.tenantId,
-    ),
+    await readTenantStateFingerprint(databaseAdmin, primaryFixture.tenantId),
     pendingPoisonBeforeClaim,
   );
   const pendingPoisonReap = await callReap(
@@ -3226,10 +3169,7 @@ async function runDeliveryMatrix({
     pendingPoisonFixture.outboxId,
   );
   assert.equal(pendingPoisonState.status, "CANCELED");
-  assert.equal(
-    pendingPoisonState.state_reason_code,
-    "INVITE_NOT_DELIVERABLE",
-  );
+  assert.equal(pendingPoisonState.state_reason_code, "INVITE_NOT_DELIVERABLE");
   assert.equal(pendingPoisonState.secret_ciphertext, null);
 
   const claimedPoisonFixture = deliveryFixture(
@@ -3333,10 +3273,7 @@ async function runDeliveryMatrix({
     reconciledSentFixture.outboxId,
   );
   assert.equal(reconciledSentState.status, "SENT");
-  assert.equal(
-    reconciledSentState.provider_outcome_class,
-    "RESOLVED_SENT",
-  );
+  assert.equal(reconciledSentState.provider_outcome_class, "RESOLVED_SENT");
   assert.equal(reconciledSentState.state_reason_code, null);
 
   const revokeRaceFixture = deliveryFixture(
@@ -3467,10 +3404,7 @@ async function runDeliveryMatrix({
     outcomeCode: "PROVIDER_AMBIGUOUS",
     terminalAckDigest: "7".repeat(64),
   });
-  assert.equal(
-    markerRaceAmbiguous.decision,
-    "RECONCILIATION_REQUIRED",
-  );
+  assert.equal(markerRaceAmbiguous.decision, "RECONCILIATION_REQUIRED");
   const markerRaceResolved = await callReconcile(databaseAdmin, {
     outboxId: markerRaceFixture.outboxId,
     transitionRevision: 4,
@@ -3539,14 +3473,8 @@ async function runDeliveryMatrix({
   );
   assert.equal(lifecycleReap.decision, "COMPLETED");
   assert.equal(lifecycleReap.processed, 3);
-  const expiredState = await readOutbox(
-    databaseAdmin,
-    expiredFixture.outboxId,
-  );
-  const budgetState = await readOutbox(
-    databaseAdmin,
-    budgetFixture.outboxId,
-  );
+  const expiredState = await readOutbox(databaseAdmin, expiredFixture.outboxId);
+  const budgetState = await readOutbox(databaseAdmin, budgetFixture.outboxId);
   const retryWindowState = await readOutbox(
     databaseAdmin,
     retryWindowFixture.outboxId,
@@ -3558,10 +3486,7 @@ async function runDeliveryMatrix({
   assert.equal(budgetState.state_reason_code, "ATTEMPT_BUDGET_EXHAUSTED");
   assert.equal(budgetState.secret_ciphertext, null);
   assert.equal(retryWindowState.status, "CANCELED");
-  assert.equal(
-    retryWindowState.state_reason_code,
-    "RETRY_WINDOW_EXHAUSTED",
-  );
+  assert.equal(retryWindowState.state_reason_code, "RETRY_WINDOW_EXHAUSTED");
   assert.equal(retryWindowState.secret_ciphertext, null);
 
   const primaryEvents = await readEvents(
@@ -3584,12 +3509,7 @@ async function runDeliveryMatrix({
   );
   assert.deepEqual(
     ambiguousEvents.map((event) => event.event_type),
-    [
-      "CLAIMED",
-      "PROVIDER_MARKED",
-      "REAP_AMBIGUOUS",
-      "RECONCILED_DEAD",
-    ],
+    ["CLAIMED", "PROVIDER_MARKED", "REAP_AMBIGUOUS", "RECONCILED_DEAD"],
   );
   const pendingPoisonEvents = await readEvents(
     databaseAdmin,
@@ -3629,12 +3549,7 @@ async function runDeliveryMatrix({
   );
   assert.deepEqual(
     reconciledSentEvents.map((event) => event.event_type),
-    [
-      "CLAIMED",
-      "PROVIDER_MARKED",
-      "PROVIDER_AMBIGUOUS",
-      "RECONCILED_SENT",
-    ],
+    ["CLAIMED", "PROVIDER_MARKED", "PROVIDER_AMBIGUOUS", "RECONCILED_SENT"],
   );
   assert.deepEqual(
     reconciledSentEvents.map((event) => event.actor_digest),
@@ -3658,12 +3573,7 @@ async function runDeliveryMatrix({
   );
   assert.deepEqual(
     markerRaceEvents.map((event) => event.event_type),
-    [
-      "CLAIMED",
-      "PROVIDER_MARKED",
-      "PROVIDER_AMBIGUOUS",
-      "RECONCILED_DEAD",
-    ],
+    ["CLAIMED", "PROVIDER_MARKED", "PROVIDER_AMBIGUOUS", "RECONCILED_DEAD"],
   );
   assert.deepEqual(
     markerRaceEvents.map((event) => event.actor_digest),
@@ -3673,33 +3583,21 @@ async function runDeliveryMatrix({
     databaseAdmin,
     expiredFixture.outboxId,
   );
-  const budgetEvents = await readEvents(
-    databaseAdmin,
-    budgetFixture.outboxId,
-  );
+  const budgetEvents = await readEvents(databaseAdmin, budgetFixture.outboxId);
   const retryWindowEvents = await readEvents(
     databaseAdmin,
     retryWindowFixture.outboxId,
   );
   assert.deepEqual(
-    expiredEvents.map((event) => [
-      event.event_type,
-      event.actor_digest,
-    ]),
+    expiredEvents.map((event) => [event.event_type, event.actor_digest]),
     [["REAP_CANCELED", WORKER_ACTOR_DIGEST]],
   );
   assert.deepEqual(
-    budgetEvents.map((event) => [
-      event.event_type,
-      event.actor_digest,
-    ]),
+    budgetEvents.map((event) => [event.event_type, event.actor_digest]),
     [["REAP_DEAD", WORKER_ACTOR_DIGEST]],
   );
   assert.deepEqual(
-    retryWindowEvents.map((event) => [
-      event.event_type,
-      event.actor_digest,
-    ]),
+    retryWindowEvents.map((event) => [event.event_type, event.actor_digest]),
     [["REAP_CANCELED", WORKER_ACTOR_DIGEST]],
   );
   assert.equal(
@@ -3740,15 +3638,12 @@ async function runDeliveryMatrix({
   );
 
   return {
-    claimDecisions: claimReceipts
-      .map((receipt) => receipt.decision)
-      .sort(),
+    claimDecisions: claimReceipts.map((receipt) => receipt.decision).sort(),
     nullInputSqlStateCases: 6,
     acceptanceDeniedCases: 9,
-    primaryFinalStatus: (await readOutbox(
-      databaseAdmin,
-      primaryFixture.outboxId,
-    )).status,
+    primaryFinalStatus: (
+      await readOutbox(databaseAdmin, primaryFixture.outboxId)
+    ).status,
     tenantBFinalStatus: tenantBState.status,
     retryDecision: retryReceipt.decision,
     providerMarkerDecision: markReceipt.decision,
@@ -4027,9 +3922,7 @@ async function assertCaseExpandApplicationWave(client, tenantId, suffix) {
   );
   assert.deepEqual(
     {
-      compatibilityAliasCount: Number(
-        drain?.compatibility_alias_count ?? -1,
-      ),
+      compatibilityAliasCount: Number(drain?.compatibility_alias_count ?? -1),
       blockingConsumedAliasCount: Number(
         drain?.blocking_consumed_alias_count ?? -1,
       ),
@@ -4175,10 +4068,7 @@ async function assertCaseContractWave(client, fixture, tenantId, suffix) {
     fixture.sourceAwareEntitlementId,
   );
   assert.equal(consumed?.reward_id, outcomeRewardId);
-  assert.equal(
-    consumed?.source_reward_id,
-    fixture.sourceAwareParentRewardId,
-  );
+  assert.equal(consumed?.source_reward_id, fixture.sourceAwareParentRewardId);
   assert.notEqual(consumed?.reward_id, consumed?.source_reward_id);
   assert.equal(consumed?.status, "CONSUMED");
   assert.equal(consumed?.consumed, true);
@@ -4296,9 +4186,7 @@ async function assertFinalWorkerRoutineBoundary(
     workerExecuteCount: Number(row?.worker_execute_count ?? -1),
     workerGrantOptionCount: Number(row?.worker_grant_option_count ?? -1),
     publicPrivilegeCount: Number(row?.public_privilege_count ?? -1),
-    unexpectedPrivilegeCount: Number(
-      row?.unexpected_privilege_count ?? -1,
-    ),
+    unexpectedPrivilegeCount: Number(row?.unexpected_privilege_count ?? -1),
     workerRoleSafe: row?.worker_role_safe,
   };
   assert.deepEqual(evidence, {
@@ -4379,12 +4267,9 @@ async function runRealSmoke() {
   const upgradeDatabaseName = `lp_identity_mail_upgrade_ci_${suffix}`;
   const originDatabaseName = `lp_identity_mail_origin_ci_${suffix}`;
   const cleanDatabaseName = `lp_identity_mail_clean_ci_${suffix}`;
-  const legacyRejectDatabaseName =
-    `lp_identity_mail_legacy_reject_ci_${suffix}`;
-  const claimRejectDatabaseName =
-    `lp_identity_mail_claim_reject_ci_${suffix}`;
-  const aclRejectDatabaseName =
-    `lp_identity_mail_acl_reject_ci_${suffix}`;
+  const legacyRejectDatabaseName = `lp_identity_mail_legacy_reject_ci_${suffix}`;
+  const claimRejectDatabaseName = `lp_identity_mail_claim_reject_ci_${suffix}`;
+  const aclRejectDatabaseName = `lp_identity_mail_acl_reject_ci_${suffix}`;
   const roles = {
     workerRoleName: `lp_identity_mail_worker_${suffix}`,
     hostileRoleName: `lp_identity_mail_hostile_${suffix}`,
@@ -4398,10 +4283,7 @@ async function runRealSmoke() {
   const upgradeUrl = databaseUrl(sourceUrl, upgradeDatabaseName);
   const originUrl = databaseUrl(sourceUrl, originDatabaseName);
   const cleanUrl = databaseUrl(sourceUrl, cleanDatabaseName);
-  const legacyRejectUrl = databaseUrl(
-    sourceUrl,
-    legacyRejectDatabaseName,
-  );
+  const legacyRejectUrl = databaseUrl(sourceUrl, legacyRejectDatabaseName);
   const claimRejectUrl = databaseUrl(sourceUrl, claimRejectDatabaseName);
   const aclRejectUrl = databaseUrl(sourceUrl, aclRejectDatabaseName);
   const admin = new PrismaClient({ log: [] });
@@ -4452,10 +4334,7 @@ async function runRealSmoke() {
       migrationPlan.identity176Manifest,
       migrationPlan.identity176Manifest.entries.slice(0, CURRENT_174_COUNT),
     );
-    await seedManifest(
-      originArtifact,
-      migrationPlan.originMainManifest,
-    );
+    await seedManifest(originArtifact, migrationPlan.originMainManifest);
     await seedManifest(cleanArtifact, migrationPlan.workingManifest);
 
     await createDatabase(admin, upgradeDatabaseName);
@@ -4491,11 +4370,7 @@ async function runRealSmoke() {
       claimRejectUrl,
       "claim-reject-174",
     );
-    runMigrateDeploy(
-      branchArtifact.schemaPath,
-      aclRejectUrl,
-      "acl-reject-174",
-    );
+    runMigrateDeploy(branchArtifact.schemaPath, aclRejectUrl, "acl-reject-174");
     runMigrateDeploy(originArtifact.schemaPath, originUrl, "origin-152");
     runMigrateDeploy(cleanArtifact.schemaPath, cleanUrl, "clean-179");
     databaseAdmin = prismaClient(upgradeUrl);
@@ -4515,11 +4390,7 @@ async function runRealSmoke() {
       CURRENT_174_COUNT,
       CURRENT_174,
     );
-    await assertMigrationState(
-      aclRejectAdmin,
-      CURRENT_174_COUNT,
-      CURRENT_174,
-    );
+    await assertMigrationState(aclRejectAdmin, CURRENT_174_COUNT, CURRENT_174);
     await assertMigrationState(originAdmin, 152, CURRENT_178);
     const originInitialManifest = await assertDatabaseMigrationManifest(
       originAdmin,
@@ -4531,19 +4402,13 @@ async function runRealSmoke() {
       migrationPlan.workingManifest,
     );
 
-    const primaryFixture = deliveryFixture(
-      randomUUID(),
-      `${suffix}-primary`,
-    );
+    const primaryFixture = deliveryFixture(randomUUID(), `${suffix}-primary`);
     await insertTenant(databaseAdmin, primaryFixture);
     const legacyRejectFixture = deliveryFixture(
       randomUUID(),
       `${suffix}-legacy-aad`,
     );
-    await insertDeliveryAggregate(
-      legacyRejectAdmin,
-      legacyRejectFixture,
-    );
+    await insertDeliveryAggregate(legacyRejectAdmin, legacyRejectFixture);
 
     await addManifestMigration(
       branchArtifact,
@@ -4561,23 +4426,15 @@ async function runRealSmoke() {
       claimRejectUrl,
       "claim-reject-175",
     );
-    runMigrateDeploy(
-      branchArtifact.schemaPath,
-      aclRejectUrl,
-      "acl-reject-175",
-    );
+    runMigrateDeploy(branchArtifact.schemaPath, aclRejectUrl, "acl-reject-175");
     await assertEnumIsolation(databaseAdmin, primaryFixture);
 
     const malformedClaimFixture = deliveryFixture(
       randomUUID(),
       `${suffix}-malformed-claim`,
     );
-    malformedClaimFixture.email =
-      `${suffix}.legacy..owner@identity-mail.example.test`;
-    await insertMalformedLegacyClaim(
-      claimRejectAdmin,
-      malformedClaimFixture,
-    );
+    malformedClaimFixture.email = `${suffix}.legacy..owner@identity-mail.example.test`;
+    await insertMalformedLegacyClaim(claimRejectAdmin, malformedClaimFixture);
     await aclRejectAdmin.$executeRawUnsafe(
       `GRANT SELECT ("id")
        ON TABLE public."IdentityMailOutbox"
@@ -4642,11 +4499,7 @@ async function runRealSmoke() {
       CURRENT_175_COUNT,
       CURRENT_175,
     );
-    await assertMigrationState(
-      aclRejectAdmin,
-      CURRENT_175_COUNT,
-      CURRENT_175,
-    );
+    await assertMigrationState(aclRejectAdmin, CURRENT_175_COUNT, CURRENT_175);
 
     await addManifestMigration(
       branchArtifact,
@@ -4662,8 +4515,10 @@ async function runRealSmoke() {
     const branchCheckpointWorkerDigests =
       await readWorkerRoutineDigests(databaseAdmin);
     await assertPopulatedBusinessUpgrade(databaseAdmin, primaryFixture);
-    const holdWriterCompatibility =
-      await assertPost176HoldWriterCompatibility(databaseAdmin, suffix);
+    const holdWriterCompatibility = await assertPost176HoldWriterCompatibility(
+      databaseAdmin,
+      suffix,
+    );
     await insertDeliveryAggregate(databaseAdmin, primaryFixture, {
       tenantExists: true,
       current176: true,
@@ -4730,9 +4585,8 @@ async function runRealSmoke() {
       originUrl,
       "origin-identity-tail-178",
     );
-    const originPreTerminalOrder = await readMigrationOrderEvidence(
-      originAdmin,
-    );
+    const originPreTerminalOrder =
+      await readMigrationOrderEvidence(originAdmin);
     assert.deepEqual(originPreTerminalOrder, {
       completedCount: CURRENT_178_COUNT,
       startedAtHead: CURRENT_176,
@@ -4751,10 +4605,9 @@ async function runRealSmoke() {
       "migration.sql",
     );
     const current179SqlDigest = digest(await readFile(current179SqlPath));
-    const pre176ManifestEntry =
-      migrationPlan.merged178Manifest.entries.find(
-        ({ name }) => name < CURRENT_175,
-      );
+    const pre176ManifestEntry = migrationPlan.merged178Manifest.entries.find(
+      ({ name }) => name < CURRENT_175,
+    );
     assert.ok(pre176ManifestEntry);
     const preTerminalRoutineDigests =
       await readWorkerRoutineDigests(originAdmin);
@@ -4935,8 +4788,10 @@ async function runRealSmoke() {
         password: credentials[roles.workerRoleName],
       }),
     );
-    const originBeforePreTerminalAssert =
-      await readTenantStateFingerprint(originAdmin, originFixture.tenantId);
+    const originBeforePreTerminalAssert = await readTenantStateFingerprint(
+      originAdmin,
+      originFixture.tenantId,
+    );
     await expectSqlState(
       "55000",
       () => callWorkerAssert(originWorker, originFixture.tenantId),
@@ -5007,8 +4862,7 @@ async function runRealSmoke() {
       roles.workerRoleName,
       roles.workerRoleOid,
     );
-    const terminalWorkerDigests =
-      await readWorkerRoutineDigests(originAdmin);
+    const terminalWorkerDigests = await readWorkerRoutineDigests(originAdmin);
     await assertNoDirectTableAccess(originWorker);
 
     await grantRuntimeBoundaries(databaseAdmin, roles);
@@ -5053,7 +4907,10 @@ async function runRealSmoke() {
       roles.workerRoleOid,
     );
     assert.deepEqual(await readStatusLabels(cleanAdmin), EXACT_STATUS_LABELS);
-    assert.deepEqual(await readStatusLabels(databaseAdmin), EXACT_STATUS_LABELS);
+    assert.deepEqual(
+      await readStatusLabels(databaseAdmin),
+      EXACT_STATUS_LABELS,
+    );
     const cleanMigrationState = await readMigrationState(cleanAdmin);
     const upgradeMigrationState = await readMigrationState(databaseAdmin);
     process.stdout.write(
@@ -5234,14 +5091,13 @@ async function runSelfTest() {
       ),
     (error) => error?.code === "TEST_SOURCE_DATABASE_REQUIRED",
   );
-  assert.throws(
-    () =>
-      databaseUrl(
-        new URL(
-          "postgresql://postgres:test@127.0.0.1:5432/leetplus_004j?schema=public",
-        ),
-        "production",
+  assert.throws(() =>
+    databaseUrl(
+      new URL(
+        "postgresql://postgres:test@127.0.0.1:5432/leetplus_004j?schema=public",
       ),
+      "production",
+    ),
   );
   const migrationPlan = await readMigrationPlan();
   assert.equal(migrationPlan.workingManifest.count, CURRENT_179_COUNT);

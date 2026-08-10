@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "contract": "IDENTITY_MAIL_WORKER_V2_LOST_RESPONSE_REPLAY_CANDIDATE_V1",
-  "candidate": "20260802020000_identity_mail_worker_v2_lost_response_replay",
+  "candidate": "20260804170000_identity_mail_worker_v2_lost_response_replay",
   "ordinal": 184,
   "predecessor": {
-    "count": 183,
-    "head": "20260802010000_identity_mail_worker_v2_freshness_protocol",
-    "manifestDigest": "70f66215bdadf0652ade1640e9dd20cf565d25a81d5d319a4c3d68c4e1c9e256",
+    "count": 184,
+    "head": "20260804160000_identity_mail_worker_v2_freshness_protocol",
+    "manifestDigest": "fbefd932e2e34cc3358b2eee8028daf729b044b690af6df01aac2b888b15f642",
     "headChecksum": "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0"
   },
   "migrationSqlSha256": "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424",

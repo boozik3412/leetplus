@@ -23,15 +23,15 @@ const ASSEMBLY_RECEIPT_CONTRACT =
 const ASSEMBLY_RECEIPT_STATUS =
   "FROZEN_IN_MEMORY_ARTIFACT_ASSEMBLED_NOT_RUNNABLE";
 const ASSEMBLY_ALLOW_MANIFEST_SHA256 =
-  "3d82c33872712376f375ddf276d9b794a410190f034dc250ed6f11a54535f4eb";
+  "925bd5300a946c82fc4265375072194bd483e5ea7bceba132c108856637fbdb9";
 const ASSEMBLY_REFREEZE_MANIFEST_SHA256 =
-  "184d1cfb46b1443a8487329382fdf2937656a8dd3ac15cbddad617009cefda98";
+  "55e4a55df4054c22261389d761aac8c34989a6022fefbd9c5f9d5bbb05b42296";
 const ASSEMBLY_PLAN_DIGEST =
-  "426a73b1e10b5960b57e67ea55287d06c02ca501677efd638b4a8b246f8d75a1";
+  "b24a3ef3a4584b99048f60341f55141d4a5c6dc4e252c2c8e6cbe28ec5a8c936";
 const ASSEMBLY_ENTRY_MANIFEST_DIGEST =
-  "c32c9720a60f16b802d32a9e9e964c8d8a9125047beeb3f569fac8b90baebbaa";
+  "acc80c6892b666e3b145cbeb2168e2929ac1ab09985b0ba05d970c87d8548126";
 const ASSEMBLY_IN_MEMORY_ARTIFACT_DIGEST =
-  "8750ebd4dff1726ab0736029735aa65f4ace08ecf3894a2a99d3eb1814673092";
+  "b1e2bc9aece1b85f7b0be6fedaf4e41c3650bbf5b72b9218e5fb6050a9ec6f04";
 const ASSEMBLY_RECEIPT_AUTHORIZATION_KEYS = Object.freeze([
   "canApplyDatabase",
   "canCallExternalProviders",
@@ -45,22 +45,22 @@ const ASSEMBLY_RECEIPT_AUTHORIZATION_KEYS = Object.freeze([
   "productionApplyAuthorized",
   "runnerConsumptionAuthorized",
 ]);
-const SOURCE_DATABASE = "leetplus_current179_ci";
+const SOURCE_DATABASE = "leetplus_current180_ci";
 const SOURCE_HOST = "127.0.0.1";
 const SOURCE_PORT = "55432";
 const SOURCE_QUERY = "?schema=public";
 const SOURCE_USERNAME = "postgres";
-const SOURCE_MIGRATION_COUNT = 179;
+const SOURCE_MIGRATION_COUNT = 180;
 const SOURCE_MIGRATION_HEAD =
-  "20260731120000_identity_mail_delivery_release_head";
+  "20260804120000_guest_game_max_pending_rewards";
 const SOURCE_MIGRATION_HEAD_SHA256 =
-  "c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519";
+  "40587bc93c34875edf6064f9848e42ce0194b321165ac494750987533cef21ef";
 const SOURCE_MIGRATION_MANIFEST_DIGEST =
-  "3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431";
-const FINAL_MIGRATION_COUNT = 190;
+  "8a763027a16c45532bf1cff84fdaacf27f2c4e834cae15cffd7a15feae63f6dc";
+const FINAL_MIGRATION_COUNT = 191;
 const FINAL_MIGRATION_HEAD = "20260805040000_guest_portal_session_current190";
 const FINAL_MIGRATION_MANIFEST_DIGEST =
-  "61c9de5adc0e4673c6eedb69d7d8f42933fc075398fa0ecf1cb2e2ff365e4f55";
+  "a386282c2f2b04fa96892d3642b13f5d16efab637a9a6e77a659d1404b1fba5d";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const TOKEN_PATTERN = /^[0-9a-f]{32}$/u;
 const WORKING_DATABASE_PATTERN = /^lp_imtec_[0-9a-f]{32}_ci$/u;
@@ -68,7 +68,7 @@ const FINAL_DATABASE_PATTERN = /^lp_c180190_[0-9a-f]{32}_ci$/u;
 const MARKER_PATTERN = /^LEETPLUS_CURRENT180190_REHEARSAL_V1:[0-9a-f]{64}$/u;
 const MIGRATION_NAME_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
 const SOURCE_URL_PATTERN =
-  /^postgresql:\/\/postgres(?::[^/?#\\@]+)?@127\.0\.0\.1:55432\/leetplus_current179_ci\?schema=public$/u;
+  /^postgresql:\/\/postgres(?::[^/?#\\@]+)?@127\.0\.0\.1:55432\/leetplus_current180_ci\?schema=public$/u;
 const SECRET_ENVIRONMENT_KEY_PATTERN =
   /(?:^|_)(?:API_?KEY|CREDENTIALS?|PRIVATE_?KEY|PASSWORD|SECRET|TOKEN)(?:$|_)/iu;
 const FORBIDDEN_DATABASE_ENVIRONMENT_KEYS = new Set([
@@ -115,7 +115,7 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP = deepFreeze([
     confirmation: "rehearse-dormant-identity-mail-tenant-enrollment-current180",
     confirmationGuc:
       "leetplus.identity_mail_tenant_enrollment_current180_confirmation",
-    migration: "20260801010000_identity_mail_tenant_enrollment_control_plane",
+    migration: "20260804130000_identity_mail_tenant_enrollment_control_plane",
     ordinal: 180,
     sha256: "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683",
     sha256Guc: "leetplus.identity_mail_tenant_enrollment_current180_sha256",
@@ -125,7 +125,7 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP = deepFreeze([
       "rehearse-noncanonical-identity-mail-tenant-lock-drain-current181",
     confirmationGuc:
       "leetplus.identity_mail_tenant_lock_drain_current181_confirmation",
-    migration: "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+    migration: "20260804140000_identity_mail_tenant_lock_drain_worker_v2",
     ordinal: 181,
     sha256: "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac",
     sha256Guc: "leetplus.identity_mail_tenant_lock_drain_current181_sha256",
@@ -135,7 +135,7 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP = deepFreeze([
       "rehearse-noncanonical-identity-mail-tenant-first-claim-current182",
     confirmationGuc:
       "leetplus.identity_mail_tenant_first_claim_current182_confirmation",
-    migration: "20260801030000_identity_mail_tenant_first_claim_protocol",
+    migration: "20260804150000_identity_mail_tenant_first_claim_protocol",
     ordinal: 182,
     sha256: "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf",
     sha256Guc: "leetplus.identity_mail_tenant_first_claim_current182_sha256",
@@ -145,7 +145,7 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP = deepFreeze([
       "rehearse-noncanonical-identity-mail-worker-v2-freshness-current183",
     confirmationGuc:
       "leetplus.identity_mail_worker_v2_freshness_current183_confirmation",
-    migration: "20260802010000_identity_mail_worker_v2_freshness_protocol",
+    migration: "20260804160000_identity_mail_worker_v2_freshness_protocol",
     ordinal: 183,
     sha256: "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0",
     sha256Guc: "leetplus.identity_mail_worker_v2_freshness_current183_sha256",
@@ -155,7 +155,7 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP = deepFreeze([
       "rehearse-noncanonical-identity-mail-worker-v2-replay-current184",
     confirmationGuc:
       "leetplus.identity_mail_worker_v2_replay_current184_confirmation",
-    migration: "20260802020000_identity_mail_worker_v2_lost_response_replay",
+    migration: "20260804170000_identity_mail_worker_v2_lost_response_replay",
     ordinal: 184,
     sha256: "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424",
     sha256Guc: "leetplus.identity_mail_worker_v2_replay_current184_sha256",
@@ -165,7 +165,7 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP = deepFreeze([
       "rehearse-noncanonical-identity-mail-enrollment-evidence-ledger-current185",
     confirmationGuc:
       "leetplus.identity_mail_enrollment_evidence_ledger_current185_confirmation",
-    migration: "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+    migration: "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
     ordinal: 185,
     sha256: "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6",
     sha256Guc:
@@ -176,7 +176,7 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP = deepFreeze([
       "rehearse-noncanonical-identity-mail-duty-role-runtime-current186",
     confirmationGuc:
       "leetplus.identity_mail_duty_role_runtime_current186_confirmation",
-    migration: "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+    migration: "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
     ordinal: 186,
     sha256: "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
     sha256Guc: "leetplus.identity_mail_duty_role_runtime_current186_sha256",
@@ -185,76 +185,76 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP = deepFreeze([
 
 export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_PREFIXES = deepFreeze([
   {
-    count: 179,
+    count: 180,
     digest: SOURCE_MIGRATION_MANIFEST_DIGEST,
     head: SOURCE_MIGRATION_HEAD,
     headChecksum: SOURCE_MIGRATION_HEAD_SHA256,
   },
   {
-    count: 180,
-    digest: "c41f3854bff364deb4f169f56f31bb5bd7e46249a677c66bc879cb967b6fae58",
+    count: 181,
+    digest: "ce2cfdf0b499aefee7171c7229ee8d9e1ec5e37b31e0e247ccd30145ac14ff46",
     head: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[0].migration,
     headChecksum: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[0].sha256,
   },
   {
-    count: 181,
-    digest: "ba90c13072d9afb2cc942b3cde1d01a789772605c69b71d3b273a0cb5a6e97f6",
+    count: 182,
+    digest: "0d7fa6466d609504696eb96e53e27c33e10881c4d2edf38b69d88ef1ab689107",
     head: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[1].migration,
     headChecksum: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[1].sha256,
   },
   {
-    count: 182,
-    digest: "d0002b64dd8e6134f20a444c8b1ff70762944ffe057da3cc2fbad46945c06506",
+    count: 183,
+    digest: "f4359a47b40fdf2df1839db4fd33c577674d4f887b56aab9e7903373e103c52a",
     head: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[2].migration,
     headChecksum: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[2].sha256,
   },
   {
-    count: 183,
-    digest: "70f66215bdadf0652ade1640e9dd20cf565d25a81d5d319a4c3d68c4e1c9e256",
+    count: 184,
+    digest: "fbefd932e2e34cc3358b2eee8028daf729b044b690af6df01aac2b888b15f642",
     head: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[3].migration,
     headChecksum: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[3].sha256,
   },
   {
-    count: 184,
-    digest: "9da93df51df3945b3219409f06118134712edb2a96543d1eb183217da9767819",
+    count: 185,
+    digest: "d5f9f9ad5d7be5706897533eb71f92aa0bd9d8f3feca62462898fc3a0757ac7a",
     head: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[4].migration,
     headChecksum: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[4].sha256,
   },
   {
-    count: 185,
-    digest: "efee75130a1ed33c7c9f431acc60e4c3275f90a2479c34906cfa40fa0332ab19",
+    count: 186,
+    digest: "a7a90ef8c5de5c8a54bdccd54309837ddda2c2e161d6650b335d83f7af04034d",
     head: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[5].migration,
     headChecksum: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[5].sha256,
   },
   {
-    count: 186,
-    digest: "cf354d5bb94069978b4b63b35e2fec1464822c682513b5c3c982f63fc472dc8e",
+    count: 187,
+    digest: "9f1e5cd7119fa1136681be1b69bc0be8419920a0a32015bad008be45cb5318d1",
     head: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[6].migration,
     headChecksum: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[6].sha256,
   },
   {
-    count: 187,
-    digest: "d7566ae943cc603e659c7513d4bf29fa0c3838639904f1b312acc78a10360989",
+    count: 188,
+    digest: "622ab534d6ce4d4c7f9de0fab00e6d104ddaa489e0eff8104167dfb1d0a41e7e",
     head: "20260805010000_identity_mail_cluster_application_admission_current187",
     headChecksum:
       "dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3",
   },
   {
-    count: 188,
-    digest: "b5309669dd7280b4034bab5139102e42d7ce7e4dde5b59ff67cdb72d56a28088",
+    count: 189,
+    digest: "7f29a2e0e93deaa59fa26e2aa143ad4a7b896014064aefd9d4615eb158a6dc26",
     head: "20260805020000_langame_onboarding_staged_receipt_current188",
     headChecksum:
       "e76ed2c1b7e913bbfa9a9779cd0c860b120534c83eba504a0510469ff26f0c60",
   },
   {
-    count: 189,
-    digest: "c96934eed0845ec741256ad2af2050b45f0a4b7fc455ce4c00f0c71a43229934",
+    count: 190,
+    digest: "54882de8ce7b5aeef11d78bd656c2a68c5e21926df4eb5c7b468c7c84f8d956e",
     head: "20260805030000_identity_employee_invite_mail_boundary_current189",
     headChecksum:
       "4bbf4d49847b82731aa2e235796b4b1a898914768c1f4f4e2cb7a8b084e5c751",
   },
   {
-    count: 190,
+    count: 191,
     digest: FINAL_MIGRATION_MANIFEST_DIGEST,
     head: FINAL_MIGRATION_HEAD,
     headChecksum:

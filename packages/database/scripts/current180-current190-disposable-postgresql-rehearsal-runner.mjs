@@ -171,7 +171,7 @@ const RUNTIME_MODULE =
   "./current180-current190-disposable-postgresql-rehearsal-runtime.mjs";
 const RUNTIME_FACTORY =
   "createCurrent180Current190DisposablePostgresqlRehearsalRuntimeAdapter";
-const SOURCE_DATABASE_NAME = "leetplus_current179_ci";
+const SOURCE_DATABASE_NAME = "leetplus_current180_ci";
 const MAINTENANCE_DATABASE_NAME = "postgres";
 const LOOPBACK_HOST = "127.0.0.1";
 const LOOPBACK_PORT = 55_432;

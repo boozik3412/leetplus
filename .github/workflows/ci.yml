@@ -163,30 +163,6 @@ jobs:
       - name: Validate protected mail-worker tenant enrollment preflight
         run: pnpm --filter database check:identity-mail-tenant-enrollment-preflight
 
-      - name: Validate dormant non-canonical CURRENT180 tenant enrollment foundation
-        run: pnpm --filter database check:identity-mail-tenant-enrollment-foundation
-
-      - name: Validate dormant non-canonical CURRENT181 tenant lock and drain foundation
-        run: pnpm --filter database check:identity-mail-tenant-lock-drain-current181-foundation
-
-      - name: Validate CURRENT181 disposable rehearsal harness
-        run: pnpm --filter database check:identity-mail-tenant-lock-drain-current181-smoke
-
-      - name: Validate dormant non-canonical CURRENT182 tenant-first claim foundation
-        run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-foundation
-
-      - name: Validate dormant non-canonical CURRENT183 worker-v2 freshness foundation
-        run: pnpm --filter database check:identity-mail-worker-v2-freshness-current183-foundation
-
-      - name: Validate dormant non-canonical CURRENT184 lost-response replay foundation
-        run: pnpm --filter database check:identity-mail-worker-v2-replay-current184-foundation
-
-      - name: Validate dormant non-canonical CURRENT185 enrollment evidence ledger foundation
-        run: pnpm --filter database check:identity-mail-enrollment-evidence-ledger-current185-foundation
-
-      - name: Validate dormant non-canonical CURRENT186 duty-role runtime foundation
-        run: pnpm --filter database check:identity-mail-duty-role-current186-foundation
-
       - name: Validate CURRENT186 exhaustive duty-role catalog
         run: pnpm --filter database check:identity-mail-duty-role-catalog-current186
 
@@ -226,7 +202,7 @@ jobs:
       - name: Validate dormant CURRENT190 persisted guest session contract
         run: pnpm --filter database check:guest-portal-session-current190
 
-      - name: Prove CURRENT180-CURRENT190 release rehearsal remains fail-closed
+      - name: Prove frozen foundation pins and CURRENT180-CURRENT190 rehearsal remain fail-closed
         run: pnpm --filter database check:current180-current190-release-rehearsal-blocker
         env:
           NODE_ENV: test
@@ -250,9 +226,6 @@ jobs:
         run: pnpm --filter database check:current180-current190-disposable-postgresql-rehearsal
         env:
           NODE_ENV: test
-
-      - name: Validate CURRENT182 disposable rehearsal harness
-        run: pnpm --filter database check:identity-mail-tenant-first-claim-current182-smoke
 
       - name: Validate independent tenant enrollment command authority
         run: pnpm --filter database check:identity-mail-tenant-enrollment-authority
@@ -449,8 +422,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260731120000_identity_mail_delivery_release_head
-          EXPECTED_DATABASE_MIGRATION_COUNT: "179"
+          EXPECTED_DATABASE_MIGRATION: 20260804120000_guest_game_max_pending_rewards
+          EXPECTED_DATABASE_MIGRATION_COUNT: "180"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -483,6 +456,80 @@ jobs:
 
       - name: Build web
         run: pnpm --filter web build
+
+      - name: Create deterministic release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+
+          release_root="$RUNNER_TEMP/leetplus-release-$CI_RELEASE_SHA"
+          archive="$RUNNER_TEMP/leetplus-release-$CI_RELEASE_SHA.tar.gz"
+          mkdir -p \
+            "$release_root/apps/api" \
+            "$release_root/apps/web" \
+            "$release_root/packages/database/prisma"
+
+          cp -a apps/api/dist "$release_root/apps/api/"
+          cp -a apps/web/.next "$release_root/apps/web/"
+          cp -a packages/database/prisma/schema.prisma "$release_root/packages/database/prisma/"
+          cp -a packages/database/prisma/migrations "$release_root/packages/database/prisma/"
+          cp -a package.json pnpm-lock.yaml pnpm-workspace.yaml "$release_root/"
+
+          printf '%s\n' \
+            '{' \
+            "  \"releaseSha\": \"$CI_RELEASE_SHA\"," \
+            '  "nodeVersion": "22",' \
+            '  "pnpmVersion": "10.33.2",' \
+            '  "databaseMigration": "20260804120000_guest_game_max_pending_rewards",' \
+            '  "databaseMigrationCount": 180' \
+            '}' > "$release_root/release-provenance.json"
+
+          (
+            cd "$release_root"
+            if find . \
+              -path './apps/web/.next/cache' -prune -o \
+              -type l -print -quit \
+              | grep -q .; then
+              printf 'Release artifact refuses symbolic links\n' >&2
+              exit 1
+            fi
+            find . \
+              -path './apps/web/.next/cache' -prune -o \
+              -type f ! -name SHA256SUMS -print0 \
+              | LC_ALL=C sort -z \
+              | xargs -0 sha256sum > SHA256SUMS
+          )
+
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            --format=posix \
+            --pax-option=delete=atime,delete=ctime \
+            --exclude='./apps/web/.next/cache' \
+            -C "$release_root" \
+            -cf - . \
+            | gzip -n > "$archive"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256"
+            sha256sum --check "$(basename "$archive").sha256"
+          )
+          gzip --test "$archive"
+
+      - name: Upload SHA-bound release artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-release-${{ env.CI_RELEASE_SHA }}
+          path: |
+            ${{ runner.temp }}/leetplus-release-${{ env.CI_RELEASE_SHA }}.tar.gz
+            ${{ runner.temp }}/leetplus-release-${{ env.CI_RELEASE_SHA }}.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
 
   migration-smoke:
     name: PostgreSQL migration smoke
@@ -616,24 +663,6 @@ jobs:
         env:
           NODE_ENV: test
           IDENTITY_MAIL_TENANT_ENROLLMENT_PREFLIGHT_SMOKE_CONFIRM: run-identity-mail-tenant-enrollment-preflight-smoke
-
-      - name: Rehearse dormant non-canonical CURRENT179 to CURRENT180 tenant enrollment candidate
-        run: pnpm --filter database db:smoke:identity-mail-tenant-enrollment-current180-candidate
-        env:
-          NODE_ENV: test
-          IDENTITY_MAIL_TENANT_ENROLLMENT_CURRENT180_CANDIDATE_SMOKE_CONFIRM: run-identity-mail-tenant-enrollment-current180-candidate-smoke
-
-      - name: Rehearse dormant non-canonical CURRENT179 through CURRENT181 tenant lock and drain candidate
-        run: pnpm --filter database db:smoke:identity-mail-tenant-lock-drain-current181-candidate
-        env:
-          NODE_ENV: test
-          IDENTITY_MAIL_TENANT_LOCK_DRAIN_CURRENT181_CANDIDATE_SMOKE_CONFIRM: run-identity-mail-tenant-lock-drain-current181-candidate-smoke
-
-      - name: Rehearse dormant non-canonical CURRENT179 through CURRENT182 tenant-first claim candidate
-        run: pnpm --filter database db:smoke:identity-mail-tenant-first-claim-current182-candidate
-        env:
-          NODE_ENV: test
-          IDENTITY_MAIL_TENANT_FIRST_CLAIM_CURRENT182_CANDIDATE_SMOKE_CONFIRM: run-identity-mail-tenant-first-claim-current182-candidate-smoke
 
       - name: Verify application and worker tenant-first identity claim races
         run: pnpm --filter api test:integration:identity-email-tenant-lock-cross-path:pg

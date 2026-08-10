@@ -51,18 +51,18 @@ const INSPECTION_CHAIN_PATHS = [
   join(SCRIPT_DIRECTORY, "current180-current190-release-rehearsal-blocker.mjs"),
 ];
 const EXPECTED_INSPECTION_CHAIN_HASHES = [
-  "e0ba9d0f49a46f560b520b25f74d1318e666c03966549308aaca96cf4d51d336",
-  "b5dc5a6f42a5eca3708bc6bb9a8a5e5f2f2e2d8b829da1affa5fbe9c8ced8bd6",
-  "2bda04a60becf778d0b14a072af11472bd7c1a545168d644f2e21c66476810d1",
+  "67ca85509e7ba702d3f31b2c02e86fdb7cbf4d548f457ce63b173295f7767f50",
+  "ccbea2f8b17f67b7c8b9a2da45699a535a68ee6347aae1d3c66f4d542dd8eba2",
+  "52112c143adfe5f1f906628fd56a592cdb7719a7290c26a9053d00e22e1d7f32",
 ];
 const EXPECTED_PLAN_DIGEST =
-  "426a73b1e10b5960b57e67ea55287d06c02ca501677efd638b4a8b246f8d75a1";
+  "b24a3ef3a4584b99048f60341f55141d4a5c6dc4e252c2c8e6cbe28ec5a8c936";
 const EXPECTED_MIGRATION_MANIFEST_DIGEST =
-  "61c9de5adc0e4673c6eedb69d7d8f42933fc075398fa0ecf1cb2e2ff365e4f55";
+  "a386282c2f2b04fa96892d3642b13f5d16efab637a9a6e77a659d1404b1fba5d";
 const EXPECTED_ENTRY_MANIFEST_DIGEST =
-  "c32c9720a60f16b802d32a9e9e964c8d8a9125047beeb3f569fac8b90baebbaa";
+  "acc80c6892b666e3b145cbeb2168e2929ac1ab09985b0ba05d970c87d8548126";
 const EXPECTED_IN_MEMORY_ARTIFACT_DIGEST =
-  "8750ebd4dff1726ab0736029735aa65f4ace08ecf3894a2a99d3eb1814673092";
+  "b1e2bc9aece1b85f7b0be6fedaf4e41c3650bbf5b72b9218e5fb6050a9ec6f04";
 const EXCLUDED_CURRENT187_E_DIRECTORY =
   "20260805050000_identity_mail_ddl_fence_ledger_current187";
 const IN_MEMORY_SCHEMA_TEXT = `datasource db {
@@ -112,7 +112,7 @@ async function inspectWithReadOverride(targetPath, transform) {
   });
 }
 
-test("builds the exact immutable 179+CURRENT180..190 in-memory plan", async () => {
+test("builds the exact immutable 180+CURRENT180..190 in-memory plan", async () => {
   const plan = await inspectCurrent180Current190DisposableReleaseAssembly();
   assert.equal(
     plan.contract,
@@ -125,10 +125,13 @@ test("builds the exact immutable 179+CURRENT180..190 in-memory plan", async () =
     plan.allowManifestSha256,
     CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_MANIFEST_SHA256,
   );
-  assert.equal(plan.migrations.length, 190);
+  assert.equal(plan.migrations.length, 191);
   assert.deepEqual(
     plan.migrations.map(({ ordinal }) => ordinal),
-    Array.from({ length: 190 }, (_, index) => index + 1),
+    [
+      ...Array.from({ length: 180 }, (_, index) => index + 1),
+      ...Array.from({ length: 11 }, (_, index) => index + 180),
+    ],
   );
   assert.deepEqual(
     [...plan.migrations]
@@ -137,12 +140,12 @@ test("builds the exact immutable 179+CURRENT180..190 in-memory plan", async () =
     plan.migrations.map(({ name }) => name),
   );
   assert.equal(
-    plan.migrations[178].name,
-    "20260731120000_identity_mail_delivery_release_head",
+    plan.migrations[179].name,
+    "20260804120000_guest_game_max_pending_rewards",
   );
   assert.equal(
-    plan.migrations[179].name,
-    "20260801010000_identity_mail_tenant_enrollment_control_plane",
+    plan.migrations[180].name,
+    "20260804130000_identity_mail_tenant_enrollment_control_plane",
   );
   assert.equal(
     plan.migrations.at(-1).name,
@@ -200,7 +203,7 @@ test("copies every frozen CURRENT180..190 SQL source byte-for-byte in memory", a
     assemblyOptions(plan),
   );
   const byPath = new Map(artifact.entries.map((entry) => [entry.path, entry]));
-  for (const migration of plan.migrations.slice(179)) {
+  for (const migration of plan.migrations.slice(180)) {
     const sourceBytes = await readFile(
       join(REPOSITORY_ROOT, migration.sourceDirectory, "migration.sql"),
     );
@@ -589,9 +592,9 @@ test("assembles an exact frozen in-memory artifact without output paths", async 
     artifact.status,
     "FROZEN_IN_MEMORY_ARTIFACT_ASSEMBLED_NOT_RUNNABLE",
   );
-  assert.equal(artifact.entryCount, 192);
-  assert.equal(artifact.entries.length, 192);
-  assert.equal(artifact.migrationCount, 190);
+  assert.equal(artifact.entryCount, 193);
+  assert.equal(artifact.entries.length, 193);
+  assert.equal(artifact.migrationCount, 191);
   assert.equal(
     artifact.migrationManifestDigest,
     EXPECTED_MIGRATION_MANIFEST_DIGEST,

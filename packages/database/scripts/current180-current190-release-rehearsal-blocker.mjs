@@ -12,12 +12,12 @@ const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "../../..");
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
-const CANONICAL_COUNT = 179;
-const CANONICAL_HEAD = "20260731120000_identity_mail_delivery_release_head";
+const CANONICAL_COUNT = 180;
+const CANONICAL_HEAD = "20260804120000_guest_game_max_pending_rewards";
 const CANONICAL_HEAD_SHA256 =
-  "c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519";
+  "40587bc93c34875edf6064f9848e42ce0194b321165ac494750987533cef21ef";
 const CANONICAL_MANIFEST_DIGEST =
-  "3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431";
+  "8a763027a16c45532bf1cff84fdaacf27f2c4e834cae15cffd7a15feae63f6dc";
 
 const EXPECTED_CURRENT187_TOOLING = deepFreeze([
   {
@@ -89,10 +89,10 @@ const EXPECTED_CANDIDATES = deepFreeze([
     metadata: {
       schemaVersion: 1,
       contract: "IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_CANDIDATE_V1",
-      candidate: "20260801010000_identity_mail_tenant_enrollment_control_plane",
+      candidate: "20260804130000_identity_mail_tenant_enrollment_control_plane",
       ordinal: 180,
       predecessor: {
-        count: 179,
+        count: 180,
         head: CANONICAL_HEAD,
         manifestDigest: CANONICAL_MANIFEST_DIGEST,
         headChecksum: CANONICAL_HEAD_SHA256,
@@ -109,13 +109,13 @@ const EXPECTED_CANDIDATES = deepFreeze([
     metadata: {
       schemaVersion: 1,
       contract: "IDENTITY_MAIL_TENANT_LOCK_DRAIN_WORKER_V2_CANDIDATE_V1",
-      candidate: "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+      candidate: "20260804140000_identity_mail_tenant_lock_drain_worker_v2",
       ordinal: 181,
       predecessor: {
-        count: 180,
-        head: "20260801010000_identity_mail_tenant_enrollment_control_plane",
+        count: 181,
+        head: "20260804130000_identity_mail_tenant_enrollment_control_plane",
         manifestDigest:
-          "c41f3854bff364deb4f169f56f31bb5bd7e46249a677c66bc879cb967b6fae58",
+          "ce2cfdf0b499aefee7171c7229ee8d9e1ec5e37b31e0e247ccd30145ac14ff46",
         headChecksum:
           "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683",
       },
@@ -131,13 +131,13 @@ const EXPECTED_CANDIDATES = deepFreeze([
     metadata: {
       schemaVersion: 1,
       contract: "IDENTITY_MAIL_TENANT_FIRST_CLAIM_PROTOCOL_CANDIDATE_V1",
-      candidate: "20260801030000_identity_mail_tenant_first_claim_protocol",
+      candidate: "20260804150000_identity_mail_tenant_first_claim_protocol",
       ordinal: 182,
       predecessor: {
-        count: 181,
-        head: "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+        count: 182,
+        head: "20260804140000_identity_mail_tenant_lock_drain_worker_v2",
         manifestDigest:
-          "ba90c13072d9afb2cc942b3cde1d01a789772605c69b71d3b273a0cb5a6e97f6",
+          "0d7fa6466d609504696eb96e53e27c33e10881c4d2edf38b69d88ef1ab689107",
         headChecksum:
           "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac",
       },
@@ -153,13 +153,13 @@ const EXPECTED_CANDIDATES = deepFreeze([
     metadata: {
       schemaVersion: 1,
       contract: "IDENTITY_MAIL_WORKER_V2_FRESHNESS_PROTOCOL_CANDIDATE_V1",
-      candidate: "20260802010000_identity_mail_worker_v2_freshness_protocol",
+      candidate: "20260804160000_identity_mail_worker_v2_freshness_protocol",
       ordinal: 183,
       predecessor: {
-        count: 182,
-        head: "20260801030000_identity_mail_tenant_first_claim_protocol",
+        count: 183,
+        head: "20260804150000_identity_mail_tenant_first_claim_protocol",
         manifestDigest:
-          "d0002b64dd8e6134f20a444c8b1ff70762944ffe057da3cc2fbad46945c06506",
+          "f4359a47b40fdf2df1839db4fd33c577674d4f887b56aab9e7903373e103c52a",
         headChecksum:
           "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf",
       },
@@ -175,13 +175,13 @@ const EXPECTED_CANDIDATES = deepFreeze([
     metadata: {
       schemaVersion: 1,
       contract: "IDENTITY_MAIL_WORKER_V2_LOST_RESPONSE_REPLAY_CANDIDATE_V1",
-      candidate: "20260802020000_identity_mail_worker_v2_lost_response_replay",
+      candidate: "20260804170000_identity_mail_worker_v2_lost_response_replay",
       ordinal: 184,
       predecessor: {
-        count: 183,
-        head: "20260802010000_identity_mail_worker_v2_freshness_protocol",
+        count: 184,
+        head: "20260804160000_identity_mail_worker_v2_freshness_protocol",
         manifestDigest:
-          "70f66215bdadf0652ade1640e9dd20cf565d25a81d5d319a4c3d68c4e1c9e256",
+          "fbefd932e2e34cc3358b2eee8028daf729b044b690af6df01aac2b888b15f642",
         headChecksum:
           "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0",
       },
@@ -197,13 +197,13 @@ const EXPECTED_CANDIDATES = deepFreeze([
     metadata: {
       schemaVersion: 1,
       contract: "IDENTITY_MAIL_ENROLLMENT_EVIDENCE_LEDGER_V2_CANDIDATE_V1",
-      candidate: "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+      candidate: "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
       ordinal: 185,
       predecessor: {
-        count: 184,
-        head: "20260802020000_identity_mail_worker_v2_lost_response_replay",
+        count: 185,
+        head: "20260804170000_identity_mail_worker_v2_lost_response_replay",
         manifestDigest:
-          "9da93df51df3945b3219409f06118134712edb2a96543d1eb183217da9767819",
+          "d5f9f9ad5d7be5706897533eb71f92aa0bd9d8f3feca62462898fc3a0757ac7a",
         headChecksum:
           "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424",
       },
@@ -220,13 +220,13 @@ const EXPECTED_CANDIDATES = deepFreeze([
     metadata: {
       schemaVersion: 1,
       contract: "IDENTITY_MAIL_DUTY_ROLE_RUNTIME_BOUNDARY_V2_CANDIDATE_V1",
-      candidate: "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+      candidate: "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
       ordinal: 186,
       predecessor: {
-        count: 185,
-        head: "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+        count: 186,
+        head: "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
         manifestDigest:
-          "efee75130a1ed33c7c9f431acc60e4c3275f90a2479c34906cfa40fa0332ab19",
+          "a7a90ef8c5de5c8a54bdccd54309837ddda2c2e161d6650b335d83f7af04034d",
         headChecksum:
           "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6",
       },
@@ -674,6 +674,7 @@ export async function inspectCurrent180Current190ReleaseRehearsal(options) {
       ordinal,
       sql: raw.sql,
       sqlSha256,
+      targetDirectory: metadata.candidate,
     });
   }
 
@@ -708,7 +709,7 @@ export async function inspectCurrent180Current190ReleaseRehearsal(options) {
     }
     chainEntries.push({
       checksum: artifact.sqlSha256,
-      name: artifact.directory,
+      name: artifact.targetDirectory,
     });
   }
   assertCandidateSqlContracts(artifacts, findings);
@@ -731,8 +732,8 @@ export async function inspectCurrent180Current190ReleaseRehearsal(options) {
   const artifactSetDigest = sha256(
     `${artifacts
       .map(
-        ({ contract, directory, ordinal, sqlSha256 }) =>
-          `${ordinal} ${directory} ${contract} ${sqlSha256}`,
+        ({ contract, directory, ordinal, sqlSha256, targetDirectory }) =>
+          `${ordinal} ${directory}->${targetDirectory} ${contract} ${sqlSha256}`,
       )
       .join("\n")}\n`,
   );
@@ -765,12 +766,13 @@ export async function inspectCurrent180Current190ReleaseRehearsal(options) {
     current187ToolingDigest,
     previousFoundationToolingDigest,
     artifacts: artifacts.map(
-      ({ contract, directory, metadata, ordinal, sqlSha256 }) => ({
+      ({ contract, directory, metadata, ordinal, sqlSha256, targetDirectory }) => ({
         contract,
         directory,
         ordinal,
         predecessor: metadata.predecessor,
         sqlSha256,
+        targetDirectory,
       }),
     ),
     blockerDigest,

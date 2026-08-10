@@ -148,7 +148,7 @@ test("pins the exact source and maintenance identities without credentials", () 
         roleName: "postgres",
       },
       source: {
-        databaseName: "leetplus_current179_ci",
+        databaseName: "leetplus_current180_ci",
         host: "127.0.0.1",
         port: 55_432,
         roleName: "postgres",
@@ -157,7 +157,7 @@ test("pins the exact source and maintenance identities without credentials", () 
     },
   );
   const source = inspectCurrent180Current190PostgresqlConnectionIdentity({
-    databaseName: "leetplus_current179_ci",
+    databaseName: "leetplus_current180_ci",
     host: "127.0.0.1",
     port: 55_432,
     roleName: "postgres",
@@ -178,13 +178,13 @@ test("pins the exact source and maintenance identities without credentials", () 
 test("rejects any connection identity drift", () => {
   for (const candidate of [
     {
-      databaseName: "leetplus_current179_ci",
+      databaseName: "leetplus_current180_ci",
       host: "localhost",
       port: 55_432,
       roleName: "postgres",
     },
     {
-      databaseName: "leetplus_current179_ci",
+      databaseName: "leetplus_current180_ci",
       host: "127.0.0.1",
       port: 5432,
       roleName: "postgres",
@@ -560,10 +560,10 @@ test("builds fixed-template CREATE and never accepts a caller-selected template"
     runToken: RUN_TOKEN,
     workingDatabaseName: NAMES.workingDatabaseName,
   });
-  assert.equal(statement.kind, "CREATE_DATABASE_FROM_FIXED_CURRENT179");
+  assert.equal(statement.kind, "CREATE_DATABASE_FROM_FIXED_CURRENT180");
   assert.equal(
     statement.sql,
-    `CREATE DATABASE "${NAMES.workingDatabaseName}" WITH TEMPLATE = "leetplus_current179_ci" OWNER = "postgres" ALLOW_CONNECTIONS = false IS_TEMPLATE = false;`,
+    `CREATE DATABASE "${NAMES.workingDatabaseName}" WITH TEMPLATE = "leetplus_current180_ci" OWNER = "postgres" ALLOW_CONNECTIONS = false IS_TEMPLATE = false;`,
   );
   assert.equal(statement.authority.databaseMutationAuthorized, false);
   assert.equal(statement.authority.callerSuppliedRowsAuthorized, false);

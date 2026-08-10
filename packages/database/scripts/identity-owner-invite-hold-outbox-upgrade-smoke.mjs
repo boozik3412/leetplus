@@ -368,9 +368,9 @@ async function readMigrationPlan() {
   ]);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260731120000_identity_mail_delivery_release_head",
+    "20260804120000_guest_game_max_pending_rewards",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_179");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_180");
   const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
   assert.equal(
     targetIndex,

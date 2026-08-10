@@ -71,5 +71,30 @@ Inventory перед staging:
 
 ## Финальный результат
 
-Заполняется после merge и CI. До этого состояние — `CANONICALIZATION IN
-PROGRESS / PRODUCTION DENIED`.
+- accumulated worktree сохранён snapshot-коммитом
+  `b42a799bc18b5f8aa802baba98d39232203463ae`;
+- создана recovery branch
+  `codex/open-beta-hardening-pre-sync-20260807`;
+- `origin/main` (`ca215571b5465857eadf548b0bd6305b2de47b7a`) влит merge-коммитом
+  `4ff8f0a72e3beb473fcbaaef53b7281bbc6eeabd` без переписывания истории;
+- divergence относительно `origin/main`: behind `0`;
+- новая upstream-миграция
+  `20260804120000_guest_game_max_pending_rewards` принята как canonical head
+  № `180`; dormant release lane `CURRENT180..CURRENT190` перезаморожен поверх
+  неё без переименования исторических source directories;
+- устаревшие прямые CI-запуски frozen foundation/smoke tools заменены единым
+  blocker/refreeze/assembler/rehearsal gate, который продолжает проверять их
+  exact source hashes;
+- CI production-startup contract ожидает canonical head № `180`;
+- Web build ID привязан к exact `CI_RELEASE_SHA`/`RELEASE_SHA`;
+- CI формирует deterministic tar.gz из API/Web/Prisma outputs, включает
+  `release-provenance.json` и per-file `SHA256SUMS`, публикует внешний SHA256 и
+  сохраняет artifact 30 дней.
+
+Финальный candidate SHA намеренно не записывается внутрь этого файла: SHA
+коммита не может содержать собственное значение. Его authoritative значение
+публикуется как `CI_RELEASE_SHA` внутри `release-provenance.json`, имени GitHub
+artifact и CI log exact-checkout gate.
+
+До зелёного GitHub CI и появления скачиваемого artifact состояние остаётся
+`CANONICALIZATION IN PROGRESS / PRODUCTION DENIED`.

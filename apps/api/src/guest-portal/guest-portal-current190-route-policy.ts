@@ -160,6 +160,14 @@ export const GUEST_PORTAL_CURRENT190_ROUTE_MANIFEST = Object.freeze([
     'PERSISTED_READ',
   ),
   route(
+    'getGameMissions',
+    'GET',
+    '/guest-portal/session/game-missions',
+    'READ',
+    'GUEST_SESSION',
+    'PERSISTED_READ',
+  ),
+  route(
     'recordAppOpen',
     'POST',
     '/guest-portal/session/app-open',

@@ -151,7 +151,7 @@ function environment(extra = {}) {
       "run-current180-current190-disposable-postgresql16-rehearsal",
     CURRENT180_CURRENT190_PG_REHEARSAL_PROFILE: "local-pinned",
     [CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_SOURCE_URL_ENVIRONMENT]:
-      "postgresql://postgres@127.0.0.1:55432/leetplus_current179_ci?schema=public",
+      "postgresql://postgres@127.0.0.1:55432/leetplus_current180_ci?schema=public",
     NODE_ENV: "test",
     ...extra,
   });
@@ -765,7 +765,7 @@ test("a cloned query spec is rejected because only the SQL module-issued object 
         methodInput(ctx, {
           connection: {
             kind: "SOURCE",
-            databaseName: "leetplus_current179_ci",
+            databaseName: "leetplus_current180_ci",
           },
           querySpec: forged,
         }),
@@ -784,7 +784,7 @@ test("a digest-recomputed statement with source-destructive SQL is rejected befo
   });
   const forgedDocument = {
     ...issued,
-    sql: 'DROP DATABASE "leetplus_current179_ci";',
+    sql: 'DROP DATABASE "leetplus_current180_ci";',
   };
   delete forgedDocument.statementSpecDigest;
   const forged = deepFreeze({
@@ -823,7 +823,7 @@ test("source and target live queries run in READ ONLY transactions and normalize
     methodInput(ctx, {
       connection: {
         kind: "SOURCE",
-        databaseName: "leetplus_current179_ci",
+        databaseName: "leetplus_current180_ci",
       },
       querySpec,
     }),
@@ -839,7 +839,7 @@ test("source and target live queries run in READ ONLY transactions and normalize
   ]);
   assert.deepEqual(result.connectionIdentity, {
     backendPid: 4_101,
-    databaseName: "leetplus_current179_ci",
+    databaseName: "leetplus_current180_ci",
     host: "127.0.0.1",
     port: 55_432,
     roleName: "postgres",
@@ -865,7 +865,7 @@ test("Prisma normalization accepts the pinned Decimal prototype and never invoke
     methodInput(decimalContext, {
       connection: {
         kind: "SOURCE",
-        databaseName: "leetplus_current179_ci",
+        databaseName: "leetplus_current180_ci",
       },
       querySpec,
     }),
@@ -899,7 +899,7 @@ test("Prisma normalization accepts the pinned Decimal prototype and never invoke
         methodInput(bombContext, {
           connection: {
             kind: "SOURCE",
-            databaseName: "leetplus_current179_ci",
+            databaseName: "leetplus_current180_ci",
           },
           querySpec,
         }),

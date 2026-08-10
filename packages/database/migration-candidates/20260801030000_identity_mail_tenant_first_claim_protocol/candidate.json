@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "contract": "IDENTITY_MAIL_TENANT_FIRST_CLAIM_PROTOCOL_CANDIDATE_V1",
-  "candidate": "20260801030000_identity_mail_tenant_first_claim_protocol",
+  "candidate": "20260804150000_identity_mail_tenant_first_claim_protocol",
   "ordinal": 182,
   "predecessor": {
-    "count": 181,
-    "head": "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
-    "manifestDigest": "ba90c13072d9afb2cc942b3cde1d01a789772605c69b71d3b273a0cb5a6e97f6",
+    "count": 182,
+    "head": "20260804140000_identity_mail_tenant_lock_drain_worker_v2",
+    "manifestDigest": "0d7fa6466d609504696eb96e53e27c33e10881c4d2edf38b69d88ef1ab689107",
     "headChecksum": "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac"
   },
   "migrationSqlSha256": "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf",

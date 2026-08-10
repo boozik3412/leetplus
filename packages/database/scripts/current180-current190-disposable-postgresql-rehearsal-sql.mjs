@@ -14,7 +14,7 @@ const IDENTITY_RECEIPT_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_POSTGRESQL_STRUCTURED_IDENTITY_V1";
 const LIVE_QUERY_EVIDENCE_REQUEST_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_POSTGRESQL_LIVE_QUERY_EVIDENCE_REQUEST_V1";
-const SOURCE_DATABASE_NAME = "leetplus_current179_ci";
+const SOURCE_DATABASE_NAME = "leetplus_current180_ci";
 const MAINTENANCE_DATABASE_NAME = "postgres";
 const DATABASE_OWNER_NAME = "postgres";
 const LOOPBACK_HOST = "127.0.0.1";
@@ -1062,7 +1062,7 @@ export function buildCurrent180Current190PostgresqlCreateDatabaseSql(input) {
     ]);
   }
   const sql = `CREATE DATABASE ${quoteCurrent180Current190PostgresqlIdentifier(names.workingDatabaseName)} WITH TEMPLATE = ${quoteCurrent180Current190PostgresqlIdentifier(SOURCE_DATABASE_NAME)} OWNER = ${quoteCurrent180Current190PostgresqlIdentifier(DATABASE_OWNER_NAME)} ALLOW_CONNECTIONS = false IS_TEMPLATE = false;`;
-  return statement("CREATE_DATABASE_FROM_FIXED_CURRENT179", sql, {
+  return statement("CREATE_DATABASE_FROM_FIXED_CURRENT180", sql, {
     catalogAbsenceReconciliationMustImmediatelyPrecedeExecution: true,
     exactSourceTemplate: SOURCE_DATABASE_NAME,
     sourceConnectionsMustBeZero: true,

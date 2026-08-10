@@ -37,12 +37,12 @@ const REVIEWED_ANCHOR_SQL_PATH = join(
   "migration.sql",
 );
 const RESERVED_PREDECESSOR = Object.freeze({
-  count: 186,
-  head: "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+  count: 187,
+  head: "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
   headChecksum:
     "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
   manifestDigest:
-    "cf354d5bb94069978b4b63b35e2fec1464822c682513b5c3c982f63fc472dc8e",
+    "9f1e5cd7119fa1136681be1b69bc0be8419920a0a32015bad008be45cb5318d1",
 });
 
 function sha256(value) {
@@ -80,7 +80,7 @@ test("builds the exact deny-only two-lane refreeze plan from frozen sources", as
   assert.equal(value.status, "PLAN_COMPLETE_REFREEZE_REQUIRED");
   assert.equal(
     value.materializationPlanDigest,
-    "d0ebbcbc660a7817747d86ccc062deba3f6c85f51d9409e682f9f3ebab7a3c15",
+    "1601660596fa566d43ce14ca51817b58cef086a09a586a4c4176a522d2c3de8e",
   );
   assert.deepEqual(
     value.schemaLane.map(({ ordinal }) => ordinal),
@@ -524,7 +524,7 @@ test("fails closed on detector, candidate and canonical source drift", async () 
         const source = await defaultRead(path);
         return path.endsWith(
           join(
-            "20260731120000_identity_mail_delivery_release_head",
+            "20260804120000_guest_game_max_pending_rewards",
             "migration.sql",
           ),
         )

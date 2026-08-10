@@ -145,7 +145,7 @@ function environment() {
     CURRENT180_CURRENT190_PG_REHEARSAL_PROFILE:
       CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_PROFILE,
     [CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_SOURCE_URL_ENVIRONMENT]:
-      "postgresql://postgres@127.0.0.1:55432/leetplus_current179_ci?schema=public",
+      "postgresql://postgres@127.0.0.1:55432/leetplus_current180_ci?schema=public",
     NODE_ENV: "test",
   };
 }
@@ -301,8 +301,8 @@ function createFakeRuntime(artifact, options = {}) {
     lockHeld: false,
     materializerVerificationConsumptionCount: 0,
   };
-  const sourceRows = migrationRows(artifact, 179);
-  const finalRows = migrationRows(artifact, 190);
+  const sourceRows = migrationRows(artifact, 180);
+  const finalRows = migrationRows(artifact, 191);
 
   function connectionIdentity(connection) {
     return {
@@ -360,7 +360,7 @@ function createFakeRuntime(artifact, options = {}) {
           rows = [authorityRow("postgres")];
           break;
         case "source-authority":
-          rows = [authorityRow("leetplus_current179_ci")];
+          rows = [authorityRow("leetplus_current180_ci")];
           break;
         case "required-relation-owners":
           rows = relationOwnerRows();
@@ -416,7 +416,7 @@ function createFakeRuntime(artifact, options = {}) {
       kind,
       statementSpecDigest: input.statementSpec.statementSpecDigest,
     });
-    if (kind === "CREATE_DATABASE_FROM_FIXED_CURRENT179") {
+    if (kind === "CREATE_DATABASE_FROM_FIXED_CURRENT180") {
       state.database = {
         allowConnections: false,
         marker: null,
@@ -747,7 +747,7 @@ test("runs exact full lifecycle, releases the identical branded lock receipt, an
   assert.equal(fake.state.lockHeld, false);
   assert.equal(fake.state.materializerVerificationConsumptionCount, 2);
   const create = fake.calls.find(
-    ({ kind }) => kind === "CREATE_DATABASE_FROM_FIXED_CURRENT179",
+    ({ kind }) => kind === "CREATE_DATABASE_FROM_FIXED_CURRENT180",
   );
   const comment = fake.calls.find(
     ({ kind }) => kind === "COMMENT_OWNERSHIP_MARKER",
@@ -931,7 +931,7 @@ test("non-zero crash admission cannot start and removes only the new pre-effect 
 test("lost CREATE with an unmarked target preserves database and durable evidence for manual janitor", async () => {
   const artifact = await assembledArtifact();
   const fake = createFakeRuntime(artifact, {
-    lostOnce: ["CREATE_DATABASE_FROM_FIXED_CURRENT179"],
+    lostOnce: ["CREATE_DATABASE_FROM_FIXED_CURRENT180"],
   });
   let runToken;
   try {
@@ -1052,7 +1052,7 @@ test("restart recovery finds a renamed database by its exact run ownership marke
     assert.equal(
       fake.calls.some(({ kind }) =>
         [
-          "CREATE_DATABASE_FROM_FIXED_CURRENT179",
+          "CREATE_DATABASE_FROM_FIXED_CURRENT180",
           "ALTER_ALLOW_CONNECTIONS",
           "DROP_EXACT_OWNED_SEALED_TARGET",
           "RUNTIME_CLEANUP",
@@ -1140,7 +1140,7 @@ test("restart recovery preserves signed filesystem evidence when the target is a
     assert.equal(
       fake.calls.some(({ kind }) =>
         [
-          "CREATE_DATABASE_FROM_FIXED_CURRENT179",
+          "CREATE_DATABASE_FROM_FIXED_CURRENT180",
           "ALTER_ALLOW_CONNECTIONS",
           "DROP_EXACT_OWNED_SEALED_TARGET",
         ].includes(kind),

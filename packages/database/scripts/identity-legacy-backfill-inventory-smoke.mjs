@@ -17,9 +17,7 @@ import {
   CURRENT_EXPECTED_LATEST_MIGRATION,
   CURRENT_EXPECTED_MIGRATION_COUNT,
 } from "./staff-task-integrity-migration-state.mjs";
-import {
-  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
-} from "./runtime-function-enrollment.mjs";
+import { EXCLUDED_RUNTIME_RELEASE_FUNCTIONS } from "./runtime-function-enrollment.mjs";
 
 const SCRIPT_NAME = "identity-legacy-backfill-inventory-smoke";
 const SMOKE_CONFIRMATION = "run-identity-legacy-inventory-smoke";
@@ -43,17 +41,13 @@ const DISPOSABLE_RESET_TRUNCATE_GUARDS = Object.freeze([
   }),
   Object.freeze({
     relationName: "IdentityMailDeliveryTenantEnrollment",
-    triggerName:
-      "IdentityMailDeliveryTenantEnrollment_truncate_guard_trigger",
+    triggerName: "IdentityMailDeliveryTenantEnrollment_truncate_guard_trigger",
   }),
 ]);
 const CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS = Object.freeze([
   ...EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
 ]);
-assert.equal(
-  CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.length,
-  20,
-);
+assert.equal(CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.length, 20);
 const READER_COLUMN_GRANTS = Object.freeze({
   IdentityEmailClaim: Object.freeze([
     "emailCanonical",
@@ -2117,8 +2111,7 @@ async function assertAuthorityAndCatalogDriftRejected(
       45,
     );
     assert.equal(
-      runtimeReleaseMissingDrift.report?.database?.catalog
-        ?.actualFunctionCount,
+      runtimeReleaseMissingDrift.report?.database?.catalog?.actualFunctionCount,
       46,
     );
     await requireCleanCheckpoint();
@@ -2239,7 +2232,10 @@ async function assertAuthorityAndCatalogDriftRejected(
     );
     const enumDrift = await inspect();
     assert.equal(enumDrift.report?.summary?.decision, "SCHEMA_MISMATCH");
-    assert.equal(enumDrift.report?.database?.catalog?.matchedEnumLabelCount, 14);
+    assert.equal(
+      enumDrift.report?.database?.catalog?.matchedEnumLabelCount,
+      14,
+    );
     assert.equal(enumDrift.report?.database?.catalog?.totalEnumLabelCount, 15);
     await requireCleanCheckpoint();
 
@@ -2424,10 +2420,10 @@ export function runSelfTest() {
     [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
     [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
   );
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 179);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 180);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260731120000_identity_mail_delivery_release_head",
+    "20260804120000_guest_game_max_pending_rewards",
   );
   assert.deepEqual(DISPOSABLE_RESET_TRUNCATE_GUARDS, [
     {
@@ -2637,10 +2633,7 @@ export async function runSmoke(environment = process.env) {
       );
     }
 
-    await assertDisposableResetRejectsDisabledGuard(
-      sourceUrl,
-      descriptors[0],
-    );
+    await assertDisposableResetRejectsDisabledGuard(sourceUrl, descriptors[0]);
 
     const healthy = await runScenario(
       inventory,

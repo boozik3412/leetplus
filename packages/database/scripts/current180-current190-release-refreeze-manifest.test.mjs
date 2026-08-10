@@ -42,7 +42,7 @@ const EXPECTED_LOGICAL_ORDER = Object.freeze([
   180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190,
 ]);
 const EXPECTED_PLAN_DIGEST =
-  "fb2582650a839a8fbe637fadfc671a680e0d944d6c96b9d9831c0c985cec721d";
+  "7313c40a0fbcf5d04032ed311588118acae0c296aecb4cce82b70fdbc1fb08a4";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -215,12 +215,12 @@ test("binds the anchor metadata to both exact contracts and the exact CURRENT186
     CURRENT180_CURRENT190_REVIEWED_ANCHOR_SQL_SHA256,
   );
   assert.deepEqual(candidate.predecessor, {
-    count: 186,
-    head: "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+    count: 187,
+    head: "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
     headChecksum:
       "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
     manifestDigest:
-      "cf354d5bb94069978b4b63b35e2fec1464822c682513b5c3c982f63fc472dc8e",
+      "9f1e5cd7119fa1136681be1b69bc0be8419920a0a32015bad008be45cb5318d1",
   });
 });
 

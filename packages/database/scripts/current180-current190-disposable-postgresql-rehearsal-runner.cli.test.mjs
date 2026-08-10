@@ -17,7 +17,7 @@ const CONFIRMATION =
 const PRIVATE_PATH = join(SCRIPT_DIRECTORY, "operator-private.pk8");
 const PUBLIC_PATH = join(SCRIPT_DIRECTORY, "operator-public.spki");
 const SOURCE_URL =
-  "postgresql://postgres@127.0.0.1:55432/leetplus_current179_ci?schema=public";
+  "postgresql://postgres@127.0.0.1:55432/leetplus_current180_ci?schema=public";
 
 function validArguments() {
   return [

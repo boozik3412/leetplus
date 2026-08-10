@@ -88,8 +88,7 @@ const PAYLOAD_KEYS = Object.freeze(
 const SYNTHETIC_CONTEXT = Object.freeze({
   databaseName: DATABASE_NAME,
   environment: "ci",
-  explicitConfirmation:
-    IDENTITY_MAIL_DUTY_ROLE_MANIFEST_SYNTHETIC_CONFIRMATION,
+  explicitConfirmation: IDENTITY_MAIL_DUTY_ROLE_MANIFEST_SYNTHETIC_CONFIRMATION,
   hostname: "127.0.0.1",
   nodeEnv: "test",
 });
@@ -162,7 +161,10 @@ function payloadFor(signer, overrides = {}) {
     publicKeyFingerprint: signer.publicKeyFingerprint,
     purpose: IDENTITY_MAIL_DUTY_ROLE_MANIFEST_PURPOSE,
     roles: {
-      coordinator: { name: "identity_mail_enrollment_coordinator", oid: 16_385 },
+      coordinator: {
+        name: "identity_mail_enrollment_coordinator",
+        oid: 16_385,
+      },
       worker: { name: "identity_mail_worker_v2", oid: 16_386 },
     },
     schemaVersion: 1,
@@ -253,7 +255,10 @@ test("verifies an exact dormant synthetic duty-role manifest with a separate bra
     () => identityMailDutyRoleManifestPayload(verified),
     "IDENTITY_MAIL_DUTY_ROLE_MANIFEST_NOT_VERIFIED",
   );
-  assert.equal(isVerifiedSyntheticIdentityMailDutyRoleManifest({ ...verified }), false);
+  assert.equal(
+    isVerifiedSyntheticIdentityMailDutyRoleManifest({ ...verified }),
+    false,
+  );
 });
 
 test("pins every discriminator and the exact CURRENT184/185 chain", () => {
@@ -298,6 +303,8 @@ test("pins every discriminator and the exact CURRENT184/185 chain", () => {
 test("recomputes the CURRENT184 manifest and CURRENT185 coordinator artifact", async () => {
   const canonicalDirectory = join(DATABASE_DIR, "prisma", "migrations");
   const candidateDirectory = join(DATABASE_DIR, "migration-candidates");
+  const historicalCanonicalHead =
+    "20260731120000_identity_mail_delivery_release_head";
   const candidateNames = [
     "20260801010000_identity_mail_tenant_enrollment_control_plane",
     "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
@@ -305,15 +312,28 @@ test("recomputes the CURRENT184 manifest and CURRENT185 coordinator artifact", a
     "20260802010000_identity_mail_worker_v2_freshness_protocol",
     "20260802020000_identity_mail_worker_v2_lost_response_replay",
   ];
-  const canonicalNames = (await readdir(canonicalDirectory, {
-    withFileTypes: true,
-  }))
+  const canonicalNames = (
+    await readdir(canonicalDirectory, {
+      withFileTypes: true,
+    })
+  )
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
+  const historicalCanonicalNames = canonicalNames.filter(
+    (name) => name.localeCompare(historicalCanonicalHead, "en") <= 0,
+  );
+  assert.equal(historicalCanonicalNames.length, 179);
+  assert.equal(historicalCanonicalNames.at(-1), historicalCanonicalHead);
   const entries = await Promise.all(
     [
-      ...canonicalNames.map((name) => ({ directory: canonicalDirectory, name })),
-      ...candidateNames.map((name) => ({ directory: candidateDirectory, name })),
+      ...historicalCanonicalNames.map((name) => ({
+        directory: canonicalDirectory,
+        name,
+      })),
+      ...candidateNames.map((name) => ({
+        directory: candidateDirectory,
+        name,
+      })),
     ].map(async ({ directory, name }) => ({
       checksum: createHash("sha256")
         .update(
@@ -333,8 +353,14 @@ test("recomputes the CURRENT184 manifest and CURRENT185 coordinator artifact", a
   const manifestDigest = createHash("sha256")
     .update(`${manifest}\n`, "utf8")
     .digest("hex");
-  assert.equal(entries.length, IDENTITY_MAIL_DUTY_ROLE_MANIFEST_PREDECESSOR.count);
-  assert.equal(entries.at(-1)?.name, IDENTITY_MAIL_DUTY_ROLE_MANIFEST_PREDECESSOR.head);
+  assert.equal(
+    entries.length,
+    IDENTITY_MAIL_DUTY_ROLE_MANIFEST_PREDECESSOR.count,
+  );
+  assert.equal(
+    entries.at(-1)?.name,
+    IDENTITY_MAIL_DUTY_ROLE_MANIFEST_PREDECESSOR.head,
+  );
   assert.equal(
     entries.at(-1)?.checksum,
     IDENTITY_MAIL_DUTY_ROLE_MANIFEST_PREDECESSOR.headChecksum,
@@ -354,7 +380,10 @@ test("recomputes the CURRENT184 manifest and CURRENT185 coordinator artifact", a
     createHash("sha256").update(coordinatorArtifact).digest("hex"),
     IDENTITY_MAIL_DUTY_ROLE_MANIFEST_HEAD.artifactSha256,
   );
-  assert.match(IDENTITY_MAIL_DUTY_ROLE_MANIFEST_HEAD.releaseSha, /^[0-9a-f]{40}$/u);
+  assert.match(
+    IDENTITY_MAIL_DUTY_ROLE_MANIFEST_HEAD.releaseSha,
+    /^[0-9a-f]{40}$/u,
+  );
 });
 
 test("rejects hostile envelope, payload, descriptor, prototype, symbol and proxy shapes", () => {
@@ -698,7 +727,10 @@ test("enforces canonical timestamps, one-minute skew and fifteen-minute lifetime
 test("production roots are frozen, empty and pinned verification is noninjectable", () => {
   const value = fixture();
   assert(Object.isFrozen(PINNED_IDENTITY_MAIL_DUTY_ROLE_MANIFEST_ROOTS));
-  assert.deepEqual(Object.keys(PINNED_IDENTITY_MAIL_DUTY_ROLE_MANIFEST_ROOTS), []);
+  assert.deepEqual(
+    Object.keys(PINNED_IDENTITY_MAIL_DUTY_ROLE_MANIFEST_ROOTS),
+    [],
+  );
   expectCode(
     () => verifyPinnedIdentityMailDutyRoleManifestEnvelope(value.envelope),
     "IDENTITY_MAIL_DUTY_ROLE_MANIFEST_AUTHORITY_NOT_ENROLLED",
@@ -712,8 +744,7 @@ test("production roots are frozen, empty and pinned verification is noninjectabl
     "IDENTITY_MAIL_DUTY_ROLE_MANIFEST_ARGUMENTS_INVALID",
   );
   expectCode(
-    () =>
-      verifyPinnedIdentityMailDutyRoleManifestEnvelope(value.envelope, NOW),
+    () => verifyPinnedIdentityMailDutyRoleManifestEnvelope(value.envelope, NOW),
     "IDENTITY_MAIL_DUTY_ROLE_MANIFEST_ARGUMENTS_INVALID",
   );
 });

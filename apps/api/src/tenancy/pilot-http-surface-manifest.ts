@@ -513,6 +513,7 @@ const definitions: readonly ControllerDefinition[] = [
           'gamification/clubs',
           ':tenantSlug/:storeId/public-config',
           'session',
+          'session/game-missions',
           'session/game-summary',
         ],
       ],

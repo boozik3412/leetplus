@@ -226,7 +226,7 @@ test("materializes all exact entries only under system temp and cleans with zero
       isStrictDescendant(receipt.artifactRootPath, REPOSITORY_ROOT),
       false,
     );
-    assert.equal(receipt.entryCount, 192);
+    assert.equal(receipt.entryCount, 193);
     assert.equal(receipt.authorization.canApplyDatabase, false);
     assert.equal(receipt.authorization.canConnectDatabase, false);
     assert.equal(receipt.authorization.canSpawnProcess, false);
@@ -1117,7 +1117,7 @@ test("restart rehydration accepts only a monotonic signed partial cleanup and re
       locator,
       artifact,
     );
-  assert.equal(recovery.remainingArtifactEntryCount, 191);
+  assert.equal(recovery.remainingArtifactEntryCount, 192);
   const cleanup =
     await cleanupCurrent180Current190DisposablePostgresqlArtifactAfterRestartForTestOnly(
       recovery,

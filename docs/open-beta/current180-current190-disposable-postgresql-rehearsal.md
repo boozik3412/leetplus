@@ -2,7 +2,8 @@
 
 ## Статус
 
-`LOCAL DISPOSABLE REHEARSAL ACCEPTED / PRODUCTION DENIED / SHARED BETA NO-GO`.
+`REFREEZE TESTS ACCEPTED / POSTGRESQL RERUN REQUIRED / PRODUCTION DENIED /
+SHARED BETA NO-GO`.
 
 Этот контур предназначен только для воспроизводимой проверки объединённого
 release `CURRENT180..CURRENT190` на отдельной одноразовой базе PostgreSQL 16.
@@ -11,7 +12,9 @@ release `CURRENT180..CURRENT190` на отдельной одноразовой 
 
 Production и действующая сеть остаются без изменений:
 
-- production head — `CURRENT179/179`;
+- repository canonical head — migration № `180`,
+  `20260804120000_guest_game_max_pending_rewards`; deployed production SHA/head
+  в рамках этой задачи не проверялся и не изменялся;
 - четыре действующих клуба — `Store A1..A4` одного `Tenant A`;
 - будущий внешний клуб должен создаваться отдельно как `Tenant B/Store B1`;
 - initial OWNER получает mailbox-bound activation и сам задаёт пароль;
@@ -21,13 +24,14 @@ Production и действующая сеть остаются без измен
 
 Rehearsal должен доказать один полный управляемый цикл:
 
-1. Зафиксировать exact source `leetplus_current179_ci` и доказать отсутствие
+1. Зафиксировать exact source `leetplus_current180_ci` и доказать отсутствие
    незавершённых/rolled-back миграций, посторонних сессий и successor state.
 2. Создать из source одноразовую закрытую базу с уникальным run token.
 3. Привязать её `name + OID + owner + ownership marker` к одному запуску.
-4. Материализовать exact immutable release artifact из `190` миграций.
-5. Применить `CURRENT180..CURRENT190`, проверить точные Prisma receipts и
-   semantic fingerprint.
+4. Материализовать exact immutable release artifact из `191` миграции.
+5. Применить логический release `CURRENT180..CURRENT190`, перезамороженный в
+   физических target directories № `181..191`, проверить точные Prisma
+   receipts и semantic fingerprint.
 6. Повторить deploy и доказать zero-diff.
 7. Закрыть базу, вернуть временное имя, удалить только доказанно принадлежащий
    запуску объект и подтвердить отсутствие residue.
@@ -42,7 +46,7 @@ receipt или публично пересчитанным SHA-256.
 | Слой                              | Текущее состояние                     | Что доказывает                                                                                                         | Чего не разрешает                                                           |
 | --------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Release blocker/planner/refreeze  | Принят локально                       | exact source/candidate bytes, порядок и immutable proposal                                                             | assembly, DB access, deploy                                                 |
-| In-memory assembler               | `21/21 PASS`                          | immutable 192-entry artifact: schema, lock, 190 migrations                                                             | filesystem materialization, process spawn, DB apply                         |
+| In-memory assembler               | `21/21 PASS`                          | immutable 193-entry artifact: schema, lock, 191 migration                                                              | filesystem materialization, process spawn, DB apply                         |
 | Planning contract/state-machine   | `33/33 PASS`                          | exact local URL/env/GUC/prefix pins, lifecycle и fail-closed reconciliation                                            | process spawn, DB connection/mutation, deploy                               |
 | Pure SQL contract                 | `26/26 PASS`                          | fixed read-only queries, exhaustive catalog/fingerprint scope и bounded DDL specs                                      | выполнение SQL или признание caller rows доказанными                        |
 | Persistent coordinator trust root | `6/6 PASS`, scoped review P0/P1=`0`   | внешний Ed25519 root связывает authorization, run token, journal и artifact recovery                                   | DB/process/deploy authority; ключ сам по себе не разрешает effect           |
@@ -60,18 +64,20 @@ preflight: `P0=0`, `P1=0`.
 
 - PostgreSQL `16.x`;
 - endpoint `127.0.0.1:55432`;
-- source database `leetplus_current179_ci`;
+- source database `leetplus_current180_ci`;
 - source/maintenance role `postgres` с подтверждённым owner parity;
 - `NODE_ENV=test`;
 - exact explicit confirmation из planning contract;
 - никакого наследования ambient `DATABASE_URL`, `PG*`, secret env, `PATH`,
   shell или production discriminator.
 
-Read-only preflight и два accepted run 07.08.2026 подтвердили PostgreSQL `16.13`, exact
-`CURRENT179/179`, нулевые unfinished/rolled-back rows, нулевой successor state,
-owner parity четырёх обязательных relations и
-`identity_email_claim_lock_v1`. Это только входное доказательство и не является
-разрешением на мутацию.
+Исторический read-only preflight и два accepted run 07.08.2026 подтвердили
+PostgreSQL `16.13`, exact `CURRENT179/179`, нулевые unfinished/rolled-back rows,
+нулевой successor state, owner parity четырёх обязательных relations и
+`identity_email_claim_lock_v1`. После появления canonical migration № `180`
+это evidence больше не закрывает текущий release: source необходимо обновить до
+exact `CURRENT180/180` и повторить оба цикла. Это не является разрешением на
+production mutation.
 
 ## Coordinator trust root
 
@@ -102,7 +108,7 @@ environment в runner input не копируются:
 ```powershell
 pnpm --filter database current180-current190:run-disposable-postgresql-rehearsal -- `
   --attempt 1 `
-  --source-url "postgresql://postgres@127.0.0.1:55432/leetplus_current179_ci?schema=public" `
+  --source-url "postgresql://postgres@127.0.0.1:55432/leetplus_current180_ci?schema=public" `
   --coordinator-private "C:\absolute\operator-owned\coordinator-private.pk8" `
   --coordinator-public "C:\absolute\operator-owned\coordinator-public.spki" `
   --coordinator-sha256 "<64 lowercase hex>" `
@@ -201,10 +207,11 @@ provenance, но не восстанавливает потерянный proces
 - runner имеет lost-response tests для каждого DDL transition;
 - до запуска и после него доказан zero residue;
 - команда остаётся привязана только к loopback PostgreSQL и source
-  `leetplus_current179_ci`.
+  `leetplus_current180_ci`.
 
-Все эти условия выполнены локально 07.08.2026. Два независимых цикла
-`apply → repeat/zero-diff → rollback/drop` приняты:
+Эти условия были выполнены локально 07.08.2026 для предыдущего canonical head
+№ `179`. Два независимых исторических цикла
+`apply → repeat/zero-diff → rollback/drop` были приняты:
 
 | Attempt | Run token                          | Source fingerprint                                                 | Runner receipt digest                                              | Результат                |
 | ------: | ---------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------------ |
@@ -227,8 +234,10 @@ attempt 2 —
 source оставался на `179` completed migrations с head
 `20260731120000_identity_mail_delivery_release_head`, без unfinished/rolled-back
 rows. Полный последовательный gate перед apply: `163` test executions, `0`
-failures. Следующий рубеж — rehearsal на восстановленной production-like копии,
-а не production deployment.
+failures. После refreeze static/runtime gate снова зелёный, но новый реальный
+PostgreSQL apply/repeat/rollback/zero-diff ещё не выполнялся. Следующий рубеж —
+повтор на exact canonical source № `180`, затем rehearsal на восстановленной
+production-like копии, а не production deployment.
 
 Финальный postflight отдельно подтвердил `0` target/marker databases и
 неизменный source `179/0`. В выделенном task temp остался один обычный

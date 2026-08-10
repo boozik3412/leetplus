@@ -47,9 +47,9 @@ import {
 const RUN_TOKEN = "0123456789abcdef".repeat(2);
 const OTHER_RUN_TOKEN = "fedcba9876543210".repeat(2);
 const SOURCE_URL =
-  "postgresql://postgres@127.0.0.1:55432/leetplus_current179_ci?schema=public";
+  "postgresql://postgres@127.0.0.1:55432/leetplus_current180_ci?schema=public";
 const PASSWORD_SOURCE_URL =
-  "postgresql://postgres:p%40ssword@127.0.0.1:55432/leetplus_current179_ci?schema=public";
+  "postgresql://postgres:p%40ssword@127.0.0.1:55432/leetplus_current180_ci?schema=public";
 const FINAL_PREFIX = CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_PREFIXES.at(-1);
 
 const assemblyPlan =
@@ -189,7 +189,7 @@ function sourcePreflight(environmentValue = environment(), overrides = {}) {
     currentUserName: "postgres",
     currentUserOid: 11,
     currentUserSuperuser: true,
-    databaseName: "leetplus_current179_ci",
+    databaseName: "leetplus_current180_ci",
     databaseOid: 100,
     databaseOwnerName: "postgres",
     databaseOwnerOid: 11,
@@ -247,7 +247,7 @@ const SOURCE_PIN =
     sourcePreflight(),
   ).sourcePin;
 const OWNERSHIP_IDENTITY = ownershipIdentity();
-const FINAL_PREFIX_EVIDENCE = evaluatePrefix(190).prefixEvidence;
+const FINAL_PREFIX_EVIDENCE = evaluatePrefix(191).prefixEvidence;
 
 function createState() {
   return createCurrent180Current190PostgresqlRehearsalState({
@@ -309,7 +309,7 @@ test("accepts exact local pinned URLs with or without a bounded encoded password
   const passwordless =
     inspectCurrent180Current190PostgresqlRehearsalEnvironment(environment());
   assert.equal(passwordless.source.passwordPresent, false);
-  assert.equal(passwordless.source.databaseName, "leetplus_current179_ci");
+  assert.equal(passwordless.source.databaseName, "leetplus_current180_ci");
   assert.equal(JSON.stringify(passwordless).includes("postgres@"), false);
 
   const withPassword =
@@ -331,7 +331,7 @@ test("rejects every non-exact source URL boundary", () => {
     SOURCE_URL.replace("postgres@", "postgres:@"),
     SOURCE_URL.replace("127.0.0.1", "localhost"),
     SOURCE_URL.replace("55432", "5432"),
-    SOURCE_URL.replace("leetplus_current179_ci", "leetplus_current180_ci"),
+    SOURCE_URL.replace("leetplus_current180_ci", "leetplus_current179_ci"),
     SOURCE_URL.replace("?schema=public", ""),
     `${SOURCE_URL}&sslmode=disable`,
     `${SOURCE_URL}#fragment`,
@@ -526,7 +526,7 @@ test("derives only same-token working and final database names", () => {
   );
 });
 
-test("pins immutable CURRENT180-CURRENT186 GUCs and all CURRENT179-CURRENT190 prefixes", () => {
+test("pins immutable CURRENT180-CURRENT186 GUCs and all source-CURRENT190 prefixes", () => {
   assert.deepEqual(
     CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP.map(
       ({ ordinal }) => ordinal,
@@ -550,11 +550,11 @@ test("pins immutable CURRENT180-CURRENT186 GUCs and all CURRENT179-CURRENT190 pr
     CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_PREFIXES.map(
       ({ count }) => count,
     ),
-    [179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190],
+    [180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191],
   );
   assert.equal(
     FINAL_PREFIX.digest,
-    "61c9de5adc0e4673c6eedb69d7d8f42933fc075398fa0ecf1cb2e2ff365e4f55",
+    "a386282c2f2b04fa96892d3642b13f5d16efab637a9a6e77a659d1404b1fba5d",
   );
   assert.ok(Object.isFrozen(options));
   assert.ok(
@@ -1101,7 +1101,7 @@ test("source preflight blocks wrong owners, projections, source pins, counts, an
       },
       "SOURCE_OBJECT_OWNER_PARITY_MISMATCH",
     ],
-    [{ migrationCount: 178 }, "SOURCE_MIGRATION_HISTORY_MISMATCH"],
+    [{ migrationCount: 179 }, "SOURCE_MIGRATION_HISTORY_MISMATCH"],
     [{ enrollmentCount: 1 }, "SOURCE_CANDIDATE_PRECONDITION_NOT_EMPTY"],
     [{ otherSessionCount: 1 }, "SOURCE_HAS_OTHER_SESSIONS"],
     [
@@ -1127,35 +1127,35 @@ test("Prisma reconciliation validates every exact row through CURRENT190", () =>
     assert.equal(result.completedMigrationCount, prefix.count);
     assert.equal(
       result.decision,
-      prefix.count === 190
+      prefix.count === 191
         ? "PRISMA_EXACT_CURRENT190_COMMITTED"
         : "PRISMA_EXACT_PREFIX_RETRY_SAFE",
     );
-    assert.equal(result.safeToRetryDeploy, prefix.count !== 190);
+    assert.equal(result.safeToRetryDeploy, prefix.count !== 191);
     assert.equal(result.safeToResolveMigration, false);
     assert.match(result.prefixEvidence.rowsDigest, /^[0-9a-f]{64}$/u);
   }
 });
 
 test("CURRENT187 is complete only with finished_at and applied_steps_count=1", () => {
-  assert.equal(evaluatePrefix(187).decision, "PRISMA_EXACT_PREFIX_RETRY_SAFE");
+  assert.equal(evaluatePrefix(188).decision, "PRISMA_EXACT_PREFIX_RETRY_SAFE");
   assert.equal(
-    evaluatePrefix(187, (row, index) =>
-      index === 186 ? { ...row, finishedAt: null } : row,
+    evaluatePrefix(188, (row, index) =>
+      index === 187 ? { ...row, finishedAt: null } : row,
     ).decision,
     "PRISMA_FAILED_OR_UNFINISHED_DISCARD_DATABASE",
   );
   assert.equal(
-    evaluatePrefix(187, (row, index) =>
-      index === 186
+    evaluatePrefix(188, (row, index) =>
+      index === 187
         ? { ...row, rolledBackAt: "2026-08-05T12:01:00.000Z" }
         : row,
     ).decision,
     "PRISMA_FAILED_OR_UNFINISHED_DISCARD_DATABASE",
   );
   assert.equal(
-    evaluatePrefix(187, (row, index) =>
-      index === 186 ? { ...row, appliedStepsCount: 0 } : row,
+    evaluatePrefix(188, (row, index) =>
+      index === 187 ? { ...row, appliedStepsCount: 0 } : row,
     ).decision,
     "PRISMA_PREFIX_DRIFT_BLOCKED",
   );

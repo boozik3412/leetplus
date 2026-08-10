@@ -7,7 +7,7 @@ import { isProxy } from "node:util/types";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_V2";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_MANIFEST_SHA256 =
-  "3d82c33872712376f375ddf276d9b794a410190f034dc250ed6f11a54535f4eb";
+  "925bd5300a946c82fc4265375072194bd483e5ea7bceba132c108856637fbdb9";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_PLAN_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_PLAN_V2";
 export const CURRENT180_CURRENT190_IN_MEMORY_ARTIFACT_CONTRACT =
@@ -16,7 +16,7 @@ export const CURRENT180_CURRENT190_IN_MEMORY_ARTIFACT_CONTRACT =
 const CURRENT180_CURRENT190_REFREEZE_MANIFEST_CONTRACT =
   "CURRENT180_CURRENT190_RELEASE_REFREEZE_MANIFEST_V1";
 const CURRENT180_CURRENT190_REFREEZE_MANIFEST_SHA256 =
-  "184d1cfb46b1443a8487329382fdf2937656a8dd3ac15cbddad617009cefda98";
+  "55e4a55df4054c22261389d761aac8c34989a6022fefbd9c5f9d5bbb05b42296";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "../../..");
@@ -51,7 +51,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-refreeze-manifest.mjs",
-    sha256: "e0ba9d0f49a46f560b520b25f74d1318e666c03966549308aaca96cf4d51d336",
+    sha256: "67ca85509e7ba702d3f31b2c02e86fdb7cbf4d548f457ce63b173295f7767f50",
   }),
   Object.freeze({
     path: join(
@@ -61,7 +61,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-materialization-planner.mjs",
-    sha256: "b5dc5a6f42a5eca3708bc6bb9a8a5e5f2f2e2d8b829da1affa5fbe9c8ced8bd6",
+    sha256: "ccbea2f8b17f67b7c8b9a2da45699a535a68ee6347aae1d3c66f4d542dd8eba2",
   }),
   Object.freeze({
     path: join(
@@ -71,26 +71,26 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-rehearsal-blocker.mjs",
-    sha256: "2bda04a60becf778d0b14a072af11472bd7c1a545168d644f2e21c66476810d1",
+    sha256: "52112c143adfe5f1f906628fd56a592cdb7719a7290c26a9053d00e22e1d7f32",
   }),
 ]);
 const MIGRATION_DIRECTORY_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
-const EXPECTED_CANONICAL_COUNT = 179;
+const EXPECTED_CANONICAL_COUNT = 180;
 const EXPECTED_CANONICAL_HEAD =
-  "20260731120000_identity_mail_delivery_release_head";
+  "20260804120000_guest_game_max_pending_rewards";
 const EXPECTED_CANONICAL_HEAD_SHA256 =
-  "c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519";
+  "40587bc93c34875edf6064f9848e42ce0194b321165ac494750987533cef21ef";
 const EXPECTED_CANONICAL_MANIFEST_DIGEST =
-  "3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431";
+  "8a763027a16c45532bf1cff84fdaacf27f2c4e834cae15cffd7a15feae63f6dc";
 const EXPECTED_MIGRATION_LOCK_SHA256 =
   "99836963713b4f5b269ad49af0ed3d7b0b2e336115c2f92dc9ac683d139d0900";
-const EXPECTED_ARTIFACT_COUNT = 190;
+const EXPECTED_ARTIFACT_COUNT = 191;
 const EXPECTED_ARTIFACT_HEAD = "20260805040000_guest_portal_session_current190";
 const EXPECTED_ARTIFACT_HEAD_SHA256 =
   "d23c0e8fbdfddd0eb9ec7a73d877e7bbcde8c170683247a66f43530cca3867d5";
 const EXPECTED_ARTIFACT_MANIFEST_DIGEST =
-  "61c9de5adc0e4673c6eedb69d7d8f42933fc075398fa0ecf1cb2e2ff365e4f55";
+  "a386282c2f2b04fa96892d3642b13f5d16efab637a9a6e77a659d1404b1fba5d";
 const EXCLUDED_CURRENT187_E_DIRECTORY =
   "20260805050000_identity_mail_ddl_fence_ledger_current187";
 const IN_MEMORY_SCHEMA_TEXT = `datasource db {
@@ -488,7 +488,7 @@ function assertAllowManifest(manifest, findings) {
     manifest?.source?.refreezeManifestSha256 !==
       CURRENT180_CURRENT190_REFREEZE_MANIFEST_SHA256 ||
     manifest?.source?.materializationPlanDigest !==
-      "fb2582650a839a8fbe637fadfc671a680e0d944d6c96b9d9831c0c985cec721d" ||
+      "7313c40a0fbcf5d04032ed311588118acae0c296aecb4cce82b70fdbc1fb08a4" ||
     manifest?.source?.frozenSourceBytesMayChange !== false ||
     manifest?.source?.frozenSourceSqlTransformation !== "BYTE_EXACT_COPY_ONLY"
   ) {

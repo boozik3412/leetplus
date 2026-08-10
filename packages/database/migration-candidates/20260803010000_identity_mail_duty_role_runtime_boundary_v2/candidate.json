@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "contract": "IDENTITY_MAIL_DUTY_ROLE_RUNTIME_BOUNDARY_V2_CANDIDATE_V1",
-  "candidate": "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+  "candidate": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
   "ordinal": 186,
   "predecessor": {
-    "count": 185,
-    "head": "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
-    "manifestDigest": "efee75130a1ed33c7c9f431acc60e4c3275f90a2479c34906cfa40fa0332ab19",
+    "count": 186,
+    "head": "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
+    "manifestDigest": "a7a90ef8c5de5c8a54bdccd54309837ddda2c2e161d6650b335d83f7af04034d",
     "headChecksum": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6"
   },
   "migrationSqlSha256": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",

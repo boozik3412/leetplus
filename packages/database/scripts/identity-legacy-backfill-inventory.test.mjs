@@ -44,9 +44,7 @@ import {
   SHARED_BETA_ADMISSION_FUNCTIONS,
   SHARED_BETA_ADMISSION_RELATIONS,
 } from "./shared-beta-admission-provenance-catalog.mjs";
-import {
-  EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
-} from "./runtime-function-enrollment.mjs";
+import { EXCLUDED_RUNTIME_RELEASE_FUNCTIONS } from "./runtime-function-enrollment.mjs";
 
 const METRIC_CODES = Object.freeze([
   "USER_TOTAL",
@@ -577,10 +575,10 @@ test("timeouts are bounded and embedded in the one-connection read-only URL", ()
 });
 
 test("the manifest exposes exactly two create-only proposal codes and exact column ACL", () => {
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 179);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 180);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260731120000_identity_mail_delivery_release_head",
+    "20260804120000_guest_game_max_pending_rewards",
   );
   assert.deepEqual(
     Object.entries(FINDING_MANIFEST)

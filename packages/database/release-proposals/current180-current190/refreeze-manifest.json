@@ -6,8 +6,8 @@
   "logicalOrder": [180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190],
   "materializationPlanner": {
     "contract": "CURRENT180_CURRENT190_RELEASE_MATERIALIZATION_PLAN_V1",
-    "planDigest": "fb2582650a839a8fbe637fadfc671a680e0d944d6c96b9d9831c0c985cec721d",
-    "sourceArtifactSetDigest": "1623309f985a40d933b3d52cbfd98ba3bf9438350c0f59f9a21b4c0c0524e3f4"
+    "planDigest": "7313c40a0fbcf5d04032ed311588118acae0c296aecb4cce82b70fdbc1fb08a4",
+    "sourceArtifactSetDigest": "0b1e2b7451cf87ce40749bc16aff9524005923abb3b0c9718ba2dffb762c57ac"
   },
   "authorization": {
     "canActivateRoutes": false,
@@ -43,7 +43,7 @@
       "contract": "IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_CANDIDATE_V1",
       "sourceKind": "MIGRATION_CANDIDATE",
       "sourceDirectory": "packages/database/migration-candidates/20260801010000_identity_mail_tenant_enrollment_control_plane",
-      "targetDirectory": "20260801010000_identity_mail_tenant_enrollment_control_plane",
+      "targetDirectory": "20260804130000_identity_mail_tenant_enrollment_control_plane",
       "sourceFiles": [
         {
           "name": "README.md",
@@ -51,20 +51,20 @@
         },
         {
           "name": "candidate.json",
-          "sha256": "dbb084d8fd365d4e641113a8c70fa7d47e79808b37d1e74378fee281c4476011"
+          "sha256": "e51580b7c8d74be9324cdebd12e2bd7eb43e25d4a579b1720a15c672e1277cd2"
         },
         {
           "name": "migration.sql",
           "sha256": "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683"
         }
       ],
-      "sourceDirectorySha256": "70e21079cda37f34eb71b9bf21f4419c389aa8e6087974b2002d0424f95954b3",
+      "sourceDirectorySha256": "aeebb58998a1e869aec0359586afd783ead805c181db579df44b0299838917fc",
       "migrationSqlSha256": "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683",
       "predecessor": {
-        "count": 179,
-        "head": "20260731120000_identity_mail_delivery_release_head",
-        "headChecksum": "c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519",
-        "manifestDigest": "3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431"
+        "count": 180,
+        "head": "20260804120000_guest_game_max_pending_rewards",
+        "headChecksum": "40587bc93c34875edf6064f9848e42ce0194b321165ac494750987533cef21ef",
+        "manifestDigest": "8a763027a16c45532bf1cff84fdaacf27f2c4e834cae15cffd7a15feae63f6dc"
       },
       "predecessorEvidence": {
         "externalEvidenceRequired": true,
@@ -78,24 +78,24 @@
       "contract": "IDENTITY_MAIL_TENANT_LOCK_DRAIN_WORKER_V2_CANDIDATE_V1",
       "sourceKind": "MIGRATION_CANDIDATE",
       "sourceDirectory": "packages/database/migration-candidates/20260801020000_identity_mail_tenant_lock_drain_worker_v2",
-      "targetDirectory": "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+      "targetDirectory": "20260804140000_identity_mail_tenant_lock_drain_worker_v2",
       "sourceFiles": [
         {
           "name": "candidate.json",
-          "sha256": "e1584acd221c75c5ce72c46784cef729055a1d6b8ba01896d02ed7d58675e98c"
+          "sha256": "2479d586ce84d5f6b138a0daec1bd7867ddc9095c879528bc146bd0e21be5da6"
         },
         {
           "name": "migration.sql",
           "sha256": "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac"
         }
       ],
-      "sourceDirectorySha256": "65c0db43f97bbe8eacc359a7eb77f1791fbf79a7c5f2408bdfa4c685d6c8ded9",
+      "sourceDirectorySha256": "5c41e75df755b304d939b3be2dc4583fa2c24d6287e8c2cb08fdb16128125d51",
       "migrationSqlSha256": "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac",
       "predecessor": {
-        "count": 180,
-        "head": "20260801010000_identity_mail_tenant_enrollment_control_plane",
+        "count": 181,
+        "head": "20260804130000_identity_mail_tenant_enrollment_control_plane",
         "headChecksum": "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683",
-        "manifestDigest": "c41f3854bff364deb4f169f56f31bb5bd7e46249a677c66bc879cb967b6fae58"
+        "manifestDigest": "ce2cfdf0b499aefee7171c7229ee8d9e1ec5e37b31e0e247ccd30145ac14ff46"
       },
       "predecessorEvidence": {
         "externalEvidenceRequired": true,
@@ -109,24 +109,24 @@
       "contract": "IDENTITY_MAIL_TENANT_FIRST_CLAIM_PROTOCOL_CANDIDATE_V1",
       "sourceKind": "MIGRATION_CANDIDATE",
       "sourceDirectory": "packages/database/migration-candidates/20260801030000_identity_mail_tenant_first_claim_protocol",
-      "targetDirectory": "20260801030000_identity_mail_tenant_first_claim_protocol",
+      "targetDirectory": "20260804150000_identity_mail_tenant_first_claim_protocol",
       "sourceFiles": [
         {
           "name": "candidate.json",
-          "sha256": "5076eacea964cb6c05000f4b04c2a9f5c79281ff4f8d27fc074c8a95603f97f7"
+          "sha256": "edb7de7208d689f744fe6be4a06aad628e28afa671976dca2a72a11c97aa62b2"
         },
         {
           "name": "migration.sql",
           "sha256": "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf"
         }
       ],
-      "sourceDirectorySha256": "8e77130e96dbd4d890d5f068508d75f599d9c3b3decc4812aba59563aa116f1c",
+      "sourceDirectorySha256": "6c544750938533a43582f77e45a2295fb4f0cf621797d3cf623361980b69c038",
       "migrationSqlSha256": "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf",
       "predecessor": {
-        "count": 181,
-        "head": "20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+        "count": 182,
+        "head": "20260804140000_identity_mail_tenant_lock_drain_worker_v2",
         "headChecksum": "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac",
-        "manifestDigest": "ba90c13072d9afb2cc942b3cde1d01a789772605c69b71d3b273a0cb5a6e97f6"
+        "manifestDigest": "0d7fa6466d609504696eb96e53e27c33e10881c4d2edf38b69d88ef1ab689107"
       },
       "predecessorEvidence": {
         "externalEvidenceRequired": true,
@@ -140,7 +140,7 @@
       "contract": "IDENTITY_MAIL_WORKER_V2_FRESHNESS_PROTOCOL_CANDIDATE_V1",
       "sourceKind": "MIGRATION_CANDIDATE",
       "sourceDirectory": "packages/database/migration-candidates/20260802010000_identity_mail_worker_v2_freshness_protocol",
-      "targetDirectory": "20260802010000_identity_mail_worker_v2_freshness_protocol",
+      "targetDirectory": "20260804160000_identity_mail_worker_v2_freshness_protocol",
       "sourceFiles": [
         {
           "name": "README.md",
@@ -148,20 +148,20 @@
         },
         {
           "name": "candidate.json",
-          "sha256": "c8017a955f7ad40d9a89de13109ec1f7199545248cc3651379d591028b4a8ffa"
+          "sha256": "54bbb95ef0449cc5526a47f0fb5d2f9be53c0ca0148fbdb26e19e5735bd7d3d2"
         },
         {
           "name": "migration.sql",
           "sha256": "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0"
         }
       ],
-      "sourceDirectorySha256": "b4c5b3a00efed62413db1e937edfcc3f1c6de947a6781961bd39fb73d74e138f",
+      "sourceDirectorySha256": "bd6268ce5de4112577d0e3ff9f9d18fd9569205b4f8812e842468afa503a062c",
       "migrationSqlSha256": "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0",
       "predecessor": {
-        "count": 182,
-        "head": "20260801030000_identity_mail_tenant_first_claim_protocol",
+        "count": 183,
+        "head": "20260804150000_identity_mail_tenant_first_claim_protocol",
         "headChecksum": "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf",
-        "manifestDigest": "d0002b64dd8e6134f20a444c8b1ff70762944ffe057da3cc2fbad46945c06506"
+        "manifestDigest": "f4359a47b40fdf2df1839db4fd33c577674d4f887b56aab9e7903373e103c52a"
       },
       "predecessorEvidence": {
         "externalEvidenceRequired": true,
@@ -175,7 +175,7 @@
       "contract": "IDENTITY_MAIL_WORKER_V2_LOST_RESPONSE_REPLAY_CANDIDATE_V1",
       "sourceKind": "MIGRATION_CANDIDATE",
       "sourceDirectory": "packages/database/migration-candidates/20260802020000_identity_mail_worker_v2_lost_response_replay",
-      "targetDirectory": "20260802020000_identity_mail_worker_v2_lost_response_replay",
+      "targetDirectory": "20260804170000_identity_mail_worker_v2_lost_response_replay",
       "sourceFiles": [
         {
           "name": "README.md",
@@ -183,20 +183,20 @@
         },
         {
           "name": "candidate.json",
-          "sha256": "568c186fc726f86d7978d112915c3b19e6abdfd0511391bf195b4c12a5b5f6a5"
+          "sha256": "c164beda8687a140bd16b9783677c29320d1461f5eacbff229932ef20618af04"
         },
         {
           "name": "migration.sql",
           "sha256": "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424"
         }
       ],
-      "sourceDirectorySha256": "b8138311acbc832f227d6c25183744c458562d2975abd31956b909122a5df9e0",
+      "sourceDirectorySha256": "0de209e2b8524447241426097a27afba8fe36b06e1ed1c4d6c671e98469fd5f3",
       "migrationSqlSha256": "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424",
       "predecessor": {
-        "count": 183,
-        "head": "20260802010000_identity_mail_worker_v2_freshness_protocol",
+        "count": 184,
+        "head": "20260804160000_identity_mail_worker_v2_freshness_protocol",
         "headChecksum": "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0",
-        "manifestDigest": "70f66215bdadf0652ade1640e9dd20cf565d25a81d5d319a4c3d68c4e1c9e256"
+        "manifestDigest": "fbefd932e2e34cc3358b2eee8028daf729b044b690af6df01aac2b888b15f642"
       },
       "predecessorEvidence": {
         "externalEvidenceRequired": true,
@@ -210,7 +210,7 @@
       "contract": "IDENTITY_MAIL_ENROLLMENT_EVIDENCE_LEDGER_V2_CANDIDATE_V1",
       "sourceKind": "MIGRATION_CANDIDATE",
       "sourceDirectory": "packages/database/migration-candidates/20260802030000_identity_mail_enrollment_evidence_ledger_v2",
-      "targetDirectory": "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+      "targetDirectory": "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
       "sourceFiles": [
         {
           "name": "README.md",
@@ -218,20 +218,20 @@
         },
         {
           "name": "candidate.json",
-          "sha256": "e64fd871ca31b6fb8f4603378e0d3753ad1751f8ecf1dceea4c33596ba8b2566"
+          "sha256": "2ba4d7a855572ca8b63df7ae3eb4a98b8ef703ab2c4b672b4061736a300ef418"
         },
         {
           "name": "migration.sql",
           "sha256": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6"
         }
       ],
-      "sourceDirectorySha256": "db8bab66cb6cfd7f8530584d0ca3b9ce67457eaf0374d1f9a255babe57e8c49c",
+      "sourceDirectorySha256": "c57e46db1730c4fd4136c183a1d6379df19797c0c3c2d14b080d87fb50fd33b5",
       "migrationSqlSha256": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6",
       "predecessor": {
-        "count": 184,
-        "head": "20260802020000_identity_mail_worker_v2_lost_response_replay",
+        "count": 185,
+        "head": "20260804170000_identity_mail_worker_v2_lost_response_replay",
         "headChecksum": "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424",
-        "manifestDigest": "9da93df51df3945b3219409f06118134712edb2a96543d1eb183217da9767819"
+        "manifestDigest": "d5f9f9ad5d7be5706897533eb71f92aa0bd9d8f3feca62462898fc3a0757ac7a"
       },
       "predecessorEvidence": {
         "externalEvidenceRequired": true,
@@ -245,7 +245,7 @@
       "contract": "IDENTITY_MAIL_DUTY_ROLE_RUNTIME_BOUNDARY_V2_CANDIDATE_V1",
       "sourceKind": "MIGRATION_CANDIDATE",
       "sourceDirectory": "packages/database/migration-candidates/20260803010000_identity_mail_duty_role_runtime_boundary_v2",
-      "targetDirectory": "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+      "targetDirectory": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
       "sourceFiles": [
         {
           "name": "README.md",
@@ -253,20 +253,20 @@
         },
         {
           "name": "candidate.json",
-          "sha256": "be911394f2e2aa33a3ce33bbc9fc2b8990f5d8304ad441dfccefdeeea440b857"
+          "sha256": "1125b2db451360c6083dbb3ce81b79516142ba5909e4d7896c1c690bf04ab1b2"
         },
         {
           "name": "migration.sql",
           "sha256": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4"
         }
       ],
-      "sourceDirectorySha256": "5bd938bd501d504f228b488d60a5e4c5590ecf6e0b304073aa8895adeaeecc0e",
+      "sourceDirectorySha256": "4fa958906d5b778ef8851b7ba8dc74d1f80d061b7b8c9a1db7fa930df7014cce",
       "migrationSqlSha256": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
       "predecessor": {
-        "count": 185,
-        "head": "20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+        "count": 186,
+        "head": "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
         "headChecksum": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6",
-        "manifestDigest": "efee75130a1ed33c7c9f431acc60e4c3275f90a2479c34906cfa40fa0332ab19"
+        "manifestDigest": "a7a90ef8c5de5c8a54bdccd54309837ddda2c2e161d6650b335d83f7af04034d"
       },
       "predecessorEvidence": {
         "externalEvidenceRequired": true,
@@ -285,20 +285,20 @@
       "sourceFiles": [
         {
           "name": "candidate.json",
-          "sha256": "dce3b85321938bb610e79f86b852a9e7bf9e03ed0585aa37d3542b5b5ff28874"
+          "sha256": "905e5631e2718e5ebd85540ff66b28b6aaff593c3e51b8504e5c8b1041082e67"
         },
         {
           "name": "migration.sql",
           "sha256": "dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3"
         }
       ],
-      "sourceDirectorySha256": "44d937a13740ed129f2ceaccf6c2ea006b10c284818df5ab3bdcda5a18544880",
+      "sourceDirectorySha256": "2e772151cae782e91e3552063925deadd4bd9b8dbf1b345a75b10d8c3e132540",
       "migrationSqlSha256": "dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3",
       "predecessor": {
-        "count": 186,
-        "head": "20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+        "count": 187,
+        "head": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
         "headChecksum": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
-        "manifestDigest": "cf354d5bb94069978b4b63b35e2fec1464822c682513b5c3c982f63fc472dc8e"
+        "manifestDigest": "9f1e5cd7119fa1136681be1b69bc0be8419920a0a32015bad008be45cb5318d1"
       },
       "predecessorEvidence": {
         "externalEvidenceRequired": true,

@@ -1,6 +1,34 @@
 import type { NextConfig } from "next";
 
+const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
+
+export function resolveReleaseBuildId(
+  environment: Readonly<Record<string, string | undefined>>,
+) {
+  const ciReleaseSha = environment.CI_RELEASE_SHA?.trim();
+  const releaseSha = environment.RELEASE_SHA?.trim();
+
+  if (ciReleaseSha && releaseSha && ciReleaseSha !== releaseSha) {
+    throw new Error(
+      "CI_RELEASE_SHA and RELEASE_SHA must identify the same commit",
+    );
+  }
+
+  const buildId = ciReleaseSha || releaseSha;
+  if (!buildId) {
+    return null;
+  }
+  if (!RELEASE_SHA_PATTERN.test(buildId)) {
+    throw new Error(
+      "The release build ID must be a lowercase 40-character Git SHA",
+    );
+  }
+
+  return buildId;
+}
+
 const nextConfig: NextConfig = {
+  generateBuildId: () => resolveReleaseBuildId(process.env),
   async headers() {
     return [
       {

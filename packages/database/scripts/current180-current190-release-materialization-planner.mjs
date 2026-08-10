@@ -25,9 +25,9 @@ const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "../../..");
 const DETECTOR_FILE = "current180-current190-release-rehearsal-blocker.mjs";
 const DETECTOR_NORMALIZED_SHA256 =
-  "2bda04a60becf778d0b14a072af11472bd7c1a545168d644f2e21c66476810d1";
+  "52112c143adfe5f1f906628fd56a592cdb7719a7290c26a9053d00e22e1d7f32";
 const SOURCE_ARTIFACT_SET_DIGEST =
-  "1623309f985a40d933b3d52cbfd98ba3bf9438350c0f59f9a21b4c0c0524e3f4";
+  "0b1e2b7451cf87ce40749bc16aff9524005923abb3b0c9718ba2dffb762c57ac";
 const SOURCE_BLOCKER_DIGEST =
   "ddec0c400a08f04183ffc0348fd202cfa509973cd7b37973b4290eb482076916";
 const SOURCE_CURRENT187_TOOLING_DIGEST =
@@ -39,11 +39,11 @@ const CURRENT187_E_DIRECTORY =
 const CURRENT187_E_SQL_SHA256 =
   "dd5f4db5aecef2c537251bc5262063c1012a1383aec0d0137e7d8b9536f8bb63";
 const CURRENT186_DIRECTORY =
-  "20260803010000_identity_mail_duty_role_runtime_boundary_v2";
+  "20260804190000_identity_mail_duty_role_runtime_boundary_v2";
 const CURRENT186_SQL_SHA256 =
   "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4";
 const CURRENT186_MANIFEST_DIGEST =
-  "cf354d5bb94069978b4b63b35e2fec1464822c682513b5c3c982f63fc472dc8e";
+  "9f1e5cd7119fa1136681be1b69bc0be8419920a0a32015bad008be45cb5318d1";
 const SAFE_INSPECTION_DATABASE_URL =
   "postgresql://release_materialization@127.0.0.1:55432/lp_c180190_0123456789abcdef0123456789abcdef_ci";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
@@ -77,7 +77,7 @@ const EXPECTED_BLOCKER_CODES = Object.freeze([
 ]);
 
 const RESERVED_ANCHOR_PREDECESSOR = deepFreeze({
-  count: 186,
+  count: 187,
   head: CURRENT186_DIRECTORY,
   headChecksum: CURRENT186_SQL_SHA256,
   manifestDigest: CURRENT186_MANIFEST_DIGEST,
@@ -372,7 +372,7 @@ function schemaLane(artifactsByOrdinal) {
       ordinal,
       sourceDirectory: artifact.directory,
       sourceSqlSha256: artifact.sqlSha256,
-      targetDirectory: artifact.directory,
+      targetDirectory: artifact.targetDirectory,
     };
   });
 }

@@ -1475,9 +1475,14 @@ function ReadyGameView({
 
   useEffect(() => {
     questBoardRequestRef.current += 1;
-    setQuestBoardPage(null);
-    setQuestBoardLoading(false);
-    setQuestBoardError(null);
+
+    const timerId = window.setTimeout(() => {
+      setQuestBoardPage(null);
+      setQuestBoardLoading(false);
+      setQuestBoardError(null);
+    }, 0);
+
+    return () => window.clearTimeout(timerId);
   }, [summary.generatedAt]);
 
   useEffect(() => {

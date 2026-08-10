@@ -41,17 +41,17 @@ test("pins all CURRENT180-CURRENT190 bytes and returns a deny-only blocker repor
   assert.equal(value.contract, CURRENT180_CURRENT190_REHEARSAL_CONTRACT);
   assert.equal(value.status, "BLOCKED");
   assert.deepEqual(value.canonical, {
-    count: 179,
-    head: "20260731120000_identity_mail_delivery_release_head",
+    count: 180,
+    head: "20260804120000_guest_game_max_pending_rewards",
     headChecksum:
-      "c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519",
+      "40587bc93c34875edf6064f9848e42ce0194b321165ac494750987533cef21ef",
     manifestDigest:
-      "3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431",
+      "8a763027a16c45532bf1cff84fdaacf27f2c4e834cae15cffd7a15feae63f6dc",
   });
   assert.equal(value.artifactIntegrityVerified, true);
   assert.equal(
     value.artifactSetDigest,
-    "1623309f985a40d933b3d52cbfd98ba3bf9438350c0f59f9a21b4c0c0524e3f4",
+    "0b1e2b7451cf87ce40749bc16aff9524005923abb3b0c9718ba2dffb762c57ac",
   );
   assert.equal(
     value.blockerDigest,
@@ -339,7 +339,7 @@ test("fails closed on previously observed foundation-gate drift", async () => {
   );
 });
 
-test("fails closed on canonical CURRENT179 byte drift", async () => {
+test("fails closed on canonical CURRENT180 byte drift", async () => {
   const defaultRead = (path) => readFile(path, "utf8");
   await assert.rejects(
     report({
@@ -347,7 +347,7 @@ test("fails closed on canonical CURRENT179 byte drift", async () => {
         const source = await defaultRead(path);
         return path.endsWith(
           join(
-            "20260731120000_identity_mail_delivery_release_head",
+            "20260804120000_guest_game_max_pending_rewards",
             "migration.sql",
           ),
         )

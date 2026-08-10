@@ -42,7 +42,7 @@ const NODE_EXECUTABLE_SHA256 =
   "39d45b5933f339d3ebdebd76474893dab5d7da1038920f65cf5bbcf0f20f3636";
 const PRISMA_EXECUTABLE_SHA256 =
   "c2a77456b70e8ba1e640e122824ed694433828a7c0d76ff3db7fc376b4b0e1a0";
-const SOURCE_DATABASE_NAME = "leetplus_current179_ci";
+const SOURCE_DATABASE_NAME = "leetplus_current180_ci";
 const MAINTENANCE_DATABASE_NAME = "postgres";
 const OWNER_ROLE = "postgres";
 const LOOPBACK_HOST = "127.0.0.1";
@@ -725,7 +725,7 @@ function validateStatementSpec(statementSpec, names) {
   );
   const source =
     quoteCurrent180Current190PostgresqlIdentifier(SOURCE_DATABASE_NAME);
-  if (statementSpec.kind === "CREATE_DATABASE_FROM_FIXED_CURRENT179") {
+  if (statementSpec.kind === "CREATE_DATABASE_FROM_FIXED_CURRENT180") {
     const expectedSql = `CREATE DATABASE ${working} WITH TEMPLATE = ${source} OWNER = "postgres" ALLOW_CONNECTIONS = false IS_TEMPLATE = false;`;
     if (
       statementSpec.sql !== expectedSql ||

@@ -2,9 +2,12 @@
 
 ## Итоговый вердикт
 
-- Текущий локальный этап `CURRENT180..CURRENT190` завершён: fail-closed
-  runner/janitor, signed journal, materializer recovery, SQL semantic
-  fingerprint и два PostgreSQL apply/repeat/rollback/zero-diff цикла приняты.
+- Fail-closed runner/janitor, signed journal, materializer recovery и SQL
+  semantic fingerprint приняты локально. Два PostgreSQL
+  apply/repeat/rollback/zero-diff цикла относятся к прежнему canonical head из
+  `179` миграций. После добавления upstream-миграции № 180 release lane
+  перезаморожен, его static/runtime tests зелёные, но реальный PostgreSQL цикл
+  на новом head ещё должен быть повторён.
 - Внешний invite-only тест пока имеет решение `NO-GO`.
 - Production, текущий `Tenant A` с четырьмя `Store A1..A4` и будущий тестер не
   изменялись. Учётная запись для `gr1mmphone1@gmail.com` не создавалась, пароль
@@ -53,10 +56,11 @@
 - production recovery использует только public verifier, private coordinator
   key не требуется для read-only inspection.
 
-## Финальное локальное PostgreSQL evidence
+## Предыдущее локальное PostgreSQL evidence
 
-Среда: PostgreSQL `16.13`, loopback `127.0.0.1:55432`, source
-`leetplus_current179_ci`, head
+Это evidence было получено до синхронизации с новой upstream-миграцией и больше
+не закрывает текущий release gate. Среда: PostgreSQL `16.13`, loopback
+`127.0.0.1:55432`, исторический source `leetplus_current180_ci`, head
 `20260731120000_identity_mail_delivery_release_head`, `179` finished и `0`
 unfinished/rolled-back migrations.
 
@@ -98,14 +102,14 @@ ready только после canonical merge, production-like evidence, tenant/
 
 ### Release gates
 
-| Gate                                     | Состояние     | Почему не закрыт                                                                                                                                                                                                                                           |
-| ---------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gate 0 — canonical source                | `NO-GO`       | Нет clean exact candidate SHA: ветка `codex/open-beta-hardening`, HEAD `23cd1470c330da027fcd259a9186d77870e9e7d6`, относительно доступного локального tracking ref `origin/main` — behind `30`, ahead `130`; worktree — 103 modified и 166 untracked paths |
-| Gate 1 — safe platform                   | `NO-GO`       | Не завершены все P0 security/tenant/IAM; anonymous operational boundary, startup/secrets, PII/export и full two-tenant enforcement ещё не приняты как production release                                                                                   |
-| Gate 1MT — shared multi-tenant admission | `NO-GO`       | Из `294` HTTP handlers `54` ещё blocked; BFF CURRENT188–190 остаются dormant/unregistered; store-scope и background/browser matrix неполные                                                                                                                |
-| Gate 2A — cutover текущей сети           | `NOT STARTED` | Нет production-like restore/apply/rollback evidence, change window и `CUTOVER GO`                                                                                                                                                                          |
-| Gate 2 — первый внешний invite           | `NOT STARTED` | `Tenant A/A1..A4` не переведён in place и не прошёл 7 суток stable internal alpha                                                                                                                                                                          |
-| Gate 3 — открытый заявочный тест         | `NOT STARTED` | Нужны две friendly-сети, 14 дней, отсутствие P0/P1 и принятые SLO/incident/offboarding evidence                                                                                                                                                            |
+| Gate                                     | Состояние     | Почему не закрыт                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gate 0 — canonical source                | `IN PROGRESS` | Snapshot `b42a799bc18b5f8aa802baba98d39232203463ae` сохранён; `origin/main` влит merge-коммитом `4ff8f0a72e3beb473fcbaaef53b7281bbc6eeabd`, отставание от `origin/main` равно `0`. Release lane перезаморожен поверх canonical migration № 180; осталось принять clean GitHub CI SHA и SHA-bound artifact. |
+| Gate 1 — safe platform                   | `NO-GO`       | Не завершены все P0 security/tenant/IAM; anonymous operational boundary, startup/secrets, PII/export и full two-tenant enforcement ещё не приняты как production release                                                                                                                                   |
+| Gate 1MT — shared multi-tenant admission | `NO-GO`       | Из `294` HTTP handlers `54` ещё blocked; BFF CURRENT188–190 остаются dormant/unregistered; store-scope и background/browser matrix неполные                                                                                                                                                                |
+| Gate 2A — cutover текущей сети           | `NOT STARTED` | Нет production-like restore/apply/rollback evidence, change window и `CUTOVER GO`                                                                                                                                                                                                                          |
+| Gate 2 — первый внешний invite           | `NOT STARTED` | `Tenant A/A1..A4` не переведён in place и не прошёл 7 суток stable internal alpha                                                                                                                                                                                                                          |
+| Gate 3 — открытый заявочный тест         | `NOT STARTED` | Нужны две friendly-сети, 14 дней, отсутствие P0/P1 и принятые SLO/incident/offboarding evidence                                                                                                                                                                                                            |
 
 ### Что уже существует, но ещё не разрешено к production wiring
 
@@ -115,8 +119,10 @@ ready только после canonical merge, production-like evidence, tenant/
   CURRENT188–190 HTTP/BFF candidates остаются noncanonical/dormant;
 - provider lost-response handling принят локально, но production runtime
   roles/grants/attestation и restored-snapshot rehearsal ещё обязательны;
-- web build воспроизводим локально, но должен быть повторён из clean CI artifact
-  с exact release SHA;
+- web build получает стабильный build ID из exact release SHA; CI собирает
+  API/Web/Prisma bundle, нормализует tar metadata, добавляет per-file
+  `SHA256SUMS` и публикует SHA-bound artifact. До зелёного GitHub run этот gate
+  остаётся незакрытым;
 - основные assortment, gamification, staff и communications boundaries имеют
   значительное локальное покрытие, но полный API/BFF/files/export/jobs/SSE/
   Telegram/browser Gate 1MT не завершён.

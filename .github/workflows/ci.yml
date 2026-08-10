@@ -705,7 +705,8 @@ jobs:
           [[ "$POSTGRES_SERVICE_CONTAINER_ID" =~ ^[0-9a-f]{64}$ ]]
           postgres_pid="$(docker inspect --format '{{.State.Pid}}' "$POSTGRES_SERVICE_CONTAINER_ID")"
           [[ "$postgres_pid" =~ ^[1-9][0-9]*$ ]]
-          test -e "/proc/$postgres_pid/ns/net"
+          sudo -n test -e "/proc/$postgres_pid/ns/net"
+          printf 'PostgreSQL service network namespace resolved for PID %s\n' "$postgres_pid"
           pnpm_bin="$(command -v pnpm)"
           test -x "$pnpm_bin"
           sudo -n nsenter \

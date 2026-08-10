@@ -17,12 +17,14 @@
 > `3804792e…` — `3/3 SUCCESS`. На момент приёмки G allowlist/GO отсутствовали. Evidence:
 > `identity-mail-current187-g-ci-evidence-2026-08-10.md`.
 >
-> CURRENT187-H локально добавил independently signed semantic allowlist и
+> CURRENT187-H добавил independently signed semantic allowlist и
 > fail-closed evaluator. Четвёртый purpose связывает exact cluster/universe,
 > review evidence, document и risk-facts digests; F теперь требует matched H
 > receipt. Authority `13/13`, acquisition/risk/allowlist/policy `24/24`, DDL
-> fence `11/11`, полный disposable rehearsal `163/163`. До exact-SHA CI H
-> остаётся `PRE-GREEN / DENY-ONLY`; deploy/test-access GO не выдаётся.
+> fence `11/11`, полный disposable rehearsal `163/163`. Exact SHA `e91b641f…`
+> принят CI `31403020215` как `3/3 SUCCESS`, artifact digest
+> `sha256:94eb8908…c61b7`. H остаётся deny-only; deploy/test-access GO не
+> выдаётся. Evidence: `identity-mail-current187-h-ci-evidence-2026-08-10.md`.
 
 ## Итоговый вердикт
 
@@ -65,7 +67,7 @@
 | Runner/janitor                   | `ACCEPTED LOCALLY`                 | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                                     |
 | CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3` |
 | CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY` | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H               |
-| CURRENT187-H semantic allowlist  | `IMPLEMENTED LOCALLY / PRE-GREEN`  | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; rehearsal `163/163`           |
+| CURRENT187-H semantic allowlist  | `ENGINEERING ACCEPTED / DENY-ONLY` | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`            |
 | Единый gate                      | `PASS`                             | `163/163`, `0` failures                                                                                                    |
 | Независимая latest-byte проверка | `PASS`                             | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                 |
 
@@ -154,8 +156,8 @@ ready только после canonical merge, production-like evidence, tenant/
 
 ## Критический путь до первого внешнего клуба
 
-1. Принять CURRENT187-H exact-SHA CI и добавить persisted one-time semantic
-   approval consumption/revocation/expiry/replay; затем закрыть infrastructure
+1. Добавить persisted one-time semantic approval
+   consumption/revocation/expiry/replay поверх принятого CURRENT187-H; затем закрыть infrastructure
    admission/provider recovery и exact production runtime
    roles/grants/attestation и выполнить reviewed canonical promotion
    CURRENT180–190.
@@ -185,8 +187,9 @@ friendly-сетей, 14-дневного окна и выполнения Gate 3
 ## Следующее действие разработки
 
 Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CURRENT187-F/G приняты
-exact-SHA CI. CURRENT187-H локально реализовал независимо подписанный allowlist,
+exact-SHA CI. CURRENT187-H реализовал независимо подписанный allowlist,
 fail-closed facts evaluator и обязательную связь с F; все launch flags false,
-полный disposable gate `163/163`. Ближайший этап — exact-SHA CI H и persisted
-one-time consumption/revocation semantic approval, затем host/TLS/HBA/pooler
-runtime admission и reviewed canonical promotion/restored-copy rehearsal.
+полный disposable gate `163/163`, exact-SHA CI `31403020215` — `3/3 SUCCESS`.
+Ближайший этап — persisted one-time consumption/revocation semantic approval,
+затем host/TLS/HBA/pooler runtime admission и reviewed canonical
+promotion/restored-copy rehearsal.

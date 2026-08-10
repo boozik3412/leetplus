@@ -80,8 +80,10 @@ production root enrollment, создание внешнего tenant, учётн
   semantic allowlist document; branded evaluator связывает cluster/universe,
   review evidence и CURRENT187-G facts, а F требует exact matched H receipt.
   Authority `13/13`, acquisition/risk/allowlist/policy `24/24`, DDL fence
-  `11/11`, полный disposable rehearsal `163/163`. Статус до exact-SHA CI:
-  `IMPLEMENTED LOCALLY / DENY-ONLY / PRE-GREEN / NOT DEPLOYABLE`; все
+  `11/11`, полный disposable rehearsal `163/163`. Exact SHA `e91b641f…` принят
+  CI `31403020215` как `3/3 SUCCESS`, artifact digest
+  `sha256:94eb8908…c61b7`. Статус:
+  `ENGINEERING ACCEPTED / DENY-ONLY / NONCANONICAL / NOT DEPLOYABLE`; все
   authority/effect/test-access flags остаются false.
 - Все receipts по-прежнему deny-only. Host-side fence executor,
   HBA/TLS/pooler/service-account evidence, production roots и hostile
@@ -358,7 +360,7 @@ production root enrollment, создание внешнего tenant, учётн
 
 Порядок нельзя переставлять или обходить ручным созданием пользователя:
 
-1. Довести CURRENT187 до Engineering Green: принять CURRENT187-H exact-SHA CI,
+1. Довести CURRENT187 до Engineering Green: поверх принятого CURRENT187-H
    добавить persisted semantic-approval consumption/revocation/expiry/replay,
    host-side DDL fence executor, HBA/TLS/pooler probes, signed baseline/policy
    ledger, hostile multi-DB race matrix и independent review.

@@ -2,7 +2,13 @@
 
 ## Статус
 
-`IMPLEMENTED LOCALLY / DENY-ONLY / PRE-GREEN / NONCANONICAL / NOT DEPLOYABLE`.
+`ENGINEERING ACCEPTED / DENY-ONLY / NONCANONICAL / NOT DEPLOYABLE`.
+
+Exact implementation `e91b641fe305e4fc9cc8224c22d561874df96827` принят GitHub
+Actions run `31403020215`: `3/3 SUCCESS`. SHA-bound artifact digest —
+`sha256:94eb8908abaa68075c19ebce90f4b4bb0eac79d1bd026577a4b33f4da14c61b7`.
+Подробное evidence:
+[CURRENT187-H CI](./identity-mail-current187-h-ci-evidence-2026-08-10.md).
 
 CURRENT187-H реализует вторую половину semantic boundary: независимо
 подписанный документ разрешённого состояния сравнивается с exact secret-free
@@ -81,14 +87,14 @@ branded semantic-allowlist receipt. `BINDINGS_MATCHED` невозможен, е�
 - blocker/planner/refreeze/assembler: `13/13`, `18/18`, `17/17`, `21/21`;
 - полный disposable CURRENT180–190 rehearsal: `163/163`.
 
-Exact-SHA CI evidence ещё не зафиксирован, поэтому текущий статус остаётся
-`PRE-GREEN`.
+Exact-SHA CI и SHA-bound artifact зафиксированы; это принимает H как
+engineering foundation, но не меняет deny-only решение.
 
 ## Что остаётся
 
 1. Persisted one-time consumption/revocation/expiry/replay для semantic
    approval, отдельно от DDL-fence ledger.
-2. Независимый review и exact-SHA CI artifact текущего candidate.
+2. Независимый latest-byte security review без P0/P1.
 3. Production root enrollment и отдельный deploy GO.
 4. Host-side DDL fence executor, TLS/HBA/pooler/service-account/runtime
    attestation и infrastructure/provider recovery closure.

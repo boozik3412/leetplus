@@ -564,8 +564,10 @@ enterprise-isolation option и не сокращает shared gates.
     `MATCHED_DENY_ONLY`, а `deploymentGoConsumable`, `testAccessAuthorized` и
     `sharedBetaAccess` остаются false. Локальные gates: authority `13/13`,
     acquisition/risk/allowlist/policy `24/24`, DDL fence `11/11`, полный
-    disposable rehearsal `163/163`. До exact-SHA CI статус H —
-    `PRE-GREEN / DENY-ONLY / NONCANONICAL / NOT_DEPLOYABLE`.
+    disposable rehearsal `163/163`. Exact-SHA CI `31403020215` на `e91b641f…`
+    — `3/3 SUCCESS`, artifact digest `sha256:94eb8908…c61b7`; evidence:
+    [CURRENT187-H CI](./identity-mail-current187-h-ci-evidence-2026-08-10.md).
+    Статус H — `ENGINEERING ACCEPTED / DENY-ONLY / NONCANONICAL / NOT_DEPLOYABLE`.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

@@ -1415,7 +1415,7 @@ CREATE TABLE public."IdentityMailDutyRoleAclEpochV1" (
   CONSTRAINT "identity_mail_duty_role_acl_epoch_definition_manifest_check"
     CHECK (
       "definitionManifestDigest" =
-        '46fcb3cd89f8b8dbb7d064e242de3df417a641e7bc3f1823781f5e914aced8be'
+        '2ac0ff62303d899a70b7600749fcd895f184523ef9dc9fc74d9b60a44eca9109'
     ),
   CONSTRAINT "identity_mail_duty_role_acl_epoch_digest_check"
     CHECK (
@@ -5999,7 +5999,7 @@ BEGIN
     AND pg_catalog.pg_get_expr(
       constraint_entry.conbin, constraint_entry.conrelid, false
     ) =
-      '("definitionManifestDigest" = ''46fcb3cd89f8b8dbb7d064e242de3df417a641e7bc3f1823781f5e914aced8be''::bpchar)';
+      '("definitionManifestDigest" = ''2ac0ff62303d899a70b7600749fcd895f184523ef9dc9fc74d9b60a44eca9109''::bpchar)';
 
   PERFORM pg_catalog.set_config('search_path', 'pg_catalog', true);
 
@@ -6215,7 +6215,7 @@ BEGIN
      OR definition_trigger_count IS DISTINCT FROM 21
      OR definition_protected_relation_count IS DISTINCT FROM 9
      OR observed_definition_manifest_digest IS DISTINCT FROM
-        '46fcb3cd89f8b8dbb7d064e242de3df417a641e7bc3f1823781f5e914aced8be'
+        '2ac0ff62303d899a70b7600749fcd895f184523ef9dc9fc74d9b60a44eca9109'
      OR EXISTS (
        SELECT 1
        FROM pg_catalog.pg_proc AS routine

@@ -53,9 +53,9 @@ BEGIN
      OR completed_head IS DISTINCT FROM
        '20260803010000_identity_mail_duty_role_runtime_boundary_v2'
      OR completed_head_checksum IS DISTINCT FROM
-       '83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4'
+       '7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd'
      OR completed_manifest_digest IS DISTINCT FROM
-       'cf354d5bb94069978b4b63b35e2fec1464822c682513b5c3c982f63fc472dc8e'
+       '3bbf04f88643d94076be96c3ae714c441454e6a7fcd6107af5bd194dca579ed6'
   THEN
     RAISE EXCEPTION
       'CURRENT187 admission anchor requires the exact completed CURRENT186 predecessor history'

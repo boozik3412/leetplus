@@ -554,7 +554,7 @@ test("pins immutable CURRENT180-CURRENT186 GUCs and all source-CURRENT190 prefix
   );
   assert.equal(
     FINAL_PREFIX.digest,
-    "a386282c2f2b04fa96892d3642b13f5d16efab637a9a6e77a659d1404b1fba5d",
+    "3220929d1a33fd20748de14427bf3bd041e1c20445d9525b7fb0a560f8baf476",
   );
   assert.ok(Object.isFrozen(options));
   assert.ok(

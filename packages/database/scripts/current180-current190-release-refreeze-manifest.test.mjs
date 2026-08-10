@@ -42,7 +42,7 @@ const EXPECTED_LOGICAL_ORDER = Object.freeze([
   180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190,
 ]);
 const EXPECTED_PLAN_DIGEST =
-  "7313c40a0fbcf5d04032ed311588118acae0c296aecb4cce82b70fdbc1fb08a4";
+  "cb0ecd967878bb7d1d10ce539118297ce1806466b74827cf564123574339b569";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -218,9 +218,9 @@ test("binds the anchor metadata to both exact contracts and the exact CURRENT186
     count: 187,
     head: "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
     headChecksum:
-      "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
+      "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
     manifestDigest:
-      "9f1e5cd7119fa1136681be1b69bc0be8419920a0a32015bad008be45cb5318d1",
+      "d5143b06ab4e21ec99d5a6c600aa257effffd7ba4cdbbb156650ebdd378ffd16",
   });
 });
 

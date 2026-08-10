@@ -6,17 +6,19 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_FOUNDATION_CONTRACT =
   "IDENTITY_MAIL_DUTY_ROLE_CURRENT186_FOUNDATION_STATIC_V1";
-export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_CANDIDATE =
+export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_SOURCE_DIRECTORY =
   "20260803010000_identity_mail_duty_role_runtime_boundary_v2";
+export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_CANDIDATE =
+  "20260804190000_identity_mail_duty_role_runtime_boundary_v2";
 export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_PREDECESSOR =
   "20260802030000_identity_mail_enrollment_evidence_ledger_v2";
 export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_ORDINAL = 186;
 export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_SQL_SHA256 =
-  "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4";
+  "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd";
 export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_COMPLETED_MANIFEST_DIGEST =
-  "cf354d5bb94069978b4b63b35e2fec1464822c682513b5c3c982f63fc472dc8e";
+  "3bbf04f88643d94076be96c3ae714c441454e6a7fcd6107af5bd194dca579ed6";
 export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_DEFINITION_MANIFEST_DIGEST =
-  "46fcb3cd89f8b8dbb7d064e242de3df417a641e7bc3f1823781f5e914aced8be";
+  "2ac0ff62303d899a70b7600749fcd895f184523ef9dc9fc74d9b60a44eca9109";
 export const IDENTITY_MAIL_DUTY_ROLE_CURRENT186_SYSTEM_PUBLIC_ACL_DIGEST =
   "ad50619e4ea13c2923f089fa4e6ac003cb56da160a30e40d61359ac034097117";
 const EXPECTED_CURRENT185_IMPORTER_PROSRC_SHA256 =
@@ -117,13 +119,18 @@ const DATABASE_DIRECTORY = dirname(SCRIPT_DIRECTORY);
 const CANDIDATES_DIRECTORY = join(DATABASE_DIRECTORY, "migration-candidates");
 const CANDIDATE_DIRECTORY = join(
   CANDIDATES_DIRECTORY,
-  IDENTITY_MAIL_DUTY_ROLE_CURRENT186_CANDIDATE,
+  IDENTITY_MAIL_DUTY_ROLE_CURRENT186_SOURCE_DIRECTORY,
 );
 const SQL_PATH = join(CANDIDATE_DIRECTORY, "migration.sql");
 const METADATA_PATH = join(CANDIDATE_DIRECTORY, "candidate.json");
 
-const EXPECTED_PREDECESSOR_COUNT = 185;
-const EXPECTED_PREDECESSOR_MANIFEST_DIGEST =
+const EXPECTED_METADATA_PREDECESSOR_COUNT = 186;
+const EXPECTED_METADATA_PREDECESSOR =
+  "20260804180000_identity_mail_enrollment_evidence_ledger_v2";
+const EXPECTED_METADATA_PREDECESSOR_MANIFEST_DIGEST =
+  "a7a90ef8c5de5c8a54bdccd54309837ddda2c2e161d6650b335d83f7af04034d";
+const EXPECTED_SQL_PREDECESSOR_COUNT = 185;
+const EXPECTED_SQL_PREDECESSOR_MANIFEST_DIGEST =
   "efee75130a1ed33c7c9f431acc60e4c3275f90a2479c34906cfa40fa0332ab19";
 const EXPECTED_PREDECESSOR_SHA256 =
   "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6";
@@ -134,9 +141,36 @@ const EXPECTED_CANDIDATE_DIRECTORIES = Object.freeze([
   "20260802010000_identity_mail_worker_v2_freshness_protocol",
   "20260802020000_identity_mail_worker_v2_lost_response_replay",
   IDENTITY_MAIL_DUTY_ROLE_CURRENT186_PREDECESSOR,
-  IDENTITY_MAIL_DUTY_ROLE_CURRENT186_CANDIDATE,
+  IDENTITY_MAIL_DUTY_ROLE_CURRENT186_SOURCE_DIRECTORY,
   "20260805020000_langame_onboarding_staged_receipt_current188",
+  "20260805030000_identity_employee_invite_mail_boundary_current189",
+  "20260805040000_guest_portal_session_current190",
+  "20260805050000_identity_mail_ddl_fence_ledger_current187",
 ]);
+const EXPECTED_CANDIDATE_IDENTITIES = Object.freeze({
+  "20260801010000_identity_mail_tenant_enrollment_control_plane":
+    "20260804130000_identity_mail_tenant_enrollment_control_plane",
+  "20260801020000_identity_mail_tenant_lock_drain_worker_v2":
+    "20260804140000_identity_mail_tenant_lock_drain_worker_v2",
+  "20260801030000_identity_mail_tenant_first_claim_protocol":
+    "20260804150000_identity_mail_tenant_first_claim_protocol",
+  "20260802010000_identity_mail_worker_v2_freshness_protocol":
+    "20260804160000_identity_mail_worker_v2_freshness_protocol",
+  "20260802020000_identity_mail_worker_v2_lost_response_replay":
+    "20260804170000_identity_mail_worker_v2_lost_response_replay",
+  "20260802030000_identity_mail_enrollment_evidence_ledger_v2":
+    EXPECTED_METADATA_PREDECESSOR,
+  [IDENTITY_MAIL_DUTY_ROLE_CURRENT186_SOURCE_DIRECTORY]:
+    IDENTITY_MAIL_DUTY_ROLE_CURRENT186_CANDIDATE,
+  "20260805020000_langame_onboarding_staged_receipt_current188":
+    "20260805020000_langame_onboarding_staged_receipt_current188",
+  "20260805030000_identity_employee_invite_mail_boundary_current189":
+    "20260805030000_identity_employee_invite_mail_boundary_current189",
+  "20260805040000_guest_portal_session_current190":
+    "20260805040000_guest_portal_session_current190",
+  "20260805050000_identity_mail_ddl_fence_ledger_current187":
+    "20260805050000_identity_mail_ddl_fence_ledger_current187",
+});
 const EXPECTED_FUNCTIONS = Object.freeze([
   Object.freeze({
     args: 0,
@@ -470,15 +504,16 @@ function auditSql(sql, metadata, candidateDirectories) {
     findings.add(F.SQL_SHA_DRIFT);
   }
   if (
-    metadata?.predecessor?.count !== EXPECTED_PREDECESSOR_COUNT ||
-    metadata?.predecessor?.head !==
-      IDENTITY_MAIL_DUTY_ROLE_CURRENT186_PREDECESSOR ||
+    metadata?.predecessor?.count !== EXPECTED_METADATA_PREDECESSOR_COUNT ||
+    metadata?.predecessor?.head !== EXPECTED_METADATA_PREDECESSOR ||
     metadata?.predecessor?.manifestDigest !==
-      EXPECTED_PREDECESSOR_MANIFEST_DIGEST ||
+      EXPECTED_METADATA_PREDECESSOR_MANIFEST_DIGEST ||
     metadata?.predecessor?.headChecksum !== EXPECTED_PREDECESSOR_SHA256 ||
-    !normalized.includes("completed_count IS DISTINCT FROM 185") ||
+    !normalized.includes(
+      `completed_count IS DISTINCT FROM ${EXPECTED_SQL_PREDECESSOR_COUNT}`,
+    ) ||
     !normalized.includes(IDENTITY_MAIL_DUTY_ROLE_CURRENT186_PREDECESSOR) ||
-    !normalized.includes(EXPECTED_PREDECESSOR_MANIFEST_DIGEST) ||
+    !normalized.includes(EXPECTED_SQL_PREDECESSOR_MANIFEST_DIGEST) ||
     !normalized.includes(EXPECTED_PREDECESSOR_SHA256)
   ) {
     findings.add(F.PREDECESSOR_DRIFT);
@@ -1525,7 +1560,7 @@ async function auditCandidateChain(candidateDirectories) {
       );
       const sql = await readFile(join(directory, "migration.sql"), "utf8");
       if (
-        metadata.candidate !== candidate ||
+        metadata.candidate !== EXPECTED_CANDIDATE_IDENTITIES[candidate] ||
         metadata.migrationSqlSha256 !== digestText(sql)
       ) {
         return false;

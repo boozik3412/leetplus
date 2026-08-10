@@ -4,8 +4,8 @@
   "status": "IN_MEMORY_ASSEMBLY_ONLY",
   "source": {
     "refreezeManifestContract": "CURRENT180_CURRENT190_RELEASE_REFREEZE_MANIFEST_V1",
-    "refreezeManifestSha256": "55e4a55df4054c22261389d761aac8c34989a6022fefbd9c5f9d5bbb05b42296",
-    "materializationPlanDigest": "7313c40a0fbcf5d04032ed311588118acae0c296aecb4cce82b70fdbc1fb08a4",
+    "refreezeManifestSha256": "8c964fd5d5afcffba7394c30f09b7d77e25a4c59580a46134ba26befbdea2482",
+    "materializationPlanDigest": "cb0ecd967878bb7d1d10ce539118297ce1806466b74827cf564123574339b569",
     "frozenSourceBytesMayChange": false,
     "frozenSourceSqlTransformation": "BYTE_EXACT_COPY_ONLY"
   },
@@ -22,7 +22,7 @@
     "migrationCount": 191,
     "head": "20260805040000_guest_portal_session_current190",
     "headChecksum": "d23c0e8fbdfddd0eb9ec7a73d877e7bbcde8c170683247a66f43530cca3867d5",
-    "migrationManifestDigest": "a386282c2f2b04fa96892d3642b13f5d16efab637a9a6e77a659d1404b1fba5d",
+    "migrationManifestDigest": "3220929d1a33fd20748de14427bf3bd041e1c20445d9525b7fb0a560f8baf476",
     "layout": "IN_MEMORY_PRISMA_MIGRATIONS_V1",
     "schemaEntry": "schema.prisma",
     "migrationLockEntry": "migrations/migration_lock.toml",
@@ -104,13 +104,13 @@
       "ordinal": 186,
       "targetDirectory": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
       "sourceDirectory": "packages/database/migration-candidates/20260803010000_identity_mail_duty_role_runtime_boundary_v2",
-      "migrationSqlSha256": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4"
+      "migrationSqlSha256": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd"
     },
     {
       "ordinal": 187,
       "targetDirectory": "20260805010000_identity_mail_cluster_application_admission_current187",
       "sourceDirectory": "packages/database/release-proposals/current180-current190/20260805010000_identity_mail_cluster_application_admission_current187",
-      "migrationSqlSha256": "dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3"
+      "migrationSqlSha256": "24de1c767af0b0bd9d386c9c2df11455743bd0ee041edfd2ca17cdba7e01c2e7"
     },
     {
       "ordinal": 188,

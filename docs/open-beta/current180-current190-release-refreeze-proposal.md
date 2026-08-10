@@ -16,7 +16,7 @@ provider calls, production или tester access.
 `packages/database/release-proposals/current180-current190/20260805010000_identity_mail_cluster_application_admission_current187`.
 
 - `migration.sql` имеет SHA-256
-  `dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3`;
+  `24de1c767af0b0bd9d386c9c2df11455743bd0ee041edfd2ca17cdba7e01c2e7`;
 - `candidate.json` имеет SHA-256
   `dce3b85321938bb610e79f86b852a9e7bf9e03ed0585aa37d3542b5b5ff28874`;
 - contract:

@@ -79,7 +79,7 @@ const EXPECTED_PREVIOUS_FOUNDATION_TOOLING = deepFreeze([
   {
     file: "identity-mail-duty-role-current186-foundation.mjs",
     ordinal: 186,
-    sha256: "1d21b85d3dbe57fc051cc0f8abc8036255dd76968e732282ac4624ca4cb36627",
+    sha256: "5d2918b472ca41a8dae6612e127b817377d79d5f5da78624663d49d652166d97",
   },
 ]);
 
@@ -231,7 +231,7 @@ const EXPECTED_CANDIDATES = deepFreeze([
           "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6",
       },
       migrationSqlSha256:
-        "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
+        "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
       authorization: false,
       authorityScope: "CURRENT_DATABASE_ONLY",
       canMutate: false,

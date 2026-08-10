@@ -6,8 +6,8 @@
   "logicalOrder": [180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190],
   "materializationPlanner": {
     "contract": "CURRENT180_CURRENT190_RELEASE_MATERIALIZATION_PLAN_V1",
-    "planDigest": "7313c40a0fbcf5d04032ed311588118acae0c296aecb4cce82b70fdbc1fb08a4",
-    "sourceArtifactSetDigest": "0b1e2b7451cf87ce40749bc16aff9524005923abb3b0c9718ba2dffb762c57ac"
+    "planDigest": "cb0ecd967878bb7d1d10ce539118297ce1806466b74827cf564123574339b569",
+    "sourceArtifactSetDigest": "7b2d29eb70674dd62450c322f33b2a689f64dd110a4c85e123b8bc517887919a"
   },
   "authorization": {
     "canActivateRoutes": false,
@@ -249,19 +249,19 @@
       "sourceFiles": [
         {
           "name": "README.md",
-          "sha256": "78b5dccdfa256f7d6223d0b1436085b8f48268b840c4733b40e6a145992afb7c"
+          "sha256": "c6469dfa74893570669fb5ebeaec0697bf72fb6182d3ed80c4ea605bf8a112a7"
         },
         {
           "name": "candidate.json",
-          "sha256": "1125b2db451360c6083dbb3ce81b79516142ba5909e4d7896c1c690bf04ab1b2"
+          "sha256": "f69b4bab382aca5bdb80bf545bab233d32855455358056e9a5a1b284c5036579"
         },
         {
           "name": "migration.sql",
-          "sha256": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4"
+          "sha256": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd"
         }
       ],
-      "sourceDirectorySha256": "4fa958906d5b778ef8851b7ba8dc74d1f80d061b7b8c9a1db7fa930df7014cce",
-      "migrationSqlSha256": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
+      "sourceDirectorySha256": "d25ad9e1da125419203337b5f8c570637e3de8200de99a132b787c877bef0ffb",
+      "migrationSqlSha256": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
       "predecessor": {
         "count": 186,
         "head": "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
@@ -285,20 +285,20 @@
       "sourceFiles": [
         {
           "name": "candidate.json",
-          "sha256": "905e5631e2718e5ebd85540ff66b28b6aaff593c3e51b8504e5c8b1041082e67"
+          "sha256": "3ce79a5e589406907ad43d612dca905ba65ebe9d6e73a36cabf96c0a2e1f345a"
         },
         {
           "name": "migration.sql",
-          "sha256": "dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3"
+          "sha256": "24de1c767af0b0bd9d386c9c2df11455743bd0ee041edfd2ca17cdba7e01c2e7"
         }
       ],
-      "sourceDirectorySha256": "2e772151cae782e91e3552063925deadd4bd9b8dbf1b345a75b10d8c3e132540",
-      "migrationSqlSha256": "dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3",
+      "sourceDirectorySha256": "248334f8039cb2768cd168d13e6b685009c56975dfcb976f3773e5bf9eb25aea",
+      "migrationSqlSha256": "24de1c767af0b0bd9d386c9c2df11455743bd0ee041edfd2ca17cdba7e01c2e7",
       "predecessor": {
         "count": 187,
         "head": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
-        "headChecksum": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
-        "manifestDigest": "9f1e5cd7119fa1136681be1b69bc0be8419920a0a32015bad008be45cb5318d1"
+        "headChecksum": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
+        "manifestDigest": "d5143b06ab4e21ec99d5a6c600aa257effffd7ba4cdbbb156650ebdd378ffd16"
       },
       "predecessorEvidence": {
         "externalEvidenceRequired": true,

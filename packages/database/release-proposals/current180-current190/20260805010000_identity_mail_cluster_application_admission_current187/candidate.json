@@ -7,14 +7,14 @@
   "predecessor": {
     "count": 187,
     "head": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
-    "headChecksum": "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
-    "manifestDigest": "9f1e5cd7119fa1136681be1b69bc0be8419920a0a32015bad008be45cb5318d1"
+    "headChecksum": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
+    "manifestDigest": "d5143b06ab4e21ec99d5a6c600aa257effffd7ba4cdbbb156650ebdd378ffd16"
   },
   "predecessorEvidence": {
     "externallyVerifiedEvidenceRequired": true,
     "resolved": false
   },
-  "migrationSqlSha256": "dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3",
+  "migrationSqlSha256": "24de1c767af0b0bd9d386c9c2df11455743bd0ee041edfd2ca17cdba7e01c2e7",
   "proposalOnly": true,
   "authorization": false,
   "effects": false,

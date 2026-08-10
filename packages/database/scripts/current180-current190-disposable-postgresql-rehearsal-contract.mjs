@@ -23,15 +23,15 @@ const ASSEMBLY_RECEIPT_CONTRACT =
 const ASSEMBLY_RECEIPT_STATUS =
   "FROZEN_IN_MEMORY_ARTIFACT_ASSEMBLED_NOT_RUNNABLE";
 const ASSEMBLY_ALLOW_MANIFEST_SHA256 =
-  "925bd5300a946c82fc4265375072194bd483e5ea7bceba132c108856637fbdb9";
+  "1b9f7e57f1227dbc86b7141e471a677e7e3f6b7e28bc886348396cf288c930b2";
 const ASSEMBLY_REFREEZE_MANIFEST_SHA256 =
-  "55e4a55df4054c22261389d761aac8c34989a6022fefbd9c5f9d5bbb05b42296";
+  "8c964fd5d5afcffba7394c30f09b7d77e25a4c59580a46134ba26befbdea2482";
 const ASSEMBLY_PLAN_DIGEST =
-  "b24a3ef3a4584b99048f60341f55141d4a5c6dc4e252c2c8e6cbe28ec5a8c936";
+  "268a9b2759fb212f3b6dd9d273f27a457366f0b395c1ea16a51b0014cc96d24b";
 const ASSEMBLY_ENTRY_MANIFEST_DIGEST =
-  "acc80c6892b666e3b145cbeb2168e2929ac1ab09985b0ba05d970c87d8548126";
+  "00513bf5b31bbf37dd0d82fe025fed72c29c17fe3e26aad8bfa273c2829ed89a";
 const ASSEMBLY_IN_MEMORY_ARTIFACT_DIGEST =
-  "b1e2bc9aece1b85f7b0be6fedaf4e41c3650bbf5b72b9218e5fb6050a9ec6f04";
+  "c52544d9c89ef6a7e33445e656aa4a926ab2eba370d92e31031661ac5e6d652e";
 const ASSEMBLY_RECEIPT_AUTHORIZATION_KEYS = Object.freeze([
   "canApplyDatabase",
   "canCallExternalProviders",
@@ -60,7 +60,7 @@ const SOURCE_MIGRATION_MANIFEST_DIGEST =
 const FINAL_MIGRATION_COUNT = 191;
 const FINAL_MIGRATION_HEAD = "20260805040000_guest_portal_session_current190";
 const FINAL_MIGRATION_MANIFEST_DIGEST =
-  "a386282c2f2b04fa96892d3642b13f5d16efab637a9a6e77a659d1404b1fba5d";
+  "3220929d1a33fd20748de14427bf3bd041e1c20445d9525b7fb0a560f8baf476";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const TOKEN_PATTERN = /^[0-9a-f]{32}$/u;
 const WORKING_DATABASE_PATTERN = /^lp_imtec_[0-9a-f]{32}_ci$/u;
@@ -178,7 +178,7 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP = deepFreeze([
       "leetplus.identity_mail_duty_role_runtime_current186_confirmation",
     migration: "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
     ordinal: 186,
-    sha256: "83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4",
+    sha256: "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
     sha256Guc: "leetplus.identity_mail_duty_role_runtime_current186_sha256",
   },
 ]);
@@ -228,27 +228,27 @@ export const CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_PREFIXES = deepFreeze([
   },
   {
     count: 187,
-    digest: "9f1e5cd7119fa1136681be1b69bc0be8419920a0a32015bad008be45cb5318d1",
+    digest: "d5143b06ab4e21ec99d5a6c600aa257effffd7ba4cdbbb156650ebdd378ffd16",
     head: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[6].migration,
     headChecksum: CURRENT180_CURRENT190_POSTGRESQL_REHEARSAL_GUC_MAP[6].sha256,
   },
   {
     count: 188,
-    digest: "622ab534d6ce4d4c7f9de0fab00e6d104ddaa489e0eff8104167dfb1d0a41e7e",
+    digest: "00401a0a356ead1f3e02947a43e7fefa2886521b413aa8985e154cb3b089d708",
     head: "20260805010000_identity_mail_cluster_application_admission_current187",
     headChecksum:
-      "dee4995dfd5e66994ad1d50a4631e0c2496db2bc6abca79b9b9a9f4acb4ba5d3",
+      "24de1c767af0b0bd9d386c9c2df11455743bd0ee041edfd2ca17cdba7e01c2e7",
   },
   {
     count: 189,
-    digest: "7f29a2e0e93deaa59fa26e2aa143ad4a7b896014064aefd9d4615eb158a6dc26",
+    digest: "1afdcb833940cce3b4da040eaea4d7cffcfe90d028ed6866d04de044646cbeca",
     head: "20260805020000_langame_onboarding_staged_receipt_current188",
     headChecksum:
       "e76ed2c1b7e913bbfa9a9779cd0c860b120534c83eba504a0510469ff26f0c60",
   },
   {
     count: 190,
-    digest: "54882de8ce7b5aeef11d78bd656c2a68c5e21926df4eb5c7b468c7c84f8d956e",
+    digest: "a6c0f85279e5e0a1dc29b753532ab02be635d026fa086355feeeae483d8dc670",
     head: "20260805030000_identity_employee_invite_mail_boundary_current189",
     headChecksum:
       "4bbf4d49847b82731aa2e235796b4b1a898914768c1f4f4e2cb7a8b084e5c751",

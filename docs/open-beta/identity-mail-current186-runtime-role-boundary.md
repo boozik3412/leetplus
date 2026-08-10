@@ -245,11 +245,11 @@ predecessor gates CURRENT180..CURRENT185, CURRENT186 foundation `15/15`, catalog
 rows, а не только их aggregate counts.
 
 Финальные pins: definition manifest
-`46fcb3cd89f8b8dbb7d064e242de3df417a641e7bc3f1823781f5e914aced8be`,
+`2ac0ff62303d899a70b7600749fcd895f184523ef9dc9fc74d9b60a44eca9109`,
 normalized migration SHA
-`83c5df307d60548ffe3b009ec35b2faba5a37b1618d8dd88a1c571ce697d48b4`,
+`7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd`,
 completed 186-row manifest
-`cf354d5bb94069978b4b63b35e2fec1464822c682513b5c3c982f63fc472dc8e`.
+`3bbf04f88643d94076be96c3ae714c441454e6a7fcd6107af5bd194dca579ed6`.
 
 Текущий definition manifest pin-ит routines, triggers, constraints и indexes,
 но исчерпывающее покрытие `pg_attribute`, column defaults и RLS policy

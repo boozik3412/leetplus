@@ -51,7 +51,7 @@ test("pins all CURRENT180-CURRENT190 bytes and returns a deny-only blocker repor
   assert.equal(value.artifactIntegrityVerified, true);
   assert.equal(
     value.artifactSetDigest,
-    "0b1e2b7451cf87ce40749bc16aff9524005923abb3b0c9718ba2dffb762c57ac",
+    "7b2d29eb70674dd62450c322f33b2a689f64dd110a4c85e123b8bc517887919a",
   );
   assert.equal(
     value.blockerDigest,
@@ -63,7 +63,7 @@ test("pins all CURRENT180-CURRENT190 bytes and returns a deny-only blocker repor
   );
   assert.equal(
     value.previousFoundationToolingDigest,
-    "9ea38d5bc3798298e0a31d43300f12630d2972a123ed9403efd8b6cf22217902",
+    "8141c8c5ac28967ca28b0f2aec91eb27c1df1250f41ce378bff114c9a863d817",
   );
   assert.equal(value.artifacts.length, 11);
   assert.deepEqual(

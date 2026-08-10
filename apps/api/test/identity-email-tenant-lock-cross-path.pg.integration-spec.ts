@@ -45,9 +45,10 @@ const WORKER_RPC_SIGNATURES = [
 
 // This is intentionally an application/locking seam for the CURRENT179
 // identity-mail RPCs on the canonical CURRENT180 database head.
-// One least-privilege repository case executes real claim_v1 and proves the
-// EMPTY decision waits on the shared tenant lock. The synthetic worker retains
-// relation-order coverage. Neither case claims ACTIVE/DRAINING coordinator or
+// One least-privilege repository case executes real claim_v1 and proves it
+// waits on the shared tenant lock before failing closed on the newer canonical
+// CURRENT180 head. The synthetic worker retains relation-order and independent
+// tenant progress coverage. Neither case claims ACTIVE/DRAINING coordinator or
 // non-empty outbox state-machine coverage.
 
 type InviteFixture = {
@@ -575,7 +576,7 @@ describePostgres(
       },
     );
 
-    it('makes a real least-privilege CURRENT179 claim_v1 EMPTY RPC wait behind application cancel while Tenant B progresses', async () => {
+    it('makes a real least-privilege CURRENT179 claim_v1 wait behind application cancel and fail closed on canonical CURRENT180', async () => {
       const fixture = await createCanonicalInvite(
         boundary,
         admin,
@@ -658,17 +659,25 @@ describePostgres(
         });
         expect(wait.query).toContain('pg_advisory_xact_lock');
 
-        const tenantBClaim = await withTimeout(
-          repositoryB.claimOne({
-            tenantId: tenantBId,
-            leaseOwnerDigest: fixtureDigest('repository-b-lease-owner'),
-            leaseTokenDigest: fixtureDigest('repository-b-lease-token'),
-            providerAuthorityDigest,
-          }),
+        const tenantBOutcome = await withTimeout(
+          capture(
+            repositoryB.claimOne({
+              tenantId: tenantBId,
+              leaseOwnerDigest: fixtureDigest('repository-b-lease-owner'),
+              leaseTokenDigest: fixtureDigest('repository-b-lease-token'),
+              providerAuthorityDigest,
+            }),
+          ),
           3_000,
-          'Tenant B real repository claim did not progress',
+          'Tenant B real repository claim did not fail closed promptly',
         );
-        expect(tenantBClaim).toBeNull();
+        if (tenantBOutcome.status === 'fulfilled') {
+          throw new Error(
+            'CURRENT179 repository claim unexpectedly ran on canonical CURRENT180',
+          );
+        }
+        assertNotDeadlock(tenantBOutcome.reason);
+        expect(sqlState(tenantBOutcome.reason)).toBe('55000');
 
         releaseApplication.resolve(undefined);
         const [applicationOutcome, workerOutcome] = await Promise.all([
@@ -679,12 +688,14 @@ describePostgres(
           assertNotDeadlock(applicationOutcome.reason);
           throw applicationOutcome.reason;
         }
-        if (workerOutcome.status === 'rejected') {
-          assertNotDeadlock(workerOutcome.reason);
-          throw workerOutcome.reason;
+        if (workerOutcome.status === 'fulfilled') {
+          throw new Error(
+            'Blocked CURRENT179 repository claim unexpectedly ran on canonical CURRENT180',
+          );
         }
+        assertNotDeadlock(workerOutcome.reason);
+        expect(sqlState(workerOutcome.reason)).toBe('55000');
         expect(applicationOutcome.value).toEqual({ decision: 'CANCELED' });
-        expect(workerOutcome.value).toBeNull();
         await expect(
           admin.identityEmailClaim.count({
             where: { emailCanonical: fixture.email },

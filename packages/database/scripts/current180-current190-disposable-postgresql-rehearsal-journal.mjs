@@ -313,6 +313,26 @@ function sameIdentity(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+function removalIdentityOf(stat) {
+  return Object.freeze({
+    birthtimeNs: String(stat.birthtimeNs),
+    ctimeNs: String(stat.ctimeNs),
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    mtimeNs: String(stat.mtimeNs),
+  });
+}
+
+function sameRemovalIdentity(left, right) {
+  return (
+    left.birthtimeNs === right.birthtimeNs &&
+    left.ctimeNs === right.ctimeNs &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mtimeNs === right.mtimeNs
+  );
+}
+
 async function assertCoordinatorRunBinding(
   coordinatorAuthority,
   coordinatorRunBinding,
@@ -1479,7 +1499,8 @@ async function reconcileAmbiguousRootRemoval(state) {
   }
   if (
     statType(rootStat) !== "directory" ||
-    !sameIdentity(identityOf(rootStat), state.rootIdentity)
+    state.rootRemovalIdentity === undefined ||
+    !sameRemovalIdentity(removalIdentityOf(rootStat), state.rootRemovalIdentity)
   ) {
     fail("REHEARSAL_JOURNAL_CLEANUP_DENIED", [
       "JOURNAL_ROOT_REMOVAL_REPLACEMENT_DETECTED",
@@ -2796,6 +2817,16 @@ async function performCleanup(state, testFault = null) {
     state.rootIdentity,
     "JOURNAL_ROOT_PRE_REMOVE_DRIFT",
   );
+  const rootRemovalStat = await lstat(state.rootPath, { bigint: true });
+  if (
+    statType(rootRemovalStat) !== "directory" ||
+    !sameIdentity(identityOf(rootRemovalStat), state.rootIdentity)
+  ) {
+    fail("REHEARSAL_JOURNAL_CLEANUP_DENIED", [
+      "JOURNAL_ROOT_PRE_REMOVE_IDENTITY_DRIFT",
+    ]);
+  }
+  state.rootRemovalIdentity = removalIdentityOf(rootRemovalStat);
   state.cleanupStage = "ROOT_REMOVAL_AMBIGUOUS";
   if (testFault === "ROOT_REMOVAL_NOT_APPLIED_RESPONSE_LOST") {
     fail("REHEARSAL_JOURNAL_CLEANUP_RESPONSE_LOST", [

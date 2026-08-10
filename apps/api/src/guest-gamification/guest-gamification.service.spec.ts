@@ -7470,6 +7470,81 @@ describe('GuestGamificationService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.guestGameSeason.updateMany).not.toHaveBeenCalled();
     });
+
+    it('rejects a storefront-only lootbox selected as a Battle Pass reward', async () => {
+      const { service, prisma } = createService();
+      prisma.store.findMany.mockResolvedValue([
+        { id: 'store-1', externalDomain: 'domain-1' },
+      ]);
+      prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.createSeason(user, {
+          name: 'Season with invalid reward',
+          status: 'DRAFT',
+          storeIds: ['store-1'],
+          levels: [
+            {
+              level: 1,
+              activationRules: playTimeRules,
+              freeRewardDetails: {
+                type: 'LOOT_BOX',
+                lootBox: { id: 'storefront-only' },
+              },
+            },
+          ],
+        }),
+      ).rejects.toThrow('лутбокс не опубликован как подарочный');
+
+      expect(prisma.guestGameLootBox.findMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: user.tenantId,
+          id: { in: ['storefront-only'] },
+          status: 'ACTIVE',
+          usageKind: { in: ['REWARD_TEMPLATE', 'BOTH'] },
+        },
+        select: { id: true },
+      });
+      expect(prisma.guestGameSeason.create).not.toHaveBeenCalled();
+    });
+
+    it.each(['REWARD_TEMPLATE', 'BOTH'])(
+      'accepts an active %s lootbox as a Battle Pass reward',
+      async (usageKind) => {
+        const { service, prisma } = createService();
+        const levels = [
+          {
+            level: 1,
+            activationRules: playTimeRules,
+            freeReward: 'Gift case',
+            freeRewardDetails: {
+              type: 'LOOT_BOX',
+              lootBox: { id: 'gift-case' },
+            },
+          },
+        ];
+        prisma.store.findMany.mockResolvedValue([
+          { id: 'store-1', externalDomain: 'domain-1' },
+        ]);
+        prisma.guestGameLootBox.findMany.mockResolvedValue([
+          { id: 'gift-case', usageKind },
+        ]);
+        prisma.guestGameSeason.create.mockResolvedValue(
+          seasonRow({ status: 'DRAFT', levels }),
+        );
+
+        await expect(
+          service.createSeason(user, {
+            name: 'Season with gift reward',
+            status: 'DRAFT',
+            storeIds: ['store-1'],
+            levels,
+          }),
+        ).resolves.toBeDefined();
+
+        expect(prisma.guestGameSeason.create).toHaveBeenCalledTimes(1);
+      },
+    );
   });
 
   describe('Battle Pass activation', () => {

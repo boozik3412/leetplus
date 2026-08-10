@@ -19934,17 +19934,78 @@ export class GuestGamificationService {
       throw new BadRequestException('Шаги Battle Pass должны быть массивом.');
     }
 
-    const stores = await this.prisma.store.findMany({
-      where: {
-        tenantId: user.tenantId,
-        isActive: true,
-        ...(storeIds.length ? { id: { in: storeIds } } : {}),
-      },
-      select: { id: true, externalDomain: true },
+    const rewardLootBoxRefs = value.flatMap((item, index) => {
+      const level = jsonRecord(item as Prisma.JsonValue);
+
+      return [
+        {
+          track: 'FREE',
+          details: jsonRecord(
+            level.freeRewardDetails as Prisma.JsonValue | null,
+          ),
+        },
+        {
+          track: 'PREMIUM',
+          details: jsonRecord(
+            level.premiumRewardDetails as Prisma.JsonValue | null,
+          ),
+        },
+      ].flatMap(({ track, details }) => {
+        if (nullableString(details.type)?.toUpperCase() !== 'LOOT_BOX') {
+          return [];
+        }
+
+        const lootBox = jsonRecord(details.lootBox as Prisma.JsonValue | null);
+        const id = nullableId(lootBox.id) ?? nullableId(details.lootBoxId);
+        if (!id) {
+          throw new BadRequestException(
+            `Шаг ${index + 1}, ${track}: выберите конкретный подарочный лутбокс.`,
+          );
+        }
+
+        return [{ id, index, track }];
+      });
     });
+    const rewardLootBoxIds = uniqueStrings(
+      rewardLootBoxRefs.map((item) => item.id),
+    );
+    const rewardLootBoxQuery: Promise<Array<{ id: string }>> =
+      rewardLootBoxIds.length
+        ? this.prisma.guestGameLootBox.findMany({
+            where: {
+              tenantId: user.tenantId,
+              id: { in: rewardLootBoxIds },
+              status: 'ACTIVE',
+              usageKind: { in: ['REWARD_TEMPLATE', 'BOTH'] },
+            },
+            select: { id: true },
+          })
+        : Promise.resolve([]);
+    const [stores, rewardLootBoxes] = await Promise.all([
+      this.prisma.store.findMany({
+        where: {
+          tenantId: user.tenantId,
+          isActive: true,
+          ...(storeIds.length ? { id: { in: storeIds } } : {}),
+        },
+        select: { id: true, externalDomain: true },
+      }),
+      rewardLootBoxQuery,
+    ]);
     if (storeIds.length && stores.length !== storeIds.length) {
       throw new BadRequestException(
         'Один или несколько клубов Battle Pass недоступны.',
+      );
+    }
+    const eligibleRewardLootBoxIds = new Set(
+      rewardLootBoxes.map((lootBox) => lootBox.id),
+    );
+    const invalidRewardLootBox = rewardLootBoxRefs.find(
+      (item) => !eligibleRewardLootBoxIds.has(item.id),
+    );
+    if (invalidRewardLootBox) {
+      throw new BadRequestException(
+        `Шаг ${invalidRewardLootBox.index + 1}, ${invalidRewardLootBox.track}: лутбокс не опубликован как подарочный. Выберите REWARD_TEMPLATE или BOTH.`,
       );
     }
     const externalDomains = uniqueStrings(

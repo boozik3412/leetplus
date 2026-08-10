@@ -11055,9 +11055,7 @@ function LootBoxPrizesEditor({
                     Math.max(0, numeric(prize.chancePercent, 0)),
                   ).colors.borderColor
                 }
-                onChange={(borderColor) =>
-                  updatePrize(index, { borderColor })
-                }
+                onChange={(borderColor) => updatePrize(index, { borderColor })}
               />
               <LootBoxPrizeColorField
                 label="Текст карточки"
@@ -11085,7 +11083,9 @@ function LootBoxPrizesEditor({
                 <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
                   Пустое значение использует автоматическую палитру редкости.
                 </p>
-                {prize.borderColor || prize.textColor || prize.backgroundColor ? (
+                {prize.borderColor ||
+                prize.textColor ||
+                prize.backgroundColor ? (
                   <button
                     type="button"
                     className={smallButtonClass}
@@ -12165,10 +12165,13 @@ function SeasonStepRewardFields({
   const rewardType =
     step[typeKey] ?? (step[legacyKey]?.trim() ? "ADMIN_OTHER" : "");
   const currentLootBoxId = step[lootBoxIdKey] ?? "";
-  const rewardLootBoxes = lootBoxes.filter(
-    (lootBox) =>
-      lootBoxCanBeRewardTemplate(lootBox) || lootBox.id === currentLootBoxId,
-  );
+  const currentLootBox = currentLootBoxId
+    ? (lootBoxes.find((lootBox) => lootBox.id === currentLootBoxId) ?? null)
+    : null;
+  const currentLootBoxIsEligible = currentLootBox
+    ? lootBoxCanBeRewardTemplate(currentLootBox)
+    : !currentLootBoxId;
+  const rewardLootBoxes = lootBoxes.filter(lootBoxCanBeRewardTemplate);
 
   const patchReward = (patch: Partial<SeasonLevelStepForm>) => {
     const next = { ...step, ...patch };
@@ -12280,7 +12283,7 @@ function SeasonStepRewardFields({
           <Field label="Лутбокс для награды">
             <select
               className={fieldClass}
-              value={step[lootBoxIdKey] ?? ""}
+              value={currentLootBoxIsEligible ? currentLootBoxId : ""}
               onChange={(event) => {
                 const selectedLootBox =
                   rewardLootBoxes.find(
@@ -12305,10 +12308,21 @@ function SeasonStepRewardFields({
                 </option>
               ))}
             </select>
+            {!currentLootBoxIsEligible ? (
+              <p
+                role="alert"
+                className="mt-2 text-xs font-semibold text-red-600 dark:text-red-300"
+              >
+                Ранее выбранный лутбокс «{currentLootBox?.name ?? "недоступен"}»
+                работает только на витрине. Выберите подарочный лутбокс или
+                лутбокс с режимом «Витрина + подарок».
+              </p>
+            ) : null}
             <OptionHelp>
-              Можно использовать активный витринный или подарочный лутбокс. Его
-              таблица призов будет участвовать в расчете минимальной, ожидаемой
-              и максимальной награды Battle Pass.
+              Для награды доступны только активные подарочные лутбоксы и
+              лутбоксы с режимом «Витрина + подарок». Их таблица призов будет
+              участвовать в расчете минимальной, ожидаемой и максимальной
+              награды Battle Pass.
             </OptionHelp>
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -16776,9 +16790,9 @@ function battlePassRewardTrackSummary(
       ? lootBoxesById.get(linkedLootBoxId)
       : null;
 
-    if (!linkedLootBox) {
+    if (!linkedLootBox || !lootBoxCanBeRewardTemplate(linkedLootBox)) {
       summary.unresolved.push(
-        `${definition.label}: не выбран конкретный лутбокс`,
+        `${definition.label}: выберите активный подарочный лутбокс`,
       );
       continue;
     }
@@ -17146,8 +17160,13 @@ function recordString(record: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function lootBoxCanBeRewardTemplate(lootBox: Pick<GuestGameLootBox, "status">) {
-  return lootBox.status === "ACTIVE";
+function lootBoxCanBeRewardTemplate(
+  lootBox: Pick<GuestGameLootBox, "status" | "usageKind">,
+) {
+  return (
+    lootBox.status === "ACTIVE" &&
+    (lootBox.usageKind === "REWARD_TEMPLATE" || lootBox.usageKind === "BOTH")
+  );
 }
 
 function nextSeasonStepId() {
@@ -17615,15 +17634,15 @@ function lootBoxPrizeFromRuleItem(
         : "",
     borderColor:
       typeof record.borderColor === "string"
-        ? normalizeLootBoxPrizeColor(record.borderColor) ?? ""
+        ? (normalizeLootBoxPrizeColor(record.borderColor) ?? "")
         : "",
     textColor:
       typeof record.textColor === "string"
-        ? normalizeLootBoxPrizeColor(record.textColor) ?? ""
+        ? (normalizeLootBoxPrizeColor(record.textColor) ?? "")
         : "",
     backgroundColor:
       typeof record.backgroundColor === "string"
-        ? normalizeLootBoxPrizeColor(record.backgroundColor) ?? ""
+        ? (normalizeLootBoxPrizeColor(record.backgroundColor) ?? "")
         : "",
   };
 }

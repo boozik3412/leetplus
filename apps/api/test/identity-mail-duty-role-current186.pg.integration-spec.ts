@@ -23,12 +23,11 @@ const CURRENT185_MIGRATION =
   '20260802030000_identity_mail_enrollment_evidence_ledger_v2';
 const CURRENT185_SHA256 =
   '2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6';
-const CURRENT179_MIGRATION =
-  '20260731120000_identity_mail_delivery_release_head';
-const CURRENT179_SHA256 =
-  'c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519';
-const CURRENT179_MANIFEST_DIGEST =
-  '3330185424ca669c18f39c2da5aa1e49f942500c0c85185c9125930e02df9431';
+const CURRENT180_MIGRATION = '20260804120000_guest_game_max_pending_rewards';
+const CURRENT180_SHA256 =
+  '40587bc93c34875edf6064f9848e42ce0194b321165ac494750987533cef21ef';
+const CURRENT180_MANIFEST_DIGEST =
+  '8a763027a16c45532bf1cff84fdaacf27f2c4e834cae15cffd7a15feae63f6dc';
 const CURRENT186_MIGRATION =
   '20260803010000_identity_mail_duty_role_runtime_boundary_v2';
 // Re-pinned after every accepted candidate-byte revision.
@@ -576,7 +575,7 @@ describePostgres(
       source = prismaFor(singleConnectionUrl(sourceDatabaseUrl.toString()));
       maintenance = prismaFor(databaseUrlFor(sourceDatabaseUrl, 'postgres'));
       await Promise.all([source.$connect(), maintenance.$connect()]);
-      await assertExactCurrent179Source(source);
+      await assertExactCanonicalCurrent180Source(source);
       await assertExactLocalPostgres16(maintenance, sourceDatabaseUrl);
       await assertNoPreexistingResidue(maintenance);
       residuePreflightPassed = true;
@@ -690,7 +689,7 @@ describePostgres(
       }
       if (source) {
         try {
-          await assertExactCurrent179Source(source);
+          await assertExactCanonicalCurrent180Source(source);
         } catch (error) {
           cleanupErrors.push(error);
         }
@@ -6031,7 +6030,7 @@ function migrationManifestDigest(
     .digest('hex');
 }
 
-async function assertExactCurrent179Source(
+async function assertExactCanonicalCurrent180Source(
   client: PrismaClient,
 ): Promise<void> {
   const migrations = await client.$queryRaw<
@@ -6045,12 +6044,12 @@ async function assertExactCurrent179Source(
       AND migration."rolled_back_at" IS NULL
     ORDER BY migration."migration_name" COLLATE "C"
   `);
-  expect(migrations).toHaveLength(179);
+  expect(migrations).toHaveLength(180);
   expect(migrations.at(-1)).toEqual({
-    checksum: CURRENT179_SHA256,
-    migrationName: CURRENT179_MIGRATION,
+    checksum: CURRENT180_SHA256,
+    migrationName: CURRENT180_MIGRATION,
   });
-  expect(migrationManifestDigest(migrations)).toBe(CURRENT179_MANIFEST_DIGEST);
+  expect(migrationManifestDigest(migrations)).toBe(CURRENT180_MANIFEST_DIGEST);
 }
 
 function current186MigrationSha256(): string {

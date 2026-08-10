@@ -15988,19 +15988,27 @@ function gameSummaryMissionSort(
 }
 
 function gameMissionPageOffset(value: unknown) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const parsed = gameMissionPageInteger(value);
 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 function gameMissionPageLimit(value: unknown) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const parsed = gameMissionPageInteger(value);
 
   if (!Number.isFinite(parsed) || parsed < 1) {
     return GAME_MISSION_PAGE_DEFAULT_LIMIT;
   }
 
   return Math.min(parsed, GAME_MISSION_PAGE_MAX_LIMIT);
+}
+
+function gameMissionPageInteger(value: unknown) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.trunc(value) : Number.NaN;
+  }
+
+  return typeof value === 'string' ? Number.parseInt(value, 10) : Number.NaN;
 }
 
 function missionHistorySort(

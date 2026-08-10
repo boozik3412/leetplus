@@ -2,12 +2,15 @@
 
 Status: `NONCANONICAL / DENY-ONLY / SYNTHETIC-CI / NOT_DEPLOYABLE`.
 
-This directory is deliberately outside `prisma/migrations`. The SQL can run
-only over a loopback server connection to a disposable database named
-`lp_c187i_<12 hex>_ci`, with an explicit rehearsal confirmation, the exact
-database owner and exact unprivileged consumer, revoker and application-runtime
-role OIDs. It does not authorize a production apply, application route, tester
-account, provider call or shared-beta access.
+This directory is deliberately outside `prisma/migrations`. The acceptance
+driver rejects non-loopback connection URLs before I/O. The SQL additionally
+requires a disposable database named `lp_c187i_<12 hex>_ci`, an explicit
+rehearsal confirmation, the exact database owner and exact unprivileged
+consumer, revoker and application-runtime role OIDs. Server-side
+`inet_server_addr()` is intentionally not used because service-container NAT
+does not preserve the client's loopback endpoint. The candidate does not
+authorize a production apply, application route, tester account, provider call
+or shared-beta access.
 
 The candidate persists two append-only streams:
 

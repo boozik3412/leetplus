@@ -31,9 +31,23 @@ Candidate имеет только локальные два независимы
 latest-byte проверки.
 
 Локально проверенный candidate SQL имеет SHA-256
-`53ebadcdaf1b26751fd2fde836343791c31121161bf776b7991ee94b4e847ec1`.
+`daf5a98f1b166002ad73c3fa20319977dbaedb8b3da4ef39460834676e182840`.
 Оба hostile run дополнительно отвергли reordered JSON и duplicate-key
 substitution с пересчитанным digest; postflight после каждого run — `0/0/0`.
+
+## Отклонённый candidate checkpoint
+
+- Commit `bab57035b8aee61b34fe9603932cc2ad209d1883`, CI run `31415009389`:
+  application и authority-root jobs прошли, PostgreSQL job отклонён новым
+  CURRENT187-I step.
+- Причина: server-side `inet_server_addr()` видел адрес service-container bridge,
+  хотя acceptance URL был exact `127.0.0.1`. Это некорректный способ доказать
+  client-side loopback при NAT.
+- Исправление сохраняет fail-closed allowlist `127.0.0.1/localhost/::1` в
+  acceptance-driver до I/O и exact disposable DB/confirmation fence в SQL, но
+  не выводит происхождение клиента из server-side NAT address.
+- Отклонённый run не является evidence приёмки candidate; successor exact-head
+  CI фиксируется отдельно только после полного `3/3 SUCCESS`.
 
 Production, четыре текущих клуба, tester account, invite delivery и external
 providers не изменялись. Внешний доступ остаётся `NO-GO`.

@@ -573,7 +573,7 @@ enterprise-isolation option и не сокращает shared gates.
     и scoped revocation contracts; F теперь принимает только branded persisted
     I receipt. Foundation SHA `340e6f05…` принят CI `31411596083` как
     `3/3 SUCCESS`; [CI evidence](./identity-mail-current187-i-ci-evidence-2026-08-10.md).
-    Noncanonical PostgreSQL candidate `53ebadcd…` реализует append-only/FORCE
+    Noncanonical PostgreSQL candidate `daf5a98f…` реализует append-only/FORCE
     RLS/execute-only RPC ledger и exact canonical-JSON reconstruction; static
     `7/7`, два независимых PostgreSQL 16.13 hostile run — `1/1 PASS`, включая
     duplicate-key/reordered JSON attacks, postflight `0/0/0`. Candidate ещё не canonical,

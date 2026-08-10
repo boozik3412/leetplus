@@ -17,6 +17,10 @@ const CANDIDATE_DIRECTORY = join(
 const SQL_PATH = join(CANDIDATE_DIRECTORY, "migration.sql");
 const METADATA_PATH = join(CANDIDATE_DIRECTORY, "candidate.json");
 const README_PATH = join(CANDIDATE_DIRECTORY, "README.md");
+const PG_TEST_PATH = join(
+  SCRIPT_DIRECTORY,
+  "identity-mail-cluster-semantic-approval-ledger-current187.pg.integration.test.mjs",
+);
 
 function normalized(value) {
   return value.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
@@ -27,12 +31,18 @@ function sha256(value) {
 }
 
 async function sources() {
-  const [sql, metadataText, readme] = await Promise.all([
+  const [sql, metadataText, readme, pgTest] = await Promise.all([
     readFile(SQL_PATH, "utf8"),
     readFile(METADATA_PATH, "utf8"),
     readFile(README_PATH, "utf8"),
+    readFile(PG_TEST_PATH, "utf8"),
   ]);
-  return { metadata: JSON.parse(metadataText), readme, sql: normalized(sql) };
+  return {
+    metadata: JSON.parse(metadataText),
+    pgTest: normalized(pgTest),
+    readme,
+    sql: normalized(sql),
+  };
 }
 
 test("CURRENT187-I candidate is hash-pinned, noncanonical, and deny-only", async () => {
@@ -77,13 +87,13 @@ test("CURRENT187-I candidate is hash-pinned, noncanonical, and deny-only", async
 });
 
 test("install is bounded to one confirmed disposable database and exact unprivileged roles", async () => {
-  const { sql } = await sources();
+  const { pgTest, sql } = await sources();
   assert.match(sql, /\^lp_c187i_\[0-9a-f\]\{12\}_ci\$/u);
-  assert.match(sql, /pg_catalog\.inet_server_addr\(\) IS NULL/u);
   assert.match(
-    sql,
-    /pg_catalog\.inet_server_addr\(\) NOT IN \(\s*'127\.0\.0\.1'::INET,\s*'::1'::INET\s*\)/u,
+    pgTest,
+    /!\["127\.0\.0\.1", "localhost", "::1"\]\.includes\(url\.hostname\)/u,
   );
+  assert.doesNotMatch(sql, /inet_server_addr|inet_client_addr/u);
   assert.match(
     sql,
     /rehearse-current187i-semantic-approval-ledger-loopback-ci-only/u,
@@ -252,5 +262,5 @@ test("ACL is execute-only for consumer and revoker and grants nothing to runtime
   const grantBlock = sql.slice(sql.indexOf("DO $current187_i_grants$"));
   assert.doesNotMatch(grantBlock, /runtime_name|runtime_role/u);
   assert.match(readme, /NONCANONICAL \/ DENY-ONLY \/ SYNTHETIC-CI/u);
-  assert.match(readme, /does not authorize a production/u);
+  assert.match(readme, /does not\s+authorize a production/u);
 });

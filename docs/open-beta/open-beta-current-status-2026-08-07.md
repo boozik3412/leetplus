@@ -32,7 +32,7 @@
 > `31/31`, release acceptance `133/133`, official sequential materializer
 > `24/24`, journal `24/24`, runner `14/14`, runtime `27/27`. Foundation SHA
 > `340e6f05…` принят CI `31411596083` — `3/3 SUCCESS`, artifact
-> `sha256:95afdce0…31ee3`. Noncanonical PostgreSQL candidate `53ebadcd…` теперь
+> `sha256:95afdce0…31ee3`. Noncanonical PostgreSQL candidate `daf5a98f…` теперь
 > реализует append-only/FORCE-RLS/execute-only RPC ledger с exact canonical-JSON
 > reconstruction; static `7/7`, два независимых hostile PG16.13 run — `1/1 PASS`,
 > включая duplicate-key/reordered JSON attacks, postflight `0/0/0`.
@@ -81,7 +81,7 @@
 | CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY` | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3`    |
 | CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY` | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H                  |
 | CURRENT187-H semantic allowlist  | `ENGINEERING ACCEPTED / DENY-ONLY` | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`               |
-| CURRENT187-I persisted approval  | `LOCAL PG ACCEPTED / NONCANONICAL` | persisted brand required; candidate `53ebadcd…`; static `7/7`, PG16.13 `2 × 1/1`, zero residue; all access/effect flags false |
+| CURRENT187-I persisted approval  | `LOCAL PG ACCEPTED / NONCANONICAL` | persisted brand required; candidate `daf5a98f…`; static `7/7`, PG16.13 `2 × 1/1`, zero residue; all access/effect flags false |
 | Единый gate                      | `PASS`                             | `163/163`, `0` failures                                                                                                       |
 | Независимая latest-byte проверка | `PASS`                             | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                    |
 

@@ -19,11 +19,6 @@ DECLARE
   runtime_oid OID;
 BEGIN
   IF pg_catalog.current_database() !~ '^lp_c187i_[0-9a-f]{12}_ci$'
-     OR pg_catalog.inet_server_addr() IS NULL
-     OR pg_catalog.inet_server_addr() NOT IN (
-       '127.0.0.1'::INET,
-       '::1'::INET
-     )
      OR pg_catalog.current_setting(
        'leetplus.current187i_confirmation',
        true

@@ -592,6 +592,13 @@ enterprise-isolation option и не сокращает shared gates.
     `sha256:0cb6ac6e…bd337`. Это только `SYNTHETIC-CI-ONLY`: actual
     TCP/TLS/HBA/PgBouncer collectors, production signer/root, persisted
     consumption и связь с F ещё не реализованы.
+    [CURRENT187-J1 actual PostgreSQL backend session collector](./identity-mail-current187-j1-postgres-session-collector.md)
+    добавляет capability-bearing read-only Prisma collector: exact database и
+    role OID, application identity, backend/network coordinates, read-only/TLS
+    и role-policy facts. Local unit `10/10`, общий CURRENT187 gate `52/52`,
+    actual loopback PostgreSQL smoke добавлен в CI. J1 остаётся deny-only и не
+    утверждает endpoint identity, matched HBA rule, PgBouncer identity или
+    negative probe; exact-SHA CI пока не принят.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

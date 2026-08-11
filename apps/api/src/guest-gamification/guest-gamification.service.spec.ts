@@ -20053,10 +20053,9 @@ describe('GuestGamificationService', () => {
       },
     );
 
-    it('loads a pending purchase below a burst of more than 30 recent snapshot facts', async () => {
+    it('drains a pending purchase below a burst of more than 30 recent snapshot facts without generic backfill flags', async () => {
       const fixture = createService();
       const { service, prisma } = fixture;
-      enablePrimarySnapshotBackfill(fixture);
       const recentFacts = Array.from({ length: 31 }, (_, index) =>
         snapshotFact(`recent-purchase-${index}`, {
           source: 'PRODUCT_EXPENSE',
@@ -20128,10 +20127,14 @@ describe('GuestGamificationService', () => {
       jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
       jest.spyOn(service, 'processEvent').mockResolvedValue(processResult());
 
-      const result = await service.runSnapshotPipeline(user, {
-        source: 'PRODUCT_EXPENSE',
-        limit: 1,
-      });
+      const result = await service.runSnapshotPipeline(
+        user,
+        {
+          source: 'PRODUCT_EXPENSE',
+          limit: 1,
+        },
+        { drainPendingPurchases: true },
+      );
 
       expect(result).toMatchObject({ checkedFacts: 1, processedFacts: 1 });
       expect(service.processEvent).toHaveBeenCalledWith(
@@ -20140,6 +20143,76 @@ describe('GuestGamificationService', () => {
           sourceFactId: 'product-expense:older-sale-32',
         }),
       );
+      const query = prisma.$queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
+      expect(query.strings.join(' ')).toContain('ORDER BY sale."saleDate" ASC');
+    });
+
+    it('keeps a category-only device rental eligible without a resolved product name or game session', async () => {
+      const { service, prisma } = createService();
+      prisma.$queryRaw.mockResolvedValue([{ id: 'device-rental-sale' }]);
+      prisma.salesFact.findMany.mockResolvedValue([
+        {
+          id: 'device-rental-sale',
+          productId: 'device-rental-product',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '46.langamepro.ru',
+          externalSaleId: 'device-rental-sale',
+          externalProductId: 'device-rental-product',
+          externalGuestId: 'guest-external-1',
+          saleDate: now,
+          quantity: 1,
+          revenue: 150,
+          cost: 0,
+          productNameAtSale: null,
+          storeNameAtSale: 'Club 1',
+          guest: {
+            id: 'guest-1',
+            externalDomain: '46.langamepro.ru',
+            externalGuestId: 'guest-external-1',
+            fullNameMasked: 'Guest',
+            phoneMasked: '***0646',
+            emailMasked: null,
+          },
+          store: { id: 'store-1', name: 'Club 1' },
+          product: null,
+        },
+      ]);
+      prisma.langameClubProductConfiguration.findMany.mockResolvedValue([
+        {
+          storeId: 'store-1',
+          externalDomain: '46.langamepro.ru',
+          externalProductId: 'device-rental-product',
+          externalGroupId: '16',
+        },
+      ]);
+      prisma.langameProductGroup.findMany.mockResolvedValue([
+        {
+          externalDomain: '46.langamepro.ru',
+          externalGroupId: '16',
+          name: 'Devices',
+        },
+      ]);
+
+      const facts = await (
+        service as any
+      ).loadPendingProductExpenseSnapshotFacts(
+        user,
+        10,
+        new Date(now.getTime() - 24 * 60 * 60_000),
+      );
+
+      expect(facts).toEqual([
+        expect.objectContaining({
+          id: 'product-expense:device-rental-sale',
+          eventType: 'PRODUCT_PURCHASE',
+          sessionType: null,
+          spendAmount: 150,
+          productName: 'device-rental-product',
+          externalCategoryKey: '46.langamepro.ru:16',
+          externalCategoryId: '16',
+          categoryName: 'Devices',
+        }),
+      ]);
     });
 
     it('keeps unbound diagnostic facts behind actionable guest facts', async () => {
@@ -21913,6 +21986,37 @@ describe('GuestGamificationService', () => {
         expect.objectContaining({
           where: {},
         }),
+      );
+    });
+
+    it('enables durable pending-purchase draining only for the scheduled primary pipeline', async () => {
+      const { service, prisma } = createService();
+      prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+      const run = jest.spyOn(service, 'runSnapshotPipeline').mockResolvedValue({
+        dryRunOnly: false,
+        langameWrite: false,
+        availableFacts: 0,
+        checkedFacts: 0,
+        processedFacts: 0,
+        skippedFacts: 0,
+        duplicateFacts: 0,
+        erroredFacts: 0,
+        appliedXpDelta: 0,
+        queuedRewards: 0,
+        queuedRewardAmount: 0,
+        facts: [],
+        note: 'scheduled test',
+      });
+
+      await service.runSnapshotPipelineScheduled({ limit: 30 });
+
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: user.tenantId,
+          tenantSlug: user.tenantSlug,
+        }),
+        { limit: 30 },
+        { drainPendingPurchases: true },
       );
     });
 

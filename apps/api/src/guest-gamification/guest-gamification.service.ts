@@ -205,6 +205,8 @@ const snapshotSessionPackageCorrectionVersion = 'package-v1';
 const snapshotPipelineBackfillLookbackDefaultMs = 30 * 24 * 60 * 60 * 1000;
 const snapshotPipelineBackfillLookbackMinMs = 24 * 60 * 60 * 1000;
 const snapshotPipelineBackfillLookbackMaxMs = 90 * 24 * 60 * 60 * 1000;
+const snapshotPipelinePendingPurchaseLookbackDefaultMs =
+  30 * 24 * 60 * 60 * 1000;
 type SnapshotPipelineBackfillMode = 'OFF' | 'SHADOW' | 'LIVE';
 type SnapshotPipelineBackfillPolicy = {
   mode: SnapshotPipelineBackfillMode;
@@ -212,6 +214,9 @@ type SnapshotPipelineBackfillPolicy = {
   profileId: string | null;
   profileGuestIds: string[];
   liveNotBefore: Date | null;
+};
+type SnapshotPipelineRunOptions = {
+  drainPendingPurchases?: boolean;
 };
 const gameEffectWindowDays = 14;
 const defaultGuestGameTimeZone = 'Asia/Yekaterinburg';
@@ -6765,7 +6770,9 @@ export class GuestGamificationService {
                 )
               )
           )
-        ORDER BY sale."saleDate" DESC, sale."createdAt" DESC, sale."id" DESC
+        -- Drain the durable backlog oldest-first. New sales keep arriving, so
+        -- newest-first ordering could starve an older valid purchase forever.
+        ORDER BY sale."saleDate" ASC, sale."createdAt" ASC, sale."id" ASC
         LIMIT ${limit}
       `)) ?? [];
     const ids = allUniqueStrings(pendingRows.map((row) => row.id));
@@ -6853,6 +6860,7 @@ export class GuestGamificationService {
   async runSnapshotPipeline(
     user: AuthenticatedUser,
     dto: GuestGamePipelineRunDto,
+    options: SnapshotPipelineRunOptions = {},
   ): Promise<GuestGamePipelineRunResult> {
     const source = pipelineSourceValue(dto.source);
     const limit = Math.min(30, Math.max(1, intValue(dto.limit) ?? 20));
@@ -6861,6 +6869,24 @@ export class GuestGamificationService {
       this.getSnapshotFacts(user),
       this.snapshotPipelineBackfillPolicy(user),
     ]);
+    const pendingPurchaseDrainFacts =
+      options.drainPendingPurchases === true &&
+      !dryRunOnly &&
+      (!source || source === 'PRODUCT_EXPENSE')
+        ? await this.loadPendingProductExpenseSnapshotFacts(
+            user,
+            limit,
+            new Date(
+              Date.now() -
+                this.configMilliseconds(
+                  'GUEST_GAME_PIPELINE_PENDING_PURCHASE_LOOKBACK_MS',
+                  snapshotPipelinePendingPurchaseLookbackDefaultMs,
+                  snapshotPipelineBackfillLookbackMinMs,
+                  snapshotPipelineBackfillLookbackMaxMs,
+                ),
+            ),
+          )
+        : [];
     const pendingPrimaryFacts = backfillPolicy.enabled
       ? await this.loadPendingPrimarySnapshotFacts(
           user,
@@ -6872,14 +6898,22 @@ export class GuestGamificationService {
     const latestSnapshotFactKeys = new Set(
       factsResult.facts.map(snapshotFactKey),
     );
+    const pendingPurchaseDrainFactKeys = new Set(
+      pendingPurchaseDrainFacts.map(snapshotFactKey),
+    );
     const shadowBackfillOnlyFactKeys = new Set(
       backfillPolicy.mode === 'SHADOW'
         ? pendingPrimaryFacts
             .map(snapshotFactKey)
-            .filter((key) => !latestSnapshotFactKeys.has(key))
+            .filter(
+              (key) =>
+                !latestSnapshotFactKeys.has(key) &&
+                !pendingPurchaseDrainFactKeys.has(key),
+            )
         : [],
     );
     const sourceCandidates = uniqueSnapshotFacts([
+      ...pendingPurchaseDrainFacts,
       ...pendingPrimaryFacts,
       ...factsResult.facts,
     ]).filter((fact) => !source || fact.source === source);
@@ -7284,6 +7318,7 @@ export class GuestGamificationService {
             tenantStatus: tenant.status,
           },
           dto,
+          { drainPendingPurchases: true },
         );
 
         tenantResults.push({

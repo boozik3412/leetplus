@@ -6738,44 +6738,74 @@ export class GuestGamificationService {
     const profileScope = scopedGuestIds.length
       ? Prisma.sql`AND sale."guestId" IN (${Prisma.join(scopedGuestIds)})`
       : Prisma.sql``;
-    const pendingRows =
-      (await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT sale."id"
-        FROM "SalesFact" sale
-        WHERE sale."tenantId" = ${user.tenantId}
-          AND sale."guestId" IS NOT NULL
-          AND sale."isCanceled" = false
-          AND sale."revenue" > 0
-          AND sale."quantity" > 0
-          AND sale."saleDate" >= ${cutoff}
-          ${profileScope}
-          AND NOT EXISTS (
-            SELECT 1
-            FROM "GuestGameEvent" event
-            WHERE event."tenantId" = sale."tenantId"
-              AND event."source" = 'API_IMPORT'
-              AND event."externalProvider" = COALESCE(
-                sale."externalProvider",
-                'LANGAME'::"IntegrationProvider"
-              )
-              AND event."externalDomain" = COALESCE(
-                sale."externalDomain",
-                'guest-gamification-snapshot'
-              )
-              AND event."externalId" = CONCAT(
-                'guest-game:PRODUCT_EXPENSE:PRODUCT_PURCHASE:',
-                COALESCE(
-                  sale."externalSaleId",
-                  CONCAT('product-expense:', sale."id")
+    const scanLimit = Math.min(600, Math.max(limit, limit * 20));
+    const [pendingRows, activePurchaseMissions] = await Promise.all([
+      this.prisma.$queryRaw<Array<{ id: string; queue: number }>>(Prisma.sql`
+        WITH pending AS (
+          SELECT sale."id", sale."saleDate", sale."createdAt"
+          FROM "SalesFact" sale
+          WHERE sale."tenantId" = ${user.tenantId}
+            AND sale."guestId" IS NOT NULL
+            AND sale."isCanceled" = false
+            AND sale."revenue" > 0
+            AND sale."quantity" > 0
+            AND sale."saleDate" >= ${cutoff}
+            ${profileScope}
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "GuestGameEvent" event
+              WHERE event."tenantId" = sale."tenantId"
+                AND event."source" = 'API_IMPORT'
+                AND event."externalProvider" = COALESCE(
+                  sale."externalProvider",
+                  'LANGAME'::"IntegrationProvider"
                 )
-              )
-          )
-        -- Drain the durable backlog oldest-first. New sales keep arriving, so
-        -- newest-first ordering could starve an older valid purchase forever.
-        ORDER BY sale."saleDate" ASC, sale."createdAt" ASC, sale."id" ASC
-        LIMIT ${limit}
-      `)) ?? [];
-    const ids = allUniqueStrings(pendingRows.map((row) => row.id));
+                AND event."externalDomain" = COALESCE(
+                  sale."externalDomain",
+                  'guest-gamification-snapshot'
+                )
+                AND event."externalId" = CONCAT(
+                  'guest-game:PRODUCT_EXPENSE:PRODUCT_PURCHASE:',
+                  COALESCE(
+                    sale."externalSaleId",
+                    CONCAT('product-expense:', sale."id")
+                  )
+                )
+            )
+        ), recent AS (
+          SELECT pending."id", 0 AS queue
+          FROM pending
+          ORDER BY pending."saleDate" DESC, pending."createdAt" DESC, pending."id" DESC
+          LIMIT ${scanLimit}
+        ), oldest AS (
+          SELECT pending."id", 1 AS queue
+          FROM pending
+          ORDER BY pending."saleDate" ASC, pending."createdAt" ASC, pending."id" ASC
+          LIMIT ${limit}
+        )
+        SELECT candidates."id", candidates.queue
+        FROM (
+          SELECT recent."id", recent.queue FROM recent
+          UNION ALL
+          SELECT oldest."id", oldest.queue FROM oldest
+        ) candidates
+        ORDER BY candidates.queue ASC
+      `),
+      this.prisma.guestGameMission.findMany({
+        where: {
+          tenantId: user.tenantId,
+          status: 'ACTIVE',
+          triggerKind: { in: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'] },
+        },
+        select: {
+          conditions: true,
+          storeIds: true,
+          periodFrom: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
+    const ids = allUniqueStrings((pendingRows ?? []).map((row) => row.id));
 
     if (!ids.length) {
       return [];
@@ -6852,7 +6882,53 @@ export class GuestGamificationService {
       );
     });
 
-    return orderedRows.flatMap((row) =>
+    const queueById = new Map(
+      (pendingRows ?? []).map((row) => [row.id, Number(row.queue)]),
+    );
+    const priorityRules = (activePurchaseMissions ?? []).map((mission) =>
+      pendingPurchasePriorityRule(mission),
+    );
+    const priorityRows = orderedRows.filter((row) =>
+      priorityRules.some((rule) =>
+        pendingPurchaseMatchesPriorityRule(row, categoryMappings, rule),
+      ),
+    );
+    const recentRows = orderedRows.filter((row) => queueById.get(row.id) === 0);
+    const oldestRows = orderedRows.filter((row) => queueById.get(row.id) === 1);
+    const selectedRows: SnapshotProductExpenseRow[] = [];
+    const selectedIds = new Set<string>();
+    const appendRows = (
+      candidates: SnapshotProductExpenseRow[],
+      take: number,
+    ) => {
+      for (const row of candidates) {
+        if (selectedRows.length >= limit || take <= 0) break;
+        if (selectedIds.has(row.id)) continue;
+        selectedIds.add(row.id);
+        selectedRows.push(row);
+        take -= 1;
+      }
+    };
+
+    // A matching active purchase mission gets the first slots so a valid
+    // current purchase is not hidden behind thousands of unrelated sales.
+    // The remaining slots are split between recent facts and the oldest tail:
+    // current gameplay stays responsive while the durable backlog still
+    // makes guaranteed forward progress and cannot starve.
+    const priorityTake =
+      limit <= 1 ? 1 : Math.max(1, Math.ceil((limit * 2) / 3));
+    appendRows(priorityRows, priorityTake);
+    const remainingAfterPriority = limit - selectedRows.length;
+    const recentTake =
+      remainingAfterPriority <= 1
+        ? 0
+        : Math.ceil((remainingAfterPriority * 2) / 3);
+    appendRows(recentRows, recentTake);
+    appendRows(oldestRows, limit - selectedRows.length);
+    appendRows(recentRows, limit - selectedRows.length);
+    appendRows(orderedRows, limit - selectedRows.length);
+
+    return selectedRows.flatMap((row) =>
       mapProductExpenseFact(row, categoryMappings),
     );
   }
@@ -12547,9 +12623,12 @@ export class GuestGamificationService {
                 select: { gameActivatedAt: true },
               });
               if (
-                profile?.gameActivatedAt &&
-                created.occurredAt.getTime() >=
-                  profile.gameActivatedAt.getTime()
+                profile &&
+                guestGameQualifiedAtWithinProfileBoundary({
+                  eventType: created.eventType,
+                  qualifiedAt: created.occurredAt,
+                  gameActivatedAt: profile.gameActivatedAt,
+                })
               ) {
                 const sourceRule =
                   qualifiedRewardIntentPlans.find(
@@ -13028,17 +13107,21 @@ export class GuestGamificationService {
       guest,
       identityGuestIds,
     );
-    const missionEntitlementsAfterActivation = gameActivatedAt
-      ? missionRewardEntitlements.filter(
-          (entitlement) =>
-            entitlement.qualifiedAt.getTime() >= gameActivatedAt.getTime(),
-        )
-      : missionRewardEntitlements;
-    const progressEventsAfterActivation = gameActivatedAt
-      ? progressEvents.filter(
-          (event) => event.occurredAt.getTime() >= gameActivatedAt.getTime(),
-        )
-      : progressEvents;
+    const externalActivityWithoutPriorGameOpen =
+      guestGameEventCountsWithoutPriorGameOpen(eventType);
+    const missionEntitlementsAfterActivation =
+      gameActivatedAt && !externalActivityWithoutPriorGameOpen
+        ? missionRewardEntitlements.filter(
+            (entitlement) =>
+              entitlement.qualifiedAt.getTime() >= gameActivatedAt.getTime(),
+          )
+        : missionRewardEntitlements;
+    const progressEventsAfterActivation =
+      gameActivatedAt && !externalActivityWithoutPriorGameOpen
+        ? progressEvents.filter(
+            (event) => event.occurredAt.getTime() >= gameActivatedAt.getTime(),
+          )
+        : progressEvents;
     const context: DryRunContext = {
       eventType,
       occurredAt,
@@ -13384,6 +13467,7 @@ export class GuestGamificationService {
           select: {
             missionId: true,
             rewardType: true,
+            evidence: true,
           },
         },
       },
@@ -13430,7 +13514,13 @@ export class GuestGamificationService {
       ? new Date()
       : occurredAt;
     const gameActivatedAt = dryRunProfileGameActivatedAt(dryRun.profile);
-    if (!gameActivatedAt || qualifiedAt.getTime() < gameActivatedAt.getTime()) {
+    if (
+      !guestGameQualifiedAtWithinProfileBoundary({
+        eventType: dryRun.eventType,
+        qualifiedAt,
+        gameActivatedAt,
+      })
+    ) {
       return [];
     }
     const timeZone = guestGameTimeZone(dryRun.store?.timeZone ?? null);
@@ -13470,6 +13560,7 @@ export class GuestGamificationService {
         const baseEvidence = {
           evaluationMode: options.evaluationMode ?? 'LIVE',
           evaluatorVersion: options.evaluatorVersion ?? 'legacy-v1',
+          sourceEventType: dryRun.eventType,
           reasons: rule.reasons,
           blockers: rule.blockers,
           input: dryRun.input,
@@ -13574,6 +13665,7 @@ export class GuestGamificationService {
                   title: input.rule.name,
                   qualifiedAt: existing.qualifiedAt,
                   gameActivatedAt: input.gameActivatedAt,
+                  sourceEventType: input.sourceEventType,
                 });
               }
               return {
@@ -13631,6 +13723,7 @@ export class GuestGamificationService {
                       profileId: true,
                       guestId: true,
                       qualifiedAt: true,
+                      evidence: true,
                     },
                   }),
                   tx.guestGameEntitlement.findMany({
@@ -13666,6 +13759,7 @@ export class GuestGamificationService {
                   guestId: input.guestId,
                   qualifiedAt: input.qualifiedAt,
                   gameActivatedAt: input.gameActivatedAt,
+                  eventType: input.sourceEventType,
                   timeZone: input.timeZone,
                   rewards,
                   entitlements,
@@ -13732,6 +13826,7 @@ export class GuestGamificationService {
                 title: input.rule.name,
                 qualifiedAt: input.qualifiedAt,
                 gameActivatedAt: input.gameActivatedAt,
+                sourceEventType: input.sourceEventType,
               });
             }
 
@@ -13940,7 +14035,13 @@ export class GuestGamificationService {
       ? new Date()
       : occurredAt;
     const gameActivatedAt = dryRunProfileGameActivatedAt(dryRun.profile);
-    if (!gameActivatedAt || qualifiedAt.getTime() < gameActivatedAt.getTime()) {
+    if (
+      !guestGameQualifiedAtWithinProfileBoundary({
+        eventType: dryRun.eventType,
+        qualifiedAt,
+        gameActivatedAt,
+      })
+    ) {
       return uniqueStrings(intentIds);
     }
 
@@ -14060,8 +14161,11 @@ export class GuestGamificationService {
     const gameActivatedAt = reward.profile?.gameActivatedAt ?? null;
     if (
       !reward.profileId ||
-      !gameActivatedAt ||
-      reward.qualifiedAt.getTime() < gameActivatedAt.getTime()
+      !guestGameQualifiedAtWithinProfileBoundary({
+        eventType: guestGameRewardSourceEventType(reward),
+        qualifiedAt: reward.qualifiedAt,
+        gameActivatedAt,
+      })
     ) {
       throw new ConflictException(
         'The loot-box reward is outside the active game profile boundary.',
@@ -14321,6 +14425,7 @@ export class GuestGamificationService {
                   source: reward.approvedByUser
                     ? 'mission_reward_admin_approval'
                     : 'mission_reward_auto',
+                  sourceEventType: guestGameRewardSourceEventType(reward),
                   missionId: reward.mission?.id ?? null,
                   sourceRewardId: reward.id,
                   approvedByUserId: reward.approvedByUser?.id ?? null,
@@ -14401,6 +14506,7 @@ export class GuestGamificationService {
             liveLootBox.name,
           qualifiedAt: legacyClaimRepairedAt ?? entitlement.qualifiedAt,
           gameActivatedAt,
+          sourceEventType: guestGameRewardSourceEventType(reward),
         });
       }
     });
@@ -18536,6 +18642,7 @@ export class GuestGamificationService {
           select: {
             missionId: true,
             rewardType: true,
+            evidence: true,
           },
         },
       },
@@ -18587,6 +18694,7 @@ export class GuestGamificationService {
           select: {
             missionId: true,
             rewardType: true,
+            evidence: true,
           },
         },
       },
@@ -25615,8 +25723,7 @@ async function upsertRewardWalletItem(
   if (
     (!reward.claimRequired && !completionMarker) ||
     !reward.profileId ||
-    !reward.profile?.gameActivatedAt ||
-    reward.qualifiedAt.getTime() < reward.profile.gameActivatedAt.getTime() ||
+    !guestGameRewardWithinProfileBoundary(reward) ||
     reward.rewardType === 'LOOT_BOX_ENTITLEMENT' ||
     reward.status !== 'APPROVED'
   ) {
@@ -25692,6 +25799,7 @@ async function upsertEntitlementWalletItem(
     title: string;
     qualifiedAt: Date;
     gameActivatedAt: Date | null;
+    sourceEventType?: string | null;
   },
 ) {
   if (
@@ -25701,8 +25809,11 @@ async function upsertEntitlementWalletItem(
     return;
   }
   if (
-    !input.gameActivatedAt ||
-    input.qualifiedAt.getTime() < input.gameActivatedAt.getTime()
+    !guestGameQualifiedAtWithinProfileBoundary({
+      eventType: input.sourceEventType,
+      qualifiedAt: input.qualifiedAt,
+      gameActivatedAt: input.gameActivatedAt,
+    })
   ) {
     return;
   }
@@ -28103,6 +28214,104 @@ type ExternalProductCategoryMapping = {
   externalCategoryId: string;
   externalCategoryName: string | null;
 };
+
+type PendingPurchasePriorityRule = {
+  activeFrom: Date;
+  storeIds: Set<string>;
+  purchaseSource: 'ANY' | 'PRODUCT' | 'CATEGORY';
+  productIds: Set<string>;
+  externalProductIds: Set<string>;
+  categoryIds: Set<string>;
+  externalCategoryKeys: Set<string>;
+  categoryNames: Set<string>;
+};
+
+function pendingPurchasePriorityRule(mission: {
+  conditions: Prisma.JsonValue;
+  storeIds: Prisma.JsonValue | null;
+  periodFrom: Date | null;
+  updatedAt: Date;
+}): PendingPurchasePriorityRule {
+  const conditions = jsonRecord(mission.conditions);
+  const metric = jsonRecord(conditions.metric as Prisma.JsonValue | null);
+  const rawSource =
+    nullableString(metric.purchaseSource) ??
+    nullableString(conditions.purchaseSource);
+  const normalizedSource = rawSource?.trim().toUpperCase();
+  const purchaseSource =
+    normalizedSource === 'ANY'
+      ? 'ANY'
+      : normalizedSource === 'CATEGORY'
+        ? 'CATEGORY'
+        : 'PRODUCT';
+  const activatedAt = dateValue(conditions.activatedAt);
+
+  return {
+    activeFrom: activatedAt ?? mission.periodFrom ?? mission.updatedAt,
+    storeIds: new Set(guestGameStringArray(mission.storeIds)),
+    purchaseSource,
+    productIds: new Set(guestGameStringArray(metric.productIds)),
+    externalProductIds: new Set(
+      guestGameStringArray(metric.externalProductIds),
+    ),
+    categoryIds: new Set(guestGameStringArray(metric.categoryIds)),
+    externalCategoryKeys: new Set(
+      guestGameStringArray(metric.externalCategoryKeys),
+    ),
+    categoryNames: new Set(
+      [
+        ...guestGameStringArray(metric.categoryNames),
+        ...guestGameStringArray(metric.categoryLabels),
+      ].map((value) => value.trim().toLocaleLowerCase('ru-RU')),
+    ),
+  };
+}
+
+function pendingPurchaseMatchesPriorityRule(
+  row: SnapshotProductExpenseRow,
+  categoryMappings: Map<string, ExternalProductCategoryMapping>,
+  rule: PendingPurchasePriorityRule,
+) {
+  if (row.saleDate.getTime() < rule.activeFrom.getTime()) {
+    return false;
+  }
+  if (rule.storeIds.size && !rule.storeIds.has(row.store.id)) {
+    return false;
+  }
+  if (rule.purchaseSource === 'ANY') {
+    return true;
+  }
+  if (rule.purchaseSource === 'PRODUCT') {
+    return (
+      rule.productIds.has(row.productId) ||
+      Boolean(
+        row.externalProductId &&
+        rule.externalProductIds.has(row.externalProductId),
+      )
+    );
+  }
+
+  const externalCategory = categoryMappings.get(
+    `${row.store.id}:${row.externalDomain}:${row.externalProductId}`,
+  );
+  const categoryName =
+    externalCategory?.externalCategoryName ?? row.product?.category?.name;
+
+  return (
+    Boolean(
+      externalCategory?.externalCategoryKey &&
+      rule.externalCategoryKeys.has(externalCategory.externalCategoryKey),
+    ) ||
+    Boolean(
+      row.product?.category?.id &&
+      rule.categoryIds.has(row.product.category.id),
+    ) ||
+    Boolean(
+      categoryName &&
+      rule.categoryNames.has(categoryName.trim().toLocaleLowerCase('ru-RU')),
+    )
+  );
+}
 
 function mapProductExpenseFact(
   row: SnapshotProductExpenseRow,
@@ -31685,6 +31894,7 @@ type DryRunMissionRewardEntitlement = {
   sourceReward: {
     missionId: string | null;
     rewardType: string;
+    evidence: Prisma.JsonValue | null;
   } | null;
 };
 
@@ -31761,6 +31971,7 @@ type LootBoxAtomicLimitReward = {
   profileId: string | null;
   guestId: string | null;
   qualifiedAt: Date;
+  evidence: Prisma.JsonValue | null;
 };
 
 type LootBoxAtomicLimitEntitlement = {
@@ -31798,7 +32009,7 @@ function evaluateLootBoxDryRun(
     context.prequalifiedLootBoxOpen.profileId === context.profile?.id &&
     context.prequalifiedLootBoxOpen.storeId === context.storeId;
 
-  appendDryRunProfileCheck(context, blockers, reasons);
+  appendDryRunProfileCheck(context, blockers, reasons, rule.triggerKind);
   let scopedContext: DryRunContext | null = context;
   if (!prequalified) {
     appendDryRunStatusCheck(rule.status, blockers, reasons);
@@ -31922,7 +32133,7 @@ function evaluateMissionDryRun(
     (entitlement) => missionEntitlementMissionId(entitlement) === rule.id,
   );
 
-  appendDryRunProfileCheck(context, blockers, reasons);
+  appendDryRunProfileCheck(context, blockers, reasons, rule.triggerKind);
   appendDryRunStatusCheck(rule.status, blockers, reasons);
   appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
   appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
@@ -32038,7 +32249,12 @@ function evaluateSeasonDryRun(
     : null;
   let progress: GuestGameProgressResult | null = null;
 
-  appendDryRunProfileCheck(context, blockers, reasons);
+  appendDryRunProfileCheck(
+    context,
+    blockers,
+    reasons,
+    dryRunString(currentStep?.activationRules.triggerKind),
+  );
   appendDryRunStatusCheck(rule.status, blockers, reasons);
   appendDryRunAudienceCheck(rule, context, blockers, reasons);
   const scopedContext = appendDryRunStoreCheck(
@@ -32069,7 +32285,12 @@ function evaluateSeasonDryRun(
       rule,
       currentStep,
       scopedContext,
-      dryRunSeasonCurrentStepActivatedAt(rule, ruleRewards, scopedContext),
+      dryRunSeasonCurrentStepActivatedAt(
+        rule,
+        currentStep,
+        ruleRewards,
+        scopedContext,
+      ),
       blockers,
       reasons,
     );
@@ -32155,6 +32376,7 @@ function appendDryRunProfileCheck(
   context: DryRunContext,
   blockers: string[],
   reasons: string[],
+  triggerKind?: string | null,
 ) {
   if (!context.profile && !context.guest) {
     reasons.push('Гость не выбран: проверяются только общие условия');
@@ -32173,6 +32395,13 @@ function appendDryRunProfileCheck(
 
   const gameActivatedAt = dryRunProfileGameActivatedAt(context.profile);
 
+  if (guestGameTriggerCountsWithoutPriorGameOpen(triggerKind)) {
+    reasons.push(
+      'Привязанная к гостю покупка или пополнение учитывается без предварительного открытия игрового модуля',
+    );
+    return;
+  }
+
   if (!gameActivatedAt) {
     blockers.push(
       'Игровой модуль ещё не активирован: действия до первого открытия не учитываются',
@@ -32190,6 +32419,64 @@ function appendDryRunProfileCheck(
   reasons.push(
     `Гость активировал игровой модуль ${gameActivatedAt.toISOString()}`,
   );
+}
+
+function guestGameTriggerCountsWithoutPriorGameOpen(value: unknown) {
+  const normalized = nullableString(value)?.trim().toUpperCase() ?? '';
+  return [
+    'PRODUCT_PURCHASE',
+    'BAR_PURCHASE',
+    'BALANCE_TOPUP',
+    'BALANCE_TOP_UP',
+  ].includes(normalized);
+}
+
+function guestGameEventCountsWithoutPriorGameOpen(value: unknown) {
+  const normalized = nullableString(value)?.trim().toUpperCase() ?? '';
+  return ['PRODUCT_PURCHASE', 'BAR_PURCHASE', 'BALANCE_TOPUP'].includes(
+    normalized,
+  );
+}
+
+function guestGameQualifiedAtWithinProfileBoundary(input: {
+  eventType: unknown;
+  qualifiedAt: Date;
+  gameActivatedAt: Date | null;
+}) {
+  return (
+    guestGameEventCountsWithoutPriorGameOpen(input.eventType) ||
+    Boolean(
+      input.gameActivatedAt &&
+      input.qualifiedAt.getTime() >= input.gameActivatedAt.getTime(),
+    )
+  );
+}
+
+function guestGameRewardSourceEventType(reward: { evidence: unknown }) {
+  const evidence = dryRunRecord(reward.evidence);
+  return (
+    nullableString(evidence.sourceEventType) ??
+    nullableString(evidence.eventType)
+  );
+}
+
+function guestGameRewardWithinProfileBoundary(reward: {
+  evidence: unknown;
+  qualifiedAt: Date;
+  profile?: { gameActivatedAt?: Date | string | null } | null;
+}) {
+  const rawGameActivatedAt = reward.profile?.gameActivatedAt ?? null;
+  const parsedGameActivatedAt = rawGameActivatedAt
+    ? new Date(rawGameActivatedAt)
+    : null;
+  return guestGameQualifiedAtWithinProfileBoundary({
+    eventType: guestGameRewardSourceEventType(reward),
+    qualifiedAt: reward.qualifiedAt,
+    gameActivatedAt:
+      parsedGameActivatedAt && !Number.isNaN(parsedGameActivatedAt.getTime())
+        ? parsedGameActivatedAt
+        : null,
+  });
 }
 
 function dryRunProfileGameActivatedAt(
@@ -32721,6 +33008,7 @@ function appendDryRunMissionProgress(
       : periodFrom;
   const gameActivatedAt = dryRunProfileGameActivatedAt(context.profile);
   const progressFrom =
+    !guestGameTriggerCountsWithoutPriorGameOpen(rule.triggerKind) &&
     gameActivatedAt &&
     (!configuredProgressFrom || gameActivatedAt > configuredProgressFrom)
       ? gameActivatedAt
@@ -32872,7 +33160,8 @@ function appendDryRunLootBoxLimits(
         const gameActivatedAt = dryRunProfileGameActivatedAt(context.profile);
         return (
           Boolean(matches) &&
-          (!gameActivatedAt ||
+          (guestGameEventCountsWithoutPriorGameOpen(context.eventType) ||
+            !gameActivatedAt ||
             entitlement.qualifiedAt.getTime() >= gameActivatedAt.getTime())
         );
       })
@@ -32885,7 +33174,8 @@ function appendDryRunLootBoxLimits(
         const gameActivatedAt = dryRunProfileGameActivatedAt(context.profile);
         return (
           Boolean(matches) &&
-          (!gameActivatedAt ||
+          (guestGameEventCountsWithoutPriorGameOpen(context.eventType) ||
+            !gameActivatedAt ||
             entitlement.qualifiedAt.getTime() >= gameActivatedAt.getTime())
         );
       })
@@ -33015,6 +33305,7 @@ function lootBoxEntitlementLimitGuard(input: {
   guestId: string | null;
   qualifiedAt: Date;
   gameActivatedAt: Date | null;
+  eventType: string;
   timeZone: string;
   rewards: LootBoxAtomicLimitReward[];
   entitlements: LootBoxAtomicLimitEntitlement[];
@@ -33045,8 +33336,11 @@ function lootBoxEntitlementLimitGuard(input: {
     (input.profileId != null && row.profileId === input.profileId) ||
     (input.guestId != null && row.guestId === input.guestId);
   const happenedAfterGameActivation = (qualifiedAt: Date) =>
-    !input.gameActivatedAt ||
-    qualifiedAt.getTime() >= input.gameActivatedAt.getTime();
+    guestGameQualifiedAtWithinProfileBoundary({
+      eventType: input.eventType,
+      qualifiedAt,
+      gameActivatedAt: input.gameActivatedAt,
+    });
   const guestEntitlements = entitlements.filter(
     (entitlement) =>
       matchesGuest(entitlement) &&
@@ -33303,6 +33597,9 @@ function dryRunRewardMatchesGuest(
 
   const gameActivatedAt = dryRunProfileGameActivatedAt(context.profile);
   return (
+    guestGameEventCountsWithoutPriorGameOpen(
+      guestGameRewardSourceEventType(reward),
+    ) ||
     !gameActivatedAt ||
     new Date(reward.qualifiedAt).getTime() >= gameActivatedAt.getTime()
   );
@@ -33451,6 +33748,7 @@ function dryRunRuleExternalDomains(
 
 function dryRunSeasonCurrentStepActivatedAt(
   season: GuestGameSeason,
+  step: DryRunSeasonLevel,
   rewards: GuestGameReward[],
   context: DryRunContext,
 ) {
@@ -33461,7 +33759,13 @@ function dryRunSeasonCurrentStepActivatedAt(
       ? periodFrom
       : createdAt;
   const gameActivatedAt = dryRunProfileGameActivatedAt(context.profile);
-  if (gameActivatedAt && gameActivatedAt > activatedAt) {
+  if (
+    !guestGameTriggerCountsWithoutPriorGameOpen(
+      dryRunString(step.activationRules.triggerKind),
+    ) &&
+    gameActivatedAt &&
+    gameActivatedAt > activatedAt
+  ) {
     activatedAt = gameActivatedAt;
   }
 

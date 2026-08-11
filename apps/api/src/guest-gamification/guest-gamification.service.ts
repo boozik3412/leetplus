@@ -6738,7 +6738,11 @@ export class GuestGamificationService {
     const profileScope = scopedGuestIds.length
       ? Prisma.sql`AND sale."guestId" IN (${Prisma.join(scopedGuestIds)})`
       : Prisma.sql``;
-    const scanLimit = Math.min(600, Math.max(limit, limit * 20));
+    // The scheduler shares its global batch limit between tenants. Keep the
+    // priority scan independent from that per-tenant slice, otherwise a
+    // valid purchase can remain invisible whenever its tenant receives a
+    // smaller batch (for example 10 of the global 30 slots).
+    const scanLimit = 600;
     const [pendingRows, activePurchaseMissions] = await Promise.all([
       this.prisma.$queryRaw<Array<{ id: string; queue: number }>>(Prisma.sql`
         WITH pending AS (

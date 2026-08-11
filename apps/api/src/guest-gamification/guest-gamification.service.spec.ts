@@ -20442,6 +20442,7 @@ describe('GuestGamificationService', () => {
       const query = prisma.$queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
       expect(query.strings.join(' ')).toContain('recent AS');
       expect(query.strings.join(' ')).toContain('oldest AS');
+      expect(query.values).toContain(600);
     });
 
     it('keeps unbound diagnostic facts behind actionable guest facts', async () => {

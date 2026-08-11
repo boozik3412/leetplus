@@ -477,6 +477,14 @@ test("source performs only bounded Prisma read-only session observation and keep
   assert.match(source, /from "@prisma\/client"/u);
   assert.match(source, /SET TRANSACTION READ ONLY/u);
   assert.match(source, /pg_catalog\.pg_stat_ssl/u);
+  assert.match(
+    CURRENT187_POSTGRES_SESSION_OBSERVATION_SQL_FOR_TEST_ONLY,
+    /pg_catalog\.pg_roles AS current_role_row/u,
+  );
+  assert.doesNotMatch(
+    CURRENT187_POSTGRES_SESSION_OBSERVATION_SQL_FOR_TEST_ONLY,
+    /\bcurrent_role\./u,
+  );
   assert.match(source, /negativeProbePerformed:\s*false/u);
   assert.match(source, /endpointIdentityAttested:\s*false/u);
   assert.match(source, /hbaRuleMatched:\s*false/u);

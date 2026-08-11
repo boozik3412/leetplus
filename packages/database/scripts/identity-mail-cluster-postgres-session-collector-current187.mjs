@@ -139,7 +139,7 @@ SELECT
   session_user::TEXT AS "sessionRoleName",
   session_role.oid::TEXT AS "sessionRoleOid",
   current_user::TEXT AS "currentRoleName",
-  current_role.oid::TEXT AS "currentRoleOid",
+  current_role_row.oid::TEXT AS "currentRoleOid",
   pg_catalog.current_setting('application_name')::TEXT AS "applicationName",
   pg_catalog.pg_backend_pid()::TEXT AS "backendPid",
   pg_catalog.inet_server_addr()::TEXT AS "serverAddress",
@@ -157,37 +157,37 @@ SELECT
   transport.client_dn::TEXT AS "tlsClientDn",
   transport.issuer_dn::TEXT AS "tlsIssuerDn",
   transport.serial::TEXT AS "tlsSerial",
-  current_role.rolcanlogin AS "currentRoleCanLogin",
-  current_role.rolinherit AS "currentRoleInherit",
-  current_role.rolsuper AS "currentRoleSuperuser",
-  current_role.rolcreaterole AS "currentRoleCreateRole",
-  current_role.rolcreatedb AS "currentRoleCreateDatabase",
-  current_role.rolreplication AS "currentRoleReplication",
-  current_role.rolbypassrls AS "currentRoleBypassRls",
-  current_role.rolconnlimit AS "currentRoleConnectionLimit",
+  current_role_row.rolcanlogin AS "currentRoleCanLogin",
+  current_role_row.rolinherit AS "currentRoleInherit",
+  current_role_row.rolsuper AS "currentRoleSuperuser",
+  current_role_row.rolcreaterole AS "currentRoleCreateRole",
+  current_role_row.rolcreatedb AS "currentRoleCreateDatabase",
+  current_role_row.rolreplication AS "currentRoleReplication",
+  current_role_row.rolbypassrls AS "currentRoleBypassRls",
+  current_role_row.rolconnlimit AS "currentRoleConnectionLimit",
   pg_catalog.has_database_privilege(session_user, database_row.oid, 'CONNECT') AS "databaseConnect",
   pg_catalog.has_database_privilege(session_user, database_row.oid, 'CREATE') AS "databaseCreate",
   pg_catalog.has_database_privilege(session_user, database_row.oid, 'TEMPORARY') AS "databaseTemporary",
   (
     SELECT pg_catalog.count(*)::TEXT
     FROM pg_catalog.pg_auth_members AS membership
-    WHERE membership.member = current_role.oid
+    WHERE membership.member = current_role_row.oid
   ) AS "incomingMembershipCount",
   (
     SELECT pg_catalog.count(*)::TEXT
     FROM pg_catalog.pg_auth_members AS membership
-    WHERE membership.roleid = current_role.oid
+    WHERE membership.roleid = current_role_row.oid
   ) AS "outgoingMembershipCount",
   (
     SELECT pg_catalog.count(*)::TEXT
     FROM pg_catalog.pg_db_role_setting AS setting
-    WHERE setting.setrole = current_role.oid
+    WHERE setting.setrole = current_role_row.oid
   ) AS "roleSettingCount"
 FROM pg_catalog.pg_database AS database_row
 INNER JOIN pg_catalog.pg_roles AS session_role
   ON session_role.rolname = session_user
-INNER JOIN pg_catalog.pg_roles AS current_role
-  ON current_role.rolname = current_user
+INNER JOIN pg_catalog.pg_roles AS current_role_row
+  ON current_role_row.rolname = current_user
 LEFT JOIN pg_catalog.pg_stat_ssl AS transport
   ON transport.pid = pg_catalog.pg_backend_pid()
 WHERE database_row.datname = pg_catalog.current_database()

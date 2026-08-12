@@ -406,16 +406,25 @@ function stableProjection(input, results, syntheticOnly) {
   const userRows = normalizeRows(results.users, reasonCode);
   const poolRows = normalizeRows(results.pools, reasonCode);
   const serverRows = normalizeRows(results.servers, reasonCode);
-  if (versionRows.length !== 1 || stateRows.length !== 1) {
+  if (versionRows.length !== 1 || stateRows.length !== 3) {
     fail(reasonCode, "PgBouncer version/state result cardinality is invalid.");
   }
   const version = requireField(versionRows[0], "version", reasonCode);
-  const state = requireField(stateRows[0], "state", reasonCode).toLowerCase();
+  const states = mapBy(stateRows, "key", reasonCode);
+  const active = states.get("active");
+  const paused = states.get("paused");
+  const suspended = states.get("suspended");
   if (
     !/^PgBouncer [0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][A-Za-z0-9.-]+)?$/u.test(
       version,
     ) ||
-    state !== "active"
+    states.size !== 3 ||
+    !active ||
+    !paused ||
+    !suspended ||
+    requireField(active, "value", reasonCode).toLowerCase() !== "yes" ||
+    requireField(paused, "value", reasonCode).toLowerCase() !== "no" ||
+    requireField(suspended, "value", reasonCode).toLowerCase() !== "no"
   ) {
     fail(reasonCode, "PgBouncer version or state is unsafe.");
   }
@@ -524,7 +533,7 @@ function stableProjection(input, results, syntheticOnly) {
       tlsRequired: !syntheticOnly,
       user: input.applicationUserName,
     },
-    state,
+    state: "active",
     user: {
       name: input.applicationUserName,
       poolMode: requireField(user, "pool_mode", reasonCode, true),

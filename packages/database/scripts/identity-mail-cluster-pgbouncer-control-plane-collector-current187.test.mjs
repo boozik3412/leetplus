@@ -79,7 +79,11 @@ function results(overrides = {}, production = false) {
         user: "lp_application",
       },
     ],
-    state: [{ state: "active" }],
+    state: [
+      { key: "active", value: "yes" },
+      { key: "paused", value: "no" },
+      { key: "suspended", value: "no" },
+    ],
     users: [
       {
         current_client_connections: 1,
@@ -283,6 +287,29 @@ test("force_user, user collapse, stale server, backend drift, and paused databas
         collect({
           inputOverrides: { expectedPoolerConfigurationDigest: "4".repeat(64) },
           resultOverrides,
+        }),
+      { code: "CURRENT187_PGBOUNCER_COLLECTION_FAILED" },
+    );
+  }
+});
+
+test("PgBouncer global pause and suspend state drift fail closed", async () => {
+  const base = results();
+  for (const state of [
+    base.state.map((row) =>
+      row.key === "paused" ? { ...row, value: "yes" } : row,
+    ),
+    base.state.map((row) =>
+      row.key === "suspended" ? { ...row, value: "yes" } : row,
+    ),
+    base.state.slice(0, 2),
+    [{ state: "active" }],
+  ]) {
+    await assert.rejects(
+      () =>
+        collect({
+          inputOverrides: { expectedPoolerConfigurationDigest: "4".repeat(64) },
+          resultOverrides: { state },
         }),
       { code: "CURRENT187_PGBOUNCER_COLLECTION_FAILED" },
     );

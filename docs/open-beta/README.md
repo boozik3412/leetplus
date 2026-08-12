@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.82                                         |
-| Дата             | 07.08.2026                                   |
+| Версия           | 1.83                                         |
+| Дата             | 12.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -668,8 +668,11 @@ enterprise-isolation option и не сокращает shared gates.
   — transferable deny-only one-time consumption и `ENVELOPE/MATRIX/ROOT`
   revocation bundles для exact signed J5 envelope. Noncanonical PG candidate
   добавляет append-only/FORCE-RLS/execute-only RPC; contract `6/6`, static PG
-  `7/7`, combined J5 `39/39`, aggregate CURRENT187 `118/118`. Actual hostile PG
-  CI, independent review, canonical promotion и production binding обязательны.
+  `7/7`, combined J5 `39/39`, aggregate CURRENT187 `118/118`. Exact SHA
+  `1f7ef47c…`, CI `31606012609` — `3/3 SUCCESS`, actual PG `1/1`, postflight
+  `0/0/0`; см. [J5-R3 PostgreSQL CI evidence](./identity-mail-current187-j5-r3-pg-ci-evidence-2026-08-12.md).
+  Independent review, canonical promotion, production root/topology и
+  production binding обязательны.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

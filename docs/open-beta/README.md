@@ -613,11 +613,15 @@ enterprise-isolation option и не сокращает shared gates.
     [CURRENT187-J3/J4 control-plane collectors](./identity-mail-current187-j3-j4-control-plane-collectors.md)
     добавляют actual read-only `pg_hba_file_rules`/reload-clock observation и
     PgBouncer simple-protocol `SHOW CONFIG/DATABASES/USERS/POOLS/SERVERS`.
-    J3 `8/8`, J4 `7/7`, aggregate CURRENT187 `78/78`; actual HBA PostgreSQL
+    J3 `8/8`, J4 `8/8`, aggregate CURRENT187 `79/79`; actual HBA PostgreSQL
     step и collector candidate приняты exact SHA `ceed7239…`, CI
     `31586755130` — `3/3 SUCCESS`, artifact `sha256:faf8c3e2…aa283`.
     [CI evidence](./identity-mail-current187-j3-j4-ci-evidence-2026-08-12.md).
-    Actual disposable PgBouncer process остаётся следующим candidate. File catalog не объявляется
+    Actual disposable PgBouncer process принят SHA `b9296430…`, CI
+    `31591848857` — `3/3 SUCCESS`, integration `2/2`, artifact
+    `sha256:01f3aba1…d776`.
+    [Actual J4 PgBouncer CI evidence](./identity-mail-current187-j4-pgbouncer-ci-evidence-2026-08-12.md).
+    File catalog не объявляется
     effective loaded HBA; оба receipt остаются unsigned deny-only.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual

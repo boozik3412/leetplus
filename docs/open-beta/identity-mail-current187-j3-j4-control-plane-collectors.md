@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026
 
-Статус: `EXACT-SHA CI ACCEPTED / ACTUAL READ-ONLY CONTROL-PLANE I/O / DENY-ONLY / NOT DEPLOYABLE`.
+Статус: `EXACT-SHA CI ACCEPTED / ACTUAL READ-ONLY CONTROL-PLANE I/O + DISPOSABLE PGBOUNCER / DENY-ONLY / NOT DEPLOYABLE`.
 
 ## CURRENT187-J3 — PostgreSQL HBA file and reload clock
 
@@ -56,13 +56,15 @@ database и `close_needed` server, exact application database/user pair и
 
 J4 acceptance:
 
-- adversarial unit `7/7 PASS`;
-- общий CURRENT187 gate с J1–J4 `78/78 PASS`;
+- adversarial unit `8/8 PASS`;
+- общий CURRENT187 gate с J1–J4 `79/79 PASS`;
 - database typecheck `PASS`;
 - collector candidate принят тем же exact-SHA CI `31586755130`;
-- protocol-accurate disposable PgBouncer `stats_users` fixture реализуется
-  следующим отдельным candidate, потому что в принятом SHA actual pooler
-  process ещё отсутствует.
+- protocol-accurate disposable PgBouncer `stats_users` fixture принят exact SHA
+  `b9296430ffb5876e3db79c37215de414dbf05799`, CI `31591848857` —
+  `3/3 SUCCESS`; actual application-through-pooler и admin-denial integration
+  `2/2 PASS`; artifact
+  `sha256:01f3aba16faf57a24308bbffd0a839aff65aa9691b21969a1e284c004922d776`.
 
 ## Authority boundary
 
@@ -77,14 +79,13 @@ CURRENT187-F/deploy authority.
 
 ## Оставшийся P0-путь
 
-1. Принять protocol-accurate disposable PgBouncer admin-console integration.
-2. Выполнить четыре production J1/J2 runs и отдельные J3/J4 control runs.
-3. Принять positive/negative connection matrix для exact HBA rule, wrong
+1. Выполнить четыре production J1/J2 runs и отдельные J3/J4 control runs.
+2. Принять independently signed positive/negative connection matrix для exact HBA rule, wrong
    role/database, plaintext, wrong CA/hostname, stale reload, wrong pool mode и
    user collapse.
-4. Добавить independent production signer/root, freshness, persisted one-time
+3. Добавить independent production signer/root, freshness, persisted one-time
    consumption/revocation и reconciliation.
-5. Связать только полный signed J receipt с CURRENT187-F/deploy authority и
+4. Связать только полный signed J receipt с CURRENT187-F/deploy authority и
    выполнить independent latest-byte review + restored-copy rehearsal.
 
 Production, текущие четыре клуба, внешний tenant/tester, invites и providers не

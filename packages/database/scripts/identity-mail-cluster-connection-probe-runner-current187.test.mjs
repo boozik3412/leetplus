@@ -82,11 +82,27 @@ function service(purpose, index, overrides = {}) {
       0,
       5,
     ).map((scenario) => ({
+      caCertificatePem:
+        scenario === "PLAINTEXT_TRANSPORT"
+          ? null
+          : scenario === "WRONG_CA"
+            ? "-----BEGIN CERTIFICATE-----\nwrong-ca\n-----END CERTIFICATE-----\n"
+            : "-----BEGIN CERTIFICATE-----\nexpected-ca\n-----END CERTIFICATE-----\n",
       challengeDigest: digest(`${purpose}:${scenario}:challenge`),
-      connectionString: `postgresql://wrong-${index}:do-not-leak@localhost:5432/db_${index}?sslmode=${
+      connectionString: `postgresql://${
+        scenario === "WRONG_ROLE" ? `wrong-${index}` : `allowed-${index}`
+      }:do-not-leak@localhost:5432/${
+        scenario === "WRONG_DATABASE" ? `missing_${index}` : `db_${index}`
+      }?sslmode=${
         scenario === "PLAINTEXT_TRANSPORT" ? "disable" : "verify-full"
       }`,
       scenario,
+      serverName:
+        scenario === "PLAINTEXT_TRANSPORT"
+          ? null
+          : scenario === "WRONG_HOSTNAME"
+            ? "wrong.invalid"
+            : "localhost",
     })),
     poolerMappingDigest: digest(`${purpose}:pooler-mapping`),
     poolMode: index === 0 ? "TRANSACTION" : "SESSION",
@@ -299,6 +315,40 @@ test("negative specifications require exact order and transport mode", async () 
       mutate.toString().includes("pop")
         ? "CURRENT187_CONNECTION_PROBE_RUNNER_CONNECTIONS_INVALID"
         : "CURRENT187_CONNECTION_PROBE_RUNNER_CONNECTION_INVALID",
+    );
+  }
+});
+
+test("negative scenarios isolate endpoint, role, database, CA, and hostname dimensions", async () => {
+  for (const mutate of [
+    (candidate) => {
+      candidate.services[0].negativeConnections[0].connectionString =
+        candidate.services[0].negativeConnections[2].connectionString.replace(
+          "sslmode=disable",
+          "sslmode=verify-full",
+        );
+    },
+    (candidate) => {
+      candidate.services[0].negativeConnections[3].caCertificatePem =
+        candidate.services[0].negativeConnections[0].caCertificatePem;
+    },
+    (candidate) => {
+      candidate.services[0].negativeConnections[4].serverName =
+        candidate.services[0].negativeConnections[0].serverName;
+    },
+    (candidate) => {
+      candidate.services[0].negativeConnections[1].connectionString =
+        candidate.services[0].negativeConnections[1].connectionString.replace(
+          ":5432/",
+          ":5433/",
+        );
+    },
+  ]) {
+    const candidate = structuredClone(input());
+    mutate(candidate);
+    await expectCode(
+      () => run(candidate),
+      "CURRENT187_CONNECTION_PROBE_RUNNER_SCENARIO_BINDING_INVALID",
     );
   }
 });

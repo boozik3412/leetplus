@@ -98,9 +98,10 @@
 > `10/10`, aggregate CURRENT187 `89/89`, typecheck green. Exact-SHA CI
 > `31594459396` завершил `3/3 SUCCESS`, artifact ID `9140727030`.
 > Capability-bearing runner foundation теперь реализован: 4 positive bindings,
-> 20 network attempts и 12 control-policy evaluations; runner `9/9`, общий J5
-> `19/19`, aggregate CURRENT187 `98/98`. Actual disposable/production-like
-> execution, production signer/root и persisted consumption ещё отсутствуют;
+> 20 network attempts и 12 control-policy evaluations; runner `10/10`, общий J5
+> `20/20`, aggregate CURRENT187 `99/99`. Actual disposable wire/TLS integration
+> `1/1` доказал 20 network attempts. Branded J1–J4 production-like execution,
+> production signer/root и persisted consumption ещё отсутствуют;
 > статус `NO-GO`. Evidence:
 > `identity-mail-current187-j5-signed-connection-probe-matrix.md`.
 
@@ -153,7 +154,7 @@
 | CURRENT187-J3 HBA/reload         | `EXACT-SHA CI ACCEPTED / DENY-ONLY`                      | actual read-only `pg_hba_file_rules` + reload clock; trust/plaintext/wildcard/regex/group/map fail closed; `8/8`; exact SHA `ceed7239…`, CI `31586755130`, actual HBA step `SUCCESS`; current file observed, effective loaded HBA/rule not attested                                                                                                         |
 | CURRENT187-J4 PgBouncer          | `EXACT-SHA CI ACCEPTED / ACTUAL FIXTURE / DENY-ONLY`     | simple-query stats-only `SHOW` collector; exact active/paused/suspended state, global/database/user/runtime transaction mode, backend/TLS mapping, `force_user`/stale mapping checks; unit `8/8`, aggregate `79/79`; SHA `b9296430…`, CI `31591848857` `3/3`, actual integration `2/2`, artifact `sha256:01f3aba1…d776`; signer/production topology pending |
 | CURRENT187-J5 signed probes      | `EXACT-SHA CI ACCEPTED / SYNTHETIC CONTRACT / DENY-ONLY` | independent Ed25519 verifier; 4 service purposes × (positive + 8 negative scenarios), 5-minute freshness, identity/evidence separation, frozen-empty production root; `10/10`, aggregate `89/89`, exact-SHA CI `31594459396` — `3/3 SUCCESS`, artifact `9140727030`; actual topology execution/signer/persistence/F binding pending                         |
-| CURRENT187-J5-R1 probe runner    | `ENGINEERING ACCEPTED LOCALLY / SYNTHETIC CAPABILITIES`  | branded J1–J4 chain; 4 positive bindings + 20 classified negative PostgreSQL attempts + 12 non-mutating control-policy evaluations; secret-free process-local receipt; runner `9/9`, combined J5 `19/19`, aggregate CURRENT187 `98/98`, typecheck green; actual disposable topology and production-like run pending                                         |
+| CURRENT187-J5-R1 probe runner    | `ENGINEERING ACCEPTED LOCALLY / ACTUAL WIRE+TLS FIXTURE` | branded J1–J4 chain; 4 positive bindings + 20 classified negative PostgreSQL attempts + 12 non-mutating control-policy evaluations; exact dimension binding; secret-free process-local receipt; runner `10/10`, combined J5 `20/20`, actual disposable wire/TLS `1/1`, aggregate CURRENT187 `99/99`, typecheck green; branded production-like run pending   |
 | Единый gate                      | `PASS`                                                   | `163/163`, `0` failures                                                                                                                                                                                                                                                                                                                                     |
 | Независимая latest-byte проверка | `PASS`                                                   | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                                                                                                                                                                                                                                                  |
 
@@ -290,8 +291,9 @@ Actual PgBouncer fixture принят SHA `b9296430…`, CI `31591848857`:
 `3/3 SUCCESS`, artifact `sha256:01f3aba1…d776`.
 J5 independently signed connection-probe contract принят exact-SHA CI:
 `31594459396`, `3/3 SUCCESS`, artifact ID `9140727030`. Capability-bearing
-runner foundation локально принят: runner `9/9`, combined J5 `19/19`, aggregate
-CURRENT187 `98/98`. Ближайший этап — actual disposable 36-outcome integration и
-protected production signer/root, затем завершить independent
+runner foundation и actual disposable wire/TLS fixture локально приняты: runner
+`10/10`, combined J5 `20/20`, integration `1/1`, aggregate CURRENT187 `99/99`.
+Ближайший этап — branded J1–J4 production-like execution и protected production
+signer/root, затем завершить independent
 latest-byte review CURRENT187-I и reviewed canonical promotion/restored-copy
 rehearsal.

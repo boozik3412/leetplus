@@ -82,12 +82,12 @@ digest
 J5 является подписываемым verification contract, а R1 уже добавляет
 capability-bearing runner foundation: 4 positive receipt bindings, 20 actual
 network attempts и 12 безопасных control-policy evaluations. R1 локально принят
-`9/9`, общий J5 `19/19`, aggregate CURRENT187 `98/98`; см.
+`10/10`, общий J5 `20/20`, aggregate CURRENT187 `99/99`; actual disposable
+wire/TLS integration `1/1`; см.
 [описание runner](./identity-mail-current187-j5-capability-probe-runner.md).
 До повышения production-статуса обязательны:
 
-1. actual disposable integration и затем production-like execution всех 36
-   outcomes;
+1. production-like execution всех 36 outcomes на actual branded J1–J4 chain;
 2. независимый protected signer/HSM и reviewed production public-root
    enrollment;
 3. persisted one-time consumption/revocation, expiry/replay и lost-response

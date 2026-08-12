@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026
 
-Статус: `ENGINEERING ACCEPTED LOCALLY / SYNTHETIC CAPABILITIES / DENY-ONLY / NOT DEPLOYABLE`.
+Статус: `ENGINEERING ACCEPTED LOCALLY / ACTUAL DISPOSABLE WIRE+TLS FIXTURE / DENY-ONLY / NOT DEPLOYABLE`.
 
 ## Назначение
 
@@ -62,21 +62,24 @@ Runner формирует `probeTranscriptDigest` и структуру `service
 
 ## Локальная приёмка
 
-- runner adversarial tests: `9/9 PASS`;
-- J5 verifier + runner: `19/19 PASS`;
-- aggregate CURRENT187 gate: `98/98 PASS`;
+- runner adversarial tests: `10/10 PASS`;
+- J5 verifier + runner: `20/20 PASS`;
+- actual disposable PostgreSQL wire/TLS integration: `1/1 PASS`;
+- integration counters: 20 TCP attempts, 4 plaintext rejects, 16 PostgreSQL
+  SSLRequest/TLS attempts и 8 post-handshake PostgreSQL error responses;
+- aggregate CURRENT187 gate: `99/99 PASS`;
 - database typecheck: `PASS`;
 - syntax и Prettier: `PASS`.
 
 ## Что ещё требуется
 
-1. actual disposable TLS/HBA/PgBouncer integration fixture для всех 20 network
-   negative attempts и 12 control-policy candidates;
-2. затем production-like четыре-service execution;
-3. отдельный protected signer/HSM и production public-root enrollment;
-4. persisted one-time consumption/revocation с replay/expiry/lost-response;
-5. branded J5 verification receipt в CURRENT187-F/deploy authority;
-6. independent latest-byte review и restored-copy rehearsal.
+1. production-like четыре-service execution, которое объединяет actual branded
+   J1–J4 receipts с этим runner; текущий wire/TLS harness не является actual
+   HBA/PgBouncer topology;
+2. отдельный protected signer/HSM и production public-root enrollment;
+3. persisted one-time consumption/revocation с replay/expiry/lost-response;
+4. branded J5 verification receipt в CURRENT187-F/deploy authority;
+5. independent latest-byte review и restored-copy rehearsal.
 
 Production, `Tenant A/A1..A4`, внешний tenant/tester, invites и providers не
 изменялись. Внешний доступ остаётся `NO-GO`.

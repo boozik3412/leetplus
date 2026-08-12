@@ -649,9 +649,10 @@ enterprise-isolation option и не сокращает shared gates.
 - [CURRENT187-J5 capability probe runner](./identity-mail-current187-j5-capability-probe-runner.md)
   — production entry связывает branded J1–J4 receipts, выполняет 20
   классифицированных negative PostgreSQL connection attempts и 12 безопасных
-  control-policy evaluations без изменения HBA/PgBouncer; runner `9/9`, J5
-  `19/19`, aggregate CURRENT187 `98/98`, typecheck green. Actual disposable
-  topology, signer/root, persistence и F/deploy binding ещё обязательны.
+  control-policy evaluations без изменения HBA/PgBouncer; runner `10/10`, J5
+  `20/20`, actual wire/TLS fixture `1/1`, aggregate CURRENT187 `99/99`, typecheck
+  green. Actual branded J1–J4 production-like topology, signer/root, persistence
+  и F/deploy binding ещё обязательны.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

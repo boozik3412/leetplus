@@ -101,9 +101,11 @@ const SERVICE_KEYS = Object.freeze([
   "tlsMode",
 ]);
 const CONNECTION_KEYS = Object.freeze([
+  "caCertificatePem",
   "challengeDigest",
   "connectionString",
   "scenario",
+  "serverName",
 ]);
 const DEPENDENCY_KEYS = Object.freeze(["attemptRejectedConnection", "now"]);
 const ATTEMPT_RESULT_KEYS = Object.freeze([
@@ -206,13 +208,36 @@ function normalizeConnectionSpec(value, scenario) {
     );
   }
   const sslMode = parsed.searchParams.get("sslmode");
+  const searchKeys = [...parsed.searchParams.keys()];
+  const plaintext = scenario === "PLAINTEXT_TRANSPORT";
+  const port = Number(parsed.port);
   if (
     !new Set(["postgres:", "postgresql:"]).has(parsed.protocol) ||
     !parsed.hostname ||
+    !parsed.port ||
+    !Number.isSafeInteger(port) ||
+    port < 1 ||
+    port > 65_535 ||
     !parsed.username ||
     !parsed.password ||
+    !parsed.pathname ||
+    parsed.pathname === "/" ||
     parsed.hash ||
-    sslMode !== EXPECTED_SSL_MODE[scenario]
+    searchKeys.length !== 1 ||
+    searchKeys[0] !== "sslmode" ||
+    sslMode !== EXPECTED_SSL_MODE[scenario] ||
+    (plaintext
+      ? row.caCertificatePem !== null || row.serverName !== null
+      : typeof row.caCertificatePem !== "string" ||
+        !row.caCertificatePem.startsWith("-----BEGIN CERTIFICATE-----\n") ||
+        !row.caCertificatePem.endsWith("-----END CERTIFICATE-----\n") ||
+        Buffer.byteLength(row.caCertificatePem, "utf8") > 16 * 1_024 ||
+        typeof row.serverName !== "string" ||
+        row.serverName.length === 0 ||
+        row.serverName.length > 253 ||
+        !/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/u.test(
+          row.serverName,
+        ))
   ) {
     fail(
       "CURRENT187_CONNECTION_PROBE_RUNNER_CONNECTION_INVALID",
@@ -396,6 +421,47 @@ function normalizeInput(value, syntheticOnly) {
     ).map((row, connectionIndex) =>
       normalizeConnectionSpec(row, NETWORK_SCENARIOS[connectionIndex]),
     );
+    const parsedNegativeConnections = negativeConnections.map(
+      (connection) => new URL(connection.connectionString),
+    );
+    const targetEndpoints = new Set(
+      parsedNegativeConnections.map(
+        (parsed) => `${parsed.hostname}:${parsed.port}`,
+      ),
+    );
+    const [wrongRole, wrongDatabase, plaintext, wrongCa, wrongHostname] =
+      negativeConnections;
+    const [
+      wrongRoleUrl,
+      wrongDatabaseUrl,
+      plaintextUrl,
+      wrongCaUrl,
+      wrongHostnameUrl,
+    ] = parsedNegativeConnections;
+    if (
+      targetEndpoints.size !== 1 ||
+      wrongRoleUrl.username === plaintextUrl.username ||
+      wrongRoleUrl.pathname !== plaintextUrl.pathname ||
+      wrongDatabaseUrl.username !== plaintextUrl.username ||
+      wrongDatabaseUrl.pathname === plaintextUrl.pathname ||
+      wrongCaUrl.username !== plaintextUrl.username ||
+      wrongCaUrl.pathname !== plaintextUrl.pathname ||
+      wrongHostnameUrl.username !== plaintextUrl.username ||
+      wrongHostnameUrl.pathname !== plaintextUrl.pathname ||
+      wrongRole.serverName !== wrongDatabase.serverName ||
+      wrongRole.serverName !== wrongCa.serverName ||
+      wrongRole.serverName === wrongHostname.serverName ||
+      wrongRole.caCertificatePem !== wrongDatabase.caCertificatePem ||
+      wrongRole.caCertificatePem !== wrongHostname.caCertificatePem ||
+      wrongRole.caCertificatePem === wrongCa.caCertificatePem ||
+      plaintext.caCertificatePem !== null ||
+      plaintext.serverName !== null
+    ) {
+      fail(
+        "CURRENT187_CONNECTION_PROBE_RUNNER_SCENARIO_BINDING_INVALID",
+        "Negative probes do not isolate role, database, transport, CA, and hostname failure dimensions.",
+      );
+    }
     return Object.freeze({ ...service, negativeConnections });
   });
   for (const key of [
@@ -488,12 +554,27 @@ function classifyConnectionError(scenario, error) {
 function productionDependencies() {
   return Object.freeze({
     async attemptRejectedConnection({
+      caCertificatePem,
       connectionString,
       connectTimeoutMs,
       scenario,
+      serverName,
     }) {
+      const parsed = new URL(connectionString);
+      const plaintext = scenario === "PLAINTEXT_TRANSPORT";
       const client = new pg.Client({
-        connectionString,
+        database: decodeURIComponent(parsed.pathname.slice(1)),
+        host: parsed.hostname,
+        password: decodeURIComponent(parsed.password),
+        port: Number(parsed.port),
+        ssl: plaintext
+          ? false
+          : {
+              ca: caCertificatePem,
+              rejectUnauthorized: true,
+              servername: serverName,
+            },
+        user: decodeURIComponent(parsed.username),
         connectionTimeoutMillis: connectTimeoutMs,
         query_timeout: connectTimeoutMs,
         statement_timeout: connectTimeoutMs,
@@ -539,10 +620,12 @@ async function runInternal(inputValue, dependencyValue, syntheticOnly) {
       try {
         resultValue = await dependencies.attemptRejectedConnection(
           Object.freeze({
+            caCertificatePem: connection.caCertificatePem,
             connectionString: connection.connectionString,
             connectTimeoutMs: input.connectTimeoutMs,
             purpose: service.purpose,
             scenario: connection.scenario,
+            serverName: connection.serverName,
           }),
         );
       } catch {
@@ -761,17 +844,7 @@ export async function runCurrent187ConnectionProbeMatrix(input) {
   return runInternal(input, productionDependencies(), false);
 }
 
-export async function runSyntheticCurrent187ConnectionProbeMatrixWithDependenciesForTestOnly(
-  input,
-  dependencies,
-  context,
-) {
-  if (arguments.length !== 3) {
-    fail(
-      "CURRENT187_CONNECTION_PROBE_RUNNER_ARGUMENTS_INVALID",
-      "Synthetic runner accepts input, dependencies, and context.",
-    );
-  }
+function normalizeSyntheticContext(context) {
   const normalizedContext = current187AdmissionExactDataRecord(
     context,
     SYNTHETIC_CONTEXT_KEYS,
@@ -789,6 +862,34 @@ export async function runSyntheticCurrent187ConnectionProbeMatrixWithDependencie
       "Synthetic capabilities are restricted to explicit CI tests.",
     );
   }
+}
+
+export async function runSyntheticCurrent187ConnectionProbeMatrixWithActualNetworkForTestOnly(
+  input,
+  context,
+) {
+  if (arguments.length !== 2) {
+    fail(
+      "CURRENT187_CONNECTION_PROBE_RUNNER_ARGUMENTS_INVALID",
+      "Synthetic actual-network runner accepts input and context.",
+    );
+  }
+  normalizeSyntheticContext(context);
+  return runInternal(input, productionDependencies(), true);
+}
+
+export async function runSyntheticCurrent187ConnectionProbeMatrixWithDependenciesForTestOnly(
+  input,
+  dependencies,
+  context,
+) {
+  if (arguments.length !== 3) {
+    fail(
+      "CURRENT187_CONNECTION_PROBE_RUNNER_ARGUMENTS_INVALID",
+      "Synthetic runner accepts input, dependencies, and context.",
+    );
+  }
+  normalizeSyntheticContext(context);
   return runInternal(input, dependencies, true);
 }
 

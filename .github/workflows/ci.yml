@@ -755,6 +755,12 @@ jobs:
           NODE_ENV: test
           IDENTITY_MAIL_ENDPOINT_TLS_PEER_CURRENT187_E2E_CONFIRM: run-current187-endpoint-tls-peer-protocol-integration-e2e
 
+      - name: Verify CURRENT187 actual negative connection probe matrix
+        run: pnpm --filter database test:integration:identity-mail-cluster-connection-probe-current187
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_CONNECTION_PROBE_RUNNER_CURRENT187_E2E_CONFIRM: run-current187-negative-connection-probe-protocol-integration-e2e
+
       - name: Verify CURRENT187 PostgreSQL HBA file catalog and reload clock
         run: pnpm --filter database test:integration:identity-mail-cluster-hba-reload-current187:pg
         env:

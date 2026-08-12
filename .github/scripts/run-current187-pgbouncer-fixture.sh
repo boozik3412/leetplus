@@ -95,5 +95,5 @@ if [[ $ready -ne 1 ]]; then
   exit 66
 fi
 
-pnpm --filter database \
+env -u PGOPTIONS pnpm --filter database \
   test:integration:identity-mail-cluster-pgbouncer-current187

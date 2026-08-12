@@ -7,7 +7,7 @@
     "requiredContract": "CURRENT187_J5_R3_PERSISTED_CONNECTION_PROBE_CONSUMPTION_REVOCATION_LEDGER",
     "resolved": false
   },
-  "migrationSqlSha256": "614ed2b77a6e50b8fc039ac074f69379f7bcfd0f64f24959e2bb16e01c98a605",
+  "migrationSqlSha256": "7b68fd84ae71e07cadcbb3740ad6a273a0f5a1b904bd9fdc62eaa2537a8cfe4c",
   "authorization": false,
   "canMutateProduction": false,
   "canActivateApplicationRoute": false,

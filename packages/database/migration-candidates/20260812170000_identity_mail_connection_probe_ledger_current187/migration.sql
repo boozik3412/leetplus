@@ -697,8 +697,8 @@ BEGIN
     || ',"consumedAt":' || pg_catalog.to_jsonb(v_consumed_at_text)::TEXT
     || ',"envelopeDigest":' || pg_catalog.to_jsonb(v_envelope_digest)::TEXT
     || ',"kind":"CURRENT187_CONNECTION_PROBE_CONSUMPTION_RECEIPT"'
-    || ',"nonce":' || pg_catalog.to_jsonb(v_nonce)::TEXT
     || ',"noncanonical":true'
+    || ',"nonce":' || pg_catalog.to_jsonb(v_nonce)::TEXT
     || ',"operationId":' || pg_catalog.to_jsonb(v_operation_id::TEXT)::TEXT
     || ',"persistedConsumptionVerified":true'
     || ',"productionRootEnrolled":false'
@@ -733,8 +733,8 @@ BEGIN
     || ',"consumedAt":' || pg_catalog.to_jsonb(v_consumed_at_text)::TEXT
     || ',"envelopeDigest":' || pg_catalog.to_jsonb(v_envelope_digest)::TEXT
     || ',"kind":"CURRENT187_CONNECTION_PROBE_CONSUMPTION_RECEIPT"'
-    || ',"nonce":' || pg_catalog.to_jsonb(v_nonce)::TEXT
     || ',"noncanonical":true'
+    || ',"nonce":' || pg_catalog.to_jsonb(v_nonce)::TEXT
     || ',"operationId":' || pg_catalog.to_jsonb(v_operation_id::TEXT)::TEXT
     || ',"persistedConsumptionVerified":true'
     || ',"productionRootEnrolled":false'

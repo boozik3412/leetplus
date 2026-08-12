@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.80                                         |
+| Версия           | 1.81                                         |
 | Дата             | 07.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -663,6 +663,12 @@ enterprise-isolation option и не сокращает shared gates.
   link и byte/inode drift. Signer `6/6`, combined J5 `26/26`, aggregate
   CURRENT187 `105/105`; production root frozen-empty, key ceremony/OS ACL или
   HSM/KMS, persistence и F/deploy binding ещё обязательны.
+
+- [CURRENT187-J5-R3 persisted ledger contract](./identity-mail-current187-j5-r3-persisted-ledger-contract.md)
+  — transferable deny-only one-time consumption и `ENVELOPE/MATRIX/ROOT`
+  revocation bundles для exact signed J5 envelope. R3 `6/6`, combined J5
+  `32/32`, aggregate CURRENT187 `111/111`; PostgreSQL tables/FORCE-RLS/RPC,
+  hostile race/lost-response acceptance и production binding ещё обязательны.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

@@ -425,6 +425,28 @@ export function current187ConnectionProbePayloadDigest(payload) {
   return digest(PAYLOAD_DIGEST_DOMAIN, normalizePayload(payload, environment));
 }
 
+export function current187ConnectionProbeEnvelopeDigest(envelopeValue) {
+  if (arguments.length !== 1) {
+    fail(
+      "CURRENT187_CONNECTION_PROBE_ARGUMENTS_INVALID",
+      "Connection-probe envelope digest accepts exactly one envelope.",
+    );
+  }
+  const envelope = current187AdmissionExactDataRecord(
+    envelopeValue,
+    ENVELOPE_KEYS,
+    "CURRENT187_CONNECTION_PROBE_ENVELOPE_INVALID",
+    "The connection-probe envelope must be exact and data-only.",
+  );
+  return digest(ENVELOPE_DIGEST_DOMAIN, {
+    payloadDigest: envelope.payloadDigest,
+    publicKeyFingerprint: envelope.publicKeyFingerprint,
+    signature: envelope.signature,
+    signatureAlgorithm: envelope.signatureAlgorithm,
+    signingKeyId: envelope.signingKeyId,
+  });
+}
+
 export function current187ConnectionProbePublicKeyFingerprint(publicKeyPem) {
   if (arguments.length !== 1 || typeof publicKeyPem !== "string") {
     fail(
@@ -668,13 +690,7 @@ function verifyInternal(envelopeValue, registriesValue, now, environment) {
     probeTranscriptDigest: payload.probeTranscriptDigest,
     serviceEvidence,
   });
-  const envelopeDigest = digest(ENVELOPE_DIGEST_DOMAIN, {
-    payloadDigest,
-    publicKeyFingerprint: envelope.publicKeyFingerprint,
-    signature: envelope.signature,
-    signatureAlgorithm: envelope.signatureAlgorithm,
-    signingKeyId: envelope.signingKeyId,
-  });
+  const envelopeDigest = current187ConnectionProbeEnvelopeDigest(envelope);
   const publicReceipt = {
     authorization: false,
     canMutate: false,

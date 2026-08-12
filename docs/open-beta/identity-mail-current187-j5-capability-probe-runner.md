@@ -85,7 +85,8 @@ connection probe step — `SUCCESS`. Release artifact ID `9142149284`, digest
    HBA/PgBouncer topology;
 2. file-backed signer boundary реализован J5-R2; остаются external key ceremony,
    OS ACL или HSM/KMS и reviewed production public-root enrollment;
-3. persisted one-time consumption/revocation с replay/expiry/lost-response;
+3. J5-R3 contract реализован локально; остаются PostgreSQL append-only/FORCE
+   RLS/execute-only RPC и hostile replay/expiry/race/lost-response acceptance;
 4. branded J5 verification receipt в CURRENT187-F/deploy authority;
 5. independent latest-byte review и restored-copy rehearsal.
 

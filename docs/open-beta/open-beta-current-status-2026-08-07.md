@@ -111,6 +111,13 @@
 > exact branded R1→J5 binding. Signer `6/6`, combined J5 `26/26`, aggregate
 > CURRENT187 `105/105`. Production root, key ceremony/ACL/HSM, persistence и
 > deploy binding не выполнены; статус остаётся `NO-GO`.
+>
+> J5-R3 локально добавил transferable deny-only consumption/revocation
+> contract: exact envelope+branded receipt, one-time operation/nonce и
+> `ENVELOPE/MATRIX/ROOT` scopes. R3 `6/6`, combined J5 `32/32`, aggregate
+> CURRENT187 `111/111`. Это ещё не PostgreSQL persistence: tables/FORCE-RLS/RPC,
+> hostile races/lost-response, production root и F/deploy binding отсутствуют;
+> статус остаётся `NO-GO`.
 
 ## Итоговый вердикт
 
@@ -163,6 +170,7 @@
 | CURRENT187-J5 signed probes       | `EXACT-SHA CI ACCEPTED / SYNTHETIC CONTRACT / DENY-ONLY` | independent Ed25519 verifier; 4 service purposes × (positive + 8 negative scenarios), 5-minute freshness, identity/evidence separation, frozen-empty production root; `10/10`, aggregate `89/89`, exact-SHA CI `31594459396` — `3/3 SUCCESS`, artifact `9140727030`; actual topology execution/signer/persistence/F binding pending                                                                                          |
 | CURRENT187-J5-R1 probe runner     | `EXACT-SHA CI ACCEPTED / ACTUAL WIRE+TLS FIXTURE`        | branded J1–J4 chain; 4 positive bindings + 20 classified negative PostgreSQL attempts + 12 non-mutating control-policy evaluations; exact dimension binding; secret-free process-local receipt; runner `10/10`, combined J5 `20/20`, actual disposable wire/TLS `1/1`, aggregate CURRENT187 `99/99`; SHA `e4789e29…`, CI `31597872402` `3/3 SUCCESS`, artifact `sha256:1fb76259…fdd85f`; branded production-like run pending |
 | CURRENT187-J5-R2 protected signer | `ENGINEERING ACCEPTED LOCALLY / ROOT FROZEN-EMPTY`       | exact branded R1→J5 Ed25519 signer; external canonical PKCS8/SPKI, public pin, repo/temp/link/drift fences; no DB/network/process/env/deploy/tenant/provider capability; `6/6`, combined J5 `26/26`, aggregate CURRENT187 `105/105`; production key/root/ACL-HSM/persistence/F binding pending                                                                                                                               |
+| CURRENT187-J5-R3 ledger contract  | `ENGINEERING ACCEPTED LOCALLY / CONTRACT ONLY / NO DB`   | exact one-time consumption and `ENVELOPE/MATRIX/ROOT` revocation bundles; binds signed envelope+branded receipt to release, cluster/universe, matrix, operation/nonce, root and timeline; byte-exact persisted receipt attachment; no effect capability; `6/6`, combined J5 `32/32`, aggregate CURRENT187 `111/111`; PostgreSQL RLS/RPC/races/lost-response and F binding pending                                            |
 | Единый gate                       | `PASS`                                                   | `163/163`, `0` failures                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Независимая latest-byte проверка  | `PASS`                                                   | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                                                                                                                                                                                                                                                                                                                   |
 

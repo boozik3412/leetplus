@@ -88,13 +88,17 @@ wire/TLS integration `1/1`; см.
 J5-R2 добавляет file-backed protected signer foundation; signer `6/6`, combined
 J5 `26/26`, aggregate CURRENT187 `105/105`; см.
 [описание signer](./identity-mail-current187-j5-r2-protected-signer.md).
+J5-R3 добавляет transferable consumption/revocation contract; R3 `6/6`,
+combined J5 `32/32`, aggregate CURRENT187 `111/111`; см.
+[описание ledger contract](./identity-mail-current187-j5-r3-persisted-ledger-contract.md).
+Это contract-only foundation без PostgreSQL persistence.
 До повышения production-статуса обязательны:
 
 1. production-like execution всех 36 outcomes на actual branded J1–J4 chain;
 2. external key ceremony, OS ACL либо HSM/KMS и reviewed production public-root
    enrollment; file-backed signer code сам по себе root не enrolling;
-3. persisted one-time consumption/revocation, expiry/replay и lost-response
-   reconciliation;
+3. материализовать J5-R3 в PostgreSQL: append-only/FORCE-RLS/execute-only RPC,
+   expiry/replay/race и lost-response reconciliation;
 4. binding branded J5 receipt в CURRENT187-F/deploy authority;
 5. independent latest-byte review и restored-copy rehearsal.
 

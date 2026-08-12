@@ -225,6 +225,9 @@ test("capability runner executes 4 positive bindings and 32 ordered deny probes"
   assert.equal(receipt.negativeProbeCount, 32);
   assert.equal(receipt.actualNetworkNegativeProbeCount, 20);
   assert.equal(receipt.controlPolicyNegativeProbeCount, 12);
+  assert.equal(receipt.hostControlChallengeDigest, digest("host-control"));
+  assert.equal(receipt.nonce, digest("nonce"));
+  assert.equal(receipt.operationId, "11111111-1111-4111-8111-111111111111");
   assert.deepEqual(
     receipt.services.map((entry) => entry.purpose),
     CURRENT187_NETWORK_RUNTIME_SERVICE_PURPOSES,

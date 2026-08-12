@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.79                                         |
+| Версия           | 1.80                                         |
 | Дата             | 07.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -656,6 +656,13 @@ enterprise-isolation option и не сокращает shared gates.
   [J5-R1 CI evidence](./identity-mail-current187-j5-r1-ci-evidence-2026-08-12.md).
   Actual branded J1–J4 production-like topology, signer/root, persistence и
   F/deploy binding ещё обязательны.
+
+- [CURRENT187-J5-R2 protected signer](./identity-mail-current187-j5-r2-protected-signer.md)
+  — отдельный file-backed signer принимает только branded R1 receipt, требует
+  external canonical Ed25519 pair и exact public pin, закрывает repo/temp,
+  link и byte/inode drift. Signer `6/6`, combined J5 `26/26`, aggregate
+  CURRENT187 `105/105`; production root frozen-empty, key ceremony/OS ACL или
+  HSM/KMS, persistence и F/deploy binding ещё обязательны.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

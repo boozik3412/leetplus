@@ -83,7 +83,8 @@ connection probe step — `SUCCESS`. Release artifact ID `9142149284`, digest
 1. production-like четыре-service execution, которое объединяет actual branded
    J1–J4 receipts с этим runner; текущий wire/TLS harness не является actual
    HBA/PgBouncer topology;
-2. отдельный protected signer/HSM и production public-root enrollment;
+2. file-backed signer boundary реализован J5-R2; остаются external key ceremony,
+   OS ACL или HSM/KMS и reviewed production public-root enrollment;
 3. persisted one-time consumption/revocation с replay/expiry/lost-response;
 4. branded J5 verification receipt в CURRENT187-F/deploy authority;
 5. independent latest-byte review и restored-copy rehearsal.

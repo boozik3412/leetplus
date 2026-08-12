@@ -806,8 +806,11 @@ async function runInternal(inputValue, dependencyValue, syntheticOnly) {
     environment: input.environment,
     executedAt,
     hbaControlReceiptDigest: input.hbaReloadReceipt.hbaReloadReceiptDigest,
+    hostControlChallengeDigest: input.hostControlChallengeDigest,
     kind: CURRENT187_CONNECTION_PROBE_RUNNER_KIND,
     negativeProbeCount: 32,
+    nonce: input.nonce,
+    operationId: input.operationId,
     pgbouncerControlReceiptDigest:
       input.pgbouncerReceipt.pgbouncerReceiptDigest,
     positiveProbeCount: 4,

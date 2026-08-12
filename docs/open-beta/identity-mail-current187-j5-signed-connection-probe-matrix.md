@@ -85,11 +85,14 @@ network attempts и 12 безопасных control-policy evaluations. R1 ло�
 `10/10`, общий J5 `20/20`, aggregate CURRENT187 `99/99`; actual disposable
 wire/TLS integration `1/1`; см.
 [описание runner](./identity-mail-current187-j5-capability-probe-runner.md).
+J5-R2 добавляет file-backed protected signer foundation; signer `6/6`, combined
+J5 `26/26`, aggregate CURRENT187 `105/105`; см.
+[описание signer](./identity-mail-current187-j5-r2-protected-signer.md).
 До повышения production-статуса обязательны:
 
 1. production-like execution всех 36 outcomes на actual branded J1–J4 chain;
-2. независимый protected signer/HSM и reviewed production public-root
-   enrollment;
+2. external key ceremony, OS ACL либо HSM/KMS и reviewed production public-root
+   enrollment; file-backed signer code сам по себе root не enrolling;
 3. persisted one-time consumption/revocation, expiry/replay и lost-response
    reconciliation;
 4. binding branded J5 receipt в CURRENT187-F/deploy authority;

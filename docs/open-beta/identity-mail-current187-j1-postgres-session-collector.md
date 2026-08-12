@@ -1,8 +1,8 @@
 # CURRENT187-J1: actual PostgreSQL backend session collector
 
-Дата фиксации: 11.08.2026
+Дата фиксации: 12.08.2026
 
-Статус: `LOCAL CANDIDATE / ACTUAL POSTGRESQL BACKEND SESSION / DENY-ONLY / CI PENDING / NOT DEPLOYABLE`
+Статус: `EXACT-SHA CI ACCEPTED / ACTUAL POSTGRESQL BACKEND SESSION / DENY-ONLY / NOT DEPLOYABLE`
 
 ## Назначение
 
@@ -75,30 +75,35 @@ PostgreSQL backend. Они не подтверждают DNS/клиентски�
 collector, PgBouncer control-plane evidence, HBA/reload attestor и negative
 probe runner.
 
-## Локальная приёмка
+## Приёмка
 
-- standalone syntax/unit: `10/10`;
-- общий CURRENT187 acquisition/semantic/policy gate: `52/52`;
+- standalone syntax/unit: `11/11`;
+- общий CURRENT187 acquisition/semantic/policy gate: `53/53`;
 - Prettier: green;
-- добавлен обязательный PostgreSQL CI integration smoke на фактической Prisma
-  backend-сессии одноразовой loopback CI базы;
+- exact SHA `a9513c69048a6840dad846c2a19843f3ded516e6` принят GitHub CI
+  `31577001152` как `3/3 SUCCESS`;
+- обязательный PostgreSQL CI integration smoke на фактической Prisma
+  backend-сессии одноразовой loopback CI базы прошёл `SUCCESS`;
+- SHA-bound artifact
+  `leetplus-release-a9513c69048a6840dad846c2a19843f3ded516e6`, digest
+  `sha256:8e0c26f50a13eb00b0ebe69d0ed061271ffd862573d802cabe60ba3c60e4d334`;
 - локальный PostgreSQL integration не запускался: в рабочей среде отсутствуют
   `DATABASE_URL` и listener на `5432`;
-- exact-SHA CI и artifact для J1 ещё не получены;
+- подробное evidence:
+  [CURRENT187-J1 exact-SHA CI](./identity-mail-current187-j1-ci-evidence-2026-08-12.md);
 - production, `Tenant A/A1..A4`, внешний tenant, user и invite не изменялись.
 
 ## Оставшийся P0-путь CURRENT187-J
 
-1. Принять exact-SHA CI с реальным PostgreSQL integration smoke J1.
-2. Запустить J1 отдельно от production identities `APPLICATION`,
+1. Запустить J1 отдельно от production identities `APPLICATION`,
    `COORDINATOR`, `MIGRATION`, `WORKER` и доказать их попарное разделение.
-3. Реализовать независимые endpoint/TLS-peer, HBA/reload и PgBouncer collectors,
+2. Реализовать независимые endpoint/TLS-peer, HBA/reload и PgBouncer collectors,
    а также положительные и отрицательные probes фактического маршрута.
-4. Добавить независимый production signer/root, freshness/reload epoch,
+3. Добавить независимый production signer/root, freshness/reload epoch,
    persisted one-time consumption/revocation и lost-response reconciliation.
-5. Принять hostile real-topology matrix: wrong CA/hostname, plaintext, `trust`,
+4. Принять hostile real-topology matrix: wrong CA/hostname, plaintext, `trust`,
    wildcard, collapsed user, wrong DB/role, pool mode и stale reload.
-6. Связать только полный branded production J receipt с CURRENT187-F и
+5. Связать только полный branded production J receipt с CURRENT187-F и
    production deploy authority, затем выполнить independent latest-byte review,
    canonical promotion и restored-copy rehearsal.
 

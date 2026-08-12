@@ -595,10 +595,13 @@ enterprise-isolation option и не сокращает shared gates.
     [CURRENT187-J1 actual PostgreSQL backend session collector](./identity-mail-current187-j1-postgres-session-collector.md)
     добавляет capability-bearing read-only Prisma collector: exact database и
     role OID, application identity, backend/network coordinates, read-only/TLS
-    и role-policy facts. Local unit `10/10`, общий CURRENT187 gate `52/52`,
-    actual loopback PostgreSQL smoke добавлен в CI. J1 остаётся deny-only и не
+    и role-policy facts. Local unit `11/11`, общий CURRENT187 gate `53/53`;
+    exact SHA `a9513c69…` принят CI `31577001152` как `3/3 SUCCESS`, actual
+    loopback PostgreSQL J1 — `SUCCESS`, artifact `sha256:8e0c26f5…d334`.
+    [CI evidence](./identity-mail-current187-j1-ci-evidence-2026-08-12.md).
+    J1 остаётся deny-only и не
     утверждает endpoint identity, matched HBA rule, PgBouncer identity или
-    negative probe; exact-SHA CI пока не принят.
+    negative probe.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

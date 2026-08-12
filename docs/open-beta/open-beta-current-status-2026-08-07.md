@@ -52,16 +52,17 @@
 > access/effect flags false. Evidence:
 > `identity-mail-current187-j-network-runtime-attestation-foundation.md`.
 >
-> CURRENT187-J1 добавил local candidate capability-bearing коллектора
+> CURRENT187-J1 принят как exact-SHA CI capability-bearing коллектор
 > фактической PostgreSQL backend-сессии через Prisma. Exact DB/role name+OID,
 > `application_name`, backend/network coordinates, read-only state, negotiated
 > TLS facts, role attributes/privileges/memberships/settings и positive SELECT
 > probe проверяются fail closed; receipt secret-free и deny-only. Standalone
-> `10/10`, общий CURRENT187 gate `52/52`; фактический loopback PostgreSQL smoke
-> добавлен в обязательный CI, но exact-SHA CI ещё не получен. J1 намеренно не
+> `11/11`, общий CURRENT187 gate `53/53`; exact SHA `a9513c69…` принят CI
+> `31577001152` как `3/3 SUCCESS`, фактический loopback PostgreSQL smoke —
+> `SUCCESS`, artifact `sha256:8e0c26f5…d334`. J1 намеренно не
 > утверждает endpoint identity, matched HBA rule, PgBouncer identity или
 > negative probe. Production и внешний доступ не менялись. Evidence:
-> `identity-mail-current187-j1-postgres-session-collector.md`.
+> `identity-mail-current187-j1-ci-evidence-2026-08-12.md`.
 
 ## Итоговый вердикт
 
@@ -93,23 +94,23 @@
 
 ## Состояние текущей инженерной задачи
 
-| Контур                           | Статус                                     | Подтверждение                                                                                                                                                                                                                          |
-| -------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Planning state machine           | `ACCEPTED LOCALLY`                         | `33/33`                                                                                                                                                                                                                                |
-| SQL semantic fingerprint         | `ACCEPTED LOCALLY`                         | `26/26`; schema/data/sequences, ACL, cluster role attributes, password-verifier hashes и memberships                                                                                                                                   |
-| Persistent coordinator           | `ACCEPTED LOCALLY`                         | `6/6`; внешний pinned Ed25519 trust root                                                                                                                                                                                               |
-| Materializer/recovery            | `ACCEPTED LOCALLY`                         | `24/24`; bounded descriptor reads, exact tree/inode provenance, signed restart locator                                                                                                                                                 |
-| Signed journal                   | `ACCEPTED LOCALLY`                         | `24/24`; public-only verification, signed lifecycle, lost unlink/rmdir recovery                                                                                                                                                        |
-| Runtime adapter                  | `ACCEPTED LOCALLY`                         | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission                                                                                                                                             |
-| Runner/janitor                   | `ACCEPTED LOCALLY`                         | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                                                                                                                                                 |
-| CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY`         | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3`                                                                                                             |
-| CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY`         | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H                                                                                                                           |
-| CURRENT187-H semantic allowlist  | `ENGINEERING ACCEPTED / DENY-ONLY`         | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`                                                                                                                        |
-| CURRENT187-I persisted approval  | `EXACT-HEAD CI ACCEPTED / NONCANONICAL`    | persisted brand required; candidate `daf5a98f…`; static `7/7`, PG16.13 `2 × 1/1`, CI `31416609580` `3/3 SUCCESS`, zero residue; all access/effect flags false                                                                          |
-| CURRENT187-J network/runtime     | `EXACT-HEAD CI ACCEPTED / SYNTHETIC-ONLY`  | four exact service paths + separate host-control brand; endpoint/TLS/HBA/pooler/service-account digests; `10/10`, aggregate CURRENT187 `42/42`, CI `31420665364` `3/3 SUCCESS`; all access/effect flags false                          |
-| CURRENT187-J1 PostgreSQL session | `LOCAL CANDIDATE / CI PENDING / DENY-ONLY` | actual Prisma backend session collector; exact DB/role OID, application, read-only, network/backend, TLS and role-policy observations; `10/10`, aggregate CURRENT187 `52/52`; endpoint/HBA/PgBouncer/negative-probe flags remain false |
-| Единый gate                      | `PASS`                                     | `163/163`, `0` failures                                                                                                                                                                                                                |
-| Независимая latest-byte проверка | `PASS`                                     | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                                                                                                                             |
+| Контур                           | Статус                                    | Подтверждение                                                                                                                                                                                                                                                                                  |
+| -------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Planning state machine           | `ACCEPTED LOCALLY`                        | `33/33`                                                                                                                                                                                                                                                                                        |
+| SQL semantic fingerprint         | `ACCEPTED LOCALLY`                        | `26/26`; schema/data/sequences, ACL, cluster role attributes, password-verifier hashes и memberships                                                                                                                                                                                           |
+| Persistent coordinator           | `ACCEPTED LOCALLY`                        | `6/6`; внешний pinned Ed25519 trust root                                                                                                                                                                                                                                                       |
+| Materializer/recovery            | `ACCEPTED LOCALLY`                        | `24/24`; bounded descriptor reads, exact tree/inode provenance, signed restart locator                                                                                                                                                                                                         |
+| Signed journal                   | `ACCEPTED LOCALLY`                        | `24/24`; public-only verification, signed lifecycle, lost unlink/rmdir recovery                                                                                                                                                                                                                |
+| Runtime adapter                  | `ACCEPTED LOCALLY`                        | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission                                                                                                                                                                                                     |
+| Runner/janitor                   | `ACCEPTED LOCALLY`                        | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                                                                                                                                                                                                         |
+| CURRENT187-F policy binding      | `ENGINEERING ACCEPTED / DENY-ONLY`        | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3`                                                                                                                                                                     |
+| CURRENT187-G semantic risk facts | `ENGINEERING ACCEPTED / DENY-ONLY`        | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H                                                                                                                                                                                   |
+| CURRENT187-H semantic allowlist  | `ENGINEERING ACCEPTED / DENY-ONLY`        | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`                                                                                                                                                                                |
+| CURRENT187-I persisted approval  | `EXACT-HEAD CI ACCEPTED / NONCANONICAL`   | persisted brand required; candidate `daf5a98f…`; static `7/7`, PG16.13 `2 × 1/1`, CI `31416609580` `3/3 SUCCESS`, zero residue; all access/effect flags false                                                                                                                                  |
+| CURRENT187-J network/runtime     | `EXACT-HEAD CI ACCEPTED / SYNTHETIC-ONLY` | four exact service paths + separate host-control brand; endpoint/TLS/HBA/pooler/service-account digests; `10/10`, aggregate CURRENT187 `42/42`, CI `31420665364` `3/3 SUCCESS`; all access/effect flags false                                                                                  |
+| CURRENT187-J1 PostgreSQL session | `EXACT-HEAD CI ACCEPTED / DENY-ONLY`      | actual Prisma backend session collector; exact DB/role OID, application, read-only, network/backend, TLS and role-policy observations; `11/11`, aggregate CURRENT187 `53/53`, CI `31577001152` `3/3 SUCCESS`, actual PG J1 `SUCCESS`; endpoint/HBA/PgBouncer/negative-probe flags remain false |
+| Единый gate                      | `PASS`                                    | `163/163`, `0` failures                                                                                                                                                                                                                                                                        |
+| Независимая latest-byte проверка | `PASS`                                    | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                                                                                                                                                                                     |
 
 Закрыты важные failure modes:
 
@@ -233,7 +234,9 @@ fail-closed facts evaluator и обязательную связь с F; все 
 полный disposable gate `163/163`, exact-SHA CI `31403020215` — `3/3 SUCCESS`.
 CURRENT187-J foundation теперь фиксирует четыре service purpose, две branded
 evidence boundary и пять production deployment digest; J `10/10`, aggregate
-CURRENT187 `42/42`, exact-head CI `31420665364` — `3/3 SUCCESS`. Ближайший этап — independent latest-byte review
-уже принятого exact-head CI CURRENT187-I PostgreSQL candidate, затем реальные
-capability-bearing TCP/TLS/HBA/PgBouncer collectors, production signer/root и
-reviewed canonical promotion/restored-copy rehearsal.
+CURRENT187 `42/42`, exact-head CI `31420665364` — `3/3 SUCCESS`. CURRENT187-J1
+actual PostgreSQL backend-session collector принят exact-head CI `31577001152`:
+`3/3 SUCCESS`, J1 `SUCCESS`, artifact `sha256:8e0c26f5…d334`. Ближайший этап —
+independent latest-byte review уже принятого CURRENT187-I PostgreSQL candidate,
+затем реальные capability-bearing endpoint/TLS-peer/HBA/PgBouncer collectors,
+production signer/root и reviewed canonical promotion/restored-copy rehearsal.

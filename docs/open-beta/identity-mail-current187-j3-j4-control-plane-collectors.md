@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026
 
-Статус: `LOCAL CANDIDATE / ACTUAL READ-ONLY CONTROL-PLANE I/O / DENY-ONLY / CI PENDING / NOT DEPLOYABLE`.
+Статус: `EXACT-SHA CI ACCEPTED / ACTUAL READ-ONLY CONTROL-PLANE I/O / DENY-ONLY / NOT DEPLOYABLE`.
 
 ## CURRENT187-J3 — PostgreSQL HBA file and reload clock
 
@@ -29,6 +29,9 @@ J3 acceptance:
 - adversarial unit `8/8 PASS`;
 - actual PostgreSQL integration подключён к CI и допускает два честных исхода:
   narrow catalog receipt либо fail-closed отказ unsafe disposable fixture;
+- exact SHA `ceed72398959a2ae22b0266557143e5e63c1817a`, CI
+  `31586755130` — `3/3 SUCCESS`, actual HBA step `SUCCESS`, artifact
+  `sha256:faf8c3e279c1388c38672a9fbdfd557771aa441d5a3c5d25e4440db48abaa283`;
 - source не вызывает `pg_reload_conf()` и не изменяет HBA/configuration.
 
 ## CURRENT187-J4 — PgBouncer admin control plane
@@ -56,8 +59,10 @@ J4 acceptance:
 - adversarial unit `7/7 PASS`;
 - общий CURRENT187 gate с J1–J4 `78/78 PASS`;
 - database typecheck `PASS`;
-- реальный PgBouncer endpoint локально отсутствует, поэтому actual admin-console
-  integration остаётся отдельным P0 production-like fixture.
+- collector candidate принят тем же exact-SHA CI `31586755130`;
+- protocol-accurate disposable PgBouncer `stats_users` fixture реализуется
+  следующим отдельным candidate, потому что в принятом SHA actual pooler
+  process ещё отсутствует.
 
 ## Authority boundary
 
@@ -72,15 +77,14 @@ CURRENT187-F/deploy authority.
 
 ## Оставшийся P0-путь
 
-1. Принять J3/J4 exact-SHA CI, включая actual PostgreSQL HBA catalog step.
-2. Добавить protocol-accurate disposable PgBouncer admin-console integration.
-3. Выполнить четыре production J1/J2 runs и отдельные J3/J4 control runs.
-4. Принять positive/negative connection matrix для exact HBA rule, wrong
+1. Принять protocol-accurate disposable PgBouncer admin-console integration.
+2. Выполнить четыре production J1/J2 runs и отдельные J3/J4 control runs.
+3. Принять positive/negative connection matrix для exact HBA rule, wrong
    role/database, plaintext, wrong CA/hostname, stale reload, wrong pool mode и
    user collapse.
-5. Добавить independent production signer/root, freshness, persisted one-time
+4. Добавить independent production signer/root, freshness, persisted one-time
    consumption/revocation и reconciliation.
-6. Связать только полный signed J receipt с CURRENT187-F/deploy authority и
+5. Связать только полный signed J receipt с CURRENT187-F/deploy authority и
    выполнить independent latest-byte review + restored-copy rehearsal.
 
 Production, текущие четыре клуба, внешний tenant/tester, invites и providers не

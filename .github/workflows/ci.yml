@@ -761,6 +761,27 @@ jobs:
           NODE_ENV: test
           IDENTITY_MAIL_HBA_RELOAD_CURRENT187_PG_E2E_CONFIRM: run-current187-hba-reload-postgres-e2e
 
+      - name: Install disposable CURRENT187 PgBouncer fixture
+        shell: bash
+        run: |
+          expected_pgbouncer_version='1.22.0-1build4'
+          sudo apt-get update
+          candidate_version="$(apt-cache policy pgbouncer | awk '/Candidate:/ { print $2 }')"
+          test "$candidate_version" = "$expected_pgbouncer_version"
+          sudo apt-get install --no-install-recommends --yes \
+            "pgbouncer=$expected_pgbouncer_version" \
+            postgresql-client
+          test "$(dpkg-query --show --showformat='${Version}' pgbouncer)" = \
+            "$expected_pgbouncer_version"
+          pgbouncer --version
+
+      - name: Verify CURRENT187 actual PgBouncer stats-only control plane
+        shell: bash
+        run: bash .github/scripts/run-current187-pgbouncer-fixture.sh
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_PGBOUNCER_CURRENT187_E2E_CONFIRM: run-current187-pgbouncer-control-plane-protocol-integration-e2e
+
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg
         env:

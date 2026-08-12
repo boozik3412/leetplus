@@ -739,6 +739,18 @@ export async function collectSyntheticCurrent187PgBouncerControlPlaneEvidenceWit
   return collectInternal(input, dependencies, true);
 }
 
+export async function collectSyntheticCurrent187PgBouncerControlPlaneEvidenceForTestOnly(
+  input,
+) {
+  if (arguments.length !== 1) {
+    fail(
+      "CURRENT187_PGBOUNCER_ARGUMENTS_INVALID",
+      "Synthetic actual collection accepts exactly one input.",
+    );
+  }
+  return collectInternal(input, pgDependencies(), true);
+}
+
 export function computeSyntheticCurrent187PgBouncerConfigurationDigestForTestOnly(
   input,
   results,

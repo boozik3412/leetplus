@@ -1,8 +1,8 @@
 # CURRENT187-J5-R9: co-located public collector runner candidate
 
-Дата: 12.08.2026.
+Дата реализации: 12.08.2026. Дата приёмки: 13.08.2026.
 
-Статус: `IMPLEMENTED LOCALLY / CI ACCEPTANCE REQUIRED / NO PRODUCTION EFFECT`.
+Статус: `EXACT-SHA CI ACCEPTED / CO-LOCATED PUBLIC CHAIN / NO PRODUCTION EFFECT`.
 
 ## Цель
 
@@ -47,9 +47,21 @@
 - shell syntax, Node syntax, Prettier и `git diff --check`: `PASS`.
 
 Локальная Windows-среда не содержит PgBouncer/PostgreSQL service-container
-топологии GitHub Actions. Поэтому новый co-located public-collector тест не
-считается принятым до `3/3 SUCCESS` на exact commit SHA и публикации SHA-bound
-artifact.
+топологии GitHub Actions. Поэтому локальные результаты использовались только
+как preflight, а итоговая приёмка выполнена на exact-SHA Linux CI ниже.
+
+## Exact-SHA CI acceptance
+
+- commit: `677a37c23b359bd9f3f39893e6a65f5a915f9495`;
+- GitHub Actions run: [`31635286090`](https://github.com/boozik3412/leetplus/actions/runs/31635286090);
+- result: `3/3 SUCCESS`;
+- target integration: `4/4 PASS`, `0 fail`, `0 skipped`;
+- artifact ID: `9156904169`;
+- artifact digest:
+  `sha256:c0ade8bdf47b849348ef81131a182882a260ebd2c73f25057949cdda006a7595`.
+
+Полная фиксация run, artifact и отклонённых predecessor SHA:
+[R9 exact-SHA CI evidence](./identity-mail-current187-j5-r9-ci-evidence-2026-08-13.md).
 
 ## Обязательные CI assertions
 
@@ -65,7 +77,7 @@ negative`, без skip;
 
 ## Не является разрешением доступа
 
-Даже успешный R9 не включает production signer/key/root, не канонизирует
+Принятый R9 не включает production signer/key/root, не канонизирует
 CURRENT187 ledgers/runtime roles и не заменяет restored-copy
 apply/rollback/zero-diff rehearsal и независимую проверку. Production, текущая
 сеть из четырёх клубов, внешний tenant, тестер, приглашения и провайдеры этим

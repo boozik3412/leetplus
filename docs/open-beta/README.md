@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.92                                         |
-| Дата             | 12.08.2026                                   |
+| Версия           | 1.93                                         |
+| Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -717,13 +717,16 @@ enterprise-isolation option и не сокращает shared gates.
   `3/3 SUCCESS`, artifact `sha256:101e956b…04cca`. Co-located J1–J4 topology
   ещё не заявляется. [CI evidence](./identity-mail-current187-j5-r8-ci-evidence-2026-08-12.md).
 
-- [CURRENT187-J5-R9 co-located runner candidate](./identity-mail-current187-j5-r9-co-located-runner-candidate.md)
+- [CURRENT187-J5-R9 co-located runner](./identity-mail-current187-j5-r9-co-located-runner-candidate.md)
   — один disposable контур собирает strict public J1/J2 для четырёх service
   purpose, strict J3/J4 и запускает production connection-probe matrix `4 + 20
-  - 12`. J2 и runner используют exact client mTLS credentials без отражения
-секретов в receipt; временные HBA, roles и hostname mapping имеют scoped
-cleanup. Локально CURRENT187 `126/126` и typecheck green; до exact-SHA CI и
-    artifact это кандидат, а не разрешение production или внешнего доступа.
+  + 12`. J2 и runner используют exact client mTLS credentials без отражения
+  секретов в receipt; exact gateway `/32`, временные HBA, roles и hostname
+  mapping имеют scoped cleanup. Target integration `4/4` без fail/skip; SHA
+  `677a37c2…` принят CI `31635286090` `3/3 SUCCESS`, artifact
+  `sha256:c0ade8bd…a7595`; все downstream PostgreSQL gates green. Это engineering
+  acceptance, а не разрешение production или внешнего доступа.
+  [CI evidence](./identity-mail-current187-j5-r9-ci-evidence-2026-08-13.md).
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

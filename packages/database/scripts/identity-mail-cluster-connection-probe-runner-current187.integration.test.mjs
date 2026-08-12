@@ -409,6 +409,16 @@ async function createProductionLikeTlsReceipt(
     {
       caCertificatePem: PRODUCTION_LIKE_CA_PEM,
       caCertificateSha256: digest(PRODUCTION_LIKE_CA_PEM),
+      clientCertificatePem:
+        "-----BEGIN CERTIFICATE-----\nQ0xJRU5U\n-----END CERTIFICATE-----\n",
+      clientCertificateSha256: digest(
+        "-----BEGIN CERTIFICATE-----\nQ0xJRU5U\n-----END CERTIFICATE-----\n",
+      ),
+      clientPrivateKeyPem:
+        "-----BEGIN PRIVATE KEY-----\nUFJJVkFURQ==\n-----END PRIVATE KEY-----\n",
+      clientPrivateKeySha256: digest(
+        "-----BEGIN PRIVATE KEY-----\nUFJJVkFURQ==\n-----END PRIVATE KEY-----\n",
+      ),
       clusterIdentityDigest: PRODUCTION_LIKE_CLUSTER_DIGEST,
       connectTimeoutMs: 5_000,
       databaseUniverseDigest: PRODUCTION_LIKE_UNIVERSE_DIGEST,
@@ -735,6 +745,26 @@ async function productionLikeBrandedRunnerInput(certificates, port) {
         challengeDigest: digest(
           `production-like:${purpose}:${scenario}:challenge`,
         ),
+        clientCertificatePem:
+          scenario === "PLAINTEXT_TRANSPORT"
+            ? null
+            : "-----BEGIN CERTIFICATE-----\nY2xpZW50\n-----END CERTIFICATE-----\n",
+        clientCertificateSha256:
+          scenario === "PLAINTEXT_TRANSPORT"
+            ? null
+            : digest(
+                "-----BEGIN CERTIFICATE-----\nY2xpZW50\n-----END CERTIFICATE-----\n",
+              ),
+        clientPrivateKeyPem:
+          scenario === "PLAINTEXT_TRANSPORT"
+            ? null
+            : "-----BEGIN PRIVATE KEY-----\nUFJJVkFURQ==\n-----END PRIVATE KEY-----\n",
+        clientPrivateKeySha256:
+          scenario === "PLAINTEXT_TRANSPORT"
+            ? null
+            : digest(
+                "-----BEGIN PRIVATE KEY-----\nUFJJVkFURQ==\n-----END PRIVATE KEY-----\n",
+              ),
         connectionString: `postgresql://${
           scenario === "WRONG_ROLE"
             ? `wrong_role_${index}`
@@ -839,6 +869,10 @@ function service(purpose, index, certificates, port) {
             ? certificates.wrongCa
             : certificates.ca,
       challengeDigest: digest(`${purpose}:${scenario}:challenge`),
+      clientCertificatePem: null,
+      clientCertificateSha256: null,
+      clientPrivateKeyPem: null,
+      clientPrivateKeySha256: null,
       connectionString: `postgresql://${
         scenario === "WRONG_ROLE"
           ? `wrong_role_${index}`

@@ -18,6 +18,7 @@ fi
 
 fixture_root="$(mktemp -d "$RUNNER_TEMP/leetplus-current187-pgbouncer-XXXXXX")"
 pooler_hostname="pool.current187.invalid"
+database_hostname="db.current187.invalid"
 config_path="$fixture_root/pgbouncer.ini"
 auth_path="$fixture_root/userlist.txt"
 log_path="$fixture_root/pgbouncer.log"
@@ -32,9 +33,16 @@ client_key_path="$fixture_root/client.key"
 client_csr_path="$fixture_root/client.csr"
 client_certificate_path="$fixture_root/client.crt"
 client_extensions_path="$fixture_root/client.ext"
+client_identity_path="$fixture_root/client.p12"
+wrong_ca_key_path="$fixture_root/wrong-ca.key"
+wrong_ca_certificate_path="$fixture_root/wrong-ca.crt"
+original_hba_path="$fixture_root/pg_hba.before.conf"
+fixture_hba_path="$fixture_root/pg_hba.fixture.conf"
 hosts_backup_path="$fixture_root/hosts.before"
 pooler_pid=""
 hosts_modified=0
+hba_modified=0
+roles_created=0
 
 cleanup() {
   local status=$?
@@ -42,6 +50,28 @@ cleanup() {
   if [[ -n "$pooler_pid" ]] && kill -0 "$pooler_pid" 2>/dev/null; then
     kill "$pooler_pid"
     wait "$pooler_pid" 2>/dev/null || true
+  fi
+  if [[ $hba_modified -eq 1 && -f "$original_hba_path" ]]; then
+    docker cp \
+      "$original_hba_path" \
+      "$POSTGRES_SERVICE_CONTAINER_ID:/var/lib/postgresql/data/pg_hba.conf" \
+      >/dev/null 2>&1 || status=1
+    docker exec --user root "$POSTGRES_SERVICE_CONTAINER_ID" sh -ceu '
+      chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf
+      chmod 600 /var/lib/postgresql/data/pg_hba.conf
+    ' >/dev/null 2>&1 || status=1
+    docker exec --user postgres "$POSTGRES_SERVICE_CONTAINER_ID" \
+      pg_ctl reload -D /var/lib/postgresql/data >/dev/null 2>&1 || status=1
+  fi
+  if [[ $roles_created -eq 1 ]]; then
+    PGPASSWORD=postgres psql \
+      --host 127.0.0.1 \
+      --port 5432 \
+      --username postgres \
+      --dbname postgres \
+      --set ON_ERROR_STOP=1 \
+      --command 'DROP ROLE IF EXISTS lp_application, lp_coordinator, lp_migration, lp_worker, lp_wrong' \
+      >/dev/null 2>&1 || status=1
   fi
   if [[ $status -ne 0 && -f "$log_path" ]]; then
     sed -n '1,200p' "$log_path" >&2
@@ -57,7 +87,8 @@ cleanup() {
 trap cleanup EXIT
 
 cp /etc/hosts "$hosts_backup_path"
-printf '127.0.0.1 %s\n' "$pooler_hostname" | sudo tee -a /etc/hosts >/dev/null
+printf '127.0.0.1 %s %s\n' "$pooler_hostname" "$database_hostname" | \
+  sudo tee -a /etc/hosts >/dev/null
 hosts_modified=1
 
 openssl genpkey \
@@ -90,7 +121,7 @@ cat >"$server_extensions_path" <<'SERVER_EXTENSIONS'
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
-subjectAltName=IP:127.0.0.1,DNS:localhost,DNS:pool.current187.invalid
+subjectAltName=IP:127.0.0.1,DNS:localhost,DNS:pool.current187.invalid,DNS:db.current187.invalid
 SERVER_EXTENSIONS
 openssl x509 \
   -req \
@@ -137,6 +168,28 @@ openssl verify \
   -purpose sslclient \
   -CAfile "$ca_certificate_path" \
   "$client_certificate_path" >/dev/null
+openssl pkcs12 \
+  -export \
+  -out "$client_identity_path" \
+  -inkey "$client_key_path" \
+  -in "$client_certificate_path" \
+  -certfile "$ca_certificate_path" \
+  -passout pass: >/dev/null 2>&1
+openssl genpkey \
+  -algorithm RSA \
+  -pkeyopt rsa_keygen_bits:2048 \
+  -out "$wrong_ca_key_path" >/dev/null 2>&1
+openssl req \
+  -new \
+  -x509 \
+  -key "$wrong_ca_key_path" \
+  -out "$wrong_ca_certificate_path" \
+  -days 1 \
+  -sha256 \
+  -subj '/CN=LeetPlus CURRENT187 wrong disposable CA' \
+  -addext 'basicConstraints=critical,CA:TRUE' \
+  -addext 'keyUsage=critical,keyCertSign,cRLSign'
+chmod 600 "$client_identity_path" "$wrong_ca_key_path"
 
 docker cp \
   "$ca_certificate_path" \
@@ -193,9 +246,61 @@ PGPASSWORD=postgres psql \
   --username postgres \
   --dbname postgres \
   --set ON_ERROR_STOP=1 \
-  <<'SQL'
-CREATE ROLE lp_application LOGIN PASSWORD 'current187-ci-application-only';
+<<'SQL'
+CREATE ROLE lp_application LOGIN PASSWORD 'current187-ci-application-only' CONNECTION LIMIT 5;
+CREATE ROLE lp_coordinator LOGIN PASSWORD 'current187-ci-coordinator-only' CONNECTION LIMIT 5;
+CREATE ROLE lp_migration LOGIN PASSWORD 'current187-ci-migration-only' CONNECTION LIMIT 5;
+CREATE ROLE lp_worker LOGIN PASSWORD 'current187-ci-worker-only' CONNECTION LIMIT 5;
+CREATE ROLE lp_wrong LOGIN PASSWORD 'current187-ci-wrong-only' CONNECTION LIMIT 1;
 SQL
+roles_created=1
+
+docker cp \
+  "$POSTGRES_SERVICE_CONTAINER_ID:/var/lib/postgresql/data/pg_hba.conf" \
+  "$original_hba_path"
+cat >"$fixture_hba_path" <<'HBA'
+local all all scram-sha-256
+hostssl leetplus_ci postgres 127.0.0.1/32 scram-sha-256
+hostssl leetplus_ci lp_application 127.0.0.1/32 scram-sha-256
+hostssl leetplus_ci lp_coordinator 127.0.0.1/32 scram-sha-256
+hostssl leetplus_ci lp_migration 127.0.0.1/32 scram-sha-256
+hostssl leetplus_ci lp_worker 127.0.0.1/32 scram-sha-256
+hostssl leetplus_ci lp_wrong 127.0.0.1/32 scram-sha-256
+HBA
+docker cp \
+  "$fixture_hba_path" \
+  "$POSTGRES_SERVICE_CONTAINER_ID:/var/lib/postgresql/data/pg_hba.conf"
+docker exec --user root "$POSTGRES_SERVICE_CONTAINER_ID" sh -ceu '
+  chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf
+  chmod 600 /var/lib/postgresql/data/pg_hba.conf
+'
+hba_modified=1
+docker exec --user postgres "$POSTGRES_SERVICE_CONTAINER_ID" \
+  pg_ctl reload -D /var/lib/postgresql/data >/dev/null
+
+hba_ready=0
+for _ in $(seq 1 50); do
+  if PGPASSWORD=postgres \
+    PGSSLMODE=verify-full \
+    PGSSLROOTCERT="$ca_certificate_path" \
+    psql \
+      --host "$database_hostname" \
+      --port 5432 \
+      --username postgres \
+      --dbname leetplus_ci \
+      --tuples-only \
+      --no-align \
+      --command "SELECT count(*) FROM pg_hba_file_rules WHERE error IS NULL" \
+      2>/dev/null | grep -qx 7; then
+    hba_ready=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ $hba_ready -ne 1 ]]; then
+  printf 'Disposable PostgreSQL narrow HBA policy did not become ready.\n' >&2
+  exit 66
+fi
 
 cat >"$auth_path" <<'AUTH'
 "lp_pool_stats" "current187-ci-stats-only"
@@ -263,6 +368,10 @@ env \
   CURRENT187_PGBOUNCER_CA_CERTIFICATE_PATH="$ca_certificate_path" \
   CURRENT187_PGBOUNCER_CLIENT_CERTIFICATE_PATH="$client_certificate_path" \
   CURRENT187_PGBOUNCER_CLIENT_PRIVATE_KEY_PATH="$client_key_path" \
+  CURRENT187_PGBOUNCER_CLIENT_IDENTITY_PATH="$client_identity_path" \
+  CURRENT187_PGBOUNCER_DATABASE_HOSTNAME="$database_hostname" \
   CURRENT187_PGBOUNCER_HOSTNAME="$pooler_hostname" \
+  CURRENT187_PGBOUNCER_SERVER_CERTIFICATE_PATH="$server_certificate_path" \
+  CURRENT187_PGBOUNCER_WRONG_CA_CERTIFICATE_PATH="$wrong_ca_certificate_path" \
   pnpm --filter database \
     test:integration:identity-mail-cluster-pgbouncer-current187

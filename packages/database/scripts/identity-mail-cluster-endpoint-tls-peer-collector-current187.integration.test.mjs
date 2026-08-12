@@ -233,6 +233,10 @@ function collectorInput(certificates, port, expectedResolvedAddresses) {
     caCertificateSha256: sha256(
       Buffer.from(certificates.caCertificatePem, "utf8"),
     ),
+    clientCertificatePem: null,
+    clientCertificateSha256: null,
+    clientPrivateKeyPem: null,
+    clientPrivateKeySha256: null,
     clusterIdentityDigest: sha256("current187-j2-ci-cluster"),
     connectTimeoutMs: 5_000,
     databaseUniverseDigest: sha256("current187-j2-ci-universe"),

@@ -89,6 +89,10 @@ function service(purpose, index, overrides = {}) {
             ? "-----BEGIN CERTIFICATE-----\nwrong-ca\n-----END CERTIFICATE-----\n"
             : "-----BEGIN CERTIFICATE-----\nexpected-ca\n-----END CERTIFICATE-----\n",
       challengeDigest: digest(`${purpose}:${scenario}:challenge`),
+      clientCertificatePem: null,
+      clientCertificateSha256: null,
+      clientPrivateKeyPem: null,
+      clientPrivateKeySha256: null,
       connectionString: `postgresql://${
         scenario === "WRONG_ROLE" ? `wrong-${index}` : `allowed-${index}`
       }:do-not-leak@localhost:5432/${
@@ -218,6 +222,13 @@ test("capability runner executes 4 positive bindings and 32 ordered deny probes"
     }),
   );
   assert.equal(calls.length, 20);
+  assert.equal(
+    calls.every(
+      (call) =>
+        call.clientCertificatePem === null && call.clientPrivateKeyPem === null,
+    ),
+    true,
+  );
   assert.equal(receipt.kind, CURRENT187_CONNECTION_PROBE_RUNNER_KIND);
   assert.equal(receipt.status, CURRENT187_CONNECTION_PROBE_RUNNER_STATUS);
   assert.equal(receipt.positiveProbeCount, 4);
@@ -320,6 +331,24 @@ test("negative specifications require exact order and transport mode", async () 
         : "CURRENT187_CONNECTION_PROBE_RUNNER_CONNECTION_INVALID",
     );
   }
+});
+
+test("synthetic negative probes reject client credential material", async () => {
+  const candidate = structuredClone(input());
+  candidate.services[0].negativeConnections[0].clientCertificatePem =
+    "-----BEGIN CERTIFICATE-----\nY2xpZW50\n-----END CERTIFICATE-----\n";
+  candidate.services[0].negativeConnections[0].clientCertificateSha256 = digest(
+    candidate.services[0].negativeConnections[0].clientCertificatePem,
+  );
+  candidate.services[0].negativeConnections[0].clientPrivateKeyPem =
+    "-----BEGIN PRIVATE KEY-----\nUFJJVkFURQ==\n-----END PRIVATE KEY-----\n";
+  candidate.services[0].negativeConnections[0].clientPrivateKeySha256 = digest(
+    candidate.services[0].negativeConnections[0].clientPrivateKeyPem,
+  );
+  await expectCode(
+    () => run(candidate),
+    "CURRENT187_CONNECTION_PROBE_RUNNER_CONNECTION_INVALID",
+  );
 });
 
 test("negative scenarios isolate endpoint, role, database, CA, and hostname dimensions", async () => {
@@ -449,6 +478,9 @@ test("production runner source has no signer, key, filesystem, process, Prisma, 
   );
   assert.doesNotMatch(source, /createPrivateKey|generateKeyPair|signPayload/iu);
   assert.doesNotMatch(source, /node:fs|node:child_process|PrismaClient/iu);
-  assert.doesNotMatch(source, /process\.env|PRIVATE_KEY|SIGNING_KEY/iu);
+  assert.doesNotMatch(
+    source,
+    /process\.env|PRIVATE_KEY_PATH|SIGNING_KEY|readFile|readFileSync/iu,
+  );
   assert.match(source, /new pg\.Client/gu);
 });

@@ -105,6 +105,10 @@ function service(purpose, index) {
             ? "-----BEGIN CERTIFICATE-----\nwrong-ca\n-----END CERTIFICATE-----\n"
             : "-----BEGIN CERTIFICATE-----\nexpected-ca\n-----END CERTIFICATE-----\n",
       challengeDigest: digest(purpose + ":" + scenario + ":challenge"),
+      clientCertificatePem: null,
+      clientCertificateSha256: null,
+      clientPrivateKeyPem: null,
+      clientPrivateKeySha256: null,
       connectionString:
         "postgresql://" +
         (scenario === "WRONG_ROLE" ? "wrong-" + index : "allowed-" + index) +

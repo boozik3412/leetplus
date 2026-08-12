@@ -25,9 +25,17 @@ function sha256(value) {
 }
 
 function input(overrides = {}, production = false) {
+  const clientCertificatePem =
+    "-----BEGIN CERTIFICATE-----\nQ0xJRU5U\n-----END CERTIFICATE-----\n";
+  const clientPrivateKeyPem =
+    "-----BEGIN PRIVATE KEY-----\nUFJJVkFURQ==\n-----END PRIVATE KEY-----\n";
   return {
     caCertificatePem: CA_PEM,
     caCertificateSha256: sha256(Buffer.from(CA_PEM, "utf8")),
+    clientCertificatePem: production ? clientCertificatePem : null,
+    clientCertificateSha256: production ? sha256(clientCertificatePem) : null,
+    clientPrivateKeyPem: production ? clientPrivateKeyPem : null,
+    clientPrivateKeySha256: production ? sha256(clientPrivateKeyPem) : null,
     clusterIdentityDigest: "1".repeat(64),
     connectTimeoutMs: 5_000,
     databaseUniverseDigest: "2".repeat(64),
@@ -152,6 +160,8 @@ test("actual endpoint/TLS dependency path returns only a branded deny-only obser
   assert.deepEqual(calls[1].value, {
     address: "127.0.0.1",
     caCertificatePem: CA_PEM,
+    clientCertificatePem: null,
+    clientPrivateKeyPem: null,
     connectTimeoutMs: 5_000,
     endpointPort: 55432,
     family: 4,

@@ -103,6 +103,10 @@ const SERVICE_KEYS = Object.freeze([
 const CONNECTION_KEYS = Object.freeze([
   "caCertificatePem",
   "challengeDigest",
+  "clientCertificatePem",
+  "clientCertificateSha256",
+  "clientPrivateKeyPem",
+  "clientPrivateKeySha256",
   "connectionString",
   "scenario",
   "serverName",
@@ -176,7 +180,55 @@ function requireDigest(value, reasonCode, label) {
   return value;
 }
 
-function normalizeConnectionSpec(value, scenario) {
+const MAX_CLIENT_CERTIFICATE_BYTES = 65_536;
+const MAX_CLIENT_PRIVATE_KEY_BYTES = 65_536;
+
+function sha256Bytes(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function normalizeClientCredential(row, plaintext, syntheticOnly) {
+  const values = [
+    row.clientCertificatePem,
+    row.clientCertificateSha256,
+    row.clientPrivateKeyPem,
+    row.clientPrivateKeySha256,
+  ];
+  if (plaintext || syntheticOnly) {
+    if (values.some((value) => value !== null)) {
+      fail(
+        "CURRENT187_CONNECTION_PROBE_RUNNER_CONNECTION_INVALID",
+        "This connection mode forbids client credential material.",
+      );
+    }
+    return;
+  }
+  if (
+    typeof row.clientCertificatePem !== "string" ||
+    Buffer.byteLength(row.clientCertificatePem, "utf8") >
+      MAX_CLIENT_CERTIFICATE_BYTES ||
+    !row.clientCertificatePem.startsWith("-----BEGIN CERTIFICATE-----\n") ||
+    !row.clientCertificatePem.endsWith("-----END CERTIFICATE-----\n") ||
+    row.clientCertificatePem.includes("\0") ||
+    !current187AdmissionValidDigest(row.clientCertificateSha256) ||
+    sha256Bytes(row.clientCertificatePem) !== row.clientCertificateSha256 ||
+    typeof row.clientPrivateKeyPem !== "string" ||
+    Buffer.byteLength(row.clientPrivateKeyPem, "utf8") >
+      MAX_CLIENT_PRIVATE_KEY_BYTES ||
+    !row.clientPrivateKeyPem.startsWith("-----BEGIN PRIVATE KEY-----\n") ||
+    !row.clientPrivateKeyPem.endsWith("-----END PRIVATE KEY-----\n") ||
+    row.clientPrivateKeyPem.includes("\0") ||
+    !current187AdmissionValidDigest(row.clientPrivateKeySha256) ||
+    sha256Bytes(row.clientPrivateKeyPem) !== row.clientPrivateKeySha256
+  ) {
+    fail(
+      "CURRENT187_CONNECTION_PROBE_RUNNER_CONNECTION_INVALID",
+      "The client mTLS credential does not match its exact binding.",
+    );
+  }
+}
+
+function normalizeConnectionSpec(value, scenario, syntheticOnly) {
   const row = current187AdmissionExactDataRecord(
     value,
     CONNECTION_KEYS,
@@ -210,6 +262,7 @@ function normalizeConnectionSpec(value, scenario) {
   const sslMode = parsed.searchParams.get("sslmode");
   const searchKeys = [...parsed.searchParams.keys()];
   const plaintext = scenario === "PLAINTEXT_TRANSPORT";
+  normalizeClientCredential(row, plaintext, syntheticOnly);
   const port = Number(parsed.port);
   if (
     !new Set(["postgres:", "postgresql:"]).has(parsed.protocol) ||
@@ -419,7 +472,11 @@ function normalizeInput(value, syntheticOnly) {
       "CURRENT187_CONNECTION_PROBE_RUNNER_CONNECTIONS_INVALID",
       "Each service requires five ordered negative network probes.",
     ).map((row, connectionIndex) =>
-      normalizeConnectionSpec(row, NETWORK_SCENARIOS[connectionIndex]),
+      normalizeConnectionSpec(
+        row,
+        NETWORK_SCENARIOS[connectionIndex],
+        syntheticOnly,
+      ),
     );
     const parsedNegativeConnections = negativeConnections.map(
       (connection) => new URL(connection.connectionString),
@@ -454,7 +511,17 @@ function normalizeInput(value, syntheticOnly) {
       wrongRole.caCertificatePem !== wrongDatabase.caCertificatePem ||
       wrongRole.caCertificatePem !== wrongHostname.caCertificatePem ||
       wrongRole.caCertificatePem === wrongCa.caCertificatePem ||
+      wrongRole.clientCertificatePem !== wrongDatabase.clientCertificatePem ||
+      wrongRole.clientCertificatePem !== wrongCa.clientCertificatePem ||
+      wrongRole.clientCertificatePem !== wrongHostname.clientCertificatePem ||
+      wrongRole.clientPrivateKeyPem !== wrongDatabase.clientPrivateKeyPem ||
+      wrongRole.clientPrivateKeyPem !== wrongCa.clientPrivateKeyPem ||
+      wrongRole.clientPrivateKeyPem !== wrongHostname.clientPrivateKeyPem ||
       plaintext.caCertificatePem !== null ||
+      plaintext.clientCertificatePem !== null ||
+      plaintext.clientCertificateSha256 !== null ||
+      plaintext.clientPrivateKeyPem !== null ||
+      plaintext.clientPrivateKeySha256 !== null ||
       plaintext.serverName !== null
     ) {
       fail(
@@ -528,19 +595,29 @@ function canonicalIso(value) {
   return value;
 }
 
-function classifyConnectionError(scenario, error) {
+function classifyConnectionError(scenario, endpointClass, error) {
   const code = typeof error?.code === "string" ? error.code : "UNKNOWN";
   const allowed = {
-    PLAINTEXT_TRANSPORT: new Set(["28000"]),
+    PLAINTEXT_TRANSPORT: new Set(
+      endpointClass === "POOLER" ? ["08P01", "28000"] : ["28000"],
+    ),
     WRONG_CA: new Set([
       "DEPTH_ZERO_SELF_SIGNED_CERT",
       "SELF_SIGNED_CERT_IN_CHAIN",
       "UNABLE_TO_GET_ISSUER_CERT",
       "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
     ]),
-    WRONG_DATABASE: new Set(["3D000", "42501"]),
+    WRONG_DATABASE: new Set(
+      endpointClass === "POOLER"
+        ? ["08P01", "3D000", "42501"]
+        : ["3D000", "42501"],
+    ),
     WRONG_HOSTNAME: new Set(["ERR_TLS_CERT_ALTNAME_INVALID"]),
-    WRONG_ROLE: new Set(["28000", "28P01"]),
+    WRONG_ROLE: new Set(
+      endpointClass === "POOLER"
+        ? ["08P01", "28000", "28P01"]
+        : ["28000", "28P01"],
+    ),
   }[scenario];
   return Object.freeze({
     connected: false,
@@ -555,8 +632,11 @@ function productionDependencies() {
   return Object.freeze({
     async attemptRejectedConnection({
       caCertificatePem,
+      clientCertificatePem,
+      clientPrivateKeyPem,
       connectionString,
       connectTimeoutMs,
+      endpointClass,
       scenario,
       serverName,
     }) {
@@ -571,6 +651,8 @@ function productionDependencies() {
           ? false
           : {
               ca: caCertificatePem,
+              cert: clientCertificatePem,
+              key: clientPrivateKeyPem,
               rejectUnauthorized: true,
               servername: serverName,
             },
@@ -589,7 +671,7 @@ function productionDependencies() {
           observedOutcome: "ALLOWED",
         });
       } catch (error) {
-        return classifyConnectionError(scenario, error);
+        return classifyConnectionError(scenario, endpointClass, error);
       } finally {
         if (connected) {
           try {
@@ -621,8 +703,11 @@ async function runInternal(inputValue, dependencyValue, syntheticOnly) {
         resultValue = await dependencies.attemptRejectedConnection(
           Object.freeze({
             caCertificatePem: connection.caCertificatePem,
+            clientCertificatePem: connection.clientCertificatePem,
+            clientPrivateKeyPem: connection.clientPrivateKeyPem,
             connectionString: connection.connectionString,
             connectTimeoutMs: input.connectTimeoutMs,
+            endpointClass: service.endpointClass,
             purpose: service.purpose,
             scenario: connection.scenario,
             serverName: connection.serverName,

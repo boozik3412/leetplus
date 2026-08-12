@@ -34,6 +34,10 @@ export const CURRENT187_ENDPOINT_TLS_PEER_MAX_HANDSHAKE_TIMEOUT_MS = 15_000;
 const INPUT_KEYS = Object.freeze([
   "caCertificatePem",
   "caCertificateSha256",
+  "clientCertificatePem",
+  "clientCertificateSha256",
+  "clientPrivateKeyPem",
+  "clientPrivateKeySha256",
   "clusterIdentityDigest",
   "connectTimeoutMs",
   "databaseUniverseDigest",
@@ -62,6 +66,8 @@ const DEPENDENCY_KEYS = Object.freeze([
 const CONNECT_INPUT_KEYS = Object.freeze([
   "address",
   "caCertificatePem",
+  "clientCertificatePem",
+  "clientPrivateKeyPem",
   "connectTimeoutMs",
   "endpointPort",
   "family",
@@ -93,6 +99,8 @@ const ENDPOINT_CLASSES = new Set(["DIRECT_DATABASE", "POOLER"]);
 const TLS_PROTOCOLS = new Set(["TLSv1.2", "TLSv1.3"]);
 const FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/u;
 const MAX_CA_CERTIFICATE_BYTES = 65_536;
+const MAX_CLIENT_CERTIFICATE_BYTES = 65_536;
+const MAX_CLIENT_PRIVATE_KEY_BYTES = 65_536;
 const MAX_RESOLVED_ADDRESSES = 8;
 const SSL_REQUEST_CODE = 80_877_103;
 
@@ -243,6 +251,53 @@ function normalizeCertificatePem(value, expectedDigest, reasonCode) {
   return value;
 }
 
+function normalizeClientCredential(input, syntheticOnly, reasonCode) {
+  const values = [
+    input.clientCertificatePem,
+    input.clientCertificateSha256,
+    input.clientPrivateKeyPem,
+    input.clientPrivateKeySha256,
+  ];
+  if (syntheticOnly) {
+    if (values.some((value) => value !== null)) {
+      fail(
+        reasonCode,
+        "Synthetic endpoint collection forbids client credentials.",
+      );
+    }
+    return Object.freeze({
+      clientCertificatePem: null,
+      clientPrivateKeyPem: null,
+    });
+  }
+  if (
+    typeof input.clientCertificatePem !== "string" ||
+    Buffer.byteLength(input.clientCertificatePem, "utf8") >
+      MAX_CLIENT_CERTIFICATE_BYTES ||
+    !input.clientCertificatePem.startsWith("-----BEGIN CERTIFICATE-----\n") ||
+    !input.clientCertificatePem.endsWith("-----END CERTIFICATE-----\n") ||
+    input.clientCertificatePem.includes("\0") ||
+    !current187AdmissionValidDigest(input.clientCertificateSha256) ||
+    bytesDigest(Buffer.from(input.clientCertificatePem, "utf8")) !==
+      input.clientCertificateSha256 ||
+    typeof input.clientPrivateKeyPem !== "string" ||
+    Buffer.byteLength(input.clientPrivateKeyPem, "utf8") >
+      MAX_CLIENT_PRIVATE_KEY_BYTES ||
+    !input.clientPrivateKeyPem.startsWith("-----BEGIN PRIVATE KEY-----\n") ||
+    !input.clientPrivateKeyPem.endsWith("-----END PRIVATE KEY-----\n") ||
+    input.clientPrivateKeyPem.includes("\0") ||
+    !current187AdmissionValidDigest(input.clientPrivateKeySha256) ||
+    bytesDigest(Buffer.from(input.clientPrivateKeyPem, "utf8")) !==
+      input.clientPrivateKeySha256
+  ) {
+    fail(reasonCode, "Endpoint client mTLS credentials are invalid.");
+  }
+  return Object.freeze({
+    clientCertificatePem: input.clientCertificatePem,
+    clientPrivateKeyPem: input.clientPrivateKeyPem,
+  });
+}
+
 function normalizeInput(value, syntheticOnly) {
   const reasonCode = "CURRENT187_ENDPOINT_TLS_PEER_INPUT_INVALID";
   const input = exactOperationalRecord(value, INPUT_KEYS, reasonCode);
@@ -299,9 +354,15 @@ function normalizeInput(value, syntheticOnly) {
     reasonCode,
     true,
   );
+  const clientCredential = normalizeClientCredential(
+    input,
+    syntheticOnly,
+    reasonCode,
+  );
   return Object.freeze({
     ...input,
     caCertificatePem,
+    ...clientCredential,
     connectTimeoutMs: validateBoundedInteger(
       input.connectTimeoutMs,
       CURRENT187_ENDPOINT_TLS_PEER_MAX_CONNECT_TIMEOUT_MS,
@@ -487,9 +548,11 @@ function upgradeToVerifiedTls(socket, options) {
   return new Promise((resolve, reject) => {
     const secureSocket = connectTls({
       ca: options.caCertificatePem,
+      cert: options.clientCertificatePem ?? undefined,
       checkServerIdentity,
       maxVersion: "TLSv1.3",
       minVersion: "TLSv1.2",
+      key: options.clientPrivateKeyPem ?? undefined,
       rejectUnauthorized: true,
       servername: options.serverName,
       socket,
@@ -644,6 +707,8 @@ async function collectInternal(
     const connectInput = Object.freeze({
       address: selectedAddress.address,
       caCertificatePem: input.caCertificatePem,
+      clientCertificatePem: input.clientCertificatePem,
+      clientPrivateKeyPem: input.clientPrivateKeyPem,
       connectTimeoutMs: input.connectTimeoutMs,
       endpointPort: input.endpointPort,
       family: selectedAddress.family,

@@ -80,6 +80,13 @@ TLS-контракт не ослабляются.
 `pool.current187.invalid` с `127.0.0.1`, включает его в server SAN и
 восстанавливает исходный `/etc/hosts` в trap.
 
+Четвёртый run `31622898891` на `c4c4663b…` прошёл hostname/baseline и снова
+подтвердил TLS/deny, но public collector остановился до нового PgBouncer login.
+Причина в actual adapter: collector сохраняет internal TLS input замороженным,
+а `node-postgres` дополняет переданный TLS options object при соединении.
+Successor передаёт драйверу свежую mutable plain-копию пяти exact TLS полей;
+internal binding, PEM hashes, receipt и production-origin boundary не меняются.
+
 ## Ограничение результата
 
 R8 закрывает только actual J4 mTLS evidence. Он ещё не собирает в одном процессе

@@ -607,7 +607,16 @@ function pgDependencies() {
         password: connection.password,
         port: connection.port,
         query_timeout: connection.queryTimeoutMs,
-        ssl: connection.ssl,
+        ssl:
+          connection.ssl === false
+            ? false
+            : {
+                ca: connection.ssl.ca,
+                cert: connection.ssl.cert,
+                key: connection.ssl.key,
+                rejectUnauthorized: connection.ssl.rejectUnauthorized,
+                servername: connection.ssl.servername,
+              },
         user: connection.user,
       });
       return Object.freeze({

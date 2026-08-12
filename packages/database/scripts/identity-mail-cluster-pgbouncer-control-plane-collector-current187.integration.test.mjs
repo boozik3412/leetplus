@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import pg from "pg";
 
 import {
   CURRENT187_PGBOUNCER_STATUS,
-  CURRENT187_PGBOUNCER_SYNTHETIC_CONFIRMATION,
-  collectSyntheticCurrent187PgBouncerControlPlaneEvidenceForTestOnly,
-  computeSyntheticCurrent187PgBouncerConfigurationDigestForTestOnly,
+  CURRENT187_PGBOUNCER_PRODUCTION_CONFIRMATION,
+  collectCurrent187PgBouncerControlPlaneEvidence,
+  computeCurrent187PgBouncerConfigurationDigestForTestOnly,
+  isVerifiedCurrent187ProductionPgBouncerReceipt,
   isVerifiedCurrent187PgBouncerReceipt,
 } from "./identity-mail-cluster-pgbouncer-control-plane-collector-current187.mjs";
 
@@ -42,7 +44,40 @@ function releaseSha() {
     : "c".repeat(40);
 }
 
-function adminClient() {
+async function fixtureTlsMaterial() {
+  const paths = [
+    process.env.CURRENT187_PGBOUNCER_CA_CERTIFICATE_PATH,
+    process.env.CURRENT187_PGBOUNCER_CLIENT_CERTIFICATE_PATH,
+    process.env.CURRENT187_PGBOUNCER_CLIENT_PRIVATE_KEY_PATH,
+  ];
+  assert.equal(
+    paths.every((value) => typeof value === "string"),
+    true,
+  );
+  const [caCertificatePem, clientCertificatePem, clientPrivateKeyPem] =
+    await Promise.all(paths.map((value) => readFile(value, "utf8")));
+  return Object.freeze({
+    caCertificatePem,
+    clientCertificatePem,
+    clientPrivateKeyPem,
+  });
+}
+
+function sslOptions(tls, includeClientCredential = true) {
+  return {
+    ca: tls.caCertificatePem,
+    ...(includeClientCredential
+      ? {
+          cert: tls.clientCertificatePem,
+          key: tls.clientPrivateKeyPem,
+        }
+      : {}),
+    rejectUnauthorized: true,
+    servername: HOST,
+  };
+}
+
+function adminClient(tls, includeClientCredential = true) {
   return new pg.Client({
     application_name: "leetplus-current187-pgbouncer-fixture-observer",
     connectionTimeoutMillis: 5_000,
@@ -51,11 +86,12 @@ function adminClient() {
     password: STATS_PASSWORD,
     port: PORT,
     query_timeout: 5_000,
+    ssl: sslOptions(tls, includeClientCredential),
     user: STATS_USER,
   });
 }
 
-function applicationClient(database = DATABASE) {
+function applicationClient(tls, database = DATABASE) {
   return new pg.Client({
     application_name: "leetplus-current187-pgbouncer-fixture-application",
     connectionTimeoutMillis: 5_000,
@@ -64,12 +100,13 @@ function applicationClient(database = DATABASE) {
     password: APPLICATION_PASSWORD,
     port: PORT,
     query_timeout: 5_000,
+    ssl: sslOptions(tls),
     user: APPLICATION_USER,
   });
 }
 
-async function showResults() {
-  const client = adminClient();
+async function showResults(tls) {
+  const client = adminClient(tls);
   await client.connect();
   try {
     const rows = [];
@@ -86,28 +123,28 @@ async function showResults() {
   }
 }
 
-function collectorInput(expectedPoolerConfigurationDigest) {
+function collectorInput(expectedPoolerConfigurationDigest, tls) {
   return {
     adminUrl: `postgresql://${STATS_USER}:${STATS_PASSWORD}@${HOST}:${PORT}/pgbouncer`,
     applicationDatabaseName: DATABASE,
     applicationUserName: APPLICATION_USER,
-    caCertificatePem: null,
-    caCertificateSha256: sha256("synthetic-no-ca"),
-    clientCertificatePem: null,
-    clientCertificateSha256: null,
-    clientPrivateKeyPem: null,
-    clientPrivateKeySha256: null,
+    caCertificatePem: tls.caCertificatePem,
+    caCertificateSha256: sha256(tls.caCertificatePem),
+    clientCertificatePem: tls.clientCertificatePem,
+    clientCertificateSha256: sha256(tls.clientCertificatePem),
+    clientPrivateKeyPem: tls.clientPrivateKeyPem,
+    clientPrivateKeySha256: sha256(tls.clientPrivateKeyPem),
     clusterIdentityDigest: "1".repeat(64),
     connectTimeoutMs: 5_000,
     databaseUniverseDigest: "2".repeat(64),
     endpointTlsPeerReceiptDigest: "3".repeat(64),
-    environment: "ci",
+    environment: "production",
     expectedBackendAddress: HOST,
     expectedBackendDatabaseName: DATABASE,
     expectedBackendHost: HOST,
     expectedBackendPort: 5432,
     expectedPoolerConfigurationDigest,
-    explicitConfirmation: CURRENT187_PGBOUNCER_SYNTHETIC_CONFIRMATION,
+    explicitConfirmation: CURRENT187_PGBOUNCER_PRODUCTION_CONFIRMATION,
     hbaReloadReceiptDigest: "5".repeat(64),
     queryTimeoutMs: 5_000,
     releaseSha: releaseSha(),
@@ -117,7 +154,7 @@ function collectorInput(expectedPoolerConfigurationDigest) {
 }
 
 test(
-  "actual PgBouncer stats-only console proves transaction pool mapping through simple protocol",
+  "actual mTLS PgBouncer stats-only console returns a strict production-origin receipt",
   { timeout: 30_000 },
   async (context) => {
     if (
@@ -128,24 +165,24 @@ test(
       return;
     }
 
-    const application = applicationClient();
+    const tls = await fixtureTlsMaterial();
+    const application = applicationClient(tls);
     await application.connect();
     try {
       assert.deepEqual((await application.query("SELECT 1 AS ready")).rows, [
         { ready: 1 },
       ]);
 
-      const observed = await showResults();
-      const provisionalInput = collectorInput("4".repeat(64));
+      const observed = await showResults(tls);
+      const provisionalInput = collectorInput("4".repeat(64), tls);
       const expectedPoolerConfigurationDigest =
-        computeSyntheticCurrent187PgBouncerConfigurationDigestForTestOnly(
+        computeCurrent187PgBouncerConfigurationDigestForTestOnly(
           provisionalInput,
           observed,
         );
-      const receipt =
-        await collectSyntheticCurrent187PgBouncerControlPlaneEvidenceForTestOnly(
-          collectorInput(expectedPoolerConfigurationDigest),
-        );
+      const receipt = await collectCurrent187PgBouncerControlPlaneEvidence(
+        collectorInput(expectedPoolerConfigurationDigest, tls),
+      );
 
       assert.equal(receipt.status, CURRENT187_PGBOUNCER_STATUS);
       assert.equal(receipt.poolerIdentityObserved, true);
@@ -160,9 +197,25 @@ test(
       assert.equal(receipt.testAccessAuthorized, false);
       assert.equal(receipt.sharedBetaAccess, false);
       assert.equal(isVerifiedCurrent187PgBouncerReceipt(receipt), true);
+      assert.equal(
+        isVerifiedCurrent187ProductionPgBouncerReceipt(receipt),
+        true,
+      );
+      assert.match(receipt.clientCredentialBindingDigest, /^[a-f0-9]{64}$/u);
+      const serializedReceipt = JSON.stringify(receipt);
       assert.doesNotMatch(
-        JSON.stringify(receipt),
+        serializedReceipt,
         /current187-ci|lp_application|lp_pool_stats|leetplus_ci/iu,
+      );
+      assert.equal(serializedReceipt.includes(tls.clientCertificatePem), false);
+      assert.equal(serializedReceipt.includes(tls.clientPrivateKeyPem), false);
+      assert.equal(
+        serializedReceipt.includes(sha256(tls.clientCertificatePem)),
+        false,
+      );
+      assert.equal(
+        serializedReceipt.includes(sha256(tls.clientPrivateKeyPem)),
+        false,
       );
     } finally {
       await application.end();
@@ -182,7 +235,8 @@ test(
       return;
     }
 
-    const unauthorized = applicationClient("pgbouncer");
+    const tls = await fixtureTlsMaterial();
+    const unauthorized = applicationClient(tls, "pgbouncer");
     await assert.rejects(async () => {
       try {
         await unauthorized.connect();
@@ -190,5 +244,29 @@ test(
         await unauthorized.end().catch(() => undefined);
       }
     }, /not allowed|no privileges|admin console/iu);
+  },
+);
+
+test(
+  "PgBouncer verify-full rejects a TLS client without a client certificate",
+  { timeout: 15_000 },
+  async (context) => {
+    if (
+      process.env.IDENTITY_MAIL_PGBOUNCER_CURRENT187_E2E_CONFIRM !==
+      REQUIRED_CONFIRMATION
+    ) {
+      context.skip("explicit CURRENT187 PgBouncer fixture confirmation absent");
+      return;
+    }
+
+    const tls = await fixtureTlsMaterial();
+    const certificateLess = adminClient(tls, false);
+    await assert.rejects(async () => {
+      try {
+        await certificateLess.connect();
+      } finally {
+        await certificateLess.end().catch(() => undefined);
+      }
+    });
   },
 );

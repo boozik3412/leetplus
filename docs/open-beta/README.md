@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.89                                         |
+| Версия           | 1.90                                         |
 | Дата             | 12.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -703,9 +703,18 @@ enterprise-isolation option и не сокращает shared gates.
   — production J4 требует bounded exact client certificate + PKCS#8 private
   key, проверяет отдельные SHA-256 и передаёт секреты только TLS client. Receipt
   содержит лишь aggregate binding digest; synthetic mode принимает только
-  четыре `null`. Локально: J4 `9/9`, CURRENT187 `125/125`, actual wire/TLS
-  `2/2`, typecheck green. Exact-SHA CI и actual co-located public-collector
-  topology ещё обязательны; production GO не заявляется.
+  четыре `null`. J4 `9/9`, CURRENT187 `125/125`, actual wire/TLS `2/2`,
+  typecheck green. SHA `5f2b529a…` принят CI `31617615666` `3/3 SUCCESS`,
+  artifact `sha256:77b3e24a…60b0a`. Actual co-located public-collector topology
+  ещё обязательна; production GO не заявляется.
+  [CI evidence](./identity-mail-current187-j5-r7-ci-evidence-2026-08-12.md).
+
+- [CURRENT187-J5-R8 actual J4 mTLS fixture](./identity-mail-current187-j5-r8-actual-pgbouncer-mtls-fixture.md)
+  — одноразовый CA, отдельные server/client certificates, PostgreSQL TLS и
+  PgBouncer client/server verify-full. Integration вызывает public actual J4
+  collector и требует strict production-origin receipt без PEM/raw hashes.
+  Реализация и статические проверки локально готовы; actual Ubuntu execution и
+  exact-SHA CI пока `PENDING`, co-located J1–J4 topology не заявляется.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

@@ -793,6 +793,7 @@ jobs:
         env:
           NODE_ENV: test
           IDENTITY_MAIL_PGBOUNCER_CURRENT187_E2E_CONFIRM: run-current187-pgbouncer-control-plane-protocol-integration-e2e
+          POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
 
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg

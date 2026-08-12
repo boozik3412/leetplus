@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026.
 
-Статус: `ENGINEERING ACCEPTED LOCALLY / NO PRODUCTION EFFECT / NOT DEPLOYABLE`.
+Статус: `EXACT-SHA CI ACCEPTED / NO PRODUCTION EFFECT / NOT DEPLOYABLE`.
 
 ## Закрытый разрыв
 
@@ -49,16 +49,20 @@ test seam не получает strict production-origin brand после R6 и 
 - production-origin fence: dependency-backed production-mode receipts остаются
   non-admissible до network I/O.
 
-Это локальная инженерная приёмка. Exact commit SHA, GitHub Actions run и
-SHA-bound artifact фиксируются только после push и полного завершения CI.
+Exact SHA `5f2b529af8d957909806252edf122c04058a40a2` принят GitHub Actions run
+`31617615666`: все `3/3` jobs завершены `SUCCESS`. Artifact ID `9150250522`,
+digest `sha256:77b3e24a6590e8b3e24b9c37755df948be6b304141db649b40b49030ea360b0a`.
+Полная фиксация: [R7 CI evidence](./identity-mail-current187-j5-r7-ci-evidence-2026-08-12.md).
 
 ## Что остаётся до следующего gate
 
-Следующий этап создаёт disposable/restored co-located topology с настоящими
-PostgreSQL, PgBouncer и client CA/certificate/key. В одном процессе через public
-actual collectors должны быть собраны strict J1/J2 для четырёх service purpose,
-J3 и J4, после чего production runner выполняет положительные проверки и всю
-negative matrix. До этого R7 не считается production-like topology evidence.
+R8 сначала обязан принять actual J4 connection через disposable PostgreSQL,
+PgBouncer и client CA/certificate/key, используя public collector и strict
+production-origin brand. После этого отдельный co-located topology run в одном
+процессе через public actual collectors собирает strict J1/J2 для четырёх
+service purpose, J3 и J4, а production runner выполняет положительные проверки
+и всю negative matrix. До этого R7 не считается production-like topology
+evidence.
 
 Далее отдельно обязательны protected production signer/key/root, canonical
 ledger/runtime roles, restored-copy apply/rollback/zero-diff и независимая

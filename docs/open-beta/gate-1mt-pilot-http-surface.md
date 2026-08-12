@@ -166,7 +166,9 @@ cookie boundary, не принимает client `Authorization`/tenant selector,
 использует authenticated cache, а динамические user/invite/role IDs передаёт
 только после `encodeURIComponent`. Invite responses остаются
 `private, no-store`; CURRENT189 imports отсутствуют до атомарного cutover.
-Локальный BFF gate: `4/4 PASS`; exact-SHA CI acceptance ещё обязательна.
+Exact-SHA BFF gate принят на `b0239b4d…`, CI `31642875953`: `4/4 PASS`,
+artifact `sha256:845c784d…eb2304`. Production-like browser matrix и CURRENT189
+atomic cutover всё ещё обязательны.
 
 ## 5. Оставшиеся blocking gaps
 

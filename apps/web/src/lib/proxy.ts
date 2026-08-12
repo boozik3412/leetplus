@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getApiUrl, getAuthHeaders } from "./api";
 
 type ProxyJsonRequestOptions = {
+  forwardQuery?: boolean;
   privateNoStore?: boolean;
 };
 
@@ -26,7 +27,8 @@ export async function proxyJsonRequest(
   const body =
     method === "GET" || method === "DELETE" ? undefined : await request.text();
   const url = new URL(request.url);
-  const response = await fetch(`${getApiUrl()}${path}${url.search}`, {
+  const search = options.forwardQuery === false ? "" : url.search;
+  const response = await fetch(`${getApiUrl()}${path}${search}`, {
     method,
     cache: "no-store",
     headers: {

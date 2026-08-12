@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const USERS_ROUTE_ROOT = fileURLToPath(
   new URL("../app/api/users", import.meta.url),
 );
+const PROXY_FILE = fileURLToPath(new URL("./proxy.ts", import.meta.url));
 
 const EXPECTED_ROUTES = new Map<string, readonly string[]>([
   ["[id]/route.ts", ["PATCH"]],
@@ -31,8 +32,9 @@ test("pins the complete users/roles BFF surface at nine protected handlers", asy
   );
 });
 
-test("requires server-side cookie admission and never accepts client authorization or tenant selectors", async () => {
+test("requires server-side cookie admission and drops client query selectors", async () => {
   const inventory = await routeInventory();
+  const proxySource = await readFile(PROXY_FILE, "utf8");
 
   for (const route of inventory) {
     const protectedByServerCookie =
@@ -52,7 +54,13 @@ test("requires server-side cookie admission and never accepts client authorizati
     assert.doesNotMatch(route.source, /searchParams\.get\(["']tenant/i);
     assert.doesNotMatch(route.source, /[?&](?:tenantId|tenant|storeId)=/i);
     assert.doesNotMatch(route.source, /cache\s*:\s*["']force-cache["']/);
+    assert.match(route.source, /forwardQuery:\s*false/);
   }
+
+  assert.match(
+    proxySource,
+    /options\.forwardQuery === false \? "" : url\.search/,
+  );
 });
 
 test("binds dynamic identifiers through encodeURIComponent and exact upstream paths", async () => {
@@ -78,24 +86,34 @@ test("binds dynamic identifiers through encodeURIComponent and exact upstream pa
   );
   assert.match(byFile.get("invites/route.ts") ?? "", /"\/users\/invites"/);
   assert.match(byFile.get("roles/route.ts") ?? "", /"\/users\/roles"/);
-  assert.match(byFile.get("route.ts") ?? "", /`\$\{getApiUrl\(\)\}\/users`/);
+  assert.match(
+    byFile.get("route.ts") ?? "",
+    /proxyJsonRequest\(request, "\/users", "GET", USERS_BFF_OPTIONS\)/,
+  );
+  assert.match(
+    byFile.get("route.ts") ?? "",
+    /proxyJsonRequest\(request, "\/users", "POST", USERS_BFF_OPTIONS\)/,
+  );
 });
 
-test("keeps invite responses private and CURRENT189 candidate imports dormant", async () => {
+test("keeps every response private and CURRENT189 candidate imports dormant", async () => {
   const inventory = await routeInventory();
+  const proxySource = await readFile(PROXY_FILE, "utf8");
 
-  for (const route of inventory.filter(({ file }) =>
-    file.startsWith("invites/"),
-  )) {
-    assert.match(route.source, /privateNoStore:\s*true/);
-  }
   for (const route of inventory) {
+    assert.match(route.source, /privateNoStore:\s*true/);
     assert.doesNotMatch(
       route.source,
       /employee-invite-current189|EmployeeInviteCurrent189/,
       `${route.file} partially activates dormant CURRENT189`,
     );
   }
+
+  assert.match(proxySource, /"Cache-Control": "private, no-store, max-age=0"/);
+  assert.match(proxySource, /Vary: "Cookie, Authorization"/);
+  assert.match(proxySource, /"Referrer-Policy": "no-referrer"/);
+  assert.match(proxySource, /"X-Content-Type-Options": "nosniff"/);
+  assert.match(proxySource, /"Cross-Origin-Resource-Policy": "same-origin"/);
 });
 
 type RouteInventoryRow = Readonly<{

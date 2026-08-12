@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 13.08.2026
-- Версия: 2.37
+- Версия: 2.38
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -4870,12 +4870,12 @@ fail-closed.
 | `GATE-2-A1..A4`                      |        P0 | `NOT STARTED`                                                                     | Текущая сеть не изменялась                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | In-place cutover одного Tenant с четырьмя Store, anonymous demo closure и минимум 7 суток stable internal alpha                                                                                                                                            |
 | `SHARED-BETA-GO`                     |        P0 | `NO-GO`                                                                           | Ручное создание tester account запрещено                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Только после всех предыдущих строк signed/persisted GO может создать `Tenant B/Store B1` и отправить mailbox-bound OWNER invite                                                                                                                            |
 
-Отдельный users/roles Web BFF candidate фиксирует exact семь route-файлов и
-девять handlers: только server-side cookie bearer, без client
+Отдельный users/roles Web BFF gate фиксирует exact семь route-файлов и девять
+handlers: только server-side cookie bearer, без client
 `Authorization`/tenant selectors/cache, с `encodeURIComponent` для динамических
 ID и `private, no-store` для invite responses. CURRENT189 остаётся dormant до
-атомарного cutover. Локальная проверка `4/4 PASS`; exact-SHA CI acceptance ещё
-не получена.
+атомарного cutover. Exact SHA `b0239b4d…`, CI `31642875953` — `3/3 SUCCESS`,
+target `4/4`, artifact `sha256:845c784d…eb2304`; browser A/B ещё обязателен.
 
 Текущий порядок разработки:
 

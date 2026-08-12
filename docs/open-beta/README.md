@@ -638,6 +638,12 @@ enterprise-isolation option и не сокращает shared gates.
     AccessScope/module scope, Gate 1MT, Gate 2, canary и отдельный post-green
     `SHARED BETA GO`. Production остаётся `CURRENT179/179`; четыре текущих
     клуба одной сети и внешний тестер не изменены.
+    [CURRENT187-J5 signed connection-probe matrix](./identity-mail-current187-j5-signed-connection-probe-matrix.md)
+    добавляет отдельный Ed25519 purpose для четырёх service purpose и exact
+    `positive + 8 negative` outcomes на каждый. J5 `10/10`, aggregate CURRENT187
+    `89/89`, typecheck green; production roots frozen-empty, actual 36-probe
+    runner/persisted consumption/F binding отсутствуют, поэтому статус
+    остаётся `NO-GO`.
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable
     attempt, provider mark/complete lost-response, ambiguous-result quarantine,

@@ -1,16 +1,32 @@
 import assert from "node:assert/strict";
-import { X509Certificate, createHash } from "node:crypto";
+import {
+  X509Certificate,
+  createHash,
+  createPublicKey,
+  verify as verifySignature,
+} from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import pg from "pg";
 
-import { CURRENT187_CONNECTION_NEGATIVE_SCENARIOS } from "./identity-mail-cluster-connection-probe-attestation-current187.mjs";
+import { current187AdmissionCanonicalJson } from "./identity-mail-cluster-application-admission-current187-contract.mjs";
+import {
+  CURRENT187_CONNECTION_NEGATIVE_SCENARIOS,
+  PINNED_CURRENT187_CONNECTION_PROBE_PRODUCTION_ROOTS,
+  current187ConnectionProbeEnvelopeDigest,
+  verifyPinnedCurrent187ConnectionProbeEnvelope,
+} from "./identity-mail-cluster-connection-probe-attestation-current187.mjs";
 import {
   CURRENT187_CONNECTION_PROBE_RUNNER_STATUS,
   isVerifiedCurrent187ConnectionProbeRunnerReceipt,
   runCurrent187ConnectionProbeMatrix,
 } from "./identity-mail-cluster-connection-probe-runner-current187.mjs";
+import {
+  CURRENT187_CONNECTION_PROBE_SIGNER_STATUS,
+  loadCurrent187ConnectionProbeSignerAuthority,
+  signCurrent187ConnectionProbeRunnerReceipt,
+} from "./identity-mail-cluster-connection-probe-signer-current187.mjs";
 import {
   CURRENT187_ENDPOINT_TLS_PEER_PRODUCTION_CONFIRMATION,
   collectCurrent187EndpointTlsPeerEvidence,
@@ -139,6 +155,40 @@ async function fixtureTlsMaterial() {
     clientPrivateKeyPem,
     serverCertificatePem,
     wrongCaCertificatePem,
+  });
+}
+
+async function fixtureSignerMaterial() {
+  const privateKeyPath =
+    process.env.CURRENT187_CONNECTION_PROBE_SIGNER_PRIVATE_KEY_PATH;
+  const publicKeyPath =
+    process.env.CURRENT187_CONNECTION_PROBE_SIGNER_PUBLIC_KEY_PATH;
+  const expectedPublicKeySha256 =
+    process.env.CURRENT187_CONNECTION_PROBE_SIGNER_PUBLIC_KEY_SHA256;
+  const keyId = process.env.CURRENT187_CONNECTION_PROBE_SIGNER_KEY_ID;
+  const notBefore = process.env.CURRENT187_CONNECTION_PROBE_SIGNER_NOT_BEFORE;
+  const notAfter = process.env.CURRENT187_CONNECTION_PROBE_SIGNER_NOT_AFTER;
+  assert.equal(typeof privateKeyPath, "string");
+  assert.equal(typeof publicKeyPath, "string");
+  assert.match(expectedPublicKeySha256 ?? "", /^[a-f0-9]{64}$/u);
+  assert.match(keyId ?? "", /^[a-z0-9][a-z0-9._-]{2,63}$/u);
+  for (const value of [notBefore, notAfter]) {
+    assert.equal(typeof value, "string");
+    assert.equal(new Date(Date.parse(value)).toISOString(), value);
+  }
+  const publicKeyBytes = await readFile(publicKeyPath);
+  assert.equal(
+    createHash("sha256").update(publicKeyBytes).digest("hex"),
+    expectedPublicKeySha256,
+  );
+  return Object.freeze({
+    expectedPublicKeySha256,
+    keyId,
+    notAfter,
+    notBefore,
+    privateKeyPath,
+    publicKeyBytes,
+    publicKeyPath,
   });
 }
 
@@ -720,7 +770,7 @@ test(
 );
 
 test(
-  "co-located public J1-J4 chain executes the strict production runner matrix",
+  "co-located public J1-J4 chain executes the strict production runner matrix and external file signer",
   { timeout: 90_000 },
   async (context) => {
     if (
@@ -771,6 +821,78 @@ test(
     assert.equal(receipt.productionRuntimeAttested, false);
     assert.equal(receipt.testAccessAuthorized, false);
     assert.equal(receipt.sharedBetaAccess, false);
+
+    const signerMaterial = await fixtureSignerMaterial();
+    const signerAuthority =
+      await loadCurrent187ConnectionProbeSignerAuthority({
+        expectedPublicKeySha256: signerMaterial.expectedPublicKeySha256,
+        keyId: signerMaterial.keyId,
+        notAfter: signerMaterial.notAfter,
+        notBefore: signerMaterial.notBefore,
+        privateKeyPath: signerMaterial.privateKeyPath,
+        publicKeyPath: signerMaterial.publicKeyPath,
+      });
+    assert.equal(
+      signerAuthority.status,
+      CURRENT187_CONNECTION_PROBE_SIGNER_STATUS,
+    );
+    assert.equal(
+      signerAuthority.publicKeyFingerprint,
+      signerMaterial.expectedPublicKeySha256,
+    );
+    assert.equal(Object.hasOwn(signerAuthority, "privateKeyPath"), false);
+    assert.equal(Object.hasOwn(signerAuthority, "publicKeyPath"), false);
+    const envelope = await signCurrent187ConnectionProbeRunnerReceipt(
+      signerAuthority,
+      receipt,
+    );
+    assert.equal(envelope.payload.environment, "production");
+    assert.equal(envelope.payload.releaseSha, releaseSha());
+    assert.equal(envelope.payload.signingKeyId, signerMaterial.keyId);
+    assert.equal(
+      verifySignature(
+        null,
+        Buffer.from(
+          current187AdmissionCanonicalJson(envelope.payload),
+          "utf8",
+        ),
+        createPublicKey({
+          format: "der",
+          key: signerMaterial.publicKeyBytes,
+          type: "spki",
+        }),
+        Buffer.from(envelope.signature, "base64url"),
+      ),
+      true,
+    );
+    assert.match(
+      current187ConnectionProbeEnvelopeDigest(envelope),
+      /^[a-f0-9]{64}$/u,
+    );
+    assert.deepEqual(PINNED_CURRENT187_CONNECTION_PROBE_PRODUCTION_ROOTS, {});
+    assert.throws(
+      () =>
+        verifyPinnedCurrent187ConnectionProbeEnvelope(
+          envelope,
+          new Date().toISOString(),
+        ),
+      (error) =>
+        error?.safeContractError === true &&
+        error.code === "CURRENT187_CONNECTION_PROBE_AUTHORITY_NOT_ENROLLED",
+    );
+    const serializedSignerOutput = JSON.stringify({
+      envelope,
+      signerAuthority,
+    });
+    assert.equal(
+      serializedSignerOutput.includes(signerMaterial.privateKeyPath),
+      false,
+    );
+    assert.equal(
+      serializedSignerOutput.includes(signerMaterial.publicKeyPath),
+      false,
+    );
+    assert.equal(serializedSignerOutput.includes("PRIVATE KEY"), false);
     const serializedReceipt = JSON.stringify(receipt);
     for (const secret of [
       "current187-ci-",

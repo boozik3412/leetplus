@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.93                                         |
+| Версия           | 1.94                                         |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -727,6 +727,11 @@ enterprise-isolation option и не сокращает shared gates.
   `sha256:c0ade8bd…a7595`; все downstream PostgreSQL gates green. Это engineering
   acceptance, а не разрешение production или внешнего доступа.
   [CI evidence](./identity-mail-current187-j5-r9-ci-evidence-2026-08-13.md).
+
+- [CURRENT187-J5-R10 disposable external signer bridge](./identity-mail-current187-j5-r10-external-signer-bridge-candidate.md)
+  — production file-backed signer подписывает exact R9 receipt одноразовым
+  внешним Ed25519 key; production root registry остаётся frozen-empty и
+  обязан отклонить envelope до отдельной key ceremony/root enrollment.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

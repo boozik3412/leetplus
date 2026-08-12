@@ -40,7 +40,22 @@ for postgres_client_octet in "${postgres_client_octets[@]}"; do
 done
 postgres_client_cidr="$postgres_client_address/32"
 
+if [[ -z "${HOME:-}" || ! -d "$HOME" ]]; then
+  printf 'HOME is unavailable for the external CURRENT187 signer fixture.\n' >&2
+  exit 65
+fi
 fixture_root="$(mktemp -d "$RUNNER_TEMP/leetplus-current187-pgbouncer-XXXXXX")"
+if ! signer_root="$(mktemp -d "$HOME/leetplus-current187-signer-XXXXXX")"; then
+  rmdir "$fixture_root"
+  printf 'External CURRENT187 signer root could not be created.\n' >&2
+  exit 65
+fi
+if ! chmod 700 "$signer_root"; then
+  rmdir "$signer_root"
+  rmdir "$fixture_root"
+  printf 'External CURRENT187 signer root permissions could not be sealed.\n' >&2
+  exit 65
+fi
 pooler_hostname="pool.current187.invalid"
 database_hostname="db.current187.invalid"
 config_path="$fixture_root/pgbouncer.ini"
@@ -60,6 +75,11 @@ client_extensions_path="$fixture_root/client.ext"
 client_identity_path="$fixture_root/client.p12"
 wrong_ca_key_path="$fixture_root/wrong-ca.key"
 wrong_ca_certificate_path="$fixture_root/wrong-ca.crt"
+signer_private_key_path="$signer_root/signer-private.pk8"
+signer_public_key_path="$signer_root/signer-public.spki"
+signer_key_id="current187-connection-probe-r10-ci-1"
+signer_not_before="$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%S.000Z')"
+signer_not_after="$(date -u -d '30 minutes' '+%Y-%m-%dT%H:%M:%S.000Z')"
 original_hba_path="$fixture_root/pg_hba.before.conf"
 fixture_hba_path="$fixture_root/pg_hba.fixture.conf"
 hosts_backup_path="$fixture_root/hosts.before"
@@ -105,6 +125,12 @@ cleanup() {
   fi
   if [[ "$fixture_root" == "$RUNNER_TEMP"/leetplus-current187-pgbouncer-* ]]; then
     rm -rf -- "$fixture_root"
+  fi
+  if [[ "$signer_root" == "$HOME"/leetplus-current187-signer-* ]]; then
+    rm -f -- "$signer_private_key_path" "$signer_public_key_path"
+    rmdir "$signer_root" || status=1
+  else
+    status=1
   fi
   exit "$status"
 }
@@ -214,6 +240,24 @@ openssl req \
   -addext 'basicConstraints=critical,CA:TRUE' \
   -addext 'keyUsage=critical,keyCertSign,cRLSign'
 chmod 600 "$client_identity_path" "$wrong_ca_key_path"
+
+openssl genpkey \
+  -algorithm ED25519 \
+  -outform DER \
+  -out "$signer_private_key_path" >/dev/null 2>&1
+openssl pkey \
+  -in "$signer_private_key_path" \
+  -inform DER \
+  -pubout \
+  -outform DER \
+  -out "$signer_public_key_path" >/dev/null 2>&1
+chmod 600 "$signer_private_key_path"
+chmod 644 "$signer_public_key_path"
+signer_public_key_sha256="$(sha256sum "$signer_public_key_path" | awk '{print $1}')"
+if [[ ! "$signer_public_key_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+  printf 'Disposable CURRENT187 signer public-key pin is invalid.\n' >&2
+  exit 66
+fi
 
 docker cp \
   "$ca_certificate_path" \
@@ -397,5 +441,11 @@ env \
   CURRENT187_PGBOUNCER_HOSTNAME="$pooler_hostname" \
   CURRENT187_PGBOUNCER_SERVER_CERTIFICATE_PATH="$server_certificate_path" \
   CURRENT187_PGBOUNCER_WRONG_CA_CERTIFICATE_PATH="$wrong_ca_certificate_path" \
+  CURRENT187_CONNECTION_PROBE_SIGNER_PRIVATE_KEY_PATH="$signer_private_key_path" \
+  CURRENT187_CONNECTION_PROBE_SIGNER_PUBLIC_KEY_PATH="$signer_public_key_path" \
+  CURRENT187_CONNECTION_PROBE_SIGNER_PUBLIC_KEY_SHA256="$signer_public_key_sha256" \
+  CURRENT187_CONNECTION_PROBE_SIGNER_KEY_ID="$signer_key_id" \
+  CURRENT187_CONNECTION_PROBE_SIGNER_NOT_BEFORE="$signer_not_before" \
+  CURRENT187_CONNECTION_PROBE_SIGNER_NOT_AFTER="$signer_not_after" \
   pnpm --filter database \
     test:integration:identity-mail-cluster-pgbouncer-current187

@@ -239,11 +239,19 @@ async function startPostgresRejectionHarness(secureContext) {
           }
           counters.tlsStartups += 1;
           const wrongDatabase = parameters.database?.startsWith("missing_");
+          const hbaDatabaseRejection =
+            wrongDatabase && parameters.user !== "allowed_role_0";
           secureSocket.end(
             postgresErrorPacket(
-              wrongDatabase ? "3D000" : "28P01",
+              hbaDatabaseRejection
+                ? "28000"
+                : wrongDatabase
+                  ? "3D000"
+                  : "28P01",
               wrongDatabase
-                ? "database does not exist"
+                ? hbaDatabaseRejection
+                  ? "no HBA rule for requested database"
+                  : "database does not exist"
                 : "password authentication failed",
             ),
           );

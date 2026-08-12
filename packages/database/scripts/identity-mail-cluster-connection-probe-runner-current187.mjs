@@ -612,8 +612,8 @@ function classifyConnectionError(scenario, endpointClass, error) {
     ]),
     WRONG_DATABASE: new Set(
       endpointClass === "POOLER"
-        ? ["08P01", "3D000", "42501"]
-        : ["3D000", "42501"],
+        ? ["08P01", "28000", "3D000", "42501"]
+        : ["28000", "3D000", "42501"],
     ),
     WRONG_HOSTNAME: new Set(["ERR_TLS_CERT_ALTNAME_INVALID"]),
     WRONG_ROLE: new Set(

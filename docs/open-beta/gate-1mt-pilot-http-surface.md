@@ -160,6 +160,14 @@ DB query: учётные записи должны появляться толь
 Четыре invite HTTP routes всё ещё имеют решение `BLOCKED` до принятия
 CURRENT189 delivery/revoke/reissue, поэтому snapshot `5/9` не изменён.
 
+Web BFF candidate отдельно фиксирует семь route-файлов и ровно девять
+handlers users/roles. Каждый path получает авторизацию только через server-side
+cookie boundary, не принимает client `Authorization`/tenant selector, не
+использует authenticated cache, а динамические user/invite/role IDs передаёт
+только после `encodeURIComponent`. Invite responses остаются
+`private, no-store`; CURRENT189 imports отсутствуют до атомарного cutover.
+Локальный BFF gate: `4/4 PASS`; exact-SHA CI acceptance ещё обязательна.
+
 ## 5. Оставшиеся blocking gaps
 
 Counts пересекаются: один handler может иметь несколько gaps.
@@ -260,6 +268,7 @@ Focused gate (`pilot-bff-boundary`: `4/4`, guest transport: `2/2`):
 pnpm --filter api test:ci:pilot-http-surface
 pnpm --filter api test:ci:pilot-crm-communications
 pnpm --filter web test:pilot-bff-boundary
+pnpm --filter web test:users-roles-bff-boundary
 pnpm --filter web test:guest-session-transport
 ```
 
@@ -274,6 +283,8 @@ pnpm --filter api test:integration:pilot-assortment-store-scope:pg
 pnpm --filter api test:integration:pilot-team-chat-fresh-scope:pg
 $env:PILOT_CRM_COMMUNICATIONS_PG_CONFIRM = 'run-pilot-crm-communications-postgres-fixtures'
 pnpm --filter api test:integration:pilot-crm-communications:pg
+$env:PILOT_USERS_ROLES_PG_CONFIRM = 'run-pilot-users-roles-postgres-fixtures'
+pnpm --filter api test:integration:pilot-users-roles:pg
 ```
 
 На exact CURRENT179 disposable PostgreSQL fixture принят `1 suite / 3 tests`:
@@ -296,6 +307,13 @@ tenant-isolated task/report/export/user/event reads, create/update, cross-tenant
 guest/task targets, полный fresh `STORES` deny и stale `NETWORK -> STORES`
 deny до mutation. Tenant predicates не подменяются; финальный residue равен
 `0 tenants / 0 users / 0 fixture tasks / 0 fixture events`.
+
+Отдельная exact CURRENT179 users/roles fixture принята на SHA
+`f26dbb1612e4e86a1d6ee7254b5d4812bdae31a7`, CI `31641457556`:
+`1 suite / 4 tests`, без fail/skip. Она проверяет `NETWORK`/`STORES`
+inventories, user/custom-role/system-role mutations для A/A1/A2↔B/B1 и
+отклоняет stale role/effective-capability authority до business effect. SHA-bound
+artifact: `9159307294`, digest `sha256:1c79f2a3…cef5408`.
 
 ## 8. Следующая последовательность
 

@@ -435,6 +435,9 @@ jobs:
       - name: Test pilot BFF authentication and cache boundary
         run: pnpm --filter web test:pilot-bff-boundary
 
+      - name: Test users and roles BFF boundary
+        run: pnpm --filter web test:users-roles-bff-boundary
+
       - name: Test reproducible web build boundary
         run: pnpm --filter web test:release-build-boundary
 

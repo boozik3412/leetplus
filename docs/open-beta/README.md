@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.95                                         |
+| Версия           | 1.96                                         |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -64,6 +64,9 @@ enterprise-isolation option и не сокращает shared gates.
    controller inventory, fresh tenant/store authority, 26 assortment reads,
    29 assortment mutations, 77 NETWORK-only in-app gamification handlers и
    точный fail-closed остаток.
+   0a.1. [Gate 1MT users/roles PostgreSQL CI evidence](./gate-1mt-users-roles-pg-ci-evidence-2026-08-13.md) —
+   exact-SHA A/A1/A2↔B/B1 inventory/mutation/stale-authority matrix `4/4`,
+   SHA-bound artifact и явная граница `NO ACCESS GO`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;

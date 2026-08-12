@@ -659,7 +659,6 @@ function productionDependencies() {
         user: decodeURIComponent(parsed.username),
         connectionTimeoutMillis: connectTimeoutMs,
         query_timeout: connectTimeoutMs,
-        statement_timeout: connectTimeoutMs,
       });
       let connected = false;
       try {

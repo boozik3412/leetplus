@@ -482,5 +482,6 @@ test("production runner source has no signer, key, filesystem, process, Prisma, 
     source,
     /process\.env|PRIVATE_KEY_PATH|SIGNING_KEY|readFile|readFileSync/iu,
   );
+  assert.doesNotMatch(source, /statement_timeout/u);
   assert.match(source, /new pg\.Client/gu);
 });

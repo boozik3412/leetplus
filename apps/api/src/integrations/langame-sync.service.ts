@@ -9,6 +9,7 @@ import {
   IntegrationSyncStatus,
   IntegrationSyncTrigger,
   Prisma,
+  TenantCustomerStage,
   TenantModule,
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
@@ -42,6 +43,8 @@ import type {
 const DEFAULT_PAGE_LIMIT = 200;
 const MAX_LANGAME_PERIOD_DAYS = 365;
 const MAX_LANGAME_OPERATION_LOG_PERIOD_DAYS = 31;
+export const EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE =
+  'EXTERNAL_LEGACY_LANGAME_SYNC_REQUIRES_CURRENT188';
 
 type DiscrepancyLogEntry = {
   entity: 'Product' | 'InventorySnapshot' | 'SalesFact';
@@ -202,6 +205,13 @@ export class LangameSyncService {
           message: tenantBackgroundExecutionNote(backgroundExecution),
         });
       }
+    }
+    if (admission.customerStage !== TenantCustomerStage.INTERNAL) {
+      throw new ServiceUnavailableException({
+        reasonCode: EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE,
+        message:
+          'External tenant Langame sync requires the staged, store-bound onboarding workflow',
+      });
     }
 
     const requestedPeriod = this.resolvePeriod(query);

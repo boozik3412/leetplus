@@ -10,7 +10,10 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
-import { LangameSyncService } from './langame-sync.service';
+import {
+  EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE,
+  LangameSyncService,
+} from './langame-sync.service';
 import {
   BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
   type LangameSyncResult,
@@ -548,6 +551,36 @@ describe('LangameSyncService', () => {
     }
   });
 
+  it('rejects legacy external sync before credentials, provider calls or mutations', async () => {
+    admission.assertAllowed.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: 'tenant-1',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.PILOT,
+    });
+
+    await expect(
+      service.syncTenant(user, {
+        mode: 'FULL',
+        dateFrom: '2026-04-29',
+        dateTo: '2026-04-29',
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE,
+      },
+    });
+
+    expect(settings.resolveTenantAccess).not.toHaveBeenCalled();
+    expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
+    expect(prisma.product.upsert).not.toHaveBeenCalled();
+    expect(prisma.store.upsert).not.toHaveBeenCalled();
+    for (const method of Object.values(client)) {
+      expect(method).not.toHaveBeenCalled();
+    }
+  });
+
   it('keeps the current day in catch-up sync when a source was already synced today', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-04-29T12:00:00.000Z'));
     settings.resolveTenantAccess.mockResolvedValueOnce({
@@ -784,7 +817,7 @@ describe('LangameSyncService', () => {
     }
   });
 
-  it('keeps an authenticated manual sync available for an external tenant', async () => {
+  it('rejects a direct authenticated external manual sync before credentials or effects', async () => {
     admission.assertAllowed.mockResolvedValueOnce({
       allowed: true,
       tenantId: 'tenant-pilot',
@@ -792,22 +825,23 @@ describe('LangameSyncService', () => {
       failedRequirement: null,
       customerStage: TenantCustomerStage.PILOT,
     });
-    settings.resolveTenantAccess.mockResolvedValueOnce({
-      apiKey: 'test-key',
-      sources: [],
-    });
-
     await expect(
       service.syncTenantById('tenant-pilot', {
         mode: 'QUICK',
         trigger: 'MANUAL',
       }),
-    ).resolves.toMatchObject({
-      tenantId: 'tenant-pilot',
-      sources: 0,
-      failedSources: 0,
+    ).rejects.toMatchObject({
+      status: 503,
+      response: {
+        reasonCode: EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE,
+      },
     });
 
-    expect(settings.resolveTenantAccess).toHaveBeenCalledWith('tenant-pilot');
+    expect(settings.resolveTenantAccess).not.toHaveBeenCalled();
+    expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
+    expect(prisma.store.upsert).not.toHaveBeenCalled();
+    for (const method of Object.values(client)) {
+      expect(method).not.toHaveBeenCalled();
+    }
   });
 });

@@ -40,6 +40,15 @@ ACTIVATE response обязан содержать тот же `receiptId`, ко�
 Legacy `POST /integrations/langame/sync` и foundation sync не являются
 безопасной заменой этим стадиям. До их реализации UI cutover запрещён.
 
+Legacy `LangameSyncService` теперь также fail-closed внутри service на fresh
+persisted `customerStage`: любой `PILOT/BETA/LIVE` manual child получает
+`EXTERNAL_LEGACY_LANGAME_SYNC_REQUIRES_CURRENT188` до чтения credential,
+provider call, sync job или business mutation. Это закрывает обход, при котором
+legacy `Store.upsert` мог автоматически создать все видимые provider clubs либо
+sales placeholder вместо exact выбранного и quota-bound Store. `INTERNAL`
+контур текущей сети не меняется. Focused service evidence: `12/12 PASS`;
+exact-SHA CI acceptance для этого slice ещё обязательна.
+
 ## Проверка
 
 ```powershell

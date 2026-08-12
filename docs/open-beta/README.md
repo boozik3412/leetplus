@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.97                                         |
+| Версия           | 1.98                                         |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -96,7 +96,8 @@ enterprise-isolation option и не сокращает shared gates.
    Handler imports it.
    0e. [CURRENT188 dormant Langame Web BFF candidate](./langame-current188-bff-candidate.md) —
    exact preview/activate transport и явные blockers для отсутствующих status,
-   reconcile и initial read-only sync contracts.
+   reconcile и initial read-only sync contracts; legacy external sync теперь
+   также fail-closed до credentials/provider/database effects.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

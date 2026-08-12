@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026
 
-Статус: `ENGINEERING ACCEPTED LOCALLY / ACTUAL DISPOSABLE WIRE+TLS FIXTURE / DENY-ONLY / NOT DEPLOYABLE`.
+Статус: `EXACT-SHA CI ACCEPTED / ACTUAL DISPOSABLE WIRE+TLS FIXTURE / DENY-ONLY / NOT DEPLOYABLE`.
 
 ## Назначение
 
@@ -70,6 +70,13 @@ Runner формирует `probeTranscriptDigest` и структуру `service
 - aggregate CURRENT187 gate: `99/99 PASS`;
 - database typecheck: `PASS`;
 - syntax и Prettier: `PASS`.
+
+Exact-SHA candidate
+`e4789e29e1072fe81d43d31543a53bb88afb7d7d` принят GitHub Actions run
+`31597872402`: все `3/3` job завершены `SUCCESS`, обязательный actual negative
+connection probe step — `SUCCESS`. Release artifact ID `9142149284`, digest
+`sha256:1fb76259ee66dd9b45219a6d8651ec0c1853dfb7583e3fd29a9d1731f3fdd85f`.
+Полная фиксация: [J5-R1 CI evidence](./identity-mail-current187-j5-r1-ci-evidence-2026-08-12.md).
 
 ## Что ещё требуется
 

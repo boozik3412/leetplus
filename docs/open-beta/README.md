@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.78                                         |
+| Версия           | 1.79                                         |
 | Дата             | 07.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -650,9 +650,12 @@ enterprise-isolation option и не сокращает shared gates.
   — production entry связывает branded J1–J4 receipts, выполняет 20
   классифицированных negative PostgreSQL connection attempts и 12 безопасных
   control-policy evaluations без изменения HBA/PgBouncer; runner `10/10`, J5
-  `20/20`, actual wire/TLS fixture `1/1`, aggregate CURRENT187 `99/99`, typecheck
-  green. Actual branded J1–J4 production-like topology, signer/root, persistence
-  и F/deploy binding ещё обязательны.
+  `20/20`, actual wire/TLS fixture `1/1`, aggregate CURRENT187 `99/99`. Exact
+  SHA `e4789e29…`, CI `31597872402` — `3/3 SUCCESS`, actual negative probe step
+  `SUCCESS`, artifact `sha256:1fb76259…fdd85f`; см.
+  [J5-R1 CI evidence](./identity-mail-current187-j5-r1-ci-evidence-2026-08-12.md).
+  Actual branded J1–J4 production-like topology, signer/root, persistence и
+  F/deploy binding ещё обязательны.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

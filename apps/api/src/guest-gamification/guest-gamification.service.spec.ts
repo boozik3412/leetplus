@@ -10563,6 +10563,93 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('does not issue a second mission reward by reusing a purchase from the previous completion', async () => {
+      const { service } = createService();
+      const completedAt = '2026-08-08T09:18:14.000Z';
+
+      jest.spyOn(service as any, 'resolveDryRunProfile').mockResolvedValue(
+        profileFixture({
+          gameActivatedAt: '2026-08-01T00:00:00.000Z',
+        }),
+      );
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          id: 'device-cashback',
+          createdAt: new Date('2026-08-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-08-01T00:00:00.000Z'),
+          missionType: 'PRODUCT_PURCHASE',
+          triggerKind: 'PRODUCT_PURCHASE',
+          progressTarget: 1,
+          progressUnit: 'purchase',
+          definitionVersion: 2,
+          maxPendingRewards: 100_000,
+          conditions: {
+            schemaVersion: 2,
+            source: 'mission_wizard',
+            taskType: 'PRODUCT_PURCHASE',
+            purchaseSource: 'CATEGORY',
+            metric: {
+              aggregation: 'count',
+              eventTypes: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
+              purchaseSource: 'CATEGORY',
+              externalCategoryKeys: ['46.langamepro.ru:16'],
+              target: 1,
+              unit: 'purchase',
+            },
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([
+        rewardResult({
+          id: 'device-cashback-first-reward',
+          qualifiedAt: completedAt,
+          mission: {
+            id: 'device-cashback',
+            name: 'Device cashback',
+            status: 'ACTIVE',
+            missionType: 'PRODUCT_PURCHASE',
+            triggerKind: 'PRODUCT_PURCHASE',
+            xpReward: 0,
+            progressUnit: 'purchase',
+          },
+        }),
+      ]);
+      jest.spyOn(service as any, 'getDryRunProgressEvents').mockResolvedValue([
+        {
+          eventType: 'PRODUCT_PURCHASE',
+          occurredAt: new Date(completedAt),
+          externalCategoryKey: '46.langamepro.ru:16',
+          externalProductId: 'device-rental',
+          spendAmount: 150,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: '2026-08-09T13:34:12.000Z',
+        externalCategoryKey: '46.langamepro.ru:3',
+        externalProductId: 'beverage',
+        spendAmount: 150,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        id: 'device-cashback',
+        kind: 'MISSION',
+        eligible: false,
+        progress: {
+          current: 0,
+          target: 1,
+          completed: false,
+        },
+      });
+      expect(result.summary).toMatchObject({
+        eligibleRules: 0,
+        estimatedRewardAmount: 0,
+      });
+    });
+
     it('counts a Battle Pass balance top-up before the first game-module open', async () => {
       const { service } = createService();
 

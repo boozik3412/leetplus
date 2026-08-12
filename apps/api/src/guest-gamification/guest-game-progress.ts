@@ -95,6 +95,12 @@ export function evaluateGuestGameProgress(
     rule.repeatPeriodicity,
     rule.timeZone,
   );
+  const completedAt = dateValue(rule.repeatCompletedAt);
+  const resetImmediatelyAfterCompletion = Boolean(
+    completedAt &&
+    !rule.repeatPeriodicity &&
+    completedAt.getTime() < referenceEvent.occurredAt.getTime(),
+  );
 
   if (!hasMetric && (!target || target <= 1)) {
     return {
@@ -134,6 +140,8 @@ export function evaluateGuestGameProgress(
         eventTypes,
         windowDays,
         repeatCycleReset,
+        completedAt,
+        resetImmediatelyAfterCompletion,
       }),
   );
   const current = progressValue(
@@ -345,6 +353,8 @@ function matchesProgressEvent(
     eventTypes: string[];
     windowDays: number;
     repeatCycleReset: boolean;
+    completedAt: Date | null;
+    resetImmediatelyAfterCompletion: boolean;
   },
 ) {
   if (options.eventTypes.length) {
@@ -382,6 +392,17 @@ function matchesProgressEvent(
       rule.repeatPeriodicity,
       rule.timeZone,
     )
+  ) {
+    return false;
+  }
+
+  // A completed non-periodic mission starts a fresh accumulation immediately.
+  // Facts that contributed to the previous reward must never be reused to
+  // qualify another reward when an unrelated later event triggers evaluation.
+  if (
+    options.resetImmediatelyAfterCompletion &&
+    options.completedAt &&
+    event.occurredAt.getTime() <= options.completedAt.getTime()
   ) {
     return false;
   }

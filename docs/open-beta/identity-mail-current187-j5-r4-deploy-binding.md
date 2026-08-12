@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026.
 
-Статус: `ENGINEERING ACCEPTED LOCALLY / SYNTHETIC DENY-ONLY / NOT DEPLOYABLE`.
+Статус: `EXACT-SHA CI ACCEPTED / SYNTHETIC DENY-ONLY / NOT DEPLOYABLE`.
 
 ## Результат
 
@@ -50,6 +50,12 @@ Matched receipt намеренно остаётся deny-only:
 - database typecheck: `PASS`;
 - capability isolation: database/network/filesystem-write/process/env/tenant/
   invite/provider authority отсутствует.
+
+Exact SHA `5fca5a9d1007e21b03b81fa5da29b52a042d6611` принят GitHub CI
+`31609394804`: `3/3 SUCCESS`. SHA-bound artifact digest —
+`sha256:396d7e78d13eb15691e3ff917335e9321d6a0618c8c934c3a9d1b595f174dce1`.
+Полное evidence:
+[CURRENT187-J5-R4 CI](./identity-mail-current187-j5-r4-ci-evidence-2026-08-12.md).
 
 ## Что этап не закрывает
 

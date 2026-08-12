@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.90                                         |
+| Версия           | 1.91                                         |
 | Дата             | 12.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -713,8 +713,9 @@ enterprise-isolation option и не сокращает shared gates.
   — одноразовый CA, отдельные server/client certificates, PostgreSQL TLS и
   PgBouncer client/server verify-full. Integration вызывает public actual J4
   collector и требует strict production-origin receipt без PEM/raw hashes.
-  Реализация и статические проверки локально готовы; actual Ubuntu execution и
-  exact-SHA CI пока `PENDING`, co-located J1–J4 topology не заявляется.
+  Actual integration `3/3` без skip; SHA `8917cd4b…` принят CI `31624262449`
+  `3/3 SUCCESS`, artifact `sha256:101e956b…04cca`. Co-located J1–J4 topology
+  ещё не заявляется. [CI evidence](./identity-mail-current187-j5-r8-ci-evidence-2026-08-12.md).
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

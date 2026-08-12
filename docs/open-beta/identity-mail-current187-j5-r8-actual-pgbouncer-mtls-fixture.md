@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026.
 
-Статус: `IMPLEMENTED LOCALLY / EXACT-SHA CI PENDING / NO PRODUCTION EFFECT`.
+Статус: `EXACT-SHA CI ACCEPTED / NO PRODUCTION EFFECT / NOT DEPLOYABLE`.
 
 ## Цель
 
@@ -49,16 +49,20 @@ Integration test:
 - доказывает, что application login не получает PgBouncer admin console.
 - доказывает, что TLS client без client certificate отклоняется.
 
-## Текущая приёмка
+## Приёмка
 
 - integration source `node --check`: `PASS`;
 - fixture `bash -n` через Git for Windows: `PASS`;
 - workflow/integration scoped Prettier: `PASS`;
 - `git diff --check`: `PASS`.
+- actual Ubuntu PostgreSQL/PgBouncer integration: `3/3 PASS`, `0` skip;
+- public J4 receipt: strict production-origin brand `PASS`;
+- все последующие PostgreSQL/shared-beta steps после TLS restart: `PASS`.
 
-Actual TLS/PostgreSQL/PgBouncer execution доступен только в Ubuntu CI job с
-service container. До полного exact-SHA CI success этот документ не заявляет,
-что mTLS fixture исполнен или принят.
+Exact SHA `8917cd4b14f7b015c9512f18bdc6304bf43b74f8` принят GitHub Actions run
+`31624262449`: все `3/3` jobs завершены `SUCCESS`. Artifact ID `9152790153`,
+digest `sha256:101e956ba192dd46cc6065043f78961bff875a3402c7932bf1e9035b73504cca`.
+Полная фиксация: [R8 CI evidence](./identity-mail-current187-j5-r8-ci-evidence-2026-08-12.md).
 
 Первый exact-SHA run `31619118015` на `cae1a205…` принят как отрицательная
 диагностика, не как R8 evidence: CA/certificates, PostgreSQL TLS и PgBouncer

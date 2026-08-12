@@ -743,6 +743,12 @@ jobs:
           NODE_ENV: test
           IDENTITY_MAIL_SEMANTIC_APPROVAL_LEDGER_CURRENT187_PG_E2E_CONFIRM: run-current187i-semantic-approval-ledger-postgres-e2e
 
+      - name: Verify CURRENT187 persisted connection probe ledger replay, scoped revocation and expiry races
+        run: pnpm --filter database test:integration:identity-mail-cluster-connection-probe-ledger-current187:pg
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_CONNECTION_PROBE_LEDGER_CURRENT187_PG_E2E_CONFIRM: run-current187j5l-connection-probe-ledger-postgres-e2e
+
       - name: Verify CURRENT187 actual Prisma PostgreSQL backend session identity
         run: pnpm --filter database test:integration:identity-mail-cluster-postgres-session-current187:pg
         env:

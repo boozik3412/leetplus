@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026.
 
-Статус: `ENGINEERING ACCEPTED LOCALLY / CONTRACT ONLY / NOT DEPLOYED`.
+Статус: `NONCANONICAL POSTGRESQL CANDIDATE / STATIC ACCEPTED / NOT DEPLOYED`.
 
 ## Результат
 
@@ -50,26 +50,29 @@ frozen-empty.
 - aggregate CURRENT187 gate: `111/111 PASS`;
 - syntax checks: `PASS`.
 
+Noncanonical PostgreSQL candidate добавлен вне `prisma/migrations`. Он содержит
+три append-only таблицы, FORCE RLS, owner-only policies, отдельные exact-OID
+consumer/revoker/runtime роли и execute-only consume/revoke RPC. Статическая
+приёмка candidate: `7/7 PASS`; combined J5: `39/39`; aggregate CURRENT187:
+`118/118`. Actual PostgreSQL hostile fixture подключён к CI, но ещё не принят
+на exact SHA.
+
 ## Что этот этап не закрывает
 
-J5-R3 пока не является persisted PostgreSQL ledger. В canonical migrations нет
-таблиц, FORCE RLS policies, execute-only ролей и RPC для этого контракта;
-отсутствуют hostile PostgreSQL race/replay/lost-response fixtures. Также не
-проведены external key ceremony, OS ACL/HSM/KMS attestation, reviewed production
-root enrollment, production-like four-service run и binding branded persisted
-J5 receipt в CURRENT187-F/deploy authority.
+J5-R3 пока не является canonical или production PostgreSQL ledger. Candidate
+находится вне canonical migrations; actual hostile PostgreSQL race/replay/
+lost-response fixture ещё должен пройти exact-SHA CI. Также не проведены
+external key ceremony, OS ACL/HSM/KMS attestation, reviewed production root
+enrollment, production-like four-service run и binding branded persisted J5
+receipt в CURRENT187-F/deploy authority.
 
 Поэтому production, `Tenant A/A1..A4`, внешний tenant/tester, invites и
 providers не изменялись. Решение по внешнему тесту остаётся `NO-GO`.
 
 ## Следующий этап
 
-1. Реализовать noncanonical PostgreSQL candidate с append-only consumption и
-   revocation ledger, FORCE RLS и раздельными execute-only consumer/revoker
-   ролями.
-2. Зафиксировать единый lock order, свежую проверку времени после ожидания
-   lock, exact replay и lost-response reconciliation.
-3. Принять hostile PostgreSQL matrix для consume/revoke/expiry/races и доказать
+1. Принять hostile PostgreSQL matrix для consume/revoke/expiry/races и доказать
    нулевой postflight residue.
-4. Только после отдельной проверки рассматривать canonical promotion и binding
+2. Провести независимую latest-byte проверку SQL/RLS/RPC и test harness.
+3. Только после отдельной проверки рассматривать canonical promotion и binding
    в CURRENT187-F/deploy authority.

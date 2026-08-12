@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "contract": "CURRENT187_CONNECTION_PROBE_LEDGER_SYNTHETIC_CI_V1",
+  "candidate": "20260812170000_identity_mail_connection_probe_ledger_current187",
+  "ordinal": "187-J5-R3",
+  "predecessor": {
+    "requiredContract": "CURRENT187_J5_R3_PERSISTED_CONNECTION_PROBE_CONSUMPTION_REVOCATION_LEDGER",
+    "resolved": false
+  },
+  "migrationSqlSha256": "614ed2b77a6e50b8fc039ac074f69379f7bcfd0f64f24959e2bb16e01c98a605",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "canConsumeProductionProbe": false,
+  "canRevokeProductionProbe": false,
+  "canSend": false,
+  "testAccessAuthorized": false,
+  "sharedBetaAccess": false,
+  "productionRootEnrolled": false,
+  "productionRootsFrozenEmpty": true,
+  "applicationRoleAllowlistBound": false,
+  "productionApplyAuthorized": false,
+  "status": "NOT_DEPLOYABLE"
+}

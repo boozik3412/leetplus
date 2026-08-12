@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.81                                         |
+| Версия           | 1.82                                         |
 | Дата             | 07.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -666,9 +666,10 @@ enterprise-isolation option и не сокращает shared gates.
 
 - [CURRENT187-J5-R3 persisted ledger contract](./identity-mail-current187-j5-r3-persisted-ledger-contract.md)
   — transferable deny-only one-time consumption и `ENVELOPE/MATRIX/ROOT`
-  revocation bundles для exact signed J5 envelope. R3 `6/6`, combined J5
-  `32/32`, aggregate CURRENT187 `111/111`; PostgreSQL tables/FORCE-RLS/RPC,
-  hostile race/lost-response acceptance и production binding ещё обязательны.
+  revocation bundles для exact signed J5 envelope. Noncanonical PG candidate
+  добавляет append-only/FORCE-RLS/execute-only RPC; contract `6/6`, static PG
+  `7/7`, combined J5 `39/39`, aggregate CURRENT187 `118/118`. Actual hostile PG
+  CI, independent review, canonical promotion и production binding обязательны.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

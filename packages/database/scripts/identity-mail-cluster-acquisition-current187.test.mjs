@@ -27,6 +27,25 @@ import {
   verifySyntheticCurrent187AdmissionEnvelope,
 } from "./identity-mail-cluster-application-admission-current187-authority.mjs";
 import {
+  CURRENT187_CONNECTION_NEGATIVE_OUTCOME_BY_SCENARIO,
+  CURRENT187_CONNECTION_NEGATIVE_SCENARIOS,
+  CURRENT187_CONNECTION_PROBE_KIND,
+  CURRENT187_CONNECTION_PROBE_PROFILE,
+  CURRENT187_CONNECTION_PROBE_PURPOSE,
+  CURRENT187_CONNECTION_PROBE_SIGNATURE_ALGORITHM,
+  CURRENT187_CONNECTION_PROBE_SLICE,
+  CURRENT187_CONNECTION_PROBE_SYNTHETIC_CONFIRMATION,
+  CURRENT187_CONNECTION_PROBE_TRUST_DOMAIN,
+  current187ConnectionProbePayloadDigest,
+  current187ConnectionProbePublicKeyFingerprint,
+  verifySyntheticCurrent187ConnectionProbeEnvelope,
+} from "./identity-mail-cluster-connection-probe-attestation-current187.mjs";
+import { bindPersistedCurrent187ConnectionProbeToDeploymentAuthority } from "./identity-mail-cluster-connection-probe-deploy-binding-current187.mjs";
+import {
+  attachPersistedCurrent187ConnectionProbeConsumption,
+  createCurrent187ConnectionProbeConsumptionBundle,
+} from "./identity-mail-cluster-connection-probe-ledger-current187.mjs";
+import {
   CURRENT187_CLUSTER_ACQUISITION_CONFIRMATION,
   CURRENT187_CLUSTER_ACQUISITION_KIND,
   CURRENT187_CLUSTER_ACQUISITION_PROFILE,
@@ -63,6 +82,14 @@ import {
   isVerifiedCurrent187ClusterPolicyReceipt,
 } from "./identity-mail-cluster-policy-current187.mjs";
 import {
+  CURRENT187_CLUSTER_POLICY_SUCCESSOR_KIND,
+  CURRENT187_CLUSTER_POLICY_SUCCESSOR_PROFILE,
+  CURRENT187_CLUSTER_POLICY_SUCCESSOR_SLICE,
+  evaluateCurrent187ClusterPolicySuccessor,
+  isVerifiedCurrent187ClusterPolicySuccessorReceipt,
+} from "./identity-mail-cluster-policy-successor-current187.mjs";
+import { CURRENT187_NETWORK_RUNTIME_SERVICE_PURPOSES } from "./identity-mail-cluster-network-runtime-attestation-current187.mjs";
+import {
   CURRENT187_SEMANTIC_ALLOWLIST_DOCUMENT_KIND,
   CURRENT187_SEMANTIC_ALLOWLIST_DOCUMENT_PROFILE,
   CURRENT187_SEMANTIC_ALLOWLIST_SLICE,
@@ -85,6 +112,20 @@ const DIGESTS = Object.freeze({
   fence: "1".repeat(64),
   topology: "2".repeat(64),
 });
+const CURRENT187_J5_RELEASE_SHA = "c".repeat(40);
+const CURRENT187_J5_OPERATION_ID = "99999999-9999-4999-8999-999999999999";
+const CURRENT187_J5_NOW = "2026-08-05T10:03:00.000Z";
+const CURRENT187_J5_KEY_ID = "current187-policy-successor-j5-ci-1";
+const {
+  privateKey: CURRENT187_J5_PRIVATE_KEY,
+  publicKey: CURRENT187_J5_PUBLIC_KEY,
+} = generateKeyPairSync("ed25519");
+const CURRENT187_J5_PUBLIC_KEY_PEM = CURRENT187_J5_PUBLIC_KEY.export({
+  format: "pem",
+  type: "spki",
+});
+const CURRENT187_J5_PUBLIC_KEY_FINGERPRINT =
+  current187ConnectionProbePublicKeyFingerprint(CURRENT187_J5_PUBLIC_KEY_PEM);
 
 function digest(label) {
   return createHash("sha256").update(label, "utf8").digest("hex");
@@ -95,6 +136,143 @@ function domainDigest(domain, value) {
     .update(`${domain}\n`, "utf8")
     .update(value, "utf8")
     .digest("hex");
+}
+
+function current187J5NegativeProbes(purpose) {
+  return CURRENT187_CONNECTION_NEGATIVE_SCENARIOS.map((scenario) => ({
+    evidenceDigest: digest(`successor:${purpose}:${scenario}`),
+    observedOutcome:
+      CURRENT187_CONNECTION_NEGATIVE_OUTCOME_BY_SCENARIO[scenario],
+    scenario,
+  }));
+}
+
+function current187J5Service(purpose, index) {
+  return {
+    allowedOperationsDigest: digest(`successor:${purpose}:operations`),
+    applicationNameDigest: digest(`successor:${purpose}:application`),
+    backendIdentityDigest: digest(`successor:${purpose}:backend`),
+    endpointClass: index === 0 ? "POOLER" : "DIRECT_DATABASE",
+    endpointTlsPeerReceiptDigest: digest(`successor:${purpose}:j2`),
+    hbaAuthMethod: "scram-sha-256",
+    hbaRuleDigest: digest(`successor:${purpose}:hba`),
+    negativeProbes: current187J5NegativeProbes(purpose),
+    poolerMappingDigest: digest(`successor:${purpose}:pooler`),
+    poolMode: index === 0 ? "TRANSACTION" : "SESSION",
+    positiveOutcome: "ALLOWED",
+    positiveProbeDigest: digest(`successor:${purpose}:positive`),
+    postgresSessionReceiptDigest: digest(`successor:${purpose}:j1`),
+    purpose,
+    secretReferenceDigest: digest(`successor:${purpose}:secret-reference`),
+    tlsMode: "VERIFY_FULL",
+  };
+}
+
+function persistedCurrent187J5ProbeFixture(attested) {
+  const planner = attested.plannerReceipt;
+  const payload = {
+    clusterIdentityDigest: planner.clusterIdentityDigest,
+    contract: CURRENT187_ADMISSION_CONTRACT,
+    databaseUniverseDigest: planner.expectedDatabaseUniverseDigest,
+    environment: "ci",
+    hbaControlReceiptDigest: digest("successor:j3"),
+    hostControlChallengeDigest: digest("successor:host-control"),
+    issuedAt: "2026-08-05T10:02:40.000Z",
+    kind: CURRENT187_CONNECTION_PROBE_KIND,
+    nonce: digest("successor:j5-nonce"),
+    operationId: CURRENT187_J5_OPERATION_ID,
+    pgbouncerControlReceiptDigest: digest("successor:j4"),
+    probeRunnerArtifactDigest: digest("successor:runner"),
+    probeTranscriptDigest: digest("successor:transcript"),
+    profile: CURRENT187_CONNECTION_PROBE_PROFILE,
+    publicKeyFingerprint: CURRENT187_J5_PUBLIC_KEY_FINGERPRINT,
+    purpose: CURRENT187_CONNECTION_PROBE_PURPOSE,
+    releaseSha: CURRENT187_J5_RELEASE_SHA,
+    schemaVersion: CURRENT187_ADMISSION_SCHEMA_VERSION,
+    services:
+      CURRENT187_NETWORK_RUNTIME_SERVICE_PURPOSES.map(current187J5Service),
+    signingKeyId: CURRENT187_J5_KEY_ID,
+    slice: CURRENT187_CONNECTION_PROBE_SLICE,
+    trustDomain: CURRENT187_CONNECTION_PROBE_TRUST_DOMAIN,
+    validUntil: "2026-08-05T10:04:30.000Z",
+  };
+  const envelope = {
+    payload,
+    payloadDigest: current187ConnectionProbePayloadDigest(payload),
+    publicKeyFingerprint: CURRENT187_J5_PUBLIC_KEY_FINGERPRINT,
+    signature: signPayload(
+      null,
+      Buffer.from(current187AdmissionCanonicalJson(payload), "utf8"),
+      CURRENT187_J5_PRIVATE_KEY,
+    ).toString("base64url"),
+    signatureAlgorithm: CURRENT187_CONNECTION_PROBE_SIGNATURE_ALGORITHM,
+    signingKeyId: CURRENT187_J5_KEY_ID,
+  };
+  const root = {
+    algorithm: CURRENT187_CONNECTION_PROBE_SIGNATURE_ALGORITHM,
+    keyId: CURRENT187_J5_KEY_ID,
+    notAfter: "2026-08-05T11:00:00.000Z",
+    notBefore: "2026-08-05T09:00:00.000Z",
+    profile: CURRENT187_CONNECTION_PROBE_PROFILE,
+    publicKeyFingerprint: CURRENT187_J5_PUBLIC_KEY_FINGERPRINT,
+    publicKeyPem: CURRENT187_J5_PUBLIC_KEY_PEM,
+    purpose: CURRENT187_CONNECTION_PROBE_PURPOSE,
+    status: "ACTIVE",
+    trustDomain: CURRENT187_CONNECTION_PROBE_TRUST_DOMAIN,
+  };
+  const verificationReceipt = verifySyntheticCurrent187ConnectionProbeEnvelope(
+    envelope,
+    { [CURRENT187_J5_KEY_ID]: root },
+    {
+      databaseName: DATABASES.app.name,
+      endpointHost: "127.0.0.1",
+      environment: "ci",
+      explicitConfirmation: CURRENT187_CONNECTION_PROBE_SYNTHETIC_CONFIRMATION,
+      nodeEnv: "test",
+    },
+    CURRENT187_J5_NOW,
+  );
+  const bundle = createCurrent187ConnectionProbeConsumptionBundle(
+    envelope,
+    verificationReceipt,
+    CURRENT187_J5_NOW,
+  );
+  const persistedBase = {
+    authorization: false,
+    canApply: false,
+    canMutate: false,
+    canSend: false,
+    commandDigest: bundle.commandDigest,
+    connectionProbeMatrixDigest: bundle.command.connectionProbeMatrixDigest,
+    consumedAt: CURRENT187_J5_NOW,
+    envelopeDigest: bundle.command.envelopeDigest,
+    kind: "CURRENT187_CONNECTION_PROBE_CONSUMPTION_RECEIPT",
+    nonce: bundle.command.nonce,
+    noncanonical: true,
+    operationId: bundle.command.operationId,
+    persistedConsumptionVerified: true,
+    productionRootEnrolled: false,
+    publicKeyFingerprint: bundle.command.publicKeyFingerprint,
+    sharedBetaAccess: false,
+    status: "CONSUMED",
+    syntheticLoopbackCiOnly: true,
+    testAccessAuthorized: false,
+    transactionId: "43",
+    verificationReceiptDigest: bundle.command.verificationReceiptDigest,
+  };
+  const persisted = {
+    ...persistedBase,
+    receiptDigest: domainDigest(
+      "LEETPLUS_CURRENT187_CONNECTION_PROBE_CONSUMPTION_RECEIPT_V1",
+      current187AdmissionCanonicalJson(persistedBase),
+    ),
+  };
+  return attachPersistedCurrent187ConnectionProbeConsumption(
+    envelope,
+    verificationReceipt,
+    bundle,
+    current187AdmissionCanonicalJson(persisted),
+  );
 }
 
 const DATABASES = Object.freeze({
@@ -973,6 +1151,197 @@ test("signed deployment policy matches stable role, ACL, and multi-database cata
   );
 });
 
+test("CURRENT187-F and persisted J5-R4 compose into one branded deny-only successor", async () => {
+  const { attested } = await attestedAcquisitionFixture();
+  const authority = deploymentAuthorityFixture(attested);
+  const semantic = semanticAllowlistFixture(attested);
+  const persistedSemantic = persistSemanticApprovalForPolicy(semantic.receipt);
+  const policyReceipt = evaluateCurrent187ClusterPolicy(
+    attested,
+    authority,
+    persistedSemantic,
+  );
+  const persistedProbe = persistedCurrent187J5ProbeFixture(attested);
+  const probeBinding =
+    bindPersistedCurrent187ConnectionProbeToDeploymentAuthority(
+      persistedProbe,
+      authority,
+    );
+  const successor = evaluateCurrent187ClusterPolicySuccessor(
+    policyReceipt,
+    probeBinding,
+  );
+
+  assert.equal(successor.kind, CURRENT187_CLUSTER_POLICY_SUCCESSOR_KIND);
+  assert.equal(successor.profile, CURRENT187_CLUSTER_POLICY_SUCCESSOR_PROFILE);
+  assert.equal(successor.slice, CURRENT187_CLUSTER_POLICY_SUCCESSOR_SLICE);
+  assert.equal(successor.status, "SUCCESSOR_BINDINGS_MATCHED_DENY_ONLY");
+  assert.equal(successor.successorPolicyBindingsMatched, true);
+  assert.equal(successor.legacyPolicyBindingsMatched, true);
+  assert.equal(successor.connectionProbeBindingsMatched, true);
+  assert.deepEqual(successor.reasonCodes, []);
+  assert.equal(
+    successor.sourceAuthorityPayloadDigest,
+    authority.envelope.payloadDigest,
+  );
+  assert.equal(
+    successor.sourcePolicyEvaluationDigest,
+    policyReceipt.policyEvaluationDigest,
+  );
+  assert.equal(
+    successor.sourceConnectionProbeDeployBindingDigest,
+    probeBinding.connectionProbeDeployBindingDigest,
+  );
+  assert.equal(successor.authorization, false);
+  assert.equal(successor.canApply, false);
+  assert.equal(successor.canMutate, false);
+  assert.equal(successor.canSend, false);
+  assert.equal(successor.deploymentGoConsumable, false);
+  assert.equal(successor.productionBindingSatisfied, false);
+  assert.equal(successor.productionRootEnrolled, false);
+  assert.equal(successor.productionRuntimeAttested, false);
+  assert.equal(successor.testAccessAuthorized, false);
+  assert.equal(successor.sharedBetaAccess, false);
+  assert.equal(Object.isFrozen(successor), true);
+  assert.equal(Object.isFrozen(successor.reasonCodes), true);
+  assert.equal(
+    isVerifiedCurrent187ClusterPolicySuccessorReceipt(successor),
+    true,
+  );
+  assert.equal(
+    isVerifiedCurrent187ClusterPolicySuccessorReceipt({ ...successor }),
+    false,
+  );
+});
+
+test("policy successor denies a different branded deployment authority and rejects clones", async () => {
+  const { attested } = await attestedAcquisitionFixture();
+  const policyAuthority = deploymentAuthorityFixture(attested);
+  const semantic = semanticAllowlistFixture(attested);
+  const policyReceipt = evaluateCurrent187ClusterPolicy(
+    attested,
+    policyAuthority,
+    persistSemanticApprovalForPolicy(semantic.receipt),
+  );
+  const persistedProbe = persistedCurrent187J5ProbeFixture(attested);
+  const otherAuthority = deploymentAuthorityFixture(attested, {
+    nonce: digest("policy-successor-other-authority"),
+  });
+  const otherProbeBinding =
+    bindPersistedCurrent187ConnectionProbeToDeploymentAuthority(
+      persistedProbe,
+      otherAuthority,
+    );
+  const denied = evaluateCurrent187ClusterPolicySuccessor(
+    policyReceipt,
+    otherProbeBinding,
+  );
+
+  assert.equal(denied.status, "SUCCESSOR_BINDINGS_DENIED");
+  assert.equal(denied.successorPolicyBindingsMatched, false);
+  assert.deepEqual(denied.reasonCodes, [
+    "CURRENT187_CLUSTER_POLICY_SUCCESSOR_AUTHORITY_MISMATCH",
+  ]);
+  assert.equal(denied.deploymentGoConsumable, false);
+  assert.throws(
+    () =>
+      evaluateCurrent187ClusterPolicySuccessor(
+        { ...policyReceipt },
+        otherProbeBinding,
+      ),
+    (error) =>
+      error?.reasonCode ===
+      "CURRENT187_CLUSTER_POLICY_SUCCESSOR_POLICY_RECEIPT_INVALID",
+  );
+  assert.throws(
+    () =>
+      evaluateCurrent187ClusterPolicySuccessor(policyReceipt, {
+        ...otherProbeBinding,
+      }),
+    (error) =>
+      error?.reasonCode ===
+      "CURRENT187_CLUSTER_POLICY_SUCCESSOR_PROBE_RECEIPT_INVALID",
+  );
+  assert.throws(
+    () => evaluateCurrent187ClusterPolicySuccessor(policyReceipt),
+    (error) =>
+      error?.reasonCode ===
+      "CURRENT187_CLUSTER_POLICY_SUCCESSOR_ARGUMENTS_INVALID",
+  );
+
+  let proxyTrapCalls = 0;
+  const hostilePolicy = new Proxy(policyReceipt, {
+    get() {
+      proxyTrapCalls += 1;
+      throw new Error("hostile getter must not run");
+    },
+  });
+  assert.throws(
+    () =>
+      evaluateCurrent187ClusterPolicySuccessor(
+        hostilePolicy,
+        otherProbeBinding,
+      ),
+    (error) =>
+      error?.reasonCode ===
+      "CURRENT187_CLUSTER_POLICY_SUCCESSOR_POLICY_RECEIPT_INVALID",
+  );
+  assert.equal(proxyTrapCalls, 0);
+});
+
+test("policy successor preserves branded legacy-policy and probe-binding denials", async () => {
+  const { attested } = await attestedAcquisitionFixture();
+  const semantic = semanticAllowlistFixture(attested);
+  const persistedSemantic = persistSemanticApprovalForPolicy(semantic.receipt);
+  const persistedProbe = persistedCurrent187J5ProbeFixture(attested);
+
+  const policyDriftAuthority = deploymentAuthorityFixture(attested, {
+    roleBindingsDigest: digest("successor-policy-role-binding-drift"),
+  });
+  const deniedPolicy = evaluateCurrent187ClusterPolicy(
+    attested,
+    policyDriftAuthority,
+    persistedSemantic,
+  );
+  const matchingProbeBinding =
+    bindPersistedCurrent187ConnectionProbeToDeploymentAuthority(
+      persistedProbe,
+      policyDriftAuthority,
+    );
+  const deniedByPolicy = evaluateCurrent187ClusterPolicySuccessor(
+    deniedPolicy,
+    matchingProbeBinding,
+  );
+  assert.deepEqual(deniedByPolicy.reasonCodes, [
+    "CURRENT187_CLUSTER_POLICY_SUCCESSOR_LEGACY_POLICY_DENIED",
+  ]);
+  assert.equal(deniedByPolicy.successorPolicyBindingsMatched, false);
+
+  const releaseDriftAuthority = deploymentAuthorityFixture(attested, {
+    releaseSha: "d".repeat(40),
+  });
+  const matchedPolicy = evaluateCurrent187ClusterPolicy(
+    attested,
+    releaseDriftAuthority,
+    persistedSemantic,
+  );
+  const deniedProbeBinding =
+    bindPersistedCurrent187ConnectionProbeToDeploymentAuthority(
+      persistedProbe,
+      releaseDriftAuthority,
+    );
+  const deniedByProbe = evaluateCurrent187ClusterPolicySuccessor(
+    matchedPolicy,
+    deniedProbeBinding,
+  );
+  assert.deepEqual(deniedByProbe.reasonCodes, [
+    "CURRENT187_CLUSTER_POLICY_SUCCESSOR_PROBE_BINDING_DENIED",
+  ]);
+  assert.equal(deniedByProbe.successorPolicyBindingsMatched, false);
+  assert.equal(deniedByProbe.authorization, false);
+  assert.equal(deniedByProbe.deploymentGoConsumable, false);
+});
+
 test("semantic approval ledger binds one-time consumption and scoped revocation deny-only", async () => {
   const { attested } = await attestedAcquisitionFixture();
   const semantic = semanticAllowlistFixture(attested);
@@ -1570,6 +1939,23 @@ test("adapter has no URL, password, provider, tenant, invite, or outbound integr
     /(?:node:fs|node:child_process|DATABASE_URL|postgresql:\/\/|password|smtp|providerPayload|secretManager|fetch\s*\(|process\.env)/iu,
   );
   assert.doesNotMatch(policySource, /(?:tenant|invite|tester)/iu);
+
+  const successorSource = await readFile(
+    new URL(
+      "./identity-mail-cluster-policy-successor-current187.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    successorSource,
+    /(?:node:fs|node:child_process|node:net|node:tls|DATABASE_URL|postgresql:\/\/|password|smtp|providerPayload|secretManager|fetch\s*\(|process\.env)/iu,
+  );
+  assert.doesNotMatch(successorSource, /(?:tenant|invite|tester)/iu);
+  assert.doesNotMatch(
+    successorSource,
+    /(?:authorization|canApply|canMutate|canSend|deploymentGoConsumable|productionBindingSatisfied|productionRootEnrolled|productionRuntimeAttested|sharedBetaAccess|testAccessAuthorized):\s*true/u,
+  );
 
   const allowlistSource = await readFile(
     new URL(

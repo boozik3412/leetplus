@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.85                                         |
+| Версия           | 1.86                                         |
 | Дата             | 12.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -680,8 +680,15 @@ enterprise-isolation option и не сокращает shared gates.
   через общий release/cluster/universe без изменения frozen deploy contract. J5
   `42/42`, aggregate CURRENT187 `121/121`, authority `13/13`; receipt остаётся
   synthetic/non-consumable. Exact SHA `5fca5a9d…` принят CI `31609394804`
-  `3/3 SUCCESS`, artifact `sha256:396d7e78…dce1`; CURRENT187-F consumption и
-  production root/topology ещё обязательны. [CI evidence](./identity-mail-current187-j5-r4-ci-evidence-2026-08-12.md).
+  `3/3 SUCCESS`, artifact `sha256:396d7e78…dce1`. R5 ниже уже добавляет
+  отдельный F + R4 successor; production root/topology ещё обязательны.
+  [CI evidence](./identity-mail-current187-j5-r4-ci-evidence-2026-08-12.md).
+
+- [CURRENT187-J5-R5 policy successor](./identity-mail-current187-j5-r5-policy-successor.md)
+  — pure branded composition CURRENT187-F + R4 с exact authority payload digest
+  equality. Acquisition `21/21`, aggregate CURRENT187 `124/124`, refreeze
+  `17/17`, assembler `21/21`; другой signed authority, clone, Proxy и arity fail
+  closed. Результат synthetic deny-only и не выдаёт внешний доступ.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

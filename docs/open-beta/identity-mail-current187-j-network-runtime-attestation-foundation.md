@@ -90,7 +90,8 @@ CURRENT187-J не выдаёт production attestation и не должен по�
 - нет независимого production signer, pinned root, persisted replay/revocation
   ledger и freshness/reload epoch acquisition;
 - J5-R4 переносит persisted probe digests в отдельный synthetic deny-only
-  successor receipt, но F ещё не принимает его как production runtime evidence;
+  successor receipt, а J5-R5 композирует его с exact branded F receipt; эта
+  композиция всё ещё не является production runtime evidence;
 - CURRENT187-I всё ещё требует независимого latest-byte review;
 - canonical promotion и restored-copy apply/rollback/zero-diff не выполнены.
 
@@ -104,8 +105,8 @@ CURRENT187-J не выдаёт production attestation и не должен по�
 3. Выполнить actual PostgreSQL/PgBouncer hostile matrix: wrong CA/hostname,
    plaintext, `trust`, wildcard, user collapse, wrong database/role, pool-mode
    mismatch, stale HBA reload и cross-release replay.
-4. Сделать R4 обязательным branded successor-policy input после CURRENT187-F;
-   production вариант должен принимать только canonical ledger и enrolled root,
-   не изменяя frozen deploy authority задним числом.
+4. R5 уже делает R4 обязательным branded successor-policy input после
+   CURRENT187-F; production вариант должен принимать только canonical ledger и
+   enrolled root, не изменяя frozen deploy authority задним числом.
 5. После independent latest-byte review выполнить canonical promotion и
    restored-copy rehearsal. До этого внешний доступ остаётся `NO-GO`.

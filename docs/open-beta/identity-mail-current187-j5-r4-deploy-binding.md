@@ -74,8 +74,9 @@ Production, `Tenant A/A1..A4`, внешний tenant/tester, invites и provider
 
 ## Следующий этап
 
-1. Добавить R4 receipt как обязательный branded input successor policy после
-   CURRENT187-F, сохранив legacy F deny-only и non-consumable.
-2. Построить production-like branded J1–J4 rehearsal без production effects.
-3. Только после независимой проверки и external key ceremony рассматривать
+1. R5 локально добавляет R4 как обязательный branded input отдельного successor
+   policy после CURRENT187-F, сохраняя F/R4 deny-only и non-consumable.
+2. Принять R5 exact-SHA CI.
+3. Построить production-like branded J1–J4 rehearsal без production effects.
+4. Только после независимой проверки и external key ceremony рассматривать
    canonical ledger/root enrollment и deploy GO.

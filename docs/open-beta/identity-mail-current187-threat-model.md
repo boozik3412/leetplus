@@ -73,7 +73,9 @@ config file, database row общего назначения, prototype chain и�
 - CURRENT187-J5-R4 не меняет immutable deploy envelope: отдельный branded
   successor receipt объединяет verified deploy authority и persisted J5 по
   общей области release/cluster/database-universe и переносит exact probe
-  digests. Этот receipt synthetic, deny-only и пока не потребляется policy.
+  digests. CURRENT187-J5-R5 локально требует этот exact brand рядом с exact
+  branded F receipt и общий authority payload digest. Оба слоя synthetic и
+  deny-only.
 
 ## Основные угрозы и fail-closed ответ
 

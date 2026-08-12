@@ -83,9 +83,10 @@ Fingerprint equality не является semantic allowlist evaluator. CURRENT
 
 CURRENT187-J5-R4 уже добавляет отдельный synthetic deny-only successor receipt,
 который связывает branded persisted connection-probe evidence с этим immutable
-deploy authority по release/cluster/database-universe. Сам CURRENT187-F его ещё
-не принимает, frozen deploy contract не изменён, поэтому это не снимает ни один
-production gate.
+deploy authority по release/cluster/database-universe. CURRENT187-J5-R5 локально
+композирует exact branded F и R4 receipts через общий authority payload digest,
+не меняя CURRENT187-F или frozen deploy contract. R5 остаётся synthetic
+deny-only и не снимает ни один production gate.
 
 ## Локальная проверка
 

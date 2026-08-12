@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026
 
-Статус: `LOCAL CANDIDATE / ACTUAL TCP + POSTGRESQL SSLREQUEST + TLS PEER / DENY-ONLY / CI PENDING / NOT DEPLOYABLE`.
+Статус: `EXACT-SHA CI ACCEPTED / ACTUAL TCP + POSTGRESQL SSLREQUEST + TLS PEER / DENY-ONLY / NOT DEPLOYABLE`.
 
 ## Назначение
 
@@ -80,13 +80,20 @@ purpose binding и булевы наблюдения. Успешный collector
 J2 receipt связан с exact J1 `postgresSessionReceiptDigest`, но ещё не
 композируется в CURRENT187-F или deploy authority.
 
-## Локальная приёмка
+## Приёмка
 
 - J2 adversarial unit: `10/10 PASS`;
 - общий CURRENT187 acquisition/semantic/policy/J1/J2 gate: `63/63 PASS`;
 - protocol-accurate integration: `1/1 PASS`;
 - database typecheck: `PASS`;
 - Prettier и `git diff --check`: `PASS`.
+- exact commit `d386dfa2534a546245169dc30e68b36bc195daa1`;
+- GitHub Actions `31584476362`: `3/3 SUCCESS`;
+- exact J2 protocol step: `SUCCESS`;
+- artifact digest:
+  `sha256:722f77c2e974db9f203fb34d01fc3029a5afc7a7a26bb497ba74ac9fbe9bf495`;
+- подробное evidence:
+  [CURRENT187-J2 exact-SHA CI](./identity-mail-current187-j2-ci-evidence-2026-08-12.md).
 
 Integration создаёт в отдельном OS temp root временные CA/server/wrong-CA keys
 через OpenSSL, поднимает TCP harness, принимает exact PostgreSQL SSLRequest и
@@ -96,18 +103,18 @@ root удаляется в `finally`; fixture keys не попадают в repo
 
 ## Оставшийся P0-путь CURRENT187-J
 
-1. Принять J2 exact-SHA CI с protocol/TLS integration.
-2. Запустить J1+J2 отдельно для production identities `APPLICATION`,
+1. Запустить J1+J2 отдельно для production identities `APPLICATION`,
    `COORDINATOR`, `MIGRATION`, `WORKER` и доказать pairwise distinct
    endpoint/session/secret/application binding.
-3. Реализовать независимо подписанные HBA/reload и PgBouncer control-plane
-   collectors, включая actual pool mode и отсутствие user collapse.
-4. Реализовать положительные и отрицательные probes для wrong role/database,
+2. Принять exact-SHA CI для
+   [J3/J4 control-plane collectors](./identity-mail-current187-j3-j4-control-plane-collectors.md)
+   и добавить actual PgBouncer fixture.
+3. Реализовать положительные и отрицательные probes для wrong role/database,
    plaintext, wrong CA/hostname, `trust`, wildcard, stale reload и wrong pool
    mode.
-5. Добавить production signer/root, freshness, persisted one-time consumption,
+4. Добавить production signer/root, freshness, persisted one-time consumption,
    revocation и lost-response reconciliation.
-6. Только полный branded production J receipt связать с CURRENT187-F и deploy
+5. Только полный branded production J receipt связать с CURRENT187-F и deploy
    authority; затем выполнить independent review, canonical promotion и
    restored-copy rehearsal.
 

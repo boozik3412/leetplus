@@ -606,8 +606,16 @@ enterprise-isolation option и не сокращает shared gates.
     добавляет actual DNS→exact IP→TCP→PostgreSQL SSLRequest→TLS 1.2/1.3
     observation с verify-full hostname/CA, leaf DER и SPKI binding. J2 unit
     `10/10`, aggregate CURRENT187 `63/63`, actual protocol/TLS harness `1/1`;
-    exact-SHA CI пока не принят. Receipt остаётся deny-only: endpoint/TLS
-    observed, но не attested; HBA/PgBouncer/negative-probe flags false.
+    exact SHA `d386dfa2…` принят CI `31584476362` как `3/3 SUCCESS`, artifact
+    `sha256:722f77c2…f495`.
+    [CI evidence](./identity-mail-current187-j2-ci-evidence-2026-08-12.md).
+    Receipt остаётся deny-only: endpoint/TLS observed, но не attested.
+    [CURRENT187-J3/J4 control-plane collectors](./identity-mail-current187-j3-j4-control-plane-collectors.md)
+    добавляют actual read-only `pg_hba_file_rules`/reload-clock observation и
+    PgBouncer simple-protocol `SHOW CONFIG/DATABASES/USERS/POOLS/SERVERS`.
+    J3 `8/8`, J4 `7/7`, aggregate CURRENT187 `78/78`; actual HBA PostgreSQL
+    step подключён, PgBouncer integration pending. File catalog не объявляется
+    effective loaded HBA; оба receipt остаются unsigned deny-only.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

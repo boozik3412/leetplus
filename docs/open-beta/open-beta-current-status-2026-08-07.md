@@ -64,14 +64,22 @@
 > negative probe. Production и внешний доступ не менялись. Evidence:
 > `identity-mail-current187-j1-ci-evidence-2026-08-12.md`.
 >
-> CURRENT187-J2 добавил local candidate actual endpoint/TLS-peer collector:
+> CURRENT187-J2 принят exact-SHA CI как actual endpoint/TLS-peer collector:
 > exact DNS address set, selected IP/family/port, PostgreSQL SSLRequest byte,
 > TLS `1.2..1.3`, verify-full hostname/CA, leaf DER/SPKI SHA-256 и validity.
 > Unit `10/10`, aggregate CURRENT187 `63/63`, protocol/TLS integration `1/1`.
-> Exact-SHA CI pending. J2 выставляет observed, но не attested; HBA, PgBouncer,
-> negative probes, production root/runtime и все access/effect flags остаются
-> false. Evidence:
-> `identity-mail-current187-j2-endpoint-tls-peer-collector.md`.
+> Exact SHA `d386dfa2…`, CI `31584476362` — `3/3 SUCCESS`, artifact
+> `sha256:722f77c2…f495`. J2 выставляет observed, но не attested. Evidence:
+> `identity-mail-current187-j2-ci-evidence-2026-08-12.md`.
+>
+> CURRENT187-J3/J4 реализованы локально как actual read-only control-plane
+> collectors. J3 читает `pg_hba_file_rules` и reload clock, но честно сохраняет
+> effective-loaded HBA flags false; J4 через simple query protocol читает
+> PgBouncer `SHOW CONFIG/DATABASES/USERS/POOLS/SERVERS`, проверяет transaction
+> pool mode, backend mapping и отсутствие `force_user`. J3 `8/8`, J4 `7/7`,
+> aggregate CURRENT187 `78/78`, typecheck green; exact-SHA CI и actual
+> PgBouncer fixture pending. Evidence:
+> `identity-mail-current187-j3-j4-control-plane-collectors.md`.
 
 ## Итоговый вердикт
 
@@ -118,7 +126,9 @@
 | CURRENT187-I persisted approval  | `EXACT-HEAD CI ACCEPTED / NONCANONICAL`    | persisted brand required; candidate `daf5a98f…`; static `7/7`, PG16.13 `2 × 1/1`, CI `31416609580` `3/3 SUCCESS`, zero residue; all access/effect flags false                                                                                                                                  |
 | CURRENT187-J network/runtime     | `EXACT-HEAD CI ACCEPTED / SYNTHETIC-ONLY`  | four exact service paths + separate host-control brand; endpoint/TLS/HBA/pooler/service-account digests; `10/10`, aggregate CURRENT187 `42/42`, CI `31420665364` `3/3 SUCCESS`; all access/effect flags false                                                                                  |
 | CURRENT187-J1 PostgreSQL session | `EXACT-HEAD CI ACCEPTED / DENY-ONLY`       | actual Prisma backend session collector; exact DB/role OID, application, read-only, network/backend, TLS and role-policy observations; `11/11`, aggregate CURRENT187 `53/53`, CI `31577001152` `3/3 SUCCESS`, actual PG J1 `SUCCESS`; endpoint/HBA/PgBouncer/negative-probe flags remain false |
-| CURRENT187-J2 endpoint/TLS peer  | `LOCAL CANDIDATE / CI PENDING / DENY-ONLY` | actual DNS/TCP/PostgreSQL SSLRequest/TLS collector; verify-full hostname/CA + leaf DER/SPKI; `10/10`, aggregate CURRENT187 `63/63`, integration `1/1`; observed but not attested, HBA/PgBouncer/negative-probe flags false                                                                     |
+| CURRENT187-J2 endpoint/TLS peer  | `EXACT-SHA CI ACCEPTED / DENY-ONLY`        | actual DNS/TCP/PostgreSQL SSLRequest/TLS collector; verify-full hostname/CA + leaf DER/SPKI; `10/10`, aggregate `63/63`, integration `1/1`; SHA `d386dfa2…`, CI `31584476362` `3/3 SUCCESS`, artifact `sha256:722f77c2…f495`                                                                   |
+| CURRENT187-J3 HBA/reload         | `LOCAL CANDIDATE / CI PENDING / DENY-ONLY` | actual read-only `pg_hba_file_rules` + reload clock; trust/plaintext/wildcard/regex/group/map fail closed; `8/8`; current file observed, effective loaded HBA/rule not attested                                                                                                                |
+| CURRENT187-J4 PgBouncer          | `LOCAL CANDIDATE / CI PENDING / DENY-ONLY` | simple-query admin `SHOW` collector; global/database/user/runtime transaction mode, backend/TLS mapping, `force_user`/stale mapping checks; `7/7`; actual PgBouncer fixture and signer pending                                                                                                 |
 | Единый gate                      | `PASS`                                     | `163/163`, `0` failures                                                                                                                                                                                                                                                                        |
 | Независимая latest-byte проверка | `PASS`                                     | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                                                                                                                                                                                     |
 
@@ -247,8 +257,10 @@ evidence boundary и пять production deployment digest; J `10/10`, aggregate
 CURRENT187 `42/42`, exact-head CI `31420665364` — `3/3 SUCCESS`. CURRENT187-J1
 actual PostgreSQL backend-session collector принят exact-head CI `31577001152`:
 `3/3 SUCCESS`, J1 `SUCCESS`, artifact `sha256:8e0c26f5…d334`. CURRENT187-J2
-actual endpoint/TLS-peer collector реализован как local deny-only candidate:
-J2 `10/10`, aggregate CURRENT187 `63/63`, protocol/TLS integration `1/1`.
-Ближайший этап — принять J2 exact-SHA CI, затем завершить independent
-latest-byte review CURRENT187-I, capability-bearing HBA/PgBouncer collectors,
-production signer/root и reviewed canonical promotion/restored-copy rehearsal.
+actual endpoint/TLS-peer collector принят exact-SHA CI `31584476362`:
+`3/3 SUCCESS`, artifact `sha256:722f77c2…f495`. J3 HBA/reload и J4 PgBouncer
+control-plane collectors реализованы локально: `8/8` и `7/7`, aggregate
+CURRENT187 `78/78`, typecheck green. Ближайший этап — принять J3/J4 exact-SHA CI,
+добавить actual PgBouncer fixture и connection negative-probe matrix, затем
+завершить independent latest-byte review CURRENT187-I, production signer/root и
+reviewed canonical promotion/restored-copy rehearsal.

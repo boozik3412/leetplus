@@ -19,14 +19,14 @@ import {
 } from "./identity-mail-cluster-connection-probe-attestation-current187.mjs";
 import {
   CURRENT187_ENDPOINT_TLS_PEER_RECEIPT_KIND,
-  isVerifiedCurrent187EndpointTlsPeerReceipt,
+  isVerifiedCurrent187ProductionEndpointTlsPeerReceipt,
 } from "./identity-mail-cluster-endpoint-tls-peer-collector-current187.mjs";
-import { isVerifiedCurrent187HbaReloadReceipt } from "./identity-mail-cluster-hba-reload-collector-current187.mjs";
+import { isVerifiedCurrent187ProductionHbaReloadReceipt } from "./identity-mail-cluster-hba-reload-collector-current187.mjs";
 import { CURRENT187_NETWORK_RUNTIME_SERVICE_PURPOSES } from "./identity-mail-cluster-network-runtime-attestation-current187.mjs";
-import { isVerifiedCurrent187PgBouncerReceipt } from "./identity-mail-cluster-pgbouncer-control-plane-collector-current187.mjs";
+import { isVerifiedCurrent187ProductionPgBouncerReceipt } from "./identity-mail-cluster-pgbouncer-control-plane-collector-current187.mjs";
 import {
   CURRENT187_POSTGRES_SESSION_RECEIPT_KIND,
-  isVerifiedCurrent187PostgresSessionReceipt,
+  isVerifiedCurrent187ProductionPostgresSessionReceipt,
 } from "./identity-mail-cluster-postgres-session-collector-current187.mjs";
 
 export { Current187AdmissionContractError };
@@ -306,10 +306,10 @@ function normalizeInput(value, syntheticOnly) {
   const pgbouncer = input.pgbouncerReceipt;
   const hbaBrand = syntheticOnly
     ? hba?.syntheticOnly === true
-    : isVerifiedCurrent187HbaReloadReceipt(hba);
+    : isVerifiedCurrent187ProductionHbaReloadReceipt(hba);
   const pgbouncerBrand = syntheticOnly
     ? pgbouncer?.syntheticOnly === true
-    : isVerifiedCurrent187PgBouncerReceipt(pgbouncer);
+    : isVerifiedCurrent187ProductionPgBouncerReceipt(pgbouncer);
   if (
     !hbaBrand ||
     !pgbouncerBrand ||
@@ -379,14 +379,14 @@ function normalizeInput(value, syntheticOnly) {
     const tls = service.endpointTlsPeerReceipt;
     const sessionBrand = verifyReceiptBrand(
       session,
-      isVerifiedCurrent187PostgresSessionReceipt,
+      isVerifiedCurrent187ProductionPostgresSessionReceipt,
       syntheticOnly,
       CURRENT187_POSTGRES_SESSION_RECEIPT_KIND,
       purpose,
     );
     const tlsBrand = verifyReceiptBrand(
       tls,
-      isVerifiedCurrent187EndpointTlsPeerReceipt,
+      isVerifiedCurrent187ProductionEndpointTlsPeerReceipt,
       syntheticOnly,
       CURRENT187_ENDPOINT_TLS_PEER_RECEIPT_KIND,
       purpose,

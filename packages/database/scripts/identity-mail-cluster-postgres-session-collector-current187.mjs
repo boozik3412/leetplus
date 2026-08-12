@@ -202,6 +202,7 @@ SELECT
 `.trim();
 
 const VERIFIED_CURRENT187_POSTGRES_SESSION_RECEIPTS = new WeakSet();
+const VERIFIED_CURRENT187_PRODUCTION_POSTGRES_SESSION_RECEIPTS = new WeakSet();
 
 function fail(reasonCode, message) {
   current187AdmissionFail(reasonCode, message);
@@ -658,7 +659,12 @@ function prismaDependencies() {
   });
 }
 
-async function collectInternal(value, dependenciesValue, syntheticOnly) {
+async function collectInternal(
+  value,
+  dependenciesValue,
+  syntheticOnly,
+  productionOrigin,
+) {
   const input = normalizeInput(value, syntheticOnly);
   const dependencies = exactOperationalRecord(
     dependenciesValue,
@@ -847,6 +853,9 @@ async function collectInternal(value, dependenciesValue, syntheticOnly) {
     postgresSessionReceiptDigest: digest(RECEIPT_DIGEST_DOMAIN, publicReceipt),
   });
   VERIFIED_CURRENT187_POSTGRES_SESSION_RECEIPTS.add(receipt);
+  if (productionOrigin) {
+    VERIFIED_CURRENT187_PRODUCTION_POSTGRES_SESSION_RECEIPTS.add(receipt);
+  }
   return receipt;
 }
 
@@ -857,7 +866,7 @@ export async function collectCurrent187PostgresSessionEvidence(input) {
       "Production PostgreSQL session collection accepts exactly one input.",
     );
   }
-  return collectInternal(input, prismaDependencies(), false);
+  return collectInternal(input, prismaDependencies(), false, true);
 }
 
 export async function collectCurrent187PostgresSessionEvidenceWithDependenciesForTestOnly(
@@ -870,7 +879,7 @@ export async function collectCurrent187PostgresSessionEvidenceWithDependenciesFo
       "Production-mode dependency-backed collection accepts exact input and dependencies.",
     );
   }
-  return collectInternal(input, dependencies, false);
+  return collectInternal(input, dependencies, false, false);
 }
 
 export async function collectSyntheticCurrent187PostgresSessionEvidenceWithPrismaForTestOnly(
@@ -882,7 +891,7 @@ export async function collectSyntheticCurrent187PostgresSessionEvidenceWithPrism
       "Synthetic PostgreSQL session collection accepts exactly one input.",
     );
   }
-  return collectInternal(input, prismaDependencies(), true);
+  return collectInternal(input, prismaDependencies(), true, false);
 }
 
 export async function collectSyntheticCurrent187PostgresSessionEvidenceWithDependenciesForTestOnly(
@@ -895,7 +904,7 @@ export async function collectSyntheticCurrent187PostgresSessionEvidenceWithDepen
       "Synthetic dependency-backed collection accepts exact input and dependencies.",
     );
   }
-  return collectInternal(input, dependencies, true);
+  return collectInternal(input, dependencies, true, false);
 }
 
 export function isVerifiedCurrent187PostgresSessionReceipt(value) {
@@ -904,6 +913,15 @@ export function isVerifiedCurrent187PostgresSessionReceipt(value) {
     !!value &&
     typeof value === "object" &&
     VERIFIED_CURRENT187_POSTGRES_SESSION_RECEIPTS.has(value)
+  );
+}
+
+export function isVerifiedCurrent187ProductionPostgresSessionReceipt(value) {
+  return (
+    arguments.length === 1 &&
+    !!value &&
+    typeof value === "object" &&
+    VERIFIED_CURRENT187_PRODUCTION_POSTGRES_SESSION_RECEIPTS.has(value)
   );
 }
 

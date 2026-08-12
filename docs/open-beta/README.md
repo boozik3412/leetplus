@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.86                                         |
+| Версия           | 1.87                                         |
 | Дата             | 12.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -688,7 +688,15 @@ enterprise-isolation option и не сокращает shared gates.
   — pure branded composition CURRENT187-F + R4 с exact authority payload digest
   equality. Acquisition `21/21`, aggregate CURRENT187 `124/124`, refreeze
   `17/17`, assembler `21/21`; другой signed authority, clone, Proxy и arity fail
-  closed. Результат synthetic deny-only и не выдаёт внешний доступ.
+  closed. Exact SHA `603e09bf…` принят CI `31612439527` `3/3 SUCCESS`, artifact
+  `sha256:d1fe9df4…8a11`; результат synthetic deny-only и не выдаёт внешний
+  доступ. [CI evidence](./identity-mail-current187-j5-r5-ci-evidence-2026-08-12.md).
+
+- [CURRENT187-J5-R6 production-origin fence](./identity-mail-current187-j5-r6-production-origin-fence.md)
+  — отдельные strict brands не позволяют production-mode test dependency seams
+  подменить actual J1–J4 collectors. Production runner отклоняет все такие
+  receipts до network I/O; integration `2/2`. Actual co-located topology и
+  production GO не заявляются.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

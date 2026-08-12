@@ -9,6 +9,7 @@ import {
   CURRENT187_POSTGRES_SESSION_SYNTHETIC_CONFIRMATION,
   collectCurrent187PostgresSessionEvidenceWithDependenciesForTestOnly,
   collectSyntheticCurrent187PostgresSessionEvidenceWithDependenciesForTestOnly,
+  isVerifiedCurrent187ProductionPostgresSessionReceipt,
   isVerifiedCurrent187PostgresSessionReceipt,
 } from "./identity-mail-cluster-postgres-session-collector-current187.mjs";
 
@@ -241,6 +242,10 @@ test("production-mode observation requires verify-full strict TLS and safe negot
   assert.equal(receipt.syntheticOnly, false);
   assert.equal(receipt.transportTlsObserved, true);
   assert.equal(receipt.productionRuntimeAttested, false);
+  assert.equal(
+    isVerifiedCurrent187ProductionPostgresSessionReceipt(receipt),
+    false,
+  );
 
   for (const rowMutation of [
     { transportTls: false },
@@ -486,6 +491,18 @@ test("source performs only bounded Prisma read-only session observation and keep
     "utf8",
   );
   assert.match(source, /from "@prisma\/client"/u);
+  assert.match(
+    source,
+    /return collectInternal\(input, prismaDependencies\(\), false, true\)/u,
+  );
+  assert.match(
+    source,
+    /return collectInternal\(input, dependencies, false, false\)/u,
+  );
+  assert.doesNotMatch(
+    source,
+    /return collectInternal\(input, dependencies, false, true\)/u,
+  );
   assert.match(source, /SET TRANSACTION READ ONLY/u);
   assert.match(source, /pg_catalog\.pg_stat_ssl/u);
   assert.match(

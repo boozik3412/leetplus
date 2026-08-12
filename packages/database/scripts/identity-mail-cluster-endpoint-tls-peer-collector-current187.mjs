@@ -111,6 +111,7 @@ const RECEIPT_DIGEST_DOMAIN =
   "LEETPLUS_CURRENT187_ENDPOINT_TLS_PEER_RECEIPT_V1";
 
 const VERIFIED_ENDPOINT_TLS_PEER_RECEIPTS = new WeakSet();
+const VERIFIED_PRODUCTION_ENDPOINT_TLS_PEER_RECEIPTS = new WeakSet();
 
 function fail(reasonCode, message) {
   current187AdmissionFail(reasonCode, message);
@@ -594,7 +595,12 @@ function productionDependencies() {
   });
 }
 
-async function collectInternal(value, dependencyValue, syntheticOnly) {
+async function collectInternal(
+  value,
+  dependencyValue,
+  syntheticOnly,
+  productionOrigin,
+) {
   const input = normalizeInput(value, syntheticOnly);
   const dependencies = exactOperationalRecord(
     dependencyValue,
@@ -747,6 +753,9 @@ async function collectInternal(value, dependencyValue, syntheticOnly) {
     verificationChallengeDigest: input.verificationChallengeDigest,
   });
   VERIFIED_ENDPOINT_TLS_PEER_RECEIPTS.add(receipt);
+  if (productionOrigin) {
+    VERIFIED_PRODUCTION_ENDPOINT_TLS_PEER_RECEIPTS.add(receipt);
+  }
   return receipt;
 }
 
@@ -757,7 +766,7 @@ export async function collectCurrent187EndpointTlsPeerEvidence(input) {
       "Production endpoint/TLS collection accepts exactly one input.",
     );
   }
-  return collectInternal(input, productionDependencies(), false);
+  return collectInternal(input, productionDependencies(), false, true);
 }
 
 export async function collectCurrent187EndpointTlsPeerEvidenceWithDependenciesForTestOnly(
@@ -770,7 +779,7 @@ export async function collectCurrent187EndpointTlsPeerEvidenceWithDependenciesFo
       "Test endpoint/TLS collection accepts exact input and dependencies.",
     );
   }
-  return collectInternal(input, dependencies, false);
+  return collectInternal(input, dependencies, false, false);
 }
 
 export async function collectSyntheticCurrent187EndpointTlsPeerEvidenceForTestOnly(
@@ -782,7 +791,7 @@ export async function collectSyntheticCurrent187EndpointTlsPeerEvidenceForTestOn
       "Synthetic endpoint/TLS collection accepts exactly one input.",
     );
   }
-  return collectInternal(input, productionDependencies(), true);
+  return collectInternal(input, productionDependencies(), true, false);
 }
 
 export async function collectSyntheticCurrent187EndpointTlsPeerEvidenceWithDependenciesForTestOnly(
@@ -795,7 +804,7 @@ export async function collectSyntheticCurrent187EndpointTlsPeerEvidenceWithDepen
       "Synthetic test collection accepts exact input and dependencies.",
     );
   }
-  return collectInternal(input, dependencies, true);
+  return collectInternal(input, dependencies, true, false);
 }
 
 export function isVerifiedCurrent187EndpointTlsPeerReceipt(value) {
@@ -804,5 +813,14 @@ export function isVerifiedCurrent187EndpointTlsPeerReceipt(value) {
     !!value &&
     typeof value === "object" &&
     VERIFIED_ENDPOINT_TLS_PEER_RECEIPTS.has(value)
+  );
+}
+
+export function isVerifiedCurrent187ProductionEndpointTlsPeerReceipt(value) {
+  return (
+    arguments.length === 1 &&
+    !!value &&
+    typeof value === "object" &&
+    VERIFIED_PRODUCTION_ENDPOINT_TLS_PEER_RECEIPTS.has(value)
   );
 }

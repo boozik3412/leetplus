@@ -114,6 +114,7 @@ const RECEIPT_DIGEST_DOMAIN = "LEETPLUS_CURRENT187_HBA_RELOAD_RECEIPT_V1";
 const FILE_NAME_DIGEST_DOMAIN = "LEETPLUS_CURRENT187_HBA_FILE_NAME_V1";
 
 const VERIFIED_RECEIPTS = new WeakSet();
+const VERIFIED_PRODUCTION_RECEIPTS = new WeakSet();
 
 const CONTROL_SQL = `
 SELECT
@@ -614,7 +615,12 @@ function prismaDependencies() {
   });
 }
 
-async function collectInternal(value, dependenciesValue, syntheticOnly) {
+async function collectInternal(
+  value,
+  dependenciesValue,
+  syntheticOnly,
+  productionOrigin,
+) {
   const input = normalizeInput(value, syntheticOnly);
   const dependencies = exactOperationalRecord(
     dependenciesValue,
@@ -750,6 +756,7 @@ async function collectInternal(value, dependenciesValue, syntheticOnly) {
     hbaReloadReceiptDigest: digest(RECEIPT_DIGEST_DOMAIN, publicReceipt),
   });
   VERIFIED_RECEIPTS.add(receipt);
+  if (productionOrigin) VERIFIED_PRODUCTION_RECEIPTS.add(receipt);
   return receipt;
 }
 
@@ -760,7 +767,7 @@ export async function collectCurrent187HbaReloadEvidence(input) {
       "Production collection accepts exactly one input.",
     );
   }
-  return collectInternal(input, prismaDependencies(), false);
+  return collectInternal(input, prismaDependencies(), false, true);
 }
 
 export async function collectCurrent187HbaReloadEvidenceWithDependenciesForTestOnly(
@@ -773,7 +780,7 @@ export async function collectCurrent187HbaReloadEvidenceWithDependenciesForTestO
       "Dependency-backed collection accepts exact input and dependencies.",
     );
   }
-  return collectInternal(input, dependencies, false);
+  return collectInternal(input, dependencies, false, false);
 }
 
 export async function collectSyntheticCurrent187HbaReloadEvidenceWithPrismaForTestOnly(
@@ -785,7 +792,7 @@ export async function collectSyntheticCurrent187HbaReloadEvidenceWithPrismaForTe
       "Synthetic collection accepts exactly one input.",
     );
   }
-  return collectInternal(input, prismaDependencies(), true);
+  return collectInternal(input, prismaDependencies(), true, false);
 }
 
 export async function collectSyntheticCurrent187HbaReloadEvidenceWithDependenciesForTestOnly(
@@ -798,7 +805,7 @@ export async function collectSyntheticCurrent187HbaReloadEvidenceWithDependencie
       "Synthetic dependency-backed collection accepts exact input and dependencies.",
     );
   }
-  return collectInternal(input, dependencies, true);
+  return collectInternal(input, dependencies, true, false);
 }
 
 export function computeSyntheticCurrent187HbaCatalogDigestForTestOnly(rows) {
@@ -817,6 +824,15 @@ export function isVerifiedCurrent187HbaReloadReceipt(value) {
     !!value &&
     typeof value === "object" &&
     VERIFIED_RECEIPTS.has(value)
+  );
+}
+
+export function isVerifiedCurrent187ProductionHbaReloadReceipt(value) {
+  return (
+    arguments.length === 1 &&
+    !!value &&
+    typeof value === "object" &&
+    VERIFIED_PRODUCTION_RECEIPTS.has(value)
   );
 }
 

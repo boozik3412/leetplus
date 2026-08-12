@@ -84,6 +84,7 @@ const BACKEND_DIGEST_DOMAIN = "LEETPLUS_CURRENT187_PGBOUNCER_BACKEND_V1";
 const USER_DIGEST_DOMAIN = "LEETPLUS_CURRENT187_PGBOUNCER_USER_V1";
 
 const VERIFIED_RECEIPTS = new WeakSet();
+const VERIFIED_PRODUCTION_RECEIPTS = new WeakSet();
 
 function fail(reasonCode, message) {
   current187AdmissionFail(reasonCode, message);
@@ -578,7 +579,12 @@ function pgDependencies() {
   });
 }
 
-async function collectInternal(value, dependenciesValue, syntheticOnly) {
+async function collectInternal(
+  value,
+  dependenciesValue,
+  syntheticOnly,
+  productionOrigin,
+) {
   const input = normalizeInput(value, syntheticOnly);
   const dependencies = exactOperationalRecord(
     dependenciesValue,
@@ -709,6 +715,7 @@ async function collectInternal(value, dependenciesValue, syntheticOnly) {
     pgbouncerReceiptDigest: digest(RECEIPT_DIGEST_DOMAIN, publicReceipt),
   });
   VERIFIED_RECEIPTS.add(receipt);
+  if (productionOrigin) VERIFIED_PRODUCTION_RECEIPTS.add(receipt);
   return receipt;
 }
 
@@ -719,7 +726,7 @@ export async function collectCurrent187PgBouncerControlPlaneEvidence(input) {
       "Production collection accepts exactly one input.",
     );
   }
-  return collectInternal(input, pgDependencies(), false);
+  return collectInternal(input, pgDependencies(), false, true);
 }
 
 export async function collectCurrent187PgBouncerControlPlaneEvidenceWithDependenciesForTestOnly(
@@ -732,7 +739,7 @@ export async function collectCurrent187PgBouncerControlPlaneEvidenceWithDependen
       "Dependency-backed collection accepts exact input and dependencies.",
     );
   }
-  return collectInternal(input, dependencies, false);
+  return collectInternal(input, dependencies, false, false);
 }
 
 export async function collectSyntheticCurrent187PgBouncerControlPlaneEvidenceWithDependenciesForTestOnly(
@@ -745,7 +752,7 @@ export async function collectSyntheticCurrent187PgBouncerControlPlaneEvidenceWit
       "Synthetic collection accepts exact input and dependencies.",
     );
   }
-  return collectInternal(input, dependencies, true);
+  return collectInternal(input, dependencies, true, false);
 }
 
 export async function collectSyntheticCurrent187PgBouncerControlPlaneEvidenceForTestOnly(
@@ -757,7 +764,7 @@ export async function collectSyntheticCurrent187PgBouncerControlPlaneEvidenceFor
       "Synthetic actual collection accepts exactly one input.",
     );
   }
-  return collectInternal(input, pgDependencies(), true);
+  return collectInternal(input, pgDependencies(), true, false);
 }
 
 export function computeSyntheticCurrent187PgBouncerConfigurationDigestForTestOnly(
@@ -801,5 +808,14 @@ export function isVerifiedCurrent187PgBouncerReceipt(value) {
     !!value &&
     typeof value === "object" &&
     VERIFIED_RECEIPTS.has(value)
+  );
+}
+
+export function isVerifiedCurrent187ProductionPgBouncerReceipt(value) {
+  return (
+    arguments.length === 1 &&
+    !!value &&
+    typeof value === "object" &&
+    VERIFIED_PRODUCTION_RECEIPTS.has(value)
   );
 }

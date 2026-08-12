@@ -10,6 +10,7 @@ import {
   collectSyntheticCurrent187HbaReloadEvidenceWithDependenciesForTestOnly,
   computeSyntheticCurrent187HbaCatalogDigestForTestOnly,
   isVerifiedCurrent187HbaReloadReceipt,
+  isVerifiedCurrent187ProductionHbaReloadReceipt,
 } from "./identity-mail-cluster-hba-reload-collector-current187.mjs";
 
 const NOW = "2026-08-12T10:00:00.000Z";
@@ -220,6 +221,7 @@ test("production-mode boundary requires verify-full strict transport and exact c
     production: true,
   });
   assert.equal(receipt.syntheticOnly, false);
+  assert.equal(isVerifiedCurrent187ProductionHbaReloadReceipt(receipt), false);
   await assert.rejects(
     () =>
       collect({
@@ -367,6 +369,18 @@ test("source is bounded read-only PostgreSQL control-plane observation with no a
   assert.match(source, /pg_hba_file_rules/u);
   assert.match(source, /pg_conf_load_time/u);
   assert.match(source, /SET TRANSACTION READ ONLY/u);
+  assert.match(
+    source,
+    /return collectInternal\(input, prismaDependencies\(\), false, true\)/u,
+  );
+  assert.match(
+    source,
+    /return collectInternal\(input, dependencies, false, false\)/u,
+  );
+  assert.doesNotMatch(
+    source,
+    /return collectInternal\(input, dependencies, false, true\)/u,
+  );
   assert.doesNotMatch(
     source,
     /process\.env|node:child_process|node:fs|pg_reload_conf/u,

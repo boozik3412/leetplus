@@ -12,6 +12,7 @@ import {
   computeCurrent187PgBouncerConfigurationDigestForTestOnly,
   computeSyntheticCurrent187PgBouncerConfigurationDigestForTestOnly,
   isVerifiedCurrent187PgBouncerReceipt,
+  isVerifiedCurrent187ProductionPgBouncerReceipt,
 } from "./identity-mail-cluster-pgbouncer-control-plane-collector-current187.mjs";
 
 const NOW = "2026-08-12T10:00:00.000Z";
@@ -320,6 +321,7 @@ test("production requires verify-full client/server TLS and an active TLS server
   const productionResults = results({}, true);
   const { receipt } = await collect({ production: true });
   assert.equal(receipt.syntheticOnly, false);
+  assert.equal(isVerifiedCurrent187ProductionPgBouncerReceipt(receipt), false);
   for (const resultOverrides of [
     { configValues: { client_tls_sslmode: "require" } },
     { configValues: { server_tls_sslmode: "require" } },
@@ -427,6 +429,18 @@ test("source uses pg simple-query SHOW only and exposes no filesystem, Prisma, e
     assert.match(source, new RegExp(statement, "u"));
   }
   assert.match(source, /queryMode:\s*"simple"/u);
+  assert.match(
+    source,
+    /return collectInternal\(input, pgDependencies\(\), false, true\)/u,
+  );
+  assert.match(
+    source,
+    /return collectInternal\(input, dependencies, false, false\)/u,
+  );
+  assert.doesNotMatch(
+    source,
+    /return collectInternal\(input, dependencies, false, true\)/u,
+  );
   assert.doesNotMatch(
     source,
     /Prisma|process\.env|node:fs|node:child_process/u,

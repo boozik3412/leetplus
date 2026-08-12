@@ -9,6 +9,7 @@ import {
   CURRENT187_ENDPOINT_TLS_PEER_SYNTHETIC_CONFIRMATION,
   collectCurrent187EndpointTlsPeerEvidenceWithDependenciesForTestOnly,
   collectSyntheticCurrent187EndpointTlsPeerEvidenceWithDependenciesForTestOnly,
+  isVerifiedCurrent187ProductionEndpointTlsPeerReceipt,
   isVerifiedCurrent187EndpointTlsPeerReceipt,
 } from "./identity-mail-cluster-endpoint-tls-peer-collector-current187.mjs";
 
@@ -174,6 +175,10 @@ test("production mode requires DNS hostname, exact purpose endpoint class, and e
     );
   assert.equal(receipt.syntheticOnly, false);
   assert.equal(receipt.productionRuntimeAttested, false);
+  assert.equal(
+    isVerifiedCurrent187ProductionEndpointTlsPeerReceipt(receipt),
+    false,
+  );
 
   for (const mutation of [
     { endpointHost: "127.0.0.1", serverName: "127.0.0.1" },
@@ -422,6 +427,18 @@ test("source uses bounded DNS, TCP, PostgreSQL SSLRequest, and verify-full TLS w
   assert.match(source, /from "node:dns\/promises"/u);
   assert.match(source, /from "node:net"/u);
   assert.match(source, /from "node:tls"/u);
+  assert.match(
+    source,
+    /return collectInternal\(input, productionDependencies\(\), false, true\)/u,
+  );
+  assert.match(
+    source,
+    /return collectInternal\(input, dependencies, false, false\)/u,
+  );
+  assert.doesNotMatch(
+    source,
+    /return collectInternal\(input, dependencies, false, true\)/u,
+  );
   assert.match(source, /SSL_REQUEST_CODE/u);
   assert.match(source, /rejectUnauthorized:\s*true/u);
   assert.match(source, /minVersion:\s*"TLSv1\.2"/u);

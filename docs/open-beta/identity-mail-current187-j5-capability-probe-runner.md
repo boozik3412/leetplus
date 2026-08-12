@@ -78,6 +78,13 @@ connection probe step — `SUCCESS`. Release artifact ID `9142149284`, digest
 `sha256:1fb76259ee66dd9b45219a6d8651ec0c1853dfb7583e3fd29a9d1731f3fdd85f`.
 Полная фиксация: [J5-R1 CI evidence](./identity-mail-current187-j5-r1-ci-evidence-2026-08-12.md).
 
+R6 локально добавляет отдельный production-origin fence. Dependency-backed
+production-mode J1–J4 receipts больше не получают strict brands, которые
+потребляет production runner. Второй integration scenario строит все четыре
+J1/J2 receipts и J3/J4 chain через test seams и доказывает их отказ до network
+I/O с zero counters. Integration теперь `2/2 PASS`; actual co-located topology
+остаётся обязательной.
+
 ## Что ещё требуется
 
 1. production-like четыре-service execution, которое объединяет actual branded

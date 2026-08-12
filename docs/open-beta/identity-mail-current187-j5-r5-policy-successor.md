@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026.
 
-Статус: `ENGINEERING ACCEPTED LOCALLY / SYNTHETIC DENY-ONLY / NOT DEPLOYABLE`.
+Статус: `EXACT-SHA CI ACCEPTED / SYNTHETIC DENY-ONLY / NOT DEPLOYABLE`.
 
 ## Результат
 
@@ -49,6 +49,12 @@ provider capabilities.
 - immutable refreeze: `17/17 PASS`;
 - frozen assembler: `21/21 PASS`;
 - scoped Prettier и `git diff --check`: `PASS`.
+
+Exact SHA `603e09bf4598fe895053d3b05416f921eb75ddc3` принят GitHub Actions
+run `31612439527`: все `3/3` jobs завершены `SUCCESS`. Artifact ID
+`9148162637`, digest
+`sha256:d1fe9df4ff02d6ecc900eb6c68b920aaa93b931cf1f8bf21646262c5c4f68a11`.
+Полная фиксация: [R5 CI evidence](./identity-mail-current187-j5-r5-ci-evidence-2026-08-12.md).
 
 ## Что этап не закрывает
 

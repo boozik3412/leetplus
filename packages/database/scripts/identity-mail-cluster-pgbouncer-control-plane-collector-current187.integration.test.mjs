@@ -548,7 +548,7 @@ function negativeConnections(tls, identity, index) {
         clientPrivateKeySha256: plaintext
           ? null
           : sha256(tls.clientPrivateKeyPem),
-        connectionString: `postgresql://${role}:${password}@${identity.host}:${identity.port}/${database}?sslmode=${plaintext ? "disable" : "verify-full"}`,
+        connectionString: `postgresql://${role}:${password}@${BACKEND_HOST}:${identity.port}/${database}?sslmode=${plaintext ? "disable" : "verify-full"}`,
         scenario,
         serverName: plaintext
           ? null
@@ -745,9 +745,17 @@ test(
       catalog,
       serviceReceipts,
     );
-    const receipt = await runCurrent187ConnectionProbeMatrix(
-      runnerInput(tls, serviceReceipts, controlReceipts),
-    );
+    const probeInput = runnerInput(tls, serviceReceipts, controlReceipts);
+    for (const service of probeInput.services) {
+      assert.equal(
+        service.negativeConnections.every(
+          (connection) =>
+            new URL(connection.connectionString).hostname === BACKEND_HOST,
+        ),
+        true,
+      );
+    }
+    const receipt = await runCurrent187ConnectionProbeMatrix(probeInput);
 
     assert.equal(receipt.status, CURRENT187_CONNECTION_PROBE_RUNNER_STATUS);
     assert.equal(

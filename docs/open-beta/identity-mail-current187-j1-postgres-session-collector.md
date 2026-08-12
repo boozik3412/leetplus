@@ -95,15 +95,17 @@ probe runner.
 
 ## Оставшийся P0-путь CURRENT187-J
 
-1. Запустить J1 отдельно от production identities `APPLICATION`,
+1. Принять exact-SHA CI для
+   [J2 endpoint/TLS-peer collector](./identity-mail-current187-j2-endpoint-tls-peer-collector.md).
+2. Запустить J1+J2 отдельно от production identities `APPLICATION`,
    `COORDINATOR`, `MIGRATION`, `WORKER` и доказать их попарное разделение.
-2. Реализовать независимые endpoint/TLS-peer, HBA/reload и PgBouncer collectors,
-   а также положительные и отрицательные probes фактического маршрута.
-3. Добавить независимый production signer/root, freshness/reload epoch,
+3. Реализовать независимые HBA/reload и PgBouncer collectors, а также
+   положительные и отрицательные probes фактического маршрута.
+4. Добавить независимый production signer/root, freshness/reload epoch,
    persisted one-time consumption/revocation и lost-response reconciliation.
-4. Принять hostile real-topology matrix: wrong CA/hostname, plaintext, `trust`,
+5. Принять hostile real-topology matrix: wrong CA/hostname, plaintext, `trust`,
    wildcard, collapsed user, wrong DB/role, pool mode и stale reload.
-5. Связать только полный branded production J receipt с CURRENT187-F и
+6. Связать только полный branded production J receipt с CURRENT187-F и
    production deploy authority, затем выполнить independent latest-byte review,
    canonical promotion и restored-copy rehearsal.
 

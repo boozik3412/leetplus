@@ -602,6 +602,12 @@ enterprise-isolation option и не сокращает shared gates.
     J1 остаётся deny-only и не
     утверждает endpoint identity, matched HBA rule, PgBouncer identity или
     negative probe.
+    [CURRENT187-J2 endpoint/TLS peer collector](./identity-mail-current187-j2-endpoint-tls-peer-collector.md)
+    добавляет actual DNS→exact IP→TCP→PostgreSQL SSLRequest→TLS 1.2/1.3
+    observation с verify-full hostname/CA, leaf DER и SPKI binding. J2 unit
+    `10/10`, aggregate CURRENT187 `63/63`, actual protocol/TLS harness `1/1`;
+    exact-SHA CI пока не принят. Receipt остаётся deny-only: endpoint/TLS
+    observed, но не attested; HBA/PgBouncer/negative-probe flags false.
     Production roots остаются frozen-empty. Дальше требуются post-Green
     production root enrollment и отдельный deployment GO, actual
     LOGIN/HBA/pooler/service mapping,

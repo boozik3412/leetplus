@@ -749,6 +749,12 @@ jobs:
           NODE_ENV: test
           IDENTITY_MAIL_POSTGRES_SESSION_COLLECTOR_CURRENT187_PG_E2E_CONFIRM: run-current187-postgres-backend-session-collector-postgres-e2e
 
+      - name: Verify CURRENT187 PostgreSQL SSLRequest endpoint and TLS peer identity
+        run: pnpm --filter database test:integration:identity-mail-cluster-endpoint-tls-peer-current187
+        env:
+          NODE_ENV: test
+          IDENTITY_MAIL_ENDPOINT_TLS_PEER_CURRENT187_E2E_CONFIRM: run-current187-endpoint-tls-peer-protocol-integration-e2e
+
       - name: Verify OWNER invite HOLD outbox envelope transaction
         run: pnpm --filter api test:integration:identity-owner-invite-hold-outbox:pg
         env:

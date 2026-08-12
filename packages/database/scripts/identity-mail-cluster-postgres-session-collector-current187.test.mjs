@@ -101,6 +101,17 @@ function positive(overrides = {}) {
   };
 }
 
+test("PostgreSQL session observation uses the exact pg_stat_ssl client serial column", () => {
+  assert.match(
+    CURRENT187_POSTGRES_SESSION_OBSERVATION_SQL_FOR_TEST_ONLY,
+    /transport\.client_serial::TEXT AS "tlsSerial"/u,
+  );
+  assert.doesNotMatch(
+    CURRENT187_POSTGRES_SESSION_OBSERVATION_SQL_FOR_TEST_ONLY,
+    /transport\.serial\b/u,
+  );
+});
+
 function dependencies({
   disconnectError = null,
   now = NOW,

@@ -156,7 +156,7 @@ SELECT
   transport.bits::TEXT AS "tlsBits",
   transport.client_dn::TEXT AS "tlsClientDn",
   transport.issuer_dn::TEXT AS "tlsIssuerDn",
-  transport.serial::TEXT AS "tlsSerial",
+  transport.client_serial::TEXT AS "tlsSerial",
   current_role_row.rolcanlogin AS "currentRoleCanLogin",
   current_role_row.rolinherit AS "currentRoleInherit",
   current_role_row.rolsuper AS "currentRoleSuperuser",

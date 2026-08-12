@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026
 
-Статус: `ENGINEERING ACCEPTED LOCALLY / SYNTHETIC SIGNED CONTRACT / DENY-ONLY / NOT DEPLOYABLE`.
+Статус: `EXACT-SHA CI ACCEPTED / SYNTHETIC SIGNED CONTRACT / DENY-ONLY / NOT DEPLOYABLE`.
 
 ## Назначение
 
@@ -66,17 +66,28 @@ adversarial test harness и принимается только в explicit loop
 - database typecheck: `PASS`;
 - syntax и Prettier: `PASS`.
 
+Exact-SHA CI принят на commit
+`1ccc7b320e897cc9b1f63c2d0de1097b53f103d1`: GitHub Actions run
+`31594459396` завершил `3/3 SUCCESS` и выпустил artifact ID `9140727030`,
+digest
+`sha256:442f19bb2c2ad9786ac1a5f62e7d03425b5854359356dc6d095437f300addd97`.
+Полная фиксация: [J5 CI evidence](./identity-mail-current187-j5-ci-evidence-2026-08-12.md).
+
 Все receipts сохраняют `authorization=false`, `canMutate=false`,
 `canSend=false`, `productionRuntimeAttested=false`,
 `testAccessAuthorized=false`, `sharedBetaAccess=false`.
 
 ## Что ещё требуется
 
-J5 сейчас является подписываемым verification contract, а не production probe
-runner. До повышения статуса обязательны:
+J5 является подписываемым verification contract, а R1 уже добавляет
+capability-bearing runner foundation: 4 positive receipt bindings, 20 actual
+network attempts и 12 безопасных control-policy evaluations. R1 локально принят
+`9/9`, общий J5 `19/19`, aggregate CURRENT187 `98/98`; см.
+[описание runner](./identity-mail-current187-j5-capability-probe-runner.md).
+До повышения production-статуса обязательны:
 
-1. capability-bearing runner, который фактически выполняет все 36 probes в
-   production-like/production topology и формирует secret-free transcript;
+1. actual disposable integration и затем production-like execution всех 36
+   outcomes;
 2. независимый protected signer/HSM и reviewed production public-root
    enrollment;
 3. persisted one-time consumption/revocation, expiry/replay и lost-response

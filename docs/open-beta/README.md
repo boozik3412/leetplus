@@ -641,9 +641,18 @@ enterprise-isolation option и не сокращает shared gates.
     [CURRENT187-J5 signed connection-probe matrix](./identity-mail-current187-j5-signed-connection-probe-matrix.md)
     добавляет отдельный Ed25519 purpose для четырёх service purpose и exact
     `positive + 8 negative` outcomes на каждый. J5 `10/10`, aggregate CURRENT187
-    `89/89`, typecheck green; production roots frozen-empty, actual 36-probe
-    runner/persisted consumption/F binding отсутствуют, поэтому статус
+    `89/89`, typecheck green; exact-SHA CI `31594459396` — `3/3 SUCCESS`, artifact
+    ID `9140727030`; production roots frozen-empty, actual topology execution,
+    persisted consumption и F binding отсутствуют, поэтому статус
     остаётся `NO-GO`.
+
+- [CURRENT187-J5 capability probe runner](./identity-mail-current187-j5-capability-probe-runner.md)
+  — production entry связывает branded J1–J4 receipts, выполняет 20
+  классифицированных negative PostgreSQL connection attempts и 12 безопасных
+  control-policy evaluations без изменения HBA/PgBouncer; runner `9/9`, J5
+  `19/19`, aggregate CURRENT187 `98/98`, typecheck green. Actual disposable
+  topology, signer/root, persistence и F/deploy binding ещё обязательны.
+
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable
     attempt, provider mark/complete lost-response, ambiguous-result quarantine,

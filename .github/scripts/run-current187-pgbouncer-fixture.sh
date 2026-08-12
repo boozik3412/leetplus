@@ -11,10 +11,34 @@ if [[ -z "${RUNNER_TEMP:-}" || ! -d "$RUNNER_TEMP" ]]; then
   printf 'RUNNER_TEMP is unavailable.\n' >&2
   exit 65
 fi
-if [[ -z "${POSTGRES_SERVICE_CONTAINER_ID:-}" ]]; then
+if [[ ! "${POSTGRES_SERVICE_CONTAINER_ID:-}" =~ ^[0-9a-f]{64}$ ]]; then
   printf 'PostgreSQL service container identity is unavailable.\n' >&2
   exit 65
 fi
+
+mapfile -t postgres_network_gateways < <(
+  docker inspect \
+    --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{"\n"}}{{end}}' \
+    "$POSTGRES_SERVICE_CONTAINER_ID" |
+    sed '/^[[:space:]]*$/d'
+)
+if [[ ${#postgres_network_gateways[@]} -ne 1 ]]; then
+  printf 'PostgreSQL service must expose exactly one Docker network gateway.\n' >&2
+  exit 65
+fi
+postgres_client_address="${postgres_network_gateways[0]}"
+if [[ ! "$postgres_client_address" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+  printf 'PostgreSQL service Docker network gateway is not an IPv4 address.\n' >&2
+  exit 65
+fi
+IFS='.' read -r -a postgres_client_octets <<<"$postgres_client_address"
+for postgres_client_octet in "${postgres_client_octets[@]}"; do
+  if ((10#$postgres_client_octet > 255)); then
+    printf 'PostgreSQL service Docker network gateway is outside IPv4 bounds.\n' >&2
+    exit 65
+  fi
+done
+postgres_client_cidr="$postgres_client_address/32"
 
 fixture_root="$(mktemp -d "$RUNNER_TEMP/leetplus-current187-pgbouncer-XXXXXX")"
 pooler_hostname="pool.current187.invalid"
@@ -258,14 +282,14 @@ roles_created=1
 docker cp \
   "$POSTGRES_SERVICE_CONTAINER_ID:/var/lib/postgresql/data/pg_hba.conf" \
   "$original_hba_path"
-cat >"$fixture_hba_path" <<'HBA'
+cat >"$fixture_hba_path" <<HBA
 local all all scram-sha-256
-hostssl leetplus_ci postgres 127.0.0.1/32 scram-sha-256
-hostssl leetplus_ci lp_application 127.0.0.1/32 scram-sha-256
-hostssl leetplus_ci lp_coordinator 127.0.0.1/32 scram-sha-256
-hostssl leetplus_ci lp_migration 127.0.0.1/32 scram-sha-256
-hostssl leetplus_ci lp_worker 127.0.0.1/32 scram-sha-256
-hostssl leetplus_ci lp_wrong 127.0.0.1/32 scram-sha-256
+hostssl leetplus_ci postgres $postgres_client_cidr scram-sha-256
+hostssl leetplus_ci lp_application $postgres_client_cidr scram-sha-256
+hostssl leetplus_ci lp_coordinator $postgres_client_cidr scram-sha-256
+hostssl leetplus_ci lp_migration $postgres_client_cidr scram-sha-256
+hostssl leetplus_ci lp_worker $postgres_client_cidr scram-sha-256
+hostssl leetplus_ci lp_wrong $postgres_client_cidr scram-sha-256
 HBA
 docker cp \
   "$fixture_hba_path" \

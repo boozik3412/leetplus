@@ -2,7 +2,7 @@
 
 Дата фиксации: 12.08.2026.
 
-Статус: `ENGINEERING ACCEPTED LOCALLY / NO PRODUCTION EFFECT / NOT DEPLOYABLE`.
+Статус: `EXACT-SHA CI ACCEPTED / NO PRODUCTION EFFECT / NOT DEPLOYABLE`.
 
 ## Закрытый риск
 
@@ -47,12 +47,23 @@ Production runner проверяет J3/J4 до service loop, затем strict 
 - harness counters: `plaintext=0`, `sslRequests=0`, `tlsStartups=0`;
 - syntax, typecheck, scoped Prettier и `git diff --check`: `PASS`.
 
+Exact SHA `24b2f7ea6b77931b24ebc251e6d261cf5d207945` принят GitHub Actions
+run `31614205518`: все `3/3` jobs завершены `SUCCESS`. Artifact ID
+`9148849155`, digest
+`sha256:766d11733a9a797286c1a2df9ddf87c8536f594b394407cb943b532106e39449`.
+Полная фиксация: [R6 CI evidence](./identity-mail-current187-j5-r6-ci-evidence-2026-08-12.md).
+
 ## Что остаётся
 
 R6 не является positive production-like topology rehearsal. Следующий этап
-должен вызвать четыре public actual J1/J2 collectors и actual J3/J4 collectors
-в одном disposable/restored topology run, после чего production runner сможет
-потребить их strict brands и выполнить negative matrix.
+сначала добавляет J4 mTLS client-certificate/private-key contract: официальный
+PgBouncer `client_tls_sslmode=verify-full` требует валидный client certificate,
+а текущий collector передаёт только CA и пароль. Key/certificate должны быть
+digest-bound, bounded, не попадать в receipt/errors и передаваться только TLS
+client. Затем четыре public actual J1/J2 collectors и actual J3/J4 collectors
+выполняются в одном disposable/restored topology run, после чего production
+runner сможет потребить их strict brands и выполнить negative matrix. См.
+[официальную TLS-конфигурацию PgBouncer](https://www.pgbouncer.org/config#client_tls_sslmode).
 
 Далее отдельно обязательны external key ceremony, OS ACL/HSM/KMS, reviewed
 production root, canonical ledger/runtime roles и restored-copy

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.87                                         |
+| Версия           | 1.88                                         |
 | Дата             | 12.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -695,8 +695,9 @@ enterprise-isolation option и не сокращает shared gates.
 - [CURRENT187-J5-R6 production-origin fence](./identity-mail-current187-j5-r6-production-origin-fence.md)
   — отдельные strict brands не позволяют production-mode test dependency seams
   подменить actual J1–J4 collectors. Production runner отклоняет все такие
-  receipts до network I/O; integration `2/2`. Actual co-located topology и
-  production GO не заявляются.
+  receipts до network I/O; integration `2/2`. SHA `24b2f7ea…` принят CI
+  `31614205518` `3/3 SUCCESS`, artifact `sha256:766d1173…9449`. Actual co-located
+  topology и production GO не заявляются. [CI evidence](./identity-mail-current187-j5-r6-ci-evidence-2026-08-12.md).
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

@@ -63,8 +63,9 @@ actual PostgreSQL hostile fixture — `1/1 PASS`, postflight
 J5-R3 пока не является canonical или production PostgreSQL ledger. Candidate
 находится вне canonical migrations. Не проведены external key ceremony, OS
 ACL/HSM/KMS attestation, reviewed production root enrollment, production-like
-four-service run и binding branded persisted J5 receipt в
-CURRENT187-F/deploy authority.
+four-service run. J5-R4 уже добавляет deny-only structural binding branded
+persisted J5 receipt в deployment authority, но CURRENT187-F ещё не потребляет
+R4 receipt и production binding не удовлетворён.
 
 Поэтому production, `Tenant A/A1..A4`, внешний tenant/tester, invites и
 providers не изменялись. Решение по внешнему тесту остаётся `NO-GO`.
@@ -76,5 +77,7 @@ providers не изменялись. Решение по внешнему тес
    production effects.
 3. Провести external key ceremony/ACL-HSM attestation и reviewed production
    root enrollment отдельным решением.
-4. Только после этих проверок рассматривать canonical promotion и binding
-   persisted J5 receipt в CURRENT187-F/deploy authority.
+4. Сделать J5-R4 receipt обязательным branded successor-policy input после
+   CURRENT187-F.
+5. Только после этих проверок рассматривать canonical promotion и production
+   deploy authority.

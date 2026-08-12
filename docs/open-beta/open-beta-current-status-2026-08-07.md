@@ -126,6 +126,15 @@
 > `databases/roles/sessions = 0/0/0`, artifact `sha256:0fc0908b…8972`.
 > Candidate остаётся noncanonical; production root, production-like topology и
 > F/deploy binding отсутствуют. Статус остаётся `NO-GO`.
+>
+> J5-R4 локально добавляет отдельный exact structural successor receipt рядом с
+> immutable deployment authority: envelope, matrix, persisted receipt, public
+> root и verifier receipt связаны через общий release/cluster/universe, frozen
+> deploy contract не меняется. J5 `42/42`, aggregate CURRENT187 `121/121`,
+> authority `13/13`; receipt остаётся synthetic deny-only с
+> `deploymentGoConsumable=false` и
+> `productionBindingSatisfied=false`. CURRENT187-F ещё не потребляет R4;
+> production root/topology отсутствуют, статус `NO-GO`.
 
 ## Итоговый вердикт
 
@@ -179,6 +188,7 @@
 | CURRENT187-J5-R1 probe runner     | `EXACT-SHA CI ACCEPTED / ACTUAL WIRE+TLS FIXTURE`        | branded J1–J4 chain; 4 positive bindings + 20 classified negative PostgreSQL attempts + 12 non-mutating control-policy evaluations; exact dimension binding; secret-free process-local receipt; runner `10/10`, combined J5 `20/20`, actual disposable wire/TLS `1/1`, aggregate CURRENT187 `99/99`; SHA `e4789e29…`, CI `31597872402` `3/3 SUCCESS`, artifact `sha256:1fb76259…fdd85f`; branded production-like run pending                        |
 | CURRENT187-J5-R2 protected signer | `ENGINEERING ACCEPTED LOCALLY / ROOT FROZEN-EMPTY`       | exact branded R1→J5 Ed25519 signer; external canonical PKCS8/SPKI, public pin, repo/temp/link/drift fences; no DB/network/process/env/deploy/tenant/provider capability; `6/6`, combined J5 `26/26`, aggregate CURRENT187 `105/105`; production key/root/ACL-HSM/persistence/F binding pending                                                                                                                                                      |
 | CURRENT187-J5-R3 ledger           | `EXACT-SHA CI ACCEPTED / NONCANONICAL PG CANDIDATE`      | exact transferable contract plus append-only/FORCE-RLS/owner-only candidate, exact-OID roles, execute-only consume/revoke RPC, total lock order and post-lock freshness; contract `6/6`, static `7/7`, combined J5 `39/39`, aggregate CURRENT187 `118/118`; SHA `1f7ef47c…`, CI `31606012609` `3/3 SUCCESS`, actual PG `1/1`, zero DB/role/session residue; independent review, canonical promotion, production root/topology and F binding pending |
+| CURRENT187-J5-R4 deploy binding   | `ENGINEERING ACCEPTED LOCALLY / SYNTHETIC DENY-ONLY`     | separate branded successor receipt combines immutable deployment authority with exact J5 envelope/matrix/persisted receipt/root/verifier digest through shared release/cluster/universe; clone/scope drift fail closed; frozen contract unchanged; J5 `42/42`, aggregate `121/121`, authority `13/13`; receipt remains non-consumable, F successor consumption and production root/topology pending                                                 |
 | Единый gate                       | `PASS`                                                   | `163/163`, `0` failures                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Независимая latest-byte проверка  | `PASS`                                                   | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                                                                                                                                                                                                                                                                                                                                          |
 

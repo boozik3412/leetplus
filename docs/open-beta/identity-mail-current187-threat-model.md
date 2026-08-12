@@ -70,6 +70,10 @@ config file, database row общего назначения, prototype chain и�
   byte-exact envelope возвращает тот же receipt, а reuse operation/nonce с
   другим envelope fail-closed. Receipt сохраняет
   `persistedConsumptionVerified=false`.
+- CURRENT187-J5-R4 не меняет immutable deploy envelope: отдельный branded
+  successor receipt объединяет verified deploy authority и persisted J5 по
+  общей области release/cluster/database-universe и переносит exact probe
+  digests. Этот receipt synthetic, deny-only и пока не потребляется policy.
 
 ## Основные угрозы и fail-closed ответ
 

@@ -81,6 +81,12 @@ Fingerprint equality не является semantic allowlist evaluator. CURRENT
 - hostile concurrent topology matrix;
 - provider recovery/kill-switch и production-like rehearsal.
 
+CURRENT187-J5-R4 уже добавляет отдельный synthetic deny-only successor receipt,
+который связывает branded persisted connection-probe evidence с этим immutable
+deploy authority по release/cluster/database-universe. Сам CURRENT187-F его ещё
+не принимает, frozen deploy contract не изменён, поэтому это не снимает ни один
+production gate.
+
 ## Локальная проверка
 
 На текущем рабочем tree:

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.83                                         |
+| Версия           | 1.84                                         |
 | Дата             | 12.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -673,6 +673,14 @@ enterprise-isolation option и не сокращает shared gates.
   `0/0/0`; см. [J5-R3 PostgreSQL CI evidence](./identity-mail-current187-j5-r3-pg-ci-evidence-2026-08-12.md).
   Independent review, canonical promotion, production root/topology и
   production binding обязательны.
+
+- [CURRENT187-J5-R4 persisted probe deploy binding](./identity-mail-current187-j5-r4-deploy-binding.md)
+  — отдельный exact deny-only successor receipt рядом с immutable deployment
+  authority: J5 envelope/matrix/persisted receipt/root/verifier digest связаны
+  через общий release/cluster/universe без изменения frozen deploy contract. J5
+  `42/42`, aggregate CURRENT187 `121/121`, authority `13/13`; receipt остаётся
+  synthetic/non-consumable, CURRENT187-F consumption и production root/topology
+  ещё обязательны.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

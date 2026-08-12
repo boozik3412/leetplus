@@ -2,7 +2,7 @@
 
 Дата реализации candidate: 13.08.2026.
 
-Статус: `LOCAL CANDIDATE / EXACT-SHA CI PENDING / PRODUCTION ROOT FROZEN EMPTY`.
+Статус: `EXACT-SHA CI ACCEPTED / DISPOSABLE EXTERNAL SIGNER / PRODUCTION ROOT FROZEN EMPTY`.
 
 ## Цель
 
@@ -48,12 +48,21 @@ file-backed signer entrypoint, не регистрируя тестовый кл
   считается acceptance evidence;
 - `git diff --check`: `PASS`.
 
-## Условия приёмки
+## Exact-SHA CI acceptance
 
-R10 может быть принят только на exact commit SHA, если GitHub CI завершит
-`3/3 SUCCESS`, целевая PgBouncer integration выполнит `4/4 PASS` без skip и
-последующие PostgreSQL/shared-beta gates останутся зелёными после scoped
-cleanup. До этого статус — candidate.
+R10 принят на exact commit
+`8c34895a35bdebc91cf5deba4258adcc709a6b7f`:
+
+- GitHub Actions run `31639146344`: `3/3 SUCCESS`;
+- target PgBouncer integration: `4/4 PASS`, `fail=0`, `skipped=0`;
+- четвёртый subtest выполнил co-located public J1–J4 runner и production
+  file-backed external signer;
+- все последующие PostgreSQL/shared-beta gates завершились успешно;
+- release artifact ID `9158424615`, digest
+  `sha256:9ac538fa08ccf2024e7e1acf54814b00995ec7a84dfd9adbb75c8a62906b00a4`.
+
+Полное доказательство:
+[R10 CI evidence](./identity-mail-current187-j5-r10-ci-evidence-2026-08-13.md).
 
 Даже после acceptance R10 не является production root enrollment. Следующие
 обязательные этапы: отдельно разрешённая key ceremony и reviewed root

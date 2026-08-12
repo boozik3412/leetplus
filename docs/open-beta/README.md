@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.94                                         |
+| Версия           | 1.95                                         |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -720,18 +720,21 @@ enterprise-isolation option и не сокращает shared gates.
 - [CURRENT187-J5-R9 co-located runner](./identity-mail-current187-j5-r9-co-located-runner-candidate.md)
   — один disposable контур собирает strict public J1/J2 для четырёх service
   purpose, strict J3/J4 и запускает production connection-probe matrix `4 + 20
-  + 12`. J2 и runner используют exact client mTLS credentials без отражения
-  секретов в receipt; exact gateway `/32`, временные HBA, roles и hostname
-  mapping имеют scoped cleanup. Target integration `4/4` без fail/skip; SHA
-  `677a37c2…` принят CI `31635286090` `3/3 SUCCESS`, artifact
-  `sha256:c0ade8bd…a7595`; все downstream PostgreSQL gates green. Это engineering
-  acceptance, а не разрешение production или внешнего доступа.
-  [CI evidence](./identity-mail-current187-j5-r9-ci-evidence-2026-08-13.md).
+  - 12`. J2 и runner используют exact client mTLS credentials без отражения
+секретов в receipt; exact gateway `/32`, временные HBA, roles и hostname
+mapping имеют scoped cleanup. Target integration `4/4`без fail/skip; SHA`677a37c2…`принят CI`31635286090` `3/3 SUCCESS`, artifact
+`sha256:c0ade8bd…a7595`; все downstream PostgreSQL gates green. Это engineering
+    acceptance, а не разрешение production или внешнего доступа.
+    [CI evidence](./identity-mail-current187-j5-r9-ci-evidence-2026-08-13.md).
 
 - [CURRENT187-J5-R10 disposable external signer bridge](./identity-mail-current187-j5-r10-external-signer-bridge-candidate.md)
   — production file-backed signer подписывает exact R9 receipt одноразовым
   внешним Ed25519 key; production root registry остаётся frozen-empty и
-  обязан отклонить envelope до отдельной key ceremony/root enrollment.
+  обязан отклонить envelope до отдельной key ceremony/root enrollment. Exact
+  SHA `8c34895a…` принят CI `31639146344` как `3/3 SUCCESS`; target integration
+  `4/4`, без fail/skip; artifact `sha256:9ac538fa…b00a4`. Это доказывает bridge,
+  но не регистрирует production root и не разрешает deployment/внешний доступ.
+  [CI evidence](./identity-mail-current187-j5-r10-ci-evidence-2026-08-13.md).
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

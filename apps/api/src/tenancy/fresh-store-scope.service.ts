@@ -4,6 +4,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import {
+  normalizeCapabilities,
+  resolveUserCapabilities,
+} from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   AccessScopeService,
@@ -50,9 +54,16 @@ export class FreshStoreScopeService {
       select: {
         id: true,
         tenantId: true,
+        role: true,
+        customRoleId: true,
         accessScope: true,
         isActive: true,
         isPlatformAdmin: true,
+        customRole: {
+          select: {
+            permissions: true,
+          },
+        },
         tenant: {
           select: {
             slug: true,
@@ -75,6 +86,30 @@ export class FreshStoreScopeService {
       throw new UnauthorizedException('Fresh tenant store scope is required');
     }
 
+    const roleOverride = subject.customRole
+      ? null
+      : await this.prisma.userRoleOverride.findUnique({
+          where: {
+            tenantId_role: {
+              tenantId: subject.tenantId,
+              role: subject.role,
+            },
+          },
+          select: {
+            permissions: true,
+          },
+        });
+    const freshPermissions = this.sorted(
+      resolveUserCapabilities({
+        role: subject.role,
+        customRole: subject.customRole,
+        roleOverride,
+      }),
+    );
+    const guardPermissions = this.sorted(
+      normalizeCapabilities(user.permissions),
+    );
+
     const persisted = this.accessScopeService.fromPersisted(subject);
     const guardScope = this.accessScopeService.resolve(user);
     const freshStoreIds = this.sorted(persisted.storeIds);
@@ -84,6 +119,9 @@ export class FreshStoreScopeService {
       subject.id !== user.id ||
       subject.tenantId !== guardScope.tenantId ||
       subject.tenant.slug !== guardScope.tenantSlug ||
+      subject.role !== user.role ||
+      subject.customRoleId !== (user.customRoleId ?? null) ||
+      !this.sameIds(freshPermissions, guardPermissions) ||
       persisted.mode !== guardScope.mode ||
       !this.sameIds(freshStoreIds, guardStoreIds)
     ) {

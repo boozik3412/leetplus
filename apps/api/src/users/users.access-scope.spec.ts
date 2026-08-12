@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { TenantCustomerStage, UserRole } from '@prisma/client';
 import { IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS } from '../auth/identity-email-claim.service';
@@ -208,10 +209,29 @@ function createService(overrides: {
   prisma.$transaction.mockImplementation(
     (callback: (tx: typeof prisma) => Promise<unknown>) => callback(prisma),
   );
-  const tenantContextService = {
-    resolve: jest.fn().mockReturnValue({
-      tenantId,
-      tenantSlug: 'tenant-a',
+  const freshStoreScopeService = {
+    resolve: jest.fn().mockImplementation((actor: AuthenticatedUser) =>
+      Promise.resolve({
+        userId: actor.id,
+        tenantId: actor.tenantId,
+        tenantSlug: actor.tenantSlug,
+        mode: actor.accessScope,
+        allowedStoreIds: [...actor.allowedStoreIds],
+      }),
+    ),
+    assertNetwork: jest.fn().mockImplementation((actor: AuthenticatedUser) => {
+      if (actor.accessScope !== 'NETWORK') {
+        return Promise.reject(
+          new ForbiddenException('Network access is required'),
+        );
+      }
+      return Promise.resolve({
+        userId: actor.id,
+        tenantId: actor.tenantId,
+        tenantSlug: actor.tenantSlug,
+        mode: actor.accessScope,
+        allowedStoreIds: [...actor.allowedStoreIds],
+      });
     }),
   };
   const configService = {
@@ -311,18 +331,23 @@ function createService(overrides: {
   const service = new UsersService(
     prisma as never,
     { hash: jest.fn() } as never,
-    tenantContextService,
     configService as never,
     new AccessScopeService(),
+    freshStoreScopeService as never,
     identityClaimBoundary as never,
   );
 
-  return { identityClaimBoundary, prisma, service };
+  return {
+    freshStoreScopeService,
+    identityClaimBoundary,
+    prisma,
+    service,
+  };
 }
 
 describe('UsersService AccessScope boundary', () => {
   it('returns only users, invites and stores fully contained in actor scope', async () => {
-    const { service } = createService({
+    const { freshStoreScopeService, service } = createService({
       users: [
         userRow(storeActor.id, 'STORES', ['a1', 'a2']),
         userRow('employee-a1', 'STORES', ['a1']),
@@ -349,6 +374,23 @@ describe('UsersService AccessScope boundary', () => {
     ]);
     expect(result.invites.map((invite) => invite.id)).toEqual(['invite-a1']);
     expect(result.invites[0]).not.toHaveProperty('registrationUrl');
+    expect(freshStoreScopeService.resolve).toHaveBeenCalledWith(storeActor);
+  });
+
+  it('rejects a stale actor before reading users, roles, invites or stores', async () => {
+    const { freshStoreScopeService, prisma, service } = createService({});
+    freshStoreScopeService.resolve.mockRejectedValueOnce(
+      new UnauthorizedException('Authorization scope is stale'),
+    );
+
+    await expect(service.getUsers(storeActor)).rejects.toThrow(
+      'Authorization scope is stale',
+    );
+    expect(prisma.user.findMany).not.toHaveBeenCalled();
+    expect(prisma.store.findMany).not.toHaveBeenCalled();
+    expect(prisma.userAccessRole.findMany).not.toHaveBeenCalled();
+    expect(prisma.userInvite.findMany).not.toHaveBeenCalled();
+    expect(prisma.userRoleOverride.findMany).not.toHaveBeenCalled();
   });
 
   it('requires every direct user creation to use an email-bound invite', async () => {

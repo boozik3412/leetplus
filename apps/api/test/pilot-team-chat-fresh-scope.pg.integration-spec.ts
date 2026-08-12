@@ -2,6 +2,7 @@ import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaClient, UserRole } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
+import { resolveUserCapabilities } from '../src/auth/capabilities';
 import { PrismaService } from '../src/prisma/prisma.service';
 import type { StaffAttachmentBindingsService } from '../src/staff/staff-attachment-bindings.service';
 import { StaffTeamChatService } from '../src/staff/staff-team-chat.service';
@@ -242,6 +243,7 @@ function buildUser(
       email: `a1-${fixture.userA1Id}@team-chat.integration.invalid`,
       fullName: 'A1 manager',
       role: UserRole.CLUB_MANAGER,
+      permissions: resolveUserCapabilities({ role: UserRole.CLUB_MANAGER }),
       isPlatformAdmin: false,
       tenantId: fixture.tenantAId,
       tenantSlug: fixture.tenantASlug,
@@ -256,6 +258,7 @@ function buildUser(
       email: `b-network-${fixture.userBNetworkId}@team-chat.integration.invalid`,
       fullName: 'Tenant B owner',
       role: UserRole.OWNER,
+      permissions: resolveUserCapabilities({ role: UserRole.OWNER }),
       isPlatformAdmin: false,
       tenantId: fixture.tenantBId,
       tenantSlug: fixture.tenantBSlug,
@@ -269,6 +272,7 @@ function buildUser(
     email: `a-network-${fixture.userANetworkId}@team-chat.integration.invalid`,
     fullName: 'Tenant A owner',
     role: UserRole.OWNER,
+    permissions: resolveUserCapabilities({ role: UserRole.OWNER }),
     isPlatformAdmin: false,
     tenantId: fixture.tenantAId,
     tenantSlug: fixture.tenantASlug,

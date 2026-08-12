@@ -341,6 +341,9 @@ jobs:
       - name: Lint Gate 1MT CRM communications PostgreSQL matrix
         run: pnpm --filter api lint:ci:pilot-crm-communications-pg
 
+      - name: Lint Gate 1MT users and roles PostgreSQL matrix
+        run: pnpm --filter api lint:ci:pilot-users-roles-pg
+
       - name: Test isolated design-partner runtime boundary
         run: pnpm --filter api test:ci:design-partner
 
@@ -892,6 +895,12 @@ jobs:
         env:
           NODE_ENV: test
           PILOT_CRM_COMMUNICATIONS_PG_CONFIRM: run-pilot-crm-communications-postgres-fixtures
+
+      - name: Verify Gate 1MT users and roles tenant isolation with PostgreSQL
+        run: pnpm --filter api test:integration:pilot-users-roles:pg
+        env:
+          NODE_ENV: test
+          PILOT_USERS_ROLES_PG_CONFIRM: run-pilot-users-roles-postgres-fixtures
 
       - name: Run read-only attachment inventory
         run: pnpm --filter database db:inventory:attachment-acl

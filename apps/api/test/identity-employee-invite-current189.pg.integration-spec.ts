@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
+import { resolveUserCapabilities } from '../src/auth/capabilities';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
 import { FreshStoreScopeService } from '../src/tenancy/fresh-store-scope.service';
 import {
@@ -967,6 +968,8 @@ function buildActor(input: {
   tenantId: string;
   tenantSlug: string;
 }): AuthenticatedUser {
+  const roleOverride = { permissions: ['manage_users'] };
+
   return {
     id: input.actorId,
     email: input.actorEmail,
@@ -978,7 +981,10 @@ function buildActor(input: {
     tenantSlug: input.tenantSlug,
     accessScope: 'NETWORK',
     allowedStoreIds: [],
-    permissions: ['manage_users'],
+    permissions: resolveUserCapabilities({
+      role: UserRole.OWNER,
+      roleOverride,
+    }),
   };
 }
 

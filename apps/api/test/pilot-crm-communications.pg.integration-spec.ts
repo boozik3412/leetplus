@@ -8,6 +8,7 @@ import { PrismaClient, UserRole } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import type { ExecutionContext } from '@nestjs/common';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
+import { resolveUserCapabilities } from '../src/auth/capabilities';
 import { GuestsService } from '../src/guests/guests.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
@@ -416,6 +417,7 @@ function buildUser(
       email: `a1-${fixture.userA1Id}@crm-communications.integration.invalid`,
       fullName: 'A1 manager',
       role: UserRole.CLUB_MANAGER,
+      permissions: resolveUserCapabilities({ role: UserRole.CLUB_MANAGER }),
       isPlatformAdmin: false,
       tenantId: fixture.tenantAId,
       tenantSlug: fixture.tenantASlug,
@@ -430,6 +432,7 @@ function buildUser(
       email: `b-${fixture.userBNetworkId}@crm-communications.integration.invalid`,
       fullName: 'Tenant B owner',
       role: UserRole.OWNER,
+      permissions: resolveUserCapabilities({ role: UserRole.OWNER }),
       isPlatformAdmin: false,
       tenantId: fixture.tenantBId,
       tenantSlug: fixture.tenantBSlug,
@@ -443,6 +446,7 @@ function buildUser(
     email: `a-${fixture.userANetworkId}@crm-communications.integration.invalid`,
     fullName: 'Tenant A owner',
     role: UserRole.OWNER,
+    permissions: resolveUserCapabilities({ role: UserRole.OWNER }),
     isPlatformAdmin: false,
     tenantId: fixture.tenantAId,
     tenantSlug: fixture.tenantASlug,

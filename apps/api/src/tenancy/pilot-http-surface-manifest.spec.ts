@@ -31,6 +31,11 @@ type NetworkMutationBinding = Readonly<{
   method: string;
 }>;
 
+type UserScopeBinding = NetworkMutationBinding &
+  Readonly<{
+    assertion: string;
+  }>;
+
 const SOURCE_ROOT = resolve(__dirname, '..');
 const WHOLE_SOURCE_DIRECTORIES = [
   'categories',
@@ -80,6 +85,28 @@ const PROVABLY_UNREGISTERED_CONTROLLER_SOURCES = new Set([
   'src/guest-portal/guest-portal-current190-candidate.controller.ts',
   'src/users/employee-invite-current189-candidate.controller.ts',
 ]);
+
+const USER_SCOPE_BINDINGS: readonly UserScopeBinding[] = [
+  ['GET /users', 'getUsers', 'resolve(user)'],
+  ['POST /users/invites', 'createInvite', 'resolve(actor)'],
+  ['PATCH /users/invites/:id', 'updateInvite', 'resolve(actor)'],
+  ['DELETE /users/invites/:id', 'cancelInvite', 'resolve(actor)'],
+  ['PATCH /users/:id', 'updateUser', 'resolve(actor)'],
+  ['POST /users/roles', 'createAccessRole', 'assertNetwork(actor)'],
+  ['PATCH /users/roles/:id', 'updateAccessRole', 'assertNetwork(actor)'],
+  [
+    'PATCH /users/system-roles/:role',
+    'updateSystemRole',
+    'assertNetwork(actor)',
+  ],
+].map(([id, method, assertion]) =>
+  Object.freeze({
+    assertion,
+    id,
+    method,
+    source: 'src/users/users.service.ts',
+  }),
+);
 
 const NETWORK_MUTATION_BINDINGS: readonly NetworkMutationBinding[] = [
   {
@@ -726,6 +753,31 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
         'await this.freshStoreScopeService.assertNetwork(user)',
       );
     }
+  });
+
+  it('re-attests every users/roles path except intentionally disabled direct creation before service data access', () => {
+    const users = PILOT_HTTP_SURFACE_MANIFEST.filter(
+      (entry) => entry.module === 'USERS_ROLES',
+    );
+    expect(users).toHaveLength(9);
+    expect(
+      users
+        .filter((entry) => entry.id !== 'POST /users')
+        .map((entry) => entry.id)
+        .sort(),
+    ).toEqual(USER_SCOPE_BINDINGS.map((binding) => binding.id).sort());
+    for (const binding of USER_SCOPE_BINDINGS) {
+      expect(serviceMethodText(binding)).toContain(
+        `await this.freshStoreScopeService.${binding.assertion}`,
+      );
+    }
+    expect(
+      serviceMethodText({
+        id: 'POST /users',
+        method: 'createUser',
+        source: 'src/users/users.service.ts',
+      }),
+    ).not.toContain('freshStoreScopeService');
   });
 
   it('opens exactly the fresh NETWORK staff slice and keeps scheduled execution blocked', () => {

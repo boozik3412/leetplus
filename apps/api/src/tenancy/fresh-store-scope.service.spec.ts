@@ -1,15 +1,18 @@
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { resolveUserCapabilities } from '../auth/capabilities';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from './access-scope.service';
 import { FreshStoreScopeService } from './fresh-store-scope.service';
 
 describe('FreshStoreScopeService', () => {
   const userFindUnique = jest.fn();
+  const userRoleOverrideFindUnique = jest.fn();
   const storeFindMany = jest.fn();
   const prisma = {
     user: { findUnique: userFindUnique },
+    userRoleOverride: { findUnique: userRoleOverrideFindUnique },
     store: { findMany: storeFindMany },
   } as unknown as PrismaService;
   const service = new FreshStoreScopeService(prisma, new AccessScopeService());
@@ -21,6 +24,8 @@ describe('FreshStoreScopeService', () => {
     email: 'owner@example.com',
     fullName: 'Owner',
     role: UserRole.OWNER,
+    customRoleId: null,
+    permissions: resolveUserCapabilities({ role: UserRole.OWNER }),
     isPlatformAdmin: false,
     tenantId: 'tenant-1',
     tenantSlug: 'network-one',
@@ -34,6 +39,9 @@ describe('FreshStoreScopeService', () => {
   ): Record<string, unknown> => ({
     id: 'user-1',
     tenantId: 'tenant-1',
+    role: UserRole.OWNER,
+    customRoleId: null,
+    customRole: null,
     accessScope: 'STORES',
     isActive: true,
     isPlatformAdmin: false,
@@ -45,6 +53,7 @@ describe('FreshStoreScopeService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     userFindUnique.mockResolvedValue(persistedUser());
+    userRoleOverrideFindUnique.mockResolvedValue(null);
     storeFindMany.mockResolvedValue([]);
   });
 
@@ -94,6 +103,63 @@ describe('FreshStoreScopeService', () => {
         }),
       ),
     ).rejects.toThrow('Authorization scope is stale');
+  });
+
+  it('rejects a JWT after the persisted system role changes', async () => {
+    userFindUnique.mockResolvedValue(persistedUser({ role: UserRole.ADMIN }));
+
+    await expect(service.resolve(requestUser())).rejects.toThrow(
+      'Authorization scope is stale',
+    );
+  });
+
+  it('rejects a JWT after a tenant role override revokes permissions', async () => {
+    userRoleOverrideFindUnique.mockResolvedValue({
+      permissions: ['view_dashboard'],
+    });
+
+    await expect(service.resolve(requestUser())).rejects.toThrow(
+      'Authorization scope is stale',
+    );
+    expect(userRoleOverrideFindUnique).toHaveBeenCalledWith({
+      where: {
+        tenantId_role: {
+          tenantId: 'tenant-1',
+          role: UserRole.OWNER,
+        },
+      },
+      select: { permissions: true },
+    });
+  });
+
+  it('accepts a matching tenant role override authority', async () => {
+    const roleOverride = { permissions: ['view_dashboard'] };
+    userRoleOverrideFindUnique.mockResolvedValue(roleOverride);
+
+    await expect(
+      service.resolve(
+        requestUser({
+          permissions: resolveUserCapabilities({
+            role: UserRole.OWNER,
+            roleOverride,
+          }),
+        }),
+      ),
+    ).resolves.toMatchObject({ userId: 'user-1' });
+  });
+
+  it('rejects a JWT after its persisted custom role binding changes', async () => {
+    userFindUnique.mockResolvedValue(
+      persistedUser({
+        customRoleId: 'custom-role-1',
+        customRole: { permissions: ['view_dashboard'] },
+      }),
+    );
+
+    await expect(service.resolve(requestUser())).rejects.toThrow(
+      'Authorization scope is stale',
+    );
+    expect(userRoleOverrideFindUnique).not.toHaveBeenCalled();
   });
 
   it('rejects Tenant A when it requests foreign store B1', async () => {

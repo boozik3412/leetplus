@@ -36,7 +36,12 @@ assortment read paths. Перед бизнес-запросами он:
    query/bulk filter выйти за его пределы;
 7. для `NETWORK` разрешает все клубы только своего tenant, а явные store IDs
    дополнительно подтверждает tenant-scoped запросом к `Store`;
-8. запрещает пустые, whitespace-only и duplicate explicit filters.
+8. запрещает пустые, whitespace-only и duplicate explicit filters;
+9. повторно читает системную роль, привязку custom role и tenant role override,
+   вычисляет effective capabilities из PostgreSQL и требует их точного
+   совпадения с guard-produced authority;
+10. при отзыве роли, custom role, capability или store scope отклоняет старый
+    JWT до чтения или изменения бизнес-данных.
 
 Отсутствие фильтра не расширяет `STORES`: оно означает весь fresh allow-list.
 `null` («все клубы tenant») может получить только fresh `NETWORK` subject.
@@ -146,19 +151,28 @@ Manifest содержит 294 handler:
 Все 21 `OUTBOUND`, public guest и internal scheduled handlers остаются
 заблокированными для внешнего tenant.
 
+Все восемь исполнимых `USERS_ROLES` service paths теперь проходят fresh
+PostgreSQL re-attestation до business query/mutation. Чтение пользователей и
+четыре legacy user/invite mutation используют fresh `NETWORK | STORES` scope;
+три операции настройки custom/system roles дополнительно требуют fresh
+`NETWORK`. Прямой `POST /users` остаётся немедленно fail-closed и не выполняет
+DB query: учётные записи должны появляться только через email-bound invite.
+Четыре invite HTTP routes всё ещё имеют решение `BLOCKED` до принятия
+CURRENT189 delivery/revoke/reissue, поэтому snapshot `5/9` не изменён.
+
 ## 5. Оставшиеся blocking gaps
 
 Counts пересекаются: один handler может иметь несколько gaps.
 
-| Gap                                                    | Handler count | Что требуется                                                              |
-| ------------------------------------------------------ | ------------: | -------------------------------------------------------------------------- |
-| `STORE_SCOPE_NOT_ENFORCED_WITH_ALLOWED_STORE_IDS`      |             2 | Перевести оставшиеся selectors/mutations на fresh authority                |
-| `PUBLIC_TENANT_ENTITLEMENT_ROUTE_UNCLASSIFIED`         |            31 | Отдельная public gamification entitlement policy                           |
-| `PUBLIC_STORE_BINDING_NOT_ATTESTED`                    |            31 | Доказать tenant/store binding guest session, Telegram и media              |
-| `NETWORK_SCOPE_NOT_ASSERTED`                           |            10 | Добавить fresh `assertNetwork()` до query/mutation/outbound                |
-| `OUTBOUND_DEFAULT_OFF`                                 |            21 | Оставить OFF до отдельного audited store canary workflow                   |
-| `INTERNAL_SERVICE_ROUTE_NOT_AVAILABLE_TO_TENANT_USERS` |             7 | Сохранить service-token admission и tenant-aware worker identity           |
-| external invite gaps                                   |      4 routes | Завершить verified delivery/revoke/reissue без raw URL/token response      |
+| Gap                                                    | Handler count | Что требуется                                                         |
+| ------------------------------------------------------ | ------------: | --------------------------------------------------------------------- |
+| `STORE_SCOPE_NOT_ENFORCED_WITH_ALLOWED_STORE_IDS`      |             2 | Перевести оставшиеся selectors/mutations на fresh authority           |
+| `PUBLIC_TENANT_ENTITLEMENT_ROUTE_UNCLASSIFIED`         |            31 | Отдельная public gamification entitlement policy                      |
+| `PUBLIC_STORE_BINDING_NOT_ATTESTED`                    |            31 | Доказать tenant/store binding guest session, Telegram и media         |
+| `NETWORK_SCOPE_NOT_ASSERTED`                           |            10 | Добавить fresh `assertNetwork()` до query/mutation/outbound           |
+| `OUTBOUND_DEFAULT_OFF`                                 |            21 | Оставить OFF до отдельного audited store canary workflow              |
+| `INTERNAL_SERVICE_ROUTE_NOT_AVAILABLE_TO_TENANT_USERS` |             7 | Сохранить service-token admission и tenant-aware worker identity      |
+| external invite gaps                                   |      4 routes | Завершить verified delivery/revoke/reissue без raw URL/token response |
 
 ## 6. Намеренно заблокированные assortment surfaces
 
@@ -182,6 +196,10 @@ capability, расхождении с tenant HTTP policy или незакрыт
 mutation с fresh NETWORK assertion в её service method.
 Ещё один exact assertion фиксирует 77 NETWORK-only in-app gamification
 handlers и запрещает смешать с ними public, service-token или outbound route.
+Отдельный users/roles assertion связывает все восемь non-direct service paths
+с `FreshStoreScopeService.resolve/assertNetwork`, а direct create сохраняет
+нулевой data-access fail-closed path. Focused fresh/users/manifest gate:
+`4 suites / 73 tests`.
 Отдельная route-to-guard проверка фиксирует 60 NETWORK-only staff routes и не
 позволяет включить scheduled execution или CRM widening. Ещё 23 ранее
 разрешённых STAFF и 10 COMMUNICATIONS routes теперь также обязаны иметь
@@ -245,7 +263,7 @@ pnpm --filter web test:pilot-bff-boundary
 pnpm --filter web test:guest-session-transport
 ```
 
-Принятый manifest-прогон: `15 suites / 154 tests`; CRM communications gate:
+Локальный manifest-прогон текущего candidate: `15 suites / 159 tests`; CRM communications gate:
 `6 suites / 162 tests`; отдельный team-chat service прогон:
 `1 suite / 21 tests`. Focused ESLint и API production typecheck также проходят.
 

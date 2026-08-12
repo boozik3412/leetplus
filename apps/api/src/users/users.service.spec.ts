@@ -41,20 +41,44 @@ describe('UsersService role override permissions', () => {
         create: jest.fn(),
       },
     };
-    const tenantContextService = {
-      resolve: jest.fn().mockReturnValue({ tenantId }),
+    const freshStoreScopeService = {
+      assertNetwork: jest
+        .fn()
+        .mockImplementation((subject: AuthenticatedUser) => {
+          if (subject.accessScope !== 'NETWORK') {
+            return Promise.reject(
+              new ForbiddenException('Network access is required'),
+            );
+          }
+          return Promise.resolve({
+            tenantId: subject.tenantId,
+            tenantSlug: subject.tenantSlug,
+            mode: subject.accessScope,
+            allowedStoreIds: [...subject.allowedStoreIds],
+            userId: subject.id,
+          });
+        }),
+      resolve: jest.fn().mockImplementation((subject: AuthenticatedUser) =>
+        Promise.resolve({
+          tenantId: subject.tenantId,
+          tenantSlug: subject.tenantSlug,
+          mode: subject.accessScope,
+          allowedStoreIds: [...subject.allowedStoreIds],
+          userId: subject.id,
+        }),
+      ),
     };
 
     const service = new UsersService(
       prisma as never,
       {} as never,
-      tenantContextService,
       {} as never,
       new AccessScopeService(),
+      freshStoreScopeService as never,
       {} as never,
     );
 
-    return { prisma, service, tenantContextService };
+    return { freshStoreScopeService, prisma, service };
   }
 
   it('allows standards manager to save tenant-scoped overrides for assignable roles', async () => {

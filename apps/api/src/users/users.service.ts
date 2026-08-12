@@ -32,7 +32,7 @@ import {
   type AccessScopeMode,
   type RequestedAccessScope,
 } from '../tenancy/access-scope.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 const assignableRolesByActor: Record<UserRole, UserRole[]> = {
   [UserRole.OWNER]: [
@@ -314,15 +314,15 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly passwordService: PasswordService,
-    private readonly tenantContextService: TenantContextService,
     private readonly configService: ConfigService,
     private readonly accessScopeService: AccessScopeService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
     private readonly identityClaimBoundary: IdentityEmailClaimService,
   ) {}
 
   async getUsers(user: AuthenticatedUser): Promise<UserAccountsResponse> {
-    const { tenantId } = this.tenantContextService.resolve(user);
-    const actorScope = this.accessScopeService.resolve(user);
+    const actorScope = await this.freshStoreScopeService.resolve(user);
+    const { tenantId } = actorScope;
     const [users, stores, customRoles, invites, roleOverrides] =
       await Promise.all([
         this.prisma.user.findMany({
@@ -405,7 +405,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
-    const { tenantId } = this.tenantContextService.resolve(actor);
+    const { tenantId } = await this.freshStoreScopeService.resolve(actor);
     await this.assertGenericIdentityMutationAllowed(
       tenantId,
       'invite delivery',
@@ -520,7 +520,7 @@ export class UsersService {
     id: string,
     dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
-    const { tenantId } = this.tenantContextService.resolve(actor);
+    const { tenantId } = await this.freshStoreScopeService.resolve(actor);
     await this.assertGenericIdentityMutationAllowed(
       tenantId,
       'invite delivery',
@@ -701,7 +701,7 @@ export class UsersService {
   }
 
   async cancelInvite(actor: AuthenticatedUser, id: string) {
-    const { tenantId } = this.tenantContextService.resolve(actor);
+    const { tenantId } = await this.freshStoreScopeService.resolve(actor);
     await this.assertGenericIdentityMutationAllowed(
       tenantId,
       'invite delivery',
@@ -790,7 +790,7 @@ export class UsersService {
     id: string,
     dto: UserAccountDto,
   ): Promise<UserAccount> {
-    const { tenantId } = this.tenantContextService.resolve(actor);
+    const { tenantId } = await this.freshStoreScopeService.resolve(actor);
     const existing = await this.prisma.user.findFirst({
       where: { id, tenantId },
       include: userAccountInclude,
@@ -988,9 +988,8 @@ export class UsersService {
     actor: AuthenticatedUser,
     dto: UserAccessRoleDto,
   ): Promise<UserAccessRoleAccount> {
-    const { tenantId } = this.tenantContextService.resolve(actor);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(actor);
     this.assertCanManageUsers(actor);
-    this.accessScopeService.assertNetwork(actor);
     const data = this.normalizeAccessRoleDto(dto);
     this.assertCapabilitiesGrantable(actor, data.permissions);
 
@@ -1013,9 +1012,8 @@ export class UsersService {
     id: string,
     dto: UserAccessRoleDto,
   ): Promise<UserAccessRoleAccount> {
-    const { tenantId } = this.tenantContextService.resolve(actor);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(actor);
     this.assertCanManageUsers(actor);
-    this.accessScopeService.assertNetwork(actor);
     await this.assertAccessRoleExists(tenantId, id);
     const data = this.normalizeAccessRoleDto(dto);
     this.assertCapabilitiesGrantable(actor, data.permissions);
@@ -1037,8 +1035,7 @@ export class UsersService {
     roleValue: string,
     dto: UserRoleOverrideDto,
   ): Promise<UserRoleOption> {
-    const { tenantId } = this.tenantContextService.resolve(actor);
-    this.accessScopeService.assertNetwork(actor);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(actor);
     const role = this.parseRole(roleValue);
     this.assertCanManageSystemRoleOverride(actor, role);
     const permissions = normalizeCapabilities(dto.permissions);

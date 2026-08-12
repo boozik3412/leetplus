@@ -74,6 +74,12 @@ tests pass, `0` skip). Первый test остановился после actua
 `syntheticOnly=false`. Successor добавляет этот data-only аргумент; runtime и
 TLS-контракт не ослабляются.
 
+Третий run `31621608778` на `eabcae29…` снова подтвердил actual TLS и оба deny,
+но production collector корректно отверг loopback literal в admin URL. Successor
+не ослабляет этот guard: fixture временно связывает выделенное имя
+`pool.current187.invalid` с `127.0.0.1`, включает его в server SAN и
+восстанавливает исходный `/etc/hosts` в trap.
+
 ## Ограничение результата
 
 R8 закрывает только actual J4 mTLS evidence. Он ещё не собирает в одном процессе

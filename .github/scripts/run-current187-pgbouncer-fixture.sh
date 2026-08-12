@@ -17,6 +17,7 @@ if [[ -z "${POSTGRES_SERVICE_CONTAINER_ID:-}" ]]; then
 fi
 
 fixture_root="$(mktemp -d "$RUNNER_TEMP/leetplus-current187-pgbouncer-XXXXXX")"
+pooler_hostname="pool.current187.invalid"
 config_path="$fixture_root/pgbouncer.ini"
 auth_path="$fixture_root/userlist.txt"
 log_path="$fixture_root/pgbouncer.log"
@@ -31,7 +32,9 @@ client_key_path="$fixture_root/client.key"
 client_csr_path="$fixture_root/client.csr"
 client_certificate_path="$fixture_root/client.crt"
 client_extensions_path="$fixture_root/client.ext"
+hosts_backup_path="$fixture_root/hosts.before"
 pooler_pid=""
+hosts_modified=0
 
 cleanup() {
   local status=$?
@@ -43,12 +46,19 @@ cleanup() {
   if [[ $status -ne 0 && -f "$log_path" ]]; then
     sed -n '1,200p' "$log_path" >&2
   fi
+  if [[ $hosts_modified -eq 1 && -f "$hosts_backup_path" ]]; then
+    sudo tee /etc/hosts <"$hosts_backup_path" >/dev/null
+  fi
   if [[ "$fixture_root" == "$RUNNER_TEMP"/leetplus-current187-pgbouncer-* ]]; then
     rm -rf -- "$fixture_root"
   fi
   exit "$status"
 }
 trap cleanup EXIT
+
+cp /etc/hosts "$hosts_backup_path"
+printf '127.0.0.1 %s\n' "$pooler_hostname" | sudo tee -a /etc/hosts >/dev/null
+hosts_modified=1
 
 openssl genpkey \
   -algorithm RSA \
@@ -80,7 +90,7 @@ cat >"$server_extensions_path" <<'SERVER_EXTENSIONS'
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
-subjectAltName=IP:127.0.0.1,DNS:localhost
+subjectAltName=IP:127.0.0.1,DNS:localhost,DNS:pool.current187.invalid
 SERVER_EXTENSIONS
 openssl x509 \
   -req \
@@ -253,5 +263,6 @@ env \
   CURRENT187_PGBOUNCER_CA_CERTIFICATE_PATH="$ca_certificate_path" \
   CURRENT187_PGBOUNCER_CLIENT_CERTIFICATE_PATH="$client_certificate_path" \
   CURRENT187_PGBOUNCER_CLIENT_PRIVATE_KEY_PATH="$client_key_path" \
+  CURRENT187_PGBOUNCER_HOSTNAME="$pooler_hostname" \
   pnpm --filter database \
     test:integration:identity-mail-cluster-pgbouncer-current187

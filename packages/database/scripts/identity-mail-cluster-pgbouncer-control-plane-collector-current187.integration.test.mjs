@@ -16,7 +16,8 @@ import {
 
 const REQUIRED_CONFIRMATION =
   "run-current187-pgbouncer-control-plane-protocol-integration-e2e";
-const HOST = "127.0.0.1";
+const HOST = process.env.CURRENT187_PGBOUNCER_HOSTNAME ?? "127.0.0.1";
+const BACKEND_HOST = "127.0.0.1";
 const PORT = 16_432;
 const DATABASE = "leetplus_ci";
 const APPLICATION_USER = "lp_application";
@@ -139,9 +140,9 @@ function collectorInput(expectedPoolerConfigurationDigest, tls) {
     databaseUniverseDigest: "2".repeat(64),
     endpointTlsPeerReceiptDigest: "3".repeat(64),
     environment: "production",
-    expectedBackendAddress: HOST,
+    expectedBackendAddress: BACKEND_HOST,
     expectedBackendDatabaseName: DATABASE,
-    expectedBackendHost: HOST,
+    expectedBackendHost: BACKEND_HOST,
     expectedBackendPort: 5432,
     expectedPoolerConfigurationDigest,
     explicitConfirmation: CURRENT187_PGBOUNCER_PRODUCTION_CONFIRMATION,

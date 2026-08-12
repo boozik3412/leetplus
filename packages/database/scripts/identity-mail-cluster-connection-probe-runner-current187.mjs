@@ -596,7 +596,10 @@ function canonicalIso(value) {
 }
 
 function classifyConnectionError(scenario, endpointClass, error) {
-  const code = typeof error?.code === "string" ? error.code : "UNKNOWN";
+  const rawCode = typeof error?.code === "string" ? error.code : "UNKNOWN";
+  const code = /^[A-Z0-9][A-Z0-9_]{0,63}$/u.test(rawCode)
+    ? rawCode
+    : "UNKNOWN";
   const allowed = {
     PLAINTEXT_TRANSPORT: new Set(
       endpointClass === "POOLER" ? ["08P01", "28000"] : ["28000"],
@@ -621,7 +624,7 @@ function classifyConnectionError(scenario, endpointClass, error) {
   }[scenario];
   return Object.freeze({
     connected: false,
-    errorCode: allowed?.has(code) ? code : "UNCLASSIFIED",
+    errorCode: code,
     observedOutcome: allowed?.has(code)
       ? CURRENT187_CONNECTION_NEGATIVE_OUTCOME_BY_SCENARIO[scenario]
       : "UNCLASSIFIED_REJECTION",
@@ -731,13 +734,14 @@ async function runInternal(inputValue, dependencyValue, syntheticOnly) {
         result.observedOutcome !== expectedOutcome ||
         typeof result.errorCode !== "string" ||
         !result.errorCode ||
+        !/^[A-Z0-9][A-Z0-9_]{0,63}$/u.test(result.errorCode) ||
         result.errorCode === "UNCLASSIFIED"
       ) {
         fail(
           result.connected === true
             ? "CURRENT187_CONNECTION_PROBE_RUNNER_NEGATIVE_ALLOWED"
             : "CURRENT187_CONNECTION_PROBE_RUNNER_REJECTION_UNCLASSIFIED",
-          "A negative network probe did not prove its exact rejected outcome.",
+          `A negative network probe did not prove its exact rejected outcome (${service.purpose}/${connection.scenario}/${result.errorCode}).`,
         );
       }
       const evidenceDigest = digest(NETWORK_EVIDENCE_DOMAIN, {

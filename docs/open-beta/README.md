@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.88                                         |
+| Версия           | 1.89                                         |
 | Дата             | 12.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -698,6 +698,14 @@ enterprise-isolation option и не сокращает shared gates.
   receipts до network I/O; integration `2/2`. SHA `24b2f7ea…` принят CI
   `31614205518` `3/3 SUCCESS`, artifact `sha256:766d1173…9449`. Actual co-located
   topology и production GO не заявляются. [CI evidence](./identity-mail-current187-j5-r6-ci-evidence-2026-08-12.md).
+
+- [CURRENT187-J5-R7 PgBouncer client mTLS credentials](./identity-mail-current187-j5-r7-pgbouncer-mtls-client-credentials.md)
+  — production J4 требует bounded exact client certificate + PKCS#8 private
+  key, проверяет отдельные SHA-256 и передаёт секреты только TLS client. Receipt
+  содержит лишь aggregate binding digest; synthetic mode принимает только
+  четыре `null`. Локально: J4 `9/9`, CURRENT187 `125/125`, actual wire/TLS
+  `2/2`, typecheck green. Exact-SHA CI и actual co-located public-collector
+  topology ещё обязательны; production GO не заявляется.
 
 49. [Provider boundary acceptance](./identity-mail-provider-boundary-acceptance.md) —
     единый acceptance contract для at-most-one SMTP invocation на durable

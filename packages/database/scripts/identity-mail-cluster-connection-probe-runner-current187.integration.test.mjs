@@ -639,6 +639,16 @@ async function createProductionLikePgBouncerReceipt(
     applicationUserName: "lp_current187_application_runtime",
     caCertificatePem: PRODUCTION_LIKE_CA_PEM,
     caCertificateSha256: digest(PRODUCTION_LIKE_CA_PEM),
+    clientCertificatePem:
+      "-----BEGIN CERTIFICATE-----\nQ0xJRU5U\n-----END CERTIFICATE-----\n",
+    clientCertificateSha256: digest(
+      "-----BEGIN CERTIFICATE-----\nQ0xJRU5U\n-----END CERTIFICATE-----\n",
+    ),
+    clientPrivateKeyPem:
+      "-----BEGIN PRIVATE KEY-----\nUFJJVkFURQ==\n-----END PRIVATE KEY-----\n",
+    clientPrivateKeySha256: digest(
+      "-----BEGIN PRIVATE KEY-----\nUFJJVkFURQ==\n-----END PRIVATE KEY-----\n",
+    ),
     clusterIdentityDigest: PRODUCTION_LIKE_CLUSTER_DIGEST,
     connectTimeoutMs: 5_000,
     databaseUniverseDigest: PRODUCTION_LIKE_UNIVERSE_DIGEST,

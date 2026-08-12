@@ -35,6 +35,10 @@ const INPUT_KEYS = Object.freeze([
   "applicationUserName",
   "caCertificatePem",
   "caCertificateSha256",
+  "clientCertificatePem",
+  "clientCertificateSha256",
+  "clientPrivateKeyPem",
+  "clientPrivateKeySha256",
   "clusterIdentityDigest",
   "connectTimeoutMs",
   "databaseUniverseDigest",
@@ -78,6 +82,8 @@ const MAX_ROWS = 4_096;
 const MAX_KEYS = 96;
 const MAX_TEXT_BYTES = 4_096;
 const CONFIG_DIGEST_DOMAIN = "LEETPLUS_CURRENT187_PGBOUNCER_CONFIGURATION_V1";
+const CLIENT_CREDENTIAL_DIGEST_DOMAIN =
+  "LEETPLUS_CURRENT187_PGBOUNCER_CLIENT_CREDENTIAL_V1";
 const RECEIPT_DIGEST_DOMAIN = "LEETPLUS_CURRENT187_PGBOUNCER_RECEIPT_V1";
 const VERSION_DIGEST_DOMAIN = "LEETPLUS_CURRENT187_PGBOUNCER_VERSION_V1";
 const BACKEND_DIGEST_DOMAIN = "LEETPLUS_CURRENT187_PGBOUNCER_BACKEND_V1";
@@ -367,9 +373,56 @@ function normalizeInput(value, syntheticOnly) {
       "PgBouncer CA binding is invalid.",
     );
   }
+  const clientCertificatePem = normalizeText(
+    source.clientCertificatePem,
+    syntheticOnly,
+    "CURRENT187_PGBOUNCER_CLIENT_CREDENTIAL_INVALID",
+  );
+  const clientPrivateKeyPem = normalizeText(
+    source.clientPrivateKeyPem,
+    syntheticOnly,
+    "CURRENT187_PGBOUNCER_CLIENT_CREDENTIAL_INVALID",
+  );
+  if (
+    syntheticOnly
+      ? clientCertificatePem !== null ||
+        clientPrivateKeyPem !== null ||
+        source.clientCertificateSha256 !== null ||
+        source.clientPrivateKeySha256 !== null
+      : !current187AdmissionValidDigest(source.clientCertificateSha256) ||
+        !current187AdmissionValidDigest(source.clientPrivateKeySha256) ||
+        Buffer.byteLength(clientCertificatePem, "utf8") > MAX_PEM_BYTES ||
+        Buffer.byteLength(clientPrivateKeyPem, "utf8") > MAX_PEM_BYTES ||
+        !/^-----BEGIN CERTIFICATE-----\n(?:[^\0\r\n]+\n)+-----END CERTIFICATE-----\n$/u.test(
+          clientCertificatePem,
+        ) ||
+        !/^-----BEGIN PRIVATE KEY-----\n(?:[^\0\r\n]+\n)+-----END PRIVATE KEY-----\n$/u.test(
+          clientPrivateKeyPem,
+        ) ||
+        createHash("sha256")
+          .update(clientCertificatePem, "utf8")
+          .digest("hex") !== source.clientCertificateSha256 ||
+        createHash("sha256")
+          .update(clientPrivateKeyPem, "utf8")
+          .digest("hex") !== source.clientPrivateKeySha256
+  ) {
+    fail(
+      "CURRENT187_PGBOUNCER_CLIENT_CREDENTIAL_INVALID",
+      "PgBouncer client TLS credential binding is invalid.",
+    );
+  }
+  const clientCredentialBindingDigest = syntheticOnly
+    ? null
+    : digest(CLIENT_CREDENTIAL_DIGEST_DOMAIN, {
+        clientCertificateSha256: source.clientCertificateSha256,
+        clientPrivateKeySha256: source.clientPrivateKeySha256,
+      });
   return Object.freeze({
     ...source,
     adminConnection: normalizeAdminUrl(source, syntheticOnly),
+    clientCertificatePem,
+    clientCredentialBindingDigest,
+    clientPrivateKeyPem,
     connectTimeoutMs: boundedInteger(
       source.connectTimeoutMs,
       CURRENT187_PGBOUNCER_MAX_CONNECT_TIMEOUT_MS,
@@ -608,6 +661,8 @@ async function collectInternal(
       ? false
       : Object.freeze({
           ca: input.caCertificatePem,
+          cert: input.clientCertificatePem,
+          key: input.clientPrivateKeyPem,
           rejectUnauthorized: true,
           servername: input.serverName,
         }),
@@ -682,6 +737,7 @@ async function collectInternal(
     canMutate: false,
     canSend: false,
     clusterIdentityDigest: input.clusterIdentityDigest,
+    clientCredentialBindingDigest: input.clientCredentialBindingDigest,
     collectedAt,
     contract: CURRENT187_ADMISSION_CONTRACT,
     databaseUniverseDigest: input.databaseUniverseDigest,

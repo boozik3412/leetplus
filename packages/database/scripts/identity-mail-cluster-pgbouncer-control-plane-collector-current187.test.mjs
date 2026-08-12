@@ -19,6 +19,10 @@ const NOW = "2026-08-12T10:00:00.000Z";
 const RELEASE_SHA = "a".repeat(40);
 const CA_PEM =
   "-----BEGIN CERTIFICATE-----\nVEVTVA==\n-----END CERTIFICATE-----\n";
+const CLIENT_CERTIFICATE_PEM =
+  "-----BEGIN CERTIFICATE-----\nQ0xJRU5U\n-----END CERTIFICATE-----\n";
+const CLIENT_PRIVATE_KEY_PEM =
+  "-----BEGIN PRIVATE KEY-----\nUFJJVkFURQ==\n-----END PRIVATE KEY-----\n";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -113,6 +117,10 @@ function input(overrides = {}, production = false) {
     caCertificateSha256: production
       ? sha256(CA_PEM)
       : sha256("synthetic-no-ca"),
+    clientCertificatePem: production ? CLIENT_CERTIFICATE_PEM : null,
+    clientCertificateSha256: production ? sha256(CLIENT_CERTIFICATE_PEM) : null,
+    clientPrivateKeyPem: production ? CLIENT_PRIVATE_KEY_PEM : null,
+    clientPrivateKeySha256: production ? sha256(CLIENT_PRIVATE_KEY_PEM) : null,
     clusterIdentityDigest: "1".repeat(64),
     connectTimeoutMs: 5_000,
     databaseUniverseDigest: "2".repeat(64),
@@ -319,9 +327,31 @@ test("PgBouncer global pause and suspend state drift fail closed", async () => {
 
 test("production requires verify-full client/server TLS and an active TLS server mapping", async () => {
   const productionResults = results({}, true);
-  const { receipt } = await collect({ production: true });
+  const { deps, receipt } = await collect({ production: true });
   assert.equal(receipt.syntheticOnly, false);
   assert.equal(isVerifiedCurrent187ProductionPgBouncerReceipt(receipt), false);
+  assert.match(receipt.clientCredentialBindingDigest, /^[a-f0-9]{64}$/u);
+  const connection = deps.calls.find((call) => call[0] === "create")[1];
+  assert.deepEqual(connection.ssl, {
+    ca: CA_PEM,
+    cert: CLIENT_CERTIFICATE_PEM,
+    key: CLIENT_PRIVATE_KEY_PEM,
+    rejectUnauthorized: true,
+    servername: "pool.internal.example",
+  });
+  const serializedReceipt = JSON.stringify(receipt);
+  assert.doesNotMatch(
+    serializedReceipt,
+    /Q0xJRU5U|UFJJVkFURQ|BEGIN (?:CERTIFICATE|PRIVATE KEY)/u,
+  );
+  assert.equal(
+    serializedReceipt.includes(sha256(CLIENT_CERTIFICATE_PEM)),
+    false,
+  );
+  assert.equal(
+    serializedReceipt.includes(sha256(CLIENT_PRIVATE_KEY_PEM)),
+    false,
+  );
   for (const resultOverrides of [
     { configValues: { client_tls_sslmode: "require" } },
     { configValues: { server_tls_sslmode: "require" } },
@@ -336,6 +366,35 @@ test("production requires verify-full client/server TLS and an active TLS server
         }),
       { code: "CURRENT187_PGBOUNCER_COLLECTION_FAILED" },
     );
+  }
+});
+
+test("production client mTLS credentials are exact, digest-bound, and absent in synthetic mode", async () => {
+  for (const inputOverrides of [
+    { clientCertificatePem: null },
+    { clientPrivateKeyPem: null },
+    { clientCertificateSha256: sha256("wrong-certificate") },
+    { clientPrivateKeySha256: sha256("wrong-private-key") },
+    { clientCertificatePem: `${CLIENT_CERTIFICATE_PEM}\n` },
+    {
+      clientPrivateKeyPem:
+        "-----BEGIN RSA PRIVATE KEY-----\nUFJJVkFURQ==\n-----END RSA PRIVATE KEY-----\n",
+    },
+  ]) {
+    await assert.rejects(() => collect({ inputOverrides, production: true }), {
+      code: "CURRENT187_PGBOUNCER_CLIENT_CREDENTIAL_INVALID",
+    });
+  }
+
+  for (const inputOverrides of [
+    { clientCertificatePem: CLIENT_CERTIFICATE_PEM },
+    { clientCertificateSha256: sha256(CLIENT_CERTIFICATE_PEM) },
+    { clientPrivateKeyPem: CLIENT_PRIVATE_KEY_PEM },
+    { clientPrivateKeySha256: sha256(CLIENT_PRIVATE_KEY_PEM) },
+  ]) {
+    await assert.rejects(() => collect({ inputOverrides }), {
+      code: "CURRENT187_PGBOUNCER_CLIENT_CREDENTIAL_INVALID",
+    });
   }
 });
 

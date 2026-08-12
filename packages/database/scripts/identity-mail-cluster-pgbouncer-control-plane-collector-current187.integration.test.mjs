@@ -179,6 +179,7 @@ test(
         computeCurrent187PgBouncerConfigurationDigestForTestOnly(
           provisionalInput,
           observed,
+          false,
         );
       const receipt = await collectCurrent187PgBouncerControlPlaneEvidence(
         collectorInput(expectedPoolerConfigurationDigest, tls),

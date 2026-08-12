@@ -67,6 +67,13 @@ service container. До полного exact-SHA CI success этот докум�
 до запуска integration tests. Successor явно удаляет `PGOPTIONS` только на
 PgBouncer client boundary и сохраняет его для остальных PostgreSQL gates.
 
+Второй run `31620377877` на `bdddabcd…` доказал actual TLS 1.3 на обоих
+направлениях, application admin deny и missing-client-certificate deny (`2/3`
+tests pass, `0` skip). Первый test остановился после actual `SHOW` rows только
+на exact arity guard: mode-aware baseline helper требует явный третий аргумент
+`syntheticOnly=false`. Successor добавляет этот data-only аргумент; runtime и
+TLS-контракт не ослабляются.
+
 ## Ограничение результата
 
 R8 закрывает только actual J4 mTLS evidence. Он ещё не собирает в одном процессе

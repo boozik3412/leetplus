@@ -225,7 +225,9 @@ pooler_pid=$!
 
 ready=0
 for _ in $(seq 1 50); do
-  if PGPASSWORD=current187-ci-stats-only \
+  if env \
+    -u PGOPTIONS \
+    PGPASSWORD=current187-ci-stats-only \
     PGSSLMODE=verify-full \
     PGSSLROOTCERT="$ca_certificate_path" \
     PGSSLCERT="$client_certificate_path" \

@@ -60,6 +60,13 @@ Actual TLS/PostgreSQL/PgBouncer execution доступен только в Ubunt
 service container. До полного exact-SHA CI success этот документ не заявляет,
 что mTLS fixture исполнен или принят.
 
+Первый exact-SHA run `31619118015` на `cae1a205…` принят как отрицательная
+диагностика, не как R8 evidence: CA/certificates, PostgreSQL TLS и PgBouncer
+успешно поднялись, но readiness `psql` унаследовал глобальный CI `PGOPTIONS` с
+`lock_timeout`; PgBouncer 1.22 fail closed отклонил unsupported startup option
+до запуска integration tests. Successor явно удаляет `PGOPTIONS` только на
+PgBouncer client boundary и сохраняет его для остальных PostgreSQL gates.
+
 ## Ограничение результата
 
 R8 закрывает только actual J4 mTLS evidence. Он ещё не собирает в одном процессе

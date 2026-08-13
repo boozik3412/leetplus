@@ -1,0 +1,16 @@
+{
+  "contract": "LANGAME_RUNTIME_TRUST_REGISTRATION_LEDGER_CURRENT199_V1",
+  "migrationName": "20260814010000_langame_runtime_trust_registration_current199",
+  "predecessor": "20260813040000_langame_runtime_revoke_intent_current195",
+  "predecessorSqlSha256": "ecb9e9a8f8a2cefff482331ec7b122af081b6175a8cc931fe594339c549183ac",
+  "requiredContracts": [
+    "LANGAME_RUNTIME_TRUST_REGISTRATION_CURRENT199_V1",
+    "LANGAME_RUNTIME_TRUST_BOOTSTRAP_REGISTRY_CURRENT198_V1"
+  ],
+  "migrationSqlSha256": "40a480ac7a16cd91530a5c59c02538e481a3f1030bdc3e82e5724b13ec1f7a5e",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "runtimeGrants": false,
+  "canonical": false
+}

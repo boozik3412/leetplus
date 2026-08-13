@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.67
+- Версия: 2.68
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -184,11 +184,23 @@ Exact SHA `be8d670d7b8125438506fc578a2b28b170c0cd8d` принят GitHub Actions
 `sha256:a1f085ab5f8d99f68780d2b9adaf899abe22b88d893008e20714b3e1aa616382`.
 Этот срез ещё не ledger и не переживает restart.
 
-Следующий P0-срез: owner-only PostgreSQL one-time registration/event ledger с
-append-only событиями, exact replay, expiry и lost-response reconciliation;
-после него — отдельные rotation/revocation command contracts. Добавление первого
-реального public root остаётся отдельной offline key ceremony и reviewed release
-change; оно не может быть сгенерировано или одобрено приложением.
+CURRENT199 owner-only PostgreSQL ledger candidate реализован локально как
+`NONCANONICAL / NO-GO`: две таблицы фиксируют immutable initial-registration и
+append-only `REGISTERED/EXPIRED` events; generation-1, registration/payload/
+acquisition digests уникальны. Register выполняет live database/owner name/OID
+re-attestation, advisory lock, freshness и exact replay; expiry запрещён до
+`validUntil`. PUBLIC ACL отозваны, grants/apply/rotation/revocation отсутствуют.
+Static gate `3/3`, typecheck/diff зелёные; migration полностью скомпилирована и
+применена на disposable PostgreSQL 16.13 (`2` relations, `4` functions), сервер
+остановлен. Candidate не canonical, не применялся к production и пока не имеет
+Prisma adapter/actual transaction CI fixture.
+
+Следующий P0-срез: branded CURRENT199-only owner adapter, actual PostgreSQL
+register/replay/expiry/ACL/concurrency matrix и bounded lost-response
+reconciliation. После него — отдельные apply/rotation/revocation command
+contracts. Добавление первого реального public root остаётся отдельной offline
+key ceremony и reviewed release change; оно не может быть сгенерировано или
+одобрено приложением.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

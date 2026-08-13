@@ -237,6 +237,9 @@ jobs:
       - name: Validate deny-only CURRENT199 trust registration provenance
         run: pnpm --filter database check:langame-runtime-trust-registration-current199
 
+      - name: Validate dormant CURRENT199 owner-only registration ledger
+        run: pnpm --filter database check:langame-runtime-trust-registration-ledger-current199
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 
@@ -1037,6 +1040,18 @@ jobs:
             --set ON_ERROR_STOP=on \
             --file packages/database/successor-candidates/20260813040000_langame_runtime_revoke_intent_current195/migration.sql \
             --file packages/database/scripts/langame-runtime-revoke-intent-ledger-current195-smoke.sql
+
+      - name: Compile dormant CURRENT199 owner-only registration ledger
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          psql \
+            --host 127.0.0.1 \
+            --port 5432 \
+            --username postgres \
+            --dbname leetplus_ci \
+            --set ON_ERROR_STOP=on \
+            --file packages/database/successor-candidates/20260814010000_langame_runtime_trust_registration_current199/migration.sql
 
       - name: Verify CURRENT194 actual separated Prisma runtime clients
         env:

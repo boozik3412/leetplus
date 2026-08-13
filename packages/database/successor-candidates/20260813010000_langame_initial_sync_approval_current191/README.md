@@ -18,6 +18,9 @@ source and credential binding under locks. Confirmation cannot rely on the
 earlier preflight snapshot. Only exact `PENDING_CONFIRMATION -> CONFIRMED` or
 `PENDING_CONFIRMATION -> EXPIRED` transitions are admitted.
 
+Approval inherits the original preflight `expiresAt` as its exact
+`validUntil`; confirmation never extends the 15-minute provider-read window.
+
 The candidate deliberately has no claim/import/complete RPC. A later slice
 must add runtime roles, deterministic plan consumption, atomic selected-Store
 business writes and lost-response reconciliation before any route can be

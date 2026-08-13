@@ -85,6 +85,7 @@ CREATE TABLE public."LangameInitialSyncApprovalV1" (
   "preflightReadSetDigest" CHAR(64) NOT NULL,
   "planDigest" CHAR(64) NOT NULL,
   "approvedAt" TIMESTAMP(3) WITH TIME ZONE NOT NULL,
+  "validUntil" TIMESTAMP(3) WITH TIME ZONE NOT NULL,
   "createdAt" TIMESTAMP(3) WITH TIME ZONE NOT NULL
     DEFAULT pg_catalog.clock_timestamp(),
   CONSTRAINT "LangameInitialSyncApprovalV1_pkey" PRIMARY KEY ("id"),
@@ -96,6 +97,10 @@ CREATE TABLE public."LangameInitialSyncApprovalV1" (
     AND "approvalDigest" ~ '^[a-f0-9]{64}$'
     AND "preflightReadSetDigest" ~ '^[a-f0-9]{64}$'
     AND "planDigest" ~ '^[a-f0-9]{64}$'
+  ),
+  CONSTRAINT "LangameInitialSyncApprovalV1_expiry_check" CHECK (
+    "validUntil" > "approvedAt"
+    AND "validUntil" <= "approvedAt" + INTERVAL '15 minutes'
   )
 );
 
@@ -671,13 +676,14 @@ BEGIN
     "id", "tenantId", "actorUserId", "preflightId", "receiptId",
     "storeId", "sourceId", "syncRequestId", "confirmationRequestId",
     "confirmationRequestDigest", "approvalDigest",
-    "preflightReadSetDigest", "planDigest", "approvedAt"
+    "preflightReadSetDigest", "planDigest", "approvedAt", "validUntil"
   ) VALUES (
     pg_catalog.gen_random_uuid()::TEXT, target_tenant_id, actor_user_id,
     preflight."id", preflight."receiptId", preflight."storeId",
     preflight."sourceId", preflight."syncRequestId", confirmation_request_id,
     confirmation_request_digest, preflight."approvalDigest",
-    preflight."preflightReadSetDigest", preflight."planDigest", server_now
+    preflight."preflightReadSetDigest", preflight."planDigest", server_now,
+    preflight."expiresAt"
   ) RETURNING * INTO approval;
 
   PERFORM pg_catalog.set_config(
@@ -779,12 +785,12 @@ BEGIN
         'LangameInitialSyncApprovalV1',
         'LangameInitialSyncAuditEventV1'
       )
-      AND grantee <> pg_catalog.current_user
+      AND grantee <> CURRENT_USER
   ) OR EXISTS (
     SELECT 1 FROM information_schema.routine_privileges
     WHERE specific_schema = 'public'
       AND routine_name LIKE 'langame_initial_sync_%_current191_v1'
-      AND grantee <> pg_catalog.current_user
+      AND grantee <> CURRENT_USER
   ) THEN
     RAISE EXCEPTION 'CURRENT191 initial sync objects require owner-only ACL';
   END IF;

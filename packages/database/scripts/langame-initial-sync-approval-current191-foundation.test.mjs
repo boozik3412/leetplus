@@ -75,6 +75,7 @@ test("CURRENT191 creates only a PII-free preflight, approval, and audit ledger",
     'CREATE TABLE public."LangameInitialSyncAuditEventV1"',
     "\"status\" VARCHAR(24) NOT NULL DEFAULT 'PENDING_CONFIRMATION'",
     '"expiresAt" <= "createdAt" + INTERVAL \'15 minutes\'',
+    '"validUntil" <= "approvedAt" + INTERVAL \'15 minutes\'',
     'CREATE UNIQUE INDEX "langame_initial_sync_preflight_actor_request_uidx"',
     'CREATE UNIQUE INDEX "langame_initial_sync_approval_preflight_uidx"',
     'CREATE UNIQUE INDEX "langame_initial_sync_audit_event_uidx"',
@@ -136,6 +137,7 @@ test("CURRENT191 confirmation re-locks authority and binding before one-time app
     'audit."eventAt" = receipt."consumedAt"',
     "CURRENT191 initial sync binding changed before confirmation",
     'INSERT INTO public."LangameInitialSyncApprovalV1"',
+    'preflight."expiresAt"',
     "SET \"status\" = 'CONFIRMED'",
     "'REPLAYED'::TEXT",
   ]);
@@ -176,7 +178,9 @@ test("CURRENT191 grants no authority and performs no provider or business effect
     'REVOKE ALL ON TABLE public."LangameInitialSyncApprovalV1" FROM PUBLIC;',
     'REVOKE ALL ON TABLE public."LangameInitialSyncAuditEventV1" FROM PUBLIC;',
     "CURRENT191 initial sync objects require owner-only ACL",
+    "grantee <> CURRENT_USER",
   ]);
+  assert.equal(sql.includes("pg_catalog.current_user"), false);
   assert.equal(/^\s*GRANT\b/imu.test(sql), false);
   for (const forbidden of [
     'INSERT INTO public."Product"',

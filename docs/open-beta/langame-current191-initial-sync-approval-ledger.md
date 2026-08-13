@@ -27,6 +27,8 @@ PENDING_CONFIRMATION --confirm--> CONFIRMED
 
 - `record_preflight`: 15-минутная exact/idempotent запись;
 - `confirm`: одно подтверждение, changed replay запрещён;
+- approval `validUntil` точно наследует исходный `preflight.expiresAt` и не
+  продлевает 15-минутное окно provider read-set;
 - `expire`: bounded `1..1000`, `FOR UPDATE SKIP LOCKED`;
 - approval и audit rows append-only;
 - preflight binding immutable;

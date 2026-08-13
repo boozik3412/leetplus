@@ -296,6 +296,14 @@ BEGIN
   ) OR (
     SELECT pg_catalog.count(*) FROM public."LangameInitialSyncApprovalV1"
   ) <> 1 OR NOT EXISTS (
+    SELECT 1 FROM public."LangameInitialSyncApprovalV1"
+    WHERE "preflightId" = 'current191-preflight-a'
+      AND "validUntil" > "approvedAt"
+      AND "validUntil" = (
+        SELECT "expiresAt" FROM public."LangameInitialSyncPreflightV1"
+        WHERE "id" = 'current191-preflight-a'
+      )
+  ) OR NOT EXISTS (
     SELECT 1 FROM public."LangameInitialSyncPreflightV1"
     WHERE "id" = 'current191-preflight-a'
       AND "status" = 'CONFIRMED'

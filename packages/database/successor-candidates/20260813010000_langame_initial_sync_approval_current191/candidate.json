@@ -12,7 +12,7 @@
     "LANGAME_INITIAL_SYNC_PREFLIGHT_CURRENT188_V1",
     "LANGAME_INITIAL_SYNC_PLAN_CURRENT191_V1"
   ],
-  "migrationSqlSha256": "7d1ca952e72c6109301ccbdbfcc206432e3911975cd26537c366a0e079f2cd12",
+  "migrationSqlSha256": "2125aa6db050f5d402871e7327dd86720ba11cb5498271b52d9baf88fcf25629",
   "authorization": false,
   "canMutateProduction": false,
   "canActivateApplicationRoute": false,

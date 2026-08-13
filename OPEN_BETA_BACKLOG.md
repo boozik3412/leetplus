@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 13.08.2026
-- Версия: 2.61
+- Версия: 2.62
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -140,10 +140,18 @@ Production path физически закрыт, пока CURRENT196 bootstrap r
 GitHub Actions run `31732110067` завершён `3/3 SUCCESS`; artifact `9193973557`,
 digest
 `sha256:8c77b16b9697d9db505cca37afe099cfeccaf895036bf91e70bde936f0c1e82c`.
+Post-acceptance latest-byte review обнаружил P1: строковая IPv6 policy не
+канонизировала полную IPv4-mapped форму и могла пропустить private destination.
+Локальный successor заменяет её двумя family-separated binary `BlockList`,
+запрещает mapped/NAT64/Teredo/6to4/non-global ranges и имеет adversarial matrix;
+focused `13/13`, composed CURRENT196/CURRENT197 `25/25`. Exact-SHA CI successor
+ещё не принят, поэтому SHA `83e3a725…` остаётся историческим, но superseded для
+CURRENT197 acceptance.
 
-Следующий P0-срез: independent latest-byte review CURRENT197, затем отдельное
-immutable bootstrap-root registry изменение и append-only enrollment ledger;
-ни один из этих шагов сам по себе не разрешает внешний тест.
+Следующий P0-срез: принять hardened CURRENT197 successor exact-SHA CI и повторный
+latest-byte review, затем отдельное immutable bootstrap-root registry изменение
+и append-only enrollment ledger; ни один из этих шагов сам по себе не разрешает
+внешний тест.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

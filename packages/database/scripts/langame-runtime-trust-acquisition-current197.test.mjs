@@ -35,6 +35,7 @@ import {
   collectSyntheticLangameRuntimeTrustAcquisitionCurrent197WithDefaultDependenciesForTestOnly,
   isVerifiedLangameRuntimeTrustAcquisitionCurrent197,
   isVerifiedProductionLangameRuntimeTrustAcquisitionCurrent197,
+  isPublicLangameRuntimeTrustAcquisitionAddressCurrent197ForTestOnly,
 } from "./langame-runtime-trust-acquisition-current197.mjs";
 import {
   LANGAME_RUNTIME_TRUST_ENROLLMENT_CURRENT196_ALGORITHM,
@@ -646,6 +647,70 @@ test("CURRENT197 rejects DNS duplicates and invalid addresses before TLS", async
       false,
     );
   }
+});
+
+test("CURRENT197 rejects non-public and alternate IPv4-mapped address forms", () => {
+  for (const [address, family] of [
+    ["0.0.0.0", 4],
+    ["10.0.0.1", 4],
+    ["100.127.255.255", 4],
+    ["127.0.0.1", 4],
+    ["169.254.1.1", 4],
+    ["172.31.255.255", 4],
+    ["192.0.2.1", 4],
+    ["192.168.1.1", 4],
+    ["198.19.255.255", 4],
+    ["198.51.100.1", 4],
+    ["203.0.113.1", 4],
+    ["224.0.0.1", 4],
+    ["255.255.255.255", 4],
+    ["::", 6],
+    ["::1", 6],
+    ["::ffff:127.0.0.1", 6],
+    ["0:0:0:0:0:ffff:7f00:1", 6],
+    ["0:0:0:0:0:ffff:a00:1", 6],
+    ["64:ff9b::7f00:1", 6],
+    ["64:ff9b:1::7f00:1", 6],
+    ["100::1", 6],
+    ["2001:0:4136:e378:8000:63bf:3fff:fdd2", 6],
+    ["2001:db8::1", 6],
+    ["2002:7f00:1::", 6],
+    ["fc00::1", 6],
+    ["fdff::1", 6],
+    ["fe80::1", 6],
+    ["ff02::1", 6],
+  ]) {
+    assert.equal(
+      isPublicLangameRuntimeTrustAcquisitionAddressCurrent197ForTestOnly(
+        address,
+        family,
+      ),
+      false,
+      address,
+    );
+  }
+  for (const [address, family] of [
+    ["1.1.1.1", 4],
+    ["8.8.8.8", 4],
+    ["2606:4700:4700::1111", 6],
+    ["2001:4860:4860::8888", 6],
+  ]) {
+    assert.equal(
+      isPublicLangameRuntimeTrustAcquisitionAddressCurrent197ForTestOnly(
+        address,
+        family,
+      ),
+      true,
+      address,
+    );
+  }
+  assert.equal(
+    isPublicLangameRuntimeTrustAcquisitionAddressCurrent197ForTestOnly(
+      "::ffff:127.0.0.1",
+      4,
+    ),
+    false,
+  );
 });
 
 test("CURRENT197 rejects TLS authorization, hostname, certificate and protocol drift", async (t) => {

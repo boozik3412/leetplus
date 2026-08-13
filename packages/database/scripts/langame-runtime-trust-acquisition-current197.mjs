@@ -1,7 +1,7 @@
 import { X509Certificate, createHash, createPublicKey } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { lstat, open, realpath } from "node:fs/promises";
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { connect as connectTls } from "node:tls";
@@ -67,6 +67,49 @@ const MAX_CA_CERTIFICATE_BYTES = 64 * 1_024;
 const MAX_RESOLVED_ADDRESSES = 16;
 const VERIFIED_RECEIPTS = new WeakSet();
 const VERIFIED_PRODUCTION_RECEIPTS = new WeakSet();
+const NON_PUBLIC_ADDRESS_BLOCKLISTS = createNonPublicAddressBlockLists();
+
+function createNonPublicAddressBlockLists() {
+  const ipv4 = new BlockList();
+  const ipv6 = new BlockList();
+  for (const [address, prefix] of [
+    ["0.0.0.0", 8],
+    ["10.0.0.0", 8],
+    ["100.64.0.0", 10],
+    ["127.0.0.0", 8],
+    ["169.254.0.0", 16],
+    ["172.16.0.0", 12],
+    ["192.0.0.0", 24],
+    ["192.0.2.0", 24],
+    ["192.168.0.0", 16],
+    ["198.18.0.0", 15],
+    ["198.51.100.0", 24],
+    ["203.0.113.0", 24],
+    ["224.0.0.0", 4],
+    ["240.0.0.0", 4],
+  ]) {
+    ipv4.addSubnet(address, prefix, "ipv4");
+  }
+  for (const [address, prefix] of [
+    ["::", 128],
+    ["::1", 128],
+    ["::ffff:0.0.0.0", 96],
+    ["64:ff9b::", 96],
+    ["64:ff9b:1::", 48],
+    ["100::", 64],
+    ["2001::", 32],
+    ["2001:10::", 28],
+    ["2001:20::", 28],
+    ["2001:db8::", 32],
+    ["2002::", 16],
+    ["fc00::", 7],
+    ["fe80::", 10],
+    ["ff00::", 8],
+  ]) {
+    ipv6.addSubnet(address, prefix, "ipv6");
+  }
+  return Object.freeze({ ipv4, ipv6 });
+}
 
 export class LangameRuntimeTrustAcquisitionCurrent197Error extends Error {
   constructor(code) {
@@ -463,33 +506,20 @@ function normalizeAddresses(value, syntheticOnly) {
 }
 
 function isPublicAddress(address, family) {
-  if (family === 6) {
-    return !(
-      address === "::" ||
-      address === "::1" ||
-      address.startsWith("fc") ||
-      address.startsWith("fd") ||
-      /^fe[89ab]/u.test(address) ||
-      address.startsWith("ff") ||
-      address.startsWith("2001:db8:")
-    );
-  }
-  const octets = address.split(".").map(Number);
-  const [a, b, c] = octets;
-  return !(
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 0 && c === 0) ||
-    (a === 192 && b === 0 && c === 2) ||
-    (a === 192 && b === 168) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    (a === 198 && b === 51 && c === 100) ||
-    (a === 203 && b === 0 && c === 113) ||
-    a >= 224
+  const type = family === 4 ? "ipv4" : "ipv6";
+  return !NON_PUBLIC_ADDRESS_BLOCKLISTS[type].check(address, type);
+}
+
+export function isPublicLangameRuntimeTrustAcquisitionAddressCurrent197ForTestOnly(
+  value,
+  family,
+) {
+  if (arguments.length !== 2 || (family !== 4 && family !== 6)) return false;
+  const address = canonicalIp(value);
+  return (
+    address !== null &&
+    isIP(address) === family &&
+    isPublicAddress(address, family)
   );
 }
 

@@ -2,7 +2,7 @@
 
 ## Статус
 
-`LOCAL FOUNDATION / DENY-ONLY / PRODUCTION PROPOSAL UNAVAILABLE / EXTERNAL BETA NO-GO`
+`LOCAL HARDENED SUCCESSOR / DENY-ONLY / PRODUCTION PROPOSAL UNAVAILABLE / EXTERNAL BETA NO-GO`
 
 Дата: 13.08.2026.
 
@@ -76,8 +76,8 @@ confirmation. Test dependencies нельзя передать production entry.
 ## Локальное evidence
 
 - CURRENT197 focused suite с actual disposable TLS-only handshake и
-  CA-substitution negative: `12/12 PASS`;
-- composed CURRENT196/CURRENT197: `24/24 PASS`;
+  CA-substitution negative и IP policy adversarial matrix: `13/13 PASS`;
+- composed CURRENT196/CURRENT197: `25/25 PASS`;
 - syntax checks: `PASS`.
 
 Покрыты exact positive receipt, production-before-I/O deny, cloned proposal,
@@ -101,13 +101,17 @@ SHA-bound release artifact: ID `9193973557`, имя
 `leetplus-release-83e3a72522ce1b93c46d50d8169390468305330d`, digest
 `sha256:8c77b16b9697d9db505cca37afe099cfeccaf895036bf91e70bde936f0c1e82c`.
 
-Independently reviewed latest-byte acceptance остаётся следующим acceptance
-slice; disposable fixture использует собственную CA и loopback TLS server и не
-является live production evidence.
+Post-acceptance latest-byte review обнаружил P1: expanded IPv4-mapped IPv6 мог
+обойти строковую private-address policy. Hardened successor использует два
+family-separated binary `BlockList`, отдельно запрещает mapped IPv4, NAT64,
+Teredo, 6to4 и остальные явно non-global ranges. Старый exact SHA остаётся
+исторически принятым, но superseded для CURRENT197; successor exact-SHA CI ещё
+не принят. Disposable fixture использует собственную CA и loopback TLS server и
+не является live production evidence.
 
 ## Что остаётся до тестового доступа
 
-1. Принять independently reviewed CURRENT197 latest-byte.
+1. Принять hardened CURRENT197 successor exact-SHA CI и latest-byte review.
 2. Внести offline bootstrap public root CURRENT196 отдельным reviewed immutable
    release change — не через API/env/database.
 3. Реализовать one-time append-only enrollment/rotation/revocation ledger.

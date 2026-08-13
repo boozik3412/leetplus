@@ -2,7 +2,7 @@
 
 ## Статус
 
-`LOCAL FOUNDATION / NONAUTHORIZING / PRODUCTION ROOTS EMPTY / EXTERNAL BETA NO-GO`
+`EXACT-SHA CI ACCEPTED / NONAUTHORIZING / PRODUCTION ROOTS EMPTY / EXTERNAL BETA NO-GO`
 
 Дата: 13.08.2026.
 
@@ -76,8 +76,20 @@ release/cluster/OID/bundle binding, two-control approvals, purpose separation,
 TLS wildcard/port/CA-SPKI failures, timeline expiry, Proxy/accessor rejection и
 отсутствие filesystem/process/network/signer authority.
 
-Remote exact-SHA CI и SHA-bound artifact будут записаны после push текущего
-implementation commit.
+Exact implementation commit:
+`00540013d5b264072f5fd54d8694e4d568e78687`.
+
+GitHub Actions run
+[`31721014759`](https://github.com/boozik3412/leetplus/actions/runs/31721014759)
+завершён `3/3 SUCCESS`:
+
+- Application checks — `SUCCESS`, включая обязательный CURRENT196 gate;
+- Authority root trust gate — `SUCCESS`;
+- PostgreSQL migration smoke — `SUCCESS`.
+
+SHA-bound release artifact: ID `9189642476`, имя
+`leetplus-release-00540013d5b264072f5fd54d8694e4d568e78687`, digest
+`sha256:9d14a6eddd7b98544034e00a4cd97a08d36d3938256c48324bd050c186e56213`.
 
 ## Что осталось до реального enrollment
 

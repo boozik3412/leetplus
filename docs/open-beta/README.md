@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.109                                        |
+| Версия           | 1.110                                        |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |

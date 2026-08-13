@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 13.08.2026
-- Версия: 2.58
+- Версия: 2.59
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -112,9 +112,12 @@ release/artifact/verifier/config digests, cluster/database/owner/runtime OID,
 одноразовый challenge, две независимые approval-ссылки, initial revocation state
 и exact TLS host/port/serverName/CA/leaf/SPKI/validity. Production entry не имеет
 root-injection API и всегда закрыт; все access/effect flags false. Focused gate
-локально `12/12`. Remote exact-SHA CI ещё не принят. Этот срез не выполняет
-protected acquisition, root enrollment, network I/O, deployment или выдачу
-доступа.
+локально `12/12`. Foundation принята exact SHA
+`00540013d5b264072f5fd54d8694e4d568e78687`: GitHub Actions run `31721014759`
+завершён `3/3 SUCCESS`; artifact `9189642476`, digest
+`sha256:9d14a6eddd7b98544034e00a4cd97a08d36d3938256c48324bd050c186e56213`.
+Этот срез не выполняет protected acquisition, root enrollment, network I/O,
+deployment или выдачу доступа.
 
 Следующий P0-порядок для Langame runtime: (1) protected public-root/live TLS
 acquisition receipt, (2) отдельно reviewed immutable bootstrap registry,

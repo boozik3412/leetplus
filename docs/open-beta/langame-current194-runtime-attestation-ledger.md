@@ -86,16 +86,17 @@ same frozen spec on a lost response, and closes both clients even when the
 response remains ambiguous. The runtime role receives no revoke grant. The
 combined static/unit gate is `32/32`; its disposable PostgreSQL fixture rotates
 both passwords, proves stale credentials fail, opens a new signed bootstrap,
-and checks terminal ledger state and zero residue. Exact-SHA CI acceptance is
-pending. All production entry points still fail closed, and no production root,
+and checks terminal ledger state and zero residue. Exact SHA
+`01cd9e456d5ff4b4878245f0c4bc365bcffcd68d` completed GitHub Actions run
+`31697571300` as `3/3 SUCCESS`; artifact ID `9180219464`, digest
+`sha256:2062ba99b6c7a81e6072fadd7cf03fb089c17482be4bc7976bc50b38bf49b271`.
+All production entry points still fail closed, and no production root,
 credential, role or grant is enrolled.
 
 ## Next implementation steps
 
-1. Accept the revoke/credential-rotation lifecycle on an exact CI SHA,
-   including disposable role/database cleanup and zero residue.
-2. Add production TLS peer pinning and durable reconciliation when both revoke
+1. Add production TLS peer pinning and durable reconciliation when both revoke
    responses are lost after the database effect may have committed.
-3. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
-4. Only after the common launch gates, run the four-club internal alpha and
+2. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
+3. Only after the common launch gates, run the four-club internal alpha and
    issue a mailbox-bound OWNER invite for a separate tester tenant.

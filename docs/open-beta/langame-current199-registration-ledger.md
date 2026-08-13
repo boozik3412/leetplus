@@ -36,7 +36,8 @@ Actions run `31741381875` как `3/3 SUCCESS`; artifact `9197547597`, digest
 Следующий локальный срез добавил test-only branded owner/Prisma adapter с
 production entry fail-closed, exact session/database/owner/runtime-role
 re-attestation и не более чем двумя попытками register/expiry после lost
-response. Unit matrix — `8/8`. Обновлённая migration с fingerprint
+response, а concurrent effect/close на одном driver отклоняются. Unit matrix —
+`9/9`. Обновлённая migration с fingerprint
 `8c55f0ebdc9da2e881b4b1a66e4cdea59a2a1f4576c107cfe24d633e3facc2fe`
 применена к отдельному PostgreSQL 16.13; actual matrix `1/1` приняла concurrent
 register/replay, hostile database-owner/OID/role-attribute/membership drift,

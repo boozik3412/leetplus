@@ -203,10 +203,14 @@ function createDriver(config, client) {
   let binding = null;
   let registerAttempts = 0;
   let expireAttempts = 0;
+  let effectInFlight = false;
   let closePromise = null;
 
   const driver = Object.freeze({
     async close() {
+      if (effectInFlight) {
+        fail("CURRENT199_PRISMA_CLOSE_EFFECT_IN_FLIGHT");
+      }
       if (!closePromise) {
         state = "CLOSED";
         closePromise = Promise.resolve().then(() => client.$disconnect());
@@ -215,6 +219,9 @@ function createDriver(config, client) {
     },
 
     async expireCurrent199(receipt) {
+      if (effectInFlight) {
+        fail("CURRENT199_PRISMA_CONCURRENT_EFFECT_DENIED");
+      }
       if (
         !["REGISTERED", "EXPIRING"].includes(state) ||
         PERSISTED_RECEIPTS.get(receipt) !== token ||
@@ -222,15 +229,18 @@ function createDriver(config, client) {
       ) {
         fail("CURRENT199_PRISMA_EXPIRE_RECEIPT_INVALID");
       }
-      expireAttempts += 1;
-      if (expireAttempts > 2) {
-        state = "AMBIGUOUS";
-        fail("CURRENT199_PRISMA_EXPIRE_RESPONSE_AMBIGUOUS");
-      }
       state = "EXPIRING";
-      await assertIdentity(client, binding, config);
+      effectInFlight = true;
       let rows;
+      let effectAttempted = false;
       try {
+        await assertIdentity(client, binding, config);
+        if (expireAttempts >= 2) {
+          state = "AMBIGUOUS";
+          fail("CURRENT199_PRISMA_EXPIRE_RESPONSE_AMBIGUOUS");
+        }
+        expireAttempts += 1;
+        effectAttempted = true;
         rows = await client.$queryRaw(Prisma.sql`
           SELECT *
           FROM public.langame_runtime_trust_registration_expire_current199_v1(
@@ -238,11 +248,13 @@ function createDriver(config, client) {
           )
         `);
       } catch (error) {
-        if (expireAttempts >= 2) {
+        if (effectAttempted && expireAttempts >= 2) {
           state = "AMBIGUOUS";
           fail("CURRENT199_PRISMA_EXPIRE_RESPONSE_AMBIGUOUS");
         }
         throw error;
+      } finally {
+        effectInFlight = false;
       }
       const row = exactSingleRow(
         rows,
@@ -269,6 +281,9 @@ function createDriver(config, client) {
     },
 
     async registerCurrent199(registration) {
+      if (effectInFlight) {
+        fail("CURRENT199_PRISMA_CONCURRENT_EFFECT_DENIED");
+      }
       if (!["NEW", "REGISTERING"].includes(state)) {
         fail("CURRENT199_PRISMA_REGISTER_STATE_INVALID");
       }
@@ -281,16 +296,19 @@ function createDriver(config, client) {
       ) {
         fail("CURRENT199_PRISMA_REGISTRATION_INVALID");
       }
-      registerAttempts += 1;
-      if (registerAttempts > 2) {
-        state = "AMBIGUOUS";
-        fail("CURRENT199_PRISMA_REGISTER_RESPONSE_AMBIGUOUS");
-      }
       state = "REGISTERING";
       binding = registration;
-      await assertIdentity(client, registration, config);
+      effectInFlight = true;
       let rows;
+      let effectAttempted = false;
       try {
+        await assertIdentity(client, registration, config);
+        if (registerAttempts >= 2) {
+          state = "AMBIGUOUS";
+          fail("CURRENT199_PRISMA_REGISTER_RESPONSE_AMBIGUOUS");
+        }
+        registerAttempts += 1;
+        effectAttempted = true;
         rows = await client.$queryRaw(Prisma.sql`
           SELECT *
           FROM public.langame_runtime_trust_registration_register_current199_v1(
@@ -336,11 +354,13 @@ function createDriver(config, client) {
           )
         `);
       } catch (error) {
-        if (registerAttempts >= 2) {
+        if (effectAttempted && registerAttempts >= 2) {
           state = "AMBIGUOUS";
           fail("CURRENT199_PRISMA_REGISTER_RESPONSE_AMBIGUOUS");
         }
         throw error;
+      } finally {
+        effectInFlight = false;
       }
       const row = exactSingleRow(
         rows,

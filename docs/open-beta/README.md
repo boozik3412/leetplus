@@ -160,7 +160,7 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    noncanonical two-table `REGISTERED/EXPIRED` ledger, exact replay, immutable
    bindings и owner/database/runtime-role identity; foundation SHA `7915912c…`
    принят CI `31741381875` как `3/3 SUCCESS`. Следующий локальный срез: test-only
-   adapter `8/8`, actual PostgreSQL matrix `1/1`; production entry и authority
+   adapter `9/9`, actual PostgreSQL matrix `1/1`; production entry и authority
    остаются закрытыми до exact-SHA acceptance.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и

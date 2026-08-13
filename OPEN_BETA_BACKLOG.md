@@ -198,7 +198,8 @@ Candidate не canonical и не применялся к production.
 Следующий локальный срез добавил test-only branded owner/Prisma adapter:
 production entry fail-closed, fresh database/owner/runtime-role re-attestation,
 exact receipt brands и максимум две одинаковые попытки при lost register/expiry
-response. Unit `8/8`; updated SQL fingerprint `8c55f0eb…acc2fe`; actual
+response; concurrent effect/close на одном driver fail closed. Unit `9/9`;
+updated SQL fingerprint `8c55f0eb…acc2fe`; actual
 PostgreSQL 16.13 matrix `1/1` покрывает concurrent register/replay,
 database-owner/runtime-role OID, attribute and membership drift, PUBLIC ACL,
 early expiry, concurrent expiry/replay и guards.

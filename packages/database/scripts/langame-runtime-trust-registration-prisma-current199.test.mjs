@@ -218,6 +218,14 @@ function fixture(overrides) {
 const code = (expected) => (error) =>
   error?.code === expected && error.safeContractError;
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 test("CURRENT199 Prisma production entry and unconfirmed injection deny", () => {
   assert.throws(
     () => createLangameRuntimeTrustRegistrationPrismaCurrent199(),
@@ -356,6 +364,80 @@ test("CURRENT199 Prisma fails closed after a second lost effect response", async
     expiring.driver.expireCurrent199(receipt),
     code("CURRENT199_PRISMA_EXPIRE_RESPONSE_AMBIGUOUS"),
   );
+});
+
+test("CURRENT199 Prisma denies concurrent effects and close on one driver", async () => {
+  const registerEntered = deferred();
+  const releaseRegister = deferred();
+  let registerHeld = false;
+  const registering = fixture({
+    async query(query) {
+      if (
+        !registerHeld &&
+        sqlText(query).includes("pg_catalog.current_database")
+      ) {
+        registerHeld = true;
+        registerEntered.resolve();
+        await releaseRegister.promise;
+        return [identityRow()];
+      }
+    },
+  });
+  const pendingRegistration = registering.driver.registerCurrent199(
+    registering.registration,
+  );
+  await registerEntered.promise;
+  await assert.rejects(
+    registering.driver.registerCurrent199(registering.registration),
+    code("CURRENT199_PRISMA_CONCURRENT_EFFECT_DENIED"),
+  );
+  await assert.rejects(
+    registering.driver.close(),
+    code("CURRENT199_PRISMA_CLOSE_EFFECT_IN_FLIGHT"),
+  );
+  releaseRegister.resolve();
+  const registered = await pendingRegistration;
+  assert.equal(registered.persistedStatus, "PENDING");
+
+  const expiryEntered = deferred();
+  const releaseExpiry = deferred();
+  let expiryHeld = false;
+  const expiring = fixture({
+    async query(query) {
+      if (
+        !expiryHeld &&
+        sqlText(query).includes("registration_expire_current199_v1")
+      ) {
+        expiryHeld = true;
+        expiryEntered.resolve();
+        await releaseExpiry.promise;
+        return [
+          {
+            expiredAt: new Date("2026-08-14T00:06:00.000Z"),
+            registrationId: "enrollment_current199_0001",
+            replayed: false,
+            status: "EXPIRED",
+          },
+        ];
+      }
+    },
+  });
+  const expiryReceipt = await expiring.driver.registerCurrent199(
+    expiring.registration,
+  );
+  const pendingExpiry = expiring.driver.expireCurrent199(expiryReceipt);
+  await expiryEntered.promise;
+  await assert.rejects(
+    expiring.driver.expireCurrent199(expiryReceipt),
+    code("CURRENT199_PRISMA_CONCURRENT_EFFECT_DENIED"),
+  );
+  await assert.rejects(
+    expiring.driver.close(),
+    code("CURRENT199_PRISMA_CLOSE_EFFECT_IN_FLIGHT"),
+  );
+  releaseExpiry.resolve();
+  const terminal = await pendingExpiry;
+  assert.equal(terminal.status, "EXPIRED");
 });
 
 test("CURRENT199 Prisma rejects clones, identity drift and forged receipts", async () => {

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.117                                        |
+| Версия           | 1.118                                        |
 | Дата             | 14.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -153,8 +153,9 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    ceremony, production enrollment и доступ не разрешены.
    0e.16. [CURRENT199 trust-registration provenance bridge](./langame-current199-trust-registration.md) —
    full CURRENT196 payload digest проходит через CURRENT197 protected receipt в
-   immutable initial-registration record; foundation deny-only, process-local,
-   не persisted и не разрешает apply/rotation/revocation.
+   immutable initial-registration record; exact SHA `be8d670d…` принят CI
+   `31738982139` как `3/3 SUCCESS`; foundation deny-only, process-local, не
+   persisted и не разрешает apply/rotation/revocation.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

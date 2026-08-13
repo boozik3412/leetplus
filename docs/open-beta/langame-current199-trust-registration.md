@@ -1,11 +1,11 @@
 # CURRENT199: trust-registration provenance bridge
 
-| Поле                           | Значение                                       |
-| ------------------------------ | ---------------------------------------------- |
-| Статус                         | `LOCAL FOUNDATION / DENY-ONLY / NOT PERSISTED` |
-| Дата                           | 14.08.2026                                     |
-| Production root                | отсутствует                                    |
-| Production / Tenant A / tester | не изменялись                                  |
+| Поле                           | Значение                                      |
+| ------------------------------ | --------------------------------------------- |
+| Статус                         | `CI SHA ACCEPTED / DENY-ONLY / NOT PERSISTED` |
+| Дата                           | 14.08.2026                                    |
+| Production root                | отсутствует                                   |
+| Production / Tenant A / tester | не изменялись                                 |
 
 CURRENT199 подготавливает единственную immutable registration-запись для
 первичного runtime trust enrollment. Это промежуточная граница между
@@ -44,6 +44,12 @@ Registration digest дополнительно фиксирует:
 
 Focused CURRENT199 matrix — `7/7`; CURRENT196/197 compatibility с реальным
 loopback TLS fixture — `25/25`; database typecheck и format/diff checks зелёные.
+
+Exact SHA `be8d670d7b8125438506fc578a2b28b170c0cd8d` принят GitHub Actions run
+[`31738982139`](https://github.com/boozik3412/leetplus/actions/runs/31738982139)
+как `3/3 SUCCESS`. SHA-bound artifact `9196601422`, digest
+`sha256:a1f085ab5f8d99f68780d2b9adaf899abe22b88d893008e20714b3e1aa616382`,
+size `16318020` bytes.
 
 Этот срез не является ledger: после рестарта process brand теряется, DB-записи
 и append-only events отсутствуют. Следующий P0 — owner-only PostgreSQL

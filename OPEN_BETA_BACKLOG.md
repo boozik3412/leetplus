@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.66
+- Версия: 2.67
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -179,6 +179,9 @@ CURRENT199 trust-registration provenance bridge реализован локал�
 provenance и свежей timeline. Production entry требует настоящие process brands
 и production-origin acquisition; все action flags false. Focused `7/7`,
 CURRENT196/197 actual TLS compatibility `25/25`, typecheck/format/diff зелёные.
+Exact SHA `be8d670d7b8125438506fc578a2b28b170c0cd8d` принят GitHub Actions run
+`31738982139` как `3/3 SUCCESS`; artifact `9196601422`, digest
+`sha256:a1f085ab5f8d99f68780d2b9adaf899abe22b88d893008e20714b3e1aa616382`.
 Этот срез ещё не ledger и не переживает restart.
 
 Следующий P0-срез: owner-only PostgreSQL one-time registration/event ledger с

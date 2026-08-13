@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.63
+- Версия: 2.64
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -155,6 +155,23 @@ SHA `83e3a725…` остаётся только историческим superse
 Следующий P0-срез: отдельное immutable bootstrap-root registry изменение,
 independent acceptance и append-only enrollment ledger; ни один из этих шагов
 сам по себе не разрешает внешний тест.
+
+CURRENT198 immutable bootstrap-root registry реализован локально как
+`ROOTS EMPTY / NO-GO`. Единственный canonical release literal проходит exact
+schema/SPKI/fingerprint/lifetime validation; lifecycle поддерживает initial
+enrollment, guarded rotation, emergency revoke и recovery без удаления или
+переписывания истории. CURRENT196 получает только активную девятиполевую
+verification-проекцию. Отдельный CI transition verifier сравнивает exact HEAD с
+каждым Git parent и отклоняет dirty/worktree или history bypass. Registry и
+contract не имеют env/filesystem/network/DB/private-key/signer authority;
+локальный composed gate — `20/20`. Реальный production public root не добавлен,
+поэтому production acquisition, текущие четыре клуба и внешний tester остаются
+без изменений. До acceptance exact SHA следующий P0-срез не начат.
+
+Следующий P0-срез после CURRENT198 acceptance: append-only одноразовый
+enrollment/rotation/revocation ledger foundation. Добавление первого реального
+public root остаётся отдельной offline key ceremony и reviewed release change;
+оно не может быть сгенерировано или одобрено приложением.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный
@@ -5013,8 +5030,10 @@ target `4/4`, artifact `sha256:2c0d023a…8e387b`; browser A/B ещё обяза
 1. Завершить CURRENT187 production admission. Public J1–J4 topology и
    36-outcome runner приняты R9; disposable production file-signer bridge
    принят R10 на SHA `8c34895a…`, CI `31639146344`. Следующий защищённый этап —
+   immutable CURRENT198 registry foundation подготовлена с пустым root set;
+   после её exact-SHA acceptance — append-only enrollment lifecycle, затем
    отдельно разрешённая external key ceremony с OS ACL/HSM/KMS и reviewed
-   production root enrollment; затем canonical ledger/runtime roles, grants,
+   production root enrollment; после этого canonical runtime roles, grants,
    attestation, restored-copy apply/repeat/rollback/zero-diff и независимая
    latest-byte проверка. Ни один из этих engineering gates сам по себе не даёт
    production deployment или shared-beta authority.

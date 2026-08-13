@@ -18,6 +18,7 @@ import {
   LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_PURPOSE,
   LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_TRUST_DOMAIN,
 } from "./langame-runtime-revoke-intent-current195.mjs";
+import { PINNED_LANGAME_RUNTIME_TRUST_BOOTSTRAP_VERIFICATION_ROOTS_CURRENT198 } from "./langame-runtime-trust-bootstrap-registry-current198.mjs";
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 export const LANGAME_RUNTIME_TRUST_ENROLLMENT_CURRENT196_CONTRACT =
@@ -38,10 +39,8 @@ export const LANGAME_RUNTIME_TRUST_ENROLLMENT_CURRENT196_CURRENT195_MIGRATION_SH
 export const LANGAME_RUNTIME_TRUST_ENROLLMENT_CURRENT196_SYNTHETIC_CONFIRMATION =
   "verify-langame-current196-trust-enrollment-proposal-on-loopback-ci";
 
-// This registry is intentionally immutable and empty. Populating it is a
-// separate reviewed release change and cannot be performed by this module.
 export const PINNED_LANGAME_RUNTIME_TRUST_ENROLLMENT_CURRENT196_BOOTSTRAP_ROOTS =
-  Object.freeze({});
+  PINNED_LANGAME_RUNTIME_TRUST_BOOTSTRAP_VERIFICATION_ROOTS_CURRENT198;
 
 const ENVELOPE_KEYS = Object.freeze(
   [

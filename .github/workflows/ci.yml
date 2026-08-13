@@ -53,6 +53,14 @@ jobs:
           --confirm
           verify-pinned-authority-root-transition
 
+      - name: Validate CURRENT198 Langame bootstrap-root transition
+        run: >-
+          node
+          packages/database/scripts/langame-runtime-trust-bootstrap-registry-current198-transition.cli.mjs
+          --check-parent
+          --confirm
+          verify-langame-current198-bootstrap-root-transition
+
   application:
     name: Application checks
     runs-on: ubuntu-latest
@@ -222,6 +230,9 @@ jobs:
         run: pnpm --filter database check:langame-runtime-trust-acquisition-current197
         env:
           LANGAME_RUNTIME_TRUST_ACQUISITION_CURRENT197_E2E_CONFIRM: run-langame-current197-actual-tls-handshake-on-loopback-ci
+
+      - name: Validate empty immutable CURRENT198 bootstrap-root registry
+        run: pnpm --filter database check:langame-runtime-trust-bootstrap-registry-current198
 
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189

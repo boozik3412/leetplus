@@ -1,7 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PrismaService } from '../prisma/prisma.service';
 import type { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { LangameInitialSyncExecutionCurrent192Coordinator } from './langame-initial-sync-execution-current192.coordinator';
 import { createLangameInitialSyncPlanCurrent191 } from './langame-initial-sync-plan-current191';
@@ -77,20 +76,20 @@ function reconciliationReceipt(status: 'CLAIMED' | 'COMPLETED' | 'EXPIRED') {
 }
 
 describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
-  let queryRaw: jest.Mock;
+  let queryCurrent192: jest.Mock;
   let assertNetwork: jest.Mock;
   let configValues: Record<string, string | undefined>;
   let coordinator: LangameInitialSyncExecutionCurrent192Coordinator;
 
   beforeEach(() => {
-    queryRaw = jest.fn();
+    queryCurrent192 = jest.fn();
     assertNetwork = jest.fn().mockResolvedValue({ tenantId, userId });
     configValues = {
       NODE_ENV: 'test',
       LANGAME_INITIAL_SYNC_EXECUTION_CURRENT192_ENABLED: 'true',
     };
     coordinator = new LangameInitialSyncExecutionCurrent192Coordinator(
-      { $queryRaw: queryRaw } as unknown as PrismaService,
+      { queryCurrent192 },
       { assertNetwork } as unknown as FreshStoreScopeService,
       {
         get: jest.fn((key: string) => configValues[key]),
@@ -111,6 +110,19 @@ describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
         'langame_initial_sync_execute_current192_v1',
       );
     }
+    const coordinatorSource = readFileSync(
+      join(
+        __dirname,
+        'langame-initial-sync-execution-current192.coordinator.ts',
+      ),
+      'utf8',
+    );
+    expect(coordinatorSource).not.toContain('PrismaService');
+    expect(coordinatorSource).not.toContain('$queryRaw');
+    expect(coordinatorSource).toContain(
+      'LANGAME_INITIAL_SYNC_CURRENT192_DATABASE',
+    );
+    expect(coordinatorSource).toContain('queryCurrent192');
   });
 
   it('is default-off before plan serialization or database access', async () => {
@@ -119,7 +131,7 @@ describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
     await expect(coordinator.execute(user, dto)).rejects.toThrow(
       'CURRENT192 initial sync execution is disabled',
     );
-    expect(queryRaw).not.toHaveBeenCalled();
+    expect(queryCurrent192).not.toHaveBeenCalled();
   });
 
   it('is unconditionally denied in production', async () => {
@@ -128,11 +140,11 @@ describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
     await expect(coordinator.execute(user, dto)).rejects.toThrow(
       'CURRENT192 initial sync execution is not production-authorized',
     );
-    expect(queryRaw).not.toHaveBeenCalled();
+    expect(queryCurrent192).not.toHaveBeenCalled();
   });
 
   it('claims and atomically executes one branded selected-Store plan', async () => {
-    queryRaw
+    queryCurrent192
       .mockResolvedValueOnce(claimReceipt())
       .mockResolvedValueOnce(executionReceipt());
 
@@ -153,12 +165,12 @@ describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
       productionExecutionAllowed: false,
     });
     expect(assertNetwork).toHaveBeenCalledTimes(2);
-    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(queryCurrent192).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(result)).not.toContain(claimToken);
   });
 
   it('replays an ambiguous claim exactly once before execution', async () => {
-    queryRaw
+    queryCurrent192
       .mockRejectedValueOnce(new Error('claim response lost'))
       .mockResolvedValueOnce(claimReceipt({ replayed: true }))
       .mockResolvedValueOnce(executionReceipt());
@@ -166,11 +178,11 @@ describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
     await expect(coordinator.execute(user, dto)).resolves.toMatchObject({
       status: 'COMPLETED',
     });
-    expect(queryRaw).toHaveBeenCalledTimes(3);
+    expect(queryCurrent192).toHaveBeenCalledTimes(3);
   });
 
   it('returns durable completion after an execution response is lost', async () => {
-    queryRaw
+    queryCurrent192
       .mockResolvedValueOnce(claimReceipt())
       .mockRejectedValueOnce(new Error('execute response lost'))
       .mockResolvedValueOnce(reconciliationReceipt('COMPLETED'));
@@ -182,11 +194,11 @@ describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
       retried: false,
       snapshotDate: null,
     });
-    expect(queryRaw).toHaveBeenCalledTimes(3);
+    expect(queryCurrent192).toHaveBeenCalledTimes(3);
   });
 
   it('retries execute only after reconciliation proves no committed writes', async () => {
-    queryRaw
+    queryCurrent192
       .mockResolvedValueOnce(claimReceipt())
       .mockRejectedValueOnce(new Error('execute failed before commit'))
       .mockResolvedValueOnce(reconciliationReceipt('CLAIMED'))
@@ -197,11 +209,11 @@ describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
       reconciled: false,
       retried: true,
     });
-    expect(queryRaw).toHaveBeenCalledTimes(4);
+    expect(queryCurrent192).toHaveBeenCalledTimes(4);
   });
 
   it('fails closed after bounded retry without a terminal durable receipt', async () => {
-    queryRaw
+    queryCurrent192
       .mockResolvedValueOnce(claimReceipt())
       .mockRejectedValueOnce(new Error('first execute failed'))
       .mockResolvedValueOnce(reconciliationReceipt('CLAIMED'))
@@ -211,18 +223,18 @@ describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
     await expect(coordinator.execute(user, dto)).rejects.toThrow(
       'CURRENT192 initial sync execution requires operator review',
     );
-    expect(queryRaw).toHaveBeenCalledTimes(5);
+    expect(queryCurrent192).toHaveBeenCalledTimes(5);
   });
 
   it('rejects a cloned plan before any database effect', async () => {
     await expect(
       coordinator.execute(user, { ...dto, plan: structuredClone(plan) }),
     ).rejects.toThrow('Untrusted initial sync plan');
-    expect(queryRaw).not.toHaveBeenCalled();
+    expect(queryCurrent192).not.toHaveBeenCalled();
   });
 
   it('stops after claim when fresh network authority changes', async () => {
-    queryRaw.mockResolvedValueOnce(claimReceipt());
+    queryCurrent192.mockResolvedValueOnce(claimReceipt());
     assertNetwork
       .mockResolvedValueOnce({ tenantId, userId })
       .mockResolvedValueOnce({ tenantId, userId: 'different-owner' });
@@ -230,17 +242,17 @@ describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
     await expect(coordinator.execute(user, dto)).rejects.toThrow(
       'CURRENT192 initial sync authority changed before execution',
     );
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(queryCurrent192).toHaveBeenCalledTimes(1);
   });
 
   it('rejects malformed database receipts without exposing raw data', async () => {
-    queryRaw.mockResolvedValueOnce([
+    queryCurrent192.mockResolvedValueOnce([
       { ...claimReceipt()[0], extra: 'untrusted' },
     ]);
 
     await expect(coordinator.execute(user, dto)).rejects.toThrow(
       'CURRENT192 initial sync execution claim is unavailable',
     );
-    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(queryCurrent192).toHaveBeenCalledTimes(2);
   });
 });

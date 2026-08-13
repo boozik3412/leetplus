@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -7,7 +8,6 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { isProductionConfig } from '../config/environment-validation';
-import { PrismaService } from '../prisma/prisma.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import {
   serializeLangameInitialSyncPlanCurrent191,
@@ -19,6 +19,14 @@ const CURRENT192_ENABLED_ENV =
 const ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
+
+export const LANGAME_INITIAL_SYNC_CURRENT192_DATABASE = Symbol(
+  'LANGAME_INITIAL_SYNC_CURRENT192_DATABASE',
+);
+
+export interface LangameInitialSyncCurrent192Database {
+  queryCurrent192(query: Prisma.Sql): Promise<unknown>;
+}
 
 export type LangameInitialSyncExecutionCurrent192Dto = Readonly<{
   executionId?: string;
@@ -61,7 +69,8 @@ type ReconciliationReceipt = Readonly<{
 @Injectable()
 export class LangameInitialSyncExecutionCurrent192Coordinator {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(LANGAME_INITIAL_SYNC_CURRENT192_DATABASE)
+    private readonly database: LangameInitialSyncCurrent192Database,
     private readonly freshStoreScopeService: FreshStoreScopeService,
     private readonly configService: ConfigService,
   ) {}
@@ -211,7 +220,7 @@ export class LangameInitialSyncExecutionCurrent192Coordinator {
     claimToken: string;
     planDigest: string;
   }) {
-    const rows = await this.prisma.$queryRaw(
+    const rows = await this.database.queryCurrent192(
       Prisma.sql`
         SELECT * FROM public.langame_initial_sync_claim_current192_v1(
           ${input.executionId}, ${input.tenantId}, ${input.actorUserId},
@@ -232,7 +241,7 @@ export class LangameInitialSyncExecutionCurrent192Coordinator {
     executionRequestDigest: string;
     canonicalPlan: string;
   }) {
-    const rows = await this.prisma.$queryRaw(
+    const rows = await this.database.queryCurrent192(
       Prisma.sql`
         SELECT * FROM public.langame_initial_sync_execute_current192_v1(
           ${input.tenantId}, ${input.actorUserId}, ${input.executionId},
@@ -252,7 +261,7 @@ export class LangameInitialSyncExecutionCurrent192Coordinator {
   }) {
     let rows: unknown;
     try {
-      rows = await this.prisma.$queryRaw(
+      rows = await this.database.queryCurrent192(
         Prisma.sql`
           SELECT * FROM public.langame_initial_sync_reconcile_current192_v1(
             ${input.tenantId}, ${input.executionId}, ${input.claimToken},

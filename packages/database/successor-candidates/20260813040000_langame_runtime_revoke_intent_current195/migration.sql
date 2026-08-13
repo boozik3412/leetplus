@@ -231,6 +231,7 @@ DECLARE
   live_database_oid BIGINT;
   live_owner_oid BIGINT;
   attestation_found BOOLEAN;
+  existing_found BOOLEAN;
 BEGIN
   IF target_intent_id !~ '^[A-Za-z0-9_-]{16,128}$'
      OR target_attestation_id !~ '^[A-Za-z0-9_-]{16,128}$'
@@ -276,6 +277,7 @@ BEGIN
      OR candidate."attestationId" = target_attestation_id
      OR candidate."revokeRequestId" = revoke_request_id
   FOR UPDATE;
+  existing_found := FOUND;
 
   SELECT candidate.* INTO attestation
   FROM public."LangameRuntimeAttestationV1" AS candidate
@@ -299,7 +301,7 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
-  IF FOUND THEN
+  IF existing_found THEN
     IF existing."id" = target_intent_id
        AND existing."intentPayloadDigest" = intent_payload_digest
        AND existing."attestationId" = target_attestation_id

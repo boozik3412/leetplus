@@ -403,10 +403,12 @@ SET search_path = pg_catalog, public
 AS $apply$
 DECLARE
   intent public."LangameRuntimeRevokeIntentV1"%ROWTYPE;
+  attestation public."LangameRuntimeAttestationV1"%ROWTYPE;
   revoked RECORD;
   server_now TIMESTAMP(3) WITH TIME ZONE;
   live_database_oid BIGINT;
   live_owner_oid BIGINT;
+  runtime_session_count BIGINT;
 BEGIN
   IF target_intent_id !~ '^[A-Za-z0-9_-]{16,128}$'
      OR expected_intent_payload_digest !~ '^[a-f0-9]{64}$'
@@ -436,6 +438,33 @@ BEGIN
     RETURN QUERY SELECT intent."id", intent."attestationId", intent."status",
       intent."appliedAt", intent."expiredAt", TRUE;
     RETURN;
+  END IF;
+
+  SELECT candidate.* INTO attestation
+  FROM public."LangameRuntimeAttestationV1" AS candidate
+  WHERE candidate."id" = intent."attestationId"
+  FOR UPDATE;
+  IF NOT FOUND
+     OR attestation."status" <> 'CONSUMED'
+     OR attestation."payloadDigest" <> intent."attestationPayloadDigest"
+     OR attestation."databaseName" <> intent."databaseName"
+     OR attestation."databaseOid" <> intent."databaseOid"
+     OR attestation."schemaOwnerRoleName" <> intent."ownerRoleName"
+     OR attestation."schemaOwnerRoleOid" <> intent."ownerRoleOid"
+  THEN
+    RAISE EXCEPTION 'CURRENT195 live attestation binding is unavailable'
+      USING ERRCODE = '42501';
+  END IF;
+
+  SELECT pg_catalog.count(*) INTO runtime_session_count
+  FROM pg_catalog.pg_stat_activity AS activity
+  WHERE activity.datid = intent."databaseOid"
+    AND activity.usesysid = attestation."executorRoleOid"
+    AND activity.pid <> pg_catalog.pg_backend_pid()
+    AND activity.backend_type = 'client backend';
+  IF runtime_session_count <> 0 THEN
+    RAISE EXCEPTION 'CURRENT195 runtime session is not drained'
+      USING ERRCODE = '55000';
   END IF;
 
   SELECT database_object.oid::BIGINT INTO live_database_oid

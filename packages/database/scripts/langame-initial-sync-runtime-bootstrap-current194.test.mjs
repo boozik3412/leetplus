@@ -40,6 +40,17 @@ import {
 } from "./langame-initial-sync-runtime-prisma-current194.mjs";
 import { isLangameInitialSyncRuntimeProviderCurrent194 } from "./langame-initial-sync-runtime-provider-current194.mjs";
 import {
+  LANGAME_INITIAL_SYNC_RUNTIME_SHUTDOWN_CURRENT195_CONFIRMATION,
+  recoverLangameInitialSyncRuntimeShutdownCurrent195,
+  recoverSyntheticLangameInitialSyncRuntimeShutdownCurrent195,
+  shutdownLangameInitialSyncRuntimeCurrent195,
+  shutdownSyntheticLangameInitialSyncRuntimeCurrent195,
+} from "./langame-initial-sync-runtime-shutdown-current195.mjs";
+import {
+  LANGAME_RUNTIME_REVOKE_INTENT_PRISMA_CURRENT195_TEST_CONFIRMATION,
+  createLangameRuntimeRevokeIntentPrismaCurrent195ForTestOnly,
+} from "./langame-runtime-revoke-intent-prisma-current195.mjs";
+import {
   LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_ALGORITHM,
   LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CONTRACT,
   LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CURRENT194_CONTRACT,
@@ -361,6 +372,62 @@ function verifiedRevokeIntent(value, payloadOverrides = {}) {
   );
 }
 
+function current195Ledger(value, events, options = {}) {
+  let registerAttempts = 0;
+  let applyAttempts = 0;
+  const ledgerOwner = client(
+    OWNER,
+    OWNER_OID,
+    value.attestation.envelope.payloadDigest,
+    {
+      async query(text) {
+        if (text.includes("revoke_intent_register_current195_v1")) {
+          registerAttempts += 1;
+          events.push("REGISTER");
+          if (options.loseRegister && registerAttempts === 1) {
+            throw new Error("lost CURRENT195 register response");
+          }
+          return [
+            {
+              intentId: "revoke-intent-current195-bootstrap",
+              replayed: options.persistedAlready || registerAttempts > 1,
+              status: "PENDING",
+              validUntil: new Date("2026-08-13T09:34:00.000Z"),
+            },
+          ];
+        }
+        if (text.includes("revoke_intent_apply_current195_v1")) {
+          applyAttempts += 1;
+          events.push("APPLY");
+          if (options.loseApply && applyAttempts === 1) {
+            throw new Error("lost CURRENT195 apply response");
+          }
+          return [
+            {
+              appliedAt: new Date("2026-08-13T09:31:00.000Z"),
+              attestationId: "attestation-current194-bootstrap",
+              expiredAt: null,
+              intentId: "revoke-intent-current195-bootstrap",
+              replayed: applyAttempts > 1,
+              status: "APPLIED",
+            },
+          ];
+        }
+      },
+    },
+  );
+  const driver = createLangameRuntimeRevokeIntentPrismaCurrent195ForTestOnly(
+    {
+      expectedDatabase: DATABASE,
+      ownerDatabaseUrl: value.config.ownerDatabaseUrl,
+      ownerRoleName: OWNER,
+    },
+    ledgerOwner.value,
+    LANGAME_RUNTIME_REVOKE_INTENT_PRISMA_CURRENT195_TEST_CONFIRMATION,
+  );
+  return { driver, ledgerOwner };
+}
+
 test("CURRENT194 bootstrap production and unconfirmed synthetic entries deny", async () => {
   await assert.rejects(
     openLangameInitialSyncRuntimeBootstrapCurrent194(),
@@ -563,6 +630,148 @@ test("CURRENT194 bootstrap verifies, persists, consumes and exposes a drained pr
   );
   assert.equal(value.owner.observed.disconnects, 1);
   assert.equal(value.runtime.observed.disconnects, 1);
+});
+
+test("CURRENT195 persists before drain and atomically applies without raw revoke", async () => {
+  const events = [];
+  let finishWork;
+  const value = bootstrapFixture({
+    runtimeOverrides: {
+      disconnect() {
+        events.push("DRAIN");
+      },
+      query(text) {
+        if (text.includes("initial_sync_reconcile_current192_v1")) {
+          return new Promise((resolve) => {
+            finishWork = resolve;
+          });
+        }
+      },
+    },
+  });
+  const session =
+    await openLangameInitialSyncRuntimeBootstrapCurrent194ForTestOnly(
+      value.input,
+      value.pair,
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION,
+    );
+  const intent = verifiedRevokeIntent(value);
+  const ledger = current195Ledger(value, events);
+  const inFlight = session.reconcileCurrent192({
+    claimToken: "claim-token-current195-bootstrap-abcdefghijklmnopqrstuvwxyz",
+    executionId: "execution-current195-bootstrap",
+    planDigest: "3".repeat(64),
+    tenantId: "tenant-current195-bootstrap",
+  });
+  const shuttingDown = shutdownSyntheticLangameInitialSyncRuntimeCurrent195(
+    session,
+    intent,
+    ledger.driver,
+    LANGAME_INITIAL_SYNC_RUNTIME_SHUTDOWN_CURRENT195_CONFIRMATION,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot().state, "DRAINING");
+  assert.equal(session.snapshot().inFlight, 1);
+  assert.deepEqual(events, ["REGISTER"]);
+  finishWork([{ status: "completed-before-current195-apply" }]);
+  assert.deepEqual(await inFlight, [
+    { status: "completed-before-current195-apply" },
+  ]);
+  const receipt = await shuttingDown;
+  assert.equal(receipt.status, "APPLIED");
+  assert.equal(receipt.persistedBeforeDrain, true);
+  assert.deepEqual(events, ["REGISTER", "DRAIN", "APPLY"]);
+  assert.equal(session.snapshot().state, "CLOSED");
+  assert.equal(session.snapshot().revokedAt, null);
+  assert.equal(
+    value.owner.observed.queries.some((text) =>
+      text.includes("attestation_revoke_current194_v1"),
+    ),
+    false,
+  );
+  assert.equal(ledger.ledgerOwner.observed.disconnects, 1);
+});
+
+test("CURRENT195 shutdown reconciles lost persist and apply responses", async () => {
+  const events = [];
+  const value = bootstrapFixture({
+    runtimeOverrides: {
+      disconnect() {
+        events.push("DRAIN");
+      },
+    },
+  });
+  const session =
+    await openLangameInitialSyncRuntimeBootstrapCurrent194ForTestOnly(
+      value.input,
+      value.pair,
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION,
+    );
+  const ledger = current195Ledger(value, events, {
+    loseApply: true,
+    loseRegister: true,
+  });
+  const receipt = await shutdownSyntheticLangameInitialSyncRuntimeCurrent195(
+    session,
+    verifiedRevokeIntent(value),
+    ledger.driver,
+    LANGAME_INITIAL_SYNC_RUNTIME_SHUTDOWN_CURRENT195_CONFIRMATION,
+  );
+  assert.equal(receipt.status, "APPLIED");
+  assert.equal(receipt.replayed, true);
+  assert.deepEqual(events, ["REGISTER", "REGISTER", "DRAIN", "APPLY", "APPLY"]);
+  assert.equal(session.snapshot().revokedAt, null);
+  assert.equal(ledger.ledgerOwner.observed.disconnects, 1);
+});
+
+test("CURRENT195 recovers persisted intent through a fresh owner-only driver", async () => {
+  const events = [];
+  const value = bootstrapFixture({
+    runtimeOverrides: {
+      disconnect() {
+        events.push("DRAIN");
+      },
+    },
+  });
+  const session =
+    await openLangameInitialSyncRuntimeBootstrapCurrent194ForTestOnly(
+      value.input,
+      value.pair,
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION,
+    );
+  const intent = verifiedRevokeIntent(value);
+  const firstProcess = current195Ledger(value, events);
+  const persisted = await firstProcess.driver.registerCurrent195(intent);
+  assert.equal(persisted.persistedStatus, "PENDING");
+  await firstProcess.driver.close();
+  await session.drain();
+
+  const restartedProcess = current195Ledger(value, events, {
+    persistedAlready: true,
+  });
+  const receipt =
+    await recoverSyntheticLangameInitialSyncRuntimeShutdownCurrent195(
+      intent,
+      restartedProcess.driver,
+      LANGAME_INITIAL_SYNC_RUNTIME_SHUTDOWN_CURRENT195_CONFIRMATION,
+    );
+  assert.equal(receipt.status, "APPLIED");
+  assert.equal(receipt.persistedBeforeRestart, true);
+  assert.deepEqual(events, ["REGISTER", "DRAIN", "REGISTER", "APPLY"]);
+  assert.equal(session.snapshot().revokedAt, null);
+  assert.equal(firstProcess.ledgerOwner.observed.disconnects, 1);
+  assert.equal(restartedProcess.ledgerOwner.observed.disconnects, 1);
+});
+
+test("CURRENT195 production shutdown remains fail-closed", async () => {
+  await assert.rejects(
+    shutdownLangameInitialSyncRuntimeCurrent195(),
+    (error) => error.code === "CURRENT195_SHUTDOWN_PRODUCTION_DENIED",
+  );
+  await assert.rejects(
+    recoverLangameInitialSyncRuntimeShutdownCurrent195(),
+    (error) => error.code === "CURRENT195_SHUTDOWN_RECOVERY_PRODUCTION_DENIED",
+  );
 });
 
 test("CURRENT194 bootstrap closes both clients after verification or request failure", async () => {

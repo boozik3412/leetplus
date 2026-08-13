@@ -22,13 +22,20 @@ import {
   LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
   isLangameInitialSyncRuntimeBootstrapCurrent194,
   openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194,
-  recoverSyntheticLangameInitialSyncRuntimeRevokeWithIntentCurrent195,
 } from "./langame-initial-sync-runtime-bootstrap-current194.mjs";
 import {
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_CONFIRMATION,
   createSyntheticLangameInitialSyncRuntimePrismaCurrent194,
 } from "./langame-initial-sync-runtime-prisma-current194.mjs";
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
+import {
+  LANGAME_INITIAL_SYNC_RUNTIME_SHUTDOWN_CURRENT195_CONFIRMATION,
+  recoverSyntheticLangameInitialSyncRuntimeShutdownCurrent195,
+} from "./langame-initial-sync-runtime-shutdown-current195.mjs";
+import {
+  LANGAME_RUNTIME_REVOKE_INTENT_PRISMA_CURRENT195_CONFIRMATION,
+  createSyntheticLangameRuntimeRevokeIntentPrismaCurrent195,
+} from "./langame-runtime-revoke-intent-prisma-current195.mjs";
 import {
   LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_ALGORITHM,
   LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CONTRACT,
@@ -387,6 +394,14 @@ test(
           ALTER FUNCTION public.langame_runtime_attestation_revoke_current194_v1(
             TEXT, TEXT, TEXT, TEXT, TEXT
           ) OWNER TO ${OWNER_ROLE};
+          ALTER FUNCTION public.langame_runtime_revoke_intent_register_current195_v1(
+            TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT,
+            TEXT, BIGINT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT,
+            TIMESTAMP(3) WITH TIME ZONE, TIMESTAMP(3) WITH TIME ZONE
+          ) OWNER TO ${OWNER_ROLE};
+          ALTER FUNCTION public.langame_runtime_revoke_intent_apply_current195_v1(
+            TEXT, TEXT
+          ) OWNER TO ${OWNER_ROLE};
 
           GRANT EXECUTE ON FUNCTION public.langame_initial_sync_claim_current192_v1(
             TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
@@ -562,35 +577,60 @@ test(
           tenantId: "missing-tenant-bootstrap-current194",
         }),
       );
-      await session.revokeAndDrain({
-        revocationReasonDigest: "1".repeat(64),
-        revokeRequestDigest: "f".repeat(64),
-        revokeRequestId: "revoke-request-current194-bootstrap-ci",
-      });
-      assert.equal(session.snapshot().state, "CLOSED");
-      assert.equal(session.snapshot().revokedAt === null, false);
-      session = null;
-
-      const recovered =
-        await recoverSyntheticLangameInitialSyncRuntimeRevokeWithIntentCurrent195(
-          signedBootstrapInput,
-          verifiedRevokeIntent(signedBootstrapInput),
+      const verifiedIntent = verifiedRevokeIntent(signedBootstrapInput);
+      const firstIntentLedger =
+        createSyntheticLangameRuntimeRevokeIntentPrismaCurrent195(
           {
             expectedDatabase: TARGET_DATABASE,
             ownerDatabaseUrl: rotatedPrismaConfig.ownerDatabaseUrl,
             ownerRoleName: OWNER_ROLE,
           },
-          LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
+          LANGAME_RUNTIME_REVOKE_INTENT_PRISMA_CURRENT195_CONFIRMATION,
         );
-      assert.deepEqual(recovered, {
+      const persistedIntent =
+        await firstIntentLedger.registerCurrent195(verifiedIntent);
+      assert.equal(persistedIntent.persistedStatus, "PENDING");
+      await assert.rejects(
+        firstIntentLedger.applyCurrent195(persistedIntent),
+        (error) =>
+          error instanceof Error &&
+          /runtime session is not drained/iu.test(
+            `${error.message} ${error.meta?.message ?? ""}`,
+          ),
+      );
+      await firstIntentLedger.close();
+      await session.drain();
+      assert.equal(session.snapshot().state, "CLOSED");
+      assert.equal(session.snapshot().revokedAt, null);
+      session = null;
+
+      const restartedIntentLedger =
+        createSyntheticLangameRuntimeRevokeIntentPrismaCurrent195(
+          {
+            expectedDatabase: TARGET_DATABASE,
+            ownerDatabaseUrl: rotatedPrismaConfig.ownerDatabaseUrl,
+            ownerRoleName: OWNER_ROLE,
+          },
+          LANGAME_RUNTIME_REVOKE_INTENT_PRISMA_CURRENT195_CONFIRMATION,
+        );
+      const shutdown =
+        await recoverSyntheticLangameInitialSyncRuntimeShutdownCurrent195(
+          verifiedIntent,
+          restartedIntentLedger,
+          LANGAME_INITIAL_SYNC_RUNTIME_SHUTDOWN_CURRENT195_CONFIRMATION,
+        );
+      assert.deepEqual(shutdown, {
+        appliedAt: shutdown.appliedAt,
         attestationId: "attestation-current194-bootstrap-ci",
         authorization: false,
+        contract: "LANGAME_INITIAL_SYNC_RUNTIME_SHUTDOWN_CURRENT195_V1",
+        intentId: "revoke-intent-current195-prisma-ci",
+        persistedBeforeRestart: true,
         productionExecutionAllowed: false,
-        replayed: true,
-        revokedAt: recovered.revokedAt,
-        status: "REVOKED",
+        replayed: false,
+        status: "APPLIED",
       });
-      assert.match(recovered.revokedAt, /^\d{4}-\d{2}-\d{2}T/u);
+      assert.match(shutdown.appliedAt, /^\d{4}-\d{2}-\d{2}T/u);
 
       const verify = new Client({
         connectionString: pgUrl(base, TARGET_DATABASE),
@@ -609,12 +649,20 @@ test(
              WHERE "status" = 'REVOKED') AS "revokedCount",
             (SELECT count(*)::INTEGER
              FROM public."LangameRuntimeAttestationEventV1"
-             WHERE "eventType" IN ('REGISTERED', 'CONSUMED', 'REVOKED')) AS "eventCount"
+             WHERE "eventType" IN ('REGISTERED', 'CONSUMED', 'REVOKED')) AS "eventCount",
+            (SELECT count(*)::INTEGER
+             FROM public."LangameRuntimeRevokeIntentV1"
+             WHERE "status" = 'APPLIED') AS "appliedIntentCount",
+            (SELECT count(*)::INTEGER
+             FROM public."LangameRuntimeRevokeIntentEventV1"
+             WHERE "eventType" IN ('REGISTERED', 'APPLIED')) AS "intentEventCount"
         `,
         );
         assert.deepEqual(ledger, {
+          appliedIntentCount: 1,
           consumedCount: 0,
           eventCount: 6,
+          intentEventCount: 2,
           revokedCount: 2,
         });
       } finally {

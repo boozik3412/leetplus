@@ -1,6 +1,6 @@
 # CURRENT195: signed Langame revoke-intent foundation
 
-Status: `SIGNED FOUNDATION ACCEPTED / LEDGER LOCAL / NONAUTHORIZING / PRODUCTION ROOTS EMPTY`.
+Status: `FOUNDATION + LEDGER ACCEPTED / LIFECYCLE LOCAL / NONAUTHORIZING / PRODUCTION ROOTS EMPTY`.
 
 CURRENT194 can reconcile an exact terminal revoke after a lost database
 response through a fresh owner-only connection. CURRENT195 removes the caller's
@@ -51,7 +51,13 @@ It records append-only `REGISTERED`, `APPLIED` and `EXPIRED` events. Apply locks
 and reloads the exact intent, re-attests the live database/owner identity and
 atomically invokes the CURRENT194 revoke routine. A lost register/apply response
 can be retried only with the exact branded intent/receipt. Local static and
-Prisma gates are `12/12`; GitHub PostgreSQL acceptance is still pending.
+Prisma gates are `12/12`.
+
+The persisted-ledger acceptance is bound to exact SHA
+`a62a09d35d776f4fafc5947ae95395b07f7b6da2`. GitHub CI run `31709298574`
+completed `3/3 SUCCESS`, including the actual PostgreSQL ledger smoke. Artifact
+`9184903219` has digest
+`sha256:02b0cd9b6ce08104e3fc6a9317bbc4afaa8d1fb8c0f4677f4000bb1e704eadc7`.
 
 This is not yet a production coordinator. PostgreSQL does not verify Ed25519;
 it persists an envelope already verified by the capability-free application
@@ -59,13 +65,21 @@ boundary. The production root registry is empty and all production entry
 points remain denied. Production, the existing four-club tenant, external
 tester account and owner invite are unchanged.
 
+The local successor lifecycle now persists the exact branded intent before it
+starts provider drain, waits for zero in-flight work, closes the runtime session
+without calling the raw CURRENT194 revoke path and only then applies the
+persisted intent. The database independently rejects apply while the exact
+consumed-attestation runtime role still has a live client backend. A fresh
+owner-only process can re-register the identical persisted envelope and finish
+apply after a lost process response or restart. Local lifecycle gates are
+`42/42`; this layer remains unaccepted until the actual PostgreSQL CI fixture is
+green for its exact SHA.
+
 ## Next implementation steps
 
-1. Accept the local CURRENT195 ledger through the mandatory disposable
-   PostgreSQL smoke and exact-SHA artifact gate.
-2. Bind the bootstrap drain/restart lifecycle to the branded persisted intent
-   receipt, removing raw revoke fields from the successor path.
-3. Add protected production signer/root enrollment and TLS peer pinning only
+1. Accept the local persist → drain → apply/restart lifecycle through the
+   mandatory actual PostgreSQL CI fixture and exact-SHA artifact gate.
+2. Add protected production signer/root enrollment and TLS peer pinning only
    after separate review.
-4. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal before
+3. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal before
    any production or tester effect.

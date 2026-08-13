@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 13.08.2026
-- Версия: 2.54
+- Версия: 2.56
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -74,13 +74,27 @@ Foundation связывает independent Ed25519 revoke intent с exact CURRENT
 attestation/signer, release SHA, database/owner OID и полным revoke request до
 создания owner-only recovery client.
 
-Следующий локальный CURRENT195 слой добавляет noncanonical owner-only
+CURRENT195 persisted-ledger слой принят после исправления replay-state на exact
+SHA `a62a09d35d776f4fafc5947ae95395b07f7b6da2`: GitHub CI run
+`31709298574` завершён `3/3 SUCCESS`; новый actual PostgreSQL ledger smoke,
+application checks и authority gate зелёные; artifact `9184903219`, digest
+`sha256:02b0cd9b6ce08104e3fc6a9317bbc4afaa8d1fb8c0f4677f4000bb1e704eadc7`.
+
+Принятый CURRENT195 слой добавляет noncanonical owner-only
 PostgreSQL intent ledger: exact signed envelope сохраняется до terminal effect,
 append-only audit фиксирует `REGISTERED/APPLIED/EXPIRED`, а apply атомарно
 вызывает CURRENT194 revoke и поддерживает exact lost-response replay. Static
 ledger/Prisma gate локально `12/12`; production roots, runtime grants и route
-по-прежнему отсутствуют. До приёмки GitHub PostgreSQL smoke этот слой не
-считается accepted evidence.
+по-прежнему отсутствуют.
+
+Локальный successor lifecycle уже связывает реальный provider shutdown с
+последовательностью persist → drain → apply, не вызывает raw CURRENT194 revoke,
+повторяет потерянные register/apply responses только для exact branded данных и
+после рестарта восстанавливает тот же persisted intent через свежий owner-only
+driver. CURRENT195 apply дополнительно блокируется самой БД, пока жива runtime
+session точной consumed-attestation. Локальные gates зелёные: CURRENT194/195
+lifecycle `42/42`, ledger `12/12`. До GitHub actual PostgreSQL acceptance этот
+successor lifecycle остаётся локальным evidence и не разрешает production.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

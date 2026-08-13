@@ -7,7 +7,7 @@
     "LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_V1",
     "LANGAME_RUNTIME_ATTESTATION_LEDGER_CURRENT194_V1"
   ],
-  "migrationSqlSha256": "9b5a2730b71146fd2ee004bf4c5daca62d273f217204c7896dc73bb5214e0276",
+  "migrationSqlSha256": "a5748797c7f6b86cbbf1b5c29a0d7e12698227a2317e299154d718be7a112002",
   "authorization": false,
   "canMutateProduction": false,
   "canActivateApplicationRoute": false,

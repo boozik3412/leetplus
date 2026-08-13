@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.64
+- Версия: 2.65
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -14,7 +14,7 @@
 - Канонический AccessScope package:
   [docs/security/access-scope](./docs/security/access-scope/README.md)
 
-Сводка launch readiness на 13.08.2026: Gate 0 закрыт exact synchronized SHA,
+Сводка launch readiness на 14.08.2026: Gate 0 закрыт exact synchronized SHA,
 GitHub CI `3/3 SUCCESS` и SHA-bound artifact; локальный CURRENT180–190
 rehearsal принят (`163/163`, independent `P0=0/P1=0`), но внешний доступ
 остаётся `NO-GO`. В основной исполнимой таблице `102` P0: `8` готовы, `34` в
@@ -156,17 +156,21 @@ SHA `83e3a725…` остаётся только историческим superse
 independent acceptance и append-only enrollment ledger; ни один из этих шагов
 сам по себе не разрешает внешний тест.
 
-CURRENT198 immutable bootstrap-root registry реализован локально как
-`ROOTS EMPTY / NO-GO`. Единственный canonical release literal проходит exact
+CURRENT198 immutable bootstrap-root registry принят как
+`CI SHA ACCEPTED / ROOTS EMPTY / NO-GO`. Единственный canonical release literal проходит exact
 schema/SPKI/fingerprint/lifetime validation; lifecycle поддерживает initial
 enrollment, guarded rotation, emergency revoke и recovery без удаления или
 переписывания истории. CURRENT196 получает только активную девятиполевую
 verification-проекцию. Отдельный CI transition verifier сравнивает exact HEAD с
 каждым Git parent и отклоняет dirty/worktree или history bypass. Registry и
 contract не имеют env/filesystem/network/DB/private-key/signer authority;
-локальный composed gate — `20/20`. Реальный production public root не добавлен,
-поэтому production acquisition, текущие четыре клуба и внешний tester остаются
-без изменений. До acceptance exact SHA следующий P0-срез не начат.
+локальный composed gate — `20/20`; CURRENT196/197 actual TLS compatibility —
+`25/25`. Exact SHA `539e51a0f036dde44af8e8397c8791fe0a41123c`
+принят GitHub Actions run `31736711886` как `3/3 SUCCESS`; artifact
+`9195731834`, digest
+`sha256:5bcc5dd5342e8667b96ef8909997ae7b3ad4c188c45dfb9daa3b46a3e7de6254`.
+Реальный production public root не добавлен, поэтому production acquisition,
+текущие четыре клуба и внешний tester остаются без изменений.
 
 Следующий P0-срез после CURRENT198 acceptance: append-only одноразовый
 enrollment/rotation/revocation ledger foundation. Добавление первого реального

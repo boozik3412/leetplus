@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.115                                        |
+| Версия           | 1.116                                        |
 | Дата             | 14.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -148,7 +148,8 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    proposal пока невозможно получить из-за frozen-empty CURRENT196 roots.
    0e.15. [CURRENT198 immutable bootstrap-root registry](./langame-current198-bootstrap-root-registry.md) —
    canonical data-only lifecycle registry, append-only Git transition policy и
-   active-root projection в CURRENT196; initial registry остаётся пустым, key
+   active-root projection в CURRENT196; exact SHA `539e51a0…` принят CI
+   `31736711886` как `3/3 SUCCESS`, initial registry остаётся пустым, key
    ceremony, production enrollment и доступ не разрешены.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и

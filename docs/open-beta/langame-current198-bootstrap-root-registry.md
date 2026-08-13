@@ -1,11 +1,11 @@
 # CURRENT198: immutable bootstrap-root registry
 
-| Поле                           | Значение                                 |
-| ------------------------------ | ---------------------------------------- |
-| Статус                         | `LOCAL FOUNDATION / ROOTS EMPTY / NO-GO` |
-| Дата                           | 14.08.2026                               |
-| Production root                | отсутствует                              |
-| Production / Tenant A / tester | не изменялись                            |
+| Поле                           | Значение                                |
+| ------------------------------ | --------------------------------------- |
+| Статус                         | `CI SHA ACCEPTED / ROOTS EMPTY / NO-GO` |
+| Дата                           | 14.08.2026                              |
+| Production root                | отсутствует                             |
+| Production / Tenant A / tester | не изменялись                           |
 
 CURRENT198 вводит единственный канонический release-owned реестр публичных
 bootstrap roots для проверки CURRENT196 trust-enrollment proposal. Реестр
@@ -35,9 +35,16 @@ bootstrap roots для проверки CURRENT196 trust-enrollment proposal. Р
 ## Проверка
 
 Локальный gate выполняет syntax checks, CURRENT198 transition/registry matrix и
-повторно CURRENT196 verifier matrix. На момент добавления документа — `20/20`.
-CI запускает transition verifier отдельно в authority job и полный gate в
-application job.
+повторно CURRENT196 verifier matrix: `20/20`. Совместимость CURRENT196/197 с
+реальным loopback TLS fixture: `25/25`; database typecheck и format/diff checks
+зелёные.
+
+Exact SHA `539e51a0f036dde44af8e8397c8791fe0a41123c` принят GitHub Actions run
+[`31736711886`](https://github.com/boozik3412/leetplus/actions/runs/31736711886)
+как `3/3 SUCCESS`: authority transition, application и PostgreSQL migration
+smoke завершились успешно. SHA-bound artifact `9195731834`, digest
+`sha256:5bcc5dd5342e8667b96ef8909997ae7b3ad4c188c45dfb9daa3b46a3e7de6254`,
+size `16318211` bytes.
 
 ## Что этот этап не разрешает
 

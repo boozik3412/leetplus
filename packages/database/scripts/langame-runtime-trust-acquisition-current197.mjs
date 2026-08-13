@@ -91,17 +91,20 @@ function createNonPublicAddressBlockLists() {
     ipv4.addSubnet(address, prefix, "ipv4");
   }
   for (const [address, prefix] of [
-    ["::", 128],
+    ["::", 96],
     ["::1", 128],
     ["::ffff:0.0.0.0", 96],
     ["64:ff9b::", 96],
     ["64:ff9b:1::", 48],
     ["100::", 64],
     ["2001::", 32],
+    ["2001:2::", 48],
     ["2001:10::", 28],
     ["2001:20::", 28],
     ["2001:db8::", 32],
     ["2002::", 16],
+    ["3fff::", 20],
+    ["5f00::", 16],
     ["fc00::", 7],
     ["fe80::", 10],
     ["ff00::", 8],
@@ -761,17 +764,32 @@ async function collectInternal(
   }
 
   const resolvedAddressSetDigest = digest("RESOLVED_ADDRESS_SET", addresses);
+  const tlsObservationDigest = digest("TLS_OBSERVATION", observation);
   const receiptDigest = digest("RECEIPT", {
     attestationPublicKeyBytesSha256: attestationRoot.bytesSha256,
     candidateBundleDigest: proposal.candidateBundleDigest,
     collectedAt: collectedAt.value,
+    databaseName: proposal.databaseName,
+    databaseOid: proposal.databaseOid,
     enrollmentId: proposal.enrollmentId,
+    issuedAt: proposal.issuedAt,
+    releaseArtifactDigest: proposal.releaseArtifactDigest,
     releaseSha: proposal.releaseSha,
     resolvedAddressSetDigest,
     revokeIntentPublicKeyBytesSha256: revokeRoot.bytesSha256,
+    runtimeAttestationKeyId: proposal.runtimeAttestationKeyId,
+    runtimeAttestationPublicKeyFingerprint:
+      attestationRoot.publicKeyFingerprint,
+    runtimeConfigDigest: proposal.runtimeConfigDigest,
+    runtimeRevokeIntentKeyId: proposal.runtimeRevokeIntentKeyId,
+    runtimeRevokeIntentPublicKeyFingerprint: revokeRoot.publicKeyFingerprint,
+    syntheticOnly,
     tlsCaCertificateSha256: caCertificate.bytesSha256,
     tlsLeafCertificateSha256: observation.leafCertificateSha256,
     tlsLeafSpkiSha256: observation.leafSpkiSha256,
+    tlsObservationDigest,
+    validUntil: proposal.validUntil,
+    verifierArtifactDigest: proposal.verifierArtifactDigest,
   });
   const receipt = Object.freeze({
     authorization: false,
@@ -810,6 +828,7 @@ async function collectInternal(
     tlsHostnameVerified: true,
     tlsLeafCertificateSha256: observation.leafCertificateSha256,
     tlsLeafSpkiSha256: observation.leafSpkiSha256,
+    tlsObservationDigest,
     tlsPeerObserved: true,
     tlsProtocol: observation.protocol,
     tlsServerName: proposal.tlsServerName,

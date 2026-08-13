@@ -524,6 +524,16 @@ test("CURRENT197 reads exact public roots and returns deny-only TLS evidence", a
     calls.map((entry) => entry.kind),
     ["now", "resolveEndpoint", "connectTlsPeer", "now"],
   );
+  assert.match(receipt.receiptDigest, /^[a-f0-9]{64}$/u);
+  assert.match(receipt.tlsObservationDigest, /^[a-f0-9]{64}$/u);
+  const tls12 = await collect(value, {
+    observation: observation({ protocol: "TLSv1.2" }),
+  });
+  assert.notEqual(
+    tls12.receipt.tlsObservationDigest,
+    receipt.tlsObservationDigest,
+  );
+  assert.notEqual(tls12.receipt.receiptDigest, receipt.receiptDigest);
   for (const forbidden of ["Path", "Pem", "resolvedAddresses", "proposal"]) {
     assert.equal(
       Object.keys(receipt).some((key) => key.includes(forbidden)),
@@ -666,6 +676,7 @@ test("CURRENT197 rejects non-public and alternate IPv4-mapped address forms", ()
     ["255.255.255.255", 4],
     ["::", 6],
     ["::1", 6],
+    ["::7f00:1", 6],
     ["::ffff:127.0.0.1", 6],
     ["0:0:0:0:0:ffff:7f00:1", 6],
     ["0:0:0:0:0:ffff:a00:1", 6],
@@ -673,8 +684,11 @@ test("CURRENT197 rejects non-public and alternate IPv4-mapped address forms", ()
     ["64:ff9b:1::7f00:1", 6],
     ["100::1", 6],
     ["2001:0:4136:e378:8000:63bf:3fff:fdd2", 6],
+    ["2001:2::1", 6],
     ["2001:db8::1", 6],
     ["2002:7f00:1::", 6],
+    ["3fff::1", 6],
+    ["5f00::1", 6],
     ["fc00::1", 6],
     ["fdff::1", 6],
     ["fe80::1", 6],

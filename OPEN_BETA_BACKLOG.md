@@ -144,9 +144,11 @@ Post-acceptance latest-byte review обнаружил P1: строковая IPv
 канонизировала полную IPv4-mapped форму и могла пропустить private destination.
 Локальный successor заменяет её двумя family-separated binary `BlockList`,
 запрещает mapped/NAT64/Teredo/6to4/non-global ranges и имеет adversarial matrix;
-focused `13/13`, composed CURRENT196/CURRENT197 `25/25`. Exact-SHA CI successor
-ещё не принят, поэтому SHA `83e3a725…` остаётся историческим, но superseded для
-CURRENT197 acceptance.
+переносимый receipt digest теперь фиксирует полный TLS observation и
+database/release/root/config provenance без раскрытия IP; focused `13/13`,
+composed CURRENT196/CURRENT197 `25/25`. Exact-SHA CI successor ещё не принят,
+поэтому SHA `83e3a725…` остаётся историческим, но superseded для CURRENT197
+acceptance.
 
 Следующий P0-срез: принять hardened CURRENT197 successor exact-SHA CI и повторный
 latest-byte review, затем отдельное immutable bootstrap-root registry изменение

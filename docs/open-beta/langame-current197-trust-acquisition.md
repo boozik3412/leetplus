@@ -56,8 +56,9 @@ protocol/cipher, leaf DER SHA-256, leaf SPKI SHA-256, exact certificate validity
 
 Branded receipt фиксирует candidate/enrollment/release/artifact/config binding,
 public-root fingerprints и byte digests, CA/leaf/SPKI digests, DNS-set digest,
-TLS protocol и collection time. Он не содержит IP-массив, paths, PEM, secrets
-или полный proposal.
+полный TLS observation digest, TLS protocol и collection time. Переносимый
+receipt digest включает database/release/root/config provenance и observation
+digest. Receipt не содержит IP-массив, paths, PEM, secrets или полный proposal.
 
 Все разрешающие поля остаются закрытыми:
 

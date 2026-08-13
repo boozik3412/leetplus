@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Current gamification state (05.08.2026)
+## Current gamification state (13.08.2026)
 
 - The canonical manager route is `/gamification`, diagnostics live at `/gamification/log`, missions are created and edited only in `/gamification/missions/wizard`, and the guest flow is `/game/auth -> /game/clubs -> /game` with reward history at `/game/rewards`.
 - Mission v2 and Battle Pass share the same condition family: `APP_OPEN`, `PLAY_TIME`, `PRODUCT_PURCHASE`, `BALANCE_TOPUP`, and `CHECK_IN`. Loot boxes accept `ANY`, `HOURLY`, or `PACKAGE_OR_SUBSCRIPTION`.
@@ -16,6 +16,16 @@
 - A domain-scoped, idempotent identity resolver refreshes stale Langame links from the verified guest identity during authentication and synchronization. Ambiguous matches fail closed instead of binding a profile to the wrong guest.
 - Check-in streak progress is based on unique club-local calendar dates and resets after a missed date. Reward-only `REWARD_TEMPLATE` loot boxes are excluded from the standalone catalog.
 - Product categories keep separate `LANGAME` and `LEETPLUS` identities. Exact tariff dictionaries remain blocked by readiness checks until a reliable structured source is available.
+- The production snapshot at documentation time is revision `29d409b6`; `origin/main`, the VDS checkout, API and Web were aligned and both services were active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
+- The LIVE-primary purchase pipeline now reserves bounded scheduler capacity for `PRODUCT_EXPENSE`, drains eligible pending external purchase facts beyond the newest 30-row window, and prioritizes facts that match active category missions. A positive guest-bound device-rental expense can qualify like any other mapped product expense; it is not rejected merely because the business calls it a service. Stable sale identity, cancellation, return and supersede handling remain required before enabling a Ledger purchase fallback.
+- Purchase missions support `ANY_PRODUCT`, exact products, or explicitly sourced categories, plus ANY/ALL selection and per-purchase/cumulative amount thresholds. Guest-facing conditions list the selected categories and omit the internal completion-window value.
+- Mission and loot-box editors expose `maxPendingRewards` (`Максимальное количество накопленных наград для получения`). The default for newly created and migrated existing elements is `1`; an explicit operator value is preserved. The guard counts pending ordinary rewards and unconsumed entitlements from the same source and blocks only a new qualification, not an already-earned claim/open.
+- Repeating progress is cycle-aware. A completed DAILY/WEEKLY/MONTHLY mission resets only when the next club-local reward period starts; a non-periodic repeat starts a fresh cycle after completion. In both cases events already consumed by the completed cycle are excluded, so another UI claim entry point or an unrelated later snapshot cannot create a second reward from the same fact. Displayed progress is capped at its target.
+- Mission and reward presentation now use the same production contract as their editor previews: persisted/cropped covers, aligned modal geometry without horizontal scroll, human-readable execution conditions, case image and prize odds, and a paginated full quest board behind the compact profile list.
+- Loot-box prize rows support a standard preset or custom image plus frame, text and background colours. The editor roulette preview and live game roulette consume the same visual payload, preload images and retain a snapshot on the opened reward so later template edits do not rewrite history.
+- `REWARD_TEMPLATE` stays out of the standalone storefront, `BOTH` remains storefront-plus-gift, and Battle Pass/mission reward selectors accept only `REWARD_TEMPLATE` or `BOTH`. The API validates this invariant even if an old or custom client bypasses the UI.
+- The reward-history page is a compact guest-facing timeline with club/source/rarity/search filters. Internal game-journal details and reward claim codes are hidden from ordinary guests. Claiming the same wallet item from a quest modal or reward history is one idempotent operation; the next summary removes the already-settled action from every surface.
+- Guest club branding uses the network logo beside the club name and in club selection. The standalone header logo was removed, and the remaining logo is decorative; only the club name changes the selected club.
 
 ### Mission wizard v2 and supplemental ledger layer (20.07.2026)
 
@@ -36,7 +46,7 @@
 - The ordinary LIVE snapshot window remains the primary path. Historical anti-join recovery for guest-bound sessions and purchases is independently gated by `GUEST_GAME_PIPELINE_BACKFILL_MODE=OFF|SHADOW|LIVE` and defaults to `OFF`, where it executes no anti-join SQL. Every enabled mode requires an exact tenant and an explicitly false kill switch; `LIVE` also requires a timezone-qualified cutoff plus an exact profile unless tenant-wide rollout is explicitly allowed. `SHADOW` records diagnostic decisions only and cannot create event, XP, reward or entitlement. `PLAY_HOUR` is emitted only after a session has stopped, so an intermediate duration cannot seal a stale event before the final 60-minute boundary. The Ledger recovery lane remains secondary and acts only after the primary grace window.
 - Standalone cases, mission-target cases and Battle Pass lootbox rewards share entitlement limits and opening semantics. `STANDALONE` is directly earnable, `REWARD_TEMPLATE` is only granted by a mission or Battle Pass target, and `BOTH` supports both paths. Qualification never selects a random prize; the guest's manual open action does that exactly once.
 
-Last updated: 2026-08-05
+Last updated: 2026-08-13
 
 ## Current Workflow
 
@@ -46,7 +56,7 @@ Last updated: 2026-08-05
 - GitHub repo: `https://github.com/boozik3412/leetplus`
 - Production branch: `main`
 - VDS auto-deploy watches `origin/main`; preferred workflow is code change, verify build if needed, commit, push.
-- VDS deploy script builds API and Web sequentially (`pnpm --filter api build`, then `pnpm --filter web build`) because the server currently has no swap and parallel workspace builds can be OOM-killed, leaving an incomplete `.next` production build.
+- VDS deploy script builds API and Web sequentially (`pnpm --filter api build`, then `pnpm --filter web build`). The VDS has limited memory and parallel workspace builds have previously been OOM-killed, leaving an incomplete `.next`; available swap does not remove the sequential-build rule.
 - Do not spend time refreshing local DB state or restarting local services unless explicitly requested. User reviews changes directly on `leetplus.ru`.
 - Production QA uses dedicated operator accounts. Credentials remain outside the repository and project documentation.
 

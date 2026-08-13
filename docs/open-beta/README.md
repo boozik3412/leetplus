@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.105                                        |
+| Версия           | 1.106                                        |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -123,7 +123,7 @@ enterprise-isolation option и не сокращает shared gates.
    business import и route wiring отсутствуют.
    0e.8. [CURRENT191 approval CI evidence](./langame-current191-approval-ci-evidence-2026-08-13.md) —
    exact SHA `56f24216…`, PostgreSQL replay/drift/expiry acceptance `3/3
-   SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
+SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    0e.9. [CURRENT192 atomic initial-sync execution](./langame-current192-initial-sync-execution.md) —
    локальный dormant claim/atomic selected-Store import/complete/reconcile;
    runtime grants, route, provider effect и production authority отсутствуют.
@@ -134,8 +134,8 @@ enterprise-isolation option и не сокращает shared gates.
    owner-only persisted register/consume/revoke/expiry state machine с exact
    replay; runtime grants, production authority и route activation отсутствуют.
    0e.12. [CURRENT195 signed revoke intent](./langame-current195-signed-revoke-intent.md) —
-   локальная Ed25519-bound foundation для exact owner-only restart recovery;
-   production roots и persisted intent ledger пока отсутствуют.
+   принятая Ed25519-bound foundation и локальный owner-only persisted ledger
+   для exact restart recovery; production roots и route authority отсутствуют.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

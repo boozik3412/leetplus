@@ -258,6 +258,7 @@ test("CURRENT195 verifies an exact signed owner revoke intent", () => {
   assert.equal(verified.expectedPayloadDigest, value.attestation.payloadDigest);
   assert.equal(verified.ownerRoleName, OWNER);
   assert.equal(verified.revokeRequestDigest, "7".repeat(64));
+  assert.equal(verified.signature, value.envelope.signature);
 });
 
 test("CURRENT195 production verification remains fail-closed with empty roots", () => {

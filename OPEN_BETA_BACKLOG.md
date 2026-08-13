@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 13.08.2026
-- Версия: 2.53
+- Версия: 2.54
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -65,14 +65,31 @@ CURRENT195 теперь подписывает exact request, но его ещё
 Production roots, route/UI, текущая сеть из четырёх клубов и первый внешний
 tenant не изменяются.
 
-CURRENT195 локально добавляет independent Ed25519 revoke-intent foundation:
+CURRENT195 signed-intent foundation принята exact SHA
+`fb2d945d8a4c7c1b88eb1af0932eeb113fd68bbf`: GitHub CI run
+`31705296426` завершён `3/3 SUCCESS`, включая actual PostgreSQL replay;
+artifact `9183244096`, digest
+`sha256:a9f8d947a32f2e9cafa74104ef653953a934986e53a0ba2713b608228b79ffc0`.
+Foundation связывает independent Ed25519 revoke intent с exact CURRENT193
+attestation/signer, release SHA, database/owner OID и полным revoke request до
+создания owner-only recovery client.
+
+Следующий локальный CURRENT195 слой добавляет noncanonical owner-only
+PostgreSQL intent ledger: exact signed envelope сохраняется до terminal effect,
+append-only audit фиксирует `REGISTERED/APPLIED/EXPIRED`, а apply атомарно
+вызывает CURRENT194 revoke и поддерживает exact lost-response replay. Static
+ledger/Prisma gate локально `12/12`; production roots, runtime grants и route
+по-прежнему отсутствуют. До приёмки GitHub PostgreSQL smoke этот слой не
+считается accepted evidence.
+
+Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный
 revoke request связываются до создания owner-only recovery client. Production
 roots frozen empty; standalone `8/8`, composed CURRENT194/CURRENT195 `38/38`,
 CURRENT193 `17/17`. Actual PostgreSQL CI fixture переведён на цепочку signed
 intent → fresh owner-only persisted replay. Это ещё не durable production
-coordinator: CURRENT195 PostgreSQL intent ledger и production root enrollment
-не реализованы, все launch/effect flags остаются false.
+coordinator: production root enrollment и protected signer не реализованы, все
+launch/effect flags остаются false.
 
 CURRENT187-J локально добавил synthetic deny-only network/runtime foundation:
 четыре exact service purpose, отдельные branded network и host/control-plane

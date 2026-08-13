@@ -405,6 +405,7 @@ function verifyWithRoots(
     revocationReasonDigest: payload.revocationReasonDigest,
     revokeRequestDigest: payload.revokeRequestDigest,
     revokeRequestId: payload.revokeRequestId,
+    signature: envelope.signature,
     signingKeyId: payload.signingKeyId,
     validUntil: payload.validUntil,
     verificationMode,

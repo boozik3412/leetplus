@@ -1,6 +1,6 @@
 # CURRENT195: signed Langame revoke-intent foundation
 
-Status: `LOCAL ENGINEERING FOUNDATION / NONAUTHORIZING / PRODUCTION ROOTS EMPTY`.
+Status: `SIGNED FOUNDATION ACCEPTED / LEDGER LOCAL / NONAUTHORIZING / PRODUCTION ROOTS EMPTY`.
 
 CURRENT194 can reconcile an exact terminal revoke after a lost database
 response through a fresh owner-only connection. CURRENT195 removes the caller's
@@ -31,25 +31,40 @@ SQL capability. The production root registry is frozen empty. The composed
 synthetic recovery verifies CURRENT193 and CURRENT195 before opening the
 owner-only Prisma connection; runtime credentials and runtime RPCs are absent.
 
-## Evidence and boundary
+## Accepted signed-foundation evidence
 
 - standalone CURRENT195 verifier: `8/8` locally;
 - composed CURRENT194/CURRENT195 static and unit gate: `38/38` locally;
 - CURRENT193 regression: `17/17` locally;
 - the mandatory PostgreSQL CI fixture now exercises
   `signed intent -> owner-only fresh connection -> persisted CURRENT194 replay`.
+- exact SHA: `fb2d945d8a4c7c1b88eb1af0932eeb113fd68bbf`;
+- GitHub CI run `31705296426`: `3/3 SUCCESS`;
+- artifact `9183244096`, digest
+  `sha256:a9f8d947a32f2e9cafa74104ef653953a934986e53a0ba2713b608228b79ffc0`.
 
-This is not yet a durable production coordinator. The signed envelope is not
-persisted by a CURRENT195 PostgreSQL ledger, the production root registry is
-empty, and all production entry points remain denied. Production, the existing
-four-club tenant, external tester account and owner invite are unchanged.
+## Local persisted-ledger successor
+
+The next noncanonical candidate now persists the already verified envelope in
+an owner-only `LangameRuntimeRevokeIntentV1` ledger before the terminal effect.
+It records append-only `REGISTERED`, `APPLIED` and `EXPIRED` events. Apply locks
+and reloads the exact intent, re-attests the live database/owner identity and
+atomically invokes the CURRENT194 revoke routine. A lost register/apply response
+can be retried only with the exact branded intent/receipt. Local static and
+Prisma gates are `12/12`; GitHub PostgreSQL acceptance is still pending.
+
+This is not yet a production coordinator. PostgreSQL does not verify Ed25519;
+it persists an envelope already verified by the capability-free application
+boundary. The production root registry is empty and all production entry
+points remain denied. Production, the existing four-club tenant, external
+tester account and owner invite are unchanged.
 
 ## Next implementation steps
 
-1. Add a noncanonical owner-only CURRENT195 PostgreSQL intent ledger with
-   append-only audit, exact register/apply replay and post-lock freshness.
-2. Bind the owner recovery adapter to the branded persisted intent receipt,
-   with bounded double-lost-response reconciliation.
+1. Accept the local CURRENT195 ledger through the mandatory disposable
+   PostgreSQL smoke and exact-SHA artifact gate.
+2. Bind the bootstrap drain/restart lifecycle to the branded persisted intent
+   receipt, removing raw revoke fields from the successor path.
 3. Add protected production signer/root enrollment and TLS peer pinning only
    after separate review.
 4. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal before

@@ -1,0 +1,16 @@
+{
+  "contract": "LANGAME_RUNTIME_REVOKE_INTENT_LEDGER_CURRENT195_V1",
+  "migrationName": "20260813040000_langame_runtime_revoke_intent_current195",
+  "predecessor": "20260813030000_langame_runtime_attestation_ledger_current194",
+  "predecessorSqlSha256": "67a031771d7af5e7f5ca02a62a18d0b26295bf7a3a8096f0c3b947c8ed1b9e87",
+  "requiredContracts": [
+    "LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_V1",
+    "LANGAME_RUNTIME_ATTESTATION_LEDGER_CURRENT194_V1"
+  ],
+  "migrationSqlSha256": "a2df8288ff82de461dcdf8bb95f210b21931f0bb8695bc56e814046201f98ff0",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "runtimeGrants": false,
+  "canonical": false
+}

@@ -212,6 +212,9 @@ jobs:
       - name: Validate nonauthorizing CURRENT195 signed revoke intent
         run: pnpm --filter database check:langame-runtime-revoke-intent-current195
 
+      - name: Validate dormant CURRENT195 revoke-intent ledger
+        run: pnpm --filter database check:langame-runtime-revoke-intent-ledger-current195
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 
@@ -999,6 +1002,19 @@ jobs:
             --set ON_ERROR_STOP=on \
             --file packages/database/successor-candidates/20260813030000_langame_runtime_attestation_ledger_current194/migration.sql \
             --file packages/database/scripts/langame-runtime-attestation-ledger-current194-smoke.sql
+
+      - name: Verify CURRENT195 persisted signed revoke-intent ledger
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          psql \
+            --host 127.0.0.1 \
+            --port 5432 \
+            --username postgres \
+            --dbname leetplus_ci \
+            --set ON_ERROR_STOP=on \
+            --file packages/database/successor-candidates/20260813040000_langame_runtime_revoke_intent_current195/migration.sql \
+            --file packages/database/scripts/langame-runtime-revoke-intent-ledger-current195-smoke.sql
 
       - name: Verify CURRENT194 actual separated Prisma runtime clients
         env:

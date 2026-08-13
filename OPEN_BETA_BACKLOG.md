@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 13.08.2026
-- Версия: 2.57
+- Версия: 2.58
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -103,6 +103,26 @@ session точной consumed-attestation. Локальные gates зелёны
 lifecycle `42/42`, ledger `12/12`. Production roots, runtime grants, route,
 текущая сеть из четырёх клубов и внешний тестер не изменялись; этот acceptance
 сам по себе не разрешает production.
+
+CURRENT196 trust-enrollment proposal foundation реализована локально как
+`NONAUTHORIZING / PRODUCTION ROOTS EMPTY`. Отдельная offline bootstrap authority
+подписывает exact initial-enrollment proposal; enroll-кандидаты CURRENT193 и
+CURRENT195 разделены по key ID/fingerprint/purpose/trust domain. Payload связывает
+release/artifact/verifier/config digests, cluster/database/owner/runtime OID,
+одноразовый challenge, две независимые approval-ссылки, initial revocation state
+и exact TLS host/port/serverName/CA/leaf/SPKI/validity. Production entry не имеет
+root-injection API и всегда закрыт; все access/effect flags false. Focused gate
+локально `12/12`. Remote exact-SHA CI ещё не принят. Этот срез не выполняет
+protected acquisition, root enrollment, network I/O, deployment или выдачу
+доступа.
+
+Следующий P0-порядок для Langame runtime: (1) protected public-root/live TLS
+acquisition receipt, (2) отдельно reviewed immutable bootstrap registry,
+(3) one-time append-only enrollment/rotation/revocation ledger, (4) signer
+isolation и exact-SHA independent acceptance. Только после этого допускается
+отдельная operations-церемония `PRODUCTION ROOT ENROLLMENT GO`; она всё равно не
+заменяет restored-copy rehearsal, production-like admission, cutover GO и Gate 2
+для первого внешнего tenant.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

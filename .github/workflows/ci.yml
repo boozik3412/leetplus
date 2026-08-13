@@ -215,6 +215,9 @@ jobs:
       - name: Validate dormant CURRENT195 revoke-intent ledger
         run: pnpm --filter database check:langame-runtime-revoke-intent-ledger-current195
 
+      - name: Validate nonauthorizing CURRENT196 trust-enrollment proposal
+        run: pnpm --filter database check:langame-runtime-trust-enrollment-current196
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 

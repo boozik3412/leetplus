@@ -137,6 +137,10 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    принятые Ed25519-bound foundation, owner-only persisted ledger и
    persist → drain → apply/restart lifecycle; production roots и
    route authority отсутствуют.
+   0e.13. [CURRENT196 trust-enrollment proposal](./langame-current196-trust-enrollment.md) —
+   nonauthorizing bootstrap-authority envelope для двухконтрольной церемонии,
+   отдельных runtime/revoke roots и exact TLS peer pins; production registry
+   frozen-empty, enrollment и network I/O отсутствуют.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

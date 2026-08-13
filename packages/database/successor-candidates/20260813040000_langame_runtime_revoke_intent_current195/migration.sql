@@ -460,8 +460,7 @@ BEGIN
   FROM pg_catalog.pg_stat_activity AS activity
   WHERE activity.datid = intent."databaseOid"
     AND activity.usesysid = attestation."executorRoleOid"
-    AND activity.pid <> pg_catalog.pg_backend_pid()
-    AND activity.backend_type = 'client backend';
+    AND activity.pid <> pg_catalog.pg_backend_pid();
   IF runtime_session_count <> 0 THEN
     RAISE EXCEPTION 'CURRENT195 runtime session is not drained'
       USING ERRCODE = '55000';

@@ -105,6 +105,7 @@ test("CURRENT195 apply is fresh, atomic and exact-response replayable", () => {
     "'APPLIED'",
   ]);
   assert.match(sql, /SELECT \* INTO STRICT revoked/u);
+  assert.doesNotMatch(sql, /activity\.backend_type/u);
 });
 
 test("CURRENT195 guards immutable provenance and terminal transitions", () => {

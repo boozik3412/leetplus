@@ -603,6 +603,25 @@ test(
           [TARGET_DATABASE, runtimeOid],
         );
         assert.equal(runtimeBackendCount.count >= 1, true);
+        const ownerActivityProbe = new Client({
+          connectionString: rotatedPrismaConfig.ownerDatabaseUrl,
+        });
+        await ownerActivityProbe.connect();
+        try {
+          const ownerVisibleRuntimeCount = await scalar(
+            ownerActivityProbe,
+            `SELECT count(*)::INTEGER AS count
+             FROM pg_catalog.pg_stat_activity
+             WHERE datid = (SELECT oid FROM pg_catalog.pg_database
+                            WHERE datname = pg_catalog.current_database())
+               AND usesysid = $1
+               AND pid <> pg_catalog.pg_backend_pid()`,
+            [runtimeOid],
+          );
+          assert.equal(ownerVisibleRuntimeCount.count >= 1, true);
+        } finally {
+          await ownerActivityProbe.end();
+        }
         await assert.rejects(
           firstIntentLedger.applyCurrent195(persistedIntent),
           (error) =>

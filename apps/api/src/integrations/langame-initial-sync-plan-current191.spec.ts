@@ -1,6 +1,7 @@
 import {
   createLangameInitialSyncPlanCurrent191,
   LANGAME_INITIAL_SYNC_PLAN_CURRENT191_CONTRACT,
+  serializeLangameInitialSyncPlanCurrent191,
   type LangameInitialSyncPlanCurrent191Input,
 } from './langame-initial-sync-plan-current191';
 
@@ -74,6 +75,23 @@ describe('createLangameInitialSyncPlanCurrent191', () => {
     expect(Object.isFrozen(plan.products[0])).toBe(true);
     expect(Object.isFrozen(plan.inventory)).toBe(true);
     expect(Object.isFrozen(plan.inventory[0])).toBe(true);
+  });
+
+  it('serializes only a branded plan to the exact digest-bound canonical bytes', () => {
+    const plan = createLangameInitialSyncPlanCurrent191(input);
+    const canonicalPlan = serializeLangameInitialSyncPlanCurrent191(plan);
+
+    expect(JSON.parse(canonicalPlan)).toEqual([
+      LANGAME_INITIAL_SYNC_PLAN_CURRENT191_CONTRACT,
+      plan.target,
+      plan.authorization,
+      plan.products,
+      plan.inventory,
+    ]);
+    expect(serializeLangameInitialSyncPlanCurrent191(plan)).toBe(canonicalPlan);
+    expect(() =>
+      serializeLangameInitialSyncPlanCurrent191(structuredClone(plan)),
+    ).toThrow('Untrusted initial sync plan');
   });
 
   it('rejects a provider count changed after preflight approval', () => {

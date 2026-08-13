@@ -15,6 +15,8 @@ const LANGAME_DOMAIN_SUFFIXES = ['.langame.ru', '.langamepro.ru'] as const;
 const MAX_ROWS = 50_000;
 const MAX_NAME_BYTES = 1_024;
 const MAX_QUANTITY = 2_147_483_647;
+const MAX_CANONICAL_PLAN_BYTES = 16 * 1024 * 1024;
+const current191PlanBrands = new WeakSet<object>();
 
 export type LangameInitialSyncPlanCurrent191Input = Readonly<{
   current188ContractVersion: string;
@@ -166,7 +168,7 @@ export function createLangameInitialSyncPlanCurrent191(
     ]),
   );
 
-  return Object.freeze({
+  const plan = Object.freeze({
     contractVersion: LANGAME_INITIAL_SYNC_PLAN_CURRENT191_CONTRACT,
     status: 'PLANNED' as const,
     target,
@@ -178,6 +180,35 @@ export function createLangameInitialSyncPlanCurrent191(
     platformWritesStarted: false as const,
     productionImportAllowed: false as const,
   });
+  current191PlanBrands.add(plan);
+  return plan;
+}
+
+/**
+ * Produces the exact UTF-8 bytes whose SHA-256 is `planDigest`. The process-
+ * local brand prevents a caller from forging a structurally similar plan and
+ * presenting it to the future CURRENT192 database execution boundary.
+ */
+export function serializeLangameInitialSyncPlanCurrent191(
+  plan: LangameInitialSyncPlanCurrent191,
+) {
+  if (!current191PlanBrands.has(plan)) {
+    unavailable('Untrusted initial sync plan');
+  }
+  const canonicalPlan = JSON.stringify([
+    LANGAME_INITIAL_SYNC_PLAN_CURRENT191_CONTRACT,
+    plan.target,
+    plan.authorization,
+    plan.products,
+    plan.inventory,
+  ]);
+  if (
+    Buffer.byteLength(canonicalPlan, 'utf8') > MAX_CANONICAL_PLAN_BYTES ||
+    sha256(canonicalPlan) !== plan.planDigest
+  ) {
+    unavailable('Invalid initial sync plan provenance');
+  }
+  return canonicalPlan;
 }
 
 function parseReadSet(value: unknown) {

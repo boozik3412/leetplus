@@ -15,9 +15,12 @@ read-set digests и свежие product/goods rows. Он:
 - отклоняет duplicates и inventory вне product set;
 - сортирует actions независимо от provider order;
 - формирует immutable product/inventory plan и SHA-256 digest полного плана;
+- сериализует canonical plan bytes только из process-local branded plan;
+  structural clone/подделка не может перейти в execution boundary;
 - всегда возвращает `providerWritesStarted=false`,
   `platformWritesStarted=false`, `productionImportAllowed=false`.
 
-Planner не является authorization receipt. Следующий обязательный этап —
-persisted one-time approval/command ledger, затем атомарный selected-Store
-import с replay/reconcile и только после этого canonical runtime grants.
+Planner не является authorization receipt. Persisted one-time approval уже
+принят отдельно на CURRENT191 exact SHA `56f24216…`. Следующий обязательный
+этап — dormant CURRENT192 atomic selected-Store import с claim/complete/
+reconcile, затем отдельные canonical runtime grants.

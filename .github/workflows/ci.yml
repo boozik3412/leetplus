@@ -200,6 +200,9 @@ jobs:
       - name: Validate dormant CURRENT191 Langame initial-sync approval contract
         run: pnpm --filter database check:langame-initial-sync-approval-current191
 
+      - name: Validate dormant CURRENT192 Langame initial-sync execution contract
+        run: pnpm --filter database check:langame-initial-sync-execution-current192
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 
@@ -949,3 +952,16 @@ jobs:
             --file packages/database/migration-candidates/20260805020000_langame_onboarding_staged_receipt_current188/migration.sql \
             --file packages/database/successor-candidates/20260813010000_langame_initial_sync_approval_current191/migration.sql \
             --file packages/database/scripts/langame-initial-sync-approval-current191-smoke.sql
+
+      - name: Verify dormant CURRENT192 Langame atomic import and reconciliation semantics
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          psql \
+            --host 127.0.0.1 \
+            --port 5432 \
+            --username postgres \
+            --dbname leetplus_ci \
+            --set ON_ERROR_STOP=on \
+            --file packages/database/successor-candidates/20260813020000_langame_initial_sync_execution_current192/migration.sql \
+            --file packages/database/scripts/langame-initial-sync-execution-current192-smoke.sql

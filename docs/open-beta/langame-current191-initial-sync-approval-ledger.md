@@ -1,6 +1,6 @@
 # CURRENT191 Langame initial-sync approval ledger
 
-Статус: `IMPLEMENTED LOCALLY / DORMANT SUCCESSOR / NONCANONICAL / NOT DEPLOYED`.
+Статус: `EXACT-SHA CI ACCEPTED / DORMANT SUCCESSOR / NONCANONICAL / NOT DEPLOYED`.
 
 ## Назначение
 
@@ -80,7 +80,9 @@ migrations и затем в одной rollback-only fixture проверяет:
 - bounded expiry;
 - отсутствие Product/IntegrationSyncJob effects.
 
-До CI acceptance этот слой остаётся локальным. После acceptance следующий
-отдельный этап — one-shot claim/import/complete/reconcile с execute-only runtime
-roles и selected-Store atomic business writes. Только затем возможны canonical
-promotion, production-like rehearsal и atomic route/UI cutover.
+Exact SHA `56f24216d787fbee57457f655b066d8727a8dcb5` принят CI
+`31680337637` как `3/3 SUCCESS`; evidence и artifact зафиксированы отдельно.
+Следующий отдельный этап — one-shot claim/import/complete/reconcile с
+execute-only runtime roles и selected-Store atomic business writes. Только
+затем возможны canonical promotion, production-like rehearsal и atomic
+route/UI cutover.

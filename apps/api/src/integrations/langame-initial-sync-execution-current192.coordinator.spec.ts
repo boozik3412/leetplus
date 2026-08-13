@@ -2,7 +2,10 @@ import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
-import { LangameInitialSyncExecutionCurrent192Coordinator } from './langame-initial-sync-execution-current192.coordinator';
+import {
+  LangameInitialSyncExecutionCurrent192Coordinator,
+  type LangameInitialSyncCurrent192Database,
+} from './langame-initial-sync-execution-current192.coordinator';
 import { createLangameInitialSyncPlanCurrent191 } from './langame-initial-sync-plan-current191';
 
 const tenantId = 'tenant-current192';
@@ -76,9 +79,15 @@ function reconciliationReceipt(status: 'CLAIMED' | 'COMPLETED' | 'EXPIRED') {
 }
 
 describe('LangameInitialSyncExecutionCurrent192Coordinator', () => {
-  let claimCurrent192: jest.Mock;
-  let executeCurrent192: jest.Mock;
-  let reconcileCurrent192: jest.Mock;
+  let claimCurrent192: jest.MockedFunction<
+    LangameInitialSyncCurrent192Database['claimCurrent192']
+  >;
+  let executeCurrent192: jest.MockedFunction<
+    LangameInitialSyncCurrent192Database['executeCurrent192']
+  >;
+  let reconcileCurrent192: jest.MockedFunction<
+    LangameInitialSyncCurrent192Database['reconcileCurrent192']
+  >;
   let assertNetwork: jest.Mock;
   let configValues: Record<string, string | undefined>;
   let coordinator: LangameInitialSyncExecutionCurrent192Coordinator;

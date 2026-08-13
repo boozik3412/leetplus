@@ -56,22 +56,25 @@ rehearsal, controlled internal alpha and `SHARED-BETA-GO` are accepted.
 - artifact ID `9176620158`, digest
   `sha256:9e0a8a9b6045e51451c3338f28927cbef496076d408797ac5bb11cc2d69fa62c`.
 
-The local synthetic provider foundation additionally consumes only a branded
+The synthetic provider foundation additionally consumes only a branded
 CURRENT193 `SYNTHETIC_CI` verification, retries the same frozen register/consume
 spec once after a lost response, exposes only exact `claimCurrent192`,
 `executeCurrent192` and `reconcileCurrent192` RPCs, and drains to zero in-flight
-work before closing its injected runtime driver. Its production
-entry point always fails closed; it neither constructs a Prisma client nor
-reads environment, filesystem or network state. The real dedicated database
-client and production root remain intentionally absent.
+work before closing its injected runtime driver. The CURRENT194 Prisma adapter
+constructs two separate clients only behind an explicit loopback-CI admission:
+an owner registrar and the fixed execute-only runtime role. Before registration
+it re-attests exact database, role names and OIDs on both live sessions, exposes
+no arbitrary SQL method, and will not execute CURRENT192 before the persisted
+receipt is consumed. Unit coverage is `8/8`; the actual disposable-clone
+PostgreSQL acceptance is wired into CI and remains pending for the next exact
+SHA. Both production entry points still fail closed, and no production root,
+credential, role or grant is enrolled.
 
 ## Next implementation steps
 
-1. Add the real dedicated runtime database client behind the accepted provider
-   boundary; it must use separate owner-importer and fixed runtime-role
-   sessions, with pinned TLS/database/role identity and no shared Prisma client
-   or arbitrary SQL port.
-2. Add process startup/revoke/credential-rotation and ambiguous-response
+1. Accept the actual separate-owner/runtime Prisma client matrix on an exact CI
+   SHA, including disposable role/database cleanup and zero residue.
+2. Add production TLS peer pinning plus process startup/revoke/credential-rotation and ambiguous-response
    reconciliation tests with zero in-flight work at shutdown.
 3. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
 4. Only after the common launch gates, run the four-club internal alpha and

@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
-- Дата актуализации: 13.08.2026
-- Версия: 2.62
+- Дата актуализации: 14.08.2026
+- Версия: 2.63
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -134,26 +134,27 @@ public SPKI и CA certificate, сверяет signed fingerprints/bytes, зат�
 production-capable TLS-only handshake с DNS/public-address policy и exact
 hostname/CA/leaf/SPKI/validity recheck. Proposal проверяется по свежему времени
 до filesystem/network effect и после TLS. Synthetic focused gate и actual
-disposable TLS-only fixture с CA-substitution negative дают `12/12`, composed
-CURRENT196/CURRENT197 `24/24`; все authority/access flags false.
+disposable TLS-only fixture с CA-substitution negative дают `13/13`, composed
+CURRENT196/CURRENT197 `25/25`; все authority/access flags false.
 Production path физически закрыт, пока CURRENT196 bootstrap roots frozen-empty.
 GitHub Actions run `31732110067` завершён `3/3 SUCCESS`; artifact `9193973557`,
 digest
 `sha256:8c77b16b9697d9db505cca37afe099cfeccaf895036bf91e70bde936f0c1e82c`.
 Post-acceptance latest-byte review обнаружил P1: строковая IPv6 policy не
 канонизировала полную IPv4-mapped форму и могла пропустить private destination.
-Локальный successor заменяет её двумя family-separated binary `BlockList`,
+Hardened successor заменяет её двумя family-separated binary `BlockList`,
 запрещает mapped/NAT64/Teredo/6to4/non-global ranges и имеет adversarial matrix;
 переносимый receipt digest теперь фиксирует полный TLS observation и
 database/release/root/config provenance без раскрытия IP; focused `13/13`,
-composed CURRENT196/CURRENT197 `25/25`. Exact-SHA CI successor ещё не принят,
-поэтому SHA `83e3a725…` остаётся историческим, но superseded для CURRENT197
-acceptance.
+composed CURRENT196/CURRENT197 `25/25`. Successor принят exact SHA
+`12733fbebc8fc3ce1970ecda101b5f3b888a3699`: GitHub Actions run `31734216369`
+завершён `3/3 SUCCESS`; artifact `9194773895`, digest
+`sha256:0c8043ffab1f38c8d04004d1c8ea73f7bfd0b0cd97a7b2c764d547876aef53f0`.
+SHA `83e3a725…` остаётся только историческим superseded baseline.
 
-Следующий P0-срез: принять hardened CURRENT197 successor exact-SHA CI и повторный
-latest-byte review, затем отдельное immutable bootstrap-root registry изменение
-и append-only enrollment ledger; ни один из этих шагов сам по себе не разрешает
-внешний тест.
+Следующий P0-срез: отдельное immutable bootstrap-root registry изменение,
+independent acceptance и append-only enrollment ledger; ни один из этих шагов
+сам по себе не разрешает внешний тест.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

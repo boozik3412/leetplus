@@ -2,9 +2,9 @@
 
 ## Статус
 
-`LOCAL HARDENED SUCCESSOR / DENY-ONLY / PRODUCTION PROPOSAL UNAVAILABLE / EXTERNAL BETA NO-GO`
+`HARDENED EXACT-SHA ACCEPTED / DENY-ONLY / PRODUCTION PROPOSAL UNAVAILABLE / EXTERNAL BETA NO-GO`
 
-Дата: 13.08.2026.
+Дата: 14.08.2026.
 
 CURRENT197 связывает принятый CURRENT196 proposal с фактически прочитанными
 public-root/CA bytes и TLS peer observation. Это production-capable collector,
@@ -87,34 +87,38 @@ TLS authorization/hostname/certificate/SPKI/protocol/address/validity drift,
 proposal expiry before I/O, accessor zero-call и отсутствие DB/HTTP/secret/signer
 authority.
 
-Exact implementation commit:
-`83e3a72522ce1b93c46d50d8169390468305330d`.
+Первоначальный implementation commit
+`83e3a72522ce1b93c46d50d8169390468305330d` и его CI `31732110067` остаются
+историческим baseline, superseded после post-acceptance P1 review.
+
+Hardened implementation commit:
+`12733fbebc8fc3ce1970ecda101b5f3b888a3699`.
 
 GitHub Actions run
-[`31732110067`](https://github.com/boozik3412/leetplus/actions/runs/31732110067)
+[`31734216369`](https://github.com/boozik3412/leetplus/actions/runs/31734216369)
 завершён `3/3 SUCCESS`:
 
 - Application checks — `SUCCESS`, включая actual TLS-only CURRENT197 gate;
 - Authority root trust gate — `SUCCESS`;
 - PostgreSQL migration smoke — `SUCCESS`.
 
-SHA-bound release artifact: ID `9193973557`, имя
-`leetplus-release-83e3a72522ce1b93c46d50d8169390468305330d`, digest
-`sha256:8c77b16b9697d9db505cca37afe099cfeccaf895036bf91e70bde936f0c1e82c`.
+SHA-bound release artifact: ID `9194773895`, имя
+`leetplus-release-12733fbebc8fc3ce1970ecda101b5f3b888a3699`, digest
+`sha256:0c8043ffab1f38c8d04004d1c8ea73f7bfd0b0cd97a7b2c764d547876aef53f0`.
 
 Post-acceptance latest-byte review обнаружил P1: expanded IPv4-mapped IPv6 мог
 обойти строковую private-address policy. Hardened successor использует два
 family-separated binary `BlockList`, отдельно запрещает mapped IPv4, NAT64,
 Teredo, 6to4 и остальные явно non-global ranges. Старый exact SHA остаётся
-исторически принятым, но superseded для CURRENT197; successor exact-SHA CI ещё
-не принят. Disposable fixture использует собственную CA и loopback TLS server и
+исторически принятым, но superseded для CURRENT197; hardened successor exact-SHA
+CI принят. Disposable fixture использует собственную CA и loopback TLS server и
 не является live production evidence.
 
 ## Что остаётся до тестового доступа
 
-1. Принять hardened CURRENT197 successor exact-SHA CI и latest-byte review.
-2. Внести offline bootstrap public root CURRENT196 отдельным reviewed immutable
+1. Внести offline bootstrap public root CURRENT196 отдельным reviewed immutable
    release change — не через API/env/database.
+2. Принять independent review этого immutable registry.
 3. Реализовать one-time append-only enrollment/rotation/revocation ledger.
 4. Зафиксировать protected signer custody/ACL либо HSM/KMS.
 5. Провести отдельно разрешённую `PRODUCTION ROOT ENROLLMENT GO` ceremony.

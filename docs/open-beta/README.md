@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.102                                        |
+| Версия           | 1.103                                        |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -114,6 +114,13 @@ enterprise-isolation option и не сокращает shared gates.
    0e.5. [CURRENT191 deterministic initial sync plan](./langame-current191-initial-sync-plan.md) —
    pure immutable selected-Store product/inventory plan без DB/provider effects;
    persisted approval/import остаются закрыты.
+   0e.6. [CURRENT191 deterministic plan CI evidence](./langame-current191-initial-sync-plan-ci-evidence-2026-08-13.md) —
+   exact SHA `d433cd67…`, CI `3/3 SUCCESS` и artifact
+   `sha256:010b2f9f…88fa` без import/deploy authority.
+   0e.7. [CURRENT191 initial-sync approval ledger](./langame-current191-initial-sync-approval-ledger.md) —
+   отдельный dormant successor с PII-free short-lived preflight/approval,
+   fresh GO/NETWORK/binding recheck и rollback-only PostgreSQL acceptance;
+   business import и route wiring отсутствуют.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

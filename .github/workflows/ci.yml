@@ -197,6 +197,9 @@ jobs:
       - name: Validate dormant CURRENT188 Langame onboarding receipt contract
         run: pnpm --filter database check:langame-onboarding-staged-receipt-current188
 
+      - name: Validate dormant CURRENT191 Langame initial-sync approval contract
+        run: pnpm --filter database check:langame-initial-sync-approval-current191
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 
@@ -930,3 +933,19 @@ jobs:
         env:
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           STAFF_TASK_INTEGRITY_RECONCILIATION_CATALOG_SMOKE_CONFIRM: run-staff-task-integrity-reconciliation-catalog-smoke
+
+      - name: Verify dormant CURRENT191 Langame approval replay, drift and expiry semantics
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          psql_args=(
+            --host 127.0.0.1
+            --port 5432
+            --username postgres
+            --dbname leetplus_ci
+            --set ON_ERROR_STOP=on
+          )
+          psql "${psql_args[@]}" \
+            --file packages/database/migration-candidates/20260805020000_langame_onboarding_staged_receipt_current188/migration.sql \
+            --file packages/database/successor-candidates/20260813010000_langame_initial_sync_approval_current191/migration.sql \
+            --file packages/database/scripts/langame-initial-sync-approval-current191-smoke.sql

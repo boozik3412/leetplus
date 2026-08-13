@@ -66,16 +66,28 @@ an owner registrar and the fixed execute-only runtime role. Before registration
 it re-attests exact database, role names and OIDs on both live sessions, exposes
 no arbitrary SQL method, and will not execute CURRENT192 before the persisted
 receipt is consumed. Unit coverage is `8/8`; the actual disposable-clone
-PostgreSQL acceptance is wired into CI and remains pending for the next exact
-SHA. Both production entry points still fail closed, and no production root,
-credential, role or grant is enrolled.
+PostgreSQL acceptance completed on exact SHA
+`2a5811e031afbc7a87f1b794fe6b913e01a2c864`: GitHub Actions run
+`31692243774` finished `3/3 SUCCESS`, including the exact owner/runtime Prisma
+step, artifact ID `9178145263`, digest
+`sha256:8a336bb0108295fd38ecec8ac5b1a041e1053ccbf48c5372f385c69c757910f2`.
+
+The next local bootstrap composes signed CURRENT193 verification, the accepted
+separate Prisma pair, persisted CURRENT194 register/consume and the bounded
+provider session. It creates no clients before signature verification, exposes
+only `claim/execute/reconcile/drain`, and closes both clients after rejected or
+ambiguous startup. Its focused matrix is `5/5`; the actual composed PostgreSQL
+CI step remains pending for the next exact SHA. All production entry points
+still fail closed, and no production root, credential, role or grant is
+enrolled.
 
 ## Next implementation steps
 
-1. Accept the actual separate-owner/runtime Prisma client matrix on an exact CI
-   SHA, including disposable role/database cleanup and zero residue.
-2. Add production TLS peer pinning plus process startup/revoke/credential-rotation and ambiguous-response
-   reconciliation tests with zero in-flight work at shutdown.
+1. Accept the composed signed bootstrap on an exact CI SHA, including
+   disposable role/database cleanup and zero residue.
+2. Add production TLS peer pinning plus process revoke/credential-rotation and
+   ambiguous-response reconciliation tests with zero in-flight work at
+   shutdown.
 3. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
 4. Only after the common launch gates, run the four-club internal alpha and
    issue a mailbox-bound OWNER invite for a separate tester tenant.

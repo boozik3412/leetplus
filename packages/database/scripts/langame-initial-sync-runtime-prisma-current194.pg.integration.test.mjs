@@ -1,11 +1,32 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync, sign as signPayload } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
 
 import {
+  LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_CONTRACT,
+  LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_MIGRATION_SHA256,
+  LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_PROFILE,
+} from "./langame-initial-sync-runtime-boundary-current193.mjs";
+import {
+  LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_ALGORITHM,
+  LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_CONTRACT,
+  LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_PURPOSE,
+  LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_SYNTHETIC_CONFIRMATION,
+  LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_TRUST_DOMAIN,
+  langameInitialSyncRuntimeAttestationCurrent193PayloadDigest,
+  langameInitialSyncRuntimeAttestationCurrent193PublicKeyFingerprint,
+} from "./langame-initial-sync-runtime-attestation-current193.mjs";
+import {
+  LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
+  isLangameInitialSyncRuntimeBootstrapCurrent194,
+  openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194,
+} from "./langame-initial-sync-runtime-bootstrap-current194.mjs";
+import {
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_CONFIRMATION,
   createSyntheticLangameInitialSyncRuntimePrismaCurrent194,
 } from "./langame-initial-sync-runtime-prisma-current194.mjs";
+import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 const { Client } = pg;
 const SOURCE_DATABASE = "leetplus_ci";
@@ -35,6 +56,7 @@ function admittedEnvironment() {
   );
   assert.equal(decodeURIComponent(parsed.username), "postgres");
   assert.equal(decodeURIComponent(parsed.password), "postgres");
+  assert.match(process.env.GITHUB_SHA ?? "", /^[a-f0-9]{40}$/u);
   return parsed;
 }
 
@@ -57,6 +79,90 @@ async function scalar(client, text, values = []) {
   return result.rows[0];
 }
 
+function bootstrapInput(databaseOid, ownerOid, runtimeOid) {
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" });
+  const publicKeyFingerprint =
+    langameInitialSyncRuntimeAttestationCurrent193PublicKeyFingerprint(
+      publicKeyPem,
+    );
+  const keyId = "langame-current194-prisma-bootstrap-ci";
+  const clock = Date.now();
+  const expected = {
+    boundaryContract: LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_CONTRACT,
+    boundaryProfile: LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_PROFILE,
+    catalogReceiptDigest: "b".repeat(64),
+    current192MigrationSha256:
+      LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_MIGRATION_SHA256,
+    databaseName: TARGET_DATABASE,
+    databaseOid,
+    executorRoleName: RUNTIME_ROLE,
+    executorRoleOid: runtimeOid,
+    planDigest: "c".repeat(64),
+    releaseSha: process.env.GITHUB_SHA,
+    schemaOwnerRoleName: OWNER_ROLE,
+    schemaOwnerRoleOid: ownerOid,
+  };
+  const payload = {
+    attestationId: "attestation-current194-bootstrap-ci",
+    ...expected,
+    contract: LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_CONTRACT,
+    issuedAt: new Date(clock - 10_000).toISOString(),
+    publicKeyFingerprint,
+    purpose: LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_PURPOSE,
+    signingKeyId: keyId,
+    trustDomain:
+      LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_TRUST_DOMAIN,
+    validUntil: new Date(clock + 180_000).toISOString(),
+  };
+  return {
+    attestationEnvelope: {
+      payload,
+      payloadDigest:
+        langameInitialSyncRuntimeAttestationCurrent193PayloadDigest(payload),
+      publicKeyFingerprint,
+      signature: signPayload(
+        null,
+        Buffer.from(canonicalStringify(payload), "utf8"),
+        privateKey,
+      ).toString("base64url"),
+      signatureAlgorithm:
+        LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_ALGORITHM,
+      signingKeyId: keyId,
+    },
+    expectedAttestation: expected,
+    now: new Date(clock).toISOString(),
+    providerRequest: {
+      consumeRequestDigest: "d".repeat(64),
+      consumeRequestId: "consume-request-current194-bootstrap-ci",
+      registerRequestDigest: "e".repeat(64),
+      registerRequestId: "register-request-current194-bootstrap-ci",
+    },
+    runtimeContext: {
+      databaseName: TARGET_DATABASE,
+      environment: "ci",
+      explicitConfirmation:
+        LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_SYNTHETIC_CONFIRMATION,
+      hostname: "127.0.0.1",
+    },
+    runtimeRoots: {
+      [keyId]: {
+        algorithm:
+          LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_ALGORITHM,
+        keyId,
+        notAfter: new Date(clock + 600_000).toISOString(),
+        notBefore: new Date(clock - 60_000).toISOString(),
+        publicKeyFingerprint,
+        publicKeyPem,
+        purpose: LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_PURPOSE,
+        status: "ACTIVE",
+        trustDomain:
+          LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_TRUST_DOMAIN,
+      },
+    },
+  };
+}
+
 test(
   "CURRENT194 actual separated Prisma clients register and consume on a disposable clone",
   { timeout: 120_000 },
@@ -72,6 +178,7 @@ test(
     let ownerOid = null;
     let runtimeOid = null;
     let drivers = null;
+    let session = null;
     await maintenance.connect();
     try {
       const preflight = await scalar(
@@ -202,23 +309,24 @@ test(
         await targetAdmin.end();
       }
 
+      const prismaConfig = {
+        expectedDatabase: TARGET_DATABASE,
+        ownerDatabaseUrl: connectionUrl(
+          base,
+          TARGET_DATABASE,
+          OWNER_ROLE,
+          OWNER_PASSWORD,
+        ),
+        ownerRoleName: OWNER_ROLE,
+        runtimeDatabaseUrl: connectionUrl(
+          base,
+          TARGET_DATABASE,
+          RUNTIME_ROLE,
+          RUNTIME_PASSWORD,
+        ),
+      };
       drivers = createSyntheticLangameInitialSyncRuntimePrismaCurrent194(
-        {
-          expectedDatabase: TARGET_DATABASE,
-          ownerDatabaseUrl: connectionUrl(
-            base,
-            TARGET_DATABASE,
-            OWNER_ROLE,
-            OWNER_PASSWORD,
-          ),
-          ownerRoleName: OWNER_ROLE,
-          runtimeDatabaseUrl: connectionUrl(
-            base,
-            TARGET_DATABASE,
-            RUNTIME_ROLE,
-            RUNTIME_PASSWORD,
-          ),
-        },
+        prismaConfig,
         LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_CONFIRMATION,
       );
       const now = Date.now();
@@ -269,6 +377,30 @@ test(
 
       await drivers.runtimeDriver.close();
       drivers = null;
+
+      session = await openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194(
+        bootstrapInput(targetDatabaseOid, ownerOid, runtimeOid),
+        prismaConfig,
+        LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
+      );
+      assert.equal(
+        isLangameInitialSyncRuntimeBootstrapCurrent194(session),
+        true,
+      );
+      assert.equal(session.snapshot().state, "ACTIVE");
+      assert.equal(session.snapshot().authorization, false);
+      await assert.rejects(
+        session.reconcileCurrent192({
+          claimToken: "claim-token-bootstrap-current194-abcdefghijklmnop",
+          executionId: "missing-execution-bootstrap-current194",
+          planDigest: "c".repeat(64),
+          tenantId: "missing-tenant-bootstrap-current194",
+        }),
+      );
+      await session.drain();
+      assert.equal(session.snapshot().state, "CLOSED");
+      session = null;
+
       const verify = new Client({
         connectionString: pgUrl(base, TARGET_DATABASE),
       });
@@ -286,11 +418,14 @@ test(
              WHERE "eventType" IN ('REGISTERED', 'CONSUMED')) AS "eventCount"
         `,
         );
-        assert.deepEqual(ledger, { consumedCount: 1, eventCount: 2 });
+        assert.deepEqual(ledger, { consumedCount: 2, eventCount: 4 });
       } finally {
         await verify.end();
       }
     } finally {
+      if (session) {
+        await session.drain().catch(() => undefined);
+      }
       if (drivers) {
         await drivers.runtimeDriver.close().catch(() => undefined);
       }

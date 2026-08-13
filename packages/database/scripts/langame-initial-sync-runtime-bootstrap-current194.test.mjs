@@ -177,6 +177,16 @@ function client(role, roleOid, payloadDigest, overrides = {}) {
             },
           ];
         }
+        if (text.includes("attestation_revoke_current194_v1")) {
+          return [
+            {
+              attestationId: "attestation-current194-bootstrap",
+              replayed: false,
+              revokedAt: new Date("2026-08-13T09:31:00.000Z"),
+              status: "REVOKED",
+            },
+          ];
+        }
         return [{ status: "MISSING" }];
       },
     },
@@ -271,6 +281,8 @@ test("CURRENT194 bootstrap verifies, persists, consumes and exposes a drained pr
     contract: "LANGAME_INITIAL_SYNC_RUNTIME_PROVIDER_CURRENT194_V1",
     inFlight: 0,
     productionExecutionAllowed: false,
+    revokeReplayed: null,
+    revokedAt: null,
     state: "ACTIVE",
   });
   await session.reconcileCurrent192({
@@ -279,8 +291,19 @@ test("CURRENT194 bootstrap verifies, persists, consumes and exposes a drained pr
     planDigest: "3".repeat(64),
     tenantId: "tenant-current194-bootstrap",
   });
-  await session.drain();
+  await session.revokeAndDrain({
+    revocationReasonDigest: "8".repeat(64),
+    revokeRequestDigest: "7".repeat(64),
+    revokeRequestId: "revoke-request-current194-bootstrap",
+  });
   assert.equal(session.snapshot().state, "CLOSED");
+  assert.equal(session.snapshot().revokedAt, "2026-08-13T09:31:00.000Z");
+  assert.equal(
+    value.owner.observed.queries.some((text) =>
+      text.includes("attestation_revoke_current194_v1"),
+    ),
+    true,
+  );
   assert.equal(value.owner.observed.disconnects, 1);
   assert.equal(value.runtime.observed.disconnects, 1);
 });

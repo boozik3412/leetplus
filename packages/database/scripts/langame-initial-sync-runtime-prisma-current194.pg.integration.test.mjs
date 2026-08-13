@@ -35,6 +35,8 @@ const OWNER_ROLE = "leetplus_current194_owner_ci";
 const RUNTIME_ROLE = "leetplus_langame_initial_sync_current192";
 const OWNER_PASSWORD = "owner-current194-password-ci";
 const RUNTIME_PASSWORD = "runtime-current194-password-ci";
+const ROTATED_OWNER_PASSWORD = "owner-current194-password-rotated-ci";
+const ROTATED_RUNTIME_PASSWORD = "runtime-current194-password-rotated-ci";
 const DATABASE_MARKER = "LEETPLUS_CURRENT194_PRISMA_CI_V1";
 const OWNER_MARKER = "LEETPLUS_CURRENT194_OWNER_CI_V1";
 const RUNTIME_MARKER = "LEETPLUS_CURRENT194_RUNTIME_CI_V1";
@@ -164,7 +166,7 @@ function bootstrapInput(databaseOid, ownerOid, runtimeOid) {
 }
 
 test(
-  "CURRENT194 actual separated Prisma clients register and consume on a disposable clone",
+  "CURRENT194 actual separated Prisma lifecycle revokes on a disposable clone",
   { timeout: 120_000 },
   async () => {
     const base = admittedEnvironment();
@@ -291,6 +293,9 @@ test(
           ALTER FUNCTION public.langame_runtime_attestation_consume_current194_v1(
             TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
           ) OWNER TO ${OWNER_ROLE};
+          ALTER FUNCTION public.langame_runtime_attestation_revoke_current194_v1(
+            TEXT, TEXT, TEXT, TEXT, TEXT
+          ) OWNER TO ${OWNER_ROLE};
 
           GRANT EXECUTE ON FUNCTION public.langame_initial_sync_claim_current192_v1(
             TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
@@ -305,6 +310,21 @@ test(
             TEXT, TEXT, TEXT, TEXT, TEXT, TEXT
           ) TO ${RUNTIME_ROLE};
         `);
+        const revokeAcl = await scalar(
+          targetAdmin,
+          `SELECT
+             has_function_privilege($1,
+               'public.langame_runtime_attestation_revoke_current194_v1(text,text,text,text,text)',
+               'EXECUTE') AS "runtimeCanRevoke",
+             has_function_privilege($2,
+               'public.langame_runtime_attestation_revoke_current194_v1(text,text,text,text,text)',
+               'EXECUTE') AS "ownerCanRevoke"`,
+          [RUNTIME_ROLE, OWNER_ROLE],
+        );
+        assert.deepEqual(revokeAcl, {
+          ownerCanRevoke: true,
+          runtimeCanRevoke: false,
+        });
       } finally {
         await targetAdmin.end();
       }
@@ -375,12 +395,61 @@ test(
         }),
       );
 
+      const revoked = await drivers.ownerDriver.revokeCurrent194({
+        attestationId: registration.attestationId,
+        contract: registration.contract,
+        expectedPayloadDigest: registration.payloadDigest,
+        revocationReasonDigest: "8".repeat(64),
+        revokeRequestDigest: "7".repeat(64),
+        revokeRequestId: "revoke-request-current194-prisma-ci",
+      });
+      assert.equal(revoked[0].status, "REVOKED");
+      await assert.rejects(
+        drivers.runtimeDriver.reconcileCurrent192({
+          claimToken: "claim-token-current194-abcdefghijklmnopqrstuvwxyz",
+          executionId: "missing-execution-current194",
+          planDigest: registration.planDigest,
+          tenantId: "missing-tenant-current194",
+        }),
+        (error) => error.code === "CURRENT194_PRISMA_RUNTIME_NOT_CONSUMED",
+      );
+
       await drivers.runtimeDriver.close();
       drivers = null;
 
+      await maintenance.query(
+        `ALTER ROLE ${OWNER_ROLE} PASSWORD '${ROTATED_OWNER_PASSWORD}'`,
+      );
+      await maintenance.query(
+        `ALTER ROLE ${RUNTIME_ROLE} PASSWORD '${ROTATED_RUNTIME_PASSWORD}'`,
+      );
+      for (const staleUrl of [
+        prismaConfig.ownerDatabaseUrl,
+        prismaConfig.runtimeDatabaseUrl,
+      ]) {
+        const stale = new Client({ connectionString: staleUrl });
+        await assert.rejects(stale.connect());
+        await stale.end().catch(() => undefined);
+      }
+      const rotatedPrismaConfig = {
+        ...prismaConfig,
+        ownerDatabaseUrl: connectionUrl(
+          base,
+          TARGET_DATABASE,
+          OWNER_ROLE,
+          ROTATED_OWNER_PASSWORD,
+        ),
+        runtimeDatabaseUrl: connectionUrl(
+          base,
+          TARGET_DATABASE,
+          RUNTIME_ROLE,
+          ROTATED_RUNTIME_PASSWORD,
+        ),
+      };
+
       session = await openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194(
         bootstrapInput(targetDatabaseOid, ownerOid, runtimeOid),
-        prismaConfig,
+        rotatedPrismaConfig,
         LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
       );
       assert.equal(
@@ -397,8 +466,13 @@ test(
           tenantId: "missing-tenant-bootstrap-current194",
         }),
       );
-      await session.drain();
+      await session.revokeAndDrain({
+        revocationReasonDigest: "1".repeat(64),
+        revokeRequestDigest: "f".repeat(64),
+        revokeRequestId: "revoke-request-current194-bootstrap-ci",
+      });
       assert.equal(session.snapshot().state, "CLOSED");
+      assert.equal(session.snapshot().revokedAt === null, false);
       session = null;
 
       const verify = new Client({
@@ -414,17 +488,26 @@ test(
              FROM public."LangameRuntimeAttestationV1"
              WHERE "status" = 'CONSUMED') AS "consumedCount",
             (SELECT count(*)::INTEGER
+             FROM public."LangameRuntimeAttestationV1"
+             WHERE "status" = 'REVOKED') AS "revokedCount",
+            (SELECT count(*)::INTEGER
              FROM public."LangameRuntimeAttestationEventV1"
-             WHERE "eventType" IN ('REGISTERED', 'CONSUMED')) AS "eventCount"
+             WHERE "eventType" IN ('REGISTERED', 'CONSUMED', 'REVOKED')) AS "eventCount"
         `,
         );
-        assert.deepEqual(ledger, { consumedCount: 2, eventCount: 4 });
+        assert.deepEqual(ledger, {
+          consumedCount: 0,
+          eventCount: 6,
+          revokedCount: 2,
+        });
       } finally {
         await verify.end();
       }
     } finally {
       if (session) {
-        await session.drain().catch(() => undefined);
+        await Promise.resolve()
+          .then(() => session.drain())
+          .catch(() => undefined);
       }
       if (drivers) {
         await drivers.runtimeDriver.close().catch(() => undefined);

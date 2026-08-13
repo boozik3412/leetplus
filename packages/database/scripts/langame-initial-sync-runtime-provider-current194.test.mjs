@@ -64,6 +64,11 @@ const reconcileInput = Object.freeze({
   planDigest: claimInput.planDigest,
   tenantId: claimInput.tenantId,
 });
+const revokeInput = Object.freeze({
+  revocationReasonDigest: "8".repeat(64),
+  revokeRequestDigest: "7".repeat(64),
+  revokeRequestId: "revoke-request-current194",
+});
 
 function verifiedAttestation() {
   const plan = planLangameInitialSyncRuntimeCurrent193({
@@ -201,6 +206,17 @@ function consumeRow(attestation, replayed = false, status = "CONSUMED") {
   ];
 }
 
+function revokeRow(attestation, replayed = false) {
+  return [
+    {
+      attestationId: attestation.attestationId,
+      replayed,
+      revokedAt: new Date("2026-08-13T09:31:00.000Z"),
+      status: "REVOKED",
+    },
+  ];
+}
+
 function drivers(attestation, overrides = {}) {
   const observed = {
     claims: [],
@@ -209,12 +225,18 @@ function drivers(attestation, overrides = {}) {
     executions: [],
     reconciliations: [],
     registers: [],
+    revokes: [],
   };
   const owner = {
     async registerCurrent194(spec) {
       observed.registers.push(spec);
       if (overrides.register) return overrides.register(spec, observed);
       return registerRow(attestation);
+    },
+    async revokeCurrent194(spec) {
+      observed.revokes.push(spec);
+      if (overrides.revoke) return overrides.revoke(spec, observed);
+      return revokeRow(attestation);
     },
   };
   const runtime = {
@@ -263,7 +285,7 @@ test("CURRENT194 production provider remains fail-closed", async () => {
   );
 });
 
-test("CURRENT194 registers, consumes and exposes only three narrow RPCs", async () => {
+test("CURRENT194 registers, consumes and exposes only narrow runtime and shutdown RPCs", async () => {
   const attestation = verifiedAttestation();
   const fixture = drivers(attestation);
   const session = await open(attestation, fixture);
@@ -304,6 +326,8 @@ test("CURRENT194 registers, consumes and exposes only three narrow RPCs", async 
     consumedAt: NOW,
     consumeReplayed: false,
     inFlight: 0,
+    revokeReplayed: null,
+    revokedAt: null,
     state: "ACTIVE",
     authorization: false,
     productionExecutionAllowed: false,
@@ -412,6 +436,19 @@ test("CURRENT194 rejects clones, reuse, malformed requests and extra driver auth
     ),
     (error) => error.code === "CURRENT194_PROVIDER_RUNTIME_DRIVER_INVALID",
   );
+
+  const extraOwnerAttestation = verifiedAttestation();
+  const extraOwnerFixture = drivers(extraOwnerAttestation);
+  await assert.rejects(
+    openSyntheticLangameInitialSyncRuntimeProviderCurrent194(
+      extraOwnerAttestation,
+      requests,
+      { ...extraOwnerFixture.owner, arbitraryQuery: async () => [] },
+      extraOwnerFixture.runtime,
+      LANGAME_INITIAL_SYNC_RUNTIME_PROVIDER_CURRENT194_TEST_CONFIRMATION,
+    ),
+    (error) => error.code === "CURRENT194_PROVIDER_OWNER_DRIVER_INVALID",
+  );
 });
 
 test("CURRENT194 drain rejects new work and waits for exact zero in-flight", async () => {
@@ -442,6 +479,90 @@ test("CURRENT194 drain rejects new work and waits for exact zero in-flight", asy
   assert.equal(fixture.observed.closes, 1);
   await session.drain();
   assert.equal(fixture.observed.closes, 1);
+});
+
+test("CURRENT194 drains in-flight work before exact owner revoke and closes", async () => {
+  const attestation = verifiedAttestation();
+  let resolveQuery;
+  let revokeAttempt = 0;
+  const fixture = drivers(attestation, {
+    execute() {
+      return new Promise((resolve) => {
+        resolveQuery = resolve;
+      });
+    },
+    revoke() {
+      revokeAttempt += 1;
+      if (revokeAttempt === 1) throw new Error("lost revoke response");
+      return revokeRow(attestation, true);
+    },
+  });
+  const session = await open(attestation, fixture);
+  const inFlight = session.executeCurrent192(executeInput);
+  const revoking = session.revokeAndDrain(revokeInput);
+  assert.equal(session.snapshot().state, "DRAINING");
+  assert.equal(fixture.observed.revokes.length, 0);
+  assert.equal(fixture.observed.closes, 0);
+  await assert.rejects(
+    session.reconcileCurrent192(reconcileInput),
+    (error) => error.code === "CURRENT194_PROVIDER_SESSION_NOT_ACTIVE",
+  );
+  resolveQuery(["completed-before-revoke"]);
+  assert.deepEqual(await inFlight, ["completed-before-revoke"]);
+  await revoking;
+  assert.equal(fixture.observed.revokes.length, 2);
+  assert.equal(fixture.observed.revokes[0], fixture.observed.revokes[1]);
+  assert.equal(
+    fixture.observed.revokes[0].attestationId,
+    attestation.attestationId,
+  );
+  assert.equal(
+    fixture.observed.revokes[0].expectedPayloadDigest,
+    attestation.payloadDigest,
+  );
+  assert.equal(fixture.observed.closes, 1);
+  assert.deepEqual(session.snapshot(), {
+    contract: LANGAME_INITIAL_SYNC_RUNTIME_PROVIDER_CURRENT194_CONTRACT,
+    attestationId: attestation.attestationId,
+    consumedAt: NOW,
+    consumeReplayed: false,
+    inFlight: 0,
+    revokeReplayed: true,
+    revokedAt: "2026-08-13T09:31:00.000Z",
+    state: "CLOSED",
+    authorization: false,
+    productionExecutionAllowed: false,
+  });
+  assert.equal(session.revokeAndDrain(revokeInput), revoking);
+  assert.throws(
+    () =>
+      session.revokeAndDrain({
+        ...revokeInput,
+        revokeRequestDigest: "9".repeat(64),
+      }),
+    (error) => error.code === "CURRENT194_PROVIDER_REVOKE_REPLAY_MISMATCH",
+  );
+  assert.throws(
+    () => session.drain(),
+    (error) => error.code === "CURRENT194_PROVIDER_SHUTDOWN_CONFLICT",
+  );
+});
+
+test("CURRENT194 closes and seals the session when revoke remains ambiguous", async () => {
+  const attestation = verifiedAttestation();
+  const fixture = drivers(attestation, {
+    revoke() {
+      throw new Error("ambiguous revoke");
+    },
+  });
+  const session = await open(attestation, fixture);
+  await assert.rejects(
+    session.revokeAndDrain(revokeInput),
+    (error) => error.code === "CURRENT194_PROVIDER_REVOKE_RESPONSE_AMBIGUOUS",
+  );
+  assert.equal(fixture.observed.revokes.length, 2);
+  assert.equal(fixture.observed.closes, 1);
+  assert.equal(session.snapshot().state, "CLOSED");
 });
 
 test("CURRENT194 provider source has no broad Prisma, process or network authority", () => {

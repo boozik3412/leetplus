@@ -53,6 +53,16 @@ const CONSUME_KEYS = Object.freeze(
     "expectedReleaseSha",
   ].sort(),
 );
+const REVOKE_KEYS = Object.freeze(
+  [
+    "attestationId",
+    "contract",
+    "expectedPayloadDigest",
+    "revocationReasonDigest",
+    "revokeRequestDigest",
+    "revokeRequestId",
+  ].sort(),
+);
 const CLAIM_KEYS = Object.freeze(
   [
     "actorUserId",
@@ -330,6 +340,26 @@ function consumption(value) {
   return input;
 }
 
+function revocation(value) {
+  const input = exactRecord(
+    value,
+    REVOKE_KEYS,
+    "CURRENT194_PRISMA_REVOKE_INPUT_INVALID",
+  );
+  if (
+    input.contract !== "LANGAME_INITIAL_SYNC_RUNTIME_PROVIDER_CURRENT194_V1" ||
+    !ID_PATTERN.test(input.attestationId) ||
+    !SHA256_PATTERN.test(input.expectedPayloadDigest) ||
+    !ID_PATTERN.test(input.revokeRequestId) ||
+    !SHA256_PATTERN.test(input.revokeRequestDigest) ||
+    !SHA256_PATTERN.test(input.revocationReasonDigest) ||
+    input.revokeRequestDigest === input.revocationReasonDigest
+  ) {
+    fail("CURRENT194_PRISMA_REVOKE_INPUT_INVALID");
+  }
+  return input;
+}
+
 function current192Input(value, keys, code) {
   return exactRecord(value, keys, code);
 }
@@ -435,6 +465,7 @@ function createDrivers(config, ownerClientValue, runtimeClientValue) {
   const runtimeClient = runtimeClientValue;
   let state = "NEW";
   let binding = null;
+  let revokeBinding = null;
   let closePromise = null;
 
   const ownerDriver = Object.freeze({
@@ -484,6 +515,50 @@ function createDrivers(config, ownerClientValue, runtimeClientValue) {
       state = "REGISTERED";
       return rows;
     },
+    async revokeCurrent194(value) {
+      if (!binding || !["CONSUMED", "REVOKING"].includes(state)) {
+        fail("CURRENT194_PRISMA_REVOKE_STATE_INVALID");
+      }
+      const input = revocation(value);
+      if (
+        input.attestationId !== binding.attestationId ||
+        input.expectedPayloadDigest !== binding.payloadDigest
+      ) {
+        fail("CURRENT194_PRISMA_REVOKE_BINDING_INVALID");
+      }
+      if (
+        revokeBinding &&
+        canonicalRevocation(revokeBinding) !== canonicalRevocation(input)
+      ) {
+        fail("CURRENT194_PRISMA_REVOKE_BINDING_INVALID");
+      }
+      state = "REVOKING";
+      revokeBinding = input;
+      await assertIdentity(
+        ownerClient,
+        binding.databaseName,
+        binding.databaseOid,
+        binding.schemaOwnerRoleName,
+        binding.schemaOwnerRoleOid,
+      );
+      const rows = await ownerClient.$queryRaw(Prisma.sql`
+        SELECT * FROM public.langame_runtime_attestation_revoke_current194_v1(
+          ${input.attestationId}, ${input.expectedPayloadDigest},
+          ${input.revokeRequestId}, ${input.revokeRequestDigest},
+          ${input.revocationReasonDigest}
+        )
+      `);
+      if (
+        Array.isArray(rows) &&
+        rows.length === 1 &&
+        rows[0] !== null &&
+        typeof rows[0] === "object" &&
+        rows[0].status === "REVOKED"
+      ) {
+        state = "REVOKED";
+      }
+      return rows;
+    },
   });
 
   const runtimeDriver = Object.freeze({
@@ -502,6 +577,7 @@ function createDrivers(config, ownerClientValue, runtimeClientValue) {
       if (closePromise) return closePromise;
       state = "CLOSING";
       binding = null;
+      revokeBinding = null;
       closePromise = Promise.allSettled([
         Promise.resolve().then(() => ownerClient.$disconnect()),
         Promise.resolve().then(() => runtimeClient.$disconnect()),
@@ -586,6 +662,10 @@ function createDrivers(config, ownerClientValue, runtimeClientValue) {
 
 function canonicalBinding(value) {
   return REGISTER_KEYS.map((key) => `${key}:${String(value[key])}`).join("\n");
+}
+
+function canonicalRevocation(value) {
+  return REVOKE_KEYS.map((key) => `${key}:${String(value[key])}`).join("\n");
 }
 
 export function createLangameInitialSyncRuntimePrismaCurrent194() {

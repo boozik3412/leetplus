@@ -45,7 +45,13 @@ const REQUEST_KEYS = Object.freeze(
     "registerRequestId",
   ].sort(),
 );
-const OWNER_DRIVER_KEYS = Object.freeze(["registerCurrent194"]);
+const REVOKE_KEYS = Object.freeze(
+  ["revocationReasonDigest", "revokeRequestDigest", "revokeRequestId"].sort(),
+);
+const OWNER_DRIVER_KEYS = Object.freeze([
+  "registerCurrent194",
+  "revokeCurrent194",
+]);
 const RUNTIME_DRIVER_KEYS = Object.freeze([
   "claimCurrent192",
   "close",
@@ -58,6 +64,9 @@ const REGISTER_ROW_KEYS = Object.freeze(
 );
 const CONSUME_ROW_KEYS = Object.freeze(
   ["attestationId", "consumedAt", "replayed", "status", "validUntil"].sort(),
+);
+const REVOKE_ROW_KEYS = Object.freeze(
+  ["attestationId", "replayed", "revokedAt", "status"].sort(),
 );
 const USED_ATTESTATIONS = new WeakSet();
 const BRANDED_SESSIONS = new WeakSet();
@@ -281,6 +290,34 @@ function consumeSpec(attestation, request) {
   });
 }
 
+function revokeRequest(value) {
+  const input = exactRecord(
+    value,
+    REVOKE_KEYS,
+    "CURRENT194_PROVIDER_REVOKE_INPUT_INVALID",
+  );
+  if (
+    !ID_PATTERN.test(input.revokeRequestId) ||
+    !SHA256_PATTERN.test(input.revokeRequestDigest) ||
+    !SHA256_PATTERN.test(input.revocationReasonDigest) ||
+    input.revokeRequestDigest === input.revocationReasonDigest
+  ) {
+    fail("CURRENT194_PROVIDER_REVOKE_INPUT_INVALID");
+  }
+  return input;
+}
+
+function revokeSpec(attestation, input) {
+  return Object.freeze({
+    contract: LANGAME_INITIAL_SYNC_RUNTIME_PROVIDER_CURRENT194_CONTRACT,
+    attestationId: attestation.attestationId,
+    expectedPayloadDigest: attestation.payloadDigest,
+    revokeRequestId: input.revokeRequestId,
+    revokeRequestDigest: input.revokeRequestDigest,
+    revocationReasonDigest: input.revocationReasonDigest,
+  });
+}
+
 function assertRegisterRow(value, attestation) {
   const row = exactSingleRow(
     value,
@@ -315,6 +352,23 @@ function assertConsumeRow(value, attestation) {
     typeof row.replayed !== "boolean"
   ) {
     fail("CURRENT194_PROVIDER_CONSUME_RECEIPT_INVALID");
+  }
+  return row;
+}
+
+function assertRevokeRow(value, attestation) {
+  const row = exactSingleRow(
+    value,
+    REVOKE_ROW_KEYS,
+    "CURRENT194_PROVIDER_REVOKE_RECEIPT_INVALID",
+  );
+  if (
+    row.attestationId !== attestation.attestationId ||
+    row.status !== "REVOKED" ||
+    !(row.revokedAt instanceof Date) ||
+    typeof row.replayed !== "boolean"
+  ) {
+    fail("CURRENT194_PROVIDER_REVOKE_RECEIPT_INVALID");
   }
   return row;
 }
@@ -355,7 +409,7 @@ async function openInternal(
       ),
       attestation,
     );
-    const session = createSession(runtime, attestation, consumed);
+    const session = createSession(owner, runtime, attestation, consumed);
     handedOff = true;
     return session;
   } finally {
@@ -365,11 +419,14 @@ async function openInternal(
   }
 }
 
-function createSession(runtime, attestation, consumed) {
+function createSession(owner, runtime, attestation, consumed) {
   let state = "ACTIVE";
   let inFlight = 0;
-  let drainPromise = null;
+  let shutdownBinding = null;
+  let shutdownMode = null;
+  let shutdownPromise = null;
   let resolveZero = null;
+  let revoked = null;
 
   const session = Object.freeze({
     async claimCurrent192(value) {
@@ -394,21 +451,13 @@ function createSession(runtime, attestation, consumed) {
     },
     drain() {
       if (arguments.length !== 0) fail("CURRENT194_PROVIDER_DRAIN_INVALID");
-      if (drainPromise) return drainPromise;
-      state = "DRAINING";
-      drainPromise = (async () => {
-        if (inFlight !== 0) {
-          await new Promise((resolve) => {
-            resolveZero = resolve;
-          });
-        }
-        try {
-          await runtime.close();
-        } finally {
-          state = "CLOSED";
-        }
-      })();
-      return drainPromise;
+      return shutdown("DRAIN", null);
+    },
+    revokeAndDrain(value) {
+      if (arguments.length !== 1)
+        fail("CURRENT194_PROVIDER_REVOKE_INPUT_INVALID");
+      const input = revokeRequest(value);
+      return shutdown("REVOKE", revokeSpec(attestation, input));
     },
     snapshot() {
       if (arguments.length !== 0) fail("CURRENT194_PROVIDER_SNAPSHOT_INVALID");
@@ -418,12 +467,60 @@ function createSession(runtime, attestation, consumed) {
         consumedAt: consumed.consumedAt.toISOString(),
         consumeReplayed: consumed.replayed,
         inFlight,
+        revokeReplayed: revoked?.replayed ?? null,
+        revokedAt: revoked?.revokedAt.toISOString() ?? null,
         state,
         authorization: false,
         productionExecutionAllowed: false,
       });
     },
   });
+
+  function shutdown(mode, revoke) {
+    const canonical = revoke ? JSON.stringify(revoke) : null;
+    if (shutdownPromise) {
+      if (mode !== shutdownMode) {
+        fail("CURRENT194_PROVIDER_SHUTDOWN_CONFLICT");
+      }
+      if (canonical !== shutdownBinding) {
+        fail("CURRENT194_PROVIDER_REVOKE_REPLAY_MISMATCH");
+      }
+      return shutdownPromise;
+    }
+    shutdownMode = mode;
+    shutdownBinding = canonical;
+    state = "DRAINING";
+    shutdownPromise = (async () => {
+      if (inFlight !== 0) {
+        await new Promise((resolve) => {
+          resolveZero = resolve;
+        });
+      }
+      let primaryError = null;
+      if (revoke) {
+        try {
+          revoked = assertRevokeRow(
+            await exactRetry(
+              () => owner.revokeCurrent194(revoke),
+              "CURRENT194_PROVIDER_REVOKE_RESPONSE_AMBIGUOUS",
+            ),
+            attestation,
+          );
+        } catch (error) {
+          primaryError = error;
+        }
+      }
+      try {
+        await runtime.close();
+      } catch (error) {
+        if (!primaryError) primaryError = error;
+      } finally {
+        state = "CLOSED";
+      }
+      if (primaryError) throw primaryError;
+    })();
+    return shutdownPromise;
+  }
 
   async function invoke(effect) {
     inFlight += 1;

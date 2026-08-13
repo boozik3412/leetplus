@@ -72,22 +72,30 @@ PostgreSQL acceptance completed on exact SHA
 step, artifact ID `9178145263`, digest
 `sha256:8a336bb0108295fd38ecec8ac5b1a041e1053ccbf48c5372f385c69c757910f2`.
 
-The next local bootstrap composes signed CURRENT193 verification, the accepted
-separate Prisma pair, persisted CURRENT194 register/consume and the bounded
-provider session. It creates no clients before signature verification, exposes
-only `claim/execute/reconcile/drain`, and closes both clients after rejected or
-ambiguous startup. Its focused matrix is `5/5`; the actual composed PostgreSQL
-CI step remains pending for the next exact SHA. All production entry points
-still fail closed, and no production root, credential, role or grant is
-enrolled.
+The composed bootstrap verifies the signed CURRENT193 receipt before creating
+a separate Prisma pair, persisted CURRENT194 register/consume and the bounded
+provider session. It creates no clients before signature verification and
+closes both clients after rejected or ambiguous startup. Exact SHA
+`e829f3036006aa7dc83ec7a7138a08c82fa060d2` completed GitHub Actions run
+`31694281914` as `3/3 SUCCESS`; artifact ID `9178952687`, digest
+`sha256:1db3c8e772f0d5600f6ee2aa1be560fe10f148b686354ba250fc74f72633afc7`.
+
+The next local lifecycle layer adds `revokeAndDrain`: it rejects new work,
+waits for exact zero in-flight, invokes only the owner-side revoke with the
+same frozen spec on a lost response, and closes both clients even when the
+response remains ambiguous. The runtime role receives no revoke grant. The
+combined static/unit gate is `32/32`; its disposable PostgreSQL fixture rotates
+both passwords, proves stale credentials fail, opens a new signed bootstrap,
+and checks terminal ledger state and zero residue. Exact-SHA CI acceptance is
+pending. All production entry points still fail closed, and no production root,
+credential, role or grant is enrolled.
 
 ## Next implementation steps
 
-1. Accept the composed signed bootstrap on an exact CI SHA, including
-   disposable role/database cleanup and zero residue.
-2. Add production TLS peer pinning plus process revoke/credential-rotation and
-   ambiguous-response reconciliation tests with zero in-flight work at
-   shutdown.
+1. Accept the revoke/credential-rotation lifecycle on an exact CI SHA,
+   including disposable role/database cleanup and zero residue.
+2. Add production TLS peer pinning and durable reconciliation when both revoke
+   responses are lost after the database effect may have committed.
 3. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
 4. Only after the common launch gates, run the four-club internal alpha and
    issue a mailbox-bound OWNER invite for a separate tester tenant.

@@ -58,6 +58,14 @@ const consumption = Object.freeze({
   expectedPayloadDigest: registration.payloadDigest,
   expectedReleaseSha: registration.releaseSha,
 });
+const revocation = Object.freeze({
+  attestationId: registration.attestationId,
+  contract: "LANGAME_INITIAL_SYNC_RUNTIME_PROVIDER_CURRENT194_V1",
+  expectedPayloadDigest: registration.payloadDigest,
+  revocationReasonDigest: "a".repeat(64),
+  revokeRequestDigest: "9".repeat(64),
+  revokeRequestId: "revoke-request-current194",
+});
 const claim = Object.freeze({
   actorUserId: "actor-user-current194",
   approvalId: "approval-current194",
@@ -134,6 +142,16 @@ function client(role, roleOid, overrides = {}) {
             replayed: false,
             status: "CONSUMED",
             validUntil: new Date(registration.validUntil),
+          },
+        ];
+      }
+      if (text.includes("attestation_revoke_current194_v1")) {
+        return [
+          {
+            attestationId: registration.attestationId,
+            replayed: false,
+            revokedAt: new Date("2026-08-13T09:31:00.000Z"),
+            status: "REVOKED",
           },
         ];
       }
@@ -251,6 +269,68 @@ test("CURRENT194 exact registration and consumption can reconcile lost responses
   await value.pair.runtimeDriver.close();
 });
 
+test("CURRENT194 owner revokes after consumption with exact lost-response replay", async () => {
+  let revokeAttempt = 0;
+  const value = fixture({
+    query(query) {
+      if (sqlText(query).includes("attestation_revoke_current194_v1")) {
+        revokeAttempt += 1;
+        if (revokeAttempt === 1) throw new Error("lost revoke response");
+        return [
+          {
+            attestationId: registration.attestationId,
+            replayed: true,
+            revokedAt: new Date("2026-08-13T09:31:00.000Z"),
+            status: "REVOKED",
+          },
+        ];
+      }
+    },
+  });
+  await registerAndConsume(value);
+  await assert.rejects(value.pair.ownerDriver.revokeCurrent194(revocation));
+  const rows = await value.pair.ownerDriver.revokeCurrent194(revocation);
+  assert.equal(rows[0].replayed, true);
+  assert.equal(revokeAttempt, 2);
+  assert.equal(
+    value.owner.observed.queries
+      .at(-1)
+      .values.includes(revocation.revocationReasonDigest),
+    true,
+  );
+  await assert.rejects(
+    value.pair.runtimeDriver.reconcileCurrent192(reconciliation),
+    (error) => error.code === "CURRENT194_PRISMA_RUNTIME_NOT_CONSUMED",
+  );
+  await value.pair.runtimeDriver.close();
+});
+
+test("CURRENT194 rejects changed or premature owner revocation", async () => {
+  const premature = fixture();
+  await assert.rejects(
+    premature.pair.ownerDriver.revokeCurrent194(revocation),
+    (error) => error.code === "CURRENT194_PRISMA_REVOKE_STATE_INVALID",
+  );
+  await premature.pair.runtimeDriver.close();
+
+  const changed = fixture();
+  await registerAndConsume(changed);
+  await assert.rejects(
+    changed.pair.ownerDriver.revokeCurrent194({
+      ...revocation,
+      expectedPayloadDigest: "b".repeat(64),
+    }),
+    (error) => error.code === "CURRENT194_PRISMA_REVOKE_BINDING_INVALID",
+  );
+  assert.equal(
+    changed.owner.observed.queries.some((item) =>
+      item.text.includes("attestation_revoke_current194_v1"),
+    ),
+    false,
+  );
+  await changed.pair.runtimeDriver.close();
+});
+
 test("CURRENT194 rejects binding and backend identity drift before lifecycle RPCs", async () => {
   const ownerDrift = fixture({
     query(query) {
@@ -354,7 +434,7 @@ test("CURRENT194 Prisma source contains only fixed parameterized SQL templates",
     source,
     /new PrismaClient\(\{ datasourceUrl: url, log: \[\] \}\)/u,
   );
-  assert.equal((source.match(/\.\$queryRaw\(Prisma\.sql`/gu) ?? []).length, 6);
+  assert.equal((source.match(/\.\$queryRaw\(Prisma\.sql`/gu) ?? []).length, 7);
   assert.doesNotMatch(
     source,
     /\$executeRaw|\$queryRawUnsafe|\$executeRawUnsafe|process\.env|ConfigService|PrismaService|fetch\s*\(|child_process/iu,

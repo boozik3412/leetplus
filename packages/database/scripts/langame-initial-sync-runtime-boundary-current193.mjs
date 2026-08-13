@@ -41,14 +41,14 @@ export const LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_ROUTINES = Object.freeze([
     callable: false,
     identity: "public.langame_initial_sync_execution_guard_current192_v1()",
     securityDefiner: false,
-    searchPath: null,
+    searchPath: "pg_catalog, public",
   }),
   Object.freeze({
     callable: false,
     identity:
       "public.langame_initial_sync_execution_event_guard_current192_v1()",
     securityDefiner: false,
-    searchPath: null,
+    searchPath: "pg_catalog, public",
   }),
 ]);
 

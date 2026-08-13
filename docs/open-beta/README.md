@@ -130,6 +130,9 @@ enterprise-isolation option и не сокращает shared gates.
    0e.10. [CURRENT193 runtime boundary](./langame-current193-runtime-boundary.md) —
    execute-only role/catalog/ACL admission и последовательность signed runtime
    acceptance; production roots и route authority остаются закрыты.
+   0e.11. [CURRENT194 runtime-attestation ledger](./langame-current194-runtime-attestation-ledger.md) —
+   owner-only persisted register/consume/revoke/expiry state machine с exact
+   replay; runtime grants, production authority и route activation отсутствуют.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

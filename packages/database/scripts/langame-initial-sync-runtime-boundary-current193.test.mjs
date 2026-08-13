@@ -243,6 +243,9 @@ test("CURRENT193 disposable SQL grants only three RPCs and rolls role/ACL change
   assert.match(smoke, /NOREPLICATION NOBYPASSRLS/u);
   assert.match(smoke, /REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC/u);
   assert.match(smoke, /direct table read unexpectedly passed/u);
+  assert.match(smoke, /'TRUNCATE'/u);
+  assert.match(smoke, /'REFERENCES'/u);
+  assert.match(smoke, /'TRIGGER'/u);
   assert.match(smoke, /schema DDL unexpectedly passed/u);
   assert.match(smoke, /TEMP unexpectedly passed/u);
   assert.match(smoke, /role escalation unexpectedly passed/u);

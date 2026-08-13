@@ -151,7 +151,7 @@ BEGIN
             'langame_initial_sync_execution_event_guard_current192_v1'
           )
           AND routine.prosecdef = FALSE
-          AND routine.proconfig IS NULL
+          AND routine.proconfig = ARRAY['search_path=pg_catalog, public']::TEXT[]
         )
       )
   ) <> 5 OR (
@@ -193,6 +193,12 @@ BEGIN
           CURRENT_USER, relation.oid, 'UPDATE'
         ) OR pg_catalog.has_table_privilege(
           CURRENT_USER, relation.oid, 'DELETE'
+        ) OR pg_catalog.has_table_privilege(
+          CURRENT_USER, relation.oid, 'TRUNCATE'
+        ) OR pg_catalog.has_table_privilege(
+          CURRENT_USER, relation.oid, 'REFERENCES'
+        ) OR pg_catalog.has_table_privilege(
+          CURRENT_USER, relation.oid, 'TRIGGER'
         )
       )
   ) THEN

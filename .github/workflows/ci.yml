@@ -206,6 +206,9 @@ jobs:
       - name: Validate nonauthorizing CURRENT193 Langame runtime boundary
         run: pnpm --filter database check:langame-initial-sync-runtime-current193
 
+      - name: Validate dormant CURRENT194 Langame runtime attestation ledger
+        run: pnpm --filter database check:langame-runtime-attestation-ledger-current194
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 
@@ -980,3 +983,16 @@ jobs:
             --dbname leetplus_ci \
             --set ON_ERROR_STOP=on \
             --file packages/database/scripts/langame-initial-sync-runtime-current193-smoke.sql
+
+      - name: Verify CURRENT194 persisted runtime attestation ledger
+        shell: bash
+        run: |
+          export PGPASSWORD=postgres
+          psql \
+            --host 127.0.0.1 \
+            --port 5432 \
+            --username postgres \
+            --dbname leetplus_ci \
+            --set ON_ERROR_STOP=on \
+            --file packages/database/successor-candidates/20260813030000_langame_runtime_attestation_ledger_current194/migration.sql \
+            --file packages/database/scripts/langame-runtime-attestation-ledger-current194-smoke.sql

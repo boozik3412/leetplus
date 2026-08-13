@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.108                                        |
+| Версия           | 1.109                                        |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -134,8 +134,8 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    owner-only persisted register/consume/revoke/expiry state machine с exact
    replay; runtime grants, production authority и route activation отсутствуют.
    0e.12. [CURRENT195 signed revoke intent](./langame-current195-signed-revoke-intent.md) —
-   принятые Ed25519-bound foundation и owner-only persisted ledger плюс
-   локальный persist → drain → apply/restart lifecycle; production roots и
+   принятые Ed25519-bound foundation, owner-only persisted ledger и
+   persist → drain → apply/restart lifecycle; production roots и
    route authority отсутствуют.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и

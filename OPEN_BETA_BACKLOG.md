@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 13.08.2026
-- Версия: 2.56
+- Версия: 2.57
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -87,14 +87,22 @@ append-only audit фиксирует `REGISTERED/APPLIED/EXPIRED`, а apply ат
 ledger/Prisma gate локально `12/12`; production roots, runtime grants и route
 по-прежнему отсутствуют.
 
-Локальный successor lifecycle уже связывает реальный provider shutdown с
+CURRENT195 successor lifecycle принят на exact SHA
+`d7005bbc5eb7037baf662f46575a8fa29ca974b6`: GitHub CI run `31716117207`
+завершён `3/3 SUCCESS`; artifact `9187713149`, digest
+`sha256:ecd3190578a6a15c583a7776d8be77cacc3e7ba978cada7c79ced8e1c5183e09`.
+Actual PostgreSQL fixture доказал DB-deny при живом runtime backend точной роли,
+затем drain и fresh-process recovery до `APPLIED`.
+
+Принятый successor lifecycle связывает реальный provider shutdown с
 последовательностью persist → drain → apply, не вызывает raw CURRENT194 revoke,
 повторяет потерянные register/apply responses только для exact branded данных и
 после рестарта восстанавливает тот же persisted intent через свежий owner-only
 driver. CURRENT195 apply дополнительно блокируется самой БД, пока жива runtime
 session точной consumed-attestation. Локальные gates зелёные: CURRENT194/195
-lifecycle `42/42`, ledger `12/12`. До GitHub actual PostgreSQL acceptance этот
-successor lifecycle остаётся локальным evidence и не разрешает production.
+lifecycle `42/42`, ledger `12/12`. Production roots, runtime grants, route,
+текущая сеть из четырёх клубов и внешний тестер не изменялись; этот acceptance
+сам по себе не разрешает production.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

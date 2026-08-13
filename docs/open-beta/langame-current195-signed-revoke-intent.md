@@ -1,6 +1,6 @@
 # CURRENT195: signed Langame revoke-intent foundation
 
-Status: `FOUNDATION + LEDGER ACCEPTED / LIFECYCLE LOCAL / NONAUTHORIZING / PRODUCTION ROOTS EMPTY`.
+Status: `FOUNDATION + LEDGER + LIFECYCLE ACCEPTED / NONAUTHORIZING / PRODUCTION ROOTS EMPTY`.
 
 CURRENT194 can reconcile an exact terminal revoke after a lost database
 response through a fresh owner-only connection. CURRENT195 removes the caller's
@@ -43,7 +43,7 @@ owner-only Prisma connection; runtime credentials and runtime RPCs are absent.
 - artifact `9183244096`, digest
   `sha256:a9f8d947a32f2e9cafa74104ef653953a934986e53a0ba2713b608228b79ffc0`.
 
-## Local persisted-ledger successor
+## Accepted persisted-ledger successor
 
 The next noncanonical candidate now persists the already verified envelope in
 an owner-only `LangameRuntimeRevokeIntentV1` ledger before the terminal effect.
@@ -65,21 +65,22 @@ boundary. The production root registry is empty and all production entry
 points remain denied. Production, the existing four-club tenant, external
 tester account and owner invite are unchanged.
 
-The local successor lifecycle now persists the exact branded intent before it
+The accepted successor lifecycle persists the exact branded intent before it
 starts provider drain, waits for zero in-flight work, closes the runtime session
 without calling the raw CURRENT194 revoke path and only then applies the
 persisted intent. The database independently rejects apply while the exact
 consumed-attestation runtime role still has a live client backend. A fresh
 owner-only process can re-register the identical persisted envelope and finish
 apply after a lost process response or restart. Local lifecycle gates are
-`42/42`; this layer remains unaccepted until the actual PostgreSQL CI fixture is
-green for its exact SHA.
+`42/42`; exact SHA `d7005bbc5eb7037baf662f46575a8fa29ca974b6` is accepted by
+GitHub CI run `31716117207` as `3/3 SUCCESS`. The actual PostgreSQL fixture
+proved live-runtime DB denial followed by drain and fresh-process recovery to
+`APPLIED`. Artifact `9187713149` has digest
+`sha256:ecd3190578a6a15c583a7776d8be77cacc3e7ba978cada7c79ced8e1c5183e09`.
 
 ## Next implementation steps
 
-1. Accept the local persist → drain → apply/restart lifecycle through the
-   mandatory actual PostgreSQL CI fixture and exact-SHA artifact gate.
-2. Add protected production signer/root enrollment and TLS peer pinning only
+1. Add protected production signer/root enrollment and TLS peer pinning only
    after separate review.
-3. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal before
+2. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal before
    any production or tester effect.

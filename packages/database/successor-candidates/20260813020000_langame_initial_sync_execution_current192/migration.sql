@@ -872,18 +872,31 @@ BEGIN
      AND existing_product."externalProvider" = 'LANGAME'
      AND existing_product."externalDomain" = preflight."externalDomain"
      AND existing_product."externalProductId" = plan_inventory.external_id
-  ), inserted AS (
-    INSERT INTO public."InventorySnapshot" (
-      "id", "tenantId", "storeId", "productId", "snapshotDate",
-      "quantity", "externalProvider", "externalDomain", "externalClubId",
-      "createdAt", "updatedAt"
-    ) SELECT
-      pg_catalog.gen_random_uuid()::TEXT, preflight."tenantId",
-      preflight."storeId", resolved.product_id, snapshot_at,
-      resolved.quantity, 'LANGAME', preflight."externalDomain",
-      preflight."externalClubId", server_now, server_now
-    FROM resolved
-    ON CONFLICT DO NOTHING
+  )
+  INSERT INTO public."InventorySnapshot" (
+    "id", "tenantId", "storeId", "productId", "snapshotDate",
+    "quantity", "externalProvider", "externalDomain", "externalClubId",
+    "createdAt", "updatedAt"
+  ) SELECT
+    pg_catalog.gen_random_uuid()::TEXT, preflight."tenantId",
+    preflight."storeId", resolved.product_id, snapshot_at,
+    resolved.quantity, 'LANGAME', preflight."externalDomain",
+    preflight."externalClubId", server_now, server_now
+  FROM resolved
+  ON CONFLICT DO NOTHING;
+
+  WITH plan_inventory AS (
+    SELECT inventory.item->>'externalProductId' AS external_id,
+      (inventory.item->>'quantity')::INTEGER AS quantity
+    FROM pg_catalog.jsonb_array_elements(plan_data->4) AS inventory(item)
+  ), resolved AS (
+    SELECT existing_product."id" AS product_id, plan_inventory.quantity
+    FROM plan_inventory
+    INNER JOIN public."Product" AS existing_product
+      ON existing_product."tenantId" = preflight."tenantId"
+     AND existing_product."externalProvider" = 'LANGAME'
+     AND existing_product."externalDomain" = preflight."externalDomain"
+     AND existing_product."externalProductId" = plan_inventory.external_id
   ), updated AS (
     UPDATE public."InventorySnapshot" AS existing_snapshot
     SET "quantity" = resolved.quantity,

@@ -127,6 +127,9 @@ enterprise-isolation option и не сокращает shared gates.
    0e.9. [CURRENT192 atomic initial-sync execution](./langame-current192-initial-sync-execution.md) —
    локальный dormant claim/atomic selected-Store import/complete/reconcile;
    runtime grants, route, provider effect и production authority отсутствуют.
+   0e.10. [CURRENT193 runtime boundary](./langame-current193-runtime-boundary.md) —
+   execute-only role/catalog/ACL admission и последовательность signed runtime
+   acceptance; production roots и route authority остаются закрыты.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

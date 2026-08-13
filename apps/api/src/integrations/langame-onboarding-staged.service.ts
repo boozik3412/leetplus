@@ -20,6 +20,8 @@ const STAGED_ONBOARDING_ACTIVATION_ENABLED_ENV =
   'LANGAME_STAGED_ONBOARDING_ACTIVATION_CURRENT188_ENABLED';
 const STAGED_ONBOARDING_STATUS_ENABLED_ENV =
   'LANGAME_STAGED_ONBOARDING_STATUS_CURRENT188_ENABLED';
+const STAGED_ONBOARDING_RECONCILE_ENABLED_ENV =
+  'LANGAME_STAGED_ONBOARDING_RECONCILE_CURRENT188_ENABLED';
 const STAGED_ONBOARDING_DIAGNOSTIC_TIMEOUT_MS = 5_000;
 const CURRENT188_STAGE_CONTRACT =
   'LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1';
@@ -49,6 +51,8 @@ export type LangameOnboardingStatusDto = {
   storeId?: string;
 };
 
+export type LangameOnboardingReconciliationDto = LangameOnboardingActivationDto;
+
 type StageReceiptRow = {
   receiptId: string;
   status: string;
@@ -76,6 +80,41 @@ type StatusReceiptRow = {
   externalClubId: string | null;
   claimDigest: string | null;
   activatedAt: Date | null;
+};
+
+type ReconciliationReceiptRow = {
+  receiptId: string;
+  status: 'PENDING' | 'CONSUMED' | 'EXPIRED';
+  expiresAt: Date;
+  consumedAt: Date | null;
+  configDigest: string;
+  bindingDigest: string;
+  activationRequestId: string | null;
+  activationRequestDigest: string | null;
+  claimId: string | null;
+  resolvedClaimId: string | null;
+  externalDomain: string | null;
+  externalClubId: string | null;
+  claimDigest: string | null;
+  activatedAt: Date | null;
+  storeExternalProvider: string | null;
+  storeExternalDomain: string | null;
+  storeExternalClubId: string | null;
+  storeIntegrationSourceId: string | null;
+  sourceId: string | null;
+  sourceProvider: string | null;
+  sourceDomain: string | null;
+  sourceBaseUrl: string | null;
+  sourceIsActive: boolean | null;
+  credentialId: string | null;
+  credentialProvider: string | null;
+  credentialIsActive: boolean | null;
+  auditId: string | null;
+  auditRequestDigest: string | null;
+  auditConfigDigest: string | null;
+  auditBindingDigest: string | null;
+  auditClaimDigest: string | null;
+  auditEventAt: Date | null;
 };
 
 @Injectable()
@@ -409,6 +448,209 @@ export class LangameOnboardingStagedService {
     } as const;
   }
 
+  async reconcile(
+    user: AuthenticatedUser,
+    dto: LangameOnboardingReconciliationDto,
+  ) {
+    const scope = await this.freshStoreScopeService.assertNetwork(user);
+    this.requireReconciliationConfiguration();
+    const hmacSecret = this.requireFoundationConfiguration();
+    const receiptId = this.requiredText(dto.receiptId, 'Receipt id', 128);
+    const requestId = this.requiredRequestId(dto.requestId);
+    const configDigest = this.requiredDigest(dto.configDigest, 'Config digest');
+    const storeId = this.requiredText(dto.storeId, 'Store id', 128);
+    const domain = this.normalizeLangameDomain(dto.domain);
+    const externalClubId = this.requiredExternalClubId(dto.externalClubId);
+    const bindingDigest = this.hmacDigest(hmacSecret, [
+      CURRENT188_STAGE_CONTRACT,
+      'BINDING',
+      scope.tenantId,
+      storeId,
+      domain,
+      externalClubId,
+      configDigest,
+    ]);
+    const activationRequestDigest = this.hmacDigest(hmacSecret, [
+      CURRENT188_STAGE_CONTRACT,
+      'ACTIVATE',
+      scope.tenantId,
+      scope.userId,
+      receiptId,
+      requestId,
+      configDigest,
+      bindingDigest,
+      storeId,
+      domain,
+      externalClubId,
+    ]);
+
+    const store = await this.prisma.store.findFirst({
+      where: { id: storeId, tenantId: scope.tenantId, isActive: true },
+      select: { id: true },
+    });
+    if (!store) {
+      throw new BadRequestException('Selected store is unavailable');
+    }
+
+    let rows: unknown;
+    try {
+      rows = await this.prisma.$queryRaw(
+        Prisma.sql`
+          SELECT
+            receipt."id" AS "receiptId",
+            receipt."status" AS "status",
+            receipt."expiresAt" AS "expiresAt",
+            receipt."consumedAt" AS "consumedAt",
+            receipt."configDigest" AS "configDigest",
+            receipt."bindingDigest" AS "bindingDigest",
+            receipt."activationRequestId" AS "activationRequestId",
+            receipt."activationRequestDigest" AS "activationRequestDigest",
+            receipt."claimId" AS "claimId",
+            claim."id" AS "resolvedClaimId",
+            claim."externalDomain" AS "externalDomain",
+            claim."externalClubId" AS "externalClubId",
+            claim."claimDigest" AS "claimDigest",
+            claim."activatedAt" AS "activatedAt",
+            store."externalProvider"::TEXT AS "storeExternalProvider",
+            store."externalDomain" AS "storeExternalDomain",
+            store."externalClubId" AS "storeExternalClubId",
+            store."integrationSourceId" AS "storeIntegrationSourceId",
+            source."id" AS "sourceId",
+            source."provider"::TEXT AS "sourceProvider",
+            source."domain" AS "sourceDomain",
+            source."baseUrl" AS "sourceBaseUrl",
+            source."isActive" AS "sourceIsActive",
+            credential."id" AS "credentialId",
+            credential."provider"::TEXT AS "credentialProvider",
+            credential."isActive" AS "credentialIsActive",
+            audit."id" AS "auditId",
+            audit."requestDigest" AS "auditRequestDigest",
+            audit."configDigest" AS "auditConfigDigest",
+            audit."bindingDigest" AS "auditBindingDigest",
+            audit."claimDigest" AS "auditClaimDigest",
+            audit."eventAt" AS "auditEventAt"
+          FROM public."LangameOnboardingStagedReceiptV1" AS receipt
+          INNER JOIN public."Store" AS store
+            ON store."tenantId" = receipt."tenantId"
+           AND store."id" = receipt."storeId"
+           AND store."isActive" = TRUE
+          LEFT JOIN public."LangameExternalClubClaimV1" AS claim
+            ON claim."id" = receipt."claimId"
+           AND claim."tenantId" = receipt."tenantId"
+           AND claim."storeId" = receipt."storeId"
+           AND claim."receiptId" = receipt."id"
+          LEFT JOIN public."IntegrationSource" AS source
+            ON source."tenantId" = store."tenantId"
+           AND source."id" = store."integrationSourceId"
+          LEFT JOIN public."IntegrationCredential" AS credential
+            ON credential."tenantId" = source."tenantId"
+           AND credential."id" = source."credentialId"
+          LEFT JOIN public."LangameOnboardingAuditEventV1" AS audit
+            ON audit."tenantId" = receipt."tenantId"
+           AND audit."receiptId" = receipt."id"
+           AND audit."eventType" = 'ACTIVATED'
+          WHERE receipt."tenantId" = ${scope.tenantId}
+            AND receipt."actorUserId" = ${scope.userId}
+            AND receipt."id" = ${receiptId}
+            AND receipt."storeId" = ${storeId}
+          LIMIT 2
+        `,
+      );
+    } catch {
+      throw new ServiceUnavailableException(
+        'Staged Langame onboarding reconciliation is unavailable',
+      );
+    }
+
+    const receipt = this.parseReconciliationReceipt(rows);
+    const baseBound =
+      receipt.receiptId === receiptId &&
+      receipt.configDigest === configDigest &&
+      receipt.bindingDigest === bindingDigest;
+    if (!baseBound) {
+      throw new ServiceUnavailableException(
+        'Invalid staged Langame onboarding reconciliation receipt',
+      );
+    }
+
+    if (receipt.status !== 'CONSUMED') {
+      const noActivationEvidence =
+        receipt.consumedAt === null &&
+        receipt.activationRequestId === null &&
+        receipt.activationRequestDigest === null &&
+        receipt.claimId === null &&
+        receipt.resolvedClaimId === null &&
+        receipt.auditId === null;
+      if (!noActivationEvidence) {
+        throw new ServiceUnavailableException(
+          'Invalid staged Langame onboarding reconciliation receipt',
+        );
+      }
+      const expired =
+        receipt.status === 'EXPIRED' ||
+        receipt.expiresAt.getTime() <= Date.now();
+      return {
+        contractVersion: CURRENT188_STAGE_CONTRACT,
+        receiptId,
+        storeId,
+        outcome: expired ? ('EXPIRED' as const) : ('NOT_APPLIED' as const),
+        consumedAt: null,
+        claimDigest: null,
+        retryActivationAllowed: !expired,
+        externalSyncStarted: false,
+        initialReadOnlySyncAvailable: false,
+        productionReconciliationAllowed: false,
+      } as const;
+    }
+
+    const activationBound =
+      receipt.consumedAt !== null &&
+      receipt.activationRequestId === requestId &&
+      receipt.activationRequestDigest === activationRequestDigest &&
+      receipt.claimId !== null &&
+      receipt.claimId === receipt.resolvedClaimId &&
+      receipt.externalDomain === domain &&
+      receipt.externalClubId === externalClubId &&
+      receipt.claimDigest === bindingDigest &&
+      receipt.activatedAt?.getTime() === receipt.consumedAt.getTime() &&
+      receipt.storeExternalProvider === 'LANGAME' &&
+      receipt.storeExternalDomain === domain &&
+      receipt.storeExternalClubId === externalClubId &&
+      receipt.storeIntegrationSourceId !== null &&
+      receipt.storeIntegrationSourceId === receipt.sourceId &&
+      receipt.sourceProvider === 'LANGAME' &&
+      receipt.sourceDomain === domain &&
+      receipt.sourceBaseUrl === `https://${domain}/public_api` &&
+      receipt.sourceIsActive === true &&
+      receipt.credentialId !== null &&
+      receipt.credentialProvider === 'LANGAME' &&
+      receipt.credentialIsActive === true &&
+      receipt.auditId !== null &&
+      receipt.auditRequestDigest === activationRequestDigest &&
+      receipt.auditConfigDigest === configDigest &&
+      receipt.auditBindingDigest === bindingDigest &&
+      receipt.auditClaimDigest === bindingDigest &&
+      receipt.auditEventAt?.getTime() === receipt.consumedAt.getTime();
+    if (!activationBound || receipt.consumedAt === null) {
+      throw new ServiceUnavailableException(
+        'Invalid staged Langame onboarding reconciliation receipt',
+      );
+    }
+
+    return {
+      contractVersion: CURRENT188_STAGE_CONTRACT,
+      receiptId,
+      storeId,
+      outcome: 'ACTIVATED' as const,
+      consumedAt: receipt.consumedAt.toISOString(),
+      claimDigest: bindingDigest,
+      retryActivationAllowed: false,
+      externalSyncStarted: false,
+      initialReadOnlySyncAvailable: false,
+      productionReconciliationAllowed: false,
+    } as const;
+  }
+
   private requireActivationConfiguration() {
     if (isProductionConfig(this.configService)) {
       throw new ServiceUnavailableException(
@@ -439,6 +681,23 @@ export class LangameOnboardingStagedService {
     ) {
       throw new ServiceUnavailableException(
         'CURRENT188 status adapter is disabled',
+      );
+    }
+  }
+
+  private requireReconciliationConfiguration() {
+    if (isProductionConfig(this.configService)) {
+      throw new ServiceUnavailableException(
+        'CURRENT188 reconciliation is not production-authorized',
+      );
+    }
+    if (
+      this.configService
+        .get<string>(STAGED_ONBOARDING_RECONCILE_ENABLED_ENV)
+        ?.trim() !== 'true'
+    ) {
+      throw new ServiceUnavailableException(
+        'CURRENT188 reconciliation adapter is disabled',
       );
     }
   }
@@ -663,6 +922,142 @@ export class LangameOnboardingStagedService {
     };
   }
 
+  private parseReconciliationReceipt(value: unknown): ReconciliationReceiptRow {
+    if (!Array.isArray(value) || value.length !== 1) {
+      throw new ServiceUnavailableException(
+        'Invalid staged Langame onboarding reconciliation receipt',
+      );
+    }
+    const row: unknown = value[0];
+    const expectedKeys = [
+      'activatedAt',
+      'activationRequestDigest',
+      'activationRequestId',
+      'auditBindingDigest',
+      'auditClaimDigest',
+      'auditConfigDigest',
+      'auditEventAt',
+      'auditId',
+      'auditRequestDigest',
+      'bindingDigest',
+      'claimDigest',
+      'claimId',
+      'configDigest',
+      'consumedAt',
+      'credentialId',
+      'credentialIsActive',
+      'credentialProvider',
+      'expiresAt',
+      'externalClubId',
+      'externalDomain',
+      'receiptId',
+      'resolvedClaimId',
+      'sourceBaseUrl',
+      'sourceDomain',
+      'sourceId',
+      'sourceIsActive',
+      'sourceProvider',
+      'status',
+      'storeExternalClubId',
+      'storeExternalDomain',
+      'storeExternalProvider',
+      'storeIntegrationSourceId',
+    ];
+    if (
+      !this.isPlainObject(row) ||
+      Object.keys(row).sort().join('|') !== expectedKeys.join('|')
+    ) {
+      throw new ServiceUnavailableException(
+        'Invalid staged Langame onboarding reconciliation receipt',
+      );
+    }
+
+    const status =
+      row.status === 'PENDING' ||
+      row.status === 'CONSUMED' ||
+      row.status === 'EXPIRED'
+        ? row.status
+        : null;
+    const expiresAt = this.optionalDate(row.expiresAt);
+    const consumedAt = this.optionalDate(row.consumedAt);
+    const activatedAt = this.optionalDate(row.activatedAt);
+    const auditEventAt = this.optionalDate(row.auditEventAt);
+    if (
+      typeof row.receiptId !== 'string' ||
+      row.receiptId.length < 1 ||
+      row.receiptId.length > 128 ||
+      status === null ||
+      expiresAt === null ||
+      typeof row.configDigest !== 'string' ||
+      !DIGEST_PATTERN.test(row.configDigest) ||
+      typeof row.bindingDigest !== 'string' ||
+      !DIGEST_PATTERN.test(row.bindingDigest) ||
+      !this.isNullableText(row.activationRequestId, 128) ||
+      !this.isNullableDigest(row.activationRequestDigest) ||
+      !this.isNullableText(row.claimId, 128) ||
+      !this.isNullableText(row.resolvedClaimId, 128) ||
+      !this.isNullableText(row.externalDomain, 253) ||
+      !this.isNullableText(row.externalClubId, 19) ||
+      !this.isNullableDigest(row.claimDigest) ||
+      !this.isNullableText(row.storeExternalProvider, 32) ||
+      !this.isNullableText(row.storeExternalDomain, 253) ||
+      !this.isNullableText(row.storeExternalClubId, 19) ||
+      !this.isNullableText(row.storeIntegrationSourceId, 128) ||
+      !this.isNullableText(row.sourceId, 128) ||
+      !this.isNullableText(row.sourceProvider, 32) ||
+      !this.isNullableText(row.sourceDomain, 253) ||
+      !this.isNullableText(row.sourceBaseUrl, 512) ||
+      !this.isNullableBoolean(row.sourceIsActive) ||
+      !this.isNullableText(row.credentialId, 128) ||
+      !this.isNullableText(row.credentialProvider, 32) ||
+      !this.isNullableBoolean(row.credentialIsActive) ||
+      !this.isNullableText(row.auditId, 128) ||
+      !this.isNullableDigest(row.auditRequestDigest) ||
+      !this.isNullableDigest(row.auditConfigDigest) ||
+      !this.isNullableDigest(row.auditBindingDigest) ||
+      !this.isNullableDigest(row.auditClaimDigest)
+    ) {
+      throw new ServiceUnavailableException(
+        'Invalid staged Langame onboarding reconciliation receipt',
+      );
+    }
+
+    return {
+      receiptId: row.receiptId,
+      status,
+      expiresAt,
+      consumedAt,
+      configDigest: row.configDigest,
+      bindingDigest: row.bindingDigest,
+      activationRequestId: row.activationRequestId,
+      activationRequestDigest: row.activationRequestDigest,
+      claimId: row.claimId,
+      resolvedClaimId: row.resolvedClaimId,
+      externalDomain: row.externalDomain,
+      externalClubId: row.externalClubId,
+      claimDigest: row.claimDigest,
+      activatedAt,
+      storeExternalProvider: row.storeExternalProvider,
+      storeExternalDomain: row.storeExternalDomain,
+      storeExternalClubId: row.storeExternalClubId,
+      storeIntegrationSourceId: row.storeIntegrationSourceId,
+      sourceId: row.sourceId,
+      sourceProvider: row.sourceProvider,
+      sourceDomain: row.sourceDomain,
+      sourceBaseUrl: row.sourceBaseUrl,
+      sourceIsActive: row.sourceIsActive,
+      credentialId: row.credentialId,
+      credentialProvider: row.credentialProvider,
+      credentialIsActive: row.credentialIsActive,
+      auditId: row.auditId,
+      auditRequestDigest: row.auditRequestDigest,
+      auditConfigDigest: row.auditConfigDigest,
+      auditBindingDigest: row.auditBindingDigest,
+      auditClaimDigest: row.auditClaimDigest,
+      auditEventAt,
+    };
+  }
+
   private normalizeLangameDomain(value: unknown) {
     const domain = this.requiredText(value, 'Langame domain', 253)
       .replace(/^https?:\/\//i, '')
@@ -698,6 +1093,29 @@ export class LangameOnboardingStagedService {
     return value instanceof Date && !Number.isNaN(value.getTime())
       ? value
       : null;
+  }
+
+  private isNullableText(
+    value: unknown,
+    maxLength: number,
+  ): value is string | null {
+    return (
+      value === null ||
+      (typeof value === 'string' &&
+        value.length > 0 &&
+        value.length <= maxLength)
+    );
+  }
+
+  private isNullableDigest(value: unknown): value is string | null {
+    return (
+      value === null ||
+      (typeof value === 'string' && DIGEST_PATTERN.test(value))
+    );
+  }
+
+  private isNullableBoolean(value: unknown): value is boolean | null {
+    return value === null || typeof value === 'boolean';
   }
 
   private requiredRequestId(value: unknown) {

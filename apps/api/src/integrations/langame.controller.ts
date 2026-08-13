@@ -30,6 +30,7 @@ import { LangameSyncService } from './langame-sync.service';
 import {
   LangameOnboardingStagedService,
   type LangameOnboardingActivationDto,
+  type LangameOnboardingReconciliationDto,
   type LangameOnboardingStagedPreviewDto,
   type LangameOnboardingStatusDto,
 } from './langame-onboarding-staged.service';
@@ -144,6 +145,14 @@ export class LangameController {
     @Body() dto: LangameOnboardingStatusDto,
   ) {
     return this.langameOnboardingStagedService.status(user, dto);
+  }
+
+  @Post('onboarding/reconcile')
+  reconcileOnboarding(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: LangameOnboardingReconciliationDto,
+  ) {
+    return this.langameOnboardingStagedService.reconcile(user, dto);
   }
 
   @Get('sync-jobs/:id/discrepancy-log')

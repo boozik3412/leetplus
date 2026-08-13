@@ -24,6 +24,7 @@ const EXTERNAL_CLUB_ID = "42";
 const PREVIEW_PATH = "/api/integrations/langame/onboarding/preview";
 const ACTIVATE_PATH = "/api/integrations/langame/onboarding/activate";
 const STATUS_PATH = "/api/integrations/langame/onboarding/status";
+const RECONCILE_PATH = "/api/integrations/langame/onboarding/reconcile";
 
 const WEB_APP_ROOT = fileURLToPath(new URL("../app", import.meta.url));
 const API_CONTROLLER = fileURLToPath(
@@ -102,14 +103,16 @@ function prepareStatus() {
   });
 }
 
-test("keeps CURRENT188 BFF dormant and declares only reconcile and initial sync missing", () => {
+function prepareReconciliation() {
+  return prepareLangameCurrent188BffRequest({
+    request: commandRequest(RECONCILE_PATH, activationBody),
+    cookieAccessToken: TOKEN,
+  });
+}
+
+test("keeps CURRENT188 BFF dormant and declares only initial sync missing", () => {
   assert.equal(LANGAME_CURRENT188_BFF_CANDIDATE_ACTIVE, false);
   assert.deepEqual(LANGAME_CURRENT188_BFF_BLOCKERS, {
-    RECONCILE: {
-      operation: "RECONCILE",
-      available: false,
-      reasonCode: "LANGAME_CURRENT188_RECONCILE_API_MISSING",
-    },
     INITIAL_READ_ONLY_SYNC: {
       operation: "INITIAL_READ_ONLY_SYNC",
       available: false,
@@ -231,6 +234,25 @@ test("prepares only exact same-origin cookie-backed staged status", async () => 
       credentials: "omit",
     },
   });
+});
+
+test("prepares exact activation-bound reconciliation without provider work", async () => {
+  const prepared = await prepareReconciliation();
+
+  assert.equal(prepared.route, "RECONCILE");
+  assert.equal(
+    prepared.upstreamPath,
+    "/integrations/langame/onboarding/reconcile",
+  );
+  assert.deepEqual(prepared.requestBinding, {
+    requestId: REQUEST_ID,
+    activationReceiptId: RECEIPT_ID,
+    storeId: STORE_ID,
+  });
+  assert.deepEqual(JSON.parse(prepared.init.body), activationBody);
+  assert.equal(prepared.init.cache, "no-store");
+  assert.equal(prepared.init.redirect, "error");
+  assert.equal(prepared.init.credentials, "omit");
 });
 
 test("fails closed before forwarding inexact route, origin, auth, media type, or body", async () => {
@@ -575,6 +597,61 @@ test("projects exact not-configured and pending staged status variants", async (
   }
 });
 
+test("projects only exact activation reconciliation outcomes", async () => {
+  const prepared = await prepareReconciliation();
+  const activated = {
+    contractVersion: CONTRACT,
+    receiptId: RECEIPT_ID,
+    storeId: STORE_ID,
+    outcome: "ACTIVATED",
+    consumedAt: "2026-08-05T12:10:00.000Z",
+    claimDigest: BINDING_DIGEST,
+    retryActivationAllowed: false,
+    externalSyncStarted: false,
+    initialReadOnlySyncAvailable: false,
+    productionReconciliationAllowed: false,
+  };
+  const notApplied = {
+    ...activated,
+    outcome: "NOT_APPLIED",
+    consumedAt: null,
+    claimDigest: null,
+    retryActivationAllowed: true,
+  };
+  const expired = {
+    ...notApplied,
+    outcome: "EXPIRED",
+    retryActivationAllowed: false,
+  };
+
+  for (const receipt of [activated, notApplied, expired]) {
+    const projected = await projectLangameCurrent188UpstreamResponse(
+      prepared,
+      Response.json(receipt, { status: 201 }),
+    );
+    assert.deepEqual(await projected.json(), receipt);
+    assertPrivate(projected);
+  }
+
+  for (const invalid of [
+    { ...activated, storeId: "another-store" },
+    { ...activated, receiptId: "99999999-9999-4999-8999-999999999999" },
+    { ...activated, retryActivationAllowed: true },
+    { ...notApplied, claimDigest: BINDING_DIGEST },
+    { ...expired, retryActivationAllowed: true },
+    { ...activated, externalSyncStarted: true },
+    { ...activated, productionReconciliationAllowed: true },
+  ]) {
+    await assert.rejects(
+      projectLangameCurrent188UpstreamResponse(
+        prepared,
+        Response.json(invalid, { status: 201 }),
+      ),
+      /LANGAME_CURRENT188_RECONCILIATION_RESPONSE_INVALID/,
+    );
+  }
+});
+
 test("sanitizes and bounds upstream failures", async () => {
   const prepared = await preparePreview();
   const projected = await projectLangameCurrent188UpstreamResponse(
@@ -604,7 +681,7 @@ test("sanitizes and bounds upstream failures", async () => {
   );
 });
 
-test("pins preview, activate and status while reconcile and initial sync stay absent", async () => {
+test("pins preview, activate, status and reconcile while initial sync stays absent", async () => {
   const [controller, service] = await Promise.all([
     readFile(API_CONTROLLER, "utf8"),
     readFile(API_STAGED_SERVICE, "utf8"),
@@ -619,11 +696,13 @@ test("pins preview, activate and status while reconcile and initial sync stay ab
     ["Post", "preview"],
     ["Post", "activate"],
     ["Post", "status"],
+    ["Post", "reconcile"],
   ]);
   for (const methodName of [
     "previewOnboarding",
     "activateOnboarding",
     "getOnboardingStatus",
+    "reconcileOnboarding",
   ]) {
     const methodStart = controller.indexOf(`${methodName}(`);
     assert.notEqual(methodStart, -1);
@@ -631,26 +710,28 @@ test("pins preview, activate and status while reconcile and initial sync stay ab
     const metadata = controller.slice(decoratorStart, methodStart);
     assert.match(
       metadata,
-      /@Post\('onboarding\/(?:preview|activate|status)'\)/,
+      /@Post\('onboarding\/(?:preview|activate|status|reconcile)'\)/,
     );
     assert.doesNotMatch(metadata, /@HttpCode\(/);
   }
   assert.doesNotMatch(
     controller,
-    /['"]onboarding\/(?:reconcile|initial-read-only-sync)['"]/,
+    /['"]onboarding\/initial-read-only-sync['"]/,
   );
   assert.match(service, /activationAvailable:\s*false/);
   assert.match(service, /externalSyncStarted:\s*false/g);
   assert.match(service, /initialReadOnlySyncAvailable:\s*false/);
   assert.match(service, /productionActivationAllowed:\s*false/);
   assert.match(service, /productionStatusAllowed:\s*false/);
+  assert.match(service, /productionReconciliationAllowed:\s*false/);
   assert.match(service, /CURRENT188 status is not production-authorized/);
   assert.match(service, /CURRENT188 activation is not production-authorized/);
+  assert.match(service, /CURRENT188 reconciliation is not production-authorized/);
   assert.match(service, /FreshStoreScopeService/);
   assert.equal(
     (service.match(/freshStoreScopeService\.assertNetwork\(user\)/g) ?? [])
       .length,
-    3,
+    4,
   );
 });
 
@@ -691,10 +772,16 @@ test("remains unimported while the active settings form and BFF stay legacy", as
   ]);
   assert.match(settingsRoute, /export async function GET/);
   assert.match(settingsRoute, /export async function PUT/);
-  assert.doesNotMatch(settingsRoute, /onboarding\/(?:preview|activate|status)/);
+  assert.doesNotMatch(
+    settingsRoute,
+    /onboarding\/(?:preview|activate|status|reconcile)/,
+  );
   assert.match(settingsForm, /\/api\/integrations\/langame\/settings/);
   assert.match(settingsForm, /method:\s*["']PUT["']/);
-  assert.doesNotMatch(settingsForm, /onboarding\/(?:preview|activate|status)/);
+  assert.doesNotMatch(
+    settingsForm,
+    /onboarding\/(?:preview|activate|status|reconcile)/,
+  );
 });
 
 test("does not map provider writes, generic sync, or unattended jobs", async () => {

@@ -26,6 +26,7 @@ const langameIntegrationManagementPaths = new Set([
   '/integrations/langame/onboarding/preview',
   '/integrations/langame/onboarding/activate',
   '/integrations/langame/onboarding/status',
+  '/integrations/langame/onboarding/reconcile',
   '/integrations/langame/routes-diagnostics',
   '/integrations/langame/service-diagnostics',
   '/integrations/langame/endpoint-profile-diagnostics',

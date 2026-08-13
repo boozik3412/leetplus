@@ -57,6 +57,19 @@ const activationBindingDigest = hmacDigest([
   '42',
   configDigest,
 ]);
+const activationRequestDigest = hmacDigest([
+  'LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1',
+  'ACTIVATE',
+  networkUser.tenantId,
+  networkUser.id,
+  'receipt-00000001',
+  'activate-request-0001',
+  configDigest,
+  activationBindingDigest,
+  'store-00000001',
+  '443.langame.ru',
+  '42',
+]);
 
 describe('LangameOnboardingStagedService', () => {
   const prisma = {
@@ -104,6 +117,9 @@ describe('LangameOnboardingStagedService', () => {
         return 'true';
       }
       if (key === 'LANGAME_STAGED_ONBOARDING_STATUS_CURRENT188_ENABLED') {
+        return 'true';
+      }
+      if (key === 'LANGAME_STAGED_ONBOARDING_RECONCILE_CURRENT188_ENABLED') {
         return 'true';
       }
       return undefined;
@@ -583,6 +599,210 @@ describe('LangameOnboardingStagedService', () => {
     expect(prisma.store.findFirst).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
+
+  it('keeps reconciliation independently default-off before database access', async () => {
+    config.get.mockImplementation((key: string) => {
+      if (key === 'LANGAME_STAGED_ONBOARDING_FOUNDATION_ENABLED') return 'true';
+      if (key === 'LANGAME_STAGED_ONBOARDING_HMAC_SECRET') return hmacSecret;
+      return undefined;
+    });
+
+    await expect(
+      service.reconcile(networkUser, validActivation()),
+    ).rejects.toThrow('CURRENT188 reconciliation adapter is disabled');
+    expect(prisma.store.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('rejects CURRENT188 reconciliation in a production environment', async () => {
+    config.get.mockImplementation((key: string) => {
+      if (key === 'NODE_ENV') return 'production';
+      if (key === 'LANGAME_STAGED_ONBOARDING_RECONCILE_CURRENT188_ENABLED') {
+        return 'true';
+      }
+      return undefined;
+    });
+
+    await expect(
+      service.reconcile(networkUser, validActivation()),
+    ).rejects.toThrow('CURRENT188 reconciliation is not production-authorized');
+    expect(prisma.store.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('proves an exact activation request was not applied without provider effects', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-05T12:05:00.000Z'));
+    prisma.$queryRaw.mockResolvedValue([
+      reconciliationRow({ status: 'PENDING' }),
+    ]);
+
+    await expect(
+      service.reconcile(networkUser, validActivation()),
+    ).resolves.toEqual({
+      contractVersion: 'LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1',
+      receiptId: 'receipt-00000001',
+      storeId: 'store-00000001',
+      outcome: 'NOT_APPLIED',
+      consumedAt: null,
+      claimDigest: null,
+      retryActivationAllowed: true,
+      externalSyncStarted: false,
+      initialReadOnlySyncAvailable: false,
+      productionReconciliationAllowed: false,
+    });
+    const reconcileQuery = prisma.$queryRaw.mock.calls[0]?.[0] as
+      | { values?: unknown[] }
+      | undefined;
+    expect(reconcileQuery?.values).toEqual([
+      'tenant-00000001',
+      'actor-user-0001',
+      'receipt-00000001',
+      'store-00000001',
+    ]);
+    expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
+    expect(encryption.encrypt).not.toHaveBeenCalled();
+  });
+
+  it('fails closed to expired when the not-applied receipt is stale', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-05T12:16:00.000Z'));
+    prisma.$queryRaw.mockResolvedValue([
+      reconciliationRow({ status: 'PENDING' }),
+    ]);
+
+    await expect(
+      service.reconcile(networkUser, validActivation()),
+    ).resolves.toMatchObject({
+      outcome: 'EXPIRED',
+      retryActivationAllowed: false,
+      externalSyncStarted: false,
+      initialReadOnlySyncAvailable: false,
+      productionReconciliationAllowed: false,
+    });
+  });
+
+  it('proves activated only when receipt, claim, store, source, credential and audit agree', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      reconciliationRow({
+        status: 'CONSUMED',
+        consumedAt: new Date('2026-08-05T12:10:00.000Z'),
+        activationRequestId: 'activate-request-0001',
+        activationRequestDigest,
+        claimId: 'claim-00000001',
+        resolvedClaimId: 'claim-00000001',
+        externalDomain: '443.langame.ru',
+        externalClubId: '42',
+        claimDigest: activationBindingDigest,
+        activatedAt: new Date('2026-08-05T12:10:00.000Z'),
+        storeExternalProvider: 'LANGAME',
+        storeExternalDomain: '443.langame.ru',
+        storeExternalClubId: '42',
+        storeIntegrationSourceId: 'source-00000001',
+        sourceId: 'source-00000001',
+        sourceProvider: 'LANGAME',
+        sourceDomain: '443.langame.ru',
+        sourceBaseUrl: 'https://443.langame.ru/public_api',
+        sourceIsActive: true,
+        credentialId: 'credential-00000001',
+        credentialProvider: 'LANGAME',
+        credentialIsActive: true,
+        auditId: 'audit-00000001',
+        auditRequestDigest: activationRequestDigest,
+        auditConfigDigest: configDigest,
+        auditBindingDigest: activationBindingDigest,
+        auditClaimDigest: activationBindingDigest,
+        auditEventAt: new Date('2026-08-05T12:10:00.000Z'),
+      }),
+    ]);
+
+    await expect(
+      service.reconcile(networkUser, validActivation()),
+    ).resolves.toEqual({
+      contractVersion: 'LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1',
+      receiptId: 'receipt-00000001',
+      storeId: 'store-00000001',
+      outcome: 'ACTIVATED',
+      consumedAt: '2026-08-05T12:10:00.000Z',
+      claimDigest: activationBindingDigest,
+      retryActivationAllowed: false,
+      externalSyncStarted: false,
+      initialReadOnlySyncAvailable: false,
+      productionReconciliationAllowed: false,
+    });
+  });
+
+  it('rejects partial, foreign or over-broad reconciliation evidence', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        ...reconciliationRow({ status: 'PENDING' }),
+        auditId: 'partial-audit',
+        credentialCiphertext: 'must-not-leak',
+      },
+    ]);
+
+    await expect(
+      service.reconcile(networkUser, validActivation()),
+    ).rejects.toThrow(
+      'Invalid staged Langame onboarding reconciliation receipt',
+    );
+  });
+
+  it('rejects missing, ambiguous or digest-inconsistent reconciliation evidence', async () => {
+    for (const rows of [
+      [],
+      [
+        reconciliationRow({ status: 'PENDING' }),
+        reconciliationRow({ status: 'PENDING' }),
+      ],
+      [
+        reconciliationRow({
+          status: 'CONSUMED',
+          consumedAt: new Date('2026-08-05T12:10:00.000Z'),
+          activationRequestId: 'activate-request-0001',
+          activationRequestDigest,
+          claimId: 'claim-00000001',
+          resolvedClaimId: 'claim-00000001',
+          externalDomain: '443.langame.ru',
+          externalClubId: '42',
+          claimDigest: activationBindingDigest,
+          activatedAt: new Date('2026-08-05T12:10:00.000Z'),
+          storeExternalProvider: 'LANGAME',
+          storeExternalDomain: '443.langame.ru',
+          storeExternalClubId: '42',
+          storeIntegrationSourceId: 'source-00000001',
+          sourceId: 'source-00000001',
+          sourceProvider: 'LANGAME',
+          sourceDomain: '443.langame.ru',
+          sourceBaseUrl: 'https://443.langame.ru/public_api',
+          sourceIsActive: true,
+          credentialId: 'credential-00000001',
+          credentialProvider: 'LANGAME',
+          credentialIsActive: true,
+          auditId: 'audit-00000001',
+          auditRequestDigest: 'a'.repeat(64),
+          auditConfigDigest: configDigest,
+          auditBindingDigest: activationBindingDigest,
+          auditClaimDigest: activationBindingDigest,
+          auditEventAt: new Date('2026-08-05T12:10:00.000Z'),
+        }),
+      ],
+    ]) {
+      prisma.$queryRaw.mockResolvedValueOnce(rows);
+      await expect(
+        service.reconcile(networkUser, validActivation()),
+      ).rejects.toThrow(
+        'Invalid staged Langame onboarding reconciliation receipt',
+      );
+    }
+  });
+
+  it('denies STORES reconciliation before configuration and database access', async () => {
+    await expect(
+      service.reconcile(storeUser, validActivation()),
+    ).rejects.toThrow('Network access is required');
+    expect(config.get).not.toHaveBeenCalled();
+    expect(prisma.store.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
 });
 
 function validPreview() {
@@ -609,6 +829,44 @@ function validActivation() {
     storeId: 'store-00000001',
     domain: '443.langame.ru',
     externalClubId: '42',
+  };
+}
+
+function reconciliationRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    receiptId: 'receipt-00000001',
+    status: 'PENDING',
+    expiresAt: new Date('2026-08-05T12:15:00.000Z'),
+    consumedAt: null,
+    configDigest,
+    bindingDigest: activationBindingDigest,
+    activationRequestId: null,
+    activationRequestDigest: null,
+    claimId: null,
+    resolvedClaimId: null,
+    externalDomain: null,
+    externalClubId: null,
+    claimDigest: null,
+    activatedAt: null,
+    storeExternalProvider: null,
+    storeExternalDomain: null,
+    storeExternalClubId: null,
+    storeIntegrationSourceId: null,
+    sourceId: null,
+    sourceProvider: null,
+    sourceDomain: null,
+    sourceBaseUrl: null,
+    sourceIsActive: null,
+    credentialId: null,
+    credentialProvider: null,
+    credentialIsActive: null,
+    auditId: null,
+    auditRequestDigest: null,
+    auditConfigDigest: null,
+    auditBindingDigest: null,
+    auditClaimDigest: null,
+    auditEventAt: null,
+    ...overrides,
   };
 }
 

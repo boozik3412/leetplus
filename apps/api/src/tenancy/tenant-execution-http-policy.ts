@@ -101,6 +101,10 @@ const READ_REQUESTS: ReadonlyArray<{
     path: /^\/integrations\/langame\/onboarding\/status$/,
   },
   {
+    method: 'POST',
+    path: /^\/integrations\/langame\/onboarding\/reconcile$/,
+  },
+  {
     method: 'GET',
     path: /^\/integrations\/langame\/routes-diagnostics$/,
   },

@@ -8,6 +8,8 @@ const ACTIVATE_BROWSER_PATH =
   "/api/integrations/langame/onboarding/activate" as const;
 const STATUS_BROWSER_PATH =
   "/api/integrations/langame/onboarding/status" as const;
+const RECONCILE_BROWSER_PATH =
+  "/api/integrations/langame/onboarding/reconcile" as const;
 const B2B_TOKEN_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 const STORE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -36,6 +38,7 @@ const ACTIVATE_INPUT_KEYS = [
   "storeId",
 ] as const;
 const STATUS_INPUT_KEYS = ["storeId"] as const;
+const RECONCILE_INPUT_KEYS = ACTIVATE_INPUT_KEYS;
 const PREVIEW_RESPONSE_KEYS = [
   "activationAvailable",
   "bindingDigest",
@@ -76,20 +79,27 @@ const STATUS_RESPONSE_KEYS = [
   "status",
   "storeId",
 ] as const;
+const RECONCILE_RESPONSE_KEYS = [
+  "claimDigest",
+  "consumedAt",
+  "contractVersion",
+  "externalSyncStarted",
+  "initialReadOnlySyncAvailable",
+  "outcome",
+  "productionReconciliationAllowed",
+  "receiptId",
+  "retryActivationAllowed",
+  "storeId",
+] as const;
 
 export const LANGAME_CURRENT188_BFF_CANDIDATE_ACTIVE = false as const;
 
 /**
- * These operations deliberately have no guessed HTTP mapping. CURRENT188 has
- * no exact reconcile/initial-sync API contract, and the generic
- * legacy sync endpoints are not a safe substitute for a receipt-bound flow.
+ * Initial sync deliberately has no guessed HTTP mapping. The generic legacy
+ * sync endpoints are not a safe substitute for an explicitly confirmed,
+ * receipt-bound initial read-only sync.
  */
 export const LANGAME_CURRENT188_BFF_BLOCKERS = Object.freeze({
-  RECONCILE: Object.freeze({
-    operation: "RECONCILE" as const,
-    available: false as const,
-    reasonCode: "LANGAME_CURRENT188_RECONCILE_API_MISSING",
-  }),
   INITIAL_READ_ONLY_SYNC: Object.freeze({
     operation: "INITIAL_READ_ONLY_SYNC" as const,
     available: false as const,
@@ -97,7 +107,11 @@ export const LANGAME_CURRENT188_BFF_BLOCKERS = Object.freeze({
   }),
 });
 
-export type LangameCurrent188BffRoute = "PREVIEW" | "ACTIVATE" | "STATUS";
+export type LangameCurrent188BffRoute =
+  | "PREVIEW"
+  | "ACTIVATE"
+  | "STATUS"
+  | "RECONCILE";
 
 export type LangameCurrent188PreparedRequest = Readonly<{
   route: LangameCurrent188BffRoute;
@@ -109,7 +123,8 @@ export type LangameCurrent188PreparedRequest = Readonly<{
   upstreamPath:
     | "/integrations/langame/onboarding/preview"
     | "/integrations/langame/onboarding/activate"
-    | "/integrations/langame/onboarding/status";
+    | "/integrations/langame/onboarding/status"
+    | "/integrations/langame/onboarding/reconcile";
   init: Readonly<{
     method: "POST";
     headers: Readonly<Record<string, string>>;
@@ -239,6 +254,20 @@ export async function projectLangameCurrent188UpstreamResponse(
       EXACT_NEST_POST_STATUS,
     );
   }
+  if (prepared.route === "RECONCILE") {
+    const expectedReceiptId = prepared.requestBinding.activationReceiptId;
+    if (!expectedReceiptId) {
+      fail(502, "LANGAME_CURRENT188_PREPARED_BINDING_INVALID");
+    }
+    return safeJsonResponse(
+      parseReconciliationResponse(
+        value,
+        expectedReceiptId,
+        prepared.requestBinding.storeId,
+      ),
+      EXACT_NEST_POST_STATUS,
+    );
+  }
   fail(502, "LANGAME_CURRENT188_RESPONSE_ROUTE_INVALID");
 }
 
@@ -272,6 +301,14 @@ function resolveRoute(request: Request): LangameCurrent188BffRoute {
     url.hash === ""
   ) {
     return "STATUS";
+  }
+  if (
+    request.method === "POST" &&
+    url.pathname === RECONCILE_BROWSER_PATH &&
+    url.search === "" &&
+    url.hash === ""
+  ) {
+    return "RECONCILE";
   }
   fail(404, "LANGAME_CURRENT188_ROUTE_DENIED");
 }
@@ -349,6 +386,13 @@ function normalizeStatusInput(value: unknown) {
   return { storeId: requiredStoreId(value.storeId) };
 }
 
+function normalizeReconciliationInput(value: unknown) {
+  if (!hasExactKeys(value, RECONCILE_INPUT_KEYS)) {
+    fail(400, "LANGAME_CURRENT188_RECONCILIATION_BODY_INVALID");
+  }
+  return normalizeActivationInput(value);
+}
+
 function normalizePreparedInput(
   route: LangameCurrent188BffRoute,
   value: unknown,
@@ -380,6 +424,15 @@ function normalizePreparedInput(
       storeId: body.storeId,
     };
   }
+  if (route === "RECONCILE") {
+    const body = normalizeReconciliationInput(value);
+    return {
+      body,
+      requestId: body.requestId,
+      activationReceiptId: body.receiptId,
+      storeId: body.storeId,
+    };
+  }
   fail(404, "LANGAME_CURRENT188_ROUTE_DENIED");
 }
 
@@ -392,6 +445,9 @@ function resolveUpstreamPath(route: LangameCurrent188BffRoute) {
   }
   if (route === "STATUS") {
     return "/integrations/langame/onboarding/status" as const;
+  }
+  if (route === "RECONCILE") {
+    return "/integrations/langame/onboarding/reconcile" as const;
   }
   fail(404, "LANGAME_CURRENT188_ROUTE_DENIED");
 }
@@ -564,6 +620,66 @@ function parseStatusResponse(value: unknown, expectedStoreId: string) {
     reconciliationAvailable: false as const,
     initialReadOnlySyncAvailable: false as const,
     productionStatusAllowed: false as const,
+  };
+}
+
+function parseReconciliationResponse(
+  value: unknown,
+  expectedReceiptId: string,
+  expectedStoreId: string,
+) {
+  if (
+    !hasExactKeys(value, RECONCILE_RESPONSE_KEYS) ||
+    value.contractVersion !== CURRENT188_CONTRACT ||
+    value.receiptId !== expectedReceiptId ||
+    value.storeId !== expectedStoreId ||
+    !["ACTIVATED", "NOT_APPLIED", "EXPIRED"].includes(
+      typeof value.outcome === "string" ? value.outcome : "",
+    ) ||
+    typeof value.retryActivationAllowed !== "boolean" ||
+    value.externalSyncStarted !== false ||
+    value.initialReadOnlySyncAvailable !== false ||
+    value.productionReconciliationAllowed !== false
+  ) {
+    fail(502, "LANGAME_CURRENT188_RECONCILIATION_RESPONSE_INVALID");
+  }
+
+  if (value.outcome === "ACTIVATED") {
+    if (value.retryActivationAllowed) {
+      fail(502, "LANGAME_CURRENT188_RECONCILIATION_RESPONSE_INVALID");
+    }
+    return {
+      contractVersion: CURRENT188_CONTRACT,
+      receiptId: expectedReceiptId,
+      storeId: expectedStoreId,
+      outcome: "ACTIVATED" as const,
+      consumedAt: requiredIsoDate(value.consumedAt),
+      claimDigest: requiredResponseDigest(value.claimDigest),
+      retryActivationAllowed: false as const,
+      externalSyncStarted: false as const,
+      initialReadOnlySyncAvailable: false as const,
+      productionReconciliationAllowed: false as const,
+    };
+  }
+
+  if (
+    value.consumedAt !== null ||
+    value.claimDigest !== null ||
+    value.retryActivationAllowed !== (value.outcome === "NOT_APPLIED")
+  ) {
+    fail(502, "LANGAME_CURRENT188_RECONCILIATION_RESPONSE_INVALID");
+  }
+  return {
+    contractVersion: CURRENT188_CONTRACT,
+    receiptId: expectedReceiptId,
+    storeId: expectedStoreId,
+    outcome: value.outcome as "NOT_APPLIED" | "EXPIRED",
+    consumedAt: null,
+    claimDigest: null,
+    retryActivationAllowed: value.outcome === "NOT_APPLIED",
+    externalSyncStarted: false as const,
+    initialReadOnlySyncAvailable: false as const,
+    productionReconciliationAllowed: false as const,
   };
 }
 

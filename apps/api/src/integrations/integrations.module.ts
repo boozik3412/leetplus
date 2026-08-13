@@ -10,6 +10,7 @@ import { LangameClient } from './langame.client';
 import { LangameController } from './langame.controller';
 import { LangameDailySyncService } from './langame-daily-sync.service';
 import { LangameOnboardingStagedService } from './langame-onboarding-staged.service';
+import { LangameInitialSyncPreflightCurrent188Service } from './langame-initial-sync-preflight-current188.service';
 import { LangameScheduledController } from './langame-scheduled.controller';
 import { LangameSettingsService } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
@@ -25,6 +26,7 @@ import { SecretEncryptionService } from './secret-encryption.service';
     GuestIdentityResolverService,
     LangameDailySyncService,
     LangameOnboardingStagedService,
+    LangameInitialSyncPreflightCurrent188Service,
     LangameSettingsService,
     LangameSyncService,
     SecretEncryptionService,

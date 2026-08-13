@@ -28,6 +28,10 @@ import {
 } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
 import {
+  LangameInitialSyncPreflightCurrent188Service,
+  type LangameInitialSyncPreflightCurrent188Dto,
+} from './langame-initial-sync-preflight-current188.service';
+import {
   LangameOnboardingStagedService,
   type LangameOnboardingActivationDto,
   type LangameOnboardingReconciliationDto,
@@ -47,6 +51,7 @@ export class LangameController {
   constructor(
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameOnboardingStagedService: LangameOnboardingStagedService,
+    private readonly langameInitialSyncPreflightCurrent188Service: LangameInitialSyncPreflightCurrent188Service,
     private readonly langameSyncService: LangameSyncService,
     private readonly guestDataFoundationService: GuestDataFoundationService,
     private readonly businessSnapshotService: BusinessSnapshotService,
@@ -153,6 +158,17 @@ export class LangameController {
     @Body() dto: LangameOnboardingReconciliationDto,
   ) {
     return this.langameOnboardingStagedService.reconcile(user, dto);
+  }
+
+  @Post('onboarding/initial-sync/preflight')
+  preflightInitialSync(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: LangameInitialSyncPreflightCurrent188Dto,
+  ) {
+    return this.langameInitialSyncPreflightCurrent188Service.preflight(
+      user,
+      dto,
+    );
   }
 
   @Get('sync-jobs/:id/discrepancy-log')

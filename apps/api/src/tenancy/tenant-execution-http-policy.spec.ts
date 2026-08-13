@@ -64,6 +64,7 @@ describe('tenant execution HTTP policy', () => {
     ['POST', '/guests/gamification/bonus-ledger/dispatch'],
     ['POST', '/guests/gamification/log/profiles/profile-1/sync'],
     ['POST', '/guests/gamification/log/profiles/profile-1/relink'],
+    ['POST', '/integrations/langame/onboarding/initial-sync/preflight'],
   ])('classifies %s %s as OUTBOUND', (method, path) => {
     expect(resolveTenantExecutionHttpAccess({ method, path })).toMatchObject({
       action: 'OUTBOUND',
@@ -204,6 +205,20 @@ describe('tenant execution HTTP policy', () => {
         TenantModule.GAMIFICATION,
         TenantModule.STAFF,
       ].map((module) => ({ module, action: 'READ' })),
+    );
+  });
+
+  it('requires OUTBOUND integration and assortment entitlements for initial sync preflight', () => {
+    expect(
+      resolveTenantExecutionHttpRequirements({
+        method: 'POST',
+        path: '/integrations/langame/onboarding/initial-sync/preflight',
+      }),
+    ).toEqual(
+      [TenantModule.INTEGRATIONS, TenantModule.ASSORTMENT].map((module) => ({
+        module,
+        action: 'OUTBOUND',
+      })),
     );
   });
 

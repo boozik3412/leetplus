@@ -264,6 +264,7 @@ describe('RolesGuard', () => {
     ['POST', '/integrations/langame/onboarding/activate'],
     ['POST', '/integrations/langame/onboarding/status'],
     ['POST', '/integrations/langame/onboarding/reconcile'],
+    ['POST', '/integrations/langame/onboarding/initial-sync/preflight'],
     ['GET', '/integrations/langame/routes-diagnostics'],
     ['GET', '/integrations/langame/service-diagnostics'],
     ['POST', '/integrations/langame/endpoint-profile-diagnostics'],

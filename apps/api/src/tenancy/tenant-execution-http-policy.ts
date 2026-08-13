@@ -72,6 +72,7 @@ const EXACT_MODULE_REQUESTS: ReadonlyArray<{
 ];
 
 const OUTBOUND_REQUESTS: readonly RegExp[] = [
+  /^\/integrations\/langame\/onboarding\/initial-sync\/preflight$/,
   /^\/stores\/address-suggestions$/,
   /^\/stores\/address-geocode$/,
   /^\/stores\/yandex-maps-geocode$/,
@@ -125,6 +126,11 @@ const CROSS_MODULE_REQUESTS: ReadonlyArray<{
   path: RegExp;
   modules: readonly TenantModule[];
 }> = [
+  {
+    method: 'POST',
+    path: /^\/integrations\/langame\/onboarding\/initial-sync\/preflight$/,
+    modules: [TenantModule.INTEGRATIONS, TenantModule.ASSORTMENT],
+  },
   {
     method: 'POST',
     path: /^\/integrations\/langame\/sync$/,

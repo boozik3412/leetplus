@@ -12,7 +12,7 @@ Route Handler или UI-компонент его не импортирует. �
 
 ## Реально поддерживаемая поверхность
 
-Кандидат отображает четыре существующих API-контракта:
+Кандидат отображает пять существующих API-контрактов:
 
 - `POST /api/integrations/langame/onboarding/preview` →
   `POST /integrations/langame/onboarding/preview`;
@@ -21,7 +21,9 @@ Route Handler или UI-компонент его не импортирует. �
 - `POST /api/integrations/langame/onboarding/status` →
   `POST /integrations/langame/onboarding/status`;
 - `POST /api/integrations/langame/onboarding/reconcile` →
-  `POST /integrations/langame/onboarding/reconcile`.
+  `POST /integrations/langame/onboarding/reconcile`;
+- `POST /api/integrations/langame/onboarding/initial-sync/preflight` →
+  `POST /integrations/langame/onboarding/initial-sync/preflight`.
 
 Transport сам читает исходный browser `Request`, принимает только B2B JWT из
 HttpOnly cookie, exact same-origin `POST` без query/hash, canonical
@@ -51,11 +53,22 @@ IntegrationSource, credential и audit event. `NOT_APPLIED` либо `EXPIRED`
 credential read, повторная activation и sync отсутствуют. Adapter отдельно
 default-off и production-denied.
 
-## Явно отсутствующие контракты
+INITIAL-SYNC PREFLIGHT принимает exact activation receipt и отдельный
+`syncRequestId`, требует `INTEGRATIONS + ASSORTMENT OUTBOUND` entitlements и
+повторно сверяет receipt/claim/Store/source/credential/audit до и после сети.
+Разрешены ровно три bounded provider `GET`: `/clubs/list`, `/products/list` и
+`/goods/list?club_id=<selected>`. После provider reads полномочия NETWORK
+повторно подтверждаются до повторной проверки persisted binding. Preflight
+возвращает только HMAC-bound counts и digests, не сохраняет provider payload,
+не создаёт Product/Inventory/
+IntegrationSyncJob и не выполняет provider write. Adapter default-off и
+production-denied.
+
+## Явно отсутствующий контракт
 
 Кандидат не выдумывает HTTP-маршрут для последней обязательной стадии:
 
-1. отдельно подтверждаемый initial read-only sync.
+1. persisted approval и идемпотентный selected-Store initial platform import.
 
 Legacy `POST /integrations/langame/sync` и foundation sync не являются
 безопасной заменой этим стадиям. До их реализации UI cutover запрещён.
@@ -81,15 +94,16 @@ pnpm --filter web typecheck
 Status exact-SHA evidence: commit `f5b94c2e…`, CI `31668745439` —
 `3/3 SUCCESS`, artifact `sha256:a42d200b…71a5c2`; full API
 `3028 passed / 2 todo`, Web status BFF `15/15`. Текущий local reconcile
-increment: API service `30/30`, policy/service/role `170/170`, targeted
-Langame `201/201`, Web BFF `17/17`; exact-SHA CI для reconcile ещё обязателен.
+increment принят exact SHA `4e2c9b29…`, CI `31671722614`, artifact
+`sha256:7bea44f8…003b1`: targeted Langame `201/201`, tenant execution
+`986/986`, full API `3038 + 2 todo`, Web BFF `17/17`. Текущий local preflight:
+targeted Langame API `219/219`, Web BFF `19/19`; exact-SHA CI ещё обязателен.
 Stale `PENDING` до прохода expirer проецируется fail-closed как `EXPIRED`.
 Текущие проверки также подтверждают, что кандидат остаётся неимпортированным
 активными routes и что API содержит ровно fresh-authority `preview`, `activate`
-и production-denied `status`/`reconcile` с Nest default `201`, но не
-отсутствующий initial-sync этап. Для `status` это уже принято exact-SHA CI; для
-`reconcile` такое доказательство должно быть получено после фиксации текущего
-increment.
+и production-denied `status`/`reconcile`/`initial-sync/preflight` с Nest default
+`201`, но не отсутствующий persisted import этап. Для status/reconcile это уже
+принято exact-SHA CI; preflight остаётся local до следующего clean SHA.
 
 ## Условия активации
 
@@ -98,8 +112,9 @@ increment.
 1. CURRENT188 включён в reviewed canonical migration lineage;
 2. application runtime role имеет только необходимые execute-grants и проходит
    OID/manifest attestation;
-3. реализован отдельно подтверждаемый initial read-only sync, а status и
-   reconcile получают canonical execute-only grants и production authorization;
+3. реализован persisted approval и идемпотентный selected-Store initial import,
+   а status/reconcile/preflight получают canonical execute-only grants и
+   production authorization;
 4. production-like apply/rollback/zero-diff rehearsal зелёный;
 5. новый Route Handler и UI импортируют candidate атомарно, а legacy write/sync
    path удаляется или остаётся явно закрытым;

@@ -10,6 +10,8 @@ const STATUS_BROWSER_PATH =
   "/api/integrations/langame/onboarding/status" as const;
 const RECONCILE_BROWSER_PATH =
   "/api/integrations/langame/onboarding/reconcile" as const;
+const INITIAL_SYNC_PREFLIGHT_BROWSER_PATH =
+  "/api/integrations/langame/onboarding/initial-sync/preflight" as const;
 const B2B_TOKEN_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 const STORE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -39,6 +41,15 @@ const ACTIVATE_INPUT_KEYS = [
 ] as const;
 const STATUS_INPUT_KEYS = ["storeId"] as const;
 const RECONCILE_INPUT_KEYS = ACTIVATE_INPUT_KEYS;
+const INITIAL_SYNC_PREFLIGHT_INPUT_KEYS = [
+  "activationRequestId",
+  "configDigest",
+  "domain",
+  "externalClubId",
+  "receiptId",
+  "storeId",
+  "syncRequestId",
+] as const;
 const PREVIEW_RESPONSE_KEYS = [
   "activationAvailable",
   "bindingDigest",
@@ -91,19 +102,39 @@ const RECONCILE_RESPONSE_KEYS = [
   "retryActivationAllowed",
   "storeId",
 ] as const;
+const INITIAL_SYNC_PREFLIGHT_RESPONSE_KEYS = [
+  "approvalDigest",
+  "contractVersion",
+  "initialReadOnlySyncAvailable",
+  "platformImportStarted",
+  "productionPreflightAllowed",
+  "providerReadsPerformed",
+  "providerWritesStarted",
+  "readSet",
+  "readSetDigest",
+  "receiptId",
+  "status",
+  "storeId",
+  "syncRequestId",
+] as const;
+const INITIAL_SYNC_PREFLIGHT_READ_SET_KEYS = [
+  "inventoryItems",
+  "products",
+  "selectedClubs",
+] as const;
 
 export const LANGAME_CURRENT188_BFF_CANDIDATE_ACTIVE = false as const;
 
 /**
- * Initial sync deliberately has no guessed HTTP mapping. The generic legacy
- * sync endpoints are not a safe substitute for an explicitly confirmed,
- * receipt-bound initial read-only sync.
+ * The bounded receipt-bound provider-read preflight is mapped below. The
+ * actual database import is still absent; generic legacy sync endpoints are
+ * not a safe substitute.
  */
 export const LANGAME_CURRENT188_BFF_BLOCKERS = Object.freeze({
-  INITIAL_READ_ONLY_SYNC: Object.freeze({
-    operation: "INITIAL_READ_ONLY_SYNC" as const,
+  INITIAL_READ_ONLY_SYNC_IMPORT: Object.freeze({
+    operation: "INITIAL_READ_ONLY_SYNC_IMPORT" as const,
     available: false as const,
-    reasonCode: "LANGAME_CURRENT188_INITIAL_READ_ONLY_SYNC_API_MISSING",
+    reasonCode: "LANGAME_CURRENT188_INITIAL_READ_ONLY_SYNC_IMPORT_MISSING",
   }),
 });
 
@@ -111,7 +142,8 @@ export type LangameCurrent188BffRoute =
   | "PREVIEW"
   | "ACTIVATE"
   | "STATUS"
-  | "RECONCILE";
+  | "RECONCILE"
+  | "INITIAL_SYNC_PREFLIGHT";
 
 export type LangameCurrent188PreparedRequest = Readonly<{
   route: LangameCurrent188BffRoute;
@@ -124,7 +156,8 @@ export type LangameCurrent188PreparedRequest = Readonly<{
     | "/integrations/langame/onboarding/preview"
     | "/integrations/langame/onboarding/activate"
     | "/integrations/langame/onboarding/status"
-    | "/integrations/langame/onboarding/reconcile";
+    | "/integrations/langame/onboarding/reconcile"
+    | "/integrations/langame/onboarding/initial-sync/preflight";
   init: Readonly<{
     method: "POST";
     headers: Readonly<Record<string, string>>;
@@ -268,6 +301,22 @@ export async function projectLangameCurrent188UpstreamResponse(
       EXACT_NEST_POST_STATUS,
     );
   }
+  if (prepared.route === "INITIAL_SYNC_PREFLIGHT") {
+    const expectedReceiptId = prepared.requestBinding.activationReceiptId;
+    const expectedSyncRequestId = prepared.requestBinding.requestId;
+    if (!expectedReceiptId || !expectedSyncRequestId) {
+      fail(502, "LANGAME_CURRENT188_PREPARED_BINDING_INVALID");
+    }
+    return safeJsonResponse(
+      parseInitialSyncPreflightResponse(
+        value,
+        expectedReceiptId,
+        expectedSyncRequestId,
+        prepared.requestBinding.storeId,
+      ),
+      EXACT_NEST_POST_STATUS,
+    );
+  }
   fail(502, "LANGAME_CURRENT188_RESPONSE_ROUTE_INVALID");
 }
 
@@ -309,6 +358,14 @@ function resolveRoute(request: Request): LangameCurrent188BffRoute {
     url.hash === ""
   ) {
     return "RECONCILE";
+  }
+  if (
+    request.method === "POST" &&
+    url.pathname === INITIAL_SYNC_PREFLIGHT_BROWSER_PATH &&
+    url.search === "" &&
+    url.hash === ""
+  ) {
+    return "INITIAL_SYNC_PREFLIGHT";
   }
   fail(404, "LANGAME_CURRENT188_ROUTE_DENIED");
 }
@@ -393,6 +450,26 @@ function normalizeReconciliationInput(value: unknown) {
   return normalizeActivationInput(value);
 }
 
+function normalizeInitialSyncPreflightInput(value: unknown) {
+  if (!hasExactKeys(value, INITIAL_SYNC_PREFLIGHT_INPUT_KEYS)) {
+    fail(400, "LANGAME_CURRENT188_INITIAL_SYNC_PREFLIGHT_BODY_INVALID");
+  }
+  const activationRequestId = requiredRequestId(value.activationRequestId);
+  const syncRequestId = requiredRequestId(value.syncRequestId);
+  if (activationRequestId === syncRequestId) {
+    fail(400, "LANGAME_CURRENT188_INITIAL_SYNC_PREFLIGHT_BODY_INVALID");
+  }
+  return {
+    receiptId: requiredReceiptId(value.receiptId),
+    activationRequestId,
+    syncRequestId,
+    configDigest: requiredDigest(value.configDigest),
+    storeId: requiredStoreId(value.storeId),
+    domain: requiredDomain(value.domain),
+    externalClubId: requiredExternalClubId(value.externalClubId),
+  };
+}
+
 function normalizePreparedInput(
   route: LangameCurrent188BffRoute,
   value: unknown,
@@ -433,6 +510,15 @@ function normalizePreparedInput(
       storeId: body.storeId,
     };
   }
+  if (route === "INITIAL_SYNC_PREFLIGHT") {
+    const body = normalizeInitialSyncPreflightInput(value);
+    return {
+      body,
+      requestId: body.syncRequestId,
+      activationReceiptId: body.receiptId,
+      storeId: body.storeId,
+    };
+  }
   fail(404, "LANGAME_CURRENT188_ROUTE_DENIED");
 }
 
@@ -448,6 +534,9 @@ function resolveUpstreamPath(route: LangameCurrent188BffRoute) {
   }
   if (route === "RECONCILE") {
     return "/integrations/langame/onboarding/reconcile" as const;
+  }
+  if (route === "INITIAL_SYNC_PREFLIGHT") {
+    return "/integrations/langame/onboarding/initial-sync/preflight" as const;
   }
   fail(404, "LANGAME_CURRENT188_ROUTE_DENIED");
 }
@@ -681,6 +770,60 @@ function parseReconciliationResponse(
     initialReadOnlySyncAvailable: false as const,
     productionReconciliationAllowed: false as const,
   };
+}
+
+function parseInitialSyncPreflightResponse(
+  value: unknown,
+  expectedReceiptId: string,
+  expectedSyncRequestId: string,
+  expectedStoreId: string,
+) {
+  if (
+    !hasExactKeys(value, INITIAL_SYNC_PREFLIGHT_RESPONSE_KEYS) ||
+    value.contractVersion !== CURRENT188_CONTRACT ||
+    value.receiptId !== expectedReceiptId ||
+    value.syncRequestId !== expectedSyncRequestId ||
+    value.storeId !== expectedStoreId ||
+    value.status !== "READY" ||
+    value.providerReadsPerformed !== 3 ||
+    value.providerWritesStarted !== false ||
+    value.platformImportStarted !== false ||
+    value.initialReadOnlySyncAvailable !== false ||
+    value.productionPreflightAllowed !== false ||
+    !hasExactKeys(value.readSet, INITIAL_SYNC_PREFLIGHT_READ_SET_KEYS) ||
+    value.readSet.selectedClubs !== 1 ||
+    !boundedNonNegativeInteger(value.readSet.products, 50_000) ||
+    !boundedNonNegativeInteger(value.readSet.inventoryItems, 50_000)
+  ) {
+    fail(502, "LANGAME_CURRENT188_INITIAL_SYNC_PREFLIGHT_RESPONSE_INVALID");
+  }
+  return {
+    contractVersion: CURRENT188_CONTRACT,
+    receiptId: expectedReceiptId,
+    storeId: expectedStoreId,
+    syncRequestId: expectedSyncRequestId,
+    status: "READY" as const,
+    approvalDigest: requiredResponseDigest(value.approvalDigest),
+    readSetDigest: requiredResponseDigest(value.readSetDigest),
+    readSet: {
+      selectedClubs: 1 as const,
+      products: value.readSet.products,
+      inventoryItems: value.readSet.inventoryItems,
+    },
+    providerReadsPerformed: 3 as const,
+    providerWritesStarted: false as const,
+    platformImportStarted: false as const,
+    initialReadOnlySyncAvailable: false as const,
+    productionPreflightAllowed: false as const,
+  };
+}
+
+function boundedNonNegativeInteger(value: unknown, maximum: number) {
+  return (
+    Number.isSafeInteger(value) &&
+    Number(value) >= 0 &&
+    Number(value) <= maximum
+  );
 }
 
 function requiredApiKey(value: unknown): string {

@@ -287,6 +287,87 @@ describe('LangameClient', () => {
     expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(10_000);
   });
 
+  it('rejects a diagnostic response once its streamed body exceeds the requested bound', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: true,
+          data: [{ id: 1, name: 'oversized' }],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      client.getDiagnosticEndpoint(
+        'https://443.langame.ru/public_api',
+        'test-key',
+        '/products/list',
+        {},
+        { timeoutMs: 5_000, maxResponseBytes: 16 },
+      ),
+    ).rejects.toThrow('Langame response exceeded limit');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps a caller-supplied diagnostic response bound at four MiB', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      new Response('{}', {
+        headers: { 'content-length': String(4 * 1024 * 1024 + 1) },
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      client.getDiagnosticEndpoint(
+        'https://443.langame.ru/public_api',
+        'test-key',
+        '/products/list',
+        {},
+        { timeoutMs: 5_000, maxResponseBytes: Number.MAX_SAFE_INTEGER },
+      ),
+    ).rejects.toThrow('Langame response exceeded limit');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the diagnostic timeout active while reading the response body', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetchMock = jest.fn(
+        (_url: string | URL | Request, init?: RequestInit) => {
+          const signal = init?.signal;
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              signal?.addEventListener(
+                'abort',
+                () => controller.error(new Error('body aborted')),
+                { once: true },
+              );
+            },
+          });
+          return Promise.resolve(new Response(body));
+        },
+      );
+      global.fetch = fetchMock as typeof fetch;
+
+      const pending = expect(
+        client.getDiagnosticEndpoint(
+          'https://443.langame.ru/public_api',
+          'test-key',
+          '/products/list',
+          {},
+          { timeoutMs: 50, maxResponseBytes: 1024 },
+        ),
+      ).rejects.toThrow('body aborted');
+      await jest.advanceTimersByTimeAsync(50);
+      await pending;
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('posts master balance updates by phone with X-Request-Token and no public API key header', async () => {
     const fetchMock = jest.fn().mockResolvedValueOnce(
       responseWithBody({
@@ -376,8 +457,7 @@ describe('LangameClient', () => {
       expect(init?.signal).toBeDefined();
     }
     expect(setTimeoutSpy.mock.calls.map(([, delay]) => delay)).toEqual([
-      30_000,
-      30_000,
+      30_000, 30_000,
     ]);
   });
 

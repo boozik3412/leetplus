@@ -16,6 +16,7 @@ const TOKEN = `header.${"a".repeat(40)}.signature`;
 const API_KEY = "synthetic-current188-api-key";
 const RECEIPT_ID = "01890f34-2abc-4def-8abc-0123456789ab";
 const REQUEST_ID = "langame-request-0001";
+const SYNC_REQUEST_ID = "langame-sync-request-0001";
 const CONFIG_DIGEST = "a".repeat(64);
 const BINDING_DIGEST = "b".repeat(64);
 const STORE_ID = "store_current188_b1";
@@ -25,6 +26,8 @@ const PREVIEW_PATH = "/api/integrations/langame/onboarding/preview";
 const ACTIVATE_PATH = "/api/integrations/langame/onboarding/activate";
 const STATUS_PATH = "/api/integrations/langame/onboarding/status";
 const RECONCILE_PATH = "/api/integrations/langame/onboarding/reconcile";
+const INITIAL_SYNC_PREFLIGHT_PATH =
+  "/api/integrations/langame/onboarding/initial-sync/preflight";
 
 const WEB_APP_ROOT = fileURLToPath(new URL("../app", import.meta.url));
 const API_CONTROLLER = fileURLToPath(
@@ -36,6 +39,12 @@ const API_CONTROLLER = fileURLToPath(
 const API_STAGED_SERVICE = fileURLToPath(
   new URL(
     "../../../api/src/integrations/langame-onboarding-staged.service.ts",
+    import.meta.url,
+  ),
+);
+const API_INITIAL_SYNC_PREFLIGHT_SERVICE = fileURLToPath(
+  new URL(
+    "../../../api/src/integrations/langame-initial-sync-preflight-current188.service.ts",
     import.meta.url,
   ),
 );
@@ -58,6 +67,15 @@ const activationBody = {
 };
 
 const statusBody = { storeId: STORE_ID };
+const initialSyncPreflightBody = {
+  receiptId: RECEIPT_ID,
+  activationRequestId: REQUEST_ID,
+  syncRequestId: SYNC_REQUEST_ID,
+  configDigest: CONFIG_DIGEST,
+  storeId: STORE_ID,
+  domain: DOMAIN,
+  externalClubId: EXTERNAL_CLUB_ID,
+};
 
 function commandRequest(
   pathname: string,
@@ -110,13 +128,23 @@ function prepareReconciliation() {
   });
 }
 
-test("keeps CURRENT188 BFF dormant and declares only initial sync missing", () => {
+function prepareInitialSyncPreflight() {
+  return prepareLangameCurrent188BffRequest({
+    request: commandRequest(
+      INITIAL_SYNC_PREFLIGHT_PATH,
+      initialSyncPreflightBody,
+    ),
+    cookieAccessToken: TOKEN,
+  });
+}
+
+test("keeps CURRENT188 BFF dormant and declares only the initial import missing", () => {
   assert.equal(LANGAME_CURRENT188_BFF_CANDIDATE_ACTIVE, false);
   assert.deepEqual(LANGAME_CURRENT188_BFF_BLOCKERS, {
-    INITIAL_READ_ONLY_SYNC: {
-      operation: "INITIAL_READ_ONLY_SYNC",
+    INITIAL_READ_ONLY_SYNC_IMPORT: {
+      operation: "INITIAL_READ_ONLY_SYNC_IMPORT",
       available: false,
-      reasonCode: "LANGAME_CURRENT188_INITIAL_READ_ONLY_SYNC_API_MISSING",
+      reasonCode: "LANGAME_CURRENT188_INITIAL_READ_ONLY_SYNC_IMPORT_MISSING",
     },
   });
 
@@ -253,6 +281,33 @@ test("prepares exact activation-bound reconciliation without provider work", asy
   assert.equal(prepared.init.cache, "no-store");
   assert.equal(prepared.init.redirect, "error");
   assert.equal(prepared.init.credentials, "omit");
+});
+
+test("prepares exact receipt-bound initial sync preflight", async () => {
+  const prepared = await prepareInitialSyncPreflight();
+
+  assert.equal(prepared.route, "INITIAL_SYNC_PREFLIGHT");
+  assert.equal(
+    prepared.upstreamPath,
+    "/integrations/langame/onboarding/initial-sync/preflight",
+  );
+  assert.deepEqual(prepared.requestBinding, {
+    requestId: SYNC_REQUEST_ID,
+    activationReceiptId: RECEIPT_ID,
+    storeId: STORE_ID,
+  });
+  assert.deepEqual(JSON.parse(prepared.init.body), initialSyncPreflightBody);
+
+  await assert.rejects(
+    prepareLangameCurrent188BffRequest({
+      request: commandRequest(INITIAL_SYNC_PREFLIGHT_PATH, {
+        ...initialSyncPreflightBody,
+        syncRequestId: REQUEST_ID,
+      }),
+      cookieAccessToken: TOKEN,
+    }),
+    /LANGAME_CURRENT188_INITIAL_SYNC_PREFLIGHT_BODY_INVALID/,
+  );
 });
 
 test("fails closed before forwarding inexact route, origin, auth, media type, or body", async () => {
@@ -652,6 +707,53 @@ test("projects only exact activation reconciliation outcomes", async () => {
   }
 });
 
+test("projects only the bounded initial sync preflight receipt", async () => {
+  const prepared = await prepareInitialSyncPreflight();
+  const receipt = {
+    contractVersion: CONTRACT,
+    receiptId: RECEIPT_ID,
+    storeId: STORE_ID,
+    syncRequestId: SYNC_REQUEST_ID,
+    status: "READY",
+    approvalDigest: "c".repeat(64),
+    readSetDigest: "d".repeat(64),
+    readSet: {
+      selectedClubs: 1,
+      products: 120,
+      inventoryItems: 80,
+    },
+    providerReadsPerformed: 3,
+    providerWritesStarted: false,
+    platformImportStarted: false,
+    initialReadOnlySyncAvailable: false,
+    productionPreflightAllowed: false,
+  };
+
+  const projected = await projectLangameCurrent188UpstreamResponse(
+    prepared,
+    Response.json(receipt, { status: 201 }),
+  );
+  assert.deepEqual(await projected.json(), receipt);
+  assertPrivate(projected);
+
+  for (const invalid of [
+    { ...receipt, storeId: "another-store" },
+    { ...receipt, syncRequestId: REQUEST_ID },
+    { ...receipt, providerReadsPerformed: 4 },
+    { ...receipt, platformImportStarted: true },
+    { ...receipt, readSet: { ...receipt.readSet, selectedClubs: 2 } },
+    { ...receipt, readSet: { ...receipt.readSet, products: 50_001 } },
+  ]) {
+    await assert.rejects(
+      projectLangameCurrent188UpstreamResponse(
+        prepared,
+        Response.json(invalid, { status: 201 }),
+      ),
+      /LANGAME_CURRENT188_INITIAL_SYNC_PREFLIGHT_RESPONSE_INVALID/,
+    );
+  }
+});
+
 test("sanitizes and bounds upstream failures", async () => {
   const prepared = await preparePreview();
   const projected = await projectLangameCurrent188UpstreamResponse(
@@ -681,10 +783,11 @@ test("sanitizes and bounds upstream failures", async () => {
   );
 });
 
-test("pins preview, activate, status and reconcile while initial sync stays absent", async () => {
-  const [controller, service] = await Promise.all([
+test("pins preview through bounded initial-sync preflight while import stays absent", async () => {
+  const [controller, service, preflightService] = await Promise.all([
     readFile(API_CONTROLLER, "utf8"),
     readFile(API_STAGED_SERVICE, "utf8"),
+    readFile(API_INITIAL_SYNC_PREFLIGHT_SERVICE, "utf8"),
   ]);
   const onboardingRoutes = [
     ...controller.matchAll(
@@ -697,12 +800,14 @@ test("pins preview, activate, status and reconcile while initial sync stays abse
     ["Post", "activate"],
     ["Post", "status"],
     ["Post", "reconcile"],
+    ["Post", "initial-sync/preflight"],
   ]);
   for (const methodName of [
     "previewOnboarding",
     "activateOnboarding",
     "getOnboardingStatus",
     "reconcileOnboarding",
+    "preflightInitialSync",
   ]) {
     const methodStart = controller.indexOf(`${methodName}(`);
     assert.notEqual(methodStart, -1);
@@ -710,14 +815,11 @@ test("pins preview, activate, status and reconcile while initial sync stays abse
     const metadata = controller.slice(decoratorStart, methodStart);
     assert.match(
       metadata,
-      /@Post\('onboarding\/(?:preview|activate|status|reconcile)'\)/,
+      /@Post\('onboarding\/(?:preview|activate|status|reconcile|initial-sync\/preflight)'\)/,
     );
     assert.doesNotMatch(metadata, /@HttpCode\(/);
   }
-  assert.doesNotMatch(
-    controller,
-    /['"]onboarding\/initial-read-only-sync['"]/,
-  );
+  assert.doesNotMatch(controller, /['"]onboarding\/initial-read-only-sync['"]/);
   assert.match(service, /activationAvailable:\s*false/);
   assert.match(service, /externalSyncStarted:\s*false/g);
   assert.match(service, /initialReadOnlySyncAvailable:\s*false/);
@@ -726,12 +828,30 @@ test("pins preview, activate, status and reconcile while initial sync stays abse
   assert.match(service, /productionReconciliationAllowed:\s*false/);
   assert.match(service, /CURRENT188 status is not production-authorized/);
   assert.match(service, /CURRENT188 activation is not production-authorized/);
-  assert.match(service, /CURRENT188 reconciliation is not production-authorized/);
+  assert.match(
+    service,
+    /CURRENT188 reconciliation is not production-authorized/,
+  );
   assert.match(service, /FreshStoreScopeService/);
   assert.equal(
     (service.match(/freshStoreScopeService\.assertNetwork\(user\)/g) ?? [])
       .length,
     4,
+  );
+  assert.match(preflightService, /providerWritesStarted:\s*false/);
+  assert.match(preflightService, /platformImportStarted:\s*false/);
+  assert.match(preflightService, /initialReadOnlySyncAvailable:\s*false/);
+  assert.match(
+    preflightService,
+    /CURRENT188 initial sync preflight is not production-authorized/,
+  );
+  assert.equal(
+    (
+      preflightService.match(
+        /freshStoreScopeService\.assertNetwork\(user\)/g,
+      ) ?? []
+    ).length,
+    2,
   );
 });
 
@@ -774,13 +894,13 @@ test("remains unimported while the active settings form and BFF stay legacy", as
   assert.match(settingsRoute, /export async function PUT/);
   assert.doesNotMatch(
     settingsRoute,
-    /onboarding\/(?:preview|activate|status|reconcile)/,
+    /onboarding\/(?:preview|activate|status|reconcile|initial-sync)/,
   );
   assert.match(settingsForm, /\/api\/integrations\/langame\/settings/);
   assert.match(settingsForm, /method:\s*["']PUT["']/);
   assert.doesNotMatch(
     settingsForm,
-    /onboarding\/(?:preview|activate|status|reconcile)/,
+    /onboarding\/(?:preview|activate|status|reconcile|initial-sync)/,
   );
 });
 

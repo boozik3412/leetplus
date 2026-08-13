@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.100                                        |
+| Версия           | 1.101                                        |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -95,9 +95,9 @@ enterprise-isolation option и не сокращает shared gates.
    bounded private responses and an explicit proof that no active Route
    Handler imports it.
    0e. [CURRENT188 dormant Langame Web BFF candidate](./langame-current188-bff-candidate.md) —
-   exact preview/activate/status/reconcile transport; все новые адаптеры
-   default-off и production-denied, а initial read-only sync остаётся явным
-   blocker; legacy external sync также
+   exact preview/activate/status/reconcile/initial-sync-preflight transport;
+   все новые адаптеры default-off и production-denied, а persisted selected-
+   Store import остаётся явным blocker; legacy external sync также
    fail-closed до credentials/provider/database effects.
    0e.1. [CURRENT188 legacy sync deny CI evidence](./langame-current188-legacy-sync-deny-ci-evidence-2026-08-13.md) —
    exact-SHA `3/3 SUCCESS`, SHA-bound artifact и доказательство, что external
@@ -105,6 +105,9 @@ enterprise-isolation option и не сокращает shared gates.
    0e.2. [CURRENT188 status CI evidence](./langame-current188-status-ci-evidence-2026-08-13.md) —
    exact-SHA `3/3 SUCCESS`, status tenant/store binding, fail-closed expiry,
    dormant Web BFF и SHA-bound artifact без production authority.
+   0e.3. [CURRENT188 reconcile CI evidence](./langame-current188-reconcile-ci-evidence-2026-08-13.md) —
+   exact-SHA `3/3 SUCCESS`, activation receipt/claim/Store/source/credential/
+   audit reconciliation, dormant Web BFF и SHA-bound artifact.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

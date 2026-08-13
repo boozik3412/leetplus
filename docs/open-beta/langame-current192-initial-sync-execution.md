@@ -48,6 +48,13 @@ facing, assortment role, mandatory flag и canonical grouping существую
 - platform writes не могут зафиксироваться без `COMPLETED`, потому что DML и
   terminal transition атомарны.
 
+Dormant application coordinator также default-off и production-denied. Он
+принимает только process-local branded plan, повторяет неоднозначный claim
+ровно один раз, а после неоднозначного execute сначала вызывает durable
+reconcile. Execute retry допустим только когда `CLAIMED` доказывает отсутствие
+committed business writes; после второго неоднозначного результата без
+terminal receipt coordinator требует operator review.
+
 ## Отсутствующая власть
 
 CURRENT192:
@@ -55,7 +62,7 @@ CURRENT192:
 - находится только в `successor-candidates`;
 - не импортирован Prisma schema;
 - не имеет PUBLIC/application/runtime grants;
-- не подключён к Nest module, route, BFF, UI или scheduler;
+- coordinator не подключён к Nest module, route, BFF, UI или scheduler;
 - не вызывает provider и не создаёт обычный IntegrationSyncJob;
 - не может выполняться в production.
 

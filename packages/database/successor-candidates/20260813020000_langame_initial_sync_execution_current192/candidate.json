@@ -8,7 +8,7 @@
     "LANGAME_INITIAL_SYNC_PLAN_CURRENT191_V1",
     "LANGAME_INITIAL_SYNC_APPROVAL_CURRENT191_V1"
   ],
-  "migrationSqlSha256": "59ac2b0f6344a65123b607fddf92b30f2b015f0d19124bb7a700af5943ab81d0",
+  "migrationSqlSha256": "42d03226dc7cfcc085c54bbcba96b6e65acc1c1261467e6c9121d8cc51d2e71e",
   "authorization": false,
   "canMutateProduction": false,
   "canActivateApplicationRoute": false,

@@ -355,6 +355,15 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
+  PERFORM 1
+  FROM public."LangameInitialSyncExecutionV1" AS prior_execution
+  WHERE prior_execution."approvalId" = approval."id"
+  FOR UPDATE;
+  IF FOUND THEN
+    RAISE EXCEPTION 'CURRENT192 initial sync approval was already claimed'
+      USING ERRCODE = '55000';
+  END IF;
+
   SELECT candidate.* INTO preflight
   FROM public."LangameInitialSyncPreflightV1" AS candidate
   WHERE candidate."id" = approval."preflightId"
@@ -863,7 +872,7 @@ BEGIN
      AND existing_product."externalProvider" = 'LANGAME'
      AND existing_product."externalDomain" = preflight."externalDomain"
      AND existing_product."externalProductId" = plan_inventory.external_id
-  ), upserted AS (
+  ), inserted AS (
     INSERT INTO public."InventorySnapshot" (
       "id", "tenantId", "storeId", "productId", "snapshotDate",
       "quantity", "externalProvider", "externalDomain", "externalClubId",
@@ -874,16 +883,22 @@ BEGIN
       resolved.quantity, 'LANGAME', preflight."externalDomain",
       preflight."externalClubId", server_now, server_now
     FROM resolved
-    ON CONFLICT ("tenantId", "storeId", "productId", "snapshotDate")
-    DO UPDATE SET
-      "quantity" = EXCLUDED."quantity",
-      "externalProvider" = EXCLUDED."externalProvider",
-      "externalDomain" = EXCLUDED."externalDomain",
-      "externalClubId" = EXCLUDED."externalClubId",
-      "updatedAt" = server_now
-    RETURNING 1
+    ON CONFLICT DO NOTHING
+  ), updated AS (
+    UPDATE public."InventorySnapshot" AS existing_snapshot
+    SET "quantity" = resolved.quantity,
+        "updatedAt" = server_now
+    FROM resolved
+    WHERE existing_snapshot."tenantId" = preflight."tenantId"
+      AND existing_snapshot."storeId" = preflight."storeId"
+      AND existing_snapshot."productId" = resolved.product_id
+      AND existing_snapshot."snapshotDate" = snapshot_at
+      AND existing_snapshot."externalProvider" = 'LANGAME'
+      AND existing_snapshot."externalDomain" = preflight."externalDomain"
+      AND existing_snapshot."externalClubId" = preflight."externalClubId"
+    RETURNING existing_snapshot."id"
   )
-  SELECT pg_catalog.count(*)::INTEGER INTO written_inventory FROM upserted;
+  SELECT pg_catalog.count(*)::INTEGER INTO written_inventory FROM updated;
 
   IF written_products <> execution."productsCount"
      OR written_inventory <> execution."inventoryCount"

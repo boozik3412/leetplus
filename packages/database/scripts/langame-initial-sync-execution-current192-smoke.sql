@@ -195,6 +195,23 @@ BEGIN
 END;
 $claim_replay_mismatch$;
 
+DO $approval_single_claim$
+BEGIN
+  BEGIN
+    PERFORM * FROM public.langame_initial_sync_claim_current192_v1(
+      'current192-execution-duplicate',
+      'current192-tenant-a', 'current192-user-a',
+      (SELECT "approvalId" FROM current192_approval),
+      'claim-request-duplicate', repeat('d', 64),
+      repeat('duplicate-token-192_', 3),
+      (SELECT plan_digest FROM current192_plan)
+    );
+    RAISE EXCEPTION 'CURRENT192 duplicate approval claim unexpectedly passed';
+  EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+  END;
+END;
+$approval_single_claim$;
+
 DO $assert_claim$
 BEGIN
   IF NOT EXISTS (
@@ -311,6 +328,123 @@ BEGIN
 END;
 $assert_execution$;
 
+-- A foreign/manual inventory row racing the selected Store/day must never be
+-- adopted or overwritten. Product DML and completion roll back together.
+CREATE TEMP TABLE current192_collision_plan AS
+WITH plan_text AS (
+  SELECT (
+    '["LANGAME_INITIAL_SYNC_PLAN_CURRENT191_V1",' ||
+    '{"tenantId":"current192-tenant-a","storeId":"current192-store-a",' ||
+    '"sourceId":"' || store."integrationSourceId" || '",' ||
+    '"domain":"443.langame.ru","externalClubId":"42"},' ||
+    '{"approvalDigest":"' || repeat('3', 64) || '",' ||
+    '"preflightReadSetDigest":"' || repeat('4', 64) || '"},' ||
+    '[{"externalProductId":"12","article":"LG-443.langame.ru-12",' ||
+    '"name":"Collision New","isActive":true}],' ||
+    '[{"externalProductId":"12","quantity":7}]]'
+  )::TEXT AS canonical_plan
+  FROM public."Store" AS store
+  WHERE store."id" = 'current192-store-a'
+)
+SELECT canonical_plan,
+  pg_catalog.encode(pg_catalog.sha256(
+    pg_catalog.convert_to(canonical_plan, 'UTF8')
+  ), 'hex') AS plan_digest
+FROM plan_text;
+
+SELECT * FROM public.langame_initial_sync_record_preflight_current191_v1(
+  'current192-preflight-collision',
+  'current192-tenant-a', 'current192-user-a', 'current192-receipt-a',
+  (SELECT "claimId" FROM public."LangameOnboardingStagedReceiptV1"
+   WHERE "id" = 'current192-receipt-a'),
+  'current192-store-a',
+  (SELECT "integrationSourceId" FROM public."Store"
+   WHERE "id" = 'current192-store-a'),
+  (SELECT source."credentialId" FROM public."Store" AS store
+   INNER JOIN public."IntegrationSource" AS source
+     ON source."id" = store."integrationSourceId"
+   WHERE store."id" = 'current192-store-a'),
+  'activate-request-19201', 'initial-sync-req-collision',
+  repeat('c', 64), repeat('e', 64), repeat('3', 64), repeat('4', 64),
+  (SELECT plan_digest FROM current192_collision_plan),
+  '443.langame.ru', '42', 1, 1
+);
+
+CREATE TEMP TABLE current192_collision_approval AS
+SELECT * FROM public.langame_initial_sync_confirm_current191_v1(
+  'current192-tenant-a', 'current192-user-a',
+  'current192-preflight-collision', 'confirm-request-collision',
+  repeat('5', 64), repeat('3', 64),
+  (SELECT plan_digest FROM current192_collision_plan)
+);
+
+INSERT INTO public."Product" (
+  "id", "tenantId", "article", "name", "purchasePrice", "salePrice",
+  "facing", "isActive", "assortmentRole", "isMandatory",
+  "externalProvider", "externalDomain", "externalProductId",
+  "createdAt", "updatedAt"
+) VALUES (
+  'current192-product-collision', 'current192-tenant-a',
+  'CUSTOM-COLLISION-12', 'Collision Old', 2, 3, 4, TRUE, 'CORE', TRUE,
+  'LANGAME', '443.langame.ru', '12', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+
+INSERT INTO public."InventorySnapshot" (
+  "id", "tenantId", "storeId", "productId", "snapshotDate", "quantity",
+  "externalProvider", "externalDomain", "externalClubId",
+  "createdAt", "updatedAt"
+) VALUES (
+  'current192-foreign-snapshot', 'current192-tenant-a',
+  'current192-store-a', 'current192-product-collision',
+  pg_catalog.date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC')
+    AT TIME ZONE 'UTC',
+  99, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+
+SELECT * FROM public.langame_initial_sync_claim_current192_v1(
+  'current192-execution-collision',
+  'current192-tenant-a', 'current192-user-a',
+  (SELECT "approvalId" FROM current192_collision_approval),
+  'claim-request-collision', repeat('6', 64),
+  repeat('collision-token-192_', 3),
+  (SELECT plan_digest FROM current192_collision_plan)
+);
+
+DO $foreign_snapshot_collision$
+BEGIN
+  BEGIN
+    PERFORM * FROM public.langame_initial_sync_execute_current192_v1(
+      'current192-tenant-a', 'current192-user-a',
+      'current192-execution-collision', repeat('collision-token-192_', 3),
+      'execute-req-collision', repeat('7', 64),
+      (SELECT canonical_plan FROM current192_collision_plan)
+    );
+    RAISE EXCEPTION 'CURRENT192 foreign snapshot collision unexpectedly passed';
+  EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+  END;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public."LangameInitialSyncExecutionV1"
+    WHERE "id" = 'current192-execution-collision' AND "status" = 'CLAIMED'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM public."Product"
+    WHERE "id" = 'current192-product-collision'
+      AND "article" = 'CUSTOM-COLLISION-12'
+      AND "name" = 'Collision Old' AND "purchasePrice" = 2
+      AND "salePrice" = 3 AND "facing" = 4
+  ) OR NOT EXISTS (
+    SELECT 1 FROM public."InventorySnapshot"
+    WHERE "id" = 'current192-foreign-snapshot'
+      AND "quantity" = 99 AND "externalProvider" IS NULL
+      AND "externalDomain" IS NULL AND "externalClubId" IS NULL
+  ) OR (SELECT pg_catalog.count(*)
+        FROM public."LangameInitialSyncExecutionEventV1"
+        WHERE "executionId" = 'current192-execution-collision') <> 1 THEN
+    RAISE EXCEPTION 'CURRENT192 foreign snapshot rollback assertion failed';
+  END IF;
+END;
+$foreign_snapshot_collision$;
+
 -- A second approved plan is claimed but never executed, then reconciled after
 -- a synthetic lease age. It must expire without adding business rows.
 SELECT * FROM public.langame_initial_sync_record_preflight_current191_v1(
@@ -367,7 +501,7 @@ BEGIN
         FROM public."LangameInitialSyncExecutionEventV1"
         WHERE "executionId" = 'current192-execution-expire') <> 2
   OR (SELECT pg_catalog.count(*) FROM public."InventorySnapshot"
-      WHERE "tenantId" = 'current192-tenant-a') <> 1 THEN
+      WHERE "tenantId" = 'current192-tenant-a') <> 2 THEN
     RAISE EXCEPTION 'CURRENT192 expiry assertion failed';
   END IF;
 END;

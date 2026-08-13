@@ -1,6 +1,6 @@
 # CURRENT194: persisted Langame runtime-attestation ledger
 
-Status: `EXACT-SHA CI ACCEPTED / DORMANT / PRODUCTION DENIED`.
+Status: `RESTART RECOVERY EXACT-SHA CI ACCEPTED / DORMANT / PRODUCTION DENIED`.
 
 CURRENT193 verifies a short-lived Ed25519-signed runtime receipt and proves the
 exact execute-only PostgreSQL role boundary. CURRENT194 persists the lifecycle
@@ -108,6 +108,12 @@ fixed terminal revoke RPC. The actual disposable PostgreSQL fixture reopens
 this separate owner-only path and observes the persisted replay. The focused
 CURRENT194 gate is locally `36/36`, including malformed-request cleanup;
 CURRENT193 remains `17/17`.
+
+Exact SHA `9baa29c39bd3a0023be287478327a8b492604d13` completed GitHub
+Actions run `31700945915` as `3/3 SUCCESS`. The PostgreSQL job exercised the
+fresh owner-only adapter against the persisted terminal row after the original
+session had closed. Artifact ID `9181448914`, digest
+`sha256:57fb23ac3078761a3ed6631936a902744bcca4c314d21b06a7f93f27420ddba6`.
 
 This foundation deliberately remains production-denied. It does not yet
 persist or coordinator-sign the revoke intent supplied by the caller, so it is

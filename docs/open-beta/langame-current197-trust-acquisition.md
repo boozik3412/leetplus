@@ -86,13 +86,28 @@ TLS authorization/hostname/certificate/SPKI/protocol/address/validity drift,
 proposal expiry before I/O, accessor zero-call и отсутствие DB/HTTP/secret/signer
 authority.
 
-Remote exact-SHA CI ещё не принят. Independently reviewed latest-byte acceptance
-остаётся следующим acceptance slice; disposable fixture использует собственную
-CA и loopback TLS server и не является live production evidence.
+Exact implementation commit:
+`83e3a72522ce1b93c46d50d8169390468305330d`.
+
+GitHub Actions run
+[`31732110067`](https://github.com/boozik3412/leetplus/actions/runs/31732110067)
+завершён `3/3 SUCCESS`:
+
+- Application checks — `SUCCESS`, включая actual TLS-only CURRENT197 gate;
+- Authority root trust gate — `SUCCESS`;
+- PostgreSQL migration smoke — `SUCCESS`.
+
+SHA-bound release artifact: ID `9193973557`, имя
+`leetplus-release-83e3a72522ce1b93c46d50d8169390468305330d`, digest
+`sha256:8c77b16b9697d9db505cca37afe099cfeccaf895036bf91e70bde936f0c1e82c`.
+
+Independently reviewed latest-byte acceptance остаётся следующим acceptance
+slice; disposable fixture использует собственную CA и loopback TLS server и не
+является live production evidence.
 
 ## Что остаётся до тестового доступа
 
-1. Принять CURRENT197 exact-SHA CI и independently reviewed latest-byte.
+1. Принять independently reviewed CURRENT197 latest-byte.
 2. Внести offline bootstrap public root CURRENT196 отдельным reviewed immutable
    release change — не через API/env/database.
 3. Реализовать one-time append-only enrollment/rotation/revocation ledger.

@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 13.08.2026
-- Версия: 2.60
+- Версия: 2.61
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -127,7 +127,8 @@ isolation и exact-SHA independent acceptance. Только после этог�
 заменяет restored-copy rehearsal, production-like admission, cutover GO и Gate 2
 для первого внешнего tenant.
 
-CURRENT197 protected acquisition foundation реализована локально. Она требует
+CURRENT197 protected acquisition foundation принята exact SHA
+`83e3a72522ce1b93c46d50d8169390468305330d`. Она требует
 exact branded CURRENT196 proposal, descriptor-bound читает два разных Ed25519
 public SPKI и CA certificate, сверяет signed fingerprints/bytes, затем имеет
 production-capable TLS-only handshake с DNS/public-address policy и exact
@@ -136,12 +137,13 @@ hostname/CA/leaf/SPKI/validity recheck. Proposal проверяется по с�
 disposable TLS-only fixture с CA-substitution negative дают `12/12`, composed
 CURRENT196/CURRENT197 `24/24`; все authority/access flags false.
 Production path физически закрыт, пока CURRENT196 bootstrap roots frozen-empty.
-Remote exact-SHA CI ещё не принят.
+GitHub Actions run `31732110067` завершён `3/3 SUCCESS`; artifact `9193973557`,
+digest
+`sha256:8c77b16b9697d9db505cca37afe099cfeccaf895036bf91e70bde936f0c1e82c`.
 
-Следующий P0-срез: remote exact-SHA CI и independent latest-byte review
-CURRENT197. После этого — отдельное immutable bootstrap-root enrollment
-изменение и append-only enrollment ledger; ни один из этих шагов сам по себе не
-разрешает внешний тест.
+Следующий P0-срез: independent latest-byte review CURRENT197, затем отдельное
+immutable bootstrap-root registry изменение и append-only enrollment ledger;
+ни один из этих шагов сам по себе не разрешает внешний тест.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

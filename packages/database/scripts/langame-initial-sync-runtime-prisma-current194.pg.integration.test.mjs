@@ -21,6 +21,7 @@ import {
   LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
   isLangameInitialSyncRuntimeBootstrapCurrent194,
   openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194,
+  recoverSyntheticLangameInitialSyncRuntimeRevokeCurrent194,
 } from "./langame-initial-sync-runtime-bootstrap-current194.mjs";
 import {
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_CONFIRMATION,
@@ -447,8 +448,13 @@ test(
         ),
       };
 
+      const signedBootstrapInput = bootstrapInput(
+        targetDatabaseOid,
+        ownerOid,
+        runtimeOid,
+      );
       session = await openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194(
-        bootstrapInput(targetDatabaseOid, ownerOid, runtimeOid),
+        signedBootstrapInput,
         rotatedPrismaConfig,
         LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
       );
@@ -474,6 +480,31 @@ test(
       assert.equal(session.snapshot().state, "CLOSED");
       assert.equal(session.snapshot().revokedAt === null, false);
       session = null;
+
+      const recovered =
+        await recoverSyntheticLangameInitialSyncRuntimeRevokeCurrent194(
+          signedBootstrapInput,
+          {
+            revocationReasonDigest: "1".repeat(64),
+            revokeRequestDigest: "f".repeat(64),
+            revokeRequestId: "revoke-request-current194-bootstrap-ci",
+          },
+          {
+            expectedDatabase: TARGET_DATABASE,
+            ownerDatabaseUrl: rotatedPrismaConfig.ownerDatabaseUrl,
+            ownerRoleName: OWNER_ROLE,
+          },
+          LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
+        );
+      assert.deepEqual(recovered, {
+        attestationId: "attestation-current194-bootstrap-ci",
+        authorization: false,
+        productionExecutionAllowed: false,
+        replayed: true,
+        revokedAt: recovered.revokedAt,
+        status: "REVOKED",
+      });
+      assert.match(recovered.revokedAt, /^\d{4}-\d{2}-\d{2}T/u);
 
       const verify = new Client({
         connectionString: pgUrl(base, TARGET_DATABASE),

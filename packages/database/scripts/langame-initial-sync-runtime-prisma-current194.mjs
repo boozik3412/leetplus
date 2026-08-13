@@ -9,6 +9,10 @@ export const LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_CONFIRMATION =
   "create-langame-current194-prisma-drivers-on-loopback-ci";
 export const LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_TEST_CONFIRMATION =
   "inject-langame-current194-prisma-drivers-for-unit-test";
+export const LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_CONFIRMATION =
+  "create-langame-current194-owner-revoke-recovery-on-loopback-ci";
+export const LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_TEST_CONFIRMATION =
+  "inject-langame-current194-owner-revoke-recovery-for-unit-test";
 
 const CONFIG_KEYS = Object.freeze(
   [
@@ -17,6 +21,9 @@ const CONFIG_KEYS = Object.freeze(
     "ownerRoleName",
     "runtimeDatabaseUrl",
   ].sort(),
+);
+const RECOVERY_CONFIG_KEYS = Object.freeze(
+  ["expectedDatabase", "ownerDatabaseUrl", "ownerRoleName"].sort(),
 );
 const CLIENT_KEYS = Object.freeze(["$disconnect", "$queryRaw"].sort());
 const REGISTER_KEYS = Object.freeze(
@@ -58,6 +65,19 @@ const REVOKE_KEYS = Object.freeze(
     "attestationId",
     "contract",
     "expectedPayloadDigest",
+    "revocationReasonDigest",
+    "revokeRequestDigest",
+    "revokeRequestId",
+  ].sort(),
+);
+const RECOVER_REVOKE_KEYS = Object.freeze(
+  [
+    "attestationId",
+    "databaseName",
+    "databaseOid",
+    "expectedPayloadDigest",
+    "ownerRoleName",
+    "ownerRoleOid",
     "revocationReasonDigest",
     "revokeRequestDigest",
     "revokeRequestId",
@@ -108,6 +128,7 @@ const SIGNING_KEY_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/u;
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]"]);
 const EXPECTED_SEARCH = "?schema=public&connect_timeout=5&socket_timeout=30";
 const BRANDED_PAIRS = new WeakSet();
+const BRANDED_RECOVERY_DRIVERS = new WeakSet();
 
 export class LangameInitialSyncRuntimePrismaCurrent194Error extends Error {
   constructor(code) {
@@ -258,6 +279,35 @@ function configuration(value) {
   });
 }
 
+function recoveryConfiguration(value) {
+  const config = exactRecord(
+    value,
+    RECOVERY_CONFIG_KEYS,
+    "CURRENT194_PRISMA_RECOVERY_CONFIG_INVALID",
+  );
+  if (
+    typeof config.expectedDatabase !== "string" ||
+    !SAFE_DATABASE_PATTERN.test(config.expectedDatabase) ||
+    !config.expectedDatabase.endsWith("_ci") ||
+    typeof config.ownerRoleName !== "string" ||
+    !SAFE_ROLE_PATTERN.test(config.ownerRoleName) ||
+    config.ownerRoleName === LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_ROLE
+  ) {
+    fail("CURRENT194_PRISMA_RECOVERY_CONFIG_INVALID");
+  }
+  const owner = connection(
+    config.ownerDatabaseUrl,
+    config.expectedDatabase,
+    config.ownerRoleName,
+    "CURRENT194_PRISMA_RECOVERY_OWNER_URL_INVALID",
+  );
+  return Object.freeze({
+    expectedDatabase: config.expectedDatabase,
+    ownerRoleName: config.ownerRoleName,
+    ownerUrl: owner.value,
+  });
+}
+
 function defaultClient(url) {
   return new PrismaClient({ datasourceUrl: url, log: [] });
 }
@@ -356,6 +406,29 @@ function revocation(value) {
     input.revokeRequestDigest === input.revocationReasonDigest
   ) {
     fail("CURRENT194_PRISMA_REVOKE_INPUT_INVALID");
+  }
+  return input;
+}
+
+function recoveryRevocation(value) {
+  const input = exactRecord(
+    value,
+    RECOVER_REVOKE_KEYS,
+    "CURRENT194_PRISMA_RECOVER_REVOKE_INPUT_INVALID",
+  );
+  if (
+    !ID_PATTERN.test(input.attestationId) ||
+    !SAFE_DATABASE_PATTERN.test(input.databaseName) ||
+    !positiveOid(input.databaseOid) ||
+    !SHA256_PATTERN.test(input.expectedPayloadDigest) ||
+    !SAFE_ROLE_PATTERN.test(input.ownerRoleName) ||
+    !positiveOid(input.ownerRoleOid) ||
+    !ID_PATTERN.test(input.revokeRequestId) ||
+    !SHA256_PATTERN.test(input.revokeRequestDigest) ||
+    !SHA256_PATTERN.test(input.revocationReasonDigest) ||
+    input.revokeRequestDigest === input.revocationReasonDigest
+  ) {
+    fail("CURRENT194_PRISMA_RECOVER_REVOKE_INPUT_INVALID");
   }
   return input;
 }
@@ -660,6 +733,78 @@ function createDrivers(config, ownerClientValue, runtimeClientValue) {
   return pair;
 }
 
+function createRecoveryDriver(config, ownerClient) {
+  let state = "NEW";
+  let binding = null;
+  let closePromise = null;
+  const recovery = Object.freeze({
+    async close() {
+      if (closePromise) return closePromise;
+      state = "CLOSING";
+      binding = null;
+      closePromise = Promise.resolve()
+        .then(() => ownerClient.$disconnect())
+        .then(
+          () => {
+            state = "CLOSED";
+          },
+          () => {
+            state = "CLOSED";
+            fail("CURRENT194_PRISMA_RECOVERY_DISCONNECT_FAILED");
+          },
+        );
+      return closePromise;
+    },
+    async recoverRevokeCurrent194(value) {
+      if (!["NEW", "RECOVERING_REVOKE"].includes(state)) {
+        fail("CURRENT194_PRISMA_RECOVER_REVOKE_STATE_INVALID");
+      }
+      const input = recoveryRevocation(value);
+      if (
+        input.databaseName !== config.expectedDatabase ||
+        input.ownerRoleName !== config.ownerRoleName
+      ) {
+        fail("CURRENT194_PRISMA_RECOVER_REVOKE_BINDING_INVALID");
+      }
+      if (
+        binding &&
+        canonicalRecoveryRevocation(binding) !==
+          canonicalRecoveryRevocation(input)
+      ) {
+        fail("CURRENT194_PRISMA_RECOVER_REVOKE_BINDING_INVALID");
+      }
+      state = "RECOVERING_REVOKE";
+      binding = input;
+      await assertIdentity(
+        ownerClient,
+        input.databaseName,
+        input.databaseOid,
+        input.ownerRoleName,
+        input.ownerRoleOid,
+      );
+      const rows = await ownerClient.$queryRaw(Prisma.sql`
+        SELECT * FROM public.langame_runtime_attestation_revoke_current194_v1(
+          ${input.attestationId}, ${input.expectedPayloadDigest},
+          ${input.revokeRequestId}, ${input.revokeRequestDigest},
+          ${input.revocationReasonDigest}
+        )
+      `);
+      if (
+        Array.isArray(rows) &&
+        rows.length === 1 &&
+        rows[0] !== null &&
+        typeof rows[0] === "object" &&
+        rows[0].status === "REVOKED"
+      ) {
+        state = "REVOKED";
+      }
+      return rows;
+    },
+  });
+  BRANDED_RECOVERY_DRIVERS.add(recovery);
+  return recovery;
+}
+
 function canonicalBinding(value) {
   return REGISTER_KEYS.map((key) => `${key}:${String(value[key])}`).join("\n");
 }
@@ -668,8 +813,18 @@ function canonicalRevocation(value) {
   return REVOKE_KEYS.map((key) => `${key}:${String(value[key])}`).join("\n");
 }
 
+function canonicalRecoveryRevocation(value) {
+  return RECOVER_REVOKE_KEYS.map((key) => `${key}:${String(value[key])}`).join(
+    "\n",
+  );
+}
+
 export function createLangameInitialSyncRuntimePrismaCurrent194() {
   fail("CURRENT194_PRISMA_PRODUCTION_DENIED");
+}
+
+export function createLangameInitialSyncRuntimeRevokeRecoveryCurrent194() {
+  fail("CURRENT194_PRISMA_RECOVERY_PRODUCTION_DENIED");
 }
 
 export function createSyntheticLangameInitialSyncRuntimePrismaCurrent194(
@@ -711,8 +866,53 @@ export function createLangameInitialSyncRuntimePrismaCurrent194ForTestOnly(
   );
 }
 
+export function createSyntheticLangameInitialSyncRuntimeRevokeRecoveryCurrent194(
+  configValue,
+  explicitConfirmation,
+) {
+  if (
+    arguments.length !== 2 ||
+    explicitConfirmation !==
+      LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_CONFIRMATION
+  ) {
+    fail("CURRENT194_PRISMA_RECOVERY_SYNTHETIC_DENIED");
+  }
+  const config = recoveryConfiguration(configValue);
+  return createRecoveryDriver(
+    config,
+    plainClient(defaultClient(config.ownerUrl)),
+  );
+}
+
+export function createLangameInitialSyncRuntimeRevokeRecoveryCurrent194ForTestOnly(
+  configValue,
+  ownerClientValue,
+  explicitConfirmation,
+) {
+  if (
+    arguments.length !== 3 ||
+    explicitConfirmation !==
+      LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_TEST_CONFIRMATION
+  ) {
+    fail("CURRENT194_PRISMA_RECOVERY_TEST_INJECTION_DENIED");
+  }
+  return createRecoveryDriver(
+    recoveryConfiguration(configValue),
+    exactClient(ownerClientValue),
+  );
+}
+
 export function isLangameInitialSyncRuntimePrismaCurrent194(value) {
   return (
     value !== null && typeof value === "object" && BRANDED_PAIRS.has(value)
+  );
+}
+
+export function isLangameInitialSyncRuntimeRevokeRecoveryCurrent194(value) {
+  return (
+    arguments.length === 1 &&
+    value !== null &&
+    typeof value === "object" &&
+    BRANDED_RECOVERY_DRIVERS.has(value)
   );
 }

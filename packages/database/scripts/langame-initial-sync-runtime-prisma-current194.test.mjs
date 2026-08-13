@@ -6,11 +6,15 @@ import { fileURLToPath } from "node:url";
 import {
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_CONFIRMATION,
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_CONTRACT,
+  LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_TEST_CONFIRMATION,
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_TEST_CONFIRMATION,
   createLangameInitialSyncRuntimePrismaCurrent194,
   createLangameInitialSyncRuntimePrismaCurrent194ForTestOnly,
+  createLangameInitialSyncRuntimeRevokeRecoveryCurrent194,
+  createLangameInitialSyncRuntimeRevokeRecoveryCurrent194ForTestOnly,
   createSyntheticLangameInitialSyncRuntimePrismaCurrent194,
   isLangameInitialSyncRuntimePrismaCurrent194,
+  isLangameInitialSyncRuntimeRevokeRecoveryCurrent194,
 } from "./langame-initial-sync-runtime-prisma-current194.mjs";
 
 const DATABASE = "leetplus_ci";
@@ -65,6 +69,17 @@ const revocation = Object.freeze({
   revocationReasonDigest: "a".repeat(64),
   revokeRequestDigest: "9".repeat(64),
   revokeRequestId: "revoke-request-current194",
+});
+const recoveryRevocation = Object.freeze({
+  attestationId: registration.attestationId,
+  databaseName: registration.databaseName,
+  databaseOid: registration.databaseOid,
+  expectedPayloadDigest: registration.payloadDigest,
+  ownerRoleName: registration.schemaOwnerRoleName,
+  ownerRoleOid: registration.schemaOwnerRoleOid,
+  revocationReasonDigest: revocation.revocationReasonDigest,
+  revokeRequestDigest: revocation.revokeRequestDigest,
+  revokeRequestId: revocation.revokeRequestId,
 });
 const claim = Object.freeze({
   actorUserId: "actor-user-current194",
@@ -173,6 +188,21 @@ function fixture(ownerOverrides, runtimeOverrides) {
   return { owner, pair, runtime };
 }
 
+function recoveryFixture(ownerOverrides) {
+  const owner = client(OWNER, OWNER_OID, ownerOverrides);
+  const recovery =
+    createLangameInitialSyncRuntimeRevokeRecoveryCurrent194ForTestOnly(
+      {
+        expectedDatabase: DATABASE,
+        ownerDatabaseUrl: config.ownerDatabaseUrl,
+        ownerRoleName: OWNER,
+      },
+      owner.value,
+      LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_TEST_CONFIRMATION,
+    );
+  return { owner, recovery };
+}
+
 async function registerAndConsume(value) {
   await value.pair.ownerDriver.registerCurrent194(registration);
   await value.pair.runtimeDriver.consumeCurrent194(consumption);
@@ -190,6 +220,10 @@ test("CURRENT194 Prisma production construction remains fail-closed", () => {
         "wrong-confirmation",
       ),
     (error) => error.code === "CURRENT194_PRISMA_SYNTHETIC_DENIED",
+  );
+  assert.throws(
+    () => createLangameInitialSyncRuntimeRevokeRecoveryCurrent194(),
+    (error) => error.code === "CURRENT194_PRISMA_RECOVERY_PRODUCTION_DENIED",
   );
 });
 
@@ -331,6 +365,72 @@ test("CURRENT194 rejects changed or premature owner revocation", async () => {
   await changed.pair.runtimeDriver.close();
 });
 
+test("CURRENT194 fresh owner-only adapter reconciles persisted revoke after restart", async () => {
+  const value = recoveryFixture({
+    query(query) {
+      if (sqlText(query).includes("attestation_revoke_current194_v1")) {
+        return [
+          {
+            attestationId: registration.attestationId,
+            replayed: true,
+            revokedAt: new Date("2026-08-13T09:31:00.000Z"),
+            status: "REVOKED",
+          },
+        ];
+      }
+    },
+  });
+  assert.equal(
+    isLangameInitialSyncRuntimeRevokeRecoveryCurrent194(value.recovery),
+    true,
+  );
+  assert.deepEqual(Reflect.ownKeys(value.recovery).sort(), [
+    "close",
+    "recoverRevokeCurrent194",
+  ]);
+  const rows = await value.recovery.recoverRevokeCurrent194(recoveryRevocation);
+  assert.equal(rows[0].replayed, true);
+  assert.equal(value.owner.observed.queries.length, 2);
+  await assert.rejects(
+    value.recovery.recoverRevokeCurrent194(recoveryRevocation),
+    (error) => error.code === "CURRENT194_PRISMA_RECOVER_REVOKE_STATE_INVALID",
+  );
+  await value.recovery.close();
+  assert.equal(value.owner.observed.disconnects, 1);
+});
+
+test("CURRENT194 restart revoke recovery is exact owner and database bound", async () => {
+  const identityDrift = recoveryFixture();
+  await assert.rejects(
+    identityDrift.recovery.recoverRevokeCurrent194({
+      ...recoveryRevocation,
+      databaseOid: DATABASE_OID + 1,
+    }),
+    (error) => error.code === "CURRENT194_PRISMA_SESSION_IDENTITY_INVALID",
+  );
+  await identityDrift.recovery.close();
+
+  const changed = recoveryFixture({
+    query(query) {
+      if (sqlText(query).includes("attestation_revoke_current194_v1")) {
+        throw new Error("lost revoke response");
+      }
+    },
+  });
+  await assert.rejects(
+    changed.recovery.recoverRevokeCurrent194(recoveryRevocation),
+  );
+  await assert.rejects(
+    changed.recovery.recoverRevokeCurrent194({
+      ...recoveryRevocation,
+      expectedPayloadDigest: "b".repeat(64),
+    }),
+    (error) =>
+      error.code === "CURRENT194_PRISMA_RECOVER_REVOKE_BINDING_INVALID",
+  );
+  await changed.recovery.close();
+});
+
 test("CURRENT194 rejects binding and backend identity drift before lifecycle RPCs", async () => {
   const ownerDrift = fixture({
     query(query) {
@@ -404,6 +504,22 @@ test("CURRENT194 validates loopback CI URLs and separates credentials", () => {
       ),
     );
   }
+
+  const recoveryOwner = client(OWNER, OWNER_OID);
+  assert.throws(
+    () =>
+      createLangameInitialSyncRuntimeRevokeRecoveryCurrent194ForTestOnly(
+        {
+          expectedDatabase: DATABASE,
+          ownerDatabaseUrl: config.ownerDatabaseUrl,
+          ownerRoleName: OWNER,
+          runtimeDatabaseUrl: config.runtimeDatabaseUrl,
+        },
+        recoveryOwner.value,
+        LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_TEST_CONFIRMATION,
+      ),
+    (error) => error.code === "CURRENT194_PRISMA_RECOVERY_CONFIG_INVALID",
+  );
 });
 
 test("CURRENT194 close disconnects both clients once and seals runtime", async () => {
@@ -434,7 +550,7 @@ test("CURRENT194 Prisma source contains only fixed parameterized SQL templates",
     source,
     /new PrismaClient\(\{ datasourceUrl: url, log: \[\] \}\)/u,
   );
-  assert.equal((source.match(/\.\$queryRaw\(Prisma\.sql`/gu) ?? []).length, 7);
+  assert.equal((source.match(/\.\$queryRaw\(Prisma\.sql`/gu) ?? []).length, 8);
   assert.doesNotMatch(
     source,
     /\$executeRaw|\$queryRawUnsafe|\$executeRawUnsafe|process\.env|ConfigService|PrismaService|fetch\s*\(|child_process/iu,

@@ -93,10 +93,32 @@ and checks terminal ledger state and zero residue. Exact SHA
 All production entry points still fail closed, and no production root,
 credential, role or grant is enrolled.
 
+The accepted lifecycle evidence was then recorded on exact SHA
+`ed2ea410fad1685c7b7c46a6241bf932d0fbddd7`: GitHub Actions run
+`31698913278` completed `3/3 SUCCESS`; artifact ID `9180745285`, digest
+`sha256:f73c8241f480aca54112888f8b32bb0fc23b62aacb99e4ef582e3808bf9f1782`.
+
+The next local restart-reconciliation foundation uses a new owner-only
+adapter. Its exact configuration contains only the expected database, owner
+role and owner URL; the object exposes only `recoverRevokeCurrent194` and
+`close`, and rejects any runtime URL or client. The composed recovery verifies
+the signed CURRENT193 attestation again, binds the database/role names and OIDs,
+payload digest, revoke request digest and reason digest, then repeats only the
+fixed terminal revoke RPC. The actual disposable PostgreSQL fixture reopens
+this separate owner-only path and observes the persisted replay. The focused
+CURRENT194 gate is locally `36/36`, including malformed-request cleanup;
+CURRENT193 remains `17/17`.
+
+This foundation deliberately remains production-denied. It does not yet
+persist or coordinator-sign the revoke intent supplied by the caller, so it is
+not by itself sufficient proof for unattended production recovery after a
+process crash.
+
 ## Next implementation steps
 
-1. Add production TLS peer pinning and durable reconciliation when both revoke
-   responses are lost after the database effect may have committed.
-2. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
-3. Only after the common launch gates, run the four-club internal alpha and
+1. Persist and coordinator-sign the exact revoke intent, then bind the
+   owner-only restart reconciler to that durable intent.
+2. Add production TLS peer pinning for the owner and runtime connections.
+3. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
+4. Only after the common launch gates, run the four-club internal alpha and
    issue a mailbox-bound OWNER invite for a separate tester tenant.

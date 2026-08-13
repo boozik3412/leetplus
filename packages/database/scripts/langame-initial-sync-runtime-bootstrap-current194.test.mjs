@@ -27,10 +27,14 @@ import {
   openLangameInitialSyncRuntimeBootstrapCurrent194,
   openLangameInitialSyncRuntimeBootstrapCurrent194ForTestOnly,
   openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194,
+  recoverLangameInitialSyncRuntimeRevokeCurrent194,
+  recoverLangameInitialSyncRuntimeRevokeCurrent194ForTestOnly,
 } from "./langame-initial-sync-runtime-bootstrap-current194.mjs";
 import {
+  LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_TEST_CONFIRMATION,
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_TEST_CONFIRMATION,
   createLangameInitialSyncRuntimePrismaCurrent194ForTestOnly,
+  createLangameInitialSyncRuntimeRevokeRecoveryCurrent194ForTestOnly,
 } from "./langame-initial-sync-runtime-prisma-current194.mjs";
 import { isLangameInitialSyncRuntimeProviderCurrent194 } from "./langame-initial-sync-runtime-provider-current194.mjs";
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
@@ -207,6 +211,12 @@ function bootstrapFixture(options = {}) {
     attestation.envelope.payloadDigest,
     options.runtimeOverrides,
   );
+  const recoveryOwner = client(
+    OWNER,
+    OWNER_OID,
+    attestation.envelope.payloadDigest,
+    options.ownerOverrides,
+  );
   const config = {
     expectedDatabase: DATABASE,
     ownerDatabaseUrl: `postgresql://${OWNER}:owner-password-current194@127.0.0.1:5432/${DATABASE}?schema=public&connect_timeout=5&socket_timeout=30`,
@@ -219,6 +229,16 @@ function bootstrapFixture(options = {}) {
     runtime.value,
     LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_TEST_CONFIRMATION,
   );
+  const recovery =
+    createLangameInitialSyncRuntimeRevokeRecoveryCurrent194ForTestOnly(
+      {
+        expectedDatabase: DATABASE,
+        ownerDatabaseUrl: config.ownerDatabaseUrl,
+        ownerRoleName: OWNER,
+      },
+      recoveryOwner.value,
+      LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_TEST_CONFIRMATION,
+    );
   const input = {
     attestationEnvelope: attestation.envelope,
     expectedAttestation: attestation.expected,
@@ -238,13 +258,27 @@ function bootstrapFixture(options = {}) {
     },
     runtimeRoots: attestation.signer.roots,
   };
-  return { attestation, config, input, owner, pair, runtime };
+  return {
+    attestation,
+    config,
+    input,
+    owner,
+    pair,
+    recovery,
+    recoveryOwner,
+    runtime,
+  };
 }
 
 test("CURRENT194 bootstrap production and unconfirmed synthetic entries deny", async () => {
   await assert.rejects(
     openLangameInitialSyncRuntimeBootstrapCurrent194(),
     (error) => error.code === "CURRENT194_BOOTSTRAP_PRODUCTION_DENIED",
+  );
+  await assert.rejects(
+    recoverLangameInitialSyncRuntimeRevokeCurrent194(),
+    (error) =>
+      error.code === "CURRENT194_BOOTSTRAP_RECOVER_REVOKE_PRODUCTION_DENIED",
   );
   await assert.rejects(
     openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194(
@@ -261,6 +295,77 @@ test("CURRENT194 bootstrap production and unconfirmed synthetic entries deny", a
     ),
     (error) => error.code === "CURRENT194_BOOTSTRAP_SYNTHETIC_DENIED",
   );
+});
+
+test("CURRENT194 fresh bootstrap reconciles persisted revoke and closes", async () => {
+  const value = bootstrapFixture({
+    ownerOverrides: {
+      query(text) {
+        if (text.includes("attestation_revoke_current194_v1")) {
+          return [
+            {
+              attestationId: "attestation-current194-bootstrap",
+              replayed: true,
+              revokedAt: new Date("2026-08-13T09:31:00.000Z"),
+              status: "REVOKED",
+            },
+          ];
+        }
+      },
+    },
+  });
+  const receipt =
+    await recoverLangameInitialSyncRuntimeRevokeCurrent194ForTestOnly(
+      value.input,
+      {
+        revocationReasonDigest: "8".repeat(64),
+        revokeRequestDigest: "7".repeat(64),
+        revokeRequestId: "revoke-request-current194-bootstrap",
+      },
+      value.recovery,
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION,
+    );
+  assert.deepEqual(receipt, {
+    attestationId: "attestation-current194-bootstrap",
+    authorization: false,
+    productionExecutionAllowed: false,
+    replayed: true,
+    revokedAt: "2026-08-13T09:31:00.000Z",
+    status: "REVOKED",
+  });
+  assert.equal(value.recoveryOwner.observed.disconnects, 1);
+  assert.equal(value.owner.observed.disconnects, 0);
+  assert.equal(value.runtime.observed.disconnects, 0);
+  assert.equal(
+    value.recoveryOwner.observed.queries.some((text) =>
+      text.includes("attestation_register_current194_v1"),
+    ),
+    false,
+  );
+  assert.equal(value.runtime.observed.queries.length, 0);
+});
+
+test("CURRENT194 revoke recovery closes owner-only client on malformed request", async () => {
+  const value = bootstrapFixture();
+  await assert.rejects(
+    recoverLangameInitialSyncRuntimeRevokeCurrent194ForTestOnly(
+      value.input,
+      {
+        revocationReasonDigest: "8".repeat(64),
+        revokeRequestDigest: "7".repeat(64),
+        revokeRequestId: "revoke-request-current194-bootstrap",
+        unexpected: true,
+      },
+      value.recovery,
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION,
+    ),
+    (error) =>
+      error.code === "CURRENT194_BOOTSTRAP_RECOVER_REVOKE_INPUT_INVALID",
+  );
+  assert.equal(value.recoveryOwner.observed.disconnects, 1);
+  assert.equal(value.recoveryOwner.observed.queries.length, 0);
+  assert.equal(value.owner.observed.disconnects, 0);
+  assert.equal(value.runtime.observed.disconnects, 0);
 });
 
 test("CURRENT194 bootstrap verifies, persists, consumes and exposes a drained provider", async () => {

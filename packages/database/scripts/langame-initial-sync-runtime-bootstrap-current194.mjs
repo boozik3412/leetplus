@@ -3,8 +3,11 @@ import { types as utilTypes } from "node:util";
 import { verifySyntheticLangameInitialSyncRuntimeAttestationCurrent193 } from "./langame-initial-sync-runtime-attestation-current193.mjs";
 import {
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_CONFIRMATION,
+  LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_CONFIRMATION,
   createSyntheticLangameInitialSyncRuntimePrismaCurrent194,
+  createSyntheticLangameInitialSyncRuntimeRevokeRecoveryCurrent194,
   isLangameInitialSyncRuntimePrismaCurrent194,
+  isLangameInitialSyncRuntimeRevokeRecoveryCurrent194,
 } from "./langame-initial-sync-runtime-prisma-current194.mjs";
 import {
   LANGAME_INITIAL_SYNC_RUNTIME_PROVIDER_CURRENT194_TEST_CONFIRMATION,
@@ -29,6 +32,11 @@ const INPUT_KEYS = Object.freeze(
     "runtimeRoots",
   ].sort(),
 );
+const REVOKE_KEYS = Object.freeze(
+  ["revocationReasonDigest", "revokeRequestDigest", "revokeRequestId"].sort(),
+);
+const ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/u;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const BOOTSTRAPPED_SESSIONS = new WeakSet();
 
 export class LangameInitialSyncRuntimeBootstrapCurrent194Error extends Error {
@@ -93,6 +101,59 @@ function exactInput(value) {
   return Object.freeze(result);
 }
 
+function exactRecord(value, expectedKeys, code) {
+  let invalid;
+  let descriptors;
+  try {
+    invalid =
+      value === null ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      utilTypes.isProxy(value);
+    descriptors = invalid ? null : Object.getOwnPropertyDescriptors(value);
+  } catch {
+    fail(code);
+  }
+  if (invalid) fail(code);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) fail(code);
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.some((key) => typeof key !== "string")) fail(code);
+  keys.sort(compareStrings);
+  if (
+    keys.length !== expectedKeys.length ||
+    keys.some((key, index) => key !== expectedKeys[index]) ||
+    keys.some((key) => {
+      const descriptor = descriptors[key];
+      return (
+        !Object.hasOwn(descriptor, "value") || descriptor.enumerable !== true
+      );
+    })
+  ) {
+    fail(code);
+  }
+  const result = Object.create(null);
+  for (const key of expectedKeys) result[key] = descriptors[key].value;
+  return Object.freeze(result);
+}
+
+function revokeRequest(value) {
+  const input = exactRecord(
+    value,
+    REVOKE_KEYS,
+    "CURRENT194_BOOTSTRAP_RECOVER_REVOKE_INPUT_INVALID",
+  );
+  if (
+    !ID_PATTERN.test(input.revokeRequestId) ||
+    !SHA256_PATTERN.test(input.revokeRequestDigest) ||
+    !SHA256_PATTERN.test(input.revocationReasonDigest) ||
+    input.revokeRequestDigest === input.revocationReasonDigest
+  ) {
+    fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_INPUT_INVALID");
+  }
+  return input;
+}
+
 function verify(input) {
   return verifySyntheticLangameInitialSyncRuntimeAttestationCurrent193(
     input.attestationEnvelope,
@@ -133,8 +194,55 @@ async function openVerified(input, attestation, pair) {
   return session;
 }
 
+async function recoverVerified(attestation, revokeValue, recovery) {
+  try {
+    const request = revokeRequest(revokeValue);
+    const rows = await recovery.recoverRevokeCurrent194({
+      attestationId: attestation.attestationId,
+      databaseName: attestation.databaseName,
+      databaseOid: attestation.databaseOid,
+      expectedPayloadDigest: attestation.payloadDigest,
+      ownerRoleName: attestation.schemaOwnerRoleName,
+      ownerRoleOid: attestation.schemaOwnerRoleOid,
+      revocationReasonDigest: request.revocationReasonDigest,
+      revokeRequestDigest: request.revokeRequestDigest,
+      revokeRequestId: request.revokeRequestId,
+    });
+    if (
+      !Array.isArray(rows) ||
+      rows.length !== 1 ||
+      rows[0] === null ||
+      typeof rows[0] !== "object" ||
+      rows[0].attestationId !== attestation.attestationId ||
+      rows[0].status !== "REVOKED" ||
+      !(rows[0].revokedAt instanceof Date) ||
+      typeof rows[0].replayed !== "boolean"
+    ) {
+      fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_RECEIPT_INVALID");
+    }
+    return Object.freeze({
+      attestationId: rows[0].attestationId,
+      authorization: false,
+      productionExecutionAllowed: false,
+      replayed: rows[0].replayed,
+      revokedAt: rows[0].revokedAt.toISOString(),
+      status: rows[0].status,
+    });
+  } finally {
+    try {
+      await recovery.close();
+    } catch {
+      fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_CLEANUP_FAILED");
+    }
+  }
+}
+
 export async function openLangameInitialSyncRuntimeBootstrapCurrent194() {
   fail("CURRENT194_BOOTSTRAP_PRODUCTION_DENIED");
+}
+
+export async function recoverLangameInitialSyncRuntimeRevokeCurrent194() {
+  fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_PRODUCTION_DENIED");
 }
 
 export async function openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194(
@@ -181,6 +289,59 @@ export async function openLangameInitialSyncRuntimeBootstrapCurrent194ForTestOnl
     throw error;
   }
   return openVerified(input, attestation, pair);
+}
+
+export async function recoverSyntheticLangameInitialSyncRuntimeRevokeCurrent194(
+  inputValue,
+  revokeValue,
+  prismaConfig,
+  explicitConfirmation,
+) {
+  if (
+    arguments.length !== 4 ||
+    explicitConfirmation !==
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION
+  ) {
+    fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_SYNTHETIC_DENIED");
+  }
+  const input = exactInput(inputValue);
+  const attestation = verify(input);
+  const recovery =
+    createSyntheticLangameInitialSyncRuntimeRevokeRecoveryCurrent194(
+      prismaConfig,
+      LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_CONFIRMATION,
+    );
+  return recoverVerified(attestation, revokeValue, recovery);
+}
+
+export async function recoverLangameInitialSyncRuntimeRevokeCurrent194ForTestOnly(
+  inputValue,
+  revokeValue,
+  recovery,
+  explicitConfirmation,
+) {
+  if (
+    arguments.length !== 4 ||
+    explicitConfirmation !==
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION ||
+    !isLangameInitialSyncRuntimeRevokeRecoveryCurrent194(recovery)
+  ) {
+    fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_TEST_INJECTION_DENIED");
+  }
+  let input;
+  let attestation;
+  try {
+    input = exactInput(inputValue);
+    attestation = verify(input);
+  } catch (error) {
+    try {
+      await recovery.close();
+    } catch {
+      fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_CLEANUP_FAILED");
+    }
+    throw error;
+  }
+  return recoverVerified(attestation, revokeValue, recovery);
 }
 
 export function isLangameInitialSyncRuntimeBootstrapCurrent194(value) {

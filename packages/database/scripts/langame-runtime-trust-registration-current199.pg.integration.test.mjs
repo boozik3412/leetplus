@@ -364,6 +364,24 @@ test(
         assert.equal(marker.marker, PARENT_MARKER);
         await owner.query(`DROP ROLE ${PARENT_ROLE}`);
       }
+      const residue = await scalar(
+        owner,
+        `SELECT
+          (SELECT count(*)::INTEGER FROM pg_catalog.pg_roles
+           WHERE rolname IN ($1, $2)) AS "roleCount",
+          (SELECT count(*)::INTEGER
+           FROM public."LangameRuntimeTrustRegistrationV1")
+            AS "registrationCount",
+          (SELECT count(*)::INTEGER
+           FROM public."LangameRuntimeTrustRegistrationEventV1")
+            AS "eventCount"`,
+        [RUNTIME_ROLE, PARENT_ROLE],
+      );
+      assert.deepEqual(residue, {
+        eventCount: 0,
+        registrationCount: 0,
+        roleCount: 0,
+      });
       await owner.end();
     }
   },

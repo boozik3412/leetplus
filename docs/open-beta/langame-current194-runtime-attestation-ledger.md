@@ -1,6 +1,6 @@
 # CURRENT194: persisted Langame runtime-attestation ledger
 
-Status: `LOCAL FOUNDATION / CI PENDING / DORMANT / PRODUCTION DENIED`.
+Status: `EXACT-SHA CI ACCEPTED / DORMANT / PRODUCTION DENIED`.
 
 CURRENT193 verifies a short-lived Ed25519-signed runtime receipt and proves the
 exact execute-only PostgreSQL role boundary. CURRENT194 persists the lifecycle
@@ -49,16 +49,30 @@ rehearsal, controlled internal alpha and `SHARED-BETA-GO` are accepted.
 - denial of runtime table reads and absence of TEMP/schema/role/table/sequence
   authority inherited from CURRENT193;
 - disposable rollback and zero runtime-role residue;
-- exact-SHA CI and artifact evidence: pending.
+- exact SHA `0578e5e432bdea4e4df9fa8144cffebd0bf7cf67` completed GitHub
+  Actions run `31688314546` as `3/3 SUCCESS` on 13.08.2026;
+- the accepted PostgreSQL job includes CURRENT192 atomic import, corrected
+  CURRENT193 role boundary and CURRENT194 register/consume/expiry/revoke/replay;
+- artifact ID `9176620158`, digest
+  `sha256:9e0a8a9b6045e51451c3338f28927cbef496076d408797ac5bb11cc2d69fa62c`.
+
+The local synthetic provider foundation additionally consumes only a branded
+CURRENT193 `SYNTHETIC_CI` verification, retries the same frozen register/consume
+spec once after a lost response, exposes only exact `claimCurrent192`,
+`executeCurrent192` and `reconcileCurrent192` RPCs, and drains to zero in-flight
+work before closing its injected runtime driver. Its production
+entry point always fails closed; it neither constructs a Prisma client nor
+reads environment, filesystem or network state. The real dedicated database
+client and production root remain intentionally absent.
 
 ## Next implementation steps
 
-1. Accept CURRENT192, corrected CURRENT193 and CURRENT194 on one exact CI SHA.
-2. Add the dedicated attested runtime database provider; it must verify the
-   signed receipt, persist registration, consume through the fixed role and
-   inject only the narrow CURRENT192 SQL port.
-3. Add process startup/drain/revoke/credential-rotation and ambiguous-response
+1. Add the real dedicated runtime database client behind the accepted provider
+   boundary; it must use separate owner-importer and fixed runtime-role
+   sessions, with pinned TLS/database/role identity and no shared Prisma client
+   or arbitrary SQL port.
+2. Add process startup/revoke/credential-rotation and ambiguous-response
    reconciliation tests with zero in-flight work at shutdown.
-4. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
-5. Only after the common launch gates, run the four-club internal alpha and
+3. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
+4. Only after the common launch gates, run the four-club internal alpha and
    issue a mailbox-bound OWNER invite for a separate tester tenant.

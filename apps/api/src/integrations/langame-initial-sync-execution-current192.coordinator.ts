@@ -5,7 +5,6 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { isProductionConfig } from '../config/environment-validation';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
@@ -25,8 +24,44 @@ export const LANGAME_INITIAL_SYNC_CURRENT192_DATABASE = Symbol(
 );
 
 export interface LangameInitialSyncCurrent192Database {
-  queryCurrent192(query: Prisma.Sql): Promise<unknown>;
+  claimCurrent192(
+    input: LangameInitialSyncClaimCurrent192Input,
+  ): Promise<unknown>;
+  executeCurrent192(
+    input: LangameInitialSyncExecuteCurrent192Input,
+  ): Promise<unknown>;
+  reconcileCurrent192(
+    input: LangameInitialSyncReconcileCurrent192Input,
+  ): Promise<unknown>;
 }
+
+export type LangameInitialSyncClaimCurrent192Input = Readonly<{
+  executionId: string;
+  tenantId: string;
+  actorUserId: string;
+  approvalId: string;
+  claimRequestId: string;
+  claimRequestDigest: string;
+  claimToken: string;
+  planDigest: string;
+}>;
+
+export type LangameInitialSyncExecuteCurrent192Input = Readonly<{
+  tenantId: string;
+  actorUserId: string;
+  executionId: string;
+  claimToken: string;
+  executionRequestId: string;
+  executionRequestDigest: string;
+  canonicalPlan: string;
+}>;
+
+export type LangameInitialSyncReconcileCurrent192Input = Readonly<{
+  tenantId: string;
+  executionId: string;
+  claimToken: string;
+  planDigest: string;
+}>;
 
 export type LangameInitialSyncExecutionCurrent192Dto = Readonly<{
   executionId?: string;
@@ -220,15 +255,7 @@ export class LangameInitialSyncExecutionCurrent192Coordinator {
     claimToken: string;
     planDigest: string;
   }) {
-    const rows = await this.database.queryCurrent192(
-      Prisma.sql`
-        SELECT * FROM public.langame_initial_sync_claim_current192_v1(
-          ${input.executionId}, ${input.tenantId}, ${input.actorUserId},
-          ${input.approvalId}, ${input.claimRequestId},
-          ${input.claimRequestDigest}, ${input.claimToken}, ${input.planDigest}
-        )
-      `,
-    );
+    const rows = await this.database.claimCurrent192(Object.freeze(input));
     return this.parseClaim(rows);
   }
 
@@ -241,15 +268,7 @@ export class LangameInitialSyncExecutionCurrent192Coordinator {
     executionRequestDigest: string;
     canonicalPlan: string;
   }) {
-    const rows = await this.database.queryCurrent192(
-      Prisma.sql`
-        SELECT * FROM public.langame_initial_sync_execute_current192_v1(
-          ${input.tenantId}, ${input.actorUserId}, ${input.executionId},
-          ${input.claimToken}, ${input.executionRequestId},
-          ${input.executionRequestDigest}, ${input.canonicalPlan}
-        )
-      `,
-    );
+    const rows = await this.database.executeCurrent192(Object.freeze(input));
     return this.parseExecution(rows);
   }
 
@@ -261,14 +280,7 @@ export class LangameInitialSyncExecutionCurrent192Coordinator {
   }) {
     let rows: unknown;
     try {
-      rows = await this.database.queryCurrent192(
-        Prisma.sql`
-          SELECT * FROM public.langame_initial_sync_reconcile_current192_v1(
-            ${input.tenantId}, ${input.executionId}, ${input.claimToken},
-            ${input.planDigest}
-          )
-        `,
-      );
+      rows = await this.database.reconcileCurrent192(Object.freeze(input));
     } catch {
       throw new ServiceUnavailableException(
         'CURRENT192 initial sync reconciliation is unavailable',

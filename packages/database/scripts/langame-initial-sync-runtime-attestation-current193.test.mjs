@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_MIGRATION_SHA256,
   LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_ROLE,
   LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_ROUTINES,
   attestLangameInitialSyncRuntimeCurrent193,
@@ -161,7 +162,8 @@ function verify(value, overrides = {}) {
 }
 
 test("CURRENT193 verifies an exact short-lived synthetic CI attestation", () => {
-  const verified = verify(fixture());
+  const value = fixture();
+  const verified = verify(value);
   assert.equal(
     isVerifiedLangameInitialSyncRuntimeAttestationCurrent193(verified),
     true,
@@ -169,6 +171,17 @@ test("CURRENT193 verifies an exact short-lived synthetic CI attestation", () => 
   assert.equal(verified.authorization, false);
   assert.equal(verified.productionExecutionAllowed, false);
   assert.equal(verified.databaseName, "leetplus_ci");
+  assert.equal(verified.verificationMode, "SYNTHETIC_CI");
+  assert.equal(verified.schemaOwnerRoleName, "leetplus_migration_owner");
+  assert.equal(verified.schemaOwnerRoleOid, 20_002);
+  assert.equal(
+    verified.current192MigrationSha256,
+    LANGAME_INITIAL_SYNC_RUNTIME_CURRENT193_MIGRATION_SHA256,
+  );
+  assert.equal(
+    verified.publicKeyFingerprint,
+    value.signer.publicKeyFingerprint,
+  );
   assert.equal(Object.isFrozen(verified), true);
 });
 

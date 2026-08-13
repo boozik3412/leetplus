@@ -371,7 +371,13 @@ function selectRoot(rootsValue, keyId, nowMs) {
   });
 }
 
-function verifyWithRoots(envelopeValue, expectedValue, roots, now) {
+function verifyWithRoots(
+  envelopeValue,
+  expectedValue,
+  roots,
+  now,
+  verificationMode,
+) {
   const envelope = exactRecord(
     envelopeValue,
     ENVELOPE_KEYS,
@@ -449,10 +455,15 @@ function verifyWithRoots(envelopeValue, expectedValue, roots, now) {
     databaseOid: payload.databaseOid,
     executorRoleName: payload.executorRoleName,
     executorRoleOid: payload.executorRoleOid,
+    schemaOwnerRoleName: payload.schemaOwnerRoleName,
+    schemaOwnerRoleOid: payload.schemaOwnerRoleOid,
+    current192MigrationSha256: payload.current192MigrationSha256,
     issuedAt: payload.issuedAt,
     validUntil: payload.validUntil,
     payloadDigest: envelope.payloadDigest,
     signingKeyId: payload.signingKeyId,
+    publicKeyFingerprint: payload.publicKeyFingerprint,
+    verificationMode,
     authorization: false,
     productionExecutionAllowed: false,
   });
@@ -470,6 +481,7 @@ export function verifyPinnedLangameInitialSyncRuntimeAttestationCurrent193(
     expected,
     PINNED_LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_ROOTS,
     new Date().toISOString(),
+    "PINNED_PRODUCTION",
   );
 }
 
@@ -497,7 +509,7 @@ export function verifySyntheticLangameInitialSyncRuntimeAttestationCurrent193(
   ) {
     fail("CURRENT193_ATTESTATION_SYNTHETIC_DENIED");
   }
-  return verifyWithRoots(envelope, expected, roots, now);
+  return verifyWithRoots(envelope, expected, roots, now, "SYNTHETIC_CI");
 }
 
 export function isVerifiedLangameInitialSyncRuntimeAttestationCurrent193(

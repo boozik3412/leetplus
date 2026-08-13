@@ -237,6 +237,11 @@ test("CURRENT196 verifies an exact nonauthorizing trust proposal", () => {
     value.expected.candidateBundleDigest,
   );
   assert.equal(receipt.tlsServerName, "api.langame.example");
+  assert.equal(receipt.tlsCaCertificateSha256, "1".repeat(64));
+  assert.equal(receipt.tlsLeafCertificateSha256, "2".repeat(64));
+  assert.equal(receipt.tlsLeafSpkiSha256, "3".repeat(64));
+  assert.equal(receipt.tlsMinimumProtocol, "TLSv1.2");
+  assert.equal(receipt.tlsRejectUnauthorized, true);
   assert.equal(Object.isFrozen(receipt), true);
   assert.equal(
     isVerifiedLangameRuntimeTrustEnrollmentCurrent196(receipt),

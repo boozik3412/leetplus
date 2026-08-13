@@ -218,6 +218,11 @@ jobs:
       - name: Validate nonauthorizing CURRENT196 trust-enrollment proposal
         run: pnpm --filter database check:langame-runtime-trust-enrollment-current196
 
+      - name: Validate deny-only CURRENT197 protected trust acquisition
+        run: pnpm --filter database check:langame-runtime-trust-acquisition-current197
+        env:
+          LANGAME_RUNTIME_TRUST_ACQUISITION_CURRENT197_E2E_CONFIRM: run-langame-current197-actual-tls-handshake-on-loopback-ci
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 

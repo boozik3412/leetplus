@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.110                                        |
+| Версия           | 1.111                                        |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -141,6 +141,10 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    nonauthorizing bootstrap-authority envelope для двухконтрольной церемонии,
    отдельных runtime/revoke roots и exact TLS peer pins; production registry
    frozen-empty, enrollment и network I/O отсутствуют.
+   0e.14. [CURRENT197 protected trust acquisition](./langame-current197-trust-acquisition.md) —
+   descriptor-bound чтение exact public roots/CA и production-capable TLS
+   verify-full collector; synthetic receipt deny-only, production proposal пока
+   невозможно получить из-за frozen-empty CURRENT196 roots.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

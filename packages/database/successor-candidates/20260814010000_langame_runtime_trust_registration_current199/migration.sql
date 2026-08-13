@@ -314,7 +314,17 @@ DECLARE
   existing public."LangameRuntimeTrustRegistrationV1"%ROWTYPE;
   server_now TIMESTAMP(3) WITH TIME ZONE;
   live_database_oid BIGINT;
+  live_database_owner_oid BIGINT;
   live_owner_oid BIGINT;
+  live_runtime_oid BIGINT;
+  live_runtime_can_login BOOLEAN;
+  live_runtime_inherit BOOLEAN;
+  live_runtime_superuser BOOLEAN;
+  live_runtime_create_database BOOLEAN;
+  live_runtime_create_role BOOLEAN;
+  live_runtime_replication BOOLEAN;
+  live_runtime_bypass_rls BOOLEAN;
+  live_runtime_membership_count BIGINT;
   existing_found BOOLEAN;
 BEGIN
   IF synthetic_only IS DISTINCT FROM FALSE
@@ -342,7 +352,10 @@ BEGIN
   END IF;
 
   PERFORM pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(registration_id, 199)
+    pg_catalog.hashtextextended(
+      target_database_oid::TEXT || ':' || enrollment_generation::TEXT,
+      199
+    )
   );
   SELECT candidate.* INTO existing
   FROM public."LangameRuntimeTrustRegistrationV1" AS candidate
@@ -356,19 +369,45 @@ BEGIN
   FOR UPDATE;
   existing_found := FOUND;
 
-  SELECT database_object.oid::BIGINT INTO live_database_oid
+  SELECT database_object.oid::BIGINT, database_object.datdba::BIGINT
+  INTO live_database_oid, live_database_owner_oid
   FROM pg_catalog.pg_database AS database_object
   WHERE database_object.datname = pg_catalog.current_database();
   SELECT role_object.oid::BIGINT INTO live_owner_oid
   FROM pg_catalog.pg_roles AS role_object
   WHERE role_object.rolname = CURRENT_USER;
+  SELECT role_object.oid::BIGINT, role_object.rolcanlogin,
+    role_object.rolinherit, role_object.rolsuper,
+    role_object.rolcreatedb, role_object.rolcreaterole,
+    role_object.rolreplication, role_object.rolbypassrls
+  INTO live_runtime_oid, live_runtime_can_login, live_runtime_inherit,
+    live_runtime_superuser, live_runtime_create_database,
+    live_runtime_create_role, live_runtime_replication,
+    live_runtime_bypass_rls
+  FROM pg_catalog.pg_roles AS role_object
+  WHERE role_object.rolname = runtime_role_name;
+  SELECT pg_catalog.count(*)::BIGINT INTO live_runtime_membership_count
+  FROM pg_catalog.pg_auth_members AS membership
+  WHERE membership.member = live_runtime_oid
+     OR membership.roleid = live_runtime_oid;
   IF target_database_name <> pg_catalog.current_database()
      OR target_database_oid <> live_database_oid
+     OR live_database_owner_oid <> live_owner_oid
      OR owner_role_name <> CURRENT_USER
      OR owner_role_name <> SESSION_USER
      OR owner_role_oid <> live_owner_oid
+     OR live_runtime_oid IS NULL
+     OR runtime_role_oid <> live_runtime_oid
+     OR live_runtime_can_login IS DISTINCT FROM TRUE
+     OR live_runtime_inherit IS DISTINCT FROM FALSE
+     OR live_runtime_superuser IS DISTINCT FROM FALSE
+     OR live_runtime_create_database IS DISTINCT FROM FALSE
+     OR live_runtime_create_role IS DISTINCT FROM FALSE
+     OR live_runtime_replication IS DISTINCT FROM FALSE
+     OR live_runtime_bypass_rls IS DISTINCT FROM FALSE
+     OR live_runtime_membership_count <> 0
   THEN
-    RAISE EXCEPTION 'CURRENT199 live owner identity mismatch'
+    RAISE EXCEPTION 'CURRENT199 live database or role identity mismatch'
       USING ERRCODE = '42501';
   END IF;
 

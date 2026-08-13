@@ -1,11 +1,11 @@
 # CURRENT199: owner-only registration ledger candidate
 
-| Поле                           | Значение                               |
-| ------------------------------ | -------------------------------------- |
-| Статус                         | `LOCAL NONCANONICAL CANDIDATE / NO-GO` |
-| Дата                           | 14.08.2026                             |
-| Canonical migration            | отсутствует                            |
-| Production / Tenant A / tester | не изменялись                          |
+| Поле                           | Значение                                         |
+| ------------------------------ | ------------------------------------------------ |
+| Статус                         | `CI FOUNDATION ACCEPTED; NEXT SHA LOCAL / NO-GO` |
+| Дата                           | 14.08.2026                                       |
+| Canonical migration            | отсутствует                                      |
+| Production / Tenant A / tester | не изменялись                                    |
 
 Этот срез добавляет noncanonical PostgreSQL successor candidate для durable
 CURRENT199 initial registration. Он не входит в `prisma/migrations` и не
@@ -18,7 +18,8 @@ CURRENT199 initial registration. Он не входит в `prisma/migrations` �
 - не более одной generation-1 registration на database OID;
 - append-only `REGISTERED/EXPIRED` event table;
 - `SECURITY DEFINER` register с fixed `search_path`, live database/owner
-  name/OID check, advisory transaction lock и exact replay;
+  name/OID и runtime-role name/OID/attributes check, advisory transaction lock
+  и exact replay;
 - registration принимает только `synthetic_only=false`, fresh timeline и
   полный CURRENT198/199 contract binding;
 - expiry возможен только после `validUntil`, exact replay поддержан;
@@ -28,16 +29,25 @@ CURRENT199 initial registration. Он не входит в `prisma/migrations` �
 
 ## Evidence
 
-Static checksum/ACL/effect gate — `3/3`; database typecheck и diff check
-зелёные. Migration полностью применена к отдельному локальному PostgreSQL
-16.13: созданы ровно две relations и четыре CURRENT199 functions, все DDL/ACL
-statements завершились успешно; disposable server остановлен после проверки.
+Foundation SHA `7915912c8f1eb6180929e3d6886b5a33d4a6a29d` принят GitHub
+Actions run `31741381875` как `3/3 SUCCESS`; artifact `9197547597`, digest
+`sha256:5708eac673b36ed2d6bf9954bb32c5b718a670da57ac7d67c424285fee4a4f31`.
+
+Следующий локальный срез добавил test-only branded owner/Prisma adapter с
+production entry fail-closed, exact session/database/owner/runtime-role
+re-attestation и не более чем двумя попытками register/expiry после lost
+response. Unit matrix — `8/8`. Обновлённая migration с fingerprint
+`8c55f0ebdc9da2e881b4b1a66e4cdea59a2a1f4576c107cfe24d633e3facc2fe`
+применена к отдельному PostgreSQL 16.13; actual matrix `1/1` приняла concurrent
+register/replay, hostile database-owner/OID/role-attribute/membership drift,
+ACL, early-expiry denial,
+concurrent expiry/replay и immutable guards. Тестовая БД и роль удалены, сервер
+остановлен.
 
 ## Остаток
 
-Candidate ещё не имеет Prisma/owner adapter и actual register/replay/expiry
-transaction fixture в CI. До canonical promotion нужны branded CURRENT199-only
-adapter, bounded lost-response reconciliation, hostile replay/ACL/concurrency
-PostgreSQL matrix, zero-residue rehearsal и independent review. Даже после
-этого отдельные apply/rotation/revocation contracts и production root ceremony
-останутся обязательными.
+Новый adapter/actual fixture ещё не принят exact-SHA CI и не прошёл independent
+adversarial review. Production factory намеренно отклоняет все вызовы; migration
+остаётся noncanonical. После acceptance обязательны offline production-root
+ceremony, production-origin registration rehearsal, отдельные
+apply/rotation/revocation contracts и zero-residue release rehearsal.

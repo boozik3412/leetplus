@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.68
+- Версия: 2.69
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -184,21 +184,30 @@ Exact SHA `be8d670d7b8125438506fc578a2b28b170c0cd8d` принят GitHub Actions
 `sha256:a1f085ab5f8d99f68780d2b9adaf899abe22b88d893008e20714b3e1aa616382`.
 Этот срез ещё не ledger и не переживает restart.
 
-CURRENT199 owner-only PostgreSQL ledger candidate реализован локально как
-`NONCANONICAL / NO-GO`: две таблицы фиксируют immutable initial-registration и
+CURRENT199 owner-only PostgreSQL ledger foundation принят как
+`CI SHA ACCEPTED / NONCANONICAL / NO-GO`: две таблицы фиксируют immutable initial-registration и
 append-only `REGISTERED/EXPIRED` events; generation-1, registration/payload/
 acquisition digests уникальны. Register выполняет live database/owner name/OID
 re-attestation, advisory lock, freshness и exact replay; expiry запрещён до
 `validUntil`. PUBLIC ACL отозваны, grants/apply/rotation/revocation отсутствуют.
-Static gate `3/3`, typecheck/diff зелёные; migration полностью скомпилирована и
-применена на disposable PostgreSQL 16.13 (`2` relations, `4` functions), сервер
-остановлен. Candidate не canonical, не применялся к production и пока не имеет
-Prisma adapter/actual transaction CI fixture.
+Exact SHA `7915912c8f1eb6180929e3d6886b5a33d4a6a29d` принят GitHub Actions
+run `31741381875` как `3/3 SUCCESS`; artifact `9197547597`, digest
+`sha256:5708eac673b36ed2d6bf9954bb32c5b718a670da57ac7d67c424285fee4a4f31`.
+Candidate не canonical и не применялся к production.
 
-Следующий P0-срез: branded CURRENT199-only owner adapter, actual PostgreSQL
-register/replay/expiry/ACL/concurrency matrix и bounded lost-response
-reconciliation. После него — отдельные apply/rotation/revocation command
-contracts. Добавление первого реального public root остаётся отдельной offline
+Следующий локальный срез добавил test-only branded owner/Prisma adapter:
+production entry fail-closed, fresh database/owner/runtime-role re-attestation,
+exact receipt brands и максимум две одинаковые попытки при lost register/expiry
+response. Unit `8/8`; updated SQL fingerprint `8c55f0eb…acc2fe`; actual
+PostgreSQL 16.13 matrix `1/1` покрывает concurrent register/replay,
+database-owner/runtime-role OID, attribute and membership drift, PUBLIC ACL,
+early expiry, concurrent expiry/replay и guards.
+Disposable DB/role удалены, сервер остановлен. Этот срез ещё не принят CI.
+
+Следующий P0-срез: exact-SHA CI acceptance и independent adversarial review
+adapter/ledger, затем production-origin registration rehearsal. После него —
+отдельные apply/rotation/revocation command contracts. Добавление первого
+реального public root остаётся отдельной offline
 key ceremony и reviewed release change; оно не может быть сгенерировано или
 одобрено приложением.
 

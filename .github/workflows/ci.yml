@@ -240,6 +240,9 @@ jobs:
       - name: Validate dormant CURRENT199 owner-only registration ledger
         run: pnpm --filter database check:langame-runtime-trust-registration-ledger-current199
 
+      - name: Validate dormant CURRENT199 owner-only Prisma adapter
+        run: pnpm --filter database check:langame-runtime-trust-registration-prisma-current199
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 
@@ -1052,6 +1055,11 @@ jobs:
             --dbname leetplus_ci \
             --set ON_ERROR_STOP=on \
             --file packages/database/successor-candidates/20260814010000_langame_runtime_trust_registration_current199/migration.sql
+
+      - name: Verify CURRENT199 owner-only registration replay and expiry
+        env:
+          LANGAME_CURRENT199_REGISTRATION_INTEGRATION: run-langame-current199-registration-ledger-on-disposable-github-ci
+        run: pnpm --filter database test:integration:langame-runtime-trust-registration-current199:pg
 
       - name: Verify CURRENT194 actual separated Prisma runtime clients
         env:

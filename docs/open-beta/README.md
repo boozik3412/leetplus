@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.119                                        |
+| Версия           | 1.120                                        |
 | Дата             | 14.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -158,8 +158,10 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    persisted и не разрешает apply/rotation/revocation.
    0e.17. [CURRENT199 owner-only registration ledger candidate](./langame-current199-registration-ledger.md) —
    noncanonical two-table `REGISTERED/EXPIRED` ledger, exact replay, immutable
-   bindings и owner/database identity; локальный PostgreSQL 16.13 compile
-   зелёный, adapter/actual transaction fixture и production authority отсутствуют.
+   bindings и owner/database/runtime-role identity; foundation SHA `7915912c…`
+   принят CI `31741381875` как `3/3 SUCCESS`. Следующий локальный срез: test-only
+   adapter `8/8`, actual PostgreSQL matrix `1/1`; production entry и authority
+   остаются закрытыми до exact-SHA acceptance.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

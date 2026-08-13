@@ -72,6 +72,16 @@ test("CURRENT199 ledger is owner-only, one-time and append-preserving", async ()
   assert.match(sql, /owner_role_name <> CURRENT_USER/u);
   assert.match(sql, /owner_role_name <> SESSION_USER/u);
   assert.match(sql, /target_database_oid <> live_database_oid/u);
+  assert.match(sql, /live_database_owner_oid <> live_owner_oid/u);
+  assert.match(sql, /runtime_role_oid <> live_runtime_oid/u);
+  assert.match(sql, /live_runtime_can_login IS DISTINCT FROM TRUE/u);
+  assert.match(sql, /live_runtime_inherit IS DISTINCT FROM FALSE/u);
+  assert.match(sql, /live_runtime_create_role IS DISTINCT FROM FALSE/u);
+  assert.match(sql, /live_runtime_membership_count <> 0/u);
+  assert.match(
+    sql,
+    /target_database_oid::TEXT \|\| ':' \|\| enrollment_generation::TEXT/u,
+  );
   assert.match(
     sql,
     /SECURITY DEFINER[\s\S]*SET search_path = pg_catalog, public/u,

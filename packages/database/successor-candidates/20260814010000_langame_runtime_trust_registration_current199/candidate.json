@@ -7,7 +7,7 @@
     "LANGAME_RUNTIME_TRUST_REGISTRATION_CURRENT199_V1",
     "LANGAME_RUNTIME_TRUST_BOOTSTRAP_REGISTRY_CURRENT198_V1"
   ],
-  "migrationSqlSha256": "40a480ac7a16cd91530a5c59c02538e481a3f1030bdc3e82e5724b13ec1f7a5e",
+  "migrationSqlSha256": "8c55f0ebdc9da2e881b4b1a66e4cdea59a2a1f4576c107cfe24d633e3facc2fe",
   "authorization": false,
   "canMutateProduction": false,
   "canActivateApplicationRoute": false,

@@ -66,6 +66,10 @@ remain behind the common `SHARED-BETA-GO`.
 ## Local evidence
 
 - pure planner/catalog matcher: `9/9` static and adversarial checks;
+- independent Ed25519 verifier: `8/8`; exact branded catalog receipt, release,
+  database/role OIDs and CURRENT192 checksum are signed for at most five
+  minutes; clone, attacker-root, signature/digest/timeline/context drift fail
+  closed;
 - branded plan and receipt reject clones, proxies, accessors and catalog drift;
 - rollback-only SQL creates the fixed role, removes inherited PUBLIC authority,
   grants exactly three CURRENT192 functions and proves denial of direct table,

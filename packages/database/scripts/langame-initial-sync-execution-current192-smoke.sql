@@ -420,7 +420,7 @@ BEGIN
       (SELECT canonical_plan FROM current192_collision_plan)
     );
     RAISE EXCEPTION 'CURRENT192 foreign snapshot collision unexpectedly passed';
-  EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+  EXCEPTION WHEN SQLSTATE '23505' THEN NULL;
   END;
 
   IF NOT EXISTS (

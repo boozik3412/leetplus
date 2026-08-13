@@ -18,6 +18,7 @@ import {
   LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_TRUST_DOMAIN,
   langameInitialSyncRuntimeAttestationCurrent193PayloadDigest,
   langameInitialSyncRuntimeAttestationCurrent193PublicKeyFingerprint,
+  verifySyntheticLangameInitialSyncRuntimeAttestationCurrent193,
 } from "./langame-initial-sync-runtime-attestation-current193.mjs";
 import {
   LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
@@ -29,6 +30,7 @@ import {
   openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194,
   recoverLangameInitialSyncRuntimeRevokeCurrent194,
   recoverLangameInitialSyncRuntimeRevokeCurrent194ForTestOnly,
+  recoverLangameInitialSyncRuntimeRevokeWithIntentCurrent195ForTestOnly,
 } from "./langame-initial-sync-runtime-bootstrap-current194.mjs";
 import {
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_TEST_CONFIRMATION,
@@ -37,6 +39,17 @@ import {
   createLangameInitialSyncRuntimeRevokeRecoveryCurrent194ForTestOnly,
 } from "./langame-initial-sync-runtime-prisma-current194.mjs";
 import { isLangameInitialSyncRuntimeProviderCurrent194 } from "./langame-initial-sync-runtime-provider-current194.mjs";
+import {
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_ALGORITHM,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CONTRACT,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CURRENT194_CONTRACT,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_PURPOSE,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_SYNTHETIC_CONFIRMATION,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_TRUST_DOMAIN,
+  langameRuntimeRevokeIntentCurrent195PayloadDigest,
+  langameRuntimeRevokeIntentCurrent195PublicKeyFingerprint,
+  verifySyntheticLangameRuntimeRevokeIntentCurrent195,
+} from "./langame-runtime-revoke-intent-current195.mjs";
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 const NOW = "2026-08-13T09:30:00.000Z";
@@ -270,6 +283,84 @@ function bootstrapFixture(options = {}) {
   };
 }
 
+function verifiedRevokeIntent(value, payloadOverrides = {}) {
+  const attestation =
+    verifySyntheticLangameInitialSyncRuntimeAttestationCurrent193(
+      value.input.attestationEnvelope,
+      value.input.expectedAttestation,
+      value.input.runtimeRoots,
+      value.input.runtimeContext,
+      value.input.now,
+    );
+  const keyId = "langame-current195-bootstrap-ci";
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" });
+  const publicKeyFingerprint =
+    langameRuntimeRevokeIntentCurrent195PublicKeyFingerprint(publicKeyPem);
+  const payload = {
+    attestationId: attestation.attestationId,
+    attestationPublicKeyFingerprint: attestation.publicKeyFingerprint,
+    attestationSigningKeyId: attestation.signingKeyId,
+    contract: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CONTRACT,
+    current194Contract:
+      LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CURRENT194_CONTRACT,
+    databaseName: attestation.databaseName,
+    databaseOid: attestation.databaseOid,
+    expectedPayloadDigest: attestation.payloadDigest,
+    intentId: "revoke-intent-current195-bootstrap",
+    issuedAt: "2026-08-13T09:29:30.000Z",
+    ownerRoleName: attestation.schemaOwnerRoleName,
+    ownerRoleOid: attestation.schemaOwnerRoleOid,
+    publicKeyFingerprint,
+    purpose: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_PURPOSE,
+    releaseSha: attestation.releaseSha,
+    revocationReasonDigest: "8".repeat(64),
+    revokeRequestDigest: "7".repeat(64),
+    revokeRequestId: "revoke-request-current194-bootstrap",
+    signingKeyId: keyId,
+    trustDomain: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_TRUST_DOMAIN,
+    validUntil: "2026-08-13T09:34:00.000Z",
+    ...payloadOverrides,
+  };
+  const envelope = {
+    payload,
+    payloadDigest: langameRuntimeRevokeIntentCurrent195PayloadDigest(payload),
+    publicKeyFingerprint,
+    signature: signPayload(
+      null,
+      Buffer.from(canonicalStringify(payload), "utf8"),
+      privateKey,
+    ).toString("base64url"),
+    signatureAlgorithm: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_ALGORITHM,
+    signingKeyId: keyId,
+  };
+  return verifySyntheticLangameRuntimeRevokeIntentCurrent195(
+    envelope,
+    attestation,
+    {
+      [keyId]: {
+        algorithm: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_ALGORITHM,
+        keyId,
+        notAfter: "2026-08-14T00:00:00.000Z",
+        notBefore: "2026-08-13T00:00:00.000Z",
+        publicKeyFingerprint,
+        publicKeyPem,
+        purpose: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_PURPOSE,
+        status: "ACTIVE",
+        trustDomain: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_TRUST_DOMAIN,
+      },
+    },
+    {
+      databaseName: DATABASE,
+      environment: "ci",
+      explicitConfirmation:
+        LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_SYNTHETIC_CONFIRMATION,
+      hostname: "127.0.0.1",
+    },
+    NOW,
+  );
+}
+
 test("CURRENT194 bootstrap production and unconfirmed synthetic entries deny", async () => {
   await assert.rejects(
     openLangameInitialSyncRuntimeBootstrapCurrent194(),
@@ -343,6 +434,67 @@ test("CURRENT194 fresh bootstrap reconciles persisted revoke and closes", async 
     false,
   );
   assert.equal(value.runtime.observed.queries.length, 0);
+});
+
+test("CURRENT195 signed intent projects an exact revoke input into recovery", async () => {
+  const value = bootstrapFixture({
+    ownerOverrides: {
+      query(text) {
+        if (text.includes("attestation_revoke_current194_v1")) {
+          return [
+            {
+              attestationId: "attestation-current194-bootstrap",
+              replayed: true,
+              revokedAt: new Date("2026-08-13T09:31:00.000Z"),
+              status: "REVOKED",
+            },
+          ];
+        }
+      },
+    },
+  });
+  const receipt =
+    await recoverLangameInitialSyncRuntimeRevokeWithIntentCurrent195ForTestOnly(
+      value.input,
+      verifiedRevokeIntent(value),
+      value.recovery,
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION,
+    );
+  assert.equal(receipt.status, "REVOKED");
+  assert.equal(receipt.replayed, true);
+  assert.equal(value.recoveryOwner.observed.disconnects, 1);
+  assert.equal(value.runtime.observed.queries.length, 0);
+});
+
+test("CURRENT195 recovery rejects cloned or cross-attestation intent and closes", async () => {
+  const cloned = bootstrapFixture();
+  const intent = verifiedRevokeIntent(cloned);
+  await assert.rejects(
+    recoverLangameInitialSyncRuntimeRevokeWithIntentCurrent195ForTestOnly(
+      cloned.input,
+      { ...intent },
+      cloned.recovery,
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION,
+    ),
+    (error) =>
+      error.code === "CURRENT194_BOOTSTRAP_RECOVER_REVOKE_INTENT_INVALID",
+  );
+  assert.equal(cloned.recoveryOwner.observed.disconnects, 1);
+  assert.equal(cloned.recoveryOwner.observed.queries.length, 0);
+
+  const cross = bootstrapFixture();
+  await assert.rejects(
+    recoverLangameInitialSyncRuntimeRevokeWithIntentCurrent195ForTestOnly(
+      cross.input,
+      intent,
+      cross.recovery,
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION,
+    ),
+    (error) =>
+      error.code === "CURRENT194_BOOTSTRAP_RECOVER_REVOKE_INTENT_INVALID",
+  );
+  assert.equal(cross.recoveryOwner.observed.disconnects, 1);
+  assert.equal(cross.recoveryOwner.observed.queries.length, 0);
 });
 
 test("CURRENT194 revoke recovery closes owner-only client on malformed request", async () => {

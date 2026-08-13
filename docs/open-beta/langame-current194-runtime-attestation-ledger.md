@@ -115,15 +115,22 @@ fresh owner-only adapter against the persisted terminal row after the original
 session had closed. Artifact ID `9181448914`, digest
 `sha256:57fb23ac3078761a3ed6631936a902744bcca4c314d21b06a7f93f27420ddba6`.
 
-This foundation deliberately remains production-denied. It does not yet
-persist or coordinator-sign the revoke intent supplied by the caller, so it is
-not by itself sufficient proof for unattended production recovery after a
-process crash.
+The exact-SHA CURRENT194 foundation deliberately remains production-denied. It
+does not persist or sign the revoke intent supplied by the caller, so it is not
+by itself sufficient proof for unattended production recovery after a process
+crash.
+
+The local CURRENT195 successor now adds an independent short-lived Ed25519
+revoke-intent envelope and makes a new recovery path accept only its branded
+verified receipt. The actual PostgreSQL fixture uses that path. CURRENT195 does
+not yet persist the signed intent and its production root registry remains
+empty, so the production decision is unchanged; see
+[CURRENT195 signed revoke intent](./langame-current195-signed-revoke-intent.md).
 
 ## Next implementation steps
 
-1. Persist and coordinator-sign the exact revoke intent, then bind the
-   owner-only restart reconciler to that durable intent.
+1. Persist the exact signed revoke intent, then bind the owner-only restart
+   reconciler to its branded durable ledger receipt.
 2. Add production TLS peer pinning for the owner and runtime connections.
 3. Run canonical restored-copy apply/repeat/rollback/zero-diff rehearsal.
 4. Only after the common launch gates, run the four-club internal alpha and

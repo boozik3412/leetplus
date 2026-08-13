@@ -209,6 +209,9 @@ jobs:
       - name: Validate dormant CURRENT194 Langame runtime attestation ledger
         run: pnpm --filter database check:langame-runtime-attestation-ledger-current194
 
+      - name: Validate nonauthorizing CURRENT195 signed revoke intent
+        run: pnpm --filter database check:langame-runtime-revoke-intent-current195
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 

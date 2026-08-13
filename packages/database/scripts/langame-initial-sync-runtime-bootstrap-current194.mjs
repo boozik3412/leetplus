@@ -14,6 +14,7 @@ import {
   isLangameInitialSyncRuntimeProviderCurrent194,
   openSyntheticLangameInitialSyncRuntimeProviderCurrent194,
 } from "./langame-initial-sync-runtime-provider-current194.mjs";
+import { isVerifiedLangameRuntimeRevokeIntentCurrent195 } from "./langame-runtime-revoke-intent-current195.mjs";
 
 export const LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONTRACT =
   "LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_V1";
@@ -237,6 +238,29 @@ async function recoverVerified(attestation, revokeValue, recovery) {
   }
 }
 
+function revokeIntentRequest(attestation, intent) {
+  if (
+    !isVerifiedLangameRuntimeRevokeIntentCurrent195(intent) ||
+    intent.attestationId !== attestation.attestationId ||
+    intent.attestationPublicKeyFingerprint !==
+      attestation.publicKeyFingerprint ||
+    intent.attestationSigningKeyId !== attestation.signingKeyId ||
+    intent.databaseName !== attestation.databaseName ||
+    intent.databaseOid !== attestation.databaseOid ||
+    intent.expectedPayloadDigest !== attestation.payloadDigest ||
+    intent.ownerRoleName !== attestation.schemaOwnerRoleName ||
+    intent.ownerRoleOid !== attestation.schemaOwnerRoleOid ||
+    intent.releaseSha !== attestation.releaseSha
+  ) {
+    fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_INTENT_INVALID");
+  }
+  return Object.freeze({
+    revocationReasonDigest: intent.revocationReasonDigest,
+    revokeRequestDigest: intent.revokeRequestDigest,
+    revokeRequestId: intent.revokeRequestId,
+  });
+}
+
 export async function openLangameInitialSyncRuntimeBootstrapCurrent194() {
   fail("CURRENT194_BOOTSTRAP_PRODUCTION_DENIED");
 }
@@ -314,6 +338,30 @@ export async function recoverSyntheticLangameInitialSyncRuntimeRevokeCurrent194(
   return recoverVerified(attestation, revokeValue, recovery);
 }
 
+export async function recoverSyntheticLangameInitialSyncRuntimeRevokeWithIntentCurrent195(
+  inputValue,
+  intent,
+  prismaConfig,
+  explicitConfirmation,
+) {
+  if (
+    arguments.length !== 4 ||
+    explicitConfirmation !==
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION
+  ) {
+    fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_INTENT_SYNTHETIC_DENIED");
+  }
+  const input = exactInput(inputValue);
+  const attestation = verify(input);
+  const request = revokeIntentRequest(attestation, intent);
+  const recovery =
+    createSyntheticLangameInitialSyncRuntimeRevokeRecoveryCurrent194(
+      prismaConfig,
+      LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_RECOVERY_CONFIRMATION,
+    );
+  return recoverVerified(attestation, request, recovery);
+}
+
 export async function recoverLangameInitialSyncRuntimeRevokeCurrent194ForTestOnly(
   inputValue,
   revokeValue,
@@ -342,6 +390,37 @@ export async function recoverLangameInitialSyncRuntimeRevokeCurrent194ForTestOnl
     throw error;
   }
   return recoverVerified(attestation, revokeValue, recovery);
+}
+
+export async function recoverLangameInitialSyncRuntimeRevokeWithIntentCurrent195ForTestOnly(
+  inputValue,
+  intent,
+  recovery,
+  explicitConfirmation,
+) {
+  if (
+    arguments.length !== 4 ||
+    explicitConfirmation !==
+      LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_TEST_CONFIRMATION ||
+    !isLangameInitialSyncRuntimeRevokeRecoveryCurrent194(recovery)
+  ) {
+    fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_INTENT_TEST_INJECTION_DENIED");
+  }
+  let attestation;
+  let request;
+  try {
+    const input = exactInput(inputValue);
+    attestation = verify(input);
+    request = revokeIntentRequest(attestation, intent);
+  } catch (error) {
+    try {
+      await recovery.close();
+    } catch {
+      fail("CURRENT194_BOOTSTRAP_RECOVER_REVOKE_CLEANUP_FAILED");
+    }
+    throw error;
+  }
+  return recoverVerified(attestation, request, recovery);
 }
 
 export function isLangameInitialSyncRuntimeBootstrapCurrent194(value) {

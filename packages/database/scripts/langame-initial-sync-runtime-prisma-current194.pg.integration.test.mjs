@@ -16,18 +16,30 @@ import {
   LANGAME_INITIAL_SYNC_RUNTIME_ATTESTATION_CURRENT193_TRUST_DOMAIN,
   langameInitialSyncRuntimeAttestationCurrent193PayloadDigest,
   langameInitialSyncRuntimeAttestationCurrent193PublicKeyFingerprint,
+  verifySyntheticLangameInitialSyncRuntimeAttestationCurrent193,
 } from "./langame-initial-sync-runtime-attestation-current193.mjs";
 import {
   LANGAME_INITIAL_SYNC_RUNTIME_BOOTSTRAP_CURRENT194_CONFIRMATION,
   isLangameInitialSyncRuntimeBootstrapCurrent194,
   openSyntheticLangameInitialSyncRuntimeBootstrapCurrent194,
-  recoverSyntheticLangameInitialSyncRuntimeRevokeCurrent194,
+  recoverSyntheticLangameInitialSyncRuntimeRevokeWithIntentCurrent195,
 } from "./langame-initial-sync-runtime-bootstrap-current194.mjs";
 import {
   LANGAME_INITIAL_SYNC_RUNTIME_PRISMA_CURRENT194_CONFIRMATION,
   createSyntheticLangameInitialSyncRuntimePrismaCurrent194,
 } from "./langame-initial-sync-runtime-prisma-current194.mjs";
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
+import {
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_ALGORITHM,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CONTRACT,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CURRENT194_CONTRACT,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_PURPOSE,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_SYNTHETIC_CONFIRMATION,
+  LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_TRUST_DOMAIN,
+  langameRuntimeRevokeIntentCurrent195PayloadDigest,
+  langameRuntimeRevokeIntentCurrent195PublicKeyFingerprint,
+  verifySyntheticLangameRuntimeRevokeIntentCurrent195,
+} from "./langame-runtime-revoke-intent-current195.mjs";
 
 const { Client } = pg;
 const SOURCE_DATABASE = "leetplus_ci";
@@ -164,6 +176,84 @@ function bootstrapInput(databaseOid, ownerOid, runtimeOid) {
       },
     },
   };
+}
+
+function verifiedRevokeIntent(input) {
+  const attestation =
+    verifySyntheticLangameInitialSyncRuntimeAttestationCurrent193(
+      input.attestationEnvelope,
+      input.expectedAttestation,
+      input.runtimeRoots,
+      input.runtimeContext,
+      input.now,
+    );
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" });
+  const publicKeyFingerprint =
+    langameRuntimeRevokeIntentCurrent195PublicKeyFingerprint(publicKeyPem);
+  const keyId = "langame-current195-prisma-revoke-ci";
+  const nowMs = Date.parse(input.now);
+  const payload = {
+    attestationId: attestation.attestationId,
+    attestationPublicKeyFingerprint: attestation.publicKeyFingerprint,
+    attestationSigningKeyId: attestation.signingKeyId,
+    contract: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CONTRACT,
+    current194Contract:
+      LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_CURRENT194_CONTRACT,
+    databaseName: attestation.databaseName,
+    databaseOid: attestation.databaseOid,
+    expectedPayloadDigest: attestation.payloadDigest,
+    intentId: "revoke-intent-current195-prisma-ci",
+    issuedAt: new Date(nowMs - 5_000).toISOString(),
+    ownerRoleName: attestation.schemaOwnerRoleName,
+    ownerRoleOid: attestation.schemaOwnerRoleOid,
+    publicKeyFingerprint,
+    purpose: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_PURPOSE,
+    releaseSha: attestation.releaseSha,
+    revocationReasonDigest: "1".repeat(64),
+    revokeRequestDigest: "f".repeat(64),
+    revokeRequestId: "revoke-request-current194-bootstrap-ci",
+    signingKeyId: keyId,
+    trustDomain: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_TRUST_DOMAIN,
+    validUntil: new Date(nowMs + 120_000).toISOString(),
+  };
+  const envelope = {
+    payload,
+    payloadDigest: langameRuntimeRevokeIntentCurrent195PayloadDigest(payload),
+    publicKeyFingerprint,
+    signature: signPayload(
+      null,
+      Buffer.from(canonicalStringify(payload), "utf8"),
+      privateKey,
+    ).toString("base64url"),
+    signatureAlgorithm: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_ALGORITHM,
+    signingKeyId: keyId,
+  };
+  return verifySyntheticLangameRuntimeRevokeIntentCurrent195(
+    envelope,
+    attestation,
+    {
+      [keyId]: {
+        algorithm: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_ALGORITHM,
+        keyId,
+        notAfter: new Date(nowMs + 600_000).toISOString(),
+        notBefore: new Date(nowMs - 60_000).toISOString(),
+        publicKeyFingerprint,
+        publicKeyPem,
+        purpose: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_PURPOSE,
+        status: "ACTIVE",
+        trustDomain: LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_TRUST_DOMAIN,
+      },
+    },
+    {
+      databaseName: TARGET_DATABASE,
+      environment: "ci",
+      explicitConfirmation:
+        LANGAME_RUNTIME_REVOKE_INTENT_CURRENT195_SYNTHETIC_CONFIRMATION,
+      hostname: "127.0.0.1",
+    },
+    input.now,
+  );
 }
 
 test(
@@ -482,13 +572,9 @@ test(
       session = null;
 
       const recovered =
-        await recoverSyntheticLangameInitialSyncRuntimeRevokeCurrent194(
+        await recoverSyntheticLangameInitialSyncRuntimeRevokeWithIntentCurrent195(
           signedBootstrapInput,
-          {
-            revocationReasonDigest: "1".repeat(64),
-            revokeRequestDigest: "f".repeat(64),
-            revokeRequestId: "revoke-request-current194-bootstrap-ci",
-          },
+          verifiedRevokeIntent(signedBootstrapInput),
           {
             expectedDatabase: TARGET_DATABASE,
             ownerDatabaseUrl: rotatedPrismaConfig.ownerDatabaseUrl,

@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 13.08.2026
-- Версия: 2.52
+- Версия: 2.53
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -59,10 +59,20 @@ restart reconciliation использует отдельный owner-only adapte
 проверенную CURRENT193 attestation и exact revoke request, не содержит runtime
 URL/client и может только повторить фиксированный terminal revoke. Actual
 PostgreSQL fixture теперь проверяет persisted replay через новый процессный
-контур. Это ещё не production-ready durable intent: production entry закрыт,
-а revoke request должен быть отдельно сохранён и подписан coordinator'ом.
+контур. Это ещё не production-ready durable intent: production entry закрыт.
+CURRENT195 теперь подписывает exact request, но его ещё нужно сохранить в
+отдельном PostgreSQL ledger до исходного revoke effect.
 Production roots, route/UI, текущая сеть из четырёх клубов и первый внешний
 tenant не изменяются.
+
+CURRENT195 локально добавляет independent Ed25519 revoke-intent foundation:
+exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный
+revoke request связываются до создания owner-only recovery client. Production
+roots frozen empty; standalone `8/8`, composed CURRENT194/CURRENT195 `38/38`,
+CURRENT193 `17/17`. Actual PostgreSQL CI fixture переведён на цепочку signed
+intent → fresh owner-only persisted replay. Это ещё не durable production
+coordinator: CURRENT195 PostgreSQL intent ledger и production root enrollment
+не реализованы, все launch/effect flags остаются false.
 
 CURRENT187-J локально добавил synthetic deny-only network/runtime foundation:
 четыре exact service purpose, отдельные branded network и host/control-plane

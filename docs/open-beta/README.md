@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.104                                        |
+| Версия           | 1.105                                        |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -133,6 +133,9 @@ enterprise-isolation option и не сокращает shared gates.
    0e.11. [CURRENT194 runtime-attestation ledger](./langame-current194-runtime-attestation-ledger.md) —
    owner-only persisted register/consume/revoke/expiry state machine с exact
    replay; runtime grants, production authority и route activation отсутствуют.
+   0e.12. [CURRENT195 signed revoke intent](./langame-current195-signed-revoke-intent.md) —
+   локальная Ed25519-bound foundation для exact owner-only restart recovery;
+   production roots и persisted intent ledger пока отсутствуют.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

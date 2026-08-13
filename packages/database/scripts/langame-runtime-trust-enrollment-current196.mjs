@@ -662,6 +662,7 @@ function verifyWithRoots(envelopeValue, expectedValue, roots, now) {
     ownerRoleName: payload.ownerRoleName,
     ownerRoleOid: payload.ownerRoleOid,
     productionExecutionAllowed: false,
+    enrollmentPayloadDigest: envelope.payloadDigest,
     releaseArtifactDigest: payload.releaseArtifactDigest,
     releaseSha: payload.releaseSha,
     runtimeAttestationKeyId: candidateBundle.runtimeAttestationRoot.keyId,

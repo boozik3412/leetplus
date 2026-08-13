@@ -234,6 +234,9 @@ jobs:
       - name: Validate empty immutable CURRENT198 bootstrap-root registry
         run: pnpm --filter database check:langame-runtime-trust-bootstrap-registry-current198
 
+      - name: Validate deny-only CURRENT199 trust registration provenance
+        run: pnpm --filter database check:langame-runtime-trust-registration-current199
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 

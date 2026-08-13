@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.65
+- Версия: 2.66
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -172,10 +172,20 @@ contract не имеют env/filesystem/network/DB/private-key/signer authority;
 Реальный production public root не добавлен, поэтому production acquisition,
 текущие четыре клуба и внешний tester остаются без изменений.
 
-Следующий P0-срез после CURRENT198 acceptance: append-only одноразовый
-enrollment/rotation/revocation ledger foundation. Добавление первого реального
-public root остаётся отдельной offline key ceremony и reviewed release change;
-оно не может быть сгенерировано или одобрено приложением.
+CURRENT199 trust-registration provenance bridge реализован локально как
+`DENY-ONLY / NOT PERSISTED`. CURRENT196 теперь переносит полный
+`enrollmentPayloadDigest`, CURRENT197 включает его в protected receipt/digest,
+а CURRENT199 связывает его с exact registry/release/database/role/key-file/TLS
+provenance и свежей timeline. Production entry требует настоящие process brands
+и production-origin acquisition; все action flags false. Focused `7/7`,
+CURRENT196/197 actual TLS compatibility `25/25`, typecheck/format/diff зелёные.
+Этот срез ещё не ledger и не переживает restart.
+
+Следующий P0-срез: owner-only PostgreSQL one-time registration/event ledger с
+append-only событиями, exact replay, expiry и lost-response reconciliation;
+после него — отдельные rotation/revocation command contracts. Добавление первого
+реального public root остаётся отдельной offline key ceremony и reviewed release
+change; оно не может быть сгенерировано или одобрено приложением.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

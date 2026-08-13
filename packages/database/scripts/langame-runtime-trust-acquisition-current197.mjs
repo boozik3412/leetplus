@@ -231,6 +231,7 @@ function normalizeProposal(value, syntheticOnly) {
     value.sharedBetaAccess !== false ||
     value.tlsRejectUnauthorized !== true ||
     !SHA256_PATTERN.test(value.candidateBundleDigest) ||
+    !SHA256_PATTERN.test(value.enrollmentPayloadDigest) ||
     !SHA256_PATTERN.test(value.runtimeAttestationPublicKeyFingerprint) ||
     !SHA256_PATTERN.test(value.runtimeRevokeIntentPublicKeyFingerprint) ||
     !SHA256_PATTERN.test(value.tlsCaCertificateSha256) ||
@@ -773,6 +774,7 @@ async function collectInternal(
     databaseOid: proposal.databaseOid,
     enrollmentId: proposal.enrollmentId,
     issuedAt: proposal.issuedAt,
+    enrollmentPayloadDigest: proposal.enrollmentPayloadDigest,
     releaseArtifactDigest: proposal.releaseArtifactDigest,
     releaseSha: proposal.releaseSha,
     resolvedAddressSetDigest,
@@ -804,6 +806,7 @@ async function collectInternal(
     enrollmentId: proposal.enrollmentId,
     productionExecutionAllowed: false,
     productionRootEnrolled: false,
+    enrollmentPayloadDigest: proposal.enrollmentPayloadDigest,
     protectedSourceFilesVerified: true,
     receiptDigest,
     releaseArtifactDigest: proposal.releaseArtifactDigest,

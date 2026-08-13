@@ -236,6 +236,7 @@ test("CURRENT196 verifies an exact nonauthorizing trust proposal", () => {
     receipt.candidateBundleDigest,
     value.expected.candidateBundleDigest,
   );
+  assert.equal(receipt.enrollmentPayloadDigest, value.envelope.payloadDigest);
   assert.equal(receipt.tlsServerName, "api.langame.example");
   assert.equal(receipt.tlsCaCertificateSha256, "1".repeat(64));
   assert.equal(receipt.tlsLeafCertificateSha256, "2".repeat(64));

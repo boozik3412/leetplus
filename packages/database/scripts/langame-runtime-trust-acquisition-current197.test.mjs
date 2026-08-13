@@ -506,6 +506,10 @@ test("CURRENT197 reads exact public roots and returns deny-only TLS evidence", a
   assert.equal(receipt.canMutate, false);
   assert.equal(receipt.productionExecutionAllowed, false);
   assert.equal(receipt.productionRootEnrolled, false);
+  assert.equal(
+    receipt.enrollmentPayloadDigest,
+    value.input.proposal.enrollmentPayloadDigest,
+  );
   assert.equal(receipt.sharedBetaAccess, false);
   assert.equal(receipt.testAccessAuthorized, false);
   assert.equal(

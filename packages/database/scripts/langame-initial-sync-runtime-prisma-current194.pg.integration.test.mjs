@@ -590,14 +590,30 @@ test(
       const persistedIntent =
         await firstIntentLedger.registerCurrent195(verifiedIntent);
       assert.equal(persistedIntent.persistedStatus, "PENDING");
-      await assert.rejects(
-        firstIntentLedger.applyCurrent195(persistedIntent),
-        (error) =>
-          error instanceof Error &&
-          /runtime session is not drained/iu.test(
-            `${error.message} ${error.meta?.message ?? ""}`,
-          ),
-      );
+      const liveRuntimeBackend = new Client({
+        connectionString: rotatedPrismaConfig.runtimeDatabaseUrl,
+      });
+      await liveRuntimeBackend.connect();
+      try {
+        const runtimeBackendCount = await scalar(
+          maintenance,
+          `SELECT count(*)::INTEGER AS count
+           FROM pg_catalog.pg_stat_activity
+           WHERE datname = $1 AND usesysid = $2 AND backend_type = 'client backend'`,
+          [TARGET_DATABASE, runtimeOid],
+        );
+        assert.equal(runtimeBackendCount.count >= 1, true);
+        await assert.rejects(
+          firstIntentLedger.applyCurrent195(persistedIntent),
+          (error) =>
+            error instanceof Error &&
+            /runtime session is not drained/iu.test(
+              `${error.message} ${error.meta?.message ?? ""}`,
+            ),
+        );
+      } finally {
+        await liveRuntimeBackend.end();
+      }
       await firstIntentLedger.close();
       await session.drain();
       assert.equal(session.snapshot().state, "CLOSED");

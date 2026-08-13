@@ -75,6 +75,7 @@ describe('tenant execution HTTP policy', () => {
     ['GET', '/integrations/langame/service-diagnostics'],
     ['POST', '/integrations/langame/settings/preview'],
     ['POST', '/integrations/langame/onboarding/preview'],
+    ['POST', '/integrations/langame/onboarding/status'],
     ['POST', '/integrations/langame/guests/search-diagnostics'],
   ])('keeps read-only diagnostic %s %s at READ', (method, path) => {
     expect(resolveTenantExecutionHttpAccess({ method, path })).toMatchObject({

@@ -23,6 +23,7 @@ const DOMAIN = "b1.langamepro.ru";
 const EXTERNAL_CLUB_ID = "42";
 const PREVIEW_PATH = "/api/integrations/langame/onboarding/preview";
 const ACTIVATE_PATH = "/api/integrations/langame/onboarding/activate";
+const STATUS_PATH = "/api/integrations/langame/onboarding/status";
 
 const WEB_APP_ROOT = fileURLToPath(new URL("../app", import.meta.url));
 const API_CONTROLLER = fileURLToPath(
@@ -54,6 +55,8 @@ const activationBody = {
   domain: DOMAIN,
   externalClubId: EXTERNAL_CLUB_ID,
 };
+
+const statusBody = { storeId: STORE_ID };
 
 function commandRequest(
   pathname: string,
@@ -92,14 +95,16 @@ function prepareActivation() {
   });
 }
 
-test("keeps CURRENT188 BFF dormant and declares missing stages without invented routes", () => {
+function prepareStatus() {
+  return prepareLangameCurrent188BffRequest({
+    request: commandRequest(STATUS_PATH, statusBody),
+    cookieAccessToken: TOKEN,
+  });
+}
+
+test("keeps CURRENT188 BFF dormant and declares only reconcile and initial sync missing", () => {
   assert.equal(LANGAME_CURRENT188_BFF_CANDIDATE_ACTIVE, false);
   assert.deepEqual(LANGAME_CURRENT188_BFF_BLOCKERS, {
-    STATUS: {
-      operation: "STATUS",
-      available: false,
-      reasonCode: "LANGAME_CURRENT188_STAGED_STATUS_API_MISSING",
-    },
     RECONCILE: {
       operation: "RECONCILE",
       available: false,
@@ -145,6 +150,7 @@ test("prepares only exact same-origin cookie-backed staged preview", async () =>
     requestBinding: {
       requestId: REQUEST_ID,
       activationReceiptId: null,
+      storeId: STORE_ID,
     },
     upstreamPath: "/integrations/langame/onboarding/preview",
     init: {
@@ -186,6 +192,7 @@ test("prepares only exact same-origin cookie-backed staged activation", async ()
   assert.deepEqual(prepared.requestBinding, {
     requestId: REQUEST_ID,
     activationReceiptId: RECEIPT_ID,
+    storeId: STORE_ID,
   });
   assert.deepEqual(JSON.parse(prepared.init.body), {
     receiptId: RECEIPT_ID,
@@ -198,6 +205,32 @@ test("prepares only exact same-origin cookie-backed staged activation", async ()
   assert.equal(prepared.init.cache, "no-store");
   assert.equal(prepared.init.redirect, "error");
   assert.equal(prepared.init.credentials, "omit");
+});
+
+test("prepares only exact same-origin cookie-backed staged status", async () => {
+  const prepared = await prepareStatus();
+
+  assert.deepEqual(prepared, {
+    route: "STATUS",
+    requestBinding: {
+      requestId: null,
+      activationReceiptId: null,
+      storeId: STORE_ID,
+    },
+    upstreamPath: "/integrations/langame/onboarding/status",
+    init: {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(statusBody),
+      cache: "no-store",
+      redirect: "error",
+      credentials: "omit",
+    },
+  });
 });
 
 test("fails closed before forwarding inexact route, origin, auth, media type, or body", async () => {
@@ -456,6 +489,92 @@ test("projects activation only while provider work and initial sync remain false
   );
 });
 
+test("projects only receipt-bound staged status and keeps later stages false", async () => {
+  const prepared = await prepareStatus();
+  const activated = {
+    contractVersion: CONTRACT,
+    storeId: STORE_ID,
+    status: "ACTIVATED",
+    receiptId: RECEIPT_ID,
+    expiresAt: "2026-08-05T12:15:00.000Z",
+    consumedAt: "2026-08-05T12:10:00.000Z",
+    configDigest: CONFIG_DIGEST,
+    bindingDigest: BINDING_DIGEST,
+    externalDomain: DOMAIN,
+    externalClubId: EXTERNAL_CLUB_ID,
+    claimDigest: BINDING_DIGEST,
+    activatedAt: "2026-08-05T12:10:00.000Z",
+    activationAvailable: false,
+    reconciliationAvailable: false,
+    initialReadOnlySyncAvailable: false,
+    productionStatusAllowed: false,
+  };
+  const projected = await projectLangameCurrent188UpstreamResponse(
+    prepared,
+    Response.json(activated, { status: 201 }),
+  );
+
+  assert.equal(projected.status, 201);
+  assert.deepEqual(await projected.json(), activated);
+  assertPrivate(projected);
+
+  for (const invalid of [
+    { ...activated, storeId: "other-store" },
+    { ...activated, claimDigest: "c".repeat(64) },
+    { ...activated, reconciliationAvailable: true },
+    { ...activated, initialReadOnlySyncAvailable: true },
+    { ...activated, apiKey: API_KEY },
+  ]) {
+    await assert.rejects(
+      projectLangameCurrent188UpstreamResponse(
+        prepared,
+        Response.json(invalid, { status: 201 }),
+      ),
+      /LANGAME_CURRENT188_STATUS_RESPONSE_INVALID/,
+    );
+  }
+});
+
+test("projects exact not-configured and pending staged status variants", async () => {
+  const prepared = await prepareStatus();
+  const empty = {
+    contractVersion: CONTRACT,
+    storeId: STORE_ID,
+    status: "NOT_CONFIGURED",
+    receiptId: null,
+    expiresAt: null,
+    consumedAt: null,
+    configDigest: null,
+    bindingDigest: null,
+    externalDomain: null,
+    externalClubId: null,
+    claimDigest: null,
+    activatedAt: null,
+    activationAvailable: false,
+    reconciliationAvailable: false,
+    initialReadOnlySyncAvailable: false,
+    productionStatusAllowed: false,
+  };
+  const pending = {
+    ...empty,
+    status: "PENDING",
+    receiptId: RECEIPT_ID,
+    expiresAt: "2026-08-05T12:15:00.000Z",
+    configDigest: CONFIG_DIGEST,
+    bindingDigest: BINDING_DIGEST,
+    activationAvailable: true,
+  };
+
+  for (const receipt of [empty, pending]) {
+    const projected = await projectLangameCurrent188UpstreamResponse(
+      prepared,
+      Response.json(receipt, { status: 201 }),
+    );
+    assert.deepEqual(await projected.json(), receipt);
+    assertPrivate(projected);
+  }
+});
+
 test("sanitizes and bounds upstream failures", async () => {
   const prepared = await preparePreview();
   const projected = await projectLangameCurrent188UpstreamResponse(
@@ -485,7 +604,7 @@ test("sanitizes and bounds upstream failures", async () => {
   );
 });
 
-test("pins the exact API gap: preview and activate exist, staged status/reconcile/sync do not", async () => {
+test("pins preview, activate and status while reconcile and initial sync stay absent", async () => {
   const [controller, service] = await Promise.all([
     readFile(API_CONTROLLER, "utf8"),
     readFile(API_STAGED_SERVICE, "utf8"),
@@ -499,24 +618,40 @@ test("pins the exact API gap: preview and activate exist, staged status/reconcil
   assert.deepEqual(onboardingRoutes, [
     ["Post", "preview"],
     ["Post", "activate"],
+    ["Post", "status"],
   ]);
-  for (const methodName of ["previewOnboarding", "activateOnboarding"]) {
+  for (const methodName of [
+    "previewOnboarding",
+    "activateOnboarding",
+    "getOnboardingStatus",
+  ]) {
     const methodStart = controller.indexOf(`${methodName}(`);
     assert.notEqual(methodStart, -1);
     const decoratorStart = controller.lastIndexOf("@Post(", methodStart);
     const metadata = controller.slice(decoratorStart, methodStart);
-    assert.match(metadata, /@Post\('onboarding\/(?:preview|activate)'\)/);
+    assert.match(
+      metadata,
+      /@Post\('onboarding\/(?:preview|activate|status)'\)/,
+    );
     assert.doesNotMatch(metadata, /@HttpCode\(/);
   }
   assert.doesNotMatch(
     controller,
-    /['"]onboarding\/(?:status|reconcile|initial-read-only-sync)['"]/,
+    /['"]onboarding\/(?:reconcile|initial-read-only-sync)['"]/,
   );
   assert.match(service, /activationAvailable:\s*false/);
   assert.match(service, /externalSyncStarted:\s*false/g);
   assert.match(service, /initialReadOnlySyncAvailable:\s*false/);
   assert.match(service, /productionActivationAllowed:\s*false/);
+  assert.match(service, /productionStatusAllowed:\s*false/);
+  assert.match(service, /CURRENT188 status is not production-authorized/);
   assert.match(service, /CURRENT188 activation is not production-authorized/);
+  assert.match(service, /FreshStoreScopeService/);
+  assert.equal(
+    (service.match(/freshStoreScopeService\.assertNetwork\(user\)/g) ?? [])
+      .length,
+    3,
+  );
 });
 
 test("remains unimported while the active settings form and BFF stay legacy", async () => {
@@ -556,10 +691,10 @@ test("remains unimported while the active settings form and BFF stay legacy", as
   ]);
   assert.match(settingsRoute, /export async function GET/);
   assert.match(settingsRoute, /export async function PUT/);
-  assert.doesNotMatch(settingsRoute, /onboarding\/(?:preview|activate)/);
+  assert.doesNotMatch(settingsRoute, /onboarding\/(?:preview|activate|status)/);
   assert.match(settingsForm, /\/api\/integrations\/langame\/settings/);
   assert.match(settingsForm, /method:\s*["']PUT["']/);
-  assert.doesNotMatch(settingsForm, /onboarding\/(?:preview|activate)/);
+  assert.doesNotMatch(settingsForm, /onboarding\/(?:preview|activate|status)/);
 });
 
 test("does not map provider writes, generic sync, or unattended jobs", async () => {

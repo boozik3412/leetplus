@@ -31,6 +31,7 @@ import {
   LangameOnboardingStagedService,
   type LangameOnboardingActivationDto,
   type LangameOnboardingStagedPreviewDto,
+  type LangameOnboardingStatusDto,
 } from './langame-onboarding-staged.service';
 import type {
   LangameEndpointProfileQuery,
@@ -135,6 +136,14 @@ export class LangameController {
     @Body() dto: LangameOnboardingActivationDto,
   ) {
     return this.langameOnboardingStagedService.activate(user, dto);
+  }
+
+  @Post('onboarding/status')
+  getOnboardingStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: LangameOnboardingStatusDto,
+  ) {
+    return this.langameOnboardingStagedService.status(user, dto);
   }
 
   @Get('sync-jobs/:id/discrepancy-log')

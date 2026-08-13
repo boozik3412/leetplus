@@ -1,7 +1,6 @@
 import { UserRole } from '@prisma/client';
 import { createHmac } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import { AccessScopeService } from '../tenancy/access-scope.service';
 import { LangameOnboardingStagedService } from './langame-onboarding-staged.service';
 
 const networkUser: AuthenticatedUser = {
@@ -64,7 +63,7 @@ describe('LangameOnboardingStagedService', () => {
     store: {
       findFirst: jest.fn(),
     },
-    $queryRaw: jest.fn(),
+    $queryRaw: jest.fn<Promise<unknown>, [unknown]>(),
   };
   const config = {
     get: jest.fn(),
@@ -75,10 +74,25 @@ describe('LangameOnboardingStagedService', () => {
   const encryption = {
     encrypt: jest.fn(),
   };
+  const freshScope = {
+    assertNetwork: jest.fn(),
+  };
   let service: LangameOnboardingStagedService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    freshScope.assertNetwork.mockImplementation((user: AuthenticatedUser) => {
+      if (user.accessScope !== 'NETWORK') {
+        throw new Error('Network access is required');
+      }
+      return {
+        userId: user.id,
+        tenantId: user.tenantId,
+        tenantSlug: user.tenantSlug,
+        mode: 'NETWORK',
+        allowedStoreIds: [],
+      };
+    });
     config.get.mockImplementation((key: string) => {
       if (key === 'LANGAME_STAGED_ONBOARDING_FOUNDATION_ENABLED') {
         return 'true';
@@ -87,6 +101,9 @@ describe('LangameOnboardingStagedService', () => {
         return hmacSecret;
       }
       if (key === 'LANGAME_STAGED_ONBOARDING_ACTIVATION_CURRENT188_ENABLED') {
+        return 'true';
+      }
+      if (key === 'LANGAME_STAGED_ONBOARDING_STATUS_CURRENT188_ENABLED') {
         return 'true';
       }
       return undefined;
@@ -115,7 +132,7 @@ describe('LangameOnboardingStagedService', () => {
     encryption.encrypt.mockReturnValue('opaque-encrypted-ciphertext');
     service = new LangameOnboardingStagedService(
       prisma as never,
-      new AccessScopeService(),
+      freshScope as never,
       config as never,
       langameClient as never,
       encryption as never,
@@ -127,6 +144,20 @@ describe('LangameOnboardingStagedService', () => {
       'Network access is required',
     );
 
+    expect(config.get).not.toHaveBeenCalled();
+    expect(prisma.store.findFirst).not.toHaveBeenCalled();
+    expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale persisted authority before configuration or effects', async () => {
+    freshScope.assertNetwork.mockRejectedValueOnce(
+      new Error('Authorization scope is stale'),
+    );
+
+    await expect(service.preview(networkUser, validPreview())).rejects.toThrow(
+      'Authorization scope is stale',
+    );
     expect(config.get).not.toHaveBeenCalled();
     expect(prisma.store.findFirst).not.toHaveBeenCalled();
     expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
@@ -354,6 +385,204 @@ describe('LangameOnboardingStagedService', () => {
     expect(config.get).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
+
+  it('keeps staged status independently default-off before database access', async () => {
+    config.get.mockImplementation((key: string) => {
+      if (key === 'LANGAME_STAGED_ONBOARDING_FOUNDATION_ENABLED') {
+        return 'true';
+      }
+      if (key === 'LANGAME_STAGED_ONBOARDING_HMAC_SECRET') {
+        return hmacSecret;
+      }
+      return undefined;
+    });
+
+    await expect(service.status(networkUser, validStatus())).rejects.toThrow(
+      'CURRENT188 status adapter is disabled',
+    );
+    expect(prisma.store.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('rejects CURRENT188 status in a production environment', async () => {
+    config.get.mockImplementation((key: string) => {
+      if (key === 'NODE_ENV') return 'production';
+      if (key === 'LANGAME_STAGED_ONBOARDING_STATUS_CURRENT188_ENABLED') {
+        return 'true';
+      }
+      return undefined;
+    });
+
+    await expect(service.status(networkUser, validStatus())).rejects.toThrow(
+      'CURRENT188 status is not production-authorized',
+    );
+    expect(prisma.store.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('returns an exact not-configured status without provider or credential access', async () => {
+    prisma.$queryRaw.mockResolvedValue([]);
+
+    await expect(service.status(networkUser, validStatus())).resolves.toEqual({
+      contractVersion: 'LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1',
+      storeId: 'store-00000001',
+      status: 'NOT_CONFIGURED',
+      receiptId: null,
+      expiresAt: null,
+      consumedAt: null,
+      configDigest: null,
+      bindingDigest: null,
+      externalDomain: null,
+      externalClubId: null,
+      claimDigest: null,
+      activatedAt: null,
+      activationAvailable: false,
+      reconciliationAvailable: false,
+      initialReadOnlySyncAvailable: false,
+      productionStatusAllowed: false,
+    });
+    const statusQuery = prisma.$queryRaw.mock.calls[0]?.[0] as
+      | { values?: unknown[] }
+      | undefined;
+    expect(statusQuery?.values).toEqual(['tenant-00000001', 'store-00000001']);
+    expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
+    expect(encryption.encrypt).not.toHaveBeenCalled();
+  });
+
+  it('projects only an exact pending status and computes freshness locally', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-05T12:05:00.000Z'));
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        receiptId: 'receipt-00000001',
+        status: 'PENDING',
+        expiresAt: new Date('2026-08-05T12:15:00.000Z'),
+        consumedAt: null,
+        configDigest,
+        bindingDigest: expectedBindingDigest,
+        externalDomain: null,
+        externalClubId: null,
+        claimDigest: null,
+        activatedAt: null,
+      },
+    ]);
+
+    await expect(service.status(networkUser, validStatus())).resolves.toEqual({
+      contractVersion: 'LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1',
+      storeId: 'store-00000001',
+      status: 'PENDING',
+      receiptId: 'receipt-00000001',
+      expiresAt: '2026-08-05T12:15:00.000Z',
+      consumedAt: null,
+      configDigest,
+      bindingDigest: expectedBindingDigest,
+      externalDomain: null,
+      externalClubId: null,
+      claimDigest: null,
+      activatedAt: null,
+      activationAvailable: true,
+      reconciliationAvailable: false,
+      initialReadOnlySyncAvailable: false,
+      productionStatusAllowed: false,
+    });
+  });
+
+  it('fails closed to expired when a pending receipt is stale before the expirer runs', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-05T12:16:00.000Z'));
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        receiptId: 'receipt-00000001',
+        status: 'PENDING',
+        expiresAt: new Date('2026-08-05T12:15:00.000Z'),
+        consumedAt: null,
+        configDigest,
+        bindingDigest: expectedBindingDigest,
+        externalDomain: null,
+        externalClubId: null,
+        claimDigest: null,
+        activatedAt: null,
+      },
+    ]);
+
+    await expect(
+      service.status(networkUser, validStatus()),
+    ).resolves.toMatchObject({
+      storeId: 'store-00000001',
+      status: 'EXPIRED',
+      activationAvailable: false,
+      reconciliationAvailable: false,
+      initialReadOnlySyncAvailable: false,
+      productionStatusAllowed: false,
+    });
+  });
+
+  it('projects an exact activated claim without credential or provider effects', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        receiptId: 'receipt-00000001',
+        status: 'CONSUMED',
+        expiresAt: new Date('2026-08-05T12:15:00.000Z'),
+        consumedAt: new Date('2026-08-05T12:10:00.000Z'),
+        configDigest,
+        bindingDigest: expectedBindingDigest,
+        externalDomain: '443.langame.ru',
+        externalClubId: '42',
+        claimDigest: expectedBindingDigest,
+        activatedAt: new Date('2026-08-05T12:10:00.000Z'),
+      },
+    ]);
+
+    await expect(service.status(networkUser, validStatus())).resolves.toEqual({
+      contractVersion: 'LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1',
+      storeId: 'store-00000001',
+      status: 'ACTIVATED',
+      receiptId: 'receipt-00000001',
+      expiresAt: '2026-08-05T12:15:00.000Z',
+      consumedAt: '2026-08-05T12:10:00.000Z',
+      configDigest,
+      bindingDigest: expectedBindingDigest,
+      externalDomain: '443.langame.ru',
+      externalClubId: '42',
+      claimDigest: expectedBindingDigest,
+      activatedAt: '2026-08-05T12:10:00.000Z',
+      activationAvailable: false,
+      reconciliationAvailable: false,
+      initialReadOnlySyncAvailable: false,
+      productionStatusAllowed: false,
+    });
+    expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
+    expect(encryption.encrypt).not.toHaveBeenCalled();
+  });
+
+  it('rejects over-broad or inconsistent status rows', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        receiptId: 'receipt-00000001',
+        status: 'CONSUMED',
+        expiresAt: new Date('2026-08-05T12:15:00.000Z'),
+        consumedAt: new Date('2026-08-05T12:10:00.000Z'),
+        configDigest,
+        bindingDigest: expectedBindingDigest,
+        externalDomain: '443.langame.ru',
+        externalClubId: '42',
+        claimDigest: 'a'.repeat(64),
+        activatedAt: new Date('2026-08-05T12:10:00.000Z'),
+        stagedApiKeyEncrypted: 'must-not-leak',
+      },
+    ]);
+
+    await expect(service.status(networkUser, validStatus())).rejects.toThrow(
+      'Invalid staged Langame onboarding status receipt',
+    );
+  });
+
+  it('denies STORES status before configuration and database access', async () => {
+    await expect(service.status(storeUser, validStatus())).rejects.toThrow(
+      'Network access is required',
+    );
+    expect(config.get).not.toHaveBeenCalled();
+    expect(prisma.store.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
 });
 
 function validPreview() {
@@ -363,6 +592,12 @@ function validPreview() {
     domain: '443.langame.ru',
     storeId: 'store-00000001',
     externalClubId: '42',
+  };
+}
+
+function validStatus() {
+  return {
+    storeId: 'store-00000001',
   };
 }
 

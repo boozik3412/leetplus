@@ -6,6 +6,8 @@ const PREVIEW_BROWSER_PATH =
   "/api/integrations/langame/onboarding/preview" as const;
 const ACTIVATE_BROWSER_PATH =
   "/api/integrations/langame/onboarding/activate" as const;
+const STATUS_BROWSER_PATH =
+  "/api/integrations/langame/onboarding/status" as const;
 const B2B_TOKEN_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 const STORE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -33,6 +35,7 @@ const ACTIVATE_INPUT_KEYS = [
   "requestId",
   "storeId",
 ] as const;
+const STATUS_INPUT_KEYS = ["storeId"] as const;
 const PREVIEW_RESPONSE_KEYS = [
   "activationAvailable",
   "bindingDigest",
@@ -55,20 +58,33 @@ const ACTIVATE_RESPONSE_KEYS = [
   "replayed",
   "status",
 ] as const;
+const STATUS_RESPONSE_KEYS = [
+  "activatedAt",
+  "activationAvailable",
+  "bindingDigest",
+  "claimDigest",
+  "configDigest",
+  "consumedAt",
+  "contractVersion",
+  "expiresAt",
+  "externalClubId",
+  "externalDomain",
+  "initialReadOnlySyncAvailable",
+  "productionStatusAllowed",
+  "receiptId",
+  "reconciliationAvailable",
+  "status",
+  "storeId",
+] as const;
 
 export const LANGAME_CURRENT188_BFF_CANDIDATE_ACTIVE = false as const;
 
 /**
  * These operations deliberately have no guessed HTTP mapping. CURRENT188 has
- * no exact staged status/reconcile/initial-sync API contract, and the generic
+ * no exact reconcile/initial-sync API contract, and the generic
  * legacy sync endpoints are not a safe substitute for a receipt-bound flow.
  */
 export const LANGAME_CURRENT188_BFF_BLOCKERS = Object.freeze({
-  STATUS: Object.freeze({
-    operation: "STATUS" as const,
-    available: false as const,
-    reasonCode: "LANGAME_CURRENT188_STAGED_STATUS_API_MISSING",
-  }),
   RECONCILE: Object.freeze({
     operation: "RECONCILE" as const,
     available: false as const,
@@ -81,17 +97,19 @@ export const LANGAME_CURRENT188_BFF_BLOCKERS = Object.freeze({
   }),
 });
 
-export type LangameCurrent188BffRoute = "PREVIEW" | "ACTIVATE";
+export type LangameCurrent188BffRoute = "PREVIEW" | "ACTIVATE" | "STATUS";
 
 export type LangameCurrent188PreparedRequest = Readonly<{
   route: LangameCurrent188BffRoute;
   requestBinding: Readonly<{
-    requestId: string;
+    requestId: string | null;
     activationReceiptId: string | null;
+    storeId: string;
   }>;
   upstreamPath:
     | "/integrations/langame/onboarding/preview"
-    | "/integrations/langame/onboarding/activate";
+    | "/integrations/langame/onboarding/activate"
+    | "/integrations/langame/onboarding/status";
   init: Readonly<{
     method: "POST";
     headers: Readonly<Record<string, string>>;
@@ -147,21 +165,15 @@ export async function prepareLangameCurrent188BffRequest(input: {
   const body = parseRequestJsonBytes(
     await readBoundedRequest(input.request, MAX_REQUEST_BYTES),
   );
-  const normalizedBody =
-    route === "PREVIEW"
-      ? normalizePreviewInput(body)
-      : normalizeActivationInput(body);
-  const upstreamPath =
-    route === "PREVIEW"
-      ? "/integrations/langame/onboarding/preview"
-      : "/integrations/langame/onboarding/activate";
+  const normalized = normalizePreparedInput(route, body);
+  const upstreamPath = resolveUpstreamPath(route);
 
   return Object.freeze({
     route,
     requestBinding: Object.freeze({
-      requestId: normalizedBody.requestId,
-      activationReceiptId:
-        "receiptId" in normalizedBody ? normalizedBody.receiptId : null,
+      requestId: normalized.requestId,
+      activationReceiptId: normalized.activationReceiptId,
+      storeId: normalized.storeId,
     }),
     upstreamPath,
     init: Object.freeze({
@@ -171,7 +183,7 @@ export async function prepareLangameCurrent188BffRequest(input: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       }),
-      body: JSON.stringify(normalizedBody),
+      body: JSON.stringify(normalized.body),
       cache: "no-store" as const,
       redirect: "error" as const,
       credentials: "omit" as const,
@@ -221,6 +233,12 @@ export async function projectLangameCurrent188UpstreamResponse(
       EXACT_NEST_POST_STATUS,
     );
   }
+  if (prepared.route === "STATUS") {
+    return safeJsonResponse(
+      parseStatusResponse(value, prepared.requestBinding.storeId),
+      EXACT_NEST_POST_STATUS,
+    );
+  }
   fail(502, "LANGAME_CURRENT188_RESPONSE_ROUTE_INVALID");
 }
 
@@ -246,6 +264,14 @@ function resolveRoute(request: Request): LangameCurrent188BffRoute {
     url.hash === ""
   ) {
     return "ACTIVATE";
+  }
+  if (
+    request.method === "POST" &&
+    url.pathname === STATUS_BROWSER_PATH &&
+    url.search === "" &&
+    url.hash === ""
+  ) {
+    return "STATUS";
   }
   fail(404, "LANGAME_CURRENT188_ROUTE_DENIED");
 }
@@ -316,6 +342,60 @@ function normalizeActivationInput(value: unknown) {
   };
 }
 
+function normalizeStatusInput(value: unknown) {
+  if (!hasExactKeys(value, STATUS_INPUT_KEYS)) {
+    fail(400, "LANGAME_CURRENT188_STATUS_BODY_INVALID");
+  }
+  return { storeId: requiredStoreId(value.storeId) };
+}
+
+function normalizePreparedInput(
+  route: LangameCurrent188BffRoute,
+  value: unknown,
+) {
+  if (route === "PREVIEW") {
+    const body = normalizePreviewInput(value);
+    return {
+      body,
+      requestId: body.requestId,
+      activationReceiptId: null,
+      storeId: body.storeId,
+    };
+  }
+  if (route === "ACTIVATE") {
+    const body = normalizeActivationInput(value);
+    return {
+      body,
+      requestId: body.requestId,
+      activationReceiptId: body.receiptId,
+      storeId: body.storeId,
+    };
+  }
+  if (route === "STATUS") {
+    const body = normalizeStatusInput(value);
+    return {
+      body,
+      requestId: null,
+      activationReceiptId: null,
+      storeId: body.storeId,
+    };
+  }
+  fail(404, "LANGAME_CURRENT188_ROUTE_DENIED");
+}
+
+function resolveUpstreamPath(route: LangameCurrent188BffRoute) {
+  if (route === "PREVIEW") {
+    return "/integrations/langame/onboarding/preview" as const;
+  }
+  if (route === "ACTIVATE") {
+    return "/integrations/langame/onboarding/activate" as const;
+  }
+  if (route === "STATUS") {
+    return "/integrations/langame/onboarding/status" as const;
+  }
+  fail(404, "LANGAME_CURRENT188_ROUTE_DENIED");
+}
+
 function parsePreviewResponse(value: unknown) {
   if (
     !hasExactKeys(value, PREVIEW_RESPONSE_KEYS) ||
@@ -367,6 +447,123 @@ function parseActivationResponse(value: unknown, expectedReceiptId: string) {
     externalSyncStarted: false as const,
     initialReadOnlySyncAvailable: false as const,
     productionActivationAllowed: false as const,
+  };
+}
+
+function parseStatusResponse(value: unknown, expectedStoreId: string) {
+  if (
+    !hasExactKeys(value, STATUS_RESPONSE_KEYS) ||
+    value.contractVersion !== CURRENT188_CONTRACT ||
+    value.storeId !== expectedStoreId ||
+    !["NOT_CONFIGURED", "PENDING", "EXPIRED", "ACTIVATED"].includes(
+      typeof value.status === "string" ? value.status : "",
+    ) ||
+    typeof value.activationAvailable !== "boolean" ||
+    value.reconciliationAvailable !== false ||
+    value.initialReadOnlySyncAvailable !== false ||
+    value.productionStatusAllowed !== false
+  ) {
+    fail(502, "LANGAME_CURRENT188_STATUS_RESPONSE_INVALID");
+  }
+
+  if (value.status === "NOT_CONFIGURED") {
+    for (const key of [
+      "activatedAt",
+      "bindingDigest",
+      "claimDigest",
+      "configDigest",
+      "consumedAt",
+      "expiresAt",
+      "externalClubId",
+      "externalDomain",
+      "receiptId",
+    ] as const) {
+      if (value[key] !== null) {
+        fail(502, "LANGAME_CURRENT188_STATUS_RESPONSE_INVALID");
+      }
+    }
+    if (value.activationAvailable) {
+      fail(502, "LANGAME_CURRENT188_STATUS_RESPONSE_INVALID");
+    }
+    return {
+      contractVersion: CURRENT188_CONTRACT,
+      storeId: expectedStoreId,
+      status: "NOT_CONFIGURED" as const,
+      receiptId: null,
+      expiresAt: null,
+      consumedAt: null,
+      configDigest: null,
+      bindingDigest: null,
+      externalDomain: null,
+      externalClubId: null,
+      claimDigest: null,
+      activatedAt: null,
+      activationAvailable: false as const,
+      reconciliationAvailable: false as const,
+      initialReadOnlySyncAvailable: false as const,
+      productionStatusAllowed: false as const,
+    };
+  }
+
+  const receiptId = requiredResponseReceiptId(value.receiptId);
+  const expiresAt = requiredIsoDate(value.expiresAt);
+  const configDigest = requiredResponseDigest(value.configDigest);
+  const bindingDigest = requiredResponseDigest(value.bindingDigest);
+  if (value.status === "PENDING" || value.status === "EXPIRED") {
+    if (
+      value.consumedAt !== null ||
+      value.externalDomain !== null ||
+      value.externalClubId !== null ||
+      value.claimDigest !== null ||
+      value.activatedAt !== null ||
+      (value.status === "EXPIRED" && value.activationAvailable)
+    ) {
+      fail(502, "LANGAME_CURRENT188_STATUS_RESPONSE_INVALID");
+    }
+    return {
+      contractVersion: CURRENT188_CONTRACT,
+      storeId: expectedStoreId,
+      status: value.status,
+      receiptId,
+      expiresAt,
+      consumedAt: null,
+      configDigest,
+      bindingDigest,
+      externalDomain: null,
+      externalClubId: null,
+      claimDigest: null,
+      activatedAt: null,
+      activationAvailable: value.activationAvailable,
+      reconciliationAvailable: false as const,
+      initialReadOnlySyncAvailable: false as const,
+      productionStatusAllowed: false as const,
+    };
+  }
+
+  if (
+    value.status !== "ACTIVATED" ||
+    value.activationAvailable ||
+    requiredResponseDigest(value.claimDigest) !== bindingDigest
+  ) {
+    fail(502, "LANGAME_CURRENT188_STATUS_RESPONSE_INVALID");
+  }
+  return {
+    contractVersion: CURRENT188_CONTRACT,
+    storeId: expectedStoreId,
+    status: "ACTIVATED" as const,
+    receiptId,
+    expiresAt,
+    consumedAt: requiredIsoDate(value.consumedAt),
+    configDigest,
+    bindingDigest,
+    externalDomain: requiredResponseDomain(value.externalDomain),
+    externalClubId: requiredResponseExternalClubId(value.externalClubId),
+    claimDigest: bindingDigest,
+    activatedAt: requiredIsoDate(value.activatedAt),
+    activationAvailable: false as const,
+    reconciliationAvailable: false as const,
+    initialReadOnlySyncAvailable: false as const,
+    productionStatusAllowed: false as const,
   };
 }
 
@@ -447,6 +644,28 @@ function requiredResponseReceiptId(value: unknown): string {
 function requiredResponseDigest(value: unknown): string {
   if (typeof value !== "string" || !DIGEST_PATTERN.test(value)) {
     fail(502, "LANGAME_CURRENT188_RESPONSE_DIGEST_INVALID");
+  }
+  return value;
+}
+
+function requiredResponseDomain(value: unknown): string {
+  if (typeof value !== "string") {
+    fail(502, "LANGAME_CURRENT188_STATUS_RESPONSE_INVALID");
+  }
+  const normalized = value.toLowerCase();
+  if (normalized !== value) {
+    fail(502, "LANGAME_CURRENT188_STATUS_RESPONSE_INVALID");
+  }
+  try {
+    return requiredDomain(value);
+  } catch {
+    fail(502, "LANGAME_CURRENT188_STATUS_RESPONSE_INVALID");
+  }
+}
+
+function requiredResponseExternalClubId(value: unknown): string {
+  if (typeof value !== "string" || !EXTERNAL_CLUB_ID_PATTERN.test(value)) {
+    fail(502, "LANGAME_CURRENT188_STATUS_RESPONSE_INVALID");
   }
   return value;
 }

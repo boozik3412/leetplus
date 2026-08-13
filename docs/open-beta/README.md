@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.101                                        |
+| Версия           | 1.102                                        |
 | Дата             | 13.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -108,6 +108,12 @@ enterprise-isolation option и не сокращает shared gates.
    0e.3. [CURRENT188 reconcile CI evidence](./langame-current188-reconcile-ci-evidence-2026-08-13.md) —
    exact-SHA `3/3 SUCCESS`, activation receipt/claim/Store/source/credential/
    audit reconciliation, dormant Web BFF и SHA-bound artifact.
+   0e.4. [CURRENT188 initial sync preflight CI evidence](./langame-current188-initial-sync-preflight-ci-evidence-2026-08-13.md) —
+   exact-SHA `3/3 SUCCESS`, bounded selected-club provider reads, double fresh
+   authority, dormant Web BFF и SHA-bound artifact без platform import.
+   0e.5. [CURRENT191 deterministic initial sync plan](./langame-current191-initial-sync-plan.md) —
+   pure immutable selected-Store product/inventory plan без DB/provider effects;
+   persisted approval/import остаются закрыты.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

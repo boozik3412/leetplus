@@ -97,13 +97,14 @@ Status exact-SHA evidence: commit `f5b94c2e…`, CI `31668745439` —
 increment принят exact SHA `4e2c9b29…`, CI `31671722614`, artifact
 `sha256:7bea44f8…003b1`: targeted Langame `201/201`, tenant execution
 `986/986`, full API `3038 + 2 todo`, Web BFF `17/17`. Текущий local preflight:
-targeted Langame API `219/219`, Web BFF `19/19`; exact-SHA CI ещё обязателен.
+targeted Langame API `219/219`, Web BFF `19/19`; preflight принят exact SHA
+`6794214a…`, CI `31675201041`, artifact `sha256:a5ca6834…f7ca3`.
 Stale `PENDING` до прохода expirer проецируется fail-closed как `EXPIRED`.
 Текущие проверки также подтверждают, что кандидат остаётся неимпортированным
 активными routes и что API содержит ровно fresh-authority `preview`, `activate`
 и production-denied `status`/`reconcile`/`initial-sync/preflight` с Nest default
-`201`, но не отсутствующий persisted import этап. Для status/reconcile это уже
-принято exact-SHA CI; preflight остаётся local до следующего clean SHA.
+`201`, но не отсутствующий persisted import этап. Status, reconcile и preflight
+приняты отдельными exact-SHA CI checkpoints.
 
 ## Условия активации
 

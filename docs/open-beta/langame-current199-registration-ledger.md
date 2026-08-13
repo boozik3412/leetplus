@@ -1,11 +1,11 @@
 # CURRENT199: owner-only registration ledger candidate
 
-| Поле                           | Значение                                         |
-| ------------------------------ | ------------------------------------------------ |
-| Статус                         | `CI FOUNDATION ACCEPTED; NEXT SHA LOCAL / NO-GO` |
-| Дата                           | 14.08.2026                                       |
-| Canonical migration            | отсутствует                                      |
-| Production / Tenant A / tester | не изменялись                                    |
+| Поле                           | Значение                                 |
+| ------------------------------ | ---------------------------------------- |
+| Статус                         | `CI SHA ACCEPTED / NONCANONICAL / NO-GO` |
+| Дата                           | 14.08.2026                               |
+| Canonical migration            | отсутствует                              |
+| Production / Tenant A / tester | не изменялись                            |
 
 Этот срез добавляет noncanonical PostgreSQL successor candidate для durable
 CURRENT199 initial registration. Он не входит в `prisma/migrations` и не
@@ -33,7 +33,7 @@ Foundation SHA `7915912c8f1eb6180929e3d6886b5a33d4a6a29d` принят GitHub
 Actions run `31741381875` как `3/3 SUCCESS`; artifact `9197547597`, digest
 `sha256:5708eac673b36ed2d6bf9954bb32c5b718a670da57ac7d67c424285fee4a4f31`.
 
-Следующий локальный срез добавил test-only branded owner/Prisma adapter с
+Следующий срез добавил test-only branded owner/Prisma adapter с
 production entry fail-closed, exact session/database/owner/runtime-role
 re-attestation и не более чем двумя попытками register/expiry после lost
 response, а concurrent effect/close на одном driver отклоняются. Unit matrix —
@@ -45,10 +45,17 @@ ACL, early-expiry denial,
 concurrent expiry/replay и immutable guards. Тестовая БД и роль удалены, сервер
 остановлен.
 
+Финальный exact SHA `d3e6d8ea9e787d615b94080070724fafdb027b16` принят
+GitHub Actions run `31744420994` как `3/3 SUCCESS`; artifact `9198621644`,
+digest
+`sha256:e46d9a70099af4857a66ed5430bf3def2735302d57d64c268d8b4cc368acbb87`.
+Внутренний adversarial pass нашёл и до acceptance исправил concurrent-driver
+state race; повторный pass не нашёл новых P0/P1.
+
 ## Остаток
 
-Новый adapter/actual fixture ещё не принят exact-SHA CI и не прошёл independent
-adversarial review. Production factory намеренно отклоняет все вызовы; migration
-остаётся noncanonical. После acceptance обязательны offline production-root
-ceremony, production-origin registration rehearsal, отдельные
-apply/rotation/revocation contracts и zero-residue release rehearsal.
+Independent adversarial review отдельным проверяющим ещё обязателен. Production
+factory намеренно отклоняет все вызовы; migration остаётся noncanonical. До
+production-origin registration нужны отдельные apply/rotation/revocation
+contracts и offline production-root ceremony; после них обязательны
+production-like registration и zero-residue release rehearsals.

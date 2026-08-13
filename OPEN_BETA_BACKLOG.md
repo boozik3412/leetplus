@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.69
+- Версия: 2.70
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -195,7 +195,7 @@ run `31741381875` как `3/3 SUCCESS`; artifact `9197547597`, digest
 `sha256:5708eac673b36ed2d6bf9954bb32c5b718a670da57ac7d67c424285fee4a4f31`.
 Candidate не canonical и не применялся к production.
 
-Следующий локальный срез добавил test-only branded owner/Prisma adapter:
+Следующий срез добавил test-only branded owner/Prisma adapter:
 production entry fail-closed, fresh database/owner/runtime-role re-attestation,
 exact receipt brands и максимум две одинаковые попытки при lost register/expiry
 response; concurrent effect/close на одном driver fail closed. Unit `9/9`;
@@ -203,13 +203,17 @@ updated SQL fingerprint `8c55f0eb…acc2fe`; actual
 PostgreSQL 16.13 matrix `1/1` покрывает concurrent register/replay,
 database-owner/runtime-role OID, attribute and membership drift, PUBLIC ACL,
 early expiry, concurrent expiry/replay и guards.
-Disposable DB/role удалены, сервер остановлен. Этот срез ещё не принят CI.
+Disposable DB/role удалены, сервер остановлен. Финальный exact SHA
+`d3e6d8ea9e787d615b94080070724fafdb027b16` принят GitHub Actions run
+`31744420994` как `3/3 SUCCESS`; artifact `9198621644`, digest
+`sha256:e46d9a70099af4857a66ed5430bf3def2735302d57d64c268d8b4cc368acbb87`.
+Внутренний adversarial pass выявил и до acceptance исправил concurrent-driver
+state race; повторный pass не выявил новых P0/P1.
 
-Следующий P0-срез: exact-SHA CI acceptance и independent adversarial review
-adapter/ledger, затем production-origin registration rehearsal. После него —
-отдельные apply/rotation/revocation command contracts. Добавление первого
-реального public root остаётся отдельной offline
-key ceremony и reviewed release change; оно не может быть сгенерировано или
+Следующий P0-срез: independent adversarial review adapter/ledger и отдельные
+apply/rotation/revocation command contracts. Затем нужны offline key ceremony,
+reviewed registry transition и production-origin registration rehearsal.
+Добавление первого реального public root не может быть сгенерировано или
 одобрено приложением.
 
 Предыдущая локальная foundation:

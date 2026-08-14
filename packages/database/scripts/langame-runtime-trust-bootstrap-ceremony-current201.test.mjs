@@ -16,6 +16,7 @@ import {
 } from "./langame-runtime-trust-bootstrap-ceremony-current201.mjs";
 import { prepareLangameRuntimeTrustBootstrapLifecycleCurrent200 } from "./langame-runtime-trust-bootstrap-lifecycle-current200.mjs";
 import { verifyReviewedLangameRuntimeTrustBootstrapRegistryTransitionCurrent198 } from "./langame-runtime-trust-bootstrap-registry-current198-transition.cli.mjs";
+import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 const NOW = "2026-08-14T04:00:00.000Z";
 const CREATED_AT = "2026-08-14T03:59:00.000Z";
@@ -233,12 +234,36 @@ test("CURRENT198 transition rejects missing or candidate-drifted CURRENT201 revi
 });
 
 test("CURRENT201 persisted verifier rejects registry, payload and signature drift", () => {
-  const { evidence, packet } = fixture();
+  const { evidence, operator, packet, reviewer } = fixture();
   const receipt = verifyLangameRuntimeTrustBootstrapCeremonyCurrent201(
     packet,
     evidence,
     NOW,
   );
+  const forgedOperatorPayload = canonicalStringify({
+    ...JSON.parse(receipt.operatorPayloadCanonicalJson),
+    operation: "ROTATE",
+  });
+  const forgedReviewerPayload = canonicalStringify({
+    ...JSON.parse(receipt.reviewerPayloadCanonicalJson),
+    operation: "ROTATE",
+  });
+  const forgedOperation = {
+    ...receipt,
+    operation: "ROTATE",
+    operatorPayloadCanonicalJson: forgedOperatorPayload,
+    operatorSignature: signPayload(
+      null,
+      Buffer.from(forgedOperatorPayload, "utf8"),
+      operator.privateKey,
+    ).toString("base64url"),
+    reviewerPayloadCanonicalJson: forgedReviewerPayload,
+    reviewerSignature: signPayload(
+      null,
+      Buffer.from(forgedReviewerPayload, "utf8"),
+      reviewer.privateKey,
+    ).toString("base64url"),
+  };
   for (const [changed, currentRegistry, expectedCode] of [
     [
       { ...receipt, currentRegistryDigest: "b".repeat(64) },
@@ -258,6 +283,7 @@ test("CURRENT201 persisted verifier rejects registry, payload and signature drif
       {},
       "CURRENT201_CEREMONY_SIGNATURE_INVALID",
     ],
+    [forgedOperation, {}, "CURRENT201_CEREMONY_PERSISTED_EVIDENCE_INVALID"],
     [receipt, { unexpected: true }, "CURRENT198_BOOTSTRAP_ROOT_INVALID"],
   ]) {
     assert.throws(

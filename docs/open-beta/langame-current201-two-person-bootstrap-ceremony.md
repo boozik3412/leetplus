@@ -99,8 +99,10 @@ Binary signature преобразуется в canonical base64url без paddin
 Успех возвращает
 `TWO_PERSON_PUBLIC_REVIEW_EVIDENCE_VERIFIED_DENY_ONLY` и
 `reviewEvidenceDigest`, а также полный переносимый public-only receipt с exact
-payload, public SPKI и двумя base64url-подписями. Любое изменение candidate,
-metadata или подписи завершает команду ошибкой.
+payload, `approvedAt/effectiveAt/keyId`, public SPKI и двумя
+base64url-подписями. Persisted verifier детерминированно воспроизводит CURRENT200
+operation и требует тот же candidate/operation digest. Любое изменение
+candidate, metadata или подписи завершает команду ошибкой.
 
 ## Reviewed CURRENT198 transition
 

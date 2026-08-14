@@ -5,7 +5,10 @@ import {
 } from "node:crypto";
 import { types as utilTypes } from "node:util";
 
-import { isPreparedLangameRuntimeTrustBootstrapLifecycleCurrent200 } from "./langame-runtime-trust-bootstrap-lifecycle-current200.mjs";
+import {
+  isPreparedLangameRuntimeTrustBootstrapLifecycleCurrent200,
+  prepareLangameRuntimeTrustBootstrapLifecycleCurrent200,
+} from "./langame-runtime-trust-bootstrap-lifecycle-current200.mjs";
 import {
   langameRuntimeTrustBootstrapRegistryDigestCurrent198,
   parsePinnedLangameRuntimeTrustBootstrapRegistryCurrent198,
@@ -41,12 +44,15 @@ const EVIDENCE_KEYS = Object.freeze(
 );
 const PARTICIPANT_PAYLOAD_KEYS = Object.freeze(
   [
+    "approvedAt",
     "candidateRegistryDigest",
     "ceremonyId",
     "contract",
     "createdAt",
     "currentRegistryDigest",
+    "effectiveAt",
     "expiresAt",
+    "keyId",
     "operation",
     "operationDigest",
     "operationId",
@@ -58,6 +64,7 @@ const PARTICIPANT_PAYLOAD_KEYS = Object.freeze(
 );
 const VERIFIED_RECEIPT_KEYS = Object.freeze(
   [
+    "approvedAt",
     "authorization",
     "canApply",
     "canEnrollProductionRoots",
@@ -67,7 +74,9 @@ const VERIFIED_RECEIPT_KEYS = Object.freeze(
     "contract",
     "createdAt",
     "currentRegistryDigest",
+    "effectiveAt",
     "expiresAt",
+    "keyId",
     "operation",
     "operationDigest",
     "operationId",
@@ -93,6 +102,7 @@ const VERIFIED_RECEIPT_KEYS = Object.freeze(
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PARTICIPANT_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/u;
+const KEY_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9_-]{86}$/u;
 const PREPARED_PACKETS = new WeakSet();
@@ -285,12 +295,15 @@ export function prepareLangameRuntimeTrustBootstrapCeremonyCurrent201(
     fail("CURRENT201_CEREMONY_PARTICIPANTS_INVALID");
   }
   const common = Object.freeze({
+    approvedAt: preparedTransition.approvedAt,
     candidateRegistryDigest: preparedTransition.candidateRegistryDigest,
     ceremonyId: request.ceremonyId,
     contract: LANGAME_RUNTIME_TRUST_BOOTSTRAP_CEREMONY_CURRENT201_CONTRACT,
     createdAt: request.createdAt,
     currentRegistryDigest: preparedTransition.currentRegistryDigest,
+    effectiveAt: preparedTransition.effectiveAt,
     expiresAt: request.expiresAt,
+    keyId: preparedTransition.keyId,
     operation: preparedTransition.operation,
     operationDigest: preparedTransition.operationDigest,
     operationId: preparedTransition.operationId,
@@ -309,6 +322,7 @@ export function prepareLangameRuntimeTrustBootstrapCeremonyCurrent201(
     reviewer.fingerprint,
   );
   const packet = Object.freeze({
+    approvedAt: preparedTransition.approvedAt,
     authorization: false,
     canApply: false,
     canEnrollProductionRoots: false,
@@ -318,7 +332,9 @@ export function prepareLangameRuntimeTrustBootstrapCeremonyCurrent201(
     contract: LANGAME_RUNTIME_TRUST_BOOTSTRAP_CEREMONY_CURRENT201_CONTRACT,
     createdAt: request.createdAt,
     currentRegistryDigest: preparedTransition.currentRegistryDigest,
+    effectiveAt: preparedTransition.effectiveAt,
     expiresAt: request.expiresAt,
+    keyId: preparedTransition.keyId,
     operation: preparedTransition.operation,
     operationDigest: preparedTransition.operationDigest,
     operationId: preparedTransition.operationId,
@@ -406,6 +422,7 @@ export function verifyLangameRuntimeTrustBootstrapCeremonyCurrent201(
     reviewerSignature: evidence.reviewerSignature,
   });
   const verified = Object.freeze({
+    approvedAt: packet.approvedAt,
     authorization: false,
     canApply: false,
     canEnrollProductionRoots: false,
@@ -415,7 +432,9 @@ export function verifyLangameRuntimeTrustBootstrapCeremonyCurrent201(
     contract: LANGAME_RUNTIME_TRUST_BOOTSTRAP_CEREMONY_CURRENT201_CONTRACT,
     createdAt: packet.createdAt,
     currentRegistryDigest: packet.currentRegistryDigest,
+    effectiveAt: packet.effectiveAt,
     expiresAt: packet.expiresAt,
+    keyId: packet.keyId,
     operation: packet.operation,
     operationDigest: packet.operationDigest,
     operationId: packet.operationId,
@@ -468,12 +487,15 @@ function canonicalPayload(value) {
 
 function assertPayloadMatchesReceipt(payload, receipt, role, participantId) {
   const matching = {
+    approvedAt: receipt.approvedAt,
     candidateRegistryDigest: receipt.candidateRegistryDigest,
     ceremonyId: receipt.ceremonyId,
     contract: receipt.contract,
     createdAt: receipt.createdAt,
     currentRegistryDigest: receipt.currentRegistryDigest,
+    effectiveAt: receipt.effectiveAt,
     expiresAt: receipt.expiresAt,
+    keyId: receipt.keyId,
     operation: receipt.operation,
     operationDigest: receipt.operationDigest,
     operationId: receipt.operationId,
@@ -522,6 +544,7 @@ export function verifyPersistedLangameRuntimeTrustBootstrapCeremonyCurrent201(
     !PARTICIPANT_PATTERN.test(receipt.operatorId) ||
     !PARTICIPANT_PATTERN.test(receipt.reviewerId) ||
     receipt.operatorId === receipt.reviewerId ||
+    !KEY_PATTERN.test(receipt.keyId) ||
     !SHA256_PATTERN.test(receipt.candidateRegistryDigest) ||
     !SHA256_PATTERN.test(receipt.currentRegistryDigest) ||
     !SHA256_PATTERN.test(receipt.operationDigest) ||
@@ -557,11 +580,38 @@ export function verifyPersistedLangameRuntimeTrustBootstrapCeremonyCurrent201(
     currentRegistry,
     candidateRegistry,
   );
+  let replayedTransition;
+  try {
+    const nextRoot = candidateRegistry[receipt.keyId];
+    replayedTransition = prepareLangameRuntimeTrustBootstrapLifecycleCurrent200(
+      {
+        command: {
+          approvedAt: receipt.approvedAt,
+          effectiveAt: receipt.effectiveAt,
+          keyId: receipt.keyId,
+          nextPublicKeyPem:
+            receipt.operation === "REVOKE" ? null : nextRoot?.publicKeyPem,
+          nextValidUntil:
+            receipt.operation === "REVOKE" ? null : nextRoot?.notAfter,
+          operation: receipt.operation,
+          operationId: receipt.operationId,
+          reasonDigest: receipt.reasonDigest,
+        },
+        currentRegistry,
+      },
+      receipt.approvedAt,
+    );
+  } catch {
+    fail("CURRENT201_CEREMONY_PERSISTED_EVIDENCE_INVALID");
+  }
   if (
     langameRuntimeTrustBootstrapRegistryDigestCurrent198(currentRegistry) !==
       receipt.currentRegistryDigest ||
     langameRuntimeTrustBootstrapRegistryDigestCurrent198(candidateRegistry) !==
-      receipt.candidateRegistryDigest
+      receipt.candidateRegistryDigest ||
+    replayedTransition.candidateCanonicalJson !==
+      receipt.candidateCanonicalJson ||
+    replayedTransition.operationDigest !== receipt.operationDigest
   ) {
     fail("CURRENT201_CEREMONY_PERSISTED_EVIDENCE_INVALID");
   }

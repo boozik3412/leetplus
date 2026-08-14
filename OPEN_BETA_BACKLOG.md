@@ -247,8 +247,9 @@ process-local brand. Любое фактическое изменение CURREN
 commit добавить exact canonical public evidence в
 `packages/database/trust-evidence/langame-current198-bootstrap-review-current201.json`.
 Transition gate сверяет каждый Git parent, clean HEAD bytes, ceremony window,
-обе Ed25519 подписи и exact signed candidate; missing/drifted/expired evidence
-fail closed. Focused matrix обновлена до `16/16`.
+обе Ed25519 подписи, deterministic CURRENT200 operation replay и exact signed
+candidate; missing/drifted/expired evidence fail closed. Focused matrix
+обновлена до `16/16`.
 
 После CURRENT201 программно подготовлены signing/verification и reviewed-PR
 границы. Не выполнены и не могут считаться автоматически выполненными:

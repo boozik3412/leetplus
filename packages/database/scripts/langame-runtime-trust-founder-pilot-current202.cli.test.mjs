@@ -33,7 +33,7 @@ function args(mode, signaturePath = null) {
     "--operation-id",
     "11111111-1111-4111-8111-111111111111",
     "--key-id",
-    "langame-bootstrap-founder-pilot-1",
+    "langame-bootstrap-global-platform-1",
     "--approved-at",
     "2026-08-14T03:59:00.000Z",
     "--effective-at",
@@ -98,7 +98,7 @@ function options(root, founder, now, signature = null) {
   };
 }
 
-test("CURRENT202 CLI prepares, cools off, and verifies one founder receipt", async () => {
+test("CURRENT202 V2 CLI prepares, cools off, and verifies global bootstrap evidence", async () => {
   const root = generateKeyPairSync("ed25519");
   const founder = generateKeyPairSync("ed25519");
   const packet = await runLangameRuntimeTrustFounderPilotCurrent202Cli(
@@ -110,6 +110,10 @@ test("CURRENT202 CLI prepares, cools off, and verifies one founder receipt", asy
     LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_PREPARED_STATUS,
   );
   assert.equal(packet.encryptedRemovableMediaCount, 1);
+  assert.equal(packet.platformScope, "GLOBAL");
+  assert.equal(packet.customerKeyCeremonyRequired, false);
+  assert.equal(packet.additionalTenantKeyCeremonyRequired, false);
+  assert.equal(packet.tenantRolloutPolicyEmbedded, false);
   const signature = signPayload(
     null,
     Buffer.from(packet.founderPayloadCanonicalJson, "utf8"),

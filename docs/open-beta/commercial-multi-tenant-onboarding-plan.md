@@ -45,15 +45,16 @@ platform trust, а не при добавлении клиентов.
 
 ### Этап A. Упростить platform bootstrap
 
-1. Зафиксировать CURRENT202 как одноразовый внутренний bootstrap глобального
-   trust anchor.
-2. Убрать из следующей принимаемой версии поля, которые можно трактовать как
-   связь ключа с числом tenants/stores или длительностью клиентского trial.
-3. Явно закрепить `platformScope=GLOBAL`,
+Статус: `IMPLEMENTED LOCALLY / CI PENDING / DENY-ONLY`.
+
+1. CURRENT202 V2 зафиксирован как внутренний bootstrap глобального trust
+   anchor.
+2. Tenant/store/trial-поля удалены из подписанного payload и receipt.
+3. V2 явно закрепляет `platformScope=GLOBAL`,
    `customerKeyCeremonyRequired=false` и
    `additionalTenantKeyCeremonyRequired=false`.
-4. Флешку использовать только для bootstrap/recovery; повседневный onboarding
-   не должен требовать её подключения.
+4. `routineTenantOnboardingRequiresRootAccess=false`, поэтому флешка нужна
+   только для bootstrap/recovery и не участвует в повседневном onboarding.
 
 ### Этап B. Принять production platform boundary
 
@@ -107,22 +108,22 @@ Entitlements и execution revisions управляют включением мо
 
 ## 4. Текущий статус
 
-| Контур                                       | Статус                                                                                |
-| -------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Multi-tenant data model, roles, capabilities | реализован; production gates ещё не полностью закрыты                                 |
-| CURRENT198–202 trust foundation              | engineering accepted, deny-only; production root не enrolled                          |
-| Owner invite/activation database boundary    | engineering accepted; route закрыт `503`, не deployed                                 |
-| SMTP/mail worker foundation                  | engineering accepted; production enrollment/config отсутствуют                        |
-| Langame runtime/import foundation            | глубокая deny-only/runtime foundation готова; self-service production flow не включён |
-| Gate 1MT tenant/store isolation              | значительная часть принята; общий gate ещё не закрыт                                  |
-| Restored-copy rehearsal                      | plan ready; backup/target/credentials не предоставлены, не выполнен                   |
-| Первый внешний tester                        | учётная запись и Tenant B не создавались                                              |
-| Текущая сеть из четырёх клубов               | без изменений, один существующий tenant                                               |
-| Release decision                             | `NO-GO` до Gate 1MT, Gate 2, rehearsal и отдельного persisted GO                      |
+| Контур                                       | Статус                                                                                          |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Multi-tenant data model, roles, capabilities | реализован; production gates ещё не полностью закрыты                                           |
+| CURRENT198–202 trust foundation              | V2 global successor реализован локально, deny-only; CI acceptance и production root отсутствуют |
+| Owner invite/activation database boundary    | engineering accepted; route закрыт `503`, не deployed                                           |
+| SMTP/mail worker foundation                  | engineering accepted; production enrollment/config отсутствуют                                  |
+| Langame runtime/import foundation            | глубокая deny-only/runtime foundation готова; self-service production flow не включён           |
+| Gate 1MT tenant/store isolation              | значительная часть принята; общий gate ещё не закрыт                                            |
+| Restored-copy rehearsal                      | plan ready; backup/target/credentials не предоставлены, не выполнен                             |
+| Первый внешний tester                        | учётная запись и Tenant B не создавались                                                        |
+| Текущая сеть из четырёх клубов               | без изменений, один существующий tenant                                                         |
+| Release decision                             | `NO-GO` до Gate 1MT, Gate 2, rehearsal и отдельного persisted GO                                |
 
 ## 5. Критический путь до тестового доступа
 
-1. Принять упрощённый global platform bootstrap без tenant-key semantics.
+1. Принять exact-SHA CI для CURRENT202 V2 global bootstrap.
 2. Провести один внутренний bootstrap и root registration.
 3. Выполнить restored-copy production-like rehearsal.
 4. Применить production runtime roles/grants и readiness.

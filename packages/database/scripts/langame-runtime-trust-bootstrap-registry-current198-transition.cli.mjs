@@ -26,11 +26,14 @@ const REGISTRY_MODULE_PATH =
   "packages/database/scripts/langame-runtime-trust-bootstrap-registry-current198.mjs";
 const TWO_PERSON_REVIEW_EVIDENCE_PATH =
   "packages/database/trust-evidence/langame-current198-bootstrap-review-current201.json";
-const FOUNDER_PILOT_EVIDENCE_PATH =
+const LEGACY_FOUNDER_PILOT_V1_EVIDENCE_PATH =
   "packages/database/trust-evidence/langame-current198-bootstrap-founder-current202.json";
+const FOUNDER_GLOBAL_PLATFORM_EVIDENCE_PATH =
+  "packages/database/trust-evidence/langame-current198-bootstrap-founder-global-current202.json";
 const REVIEW_EVIDENCE_PATHS = Object.freeze([
   TWO_PERSON_REVIEW_EVIDENCE_PATH,
-  FOUNDER_PILOT_EVIDENCE_PATH,
+  LEGACY_FOUNDER_PILOT_V1_EVIDENCE_PATH,
+  FOUNDER_GLOBAL_PLATFORM_EVIDENCE_PATH,
 ]);
 const MAX_SOURCE_BYTES = 128 * 1024;
 const MAX_REVIEW_EVIDENCE_BYTES = 256 * 1024;
@@ -175,7 +178,7 @@ export function verifyReviewedLangameRuntimeTrustBootstrapRegistryTransitionCurr
   return verified;
 }
 
-export function verifyFounderPilotLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
+export function verifyFounderGlobalPlatformLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
   previousRegistry,
   nextRegistry,
   founderEvidence,
@@ -381,7 +384,7 @@ export function verifyLangameRuntimeTrustBootstrapRegistryCurrent198Transition()
             current,
             loaded.evidence,
           )
-        : verifyFounderPilotLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
+        : verifyFounderGlobalPlatformLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
             changedParents[0],
             current,
             loaded.evidence,
@@ -390,7 +393,7 @@ export function verifyLangameRuntimeTrustBootstrapRegistryCurrent198Transition()
     reviewMode =
       loaded.evidencePath === TWO_PERSON_REVIEW_EVIDENCE_PATH
         ? "TWO_PERSON_CURRENT201"
-        : "FOUNDER_SINGLE_CONTROL_CURRENT202";
+        : "FOUNDER_GLOBAL_PLATFORM_CURRENT202_V2";
   }
   return Object.freeze({
     parentsChecked: parents.length,

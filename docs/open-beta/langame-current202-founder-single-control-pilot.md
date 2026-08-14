@@ -1,21 +1,25 @@
-# CURRENT202: single-founder pilot exception
+# CURRENT202 V2: single-founder global platform bootstrap
 
-| Поле                                       | Значение                                      |
-| ------------------------------------------ | --------------------------------------------- |
-| Статус                                     | `ENGINEERING_ACCEPTED / DENY-ONLY / NO-GO`    |
-| Дата                                       | 14.08.2026                                    |
-| Режим                                      | один founder, один зашифрованный USB-носитель |
-| Scope ключа                                | глобальная платформа LeetPlus                 |
-| Первый rollout                             | canary: один внешний tenant/store, 30 дней    |
-| Production / текущие четыре клуба / tester | не изменялись                                 |
+| Поле                                       | Значение                                       |
+| ------------------------------------------ | ---------------------------------------------- |
+| Статус                                     | `IMPLEMENTED / CI PENDING / DENY-ONLY / NO-GO` |
+| Дата                                       | 14.08.2026                                     |
+| Режим                                      | один founder, один зашифрованный USB-носитель  |
+| Scope ключа                                | глобальная платформа LeetPlus                  |
+| Tenant rollout policy                      | вне key evidence; отдельный `SHARED BETA GO`   |
+| Production / текущие четыре клуба / tester | не изменялись                                  |
 
-Engineering acceptance: exact SHA
+Исторический CURRENT202 V1 engineering acceptance: exact SHA
 `77bb66b38207dcc0882d98021593182c4e1777f4`,
 [GitHub CI 31783338350](https://github.com/boozik3412/leetplus/actions/runs/31783338350)
 `3/3 SUCCESS`. SHA-bound release artifact
 `leetplus-release-77bb66b38207dcc0882d98021593182c4e1777f4`, id `9212779648`,
 digest
 `sha256:3e0d8e0d48a5822ee7f828adf54d71d4e030095e89a37496342c67d8702e9807`.
+
+V1 остаётся только историческим deny-only evidence и новым verifier не
+принимается. V2 реализован в текущей ветке; exact implementation SHA, CI и
+artifact фиксируются отдельным acceptance update после push.
 
 CURRENT202 — честное внутреннее bootstrap-исключение, когда основатель
 является единственным членом команды. Оно не изображает двух независимых людей
@@ -24,15 +28,15 @@ CURRENT202 — честное внутреннее bootstrap-исключени�
 
 Один platform key не равен одной сети. Он является глобальным внутренним trust
 anchor LeetPlus. Внешние tenants подключаются обычным owner email invite и не
-получают private key, флешку или signing CLI. Ограничение первого tenant ниже —
-canary-политика конкретного launch GO, а не предел применимости root.
+получают private key, флешку или signing CLI. Canary-политика первого tenant
+хранится в отдельном launch GO, а не в platform bootstrap evidence.
 
 ## Зафиксированное решение
 
 Founder принимает точный текст риска:
 
 ```text
-I_ACCEPT_SINGLE_FOUNDER_CONTROL_RISK_FOR_ONE_30_DAY_PILOT
+I_ACCEPT_SINGLE_FOUNDER_CONTROL_RISK_FOR_GLOBAL_PLATFORM_BOOTSTRAP
 ```
 
 Verified evidence криптографически связывает одного и того же `founderId` как:
@@ -42,23 +46,30 @@ Verified evidence криптографически связывает одног
   rollback при срабатывании stop condition.
 
 Это операционные идентификаторы в подписанном evidence, а не роли пользователя
-LeetPlus. Для первого пилота используется постоянный неперсональный alias
+LeetPlus. Для bootstrap используется постоянный неперсональный alias
 `founder-primary`. В приложении он сам по себе не выдаёт capabilities.
 
 Контракт фиксирует без возможности расширить поля:
 
+- `platformScope = GLOBAL`;
+- `customerKeyCeremonyRequired = false`;
+- `additionalTenantKeyCeremonyRequired = false`;
+- `routineTenantOnboardingRequiresRootAccess = false`;
+- `tenantRolloutPolicyEmbedded = false`;
+- `sharedBetaGoRequired = true`;
 - `encryptedRemovableMediaCount = 1`;
 - `physicalKeySeparationSatisfied = false`;
 - `organizationalIndependenceSatisfied = false`;
-- `pilotTenantLimit = 1`, `pilotStoreLimit = 1` только для первого canary GO;
-- `pilotDurationSeconds = 2592000`;
 - `currentNetworkMutationAllowed = false`;
 - `outboundInitiallyEnabled = false`;
 - `publicSignupAllowed = false`;
-- `secondExternalTenantAllowed = false` и `scaleBeyondPilotAllowed = false`
-  означают, что этот receipt сам не является автоматическим GO для расширения;
 - обязательный cooling-off — ровно 12 часов;
 - окно подписи после cooling-off — не более 24 часов.
+
+V2 payload и receipt вообще не содержат `pilotTenantLimit`, `pilotStoreLimit`,
+`pilotDurationSeconds`, `secondExternalTenantAllowed` или
+`scaleBeyondPilotAllowed`. Любое их добавление отклоняется exact-record
+проверкой.
 
 CURRENT202 разрешает только initial `ENROLL` в пустой CURRENT198 registry.
 Rotate/revoke и второй root по founder-exception запрещены. Для внутренней
@@ -66,11 +77,9 @@ Rotate/revoke и второй root по founder-exception запрещены. Д
 ротацией: после review ему выпускается отдельный tenant GO с тем же глобальным
 platform trust и обычным owner invite.
 
-## Коррекция контракта до production
+## Результат V2 successor
 
-CURRENT202 V1 уже принят как deny-only engineering evidence, но ещё не enrolled
-и не является production canonical. До фактического root enrollment нужен его
-successor, который:
+CURRENT202 V2 реализует требуемый successor:
 
 - явно подписывает `platformScope = GLOBAL`;
 - фиксирует `customerKeyCeremonyRequired = false` и
@@ -80,8 +89,10 @@ successor, который:
 - сохраняет запрет public signup, initial outbound и изменения текущей сети до
   отдельных launch decisions.
 
-Это устраняет двусмысленные имена полей V1 без ослабления fail-closed границ.
-До принятия successor использовать CURRENT202 V1 для production enrollment
+Contract domain изменён с `CURRENT202_V1` на
+`LANGAME_RUNTIME_TRUST_FOUNDER_GLOBAL_PLATFORM_BOOTSTRAP_CURRENT202_V2`,
+поэтому V1 signature/receipt нельзя переиспользовать. До exact-SHA CI acceptance
+и отдельного production root enrollment GO использовать V2 для registry apply
 нельзя.
 
 ## Одна флешка
@@ -164,7 +175,7 @@ rollbackPlanDigest     = 157597d98a13b67cb32414d828065c49adf78538b8efd21f68ccc8c
 Сначала получить полную справку:
 
 ```powershell
-pnpm --filter database langame-runtime-trust:prepare-founder-pilot -- --help
+pnpm --filter database langame-runtime-trust:prepare-founder-global-bootstrap -- --help
 ```
 
 В `prepare` передаются CURRENT200 ENROLL-поля, public root, public founder key,
@@ -183,10 +194,12 @@ base64url signature. CLI private keys не читает.
 - exact `candidateCanonicalJson` в
   `packages/database/scripts/langame-runtime-trust-bootstrap-registry-current198.mjs`;
 - полный canonical verified receipt с завершающим LF в
-  `packages/database/trust-evidence/langame-current198-bootstrap-founder-current202.json`.
+  `packages/database/trust-evidence/langame-current198-bootstrap-founder-global-current202.json`.
 
 Ровно один evidence-путь может присутствовать в HEAD: CURRENT201 или
-CURRENT202. Одновременное присутствие обоих останавливает transition gate.
+CURRENT202 V2. Legacy V1 path остаётся в deny-list: его единоличное присутствие
+отклоняется V2 verifier, а одновременное присутствие с V2/CURRENT201 считается
+ambiguous и останавливает transition gate.
 Gate повторно проверяет подпись, CURRENT200 operation, candidate, cooling-off,
 expiry, clean HEAD bytes и каждого Git parent.
 

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.125                                        |
+| Версия           | 1.126                                        |
 | Дата             | 14.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -19,13 +19,13 @@
 `SHARED BETA GO`. Отдельный runtime/DB сохранён только как contingency или
 enterprise-isolation option и не сокращает shared gates.
 
-Для фактического состава команды из одного человека добавлен внутренний
-`FOUNDER_SINGLE_CONTROL_PILOT` bootstrap CURRENT202. Он фиксирует одного
-release/rollback owner, одну зашифрованную флешку и 12-часовой cooling-off.
-Ключ имеет global platform scope и не соответствует tenant. Предел первого
-tenant/store/30 дней — canary rollout policy; следующие tenants используют тот
-же owner-invite workflow без новых ключей. CURRENT201 нужен для внутренней
-ротации/recovery root, а не для подключения клиентов.
+Для фактического состава команды из одного человека CURRENT202 V2 реализует
+внутренний single-founder bootstrap. Он фиксирует одного release/rollback
+owner, одну зашифрованную флешку, 12-часовой cooling-off и global platform
+scope. V2 не содержит tenant/store/trial limits: rollout policy живёт только в
+отдельном `SHARED BETA GO`. Клиенты используют owner-invite workflow без новых
+ключей. CURRENT201 нужен для внутренней ротации/recovery root, а не для
+подключения клиентов.
 
 ## Зафиксированные решения
 
@@ -182,16 +182,15 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    `e3cf6ff4…`, CI `31776034567` — `3/3 SUCCESS`, artifact
    `sha256:2e3d1201…86d2`; production root и доступ остаются `NO-GO` до
    фактической ceremony и restored-copy rehearsal.
-   0e.20. [CURRENT202 single-founder platform bootstrap](./langame-current202-founder-single-control-pilot.md) —
+   0e.20. [CURRENT202 V2 single-founder global platform bootstrap](./langame-current202-founder-single-control-pilot.md) —
    один founder подписывает release/rollback ownership глобального внутреннего
    trust anchor; контракт фиксирует один зашифрованный USB-носитель, отсутствие
-   физической независимости и 12-часовой cooling-off. Tenant/store/30-day поля
-   ограничивают первый canary receipt, а не применимость ключа. Клиенты и
-   последующие tenants не проходят key ceremony. CURRENT198 принимает ровно
-   один canonical evidence path — CURRENT201 или CURRENT202. Exact SHA
-   `77bb66b3…` принят CI
-   `31783338350` как `3/3 SUCCESS`, artifact digest
-   `sha256:3e0d8e0d…e9807`; все effect/access flags остаются false.
+   физической независимости и 12-часовой cooling-off. V2 подписывает
+   `platformScope=GLOBAL`, требует отдельный `SHARED BETA GO` и не содержит
+   tenant/store/trial policy. Клиенты и последующие tenants не проходят key
+   ceremony. Исторический V1 exact SHA `77bb66b3…` принят CI `31783338350`;
+   V2 implementation ожидает отдельный exact-SHA acceptance. Все effect/access
+   flags остаются false.
    0e.21. Founder pilot operation plans:
    [key custody](./founder-pilot-key-custody-plan.md),
    [isolated restored copy](./founder-pilot-restored-copy-plan.md) и

@@ -18,22 +18,19 @@ import {
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 export const LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_CONTRACT =
-  "LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_V1";
+  "LANGAME_RUNTIME_TRUST_FOUNDER_GLOBAL_PLATFORM_BOOTSTRAP_CURRENT202_V2";
 export const LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_PREPARED_STATUS =
-  "FOUNDER_SINGLE_CONTROL_PILOT_PACKET_PREPARED_DENY_ONLY";
+  "FOUNDER_SINGLE_CONTROL_GLOBAL_PLATFORM_BOOTSTRAP_PACKET_PREPARED_DENY_ONLY";
 export const LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_VERIFIED_STATUS =
-  "FOUNDER_SINGLE_CONTROL_PILOT_EVIDENCE_VERIFIED_DENY_ONLY";
+  "FOUNDER_SINGLE_CONTROL_GLOBAL_PLATFORM_BOOTSTRAP_EVIDENCE_VERIFIED_DENY_ONLY";
 export const LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_RISK_ACCEPTANCE =
-  "I_ACCEPT_SINGLE_FOUNDER_CONTROL_RISK_FOR_ONE_30_DAY_PILOT";
+  "I_ACCEPT_SINGLE_FOUNDER_CONTROL_RISK_FOR_GLOBAL_PLATFORM_BOOTSTRAP";
 export const LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_COOLING_OFF_MS =
   12 * 60 * 60 * 1_000;
 export const LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_MAX_SIGNING_WINDOW_MS =
   24 * 60 * 60 * 1_000;
 export const LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_MAX_CLOCK_SKEW_MS =
   5 * 60 * 1_000;
-export const LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_DURATION_SECONDS =
-  30 * 24 * 60 * 60;
-
 const REQUEST_KEYS = Object.freeze(
   [
     "eligibleAt",
@@ -53,11 +50,13 @@ const REQUEST_KEYS = Object.freeze(
 const EVIDENCE_KEYS = Object.freeze(["founderSignature"]);
 const PAYLOAD_KEYS = Object.freeze(
   [
+    "additionalTenantKeyCeremonyRequired",
     "approvedAt",
     "candidateRegistryDigest",
     "contract",
     "coolingOffMilliseconds",
     "currentNetworkMutationAllowed",
+    "customerKeyCeremonyRequired",
     "currentRegistryDigest",
     "effectiveAt",
     "eligibleAt",
@@ -74,9 +73,7 @@ const PAYLOAD_KEYS = Object.freeze(
     "organizationalIndependenceSatisfied",
     "outboundInitiallyEnabled",
     "physicalKeySeparationSatisfied",
-    "pilotDurationSeconds",
-    "pilotStoreLimit",
-    "pilotTenantLimit",
+    "platformScope",
     "preparedAt",
     "publicSignupAllowed",
     "reasonDigest",
@@ -85,9 +82,10 @@ const PAYLOAD_KEYS = Object.freeze(
     "riskAcceptance",
     "rollbackOwnerId",
     "rollbackPlanDigest",
-    "scaleBeyondPilotAllowed",
-    "secondExternalTenantAllowed",
+    "routineTenantOnboardingRequiresRootAccess",
+    "sharedBetaGoRequired",
     "singleFounderRiskAccepted",
+    "tenantRolloutPolicyEmbedded",
   ].sort(),
 );
 const RECEIPT_KEYS = Object.freeze(
@@ -121,7 +119,9 @@ const VERIFIED_RECEIPTS = new WeakSet();
 
 export class LangameRuntimeTrustFounderPilotCurrent202Error extends Error {
   constructor(code) {
-    super("CURRENT202 founder pilot evidence was rejected.");
+    super(
+      "CURRENT202 founder global platform bootstrap evidence was rejected.",
+    );
     this.name = "LangameRuntimeTrustFounderPilotCurrent202Error";
     this.code = code;
     this.safeContractError = true;
@@ -252,21 +252,21 @@ function assertPreparedEnrollment(value) {
 
 function fixedControls() {
   return Object.freeze({
+    additionalTenantKeyCeremonyRequired: false,
     coolingOffMilliseconds:
       LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_COOLING_OFF_MS,
     currentNetworkMutationAllowed: false,
+    customerKeyCeremonyRequired: false,
     encryptedRemovableMediaCount: 1,
     organizationalIndependenceSatisfied: false,
     outboundInitiallyEnabled: false,
     physicalKeySeparationSatisfied: false,
-    pilotDurationSeconds:
-      LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_DURATION_SECONDS,
-    pilotStoreLimit: 1,
-    pilotTenantLimit: 1,
+    platformScope: "GLOBAL",
     publicSignupAllowed: false,
-    scaleBeyondPilotAllowed: false,
-    secondExternalTenantAllowed: false,
+    routineTenantOnboardingRequiresRootAccess: false,
+    sharedBetaGoRequired: true,
     singleFounderRiskAccepted: true,
+    tenantRolloutPolicyEmbedded: false,
   });
 }
 
@@ -484,18 +484,18 @@ export function verifyPersistedLangameRuntimeTrustFounderPilotCurrent202(
       LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_RISK_ACCEPTANCE ||
     receipt.coolingOffMilliseconds !==
       LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_COOLING_OFF_MS ||
-    receipt.pilotDurationSeconds !==
-      LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_DURATION_SECONDS ||
-    receipt.pilotTenantLimit !== 1 ||
-    receipt.pilotStoreLimit !== 1 ||
+    receipt.platformScope !== "GLOBAL" ||
+    receipt.customerKeyCeremonyRequired !== false ||
+    receipt.additionalTenantKeyCeremonyRequired !== false ||
+    receipt.routineTenantOnboardingRequiresRootAccess !== false ||
+    receipt.sharedBetaGoRequired !== true ||
+    receipt.tenantRolloutPolicyEmbedded !== false ||
     receipt.encryptedRemovableMediaCount !== 1 ||
     receipt.currentNetworkMutationAllowed !== false ||
     receipt.organizationalIndependenceSatisfied !== false ||
     receipt.outboundInitiallyEnabled !== false ||
     receipt.physicalKeySeparationSatisfied !== false ||
     receipt.publicSignupAllowed !== false ||
-    receipt.scaleBeyondPilotAllowed !== false ||
-    receipt.secondExternalTenantAllowed !== false ||
     receipt.singleFounderRiskAccepted !== true
   ) {
     fail("CURRENT202_FOUNDER_PERSISTED_EVIDENCE_INVALID");

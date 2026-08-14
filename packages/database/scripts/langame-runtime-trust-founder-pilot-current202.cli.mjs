@@ -15,7 +15,7 @@ import {
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 export const LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_CLI_CONFIRMATION =
-  "prepare-current202-founder-single-control-pilot";
+  "prepare-current202-founder-global-platform-bootstrap";
 
 const COMMON_ARGUMENTS = Object.freeze(
   [
@@ -48,7 +48,9 @@ const MAX_SIGNATURE_BYTES = 128;
 
 class Current202CliError extends Error {
   constructor(code, exitCode = 2) {
-    super("CURRENT202 founder pilot CLI rejected the request.");
+    super(
+      "CURRENT202 founder global platform bootstrap CLI rejected the request.",
+    );
     this.name = "Current202CliError";
     this.code = code;
     this.exitCode = exitCode;
@@ -259,14 +261,16 @@ export async function runLangameRuntimeTrustFounderPilotCurrent202Cli(
 
 function usage() {
   return [
-    "CURRENT202 founder single-control pilot evidence",
+    "CURRENT202 founder single-control global platform bootstrap evidence",
     "",
     "Modes:",
     "  --mode prepare   Print the exact founder signing payload before cooling-off",
     "  --mode verify    Verify one detached founder Ed25519 signature after cooling-off",
     "",
     "The command composes CURRENT200 ENROLL arguments with founder, owner,",
-    "timeline and three SHA-256 plan-digest arguments. It requires exact risk text:",
+    "timeline and three SHA-256 plan-digest arguments. The signed payload has",
+    "GLOBAL platform scope and contains no tenant/store/trial rollout policy.",
+    "It requires exact risk text:",
     `  --risk-acceptance ${LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_RISK_ACCEPTANCE}`,
     `  --confirm ${LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_CLI_CONFIRMATION}`,
     "",

@@ -249,8 +249,8 @@ jobs:
       - name: Validate deny-only CURRENT201 two-person bootstrap ceremony
         run: pnpm --filter database check:langame-runtime-trust-bootstrap-ceremony-current201
 
-      - name: Validate deny-only CURRENT202 single-founder pilot exception
-        run: pnpm --filter database check:langame-runtime-trust-founder-pilot-current202
+      - name: Validate deny-only CURRENT202 V2 global platform bootstrap
+        run: pnpm --filter database check:langame-runtime-trust-founder-global-platform-current202
 
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189

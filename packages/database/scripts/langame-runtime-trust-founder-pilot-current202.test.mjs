@@ -6,8 +6,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { prepareLangameRuntimeTrustBootstrapLifecycleCurrent200 } from "./langame-runtime-trust-bootstrap-lifecycle-current200.mjs";
-import { verifyFounderPilotLangameRuntimeTrustBootstrapRegistryTransitionCurrent198 } from "./langame-runtime-trust-bootstrap-registry-current198-transition.cli.mjs";
+import { verifyFounderGlobalPlatformLangameRuntimeTrustBootstrapRegistryTransitionCurrent198 } from "./langame-runtime-trust-bootstrap-registry-current198-transition.cli.mjs";
 import {
+  LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_CONTRACT,
   LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_COOLING_OFF_MS,
   LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_PREPARED_STATUS,
   LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_RISK_ACCEPTANCE,
@@ -33,7 +34,7 @@ function transition(root = generateKeyPairSync("ed25519")) {
       command: {
         approvedAt: "2026-08-14T03:59:00.000Z",
         effectiveAt: "2026-08-14T04:05:00.000Z",
-        keyId: "langame-bootstrap-founder-pilot-1",
+        keyId: "langame-bootstrap-global-platform-1",
         nextPublicKeyPem: publicKeyPem(root),
         nextValidUntil: "2027-08-14T04:05:00.000Z",
         operation: "ENROLL",
@@ -84,8 +85,16 @@ function code(expected) {
   return (error) => error?.code === expected && error.safeContractError;
 }
 
-test("CURRENT202 prepares an explicit one-media single-founder pilot exception", () => {
+test("CURRENT202 V2 prepares one-media global platform bootstrap evidence", () => {
   const { packet } = fixture();
+  assert.equal(
+    packet.contract,
+    "LANGAME_RUNTIME_TRUST_FOUNDER_GLOBAL_PLATFORM_BOOTSTRAP_CURRENT202_V2",
+  );
+  assert.equal(
+    packet.contract,
+    LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_CONTRACT,
+  );
   assert.equal(
     packet.status,
     LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_PREPARED_STATUS,
@@ -97,9 +106,21 @@ test("CURRENT202 prepares an explicit one-media single-founder pilot exception",
   );
   assert.equal(packet.encryptedRemovableMediaCount, 1);
   assert.equal(packet.physicalKeySeparationSatisfied, false);
-  assert.equal(packet.scaleBeyondPilotAllowed, false);
-  assert.equal(packet.pilotTenantLimit, 1);
-  assert.equal(packet.pilotStoreLimit, 1);
+  assert.equal(packet.platformScope, "GLOBAL");
+  assert.equal(packet.customerKeyCeremonyRequired, false);
+  assert.equal(packet.additionalTenantKeyCeremonyRequired, false);
+  assert.equal(packet.routineTenantOnboardingRequiresRootAccess, false);
+  assert.equal(packet.sharedBetaGoRequired, true);
+  assert.equal(packet.tenantRolloutPolicyEmbedded, false);
+  for (const legacyTenantPolicyKey of [
+    "pilotDurationSeconds",
+    "pilotStoreLimit",
+    "pilotTenantLimit",
+    "scaleBeyondPilotAllowed",
+    "secondExternalTenantAllowed",
+  ]) {
+    assert.equal(Object.hasOwn(packet, legacyTenantPolicyKey), false);
+  }
   assert.equal(packet.currentNetworkMutationAllowed, false);
   assert.equal(packet.outboundInitiallyEnabled, false);
   assert.equal(packet.publicSignupAllowed, false);
@@ -138,7 +159,7 @@ test("CURRENT202 verifies one founder signature after cooling and re-verifies pe
   assert.equal(restored.reviewEvidenceDigest, receipt.reviewEvidenceDigest);
 });
 
-test("CURRENT198 accepts exact CURRENT202 founder evidence only inside its cooling window", () => {
+test("CURRENT198 accepts exact CURRENT202 V2 global evidence only inside its cooling window", () => {
   const { founderSignature, packet } = fixture();
   const receipt = verifyLangameRuntimeTrustFounderPilotCurrent202(
     packet,
@@ -147,7 +168,7 @@ test("CURRENT198 accepts exact CURRENT202 founder evidence only inside its cooli
   );
   const candidate = JSON.parse(receipt.candidateCanonicalJson);
   const verified =
-    verifyFounderPilotLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
+    verifyFounderGlobalPlatformLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
       {},
       candidate,
       JSON.parse(JSON.stringify(receipt)),
@@ -157,7 +178,7 @@ test("CURRENT198 accepts exact CURRENT202 founder evidence only inside its cooli
   for (const observedAt of [PREPARED_AT, EXPIRES_AT]) {
     assert.throws(
       () =>
-        verifyFounderPilotLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
+        verifyFounderGlobalPlatformLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
           {},
           candidate,
           receipt,
@@ -241,7 +262,7 @@ test("CURRENT202 rejects widened input, forged signatures, and cloned packets", 
   );
 });
 
-test("CURRENT202 persisted verifier rejects any control or payload drift", () => {
+test("CURRENT202 V2 persisted verifier rejects scope, control, and payload drift", () => {
   const { founderSignature, packet } = fixture();
   const receipt = verifyLangameRuntimeTrustFounderPilotCurrent202(
     packet,
@@ -249,8 +270,18 @@ test("CURRENT202 persisted verifier rejects any control or payload drift", () =>
     VERIFY_AT,
   );
   for (const changed of [
+    {
+      ...receipt,
+      contract: "LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_V1",
+    },
     { ...receipt, encryptedRemovableMediaCount: 2 },
-    { ...receipt, scaleBeyondPilotAllowed: true },
+    { ...receipt, platformScope: "TENANT" },
+    { ...receipt, customerKeyCeremonyRequired: true },
+    { ...receipt, additionalTenantKeyCeremonyRequired: true },
+    { ...receipt, routineTenantOnboardingRequiresRootAccess: true },
+    { ...receipt, sharedBetaGoRequired: false },
+    { ...receipt, tenantRolloutPolicyEmbedded: true },
+    { ...receipt, pilotTenantLimit: 1 },
     { ...receipt, releaseOwnerId: "somebody-else" },
     { ...receipt, reviewEvidenceDigest: "e".repeat(64) },
   ]) {
@@ -279,7 +310,36 @@ test("CURRENT202 source has no filesystem, private-key, process, or production a
     "process.env",
     "PrismaClient",
     "fetch(",
+    '"pilotDurationSeconds"',
+    '"pilotStoreLimit"',
+    '"pilotTenantLimit"',
+    '"scaleBeyondPilotAllowed"',
+    '"secondExternalTenantAllowed"',
   ]) {
     assert.equal(source.includes(forbidden), false, forbidden);
   }
+
+  const transitionSource = await readFile(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "langame-runtime-trust-bootstrap-registry-current198-transition.cli.mjs",
+    ),
+    "utf8",
+  );
+  assert.equal(
+    transitionSource.includes(
+      "langame-current198-bootstrap-founder-global-current202.json",
+    ),
+    true,
+  );
+  assert.equal(
+    transitionSource.includes(
+      "langame-current198-bootstrap-founder-current202.json",
+    ),
+    true,
+  );
+  assert.equal(
+    transitionSource.includes('"FOUNDER_GLOBAL_PLATFORM_CURRENT202_V2"'),
+    true,
+  );
 });

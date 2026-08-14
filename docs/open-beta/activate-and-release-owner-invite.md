@@ -7,8 +7,8 @@
 активации внешнего tenant. Она не открывает Platform Admin route, не включает
 SMTP worker, не создаёт тестера и не разрешает production cutover.
 
-Для single-founder пилота release и rollback owner назначаются не application
-ролью, а exact подписанным CURRENT202 evidence: все три значения `founderId`,
+Для single-founder platform bootstrap release и rollback owner назначаются не
+application ролью, а exact подписанным CURRENT202 V2 evidence: все три значения `founderId`,
 `releaseOwnerId`, `rollbackOwnerId` равны `founder-primary`. Это не активирует
 данный writer. До принятого restored-copy rehearsal, runtime grants и отдельного
 persisted `SHARED BETA GO` маршрут обязан оставаться закрытым.
@@ -414,7 +414,7 @@ invite.
 - verified delivery и protected resend/reissue/revoke;
 - production-like inventory/admission на фактическом окружении;
 - platform route/operator ceremony;
-- verified CURRENT201 two-person ceremony либо ограниченный CURRENT202 founder
+- verified CURRENT201 two-person ceremony либо CURRENT202 V2 global founder
   evidence, reviewed CURRENT198 transition и production-origin registration;
 - restored-copy apply/repeat/rollback/zero-diff rehearsal; одна подготовленная
   флешка не заменяет изолированный PostgreSQL target и production backup;

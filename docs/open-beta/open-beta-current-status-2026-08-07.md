@@ -1,5 +1,15 @@
 # LeetPlus open beta — текущее состояние на 07.08.2026
 
+> Обновление 14.08.2026: CURRENT200 принят exact SHA `ccf38764…` / CI
+> `31767536910`. Поверх него реализован deny-only CURRENT201: два разных
+> участника и два разных Ed25519 public key подписывают role-bound payload,
+> переносимый public receipt повторно проверяется, а любое изменение CURRENT198
+> теперь требует exact canonical evidence-файл в том же commit. Missing,
+> drifted, expired или forged evidence останавливает CI; focused matrix
+> `16/16`. Private keys, production, Tenant A/A1..A4, тестер и owner route не
+> изменялись. Внешний доступ остаётся `NO-GO` до фактической offline ceremony,
+> production-origin registration и restored-copy role/grant rehearsal.
+
 > Обновление 10.08.2026: Gate 0 закрыт exact synchronized SHA и зелёным
 > SHA-bound CI artifact. Актуальное evidence вынесено в
 > `gate-0-ci-artifact-2026-08-10.md`; остальные launch gates сохраняют `NO-GO`.

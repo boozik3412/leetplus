@@ -7,6 +7,12 @@
 | Production root                | отсутствует                               |
 | Production / Tenant A / tester | не изменялись                             |
 
+Exact-SHA engineering acceptance: `ccf387645e4c9dd56502612ea41130f3bad3ea94`,
+[CI run 31767536910](https://github.com/boozik3412/leetplus/actions/runs/31767536910),
+release artifact
+`leetplus-release-ccf387645e4c9dd56502612ea41130f3bad3ea94`, digest
+`sha256:eae83b266e618ee20c6b97d2e32ebc6123bdff8558e1c3c185fbcb4e71da4f33`.
+
 CURRENT200 добавляет детерминированный public-only planner для трёх операций
 над immutable CURRENT198 registry:
 
@@ -37,10 +43,12 @@ CURRENT198 `20/20` и CURRENT199 `19/19` регрессии остаются з�
 
 ## Что остаётся
 
-CURRENT200 не является key ceremony или production enrollment. Следующий
-операционный этап требует внешней/offline генерации private key, двухконтрольной
-проверки public fingerprint, защищённого хранения private material и отдельного
-reviewed изменения CURRENT198 canonical literal. Затем обязательны exact-parent
+CURRENT200 не является key ceremony или production enrollment. Программная
+часть двухконтрольной проверки реализована следующим deny-only контрактом:
+[CURRENT201 two-person ceremony](./langame-current201-two-person-bootstrap-ceremony.md).
+Фактический этап всё ещё требует внешней/offline генерации private key,
+двухконтрольной проверки public fingerprint, защищённого хранения private
+material и отдельного reviewed изменения CURRENT198 canonical literal. Затем обязательны exact-parent
 transition verification, production-origin CURRENT196–199 registration,
 runtime role/grant attestation и production-like apply/rollback/zero-residue
 rehearsal.

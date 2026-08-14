@@ -246,6 +246,9 @@ jobs:
       - name: Validate deny-only CURRENT200 bootstrap lifecycle transitions
         run: pnpm --filter database check:langame-runtime-trust-bootstrap-lifecycle-current200
 
+      - name: Validate deny-only CURRENT201 two-person bootstrap ceremony
+        run: pnpm --filter database check:langame-runtime-trust-bootstrap-ceremony-current201
+
       - name: Validate dormant CURRENT189 employee invitation contract
         run: pnpm --filter database check:identity-employee-invite-mail-current189
 

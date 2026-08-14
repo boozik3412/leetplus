@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.121                                        |
+| Версия           | 1.122                                        |
 | Дата             | 14.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -162,6 +162,16 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    принят CI `31744420994` как `3/3 SUCCESS`, artifact digest
    `sha256:e46d9a70…cbb87`; test-only adapter `9/9`, actual PostgreSQL matrix
    `1/1`, production entry и authority остаются закрытыми.
+   0e.18. [CURRENT200 bootstrap-root lifecycle](./langame-current200-bootstrap-lifecycle.md) —
+   public-only `ENROLL/ROTATE/REVOKE` planner; exact SHA `ccf38764…` принят CI
+   `31767536910` как `3/3 SUCCESS`, release artifact
+   `sha256:eae83b26…a4f33`; private-key, registry-write и access authority
+   отсутствуют.
+   0e.19. [CURRENT201 two-person bootstrap ceremony](./langame-current201-two-person-bootstrap-ceremony.md) —
+   разные operator/reviewer identities и Ed25519 public keys, role-bound
+   detached signatures и обязательный canonical public evidence для любого
+   изменения CURRENT198; focused matrix `16/16`, production root и доступ
+   остаются `NO-GO` до фактической ceremony и restored-copy rehearsal.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

@@ -226,6 +226,35 @@ command-planning foundation, но не external/offline key ceremony, registry
 apply, independent review, production-origin registration, runtime grants или
 production-like rehearsal. Подробности:
 [CURRENT200 bootstrap lifecycle](./docs/open-beta/langame-current200-bootstrap-lifecycle.md).
+
+CURRENT200 принят exact-SHA `ccf387645e4c9dd56502612ea41130f3bad3ea94`:
+[CI 31767536910](https://github.com/boozik3412/leetplus/actions/runs/31767536910),
+release artifact `leetplus-release-ccf387645e4c9dd56502612ea41130f3bad3ea94`,
+digest `sha256:eae83b266e618ee20c6b97d2e32ebc6123bdff8558e1c3c185fbcb4e71da4f33`.
+
+CURRENT201 two-person bootstrap ceremony реализован как `DENY-ONLY / NO-GO`.
+Он связывает exact CURRENT200 candidate с разными operator/reviewer identity и
+разными canonical Ed25519 public keys, выдаёт role-specific signing payloads и
+проверяет две detached signatures в bounded 24-hour window. Swap, forgery,
+single-person/single-key, candidate/timeline drift, clone, proxy/accessor
+отклоняются. CLI descriptor-bound читает только public `.pem` и base64url
+`.sig`, не имеет private-key, repository/DB/network/process authority и не пишет
+CURRENT198. Focused matrix `16/16`. Подробности и операционный runbook:
+[CURRENT201 two-person ceremony](./docs/open-beta/langame-current201-two-person-bootstrap-ceremony.md).
+
+CURRENT201 review receipt теперь переносим и повторно проверяется без
+process-local brand. Любое фактическое изменение CURRENT198 обязано тем же
+commit добавить exact canonical public evidence в
+`packages/database/trust-evidence/langame-current198-bootstrap-review-current201.json`.
+Transition gate сверяет каждый Git parent, clean HEAD bytes, ceremony window,
+обе Ed25519 подписи и exact signed candidate; missing/drifted/expired evidence
+fail closed. Focused matrix обновлена до `16/16`.
+
+После CURRENT201 программно подготовлены signing/verification и reviewed-PR
+границы. Не выполнены и не могут считаться автоматически выполненными:
+фактическая offline ceremony двумя независимыми людьми, reviewed CURRENT198
+literal apply, production-origin CURRENT196–199 acceptance и restored-copy
+production-like role/grant/apply/rollback/zero-residue rehearsal.
 Добавление первого реального public root не может быть сгенерировано или
 одобрено приложением.
 

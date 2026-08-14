@@ -51,5 +51,10 @@ size `16318211` bytes.
 CURRENT198 не является key ceremony, root enrollment, migration, deploy или
 `SHARED BETA GO`. Следующее добавление реального публичного root должно быть
 отдельным reviewed exact-SHA изменением после внешней/offline генерации ключа,
-двухконтрольной проверки fingerprint и operational approval. До этого
-production acquisition остаётся физически fail-closed.
+двухконтрольной проверки fingerprint и operational approval. Программная
+часть этой проверки реализована в
+[CURRENT201](./langame-current201-two-person-bootstrap-ceremony.md): изменение
+реестра без exact canonical public evidence, двух валидных подписей и
+совпадающего signed candidate теперь отклоняется transition gate. До
+фактической offline ceremony и принятого reviewed PR production acquisition
+остаётся физически fail-closed.

@@ -518,7 +518,7 @@ describe('SharedBetaInitialOwnerCoordinator dormant application boundary', () =>
     expect(ciphertext).toEqual(Buffer.alloc(71));
   });
 
-  it('rejects boolean GO, raw signed envelopes and shell revision drift before cryptography', async () => {
+  it('rejects boolean GO, raw signed envelopes, temporary passwords and shell revision drift before cryptography', async () => {
     const { coordinator, activate, sealInitialOwnerInviteToken } = fixture();
     const booleanGo = command({ gatePassed: true });
     await expect(
@@ -535,6 +535,14 @@ describe('SharedBetaInitialOwnerCoordinator dormant application boundary', () =>
     });
     await expect(
       coordinator.coordinate(actor, TENANT_ID, rawSignature),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    await expect(
+      coordinator.coordinate(
+        actor,
+        TENANT_ID,
+        command({ password: 'temporary-password' }),
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
 
     await expect(

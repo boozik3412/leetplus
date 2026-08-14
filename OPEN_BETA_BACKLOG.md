@@ -213,6 +213,19 @@ state race; повторный pass не выявил новых P0/P1.
 Следующий P0-срез: independent adversarial review adapter/ledger и отдельные
 apply/rotation/revocation command contracts. Затем нужны offline key ceremony,
 reviewed registry transition и production-origin registration rehearsal.
+
+CURRENT200 public bootstrap-root lifecycle planner реализован локально как
+`DENY-ONLY / NO-GO`. Он детерминированно готовит initial enrollment, linear
+rotation и emergency revoke для CURRENT198 registry, связывает operation UUID,
+reason/timeline и exact current/candidate registry digests и возвращает
+canonical candidate JSON. Planner принимает только public Ed25519 SPKI, не
+имеет private-key/filesystem/network/DB/write authority и сохраняет все
+production/test-access flags false. Focused matrix `11/11`; CURRENT198 `20/20` и
+CURRENT199 application/ledger/adapter `19/19` регрессии зелёные. Это закрывает
+command-planning foundation, но не external/offline key ceremony, registry
+apply, independent review, production-origin registration, runtime grants или
+production-like rehearsal. Подробности:
+[CURRENT200 bootstrap lifecycle](./docs/open-beta/langame-current200-bootstrap-lifecycle.md).
 Добавление первого реального public root не может быть сгенерировано или
 одобрено приложением.
 

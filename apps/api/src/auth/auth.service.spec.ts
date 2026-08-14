@@ -572,8 +572,15 @@ describe('AuthService', () => {
       id: generatedUserId,
       tenantId: 'tenant-1',
       email: 'owner@club-a.leetplus.ru',
+      role: UserRole.OWNER,
+      customRoleId: null,
+      accessScope: UserAccessScope.NETWORK,
+      isActive: true,
       identityClaimRevision: null,
     });
+    expect(userCreate.mock.calls[0]?.[0].data.passwordHash).not.toBe(
+      'strong-password',
+    );
 
     expect(prisma.tenant.updateMany).toHaveBeenCalledWith({
       where: {

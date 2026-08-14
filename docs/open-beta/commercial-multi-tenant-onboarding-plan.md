@@ -45,7 +45,7 @@ platform trust, а не при добавлении клиентов.
 
 ### Этап A. Упростить platform bootstrap
 
-Статус: `IMPLEMENTED LOCALLY / CI PENDING / DENY-ONLY`.
+Статус: `EXACT-SHA CI ACCEPTED / DENY-ONLY / NOT ENROLLED`.
 
 1. CURRENT202 V2 зафиксирован как внутренний bootstrap глобального trust
    anchor.
@@ -108,22 +108,22 @@ Entitlements и execution revisions управляют включением мо
 
 ## 4. Текущий статус
 
-| Контур                                       | Статус                                                                                          |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Multi-tenant data model, roles, capabilities | реализован; production gates ещё не полностью закрыты                                           |
-| CURRENT198–202 trust foundation              | V2 global successor реализован локально, deny-only; CI acceptance и production root отсутствуют |
-| Owner invite/activation database boundary    | engineering accepted; route закрыт `503`, не deployed                                           |
-| SMTP/mail worker foundation                  | engineering accepted; production enrollment/config отсутствуют                                  |
-| Langame runtime/import foundation            | глубокая deny-only/runtime foundation готова; self-service production flow не включён           |
-| Gate 1MT tenant/store isolation              | значительная часть принята; общий gate ещё не закрыт                                            |
-| Restored-copy rehearsal                      | plan ready; backup/target/credentials не предоставлены, не выполнен                             |
-| Первый внешний tester                        | учётная запись и Tenant B не создавались                                                        |
-| Текущая сеть из четырёх клубов               | без изменений, один существующий tenant                                                         |
-| Release decision                             | `NO-GO` до Gate 1MT, Gate 2, rehearsal и отдельного persisted GO                                |
+| Контур                                       | Статус                                                                                |
+| -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Multi-tenant data model, roles, capabilities | реализован; production gates ещё не полностью закрыты                                 |
+| CURRENT198–202 trust foundation              | V2 global successor exact-SHA CI accepted, deny-only; production root не enrolled     |
+| Owner invite/activation database boundary    | engineering accepted; route закрыт `503`, не deployed                                 |
+| SMTP/mail worker foundation                  | engineering accepted; production enrollment/config отсутствуют                        |
+| Langame runtime/import foundation            | глубокая deny-only/runtime foundation готова; self-service production flow не включён |
+| Gate 1MT tenant/store isolation              | значительная часть принята; общий gate ещё не закрыт                                  |
+| Restored-copy rehearsal                      | plan ready; backup/target/credentials не предоставлены, не выполнен                   |
+| Первый внешний tester                        | учётная запись и Tenant B не создавались                                              |
+| Текущая сеть из четырёх клубов               | без изменений, один существующий tenant                                               |
+| Release decision                             | `NO-GO` до Gate 1MT, Gate 2, rehearsal и отдельного persisted GO                      |
 
 ## 5. Критический путь до тестового доступа
 
-1. Принять exact-SHA CI для CURRENT202 V2 global bootstrap.
+1. `DONE`: CURRENT202 V2 global bootstrap принят exact-SHA CI.
 2. Провести один внутренний bootstrap и root registration.
 3. Выполнить restored-copy production-like rehearsal.
 4. Применить production runtime roles/grants и readiness.

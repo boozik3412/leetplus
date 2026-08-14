@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.126                                        |
+| Версия           | 1.127                                        |
 | Дата             | 14.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -189,8 +189,9 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    `platformScope=GLOBAL`, требует отдельный `SHARED BETA GO` и не содержит
    tenant/store/trial policy. Клиенты и последующие tenants не проходят key
    ceremony. Исторический V1 exact SHA `77bb66b3…` принят CI `31783338350`;
-   V2 implementation ожидает отдельный exact-SHA acceptance. Все effect/access
-   flags остаются false.
+   V2 exact SHA `c2b7b370…` принят CI `31790021275` как `3/3 SUCCESS`, artifact
+   `9215344140`, digest `sha256:8e7b70c5…b504`. Все effect/access flags остаются
+   false.
    0e.21. Founder pilot operation plans:
    [key custody](./founder-pilot-key-custody-plan.md),
    [isolated restored copy](./founder-pilot-restored-copy-plan.md) и

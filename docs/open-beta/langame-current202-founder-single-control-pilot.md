@@ -1,13 +1,13 @@
 # CURRENT202 V2: single-founder global platform bootstrap
 
-| Поле                                       | Значение                                       |
-| ------------------------------------------ | ---------------------------------------------- |
-| Статус                                     | `IMPLEMENTED / CI PENDING / DENY-ONLY / NO-GO` |
-| Дата                                       | 14.08.2026                                     |
-| Режим                                      | один founder, один зашифрованный USB-носитель  |
-| Scope ключа                                | глобальная платформа LeetPlus                  |
-| Tenant rollout policy                      | вне key evidence; отдельный `SHARED BETA GO`   |
-| Production / текущие четыре клуба / tester | не изменялись                                  |
+| Поле                                       | Значение                                      |
+| ------------------------------------------ | --------------------------------------------- |
+| Статус                                     | `ENGINEERING_ACCEPTED / DENY-ONLY / NO-GO`    |
+| Дата                                       | 14.08.2026                                    |
+| Режим                                      | один founder, один зашифрованный USB-носитель |
+| Scope ключа                                | глобальная платформа LeetPlus                 |
+| Tenant rollout policy                      | вне key evidence; отдельный `SHARED BETA GO`  |
+| Production / текущие четыре клуба / tester | не изменялись                                 |
 
 Исторический CURRENT202 V1 engineering acceptance: exact SHA
 `77bb66b38207dcc0882d98021593182c4e1777f4`,
@@ -18,8 +18,15 @@ digest
 `sha256:3e0d8e0d48a5822ee7f828adf54d71d4e030095e89a37496342c67d8702e9807`.
 
 V1 остаётся только историческим deny-only evidence и новым verifier не
-принимается. V2 реализован в текущей ветке; exact implementation SHA, CI и
-artifact фиксируются отдельным acceptance update после push.
+принимается.
+
+CURRENT202 V2 engineering acceptance: exact SHA
+`c2b7b370627d79e75f0afbd41dbfe0cf04a5cb6b`,
+[GitHub CI 31790021275](https://github.com/boozik3412/leetplus/actions/runs/31790021275)
+`3/3 SUCCESS`. SHA-bound release artifact
+`leetplus-release-c2b7b370627d79e75f0afbd41dbfe0cf04a5cb6b`, id
+`9215344140`, digest
+`sha256:8e7b70c5fd252841f409d9efb311018ea5c796e7adb61083872529cafdddb504`.
 
 CURRENT202 — честное внутреннее bootstrap-исключение, когда основатель
 является единственным членом команды. Оно не изображает двух независимых людей
@@ -91,8 +98,8 @@ CURRENT202 V2 реализует требуемый successor:
 
 Contract domain изменён с `CURRENT202_V1` на
 `LANGAME_RUNTIME_TRUST_FOUNDER_GLOBAL_PLATFORM_BOOTSTRAP_CURRENT202_V2`,
-поэтому V1 signature/receipt нельзя переиспользовать. До exact-SHA CI acceptance
-и отдельного production root enrollment GO использовать V2 для registry apply
+поэтому V1 signature/receipt нельзя переиспользовать. Exact-SHA CI принят, но
+до отдельного production root enrollment GO использовать V2 для registry apply
 нельзя.
 
 ## Одна флешка

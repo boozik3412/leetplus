@@ -266,6 +266,13 @@ function candidateRoot(authority, keyId, purpose, trustDomain) {
 function verifiedProposal(attestationAuthority, revokeAuthority, options = {}) {
   const bootstrapAuthority = generateKeyPairSync("ed25519");
   const bootstrapSigningKeyId = "langame-current196-bootstrap-ci-1";
+  const verificationTime = Date.parse(options.now ?? NOW);
+  const bootstrapNotBefore = new Date(
+    verificationTime - 5 * 60_000,
+  ).toISOString();
+  const bootstrapNotAfter = new Date(
+    verificationTime + 5 * 60_000,
+  ).toISOString();
   const bootstrapPublicKeyPem = publicKey(bootstrapAuthority);
   const bootstrapPublicKeyFingerprint =
     langameRuntimeTrustEnrollmentCurrent196PublicKeyFingerprint(
@@ -372,8 +379,8 @@ function verifiedProposal(attestationAuthority, revokeAuthority, options = {}) {
     [bootstrapSigningKeyId]: {
       algorithm: LANGAME_RUNTIME_TRUST_ENROLLMENT_CURRENT196_ALGORITHM,
       keyId: bootstrapSigningKeyId,
-      notAfter: "2026-08-14T00:00:00.000Z",
-      notBefore: "2026-08-13T00:00:00.000Z",
+      notAfter: bootstrapNotAfter,
+      notBefore: bootstrapNotBefore,
       publicKeyFingerprint: bootstrapPublicKeyFingerprint,
       publicKeyPem: bootstrapPublicKeyPem,
       purpose: LANGAME_RUNTIME_TRUST_ENROLLMENT_CURRENT196_PURPOSE,
@@ -484,6 +491,19 @@ async function collect(value, dependencyOverrides = {}) {
     );
   return { ...dependency, receipt };
 }
+
+test("CURRENT197 synthetic bootstrap validity follows the verification instant", async (t) => {
+  const verificationNow = "2026-09-01T10:00:00.000Z";
+  const value = await fixture(t, {
+    proposal: {
+      issuedAt: "2026-09-01T09:59:00.000Z",
+      now: verificationNow,
+      validUntil: "2026-09-01T10:04:00.000Z",
+    },
+  });
+  assert.equal(value.input.proposal.issuedAt, "2026-09-01T09:59:00.000Z");
+  assert.equal(value.input.proposal.validUntil, "2026-09-01T10:04:00.000Z");
+});
 
 test("CURRENT197 reads exact public roots and returns deny-only TLS evidence", async (t) => {
   const value = await fixture(t);

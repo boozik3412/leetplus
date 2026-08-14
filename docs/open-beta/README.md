@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.123                                        |
+| Версия           | 1.124                                        |
 | Дата             | 14.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -185,7 +185,9 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    30-дневного пилота; контракт фиксирует один зашифрованный USB-носитель,
    отсутствие физической независимости, 12-часовой cooling-off и запрет второго
    tenant/масштабирования. CURRENT198 принимает ровно один canonical evidence
-   path — CURRENT201 или CURRENT202. Все effect/access flags остаются false.
+   path — CURRENT201 или CURRENT202. Exact SHA `77bb66b3…` принят CI
+   `31783338350` как `3/3 SUCCESS`, artifact digest
+   `sha256:3e0d8e0d…e9807`; все effect/access flags остаются false.
    0e.21. Founder pilot operation plans:
    [key custody](./founder-pilot-key-custody-plan.md),
    [isolated restored copy](./founder-pilot-restored-copy-plan.md) и

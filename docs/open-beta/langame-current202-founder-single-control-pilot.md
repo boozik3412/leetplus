@@ -2,11 +2,19 @@
 
 | Поле                                       | Значение                                      |
 | ------------------------------------------ | --------------------------------------------- |
-| Статус                                     | `IMPLEMENTED / DENY-ONLY / NO-GO`             |
+| Статус                                     | `ENGINEERING_ACCEPTED / DENY-ONLY / NO-GO`    |
 | Дата                                       | 14.08.2026                                    |
 | Режим                                      | один founder, один зашифрованный USB-носитель |
 | Предел                                     | один внешний `Tenant`, один `Store`, 30 дней  |
 | Production / текущие четыре клуба / tester | не изменялись                                 |
+
+Engineering acceptance: exact SHA
+`77bb66b38207dcc0882d98021593182c4e1777f4`,
+[GitHub CI 31783338350](https://github.com/boozik3412/leetplus/actions/runs/31783338350)
+`3/3 SUCCESS`. SHA-bound release artifact
+`leetplus-release-77bb66b38207dcc0882d98021593182c4e1777f4`, id `9212779648`,
+digest
+`sha256:3e0d8e0d48a5822ee7f828adf54d71d4e030095e89a37496342c67d8702e9807`.
 
 CURRENT202 — честное исключение для первого закрытого пилота, когда основатель
 является единственным членом команды. Оно не изображает двух независимых людей

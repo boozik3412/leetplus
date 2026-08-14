@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.71
+- Версия: 2.72
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -284,6 +284,14 @@ closed. Focused CURRENT202/CLI matrix — `12/12`; CURRENT198 и CURRENT201
 production-origin registration и restored-copy rehearsal ещё не выполнены; production, текущая
 сеть и внешний tester не изменялись. Runbook:
 [CURRENT202 founder pilot](./docs/open-beta/langame-current202-founder-single-control-pilot.md).
+
+CURRENT202 принят exact SHA `77bb66b38207dcc0882d98021593182c4e1777f4`:
+[CI 31783338350](https://github.com/boozik3412/leetplus/actions/runs/31783338350)
+завершён `3/3 SUCCESS`; artifact `9212779648`,
+`leetplus-release-77bb66b38207dcc0882d98021593182c4e1777f4`, digest
+`sha256:3e0d8e0d48a5822ee7f828adf54d71d4e030095e89a37496342c67d8702e9807`.
+Acceptance подтверждает инженерный deny-only контур, но не root enrollment,
+restore, deployment или выдачу внешнего доступа.
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

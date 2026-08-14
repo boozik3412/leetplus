@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.122                                        |
+| Версия           | 1.123                                        |
 | Дата             | 14.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -18,6 +18,12 @@
 Доступ остаётся `NO-GO` до Gate 1MT, Gate 2 и отдельного protected
 `SHARED BETA GO`. Отдельный runtime/DB сохранён только как contingency или
 enterprise-isolation option и не сокращает shared gates.
+
+Для фактического состава команды из одного человека добавлен ограниченный
+`FOUNDER_SINGLE_CONTROL_PILOT` successor CURRENT202. Он честно фиксирует одного
+release/rollback owner, одну зашифрованную флешку, 12-часовой cooling-off и
+предел в один внешний tenant/один store/30 дней. Он не является access GO и не
+заменяет CURRENT201 перед дальнейшим масштабированием.
 
 ## Зафиксированные решения
 
@@ -174,6 +180,17 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    `e3cf6ff4…`, CI `31776034567` — `3/3 SUCCESS`, artifact
    `sha256:2e3d1201…86d2`; production root и доступ остаются `NO-GO` до
    фактической ceremony и restored-copy rehearsal.
+   0e.20. [CURRENT202 single-founder pilot exception](./langame-current202-founder-single-control-pilot.md) —
+   один founder одновременно подписывает release/rollback ownership для одного
+   30-дневного пилота; контракт фиксирует один зашифрованный USB-носитель,
+   отсутствие физической независимости, 12-часовой cooling-off и запрет второго
+   tenant/масштабирования. CURRENT198 принимает ровно один canonical evidence
+   path — CURRENT201 или CURRENT202. Все effect/access flags остаются false.
+   0e.21. Founder pilot operation plans:
+   [key custody](./founder-pilot-key-custody-plan.md),
+   [isolated restored copy](./founder-pilot-restored-copy-plan.md) и
+   [stop/rollback](./founder-pilot-rollback-plan.md). Это exact digest inputs,
+   а не утверждение о выполненном production restore.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

@@ -1,11 +1,15 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.70
+- Версия: 2.71
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
   только после Gate 1MT и Gate 2
+- Принято founder-исключение CURRENT202: один release/rollback owner, одна
+  зашифрованная флешка, один внешний tenant/store на 30 дней. Это deny-only
+  evidence path, не deployment/access GO; перед вторым внешним tenant обязателен
+  возврат к независимому CURRENT201-контролю
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
 - Пакет документации запуска:
   [docs/open-beta](./docs/open-beta/README.md)
@@ -265,6 +269,21 @@ literal apply, production-origin CURRENT196–199 acceptance и restored-copy
 production-like role/grant/apply/rollback/zero-residue rehearsal.
 Добавление первого реального public root не может быть сгенерировано или
 одобрено приложением.
+
+CURRENT202 single-founder pilot exception реализован как отдельный
+`DENY-ONLY / NO-GO` successor для фактической команды из одного человека.
+Точный risk acceptance, один `founder-primary` как release и rollback owner,
+одна зашифрованная флешка, отсутствие физического разделения, 12-часовой
+cooling-off, один внешний tenant/store и 30-дневный предел входят в подписанный
+payload. Second tenant, public signup, initial outbound, current-network
+mutation и scale beyond pilot запрещены полями контракта. CURRENT198 transition
+gate теперь принимает ровно один clean HEAD evidence path: стандартный
+CURRENT201 либо founder CURRENT202; два evidence-файла одновременно fail
+closed. Focused CURRENT202/CLI matrix — `12/12`; CURRENT198 и CURRENT201
+регрессии — `20/20` и `16/16`. Фактические keys/evidence, registry apply,
+production-origin registration и restored-copy rehearsal ещё не выполнены; production, текущая
+сеть и внешний tester не изменялись. Runbook:
+[CURRENT202 founder pilot](./docs/open-beta/langame-current202-founder-single-control-pilot.md).
 
 Предыдущая локальная foundation:
 exact CURRENT193 attestation/signer, release SHA, database/owner OID и полный

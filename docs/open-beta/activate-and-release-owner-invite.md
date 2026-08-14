@@ -7,6 +7,12 @@
 активации внешнего tenant. Она не открывает Platform Admin route, не включает
 SMTP worker, не создаёт тестера и не разрешает production cutover.
 
+Для single-founder пилота release и rollback owner назначаются не application
+ролью, а exact подписанным CURRENT202 evidence: все три значения `founderId`,
+`releaseOwnerId`, `rollbackOwnerId` равны `founder-primary`. Это не активирует
+данный writer. До принятого restored-copy rehearsal, runtime grants и отдельного
+persisted `SHARED BETA GO` маршрут обязан оставаться закрытым.
+
 ## 1. Результат checkpoint
 
 Один закрытый operator-only writer должен в одной PostgreSQL-транзакции:
@@ -408,4 +414,8 @@ invite.
 - verified delivery и protected resend/reissue/revoke;
 - production-like inventory/admission на фактическом окружении;
 - platform route/operator ceremony;
+- verified CURRENT201 two-person ceremony либо ограниченный CURRENT202 founder
+  evidence, reviewed CURRENT198 transition и production-origin registration;
+- restored-copy apply/repeat/rollback/zero-diff rehearsal; одна подготовленная
+  флешка не заменяет изолированный PostgreSQL target и production backup;
 - explicit launch GO и stop/rollback procedure.

@@ -12,6 +12,10 @@ import {
   LANGAME_RUNTIME_TRUST_BOOTSTRAP_CEREMONY_CURRENT201_MAX_SKEW_MS,
   verifyPersistedLangameRuntimeTrustBootstrapCeremonyCurrent201,
 } from "./langame-runtime-trust-bootstrap-ceremony-current201.mjs";
+import {
+  LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_CONTRACT,
+  verifyPersistedLangameRuntimeTrustFounderPilotCurrent202,
+} from "./langame-runtime-trust-founder-pilot-current202.mjs";
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 export const LANGAME_RUNTIME_TRUST_BOOTSTRAP_REGISTRY_CURRENT198_TRANSITION_CONFIRMATION =
@@ -20,8 +24,14 @@ export const LANGAME_RUNTIME_TRUST_BOOTSTRAP_REGISTRY_CURRENT198_TRANSITION_CONF
 const REPOSITORY_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const REGISTRY_MODULE_PATH =
   "packages/database/scripts/langame-runtime-trust-bootstrap-registry-current198.mjs";
-const REVIEW_EVIDENCE_PATH =
+const TWO_PERSON_REVIEW_EVIDENCE_PATH =
   "packages/database/trust-evidence/langame-current198-bootstrap-review-current201.json";
+const FOUNDER_PILOT_EVIDENCE_PATH =
+  "packages/database/trust-evidence/langame-current198-bootstrap-founder-current202.json";
+const REVIEW_EVIDENCE_PATHS = Object.freeze([
+  TWO_PERSON_REVIEW_EVIDENCE_PATH,
+  FOUNDER_PILOT_EVIDENCE_PATH,
+]);
 const MAX_SOURCE_BYTES = 128 * 1024;
 const MAX_REVIEW_EVIDENCE_BYTES = 256 * 1024;
 const REGISTRY_LITERAL_PATTERN =
@@ -165,8 +175,92 @@ export function verifyReviewedLangameRuntimeTrustBootstrapRegistryTransitionCurr
   return verified;
 }
 
+export function verifyFounderPilotLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
+  previousRegistry,
+  nextRegistry,
+  founderEvidence,
+  now,
+) {
+  if (arguments.length !== 3 && arguments.length !== 4) {
+    fail("CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_ARGUMENTS_INVALID");
+  }
+  validateLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
+    previousRegistry,
+    nextRegistry,
+  );
+  if (
+    canonicalStringify(previousRegistry) === canonicalStringify(nextRegistry)
+  ) {
+    return null;
+  }
+  if (founderEvidence === null || founderEvidence === undefined) {
+    fail("CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_EVIDENCE_REQUIRED");
+  }
+  let verified;
+  try {
+    verified = verifyPersistedLangameRuntimeTrustFounderPilotCurrent202(
+      founderEvidence,
+      previousRegistry,
+    );
+  } catch {
+    fail("CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_EVIDENCE_INVALID");
+  }
+  if (
+    verified.contract !==
+      LANGAME_RUNTIME_TRUST_FOUNDER_PILOT_CURRENT202_CONTRACT ||
+    verified.candidateCanonicalJson !== canonicalStringify(nextRegistry)
+  ) {
+    fail("CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_EVIDENCE_INVALID");
+  }
+  const observedAtIso = arguments.length === 4 ? now : new Date().toISOString();
+  const observedAt = Date.parse(observedAtIso);
+  const eligibleAt = Date.parse(verified.eligibleAt);
+  const expiresAt = Date.parse(verified.expiresAt);
+  if (
+    !Number.isFinite(observedAt) ||
+    new Date(observedAt).toISOString() !== observedAtIso ||
+    observedAt < eligibleAt ||
+    observedAt >= expiresAt
+  ) {
+    fail("CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_EVIDENCE_EXPIRED");
+  }
+  return verified;
+}
+
+function trackedReviewEvidencePath() {
+  const tracked = [];
+  for (const evidencePath of REVIEW_EVIDENCE_PATHS) {
+    const entry = runGit(
+      ["ls-tree", "-z", "--full-tree", "HEAD", "--", evidencePath],
+      { encoding: null },
+    );
+    if (entry.length === 0) continue;
+    const suffix = Buffer.from(`\t${evidencePath}\0`, "utf8");
+    if (
+      !Buffer.isBuffer(entry) ||
+      !entry.subarray(-suffix.length).equals(suffix) ||
+      !/^[0-7]{6} blob [a-f0-9]{40}$/u.test(
+        entry.subarray(0, -suffix.length).toString("ascii"),
+      )
+    ) {
+      fail("CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_EVIDENCE_INVALID", 1);
+    }
+    tracked.push(evidencePath);
+  }
+  if (tracked.length !== 1) {
+    fail(
+      tracked.length === 0
+        ? "CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_EVIDENCE_UNAVAILABLE"
+        : "CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_EVIDENCE_AMBIGUOUS",
+      1,
+    );
+  }
+  return tracked[0];
+}
+
 function loadTrackedReviewEvidence() {
-  const evidencePath = path.join(REPOSITORY_ROOT, REVIEW_EVIDENCE_PATH);
+  const reviewEvidencePath = trackedReviewEvidencePath();
+  const evidencePath = path.join(REPOSITORY_ROOT, reviewEvidencePath);
   let worktree;
   try {
     worktree = readFileSync(evidencePath);
@@ -180,7 +274,7 @@ function loadTrackedReviewEvidence() {
   ) {
     fail("CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_EVIDENCE_INVALID");
   }
-  const head = runGit(["show", `HEAD:${REVIEW_EVIDENCE_PATH}`], {
+  const head = runGit(["show", `HEAD:${reviewEvidencePath}`], {
     encoding: null,
     maxBuffer: MAX_REVIEW_EVIDENCE_BYTES + 1,
   });
@@ -194,7 +288,7 @@ function loadTrackedReviewEvidence() {
         "--porcelain=v1",
         "--untracked-files=all",
         "--",
-        REVIEW_EVIDENCE_PATH,
+        reviewEvidencePath,
       ]),
     ).trim()
   ) {
@@ -213,7 +307,10 @@ function loadTrackedReviewEvidence() {
   if (`${canonicalStringify(parsed)}\n` !== source) {
     fail("CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_EVIDENCE_INVALID");
   }
-  return parsed;
+  return Object.freeze({
+    evidence: parsed,
+    evidencePath: reviewEvidencePath,
+  });
 }
 
 export function verifyLangameRuntimeTrustBootstrapRegistryCurrent198Transition() {
@@ -266,6 +363,7 @@ export function verifyLangameRuntimeTrustBootstrapRegistryCurrent198Transition()
     }
   }
   let reviewEvidenceDigest = null;
+  let reviewMode = null;
   if (changedParents.length > 0) {
     const previousCanonical = canonicalStringify(changedParents[0]);
     if (
@@ -275,17 +373,29 @@ export function verifyLangameRuntimeTrustBootstrapRegistryCurrent198Transition()
     ) {
       fail("CURRENT198_BOOTSTRAP_REGISTRY_REVIEW_PARENT_AMBIGUOUS");
     }
+    const loaded = loadTrackedReviewEvidence();
     const verified =
-      verifyReviewedLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
-        changedParents[0],
-        current,
-        loadTrackedReviewEvidence(),
-      );
+      loaded.evidencePath === TWO_PERSON_REVIEW_EVIDENCE_PATH
+        ? verifyReviewedLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
+            changedParents[0],
+            current,
+            loaded.evidence,
+          )
+        : verifyFounderPilotLangameRuntimeTrustBootstrapRegistryTransitionCurrent198(
+            changedParents[0],
+            current,
+            loaded.evidence,
+          );
     reviewEvidenceDigest = verified.reviewEvidenceDigest;
+    reviewMode =
+      loaded.evidencePath === TWO_PERSON_REVIEW_EVIDENCE_PATH
+        ? "TWO_PERSON_CURRENT201"
+        : "FOUNDER_SINGLE_CONTROL_CURRENT202";
   }
   return Object.freeze({
     parentsChecked: parents.length,
     reviewEvidenceDigest,
+    reviewMode,
   });
 }
 
@@ -306,6 +416,7 @@ async function main() {
     `${canonicalStringify({
       parentsChecked: result.parentsChecked,
       reviewEvidenceDigest: result.reviewEvidenceDigest,
+      reviewMode: result.reviewMode,
       status: "PASS",
     })}\n`,
   );

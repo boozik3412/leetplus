@@ -6,9 +6,11 @@
 > переносимый public receipt повторно проверяется, а любое изменение CURRENT198
 > теперь требует exact canonical evidence-файл в том же commit. Missing,
 > drifted, expired или forged evidence останавливает CI; focused matrix
-> `16/16`. Private keys, production, Tenant A/A1..A4, тестер и owner route не
-> изменялись. Внешний доступ остаётся `NO-GO` до фактической offline ceremony,
-> production-origin registration и restored-copy role/grant rehearsal.
+> `16/16`. Exact implementation SHA `e3cf6ff4…` принят CI `31776034567` как
+> `3/3 SUCCESS`, artifact digest `sha256:2e3d1201…86d2`. Private keys,
+> production, Tenant A/A1..A4, тестер и owner route не изменялись. Внешний
+> доступ остаётся `NO-GO` до фактической offline ceremony, production-origin
+> registration и restored-copy role/grant rehearsal.
 
 > Обновление 10.08.2026: Gate 0 закрыт exact synchronized SHA и зелёным
 > SHA-bound CI artifact. Актуальное evidence вынесено в

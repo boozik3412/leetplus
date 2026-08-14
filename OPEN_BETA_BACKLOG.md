@@ -251,6 +251,13 @@ Transition gate сверяет каждый Git parent, clean HEAD bytes, ceremo
 candidate; missing/drifted/expired evidence fail closed. Focused matrix
 обновлена до `16/16`.
 
+CURRENT201 принят exact implementation SHA
+`e3cf6ff4ff842192e3dd0a149bb2ec9338702562`:
+[CI 31776034567](https://github.com/boozik3412/leetplus/actions/runs/31776034567)
+`3/3 SUCCESS`, release artifact
+`leetplus-release-e3cf6ff4ff842192e3dd0a149bb2ec9338702562`, digest
+`sha256:2e3d1201980193d89333ee2ec46c04b84529a811e3749c5331ed964dc6fa86d2`.
+
 После CURRENT201 программно подготовлены signing/verification и reviewed-PR
 границы. Не выполнены и не могут считаться автоматически выполненными:
 фактическая offline ceremony двумя независимыми людьми, reviewed CURRENT198

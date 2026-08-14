@@ -8,6 +8,13 @@
 | Private-key authority          | отсутствует в приложении и CLI    |
 | Production / Tenant A / tester | не изменялись                     |
 
+Engineering acceptance: exact implementation SHA
+`e3cf6ff4ff842192e3dd0a149bb2ec9338702562`,
+[GitHub CI 31776034567](https://github.com/boozik3412/leetplus/actions/runs/31776034567)
+`3/3 SUCCESS`. SHA-bound release artifact
+`leetplus-release-e3cf6ff4ff842192e3dd0a149bb2ec9338702562`, digest
+`sha256:2e3d1201980193d89333ee2ec46c04b84529a811e3749c5331ed964dc6fa86d2`.
+
 CURRENT201 закрывает программную часть двухконтрольной церемонии добавления,
 ротации или отзыва public bootstrap root. Он связывает один branded CURRENT200
 candidate с двумя разными участниками:

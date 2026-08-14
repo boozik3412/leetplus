@@ -170,8 +170,10 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    0e.19. [CURRENT201 two-person bootstrap ceremony](./langame-current201-two-person-bootstrap-ceremony.md) —
    разные operator/reviewer identities и Ed25519 public keys, role-bound
    detached signatures и обязательный canonical public evidence для любого
-   изменения CURRENT198; focused matrix `16/16`, production root и доступ
-   остаются `NO-GO` до фактической ceremony и restored-copy rehearsal.
+   изменения CURRENT198; focused matrix `16/16`, exact implementation SHA
+   `e3cf6ff4…`, CI `31776034567` — `3/3 SUCCESS`, artifact
+   `sha256:2e3d1201…86d2`; production root и доступ остаются `NO-GO` до
+   фактической ceremony и restored-copy rehearsal.
    0f. [CURRENT180–190 release rehearsal blocker](./current180-current190-release-rehearsal-blocker.md) —
    fail-closed доказательство несовместимого Prisma order, database guards и
    unresolved predecessor chain до любого deploy или подключения к БД.

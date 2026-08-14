@@ -1,15 +1,16 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 14.08.2026
-- Версия: 2.72
+- Версия: 2.73
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
   только после Gate 1MT и Gate 2
-- Принято founder-исключение CURRENT202: один release/rollback owner, одна
-  зашифрованная флешка, один внешний tenant/store на 30 дней. Это deny-only
-  evidence path, не deployment/access GO; перед вторым внешним tenant обязателен
-  возврат к независимому CURRENT201-контролю
+- Принято founder-исключение CURRENT202: один release/rollback owner и одна
+  зашифрованная флешка для глобального внутреннего platform bootstrap. Ключ не
+  соответствует tenant. Один внешний tenant/store на 30 дней — только canary
+  rollout; следующие сети подключаются обычным owner invite без новой key
+  ceremony. CURRENT201 нужен для внутренней ротации/recovery root
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
 - Пакет документации запуска:
   [docs/open-beta](./docs/open-beta/README.md)
@@ -270,20 +271,24 @@ production-like role/grant/apply/rollback/zero-residue rehearsal.
 Добавление первого реального public root не может быть сгенерировано или
 одобрено приложением.
 
-CURRENT202 single-founder pilot exception реализован как отдельный
+CURRENT202 single-founder bootstrap реализован как отдельный
 `DENY-ONLY / NO-GO` successor для фактической команды из одного человека.
 Точный risk acceptance, один `founder-primary` как release и rollback owner,
-одна зашифрованная флешка, отсутствие физического разделения, 12-часовой
-cooling-off, один внешний tenant/store и 30-дневный предел входят в подписанный
-payload. Second tenant, public signup, initial outbound, current-network
-mutation и scale beyond pilot запрещены полями контракта. CURRENT198 transition
-gate теперь принимает ровно один clean HEAD evidence path: стандартный
-CURRENT201 либо founder CURRENT202; два evidence-файла одновременно fail
-closed. Focused CURRENT202/CLI matrix — `12/12`; CURRENT198 и CURRENT201
-регрессии — `20/20` и `16/16`. Фактические keys/evidence, registry apply,
-production-origin registration и restored-copy rehearsal ещё не выполнены; production, текущая
-сеть и внешний tester не изменялись. Runbook:
-[CURRENT202 founder pilot](./docs/open-beta/langame-current202-founder-single-control-pilot.md).
+одна зашифрованная флешка, отсутствие физического разделения и 12-часовой
+cooling-off входят в подписанный payload глобального platform trust. Поля
+`pilotTenantLimit`, `pilotStoreLimit`, `secondExternalTenantAllowed` и
+`scaleBeyondPilotAllowed` ограничивают только первый canary GO и не связывают
+ключ с tenant. До production enrollment CURRENT202 должен получить successor с
+явными `platformScope=GLOBAL`, `customerKeyCeremonyRequired=false` и вынесенным
+из key evidence tenant rollout policy. CURRENT198 transition gate сейчас
+принимает ровно один clean HEAD evidence path: стандартный CURRENT201 либо
+founder CURRENT202; два evidence-файла одновременно fail closed. Focused
+CURRENT202/CLI matrix — `12/12`; CURRENT198 и CURRENT201 регрессии — `20/20` и
+`16/16`. Фактические keys/evidence, registry apply, production-origin
+registration и restored-copy rehearsal ещё не выполнены; production, текущая
+сеть и внешний tester не изменялись. Runbooks:
+[CURRENT202 founder bootstrap](./docs/open-beta/langame-current202-founder-single-control-pilot.md)
+и [commercial multi-tenant onboarding](./docs/open-beta/commercial-multi-tenant-onboarding-plan.md).
 
 CURRENT202 принят exact SHA `77bb66b38207dcc0882d98021593182c4e1777f4`:
 [CI 31783338350](https://github.com/boozik3412/leetplus/actions/runs/31783338350)
@@ -5067,7 +5072,8 @@ Engineering Green CURRENT187. Он не меняет статус CURRENT186/CUR
 
 | ID                 | Приоритет | Статус        | Шаг                                                           | Definition of Done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Зависимости                                                                                    |
 | ------------------ | --------: | ------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| BETA-LAUNCH-CP-001 |        P0 | Запланировано | Зафиксировать принятый identity/database baseline             | CURRENT186 отдельно принят и refrozen; CURRENT187 достиг Engineering Green; definition coverage, provider lost-response/killswitch evidence и hostile multi-DB/HBA/pooler suite зелёные; exact clean SHA и immutable evidence известны. Каждый CURRENT187 receipt сохраняет `testAccessAuthorized=false/sharedBetaAccess=false`                                                                                                                                                                                                                                                                                                                 | BETA-IAM-004K, CURRENT186 acceptance, CURRENT187 Engineering Green                             |
+| BETA-LAUNCH-CP-000 |        P0 | Запланировано | Принять global platform bootstrap successor                   | CURRENT202 V1 остаётся deny-only и не применяется в production. Successor подписывает `platformScope=GLOBAL`, `customerKeyCeremonyRequired=false` и `additionalTenantKeyCeremonyRequired=false`; tenant/store/trial limits удалены из platform key evidence и перенесены в отдельный `SHARED BETA GO`. Один внутренний root обслуживает все tenants; owner invite, создание Store и подключение Langame не требуют клиентского ключа, флешки или новой ceremony                                                                                                                                                                                 | CURRENT198, CURRENT202 engineering acceptance                                                  |
+| BETA-LAUNCH-CP-001 |        P0 | Запланировано | Зафиксировать принятый identity/database baseline             | CURRENT186 отдельно принят и refrozen; CURRENT187 достиг Engineering Green; definition coverage, provider lost-response/killswitch evidence и hostile multi-DB/HBA/pooler suite зелёные; exact clean SHA и immutable evidence известны. Каждый CURRENT187 receipt сохраняет `testAccessAuthorized=false/sharedBetaAccess=false`                                                                                                                                                                                                                                                                                                                 | BETA-LAUNCH-CP-000, BETA-IAM-004K, CURRENT186 acceptance, CURRENT187 Engineering Green         |
 | BETA-LAUNCH-CP-002 |        P0 | Запланировано | Провести canonical promotion и production admission ceremony  | Producer/activation v2, zero-secret/zero-inflight, reconciliation/backfill закрыты; выполнены отдельные `PRODUCTION ROOT ENROLLMENT GO` и `PRODUCTION DEPLOY GO`; fresh cluster scan, immutable artifact, CI, backup/restore, apply/rollback/emergency/zero-diff, readiness, monitoring и canary приняты. Сам production admission не разрешает tester access                                                                                                                                                                                                                                                                                   | BETA-LAUNCH-CP-001, BETA-OPS-001..012                                                          |
 | BETA-LAUNCH-CP-003 |        P0 | Запланировано | Включить защищённые email-приглашения владельца и сотрудников | Platform workflow атомарно создаёт shell tenant/store и отправляет mailbox-bound initial `OWNER + NETWORK` invite без raw token/URL/ciphertext в API, BFF, logs или admin response; reissue/revoke/suspend/accept и `SENT` barrier проверены. После активации владелец может в пределах своего tenant отправлять verified email invites сотрудникам, resend/revoke их, назначать только разрешённые роли/клубы и отзывать sessions; password задаётся получателем, generic OWNER escalation и удаление последнего владельца запрещены                                                                                                           | BETA-IAM-004C, BETA-IAM-004L, BETA-IAM-005, BETA-IAM-007, BETA-TEN-001..008, BETA-SEC-008..010 |
 | BETA-LAUNCH-CP-004 |        P0 | Запланировано | Реализовать безопасное self-service подключение Langame       | Управление tenant-wide credential разрешено только `NETWORK` scope; credential зашифрован, tenant-aware FK/claims и запрет повторной привязки external club enforced в БД. Endpoint policy закрывает scheme/host/port, DNS/IP recheck, SSRF/rebinding, metadata/loopback/link-local targets, обязательные timeout, bounded read retry и circuit breaker. Единственный разрешённый flow: diagnostic → read-only club preview → явный выбор → атомарная привязка только выбранного `B1` → reconcile → отдельно подтверждённый initial read-only sync; остальные видимые clubs не создаются автоматически, unattended/outbound writes остаются OFF | BETA-LAUNCH-CP-003, BETA-MT-006, BETA-MOD-ASSORT-006, BETA-OPS-009                             |

@@ -2,8 +2,9 @@
 
 Статус: `APPROVED_FOR_ONE_PILOT / NOT_EXECUTED`.
 
-Область: один founder, одна полнодисково зашифрованная флешка, один внешний
-tenant/store, не более 30 дней. Alias владельца: `founder-primary`.
+Область: один founder и одна полнодисково зашифрованная флешка для bootstrap и
+recovery глобального platform trust LeetPlus. Носитель не соответствует
+конкретному tenant/store. Alias владельца: `founder-primary`.
 
 ## Правила
 
@@ -20,8 +21,10 @@ tenant/store, не более 30 дней. Alias владельца: `founder-pr
 6. Потеря, повреждение, неожиданное изменение fingerprint или подозрение на
    компрометацию означает `STOP`: registry transition, deploy и invite не
    продолжаются.
-7. До второго внешнего tenant этот план заменяется на независимый CURRENT201 с
-   раздельными людьми/носителями и проверенной recovery-копией.
+7. Перед ротацией/revoke глобального platform root или существенным расширением
+   команды этот план заменяется CURRENT201 с независимыми людьми/носителями и
+   проверенной recovery-копией. Добавление tenant само по себе ротации не
+   требует.
 
 Этот документ не содержит private material. Его exact LF-normalized bytes
 хешируются SHA-256 и передаются как `keyCustodyPlanDigest` CURRENT202.

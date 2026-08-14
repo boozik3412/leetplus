@@ -5,7 +5,8 @@
 | Статус                                     | `ENGINEERING_ACCEPTED / DENY-ONLY / NO-GO`    |
 | Дата                                       | 14.08.2026                                    |
 | Режим                                      | один founder, один зашифрованный USB-носитель |
-| Предел                                     | один внешний `Tenant`, один `Store`, 30 дней  |
+| Scope ключа                                | глобальная платформа LeetPlus                 |
+| Первый rollout                             | canary: один внешний tenant/store, 30 дней    |
 | Production / текущие четыре клуба / tester | не изменялись                                 |
 
 Engineering acceptance: exact SHA
@@ -16,10 +17,15 @@ Engineering acceptance: exact SHA
 digest
 `sha256:3e0d8e0d48a5822ee7f828adf54d71d4e030095e89a37496342c67d8702e9807`.
 
-CURRENT202 — честное исключение для первого закрытого пилота, когда основатель
+CURRENT202 — честное внутреннее bootstrap-исключение, когда основатель
 является единственным членом команды. Оно не изображает двух независимых людей
-и не ослабляет стандартный CURRENT201: при масштабировании основным путём
-остаётся двухконтрольная церемония.
+и не ослабляет стандартный CURRENT201 для внутренней ротации platform root.
+Клиенты в этой церемонии не участвуют.
+
+Один platform key не равен одной сети. Он является глобальным внутренним trust
+anchor LeetPlus. Внешние tenants подключаются обычным owner email invite и не
+получают private key, флешку или signing CLI. Ограничение первого tenant ниже —
+canary-политика конкретного launch GO, а не предел применимости root.
 
 ## Зафиксированное решение
 
@@ -44,24 +50,44 @@ LeetPlus. Для первого пилота используется посто
 - `encryptedRemovableMediaCount = 1`;
 - `physicalKeySeparationSatisfied = false`;
 - `organizationalIndependenceSatisfied = false`;
-- `pilotTenantLimit = 1`, `pilotStoreLimit = 1`;
+- `pilotTenantLimit = 1`, `pilotStoreLimit = 1` только для первого canary GO;
 - `pilotDurationSeconds = 2592000`;
 - `currentNetworkMutationAllowed = false`;
 - `outboundInitiallyEnabled = false`;
 - `publicSignupAllowed = false`;
-- `secondExternalTenantAllowed = false`;
-- `scaleBeyondPilotAllowed = false`;
+- `secondExternalTenantAllowed = false` и `scaleBeyondPilotAllowed = false`
+  означают, что этот receipt сам не является автоматическим GO для расширения;
 - обязательный cooling-off — ровно 12 часов;
 - окно подписи после cooling-off — не более 24 часов.
 
 CURRENT202 разрешает только initial `ENROLL` в пустой CURRENT198 registry.
-Rotate/revoke и второй root по founder-exception запрещены. Для них применяется
-CURRENT201 либо отдельный будущий successor с независимыми участниками.
+Rotate/revoke и второй root по founder-exception запрещены. Для внутренней
+ротации применяется CURRENT201. Подключение второго tenant не является
+ротацией: после review ему выпускается отдельный tenant GO с тем же глобальным
+platform trust и обычным owner invite.
+
+## Коррекция контракта до production
+
+CURRENT202 V1 уже принят как deny-only engineering evidence, но ещё не enrolled
+и не является production canonical. До фактического root enrollment нужен его
+successor, который:
+
+- явно подписывает `platformScope = GLOBAL`;
+- фиксирует `customerKeyCeremonyRequired = false` и
+  `additionalTenantKeyCeremonyRequired = false`;
+- переносит ограничения первого tenant/store/trial из platform key evidence в
+  отдельный `SHARED BETA GO`;
+- сохраняет запрет public signup, initial outbound и изменения текущей сети до
+  отдельных launch decisions.
+
+Это устраняет двусмысленные имена полей V1 без ослабления fail-closed границ.
+До принятия successor использовать CURRENT202 V1 для production enrollment
+нельзя.
 
 ## Одна флешка
 
-Обычная флешка подходит для первого закрытого пилота как переносной ключевой
-носитель при одновременном выполнении всех условий:
+Обычная флешка подходит как внутренний переносной bootstrap/recovery-носитель
+LeetPlus при одновременном выполнении всех условий:
 
 1. Весь носитель зашифрован средствами ОС; пароль не хранится на флешке, в
    репозитории, `.env`, облачной синхронизации или переписке.
@@ -76,9 +102,10 @@ CURRENT201 либо отдельный будущий successor с незави�
    останавливает релиз, ротацию и выдачу нового доступа. Обхода контроля нет.
 
 Отсутствие второго носителя означает отсутствие физической резервной копии.
-Это принятый single-point-of-failure только для одного пилота. До второго
-внешнего tenant обязательны независимый reviewer, раздельные ключи/носители и
-проверенная recovery-процедура.
+Это принятый single-point-of-failure раннего запуска. Он не переносится на
+клиентов. Дополнительные носители и независимый reviewer обязательны перед
+внутренней ротацией root и по мере роста команды, но не перед каждым новым
+tenant.
 
 Private keys нельзя добавлять в Git. Канонический evidence-файл содержит только
 public SPKI, payload, detached signature и digests.
@@ -121,7 +148,7 @@ public SPKI, payload, detached signature и digests.
 SHA-256 текущих exact bytes:
 
 ```text
-keyCustodyPlanDigest   = 9edcf4f17eeef3f33edbc7282e4637b525c83bc286a7f8f7bd68cafdd6160d2c
+keyCustodyPlanDigest   = b7bcb48f5cd009ffc375b8575c8f0024ae8c840231027c5f27386eeaa3a18843
 restoredCopyPlanDigest = cc8f19cd45ac46d2de3679bc9f99a7f3c4e20be5e3033d8d7e3b07f5d3423312
 rollbackPlanDigest     = 157597d98a13b67cb32414d828065c49adf78538b8efd21f68ccc8cd26690e59
 ```

@@ -11,6 +11,10 @@ import {
   TenantModule,
   TenantOnboardingStatus,
 } from '@prisma/client';
+import {
+  IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+  type IdentityEmailClaimService,
+} from '../auth/identity-email-claim.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import type { PrismaService } from '../prisma/prisma.service';
 import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-profile.service';
@@ -46,7 +50,6 @@ type PrismaMock = {
   $queryRaw: jest.Mock;
   $transaction: jest.Mock;
   tenant: { findUnique: jest.Mock };
-  identityEmailClaim: { findFirst: jest.Mock };
   user: { findUnique: jest.Mock };
   founderOperatorBetaGo: {
     findUnique: jest.Mock;
@@ -161,7 +164,6 @@ function fixture(mode = 'PREPARE') {
     $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(),
     tenant: { findUnique: jest.fn() },
-    identityEmailClaim: { findFirst: jest.fn() },
     user: { findUnique: jest.fn() },
     founderOperatorBetaGo: {
       findUnique: jest.fn(),
@@ -201,11 +203,21 @@ function fixture(mode = 'PREPARE') {
       profileRevision: 1,
     })),
   });
-  prisma.identityEmailClaim.findFirst.mockResolvedValue({
-    claimType: IdentityEmailClaimType.INVITE,
-    subjectId: LOCATOR_ID,
-    revision: 1,
-  });
+  const identityEmailClaims = {
+    lockTenantTransaction: jest.fn().mockResolvedValue({
+      tenantId: TENANT_ID,
+    }),
+    assertInviteLocator: jest.fn().mockResolvedValue({
+      schemaVersion: 1,
+      operation: 'ASSERT_INVITE_LOCATOR',
+      decision: 'MATCHED',
+      claimType: IdentityEmailClaimType.INVITE,
+      tenantId: TENANT_ID,
+      subjectId: LOCATOR_ID,
+      workflowLocator: LOCATOR_ID,
+      revision: 1,
+    }),
+  };
   prisma.user.findUnique.mockResolvedValue({
     isActive: true,
     isPlatformAdmin: true,
@@ -237,10 +249,11 @@ function fixture(mode = 'PREPARE') {
     prisma as unknown as PrismaService,
     shellProvisioning as unknown as SharedTenantProvisioningService,
     config as unknown as ConfigService,
+    identityEmailClaims as unknown as IdentityEmailClaimService,
     () => NOW,
     () => GO_ID,
   );
-  return { service, prisma, shellProvisioning, config };
+  return { service, prisma, shellProvisioning, config, identityEmailClaims };
 }
 
 describe('FounderOperatorBetaGoService', () => {
@@ -261,7 +274,7 @@ describe('FounderOperatorBetaGoService', () => {
   });
 
   it('persists an exact one-founder GO without a USB/offline-key dependency', async () => {
-    const { service, prisma } = fixture();
+    const { service, prisma, identityEmailClaims } = fixture();
 
     await expect(service.issue(actor, TENANT_ID, command())).resolves.toEqual({
       ok: true,
@@ -323,6 +336,27 @@ describe('FounderOperatorBetaGoService', () => {
       offlineKeyCeremonyRequired: false,
       activationRequired: true,
     });
+    expect(identityEmailClaims.lockTenantTransaction).toHaveBeenCalledWith(
+      prisma,
+      TENANT_ID,
+    );
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+    );
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      identityEmailClaims.lockTenantTransaction.mock.invocationCallOrder[0] ??
+        Number.POSITIVE_INFINITY,
+    );
+    expect(identityEmailClaims.assertInviteLocator).toHaveBeenCalledWith(
+      expect.any(Object),
+      {
+        workflowLocator: LOCATOR_ID,
+        tenantId: TENANT_ID,
+        subjectId: LOCATOR_ID,
+        expectedRevision: 1,
+      },
+    );
   });
 
   it('rejects route/body tenant substitution before shell or database access', async () => {

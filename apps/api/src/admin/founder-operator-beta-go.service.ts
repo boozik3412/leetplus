@@ -15,6 +15,11 @@ import {
   TenantOnboardingStatus,
 } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
+import {
+  IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+  IdentityEmailClaimService,
+  type IdentityEmailClaimTransaction,
+} from '../auth/identity-email-claim.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-profile.service';
@@ -113,6 +118,7 @@ export class FounderOperatorBetaGoService {
     private readonly prisma: PrismaService,
     private readonly shellProvisioning: SharedTenantProvisioningService,
     private readonly config: ConfigService,
+    private readonly identityEmailClaims: IdentityEmailClaimService,
     @Optional() private readonly clock: () => Date = () => new Date(),
     @Optional() private readonly uuidFactory: () => string = randomUUID,
   ) {}
@@ -209,8 +215,13 @@ export class FounderOperatorBetaGoService {
     return this.prisma.$transaction(
       async (tx) => {
         await this.lockTenant(tx, command.go.tenantId);
+        const identityTx = await this.identityEmailClaims.lockTenantTransaction(
+          tx,
+          command.go.tenantId,
+        );
         await this.assertFreshShellAndAuthority(
           tx,
+          identityTx,
           actor.id,
           shell,
           command.go,
@@ -317,9 +328,7 @@ export class FounderOperatorBetaGoService {
         return this.issueResult(created, command.go.tenantSlug, false);
       },
       {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        maxWait: 5_000,
-        timeout: 15_000,
+        ...IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
       },
     );
   }
@@ -409,6 +418,7 @@ export class FounderOperatorBetaGoService {
 
   private async assertFreshShellAndAuthority(
     tx: Prisma.TransactionClient,
+    identityTx: IdentityEmailClaimTransaction,
     actorUserId: string,
     shell: ShellProvisioningResult,
     command: ParsedGo,
@@ -419,15 +429,6 @@ export class FounderOperatorBetaGoService {
         FROM public."Tenant"
         WHERE "id" = ${command.tenantId}
         FOR UPDATE
-      `,
-    );
-    await tx.$queryRaw(
-      Prisma.sql`
-        SELECT "emailCanonical"
-        FROM public."IdentityEmailClaim"
-        WHERE "workflowLocator" = ${shell.ownerIdentity.reservationId}
-          AND "tenantId" = ${command.tenantId}
-        FOR SHARE
       `,
     );
     const tenant = await tx.tenant.findUnique({
@@ -464,17 +465,15 @@ export class FounderOperatorBetaGoService {
         },
       },
     });
-    const claim = await tx.identityEmailClaim.findFirst({
-      where: {
+    const claim = await this.identityEmailClaims.assertInviteLocator(
+      identityTx,
+      {
         workflowLocator: shell.ownerIdentity.reservationId,
         tenantId: command.tenantId,
+        subjectId: shell.ownerIdentity.reservationId,
+        expectedRevision: shell.ownerIdentity.claimRevision,
       },
-      select: {
-        claimType: true,
-        subjectId: true,
-        revision: true,
-      },
-    });
+    );
     if (
       !tenant ||
       tenant.slug !== command.tenantSlug ||

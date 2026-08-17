@@ -83,17 +83,25 @@ function typeScriptFiles(directory: string): string[] {
 }
 
 describe('IdentityMailSecretEnvelopeService', () => {
-  it('is referenced only by the standalone identity-mail worker CLI', () => {
+  it('is referenced only by the founder activation producer and standalone worker consumer', () => {
     const implementationPath = join(
       __dirname,
       'identity-mail-secret-envelope.service.ts',
     );
-    const allowedWorkerPath = join(
-      __dirname,
-      '..',
-      'identity-mail-worker',
-      'identity-mail-worker.cli.ts',
-    );
+    const allowedPaths = [
+      join(
+        __dirname,
+        '..',
+        'admin',
+        'founder-operator-beta-activation.service.ts',
+      ),
+      join(
+        __dirname,
+        '..',
+        'identity-mail-worker',
+        'identity-mail-worker.cli.ts',
+      ),
+    ].sort();
     const references = typeScriptFiles(join(__dirname, '..'))
       .filter(
         (path) =>
@@ -107,7 +115,7 @@ describe('IdentityMailSecretEnvelopeService', () => {
         ),
       );
 
-    expect(references).toEqual([allowedWorkerPath]);
+    expect(references.sort()).toEqual(allowedPaths);
   });
 
   it('seals and opens the compatible 256-bit invite token contract', () => {

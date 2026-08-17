@@ -5668,7 +5668,7 @@ describe('GuestPortalService', () => {
 
     it('preserves BLOCKED when a newly backfilled entitlement has ambiguous legacy rewards', async () => {
       const { prisma, service } = createService();
-      const qualifiedAt = new Date('2026-07-17T14:24:00.000Z');
+      const qualifiedAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const entitlement = {
         id: 'entitlement-backfill-ambiguous',
         tenantId: 'tenant-1',
@@ -5700,7 +5700,7 @@ describe('GuestPortalService', () => {
       const lootBox = {
         id: 'loot-weekday',
         name: 'Weekday case',
-        updatedAt: new Date('2026-07-17T13:00:00.000Z'),
+        updatedAt: new Date(qualifiedAt.getTime() - 60 * 60 * 1000),
         audienceId: null,
         usageKind: 'REWARD',
         triggerKind: 'SESSION_START',
@@ -5723,13 +5723,13 @@ describe('GuestPortalService', () => {
       prisma.guestGameReward.findMany.mockResolvedValue([
         {
           id: 'reward-ambiguous-1',
-          qualifiedAt: new Date('2026-07-17T15:05:59.000Z'),
-          createdAt: new Date('2026-07-17T15:05:59.000Z'),
+          qualifiedAt: new Date(qualifiedAt.getTime() + 41 * 60 * 1000),
+          createdAt: new Date(qualifiedAt.getTime() + 41 * 60 * 1000),
         },
         {
           id: 'reward-ambiguous-2',
-          qualifiedAt: new Date('2026-07-17T15:06:00.000Z'),
-          createdAt: new Date('2026-07-17T15:06:00.000Z'),
+          qualifiedAt: new Date(qualifiedAt.getTime() + 42 * 60 * 1000),
+          createdAt: new Date(qualifiedAt.getTime() + 42 * 60 * 1000),
         },
       ]);
 
@@ -5741,7 +5741,7 @@ describe('GuestPortalService', () => {
         profileId: 'profile-1',
         storeId: 'store-1',
         storeTimeZone: 'Asia/Yekaterinburg',
-        gameActivatedAt: new Date('2026-07-01T00:00:00.000Z'),
+        gameActivatedAt: new Date(qualifiedAt.getTime() - 24 * 60 * 60 * 1000),
         lootBox,
         unlockEvents: [
           {

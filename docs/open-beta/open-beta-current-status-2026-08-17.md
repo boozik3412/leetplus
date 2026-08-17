@@ -31,6 +31,17 @@ pool и least-privilege runtime assertion реализованы; `PUBLIC EXECUT
 Production runtime role/secret/grant не создавались. Поэтому code presence не
 открывает production-доступ.
 
+На полном локальном Nest/Web/PostgreSQL контуре дополнительно принят первый
+browser/store-scope срез Gate 1MT. Владелец синтетической сети открыл
+геймификацию, ассортимент/товары, сотрудников, регламенты, базу знаний,
+коммуникации и users/roles. Пользователь с доступом к одному Store видел только
+разрешённый клуб; прямой URL с ID второго Store не расширил scope. Новые
+сотрудники теперь создаются UI только через обязательное email-bound
+приглашение и задают пароль сами. Локальный запрос реально создал приглашение
+только в разрешённый Store; preview/accept затем создал сотрудника с
+`STORES` scope и тем же единственным Store, пароль был задан самим
+получателем.
+
 ## Принятое локальное evidence
 
 - Prisma validate/generate и API/database typecheck — `PASS`;
@@ -45,11 +56,24 @@ Production runtime role/secret/grant не создавались. Поэтому
 - disposable test database удалена без residue.
 - restricted runtime role имеет ровно один effective `SECURITY DEFINER`;
   owner/superuser, `INHERIT` drift и `PUBLIC EXECUTE` drift блокируются.
+- exact SHA `8cce1408dda7c32bd1f3a367d32f2caabefddcbe` принят GitHub CI
+  [run 32038312056](https://github.com/boozik3412/leetplus/actions/runs/32038312056)
+  как `3/3 SUCCESS`; release artifact `9291522690`, digest
+  `sha256:54cc505b22e5980ad747e0eef45fc46f5ab138e847e2859241909fdd145b57f1`;
+- invite-only Web successor `15b9e3ac878f01e04c76efc3942d4d0cfe87d7a1`:
+  `pilot BFF 4/4`, `users/roles BFF 5/5`, Web typecheck, full Web lint без
+  errors и локальный browser/API scenario — `PASS`; exact-SHA GitHub CI
+  [run 32040816369](https://github.com/boozik3412/leetplus/actions/runs/32040816369)
+  attempt 2 — `3/3 SUCCESS`, artifact `9292006557`, digest
+  `sha256:edb072f72b97924440dc4b8f8f36ea61b04e543a030f80e84f8a84859561b06a`;
+- подробное browser evidence:
+  [Gate 1MT local browser evidence](./gate-1mt-local-browser-evidence-2026-08-17.md).
 
 ## Что блокирует выдачу доступа
 
-1. Текущий рабочий diff ещё не собран в clean exact SHA и не принят CI
-   artifact.
+1. API/activation и invite-only Web successor собраны в clean exact SHA и
+   приняты CI artifact. После этого `origin/main` продвинулся на восемь
+   commit'ов; до promotion нужен clean merge и новый exact-SHA CI artifact.
 2. Код dedicated pool/live role attestation готов, но production role/password/
    grant ещё не созданы и не приняты на restored-copy; обычные application
    roles намеренно не имеют `EXECUTE`.
@@ -57,8 +81,9 @@ Production runtime role/secret/grant не создавались. Поэтому
    readiness evidence.
 4. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
    `SENT` barrier и полная reissue/revoke/suspend/accept acceptance.
-5. Gate 1MT browser/store-scope и Gate 2 для текущей сети из четырёх клубов не
-   закрыты.
+5. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
+   production-like A/B matrix, jobs/Telegram/files/SSE и Gate 2 для текущей
+   сети из четырёх клубов не закрыты.
 6. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 

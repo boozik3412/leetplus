@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.130                                        |
+| Версия           | 1.131                                        |
 | Дата             | 17.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -92,6 +92,10 @@ Dedicated database boundary:
    0a.2. [Gate 1MT users/roles BFF CI evidence](./gate-1mt-users-roles-bff-ci-evidence-2026-08-13.md) —
    exact seven-route/nine-handler cookie-only boundary `4/4`, SHA-bound
    artifact и оставшийся browser/cutover blocker.
+   0a.3. [Gate 1MT local browser/store-scope evidence](./gate-1mt-local-browser-evidence-2026-08-17.md) —
+   реальный локальный Nest/Web/PostgreSQL bootstrap, согласованные модули,
+   allowed/denied Store direct-URL matrix и invite-only employee flow;
+   `PARTIAL PASS`, не production/shared-beta GO.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;

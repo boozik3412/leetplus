@@ -100,9 +100,17 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   exact `hostssl+scram`, TLS 1.3 peer verification, successful role login,
   wrong-secret `28P01`, other-database/plaintext `28000`, direct table read
   `42501`, identical pre/post role attestation. Evidence digest
-  `5674b09f…dd7b`; затем role rollback и zero process/port/temp residue. Это
-  synthetic engineering evidence; PgBouncer/dedicated pool и live API ещё не
-  приняты.
+  `5674b09f…dd7b`; затем role rollback и zero process/port/temp residue.
+  Implementation SHA `821b2fbd62a098141664ca4c1b3970125e05eeff` принят
+  push CI `32065667436` и PR CI `32065674292` как `3/3 SUCCESS`; artifact
+  `9300127232`, digest `sha256:f2cca9b5…d1e41`. Это synthetic engineering
+  evidence; PgBouncer/dedicated pool и live API ещё не приняты.
+- 18.08 начат следующий runtime-слой: отдельный activation Prisma pool теперь
+  fresh-attest'ит exact session role/database/TLS внутри каждой транзакции, а
+  production `ACTIVE` требует `sslmode=verify-full`. PostgreSQL fixture
+  вызывает production `AdminController` по HTTP и затем проверяет replay и
+  zero residue. Local unit `60/60`, typecheck и scoped lint зелёные; exact-SHA
+  PG CI ещё pending, поэтому live API gate пока открыт.
 
 ## Что блокирует выдачу доступа
 

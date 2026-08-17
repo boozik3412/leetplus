@@ -337,6 +337,15 @@ export function validateEnvironment(config: EnvironmentValues) {
       );
     } else {
       try {
+        const activationUrl = new URL(founderOperatorBetaActivationDatabaseUrl);
+        if (
+          isProduction &&
+          activationUrl.searchParams.get('sslmode') !== 'verify-full'
+        ) {
+          errors.push(
+            'FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL must use sslmode=verify-full in production ACTIVE mode',
+          );
+        }
         const primaryDatabaseUrl = stringValue(config.DATABASE_URL);
         if (
           primaryDatabaseUrl &&

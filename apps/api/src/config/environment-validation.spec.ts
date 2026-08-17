@@ -144,6 +144,15 @@ describe('validateEnvironment', () => {
         FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL: `${databaseUrl}&application_name=api`,
       }),
     ).toThrow(/exact bounded connection options/);
+    expect(() =>
+      validateEnvironment({
+        ...validProductionEnvironment(),
+        FOUNDER_OPERATOR_BETA_MODE: 'ACTIVE',
+        DATABASE_URL:
+          'postgresql://leetplus_api:primary-password@db.example.test:5432/leetplus',
+        FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL: databaseUrl,
+      }),
+    ).toThrow(/sslmode=verify-full/);
   });
 
   it.each([

@@ -1,7 +1,7 @@
 # Founder pilot: activation-role network acceptance
 
 Статус:
-`ENGINEERING IMPLEMENTED / UNIT 7/7 + SYNTHETIC TLS/SCRAM PASS / EXACT-SHA CI PENDING / PRODUCTION NO-GO`.
+`EXACT-SHA CI ACCEPTED / UNIT 7/7 + SYNTHETIC TLS/SCRAM PASS / PRODUCTION NO-GO`.
 
 Контракт `FOUNDER_PILOT_ACTIVATION_ROLE_NETWORK_ACCEPTANCE_V1` принимает только
 сетевую границу dedicated роли `leetplus_founder_beta_activation_runtime` на
@@ -80,6 +80,13 @@ PII-free digests:
 - certificate:
   `409345cc920b3a812edd7ac418baaea0da51c39e0f4c8320228dccc172bb4e1f`.
 
+Implementation SHA
+`821b2fbd62a098141664ca4c1b3970125e05eeff` принят push CI
+`32065667436` и PR CI `32065674292` как `3/3 SUCCESS`. Release artifact
+`9300127232` имеет имя
+`leetplus-release-821b2fbd62a098141664ca4c1b3970125e05eeff` и digest
+`sha256:f2cca9b58af07abcf92fb06e8e9b1d8e1ae47d4b5abf781f94e2feef791d1e41`.
+
 После acceptance exact role controller выполнил rollback. Role count `0`,
 исходные `PUBLIC TEMPORARY=true` и `public CREATE=false` восстановлены, other
 sessions `0`; cluster остановлен, port/process/temp-root `0`. Synthetic CA/key,
@@ -88,7 +95,6 @@ role secret, dump, archive, manifest, receipt и debug evidence удалены �
 
 ## Что ещё не принято
 
-- network implementation exact SHA и CI artifact;
 - immutable production backup и independently obtained checksum;
 - скачанный release artifact вместо локального `git archive`;
 - PgBouncer/dedicated pool session identity, transaction pooling и drain;

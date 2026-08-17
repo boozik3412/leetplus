@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.136                                        |
+| Версия           | 1.138                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -72,6 +72,8 @@ Exact lifecycle dedicated activation role на restored copy:
 
 Exact direct PostgreSQL HBA/TLS/SCRAM acceptance dedicated роли:
 [founder activation-role network acceptance](./founder-pilot-activation-role-network-acceptance.md).
+Следующий runtime-слой описан в
+[founder dedicated activation pool and API acceptance](./founder-pilot-activation-pool-api-acceptance.md).
 
 ## Канонические документы
 

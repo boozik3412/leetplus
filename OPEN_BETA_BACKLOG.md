@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 18.08.2026
-- Версия: 2.84
+- Версия: 2.86
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -24,9 +24,18 @@
   artifact приняты. Read-only restored-copy preflight реализован локально
   (`6/6`), activation-role lifecycle — unit `6/6` плюс полный synthetic PG
   apply/check/reconcile/rollback; direct HBA/TLS/SCRAM acceptance — unit `7/7`
-  плюс actual TLS 1.3/SCRAM matrix. Но live production backup/target,
+  плюс actual TLS 1.3/SCRAM matrix и exact SHA `821b2fbd…`, push/PR CI
+  `32065667436`/`32065674292` (`3/3 SUCCESS`), artifact `9300127232`, digest
+  `sha256:f2cca9b5…d1e41`. Но live production backup/target,
   dedicated pool/API acceptance, rehearsal и SMTP ещё обязательны, поэтому
   release decision остаётся `NO-GO`
+- Dedicated activation Prisma pool admission реализован локально: перед каждым
+  callback в той же транзакции сверяются exact `session_user`, `current_user`,
+  database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch
+  блокируется до effect. Disposable PG fixture переведён на production database
+  service и настоящий HTTP `AdminController`; local unit `60/60`, typecheck и
+  scoped lint зелёные. Exact-SHA PostgreSQL CI ещё pending, поэтому этот слой
+  пока не закрывает live API gate
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
 - Пакет документации запуска:
   [docs/open-beta](./docs/open-beta/README.md)

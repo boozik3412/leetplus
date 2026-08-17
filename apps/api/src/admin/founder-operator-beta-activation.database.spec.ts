@@ -12,10 +12,30 @@ const DEDICATED_URL =
 function fixture(
   activationDatabaseUrl: unknown,
   primaryDatabaseUrl = 'postgresql://leetplus_api:primary-password@db.example.test:5432/leetplus',
+  sessionOverrides: Partial<{
+    currentUser: string;
+    databaseName: string;
+    sessionUser: string;
+    tlsActive: boolean;
+    tlsVersion: string | null;
+  }> = {},
 ) {
+  const queryRaw = jest.fn().mockResolvedValue([
+    {
+      currentUser: FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE,
+      databaseName: 'leetplus',
+      sessionUser: FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE,
+      tlsActive: true,
+      tlsVersion: 'TLSv1.3',
+      ...sessionOverrides,
+    },
+  ]);
   const transaction = jest.fn(
     <T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) =>
-      operation({ marker: 'dedicated' } as unknown as Prisma.TransactionClient),
+      operation({
+        marker: 'dedicated',
+        $queryRaw: queryRaw,
+      } as unknown as Prisma.TransactionClient),
   );
   const disconnect = jest.fn().mockResolvedValue(undefined);
   const factory = jest.fn(() => ({
@@ -33,7 +53,7 @@ function fixture(
     config,
     factory,
   );
-  return { service, factory, transaction, disconnect };
+  return { service, factory, transaction, queryRaw, disconnect };
 }
 
 describe('FounderOperatorBetaActivationDatabaseService', () => {
@@ -53,7 +73,7 @@ describe('FounderOperatorBetaActivationDatabaseService', () => {
   );
 
   it('uses only the exact dedicated URL and lazily reuses one client', async () => {
-    const { service, factory, transaction, disconnect } =
+    const { service, factory, transaction, queryRaw, disconnect } =
       fixture(DEDICATED_URL);
 
     await expect(
@@ -66,6 +86,7 @@ describe('FounderOperatorBetaActivationDatabaseService', () => {
     expect(factory).toHaveBeenCalledTimes(1);
     expect(factory).toHaveBeenCalledWith(DEDICATED_URL);
     expect(transaction).toHaveBeenCalledTimes(2);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
     await service.onModuleDestroy();
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
@@ -103,5 +124,42 @@ describe('FounderOperatorBetaActivationDatabaseService', () => {
       });
       expect(factory).not.toHaveBeenCalled();
     }
+  });
+
+  it.each([
+    [{ sessionUser: 'leetplus_api' }, 'session user'],
+    [{ currentUser: 'postgres' }, 'current user'],
+    [{ databaseName: 'postgres' }, 'database'],
+    [{ tlsActive: false, tlsVersion: null }, 'TLS'],
+    [{ tlsVersion: 'TLSv1.1' }, 'TLS version'],
+  ] as const)(
+    'rejects a mismatched dedicated pool %s before invoking the operation',
+    async (sessionOverrides) => {
+      const { service } = fixture(DEDICATED_URL, undefined, sessionOverrides);
+      const operation = jest.fn().mockResolvedValue('unreachable');
+
+      await expect(service.$transaction(operation)).rejects.toMatchObject({
+        response: {
+          reasonCode:
+            'FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_SESSION_INVALID',
+        },
+      });
+      expect(operation).not.toHaveBeenCalled();
+    },
+  );
+
+  it('contains pool attestation query failures without exposing the driver error', async () => {
+    const { service, queryRaw } = fixture(DEDICATED_URL);
+    queryRaw.mockRejectedValueOnce(
+      new Error('postgresql://user:secret@forbidden.example.test/database'),
+    );
+
+    await expect(
+      service.$transaction(() => Promise.resolve('unreachable')),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_SESSION_INVALID',
+      },
+    });
   });
 });

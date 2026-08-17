@@ -1,13 +1,26 @@
+import { type ExecutionContext, type INestApplication } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { Test } from '@nestjs/testing';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { randomBytes, randomUUID } from 'node:crypto';
+import request from 'supertest';
+import type { App } from 'supertest/types';
+import { AdminController } from '../src/admin/admin.controller';
+import { AdminService } from '../src/admin/admin.service';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
+import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
+import { PlatformAdminGuard } from '../src/auth/platform-admin.guard';
 import { IdentityEmailClaimService } from '../src/auth/identity-email-claim.service';
-import { FounderOperatorBetaActivationService } from '../src/admin/founder-operator-beta-activation.service';
+import { FounderOperatorBetaActivationDatabaseService } from '../src/admin/founder-operator-beta-activation.database';
+import {
+  FounderOperatorBetaActivationService,
+  type FounderOperatorBetaActivationResult,
+} from '../src/admin/founder-operator-beta-activation.service';
 import { FounderOperatorBetaGoService } from '../src/admin/founder-operator-beta-go.service';
 import { SharedTenantProvisioningService } from '../src/admin/shared-tenant-provisioning.service';
 import { FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE } from '../src/config/environment-validation';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { TenantEntitlementProfileService } from '../src/tenancy/tenant-entitlement-profile.service';
 import { deployCanonicalPrismaMigrations } from './canonical-prisma-migration-deploy';
 
 const REQUIRED_CONFIRMATION =
@@ -30,6 +43,7 @@ describePostgres(
     let maintenance: PrismaClient;
     let prisma: PrismaService;
     let activationPrisma: PrismaService;
+    let activationDatabase: FounderOperatorBetaActivationDatabaseService;
     let disposableDatabase = '';
     let disposableDatabaseUrl = '';
     let actor: AuthenticatedUser;
@@ -133,6 +147,8 @@ describePostgres(
       });
       actor = { id: actorId, isPlatformAdmin: true } as AuthenticatedUser;
       const values: Record<string, unknown> = {
+        DATABASE_URL: disposableDatabaseUrl,
+        FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL: activationUrl.toString(),
         FOUNDER_OPERATOR_BETA_MODE: 'ACTIVE',
         RELEASE_SHA,
         IDENTITY_MAIL_AAD_ENVIRONMENT: 'ci',
@@ -142,10 +158,18 @@ describePostgres(
         IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION: 'v1',
       };
       config = { get: (key: string) => values[key] } as ConfigService;
+      activationDatabase = new FounderOperatorBetaActivationDatabaseService(
+        config,
+      );
     });
 
     afterAll(async () => {
       const cleanupErrors: unknown[] = [];
+      try {
+        await activationDatabase?.onModuleDestroy();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
       for (const client of [activationPrisma, prisma]) {
         try {
           await client?.$disconnect();
@@ -210,7 +234,7 @@ describePostgres(
         identity,
       );
       const activation = new FounderOperatorBetaActivationService(
-        activationPrisma,
+        activationDatabase,
         config,
         provisioning,
       );
@@ -302,11 +326,14 @@ describePostgres(
         `),
       ).rejects.toMatchObject({ code: 'P2010' });
 
-      const first = await activation.activate(
+      const first = await activateThroughHttp({
+        activation,
         actor,
-        provisioned.tenant.id,
-        activationBody,
-      );
+        body: activationBody,
+        goService,
+        provisioning,
+        tenantId: provisioned.tenant.id,
+      });
       const replay = await activation.activate(
         actor,
         provisioned.tenant.id,
@@ -467,4 +494,61 @@ function databaseUrlFor(databaseUrl: string, databaseName: string): string {
 
 function prismaFor(databaseUrl: string): PrismaClient {
   return new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+}
+
+async function activateThroughHttp(input: {
+  activation: FounderOperatorBetaActivationService;
+  actor: AuthenticatedUser;
+  body: unknown;
+  goService: FounderOperatorBetaGoService;
+  provisioning: SharedTenantProvisioningService;
+  tenantId: string;
+}): Promise<FounderOperatorBetaActivationResult> {
+  const moduleFixture = await Test.createTestingModule({
+    controllers: [AdminController],
+    providers: [
+      { provide: AdminService, useValue: {} },
+      { provide: TenantEntitlementProfileService, useValue: {} },
+      {
+        provide: SharedTenantProvisioningService,
+        useValue: input.provisioning,
+      },
+      { provide: FounderOperatorBetaGoService, useValue: input.goService },
+      {
+        provide: FounderOperatorBetaActivationService,
+        useValue: input.activation,
+      },
+    ],
+  })
+    .overrideGuard(JwtAuthGuard)
+    .useValue({
+      canActivate: (context: ExecutionContext) => {
+        const httpRequest = context.switchToHttp().getRequest<{
+          user?: AuthenticatedUser;
+        }>();
+        httpRequest.user = input.actor;
+        return true;
+      },
+    })
+    .overrideGuard(PlatformAdminGuard)
+    .useValue({ canActivate: () => true })
+    .compile();
+  let app: INestApplication<App> | undefined;
+  try {
+    app = moduleFixture.createNestApplication<App>();
+    await app.init();
+    const response = await request(app.getHttpServer())
+      .post(`/admin/shared-beta/tenants/${input.tenantId}/activate`)
+      .send(input.body)
+      .expect(201);
+    const body: unknown = response.body;
+    expect(body).toMatchObject({
+      ok: true,
+      contractVersion: 'FOUNDER_OPERATOR_BETA_ACTIVATION_V2',
+      decision: 'ACTIVATED',
+    });
+    return body as FounderOperatorBetaActivationResult;
+  } finally {
+    await app?.close();
+  }
 }

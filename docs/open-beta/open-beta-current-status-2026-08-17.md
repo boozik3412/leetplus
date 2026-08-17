@@ -72,8 +72,11 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 ## Что блокирует выдачу доступа
 
 1. API/activation и invite-only Web successor собраны в clean exact SHA и
-   приняты CI artifact. После этого `origin/main` продвинулся на восемь
-   commit'ов; до promotion нужен clean merge и новый exact-SHA CI artifact.
+   приняты CI artifact. Восемь новых commit'ов `origin/main` после этого
+   объединены merge commit `4d4a2204`; targeted gamification/staff suites
+   (`501/501` и `72/72`), API/Web typecheck, focused lint и Web boundary
+   `9/9` зелёные. До promotion merged documentation successor должен получить
+   новый exact-SHA CI artifact.
 2. Код dedicated pool/live role attestation готов, но production role/password/
    grant ещё не созданы и не приняты на restored-copy; обычные application
    roles намеренно не имеют `EXECUTE`.

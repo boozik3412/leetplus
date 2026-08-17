@@ -18,7 +18,7 @@ import {
   type IdentityEmailClaimTransactionHost,
 } from '../src/auth/identity-email-claim.service';
 import { PrismaIdentityMailWorkerRepository } from '../src/identity-mail-worker/identity-mail-worker.repository';
-import { deployCanonicalPrismaMigrations } from './canonical-prisma-migration-deploy';
+import { deployIdentityTenantLockCurrent180CanonicalPrefix } from './canonical-prisma-migration-deploy';
 
 const REQUIRED_CONFIRMATION =
   'run-identity-email-tenant-lock-cross-path-postgres-e2e';
@@ -147,7 +147,7 @@ describePostgres(
       await maintenance.$executeRawUnsafe(
         `CREATE DATABASE "${disposableDatabase}" TEMPLATE template0`,
       );
-      deployCanonicalPrismaMigrations(disposableDatabaseUrl, {
+      deployIdentityTenantLockCurrent180CanonicalPrefix(disposableDatabaseUrl, {
         failureMessage:
           'Failed to deploy canonical migrations into the disposable identity tenant-lock database',
         timeoutMs: 120_000,
@@ -1150,6 +1150,7 @@ async function reissueInvitePath(
         expectedRevision: fixture.claimRevision,
       });
       const revokedAt = new Date();
+      const expiresAt = await databaseLocalTimestampAfter(tx, 60 * 60);
       await tx.userInvite.create({
         data: {
           id: inviteId,
@@ -1158,7 +1159,7 @@ async function reissueInvitePath(
           role: UserRole.ADMIN,
           accessScope: UserAccessScope.NETWORK,
           tokenHash,
-          expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+          expiresAt,
           identityClaimRevision: null,
         },
       });
@@ -1307,6 +1308,7 @@ async function createCanonicalInvite(
         subjectId: reservationId,
         expectedRevision: reservation.revision,
       });
+      const expiresAt = await databaseLocalTimestampAfter(tx, 60 * 60);
       await tx.userInvite.create({
         data: {
           id: inviteId,
@@ -1315,7 +1317,7 @@ async function createCanonicalInvite(
           role: UserRole.ADMIN,
           accessScope: UserAccessScope.NETWORK,
           tokenHash,
-          expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+          expiresAt,
           identityClaimRevision: null,
         },
       });
@@ -1339,6 +1341,22 @@ async function createCanonicalInvite(
       };
     },
   );
+}
+
+async function databaseLocalTimestampAfter(
+  tx: Prisma.TransactionClient,
+  seconds: number,
+): Promise<Date> {
+  const [row] = await tx.$queryRaw<Array<{ value: Date }>>(Prisma.sql`
+    SELECT (
+      pg_catalog.clock_timestamp()::TIMESTAMP
+      + ${seconds}::INTEGER * INTERVAL '1 second'
+    ) AS "value"
+  `);
+  if (!(row?.value instanceof Date) || !Number.isFinite(row.value.getTime())) {
+    throw new Error('PostgreSQL fixture clock was unavailable');
+  }
+  return row.value;
 }
 
 async function createTenant(

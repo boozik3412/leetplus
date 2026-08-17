@@ -24,6 +24,24 @@ const FAILED_MIGRATION_LOG_LIMIT = 12_000;
 const LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT = 179;
 const LEGACY_IDENTITY_MAIL_BASE_MIGRATION =
   '20260731120000_identity_mail_delivery_release_head';
+const IDENTITY_TENANT_LOCK_BASE_MIGRATION_COUNT = 180;
+const IDENTITY_TENANT_LOCK_BASE_MIGRATION =
+  '20260804120000_guest_game_max_pending_rewards';
+type CanonicalMigrationPrefix = {
+  count: number;
+  head: string;
+  driftMessage: string;
+};
+const LEGACY_IDENTITY_MAIL_CANONICAL_PREFIX: CanonicalMigrationPrefix = {
+  count: LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT,
+  head: LEGACY_IDENTITY_MAIL_BASE_MIGRATION,
+  driftMessage: 'Legacy identity-mail candidate stack canonical prefix drifted',
+};
+const IDENTITY_TENANT_LOCK_CANONICAL_PREFIX: CanonicalMigrationPrefix = {
+  count: IDENTITY_TENANT_LOCK_BASE_MIGRATION_COUNT,
+  head: IDENTITY_TENANT_LOCK_BASE_MIGRATION,
+  driftMessage: 'Identity tenant-lock canonical CURRENT180 prefix drifted',
+};
 const IDENTITY_MAIL_CURRENT183_CANDIDATES = [
   {
     name: '20260801010000_identity_mail_tenant_enrollment_control_plane',
@@ -99,20 +117,35 @@ export function deployCanonicalPrismaMigrations(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
 ): void {
-  deployCanonicalPrismaMigrationArtifact(databaseUrl, options, false);
+  deployCanonicalPrismaMigrationArtifact(databaseUrl, options, null);
 }
 
 export function deployIdentityMailCurrent179CanonicalPrefix(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
 ): void {
-  deployCanonicalPrismaMigrationArtifact(databaseUrl, options, true);
+  deployCanonicalPrismaMigrationArtifact(
+    databaseUrl,
+    options,
+    LEGACY_IDENTITY_MAIL_CANONICAL_PREFIX,
+  );
+}
+
+export function deployIdentityTenantLockCurrent180CanonicalPrefix(
+  databaseUrl: string,
+  options: CanonicalMigrationDeployOptions,
+): void {
+  deployCanonicalPrismaMigrationArtifact(
+    databaseUrl,
+    options,
+    IDENTITY_TENANT_LOCK_CANONICAL_PREFIX,
+  );
 }
 
 function deployCanonicalPrismaMigrationArtifact(
   databaseUrl: string,
   options: CanonicalMigrationDeployOptions,
-  retainIdentityMailCurrent179Prefix: boolean,
+  retainedPrefix: CanonicalMigrationPrefix | null,
 ): void {
   const repositoryRoot = resolve(__dirname, '../../..');
   const databasePackage = join(repositoryRoot, 'packages', 'database');
@@ -125,8 +158,8 @@ function deployCanonicalPrismaMigrationArtifact(
       recursive: true,
     });
     const migrationsDirectory = join(artifactPrismaDirectory, 'migrations');
-    if (retainIdentityMailCurrent179Prefix) {
-      retainLegacyIdentityMailCanonicalPrefix(migrationsDirectory);
+    if (retainedPrefix !== null) {
+      retainCanonicalMigrationPrefix(migrationsDirectory, retainedPrefix);
     }
     normalizeMigrationLineEndings(migrationsDirectory);
     execFileSync(
@@ -296,7 +329,10 @@ function deployIdentityMailCandidateStack(
       recursive: true,
     });
     const migrationsDirectory = join(artifactPrismaDirectory, 'migrations');
-    retainLegacyIdentityMailCanonicalPrefix(migrationsDirectory);
+    retainCanonicalMigrationPrefix(
+      migrationsDirectory,
+      LEGACY_IDENTITY_MAIL_CANONICAL_PREFIX,
+    );
     const sessionOptions: string[] = [];
     for (const candidate of candidates) {
       const sourceMigration = join(
@@ -362,8 +398,9 @@ function deployIdentityMailCandidateStack(
   }
 }
 
-function retainLegacyIdentityMailCanonicalPrefix(
+function retainCanonicalMigrationPrefix(
   migrationsDirectory: string,
+  prefix: CanonicalMigrationPrefix,
 ): void {
   const migrationDirectories = readdirSync(migrationsDirectory, {
     withFileTypes: true,
@@ -371,21 +408,11 @@ function retainLegacyIdentityMailCanonicalPrefix(
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort((left, right) => left.localeCompare(right));
-  const retained = migrationDirectories.slice(
-    0,
-    LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT,
-  );
-  if (
-    retained.length !== LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT ||
-    retained.at(-1) !== LEGACY_IDENTITY_MAIL_BASE_MIGRATION
-  ) {
-    throw new Error(
-      'Legacy identity-mail candidate stack canonical prefix drifted',
-    );
+  const retained = migrationDirectories.slice(0, prefix.count);
+  if (retained.length !== prefix.count || retained.at(-1) !== prefix.head) {
+    throw new Error(prefix.driftMessage);
   }
-  for (const migrationName of migrationDirectories.slice(
-    LEGACY_IDENTITY_MAIL_BASE_MIGRATION_COUNT,
-  )) {
+  for (const migrationName of migrationDirectories.slice(prefix.count)) {
     rmSync(join(migrationsDirectory, migrationName), {
       recursive: true,
       force: true,

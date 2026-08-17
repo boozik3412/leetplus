@@ -277,9 +277,9 @@ async function readMigrationPlan() {
   assert.equal(migrationDirectories[targetIndex - 1], PREVIOUS_MIGRATION);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260804120000_guest_game_max_pending_rewards",
+    "20260817030000_founder_operator_beta_activation_runtime_v1",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_180");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_183");
   const historicalMigrations = migrationDirectories.slice(0, targetIndex + 1);
   return {
     sourcePrismaDir,

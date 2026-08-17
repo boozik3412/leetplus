@@ -575,10 +575,10 @@ test("timeouts are bounded and embedded in the one-connection read-only URL", ()
 });
 
 test("the manifest exposes exactly two create-only proposal codes and exact column ACL", () => {
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 180);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 183);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260804120000_guest_game_max_pending_rewards",
+    "20260817030000_founder_operator_beta_activation_runtime_v1",
   );
   assert.deepEqual(
     Object.entries(FINDING_MANIFEST)

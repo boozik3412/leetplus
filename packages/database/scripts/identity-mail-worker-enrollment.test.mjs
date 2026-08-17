@@ -113,12 +113,12 @@ function compliantSnapshot(config = checkConfig()) {
   };
 }
 
-test("pins terminal CURRENT_180 and exactly five CURRENT_176 worker RPCs", () => {
+test("pins terminal CURRENT_183 and exactly five CURRENT_176 worker RPCs", () => {
   assert.equal(
     IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION,
-    "20260804120000_guest_game_max_pending_rewards",
+    "20260817030000_founder_operator_beta_activation_runtime_v1",
   );
-  assert.equal(IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT, 180);
+  assert.equal(IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT, 183);
   assert.deepEqual(
     IDENTITY_MAIL_WORKER_FUNCTIONS.map(({ key }) => key),
     ["workerAssert", "claim", "providerMark", "complete", "reap"],
@@ -178,7 +178,10 @@ test("requires an exact apply confirmation bound to role OID and head", () => {
   );
   assert.equal(config.requiredConfirmation, confirmation);
   assert.match(confirmation, / 16384 /u);
-  assert.match(confirmation, /guest_game_max_pending_rewards 180$/u);
+  assert.match(
+    confirmation,
+    /founder_operator_beta_activation_runtime_v1 183$/u,
+  );
 });
 
 for (const [name, overrides, code] of [

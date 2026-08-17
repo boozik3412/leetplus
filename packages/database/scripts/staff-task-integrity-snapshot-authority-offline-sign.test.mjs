@@ -153,7 +153,7 @@ test("prepare emits only a detached payload and privacy-safe signing package", (
 
 test("an external detached signature finalizes one verifiable envelope", () => {
   const { privateKey, roots } = keyMaterial();
-  const request = acquisitionRequest("CURRENT_180");
+  const request = acquisitionRequest("CURRENT_183");
   const prepared = prepareAuthoritySigningPackage({
     acquisitionRequest: request,
     roots,
@@ -170,7 +170,7 @@ test("an external detached signature finalizes one verifiable envelope", () => {
   });
 
   assert.equal(finalized.receipt.kind, SIGNING_RECEIPT_KIND);
-  assert.equal(finalized.receipt.expectedState, "CURRENT_180");
+  assert.equal(finalized.receipt.expectedState, "CURRENT_183");
   assert.match(finalized.authorityEnvelope, /^[A-Za-z0-9_-]+$/u);
   assert.match(
     finalized.receipt.databaseMarker,
@@ -178,7 +178,7 @@ test("an external detached signature finalizes one verifiable envelope", () => {
   );
   const envelope = parseAuthorityEnvelope(finalized.authorityEnvelope);
   assert.equal(envelope.signingKeyId, KEY_ID);
-  assert.equal(envelope.expectedState, "CURRENT_180");
+  assert.equal(envelope.expectedState, "CURRENT_183");
 });
 
 test("three schema states require three nonce-bound envelopes and markers", () => {
@@ -186,7 +186,7 @@ test("three schema states require three nonce-bound envelopes and markers", () =
   const results = [
     ["BASELINE_156", "c"],
     ["EXPAND_162", "d"],
-    ["CURRENT_180", "e"],
+    ["CURRENT_183", "e"],
   ].map(([state, nonceByte]) => {
     const request = acquisitionRequest(state);
     const prepared = prepareAuthoritySigningPackage({

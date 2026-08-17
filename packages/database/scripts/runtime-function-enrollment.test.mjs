@@ -52,9 +52,10 @@ function compliantSnapshot() {
     migration: {
       completedTargetCount: 1,
       completedRequiredCount: 1,
-      completedCount: 180,
+      completedCount: 183,
       unfinishedCount: 0,
-      latestCompletedMigration: "20260804120000_guest_game_max_pending_rewards",
+      latestCompletedMigration:
+        "20260817030000_founder_operator_beta_activation_runtime_v1",
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -228,7 +229,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260804120000_guest_game_max_pending_rewards 180$/u,
+    /20260817030000_founder_operator_beta_activation_runtime_v1 183$/u,
   );
 });
 
@@ -773,7 +774,7 @@ test("rejects every activation-bound role before general enrollment", () => {
   );
 });
 
-test("binds enrollment to exact terminal migration 180 and exact count 180", () => {
+test("binds enrollment to exact terminal migration 183 and exact count 183", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

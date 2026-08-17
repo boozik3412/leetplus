@@ -2420,10 +2420,10 @@ export function runSelfTest() {
     [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
     [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
   );
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 180);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 183);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260804120000_guest_game_max_pending_rewards",
+    "20260817030000_founder_operator_beta_activation_runtime_v1",
   );
   assert.deepEqual(DISPOSABLE_RESET_TRUNCATE_GUARDS, [
     {

@@ -30,8 +30,9 @@ const DISPOSABLE_DATABASE_PATTERN = /^lp_activation176_pg_test_[0-9a-f]{32}$/u;
 const DISPOSABLE_ROLE_PATTERN = /^lp_activation_role_ci_[0-9a-f]{24}$/u;
 const DISPOSABLE_BYSTANDER_ROLE_PATTERN =
   /^lp_activation_bystander_ci_[0-9a-f]{24}$/u;
-const TARGET_MIGRATION = '20260804120000_guest_game_max_pending_rewards';
-const TARGET_MIGRATION_COUNT = 180;
+const TARGET_MIGRATION =
+  '20260817030000_founder_operator_beta_activation_runtime_v1';
+const TARGET_MIGRATION_COUNT = 183;
 const ACTIVATION_FUNCTION_SIGNATURE =
   'public."shared_beta_tenant_activate_v1"(text,text,text,text,text,text,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)';
 const CATALOG_RELATION_PROBE =
@@ -1629,7 +1630,7 @@ async function activateWithSerializationRetry(
         },
       );
     } catch (error) {
-      if (attempt === 5 || !isSerializationFailure(error)) {
+      if (attempt === 5 || !isActivationContention(error)) {
         throw error;
       }
     }
@@ -2184,6 +2185,10 @@ function isSerializationFailure(error: unknown): boolean {
     error instanceof Error &&
     /\b(?:40001|serialization|write conflict)\b/iu.test(error.message)
   );
+}
+
+function isActivationContention(error: unknown): boolean {
+  return isSerializationFailure(error) || postgresSqlState(error) === '55P03';
 }
 
 async function expectSqlState(

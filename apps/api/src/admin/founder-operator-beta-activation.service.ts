@@ -23,9 +23,9 @@ import {
   FounderOperatorBetaActivationDatabaseService,
   type FounderOperatorBetaActivationTransactionClient,
 } from './founder-operator-beta-activation.database';
-import type {
+import {
   SharedTenantProvisioningService,
-  ShellProvisioningResult,
+  type ShellProvisioningResult,
 } from './shared-tenant-provisioning.service';
 
 export const FOUNDER_OPERATOR_BETA_ACTIVATION_CONTRACT =

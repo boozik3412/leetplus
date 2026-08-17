@@ -23,9 +23,9 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-profile.service';
-import type {
+import {
   SharedTenantProvisioningService,
-  ShellProvisioningResult,
+  type ShellProvisioningResult,
 } from './shared-tenant-provisioning.service';
 
 export const FOUNDER_OPERATOR_BETA_GO_CONTRACT =

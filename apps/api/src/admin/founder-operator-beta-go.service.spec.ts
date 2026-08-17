@@ -24,9 +24,9 @@ import {
   FOUNDER_OPERATOR_BETA_TRIAL_DURATION_SECONDS,
   FounderOperatorBetaGoService,
 } from './founder-operator-beta-go.service';
-import type {
+import {
   SharedTenantProvisioningService,
-  ShellProvisioningResult,
+  type ShellProvisioningResult,
 } from './shared-tenant-provisioning.service';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
@@ -257,6 +257,15 @@ function fixture(mode = 'PREPARE') {
 }
 
 describe('FounderOperatorBetaGoService', () => {
+  it('publishes the concrete shell provisioning token for Nest injection', () => {
+    const dependencyTypes = Reflect.getMetadata(
+      'design:paramtypes',
+      FounderOperatorBetaGoService,
+    ) as unknown[];
+
+    expect(dependencyTypes[1]).toBe(SharedTenantProvisioningService);
+  });
+
   it('fails closed while the explicit beta mode is disabled', async () => {
     const { service, prisma, shellProvisioning } = fixture('DISABLED');
 

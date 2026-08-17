@@ -775,7 +775,11 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   assert.match(CATALOG_STATE_SQL, /IdentityMailOutbox_delivery_guard_trigger/u);
   assert.match(
     CATALOG_STATE_SQL,
-    /fb642a3e117ffe6804f4448a9b850c03ad7c6e1e7d5da05f1d20e19bfa5ddd70/u,
+    /8cd392748b9acd749c7be0ffc545da0ab0de347b75888ccec51e53df7d3865bc/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /3ce446e3ef40b4e6693485d00e5e38d9a7451887e265ba28572c908361d1d879/u,
   );
   assert.match(
     CATALOG_STATE_SQL,

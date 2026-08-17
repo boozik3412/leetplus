@@ -236,7 +236,7 @@ const CURRENT_174_RUNTIME_RELEASE_FUNCTION_METADATA = Object.freeze(
       [
         "shared_beta_tenant_activation_guard_v1",
         "trigger",
-        "efec1de6fe3931c8d82f68c49afded71a3e912aac4cd7f2126e916942c59f47f",
+        "3ce446e3ef40b4e6693485d00e5e38d9a7451887e265ba28572c908361d1d879",
       ],
       [
         "shared_beta_tenant_actual_shell_v1",
@@ -2196,7 +2196,7 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     result: "trigger",
     securityDefiner: false,
     definitionSha256:
-      "fb642a3e117ffe6804f4448a9b850c03ad7c6e1e7d5da05f1d20e19bfa5ddd70",
+      "8cd392748b9acd749c7be0ffc545da0ab0de347b75888ccec51e53df7d3865bc",
   },
   {
     name: "identity_owner_invite_issue_command_immutable_v1",

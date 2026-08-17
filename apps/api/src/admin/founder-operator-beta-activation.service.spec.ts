@@ -18,9 +18,9 @@ import {
   FOUNDER_OPERATOR_BETA_ACTIVATION_TRANSACTION_OPTIONS,
   FounderOperatorBetaActivationService,
 } from './founder-operator-beta-activation.service';
-import type {
+import {
   SharedTenantProvisioningService,
-  ShellProvisioningResult,
+  type ShellProvisioningResult,
 } from './shared-tenant-provisioning.service';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
@@ -210,6 +210,15 @@ function fixture(mode = 'ACTIVE') {
 }
 
 describe('FounderOperatorBetaActivationService', () => {
+  it('publishes the concrete shell provisioning token for Nest injection', () => {
+    const dependencyTypes = Reflect.getMetadata(
+      'design:paramtypes',
+      FounderOperatorBetaActivationService,
+    ) as unknown[];
+
+    expect(dependencyTypes[2]).toBe(SharedTenantProvisioningService);
+  });
+
   it('fails closed outside ACTIVE before shell or database effects', async () => {
     const { service, provision, queryRaw } = fixture('PREPARE');
     await expect(

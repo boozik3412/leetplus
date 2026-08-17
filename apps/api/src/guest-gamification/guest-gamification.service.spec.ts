@@ -10525,6 +10525,218 @@ describe('GuestGamificationService', () => {
       },
     );
 
+    it('counts a guest-bound category purchase before the first game-module open', async () => {
+      const { service } = createService();
+
+      jest.spyOn(service as any, 'resolveDryRunProfile').mockResolvedValue(
+        profileFixture({
+          gameActivatedAt: '2026-06-10T10:00:01.000Z',
+        }),
+      );
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+          missionType: 'PRODUCT_PURCHASE',
+          triggerKind: 'PRODUCT_PURCHASE',
+          progressTarget: 1,
+          progressUnit: 'purchase',
+          definitionVersion: 2,
+          conditions: {
+            schemaVersion: 2,
+            source: 'mission_wizard',
+            taskType: 'PRODUCT_PURCHASE',
+            purchaseSource: 'CATEGORY',
+            categoryCatalogSource: 'LANGAME',
+            metric: {
+              aggregation: 'count',
+              eventTypes: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
+              purchaseSource: 'CATEGORY',
+              categoryCatalogSource: 'LANGAME',
+              externalCategoryKeys: ['club.example:devices'],
+              target: 1,
+              unit: 'purchase',
+            },
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunProgressEvents')
+        .mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: isoNow,
+        externalCategoryKey: 'club.example:devices',
+        externalProductId: 'device-rental',
+        spendAmount: 150,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'MISSION',
+        eligible: true,
+        progress: {
+          current: 1,
+          target: 1,
+          completed: true,
+        },
+      });
+      expect(result.rules[0]?.blockers).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('до первого открытия игрового модуля'),
+        ]),
+      );
+    });
+
+    it('does not issue a second mission reward by reusing a purchase from the previous completion', async () => {
+      const { service } = createService();
+      const completedAt = '2026-08-08T09:18:14.000Z';
+
+      jest.spyOn(service as any, 'resolveDryRunProfile').mockResolvedValue(
+        profileFixture({
+          gameActivatedAt: '2026-08-01T00:00:00.000Z',
+        }),
+      );
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          id: 'device-cashback',
+          createdAt: new Date('2026-08-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-08-01T00:00:00.000Z'),
+          missionType: 'PRODUCT_PURCHASE',
+          triggerKind: 'PRODUCT_PURCHASE',
+          progressTarget: 1,
+          progressUnit: 'purchase',
+          definitionVersion: 2,
+          maxPendingRewards: 100_000,
+          conditions: {
+            schemaVersion: 2,
+            source: 'mission_wizard',
+            taskType: 'PRODUCT_PURCHASE',
+            purchaseSource: 'CATEGORY',
+            metric: {
+              aggregation: 'count',
+              eventTypes: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
+              purchaseSource: 'CATEGORY',
+              externalCategoryKeys: ['46.langamepro.ru:16'],
+              target: 1,
+              unit: 'purchase',
+            },
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([
+        rewardResult({
+          id: 'device-cashback-first-reward',
+          qualifiedAt: completedAt,
+          mission: {
+            id: 'device-cashback',
+            name: 'Device cashback',
+            status: 'ACTIVE',
+            missionType: 'PRODUCT_PURCHASE',
+            triggerKind: 'PRODUCT_PURCHASE',
+            xpReward: 0,
+            progressUnit: 'purchase',
+          },
+        }),
+      ]);
+      jest.spyOn(service as any, 'getDryRunProgressEvents').mockResolvedValue([
+        {
+          eventType: 'PRODUCT_PURCHASE',
+          occurredAt: new Date(completedAt),
+          externalCategoryKey: '46.langamepro.ru:16',
+          externalProductId: 'device-rental',
+          spendAmount: 150,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: '2026-08-09T13:34:12.000Z',
+        externalCategoryKey: '46.langamepro.ru:3',
+        externalProductId: 'beverage',
+        spendAmount: 150,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        id: 'device-cashback',
+        kind: 'MISSION',
+        eligible: false,
+        progress: {
+          current: 0,
+          target: 1,
+          completed: false,
+        },
+      });
+      expect(result.summary).toMatchObject({
+        eligibleRules: 0,
+        estimatedRewardAmount: 0,
+      });
+    });
+
+    it('counts a Battle Pass balance top-up before the first game-module open', async () => {
+      const { service } = createService();
+
+      jest.spyOn(service as any, 'resolveDryRunProfile').mockResolvedValue(
+        profileFixture({
+          gameActivatedAt: '2026-06-10T10:00:01.000Z',
+        }),
+      );
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Top up balance',
+              freeReward: '100 bonuses',
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'BALANCE_TOPUP',
+                triggerKind: 'BALANCE_TOPUP',
+                evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+                metric: {
+                  aggregation: 'count',
+                  eventTypes: ['BALANCE_TOPUP'],
+                  target: 1,
+                  unit: 'topup',
+                },
+              },
+            },
+          ],
+        }),
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunProgressEvents')
+        .mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'BALANCE_TOPUP',
+        occurredAt: isoNow,
+        spendAmount: 500,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        battlePassStep: 1,
+        progress: {
+          current: 1,
+          target: 1,
+          completed: true,
+        },
+      });
+    });
+
     it('evaluates a Battle Pass play-time step with the mission wizard v2 contract', async () => {
       const { service } = createService();
 
@@ -14556,6 +14768,7 @@ describe('GuestGamificationService', () => {
             select: {
               missionId: true,
               rewardType: true,
+              evidence: true,
             },
           },
         },
@@ -20081,10 +20294,9 @@ describe('GuestGamificationService', () => {
       },
     );
 
-    it('loads a pending purchase below a burst of more than 30 recent snapshot facts', async () => {
+    it('drains a pending purchase below a burst of more than 30 recent snapshot facts without generic backfill flags', async () => {
       const fixture = createService();
       const { service, prisma } = fixture;
-      enablePrimarySnapshotBackfill(fixture);
       const recentFacts = Array.from({ length: 31 }, (_, index) =>
         snapshotFact(`recent-purchase-${index}`, {
           source: 'PRODUCT_EXPENSE',
@@ -20156,10 +20368,14 @@ describe('GuestGamificationService', () => {
       jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
       jest.spyOn(service, 'processEvent').mockResolvedValue(processResult());
 
-      const result = await service.runSnapshotPipeline(user, {
-        source: 'PRODUCT_EXPENSE',
-        limit: 1,
-      });
+      const result = await service.runSnapshotPipeline(
+        user,
+        {
+          source: 'PRODUCT_EXPENSE',
+          limit: 1,
+        },
+        { drainPendingPurchases: true },
+      );
 
       expect(result).toMatchObject({ checkedFacts: 1, processedFacts: 1 });
       expect(service.processEvent).toHaveBeenCalledWith(
@@ -20168,6 +20384,180 @@ describe('GuestGamificationService', () => {
           sourceFactId: 'product-expense:older-sale-32',
         }),
       );
+      const query = prisma.$queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
+      expect(query.strings.join(' ')).toContain(
+        'ORDER BY pending."saleDate" ASC',
+      );
+    });
+
+    it('keeps a category-only device rental eligible without a resolved product name or game session', async () => {
+      const { service, prisma } = createService();
+      prisma.$queryRaw.mockResolvedValue([{ id: 'device-rental-sale' }]);
+      prisma.salesFact.findMany.mockResolvedValue([
+        {
+          id: 'device-rental-sale',
+          productId: 'device-rental-product',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '46.langamepro.ru',
+          externalSaleId: 'device-rental-sale',
+          externalProductId: 'device-rental-product',
+          externalGuestId: 'guest-external-1',
+          saleDate: now,
+          quantity: 1,
+          revenue: 150,
+          cost: 0,
+          productNameAtSale: null,
+          storeNameAtSale: 'Club 1',
+          guest: {
+            id: 'guest-1',
+            externalDomain: '46.langamepro.ru',
+            externalGuestId: 'guest-external-1',
+            fullNameMasked: 'Guest',
+            phoneMasked: '***0646',
+            emailMasked: null,
+          },
+          store: { id: 'store-1', name: 'Club 1' },
+          product: null,
+        },
+      ]);
+      prisma.langameClubProductConfiguration.findMany.mockResolvedValue([
+        {
+          storeId: 'store-1',
+          externalDomain: '46.langamepro.ru',
+          externalProductId: 'device-rental-product',
+          externalGroupId: '16',
+        },
+      ]);
+      prisma.langameProductGroup.findMany.mockResolvedValue([
+        {
+          externalDomain: '46.langamepro.ru',
+          externalGroupId: '16',
+          name: 'Devices',
+        },
+      ]);
+
+      const facts = await (
+        service as any
+      ).loadPendingProductExpenseSnapshotFacts(
+        user,
+        10,
+        new Date(now.getTime() - 24 * 60 * 60_000),
+      );
+
+      expect(facts).toEqual([
+        expect.objectContaining({
+          id: 'product-expense:device-rental-sale',
+          eventType: 'PRODUCT_PURCHASE',
+          sessionType: null,
+          spendAmount: 150,
+          productName: 'device-rental-product',
+          externalCategoryKey: '46.langamepro.ru:16',
+          externalCategoryId: '16',
+          categoryName: 'Devices',
+        }),
+      ]);
+    });
+
+    it('prioritizes a pending purchase that matches an active category mission while reserving backlog slots', async () => {
+      const { service, prisma } = createService();
+      const sale = (id: string, externalProductId: string, saleDate: Date) => ({
+        id,
+        productId: `${id}-product`,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '46.langamepro.ru',
+        externalSaleId: id,
+        externalProductId,
+        externalGuestId: 'guest-external-1',
+        saleDate,
+        quantity: 1,
+        revenue: 150,
+        cost: 0,
+        productNameAtSale: id,
+        storeNameAtSale: 'Club 1',
+        guest: {
+          id: 'guest-1',
+          externalDomain: '46.langamepro.ru',
+          externalGuestId: 'guest-external-1',
+          fullNameMasked: 'Guest',
+          phoneMasked: '***0646',
+          emailMasked: null,
+        },
+        store: { id: 'store-1', name: 'Club 1' },
+        product: null,
+      });
+      const missionActivatedAt = new Date(now.getTime() - 60 * 60_000);
+
+      prisma.$queryRaw.mockResolvedValue([
+        { id: 'recent-snack', queue: 0 },
+        { id: 'device-rental', queue: 0 },
+        { id: 'oldest-snack', queue: 1 },
+      ]);
+      prisma.salesFact.findMany.mockResolvedValue([
+        sale('recent-snack', 'snack-product', now),
+        sale(
+          'device-rental',
+          'device-product',
+          new Date(now.getTime() - 30 * 60_000),
+        ),
+        sale(
+          'oldest-snack',
+          'old-snack-product',
+          new Date(now.getTime() - 12 * 60 * 60_000),
+        ),
+      ]);
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          conditions: {
+            activatedAt: missionActivatedAt.toISOString(),
+            purchaseSource: 'CATEGORY',
+            metric: {
+              purchaseSource: 'CATEGORY',
+              externalCategoryKeys: ['46.langamepro.ru:16'],
+            },
+          },
+          storeIds: ['store-1'],
+          periodFrom: missionActivatedAt,
+          updatedAt: missionActivatedAt,
+        },
+      ]);
+      prisma.langameClubProductConfiguration.findMany.mockResolvedValue([
+        {
+          storeId: 'store-1',
+          externalDomain: '46.langamepro.ru',
+          externalProductId: 'device-product',
+          externalGroupId: '16',
+        },
+      ]);
+      prisma.langameProductGroup.findMany.mockResolvedValue([
+        {
+          externalDomain: '46.langamepro.ru',
+          externalGroupId: '16',
+          name: 'Devices',
+        },
+      ]);
+
+      const facts = await (
+        service as any
+      ).loadPendingProductExpenseSnapshotFacts(
+        user,
+        3,
+        new Date(now.getTime() - 24 * 60 * 60_000),
+      );
+
+      expect(facts.map((fact) => fact.id)).toEqual([
+        'product-expense:device-rental',
+        'product-expense:recent-snack',
+        'product-expense:oldest-snack',
+      ]);
+      expect(facts[0]).toEqual(
+        expect.objectContaining({
+          externalCategoryKey: '46.langamepro.ru:16',
+        }),
+      );
+      const query = prisma.$queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
+      expect(query.strings.join(' ')).toContain('recent AS');
+      expect(query.strings.join(' ')).toContain('oldest AS');
+      expect(query.values).toContain(600);
     });
 
     it('keeps unbound diagnostic facts behind actionable guest facts', async () => {
@@ -22730,6 +23120,37 @@ describe('GuestGamificationService', () => {
         expect.objectContaining({
           where: {},
         }),
+      );
+    });
+
+    it('enables durable pending-purchase draining only for the scheduled primary pipeline', async () => {
+      const { service, prisma } = createService();
+      prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+      const run = jest.spyOn(service, 'runSnapshotPipeline').mockResolvedValue({
+        dryRunOnly: false,
+        langameWrite: false,
+        availableFacts: 0,
+        checkedFacts: 0,
+        processedFacts: 0,
+        skippedFacts: 0,
+        duplicateFacts: 0,
+        erroredFacts: 0,
+        appliedXpDelta: 0,
+        queuedRewards: 0,
+        queuedRewardAmount: 0,
+        facts: [],
+        note: 'scheduled test',
+      });
+
+      await service.runSnapshotPipelineScheduled({ limit: 30 });
+
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: user.tenantId,
+          tenantSlug: user.tenantSlug,
+        }),
+        { limit: 30 },
+        { drainPendingPurchases: true },
       );
     });
 

@@ -77,10 +77,9 @@ describe('Staff checklist catalog visibility', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
     };
-    const service = new StaffChecklistTemplatesService(
-      prisma as never,
-      { resolve: jest.fn().mockResolvedValue({ tenantId }) } as never,
-    );
+    const service = new StaffChecklistTemplatesService(prisma as never, {
+      resolve: jest.fn().mockResolvedValue({ tenantId }),
+    });
 
     const report = await service.getTemplates(
       actor(UserRole.CLUB_ADMINISTRATOR),
@@ -154,10 +153,9 @@ describe('Staff checklist catalog visibility', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
     };
-    const service = new StaffChecklistsService(
-      prisma as never,
-      { resolve: jest.fn().mockResolvedValue({ tenantId }) } as never,
-    );
+    const service = new StaffChecklistsService(prisma as never, {
+      resolve: jest.fn().mockResolvedValue({ tenantId }),
+    });
 
     const report = await service.getChecklists(
       actor(UserRole.CLUB_ADMINISTRATOR),
@@ -230,5 +228,129 @@ describe('Staff checklist time-of-day planning', () => {
         '01:00',
       )?.toISOString(),
     ).toBe('2026-07-19T20:00:00.000Z');
+  });
+
+  it('does not mark a midnight task late by a day in an overnight shift', () => {
+    const service = createService();
+    const shiftStartedAt = new Date('2026-07-19T17:00:00.000Z');
+    const item = {
+      id: 'item-midnight',
+      title: 'Midnight check',
+      instruction: null,
+      valueType: 'CHECKBOX',
+      required: true,
+      evidenceRequired: false,
+      score: 1,
+      timing: {
+        mode: 'TIME_OF_DAY',
+        offsetMinutes: null,
+        timeOfDay: '00:00',
+        toleranceMinutes: 30,
+        affectsDiscipline: true,
+      },
+    } as const;
+    const row = {
+      status: 'IN_PROGRESS',
+      scheduledAt: null,
+      startedAt: shiftStartedAt,
+      createdAt: shiftStartedAt,
+      sectionsSnapshot: [],
+      answers: [],
+      store: {
+        city: 'Ekaterinburg',
+        address: null,
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      shift: {
+        startedAt: shiftStartedAt,
+        stoppedAt: null,
+        store: null,
+      },
+    };
+    const answer = {
+      sectionId: 'section-1',
+      itemId: item.id,
+      value: 'done',
+      status: 'PASS',
+      note: null,
+      evidenceUrl: null,
+      evidenceAttachments: [],
+      reviewThreads: [],
+      completedAt: '2026-07-19T19:17:00.000Z',
+      timing: null,
+    };
+    const timing = (
+      service as unknown as {
+        evaluateAnswerTiming: (
+          row: typeof row,
+          item: typeof item,
+          answer: typeof answer,
+        ) => {
+          status: string;
+          plannedAt: string | null;
+          deviationMinutes: number | null;
+        } | null;
+      }
+    ).evaluateAnswerTiming(row, item, answer);
+
+    expect(timing).toEqual(
+      expect.objectContaining({
+        status: 'ON_TIME',
+        plannedAt: '2026-07-19T19:00:00.000Z',
+        deviationMinutes: 17,
+      }),
+    );
+  });
+
+  it('uses the server timestamp instead of a timestamp sent by the device', () => {
+    const service = createService();
+    const sections = [
+      {
+        id: 'section-1',
+        title: 'Section',
+        description: null,
+        items: [
+          {
+            id: 'item-1',
+            title: 'Item',
+            instruction: null,
+            valueType: 'CHECKBOX',
+            required: true,
+            evidenceRequired: false,
+            score: 1,
+            timing: {
+              mode: 'NONE',
+              offsetMinutes: null,
+              timeOfDay: null,
+              toleranceMinutes: 0,
+              affectsDiscipline: false,
+            },
+          },
+        ],
+      },
+    ] as const;
+    const serverCompletedAt = '2026-07-19T19:17:00.000Z';
+    const answers = (
+      service as unknown as {
+        normalizeAnswers: (
+          value: unknown,
+          sections: typeof sections,
+          options: { serverCompletedAt: string },
+        ) => Array<{ completedAt: string | null }>;
+      }
+    ).normalizeAnswers(
+      [
+        {
+          sectionId: 'section-1',
+          itemId: 'item-1',
+          status: 'PASS',
+          completedAt: '1999-01-01T00:00:00.000Z',
+        },
+      ],
+      sections,
+      { serverCompletedAt },
+    );
+
+    expect(answers[0]?.completedAt).toBe(serverCompletedAt);
   });
 });

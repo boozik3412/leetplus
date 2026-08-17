@@ -1253,9 +1253,6 @@ function GameModuleTopbar({ summary }: { summary: GuestPortalGameSummary }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const brandLogoUrl = summary.store.gameLogoUrl ?? summary.tenant.gameLogoUrl;
-  const brandLogoTitle = summary.store.gameLogoUrl
-    ? summary.store.name
-    : summary.tenant.name;
 
   useEffect(() => {
     if (!menuOpen) {
@@ -1317,10 +1314,10 @@ function GameModuleTopbar({ summary }: { summary: GuestPortalGameSummary }) {
       </div>
 
       <div className="lp-club-network">
-        <Link href="/game/clubs" className="lp-club-switch">
-          <BrandMark logoUrl={brandLogoUrl} title={brandLogoTitle} />
-          <span>{summary.store.name}</span>
-        </Link>
+        <div className="lp-club-switch">
+          <BrandMark logoUrl={brandLogoUrl} />
+          <Link href="/game/clubs">{summary.store.name}</Link>
+        </div>
       </div>
 
       <div className="lp-club-header-actions">
@@ -7817,14 +7814,12 @@ function formatPlayerPhoneMasked(value: string | null) {
 
 function BrandMark({
   logoUrl,
-  title,
 }: {
   logoUrl?: string | null;
-  title: string;
 }) {
   if (logoUrl) {
     return (
-      <span className="lp-club-brand-mark is-custom-logo" title={title}>
+      <span className="lp-club-brand-mark is-custom-logo" aria-hidden="true">
         <img src={logoUrl} alt="" />
       </span>
     );
@@ -10661,7 +10656,13 @@ const clubHomeCss = `
   letter-spacing: 0.12em;
 }
 
-.lp-club-switch span,
+.lp-club-switch > a {
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.lp-club-switch > a,
 .lp-club-brand span {
   overflow: hidden;
   text-overflow: ellipsis;

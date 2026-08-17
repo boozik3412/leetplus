@@ -135,7 +135,13 @@ describe('guest game progress trigger matching', () => {
     },
   ])(
     'starts a new $name repeat cycle only after the previous task was completed',
-    ({ periodicity, timeZone, completedAt, previousEventAt, currentEventAt }) => {
+    ({
+      periodicity,
+      timeZone,
+      completedAt,
+      previousEventAt,
+      currentEventAt,
+    }) => {
       const result = evaluateGuestGameProgress(
         {
           triggerKind: 'APP_OPEN',
@@ -997,6 +1003,88 @@ describe('guest game progress trigger matching', () => {
     );
 
     expect(result).toMatchObject({ current: 1, completed: true });
+  });
+
+  it('does not reuse a purchase from an already completed non-periodic mission', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PRODUCT_PURCHASE',
+        progressTarget: 1,
+        repeatCompletedAt: new Date('2026-08-08T09:18:14.000Z'),
+        conditions: {
+          purchaseSource: 'CATEGORY',
+          metric: {
+            aggregation: 'count',
+            eventTypes: ['PRODUCT_PURCHASE'],
+            purchaseSource: 'CATEGORY',
+            externalCategoryKeys: ['46.langamepro.ru:16'],
+            target: 1,
+          },
+        },
+      },
+      {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: new Date('2026-08-09T13:34:12.000Z'),
+        externalCategoryKey: '46.langamepro.ru:3',
+        spendAmount: 150,
+      },
+      [
+        {
+          eventType: 'PRODUCT_PURCHASE',
+          occurredAt: new Date('2026-08-08T09:18:14.000Z'),
+          externalCategoryKey: '46.langamepro.ru:16',
+          spendAmount: 150,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 0,
+      completed: false,
+      matchedEvents: 0,
+      repeatCycleReset: false,
+    });
+  });
+
+  it('allows a fresh matching purchase after a non-periodic mission completion', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PRODUCT_PURCHASE',
+        progressTarget: 1,
+        repeatCompletedAt: new Date('2026-08-08T09:18:14.000Z'),
+        conditions: {
+          purchaseSource: 'CATEGORY',
+          metric: {
+            aggregation: 'count',
+            eventTypes: ['PRODUCT_PURCHASE'],
+            purchaseSource: 'CATEGORY',
+            externalCategoryKeys: ['46.langamepro.ru:16'],
+            target: 1,
+          },
+        },
+      },
+      {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: new Date('2026-08-10T10:00:00.000Z'),
+        externalCategoryKey: '46.langamepro.ru:16',
+        spendAmount: 200,
+      },
+      [
+        {
+          eventType: 'PRODUCT_PURCHASE',
+          occurredAt: new Date('2026-08-08T09:18:14.000Z'),
+          externalCategoryKey: '46.langamepro.ru:16',
+          spendAmount: 150,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 1,
+      completed: true,
+      matchedEvents: 1,
+      repeatCycleReset: false,
+    });
   });
 
   it('completes ALL semantic categories across domains and purchases', () => {

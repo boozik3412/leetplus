@@ -537,12 +537,25 @@ jobs:
           mkdir -p \
             "$release_root/apps/api" \
             "$release_root/apps/web" \
-            "$release_root/packages/database/prisma"
+            "$release_root/packages/database/prisma" \
+            "$release_root/packages/database/scripts"
 
           cp -a apps/api/dist "$release_root/apps/api/"
+          cp -a apps/api/package.json "$release_root/apps/api/"
           cp -a apps/web/.next "$release_root/apps/web/"
+          cp -a apps/web/next.config.ts apps/web/package.json "$release_root/apps/web/"
+          cp -a apps/web/public "$release_root/apps/web/"
+          cp -a packages/database/package.json "$release_root/packages/database/"
           cp -a packages/database/prisma/schema.prisma "$release_root/packages/database/prisma/"
           cp -a packages/database/prisma/migrations "$release_root/packages/database/prisma/"
+          cp -a \
+            packages/database/scripts/founder-pilot-restored-copy-preflight.mjs \
+            packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs \
+            packages/database/scripts/founder-pilot-activation-role-deployment.mjs \
+            packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs \
+            packages/database/scripts/founder-pilot-activation-role-network-acceptance.mjs \
+            packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs \
+            "$release_root/packages/database/scripts/"
           cp -a package.json pnpm-lock.yaml pnpm-workspace.yaml "$release_root/"
 
           printf '%s\n' \
@@ -551,13 +564,18 @@ jobs:
             '  "nodeVersion": "22",' \
             '  "pnpmVersion": "10.33.2",' \
             '  "databaseMigration": "20260817030000_founder_operator_beta_activation_runtime_v1",' \
-            '  "databaseMigrationCount": 183' \
+            '  "databaseMigrationCount": 183,' \
+            '  "runtimePackageManifestsIncluded": true,' \
+            '  "founderPilotOperationalScriptsIncluded": true,' \
+            '  "founderPilotOperationalScriptCount": 6,' \
+            '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
           (
             cd "$release_root"
             if find . \
               -path './apps/web/.next/cache' -prune -o \
+              -path './apps/web/.next/dev' -prune -o \
               -type l -print -quit \
               | grep -q .; then
               printf 'Release artifact refuses symbolic links\n' >&2
@@ -565,6 +583,7 @@ jobs:
             fi
             find . \
               -path './apps/web/.next/cache' -prune -o \
+              -path './apps/web/.next/dev' -prune -o \
               -type f ! -name SHA256SUMS -print0 \
               | LC_ALL=C sort -z \
               | xargs -0 sha256sum > SHA256SUMS
@@ -579,6 +598,7 @@ jobs:
             --format=posix \
             --pax-option=delete=atime,delete=ctime \
             --exclude='./apps/web/.next/cache' \
+            --exclude='./apps/web/.next/dev' \
             -C "$release_root" \
             -cf - . \
             | gzip -n > "$archive"
@@ -588,6 +608,57 @@ jobs:
             sha256sum --check "$(basename "$archive").sha256"
           )
           gzip --test "$archive"
+
+          verification_root="$RUNNER_TEMP/leetplus-release-verify-$CI_RELEASE_SHA"
+          archive_listing="$RUNNER_TEMP/leetplus-release-$CI_RELEASE_SHA.contents"
+          mkdir -p "$verification_root"
+          tar -tzf "$archive" > "$archive_listing"
+          for required_path in \
+            './apps/api/dist/main.js' \
+            './apps/api/package.json' \
+            './apps/web/package.json' \
+            './apps/web/next.config.ts' \
+            './apps/web/public/' \
+            './packages/database/package.json' \
+            './packages/database/prisma/schema.prisma' \
+            './packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs' \
+            './packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs' \
+            './packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs' \
+            './release-provenance.json' \
+            './SHA256SUMS'; do
+            grep -F -x "$required_path" "$archive_listing" > /dev/null
+          done
+          if grep -E '(^|/)node_modules/' "$archive_listing" > /dev/null; then
+            printf 'Release artifact must not embed node_modules\n' >&2
+            exit 1
+          fi
+          script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
+          test "$script_file_count" = '6'
+          if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
+            printf 'Release artifact contains a forbidden operational fixture\n' >&2
+            exit 1
+          fi
+          tar -xzf "$archive" -C "$verification_root"
+          (
+            cd "$verification_root"
+            sha256sum --check --quiet SHA256SUMS
+            test "$(node -p 'require("./release-provenance.json").releaseSha')" = "$CI_RELEASE_SHA"
+            test "$(node -p 'require("./release-provenance.json").runtimePackageManifestsIncluded')" = 'true'
+            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptsIncluded')" = 'true'
+            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '6'
+            test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
+            node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
+            node --check packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs
+            node --check packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs
+            pnpm install --prod --offline --frozen-lockfile
+            pnpm --filter database db:generate
+            node packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs --help > /dev/null
+            node packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs --help > /dev/null
+            node packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs --help > /dev/null
+            node -e "require.resolve('@nestjs/core', { paths: ['./apps/api'] })"
+            node -e "require.resolve('@prisma/client', { paths: ['./apps/api'] })"
+            test -s apps/web/.next/BUILD_ID
+          )
 
       - name: Upload SHA-bound release artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

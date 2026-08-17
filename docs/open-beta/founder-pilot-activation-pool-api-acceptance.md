@@ -1,7 +1,7 @@
 # Founder pilot: dedicated activation pool and API acceptance
 
 Статус:
-`ENGINEERING IMPLEMENTED / LOCAL UNIT 60/60 / POSTGRESQL CI PENDING / PRODUCTION NO-GO`.
+`EXACT-SHA CI ACCEPTED / LOCAL UNIT 60/60 + POSTGRESQL HTTP PASS / PRODUCTION NO-GO`.
 
 Этот этап связывает уже принятую least-privilege роль
 `leetplus_founder_beta_activation_runtime` с production-кодом API. Он не
@@ -51,6 +51,15 @@ Existing disposable PostgreSQL fixture теперь обязан:
 CI уже содержит отдельный PostgreSQL 16 шаг `Verify founder-operator beta
 activation transaction`; поэтому exact commit будет принят только если этот
 реальный fixture пройдёт вместе с unit/typecheck/lint и общей release matrix.
+
+Implementation SHA
+`5199563561683ae2d9fce4c08aa5d991cf6d2fe3` принят push CI
+`32068262701` и PR CI `32068266758` attempt `2` как `3/3 SUCCESS`. В обоих
+run actual PostgreSQL + HTTP activation step завершён успешно. Первая попытка
+PR-run была отменена после 46-минутного зависания на внешней установке
+disposable PgBouncer; повтор прошёл без изменения commit. Push artifact
+`9301062934`, digest
+`sha256:ed1db27f3bd483668564bd6806952d97405b053612a868c089c2a4281b3316e7`.
 
 ## Что этот этап не доказывает
 

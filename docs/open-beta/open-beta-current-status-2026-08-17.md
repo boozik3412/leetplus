@@ -109,8 +109,16 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   fresh-attest'ит exact session role/database/TLS внутри каждой транзакции, а
   production `ACTIVE` требует `sslmode=verify-full`. PostgreSQL fixture
   вызывает production `AdminController` по HTTP и затем проверяет replay и
-  zero residue. Local unit `60/60`, typecheck и scoped lint зелёные; exact-SHA
-  PG CI ещё pending, поэтому live API gate пока открыт.
+  zero residue. Exact SHA `5199563561683ae2d9fce4c08aa5d991cf6d2fe3`
+  принят push CI `32068262701` и PR CI `32068266758` attempt `2` как
+  `3/3 SUCCESS`; artifact `9301062934`, digest `sha256:ed1db27f…16e7`.
+  In-process HTTP/PG pool gate закрыт; полный artifact child-process gate ещё
+  открыт.
+- Начат runnable-artifact слой: release tar получает package manifests,
+  operational founder scripts и web public assets, исключает `.next/dev`,
+  cache, symlink и `node_modules`; CI должен доказать frozen offline production
+  install, Prisma generate и runtime resolution до upload. Local
+  layout/tar/checksum/extract smoke зелёный; exact-SHA CI pending.
 
 ## Что блокирует выдачу доступа
 

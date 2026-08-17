@@ -160,12 +160,12 @@
   "license": "ISC",
   "packageManager": "pnpm@10.33.2",
   "dependencies": {
-    "@prisma/client": "6.19.3"
+    "@prisma/client": "6.19.3",
+    "pg": "8.16.3",
+    "prisma": "6.19.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "pg": "8.16.3",
-    "prisma": "6.19.3",
     "tsx": "^4.21.0",
     "typescript": "^5.7.3"
   }

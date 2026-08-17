@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.135                                        |
-| Дата             | 17.08.2026                                   |
+| Версия           | 1.136                                        |
+| Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -69,6 +69,9 @@ Dedicated database boundary:
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
+
+Exact direct PostgreSQL HBA/TLS/SCRAM acceptance dedicated роли:
+[founder activation-role network acceptance](./founder-pilot-activation-role-network-acceptance.md).
 
 ## Канонические документы
 
@@ -220,7 +223,8 @@ SUCCESS` и artifact `sha256:5e8e07de…a3a` без import/deploy authority.
    [key custody](./founder-pilot-key-custody-plan.md),
    [isolated restored copy](./founder-pilot-restored-copy-plan.md),
    [restored-copy preflight](./founder-pilot-restored-copy-preflight.md),
-   [activation role deployment](./founder-pilot-activation-role-deployment.md) и
+   [activation role deployment](./founder-pilot-activation-role-deployment.md),
+   [activation role network acceptance](./founder-pilot-activation-role-network-acceptance.md) и
    [stop/rollback](./founder-pilot-rollback-plan.md). Это exact digest inputs,
    а не утверждение о выполненном production restore.
    0e.22. [Commercial multi-tenant onboarding plan](./commercial-multi-tenant-onboarding-plan.md) —

@@ -329,6 +329,9 @@ jobs:
       - name: Validate founder-pilot exact activation-role deployment
         run: pnpm --filter database check:founder-pilot-activation-role-deployment
 
+      - name: Validate founder-pilot activation-role network acceptance
+        run: pnpm --filter database check:founder-pilot-activation-role-network
+
       - name: Validate identity email claim and invite writer boundaries
         run: pnpm --filter database check:identity-email-claim-boundary
 

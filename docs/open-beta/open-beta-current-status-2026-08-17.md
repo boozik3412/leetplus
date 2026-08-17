@@ -94,14 +94,22 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   `6/6`; synthetic PostgreSQL lifecycle прошёл
   `PLAN→APPLIED→ATTESTED→APPLY_RECONCILED→ROLLED_BACK→ROLLBACK_RECONCILED` с
   восстановлением исходного PUBLIC ACL и zero role/database/file residue.
-  Fixture HBA был `trust`, поэтому production-like TLS/SCRAM login ещё не принят.
+  SHA `032bacbf…` принят push CI `32059938202` и PR CI `32059941436` как
+  `3/3 SUCCESS`; artifact `9298073553`, digest `sha256:137acecc…a8b`;
+- 18.08 direct network acceptance реализован и принят на одноразовом PG16.13:
+  exact `hostssl+scram`, TLS 1.3 peer verification, successful role login,
+  wrong-secret `28P01`, other-database/plaintext `28000`, direct table read
+  `42501`, identical pre/post role attestation. Evidence digest
+  `5674b09f…dd7b`; затем role rollback и zero process/port/temp residue. Это
+  synthetic engineering evidence; PgBouncer/dedicated pool и live API ещё не
+  приняты.
 
 ## Что блокирует выдачу доступа
 
-1. Clean SHA/CI artifact принят; read-only preflight и exact activation-role
-   controller реализованы и приняты на synthetic PostgreSQL. Но immutable
-   production backup/isolated restored target, скачанный exact artifact и
-   production-like HBA/TLS/SCRAM/pool/API acceptance ещё не выполнены.
+1. Clean SHA/CI artifact, read-only preflight, exact activation-role controller
+   и direct HBA/TLS/SCRAM synthetic acceptance приняты. Но immutable production
+   backup/isolated restored target, скачанный exact artifact и dedicated
+   PgBouncer pool/live API acceptance ещё не выполнены.
 2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
    readiness evidence.
 3. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
@@ -118,7 +126,8 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 clean SHA + CI artifact [DONE]
   → live backup + isolated target + read-only preflight
   → execute-only runtime role/grant/attestation
-  → HBA/TLS/SCRAM + dedicated pool live call
+  → [DONE synthetic] direct HBA/TLS/SCRAM
+  → dedicated pool + live API call
   → restored-copy apply/replay/rollback + backup/readiness
   → SMTP canary + SENT/revoke/accept evidence
   → Gate 1MT browser/store-scope

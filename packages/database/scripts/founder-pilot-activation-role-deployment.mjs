@@ -26,6 +26,7 @@ export const FOUNDER_PILOT_ACTIVATION_ROLE_CONNECTION_LIMIT = 4;
 
 const WRAPPER_SIGNATURE =
   'public."founder_operator_beta_tenant_activate_v2"(text,text,text,text,text,text,text,text,text,text,text,text,text,text,text,bytea,timestamp with time zone)';
+export const FOUNDER_PILOT_ACTIVATION_WRAPPER_SIGNATURE = WRAPPER_SIGNATURE;
 const WRAPPER_GRANT_SIGNATURE =
   'public."founder_operator_beta_tenant_activate_v2"(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BYTEA, TIMESTAMP WITH TIME ZONE)';
 const LOCK_DOMAIN = "leetplus:founder-pilot:activation-role-deployment:v1";

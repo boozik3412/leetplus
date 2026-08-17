@@ -1,7 +1,12 @@
 # Founder pilot: restored-copy activation role deployment
 
 Статус:
-`ENGINEERING IMPLEMENTED / UNIT 6/6 + SYNTHETIC PG FULL LIFECYCLE PASS / PRODUCTION NO-GO`.
+`EXACT-SHA CI ACCEPTED / UNIT 6/6 + SYNTHETIC PG FULL LIFECYCLE PASS / PRODUCTION NO-GO`.
+
+Implementation SHA `032bacbf4c052bd4f3a8a575687e324bae5edaf3` принят push CI
+`32059938202` и PR CI `32059941436` как `3/3 SUCCESS`. Release artifact
+`9298073553`, digest
+`sha256:137acecc9084d15a655a2da2c105fcbf6cdb244885dbc1144b91cef8c3497a8b`.
 
 Контракт `FOUNDER_PILOT_ACTIVATION_ROLE_DEPLOYMENT_V1` управляет только
 dedicated ролью `leetplus_founder_beta_activation_runtime` на изолированной
@@ -102,6 +107,10 @@ Fixture использовал local `trust` HBA, поэтому реальны�
 не принят. Криптографическое соответствие raw secret ↔ stored SCRAM verifier
 проверено controller, но production-like HBA/TLS/SCRAM login, pool URL и live
 API call остаются следующим обязательным этапом.
+
+Первый прямой HBA/TLS/SCRAM этап теперь реализован и принят на synthetic
+PostgreSQL: [network acceptance](./founder-pilot-activation-role-network-acceptance.md).
+Он ещё не включает PgBouncer/dedicated pool и live API process.
 
 Сам grant на target database не отменяет возможный унаследованный
 `PUBLIC CONNECT` к другим базам того же PostgreSQL cluster. До readiness HBA

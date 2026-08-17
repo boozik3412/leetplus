@@ -118,6 +118,9 @@ try {
   await maintenance.$executeRawUnsafe(
     `GRANT CONNECT ON DATABASE "${databaseName}" TO "${ACTIVATION_ROLE}"`,
   );
+  await maintenance.$executeRawUnsafe(
+    `REVOKE CREATE, TEMPORARY ON DATABASE "${databaseName}" FROM PUBLIC`,
+  );
   await primary.$executeRawUnsafe("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
   await primary.$executeRawUnsafe(
     `GRANT USAGE ON SCHEMA public TO "${ACTIVATION_ROLE}"`,

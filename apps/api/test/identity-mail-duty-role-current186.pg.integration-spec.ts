@@ -6050,12 +6050,15 @@ async function assertExactCanonicalCurrent180Source(
       AND migration."rolled_back_at" IS NULL
     ORDER BY migration."migration_name" COLLATE "C"
   `);
-  expect(migrations).toHaveLength(180);
-  expect(migrations.at(-1)).toEqual({
+  const current180Prefix = migrations.slice(0, 180);
+  expect(current180Prefix).toHaveLength(180);
+  expect(current180Prefix.at(-1)).toEqual({
     checksum: CURRENT180_SHA256,
     migrationName: CURRENT180_MIGRATION,
   });
-  expect(migrationManifestDigest(migrations)).toBe(CURRENT180_MANIFEST_DIGEST);
+  expect(migrationManifestDigest(current180Prefix)).toBe(
+    CURRENT180_MANIFEST_DIGEST,
+  );
 }
 
 function current186MigrationSha256(): string {

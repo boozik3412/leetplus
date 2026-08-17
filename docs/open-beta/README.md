@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.127                                        |
-| Дата             | 14.08.2026                                   |
+| Версия           | 1.130                                        |
+| Дата             | 17.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -19,13 +19,15 @@
 `SHARED BETA GO`. Отдельный runtime/DB сохранён только как contingency или
 enterprise-isolation option и не сокращает shared gates.
 
-Для фактического состава команды из одного человека CURRENT202 V2 реализует
-внутренний single-founder bootstrap. Он фиксирует одного release/rollback
-owner, одну зашифрованную флешку, 12-часовой cooling-off и global platform
-scope. V2 не содержит tenant/store/trial limits: rollout policy живёт только в
-отдельном `SHARED BETA GO`. Клиенты используют owner-invite workflow без новых
-ключей. CURRENT201 нужен для внутренней ротации/recovery root, а не для
-подключения клиентов.
+Решением от 17.08.2026 offline CURRENT198–202 bootstrap, USB и key ceremony
+перенесены из critical path первого внешнего beta tenant в post-beta security
+hardening. Они остаются deny-only и не заменяются фиктивными ключами. Beta
+onboarding использует persisted `FOUNDER_OPERATOR_BETA_GO_V1`: fresh Platform
+Admin, exact release SHA, конкретный tenant shell, 30-day trial, тот же founder
+как rollback owner и явные stop conditions. Клиенту по-прежнему не нужен ключ:
+он получает email-bound OWNER invite и сам задаёт пароль. Обычные production
+JWT/encryption/SMTP secrets, tenant isolation, backup/restore и rollback
+остаются обязательными.
 
 ## Зафиксированные решения
 
@@ -53,12 +55,24 @@ scope. V2 не содержит tenant/store/trial limits: rollout policy жив
 - production-изменения выполняются только после exact candidate SHA, CI,
   backup/restore, canary и явного решения `GO`.
 
+Актуальный successor и его строгая граница:
+[Founder-operator beta GO](./founder-operator-beta-go.md).
+
+Текущий фактический статус после реализации v2:
+[open beta status 17.08.2026](./open-beta-current-status-2026-08-17.md).
+
+Dedicated database boundary:
+[founder activation runtime v1](./founder-operator-beta-activation-runtime.md).
+
 ## Канонические документы
 
 Сначала читать:
-[актуальный статус открытого теста на 07.08.2026](./open-beta-current-status-2026-08-07.md) —
+[актуальный статус открытого теста на 17.08.2026](./open-beta-current-status-2026-08-17.md) —
 единый вердикт по текущей задаче, release gates, фактическим blockers и пути до
 первого `Tenant B/Store B1`.
+
+Предыдущий подробный snapshot:
+[статус на 07.08.2026](./open-beta-current-status-2026-08-07.md).
 
 Текущая source-синхронизация:
 [canonicalization manifest 07.08.2026](./canonicalization-manifest-2026-08-07.md) —

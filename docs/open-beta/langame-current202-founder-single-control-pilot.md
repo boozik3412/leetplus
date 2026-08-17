@@ -1,5 +1,11 @@
 # CURRENT202 V2: single-founder global platform bootstrap
 
+> Решение 17.08.2026: этот контур остаётся `DENY-ONLY` и перенесён в post-beta
+> security hardening. USB/offline key не является условием первого внешнего
+> tenant. Актуальный beta-onboarding successor описан в
+> [founder-operator-beta-go.md](./founder-operator-beta-go.md). Исторические
+> acceptance evidence и запрет фиктивного enrollment сохраняются.
+
 | Поле                                       | Значение                                      |
 | ------------------------------------------ | --------------------------------------------- |
 | Статус                                     | `ENGINEERING_ACCEPTED / DENY-ONLY / NO-GO`    |

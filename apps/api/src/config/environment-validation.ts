@@ -54,6 +54,28 @@ export const STAFF_ATTACHMENT_ACL_MODES = [
 export type StaffAttachmentAclMode =
   (typeof STAFF_ATTACHMENT_ACL_MODES)[number];
 
+export const FOUNDER_OPERATOR_BETA_MODES = [
+  'DISABLED',
+  'PREPARE',
+  'ACTIVE',
+] as const;
+
+export type FounderOperatorBetaMode =
+  (typeof FOUNDER_OPERATOR_BETA_MODES)[number];
+
+export const FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE =
+  'leetplus_founder_beta_activation_runtime' as const;
+const FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_OPTIONS = Object.freeze({
+  schema: 'public',
+  connection_limit: '2',
+  pool_timeout: '5',
+  connect_timeout: '5',
+});
+const FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_OPTION_KEYS = new Set([
+  ...Object.keys(FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_OPTIONS),
+  'sslmode',
+]);
+
 export const DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS = {
   DESIGN_PARTNER_ISOLATED_MODE: 'true',
   ACCESS_SCOPE_ENFORCEMENT_MODE: 'ENFORCED',
@@ -160,6 +182,69 @@ export function resolveStaffAttachmentAclMode(
   );
 }
 
+export function resolveFounderOperatorBetaMode(
+  value: unknown,
+): FounderOperatorBetaMode {
+  const normalized = stringValue(value).toUpperCase();
+  if (!normalized) return 'DISABLED';
+  if (
+    FOUNDER_OPERATOR_BETA_MODES.includes(normalized as FounderOperatorBetaMode)
+  ) {
+    return normalized as FounderOperatorBetaMode;
+  }
+  throw new Error(
+    'FOUNDER_OPERATOR_BETA_MODE must be DISABLED, PREPARE, or ACTIVE',
+  );
+}
+
+export function resolveFounderOperatorBetaActivationDatabaseUrl(
+  value: unknown,
+): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value !== value.trim()
+  ) {
+    return undefined;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    parsed.protocol !== 'postgresql:' ||
+    parsed.username !== FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE ||
+    parsed.password.length < MINIMUM_PRODUCTION_SECRET_LENGTH ||
+    parsed.hostname.length === 0 ||
+    parsed.pathname.length <= 1 ||
+    parsed.hash.length > 0
+  ) {
+    return undefined;
+  }
+  const seen = new Set<string>();
+  for (const [key] of parsed.searchParams) {
+    if (
+      seen.has(key) ||
+      !FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_OPTION_KEYS.has(key)
+    ) {
+      return undefined;
+    }
+    seen.add(key);
+  }
+  for (const [key, expected] of Object.entries(
+    FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_OPTIONS,
+  )) {
+    if (parsed.searchParams.get(key) !== expected) return undefined;
+  }
+  const sslMode = parsed.searchParams.get('sslmode');
+  if (sslMode && sslMode !== 'require' && sslMode !== 'verify-full') {
+    return undefined;
+  }
+  return value;
+}
+
 function productionEnvironment(config: EnvironmentValues) {
   return ENVIRONMENT_MARKER_KEYS.some((key) =>
     PRODUCTION_ENVIRONMENT_MARKERS.has(stringValue(config[key]).toLowerCase()),
@@ -217,6 +302,9 @@ export function resolveIdentityMailAadEnvironment(
 export function validateEnvironment(config: EnvironmentValues) {
   const isProduction = productionEnvironment(config);
   const isolatedMode = stringValue(config.DESIGN_PARTNER_ISOLATED_MODE);
+  const founderOperatorBetaMode = resolveFounderOperatorBetaMode(
+    config.FOUNDER_OPERATOR_BETA_MODE,
+  );
 
   if (isolatedMode && isolatedMode !== 'true' && isolatedMode !== 'false') {
     throw new Error(
@@ -225,11 +313,45 @@ export function validateEnvironment(config: EnvironmentValues) {
   }
 
   if (!isProduction && isolatedMode !== 'true') {
-    return config;
+    if (!stringValue(config.FOUNDER_OPERATOR_BETA_MODE)) {
+      return config;
+    }
+    return {
+      ...config,
+      FOUNDER_OPERATOR_BETA_MODE: founderOperatorBetaMode,
+    };
   }
 
   const errors: string[] = [];
   const configuredSecrets = new Map<ProductionSecretKey, string>();
+
+  let founderOperatorBetaActivationDatabaseUrl: string | undefined;
+  if (founderOperatorBetaMode === 'ACTIVE') {
+    founderOperatorBetaActivationDatabaseUrl =
+      resolveFounderOperatorBetaActivationDatabaseUrl(
+        config.FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL,
+      );
+    if (!founderOperatorBetaActivationDatabaseUrl) {
+      errors.push(
+        'FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL must use the dedicated activation role and exact bounded connection options in ACTIVE mode',
+      );
+    } else {
+      try {
+        const primaryDatabaseUrl = stringValue(config.DATABASE_URL);
+        if (
+          primaryDatabaseUrl &&
+          new URL(primaryDatabaseUrl).username ===
+            FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE
+        ) {
+          errors.push(
+            'DATABASE_URL must not use the dedicated founder activation role',
+          );
+        }
+      } catch {
+        errors.push('DATABASE_URL must be a valid PostgreSQL URL');
+      }
+    }
+  }
 
   for (const key of PRODUCTION_SECRET_KEYS) {
     const value = stringValue(config[key]);
@@ -422,6 +544,9 @@ export function validateEnvironment(config: EnvironmentValues) {
     ACCESS_SCOPE_ENFORCEMENT_MODE: accessScopeEnforcementMode,
     STAFF_ATTACHMENT_ACL_MODE: staffAttachmentAclMode,
     DESIGN_PARTNER_ISOLATED_MODE: isolatedMode || undefined,
+    FOUNDER_OPERATOR_BETA_MODE: founderOperatorBetaMode,
+    FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL:
+      founderOperatorBetaActivationDatabaseUrl,
   };
 }
 

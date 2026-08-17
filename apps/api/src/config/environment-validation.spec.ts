@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
+  FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE,
   PRODUCTION_SECRET_KEYS,
   resolveAccessScopeEnforcementMode,
   resolveSecuritySecret,
@@ -67,6 +68,82 @@ describe('validateEnvironment', () => {
     const local = { NODE_ENV: 'test' };
 
     expect(validateEnvironment(local)).toBe(local);
+  });
+
+  it.each(['disabled', 'PREPARE', 'active'])(
+    'normalizes an explicit founder-operator beta mode: %s',
+    (mode) => {
+      expect(
+        validateEnvironment({
+          NODE_ENV: 'test',
+          FOUNDER_OPERATOR_BETA_MODE: mode,
+        }),
+      ).toMatchObject({
+        FOUNDER_OPERATOR_BETA_MODE: mode.toUpperCase(),
+      });
+    },
+  );
+
+  it('rejects an unknown founder-operator beta mode in every environment', () => {
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'test',
+        FOUNDER_OPERATOR_BETA_MODE: 'BYPASS',
+      }),
+    ).toThrow(
+      /FOUNDER_OPERATOR_BETA_MODE must be DISABLED, PREPARE, or ACTIVE/,
+    );
+  });
+
+  it('requires an exact dedicated database URL for production ACTIVE mode', () => {
+    const missing = {
+      ...validProductionEnvironment(),
+      FOUNDER_OPERATOR_BETA_MODE: 'ACTIVE',
+    };
+    expect(() => validateEnvironment(missing)).toThrow(
+      /FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL must use the dedicated activation role/,
+    );
+
+    const password = 'r'.repeat(40);
+    const databaseUrl =
+      `postgresql://${FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE}:${password}` +
+      '@db.example.test:5432/leetplus?schema=public&connection_limit=2&pool_timeout=5&connect_timeout=5&sslmode=verify-full';
+    const active = {
+      ...missing,
+      DATABASE_URL:
+        'postgresql://leetplus_api:primary-password@db.example.test:5432/leetplus',
+      FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL: databaseUrl,
+    };
+    expect(validateEnvironment(active)).toMatchObject({
+      FOUNDER_OPERATOR_BETA_MODE: 'ACTIVE',
+      FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL: databaseUrl,
+    });
+  });
+
+  it('rejects primary-pool reuse and unsafe activation connection options', () => {
+    const password = 'r'.repeat(40);
+    const databaseUrl =
+      `postgresql://${FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE}:${password}` +
+      '@db.example.test:5432/leetplus?schema=public&connection_limit=2&pool_timeout=5&connect_timeout=5';
+    expect(() =>
+      validateEnvironment({
+        ...validProductionEnvironment(),
+        FOUNDER_OPERATOR_BETA_MODE: 'ACTIVE',
+        DATABASE_URL: databaseUrl,
+        FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL: databaseUrl,
+      }),
+    ).toThrow(
+      /DATABASE_URL must not use the dedicated founder activation role/,
+    );
+    expect(() =>
+      validateEnvironment({
+        ...validProductionEnvironment(),
+        FOUNDER_OPERATOR_BETA_MODE: 'ACTIVE',
+        DATABASE_URL:
+          'postgresql://leetplus_api:primary-password@db.example.test:5432/leetplus',
+        FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL: `${databaseUrl}&application_name=api`,
+      }),
+    ).toThrow(/exact bounded connection options/);
   });
 
   it.each([

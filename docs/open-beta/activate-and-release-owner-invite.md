@@ -1,5 +1,15 @@
 # ACTIVATE_AND_RELEASE_OWNER_INVITE_V1
 
+> Successor decision 17.08.2026: signed CURRENT202/TenantAdmissionDecision path
+> остаётся legacy deny-only. Первый внешний beta tenant будет активирован через
+> `FOUNDER_OPERATOR_BETA_GO_V1` и новый v2 atomic consume path без USB/offline
+> key. V2 SQL/RPC и ACTIVE-only application coordinator реализованы локально и
+> прошли clean PostgreSQL 16 activation/replay. По умолчанию route остаётся
+> fail-closed (`FOUNDER_OPERATOR_BETA_MODE=DISABLED`), а execute-only
+> production grant, restored-copy rehearsal, SMTP acceptance и deploy ещё не
+> выполнены; описанные ниже tenant/identity/outbox atomicity requirements не
+> ослабляются.
+
 Статус:
 `ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`.
 

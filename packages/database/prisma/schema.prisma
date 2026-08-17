@@ -380,6 +380,8 @@ model Tenant {
   identityMailDeliveryTenantEnrollment IdentityMailDeliveryTenantEnrollment?
   identityMailDeliveryEvents           IdentityMailDeliveryEvent[]
   admissionDecisions                   TenantAdmissionDecision[]
+  founderOperatorBetaGos               FounderOperatorBetaGo[]
+  founderOperatorBetaActivation        FounderOperatorBetaActivationCommand?
   sharedBetaActivationCommand          SharedBetaTenantActivationCommand?
   platformAdminAuditEvents             PlatformAdminAuditEvent[]
 
@@ -517,6 +519,9 @@ model User {
   resolvedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationResolvedBy")
   targetedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationTargetUser")
   approvedTenantAdmissionDecisions     TenantAdmissionDecision[]             @relation("TenantAdmissionDecisionApprovedBy")
+  approvedFounderOperatorBetaGos       FounderOperatorBetaGo[]               @relation("FounderOperatorBetaGoApprovedBy")
+  rollbackFounderOperatorBetaGos       FounderOperatorBetaGo[]               @relation("FounderOperatorBetaGoRollbackOwner")
+  founderOperatorBetaActivations       FounderOperatorBetaActivationCommand[] @relation("FounderOperatorBetaActivationActor")
   sharedBetaTenantActivations          SharedBetaTenantActivationCommand[]   @relation("SharedBetaTenantActivationActor")
   platformAdminAuditEvents             PlatformAdminAuditEvent[]             @relation("PlatformAdminAuditActor")
   supportedTenants                     Tenant[]                              @relation("TenantSupportOwner")
@@ -614,6 +619,7 @@ model UserInvite {
   initialOwnerIssueCommand IdentityOwnerInviteIssueCommand?   @relation("IdentityOwnerInviteIssueCommandInvite")
   identityMailOutbox       IdentityMailOutbox?                @relation("IdentityMailOutboxInvite")
   identityMailDeliveryEvents IdentityMailDeliveryEvent[]      @relation("IdentityMailDeliveryEventInvite")
+  founderOperatorBetaActivation FounderOperatorBetaActivationCommand? @relation("FounderOperatorBetaActivationInvite")
   sharedBetaActivation     SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationInvite")
 
   @@unique([tenantId, id], map: "UserInvite_tenantId_id_key")
@@ -675,6 +681,7 @@ model IdentityOwnerInviteIssueCommand {
   tenant               Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   invite               UserInvite                         @relation("IdentityOwnerInviteIssueCommandInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityOwnerInviteIssueCommand_invite_fkey")
   outbox               IdentityMailOutbox?                @relation("IdentityOwnerInviteIssueCommandOutbox")
+  founderOperatorBetaActivation FounderOperatorBetaActivationCommand? @relation("FounderOperatorBetaActivationIssue")
   sharedBetaActivation SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationIssue")
 
   @@unique([tenantId, id], map: "identity_owner_invite_issue_command_tenant_id_key")
@@ -733,6 +740,7 @@ model IdentityMailOutbox {
   tenant               Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   issueCommand         IdentityOwnerInviteIssueCommand    @relation("IdentityOwnerInviteIssueCommandOutbox", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey")
   invite               UserInvite                         @relation("IdentityMailOutboxInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_invite_fkey")
+  founderOperatorBetaActivation FounderOperatorBetaActivationCommand? @relation("FounderOperatorBetaActivationOutbox")
   sharedBetaActivation SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationOutbox")
   deliveryEvents       IdentityMailDeliveryEvent[]
 
@@ -910,6 +918,108 @@ model TenantAdmissionDecisionGate {
   @@id([decisionId, gateCode])
   @@unique([decisionId, attestationId], map: "tenant_admission_decision_gate_attestation_key")
   @@index([attestationId], map: "tenant_admission_decision_gate_attestation_idx")
+}
+
+/// Single-founder beta-only admission authority. It deliberately does not
+/// depend on an offline customer/platform key. The exact tenant shell, release
+/// SHA, trial policy and stop conditions are persisted before owner activation.
+/// A later hardening release may replace this authority with hardware-backed
+/// signing without changing tenant, role or mailbox isolation.
+model FounderOperatorBetaGo {
+  id                                 String    @id
+  tenantId                           String
+  requestId                          String
+  requestDigest                      String    @db.Char(64)
+  contractVersion                    String    @default("FOUNDER_OPERATOR_BETA_GO_V1") @db.VarChar(48)
+  decision                           String    @default("GO") @db.VarChar(8)
+  releaseSha                         String    @db.Char(40)
+  environment                        String    @db.VarChar(64)
+  workflowLocator                    String    @unique(map: "founder_operator_beta_go_locator_uidx")
+  reservationSubjectId               String
+  expectedClaimRevision              Int
+  shellEvidenceDigest                String    @db.Char(64)
+  expectedEntitlementProfileRevision Int
+  expectedExecutionRevision          Int
+  trialPolicyVersion                 String    @default("FOUNDER_OPERATOR_BETA_TRIAL_V1") @db.VarChar(64)
+  trialDurationSeconds               Int
+  approvedByUserId                   String
+  rollbackOwnerUserId                String
+  singleFounderRiskAccepted          Boolean   @default(true)
+  stopConditions                     Json
+  stopConditionsDigest               String    @db.Char(64)
+  payload                            Json
+  payloadDigest                      String    @unique(map: "founder_operator_beta_go_payload_digest_uidx") @db.Char(64)
+  approvedAt                         DateTime  @db.Timestamptz(3)
+  validUntil                         DateTime  @db.Timestamptz(3)
+  stateRevision                      Int       @default(1)
+  revokedAt                          DateTime? @db.Timestamptz(3)
+  revocationReasonDigest             String?   @db.Char(64)
+  consumedAt                         DateTime? @db.Timestamptz(3)
+  createdAt                          DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy    User   @relation("FounderOperatorBetaGoApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  rollbackOwner User   @relation("FounderOperatorBetaGoRollbackOwner", fields: [rollbackOwnerUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  activation    FounderOperatorBetaActivationCommand?
+
+  @@unique([tenantId, requestId], map: "founder_operator_beta_go_request_uidx")
+  @@unique([id, tenantId], map: "founder_operator_beta_go_id_tenant_uidx")
+  @@index([tenantId, stateRevision, validUntil], map: "founder_operator_beta_go_tenant_state_idx")
+  @@index([releaseSha, environment, validUntil], map: "founder_operator_beta_go_release_valid_idx")
+  @@index([approvedByUserId, approvedAt], map: "founder_operator_beta_go_approver_idx")
+  @@index([rollbackOwnerUserId, approvedAt], map: "founder_operator_beta_go_rollback_idx")
+}
+
+/// Immutable PII-free receipt for the single-founder beta activation path.
+/// The database creates this row, consumes the matching GO, activates the
+/// tenant and releases exactly one initial-owner outbox in one SERIALIZABLE
+/// transaction. Application roles never receive direct table writes.
+model FounderOperatorBetaActivationCommand {
+  id                                 String   @id
+  tenantId                           String   @unique(map: "founder_operator_beta_activation_tenant_uidx")
+  action                             String   @default("ACTIVATE_AND_RELEASE_OWNER_INVITE") @db.VarChar(64)
+  requestId                          String
+  requestDigest                      String   @db.Char(64)
+  goId                               String   @unique(map: "founder_operator_beta_activation_go_uidx")
+  releaseSha                         String   @db.Char(40)
+  environment                        String   @db.VarChar(64)
+  shellEvidenceDigest                String   @db.Char(64)
+  actualShellDigest                  String   @db.Char(64)
+  reservationSubjectId               String
+  reservationClaimRevision           Int
+  issueRequestId                     String
+  issueRequestDigest                 String   @db.Char(64)
+  issueCommandId                     String   @unique(map: "founder_operator_beta_activation_issue_uidx")
+  inviteId                           String   @unique(map: "founder_operator_beta_activation_invite_uidx")
+  outboxId                           String   @unique(map: "founder_operator_beta_activation_outbox_uidx")
+  messageKey                         String
+  tokenHash                          String   @db.Char(64)
+  secretCiphertextDigest             String   @db.Char(64)
+  workflowLocator                    String   @unique(map: "founder_operator_beta_activation_locator_uidx")
+  activatedByUserId                  String
+  entitlementProfileRevision         Int
+  executionRevisionBefore            Int
+  executionRevisionAfter             Int
+  trialPolicyVersion                 String   @db.VarChar(64)
+  trialDurationSeconds               Int
+  trialStartsAt                      DateTime @db.Timestamptz(3)
+  trialEndsAt                        DateTime @db.Timestamptz(3)
+  receipt                            Json
+  createdTransactionId               String
+  activatedAt                        DateTime @db.Timestamptz(3)
+
+  tenant      Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_tenant_fkey")
+  go          FounderOperatorBetaGo           @relation(fields: [goId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_go_fkey")
+  issue       IdentityOwnerInviteIssueCommand @relation("FounderOperatorBetaActivationIssue", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_issue_fkey")
+  invite      UserInvite                      @relation("FounderOperatorBetaActivationInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_invite_fkey")
+  outbox      IdentityMailOutbox              @relation("FounderOperatorBetaActivationOutbox", fields: [tenantId, outboxId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_outbox_fkey")
+  activatedBy User                            @relation("FounderOperatorBetaActivationActor", fields: [activatedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_actor_fkey")
+
+  @@unique([tenantId, action, requestId], map: "founder_operator_beta_activation_request_uidx")
+  @@unique([goId, tenantId], map: "founder_operator_beta_activation_go_tenant_uidx")
+  @@unique([tenantId, issueCommandId], map: "founder_operator_beta_activation_tenant_issue_uidx")
+  @@unique([tenantId, inviteId], map: "founder_operator_beta_activation_tenant_invite_uidx")
+  @@unique([tenantId, outboxId], map: "founder_operator_beta_activation_tenant_outbox_uidx")
 }
 
 /// Sealed CI-build provenance for one exact artifact, migration manifest,

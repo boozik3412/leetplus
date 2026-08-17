@@ -1,26 +1,37 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
-- Дата актуализации: 14.08.2026
-- Версия: 2.75
+- Дата актуализации: 17.08.2026
+- Версия: 2.78
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
   только после Gate 1MT и Gate 2
-- Реализован CURRENT202 V2 founder bootstrap: один release/rollback owner и одна
-  зашифрованная флешка для глобального внутреннего platform bootstrap. Ключ не
-  соответствует tenant. Один внешний tenant/store на 30 дней — только canary
-  rollout хранится вне key evidence в отдельном `SHARED BETA GO`; следующие
-  сети подключаются обычным owner invite без новой key ceremony. CURRENT201
-  нужен для внутренней ротации/recovery root
+- Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
+  исключены из critical path первого дружественного beta tenant. CURRENT202 V2
+  остаётся принятым deny-only engineering evidence и переносится в post-beta
+  hardening; он не применяется и не подменяется фиктивным root. Первый внешний
+  tenant получает отдельный persisted `FOUNDER_OPERATOR_BETA_GO_V1`, созданный
+  аутентифицированным Platform Admin, привязанный к exact release SHA, tenant
+  shell, 30-дневной trial policy, rollback owner и пяти stop conditions. Это не
+  отменяет обычные серверные JWT/encryption/SMTP secrets, tenant isolation,
+  email-bound OWNER invite, CI, backup/restore или rollback
+- На 17.08.2026 v2 atomic activation реализован локально: current clean
+  PostgreSQL 16 chain из `183` migrations развёрнут на disposable DB;
+  `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day
+  trial и единственный `HOLD→PENDING` приняты. Application route остаётся
+  default-disabled. Dedicated pool и live least-privilege role assertion
+  реализованы, а `PUBLIC`/обычные roles не имеют RPC `EXECUTE`. Exact SHA, CI
+  artifact, production role/secret/grant, restored-copy и SMTP acceptance ещё
+  обязательны, поэтому release decision остаётся `NO-GO`
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
 - Пакет документации запуска:
   [docs/open-beta](./docs/open-beta/README.md)
 - Актуальный status snapshot:
-  [Gate 0 evidence 10.08.2026](./docs/open-beta/gate-0-ci-artifact-2026-08-10.md)
+  [open beta status 17.08.2026](./docs/open-beta/open-beta-current-status-2026-08-17.md)
 - Канонический AccessScope package:
   [docs/security/access-scope](./docs/security/access-scope/README.md)
 
-Сводка launch readiness на 14.08.2026: Gate 0 закрыт exact synchronized SHA,
+Сводка launch readiness на 17.08.2026: Gate 0 закрыт exact synchronized SHA,
 GitHub CI `3/3 SUCCESS` и SHA-bound artifact; локальный CURRENT180–190
 rehearsal принят (`163/163`, independent `P0=0/P1=0`), но внешний доступ
 остаётся `NO-GO`. В основной исполнимой таблице `102` P0: `8` готовы, `34` в
@@ -5076,18 +5087,36 @@ Engineering Green CURRENT187. Он не меняет статус CURRENT186/CUR
 
 | ID                 | Приоритет | Статус        | Шаг                                                           | Definition of Done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Зависимости                                                                                    |
 | ------------------ | --------: | ------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| BETA-LAUNCH-CP-000 |        P0 | Выполнено     | Принять global platform bootstrap successor                   | CURRENT202 V1 остаётся deny-only и не применяется в production. V2 подписывает `platformScope=GLOBAL`, `customerKeyCeremonyRequired=false`, `additionalTenantKeyCeremonyRequired=false`, `routineTenantOnboardingRequiresRootAccess=false` и `sharedBetaGoRequired=true`; tenant/store/trial limits удалены из platform key evidence. Focused `12/12`, CURRENT198 `20/20`, CURRENT201 `16/16`; exact SHA `c2b7b370…`, CI `31790021275` `3/3 SUCCESS`, artifact digest `sha256:8e7b70c5…b504`. Один внутренний root обслуживает все tenants; owner invite, Store и Langame не требуют клиентского ключа                                          | CURRENT198, CURRENT202 V1 engineering acceptance                                               |
+| BETA-LAUNCH-CP-000 |        P0 | Выполнено     | Отделить tenant onboarding от offline platform bootstrap      | Решение 17.08.2026: CURRENT198–202 сохраняются deny-only и переносятся в post-beta hardening. Ни клиентский, ни platform offline key не требуется для первого invite-only tenant. Запрещены фиктивные signatures/root enrollment и ослабление tenant/identity/mail boundaries. Beta-only successor — persisted `FOUNDER_OPERATOR_BETA_GO_V1` от fresh Platform Admin с explicit single-founder risk acceptance, exact SHA, tenant shell, trial, rollback owner и stop conditions                                                                                                                                                | CURRENT202 V2 engineering acceptance, single-founder risk acceptance                            |
 | BETA-LAUNCH-CP-001 |        P0 | Запланировано | Зафиксировать принятый identity/database baseline             | CURRENT186 отдельно принят и refrozen; CURRENT187 достиг Engineering Green; definition coverage, provider lost-response/killswitch evidence и hostile multi-DB/HBA/pooler suite зелёные; exact clean SHA и immutable evidence известны. Каждый CURRENT187 receipt сохраняет `testAccessAuthorized=false/sharedBetaAccess=false`                                                                                                                                                                                                                                                                                                                 | BETA-LAUNCH-CP-000, BETA-IAM-004K, CURRENT186 acceptance, CURRENT187 Engineering Green         |
-| BETA-LAUNCH-CP-002 |        P0 | Запланировано | Провести canonical promotion и production admission ceremony  | Producer/activation v2, zero-secret/zero-inflight, reconciliation/backfill закрыты; выполнены отдельные `PRODUCTION ROOT ENROLLMENT GO` и `PRODUCTION DEPLOY GO`; fresh cluster scan, immutable artifact, CI, backup/restore, apply/rollback/emergency/zero-diff, readiness, monitoring и canary приняты. Сам production admission не разрешает tester access                                                                                                                                                                                                                                                                                   | BETA-LAUNCH-CP-001, BETA-OPS-001..012                                                          |
-| BETA-LAUNCH-CP-003 |        P0 | Запланировано | Включить защищённые email-приглашения владельца и сотрудников | Platform workflow атомарно создаёт shell tenant/store и отправляет mailbox-bound initial `OWNER + NETWORK` invite без raw token/URL/ciphertext в API, BFF, logs или admin response; reissue/revoke/suspend/accept и `SENT` barrier проверены. После активации владелец может в пределах своего tenant отправлять verified email invites сотрудникам, resend/revoke их, назначать только разрешённые роли/клубы и отзывать sessions; password задаётся получателем, generic OWNER escalation и удаление последнего владельца запрещены                                                                                                           | BETA-IAM-004C, BETA-IAM-004L, BETA-IAM-005, BETA-IAM-007, BETA-TEN-001..008, BETA-SEC-008..010 |
+| BETA-LAUNCH-CP-002 |        P0 | Запланировано | Провести canonical promotion и production admission           | Founder beta не требует `PRODUCTION ROOT ENROLLMENT GO`. Обязательны exact clean SHA, immutable CI artifact, fresh cluster scan, zero-secret/zero-inflight, backup/restore, apply/repeat/rollback/emergency/zero-diff, readiness, alerts, monitoring и controlled canary. Обычные production secrets остаются fail-closed. Сам production admission не разрешает tester access                                                                                                                                                                                                                                                     | BETA-LAUNCH-CP-001, BETA-OPS-001..012                                                          |
+| BETA-LAUNCH-CP-003 |        P0 | В работе      | Включить защищённые email-приглашения владельца и сотрудников | Реализованы `FOUNDER_OPERATOR_BETA_GO_V1`, atomic `FOUNDER_OPERATOR_BETA_ACTIVATION_V2` и отдельный activation database pool/live role assertion. Default `DISABLED`; `PREPARE` создаёт только shell + GO/revoke; `ACTIVE` одной SERIALIZABLE transaction создаёт OWNER/NETWORK aggregate, запускает trial, consume GO и делает единственный HOLD→PENDING. Clean PG16 `183` migrations, restricted-role activation/replay/immutability и `INHERIT`/PUBLIC drift deny приняты локально. Production role/secret/grant отсутствуют. Остаток — restored-copy enrollment, provider `SENT`, reissue/revoke/suspend/accept и production-like rehearsal. После accept OWNER управляет users/roles/stores только своего tenant; пароль задаётся получателем | BETA-IAM-004C, BETA-IAM-004L, BETA-IAM-005, BETA-IAM-007, BETA-TEN-001..008, BETA-SEC-008..010 |
 | BETA-LAUNCH-CP-004 |        P0 | Запланировано | Реализовать безопасное self-service подключение Langame       | Управление tenant-wide credential разрешено только `NETWORK` scope; credential зашифрован, tenant-aware FK/claims и запрет повторной привязки external club enforced в БД. Endpoint policy закрывает scheme/host/port, DNS/IP recheck, SSRF/rebinding, metadata/loopback/link-local targets, обязательные timeout, bounded read retry и circuit breaker. Единственный разрешённый flow: diagnostic → read-only club preview → явный выбор → атомарная привязка только выбранного `B1` → reconcile → отдельно подтверждённый initial read-only sync; остальные видимые clubs не создаются автоматически, unattended/outbound writes остаются OFF | BETA-LAUNCH-CP-003, BETA-MT-006, BETA-MOD-ASSORT-006, BETA-OPS-009                             |
 | BETA-LAUNCH-CP-005 |        P0 | Запланировано | Закрыть Gate 1MT, tenant-aware workers и shared Telegram      | Для геймификации, ассортимента/товаров, сотрудников целиком, in-app коммуникаций, users/roles и supporting integrations завершены route/action inventory и статусы `ENFORCED + VERIFIED`; зелёная A/B matrix покрывает API, BFF, UUID/filter/aggregate/export/file/job/SSE и critical browser journeys. Schedulers/workers используют tenant-addressed leases/fencing, fresh lifecycle/entitlement checks и не допускают cross-tenant effects. Общий Telegram-контур имеет durable `update_id` dedupe, tenant/store routing и A/B negative tests; hardcoded demo/tenant/store behaviour отсутствует                                             | BETA-MT-001..009, все BETA-MOD-\* P0, BETA-SEC-003..006, BETA-OPS-002..003, BETA-OPS-008       |
 | BETA-LAUNCH-CP-006 |        P0 | Запланировано | Пройти Gate 2 на текущей сети `Tenant A/A1..A4`               | Четыре текущих клуба остаются одной сетью и переводятся in-place как один `Tenant A` с `Store A1..A4`, без split, duplicate import и переноса внешнего владельца в их scope. Anonymous operational demo paths закрыты; backup/restore, rollback, alerts, support/stop conditions и module reconciliation проверены; internal alpha стабилен не менее семи суток на exact deployed SHA                                                                                                                                                                                                                                                           | BETA-LAUNCH-CP-005, BETA-CUT-001..009, BETA-PILOT-001..006                                     |
-| BETA-LAUNCH-CP-007 |        P0 | Запланировано | Принять отдельный `SHARED BETA GO` и выполнить day-0          | Только после закрытия Gate 1MT и Gate 2 product/operations сохраняют signed/persisted GO с exact SHA, Tenant/Store aliases, entitlement revision, trial, approver, support/rollback owner и stop conditions. После GO штатный protected workflow создаёт отдельный логический `Tenant B/Store B1` в общем data plane и отправляет initial owner email invite; владелец сам задаёт пароль, подключает только свой клуб через безопасный Langame flow и проходит login/scope/module/feedback/kill-switch smoke. Второй внешний tenant не подключается до D1/D7 review первого                                                                     | BETA-LAUNCH-CP-001..006, BETA-MT-010, BETA-PILOT-005..006                                      |
+| BETA-LAUNCH-CP-007 |        P0 | Запланировано | Принять `FOUNDER_OPERATOR_BETA_GO` и выполнить day-0          | После Gate 1MT/Gate 2 fresh Platform Admin сохраняет одноразовый persisted GO с exact SHA, Tenant/Store aliases, entitlement/execution revisions, 30-day trial, same-founder rollback ownership, explicit risk acceptance и stop conditions. Никакая флешка/signing CLI не требуется. После атомарного consume workflow активирует отдельный `Tenant B/Store B1` и отправляет initial OWNER email invite; владелец сам задаёт пароль, подключает только свой клуб и проходит login/scope/module/feedback/kill-switch smoke. Второй внешний tenant не подключается до D1/D7 review первого                                                       | BETA-LAUNCH-CP-001..006, BETA-MT-010, BETA-PILOT-005..006                                      |
+| BETA-LAUNCH-CP-008 |        P1 | Post-beta     | Вернуться к hardware/offline platform trust hardening         | После проверки product-market fit отдельно принимаются threat model и необходимость KMS/HSM/малой USB: CURRENT198 registry, CURRENT199 registration, CURRENT200 lifecycle и CURRENT201/202 ceremony могут быть активированы для узких privileged Langame/platform operations. Это не меняет модель one-key-per-platform, не создаёт client keys и не является условием обычного tenant onboarding                                                                                                                                                | Успешный D7/D30 review первого beta tenant, отдельное security decision                         |
 
 До `BETA-LAUNCH-CP-007` внешний tester access остаётся `NO-GO`. Первый тестер
 никогда не добавляется в `Tenant A/A1..A4`, а временный общий пароль или ручное
 создание пользователя не являются допустимым обходом email-bound activation.
+
+Checkpoint 17.08.2026: локально добавлены migrations
+`20260817010000_founder_operator_beta_go` и
+`20260817020000_founder_operator_beta_activation_v2`, immutable GO/activation
+guards, `FOUNDER_OPERATOR_BETA_MODE`, Platform Admin prepare/GO/revoke/activate
+routes и PII-free SHA/tenant/trial/stop-condition binding. Focused gate —
+`4 suites / 65 tests`, полный identity-mail/onboarding —
+`18 suites / 477 tests`; API/database typecheck, Prisma validate/generate и
+focused ESLint зелёные. Clean PostgreSQL 16 deploy всех `183` migrations и
+opt-in restricted-role activation/replay/immutability fixture — `PASS`;
+disposable DB/role удалены без residue. `DISABLED` остаётся default;
+PUBLIC/application RPC `EXECUTE` отсутствует. Dedicated pool и live assertion
+блокируют owner/superuser, `INHERIT`, `PUBLIC EXECUTE`, extra definer и
+privilege drift. Production, четыре текущих клуба и внешний tester не
+изменялись. До deploy обязательны exact SHA/CI artifact, production role/secret/
+grant enrollment на restored-copy, mail worker `SENT` barrier, Gate 1MT/Gate 2
+и отдельный deploy decision.
 
 ### 12.15. Implementation checkpoint — 05.08.2026
 
@@ -5145,7 +5174,7 @@ fail-closed.
 | `CURRENT180-190-IN-MEMORY-ASSEMBLER`    |        P0 | `ENGINEERING ACCEPTED LOCALLY / NON-RUNNABLE / NO DEPLOY`                         | V2 allow-manifest и assembler собирают immutable 192-entry artifact: schema, lock и exact 190 migrations; CURRENT187-E исключён; canonical CRLF/LF нормализуется, frozen CURRENT180–190 byte-exact; filesystem/process/DB/network/provider capabilities отсутствуют; caller proxy/accessor не исполняется; focused `21/21`; CI gate подключён                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Нужен отдельный `DISPOSABLE_POSTGRESQL_REHEARSAL_ONLY` authority contract и reviewed runner; assembler receipt не разрешает DB apply                                                                                                                       |
 | `CANONICAL-180-190`                     |        P0 | `LOCAL REHEARSAL GREEN / CANONICAL PROMOTION PENDING`                             | frozen source candidates и proposal-only refreeze manifest существуют вне canonical chain; local disposable runner дважды доказал exact CURRENT179→190 apply/no-op/rollback и zero residue; прямое копирование в canonical migrations по-прежнему запрещено                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Один reviewed refrozen canonical release, exact runtime grants/attestation, backup/restore и signed production-like apply/rollback/emergency/zero-diff                                                                                                     |
 | `GATE-2-A1..A4`                         |        P0 | `NOT STARTED`                                                                     | Текущая сеть не изменялась                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | In-place cutover одного Tenant с четырьмя Store, anonymous demo closure и минимум 7 суток stable internal alpha                                                                                                                                            |
-| `SHARED-BETA-GO`                        |        P0 | `NO-GO`                                                                           | Ручное создание tester account запрещено                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Только после всех предыдущих строк signed/persisted GO может создать `Tenant B/Store B1` и отправить mailbox-bound OWNER invite                                                                                                                            |
+| `FOUNDER-OPERATOR-BETA-GO`              |        P0 | `V2 + RUNTIME BOUNDARY IMPLEMENTED / PRODUCTION NO-GO`                             | Ручное создание tester account запрещено. GO/revoke, atomic v2 activation и dedicated database pool/live least-privilege assertion не требуют USB/offline key; default mode `DISABLED`. V2 одной SERIALIZABLE transaction создаёт OWNER/NETWORK invite, запускает 30-day trial, consume GO и выполняет единственный HOLD→PENDING. Локально зелёные Prisma/API/database checks, focused `3 suites / 59 tests`, identity-mail `18 suites / 477 tests`, clean PG16 `183` migrations и restricted-role activation/replay/immutability/drift `1/1`; response secret-free. Production и текущие четыре клуба не изменены; PUBLIC/обычные roles не имеют RPC EXECUTE, production activation role/secret/grant не создавались                                                                                                                                                                                                                          | Exact clean SHA/CI artifact; создать role secret и применить grant/attestation на restored-copy; apply/replay/rollback; SMTP SENT/reissue/revoke/accept; Gate 1MT/2; затем PREPARE→one-tenant ACTIVE canary и mailbox-bound OWNER invite              |
 
 Отдельный users/roles Web BFF gate фиксирует exact семь route-файлов и девять
 handlers: только server-side cookie bearer, без client
@@ -5157,22 +5186,19 @@ target `4/4`, artifact `sha256:2c0d023a…8e387b`; browser A/B ещё обяза
 
 Текущий порядок разработки:
 
-1. Завершить CURRENT187 production admission. Public J1–J4 topology и
-   36-outcome runner приняты R9; disposable production file-signer bridge
-   принят R10 на SHA `8c34895a…`, CI `31639146344`. Следующий защищённый этап —
-   immutable CURRENT198 registry foundation подготовлена с пустым root set;
-   после её exact-SHA acceptance — append-only enrollment lifecycle, затем
-   отдельно разрешённая external key ceremony с OS ACL/HSM/KMS и reviewed
-   production root enrollment; после этого canonical runtime roles, grants,
-   attestation, restored-copy apply/repeat/rollback/zero-diff и независимая
-   latest-byte проверка. Ни один из этих engineering gates сам по себе не даёт
-   production deployment или shared-beta authority.
+1. Зафиксировать текущий v2/runtime successor в clean exact SHA и принять
+   воспроизводимый CI artifact. Затем создать dedicated role secret, применить
+   exact grant/attestation на restored-copy и принять ACL/lost-response/revoke
+   matrix.
+   CURRENT198–202 и USB не входят в этот critical path и остаются deny-only
+   post-beta hardening.
 2. Завершить Gate 1MT store-scope/HTTP/BFF/browser adoption по всему
    согласованному scope.
-3. Выполнить canonical CURRENT180–190 promotion, signed production-like
-   restored-copy apply/repeat/rollback/zero-diff и получить отдельный production
-   root/deploy GO.
+3. Выполнить canonical promotion и production-like restored-copy
+   apply/repeat/rollback/zero-diff; принять exact SHA/CI artifact, backup,
+   readiness, monitoring и отдельный `PRODUCTION DEPLOY GO` без offline root.
 4. Controlled canary, затем Gate 2 на `Tenant A/A1..A4` и минимум семь суток
    stable internal alpha.
-5. Отдельный `SHARED BETA GO`, затем штатное создание `Tenant B/Store B1` и
-   mailbox-bound OWNER invite.
+5. В режиме `ACTIVE` сохранить отдельный `FOUNDER_OPERATOR_BETA_GO`, затем
+   атомарно активировать `Tenant B/Store B1` и отправить mailbox-bound OWNER
+   invite. Внешний пользователь сам задаёт пароль; `123456` не используется.

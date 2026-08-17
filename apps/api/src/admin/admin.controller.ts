@@ -18,6 +18,8 @@ import {
   AdminService,
   type PlatformAdminAuditEventQuery,
 } from './admin.service';
+import { FounderOperatorBetaActivationService } from './founder-operator-beta-activation.service';
+import { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
 import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
 
 @Controller('admin')
@@ -27,6 +29,8 @@ export class AdminController {
     private readonly adminService: AdminService,
     private readonly tenantEntitlementProfileService: TenantEntitlementProfileService,
     private readonly sharedTenantProvisioningService: SharedTenantProvisioningService,
+    private readonly founderOperatorBetaGoService: FounderOperatorBetaGoService,
+    private readonly founderOperatorBetaActivationService: FounderOperatorBetaActivationService,
   ) {}
 
   @Get('overview')
@@ -71,13 +75,26 @@ export class AdminController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: unknown,
   ) {
-    void user;
-    void body;
-    throw new ServiceUnavailableException({
-      message:
-        'Shared beta provisioning is disabled until the initial OWNER identity outbox and protected activation workflow are implemented',
-      reasonCode: 'SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING',
-    });
+    this.founderOperatorBetaGoService.assertPreparationEnabled();
+    return this.sharedTenantProvisioningService.provision(user, body ?? {});
+  }
+
+  @Post('shared-beta/tenants/:tenantId/founder-operator-go')
+  issueFounderOperatorBetaGo(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    return this.founderOperatorBetaGoService.issue(user, tenantId, body ?? {});
+  }
+
+  @Post('shared-beta/tenants/:tenantId/founder-operator-go/revoke')
+  revokeFounderOperatorBetaGo(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    return this.founderOperatorBetaGoService.revoke(user, tenantId, body ?? {});
   }
 
   @Post('shared-beta/tenants/:tenantId/activate')
@@ -86,14 +103,11 @@ export class AdminController {
     @Param('tenantId') tenantId: string,
     @Body() body: unknown,
   ) {
-    void user;
-    void tenantId;
-    void body;
-    throw new ServiceUnavailableException({
-      message:
-        'Shared beta initial-owner activation is disabled until cluster admission, production role enrollment and launch GO are accepted',
-      reasonCode: 'SHARED_BETA_INITIAL_OWNER_COORDINATOR_DORMANT',
-    });
+    return this.founderOperatorBetaActivationService.activate(
+      user,
+      tenantId,
+      body ?? {},
+    );
   }
 
   @Post('tenants/:tenantId/initial-owner-invite/revoke')

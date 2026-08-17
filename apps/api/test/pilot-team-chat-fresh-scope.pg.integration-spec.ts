@@ -15,6 +15,8 @@ const integrationEnabled =
   process.env.PILOT_TEAM_CHAT_SCOPE_PG_CONFIRM === integrationConfirmation;
 const describePostgres = integrationEnabled ? describe : describe.skip;
 
+jest.setTimeout(30_000);
+
 type Fixture = {
   tenantAId: string;
   tenantASlug: string;

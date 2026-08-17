@@ -84,13 +84,24 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   файлы удалены, кластер остановлен. Live production backup/isolated restored
   target и скачанный CI artifact не использовались, поэтому gate ещё не
   выполнен.
+- implementation SHA `9caa3e49a03e4b04156689aa6d8ef0d8f4ffebe6` принят push CI
+  `32053402516` и PR CI `32053406454` как `3/3 SUCCESS`; release artifact
+  `9295786786`, digest
+  `sha256:e8cf5a0e062089fc709054c74e754de92e579bc0e6ce195ec6aa5aadf2526704`;
+- activation-role controller реализован: raw password заменяется локально
+  рассчитанным SCRAM verifier, modes `plan/apply/check/rollback` exact-bound к
+  fresh preflight/manifest/operation ID и сохраняют recovery receipt. Unit
+  `6/6`; synthetic PostgreSQL lifecycle прошёл
+  `PLAN→APPLIED→ATTESTED→APPLY_RECONCILED→ROLLED_BACK→ROLLBACK_RECONCILED` с
+  восстановлением исходного PUBLIC ACL и zero role/database/file residue.
+  Fixture HBA был `trust`, поэтому production-like TLS/SCRAM login ещё не принят.
 
 ## Что блокирует выдачу доступа
 
-1. Clean SHA/CI artifact принят, read-only restored-copy preflight реализован,
-   но live backup/isolated target ещё не поданы. Dedicated role/password/grant
-   не созданы и не приняты на restored-copy; обычные application roles
-   намеренно не имеют `EXECUTE`.
+1. Clean SHA/CI artifact принят; read-only preflight и exact activation-role
+   controller реализованы и приняты на synthetic PostgreSQL. Но immutable
+   production backup/isolated restored target, скачанный exact artifact и
+   production-like HBA/TLS/SCRAM/pool/API acceptance ещё не выполнены.
 2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
    readiness evidence.
 3. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
@@ -107,6 +118,7 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 clean SHA + CI artifact [DONE]
   → live backup + isolated target + read-only preflight
   → execute-only runtime role/grant/attestation
+  → HBA/TLS/SCRAM + dedicated pool live call
   → restored-copy apply/replay/rollback + backup/readiness
   → SMTP canary + SENT/revoke/accept evidence
   → Gate 1MT browser/store-scope

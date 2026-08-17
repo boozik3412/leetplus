@@ -1,18 +1,15 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import pg from "pg";
 import {
   FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_READY,
   assertFounderPilotRestoredCopyDatabaseUrl,
+  inspectFounderPilotRestoredCopyTarget,
   loadFounderPilotRestoredCopyManifest,
   runFounderPilotRestoredCopyPreflight,
 } from "./founder-pilot-restored-copy-preflight.mjs";
 
-const { Client } = pg;
 const DATABASE_URL_ENV = "FOUNDER_PILOT_RESTORED_COPY_DATABASE_URL";
-const ACTIVATION_ROLE = "leetplus_founder_beta_activation_runtime";
 
 function usage() {
   return `Usage:
@@ -33,76 +30,6 @@ function parseArgs(argv) {
     throw new Error("FOUNDER_PILOT_PREFLIGHT_ARGUMENTS_INVALID");
   }
   return { help: false, manifestPath: argv[1] };
-}
-
-function migrationManifestDigest(rows) {
-  return createHash("sha256")
-    .update(
-      rows
-        .map(({ checksum, migrationName }) => `${migrationName}\0${checksum}`)
-        .join("\n"),
-      "utf8",
-    )
-    .digest("hex");
-}
-
-async function inspectTarget(databaseUrl, expected) {
-  assertFounderPilotRestoredCopyDatabaseUrl(databaseUrl, expected);
-  const client = new Client({
-    connectionString: databaseUrl,
-    connectionTimeoutMillis: 5000,
-  });
-  await client.connect();
-  try {
-    await client.query("BEGIN TRANSACTION READ ONLY");
-    await client.query("SET LOCAL statement_timeout = '10s'");
-    const identity = await client.query(`
-      SELECT
-        pg_catalog.current_database() AS "currentDatabase",
-        current_user AS "currentUser",
-        pg_catalog.host(pg_catalog.inet_server_addr()) AS "serverAddress",
-        pg_catalog.inet_server_port()::INTEGER AS "serverPort",
-        (pg_catalog.pg_control_system()).system_identifier::TEXT AS "systemIdentifier",
-        (
-          SELECT pg_catalog.count(*)::INTEGER
-          FROM pg_catalog.pg_roles AS role
-          WHERE role.rolname = '${ACTIVATION_ROLE}'
-        ) AS "founderActivationRoleCount",
-        (
-          SELECT pg_catalog.count(*)::INTEGER
-          FROM pg_catalog.pg_stat_activity AS activity
-          WHERE activity.datname = pg_catalog.current_database()
-            AND activity.pid <> pg_catalog.pg_backend_pid()
-        ) AS "otherTargetSessionCount"
-    `);
-    const migrations = await client.query(`
-      SELECT
-        migration."migration_name" AS "migrationName",
-        migration."checksum",
-        migration."finished_at" IS NOT NULL
-          AND migration."rolled_back_at" IS NULL AS "applied"
-      FROM public."_prisma_migrations" AS migration
-      ORDER BY migration."migration_name" COLLATE "C", migration."started_at"
-    `);
-    await client.query("COMMIT");
-    const applied = migrations.rows.filter((row) => row.applied === true);
-    return {
-      ...identity.rows[0],
-      migrationCount: applied.length,
-      migrationManifestDigest: migrationManifestDigest(applied),
-      nonAppliedMigrationCount: migrations.rows.length - applied.length,
-      schemaHead: applied.at(-1)?.migrationName ?? null,
-    };
-  } catch (error) {
-    try {
-      await client.query("ROLLBACK");
-    } catch {
-      // The outer fail-closed result retains no database or credential details.
-    }
-    throw error;
-  } finally {
-    await client.end();
-  }
 }
 
 export async function main(
@@ -127,7 +54,8 @@ export async function main(
     const databaseUrl = environment[DATABASE_URL_ENV];
     assertFounderPilotRestoredCopyDatabaseUrl(databaseUrl, manifest.target);
     const result = await runFounderPilotRestoredCopyPreflight({
-      inspectTarget: (expected) => inspectTarget(databaseUrl, expected),
+      inspectTarget: (expected) =>
+        inspectFounderPilotRestoredCopyTarget(databaseUrl, expected),
       manifest,
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

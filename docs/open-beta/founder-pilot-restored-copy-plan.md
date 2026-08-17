@@ -12,6 +12,11 @@ adversarial-матрица `6/6 PASS`, synthetic PostgreSQL 16.14 collector ве
 ещё не предоставлены, поэтому это engineering evidence, а не утверждение о
 выполненном rehearsal.
 
+Exact activation-role `plan/apply/check/rollback` controller также реализован:
+[restored-copy activation role deployment](./founder-pilot-activation-role-deployment.md).
+Unit `6/6`; synthetic PostgreSQL full lifecycle и zero-residue приняты. Реальный
+HBA/TLS/SCRAM handshake и production-backup restored copy ещё обязательны.
+
 ## Входные условия
 
 - immutable production backup и отдельно полученный checksum;

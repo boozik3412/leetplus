@@ -8,6 +8,7 @@ import {
   FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_BLOCKED,
   FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_CONTRACT,
   FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_READY,
+  assertFounderPilotRestoredCopyPreflightReceipt,
   assertFounderPilotRestoredCopyDatabaseUrl,
   inspectFounderPilotImmutableFile,
   loadFounderPilotRestoredCopyManifest,
@@ -111,6 +112,7 @@ test("accepts exact files, isolated target identity, migration state, and outbou
   assert.equal(result.evidence.artifactSha256, sha256(ARTIFACT_BYTES));
   assert.match(result.evidence.targetIdentityDigest, /^[0-9a-f]{64}$/u);
   assert.match(result.evidenceDigest, /^[0-9a-f]{64}$/u);
+  assert.match(result.manifestDigest, /^[0-9a-f]{64}$/u);
   const serialized = JSON.stringify(result);
   assert.doesNotMatch(
     serialized,
@@ -119,6 +121,28 @@ test("accepts exact files, isolated target identity, migration state, and outbou
   assert.doesNotMatch(serialized, /password|secret|ALIENWARE/iu);
   assert.ok(Object.isFrozen(result));
   assert.ok(Object.isFrozen(result.evidence));
+  assert.equal(
+    assertFounderPilotRestoredCopyPreflightReceipt(
+      result,
+      manifest(files.artifactPath, files.backupPath),
+    ),
+    result,
+  );
+  assert.throws(
+    () =>
+      assertFounderPilotRestoredCopyPreflightReceipt(
+        structuredClone(result),
+        manifest(files.artifactPath, files.backupPath),
+      ),
+    { reasonCode: "FOUNDER_PILOT_PREFLIGHT_RECEIPT_NOT_LIVE" },
+  );
+  const changedManifest = manifest(files.artifactPath, files.backupPath);
+  changedManifest.retention.rtoSeconds += 1;
+  assert.throws(
+    () =>
+      assertFounderPilotRestoredCopyPreflightReceipt(result, changedManifest),
+    { reasonCode: "FOUNDER_PILOT_PREFLIGHT_RECEIPT_NOT_LIVE" },
+  );
 });
 
 test("hashes the actual file and fails closed on a separately supplied checksum mismatch", async (t) => {

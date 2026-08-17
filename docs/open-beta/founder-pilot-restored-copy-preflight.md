@@ -8,6 +8,11 @@
 изолированной копии. Он не является deploy authority и никогда не подключается
 к production.
 
+Implementation SHA `9caa3e49a03e4b04156689aa6d8ef0d8f4ffebe6` принят push CI
+`32053402516` и PR CI `32053406454` как `3/3 SUCCESS`. Release artifact
+`9295786786`, digest
+`sha256:e8cf5a0e062089fc709054c74e754de92e579bc0e6ce195ec6aa5aadf2526704`.
+
 ## Что доказывает команда
 
 Команда допускает только database-only rehearsal и возвращает
@@ -123,11 +128,9 @@ production backup gate: использовались synthetic clone и лока
 
 ## Что остаётся после `READY`
 
-1. Создать одноразовый secret dedicated activation role вне Git/logs.
-2. Выполнить отдельно реализуемый apply/check/revoke controller на этой же
-   restored copy.
-3. Принять exact role attributes, один `EXECUTE`, zero membership/ownership и
-   rollback/revoke/lost-response matrix.
-4. Выполнить migration apply/replay/rollback и zero-diff.
-5. Удалить role, credentials, restored DB и backup copy в срок `deleteBy`.
-6. Только после PII-free отчёта переходить к SMTP canary и Gate 1MT/2.
+1. На production-backup restored copy выполнить уже реализованный
+   [activation role deployment](./founder-pilot-activation-role-deployment.md).
+2. Принять production-like HBA/TLS/SCRAM login, pool URL и live API call.
+3. Выполнить migration apply/replay/rollback и zero-diff.
+4. Удалить role, credentials, restored DB и backup copy в срок `deleteBy`.
+5. Только после PII-free отчёта переходить к SMTP canary и Gate 1MT/2.

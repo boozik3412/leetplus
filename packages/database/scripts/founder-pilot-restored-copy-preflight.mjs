@@ -2,20 +2,24 @@ import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
+import pg from "pg";
 
 export const FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_CONTRACT =
   "FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_V1";
 export const FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_READY =
   "READY_FOR_RESTORED_COPY_DATABASE_REHEARSAL";
 export const FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_BLOCKED = "BLOCKED_MANUAL";
+export const FOUNDER_PILOT_ACTIVATION_ROLE =
+  "leetplus_founder_beta_activation_runtime";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const RELEASE_SHA = /^[0-9a-f]{40}$/u;
 const SAFE_ROLE = /^[a-z][a-z0-9_]{2,62}$/u;
 const SAFE_DATABASE = /^leetplus_(?:rehearsal|restored)_[a-z0-9_]{3,48}$/u;
 const LOOPBACK_HOST = "127.0.0.1";
-const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u;
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const MAX_MANIFEST_BYTES = 64 * 1024;
+const acceptedPreflightReceipts = new WeakSet();
 
 export class FounderPilotRestoredCopyPreflightError extends Error {
   constructor(reasonCode) {
@@ -269,6 +273,39 @@ function digest(domain, value) {
     .digest("hex");
 }
 
+export function founderPilotRestoredCopyManifestDigest(value) {
+  return digest("manifest", normalizeManifest(value));
+}
+
+export function assertFounderPilotRestoredCopyPreflightReceipt(
+  receipt,
+  manifest,
+) {
+  if (
+    receipt === null ||
+    typeof receipt !== "object" ||
+    !acceptedPreflightReceipts.has(receipt) ||
+    receipt.contractVersion !==
+      FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_CONTRACT ||
+    receipt.decision !== FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_READY ||
+    receipt.reasonCode !== null ||
+    receipt.manifestDigest !==
+      founderPilotRestoredCopyManifestDigest(manifest) ||
+    receipt.evidence?.releaseSha !== manifest.release.releaseSha ||
+    receipt.evidence?.artifactSha256 !== manifest.release.artifactSha256 ||
+    receipt.evidence?.backupSha256 !== manifest.backup.backupSha256 ||
+    receipt.evidence?.sourceMigrationCount !==
+      manifest.target.sourceMigrationCount ||
+    receipt.evidence?.sourceSchemaHead !== manifest.target.sourceSchemaHead ||
+    receipt.evidence?.sourceMigrationManifestDigest !==
+      manifest.target.sourceMigrationManifestDigest ||
+    !SHA256.test(receipt.evidenceDigest)
+  ) {
+    fail("FOUNDER_PILOT_PREFLIGHT_RECEIPT_NOT_LIVE");
+  }
+  return receipt;
+}
+
 function fileIdentity(stat) {
   return [stat.dev, stat.ino, stat.size, stat.mtimeNs]
     .map((part) => part.toString())
@@ -401,6 +438,83 @@ export function assertFounderPilotRestoredCopyDatabaseUrl(databaseUrl, target) {
     ownerRoleName: parsed.username,
     port: Number(parsed.port),
   });
+}
+
+function migrationManifestDigest(rows) {
+  return createHash("sha256")
+    .update(
+      rows
+        .map(({ checksum, migrationName }) => `${migrationName}\0${checksum}`)
+        .join("\n"),
+      "utf8",
+    )
+    .digest("hex");
+}
+
+export async function inspectFounderPilotRestoredCopyTarget(
+  databaseUrl,
+  expected,
+) {
+  assertFounderPilotRestoredCopyDatabaseUrl(databaseUrl, expected);
+  const { Client } = pg;
+  const client = new Client({
+    connectionString: databaseUrl,
+    connectionTimeoutMillis: 5000,
+  });
+  await client.connect();
+  try {
+    await client.query("BEGIN TRANSACTION READ ONLY");
+    await client.query("SET LOCAL statement_timeout = '10s'");
+    const identity = await client.query(
+      `
+        SELECT
+          pg_catalog.current_database() AS "currentDatabase",
+          current_user AS "currentUser",
+          pg_catalog.host(pg_catalog.inet_server_addr()) AS "serverAddress",
+          pg_catalog.inet_server_port()::INTEGER AS "serverPort",
+          (pg_catalog.pg_control_system()).system_identifier::TEXT AS "systemIdentifier",
+          (
+            SELECT pg_catalog.count(*)::INTEGER
+            FROM pg_catalog.pg_roles AS role
+            WHERE role.rolname = $1
+          ) AS "founderActivationRoleCount",
+          (
+            SELECT pg_catalog.count(*)::INTEGER
+            FROM pg_catalog.pg_stat_activity AS activity
+            WHERE activity.datname = pg_catalog.current_database()
+              AND activity.pid <> pg_catalog.pg_backend_pid()
+          ) AS "otherTargetSessionCount"
+      `,
+      [FOUNDER_PILOT_ACTIVATION_ROLE],
+    );
+    const migrations = await client.query(`
+      SELECT
+        migration."migration_name" AS "migrationName",
+        migration."checksum",
+        migration."finished_at" IS NOT NULL
+          AND migration."rolled_back_at" IS NULL AS "applied"
+      FROM public."_prisma_migrations" AS migration
+      ORDER BY migration."migration_name" COLLATE "C", migration."started_at"
+    `);
+    await client.query("COMMIT");
+    const applied = migrations.rows.filter((row) => row.applied === true);
+    return {
+      ...identity.rows[0],
+      migrationCount: applied.length,
+      migrationManifestDigest: migrationManifestDigest(applied),
+      nonAppliedMigrationCount: migrations.rows.length - applied.length,
+      schemaHead: applied.at(-1)?.migrationName ?? null,
+    };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // The outer fail-closed result retains no database or credential details.
+    }
+    throw error;
+  } finally {
+    await client.end();
+  }
 }
 
 function validateTargetEvidence(evidence, target) {
@@ -563,14 +677,17 @@ export async function runFounderPilotRestoredCopyPreflight({
         systemIdentifier: targetEvidence.systemIdentifier,
       }),
     });
-    return Object.freeze({
+    const receipt = Object.freeze({
       checkedAt,
       contractVersion: FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_CONTRACT,
       decision: FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_READY,
       evidence,
       evidenceDigest: digest("accepted-evidence", evidence),
+      manifestDigest: founderPilotRestoredCopyManifestDigest(manifest),
       reasonCode: null,
     });
+    acceptedPreflightReceipts.add(receipt);
+    return receipt;
   } catch (error) {
     return blocked(
       error instanceof FounderPilotRestoredCopyPreflightError

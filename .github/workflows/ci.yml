@@ -326,6 +326,9 @@ jobs:
       - name: Validate founder-pilot restored-copy fail-closed preflight
         run: pnpm --filter database check:founder-pilot-restored-copy-preflight
 
+      - name: Validate founder-pilot exact activation-role deployment
+        run: pnpm --filter database check:founder-pilot-activation-role-deployment
+
       - name: Validate identity email claim and invite writer boundaries
         run: pnpm --filter database check:identity-email-claim-boundary
 

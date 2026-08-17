@@ -8,10 +8,7 @@ export type GuestGameProgressAggregation =
   | 'exists'
   | 'streak';
 
-export type GuestGameProgressPeriodicity =
-  | 'DAILY'
-  | 'WEEKLY'
-  | 'MONTHLY';
+export type GuestGameProgressPeriodicity = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 
 export type GuestGameProgressEvent = {
   eventType: string;
@@ -99,7 +96,7 @@ export function evaluateGuestGameProgress(
   const resetImmediatelyAfterCompletion = Boolean(
     completedAt &&
     !rule.repeatPeriodicity &&
-    completedAt.getTime() < referenceEvent.occurredAt.getTime(),
+    completedAt.getTime() <= referenceEvent.occurredAt.getTime(),
   );
 
   if (!hasMetric && (!target || target <= 1)) {
@@ -398,7 +395,9 @@ function matchesProgressEvent(
 
   // A completed non-periodic mission starts a fresh accumulation immediately.
   // Facts that contributed to the previous reward must never be reused to
-  // qualify another reward when an unrelated later event triggers evaluation.
+  // qualify another reward when an unrelated event triggers evaluation. The
+  // boundary is inclusive because providers can emit several events with the
+  // same second-level timestamp as the completed reward.
   if (
     options.resetImmediatelyAfterCompletion &&
     options.completedAt &&
@@ -840,7 +839,8 @@ function dateWithinLastDays(value: Date, reference: Date, days: number) {
 export function guestGameProgressPeriodicity(
   value: unknown,
 ): GuestGameProgressPeriodicity | null {
-  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  const normalized =
+    typeof value === 'string' ? value.trim().toUpperCase() : '';
 
   return normalized === 'DAILY' ||
     normalized === 'WEEKLY' ||
@@ -859,13 +859,13 @@ export function guestGameRepeatCycleReset(
 
   return Boolean(
     completedAt &&
-      periodicity &&
-      !guestGameProgressEventInRepeatPeriod(
-        completedAt,
-        reference,
-        periodicity,
-        timeZone,
-      ),
+    periodicity &&
+    !guestGameProgressEventInRepeatPeriod(
+      completedAt,
+      reference,
+      periodicity,
+      timeZone,
+    ),
   );
 }
 
@@ -884,7 +884,9 @@ function guestGameProgressEventInRepeatPeriod(
   }
 
   if (periodicity === 'MONTHLY') {
-    return localMonthKey(value, timeZone) === localMonthKey(reference, timeZone);
+    return (
+      localMonthKey(value, timeZone) === localMonthKey(reference, timeZone)
+    );
   }
 
   return reference.getTime() - value.getTime() < 7 * 24 * 60 * 60 * 1000;

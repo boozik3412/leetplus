@@ -1,10 +1,10 @@
-import { ServiceUnavailableException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import type { TenantEntitlementProfileService } from '../tenancy/tenant-entitlement-profile.service';
 import { AdminController } from './admin.controller';
 import type { AdminService } from './admin.service';
 import type { FounderOperatorBetaActivationService } from './founder-operator-beta-activation.service';
 import type { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
+import type { FounderOwnerInviteLifecycleService } from './founder-owner-invite-lifecycle.service';
 import type { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
 
 describe('AdminController shared beta provisioning boundary', () => {
@@ -12,7 +12,6 @@ describe('AdminController shared beta provisioning boundary', () => {
     const sharedTenantProvisioningService = {
       provision: jest.fn(),
       activateInitialOwner: jest.fn(),
-      revokeInitialOwnerInvite: jest.fn(),
     };
     const founderOperatorBetaGoService = {
       assertPreparationEnabled: jest.fn(),
@@ -22,6 +21,10 @@ describe('AdminController shared beta provisioning boundary', () => {
     const founderOperatorBetaActivationService = {
       activate: jest.fn(),
     };
+    const founderOwnerInviteLifecycleService = {
+      status: jest.fn(),
+      revoke: jest.fn(),
+    };
     return {
       controller: new AdminController(
         {} as AdminService,
@@ -29,10 +32,12 @@ describe('AdminController shared beta provisioning boundary', () => {
         sharedTenantProvisioningService as unknown as SharedTenantProvisioningService,
         founderOperatorBetaGoService as unknown as FounderOperatorBetaGoService,
         founderOperatorBetaActivationService as unknown as FounderOperatorBetaActivationService,
+        founderOwnerInviteLifecycleService as unknown as FounderOwnerInviteLifecycleService,
       ),
       sharedTenantProvisioningService,
       founderOperatorBetaGoService,
       founderOperatorBetaActivationService,
+      founderOwnerInviteLifecycleService,
     };
   }
 
@@ -116,27 +121,34 @@ describe('AdminController shared beta provisioning boundary', () => {
     );
   });
 
-  it('keeps the legacy initial-owner revoke route fail-closed', () => {
-    const { controller: adminController, sharedTenantProvisioningService } =
+  it('delegates protected initial-owner status and revoke', async () => {
+    const { controller: adminController, founderOwnerInviteLifecycleService } =
       controller();
     const user = {
       id: 'platform-admin',
       isPlatformAdmin: true,
     } as AuthenticatedUser;
+    founderOwnerInviteLifecycleService.status.mockResolvedValue({
+      ownerInvite: { state: 'ACTIVE' },
+    });
+    founderOwnerInviteLifecycleService.revoke.mockResolvedValue({
+      decision: 'REVOKED',
+    });
 
-    try {
-      adminController.revokeSharedBetaInitialOwnerInvite(user, 'tenant-id', {});
-      throw new Error('Expected revoke boundary to reject');
-    } catch (error) {
-      expect(error).toBeInstanceOf(ServiceUnavailableException);
-      expect(
-        (error as ServiceUnavailableException).getResponse(),
-      ).toMatchObject({
-        reasonCode: 'SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING',
-      });
-    }
-    expect(
-      sharedTenantProvisioningService.revokeInitialOwnerInvite,
-    ).not.toHaveBeenCalled();
+    await expect(
+      adminController.getSharedBetaInitialOwnerInviteStatus(user, 'tenant-id'),
+    ).resolves.toEqual({ ownerInvite: { state: 'ACTIVE' } });
+    await expect(
+      adminController.revokeSharedBetaInitialOwnerInvite(user, 'tenant-id', {}),
+    ).resolves.toEqual({ decision: 'REVOKED' });
+    expect(founderOwnerInviteLifecycleService.status).toHaveBeenCalledWith(
+      user,
+      'tenant-id',
+    );
+    expect(founderOwnerInviteLifecycleService.revoke).toHaveBeenCalledWith(
+      user,
+      'tenant-id',
+      {},
+    );
   });
 });

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.141                                        |
+| Версия           | 1.142                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -78,6 +78,8 @@ Exact direct PostgreSQL HBA/TLS/SCRAM acceptance dedicated роли:
 [founder runnable release artifact](./founder-pilot-release-artifact-runtime.md).
 Полный запуск скачанного API package описан в
 [founder release artifact API child process](./founder-pilot-release-artifact-api-child-process.md).
+Защищённые status/revoke initial OWNER invite описаны в
+[founder owner invite lifecycle](./founder-owner-invite-lifecycle.md).
 
 ## Канонические документы
 

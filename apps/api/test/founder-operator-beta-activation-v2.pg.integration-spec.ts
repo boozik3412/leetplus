@@ -17,6 +17,7 @@ import {
   type FounderOperatorBetaActivationResult,
 } from '../src/admin/founder-operator-beta-activation.service';
 import { FounderOperatorBetaGoService } from '../src/admin/founder-operator-beta-go.service';
+import { FounderOwnerInviteLifecycleService } from '../src/admin/founder-owner-invite-lifecycle.service';
 import { SharedTenantProvisioningService } from '../src/admin/shared-tenant-provisioning.service';
 import { FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE } from '../src/config/environment-validation';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -237,6 +238,10 @@ describePostgres(
         activationDatabase,
         config,
         provisioning,
+      );
+      const ownerInviteLifecycle = new FounderOwnerInviteLifecycleService(
+        prisma,
+        identity,
       );
       const effectiveSecurityDefiners = await activationPrisma.$queryRaw<
         Array<{ signature: string }>
@@ -459,6 +464,96 @@ describePostgres(
           WHERE "id" = ${command.id}
         `),
       ).rejects.toMatchObject({ code: 'P2010' });
+
+      await expect(
+        ownerInviteLifecycle.status(actor, provisioned.tenant.id),
+      ).resolves.toMatchObject({
+        tenant: {
+          id: provisioned.tenant.id,
+          status: 'ACTIVE',
+          onboardingStatus: 'OWNER_INVITED',
+        },
+        ownerInvite: {
+          id: invite.id,
+          state: 'ACTIVE',
+          deliveryStatus: 'PENDING',
+        },
+        actions: { revokeAllowed: true, reissueRequired: false },
+      });
+      const revokeBody = {
+        confirmation: `REVOKE OWNER INVITE ${provisioned.tenant.id}`,
+        requestId: `${run}-owner-revoke`,
+        reason: 'Invalidate the initial owner invite before provider delivery',
+        supportTicket: 'FOUNDER-V2-PG-REVOKE',
+        expectedInviteId: invite.id,
+      };
+      const revoked = await ownerInviteLifecycle.revoke(
+        actor,
+        provisioned.tenant.id,
+        revokeBody,
+      );
+      const revokeReplay = await ownerInviteLifecycle.revoke(
+        actor,
+        provisioned.tenant.id,
+        revokeBody,
+      );
+      const [
+        revokedInvite,
+        canceledOutbox,
+        claimCount,
+        cancelEvents,
+        auditCount,
+      ] = await Promise.all([
+        prisma.userInvite.findUniqueOrThrow({ where: { id: invite.id } }),
+        prisma.identityMailOutbox.findUniqueOrThrow({
+          where: { id: outbox.id },
+        }),
+        prisma.identityEmailClaim.count({
+          where: { tenantId: provisioned.tenant.id },
+        }),
+        prisma.identityMailDeliveryEvent.count({
+          where: {
+            tenantId: provisioned.tenant.id,
+            outboxId: outbox.id,
+            eventType: 'CANCELED',
+          },
+        }),
+        prisma.platformAdminAuditEvent.count({
+          where: {
+            tenantId: provisioned.tenant.id,
+            action: 'FOUNDER_OWNER_INVITE_REVOKED',
+            requestId: revokeBody.requestId,
+          },
+        }),
+      ]);
+      const revokeJson = JSON.stringify([revoked, revokeReplay]);
+      expect({
+        revokedDecision: revoked.decision,
+        replayDecision: revokeReplay.decision,
+        revokedByActor: revokedInvite.revokedByUserId === actor.id,
+        revokedInviteExpired:
+          revokedInvite.expiresAt.getTime() ===
+          revokedInvite.revokedAt?.getTime(),
+        outboxStatus: canceledOutbox.status,
+        outboxCiphertextCleared: canceledOutbox.secretCiphertext === null,
+        outboxReason: canceledOutbox.stateReasonCode,
+        claimCount,
+        cancelEvents,
+        auditCount,
+        responseContainsOwnerEmail: revokeJson.includes(ownerEmail),
+      }).toEqual({
+        revokedDecision: 'REVOKED',
+        replayDecision: 'REPLAYED',
+        revokedByActor: true,
+        revokedInviteExpired: true,
+        outboxStatus: 'CANCELED',
+        outboxCiphertextCleared: true,
+        outboxReason: 'OWNER_INVITE_REVOKED',
+        claimCount: 0,
+        cancelEvents: 1,
+        auditCount: 1,
+        responseContainsOwnerEmail: false,
+      });
     });
   },
 );
@@ -518,6 +613,7 @@ async function activateThroughHttp(input: {
         provide: FounderOperatorBetaActivationService,
         useValue: input.activation,
       },
+      { provide: FounderOwnerInviteLifecycleService, useValue: {} },
     ],
   })
     .overrideGuard(JwtAuthGuard)

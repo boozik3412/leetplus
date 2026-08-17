@@ -8,6 +8,7 @@ import { AdminService } from './admin.service';
 import { FounderOperatorBetaActivationDatabaseService } from './founder-operator-beta-activation.database';
 import { FounderOperatorBetaActivationService } from './founder-operator-beta-activation.service';
 import { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
+import { FounderOwnerInviteLifecycleService } from './founder-owner-invite-lifecycle.service';
 import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
 
 @Module({
@@ -19,6 +20,7 @@ import { SharedTenantProvisioningService } from './shared-tenant-provisioning.se
     FounderOperatorBetaGoService,
     FounderOperatorBetaActivationDatabaseService,
     FounderOperatorBetaActivationService,
+    FounderOwnerInviteLifecycleService,
   ],
 })
 export class AdminModule {}

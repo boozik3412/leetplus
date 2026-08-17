@@ -363,6 +363,9 @@ jobs:
       - name: Lint identity-mail worker and SENT boundary
         run: pnpm --filter api lint:ci:identity-mail-worker
 
+      - name: Lint founder owner invite lifecycle
+        run: pnpm --filter api lint:ci:founder-owner-invite
+
       - name: Lint identity-mail PostgreSQL acceptance seams
         run: pnpm --filter api lint:ci:identity-mail-worker-pg
 
@@ -413,6 +416,9 @@ jobs:
 
       - name: Test identity-mail worker and SENT boundary
         run: pnpm --filter api test:ci:identity-mail-worker
+
+      - name: Test founder owner invite lifecycle
+        run: pnpm --filter api test:ci:founder-owner-invite
 
       - name: Test dormant CURRENT184 provider lost-response boundary
         run: pnpm --filter api test:ci:identity-mail-provider-boundary

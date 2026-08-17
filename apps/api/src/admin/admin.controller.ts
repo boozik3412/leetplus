@@ -5,7 +5,6 @@ import {
   Param,
   Post,
   Query,
-  ServiceUnavailableException,
   StreamableFile,
   UseGuards,
 } from '@nestjs/common';
@@ -20,6 +19,7 @@ import {
 } from './admin.service';
 import { FounderOperatorBetaActivationService } from './founder-operator-beta-activation.service';
 import { FounderOperatorBetaGoService } from './founder-operator-beta-go.service';
+import { FounderOwnerInviteLifecycleService } from './founder-owner-invite-lifecycle.service';
 import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
 
 @Controller('admin')
@@ -31,6 +31,7 @@ export class AdminController {
     private readonly sharedTenantProvisioningService: SharedTenantProvisioningService,
     private readonly founderOperatorBetaGoService: FounderOperatorBetaGoService,
     private readonly founderOperatorBetaActivationService: FounderOperatorBetaActivationService,
+    private readonly founderOwnerInviteLifecycleService: FounderOwnerInviteLifecycleService,
   ) {}
 
   @Get('overview')
@@ -110,20 +111,25 @@ export class AdminController {
     );
   }
 
+  @Get('tenants/:tenantId/initial-owner-invite')
+  getSharedBetaInitialOwnerInviteStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+  ) {
+    return this.founderOwnerInviteLifecycleService.status(user, tenantId);
+  }
+
   @Post('tenants/:tenantId/initial-owner-invite/revoke')
   revokeSharedBetaInitialOwnerInvite(
     @CurrentUser() user: AuthenticatedUser,
     @Param('tenantId') tenantId: string,
     @Body() body: unknown,
   ) {
-    void user;
-    void tenantId;
-    void body;
-    throw new ServiceUnavailableException({
-      message:
-        'Shared beta owner invite revoke is disabled until protected activation, delivery and revocation are implemented',
-      reasonCode: 'SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING',
-    });
+    return this.founderOwnerInviteLifecycleService.revoke(
+      user,
+      tenantId,
+      body ?? {},
+    );
   }
 
   @Post('tenants/:tenantId/entitlement-profile')

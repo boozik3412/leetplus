@@ -8,6 +8,9 @@ const USERS_ROUTE_ROOT = fileURLToPath(
   new URL("../app/api/users", import.meta.url),
 );
 const PROXY_FILE = fileURLToPath(new URL("./proxy.ts", import.meta.url));
+const USER_ACCOUNTS_PANEL_FILE = fileURLToPath(
+  new URL("../components/user-accounts-panel.tsx", import.meta.url),
+);
 
 const EXPECTED_ROUTES = new Map<string, readonly string[]>([
   ["[id]/route.ts", ["PATCH"]],
@@ -114,6 +117,21 @@ test("keeps every response private and CURRENT189 candidate imports dormant", as
   assert.match(proxySource, /"Referrer-Policy": "no-referrer"/);
   assert.match(proxySource, /"X-Content-Type-Options": "nosniff"/);
   assert.match(proxySource, /"Cross-Origin-Resource-Policy": "same-origin"/);
+});
+
+test("keeps new-account UI invite-only and never posts a password account", async () => {
+  const source = await readFile(USER_ACCOUNTS_PANEL_FILE, "utf8");
+
+  assert.doesNotMatch(source, /Создать вручную/u);
+  assert.doesNotMatch(source, /Создать учетную запись/u);
+  assert.doesNotMatch(
+    source,
+    /method:\s*selectedUser\s*\?\s*"PATCH"\s*:\s*"POST"/u,
+  );
+  assert.doesNotMatch(source, /:\s*"\/api\/users"/u);
+  assert.match(source, /fetch\("\/api\/users\/invites"/u);
+  assert.match(source, /Новые учетные записи создаются только/u);
+  assert.match(source, /Пароль задает сам сотрудник/u);
 });
 
 type RouteInventoryRow = Readonly<{

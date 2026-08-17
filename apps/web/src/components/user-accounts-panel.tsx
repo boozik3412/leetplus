@@ -18,7 +18,6 @@ import type {
   UserRoleOption,
 } from "@/lib/users";
 
-type AccountFormMode = "account" | "invite";
 type RoleEditorMode = "idle" | "new" | "system" | "custom";
 
 type FormState = {
@@ -366,8 +365,6 @@ export function UserAccountsPanel({
   const [form, setForm] = useState<FormState>(() =>
     createEmptyForm(defaultRole),
   );
-  const [accountFormMode, setAccountFormMode] =
-    useState<AccountFormMode>("account");
   const [createdInviteUrl, setCreatedInviteUrl] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [roleForm, setRoleForm] =
@@ -596,17 +593,6 @@ export function UserAccountsPanel({
   function startCreate() {
     setSelectedId(null);
     setSelectedInviteId(null);
-    setAccountFormMode("account");
-    setForm(createEmptyForm(defaultRole));
-    setCreatedInviteUrl(null);
-    setCopyStatus("");
-    setStatus({ type: "idle", message: "" });
-  }
-
-  function startCreateInvite() {
-    setSelectedId(null);
-    setSelectedInviteId(null);
-    setAccountFormMode("invite");
     setForm(createEmptyForm(defaultRole));
     setCreatedInviteUrl(null);
     setCopyStatus("");
@@ -616,7 +602,6 @@ export function UserAccountsPanel({
   function startEdit(account: UserAccount) {
     setSelectedId(account.id);
     setSelectedInviteId(null);
-    setAccountFormMode("account");
     setForm(formFromAccount(account));
     setCreatedInviteUrl(null);
     setCopyStatus("");
@@ -626,7 +611,6 @@ export function UserAccountsPanel({
   function startEditInvite(invite: UserInvite) {
     setSelectedId(null);
     setSelectedInviteId(invite.id);
-    setAccountFormMode("invite");
     setForm(formFromInvite(invite));
     setCreatedInviteUrl(invite.registrationUrl ?? null);
     setCopyStatus("");
@@ -870,17 +854,8 @@ export function UserAccountsPanel({
     setCopyStatus("");
     setCreatedInviteUrl(selectedInvite?.registrationUrl ?? null);
 
-    const payload = {
-      email: form.email,
-      fullName: form.fullName,
-      role: form.role,
-      customRoleId: form.customRoleId,
-      isActive: form.isActive,
-      ...(form.password.trim() ? { password: form.password.trim() } : {}),
-      scope: form.scope,
-      storeIds: form.scope === "STORES" ? form.storeIds : [],
-    };
-    if (selectedInvite && accountFormMode === "invite") {
+    const storeIds = form.scope === "STORES" ? form.storeIds : [];
+    if (selectedInvite) {
       const response = await fetch(`/api/users/invites/${selectedInvite.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -890,7 +865,7 @@ export function UserAccountsPanel({
           role: form.role,
           customRoleId: form.customRoleId,
           scope: form.scope,
-          storeIds: payload.storeIds,
+          storeIds,
         }),
       });
 
@@ -918,7 +893,7 @@ export function UserAccountsPanel({
       return;
     }
 
-    if (!selectedUser && accountFormMode === "invite") {
+    if (!selectedUser) {
       const response = await fetch("/api/users/invites", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -928,7 +903,7 @@ export function UserAccountsPanel({
           role: form.role,
           customRoleId: form.customRoleId,
           scope: form.scope,
-          storeIds: payload.storeIds,
+          storeIds,
           expiresInDays: 7,
         }),
       });
@@ -950,19 +925,26 @@ export function UserAccountsPanel({
       setCreatedInviteUrl(invite.registrationUrl ?? null);
       setStatus({
         type: "success",
-        message: "Ссылка создана. Передайте ее сотруднику для регистрации.",
+        message:
+          "Приглашение создано. Передайте ссылку сотруднику: пароль он задаст сам.",
       });
       setIsSaving(false);
       return;
     }
 
-    const endpoint = selectedUser
-      ? `/api/users/${selectedUser.id}`
-      : "/api/users";
-    const response = await fetch(endpoint, {
-      method: selectedUser ? "PATCH" : "POST",
+    const response = await fetch(`/api/users/${selectedUser.id}`, {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        email: form.email,
+        fullName: form.fullName,
+        role: form.role,
+        customRoleId: form.customRoleId,
+        isActive: form.isActive,
+        ...(form.password.trim() ? { password: form.password.trim() } : {}),
+        scope: form.scope,
+        storeIds,
+      }),
     });
 
     if (!response.ok) {
@@ -1025,7 +1007,6 @@ export function UserAccountsPanel({
       current.filter((invite) => invite.id !== selectedInvite.id),
     );
     setSelectedInviteId(null);
-    setAccountFormMode("invite");
     setForm(createEmptyForm(defaultRole));
     setCreatedInviteUrl(null);
     setStatus({ type: "success", message: "Приглашение отменено." });
@@ -1126,47 +1107,21 @@ export function UserAccountsPanel({
                 ? selectedInvite.fullName ||
                   selectedInvite.email ||
                   "Ссылка-приглашение"
-                : accountFormMode === "invite"
-                  ? "Ссылка для регистрации"
-                  : "Новая учетная запись"}
+                : "Ссылка для регистрации"}
           </h2>
           <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            {accountFormMode === "invite" && !selectedUser
-              ? selectedInvite
+            {selectedUser
+              ? "Роль определяет доступ к разделам LeetPlus. Клубы задают рабочий контур сотрудника и ограничивают доступ к операционным данным."
+              : selectedInvite
                 ? "Проверьте данные приглашения, скопируйте ссылку повторно, измените роль или отмените доступ."
-                : "Настройте роль и клубы, создайте ссылку и передайте ее сотруднику. Он сам задаст email и пароль при регистрации."
-              : "Роль определяет доступ к разделам LeetPlus. Клубы задают рабочий контур сотрудника и будут использоваться для дальнейшего ограничения операционных данных."}
+                : "Укажите email, роль и клубы. Сотрудник откроет персональную ссылку и сам задаст пароль при регистрации."}
           </p>
         </div>
 
         {!selectedUser && !selectedInvite ? (
-          <div className="mt-5 inline-flex rounded-md border border-zinc-300 bg-zinc-50 p-1 text-sm dark:border-zinc-700 dark:bg-zinc-900/60">
-            {(
-              [
-                ["account", "Создать вручную"],
-                ["invite", "Ссылка-приглашение"],
-              ] as const
-            ).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => {
-                  setSelectedInviteId(null);
-                  setAccountFormMode(mode);
-                  setStatus({ type: "idle", message: "" });
-                  setCreatedInviteUrl(null);
-                  setCopyStatus("");
-                }}
-                className={[
-                  "rounded px-3 py-1.5 font-semibold transition",
-                  accountFormMode === mode
-                    ? "bg-zinc-950 text-white dark:bg-emerald-400 dark:text-zinc-950"
-                    : "text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-100",
-                ].join(" ")}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="mt-5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
+            Новые учетные записи создаются только по персональной email-ссылке.
+            Пароль задает сам сотрудник.
           </div>
         ) : null}
 
@@ -1177,9 +1132,7 @@ export function UserAccountsPanel({
                 Email
               </span>
               <input
-                required={
-                  selectedUser !== null || accountFormMode === "account"
-                }
+                required
                 type="email"
                 value={form.email}
                 onChange={(event) =>
@@ -1188,11 +1141,7 @@ export function UserAccountsPanel({
                     email: event.target.value,
                   }))
                 }
-                placeholder={
-                  accountFormMode === "invite"
-                    ? "Можно оставить пустым для универсальной ссылки"
-                    : undefined
-                }
+                placeholder="employee@club.ru"
                 className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
               />
             </label>
@@ -1309,14 +1258,13 @@ export function UserAccountsPanel({
             ) : null}
           </div>
 
-          {selectedUser || accountFormMode === "account" ? (
+          {selectedUser ? (
             <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
               <label className="space-y-1">
                 <span className="text-xs font-bold uppercase text-zinc-500">
-                  {selectedUser ? "Новый пароль" : "Пароль"}
+                  Новый пароль
                 </span>
                 <input
-                  required={!selectedUser}
                   type="password"
                   value={form.password}
                   onChange={(event) =>
@@ -1325,16 +1273,12 @@ export function UserAccountsPanel({
                       password: event.target.value,
                     }))
                   }
-                  placeholder={
-                    selectedUser
-                      ? "Оставьте пустым, если не менять"
-                      : "От 8 символов"
-                  }
+                  placeholder="Оставьте пустым, если не менять"
                   className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
                 />
                 <span className="block text-xs leading-5 text-zinc-500">
-                  Пароль передается сотруднику вручную. Автоотправку письма
-                  подключим отдельным SMTP-слоем.
+                  Поле используется только для административного сброса уже
+                  существующей учетной записи.
                 </span>
               </label>
 
@@ -1426,9 +1370,7 @@ export function UserAccountsPanel({
                   ? "Сохранить изменения"
                   : selectedInvite
                     ? "Сохранить приглашение"
-                    : accountFormMode === "invite"
-                      ? "Создать ссылку"
-                      : "Создать учетную запись"}
+                    : "Создать приглашение"}
             </button>
             {selectedInvite ? (
               <button
@@ -1443,7 +1385,7 @@ export function UserAccountsPanel({
             {selectedUser || selectedInvite ? (
               <button
                 type="button"
-                onClick={selectedInvite ? startCreateInvite : startCreate}
+                onClick={startCreate}
                 className="inline-flex h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
                 {selectedInvite ? "Новая ссылка" : "Создать другую"}

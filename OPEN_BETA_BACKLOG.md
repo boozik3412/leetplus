@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 17.08.2026
-- Версия: 2.81
+- Версия: 2.82
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -20,9 +20,10 @@
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day
   trial и единственный `HOLD→PENDING` приняты. Application route остаётся
   default-disabled. Dedicated pool и live least-privilege role assertion
-  реализованы, а `PUBLIC`/обычные roles не имеют RPC `EXECUTE`. Exact SHA, CI
-  artifact, production role/secret/grant, restored-copy и SMTP acceptance ещё
-  обязательны, поэтому release decision остаётся `NO-GO`
+  реализованы, а `PUBLIC`/обычные roles не имеют RPC `EXECUTE`. Clean SHA и CI
+  artifact приняты. Read-only restored-copy preflight реализован локально
+  (`6/6`), но live backup/target, runtime role/secret/grant, rehearsal и SMTP
+  acceptance ещё обязательны, поэтому release decision остаётся `NO-GO`
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
 - Пакет документации запуска:
   [docs/open-beta](./docs/open-beta/README.md)
@@ -5189,6 +5190,7 @@ fail-closed.
 | `CANONICAL-180-190`                     |        P0 | `LOCAL REHEARSAL GREEN / CANONICAL PROMOTION PENDING`                             | frozen source candidates и proposal-only refreeze manifest существуют вне canonical chain; local disposable runner дважды доказал exact CURRENT179→190 apply/no-op/rollback и zero residue; прямое копирование в canonical migrations по-прежнему запрещено                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Один reviewed refrozen canonical release, exact runtime grants/attestation, backup/restore и signed production-like apply/rollback/emergency/zero-diff                                                                                                     |
 | `GATE-2-A1..A4`                         |        P0 | `NOT STARTED`                                                                     | Текущая сеть не изменялась                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | In-place cutover одного Tenant с четырьмя Store, anonymous demo closure и минимум 7 суток stable internal alpha                                                                                                                                            |
 | `FOUNDER-OPERATOR-BETA-GO`              |        P0 | `V2 + RUNTIME BOUNDARY IMPLEMENTED / PRODUCTION NO-GO`                             | Ручное создание tester account запрещено. GO/revoke, atomic v2 activation и dedicated database pool/live least-privilege assertion не требуют USB/offline key; default mode `DISABLED`. V2 одной SERIALIZABLE transaction создаёт OWNER/NETWORK invite, запускает 30-day trial, consume GO и выполняет единственный HOLD→PENDING. Локально зелёные Prisma/API/database checks, focused `3 suites / 59 tests`, identity-mail `18 suites / 477 tests`, clean PG16 `183` migrations и restricted-role activation/replay/immutability/drift `1/1`; response secret-free. Production и текущие четыре клуба не изменены; PUBLIC/обычные roles не имеют RPC EXECUTE, production activation role/secret/grant не создавались                                                                                                                                                                                                                          | Exact clean SHA/CI artifact; создать role secret и применить grant/attestation на restored-copy; apply/replay/rollback; SMTP SENT/reissue/revoke/accept; Gate 1MT/2; затем PREPARE→one-tenant ACTIVE canary и mailbox-bound OWNER invite              |
+| `FOUNDER-RESTORED-COPY-PREFLIGHT`       |        P0 | `ENGINEERING IMPLEMENTED / UNIT 6/6 + SYNTHETIC PG READY / LIVE INPUTS REQUIRED`    | Read-only fail-closed CLI проверяет фактические SHA-256 artifact/backup, разные file identities, bounded exact manifest, только `127.0.0.1`/non-5432 и отдельное restored DB name, live PostgreSQL system/database/owner identity, zero other target sessions, exact source migration manifest, отсутствие failed rows и founder activation role. Operator обязан явно зафиксировать OFF для API/workers/schedulers/SMTP/Telegram/Langame/production tokens. Synthetic PG16.14 run (`183` migrations) вернул READY; test DB/files удалены, cluster stopped. Output PII/secret/path-free; production, четыре клуба и tester не затрагивались                                                                                                                                                                                                                                 | Получить immutable production backup + independent checksum, скачанный exact CI artifact и isolated target; принять live `READY` receipt; затем реализовать/выполнить exact role apply/check/revoke и migration apply/replay/rollback/cleanup                 |
 
 Отдельный users/roles Web BFF gate фиксирует exact семь route-файлов и девять
 handlers: только server-side cookie bearer, без client
@@ -5200,10 +5202,11 @@ target `4/4`, artifact `sha256:2c0d023a…8e387b`; browser A/B ещё обяза
 
 Текущий порядок разработки:
 
-1. Зафиксировать текущий v2/runtime successor в clean exact SHA и принять
-   воспроизводимый CI artifact. Затем создать dedicated role secret, применить
-   exact grant/attestation на restored-copy и принять ACL/lost-response/revoke
-   matrix.
+1. Clean exact SHA и воспроизводимый CI artifact приняты. Исполнимый read-only
+   restored-copy preflight реализован; следующий шаг — подать immutable backup,
+   independent checksum и isolated target, получить live `READY`, затем создать
+   dedicated role secret, применить exact grant/attestation и принять
+   ACL/lost-response/revoke matrix.
    CURRENT198–202 и USB не входят в этот critical path и остаются deny-only
    post-beta hardening.
 2. Завершить Gate 1MT store-scope/HTTP/BFF/browser adoption по всему

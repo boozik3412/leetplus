@@ -323,6 +323,9 @@ jobs:
       - name: Validate populated runtime activation upgrade rehearsal
         run: pnpm --filter database check:shared-beta-runtime-release-activation-upgrade
 
+      - name: Validate founder-pilot restored-copy fail-closed preflight
+        run: pnpm --filter database check:founder-pilot-restored-copy-preflight
+
       - name: Validate identity email claim and invite writer boundaries
         run: pnpm --filter database check:identity-email-claim-boundary
 

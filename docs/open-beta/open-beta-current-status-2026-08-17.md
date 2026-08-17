@@ -1,13 +1,13 @@
 # LeetPlus open beta — текущее состояние на 17.08.2026
 
-| Поле | Состояние |
-| --- | --- |
-| Release decision | `NO-GO` для внешнего доступа |
-| Production | не изменён |
-| Текущая сеть | один Tenant, четыре Store; не изменена |
-| Первый внешний пилот | отдельный `Tenant B/Store B1` |
-| Offline/USB key | исключён из beta critical path |
-| Owner onboarding | email-bound invite, пользователь сам задаёт пароль |
+| Поле                 | Состояние                                          |
+| -------------------- | -------------------------------------------------- |
+| Release decision     | `NO-GO` для внешнего доступа                       |
+| Production           | не изменён                                         |
+| Текущая сеть         | один Tenant, четыре Store; не изменена             |
+| Первый внешний пилот | отдельный `Tenant B/Store B1`                      |
+| Offline/USB key      | исключён из beta critical path                     |
+| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль |
 
 ## Что уже реализовано
 
@@ -73,12 +73,24 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   [run 32043177732](https://github.com/boozik3412/leetplus/actions/runs/32043177732)
   как `3/3 SUCCESS`; artifact `9292418006`, digest
   `sha256:eb5b7ac2cfeeab9912ed0dcf91d2b22a089661bb4fb4d3c1cc79fe8149acfce9`.
+- документационный baseline `171bb8fb5ffe57dbb3b881e3ea4e22753e4ed9a7`
+  принят push/PR CI `3/3 SUCCESS`; release artifact `9292569673`, digest
+  `sha256:c4bcec5fdd195a3f59512ab55edde61268ddb44edc234c7a19d994ce18a9c9e9`;
+- read-only restored-copy preflight реализован локально: exact actual
+  artifact/backup SHA-256, loopback/non-5432 target, live system/database/migration
+  identity, runtime-role absence, zero other sessions и explicit outbound-off
+  declarations; focused `6/6 PASS`.
+  Synthetic PostgreSQL 16.14 run на `55439` вернул `READY`, после чего test DB и
+  файлы удалены, кластер остановлен. Live production backup/isolated restored
+  target и скачанный CI artifact не использовались, поэтому gate ещё не
+  выполнен.
 
 ## Что блокирует выдачу доступа
 
-1. Код dedicated pool/live role attestation готов, но production role/password/
-   grant ещё не созданы и не приняты на restored-copy; обычные application
-   roles намеренно не имеют `EXECUTE`.
+1. Clean SHA/CI artifact принят, read-only restored-copy preflight реализован,
+   но live backup/isolated target ещё не поданы. Dedicated role/password/grant
+   не созданы и не приняты на restored-copy; обычные application roles
+   намеренно не имеют `EXECUTE`.
 2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
    readiness evidence.
 3. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
@@ -92,7 +104,8 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 ## Полный путь до первого внешнего тестера
 
 ```text
-clean SHA + CI artifact
+clean SHA + CI artifact [DONE]
+  → live backup + isolated target + read-only preflight
   → execute-only runtime role/grant/attestation
   → restored-copy apply/replay/rollback + backup/readiness
   → SMTP canary + SENT/revoke/accept evidence

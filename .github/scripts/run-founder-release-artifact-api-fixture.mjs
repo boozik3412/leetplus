@@ -538,13 +538,27 @@ function signJwt(secret, subject) {
 }
 
 async function stopChild(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
+  if (child.exitCode !== null || child.signalCode !== null) {
+    throw new Error("API_CHILD_EXITED_BEFORE_CONTROLLED_SHUTDOWN");
+  }
+  if (!child.kill("SIGTERM")) {
+    throw new Error("API_CHILD_CONTROLLED_SHUTDOWN_SIGNAL_FAILED");
+  }
   try {
-    await waitForExit(child, 15_000);
+    const outcome = await waitForExit(child, 15_000);
+    if (outcome.code !== 0 && outcome.signal !== "SIGTERM") {
+      throw new Error("API_CHILD_GRACEFUL_SHUTDOWN_FAILED");
+    }
   } catch {
-    child.kill("SIGKILL");
-    await waitForExit(child, 5_000);
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      try {
+        await waitForExit(child, 5_000);
+      } catch {
+        // Preserve the original fail-closed shutdown result.
+      }
+    }
+    throw new Error("API_CHILD_GRACEFUL_SHUTDOWN_FAILED");
   }
 }
 

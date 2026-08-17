@@ -884,6 +884,12 @@ jobs:
         env:
           SHARED_TENANT_SHELL_PROVISIONING_PG_CONFIRM: run-shared-tenant-shell-provisioning-postgres-fixtures
 
+      - name: Verify founder-operator beta activation transaction
+        run: pnpm --filter api test:integration:founder-operator-beta-activation-v2:pg
+        env:
+          NODE_ENV: test
+          FOUNDER_OPERATOR_BETA_ACTIVATION_V2_PG_CONFIRM: run-founder-operator-beta-activation-v2-postgres-fixture
+
       - name: Verify atomic shared beta tenant activation transaction
         run: pnpm --filter api test:integration:shared-beta-runtime-release-activation:pg
         env:

@@ -207,6 +207,7 @@ describePostgres(
         prisma,
         provisioning,
         config,
+        identity,
       );
       const activation = new FounderOperatorBetaActivationService(
         activationPrisma,

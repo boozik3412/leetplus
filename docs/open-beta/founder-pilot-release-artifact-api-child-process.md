@@ -1,7 +1,7 @@
 # Founder pilot: downloaded release artifact API child process
 
 Статус:
-`ENGINEERING IMPLEMENTED / EXACT-SHA CI PENDING / PRODUCTION NO-GO`.
+`EXACT-SHA CI ACCEPTED / DOWNLOADED ARTIFACT CHILD PROCESS PASS / PRODUCTION NO-GO`.
 
 ## Цель
 
@@ -37,7 +37,30 @@ Fixture запускается только с exact confirmation phrase, loopba
 Production env, production database, текущий tenant из четырёх клубов и внешний
 tester не используются.
 
-## Что остаётся после CI
+## Принятое exact-SHA evidence
+
+- implementation SHA:
+  `0c721f4de5891689e9e344b89c64b5b72e6a8ce7`;
+- push CI
+  [32078882449](https://github.com/boozik3412/leetplus/actions/runs/32078882449)
+  и PR CI
+  [32078886786](https://github.com/boozik3412/leetplus/actions/runs/32078886786)
+  завершены как `4/4 SUCCESS`;
+- скачан artifact `9304656653`, размер `28 421 509` bytes, GitHub digest
+  `sha256:5dc17d356030d480fdae5cbae3e97d0329c23b77e9032be019f2ef4336915700`;
+- child process подтвердил release/version SHA, migration
+  `20260817030000_founder_operator_beta_activation_runtime_v1` и все `183`
+  migrations;
+- фактический lifecycle:
+  `SHELL_PROVISIONED → ISSUED → ACTIVATED → REPLAYED`;
+- итоговое состояние: tenant `ACTIVE`, onboarding `OWNER_INVITED`, database
+  residue `0`, role residue `0`;
+- первая fail-closed попытка на predecessor SHA `a057260a…` корректно остановила
+  activation из-за унаследованного `PUBLIC TEMPORARY`. Fixture отозвал
+  `PUBLIC CREATE/TEMPORARY`, не ослабляя runtime assertion, после чего exact
+  acceptance прошёл.
+
+## Что остаётся после принятого CI
 
 Зелёный synthetic child-process gate доказывает исполнимость скачанного
 артефакта и полный HTTP/auth/database path. Он не заменяет:

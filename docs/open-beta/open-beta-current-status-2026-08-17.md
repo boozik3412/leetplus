@@ -126,16 +126,19 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   production dependencies, поднимает disposable PostgreSQL и реальный
   `apps/api/dist/main.js`. Через JWT/guards он обязан выполнить
   `provision→GO→ACTIVATED→REPLAYED`, проверить readiness/DB и удалить database и
-  role без residue. Exact-SHA CI этого нового gate ещё pending.
+  role без residue. Exact SHA `0c721f4de5891689e9e344b89c64b5b72e6a8ce7`
+  принят push CI `32078882449` и PR CI `32078886786` как `4/4 SUCCESS`;
+  artifact `9304656653`, размер `28 421 509` bytes, digest
+  `sha256:5dc17d356030d480fdae5cbae3e97d0329c23b77e9032be019f2ef4336915700`.
+  Фактический результат child process: `SHELL_PROVISIONED→ISSUED→ACTIVATED→REPLAYED`,
+  tenant `ACTIVE/OWNER_INVITED`, database residue `0`, role residue `0`.
 
 ## Что блокирует выдачу доступа
 
 1. Clean SHA/CI artifact, read-only preflight, activation-role controller,
-   direct HBA/TLS/SCRAM и in-process dedicated pool/API acceptance приняты.
-   Runnable artifact принят; его полный downloaded child-process gate
-   реализован и ожидает exact-SHA CI. Immutable production backup/isolated
-   restored target и production PgBouncer/session-drain acceptance ещё не
-   выполнены.
+   direct HBA/TLS/SCRAM, dedicated pool/API и downloaded artifact child-process
+   acceptance приняты. Immutable production backup/isolated restored target и
+   production PgBouncer/session-drain acceptance ещё не выполнены.
 2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
    readiness evidence.
 3. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
@@ -154,7 +157,7 @@ clean SHA + CI artifact [DONE]
   → execute-only runtime role/grant/attestation
   → [DONE synthetic] direct HBA/TLS/SCRAM
   → [DONE synthetic] dedicated pool + in-process HTTP/PG
-  → downloaded artifact API child process [CI PENDING]
+  → [DONE synthetic] downloaded artifact API child process
   → restored-copy apply/replay/rollback + backup/readiness
   → SMTP canary + SENT/revoke/accept evidence
   → Gate 1MT browser/store-scope

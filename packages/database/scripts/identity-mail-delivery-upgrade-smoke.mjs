@@ -15,6 +15,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
+import {
+  CURRENT_EXPECTED_LATEST_MIGRATION,
+  CURRENT_EXPECTED_MIGRATION_COUNT,
+} from "./staff-task-integrity-migration-state.mjs";
 
 const SCRIPT_NAME = "identity-mail-delivery-upgrade-smoke";
 const REQUIRED_CONFIRMATION = "run-identity-mail-delivery-upgrade-smoke";
@@ -107,7 +111,8 @@ source-aware application wave/drain -> case contract -> terminal CURRENT_179;
 (2) exact origin/main CURRENT_152, where case migrations already finished,
 then 26 identity migrations with started_at head CURRENT_176 -> terminal
 CURRENT_179; and (3) a clean historical CURRENT_179-prefix deploy extracted
-from the exact canonical CURRENT_180 manifest. The origin/main path proves
+from the exact CURRENT_180 prefix of the current release manifest. The
+origin/main path proves
 the enrolled worker fails before and becomes READY after the terminal migration
 without re-enrollment. Every generated database and role is removed in finally.
 
@@ -394,8 +399,12 @@ async function readMigrationPlan() {
   );
   assert.equal(identity176Manifest.head, CURRENT_176);
   assert.equal(originMainManifest.head, CURRENT_178);
-  assert.equal(currentReleaseManifest.count, CURRENT_180_COUNT);
-  assert.equal(currentReleaseManifest.head, CURRENT_180);
+  assert.equal(currentReleaseManifest.count, CURRENT_EXPECTED_MIGRATION_COUNT);
+  assert.equal(currentReleaseManifest.head, CURRENT_EXPECTED_LATEST_MIGRATION);
+  assert.equal(
+    currentReleaseManifest.entries[CURRENT_180_COUNT - 1]?.name,
+    CURRENT_180,
+  );
 
   const historicalEntries = Object.freeze(
     currentReleaseManifest.entries.slice(0, CURRENT_179_COUNT),

@@ -1,7 +1,7 @@
 # Founder pilot: runnable SHA-bound release artifact
 
 Статус:
-`ENGINEERING IMPLEMENTED / LOCAL LAYOUT PASS / EXACT-SHA CI PENDING / PRODUCTION NO-GO`.
+`EXACT-SHA CI ACCEPTED / RUNNABLE ARTIFACT / PRODUCTION NO-GO`.
 
 Цель этого этапа — превратить CI artifact из проверяемого архива build output в
 воспроизводимый runtime/rehearsal package. Артефакт остаётся без secrets и без
@@ -44,7 +44,15 @@ exact `pnpm-lock.yaml`.
 
 Локальный layout/tar/checksum/extract smoke пройден. Созданный system temp root
 после проверки был удалён; production, PostgreSQL и пользовательский `.tmp/` не
-изменялись. Exact acceptance будет записан только после push и PR CI нового SHA.
+изменялись.
+
+Implementation SHA `90a94f1bd729424751db156fb17fa2a318995a59` принят push CI
+[`32075030815`](https://github.com/boozik3412/leetplus/actions/runs/32075030815)
+и PR CI
+[`32075035388`](https://github.com/boozik3412/leetplus/actions/runs/32075035388)
+как `3/3 SUCCESS`. Push artifact `9303394475`, размер `28 419 842` bytes,
+digest
+`sha256:b73c932f285b17e815ac20d6dda19bc73766a0b90466363103cc87ff1bd8d5fd`.
 
 ## Безопасная hydration-последовательность
 
@@ -64,6 +72,7 @@ Offline install требует заранее заполненный довер�
 не подготовлен, rehearsal останавливается до отдельного online dependency
 acquisition с lockfile review; fallback на незакреплённые версии запрещён.
 
-Этот этап не разрешает запуск с production env. Следующий gate — скачать
-принятый artifact, проверить его на отдельной машине/каталоге и запустить полный
-API child process на isolated restored copy.
+Этот этап не разрешает запуск с production env. Следующий gate —
+[скачать принятый artifact и запустить полный API child process](./founder-pilot-release-artifact-api-child-process.md)
+на isolated PostgreSQL, затем повторить на immutable production-backup restored
+copy.

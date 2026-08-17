@@ -114,18 +114,28 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   `3/3 SUCCESS`; artifact `9301062934`, digest `sha256:ed1db27f…16e7`.
   In-process HTTP/PG pool gate закрыт; полный artifact child-process gate ещё
   открыт.
-- Начат runnable-artifact слой: release tar получает package manifests,
+- Runnable-artifact слой принят: release tar содержит package manifests,
   operational founder scripts и web public assets, исключает `.next/dev`,
-  cache, symlink и `node_modules`; CI должен доказать frozen offline production
-  install, Prisma generate и runtime resolution до upload. Local
-  layout/tar/checksum/extract smoke зелёный; exact-SHA CI pending.
+  cache, symlink и `node_modules`; CI до upload доказал frozen offline
+  production install, Prisma generate и runtime resolution. Exact SHA
+  `90a94f1bd729424751db156fb17fa2a318995a59` принят push CI `32075030815`
+  и PR CI `32075035388` как `3/3 SUCCESS`; artifact `9303394475`, размер
+  `28 419 842` bytes, digest `sha256:b73c932f…d5fd`.
+- Реализован следующий synthetic gate: отдельный CI job скачивает exact
+  artifact, повторно проверяет внешний/внутренний SHA-256, гидратирует только
+  production dependencies, поднимает disposable PostgreSQL и реальный
+  `apps/api/dist/main.js`. Через JWT/guards он обязан выполнить
+  `provision→GO→ACTIVATED→REPLAYED`, проверить readiness/DB и удалить database и
+  role без residue. Exact-SHA CI этого нового gate ещё pending.
 
 ## Что блокирует выдачу доступа
 
-1. Clean SHA/CI artifact, read-only preflight, exact activation-role controller
-   и direct HBA/TLS/SCRAM synthetic acceptance приняты. Но immutable production
-   backup/isolated restored target, скачанный exact artifact и dedicated
-   PgBouncer pool/live API acceptance ещё не выполнены.
+1. Clean SHA/CI artifact, read-only preflight, activation-role controller,
+   direct HBA/TLS/SCRAM и in-process dedicated pool/API acceptance приняты.
+   Runnable artifact принят; его полный downloaded child-process gate
+   реализован и ожидает exact-SHA CI. Immutable production backup/isolated
+   restored target и production PgBouncer/session-drain acceptance ещё не
+   выполнены.
 2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
    readiness evidence.
 3. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
@@ -143,7 +153,8 @@ clean SHA + CI artifact [DONE]
   → live backup + isolated target + read-only preflight
   → execute-only runtime role/grant/attestation
   → [DONE synthetic] direct HBA/TLS/SCRAM
-  → dedicated pool + live API call
+  → [DONE synthetic] dedicated pool + in-process HTTP/PG
+  → downloaded artifact API child process [CI PENDING]
   → restored-copy apply/replay/rollback + backup/readiness
   → SMTP canary + SENT/revoke/accept evidence
   → Gate 1MT browser/store-scope

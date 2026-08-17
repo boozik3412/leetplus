@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.139                                        |
+| Версия           | 1.140                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -76,6 +76,8 @@ Exact direct PostgreSQL HBA/TLS/SCRAM acceptance dedicated роли:
 [founder dedicated activation pool and API acceptance](./founder-pilot-activation-pool-api-acceptance.md).
 Состав и hydration SHA-bound runtime package зафиксированы в
 [founder runnable release artifact](./founder-pilot-release-artifact-runtime.md).
+Полный запуск скачанного API package описан в
+[founder release artifact API child process](./founder-pilot-release-artifact-api-child-process.md).
 
 ## Канонические документы
 

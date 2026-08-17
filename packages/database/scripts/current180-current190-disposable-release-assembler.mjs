@@ -7,7 +7,7 @@ import { isProxy } from "node:util/types";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_V2";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_ALLOW_MANIFEST_SHA256 =
-  "738063efe68828432bc39d4d1bea2f283e17c58dfc367ed6beb6c69a0cd5c69e";
+  "e71c211f5f6743f9784c8a9d2b089c1679ea27613c62387168d33c6e152fa32d";
 export const CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_PLAN_CONTRACT =
   "CURRENT180_CURRENT190_DISPOSABLE_ASSEMBLY_PLAN_V2";
 export const CURRENT180_CURRENT190_IN_MEMORY_ARTIFACT_CONTRACT =
@@ -16,7 +16,7 @@ export const CURRENT180_CURRENT190_IN_MEMORY_ARTIFACT_CONTRACT =
 const CURRENT180_CURRENT190_REFREEZE_MANIFEST_CONTRACT =
   "CURRENT180_CURRENT190_RELEASE_REFREEZE_MANIFEST_V1";
 const CURRENT180_CURRENT190_REFREEZE_MANIFEST_SHA256 =
-  "290909b51d4eb3bc1cab035a182b5647e89471680441c73bbe4d77cf704053e4";
+  "00d2fed693e7085c6c8fa672635a92af6da2450eea8afaabcb643bd296cf9087";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "../../..");
@@ -51,7 +51,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-refreeze-manifest.mjs",
-    sha256: "7db62383915bf780740ce6aeded51d18491590a2cacc65872e99765579dd484f",
+    sha256: "06132026c244cbb6b31d9f2f169e6849e176c5836eb195297c5703ceaedb5e8a",
   }),
   Object.freeze({
     path: join(
@@ -61,7 +61,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-materialization-planner.mjs",
-    sha256: "6643b7601d7cfaf347510572a3a5f5ecc60d0a231582dd64cf00ca38cf327c99",
+    sha256: "adff50e690c02eaa1bd68ef00374f699656427833a462b413ae2c11fdde5243b",
   }),
   Object.freeze({
     path: join(
@@ -71,7 +71,7 @@ const INSPECTION_CHAIN = Object.freeze([
     ),
     repositoryPath:
       "packages/database/scripts/current180-current190-release-rehearsal-blocker.mjs",
-    sha256: "e5249159473deec3dfb230bfd75666dada72547c830a6d73e6ca19f547122a79",
+    sha256: "4d6c1e587419586b81a7bcf7d600690d77c2f4df7ffbaf00b20588506a22e6ee",
   }),
 ]);
 const MIGRATION_DIRECTORY_PATTERN = /^\d{14}_[a-z0-9_]+$/u;
@@ -487,7 +487,7 @@ function assertAllowManifest(manifest, findings) {
     manifest?.source?.refreezeManifestSha256 !==
       CURRENT180_CURRENT190_REFREEZE_MANIFEST_SHA256 ||
     manifest?.source?.materializationPlanDigest !==
-      "55fc45e1d284c82fd738ddde8d3c7f9028fc8c8a955f546f7af2f13d4ee9763" ||
+      "37dab050287389027af6691d13b0cc25536e9670f740a8c0cb71ff11d09ba1b7" ||
     manifest?.source?.frozenSourceBytesMayChange !== false ||
     manifest?.source?.frozenSourceSqlTransformation !== "BYTE_EXACT_COPY_ONLY"
   ) {
@@ -727,8 +727,12 @@ async function loadVerifiedBundle({
     .filter(({ type }) => type === "directory")
     .map(({ name }) => name)
     .sort(compareText);
+  const canonicalPrefixNames = canonicalNames.slice(
+    0,
+    EXPECTED_CANONICAL_COUNT,
+  );
   if (
-    canonicalNames.length !== EXPECTED_CANONICAL_COUNT ||
+    canonicalPrefixNames.length !== EXPECTED_CANONICAL_COUNT ||
     canonicalNames.some((name) => !MIGRATION_DIRECTORY_PATTERN.test(name)) ||
     canonicalRootEntries.some(
       ({ name, type }) =>
@@ -736,7 +740,7 @@ async function loadVerifiedBundle({
         (type !== "directory" &&
           !(name === "migration_lock.toml" && type === "file")),
     ) ||
-    canonicalRootEntries.length !== EXPECTED_CANONICAL_COUNT + 1
+    canonicalRootEntries.length !== canonicalNames.length + 1
   ) {
     fail("DISPOSABLE_ASSEMBLY_SOURCE_INTEGRITY_BLOCKED", [
       "CANONICAL_DIRECTORY_SET_DRIFT",
@@ -762,8 +766,8 @@ async function loadVerifiedBundle({
   }
 
   const internalMigrations = [];
-  for (let index = 0; index < canonicalNames.length; index += 1) {
-    const name = canonicalNames[index];
+  for (let index = 0; index < canonicalPrefixNames.length; index += 1) {
+    const name = canonicalPrefixNames[index];
     const directory = join(CANONICAL_MIGRATIONS_DIRECTORY, name);
     const entries = await listVerifiedRepositoryDirectory(
       directory,

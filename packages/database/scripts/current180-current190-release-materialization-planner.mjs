@@ -25,7 +25,7 @@ const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "../../..");
 const DETECTOR_FILE = "current180-current190-release-rehearsal-blocker.mjs";
 const DETECTOR_NORMALIZED_SHA256 =
-  "e5249159473deec3dfb230bfd75666dada72547c830a6d73e6ca19f547122a79";
+  "4d6c1e587419586b81a7bcf7d600690d77c2f4df7ffbaf00b20588506a22e6ee";
 const SOURCE_ARTIFACT_SET_DIGEST =
   "7b2d29eb70674dd62450c322f33b2a689f64dd110a4c85e123b8bc517887919a";
 const SOURCE_BLOCKER_DIGEST =

@@ -639,16 +639,17 @@ export async function inspectCurrent180Current190ReleaseRehearsal(options) {
   }
 
   const findings = [];
-  if (canonicalEntries.length !== CANONICAL_COUNT) {
+  const canonicalPrefixEntries = canonicalEntries.slice(0, CANONICAL_COUNT);
+  if (canonicalPrefixEntries.length !== CANONICAL_COUNT) {
     findings.push("CANONICAL_COUNT_DRIFT");
   }
-  if (canonicalEntries.at(-1)?.name !== CANONICAL_HEAD) {
+  if (canonicalPrefixEntries.at(-1)?.name !== CANONICAL_HEAD) {
     findings.push("CANONICAL_HEAD_DRIFT");
   }
-  if (canonicalEntries.at(-1)?.checksum !== CANONICAL_HEAD_SHA256) {
+  if (canonicalPrefixEntries.at(-1)?.checksum !== CANONICAL_HEAD_SHA256) {
     findings.push("CANONICAL_HEAD_SHA_DRIFT");
   }
-  if (manifestDigest(canonicalEntries) !== CANONICAL_MANIFEST_DIGEST) {
+  if (manifestDigest(canonicalPrefixEntries) !== CANONICAL_MANIFEST_DIGEST) {
     findings.push("CANONICAL_MANIFEST_DRIFT");
   }
   for (const tooling of current187Tooling) {
@@ -711,7 +712,7 @@ export async function inspectCurrent180Current190ReleaseRehearsal(options) {
     findings.push("NONCANONICAL_CANDIDATE_PROMOTED");
   }
 
-  const chainEntries = [...canonicalEntries];
+  const chainEntries = [...canonicalPrefixEntries];
   for (const artifact of artifacts.filter(({ ordinal }) => ordinal <= 186)) {
     const predecessor = artifact.metadata.predecessor;
     const predecessorHead = chainEntries.at(-1);

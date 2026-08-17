@@ -4,8 +4,8 @@
   "status": "IN_MEMORY_ASSEMBLY_ONLY",
   "source": {
     "refreezeManifestContract": "CURRENT180_CURRENT190_RELEASE_REFREEZE_MANIFEST_V1",
-    "refreezeManifestSha256": "290909b51d4eb3bc1cab035a182b5647e89471680441c73bbe4d77cf704053e4",
-    "materializationPlanDigest": "55fc45e1d284c82fd738ddde8d3c7f9028fc8c8a955f546f7af2f13d4ee9763",
+    "refreezeManifestSha256": "00d2fed693e7085c6c8fa672635a92af6da2450eea8afaabcb643bd296cf9087",
+    "materializationPlanDigest": "37dab050287389027af6691d13b0cc25536e9670f740a8c0cb71ff11d09ba1b7",
     "frozenSourceBytesMayChange": false,
     "frozenSourceSqlTransformation": "BYTE_EXACT_COPY_ONLY"
   },

@@ -68,26 +68,25 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   `sha256:edb072f72b97924440dc4b8f8f36ea61b04e543a030f80e84f8a84859561b06a`;
 - подробное browser evidence:
   [Gate 1MT local browser evidence](./gate-1mt-local-browser-evidence-2026-08-17.md).
+- канонический merged SHA `eb46d587b12a79e34ef271db3fc8ac65a91a0d8a`
+  содержит `origin/main` без отставания и принят exact-SHA push CI
+  [run 32043177732](https://github.com/boozik3412/leetplus/actions/runs/32043177732)
+  как `3/3 SUCCESS`; artifact `9292418006`, digest
+  `sha256:eb5b7ac2cfeeab9912ed0dcf91d2b22a089661bb4fb4d3c1cc79fe8149acfce9`.
 
 ## Что блокирует выдачу доступа
 
-1. API/activation и invite-only Web successor собраны в clean exact SHA и
-   приняты CI artifact. Восемь новых commit'ов `origin/main` после этого
-   объединены merge commit `4d4a2204`; targeted gamification/staff suites
-   (`501/501` и `72/72`), API/Web typecheck, focused lint и Web boundary
-   `9/9` зелёные. До promotion merged documentation successor должен получить
-   новый exact-SHA CI artifact.
-2. Код dedicated pool/live role attestation готов, но production role/password/
+1. Код dedicated pool/live role attestation готов, но production role/password/
    grant ещё не созданы и не приняты на restored-copy; обычные application
    roles намеренно не имеют `EXECUTE`.
-3. Не выполнен production-like restored-copy apply/replay/rollback с backup и
+2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
    readiness evidence.
-4. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
+3. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
    `SENT` barrier и полная reissue/revoke/suspend/accept acceptance.
-5. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
+4. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
    production-like A/B matrix, jobs/Telegram/files/SSE и Gate 2 для текущей
    сети из четырёх клубов не закрыты.
-6. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
+5. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
 ## Полный путь до первого внешнего тестера

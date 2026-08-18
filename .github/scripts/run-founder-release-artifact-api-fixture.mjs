@@ -47,7 +47,12 @@ const provenance = JSON.parse(
 if (
   provenance.releaseSha !== releaseSha ||
   provenance.databaseMigration !== EXPECTED_MIGRATION ||
-  provenance.databaseMigrationCount !== EXPECTED_MIGRATION_COUNT
+  provenance.databaseMigrationCount !== EXPECTED_MIGRATION_COUNT ||
+  provenance.founderPilotOperationalScriptsIncluded !== true ||
+  provenance.founderPilotOperationalScriptCount !== 6 ||
+  provenance.runtimeEnrollmentOperationalScriptsIncluded !== true ||
+  provenance.runtimeEnrollmentOperationalScriptCount !== 6 ||
+  provenance.operationalScriptCount !== 12
 ) {
   throw new Error("RELEASE_PROVENANCE_INVALID");
 }

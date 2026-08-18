@@ -570,6 +570,12 @@ jobs:
             packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs \
             packages/database/scripts/founder-pilot-activation-role-network-acceptance.mjs \
             packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs \
+            packages/database/scripts/runtime-function-enrollment.mjs \
+            packages/database/scripts/runtime-function-enrollment.cli.mjs \
+            packages/database/scripts/identity-mail-worker-enrollment.mjs \
+            packages/database/scripts/identity-mail-worker-enrollment.cli.mjs \
+            packages/database/scripts/shared-beta-admission-provenance-catalog.mjs \
+            packages/database/scripts/staff-task-integrity-migration-state.mjs \
             "$release_root/packages/database/scripts/"
           cp -a package.json pnpm-lock.yaml pnpm-workspace.yaml "$release_root/"
 
@@ -583,6 +589,9 @@ jobs:
             '  "runtimePackageManifestsIncluded": true,' \
             '  "founderPilotOperationalScriptsIncluded": true,' \
             '  "founderPilotOperationalScriptCount": 6,' \
+            '  "runtimeEnrollmentOperationalScriptsIncluded": true,' \
+            '  "runtimeEnrollmentOperationalScriptCount": 6,' \
+            '  "operationalScriptCount": 12,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
@@ -639,6 +648,8 @@ jobs:
             './packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs' \
+            './packages/database/scripts/runtime-function-enrollment.cli.mjs' \
+            './packages/database/scripts/identity-mail-worker-enrollment.cli.mjs' \
             './release-provenance.json' \
             './SHA256SUMS'; do
             grep -F -x "$required_path" "$archive_listing" > /dev/null
@@ -648,7 +659,7 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '6'
+          test "$script_file_count" = '12'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1
@@ -661,15 +672,22 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").runtimePackageManifestsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '6'
+            test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptsIncluded')" = 'true'
+            test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptCount')" = '6'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '12'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs
+            node --check packages/database/scripts/runtime-function-enrollment.cli.mjs
+            node --check packages/database/scripts/identity-mail-worker-enrollment.cli.mjs
             pnpm install --prod --offline --frozen-lockfile
             pnpm --filter database db:generate
             node packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs --help > /dev/null
             node packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs --help > /dev/null
             node packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs --help > /dev/null
+            node packages/database/scripts/runtime-function-enrollment.cli.mjs --help > /dev/null
+            node packages/database/scripts/identity-mail-worker-enrollment.cli.mjs --help > /dev/null
             node -e "require.resolve('@nestjs/core', { paths: ['./apps/api'] })"
             node -e "require.resolve('@prisma/client', { paths: ['./apps/api'] })"
             test -s apps/web/.next/BUILD_ID

@@ -24,6 +24,11 @@ protected founder activation/enrollment/SENT/accept/disable `1/1`, после о
 disposable clone database/role residue `0`, исходный preflight снова `READY`.
 [Отчёт mail rehearsal](./founder-restored-copy-mail-rehearsal-2026-08-18.md).
 
+Gate 1MT PostgreSQL A/B matrix на отдельном клоне той же clean restored copy
+прошла `14/14`: ассортимент `3/3`, team chat `3/3`, CRM `4/4`, users/roles
+`4/4`. Fixture residue равен нулю, контрольные row counts клона совпали с
+источником, одноразовая БД удалена. [Отчёт Gate 1MT](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md).
+
 ## Что уже реализовано
 
 Первый внешний клуб создаётся как отдельный tenant общей SaaS-платформы, а не
@@ -201,9 +206,9 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 2. `SENT`, owner accept, one-tenant enrollment и trusted TLS SMTP доказаны на
    disposable клонах restored copy. Ещё не выполнены production worker-role
    enrollment, production SMTP secret/config и controlled production canary.
-3. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
-   production-like A/B matrix, jobs/Telegram/files/SSE и Gate 2 для текущей
-   сети из четырёх клубов не закрыты.
+3. Gate 1MT PostgreSQL A/B matrix принята на restored copy (`14/14`), но полный
+   HTTP/BFF/browser срез, jobs/Telegram/files/SSE и Gate 2 для текущей сети из
+   четырёх клубов не закрыты.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
@@ -224,8 +229,9 @@ clean SHA + CI artifact [DONE]
   → [DONE local PostgreSQL] CURRENT185 worker + SENT/reissue/accept
   → [DONE exact-SHA CI] exact one-tenant mail enrollment plan/apply/check/disable
   → [DONE restored-copy clones] trusted TLS SMTP + enrollment/SENT/accept/disable
+  → [DONE restored-copy clone] Gate 1MT PostgreSQL A/B matrix 14/14
   → production roles/secrets + controlled SMTP canary
-  → Gate 1MT browser/store-scope
+  → Gate 1MT HTTP/BFF/browser/background remainder
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE
   → create Tenant B/Store B1 + persisted GO

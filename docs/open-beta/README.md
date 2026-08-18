@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.148                                        |
+| Версия           | 1.149                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -75,6 +75,10 @@ Trusted TLS SMTP, protected mail enrollment и полный OWNER workflow на
 disposable клонах clean restored copy:
 [restored-copy mail rehearsal 18.08.2026](./founder-restored-copy-mail-rehearsal-2026-08-18.md).
 
+Production-like PostgreSQL A/B matrix ассортимента, team chat, CRM и
+users/roles на отдельном CURRENT185 restored-copy clone:
+[Gate 1MT restored-copy PostgreSQL evidence 18.08.2026](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md).
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 
@@ -128,6 +132,9 @@ checksum. Production и текущая сеть не изменялись.
    реальный локальный Nest/Web/PostgreSQL bootstrap, согласованные модули,
    allowed/denied Store direct-URL matrix и invite-only employee flow;
    `PARTIAL PASS`, не production/shared-beta GO.
+   0a.4. [Gate 1MT restored-copy PostgreSQL evidence](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md) —
+   CURRENT185 production-backup clone, четыре A/B suites, `14/14 PASS`,
+   fixture/database residue `0`; HTTP/BFF/browser/background остаток не закрыт.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;

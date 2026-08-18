@@ -47,6 +47,7 @@ function createHarness(
         })),
       ),
       createMany: createBindings,
+      deleteMany: jest.fn().mockResolvedValue({ count: rows.length }),
     },
     staffAttachment: {
       updateMany: jest.fn().mockResolvedValue({ count: rows.length }),
@@ -261,6 +262,116 @@ describe('StaffAttachmentBindingsService', () => {
         stateChangedAt: now,
       },
     });
+  });
+
+  it('removes an omitted native binding and quarantines its last blob reference', async () => {
+    const { service, tx, mocks } = createHarness([
+      {
+        id: 'attachment-1',
+        tenantId: 'tenant-a',
+        uploadedByUserId: 'user-a',
+        state: 'BOUND',
+        pendingExpiresAt: null,
+      },
+    ]);
+    mocks.staffAttachmentBinding.findMany
+      .mockReset()
+      .mockResolvedValueOnce([
+        { id: 'binding-1', attachmentId: 'attachment-1' },
+      ])
+      .mockResolvedValueOnce([]);
+    mocks.staffAttachment.updateMany.mockResolvedValue({ count: 1 });
+
+    await service.syncNativeResourceAttachments(tx, {
+      tenantId: 'tenant-a',
+      actorUserId: 'user-a',
+      resourceKind: StaffAttachmentResourceKind.SHIFT_REGULATION,
+      resourceId: 'regulation-a',
+      attachmentIds: [],
+    });
+
+    expect(mocks.staffAttachmentBinding.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['binding-1'] },
+        tenantId: 'tenant-a',
+        resourceKind: 'SHIFT_REGULATION',
+        resourceId: 'regulation-a',
+        source: 'NATIVE',
+        state: 'BOUND',
+      },
+    });
+    expect(mocks.staffAttachment.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['attachment-1'] },
+        tenantId: 'tenant-a',
+        state: 'BOUND',
+      },
+      data: {
+        state: 'QUARANTINED',
+        pendingExpiresAt: null,
+        stateReasonCode: 'NATIVE_REFERENCE_REMOVED',
+        stateChangedAt: now,
+      },
+    });
+  });
+
+  it('keeps a removed attachment bound while another bound parent remains', async () => {
+    const { service, tx, mocks } = createHarness([
+      {
+        id: 'attachment-1',
+        tenantId: 'tenant-a',
+        uploadedByUserId: 'user-a',
+        state: 'BOUND',
+        pendingExpiresAt: null,
+      },
+    ]);
+    mocks.staffAttachmentBinding.findMany
+      .mockReset()
+      .mockResolvedValueOnce([
+        { id: 'binding-1', attachmentId: 'attachment-1' },
+      ])
+      .mockResolvedValueOnce([{ attachmentId: 'attachment-1' }]);
+
+    await service.syncNativeResourceAttachments(tx, {
+      tenantId: 'tenant-a',
+      actorUserId: 'user-a',
+      resourceKind: StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+      resourceId: 'article-a',
+      attachmentIds: [],
+    });
+
+    expect(mocks.staffAttachmentBinding.deleteMany).toHaveBeenCalledTimes(1);
+    expect(mocks.staffAttachment.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('fails closed if a native binding changes during synchronized removal', async () => {
+    const { service, tx, mocks } = createHarness([
+      {
+        id: 'attachment-1',
+        tenantId: 'tenant-a',
+        uploadedByUserId: 'user-a',
+        state: 'BOUND',
+        pendingExpiresAt: null,
+      },
+    ]);
+    mocks.staffAttachmentBinding.findMany
+      .mockReset()
+      .mockResolvedValueOnce([
+        { id: 'binding-1', attachmentId: 'attachment-1' },
+      ]);
+    mocks.staffAttachmentBinding.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.syncNativeResourceAttachments(tx, {
+        tenantId: 'tenant-a',
+        actorUserId: 'user-a',
+        resourceKind: StaffAttachmentResourceKind.ONBOARDING_PLAN,
+        resourceId: 'plan-a',
+        attachmentIds: [],
+      }),
+    ).rejects.toThrow('Attachment binding changed concurrently');
+
+    expect(mocks.staffAttachment.updateMany).not.toHaveBeenCalled();
   });
 
   it.each([

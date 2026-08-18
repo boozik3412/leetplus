@@ -209,7 +209,7 @@ export class StaffTrainingCoursesService {
         include: courseInclude,
       });
 
-      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
         tx,
         {
           tenantId,
@@ -253,6 +253,7 @@ export class StaffTrainingCoursesService {
         required: true,
         roleScope: true,
         storeId: true,
+        steps: true,
       },
     });
 
@@ -270,14 +271,18 @@ export class StaffTrainingCoursesService {
         include: courseInclude,
       });
 
-      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
         tx,
         {
           tenantId,
           actorUserId: user.id,
           resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
           resourceId: course.id,
-          attachmentIds: extractStaffAttachmentIds([normalized.data.steps]),
+          attachmentIds: extractStaffAttachmentIds([
+            normalized.data.steps === undefined
+              ? current.steps
+              : normalized.data.steps,
+          ]),
         },
       );
 

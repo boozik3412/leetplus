@@ -356,7 +356,7 @@ export class StaffShiftRegulationsService {
         include: regulationInclude,
       });
 
-      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
         tx,
         {
           tenantId,
@@ -397,7 +397,13 @@ export class StaffShiftRegulationsService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.prisma.staffShiftRegulation.findFirst({
       where: { id, tenantId },
-      select: { id: true, status: true, version: true, publishedAt: true },
+      select: {
+        id: true,
+        status: true,
+        version: true,
+        publishedAt: true,
+        attachments: true,
+      },
     });
 
     if (!current) {
@@ -429,14 +435,18 @@ export class StaffShiftRegulationsService {
         include: regulationInclude,
       });
 
-      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
         tx,
         {
           tenantId,
           actorUserId: user.id,
           resourceKind: StaffAttachmentResourceKind.SHIFT_REGULATION,
           resourceId: updated.id,
-          attachmentIds: extractStaffAttachmentIds([data.attachments]),
+          attachmentIds: extractStaffAttachmentIds([
+            data.attachments === undefined
+              ? current.attachments
+              : data.attachments,
+          ]),
         },
       );
 
@@ -485,6 +495,29 @@ export class StaffShiftRegulationsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT regulation."id"
+        FROM "StaffShiftRegulation" AS regulation
+        WHERE regulation."id" = ${regulation.id}
+          AND regulation."tenantId" = ${tenantId}
+        FOR UPDATE
+      `);
+
+      if (locked.length !== 1) {
+        throw new NotFoundException('Shift regulation not found');
+      }
+
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.SHIFT_REGULATION,
+          resourceId: regulation.id,
+          attachmentIds: [],
+        },
+      );
+
       await tx.staffChecklistRun.updateMany({
         where: { tenantId, regulationId: regulation.id },
         data: { regulationId: null },

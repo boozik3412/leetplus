@@ -286,7 +286,7 @@ export class StaffOnboardingPlansService {
         include: planInclude,
       });
 
-      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
         tx,
         {
           tenantId,
@@ -316,7 +316,7 @@ export class StaffOnboardingPlansService {
 
     const current = await this.prisma.staffOnboardingPlan.findFirst({
       where: { id, tenantId },
-      select: { id: true },
+      select: { id: true, steps: true },
     });
 
     if (!current) {
@@ -333,14 +333,18 @@ export class StaffOnboardingPlansService {
         include: planInclude,
       });
 
-      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
         tx,
         {
           tenantId,
           actorUserId: user.id,
           resourceKind: StaffAttachmentResourceKind.ONBOARDING_PLAN,
           resourceId: plan.id,
-          attachmentIds: extractStaffAttachmentIds([normalized.data.steps]),
+          attachmentIds: extractStaffAttachmentIds([
+            normalized.data.steps === undefined
+              ? current.steps
+              : normalized.data.steps,
+          ]),
         },
       );
 

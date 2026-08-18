@@ -738,7 +738,7 @@ export class StaffKnowledgeBaseService {
         },
       });
 
-      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
         tx,
         {
           tenantId,
@@ -800,6 +800,7 @@ export class StaffKnowledgeBaseService {
         roleScope: true,
         content: true,
         materials: true,
+        relatedLinks: true,
         revisionSlaDays: true,
       },
     });
@@ -892,7 +893,7 @@ export class StaffKnowledgeBaseService {
         },
       });
 
-      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
         tx,
         {
           tenantId,
@@ -900,9 +901,11 @@ export class StaffKnowledgeBaseService {
           resourceKind: StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
           resourceId: article.id,
           attachmentIds: extractStaffAttachmentIds([
-            data.content,
-            data.materials,
-            data.relatedLinks,
+            data.content === undefined ? current.content : data.content,
+            data.materials === undefined ? current.materials : data.materials,
+            data.relatedLinks === undefined
+              ? current.relatedLinks
+              : data.relatedLinks,
           ]),
         },
       );

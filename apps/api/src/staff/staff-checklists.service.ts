@@ -1068,7 +1068,7 @@ export class StaffChecklistsService {
       });
 
       if (dto.answers !== undefined) {
-        await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+        await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
           tx,
           {
             tenantId,

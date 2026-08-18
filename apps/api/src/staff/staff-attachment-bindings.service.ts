@@ -25,6 +25,11 @@ type LockedAttachmentRow = {
   pendingExpiresAt: Date | null;
 };
 
+type NativeBindingRow = {
+  attachmentId: string | null;
+  id: string;
+};
+
 @Injectable()
 export class StaffAttachmentBindingsService {
   async bindPendingChatAttachments(
@@ -60,30 +65,126 @@ export class StaffAttachmentBindingsService {
     await this.bindPendingResourceAttachmentsInternal(tx, input);
   }
 
+  async syncNativeResourceAttachments(
+    tx: Prisma.TransactionClient,
+    input: BindPendingResourceAttachmentsInput,
+  ) {
+    const desiredAttachmentIds = this.normalizeAttachmentIds(
+      input.attachmentIds,
+    );
+    const currentBindings = await tx.staffAttachmentBinding.findMany({
+      where: {
+        tenantId: input.tenantId,
+        resourceKind: input.resourceKind,
+        resourceId: input.resourceId,
+        source: 'NATIVE',
+        state: 'BOUND',
+        attachmentId: { not: null },
+      },
+      select: { id: true, attachmentId: true },
+      orderBy: { id: 'asc' },
+    });
+    const currentAttachmentIds = this.bindingAttachmentIds(currentBindings);
+    const allAttachmentIds = this.normalizeAttachmentIds([
+      ...currentAttachmentIds,
+      ...desiredAttachmentIds,
+    ]);
+    const lockedRows = await this.lockAttachments(
+      tx,
+      input.tenantId,
+      allAttachmentIds,
+    );
+
+    await this.bindPendingResourceAttachmentsInternal(
+      tx,
+      { ...input, attachmentIds: desiredAttachmentIds },
+      undefined,
+      lockedRows,
+    );
+
+    const desiredAttachmentIdSet = new Set(desiredAttachmentIds);
+    const removedBindings = currentBindings.filter(
+      (binding) =>
+        binding.attachmentId !== null &&
+        !desiredAttachmentIdSet.has(binding.attachmentId),
+    );
+
+    if (removedBindings.length === 0) {
+      return;
+    }
+
+    const removedAttachmentIds = this.bindingAttachmentIds(removedBindings);
+    const deletion = await tx.staffAttachmentBinding.deleteMany({
+      where: {
+        id: { in: removedBindings.map((binding) => binding.id) },
+        tenantId: input.tenantId,
+        resourceKind: input.resourceKind,
+        resourceId: input.resourceId,
+        source: 'NATIVE',
+        state: 'BOUND',
+      },
+    });
+
+    if (deletion.count !== removedBindings.length) {
+      throw new BadRequestException('Attachment binding changed concurrently');
+    }
+
+    const remainingBindings = await tx.staffAttachmentBinding.findMany({
+      where: {
+        tenantId: input.tenantId,
+        state: 'BOUND',
+        attachmentId: { in: removedAttachmentIds },
+      },
+      select: { attachmentId: true },
+    });
+    const stillBoundIds = new Set(
+      remainingBindings.flatMap((binding) =>
+        binding.attachmentId ? [binding.attachmentId] : [],
+      ),
+    );
+    const quarantineIds = removedAttachmentIds.filter(
+      (attachmentId) => !stillBoundIds.has(attachmentId),
+    );
+
+    if (quarantineIds.length === 0) {
+      return;
+    }
+
+    const now = new Date();
+    const transition = await tx.staffAttachment.updateMany({
+      where: {
+        id: { in: quarantineIds },
+        tenantId: input.tenantId,
+        state: 'BOUND',
+      },
+      data: {
+        state: 'QUARANTINED',
+        pendingExpiresAt: null,
+        stateReasonCode: 'NATIVE_REFERENCE_REMOVED',
+        stateChangedAt: now,
+      },
+    });
+
+    if (transition.count !== quarantineIds.length) {
+      throw new BadRequestException('Attachment binding changed concurrently');
+    }
+  }
+
   private async bindPendingResourceAttachmentsInternal(
     tx: Prisma.TransactionClient,
     input: BindPendingResourceAttachmentsInput,
     beforeBinding?: (attachmentIds: readonly string[]) => Promise<void>,
+    prelockedRows?: readonly LockedAttachmentRow[],
   ) {
-    const attachmentIds = Array.from(new Set(input.attachmentIds)).sort();
+    const attachmentIds = this.normalizeAttachmentIds(input.attachmentIds);
 
     if (attachmentIds.length === 0) {
       return;
     }
 
-    const rows = await tx.$queryRaw<LockedAttachmentRow[]>(Prisma.sql`
-      SELECT
-        attachment."id",
-        attachment."tenantId",
-        attachment."uploadedByUserId",
-        attachment."state"::text AS "state",
-        attachment."pendingExpiresAt"
-      FROM "StaffAttachment" AS attachment
-      WHERE attachment."tenantId" = ${input.tenantId}
-        AND attachment."id" IN (${Prisma.join(attachmentIds)})
-      ORDER BY attachment."id"
-      FOR UPDATE
-    `);
+    const rows = prelockedRows
+      ? prelockedRows.filter((row) => attachmentIds.includes(row.id))
+      : await this.lockAttachments(tx, input.tenantId, attachmentIds);
     const existingBindings = await tx.staffAttachmentBinding.findMany({
       where: {
         tenantId: input.tenantId,
@@ -171,6 +272,42 @@ export class StaffAttachmentBindingsService {
     if (transition.count !== pendingAttachmentIds.length) {
       throw new BadRequestException('Attachment is not available');
     }
+  }
+
+  private async lockAttachments(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    attachmentIds: readonly string[],
+  ) {
+    if (attachmentIds.length === 0) {
+      return [];
+    }
+
+    return tx.$queryRaw<LockedAttachmentRow[]>(Prisma.sql`
+      SELECT
+        attachment."id",
+        attachment."tenantId",
+        attachment."uploadedByUserId",
+        attachment."state"::text AS "state",
+        attachment."pendingExpiresAt"
+      FROM "StaffAttachment" AS attachment
+      WHERE attachment."tenantId" = ${tenantId}
+        AND attachment."id" IN (${Prisma.join(attachmentIds)})
+      ORDER BY attachment."id"
+      FOR UPDATE
+    `);
+  }
+
+  private bindingAttachmentIds(bindings: readonly NativeBindingRow[]) {
+    return this.normalizeAttachmentIds(
+      bindings.flatMap((binding) =>
+        binding.attachmentId ? [binding.attachmentId] : [],
+      ),
+    );
+  }
+
+  private normalizeAttachmentIds(attachmentIds: readonly string[]) {
+    return Array.from(new Set(attachmentIds)).sort();
   }
 
   private sourceKey(locator: string) {

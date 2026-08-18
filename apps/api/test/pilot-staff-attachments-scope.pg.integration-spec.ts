@@ -70,6 +70,10 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
   });
 
   afterAll(async () => {
+    if (prisma === undefined) {
+      return;
+    }
+
     const [tenantResidue, userResidue, attachmentResidue] = await Promise.all([
       prisma.tenant.count({
         where: { slug: { startsWith: 'pilot-attachment-' } },
@@ -385,6 +389,60 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
         },
       }),
     ).resolves.toBe(1);
+
+    await services.knowledgeBase.updateArticle(user, article.id, {
+      summary: 'Status-only native binding retention check',
+    });
+    await expect(
+      prisma.staffAttachmentBinding.count({
+        where: {
+          tenantId: fixture.tenantAId,
+          attachmentId: articleAttachment.id,
+          resourceKind: StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+          resourceId: article.id,
+          state: 'BOUND',
+        },
+      }),
+    ).resolves.toBe(1);
+
+    await services.trainingCourses.updateCourse(user, course.id, { steps: [] });
+    await expect(
+      prisma.staffAttachment.findUniqueOrThrow({
+        where: { id: courseAttachment.id },
+        select: { state: true, stateReasonCode: true },
+      }),
+    ).resolves.toEqual({
+      state: 'QUARANTINED',
+      stateReasonCode: 'NATIVE_REFERENCE_REMOVED',
+    });
+    await expect(
+      prisma.staffAttachmentBinding.count({
+        where: {
+          tenantId: fixture.tenantAId,
+          attachmentId: courseAttachment.id,
+          resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
+          resourceId: course.id,
+          state: 'BOUND',
+        },
+      }),
+    ).resolves.toBe(0);
+    await expect(
+      services.attachments.getAttachment(user, courseAttachment.id),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    await services.shiftRegulations.deleteRegulation(user, regulation.id);
+    await expect(
+      prisma.staffShiftRegulation.count({ where: { id: regulation.id } }),
+    ).resolves.toBe(0);
+    await expect(
+      prisma.staffAttachment.findUniqueOrThrow({
+        where: { id: regulationAttachment.id },
+        select: { state: true, stateReasonCode: true },
+      }),
+    ).resolves.toEqual({
+      state: 'QUARANTINED',
+      stateReasonCode: 'NATIVE_REFERENCE_REMOVED',
+    });
 
     const foreignAttachment = await services.attachments.createAttachment(
       buildUser(fixture, 'B_NETWORK'),

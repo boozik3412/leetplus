@@ -60,6 +60,14 @@ test("reissue creates and releases only a newly generated invite aggregate", () 
   );
   assert.match(
     migration,
+    /SELECT outbox\."createdAt" INTO release_at[\s\S]*SET "status" = 'PENDING'::public\."IdentityMailOutboxStatus",\s+"releasedAt" = release_at/u,
+  );
+  assert.doesNotMatch(
+    migration,
+    /SET "status" = 'PENDING'::public\."IdentityMailOutboxStatus",\s+"releasedAt" = issued_at/u,
+  );
+  assert.match(
+    migration,
     /FROM public\."FounderOwnerInviteReissueCommand" AS command[\s\S]*command\."createdTransactionId" = pg_catalog\.pg_current_xact_id\(\)::TEXT/u,
   );
   assert.doesNotMatch(

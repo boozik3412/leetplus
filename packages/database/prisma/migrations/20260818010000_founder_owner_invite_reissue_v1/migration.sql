@@ -390,6 +390,7 @@ DECLARE
   current_outbox_id TEXT;
   current_sequence INTEGER;
   issued_at TIMESTAMP(3) WITH TIME ZONE;
+  release_at TIMESTAMP(3) WITH TIME ZONE;
   transaction_id TEXT;
   prior_delivery_status TEXT;
   prior_invite_state TEXT;
@@ -670,6 +671,18 @@ BEGIN
     candidate_expires_at
   );
 
+  SELECT outbox."createdAt" INTO release_at
+  FROM public."IdentityMailOutbox" AS outbox
+  WHERE outbox."tenantId" = tenant_id
+    AND outbox."id" = outbox_id
+    AND outbox."issueCommandId" = issue_command_id
+    AND outbox."inviteId" = invite_id
+    AND outbox."status" = 'HOLD'::public."IdentityMailOutboxStatus";
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'New owner invite delivery aggregate was not created'
+      USING ERRCODE = '23514';
+  END IF;
+
   receipt := pg_catalog.jsonb_build_object(
     'schemaVersion', 1,
     'operation', 'REISSUE_INITIAL_OWNER_INVITE',
@@ -699,12 +712,12 @@ BEGIN
     issue_command_id, invite_id, outbox_id, message_key, candidate_token_hash,
     pg_catalog.encode(pg_catalog.sha256(candidate_secret_ciphertext), 'hex'),
     candidate_expires_at, actor_id, operation_reason_digest,
-    operation_support_ticket_digest, receipt, transaction_id, issued_at
+    operation_support_ticket_digest, receipt, transaction_id, release_at
   );
 
   UPDATE public."IdentityMailOutbox"
   SET "status" = 'PENDING'::public."IdentityMailOutboxStatus",
-      "releasedAt" = issued_at
+      "releasedAt" = release_at
   WHERE "tenantId" = tenant_id
     AND "id" = outbox_id
     AND "status" = 'HOLD'::public."IdentityMailOutboxStatus";
@@ -731,7 +744,7 @@ BEGIN
       'supportTicket', operation_support_ticket,
       'blindResend', false
     ),
-    issued_at AT TIME ZONE 'UTC'
+    release_at AT TIME ZONE 'UTC'
   );
 
   RETURN receipt;

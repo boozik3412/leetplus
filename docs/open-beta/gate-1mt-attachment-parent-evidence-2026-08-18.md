@@ -8,7 +8,8 @@ reader implementation:
 `abb8a667c986fb92c1a8da475f764733b1c395c1`; exact writer implementation:
 `fc07e959d6beab79a98c4bbd8c41e8ddf09b98de`; exact lifecycle implementation:
 `f2e9e6ca2d4804fe62ca1d51b04ef60abd8d7fcf`; exact PostgreSQL race
-evidence: `7928b7f869a571174c532bb92f060ff37cb589d0`.
+evidence: `7928b7f869a571174c532bb92f060ff37cb589d0`; exact direct subject-revoke
+implementation: `c5b86abadeca5bc55e5f5b231eda3a37ad0a49fc`.
 
 Принятые parent kinds:
 
@@ -31,8 +32,9 @@ Production и текущий Tenant A/A1–A4 не изменялись.
 2. проверяет capability соответствующего staff-модуля;
 3. повторно получает persisted role/custom-role/capabilities и access scope;
 4. разрешает эти временно network-only workspaces только при fresh `NETWORK`;
-5. выполняет exact `tenantId + parent id` lookup в той же repeatable-read
-   транзакции;
+5. в `ENFORCED` режиме до metadata берёт exact tenant-scoped shared row lock
+   на subject и attachment, затем выполняет `tenantId + parent id` lookup в той
+   же read-committed транзакции;
 6. загружает blob bytes только после положительного решения.
 
 Capability mapping:
@@ -86,7 +88,7 @@ Static/local:
 ```text
 StaffAttachmentsService unit: 26/26 PASS
 Writer/binder focused unit:      24/24 PASS
-Final attachment-focused unit:   48/48 PASS
+Final attachment-focused unit:   49/49 PASS
 targeted API ESLint:           PASS
 API production typecheck:     PASS
 API production build:         PASS
@@ -120,6 +122,13 @@ remove и replacement одного parent: обе операции сериал�
 parent steps совпали с единственным BOUND binding, старый blob остался
 QUARANTINED, а его повторная привязка к новому parent была отклонена.
 
+Direct subject-revoke extension дважды прошёл `7/7 + 7/7`. В `ENFORCED`
+режиме download до metadata берёт один PostgreSQL `FOR SHARE` lock на exact
+tenant-scoped `User + StaffAttachment`; lifecycle/user writers используют
+конфликтующие row locks. В fixture `isActive=false` был записан и удержан до
+старта download: reader реально заблокировался, после commit повторно увидел
+неактивного subject, вернул `Unauthorized` без bytes и не повредил binding.
+
 ## Postflight
 
 Для обоих exact-commit прогонов:
@@ -131,7 +140,7 @@ QUARANTINED, а его повторная привязка к новому paren
 - exact disposable database удалена;
 - database residue: `0`.
 
-После этого Gate 1MT PostgreSQL matrix составляет `33/33`:
+После этого Gate 1MT PostgreSQL matrix составляет `34/34`:
 
 | Slice                                              |        Результат |
 | -------------------------------------------------- | ---------------: |
@@ -139,8 +148,8 @@ QUARANTINED, а его повторная привязка к новому paren
 | Team chat, включая real HTTP SSE                   |            `4/4` |
 | CRM communications                                 |            `4/4` |
 | Users/roles                                        |            `4/4` |
-| Staff attachments, reader + writer/lifecycle/races |            `6/6` |
-| **Итого**                                          | **`33/33 PASS`** |
+| Staff attachments, reader + writer/lifecycle/races |            `7/7` |
+| **Итого**                                          | **`34/34 PASS`** |
 
 ## Что ещё не закрыто
 
@@ -152,6 +161,6 @@ Reader coverage не равна полной file workflow readiness. До вн�
    безопасно сузить;
 2. production-build upload→create/update/remove/delete→download browser matrix;
 3. archive/move policy для остальных parent kinds, orphan retention и
-   scope-revoke/download race;
+   capability-revoke race через изменение custom/system role;
 4. tenant-aware jobs, Telegram/public guest binding, controlled outbound,
    Gate 2 и production `PREPARE`.

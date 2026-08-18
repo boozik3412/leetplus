@@ -450,10 +450,12 @@ SELECT
   (SELECT pg_catalog.count(*)::INTEGER
    FROM pg_catalog.pg_stat_activity AS activity
    WHERE activity.datname = pg_catalog.current_database()
+     AND activity.backend_type = 'client backend'
      AND activity.pid <> pg_catalog.pg_backend_pid()) AS "otherTargetSessionCount",
   (SELECT pg_catalog.count(*)::INTEGER
    FROM pg_catalog.pg_stat_activity AS activity
-   WHERE activity.usename = $1) AS "runtimeSessionCount"
+   WHERE activity.usename = $1
+     AND activity.backend_type = 'client backend') AS "runtimeSessionCount"
 `;
 
 const MIGRATIONS_SQL = `
@@ -461,7 +463,8 @@ SELECT
   migration."migration_name" AS "migrationName",
   migration."checksum",
   migration."finished_at" IS NOT NULL
-    AND migration."rolled_back_at" IS NULL AS "applied"
+    AND migration."rolled_back_at" IS NULL AS "applied",
+  migration."rolled_back_at" IS NOT NULL AS "rolledBack"
 FROM public."_prisma_migrations" AS migration
 ORDER BY migration."migration_name" COLLATE "C", migration."started_at"
 `;
@@ -499,6 +502,12 @@ async function collectState(adapter) {
   }
   const raw = stateResult.rows[0];
   const applied = migrationResult.rows.filter((row) => row.applied === true);
+  const rolledBack = migrationResult.rows.filter(
+    (row) => row.applied !== true && row.rolledBack === true,
+  );
+  const unfinished = migrationResult.rows.filter(
+    (row) => row.applied !== true && row.rolledBack !== true,
+  );
   const numericKeys = [
     "crossDatabaseDependencyCount",
     "otherDatabaseDirectPrivilegeCount",
@@ -532,9 +541,10 @@ async function collectState(adapter) {
   for (const key of numericKeys) normalized[key] = numberField(raw, key);
   normalized.migrationCount = applied.length;
   normalized.migrationManifestDigest = migrationDigest(applied);
-  normalized.nonAppliedMigrationCount =
-    migrationResult.rows.length - applied.length;
+  normalized.rolledBackMigrationCount = rolledBack.length;
+  normalized.rolledBackMigrationManifestDigest = migrationDigest(rolledBack);
   normalized.schemaHead = applied.at(-1)?.migrationName ?? null;
+  normalized.unfinishedMigrationCount = unfinished.length;
   return normalized;
 }
 
@@ -554,7 +564,11 @@ function assertTargetState(state, manifest) {
     state.schemaHead !== manifest.target.sourceSchemaHead ||
     state.migrationManifestDigest !==
       manifest.target.sourceMigrationManifestDigest ||
-    state.nonAppliedMigrationCount !== 0
+    state.rolledBackMigrationCount !==
+      manifest.target.sourceRolledBackMigrationCount ||
+    state.rolledBackMigrationManifestDigest !==
+      manifest.target.sourceRolledBackMigrationManifestDigest ||
+    state.unfinishedMigrationCount !== 0
   ) {
     fail("FOUNDER_PILOT_ACTIVATION_ROLE_MIGRATION_STATE_MISMATCH");
   }

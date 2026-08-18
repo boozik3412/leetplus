@@ -139,12 +139,14 @@ Exact head принят:
 Этот controller не применён к production и сам по себе не является `GO`.
 Перед первым реальным invite обязательны:
 
-1. immutable production backup и изолированная restored copy;
-2. прогон exact downloaded artifact на restored copy;
-3. создание и attestation production runtime/activation/mail-worker roles;
-4. production encryption/SMTP secrets и trusted-SMTP canary;
-5. Gate 1MT/2 production-like acceptance текущего `Tenant A/A1..A4`;
-6. production deploy в `PREPARE`, recovery point и только затем отдельный
+1. `DONE`: immutable production backup и clean isolated restored-copy
+   migration/activation-role rehearsal;
+2. собрать новый exact-SHA artifact с production-history controller и повторить
+   artifact-bound admission;
+3. создать и attested-проверить production runtime/activation/mail-worker roles;
+4. настроить production encryption/SMTP secrets и выполнить trusted-SMTP canary;
+5. закрыть Gate 1MT/2 production-like acceptance текущего `Tenant A/A1..A4`;
+6. выполнить production deploy в `PREPARE`, recovery point и только затем отдельный
    `Tenant B/Store B1`, persisted GO, controlled activation и этот enrollment.
 
 USB/offline key ceremony остаётся post-beta hardening и в этот список не

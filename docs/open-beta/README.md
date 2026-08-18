@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.147                                        |
+| Версия           | 1.148                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -66,6 +66,10 @@ Dedicated database boundary:
 
 Исполнимый read-only вход в restored-copy этап:
 [founder restored-copy preflight](./founder-pilot-restored-copy-preflight.md).
+
+Принятый прогон настоящего production backup, production-history migration
+lane, data zero-diff и TLS activation-role rollback:
+[production restored-copy rehearsal 18.08.2026](./founder-production-restored-copy-rehearsal-2026-08-18.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

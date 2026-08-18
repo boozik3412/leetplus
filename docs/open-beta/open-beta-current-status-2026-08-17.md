@@ -9,6 +9,11 @@
 | Offline/USB key      | исключён из beta critical path                     |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль |
 
+Restored-copy gate 18.08.2026: настоящий production backup восстановлен в
+изолированный PostgreSQL; clean migration/repeat/data-zero-diff и полный
+activation-role TLS/HBA/SCRAM apply/attest/rollback завершены `PASS`.
+[Полный отчёт](./founder-production-restored-copy-rehearsal-2026-08-18.md).
+
 ## Что уже реализовано
 
 Первый внешний клуб создаётся как отдельный tenant общей SaaS-платформы, а не
@@ -80,10 +85,9 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   artifact/backup SHA-256, loopback/non-5432 target, live system/database/migration
   identity, runtime-role absence, zero other sessions и explicit outbound-off
   declarations; focused `6/6 PASS`.
-  Synthetic PostgreSQL 16.14 run на `55439` вернул `READY`, после чего test DB и
-  файлы удалены, кластер остановлен. Live production backup/isolated restored
-  target и скачанный CI artifact не использовались, поэтому gate ещё не
-  выполнен.
+  Первоначальный synthetic PostgreSQL 16.14 run на `55439` вернул `READY`.
+  Этот исторический synthetic этап теперь superseded принятым 18.08
+  production-backup clean rehearsal, указанным выше.
 - implementation SHA `9caa3e49a03e4b04156689aa6d8ef0d8f4ffebe6` принят push CI
   `32053402516` и PR CI `32053406454` как `3/3 SUCCESS`; release artifact
   `9295786786`, digest
@@ -181,32 +185,29 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 
 ## Что блокирует выдачу доступа
 
-1. Clean SHA/CI artifact, read-only preflight, activation-role controller,
-   direct HBA/TLS/SCRAM, dedicated pool/API и downloaded artifact child-process
-   acceptance приняты. Immutable production backup/isolated restored target и
-   production PgBouncer/session-drain acceptance ещё не выполнены.
-2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
-   readiness evidence.
-3. Локальный `SENT` barrier, полный owner accept и безопасный one-tenant
-   enrollment доказаны на canonical CURRENT185. Ещё не выполнены
-   production-like restored-copy прогон exact artifact, production worker role
-   и реальный trusted-SMTP canary.
-4. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
+1. Production backup/restore, clean migration/repeat/data zero-diff и
+   activation-role TLS/HBA/SCRAM lifecycle приняты. Изменения ещё нужно собрать
+   в новый clean SHA/CI artifact и повторить artifact-bound admission.
+2. Локальный `SENT` barrier, полный owner accept и безопасный one-tenant
+   enrollment доказаны на canonical CURRENT185. Ещё не выполнены production
+   worker enrollment и реальный trusted-SMTP canary.
+3. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
    production-like A/B matrix, jobs/Telegram/files/SSE и Gate 2 для текущей
    сети из четырёх клубов не закрыты.
-5. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
+4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
 ## Полный путь до первого внешнего тестера
 
 ```text
 clean SHA + CI artifact [DONE]
-  → live backup + isolated target + read-only preflight
-  → execute-only runtime role/grant/attestation
-  → [DONE synthetic] direct HBA/TLS/SCRAM
+  → [DONE] live backup + isolated target + read-only preflight
+  → [DONE restored copy] production-history migrate + repeat + zero-diff
+  → [DONE restored copy] execute-only runtime role/grant/attestation
+  → [DONE restored copy] direct HBA/TLS/SCRAM + rollback
+  → new exact-SHA CI artifact + artifact-bound recheck
   → [DONE synthetic] dedicated pool + in-process HTTP/PG
   → [DONE synthetic] downloaded artifact API child process
-  → restored-copy apply/replay/rollback + backup/readiness
   → [DONE] owner invite status/revoke
   → [DONE engineering/CI] immutable owner invite reissue
   → [DONE local PostgreSQL] CURRENT185 worker + SENT/reissue/accept

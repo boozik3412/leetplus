@@ -49,10 +49,10 @@ if (
   provenance.databaseMigration !== EXPECTED_MIGRATION ||
   provenance.databaseMigrationCount !== EXPECTED_MIGRATION_COUNT ||
   provenance.founderPilotOperationalScriptsIncluded !== true ||
-  provenance.founderPilotOperationalScriptCount !== 8 ||
+  provenance.founderPilotOperationalScriptCount !== 10 ||
   provenance.runtimeEnrollmentOperationalScriptsIncluded !== true ||
   provenance.runtimeEnrollmentOperationalScriptCount !== 6 ||
-  provenance.operationalScriptCount !== 14
+  provenance.operationalScriptCount !== 16
 ) {
   throw new Error("RELEASE_PROVENANCE_INVALID");
 }

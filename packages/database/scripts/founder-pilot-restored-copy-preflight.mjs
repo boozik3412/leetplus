@@ -5,7 +5,7 @@ import path from "node:path";
 import pg from "pg";
 
 export const FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_CONTRACT =
-  "FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_V1";
+  "FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_V2";
 export const FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_READY =
   "READY_FOR_RESTORED_COPY_DATABASE_REHEARSAL";
 export const FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_BLOCKED = "BLOCKED_MANUAL";
@@ -123,6 +123,8 @@ function normalizeManifest(value) {
       "port",
       "sourceMigrationCount",
       "sourceMigrationManifestDigest",
+      "sourceRolledBackMigrationCount",
+      "sourceRolledBackMigrationManifestDigest",
       "sourceSchemaHead",
     ],
     "FOUNDER_PILOT_RESTORED_COPY_TARGET_INVALID",
@@ -200,6 +202,17 @@ function normalizeManifest(value) {
     target.sourceMigrationManifestDigest,
     SHA256,
     "FOUNDER_PILOT_SOURCE_MIGRATION_DIGEST_INVALID",
+  );
+  exactInteger(
+    target.sourceRolledBackMigrationCount,
+    0,
+    10000,
+    "FOUNDER_PILOT_SOURCE_ROLLED_BACK_MIGRATION_COUNT_INVALID",
+  );
+  exactString(
+    target.sourceRolledBackMigrationManifestDigest,
+    SHA256,
+    "FOUNDER_PILOT_SOURCE_ROLLED_BACK_MIGRATION_DIGEST_INVALID",
   );
   if (
     typeof target.sourceSchemaHead !== "string" ||
@@ -299,6 +312,10 @@ export function assertFounderPilotRestoredCopyPreflightReceipt(
     receipt.evidence?.sourceSchemaHead !== manifest.target.sourceSchemaHead ||
     receipt.evidence?.sourceMigrationManifestDigest !==
       manifest.target.sourceMigrationManifestDigest ||
+    receipt.evidence?.sourceRolledBackMigrationCount !==
+      manifest.target.sourceRolledBackMigrationCount ||
+    receipt.evidence?.sourceRolledBackMigrationManifestDigest !==
+      manifest.target.sourceRolledBackMigrationManifestDigest ||
     !SHA256.test(receipt.evidenceDigest)
   ) {
     fail("FOUNDER_PILOT_PREFLIGHT_RECEIPT_NOT_LIVE");
@@ -482,6 +499,7 @@ export async function inspectFounderPilotRestoredCopyTarget(
             SELECT pg_catalog.count(*)::INTEGER
             FROM pg_catalog.pg_stat_activity AS activity
             WHERE activity.datname = pg_catalog.current_database()
+              AND activity.backend_type = 'client backend'
               AND activity.pid <> pg_catalog.pg_backend_pid()
           ) AS "otherTargetSessionCount"
       `,
@@ -492,18 +510,27 @@ export async function inspectFounderPilotRestoredCopyTarget(
         migration."migration_name" AS "migrationName",
         migration."checksum",
         migration."finished_at" IS NOT NULL
-          AND migration."rolled_back_at" IS NULL AS "applied"
+          AND migration."rolled_back_at" IS NULL AS "applied",
+        migration."rolled_back_at" IS NOT NULL AS "rolledBack"
       FROM public."_prisma_migrations" AS migration
       ORDER BY migration."migration_name" COLLATE "C", migration."started_at"
     `);
     await client.query("COMMIT");
     const applied = migrations.rows.filter((row) => row.applied === true);
+    const rolledBack = migrations.rows.filter(
+      (row) => row.applied !== true && row.rolledBack === true,
+    );
+    const unfinished = migrations.rows.filter(
+      (row) => row.applied !== true && row.rolledBack !== true,
+    );
     return {
       ...identity.rows[0],
       migrationCount: applied.length,
       migrationManifestDigest: migrationManifestDigest(applied),
-      nonAppliedMigrationCount: migrations.rows.length - applied.length,
+      rolledBackMigrationCount: rolledBack.length,
+      rolledBackMigrationManifestDigest: migrationManifestDigest(rolledBack),
       schemaHead: applied.at(-1)?.migrationName ?? null,
+      unfinishedMigrationCount: unfinished.length,
     };
   } catch (error) {
     try {
@@ -526,12 +553,14 @@ function validateTargetEvidence(evidence, target) {
       "founderActivationRoleCount",
       "migrationCount",
       "migrationManifestDigest",
-      "nonAppliedMigrationCount",
       "otherTargetSessionCount",
+      "rolledBackMigrationCount",
+      "rolledBackMigrationManifestDigest",
       "schemaHead",
       "serverAddress",
       "serverPort",
       "systemIdentifier",
+      "unfinishedMigrationCount",
     ],
     "FOUNDER_PILOT_TARGET_EVIDENCE_INVALID",
   );
@@ -548,7 +577,10 @@ function validateTargetEvidence(evidence, target) {
     value.migrationCount !== target.sourceMigrationCount ||
     value.schemaHead !== target.sourceSchemaHead ||
     value.migrationManifestDigest !== target.sourceMigrationManifestDigest ||
-    value.nonAppliedMigrationCount !== 0
+    value.rolledBackMigrationCount !== target.sourceRolledBackMigrationCount ||
+    value.rolledBackMigrationManifestDigest !==
+      target.sourceRolledBackMigrationManifestDigest ||
+    value.unfinishedMigrationCount !== 0
   ) {
     fail("FOUNDER_PILOT_TARGET_MIGRATION_STATE_MISMATCH");
   }
@@ -668,6 +700,9 @@ export async function runFounderPilotRestoredCopyPreflight({
       rtoSeconds: manifest.retention.rtoSeconds,
       sourceMigrationCount: targetEvidence.migrationCount,
       sourceMigrationManifestDigest: targetEvidence.migrationManifestDigest,
+      sourceRolledBackMigrationCount: targetEvidence.rolledBackMigrationCount,
+      sourceRolledBackMigrationManifestDigest:
+        targetEvidence.rolledBackMigrationManifestDigest,
       sourceSchemaHead: targetEvidence.schemaHead,
       targetIdentityDigest: digest("target-identity", {
         currentDatabase: targetEvidence.currentDatabase,

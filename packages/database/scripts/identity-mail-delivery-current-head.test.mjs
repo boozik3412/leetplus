@@ -13,6 +13,8 @@ const migrationName = "20260818020000_identity_mail_delivery_current_head_v1";
 const predecessorName = "20260818010000_founder_owner_invite_reissue_v1";
 const preterminalManifestDigest =
   "f269f0878c9940b7ee2619e778e032361acc844364ab876bbe7fcc01e15a9fcd";
+const productionHistoryPreterminalManifestDigest =
+  "7a0bb533293e9ddf69d689a1215f3589872d399dccecde5a598bf79175923bcc";
 const workerAssertSourceDigest =
   "47690501257272fd455475a00bea0e21b13f27187a669adef2115de349633315";
 const workerAssertDefinitionDigest =
@@ -90,6 +92,10 @@ test("the active worker repository consumes the same exact CURRENT185 receipt", 
   assert.match(repository, new RegExp(migrationName, "u"));
   assert.match(repository, /CURRENT_MIGRATION_COUNT = 185 as const/u);
   assert.match(repository, new RegExp(preterminalManifestDigest, "u"));
+  assert.match(
+    repository,
+    new RegExp(productionHistoryPreterminalManifestDigest, "u"),
+  );
   assert.doesNotMatch(
     repository,
     /const CURRENT_MIGRATION =\s*'20260731120000_identity_mail_delivery_release_head'/u,

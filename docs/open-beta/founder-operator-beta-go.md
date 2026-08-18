@@ -1,13 +1,13 @@
 # FOUNDER_OPERATOR_BETA_GO_V1
 
-| Поле | Значение |
-| --- | --- |
-| Дата решения | 17.08.2026 |
-| Статус | `V2 + RUNTIME BOUNDARY IMPLEMENTED / PRODUCTION NO-GO` |
-| Цель | первый invite-only внешний `Tenant B/Store B1` |
-| Offline/USB key | не требуется; CURRENT198–202 отложен |
-| Клиентский ключ | не существует и не требуется |
-| Текущий production | не изменён |
+| Поле               | Значение                                               |
+| ------------------ | ------------------------------------------------------ |
+| Дата решения       | 17.08.2026                                             |
+| Статус             | `V2 + RUNTIME BOUNDARY IMPLEMENTED / PRODUCTION NO-GO` |
+| Цель               | первый invite-only внешний `Tenant B/Store B1`         |
+| Offline/USB key    | не требуется; CURRENT198–202 отложен                   |
+| Клиентский ключ    | не существует и не требуется                           |
+| Текущий production | не изменён                                             |
 
 ## Решение
 
@@ -137,15 +137,16 @@ V2 atomic activation реализован. До внешнего invite оста
 - owner/superuser, `INHERIT` drift и случайный `PUBLIC EXECUTE` не проходят
   runtime wrapper; после exact ACL restore replay снова проходит;
 - valid GO + one-way revoke — `stateRevision=3 / revoked=true /
-  consumed=false`;
+consumed=false`;
 - adversarial active→consumed до v2, immutable-field rewrite и
   revoked→consumed transition — denied;
 - partial unique active-tenant fence — присутствует.
 
-Это локальное engineering evidence, а не accepted release artifact. Exact SHA
-ещё не зафиксирован CI, production runtime role/secret/grant не созданы,
-production-like restored-copy rehearsal и SMTP acceptance не выполнены.
-Поэтому статус внешнего доступа остаётся `NO-GO`.
+Этот исходный локальный engineering checkpoint впоследствии принят exact-SHA
+CI. На 18.08 production-backup restored-copy migration и activation-role
+TLS/HBA/SCRAM rollback также приняты; production runtime role/secret/grant не
+созданы. Новый artifact с production-history controller и SMTP acceptance ещё
+не приняты, поэтому статус внешнего доступа остаётся `NO-GO`.
 
 ## Что по-прежнему запрещено
 

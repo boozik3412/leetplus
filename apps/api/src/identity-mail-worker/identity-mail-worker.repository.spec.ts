@@ -726,6 +726,23 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     expect(sealedAssertion.values).toEqual([TENANT_ID]);
   });
 
+  it('accepts the exact reviewed production-history CURRENT185 receipt', async () => {
+    const { prisma, repository } = harness();
+    prisma.$queryRaw.mockResolvedValueOnce([readinessRow()]);
+    prisma.rpcQueryRaw.mockResolvedValueOnce([
+      {
+        result: readinessReceipt({
+          preterminalManifestDigest:
+            '7a0bb533293e9ddf69d689a1215f3589872d399dccecde5a598bf79175923bcc',
+        }),
+      },
+    ]);
+
+    await expect(
+      repository.assertReady(readinessInput()),
+    ).resolves.toBeUndefined();
+  });
+
   it('allows a proven plaintext session only for a loopback transport policy', async () => {
     const { prisma, repository } = harness();
     prisma.$queryRaw.mockResolvedValueOnce([

@@ -65,7 +65,7 @@ export async function main(
   } catch (error) {
     process.stdout.write(
       `${JSON.stringify({
-        contractVersion: "FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_V1",
+        contractVersion: "FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_V2",
         decision: "BLOCKED_MANUAL",
         reasonCode:
           error?.safeContractError === true

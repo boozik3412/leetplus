@@ -25,6 +25,9 @@ import {
 const OPERATION_ID = "12345678-1234-4123-8123-123456789abc";
 const RELEASE_SHA = "a".repeat(40);
 const MIGRATION_DIGEST = "b".repeat(64);
+const EMPTY_MIGRATION_DIGEST = createHash("sha256")
+  .update("", "utf8")
+  .digest("hex");
 const ROLE_CATALOG_DIGEST = "c".repeat(64);
 const CA_SHA = "d".repeat(64);
 const CERTIFICATE_SHA = "e".repeat(64);
@@ -66,6 +69,8 @@ function manifest() {
       port: 55439,
       sourceMigrationCount: 185,
       sourceMigrationManifestDigest: MIGRATION_DIGEST,
+      sourceRolledBackMigrationCount: 0,
+      sourceRolledBackMigrationManifestDigest: EMPTY_MIGRATION_DIGEST,
       sourceSchemaHead: "20260818020000_identity_mail_delivery_current_head_v1",
     },
   };

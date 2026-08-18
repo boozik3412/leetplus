@@ -326,6 +326,9 @@ jobs:
       - name: Validate founder-pilot restored-copy fail-closed preflight
         run: pnpm --filter database check:founder-pilot-restored-copy-preflight
 
+      - name: Validate founder-pilot production-history rehearsal lane
+        run: pnpm --filter database check:founder-pilot-production-history-rehearsal
+
       - name: Validate founder-pilot exact activation-role deployment
         run: pnpm --filter database check:founder-pilot-activation-role-deployment
 
@@ -569,6 +572,8 @@ jobs:
           cp -a \
             packages/database/scripts/founder-pilot-restored-copy-preflight.mjs \
             packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs \
+            packages/database/scripts/founder-pilot-production-history-rehearsal.mjs \
+            packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs \
             packages/database/scripts/founder-pilot-activation-role-deployment.mjs \
             packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs \
             packages/database/scripts/founder-pilot-activation-role-network-acceptance.mjs \
@@ -593,10 +598,10 @@ jobs:
             '  "databaseMigrationCount": 185,' \
             '  "runtimePackageManifestsIncluded": true,' \
             '  "founderPilotOperationalScriptsIncluded": true,' \
-            '  "founderPilotOperationalScriptCount": 8,' \
+            '  "founderPilotOperationalScriptCount": 10,' \
             '  "runtimeEnrollmentOperationalScriptsIncluded": true,' \
             '  "runtimeEnrollmentOperationalScriptCount": 6,' \
-            '  "operationalScriptCount": 14,' \
+            '  "operationalScriptCount": 16,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
@@ -651,6 +656,7 @@ jobs:
             './packages/database/package.json' \
             './packages/database/prisma/schema.prisma' \
             './packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs' \
+            './packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs' \
             './packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs' \
@@ -665,7 +671,7 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '14'
+          test "$script_file_count" = '16'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1
@@ -677,12 +683,13 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").releaseSha')" = "$CI_RELEASE_SHA"
             test "$(node -p 'require("./release-provenance.json").runtimePackageManifestsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptsIncluded')" = 'true'
-            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '8'
+            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '10'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptCount')" = '6'
-            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '14'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '16'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
+            node --check packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs
             node --check packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs
@@ -691,6 +698,7 @@ jobs:
             pnpm install --prod --offline --frozen-lockfile
             pnpm --filter database db:generate
             node packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs --help > /dev/null
+            node packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs --help > /dev/null
             node packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs --help > /dev/null
             node packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs --help > /dev/null
             node packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs --help > /dev/null

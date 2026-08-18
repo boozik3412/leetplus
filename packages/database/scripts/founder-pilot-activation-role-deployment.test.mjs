@@ -33,6 +33,14 @@ const MIGRATION_CHECKSUM = "d".repeat(64);
 const MIGRATION_DIGEST = createHash("sha256")
   .update(`${MIGRATION_NAME}\0${MIGRATION_CHECKSUM}`, "utf8")
   .digest("hex");
+const ROLLED_BACK_MIGRATION_NAME = "20260725213500_guest_game_reward_wallet";
+const ROLLED_BACK_MIGRATION_CHECKSUM = "e".repeat(64);
+const ROLLED_BACK_MIGRATION_DIGEST = createHash("sha256")
+  .update(
+    `${ROLLED_BACK_MIGRATION_NAME}\0${ROLLED_BACK_MIGRATION_CHECKSUM}`,
+    "utf8",
+  )
+  .digest("hex");
 
 function manifest() {
   return {
@@ -70,6 +78,8 @@ function manifest() {
       port: 55439,
       sourceMigrationCount: 1,
       sourceMigrationManifestDigest: MIGRATION_DIGEST,
+      sourceRolledBackMigrationCount: 1,
+      sourceRolledBackMigrationManifestDigest: ROLLED_BACK_MIGRATION_DIGEST,
       sourceSchemaHead: MIGRATION_NAME,
     },
   };
@@ -149,12 +159,14 @@ function targetEvidence() {
     founderActivationRoleCount: 0,
     migrationCount: 1,
     migrationManifestDigest: MIGRATION_DIGEST,
-    nonAppliedMigrationCount: 0,
     otherTargetSessionCount: 0,
+    rolledBackMigrationCount: 1,
+    rolledBackMigrationManifestDigest: ROLLED_BACK_MIGRATION_DIGEST,
     schemaHead: MIGRATION_NAME,
     serverAddress: "127.0.0.1",
     serverPort: 55439,
     systemIdentifier: SYSTEM_IDENTIFIER,
+    unfinishedMigrationCount: 0,
   };
 }
 
@@ -191,6 +203,13 @@ function createFakeDatabase() {
       applied: true,
       checksum: MIGRATION_CHECKSUM,
       migrationName: MIGRATION_NAME,
+      rolledBack: false,
+    },
+    {
+      applied: false,
+      checksum: ROLLED_BACK_MIGRATION_CHECKSUM,
+      migrationName: ROLLED_BACK_MIGRATION_NAME,
+      rolledBack: true,
     },
   ];
 
@@ -479,6 +498,7 @@ test("catalog SQL covers attributes, memberships, ownership, ACL, sessions, and 
     "has_schema_privilege",
     "has_function_privilege",
     "pg_stat_activity",
+    "backend_type = 'client backend'",
     "pg_control_system",
     "requiredFunctionPublicExecuteCount",
     "crossDatabaseDependencyCount",

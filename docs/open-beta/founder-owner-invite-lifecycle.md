@@ -132,9 +132,10 @@ Successor не развёрнут в production.
 ## Что ещё не реализовано
 
 - resend уже созданного токена запрещён: используется только reissue;
-- production-like restored-copy worker enrollment и trusted SMTP canary;
+- новый artifact-bound restored-copy worker enrollment и trusted SMTP canary;
 - production canary нового reissued invite с подтверждённым `SENT` и accept;
-- restored-copy rehearsal, Gate 1MT/2 и production activation.
+- Gate 1MT/2 и production activation. Clean migration/activation-role
+  restored-copy rehearsal уже принят 18.08.2026.
 
 Production, текущая сеть из четырёх клубов и внешний tester этим этапом не
 изменяются.

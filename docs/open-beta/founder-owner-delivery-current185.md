@@ -66,13 +66,15 @@ roles, не включал outbound, не создавал новый tenant и 
 
 ## Следующий operational gate
 
-1. Скачать и проверить принятый SHA-bound artifact.
-2. На изолированной restored copy production backup применить exact artifact,
-   повторить readiness, worker enrollment, `SENT`, accept и rollback/restore.
-3. Подготовить production backup и recovery point.
-4. Развернуть exact artifact/migration, создать и аттестовать least-privilege
+1. `DONE`: production backup restore, CURRENT185 production-history migration,
+   repeat, data zero-diff и activation-role TLS rollback.
+2. Собрать и скачать новый SHA-bound artifact с принятым history controller.
+3. На сохранённой restored copy повторить artifact-bound readiness и worker
+   enrollment/`SENT`/accept/disable.
+4. Перед production cutover подготовить новый recovery point, развернуть exact
+   artifact/migration, создать и аттестовать least-privilege
    runtime/worker roles, настроить production encryption и trusted SMTP.
-5. Выполнить один controlled canary, затем создать отдельный
+5. После Gate 1MT/2 выполнить один controlled canary, затем создать отдельный
    `Tenant B/Store B1` и отправить mailbox-bound OWNER invite.
 6. После accept проверить tenant/store/module isolation и оставить outbound
    включённым только для явно разрешённого pilot tenant.

@@ -17,8 +17,13 @@ import type {
 const CURRENT_MIGRATION =
   '20260818020000_identity_mail_delivery_current_head_v1' as const;
 const CURRENT_MIGRATION_COUNT = 185 as const;
-const PRETERMINAL_MIGRATION_MANIFEST_DIGEST =
-  'f269f0878c9940b7ee2619e778e032361acc844364ab876bbe7fcc01e15a9fcd' as const;
+const PRETERMINAL_MIGRATION_MANIFEST_DIGESTS = new Set<string>([
+  // Canonical clean install.
+  'f269f0878c9940b7ee2619e778e032361acc844364ab876bbe7fcc01e15a9fcd',
+  // Exact production-history restored-copy lane: two reviewed comment-only
+  // legacy checksums plus the CURRENT179/CURRENT185 history bridges.
+  '7a0bb533293e9ddf69d689a1215f3589872d399dccecde5a598bf79175923bcc',
+]);
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const UUID_PATTERN =
@@ -982,8 +987,10 @@ function assertReadinessReceipt(
     record.tenantId !== tenantId ||
     record.migrationHead !== input.expectedMigration ||
     record.migrationCount !== input.expectedMigrationCount ||
-    record.preterminalManifestDigest !==
-      PRETERMINAL_MIGRATION_MANIFEST_DIGEST ||
+    typeof record.preterminalManifestDigest !== 'string' ||
+    !PRETERMINAL_MIGRATION_MANIFEST_DIGESTS.has(
+      record.preterminalManifestDigest,
+    ) ||
     !positiveSafeInteger(record.policyRevision) ||
     record.maxAttempts !== input.expectedPolicy.maxAttempts ||
     record.leaseSeconds !== input.expectedPolicy.leaseSeconds ||

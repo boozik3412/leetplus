@@ -19,6 +19,7 @@ const NOW = new Date("2026-08-17T12:00:00.000Z");
 const RELEASE_SHA = "1".repeat(40);
 const SYSTEM_IDENTIFIER = "7612345678901234567";
 const MIGRATION_DIGEST = "2".repeat(64);
+const ROLLED_BACK_MIGRATION_DIGEST = "3".repeat(64);
 const ARTIFACT_BYTES = Buffer.from("accepted-release-artifact", "utf8");
 const BACKUP_BYTES = Buffer.from("isolated-production-backup", "utf8");
 
@@ -62,6 +63,8 @@ function manifest(artifactPath, backupPath) {
       port: 55439,
       sourceMigrationCount: 185,
       sourceMigrationManifestDigest: MIGRATION_DIGEST,
+      sourceRolledBackMigrationCount: 4,
+      sourceRolledBackMigrationManifestDigest: ROLLED_BACK_MIGRATION_DIGEST,
       sourceSchemaHead: "20260818020000_identity_mail_delivery_current_head_v1",
     },
   };
@@ -74,12 +77,14 @@ function targetEvidence(overrides = {}) {
     founderActivationRoleCount: 0,
     migrationCount: 185,
     migrationManifestDigest: MIGRATION_DIGEST,
-    nonAppliedMigrationCount: 0,
     otherTargetSessionCount: 0,
+    rolledBackMigrationCount: 4,
+    rolledBackMigrationManifestDigest: ROLLED_BACK_MIGRATION_DIGEST,
     schemaHead: "20260818020000_identity_mail_delivery_current_head_v1",
     serverAddress: "127.0.0.1",
     serverPort: 55439,
     systemIdentifier: SYSTEM_IDENTIFIER,
+    unfinishedMigrationCount: 0,
     ...overrides,
   };
 }
@@ -244,7 +249,7 @@ test("rejects declaration-only bypasses before target inspection", async (t) => 
   }
 });
 
-test("rejects target identity, migration drift, unapplied rows, and pre-existing runtime role", async (t) => {
+test("rejects target identity, migration or rollback drift, unfinished rows, and pre-existing runtime role", async (t) => {
   const files = await fixture(t);
   const cases = [
     [
@@ -256,7 +261,15 @@ test("rejects target identity, migration drift, unapplied rows, and pre-existing
       "FOUNDER_PILOT_TARGET_MIGRATION_STATE_MISMATCH",
     ],
     [
-      { nonAppliedMigrationCount: 1 },
+      { rolledBackMigrationCount: 3 },
+      "FOUNDER_PILOT_TARGET_MIGRATION_STATE_MISMATCH",
+    ],
+    [
+      { rolledBackMigrationManifestDigest: "4".repeat(64) },
+      "FOUNDER_PILOT_TARGET_MIGRATION_STATE_MISMATCH",
+    ],
+    [
+      { unfinishedMigrationCount: 1 },
       "FOUNDER_PILOT_TARGET_MIGRATION_STATE_MISMATCH",
     ],
     [

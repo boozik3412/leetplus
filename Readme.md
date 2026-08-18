@@ -10,6 +10,12 @@ LeetPlus - SaaS-платформа для операционного управ�
 Четыре текущих клуба считаются одной сетью и сохраняются четырьмя `Store`
 одного существующего `Tenant`.
 
+Production-backup restored-copy rehearsal от 18.08.2026 принят: clean
+migration/repeat, 134-table row-count zero-diff и activation-role
+TLS/HBA/SCRAM rollback прошли на изолированной копии. Точный evidence и
+оставшийся путь до первого внешнего tenant зафиксированы в
+[отчёте restored-copy rehearsal](./docs/open-beta/founder-production-restored-copy-rehearsal-2026-08-18.md).
+
 Текущий StaffTask hardening checkpoint —
 [snapshot evidence boundary и SYNTHETIC reconciliation proposal dry-run](./docs/security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
 на runtime candidate SHA `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`.

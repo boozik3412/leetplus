@@ -408,6 +408,9 @@ jobs:
       - name: Lint Gate 1MT team-chat PostgreSQL matrix
         run: pnpm --filter api lint:ci:pilot-team-chat-pg
 
+      - name: Lint Gate 1MT staff attachment PostgreSQL matrix
+        run: pnpm --filter api lint:ci:pilot-staff-attachments-pg
+
       - name: Lint Gate 1MT CRM communications boundary
         run: pnpm --filter api lint:ci:pilot-crm-communications
 
@@ -1187,6 +1190,11 @@ jobs:
         run: pnpm --filter api test:integration:pilot-team-chat-fresh-scope:pg
         env:
           PILOT_TEAM_CHAT_SCOPE_PG_CONFIRM: run-pilot-team-chat-fresh-scope-postgres-fixtures
+
+      - name: Verify Gate 1MT staff attachment isolation with PostgreSQL
+        run: pnpm --filter api test:integration:pilot-staff-attachments-scope:pg
+        env:
+          PILOT_STAFF_ATTACHMENTS_SCOPE_PG_CONFIRM: run-pilot-staff-attachments-scope-postgres-fixtures
 
       - name: Verify Gate 1MT CRM communications tenant isolation with PostgreSQL
         run: pnpm --filter api test:integration:pilot-crm-communications:pg

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.152                                        |
+| Версия           | 1.153                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -79,6 +79,10 @@ Production-like PostgreSQL A/B matrix ассортимента, team chat, CRM �
 users/roles на отдельном CURRENT185 restored-copy clone:
 [Gate 1MT restored-copy PostgreSQL evidence 18.08.2026](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md).
 
+Production-build report/download/mutation acceptance на clean restored-copy
+clone:
+[Gate 1MT report browser evidence 18.08.2026](./gate-1mt-report-browser-evidence-2026-08-18.md).
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 
@@ -133,7 +137,7 @@ checksum. Production и текущая сеть не изменялись.
    allowed/denied Store direct-URL matrix и invite-only employee flow;
    `PARTIAL PASS`, не production/shared-beta GO.
    0a.4. [Gate 1MT restored-copy PostgreSQL evidence](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md) —
-   CURRENT185 production-backup clones, пять A/B suites, `28/28 PASS`
+   CURRENT185 production-backup clones, пять A/B suites, `29/29 PASS`
    (включая staff attachments), затем production-build OWNER/STORES browser
    read/admission slice на `771bbd5f…`; fixture/database residue `0`. Latest
    assortment candidate `f59c32fc…` добавил category/supplier,
@@ -143,11 +147,16 @@ checksum. Production и текущая сеть не изменялись.
    `12/12 + 12/12` на disposable
    restored-copy clone; fixture/database residue `0`. Exact `3e0389b4…`
    добавил real Nest HTTP/RolesGuard и hardened report BFF proxies; два
-   restored-copy run дали `14/14 + 14/14`, BFF acceptance `8/8`,
-   seven-table/core equality и zero database residue. Browser report/download/
-   mutation journey, outbound digest и remaining-file/job/SSE/Telegram остаток
-   не закрыт. HTTP inventory: `295 = 241 ALLOW + 54
+   restored-copy run дали `14/14 + 14/14`. Exact `94db1fdd…` закрыл
+   RecommendationState concurrency и bounded SSR fan-out: `15/15 + 15/15`,
+   BFF acceptance `9/9`, production-build report/download/mutation journey,
+   whole-schema `156`-table postflight и zero database residue приняты.
+   Outbound digest и remaining-file/job/SSE/Telegram остаток не закрыт. HTTP
+   inventory: `295 = 241 ALLOW + 54
    BLOCKED`.
+   0a.5. [Gate 1MT report browser evidence](./gate-1mt-report-browser-evidence-2026-08-18.md) —
+   exact `94db1fdd…`, реальные CSV/XLSX, recommendation/OOS mutations,
+   `0` console errors/warnings и unexpected table deltas, database residue `0`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;

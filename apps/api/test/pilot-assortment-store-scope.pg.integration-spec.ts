@@ -847,6 +847,53 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
     expect(networkEvidence).not.toContain('B1 product');
   });
 
+  it('initializes recommendation workflow state atomically under concurrent report reads', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const seeded = await seedReportFacts(prisma, fixture);
+    const userA1 = buildUser(fixture, 'A1');
+
+    await prisma.inventorySnapshot.updateMany({
+      where: {
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        productId: fixture.productA1Id,
+      },
+      data: { quantity: 0 },
+    });
+    await prisma.salesFact.updateMany({
+      where: {
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        productId: fixture.productA1Id,
+      },
+      data: { cost: 19 },
+    });
+
+    const reports = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        buildReportsService(prisma).getOperationalReport(userA1, seeded.query),
+      ),
+    );
+    const recommendationKeys = reports[0].recommendations.map(({ id }) => id);
+
+    expect(recommendationKeys.length).toBeGreaterThan(0);
+    reports.forEach((report) => {
+      expect(report.recommendations.map(({ id }) => id)).toEqual(
+        recommendationKeys,
+      );
+    });
+    await expect(
+      prisma.recommendationState.count({
+        where: {
+          tenantId: fixture.tenantAId,
+          recommendationKey: { in: recommendationKeys },
+        },
+      }),
+    ).resolves.toBe(recommendationKeys.length);
+  });
+
   it('keeps every local CSV/XLSX export inside Store scope', async () => {
     const fixture = await createFixture(prisma);
     fixtureTenantIds.add(fixture.tenantAId);

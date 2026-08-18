@@ -3903,33 +3903,27 @@ export class ReportsService {
       recommendations.map((recommendation) => {
         const existing = existingByKey.get(recommendation.id);
 
-        if (!existing) {
-          return this.prisma.recommendationState.create({
-            data: {
-              tenantId,
-              recommendationKey: recommendation.id,
-              role: recommendation.role,
-              status: RecommendationStatus.NEW,
-              firstSeenAt: now,
-              lastSeenAt: now,
-              statusChangedAt: now,
-            },
-          });
-        }
+        const shouldReappear = existing
+          ? this.shouldMarkRecommendationReappeared(existing, now)
+          : false;
 
-        const shouldReappear = this.shouldMarkRecommendationReappeared(
-          existing,
-          now,
-        );
-
-        return this.prisma.recommendationState.update({
+        return this.prisma.recommendationState.upsert({
           where: {
             tenantId_recommendationKey: {
               tenantId,
               recommendationKey: recommendation.id,
             },
           },
-          data: {
+          create: {
+            tenantId,
+            recommendationKey: recommendation.id,
+            role: recommendation.role,
+            status: RecommendationStatus.NEW,
+            firstSeenAt: now,
+            lastSeenAt: now,
+            statusChangedAt: now,
+          },
+          update: {
             lastSeenAt: now,
             ...(shouldReappear
               ? {

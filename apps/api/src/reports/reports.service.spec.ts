@@ -43,8 +43,8 @@ type FreshStoreScopeMock = {
   resolveRequestedStoreIds: jest.Mock;
 };
 
-type RecommendationStateCreateArgs = {
-  data: {
+type RecommendationStateUpsertArgs = {
+  create: {
     tenantId: string;
     recommendationKey: string;
     role: string;
@@ -88,24 +88,24 @@ function createPrismaMock(): ReportsPrismaMock {
     },
     recommendationState: {
       findMany: jest.fn().mockResolvedValue([]),
-      create: jest.fn((args: RecommendationStateCreateArgs) =>
+      create: jest.fn(),
+      update: jest.fn(),
+      upsert: jest.fn((args: RecommendationStateUpsertArgs) =>
         Promise.resolve({
           id: 'state-1',
-          tenantId: args.data.tenantId,
-          recommendationKey: args.data.recommendationKey,
-          role: args.data.role,
-          status: args.data.status,
-          note: args.data.note ?? null,
-          firstSeenAt: args.data.firstSeenAt ?? now,
-          lastSeenAt: args.data.lastSeenAt ?? now,
-          statusChangedAt: args.data.statusChangedAt ?? now,
-          resolvedAt: args.data.resolvedAt ?? null,
+          tenantId: args.create.tenantId,
+          recommendationKey: args.create.recommendationKey,
+          role: args.create.role,
+          status: args.create.status,
+          note: args.create.note ?? null,
+          firstSeenAt: args.create.firstSeenAt ?? now,
+          lastSeenAt: args.create.lastSeenAt ?? now,
+          statusChangedAt: args.create.statusChangedAt ?? now,
+          resolvedAt: args.create.resolvedAt ?? null,
           createdAt: now,
           updatedAt: now,
         }),
       ),
-      update: jest.fn(),
-      upsert: jest.fn(),
     },
   };
 }

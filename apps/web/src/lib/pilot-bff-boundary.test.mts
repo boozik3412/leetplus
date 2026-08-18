@@ -220,6 +220,26 @@ test("keeps report exports and mutations inside hardened cookie-backed proxies",
   assert.match(recommendationRoute, /privateNoStore:\s*true/);
 });
 
+test("bounds the reports SSR fan-out to two upstream loaders at a time", async () => {
+  const source = await readFile(
+    fileURLToPath(new URL("../app/(app)/reports/page.tsx", import.meta.url)),
+    "utf8",
+  );
+  const loaderPattern =
+    /\b(?:getAssortmentReport|getOperationalReport|getSkuPerformanceReport|getReplenishmentReport|getSuppliersPerformanceReport|getNewProductsReport|getLflReport|getStores|safeGetBusinessSnapshot)\s*\(/g;
+  const boundedBlocks = [
+    ...source.matchAll(/await Promise\.all\(\[([\s\S]*?)\]\);/g),
+  ]
+    .map((match) => [...match[1].matchAll(loaderPattern)].length)
+    .filter((count) => count > 0);
+
+  assert.deepEqual(boundedBlocks, [2, 2, 2, 2, 2, 2]);
+  assert.equal(
+    boundedBlocks.reduce((total, count) => total + count, 0),
+    12,
+  );
+});
+
 test("keeps transitional tenant-wide staff workspaces out of STORES scope", async () => {
   const networkOnlyPages = [
     "ai-assistant/page.tsx",

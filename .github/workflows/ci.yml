@@ -665,7 +665,7 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '12'
+          test "$script_file_count" = '14'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1

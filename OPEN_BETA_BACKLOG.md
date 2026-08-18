@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 18.08.2026
-- Версия: 2.94
+- Версия: 2.95
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -82,6 +82,22 @@
   Production SMTP, migration, roles, tenant и tester не изменялись. Этот канонический
   CURRENT185 не следует смешивать с одноимённым noncanonical rehearsal
   evidence-ledger candidate
+- Принятый SHA `dd035cb6b199bcfa3c0c3e00454e282e5d717a97` расширил immutable
+  release artifact всеми runtime/mail-worker enrollment CLI: push/PR CI
+  `32108215180`/`32108218082` завершены `4/4 SUCCESS`; artifact
+  `9314172297`, digest
+  `sha256:69ed66ad7ea742143fb0d2b4fc6dda3f507de718556d4d480daa4a7096f9e61a`.
+  Скачанный archive прошёл внешний SHA-256
+  `67ada9631637e2e683435ddc6e3ddc8b0b6b0b3bb726cb96b36b2fd66f8391d5`
+  и содержит exact runtime/worker enrollment sources+CLI
+- Следующий P0 реализован на commit `3eef2be1b8a04888908bfd28d5e9c77007bd0449`:
+  single-founder controller `plan/apply/check/disable` включает только один
+  уже активированный `PILOT` tenant, exact-bound к CURRENT185, activation
+  release, worker role/OID, provider digest и фиксированной policy. Tenant
+  advisory lock, `SERIALIZABLE`, monotonic disable, lost-response reconciliation
+  и PII-free receipt приняты локально (`7/7`); полный disposable PostgreSQL
+  owner lifecycle через реальный CLI — `1/1 PASS`. Exact-SHA CI пока выполняется;
+  production, Tenant A и внешний tester не изменялись
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
 - Пакет документации запуска:
   [docs/open-beta](./docs/open-beta/README.md)
@@ -5255,6 +5271,7 @@ fail-closed.
 | `FOUNDER-RUNNABLE-RELEASE-ARTIFACT`     |        P0 | `EXACT-SHA CI ACCEPTED / HYDRATION + CHILD PASS / PROD NO-GO`                     | SHA-bound tar содержит API/Web runtime, exact package manifests/lock, 183 migrations и шесть founder operational files; исключены cache/dev/symlink/node_modules и test/key fixtures. CI до upload проверил outer/inner SHA-256, offline frozen production install, Prisma generate, CLI/Nest/Prisma resolution и web BUILD_ID. Layout SHA `90a94f1b…` принят push/PR CI `32075030815`/`32075035388`; скачивание, повторная hydration и полный API child process приняты на `0c721f4d…`, artifact `9304656653`, digest `sha256:5dc17d35…5700`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Использовать тот же artifact/hydration механизм на immutable production-backup restored copy                                                                                                                                                               |
 | `FOUNDER-ARTIFACT-API-CHILD`            |        P0 | `EXACT-SHA CI ACCEPTED / CHILD PROCESS PASS / PROD NO-GO`                         | Зависимый CI job скачал exact artifact, повторно проверил SHA-256, гидратировал prod dependencies, создал disposable PG database и activation role, запустил artifact `dist/main.js`, проверил version/readiness, JWT/PlatformAdmin guards и HTTP `provision→GO→ACTIVATED→REPLAYED`, отсутствие PII/secrets и zero database/role residue. SHA `0c721f4d…` принят push/PR CI `32078882449`/`32078886786` как `4/4 SUCCESS`; artifact `9304656653`, `28 421 509` bytes, digest `sha256:5dc17d35…5700`; итог `ACTIVE/OWNER_INVITED`, database/role residue `0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Повторить тот же механизм на immutable production-backup restored copy с production HBA/TLS/PgBouncer и session drain                                                                                                                                      |
 | `FOUNDER-OWNER-INVITE-LIFECYCLE`        |        P0 | `CURRENT185 SENT/ACCEPT EXACT-SHA CI ACCEPTED / PROD NO-GO`                       | Status/revoke принят на `0bc178bc…`; reissue — `f33e598a…`. Canonical CURRENT185 fail-closed перепривязывает active worker к `185` migrations без расширения delivery RPC. Strict-TLS worker `1/1` и полный disposable PG `activate→revoke→reissue→SENT→preview→accept` `1/1`; full API `157 suites / 3144 passed / 2 todo`. Accept создаёт одного OWNER/NETWORK, переводит tenant в ONBOARDING и claim в USER, очищает ciphertext. Exact SHA `14193e51…`, push/PR CI `32105326187`/`32105331954` — `4/4 SUCCESS`; artifact `9313186108`, digest `sha256:6d2747e7…2fe09`. Production SMTP/roles/migration не менялись                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Restored-copy worker enrollment/SENT/accept/restore; production trusted-SMTP canary, Gate 1MT/2 и controlled owner invite                                                                                                                                  |
+| `FOUNDER-PILOT-MAIL-TENANT-ENROLLMENT`  |        P0 | `LOCAL ENGINEERING GREEN / EXACT-SHA CI PENDING / PROD NO-GO`                     | Новый operator CLI выполняет только `plan/apply/check/disable` для одного exact `PILOT` tenant. CURRENT185/head/count, activation release/environment, OWNER/NETWORK invite, worker role/OID и пять RPC, provider digest и fixed policy проверяются под tenant advisory lock в `SERIALIZABLE`; active claim/drift/cross-tenant substitution блокируются, lost commit response reconciles только по полному state equality, disable монотонно повышает revision. Unit `7/7`, database typecheck, scoped lint и полный disposable PG owner lifecycle через CLI `1/1 PASS`; commit `3eef2be1…` отправлен, production и Tenant A не менялись                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Принять push/PR CI и новый 14-script artifact; затем exact downloaded artifact на immutable restored copy, production worker role/TLS/SMTP canary и controlled Tenant B enrollment                                                                         |
 
 Отдельный users/roles Web BFF gate фиксирует exact семь route-файлов и девять
 handlers: только server-side cookie bearer, без client

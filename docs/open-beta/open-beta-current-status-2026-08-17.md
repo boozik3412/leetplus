@@ -159,6 +159,18 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   как `4/4 SUCCESS`; artifact `9313186108`, `28 444 909` bytes, digest
   `sha256:6d2747e7642f7ebd52714638bb229c0abd0c1b4fc221c2de3c09d04d2eb2fe09`.
   Production не менялся.
+- SHA `dd035cb6b199bcfa3c0c3e00454e282e5d717a97` добавил в release artifact
+  operator-ready runtime/worker enrollment sources и CLI. Push/PR CI
+  `32108215180`/`32108218082` приняты `4/4 SUCCESS`; artifact `9314172297`,
+  GitHub digest `sha256:69ed66ad…f9e61a`, downloaded archive SHA-256
+  `67ada963…391d5` совпал с outer checksum.
+- Реализован отсутствовавший one-tenant mail enrollment controller:
+  `plan/apply/check/disable`, CURRENT185, exact activation release,
+  worker role/OID, provider digest, fixed policy, tenant advisory lock,
+  `SERIALIZABLE`, monotonic disable и lost-response reconciliation. Unit
+  `7/7`, database typecheck/scoped lint и реальный disposable PostgreSQL founder
+  lifecycle через CLI `1/1` прошли. Commit `3eef2be1…` отправлен в ветку;
+  exact-SHA CI выполняется. Production и Tenant A не изменялись.
 
 ## Что блокирует выдачу доступа
 
@@ -168,9 +180,10 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    production PgBouncer/session-drain acceptance ещё не выполнены.
 2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
    readiness evidence.
-3. Локальный `SENT` barrier и полный owner accept доказаны на canonical
-   CURRENT185. Ещё не выполнены production-like restored-copy прогон exact
-   artifact, production worker role/enrollment и реальный trusted-SMTP canary.
+3. Локальный `SENT` barrier, полный owner accept и безопасный one-tenant
+   enrollment доказаны на canonical CURRENT185. Ещё не выполнены
+   production-like restored-copy прогон exact artifact, production worker role
+   и реальный trusted-SMTP canary.
 4. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
    production-like A/B matrix, jobs/Telegram/files/SSE и Gate 2 для текущей
    сети из четырёх клубов не закрыты.
@@ -190,6 +203,7 @@ clean SHA + CI artifact [DONE]
   → [DONE] owner invite status/revoke
   → [DONE engineering/CI] immutable owner invite reissue
   → [DONE local PostgreSQL] CURRENT185 worker + SENT/reissue/accept
+  → [DONE local PostgreSQL] exact one-tenant mail enrollment plan/apply/check/disable
   → trusted production-like SMTP canary
   → Gate 1MT browser/store-scope
   → Gate 2 current Tenant A/A1..A4

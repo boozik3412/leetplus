@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.145                                        |
+| Версия           | 1.146                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -82,6 +82,8 @@ Exact direct PostgreSQL HBA/TLS/SCRAM acceptance dedicated роли:
 [founder owner invite lifecycle](./founder-owner-invite-lifecycle.md).
 Канонический CURRENT185 delivery/accept successor описан в
 [founder owner delivery CURRENT185](./founder-owner-delivery-current185.md).
+Безопасное включение mail worker только для одного pilot tenant описано в
+[founder-pilot mail tenant enrollment](./founder-pilot-mail-tenant-enrollment.md).
 
 ## Канонические документы
 

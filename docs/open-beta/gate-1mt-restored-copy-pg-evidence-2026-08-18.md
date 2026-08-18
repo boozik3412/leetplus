@@ -34,8 +34,9 @@ File/attachment PostgreSQL slice добавлен exact commit
 `e6e8d2aa4e5655fa55a715b0d71dc7d2c848a036` и выполнен на одноразовом клоне
 `leetplus_gate1mt_attachment_test_800b246d`.
 
-Latest assortment candidates `230d62b1…`, `d3a2d8b6…`, `58410b37…` и
-`f59c32fc…` добавили в существующую suite девять реальных
+Latest assortment candidates `230d62b1…`, `d3a2d8b6…`, `58410b37…`,
+`f59c32fc…` и `3e0389b4…` добавили в существующую suite одиннадцать
+реальных
 PostgreSQL-проверок: категории, поставщики, product CSV,
 inventory/sales/stock-movement CSV, все локальные варианты
 отчётов, CSV/XLSX exports, OOS exclusions и recommendation state. Exact
@@ -43,18 +44,19 @@ bytes `f59c32fc…` дали два последовательных зелён�
 чистом PostgreSQL 16.14 после canonical LF migration deploy и два — на disposable
 клоне `leetplus_gate1mt_assortment_test_reports_a4` clean
 production-backup copy. Restored-copy матрица тем самым расширена до
-`26/26`.
+`28/28`: два дополнительных test проводят те же services через
+реальный Nest HTTP controller и RolesGuard.
 
 ## Выполненная матрица
 
 | Контур                      | Набор                                                  |      Результат |
 | --------------------------- | ------------------------------------------------------ | -------------: |
-| Ассортимент и Store scope   | `pilot-assortment-store-scope.pg.integration-spec.ts`  |   `12/12 PASS` |
+| Ассортимент и Store scope   | `pilot-assortment-store-scope.pg.integration-spec.ts`  |   `14/14 PASS` |
 | Командный чат и fresh scope | `pilot-team-chat-fresh-scope.pg.integration-spec.ts`   |     `3/3 PASS` |
 | CRM-коммуникации            | `pilot-crm-communications.pg.integration-spec.ts`      |     `4/4 PASS` |
 | Пользователи и роли         | `pilot-users-roles-fresh-scope.pg.integration-spec.ts` |     `4/4 PASS` |
 | Файловые вложения staff     | `pilot-staff-attachments-scope.pg.integration-spec.ts` |     `3/3 PASS` |
-| **Итого**                   | **5 PostgreSQL suites**                                | **26/26 PASS** |
+| **Итого**                   | **5 PostgreSQL suites**                                | **28/28 PASS** |
 
 Матрица включает Tenant A/Tenant B, network scope, Store A1/A2 и Store B1,
 cross-tenant deny, cross-store deny, stale authority и допустимые операции
@@ -99,6 +101,32 @@ recommendation states`; target/source core counts совпали:
 `3 tenants / 4 stores / 30 users / 1483 products / 51257 guests`. Exact
 disposable database удалена, database residue `0`. Production, clean
 restored-copy source и текущая сеть не изменялись.
+
+## Report HTTP/BFF extension
+
+Exact implementation `3e0389b4…` поднимает `ReportsController` через
+настоящий Nest HTTP adapter поверх тех же PostgreSQL services:
+
+- OWNER/NETWORK Tenant A проходит все одиннадцать report GET без B1;
+- OWNER/NETWORK Tenant B видит B1 и не видит A1/A2;
+- CLUB_MANAGER/STORES(A1) получает только A1 через свой
+  `view_reports` capability;
+- CSV и XLSX стримятся с attachment headers, XLSX после HTTP снова
+  читается ExcelJS и не содержит foreign tenant rows;
+- OOS create/delete и recommendation state проходят RolesGuard и
+  tenant authority; cross-tenant delete блокируется, STORES mutation получает
+  `403`;
+- Web BFF export переведён на единый `proxyFileRequest` с safe
+  disposition и private/no-store; OOS/recommendation routes используют
+  cookie-backed `proxyJsonRequest`, private/no-store и URL-encoding динамических
+  id/key. Static BFF acceptance расширена до `8/8`.
+
+Два последовательных restored-copy прогона на клоне
+`leetplus_gate1mt_reports_http_test_a1` дали `14/14 + 14/14`.
+Target/source counts семи затронутых таблиц совпали
+`3/30/0/106897/0/8/1212`; core counts совпали
+`3/4/30/1483/51257`. После exact database/session preflight клон удалён,
+database residue `0`.
 
 ## HTTP/BFF/browser-срез
 
@@ -166,9 +194,9 @@ Attachment-клон после двух успешных прогонов под
 совпали с source template (`3/4/30/1483/51257`). Exact disposable database
 удалена, database residue равен `0`.
 
-Assortment-клон `leetplus_gate1mt_assortment_test_reports_a4` после двух
-успешных `12/12` прогонов подтвердил fixture residue
-`0/0/0/0/0/0/0`; его core counts
+Assortment HTTP-клон `leetplus_gate1mt_reports_http_test_a1` после двух
+успешных `14/14` прогонов подтвердил exact equality семи
+затронутых table counts; его core counts
 точно совпали с clean source (`3/4/30/1483/51257`). Перед удалением проверены
 exact database name и zero sessions; после `dropdb --force` database residue
 равен `0`.
@@ -181,10 +209,9 @@ exact database name и zero sessions; после `dropdb --force` database resid
 
 До первого внешнего клуба остаются:
 
-1. HTTP/BFF/browser mutation/export/file A/B matrix для принятых
-   report/export вариантов; service-level CSV/XLSX, OOS, LFL, turnover,
-   matrix и recommendations уже закрыты, но outbound email/digest ещё
-   выключен и не проверен;
+1. production-build browser A/B journey для report pages, download и
+   mutations; service/PostgreSQL, Nest HTTP и BFF proxy boundary уже закрыты,
+   но outbound email/digest ещё выключен и не проверен;
 2. background jobs, Telegram, files/attachments, SSE и outbound fail-closed
    matrix;
 3. Gate 2 текущей сети A1–A4 и стабильное internal-alpha окно;

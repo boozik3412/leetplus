@@ -53,8 +53,16 @@ Team-chat SSE extension exact `ccf81a28…`/`dfe5e0f8…` добавил real Ne
 фиксации SSE `200`: cross-store/cross-tenant channel возвращает `404`, stale
 persisted scope — `401`; разрешённый A1/B1 stream содержит только свой channel.
 Два последовательных run дали `4/4 + 4/4`, все `156` table counts совпали с
-source, exact disposable DB удалена. Текущая матрица — `30/30`.
+source, exact disposable DB удалена. После SSE матрица была `30/30`.
 [Полное SSE evidence](./gate-1mt-team-chat-sse-evidence-2026-08-18.md).
+
+Attachment parent extension exact `abb8a667…` добавил fresh
+NETWORK/capability/exact-parent reader для `CHECKLIST_RUN`,
+`KNOWLEDGE_ARTICLE`, `SHIFT_REGULATION`, `TRAINING_COURSE` и
+`ONBOARDING_PLAN`. Exact bytes дважды прошли `4/4 + 4/4`; все `156` table
+counts совпали с source, disposable DB residue `0`. Текущая матрица —
+`31/31`.
+[Полное attachment evidence](./gate-1mt-attachment-parent-evidence-2026-08-18.md).
 
 ## Выполненная матрица
 
@@ -64,8 +72,8 @@ source, exact disposable DB удалена. Текущая матрица — `3
 | Командный чат и fresh scope | `pilot-team-chat-fresh-scope.pg.integration-spec.ts`   |     `4/4 PASS` |
 | CRM-коммуникации            | `pilot-crm-communications.pg.integration-spec.ts`      |     `4/4 PASS` |
 | Пользователи и роли         | `pilot-users-roles-fresh-scope.pg.integration-spec.ts` |     `4/4 PASS` |
-| Файловые вложения staff     | `pilot-staff-attachments-scope.pg.integration-spec.ts` |     `3/3 PASS` |
-| **Итого**                   | **5 PostgreSQL suites**                                | **30/30 PASS** |
+| Файловые вложения staff     | `pilot-staff-attachments-scope.pg.integration-spec.ts` |     `4/4 PASS` |
+| **Итого**                   | **5 PostgreSQL suites**                                | **31/31 PASS** |
 
 Матрица включает Tenant A/Tenant B, network scope, Store A1/A2 и Store B1,
 cross-tenant deny, cross-store deny, stale authority и допустимые операции
@@ -253,8 +261,8 @@ drop database residue равен `0`.
 
 1. controlled outbound email/digest canary: report browser/download/mutation
    journey закрыт, но send actions были выключены и не вызывались;
-2. background jobs, Telegram, remaining files/attachments, public guest binding
-   и outbound fail-closed
+2. native attachment binding writers/browser/races, background jobs, Telegram,
+   public guest binding и outbound fail-closed
    matrix;
 3. Gate 2 текущей сети A1–A4 и стабильное internal-alpha окно;
 4. production `PREPARE`: roles, secrets, monitoring, rollback и controlled SMTP

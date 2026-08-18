@@ -244,6 +244,16 @@ describePostgres(
         identity,
         config,
       );
+      expect(
+        Reflect.set(
+          ownerInviteLifecycle,
+          'reissueFailure',
+          (error: unknown): Error =>
+            error instanceof Error
+              ? error
+              : new Error('OWNER_INVITE_REISSUE_DATABASE_FAILURE_UNKNOWN'),
+        ),
+      ).toBe(true);
       const effectiveSecurityDefiners = await activationPrisma.$queryRaw<
         Array<{ signature: string }>
       >(Prisma.sql`

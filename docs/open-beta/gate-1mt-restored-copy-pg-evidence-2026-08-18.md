@@ -261,10 +261,11 @@ drop database residue равен `0`.
 
 1. controlled outbound email/digest canary: report browser/download/mutation
    journey закрыт, но send actions были выключены и не вызывались;
-2. STORES adoption пяти network-only staff parents, remaining attachment
-   archive/orphan browser matrix, background jobs, Telegram, public guest
-   binding и outbound fail-closed matrix; native writer/lifecycle/races и
-   OWNER upload/bind/download/unbind/quarantine browser flow уже приняты;
+2. STORES adoption четырёх оставшихся network-only staff parent families,
+   remaining attachment archive/orphan browser matrix, background jobs,
+   Telegram, public guest binding и outbound fail-closed matrix; native
+   writer/lifecycle/races, OWNER attachment lifecycle и knowledge STORES
+   adoption уже приняты;
 3. Gate 2 текущей сети A1–A4 и стабильное internal-alpha окно;
 4. production `PREPARE`: roles, secrets, monitoring, rollback и controlled SMTP
    canary;

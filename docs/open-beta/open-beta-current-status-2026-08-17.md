@@ -82,10 +82,11 @@ PG/HTTP run дали `4/4 + 4/4`, все `156` table counts совпали с so
 database residue `0`.
 [Полный SSE-отчёт](./gate-1mt-team-chat-sse-evidence-2026-08-18.md).
 
-Attachment reader exact `abb8a667…` теперь покрывает chat, task, checklist,
-knowledge, regulation, training и onboarding parents. Пять новых типов требуют
-fresh NETWORK, capability своего staff-модуля и exact same-tenant parent до
-blob read; STORES пока скрыт, чтобы download не обходил network-only workspace.
+Attachment reader exact `abb8a667…` расширил coverage на chat, task,
+checklist, knowledge, regulation, training и onboarding parents. В том
+историческом срезе пять новых типов требовали fresh NETWORK, capability своего
+staff-модуля и exact same-tenant parent до blob read; последующий
+`085f8bbd…` безопасно открыл knowledge для STORES вместе с parent policy.
 Unit `26/26`, два restored-copy run `4/4 + 4/4`, все `156` table counts
 zero-diff, database residue `0`.
 [Полный attachment-отчёт](./gate-1mt-attachment-parent-evidence-2026-08-18.md).
@@ -134,9 +135,24 @@ Production-build attachment browser slice принят на exact implementation
 quarantine→404. Database blob и browser download совпали с исходником по
 SHA-256, положительный console `0/0`, whole-schema postflight: только семь
 ожидаемых deltas из `156` таблиц, database residue `0`. STORES(B1) direct URL
-к network-only knowledge parent дал штатный 404 с чистой console; parent-level
-STORES adoption остаётся отдельным blocker.
+к network-only knowledge parent дал штатный 404 с чистой console; это было
+deny-only evidence до последующего knowledge STORES adoption.
 [Полный browser-отчёт](./gate-1mt-attachment-browser-evidence-2026-08-19.md).
+
+Knowledge-base STORES adoption реализован на exact implementation
+`085f8bbdd3115b3ec7a4438e7614c815004dd844`. Общая server-side policy теперь
+одинаково ограничивает list/detail/mutation/audit и attachment download:
+`STORES(B1)` управляет только статьями B1, читает совместимые опубликованные
+network articles и получает hidden `404` для B2. Focused unit `32/32`, Web BFF
+`12/12`, restored-copy PostgreSQL `9/9`, API/Web typecheck/build и
+production-build browser A/B прошли. B1 upload/bind/download дал `BOUND`
+binding с exact B1 Store; authenticated B2 GET того же файла вернул hidden
+`404`. Остались четыре network-only staff parent families.
+[Полный отчёт](./gate-1mt-knowledge-stores-evidence-2026-08-19.md).
+
+Предыдущий clean head `6c6bf7adca71c8ee27d1e0fc2a61819dd7e149f8`
+принят GitHub Actions run `32178680887` как `4/4 SUCCESS`. Новый knowledge
+candidate считается remote accepted только после exact-head CI pushed SHA.
 
 Pilot HTTP inventory повторно связан с production source: `295` exact routes,
 `241 ALLOW / 54 BLOCKED`. `POST /stores` имеет fresh NETWORK assertion; для
@@ -324,8 +340,9 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    writer/lifecycle, real
    HTTP SSE и latest
    assortment HTTP `15/15`), browser read/admission и report/download/mutation
-   journey и OWNER attachment lifecycle приняты на restored copy. Не закрыты
-   outbound digest, STORES adoption пяти network-only staff parents,
+   journey, OWNER attachment lifecycle и knowledge STORES adoption приняты на
+   restored copy. Не закрыты outbound digest, STORES adoption четырёх
+   оставшихся network-only staff parent families,
    archive/orphan browser matrix остальных attachment parents,
    jobs/Telegram/public guest binding и Gate 2 текущей сети.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
@@ -361,8 +378,9 @@ clean SHA + CI artifact [DONE]
   → [DONE restored-copy clones] custom/system-role revoke/download races
   → [DONE restored-copy clone] OWNER attachment upload/bind/download/unbind/quarantine
   → [DONE restored-copy clone] STORES side-door deny for network-only staff parents
+  → [DONE restored-copy clone] knowledge-base STORES parent + attachment adoption
   → production roles/secrets + controlled SMTP canary
-  → Gate 1MT STORES parent adoption + remaining attachment archive/orphan browser matrix
+  → Gate 1MT four remaining STORES staff parents + attachment archive/orphan browser matrix
   → Gate 1MT jobs/Telegram/public-guest/outbound
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE

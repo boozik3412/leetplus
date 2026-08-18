@@ -1,6 +1,6 @@
 # Gate 1MT: production-build staff attachment browser evidence — 19.08.2026
 
-Статус: `OWNER/NETWORK LIFECYCLE PASS / STORES ADOPTION PENDING / PRODUCTION NO-GO`.
+Статус: `OWNER/NETWORK LIFECYCLE PASS / KNOWLEDGE STORES PASS / PRODUCTION NO-GO`.
 
 ## Цель
 
@@ -77,18 +77,24 @@ Fixture содержала только синтетические данные:
 Намеренный negative GET после quarantine создал ожидаемую browser console
 запись о `404`; она не учитывается как ошибка положительного journey.
 
-## STORES negative boundary
+## Историческая STORES negative boundary
 
 Независимая cookie-сессия `CLUB_MANAGER/STORES(B1)` успешно вошла в tenant,
 но прямой URL `/staff/knowledge-base` получил штатную Next `404` с чистой
 консолью. Это подтверждает отсутствие side door, но не является STORES
 adoption этой базы знаний.
 
-Knowledge, shift regulations, training, onboarding и checklist templates всё
-ещё защищены `FreshNetworkScopeGuard`/`requireNetworkScopedUser`. До включения
-их для клубных пользователей нужно сначала реализовать parent-level
-store-aware visibility и mutation policy, а затем синхронно сузить attachment
-reader deny. Открывать download отдельно от parent запрещено.
+Этот deny-only результат был правильным для exact implementation
+`97648308…`, но больше не описывает текущий candidate. Knowledge parent и его
+attachment reader затем синхронно переведены на store-aware policy в exact
+commit `085f8bbdd3115b3ec7a4438e7614c815004dd844`.
+[Новая A/B приёмка](./gate-1mt-knowledge-stores-evidence-2026-08-19.md)
+подтвердила B1 edit/upload/download и hidden `404` для authenticated B2.
+
+Shift regulations, training, onboarding и checklist/templates всё ещё требуют
+отдельной store-aware parent policy. Для каждого следующего parent необходимо
+синхронно расширять attachment reader; открывать download отдельно от parent
+запрещено.
 
 ## Static acceptance
 
@@ -126,8 +132,9 @@ database sessions были `0`; exact `a2` database удалена. Совоку
 
 ## Остаток до внешнего теста
 
-1. Реализовать и принять STORES parent policy для пяти network-only staff
-   workspaces; attachment reader должен следовать ей, а не опережать её.
+1. Реализовать и принять STORES parent policy для четырёх оставшихся staff
+   parent families: shift regulations, training, onboarding и
+   checklists/templates; attachment reader должен следовать parent policy.
 2. Закрыть archive/delete/orphan-retention browser matrix остальных parent
    kinds.
 3. Закрыть tenant-aware background jobs, Telegram/public guest binding и

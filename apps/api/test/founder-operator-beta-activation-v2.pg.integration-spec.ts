@@ -4,6 +4,8 @@ import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AdminController } from '../src/admin/admin.controller';
@@ -832,11 +834,11 @@ describePostgres(
         encryptionKeyVersion: 'v1',
         aadEnvironment: 'ci',
         pollIntervalMs: 1_000,
-        leaseMs: 30_000,
+        leaseMs: 60_000,
         batchSize: 1,
-        maxAttempts: 3,
-        baseRetryMs: 1_000,
-        maxRetryMs: 8_000,
+        maxAttempts: 5,
+        baseRetryMs: 30_000,
+        maxRetryMs: 900_000,
         healthHost: '127.0.0.1',
         healthPort: 19_732,
         smtp,
@@ -847,28 +849,45 @@ describePostgres(
         envelopeService,
         provider,
       );
-      const workerEnabledAt = new Date();
-      await prisma.identityMailDeliveryTenantEnrollment.create({
-        data: {
-          tenantId: provisioned.tenant.id,
-          workerRoleName,
-          workerRoleOid,
-          enabled: true,
-          maxAttempts: workerConfig.maxAttempts,
-          leaseSeconds: workerConfig.leaseMs / 1_000,
-          acknowledgeSeconds: Math.ceil(
-            (smtp.connectionTimeoutMs +
-              smtp.greetingTimeoutMs +
-              smtp.socketTimeoutMs) /
-              1_000,
-          ),
-          baseRetrySeconds: workerConfig.baseRetryMs / 1_000,
-          maxRetrySeconds: workerConfig.maxRetryMs / 1_000,
-          providerAuthorityDigest: worker.providerAuthorityDigest,
-          enabledAt: workerEnabledAt,
-          createdAt: workerEnabledAt,
-          updatedAt: workerEnabledAt,
-        },
+      const enrollmentUrl = new URL(disposableDatabaseUrl);
+      enrollmentUrl.search = '?schema=public';
+      const enrollmentEnvironment: NodeJS.ProcessEnv = {
+        ...process.env,
+        DATABASE_URL: enrollmentUrl.toString(),
+        FOUNDER_PILOT_MAIL_EXPECTED_DATABASE: disposableDatabase,
+        FOUNDER_PILOT_MAIL_TENANT_ID: provisioned.tenant.id,
+        FOUNDER_PILOT_MAIL_ENVIRONMENT: 'ci',
+        FOUNDER_PILOT_MAIL_RELEASE_SHA: RELEASE_SHA,
+        FOUNDER_PILOT_MAIL_WORKER_ROLE: workerRoleName,
+        FOUNDER_PILOT_MAIL_EXPECTED_ROLE_OID: workerRoleOid.toString(),
+        FOUNDER_PILOT_MAIL_PROVIDER_AUTHORITY_DIGEST:
+          worker.providerAuthorityDigest,
+        FOUNDER_PILOT_MAIL_OPERATION_ID: randomUUID(),
+      };
+      const enrollmentPlan = runFounderPilotMailTenantEnrollmentCli(
+        'plan',
+        enrollmentEnvironment,
+      );
+      expect(enrollmentPlan).toMatchObject({
+        decision: 'READY_TO_APPLY',
+        tenantId: provisioned.tenant.id,
+        roleName: workerRoleName,
+        roleOid: workerRoleOid.toString(),
+      });
+      expect(enrollmentPlan.requiredConfirmation).toEqual(
+        expect.stringMatching(
+          /^APPLY FOUNDER_PILOT_MAIL_TENANT_ENROLLMENT_V1 /u,
+        ),
+      );
+      const enrollmentApply = runFounderPilotMailTenantEnrollmentCli('apply', {
+        ...enrollmentEnvironment,
+        FOUNDER_PILOT_MAIL_CONFIRM: String(enrollmentPlan.requiredConfirmation),
+      });
+      expect(enrollmentApply).toMatchObject({
+        decision: 'ACTIVE',
+        policyRevision: 1,
+        replayed: false,
+        reconciledAfterLostResponse: false,
       });
 
       await worker.assertReady();
@@ -1114,6 +1133,30 @@ async function installLeastPrivilegeWorkerRole(
 
 function prismaFor(databaseUrl: string): PrismaClient {
   return new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+}
+
+function runFounderPilotMailTenantEnrollmentCli(
+  mode: 'apply' | 'check' | 'disable' | 'plan',
+  environment: NodeJS.ProcessEnv,
+): Record<string, unknown> {
+  const script = path.resolve(
+    __dirname,
+    '../../../packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs',
+  );
+  const result = spawnSync(process.execPath, [script, '--mode', mode], {
+    encoding: 'utf8',
+    env: environment,
+    timeout: 30_000,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) {
+    const diagnostic =
+      result.error?.message || result.stderr.trim() || result.stdout.trim();
+    throw new Error(
+      `Founder pilot mail tenant enrollment CLI failed: ${diagnostic}`,
+    );
+  }
+  return JSON.parse(result.stdout) as Record<string, unknown>;
 }
 
 async function activateThroughHttp(input: {

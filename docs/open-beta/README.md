@@ -133,14 +133,15 @@ checksum. Production и текущая сеть не изменялись.
    allowed/denied Store direct-URL matrix и invite-only employee flow;
    `PARTIAL PASS`, не production/shared-beta GO.
    0a.4. [Gate 1MT restored-copy PostgreSQL evidence](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md) —
-   CURRENT185 production-backup clones, пять A/B suites, `17/17 PASS`
+   CURRENT185 production-backup clones, пять A/B suites, `23/23 PASS`
    (включая staff attachments), затем production-build OWNER/STORES browser
    read/admission slice на `771bbd5f…`; fixture/database residue `0`. Latest
    assortment candidate `58410b37…` добавил category/supplier, product/fact
    CSV и report/CSV-export PostgreSQL boundary и дважды прошёл `9/9` на clean
-   current-head DB; restored-copy replay шести добавленных checks ещё
-   обязателен. Остальные report/export variants, remaining-file/job/SSE/
-   Telegram остаток не закрыт. HTTP inventory: `295 = 241 ALLOW + 54
+   current-head DB и затем дважды `9/9` на disposable restored-copy clone;
+   fixture/database residue `0`. Остальные report/export variants,
+   remaining-file/job/SSE/Telegram остаток не закрыт. HTTP inventory: `295 =
+   241 ALLOW + 54
    BLOCKED`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и

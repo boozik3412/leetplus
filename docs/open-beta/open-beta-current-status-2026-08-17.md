@@ -30,15 +30,16 @@ users/roles `4/4`, staff attachments `3/3`. Fixture residue равен нулю,
 контрольные row counts клонов совпали с источником, одноразовые БД удалены.
 [Отчёт Gate 1MT](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md).
 
-Latest assortment candidate `d3a2d8b6…` расширяет ту же suite до `7/7`:
+Latest assortment candidate `58410b37…` расширяет ту же suite до `9/9`:
 добавлены реальные PostgreSQL-проверки `CategoriesService`,
-`SuppliersService`, `ProductCsvImportService` и `FactCsvImportService` для
-NETWORK-only reads/mutations/imports, tenant-bound product/inventory/sales/
-movement writes, cross-tenant deny и stale-scope deny. На чистом CURRENT185+
-current-head PostgreSQL выполнены два последовательных run `7/7 + 7/7`;
-fixture residue `0/0/0/0/0`, одноразовый кластер удалён. Это engineering
-evidence; replay четырёх добавленных checks на restored-copy clone и
-exact-head CI ещё обязательны.
+`SuppliersService`, `ProductCsvImportService`, `FactCsvImportService`,
+`ReportsService` и `ReportsExportService` для NETWORK-only reads/mutations/
+imports, tenant-bound product/inventory/sales/movement writes, store-scoped
+assortment/sales reports, CSV export без foreign rows, cross-tenant deny и
+stale-scope deny. На чистом CURRENT185+ current-head PostgreSQL выполнены два
+последовательных run `9/9 + 9/9`; fixture residue `0/0/0/0/0`, одноразовый
+кластер удалён. Это engineering evidence; replay шести добавленных checks на
+restored-copy clone и exact-head CI ещё обязательны.
 
 На exact implementation SHA `771bbd5fa73e0be3b41d74dbb107495824987554`
 принят следующий restored-copy production-build browser slice. Независимые
@@ -232,10 +233,10 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    enrollment, production SMTP secret/config и controlled production canary.
 3. Gate 1MT PostgreSQL A/B matrix (`17/17`, включая attachment scope) и browser
    read/admission slice приняты на restored copy. Latest assortment suite уже
-   `7/7` на clean current-head PostgreSQL, но её четыре добавленных category/
-   supplier/product CSV/fact CSV checks ещё не повторены на restored copy;
-   reports/exports, остальные file parents, jobs/Telegram/SSE и Gate 2 текущей
-   сети не закрыты.
+   `9/9` на clean current-head PostgreSQL, но её шесть добавленных category/
+   supplier/product CSV/fact CSV/report/export checks ещё не повторены на
+   restored copy; остальные report/export variants и file parents,
+   jobs/Telegram/SSE и Gate 2 текущей сети не закрыты.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
@@ -257,7 +258,7 @@ clean SHA + CI artifact [DONE]
   → [DONE exact-SHA CI] exact one-tenant mail enrollment plan/apply/check/disable
   → [DONE restored-copy clones] trusted TLS SMTP + enrollment/SENT/accept/disable
   → [DONE restored-copy clones] Gate 1MT PostgreSQL A/B matrix 17/17
-  → [DONE current-head PG; restored-copy replay pending] assortment categories/suppliers/CSV imports 7/7
+  → [DONE current-head PG; restored-copy replay pending] assortment categories/suppliers/imports/report-export 9/9
   → [DONE restored-copy clone] production-build OWNER/STORES browser read/admission
   → production roles/secrets + controlled SMTP canary
   → Gate 1MT mutations/files/jobs/SSE/Telegram remainder

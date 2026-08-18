@@ -38,11 +38,7 @@ export const PRODUCTION_ATTESTATION =
 export const HMAC_KEY_VERSION = "v1";
 export const EXPECTED_PRISMA_CLIENT_VERSION = "6.19.3";
 
-const TARGET_ENVIRONMENTS = new Set([
-  "development",
-  "staging",
-  "production",
-]);
+const TARGET_ENVIRONMENTS = new Set(["development", "staging", "production"]);
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/u;
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const HMAC_PATTERN = /^[0-9a-f]{64}$/u;
@@ -102,13 +98,7 @@ assert.deepEqual(
 );
 const CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS = Object.freeze(
   EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.map(
-    ({
-      key,
-      catalogSignature,
-      securityDefiner,
-      volatility,
-      language,
-    }) => {
+    ({ key, catalogSignature, securityDefiner, volatility, language }) => {
       const signaturePrefix = `public."${key}"(`;
       assert.equal(
         catalogSignature.startsWith(signaturePrefix) &&
@@ -472,9 +462,7 @@ const DORMANT_IDENTITY_FUNCTIONS = Object.freeze([
   "identity_mail_delivery_worker_assert_v1",
   "identity_owner_invite_issue_hold_v1",
   ...SHARED_BETA_ADMISSION_DORMANT_FUNCTIONS,
-  ...CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.map(
-    ({ name }) => name,
-  ),
+  ...CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.map(({ name }) => name),
 ]);
 
 const DORMANT_IDENTITY_TYPES = Object.freeze([
@@ -537,15 +525,7 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
   ["User", "id", 1, "text", true, "", "pg_catalog.default"],
   ["User", "tenantId", 2, "text", true, "", "pg_catalog.default"],
   ["User", "email", 3, "text", true, "", "pg_catalog.default"],
-  [
-    "User",
-    "updatedAt",
-    8,
-    "timestamp(3) without time zone",
-    true,
-    "",
-    "",
-  ],
+  ["User", "updatedAt", 8, "timestamp(3) without time zone", true, "", ""],
   [
     "User",
     "emailVerifiedAt",
@@ -559,15 +539,7 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
   ["User", "isActive", 11, "boolean", true, "true", ""],
   ["User", "identityClaimRevision", 14, "integer", false, "", ""],
   ["UserInvite", "id", 1, "text", true, "", "pg_catalog.default"],
-  [
-    "UserInvite",
-    "tenantId",
-    2,
-    "text",
-    true,
-    "",
-    "pg_catalog.default",
-  ],
+  ["UserInvite", "tenantId", 2, "text", true, "", "pg_catalog.default"],
   ["UserInvite", "email", 3, "text", false, "", "pg_catalog.default"],
   [
     "UserInvite",
@@ -642,15 +614,7 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "",
     "",
   ],
-  [
-    "IdentityEmailClaim",
-    "tenantId",
-    3,
-    "text",
-    true,
-    "",
-    "pg_catalog.default",
-  ],
+  ["IdentityEmailClaim", "tenantId", 3, "text", true, "", "pg_catalog.default"],
   [
     "IdentityEmailClaim",
     "subjectId",
@@ -733,24 +697,8 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "",
     "",
   ],
-  [
-    "IdentityMailDeliveryEvent",
-    "leaseVersion",
-    6,
-    "integer",
-    true,
-    "",
-    "",
-  ],
-  [
-    "IdentityMailDeliveryEvent",
-    "attemptNumber",
-    7,
-    "integer",
-    true,
-    "",
-    "",
-  ],
+  ["IdentityMailDeliveryEvent", "leaseVersion", 6, "integer", true, "", ""],
+  ["IdentityMailDeliveryEvent", "attemptNumber", 7, "integer", true, "", ""],
   [
     "IdentityMailDeliveryEvent",
     "eventType",
@@ -887,15 +835,7 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "pg_catalog.default",
   ],
   ["IdentityMailOutbox", "id", 1, "text", true, "", "pg_catalog.default"],
-  [
-    "IdentityMailOutbox",
-    "tenantId",
-    2,
-    "text",
-    true,
-    "",
-    "pg_catalog.default",
-  ],
+  ["IdentityMailOutbox", "tenantId", 2, "text", true, "", "pg_catalog.default"],
   [
     "IdentityMailOutbox",
     "issueCommandId",
@@ -905,15 +845,7 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "",
     "pg_catalog.default",
   ],
-  [
-    "IdentityMailOutbox",
-    "inviteId",
-    4,
-    "text",
-    true,
-    "",
-    "pg_catalog.default",
-  ],
+  ["IdentityMailOutbox", "inviteId", 4, "text", true, "", "pg_catalog.default"],
   [
     "IdentityMailOutbox",
     "workflowLocator",
@@ -1026,15 +958,7 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
   ],
   ["IdentityMailOutbox", "attempts", 19, "integer", true, "0", ""],
   ["IdentityMailOutbox", "leaseVersion", 20, "integer", true, "0", ""],
-  [
-    "IdentityMailOutbox",
-    "transitionRevision",
-    21,
-    "bigint",
-    true,
-    "0",
-    "",
-  ],
+  ["IdentityMailOutbox", "transitionRevision", 21, "bigint", true, "0", ""],
   [
     "IdentityMailOutbox",
     "availableAt",
@@ -1389,10 +1313,9 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
   ...SHARED_BETA_ADMISSION_COLUMNS,
 ]);
 
-const EXPECTED_EXACT_IDENTITY_COLUMN_COUNT =
-  EXPECTED_CATALOG_COLUMNS.filter(([relation]) =>
-    EXACT_IDENTITY_RELATIONS.includes(relation),
-  ).length;
+const EXPECTED_EXACT_IDENTITY_COLUMN_COUNT = EXPECTED_CATALOG_COLUMNS.filter(
+  ([relation]) => EXACT_IDENTITY_RELATIONS.includes(relation),
+).length;
 
 function expectedCatalogRelationValues() {
   return EXPECTED_CATALOG_RELATIONS.map(
@@ -2094,13 +2017,12 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
   },
   {
     name: "identity_mail_delivery_worker_assert_v1",
-    catalogSignature:
-      'public."identity_mail_delivery_worker_assert_v1"(text)',
+    catalogSignature: 'public."identity_mail_delivery_worker_assert_v1"(text)',
     identityArguments: "p_tenant_id text",
     result: "jsonb",
     securityDefiner: true,
     definitionSha256:
-      "5a159f0e3020d829dcf43b1cd2a0caff4a9269877efc92074678e2018a7404a0",
+      "4231a5a96d238dfa838551e722b56edf8a3787a2929f865508e94b747743cf80",
   },
   {
     name: "identity_email_claim_assert_invite_v1",
@@ -2231,8 +2153,7 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     }),
   ),
   ...CURRENT_174_NON_IDENTITY_RUNTIME_RELEASE_FUNCTIONS.map((entry) => {
-    const metadata =
-      CURRENT_174_RUNTIME_RELEASE_FUNCTION_METADATA[entry.name];
+    const metadata = CURRENT_174_RUNTIME_RELEASE_FUNCTION_METADATA[entry.name];
     return Object.freeze({
       name: entry.name,
       catalogSignature: entry.catalogSignature,
@@ -2542,25 +2463,27 @@ const EXPECTED_ENUM_MANIFEST = Object.freeze([
 ]);
 
 function expectedConstraintValues() {
-  return EXPECTED_CONSTRAINT_MANIFEST.map((entry) =>
-    `(${[
-      sqlLiteral(entry.name),
-      sqlLiteral(entry.relation),
-      sqlLiteral(entry.type),
-      sqlLiteral(entry.definitionSha256),
-    ].join(", ")})`,
+  return EXPECTED_CONSTRAINT_MANIFEST.map(
+    (entry) =>
+      `(${[
+        sqlLiteral(entry.name),
+        sqlLiteral(entry.relation),
+        sqlLiteral(entry.type),
+        sqlLiteral(entry.definitionSha256),
+      ].join(", ")})`,
   ).join(",\n    ");
 }
 
 function expectedIndexValues() {
-  return EXPECTED_INDEX_MANIFEST.map((entry) =>
-    `(${[
-      sqlLiteral(entry.name),
-      sqlLiteral(entry.relation),
-      entry.unique ? "true" : "false",
-      entry.primary ? "true" : "false",
-      sqlLiteral(entry.definitionSha256),
-    ].join(", ")})`,
+  return EXPECTED_INDEX_MANIFEST.map(
+    (entry) =>
+      `(${[
+        sqlLiteral(entry.name),
+        sqlLiteral(entry.relation),
+        entry.unique ? "true" : "false",
+        entry.primary ? "true" : "false",
+        sqlLiteral(entry.definitionSha256),
+      ].join(", ")})`,
   ).join(",\n    ");
 }
 
@@ -2591,14 +2514,15 @@ function expectedFunctionValues() {
 }
 
 function expectedTriggerValues() {
-  return EXPECTED_TRIGGER_MANIFEST.map((entry) =>
-    `(${[
-      sqlLiteral(entry.name),
-      sqlLiteral(entry.relation),
-      sqlLiteral(entry.functionName),
-      entry.triggerType,
-      sqlLiteral(entry.definitionSha256),
-    ].join(", ")})`,
+  return EXPECTED_TRIGGER_MANIFEST.map(
+    (entry) =>
+      `(${[
+        sqlLiteral(entry.name),
+        sqlLiteral(entry.relation),
+        sqlLiteral(entry.functionName),
+        entry.triggerType,
+        sqlLiteral(entry.definitionSha256),
+      ].join(", ")})`,
   ).join(",\n    ");
 }
 
@@ -2610,15 +2534,16 @@ function expectedEnumValues() {
 }
 
 function expectedRiTriggerValues() {
-  return EXPECTED_RI_TRIGGER_MANIFEST.map((entry) =>
-    `(${[
-      sqlLiteral(entry.constraintName),
-      sqlLiteral(entry.constraintRelation),
-      sqlLiteral(entry.triggerRelation),
-      sqlLiteral(entry.constraintPeerRelation),
-      sqlLiteral(entry.functionName),
-      entry.triggerType,
-    ].join(", ")})`,
+  return EXPECTED_RI_TRIGGER_MANIFEST.map(
+    (entry) =>
+      `(${[
+        sqlLiteral(entry.constraintName),
+        sqlLiteral(entry.constraintRelation),
+        sqlLiteral(entry.triggerRelation),
+        sqlLiteral(entry.constraintPeerRelation),
+        sqlLiteral(entry.functionName),
+        entry.triggerType,
+      ].join(", ")})`,
   ).join(",\n    ");
 }
 
@@ -4478,9 +4403,7 @@ function normalizeDatabaseUrl(rawValue) {
 }
 
 export function parseRuntimeContract(environment) {
-  const target = String(
-    environment.IDENTITY_LEGACY_INVENTORY_TARGET ?? "",
-  )
+  const target = String(environment.IDENTITY_LEGACY_INVENTORY_TARGET ?? "")
     .trim()
     .toLowerCase();
   if (!TARGET_ENVIRONMENTS.has(target)) {
@@ -4489,9 +4412,7 @@ export function parseRuntimeContract(environment) {
       "The exact identity inventory target is required.",
     );
   }
-  if (
-    environment.IDENTITY_LEGACY_INVENTORY_CONFIRM !== RUN_CONFIRMATION
-  ) {
+  if (environment.IDENTITY_LEGACY_INVENTORY_CONFIRM !== RUN_CONFIRMATION) {
     contractError(
       "RUN_CONFIRMATION_REQUIRED",
       "The exact identity inventory confirmation is required.",
@@ -4506,9 +4427,7 @@ export function parseRuntimeContract(environment) {
   }
   const productionRequested =
     target === "production" || nodeEnvironment === "production";
-  if (
-    (target === "production") !== (nodeEnvironment === "production")
-  ) {
+  if ((target === "production") !== (nodeEnvironment === "production")) {
     contractError(
       "PRODUCTION_TARGET_MISMATCH",
       "NODE_ENV and inventory target disagree about production.",
@@ -4542,13 +4461,8 @@ export function parseRuntimeContract(environment) {
       "The exact expected database name is required.",
     );
   }
-  const {
-    parsed,
-    databaseName,
-    hostname,
-    sslMode,
-    sslAccept,
-  } = normalizeDatabaseUrl(environment.DATABASE_URL);
+  const { parsed, databaseName, hostname, sslMode, sslAccept } =
+    normalizeDatabaseUrl(environment.DATABASE_URL);
   if (databaseName !== expectedDatabaseName) {
     contractError(
       "EXPECTED_DATABASE_URL_MISMATCH",
@@ -4556,9 +4470,7 @@ export function parseRuntimeContract(environment) {
     );
   }
 
-  const hmacKey = String(
-    environment.IDENTITY_LEGACY_INVENTORY_HMAC_KEY ?? "",
-  );
+  const hmacKey = String(environment.IDENTITY_LEGACY_INVENTORY_HMAC_KEY ?? "");
   const hmacKeyBytes = Buffer.byteLength(hmacKey, "utf8");
   if (hmacKeyBytes < 32 || hmacKeyBytes > MAX_HMAC_KEY_BYTES) {
     contractError(
@@ -4567,8 +4479,7 @@ export function parseRuntimeContract(environment) {
     );
   }
   if (
-    environment.IDENTITY_LEGACY_INVENTORY_HMAC_KEY_VERSION !==
-    HMAC_KEY_VERSION
+    environment.IDENTITY_LEGACY_INVENTORY_HMAC_KEY_VERSION !== HMAC_KEY_VERSION
   ) {
     contractError(
       "HMAC_KEY_VERSION_INVALID",
@@ -4621,8 +4532,7 @@ export function parseRuntimeContract(environment) {
     productionAttested: productionRequested,
     releaseSha,
     expectedDatabaseName,
-    expectedDatabaseIdentityDigest:
-      expectedDatabaseIdentityDigest || null,
+    expectedDatabaseIdentityDigest: expectedDatabaseIdentityDigest || null,
     transportEncryptionRequired,
     databaseUrl: parsed.toString(),
     hmacKey,
@@ -4790,17 +4700,12 @@ function normalizedSourceContent(content) {
 export function releaseRuntimePathMatches(
   runtimePath,
   expectedRuntimePath,
-  {
-    platform = process.platform,
-    canonicalize = realpathSync.native,
-  } = {},
+  { platform = process.platform, canonicalize = realpathSync.native } = {},
 ) {
   let canonicalRuntimePath;
   let canonicalExpectedPath;
   try {
-    canonicalRuntimePath = path.resolve(
-      String(canonicalize(runtimePath)),
-    );
+    canonicalRuntimePath = path.resolve(String(canonicalize(runtimePath)));
     canonicalExpectedPath = path.resolve(
       String(canonicalize(expectedRuntimePath)),
     );
@@ -4808,8 +4713,7 @@ export function releaseRuntimePathMatches(
     return false;
   }
   return platform === "win32"
-    ? canonicalRuntimePath.toLowerCase() ===
-        canonicalExpectedPath.toLowerCase()
+    ? canonicalRuntimePath.toLowerCase() === canonicalExpectedPath.toLowerCase()
     : canonicalRuntimePath === canonicalExpectedPath;
 }
 
@@ -4825,10 +4729,7 @@ export function assertRuntimeDependencyVersions(
   return true;
 }
 
-export function buildMigrationSourceArtifact(
-  migrationNames,
-  migrationObjects,
-) {
+export function buildMigrationSourceArtifact(migrationNames, migrationObjects) {
   if (
     !Array.isArray(migrationNames) ||
     !Array.isArray(migrationObjects) ||
@@ -5008,7 +4909,8 @@ function safeBoolean(value, code = "DATABASE_BOOLEAN_INVALID") {
 }
 
 function normalizeIsoTimestamp(value, code) {
-  const parsed = value instanceof Date ? new Date(value.valueOf()) : new Date(value);
+  const parsed =
+    value instanceof Date ? new Date(value.valueOf()) : new Date(value);
   if (Number.isNaN(parsed.valueOf())) {
     contractError(code, "The database returned an invalid timestamp.");
   }
@@ -5079,13 +4981,9 @@ export function buildMigrationState(expectedArtifact, rows) {
   ).length;
   const duplicateNameCount =
     normalizedRows.length -
-    new Set(
-      normalizedRows.map((row) => String(row?.migration_name ?? "")),
-    ).size;
-  const orderedNamesMatched = arraysEqual(
-    expectedNames,
-    appliedNames,
-  );
+    new Set(normalizedRows.map((row) => String(row?.migration_name ?? "")))
+      .size;
+  const orderedNamesMatched = arraysEqual(expectedNames, appliedNames);
   const orderedChecksumsMatched = arraysEqual(
     expectedChecksums,
     appliedChecksums,
@@ -5191,8 +5089,7 @@ export function buildCatalogState(row) {
       matchedColumnCount === EXPECTED_CATALOG_COLUMNS.length &&
       expectedExactIdentityColumnCount ===
         EXPECTED_EXACT_IDENTITY_COLUMN_COUNT &&
-      actualExactIdentityColumnCount ===
-        EXPECTED_EXACT_IDENTITY_COLUMN_COUNT &&
+      actualExactIdentityColumnCount === EXPECTED_EXACT_IDENTITY_COLUMN_COUNT &&
       matchedConstraintCount === EXPECTED_CONSTRAINT_MANIFEST.length &&
       actualConstraintCount === EXPECTED_CONSTRAINT_MANIFEST.length &&
       matchedIndexCount === EXPECTED_INDEX_MANIFEST.length &&
@@ -5298,9 +5195,7 @@ export function buildPrivilegeState(
     ),
     databaseCreatePrivilege: safeBoolean(row?.database_create_privilege),
     databaseTempPrivilege: safeBoolean(row?.database_temp_privilege),
-    publicSchemaUsagePrivilege: safeBoolean(
-      row?.public_schema_usage_privilege,
-    ),
+    publicSchemaUsagePrivilege: safeBoolean(row?.public_schema_usage_privilege),
     publicSchemaUsageGrantOption: safeBoolean(
       row?.public_schema_usage_grant_option,
     ),
@@ -5318,19 +5213,11 @@ export function buildPrivilegeState(
     explicitOtherDatabaseConnectCount: safeCount(
       row?.explicit_other_database_connect_count,
     ),
-    nonPublicSchemaUsageCount: safeCount(
-      row?.non_public_schema_usage_count,
-    ),
-    nonPublicSchemaCreateCount: safeCount(
-      row?.non_public_schema_create_count,
-    ),
+    nonPublicSchemaUsageCount: safeCount(row?.non_public_schema_usage_count),
+    nonPublicSchemaCreateCount: safeCount(row?.non_public_schema_create_count),
     systemSchemaCreateCount: safeCount(row?.system_schema_create_count),
-    systemSchemaPrivilegeCount: safeCount(
-      row?.system_schema_privilege_count,
-    ),
-    systemObjectPrivilegeCount: safeCount(
-      row?.system_object_privilege_count,
-    ),
+    systemSchemaPrivilegeCount: safeCount(row?.system_schema_privilege_count),
+    systemObjectPrivilegeCount: safeCount(row?.system_object_privilege_count),
     systemSecurityDefinerFunctionCount: safeCount(
       row?.system_security_definer_function_count,
     ),
@@ -5338,9 +5225,7 @@ export function buildPrivilegeState(
       row?.system_high_oid_executable_function_count,
     ),
     writableRelationCount: safeCount(row?.writable_relation_count),
-    tableSelectRelationCount: safeCount(
-      row?.table_select_relation_count,
-    ),
+    tableSelectRelationCount: safeCount(row?.table_select_relation_count),
     excessSelectColumnCount: safeCount(row?.excess_select_column_count),
     tableSelectGrantOptionCount: safeCount(
       row?.table_select_grant_option_count,
@@ -5351,33 +5236,21 @@ export function buildPrivilegeState(
     requiredRelationMissingCount: safeCount(
       row?.required_relation_missing_count,
     ),
-    requiredSelectMissingCount: safeCount(
-      row?.required_select_missing_count,
-    ),
-    requiredRelationRlsCount: safeCount(
-      row?.required_relation_rls_count,
-    ),
+    requiredSelectMissingCount: safeCount(row?.required_select_missing_count),
+    requiredRelationRlsCount: safeCount(row?.required_relation_rls_count),
     publicRelationPrivilegeCount: safeCount(
       row?.public_relation_privilege_count,
     ),
-    publicColumnPrivilegeCount: safeCount(
-      row?.public_column_privilege_count,
-    ),
+    publicColumnPrivilegeCount: safeCount(row?.public_column_privilege_count),
     sequencePrivilegeCount: safeCount(row?.sequence_privilege_count),
-    executableUserFunctionCount: safeCount(
-      row?.executable_user_function_count,
-    ),
+    executableUserFunctionCount: safeCount(row?.executable_user_function_count),
     dormantTypeUsageCount: safeCount(row?.dormant_type_usage_count),
     foreignServerUsageCount: safeCount(row?.foreign_server_usage_count),
     foreignDataWrapperUsageCount: safeCount(
       row?.foreign_data_wrapper_usage_count,
     ),
-    parameterPrivilegeCount: safeCount(
-      row?.parameter_privilege_count,
-    ),
-    largeObjectPrivilegeCount: safeCount(
-      row?.large_object_privilege_count,
-    ),
+    parameterPrivilegeCount: safeCount(row?.parameter_privilege_count),
+    largeObjectPrivilegeCount: safeCount(row?.large_object_privilege_count),
   };
   state.syntheticPublicConnectException =
     allowSyntheticPublicConnect &&
@@ -5475,9 +5348,7 @@ export function buildInventoryState(rows) {
   }
   const nonZeroCodes = (severity) =>
     findings
-      .filter(
-        (finding) => finding.severity === severity && finding.count > 0,
-      )
+      .filter((finding) => finding.severity === severity && finding.count > 0)
       .map((finding) => finding.code);
   const decision =
     totals.BLOCKING > 0
@@ -5518,8 +5389,7 @@ function snapshotState(snapshotRow, config) {
   const currentSchemaIsPublic =
     String(snapshotRow?.current_schema ?? "") === "public";
   const databaseNameMatched =
-    String(snapshotRow?.current_database ?? "") ===
-    config.expectedDatabaseName;
+    String(snapshotRow?.current_database ?? "") === config.expectedDatabaseName;
   const sessionRoleUnchanged =
     String(snapshotRow?.current_role ?? "") ===
     String(snapshotRow?.session_role ?? "");
@@ -5616,8 +5486,7 @@ export function buildReport({
     admissionRejectionCodes.push("LEAST_PRIVILEGE_ROLE_REQUIRED");
   }
   const admitted =
-    schemaRejectionCodes.length === 0 &&
-    admissionRejectionCodes.length === 0;
+    schemaRejectionCodes.length === 0 && admissionRejectionCodes.length === 0;
   if (admitted !== Boolean(inventoryState)) {
     contractError(
       "INVENTORY_EXECUTION_GATE_MISMATCH",
@@ -5676,13 +5545,10 @@ export function buildReport({
       postgresqlMajor: snapshot.postgresqlMajor,
       postgresqlMajorSupported: snapshot.postgresqlMajorSupported,
       databaseIdentityDigest: snapshot.databaseIdentityDigest,
-      databaseIdentityDigestRequired:
-        snapshot.databaseIdentityDigestRequired,
-      databaseIdentityDigestMatched:
-        snapshot.databaseIdentityDigestMatched,
+      databaseIdentityDigestRequired: snapshot.databaseIdentityDigestRequired,
+      databaseIdentityDigestMatched: snapshot.databaseIdentityDigestMatched,
       transportEncrypted: snapshot.transportEncrypted,
-      transportEncryptionRequired:
-        snapshot.transportEncryptionRequired,
+      transportEncryptionRequired: snapshot.transportEncryptionRequired,
       transportEncryptionMatched: snapshot.transportEncryptionMatched,
       roleIdentityDigest: snapshot.roleIdentityDigest,
       migrations: migrationState,
@@ -5758,7 +5624,10 @@ export function exitCodeForReport(report, hmacKey) {
   );
   const expectedExecutionDigest = computeHmac(
     "identity-legacy-inventory-execution-v1",
-    { contentDigest: expectedContentDigest, generatedAt: normalizedGeneratedAt },
+    {
+      contentDigest: expectedContentDigest,
+      generatedAt: normalizedGeneratedAt,
+    },
     hmacKey,
   );
   if (
@@ -5838,14 +5707,8 @@ export function exitCodeForReport(report, hmacKey) {
       report.summary.blockingTotal !== totals.BLOCKING ||
       report.summary.proposalTotal !== totals.PROPOSAL ||
       report.summary.reviewTotal !== totals.REVIEW ||
-      !arraysEqual(
-        report.summary.blockingCodes ?? [],
-        nonZeroCodes.BLOCKING,
-      ) ||
-      !arraysEqual(
-        report.summary.proposalCodes ?? [],
-        nonZeroCodes.PROPOSAL,
-      ) ||
+      !arraysEqual(report.summary.blockingCodes ?? [], nonZeroCodes.BLOCKING) ||
+      !arraysEqual(report.summary.proposalCodes ?? [], nonZeroCodes.PROPOSAL) ||
       !arraysEqual(report.summary.reviewCodes ?? [], nonZeroCodes.REVIEW)
     ) {
       return 1;
@@ -5865,10 +5728,7 @@ export function exitCodeForReport(report, hmacKey) {
   if (decision === "BLOCKED" || decision === "REVIEW") {
     return inventoryExecuted === true ? 2 : 1;
   }
-  if (
-    decision === "SCHEMA_MISMATCH" ||
-    decision === "ADMISSION_MISMATCH"
-  ) {
+  if (decision === "SCHEMA_MISMATCH" || decision === "ADMISSION_MISMATCH") {
     return inventoryExecuted === false ? 3 : 1;
   }
   return 1;
@@ -5897,10 +5757,7 @@ function assertReadOnlySource() {
     INVENTORY_SQL,
     /passwordHash|tokenHash|fullName|createdByUserId|revokedByUserId/iu,
   );
-  assert.match(
-    INVENTORY_SQL,
-    /lower\(btrim\([^)]*\)\s+COLLATE\s+"C"\)/iu,
-  );
+  assert.match(INVENTORY_SQL, /lower\(btrim\([^)]*\)\s+COLLATE\s+"C"\)/iu);
   assert.equal(
     Object.entries(FINDING_MANIFEST).filter(
       ([, severity]) => severity === "PROPOSAL",
@@ -5952,9 +5809,7 @@ function selfTestCatalogRow() {
     matched_enum_label_count: String(EXPECTED_ENUM_MANIFEST.length),
     total_enum_label_count: String(EXPECTED_ENUM_MANIFEST.length),
     matched_trigger_count: String(EXPECTED_TRIGGER_MANIFEST.length),
-    actual_identity_trigger_count: String(
-      EXPECTED_TRIGGER_MANIFEST.length,
-    ),
+    actual_identity_trigger_count: String(EXPECTED_TRIGGER_MANIFEST.length),
     matched_ri_trigger_count: String(EXPECTED_RI_TRIGGER_MANIFEST.length),
     actual_ri_trigger_count: String(EXPECTED_RI_TRIGGER_MANIFEST.length),
   };
@@ -6249,11 +6104,7 @@ export async function inspectDatabase(
           await transaction.$queryRawUnsafe(CATALOG_STATE_SQL);
         const privilegeRows =
           await transaction.$queryRawUnsafe(PRIVILEGE_STATE_SQL);
-        if (
-          !snapshotRows[0] ||
-          !catalogRows[0] ||
-          !privilegeRows[0]
-        ) {
+        if (!snapshotRows[0] || !catalogRows[0] || !privilegeRows[0]) {
           contractError(
             "DATABASE_ADMISSION_STATE_MISSING",
             "The database did not return complete admission state.",
@@ -6276,9 +6127,7 @@ export async function inspectDatabase(
         const migrationState = preMigrationGate
           ? buildMigrationState(
               migrationArtifact,
-              await transaction.$queryRawUnsafe(
-                APPLIED_MIGRATION_STATE_SQL,
-              ),
+              await transaction.$queryRawUnsafe(APPLIED_MIGRATION_STATE_SQL),
             )
           : {
               ...buildMigrationState(migrationArtifact, []),
@@ -6305,8 +6154,7 @@ export async function inspectDatabase(
             releaseArtifactBound,
           });
         }
-        const inventoryRows =
-          await transaction.$queryRawUnsafe(INVENTORY_SQL);
+        const inventoryRows = await transaction.$queryRawUnsafe(INVENTORY_SQL);
         return buildReport({
           config,
           snapshotRow: snapshotRows[0],
@@ -6395,6 +6243,8 @@ export async function main(
 const invokedPath = process.argv[1]
   ? path.resolve(process.argv[1]).toLowerCase()
   : "";
-if (invokedPath === path.resolve(fileURLToPath(import.meta.url)).toLowerCase()) {
+if (
+  invokedPath === path.resolve(fileURLToPath(import.meta.url)).toLowerCase()
+) {
   process.exitCode = await main();
 }

@@ -15,6 +15,8 @@ const preterminalManifestDigest =
   "f269f0878c9940b7ee2619e778e032361acc844364ab876bbe7fcc01e15a9fcd";
 const workerAssertSourceDigest =
   "47690501257272fd455475a00bea0e21b13f27187a669adef2115de349633315";
+const workerAssertDefinitionDigest =
+  "4231a5a96d238dfa838551e722b56edf8a3787a2929f865508e94b747743cf80";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -91,5 +93,23 @@ test("the active worker repository consumes the same exact CURRENT185 receipt", 
   assert.doesNotMatch(
     repository,
     /const CURRENT_MIGRATION =\s*'20260731120000_identity_mail_delivery_release_head'/u,
+  );
+});
+
+test("the legacy inventory pins the CURRENT185 worker function definition", async () => {
+  const inventory = await readFile(
+    path.join(
+      databaseRoot,
+      "scripts",
+      "identity-legacy-backfill-inventory.mjs",
+    ),
+    "utf8",
+  );
+  assert.match(
+    inventory,
+    new RegExp(
+      `name: "identity_mail_delivery_worker_assert_v1",[\\s\\S]*?definitionSha256:\\s*"${workerAssertDefinitionDigest}"`,
+      "u",
+    ),
   );
 });

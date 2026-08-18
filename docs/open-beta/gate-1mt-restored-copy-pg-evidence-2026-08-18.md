@@ -34,25 +34,27 @@ File/attachment PostgreSQL slice добавлен exact commit
 `e6e8d2aa4e5655fa55a715b0d71dc7d2c848a036` и выполнен на одноразовом клоне
 `leetplus_gate1mt_attachment_test_800b246d`.
 
-Latest assortment candidates `230d62b1…`, `d3a2d8b6…` и `58410b37…`
-добавили в существующую suite шесть реальных PostgreSQL-проверок: категории,
-поставщики, product CSV, inventory/sales/stock-movement CSV, store-scoped
-assortment/sales reports и CSV export. Сначала они дважды прошли на отдельном
-чистом PostgreSQL 16.14 после canonical LF migration deploy, затем exact bytes
-`c8b094d3b6dfdae8df94a6725d1751128ebde6ef` дважды прошли на disposable клоне
-`leetplus_gate1mt_assortment_test_c8b094d3` clean production-backup copy.
-Restored-copy матрица тем самым расширена до `23/23`.
+Latest assortment candidates `230d62b1…`, `d3a2d8b6…`, `58410b37…` и
+`f59c32fc…` добавили в существующую suite девять реальных
+PostgreSQL-проверок: категории, поставщики, product CSV,
+inventory/sales/stock-movement CSV, все локальные варианты
+отчётов, CSV/XLSX exports, OOS exclusions и recommendation state. Exact
+bytes `f59c32fc…` дали два последовательных зелёных прогона на отдельном
+чистом PostgreSQL 16.14 после canonical LF migration deploy и два — на disposable
+клоне `leetplus_gate1mt_assortment_test_reports_a4` clean
+production-backup copy. Restored-copy матрица тем самым расширена до
+`26/26`.
 
 ## Выполненная матрица
 
 | Контур                      | Набор                                                  |      Результат |
 | --------------------------- | ------------------------------------------------------ | -------------: |
-| Ассортимент и Store scope   | `pilot-assortment-store-scope.pg.integration-spec.ts`  |     `9/9 PASS` |
+| Ассортимент и Store scope   | `pilot-assortment-store-scope.pg.integration-spec.ts`  |   `12/12 PASS` |
 | Командный чат и fresh scope | `pilot-team-chat-fresh-scope.pg.integration-spec.ts`   |     `3/3 PASS` |
 | CRM-коммуникации            | `pilot-crm-communications.pg.integration-spec.ts`      |     `4/4 PASS` |
 | Пользователи и роли         | `pilot-users-roles-fresh-scope.pg.integration-spec.ts` |     `4/4 PASS` |
 | Файловые вложения staff     | `pilot-staff-attachments-scope.pg.integration-spec.ts` |     `3/3 PASS` |
-| **Итого**                   | **5 PostgreSQL suites**                                | **23/23 PASS** |
+| **Итого**                   | **5 PostgreSQL suites**                                | **26/26 PASS** |
 
 Матрица включает Tenant A/Tenant B, network scope, Store A1/A2 и Store B1,
 cross-tenant deny, cross-store deny, stale authority и допустимые операции
@@ -61,7 +63,7 @@ cross-tenant deny, cross-store deny, stale authority и допустимые о�
 ## Latest assortment extension
 
 `pilot-assortment-store-scope.pg.integration-spec.ts` расширен с `3/3` до
-`9/9` без test-only service substitutes:
+`12/12` без test-only service substitutes:
 
 - `CategoriesService`: NETWORK-only list, cross-tenant update/merge deny,
   допустимый same-tenant merge с проверкой переноса Product и stale JWT/DB
@@ -78,11 +80,22 @@ cross-tenant deny, cross-store deny, stale authority и допустимые о�
   explicit foreign Store filters запрещены;
 - `ReportsExportService`: sales-detail CSV содержит только разрешённые Store и
   tenant rows, а stale Store binding блокирует export до выдачи файла.
+- все локальные `ReportsService` variants проверены для A1 и NETWORK:
+  operational, turnover, matrix, plan/fact, sales detail, SKU, suppliers,
+  replenishment, new products и LFL; A2/B1 не проникают в Store scope,
+  B1 не проникает в Tenant A NETWORK scope;
+- все локальные `ReportsExportService` variants проверены в CSV и
+  XLSX: comprehensive, LFL, sales detail, replenishment и product movement;
+  XLSX повторно читается ExcelJS и проверяется по ячейкам;
+- OOS exclusions и recommendation state проверены на NETWORK-only
+  mutation, cross-tenant deny и раздельное состояние одинакового
+  recommendation key в Tenant A/Tenant B.
 
 Два последовательных clean current-head прогона и два последовательных
-restored-copy прогона завершились `9/9 + 9/9 PASS` каждый. Restored-copy
-postflight: `0 fixture tenants / 0 fixture users / 0 import jobs / 0 sales
-facts / 0 stock movements`; target/source core counts совпали:
+restored-copy прогона завершились `12/12 + 12/12 PASS` каждый.
+Restored-copy postflight: `0 fixture tenants / 0 fixture users / 0 import
+jobs / 0 sales facts / 0 stock movements / 0 OOS exclusions / 0
+recommendation states`; target/source core counts совпали:
 `3 tenants / 4 stores / 30 users / 1483 products / 51257 guests`. Exact
 disposable database удалена, database residue `0`. Production, clean
 restored-copy source и текущая сеть не изменялись.
@@ -153,8 +166,9 @@ Attachment-клон после двух успешных прогонов под
 совпали с source template (`3/4/30/1483/51257`). Exact disposable database
 удалена, database residue равен `0`.
 
-Assortment-клон `leetplus_gate1mt_assortment_test_c8b094d3` после двух
-успешных `9/9` прогонов подтвердил fixture residue `0/0/0/0/0`; его core counts
+Assortment-клон `leetplus_gate1mt_assortment_test_reports_a4` после двух
+успешных `12/12` прогонов подтвердил fixture residue
+`0/0/0/0/0/0/0`; его core counts
 точно совпали с clean source (`3/4/30/1483/51257`). Перед удалением проверены
 exact database name и zero sessions; после `dropdb --force` database residue
 равен `0`.
@@ -167,9 +181,10 @@ exact database name и zero sessions; после `dropdb --force` database resid
 
 До первого внешнего клуба остаются:
 
-1. глубокая HTTP mutation/export/file A/B matrix остальных report variants и
-   модулей, включая XLSX, OOS/ABC/LFL/turnover/matrix/recommendations и
-   email/digest boundary;
+1. HTTP/BFF/browser mutation/export/file A/B matrix для принятых
+   report/export вариантов; service-level CSV/XLSX, OOS, LFL, turnover,
+   matrix и recommendations уже закрыты, но outbound email/digest ещё
+   выключен и не проверен;
 2. background jobs, Telegram, files/attachments, SSE и outbound fail-closed
    matrix;
 3. Gate 2 текущей сети A1–A4 и стабильное internal-alpha окно;

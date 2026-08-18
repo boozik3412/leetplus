@@ -25,22 +25,24 @@ disposable clone database/role residue `0`, исходный preflight снов�
 [Отчёт mail rehearsal](./founder-restored-copy-mail-rehearsal-2026-08-18.md).
 
 Gate 1MT PostgreSQL A/B matrix на disposable клонах той же clean restored copy
-расширена до `23/23`: ассортимент `9/9`, team chat `3/3`, CRM `4/4`,
+расширена до `26/26`: ассортимент `12/12`, team chat `3/3`, CRM `4/4`,
 users/roles `4/4`, staff attachments `3/3`. Fixture residue равен нулю,
 контрольные row counts клонов совпали с источником, одноразовые БД удалены.
 [Отчёт Gate 1MT](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md).
 
-Latest assortment candidate `58410b37…` расширяет ту же suite до `9/9`:
+Latest assortment candidate `f59c32fc…` расширяет ту же suite до `12/12`:
 добавлены реальные PostgreSQL-проверки `CategoriesService`,
 `SuppliersService`, `ProductCsvImportService`, `FactCsvImportService`,
 `ReportsService` и `ReportsExportService` для NETWORK-only reads/mutations/
-imports, tenant-bound product/inventory/sales/movement writes, store-scoped
-assortment/sales reports, CSV export без foreign rows, cross-tenant deny и
-stale-scope deny. На чистом CURRENT185+ current-head PostgreSQL выполнены два
-последовательных run `9/9 + 9/9`; fixture residue `0/0/0/0/0`, одноразовый
-кластер удалён. Те же exact bytes `c8b094d3…` дважды прошли `9/9 + 9/9` на
+imports, tenant-bound product/inventory/sales/movement writes, все local
+report variants, CSV/XLSX exports без foreign rows, OOS/recommendation state,
+cross-tenant deny и stale-scope deny. На чистом CURRENT185+ current-head PostgreSQL
+выполнены два последовательных run `12/12 + 12/12`; fixture residue
+`0/0/0/0/0/0/0`, одноразовый кластер удалён. Два последовательных
+restored-copy прогона тех же exact bytes `f59c32fc…` дали `12/12 + 12/12` на
 disposable restored-copy clone; target/source core counts совпали
-`3/4/30/1483/51257`, database residue `0`. Exact-head CI ещё выполняется.
+`3/4/30/1483/51257`, database residue `0`. CI для exact documentation
+head запускается после его фиксации.
 
 На exact implementation SHA `771bbd5fa73e0be3b41d74dbb107495824987554`
 принят следующий restored-copy production-build browser slice. Независимые
@@ -232,9 +234,10 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 2. `SENT`, owner accept, one-tenant enrollment и trusted TLS SMTP доказаны на
    disposable клонах restored copy. Ещё не выполнены production worker-role
    enrollment, production SMTP secret/config и controlled production canary.
-3. Gate 1MT PostgreSQL A/B matrix (`23/23`, включая attachment scope и latest
-   assortment `9/9`) и browser read/admission slice приняты на restored copy.
-   Остальные report/export variants и file parents, jobs/Telegram/SSE и Gate 2
+3. Gate 1MT PostgreSQL A/B matrix (`26/26`, включая attachment scope и latest
+   assortment `12/12`) и browser read/admission slice приняты на restored copy.
+   Локальные report/CSV/XLSX variants закрыты на service/DB уровне;
+   HTTP/BFF/browser boundary, outbound digest, file parents, jobs/Telegram/SSE и Gate 2
    текущей сети не закрыты.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
@@ -256,8 +259,8 @@ clean SHA + CI artifact [DONE]
   → [DONE local PostgreSQL] CURRENT185 worker + SENT/reissue/accept
   → [DONE exact-SHA CI] exact one-tenant mail enrollment plan/apply/check/disable
   → [DONE restored-copy clones] trusted TLS SMTP + enrollment/SENT/accept/disable
-  → [DONE restored-copy clones] Gate 1MT PostgreSQL A/B matrix 23/23
-  → [DONE restored-copy clone] assortment categories/suppliers/imports/report-export 9/9
+  → [DONE restored-copy clones] Gate 1MT PostgreSQL A/B matrix 26/26
+  → [DONE restored-copy clone] assortment categories/suppliers/imports/reports/CSV/XLSX/OOS/recommendations 12/12
   → [DONE restored-copy clone] production-build OWNER/STORES browser read/admission
   → production roles/secrets + controlled SMTP canary
   → Gate 1MT mutations/files/jobs/SSE/Telegram remainder

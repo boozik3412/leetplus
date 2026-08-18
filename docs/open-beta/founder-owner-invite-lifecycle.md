@@ -1,7 +1,7 @@
 # Founder pilot: initial owner invite lifecycle
 
 Статус:
-`STATUS + REVOKE EXACT-SHA ACCEPTED / REISSUE ENGINEERING IMPLEMENTED / REISSUE CI PENDING / PRODUCTION NO-GO`.
+`STATUS + REVOKE + REISSUE EXACT-SHA ACCEPTED / PRODUCTION NO-GO`.
 
 ## Назначение
 
@@ -85,7 +85,7 @@ Migration `20260818010000_founder_owner_invite_reissue_v1` добавляет im
 
 - API typecheck;
 - scoped lint без warnings;
-- controller/service unit: `2 suites / 14 tests PASS`;
+- controller/service unit: `2 suites / 18 tests PASS`;
 - fail-closed cases: stale Platform Admin, tenant/invite drift, unsafe delivery
   state, payload smuggling и PII в audit metadata.
 
@@ -102,15 +102,17 @@ Status/revoke принят на exact SHA
 Дублирующий push run был отменён конкурирующим workflow и не является
 отрицательным acceptance.
 
-Для reissue локально приняты API typecheck, scoped lint, controller/service/
-identity-boundary `3 suites / 20 tests`, envelope producer boundary `1/50`,
-static migration `4/4` и полный API regression `157 suites / 3142 tests`.
-Новый реальный PostgreSQL сценарий `REVOKED → REISSUED → REPLAYED`, exact
-counts и current status добавлен в тот же fixture; exact-SHA CI ещё обязателен.
+Для reissue приняты API typecheck, scoped lint, controller/service unit
+`2 suites / 18 tests`, static migration `4/4`, полный API regression
+`157 suites / 3144 passed` и реальный PostgreSQL сценарий
+`REVOKED → REISSUED → REPLAYED` `1/1 PASS`. Exact SHA
+`f33e598ad2955afaf378777165bd2c34e6471c7a` принят push CI
+`32098804217` (`4/4 SUCCESS`) и PR CI `32098806708` (`3/3 SUCCESS`); push
+artifact `9311012974`, digest
+`sha256:f0843edc24b9664436258910b2149b60d999fc58ed9bad5ca48c8ed248c77e81`.
 
 ## Что ещё не реализовано
 
-- exact-SHA PostgreSQL acceptance нового reissue boundary;
 - resend уже созданного токена запрещён: используется только reissue;
 - production SMTP canary и подтверждённый `SENT`;
 - production-like accept нового reissued invite;

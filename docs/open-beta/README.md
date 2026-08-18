@@ -59,7 +59,7 @@ JWT/encryption/SMTP secrets, tenant isolation, backup/restore и rollback
 [Founder-operator beta GO](./founder-operator-beta-go.md).
 
 Текущий фактический статус после реализации v2:
-[open beta status 17.08.2026](./open-beta-current-status-2026-08-17.md).
+[open beta status 18.08.2026](./open-beta-current-status-2026-08-17.md).
 
 Dedicated database boundary:
 [founder activation runtime v1](./founder-operator-beta-activation-runtime.md).
@@ -84,7 +84,7 @@ Exact direct PostgreSQL HBA/TLS/SCRAM acceptance dedicated роли:
 ## Канонические документы
 
 Сначала читать:
-[актуальный статус открытого теста на 17.08.2026](./open-beta-current-status-2026-08-17.md) —
+[актуальный статус открытого теста на 18.08.2026](./open-beta-current-status-2026-08-17.md) —
 единый вердикт по текущей задаче, release gates, фактическим blockers и пути до
 первого `Tenant B/Store B1`.
 

@@ -1,4 +1,4 @@
-# LeetPlus open beta — текущее состояние на 17.08.2026
+# LeetPlus open beta — текущее состояние на 18.08.2026
 
 | Поле                 | Состояние                                          |
 | -------------------- | -------------------------------------------------- |
@@ -48,7 +48,7 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 - focused config/admin/GO/activation — `4 suites / 65 tests PASS`;
 - identity-mail/onboarding — `18 suites / 477 tests PASS`;
 - identity-mail и PostgreSQL focused ESLint — `PASS`;
-- clean PostgreSQL 16 deploy `183` migrations — `PASS`;
+- clean PostgreSQL 16 deploy `184` migrations — `PASS`;
 - real PostgreSQL v2 activation/replay/immutability — `1/1 PASS`;
 - результат: `ACTIVATED → REPLAYED`, tenant `ACTIVE/OWNER_INVITED`, trial 30
   дней, один `OWNER/NETWORK` invite, один `PENDING` outbox, `User=0` до accept;
@@ -132,6 +132,15 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   `sha256:5dc17d356030d480fdae5cbae3e97d0329c23b77e9032be019f2ef4336915700`.
   Фактический результат child process: `SHELL_PROVISIONED→ISSUED→ACTIVATED→REPLAYED`,
   tenant `ACTIVE/OWNER_INVITED`, database residue `0`, role residue `0`.
+- Owner invite reissue принят на exact SHA
+  `f33e598ad2955afaf378777165bd2c34e6471c7a`: локально owner lifecycle
+  `2 suites / 18`, full API `157 suites / 3144 passed`, static migration `4/4`
+  и real PostgreSQL `REVOKED→REISSUED→REPLAYED` `1/1 PASS`. Push CI
+  [32098804217](https://github.com/boozik3412/leetplus/actions/runs/32098804217)
+  завершён `4/4 SUCCESS`, PR CI
+  [32098806708](https://github.com/boozik3412/leetplus/actions/runs/32098806708)
+  — `3/3 SUCCESS`; artifact `9311012974`, digest
+  `sha256:f0843edc24b9664436258910b2149b60d999fc58ed9bad5ca48c8ed248c77e81`.
 
 ## Что блокирует выдачу доступа
 
@@ -142,10 +151,9 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
    readiness evidence.
 3. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
-   `SENT` barrier и полная reissue/suspend/accept acceptance. PII-free status и
-   атомарный revoke initial OWNER invite приняты exact-SHA CI/PostgreSQL;
-   immutable reissue реализован локально и ожидает свой exact-SHA PostgreSQL
-   acceptance.
+   `SENT` barrier и полная suspend/accept acceptance. PII-free status, атомарный
+   revoke и immutable fresh-token reissue initial OWNER invite приняты
+   exact-SHA CI/PostgreSQL.
 4. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
    production-like A/B matrix, jobs/Telegram/files/SSE и Gate 2 для текущей
    сети из четырёх клубов не закрыты.
@@ -163,7 +171,7 @@ clean SHA + CI artifact [DONE]
   → [DONE synthetic] downloaded artifact API child process
   → restored-copy apply/replay/rollback + backup/readiness
   → [DONE] owner invite status/revoke
-  → [IMPLEMENTED, CI PENDING] immutable owner invite reissue
+  → [DONE engineering/CI] immutable owner invite reissue
   → SMTP canary + SENT/reissue/accept evidence
   → Gate 1MT browser/store-scope
   → Gate 2 current Tenant A/A1..A4

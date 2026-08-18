@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.146                                        |
+| Версия           | 1.147                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -84,6 +84,9 @@ Exact direct PostgreSQL HBA/TLS/SCRAM acceptance dedicated роли:
 [founder owner delivery CURRENT185](./founder-owner-delivery-current185.md).
 Безопасное включение mail worker только для одного pilot tenant описано в
 [founder-pilot mail tenant enrollment](./founder-pilot-mail-tenant-enrollment.md).
+Контроллер принят на exact SHA `55748217…`: push/PR CI — `4/4 SUCCESS`,
+focused PostgreSQL — `SUCCESS`; скачанный 14-script artifact прошёл внешний
+checksum. Production и текущая сеть не изменялись.
 
 ## Канонические документы
 

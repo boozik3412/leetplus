@@ -169,8 +169,15 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   worker role/OID, provider digest, fixed policy, tenant advisory lock,
   `SERIALIZABLE`, monotonic disable и lost-response reconciliation. Unit
   `7/7`, database typecheck/scoped lint и реальный disposable PostgreSQL founder
-  lifecycle через CLI `1/1` прошли. Commit `3eef2be1…` отправлен в ветку;
-  exact-SHA CI выполняется. Production и Tenant A не изменялись.
+  lifecycle через CLI `1/1` прошли. Full CI выявил и закрыл residue старого
+  PgBouncer fixture: точный `postgresql.auto.conf` теперь восстанавливается,
+  post-cleanup доказывает `ssl=off` и отсутствие трёх fixture-сертификатов.
+  Exact SHA `5574821723de22d3d83a51a03f3dbdab639cd53d` принят push/PR CI
+  `32115334678`/`32115340009` как `4/4 SUCCESS`, focused PG
+  `32115339918` — `SUCCESS`. Artifact `9316782148`, digest
+  `sha256:a2b0ea21563efb5fc9c1df078a9d0d97afce9f9c8b404d9351457aa7433f0706`;
+  downloaded SHA-256 `d360e5b1…a7849167` совпал с outer checksum и содержит
+  `14` operational scripts (`8+6`). Production и Tenant A не изменялись.
 
 ## Что блокирует выдачу доступа
 
@@ -203,7 +210,7 @@ clean SHA + CI artifact [DONE]
   → [DONE] owner invite status/revoke
   → [DONE engineering/CI] immutable owner invite reissue
   → [DONE local PostgreSQL] CURRENT185 worker + SENT/reissue/accept
-  → [DONE local PostgreSQL] exact one-tenant mail enrollment plan/apply/check/disable
+  → [DONE exact-SHA CI] exact one-tenant mail enrollment plan/apply/check/disable
   → trusted production-like SMTP canary
   → Gate 1MT browser/store-scope
   → Gate 2 current Tenant A/A1..A4

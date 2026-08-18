@@ -1,6 +1,7 @@
 # Founder-pilot mail tenant enrollment
 
-Статус: `ENGINEERING GREEN / EXACT-SHA CI PENDING / PRODUCTION NO-GO`.
+Статус:
+`EXACT-SHA CI ACCEPTED / CLEAN+SEQUENTIAL POSTGRESQL PASS / PRODUCTION NO-GO`.
 
 ## Назначение
 
@@ -90,7 +91,7 @@ delivery `SENT`, invite preview/accept и day-0 monitoring. Для аварий�
 остановки сначала прекращается polling worker, затем используется exact
 `requiredDisableConfirmation` из `check` и `--mode disable`.
 
-## Принято локально
+## Принято
 
 - adversarial controller matrix: `7/7 PASS`;
 - syntax, Prettier, database typecheck и scoped API PostgreSQL lint: `PASS`;
@@ -102,8 +103,36 @@ delivery `SENT`, invite preview/accept и day-0 monitoring. Для аварий�
 
 Implementation commit:
 `3eef2be1b8a04888908bfd28d5e9c77007bd0449`. Он отправлен в
-`codex/open-beta-hardening`; точные CI run/artifact identifiers будут записаны
-после terminal acceptance.
+`codex/open-beta-hardening`. PII-free ACL/migration violation codes добавлены
+commit `df6b6465…`; отдельный focused PostgreSQL gate — `f249573d…`.
+
+Полный CI обнаружил не дефект tenant enrollment, а residue предыдущего
+PgBouncer fixture: fixture включал PostgreSQL TLS через `ALTER SYSTEM`, но
+восстанавливал только `pg_hba.conf`. Commit
+`5574821723de22d3d83a51a03f3dbdab639cd53d` теперь сохраняет и возвращает
+точный `postgresql.auto.conf`, перезапускает disposable PostgreSQL и удаляет
+ровно три fixture-сертификата. Отдельный post-cleanup gate подтвердил
+`ssl=off`, после чего тот же founder lifecycle прошёл в последовательном
+migration-smoke без ослабления `LOOPBACK_PLAINTEXT` или grant allowlist.
+
+Exact head принят:
+
+- push CI
+  [32115334678](https://github.com/boozik3412/leetplus/actions/runs/32115334678)
+  и PR CI
+  [32115340009](https://github.com/boozik3412/leetplus/actions/runs/32115340009) —
+  `4/4 SUCCESS`;
+- focused PostgreSQL PR gate
+  [32115339918](https://github.com/boozik3412/leetplus/actions/runs/32115339918) —
+  `SUCCESS`;
+- artifact `9316782148`, `28 481 175` bytes, GitHub digest
+  `sha256:a2b0ea21563efb5fc9c1df078a9d0d97afce9f9c8b404d9351457aa7433f0706`;
+- downloaded archive SHA-256
+  `d360e5b18666ca347ba5b76a6453db9f8414fc8ed3ecf3ff553e2eb9a7849167`
+  совпал с outer checksum;
+- provenance: CURRENT185/count `185`, founder scripts `8`, runtime enrollment
+  scripts `6`, total operational scripts `14`; оба mail tenant enrollment
+  source/CLI находятся в archive.
 
 ## Что всё ещё блокирует внешний доступ
 

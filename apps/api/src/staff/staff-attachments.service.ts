@@ -15,6 +15,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { lockUserRoleAuthority } from '../users/user-role-authority-lock';
 import { StaffTeamChatService } from './staff-team-chat.service';
 import { StaffTasksService } from './staff-tasks.service';
 
@@ -246,10 +247,17 @@ export class StaffAttachmentsService {
     userId: string,
   ) {
     const rows = await tx.$queryRaw<
-      Array<{ attachmentId: string; userId: string }>
+      Array<{
+        attachmentId: string;
+        customRoleId: string | null;
+        role: string;
+        userId: string;
+      }>
     >(Prisma.sql`
       SELECT
         attachment."id" AS "attachmentId",
+        subject."customRoleId",
+        subject."role"::text AS "role",
         subject."id" AS "userId"
       FROM "StaffAttachment" AS attachment
       INNER JOIN "User" AS subject
@@ -260,11 +268,27 @@ export class StaffAttachmentsService {
       FOR SHARE OF attachment, subject
     `);
 
-    return (
+    const authority = rows[0];
+    const exactAuthority =
       rows.length === 1 &&
-      rows[0]?.attachmentId === attachmentId &&
-      rows[0]?.userId === userId
-    );
+      authority?.attachmentId === attachmentId &&
+      authority.userId === userId &&
+      typeof authority.role === 'string' &&
+      authority.role.length > 0 &&
+      (authority.customRoleId === null ||
+        (typeof authority.customRoleId === 'string' &&
+          authority.customRoleId.length > 0));
+
+    if (!exactAuthority) {
+      return false;
+    }
+
+    await lockUserRoleAuthority(tx, {
+      tenantId,
+      role: authority.role,
+      customRoleId: authority.customRoleId,
+    });
+    return true;
   }
 
   private async canReadStrict(

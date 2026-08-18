@@ -33,6 +33,7 @@ import {
   type RequestedAccessScope,
 } from '../tenancy/access-scope.service';
 import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
+import { lockUserRoleAuthority } from './user-role-authority-lock';
 
 const assignableRolesByActor: Record<UserRole, UserRole[]> = {
   [UserRole.OWNER]: [
@@ -1019,9 +1020,17 @@ export class UsersService {
     this.assertCapabilitiesGrantable(actor, data.permissions);
 
     try {
-      const role = await this.prisma.userAccessRole.update({
-        where: { id },
-        data,
+      const role = await this.prisma.$transaction(async (tx) => {
+        await lockUserRoleAuthority(tx, {
+          tenantId,
+          role: UserRole.CLUB_ADMINISTRATOR,
+          customRoleId: id,
+        });
+
+        return tx.userAccessRole.update({
+          where: { id, tenantId },
+          data,
+        });
       });
 
       return this.toAccessRole(role);
@@ -1041,26 +1050,34 @@ export class UsersService {
     const permissions = normalizeCapabilities(dto.permissions);
     this.assertCapabilitiesGrantable(actor, permissions);
 
-    const override = await this.prisma.userRoleOverride.upsert({
-      where: {
-        tenantId_role: {
-          tenantId,
-          role,
-        },
-      },
-      create: {
+    const override = await this.prisma.$transaction(async (tx) => {
+      await lockUserRoleAuthority(tx, {
         tenantId,
         role,
-        permissions,
-      },
-      update: {
-        permissions,
-      },
-      select: {
-        role: true,
-        permissions: true,
-        updatedAt: true,
-      },
+        customRoleId: null,
+      });
+
+      return tx.userRoleOverride.upsert({
+        where: {
+          tenantId_role: {
+            tenantId,
+            role,
+          },
+        },
+        create: {
+          tenantId,
+          role,
+          permissions,
+        },
+        update: {
+          permissions,
+        },
+        select: {
+          role: true,
+          permissions: true,
+          updatedAt: true,
+        },
+      });
     });
 
     return this.toRoleOption(role, override);

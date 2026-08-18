@@ -26,6 +26,7 @@ import { StaffTrainingCoursesService } from '../src/staff/staff-training-courses
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
 import { FreshStoreScopeService } from '../src/tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../src/tenancy/tenant-context.service';
+import { lockUserRoleAuthority } from '../src/users/user-role-authority-lock';
 
 const integrationConfirmation =
   'run-pilot-staff-attachments-scope-postgres-fixtures';
@@ -780,6 +781,160 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
         },
       }),
     ).resolves.toBe(1);
+  });
+
+  it('denies attachment bytes when custom or system role capabilities are revoked first', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const services = buildServices(prisma);
+    const customRoleId = randomUUID();
+    const customPermissions = ['view_staff_knowledge', 'edit_staff_knowledge'];
+    await prisma.userAccessRole.create({
+      data: {
+        id: customRoleId,
+        tenantId: fixture.tenantAId,
+        name: `Attachment custom role ${randomUUID()}`,
+        permissions: customPermissions,
+      },
+    });
+    await prisma.user.update({
+      where: { id: fixture.userANetworkId },
+      data: {
+        role: UserRole.CLUB_ADMINISTRATOR,
+        customRoleId,
+      },
+    });
+    const customUser: AuthenticatedUser = {
+      ...buildUser(fixture, 'A_NETWORK'),
+      role: UserRole.CLUB_ADMINISTRATOR,
+      customRoleId,
+      permissions: customPermissions,
+    };
+    const customAttachment = await services.attachments.createAttachment(
+      customUser,
+      {
+        originalname: `PG attachment fixture custom role revoke ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: Buffer.from('custom-role-revoke-race'),
+      },
+    );
+    await services.knowledgeBase.createArticle(customUser, {
+      title: `Custom role revoke article ${randomUUID()}`,
+      content: `<a href="${customAttachment.url}">Protected attachment</a>`,
+    });
+    const heldCustomRevoke = await holdDatabaseLock(
+      concurrentPrisma,
+      async (tx) => {
+        await lockUserRoleAuthority(tx, {
+          tenantId: fixture.tenantAId,
+          role: UserRole.CLUB_ADMINISTRATOR,
+          customRoleId,
+        });
+        await tx.userAccessRole.update({
+          where: { id: customRoleId },
+          data: { permissions: [] },
+        });
+      },
+    );
+    const customDownload = observeOperation(
+      services.attachments.getAttachment(customUser, customAttachment.id),
+    );
+
+    try {
+      await expect(
+        waitForBlockedOperation(prisma, heldCustomRevoke.blockerPid, [
+          customDownload,
+        ]),
+      ).resolves.toBe(true);
+    } finally {
+      heldCustomRevoke.release();
+      await heldCustomRevoke.finished;
+    }
+
+    const customResult = await customDownload.result;
+    expect(customResult.ok).toBe(false);
+    if (!customResult.ok) {
+      expect(customResult.error).toBeInstanceOf(UnauthorizedException);
+    }
+
+    const systemPermissions = resolveUserCapabilities({
+      role: UserRole.CLUB_MANAGER,
+    });
+    await prisma.user.update({
+      where: { id: fixture.userANetworkId },
+      data: { customRoleId: null, role: UserRole.CLUB_MANAGER },
+    });
+    await prisma.userRoleOverride.upsert({
+      where: {
+        tenantId_role: {
+          tenantId: fixture.tenantAId,
+          role: UserRole.CLUB_MANAGER,
+        },
+      },
+      create: {
+        tenantId: fixture.tenantAId,
+        role: UserRole.CLUB_MANAGER,
+        permissions: systemPermissions,
+      },
+      update: { permissions: systemPermissions },
+    });
+    const systemUser: AuthenticatedUser = {
+      ...buildUser(fixture, 'A_NETWORK'),
+      role: UserRole.CLUB_MANAGER,
+      customRoleId: null,
+      permissions: systemPermissions,
+    };
+    const systemAttachment = await services.attachments.createAttachment(
+      systemUser,
+      {
+        originalname: `PG attachment fixture system role revoke ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: Buffer.from('system-role-revoke-race'),
+      },
+    );
+    await services.knowledgeBase.createArticle(systemUser, {
+      title: `System role revoke article ${randomUUID()}`,
+      content: `<a href="${systemAttachment.url}">Protected attachment</a>`,
+    });
+    const heldSystemRevoke = await holdDatabaseLock(
+      concurrentPrisma,
+      async (tx) => {
+        await lockUserRoleAuthority(tx, {
+          tenantId: fixture.tenantAId,
+          role: UserRole.CLUB_MANAGER,
+          customRoleId: null,
+        });
+        await tx.userRoleOverride.update({
+          where: {
+            tenantId_role: {
+              tenantId: fixture.tenantAId,
+              role: UserRole.CLUB_MANAGER,
+            },
+          },
+          data: { permissions: [] },
+        });
+      },
+    );
+    const systemDownload = observeOperation(
+      services.attachments.getAttachment(systemUser, systemAttachment.id),
+    );
+
+    try {
+      await expect(
+        waitForBlockedOperation(prisma, heldSystemRevoke.blockerPid, [
+          systemDownload,
+        ]),
+      ).resolves.toBe(true);
+    } finally {
+      heldSystemRevoke.release();
+      await heldSystemRevoke.finished;
+    }
+
+    const systemResult = await systemDownload.result;
+    expect(systemResult.ok).toBe(false);
+    if (!systemResult.ok) {
+      expect(systemResult.error).toBeInstanceOf(UnauthorizedException);
+    }
   });
 });
 

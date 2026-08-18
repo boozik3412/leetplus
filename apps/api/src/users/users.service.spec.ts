@@ -23,6 +23,8 @@ describe('UsersService role override permissions', () => {
 
   function createService() {
     const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([{ pg_advisory_xact_lock: null }]),
+      $transaction: jest.fn(),
       userRoleOverride: {
         upsert: jest
           .fn()
@@ -39,8 +41,21 @@ describe('UsersService role override permissions', () => {
       },
       userAccessRole: {
         create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue({ id: 'custom-role-1' }),
+        update: jest.fn().mockResolvedValue({
+          id: 'custom-role-1',
+          tenantId,
+          name: 'Стандарты клуба',
+          description: null,
+          permissions: ['view_staff_tasks', 'view_staff_standards'],
+          createdAt: updatedAt,
+          updatedAt,
+        }),
       },
     };
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: typeof prisma) => Promise<unknown>) => callback(prisma),
+    );
     const freshStoreScopeService = {
       assertNetwork: jest
         .fn()
@@ -116,6 +131,17 @@ describe('UsersService role override permissions', () => {
         updatedAt: true,
       },
     });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const [lockQuery] = prisma.$queryRaw.mock.calls[0] as unknown as [
+      {
+        strings?: readonly string[];
+        values?: readonly unknown[];
+      },
+    ];
+    expect(lockQuery.strings?.join(' ')).toContain('pg_advisory_xact_lock');
+    expect(lockQuery.values).toEqual([
+      `user-role-authority:system:${tenantId}:${UserRole.CLUB_ADMINISTRATOR}`,
+    ]);
   });
 
   it('allows standards manager to save trainee role overrides', async () => {
@@ -175,6 +201,36 @@ describe('UsersService role override permissions', () => {
         role: true,
         permissions: true,
         updatedAt: true,
+      },
+    });
+  });
+
+  it('serializes custom role updates on the same authority key used by readers', async () => {
+    const { prisma, service } = createService();
+
+    await expect(
+      service.updateAccessRole(actor, 'custom-role-1', {
+        name: 'Стандарты клуба',
+        permissions: ['view_staff_tasks', 'view_staff_standards'],
+      }),
+    ).resolves.toMatchObject({
+      id: 'custom-role-1',
+      permissions: ['view_staff_tasks', 'view_staff_standards'],
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const [lockQuery] = prisma.$queryRaw.mock.calls[0] as unknown as [
+      { values?: readonly unknown[] },
+    ];
+    expect(lockQuery.values).toEqual([
+      `user-role-authority:custom:${tenantId}:custom-role-1`,
+    ]);
+    expect(prisma.userAccessRole.update).toHaveBeenCalledWith({
+      where: { id: 'custom-role-1', tenantId },
+      data: {
+        name: 'Стандарты клуба',
+        description: null,
+        permissions: ['view_staff_tasks', 'view_staff_standards'],
       },
     });
   });

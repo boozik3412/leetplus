@@ -85,9 +85,22 @@ describe('StaffAttachmentsService', () => {
     const queryRaw = jest
       .fn()
       .mockImplementation((query: { values: unknown[] }) => {
-        events.push('authority-lock');
+        const isRoleAuthorityLock = query.values.length === 1;
+        events.push(
+          isRoleAuthorityLock ? 'role-authority-lock' : 'authority-lock',
+        );
+
+        if (isRoleAuthorityLock) {
+          return Promise.resolve([{ pg_advisory_xact_lock: null }]);
+        }
+
         return Promise.resolve([
-          { attachmentId: query.values[2], userId: query.values[0] },
+          {
+            attachmentId: query.values[2],
+            customRoleId: null,
+            role: user.role,
+            userId: query.values[0],
+          },
         ]);
       });
     const updateMany = jest.fn().mockResolvedValue({ count: 1 });
@@ -449,6 +462,7 @@ describe('StaffAttachmentsService', () => {
     );
     expect(events).toEqual([
       'authority-lock',
+      'role-authority-lock',
       'metadata-query',
       'chat-authorizer',
       'blob-query',

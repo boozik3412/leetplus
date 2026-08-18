@@ -123,9 +123,11 @@ tenant в `ONBOARDING`, claim в `USER` и очищает ciphertext. Парол
 
 Это доказательство разделено на два независимых fixture: strict trusted-TLS
 SMTP проверяет реальный transport boundary, а deterministic provider seam
-проверяет полный state machine и owner acceptance без внешнего письма. Новый
-successor ещё не имеет принятого exact-SHA CI artifact и не развёрнут в
-production.
+проверяет полный state machine и owner acceptance без внешнего письма. Exact
+implementation SHA `14193e5151cf5ba1118466facdaf4a8a4a4e0922` принят push/PR
+CI `32105326187`/`32105331954` как `4/4 SUCCESS`; artifact `9313186108`, digest
+`sha256:6d2747e7642f7ebd52714638bb229c0abd0c1b4fc221c2de3c09d04d2eb2fe09`.
+Successor не развёрнут в production.
 
 ## Что ещё не реализовано
 

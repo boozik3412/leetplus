@@ -151,8 +151,14 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   После accept создан ровно один `OWNER/NETWORK`, tenant перешёл
   `OWNER_INVITED→ONBOARDING`, identity claim — `INVITE→USER`, ciphertext
   очищен, пароль проверен как самостоятельно заданный получателем. Full API:
-  `157 suites / 3144 passed / 2 todo`. Exact SHA и CI artifact этого
-  successor ещё не приняты; production не менялся.
+  `157 suites / 3144 passed / 2 todo`. Exact implementation SHA
+  `14193e5151cf5ba1118466facdaf4a8a4a4e0922` принят push CI
+  [32105326187](https://github.com/boozik3412/leetplus/actions/runs/32105326187)
+  и PR CI
+  [32105331954](https://github.com/boozik3412/leetplus/actions/runs/32105331954)
+  как `4/4 SUCCESS`; artifact `9313186108`, `28 444 909` bytes, digest
+  `sha256:6d2747e7642f7ebd52714638bb229c0abd0c1b4fc221c2de3c09d04d2eb2fe09`.
+  Production не менялся.
 
 ## Что блокирует выдачу доступа
 

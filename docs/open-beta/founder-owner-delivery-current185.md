@@ -1,6 +1,6 @@
 # Founder owner delivery — canonical CURRENT185
 
-Статус: `LOCAL ENGINEERING PASS / EXACT-SHA CI PENDING / PRODUCTION NO-GO`.
+Статус: `EXACT-SHA CI ACCEPTED / PRODUCTION NO-GO`.
 
 ## Зачем нужен checkpoint
 
@@ -45,6 +45,14 @@ fail-closed smoke tests используют тот же exact head/count.
 - owner lifecycle focused: `2 suites / 18 tests PASS`;
 - full API: `157 suites / 3144 passed / 2 todo`.
 
+Implementation SHA `14193e5151cf5ba1118466facdaf4a8a4a4e0922` принят push CI
+`32105326187` и PR CI `32105331954` как `4/4 SUCCESS`. SHA-bound artifact:
+`9313186108`, `28 444 909` bytes,
+`sha256:6d2747e7642f7ebd52714638bb229c0abd0c1b4fc221c2de3c09d04d2eb2fe09`.
+Первый CI run выявил stale legacy-inventory function digest; исправление
+перепривязало его к CURRENT185 и было отдельно принято реальным трехклоновым
+PostgreSQL smoke с zero database/role residue.
+
 Strict TLS fixture доказывает настоящий SMTP transport boundary. Полный owner
 lifecycle использует deterministic provider seam, чтобы доказать state machine
 и accept без отправки внешнего письма. Вместе они не считаются production SMTP
@@ -58,7 +66,7 @@ roles, не включал outbound, не создавал новый tenant и 
 
 ## Следующий operational gate
 
-1. Принять exact commit в GitHub CI и получить SHA-bound artifact.
+1. Скачать и проверить принятый SHA-bound artifact.
 2. На изолированной restored copy production backup применить exact artifact,
    повторить readiness, worker enrollment, `SENT`, accept и rollback/restore.
 3. Подготовить production backup и recovery point.

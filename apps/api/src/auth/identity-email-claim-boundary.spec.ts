@@ -12,6 +12,7 @@ const ALLOWED_TENANT_LOCK_IMPLEMENTATIONS = new Set([
 ]);
 const ALLOWED_USER_OWNERSHIP_WRITERS = new Set(['auth/auth.service.ts']);
 const ALLOWED_INVITE_WRITERS = new Set([
+  'admin/founder-owner-invite-lifecycle.service.ts',
   'auth/auth.service.ts',
   'users/users.service.ts',
 ]);
@@ -125,6 +126,21 @@ describe('Identity email claim application boundary', () => {
     expect(
       provisioningSource.match(/\.lockTenantTransaction\s*\(/gu) ?? [],
     ).toHaveLength(3);
+
+    const founderLifecycleSource = await readFile(
+      join(sourceRoot, 'admin/founder-owner-invite-lifecycle.service.ts'),
+      'utf8',
+    );
+    expect(founderLifecycleSource).not.toContain('.bindTransaction(');
+    expect(
+      founderLifecycleSource.match(/\.lockTenantTransaction\s*\(/gu) ?? [],
+    ).toHaveLength(2);
+    expect(
+      founderLifecycleSource.match(/\.releaseInvite\s*\(/gu) ?? [],
+    ).toHaveLength(1);
+    expect(
+      founderLifecycleSource.match(/\.userInvite\.updateMany\s*\(/gu) ?? [],
+    ).toHaveLength(1);
   });
 });
 

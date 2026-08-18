@@ -359,22 +359,60 @@ export class FounderOwnerInviteLifecycleService {
     const parsed = this.parseReissue(tenantId, body);
     const environment = this.environment();
     const requestDigest = this.reissueDigest(actor.id, tenantId, parsed);
-    const identifiers = this.reissueIdentifiers(tenantId, parsed.requestId);
-    const issueRequestDigest = this.digest({
-      contractVersion: FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT,
-      operation: 'ISSUE_REPLACEMENT_INITIAL_OWNER_INVITE',
-      tenantId,
-      reissueRequestId: parsed.requestId,
-      reissueRequestDigest: requestDigest,
-      workflowLocator: identifiers.reservationSubjectId,
-      expiresAt: parsed.expiresAt.toISOString(),
-      environment,
-    });
-    const envelopeService = new IdentityMailSecretEnvelopeService(this.config);
 
     return this.prisma.$transaction(async (tx) => {
       await this.identityClaimBoundary.lockTenantTransaction(tx, tenantId);
       await this.assertFreshPlatformAuthority(tx, actor.id);
+      const replayRows = await tx.$queryRaw<
+        Array<{ requestDigest: string; receipt: Prisma.JsonValue }>
+      >(Prisma.sql`
+        SELECT
+          "requestDigest",
+          pg_catalog.jsonb_set(
+            "receipt",
+            '{decision}',
+            '"REPLAYED"'::JSONB,
+            false
+          ) AS "receipt"
+        FROM public."FounderOwnerInviteReissueCommand"
+        WHERE "tenantId" = ${tenantId}
+          AND "action" = 'FOUNDER_OWNER_INVITE_REISSUE'
+          AND "requestId" = ${parsed.requestId}
+      `);
+      if (replayRows.length > 1) {
+        throw new ServiceUnavailableException(
+          'Owner invite reissue replay authority is invalid',
+        );
+      }
+      const replay = replayRows[0];
+      if (replay) {
+        if (replay.requestDigest !== requestDigest) {
+          throw new ConflictException({
+            message: 'Owner invite reissue request was already used',
+            reasonCode: 'FOUNDER_OWNER_INVITE_REISSUE_REQUEST_REUSED',
+          });
+        }
+        return this.reissueResult(
+          this.reissueReceipt([{ receipt: replay.receipt }]),
+          tenantId,
+          parsed,
+        );
+      }
+
+      const identifiers = this.reissueIdentifiers(tenantId, parsed.requestId);
+      const issueRequestDigest = this.digest({
+        contractVersion: FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT,
+        operation: 'ISSUE_REPLACEMENT_INITIAL_OWNER_INVITE',
+        tenantId,
+        reissueRequestId: parsed.requestId,
+        reissueRequestDigest: requestDigest,
+        workflowLocator: identifiers.reservationSubjectId,
+        expiresAt: parsed.expiresAt.toISOString(),
+        environment,
+      });
+      const envelopeService = new IdentityMailSecretEnvelopeService(
+        this.config,
+      );
       const aggregate = await this.loadAggregate(tx, tenantId);
       const state = this.inviteState(aggregate.invite, this.clock());
       if (!this.ownerInviteStage(aggregate.tenant)) {

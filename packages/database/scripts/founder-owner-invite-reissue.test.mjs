@@ -68,6 +68,10 @@ test("reissue creates and releases only a newly generated invite aggregate", () 
   );
   assert.match(
     migration,
+    /INSERT INTO public\."PlatformAdminAuditEvent" \(\s+"id",[\s\S]*?\) VALUES \(\s+command_id,/u,
+  );
+  assert.match(
+    migration,
     /FROM public\."FounderOwnerInviteReissueCommand" AS command[\s\S]*command\."createdTransactionId" = pg_catalog\.pg_current_xact_id\(\)::TEXT/u,
   );
   assert.doesNotMatch(

@@ -487,6 +487,7 @@ describe('FounderOwnerInviteLifecycleService', () => {
     prisma.$queryRaw
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           receipt: {
@@ -529,6 +530,73 @@ describe('FounderOwnerInviteLifecycleService', () => {
     expect(prisma.userInvite.updateMany).not.toHaveBeenCalled();
     expect(prisma.identityMailOutbox.updateMany).not.toHaveBeenCalled();
     expect(releaseInvite).not.toHaveBeenCalled();
+  });
+
+  it('replays an exact reissue before reading the successor aggregate or generating a token', async () => {
+    invite.revokedAt = new Date('2026-08-18T00:30:00.000Z');
+    const issuedReceipt = {
+      schemaVersion: 1,
+      operation: 'REISSUE_INITIAL_OWNER_INVITE',
+      decision: 'REISSUED',
+      tenantId: TENANT_ID,
+      commandId: REISSUE_COMMAND_ID,
+      sequence: 1,
+      predecessorInviteId: INVITE_ID,
+      inviteId: NEW_INVITE_ID,
+      outboxId: NEW_OUTBOX_ID,
+      outboxStatus: 'PENDING',
+      expiresAtEpochMs: REISSUE_EXPIRES_AT.getTime(),
+      createdTransactionId: '123',
+    };
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ receipt: issuedReceipt }]);
+
+    await service.reissue(actor, TENANT_ID, reissueBody());
+    const calls = prisma.$queryRaw.mock.calls as unknown[][];
+    const command = calls[3]?.[0];
+    if (!record(command) || !Array.isArray(command.values)) {
+      throw new Error('Expected the reissue SQL command');
+    }
+    const commandValues = command.values as unknown[];
+    const requestDigest = commandValues[2];
+    if (typeof requestDigest !== 'string') {
+      throw new Error('Expected the reissue request digest');
+    }
+    const aggregateReads = prisma.tenant.findUnique.mock.calls.length;
+    prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        requestDigest,
+        receipt: { ...issuedReceipt, decision: 'REPLAYED' },
+      },
+    ]);
+
+    await expect(
+      service.reissue(actor, TENANT_ID, reissueBody()),
+    ).resolves.toMatchObject({ decision: 'REPLAYED', replayed: true });
+    expect(prisma.tenant.findUnique).toHaveBeenCalledTimes(aggregateReads);
+    expect(uuidFactory).toHaveBeenCalledTimes(6);
+  });
+
+  it('rejects reuse of a reissue request id with a different command', async () => {
+    prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        requestDigest: '0'.repeat(64),
+        receipt: {},
+      },
+    ]);
+
+    await expect(
+      service.reissue(actor, TENANT_ID, reissueBody()),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'FOUNDER_OWNER_INVITE_REISSUE_REQUEST_REUSED',
+      },
+    });
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
+    expect(uuidFactory).not.toHaveBeenCalled();
   });
 
   it('blocks reissue of an active invite and rejects blind-resend fields', async () => {

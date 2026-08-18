@@ -700,17 +700,19 @@ function assertSafeIntegrationDatabase(): string {
 function safeReissueDatabaseDiagnostic(error: unknown): Error {
   const source = record(error) ? error : {};
   const meta = record(source.meta) ? source.meta : {};
-  const rawPrimary =
-    typeof meta.message === 'string'
-      ? (/ERROR: ([^\r\n]{1,300})/u.exec(meta.message)?.[1] ?? 'UNAVAILABLE')
-      : 'UNAVAILABLE';
-  const primary = rawPrimary.replace(/[^A-Za-z0-9 _.:"'()/-]/gu, '?');
+  const sqlState = typeof meta.code === 'string' ? meta.code : 'UNAVAILABLE';
+  const primary =
+    sqlState === '23502'
+      ? 'NOT_NULL_VIOLATION'
+      : sqlState === '23514'
+        ? 'CHECK_VIOLATION'
+        : 'DATABASE_ERROR';
   return new Error(
     [
       'OWNER_INVITE_REISSUE_DATABASE_FAILURE',
       `class=${error instanceof Error ? error.constructor.name : typeof error}`,
       `prismaCode=${typeof source.code === 'string' ? source.code : 'UNAVAILABLE'}`,
-      `sqlState=${typeof meta.code === 'string' ? meta.code : 'UNAVAILABLE'}`,
+      `sqlState=${sqlState}`,
       `primary=${primary}`,
     ].join(' '),
   );

@@ -726,10 +726,10 @@ BEGIN
   END IF;
 
   INSERT INTO public."PlatformAdminAuditEvent" (
-    "tenantId", "actorUserId", "requestId", "action", "targetType",
+    "id", "tenantId", "actorUserId", "requestId", "action", "targetType",
     "targetId", "reason", "before", "after", "metadata", "createdAt"
   ) VALUES (
-    tenant_id, actor_id, request_id, 'FOUNDER_OWNER_INVITE_REISSUED',
+    command_id, tenant_id, actor_id, request_id, 'FOUNDER_OWNER_INVITE_REISSUED',
     'UserInvite', invite_id, operation_reason,
     pg_catalog.jsonb_build_object(
       'inviteId', current_invite_id,

@@ -18,6 +18,7 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { lockUserRoleAuthority } from '../users/user-role-authority-lock';
 import { StaffTeamChatService } from './staff-team-chat.service';
 import { StaffTasksService } from './staff-tasks.service';
+import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-policy.service';
 
 export const STAFF_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
 export const STAFF_ATTACHMENT_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
@@ -86,6 +87,7 @@ export class StaffAttachmentsService {
     private readonly staffTeamChatService: StaffTeamChatService,
     private readonly staffTasksService: StaffTasksService,
     private readonly freshStoreScopeService: FreshStoreScopeService,
+    private readonly staffKnowledgeAccessPolicyService: StaffKnowledgeAccessPolicyService,
   ) {}
 
   async createAttachment(
@@ -407,6 +409,28 @@ export class StaffAttachmentsService {
       return false;
     }
 
+    const knowledgeArticleIds = grouped.get('KNOWLEDGE_ARTICLE');
+    if (knowledgeArticleIds && knowledgeArticleIds.size > 0) {
+      const knowledgeAccess =
+        await this.staffKnowledgeAccessPolicyService.resolve(user);
+      const knowledgeArticle = await tx.staffKnowledgeArticle.findFirst({
+        where: this.staffKnowledgeAccessPolicyService.readableArticleIdsWhere(
+          knowledgeAccess,
+          [...knowledgeArticleIds],
+        ),
+        select: { id: true },
+      });
+
+      if (knowledgeArticle) {
+        return true;
+      }
+    }
+
+    grouped.delete('KNOWLEDGE_ARTICLE');
+    if (grouped.size === 0) {
+      return false;
+    }
+
     const scope = await this.freshStoreScopeService.resolve(user);
 
     // The parent workspaces are still protected by FreshNetworkScopeGuard.
@@ -426,12 +450,6 @@ export class StaffAttachmentsService {
       switch (resourceKind) {
         case 'CHECKLIST_RUN':
           parent = await tx.staffChecklistRun.findFirst({
-            where,
-            select: { id: true },
-          });
-          break;
-        case 'KNOWLEDGE_ARTICLE':
-          parent = await tx.staffKnowledgeArticle.findFirst({
             where,
             select: { id: true },
           });

@@ -11,6 +11,7 @@ import {
   STAFF_ATTACHMENT_PENDING_TTL_MS,
   StaffAttachmentsService,
 } from './staff-attachments.service';
+import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-policy.service';
 import type { StaffTeamChatService } from './staff-team-chat.service';
 import type { StaffTasksService } from './staff-tasks.service';
 
@@ -155,6 +156,9 @@ describe('StaffAttachmentsService', () => {
       teamChat as unknown as StaffTeamChatService,
       staffTasks as unknown as StaffTasksService,
       { resolve: resolveFreshStoreScope } as never,
+      new StaffKnowledgeAccessPolicyService({
+        resolve: resolveFreshStoreScope,
+      } as never),
     );
 
     return {
@@ -594,10 +598,29 @@ describe('StaffAttachmentsService', () => {
 
       expect(resolveFreshStoreScope).toHaveBeenCalledWith(user);
       expect(parentDelegate.findFirst).toHaveBeenCalledWith({
-        where: {
-          id: { in: [resourceId] },
-          tenantId: 'tenant-a',
-        },
+        where:
+          resourceKind === 'KNOWLEDGE_ARTICLE'
+            ? {
+                id: { in: [resourceId] },
+                tenantId: 'tenant-a',
+                AND: [
+                  {
+                    status: 'PUBLISHED',
+                    roleScope: {
+                      in: [
+                        'ALL_STAFF',
+                        'ADMINISTRATOR',
+                        'SENIOR_ADMINISTRATOR',
+                        'CLUB_MANAGER',
+                      ],
+                    },
+                  },
+                ],
+              }
+            : {
+                id: { in: [resourceId] },
+                tenantId: 'tenant-a',
+              },
         select: { id: true },
       });
       expect(canReadAnyAttachmentMessage).not.toHaveBeenCalled();
@@ -605,7 +628,7 @@ describe('StaffAttachmentsService', () => {
     },
   );
 
-  it('keeps network-only parent files hidden from a STORES subject', async () => {
+  it('keeps an unreadable knowledge parent file hidden from a STORES subject', async () => {
     const {
       service,
       findResults,
@@ -638,7 +661,43 @@ describe('StaffAttachmentsService', () => {
     await expect(
       service.getAttachment(storeUser, 'attachment-1'),
     ).rejects.toBeInstanceOf(NotFoundException);
-    expect(parentFindFirst).not.toHaveBeenCalled();
+    expect(parentFindFirst).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['article-1'] },
+        tenantId: 'tenant-a',
+        AND: [
+          {
+            OR: [
+              {
+                storeId: { in: ['store-a1'] },
+                status: 'PUBLISHED',
+                roleScope: {
+                  in: [
+                    'ALL_STAFF',
+                    'ADMINISTRATOR',
+                    'SENIOR_ADMINISTRATOR',
+                    'CLUB_MANAGER',
+                  ],
+                },
+              },
+              {
+                storeId: null,
+                status: 'PUBLISHED',
+                roleScope: {
+                  in: [
+                    'ALL_STAFF',
+                    'ADMINISTRATOR',
+                    'SENIOR_ADMINISTRATOR',
+                    'CLUB_MANAGER',
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+      select: { id: true },
+    });
     expect(findFirstArgs).toHaveLength(1);
   });
 

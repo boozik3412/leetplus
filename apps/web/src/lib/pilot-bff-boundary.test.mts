@@ -309,7 +309,6 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
     "checklists/page.tsx",
     "checklists/report/page.tsx",
     "discipline/page.tsx",
-    "knowledge-base/page.tsx",
     "onboarding/page.tsx",
     "operations-dashboard/page.tsx",
     "readiness-report/page.tsx",
@@ -351,6 +350,22 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
       `${networkOnlyPages[index]} must apply the scope gate before data access`,
     );
   }
+});
+
+test("keeps the store-aware knowledge workspace behind authenticated API authority", async () => {
+  const pageSource = await readFile(
+    fileURLToPath(
+      new URL("../app/(app)/staff/knowledge-base/page.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    pageSource,
+    /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+  );
+  assert.match(pageSource, /await requireCurrentUser\(\)/);
+  assert.doesNotMatch(pageSource, /requireNetworkScopedUser/);
 });
 
 async function routeInventory(): Promise<readonly RouteInventoryRow[]> {

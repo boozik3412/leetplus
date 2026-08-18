@@ -23,6 +23,7 @@ import { StaffDirectoryController } from './staff-directory.controller';
 import { StaffDirectoryService } from './staff-directory.service';
 import { StaffKnowledgeBaseController } from './staff-knowledge-base.controller';
 import { StaffKnowledgeBaseService } from './staff-knowledge-base.service';
+import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-policy.service';
 import { StaffNotificationsController } from './staff-notifications.controller';
 import { StaffNotificationsService } from './staff-notifications.service';
 import { StaffOnboardingPlansController } from './staff-onboarding-plans.controller';
@@ -86,6 +87,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTaskCatalogAccessPolicyService,
     StaffTaskTemplatesService,
     StaffTaskRecurringRulesService,
+    StaffKnowledgeAccessPolicyService,
     StaffKnowledgeBaseService,
     StaffTrainingCoursesService,
     StaffTrainingProfilesService,

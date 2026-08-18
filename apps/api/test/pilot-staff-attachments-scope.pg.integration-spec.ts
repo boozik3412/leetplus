@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -18,6 +19,7 @@ import { StaffAttachmentBindingsService } from '../src/staff/staff-attachment-bi
 import { StaffAttachmentsService } from '../src/staff/staff-attachments.service';
 import { StaffChecklistsService } from '../src/staff/staff-checklists.service';
 import { StaffKnowledgeBaseService } from '../src/staff/staff-knowledge-base.service';
+import { StaffKnowledgeAccessPolicyService } from '../src/staff/staff-knowledge-access-policy.service';
 import { StaffOnboardingPlansService } from '../src/staff/staff-onboarding-plans.service';
 import { StaffShiftRegulationsService } from '../src/staff/staff-shift-regulations.service';
 import type { StaffTasksService } from '../src/staff/staff-tasks.service';
@@ -211,7 +213,7 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('authorizes all remaining parent kinds only through fresh NETWORK visibility', async () => {
+  it('adopts store-aware knowledge parents while other parent kinds remain NETWORK-only', async () => {
     const fixture = await createFixture(prisma);
     rememberFixture(fixtureTenantIds, fixture);
     const { attachments: service, bindings } = buildServices(prisma);
@@ -251,13 +253,162 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       await expect(
         service.getAttachment(networkUser, attachment.id),
       ).resolves.toEqual(expect.objectContaining({ buffer: payload }));
-      await expect(
-        service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      if (resourceKind === StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE) {
+        await expect(
+          service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
+        ).resolves.toEqual(expect.objectContaining({ buffer: payload }));
+        await expect(
+          service.getAttachment(buildUser(fixture, 'A2'), attachment.id),
+        ).rejects.toBeInstanceOf(NotFoundException);
+      } else {
+        await expect(
+          service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
+        ).rejects.toBeInstanceOf(NotFoundException);
+      }
       await expect(
         service.getAttachment(buildUser(fixture, 'B_NETWORK'), attachment.id),
       ).rejects.toBeInstanceOf(NotFoundException);
     }
+  });
+
+  it('enforces the knowledge catalog, writer and settings boundary for STORES', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const services = buildServices(prisma);
+    const networkUser = buildUser(fixture, 'A_NETWORK');
+    const storeA1User = buildUser(fixture, 'A1');
+    const networkArticleId = randomUUID();
+    const storeA2ArticleId = randomUUID();
+
+    await prisma.staffKnowledgeArticle.createMany({
+      data: [
+        {
+          id: networkArticleId,
+          tenantId: fixture.tenantAId,
+          createdByUserId: fixture.userANetworkId,
+          title: `Network published article ${randomUUID()}`,
+          status: 'PUBLISHED',
+          version: 1,
+          roleScope: 'ALL_STAFF',
+          publishedAt: new Date(),
+        },
+        {
+          id: storeA2ArticleId,
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA2Id,
+          createdByUserId: fixture.userANetworkId,
+          title: `A2 private draft ${randomUUID()}`,
+          status: 'DRAFT',
+        },
+      ],
+    });
+    const settings = await prisma.staffKnowledgeSettings.create({
+      data: {
+        tenantId: fixture.tenantAId,
+        updatedByUserId: fixture.userANetworkId,
+      },
+      select: { id: true },
+    });
+    await prisma.staffKnowledgeSettingsEvent.create({
+      data: {
+        tenantId: fixture.tenantAId,
+        settingsId: settings.id,
+        actorUserId: fixture.userANetworkId,
+        nextRevisionSlaPolicy: { defaultDays: 2 },
+      },
+    });
+
+    const ownDraft = await services.knowledgeBase.createArticle(storeA1User, {
+      title: `A1 draft ${randomUUID()}`,
+      storeId: fixture.storeA1Id,
+      status: 'DRAFT',
+    });
+    await prisma.staffKnowledgeArticleReadReceipt.create({
+      data: {
+        tenantId: fixture.tenantAId,
+        articleId: ownDraft.id,
+        userId: fixture.userA2Id,
+        version: ownDraft.version,
+        note: 'Adversarial out-of-scope historical receipt',
+      },
+    });
+    const report = await services.knowledgeBase.getArticles(storeA1User);
+    const visibleIds = report.rows.map((row) => row.id);
+
+    expect(report.accessScope).toBe('STORES');
+    expect(report.stores.map((store) => store.id)).toEqual([fixture.storeA1Id]);
+    expect(visibleIds).toEqual(
+      expect.arrayContaining([
+        fixture.knowledgeArticleA1Id,
+        networkArticleId,
+        ownDraft.id,
+      ]),
+    );
+    expect(visibleIds).not.toContain(storeA2ArticleId);
+    expect(
+      report.rows.find((row) => row.id === networkArticleId)?.canManage,
+    ).toBe(false);
+    expect(report.rows.find((row) => row.id === ownDraft.id)?.canManage).toBe(
+      true,
+    );
+    expect(
+      report.rows
+        .find((row) => row.id === ownDraft.id)
+        ?.readReceipts.map((receipt) => receipt.user.id),
+    ).not.toContain(fixture.userA2Id);
+    expect(report.settings.updatedByUser).toBeNull();
+    expect(report.settings.history).toEqual([]);
+
+    await expect(
+      services.knowledgeBase.createArticle(storeA1User, {
+        title: `Network escape ${randomUUID()}`,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.knowledgeBase.createArticle(storeA1User, {
+        title: `A2 escape ${randomUUID()}`,
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.knowledgeBase.updateArticle(storeA1User, networkArticleId, {
+        title: 'Forbidden network edit',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      services.knowledgeBase.updateArticle(storeA1User, storeA2ArticleId, {
+        title: 'Forbidden A2 edit',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      services.knowledgeBase.updateArticle(storeA1User, ownDraft.id, {
+        title: 'Allowed A1 edit',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ title: 'Allowed A1 edit', canManage: true }),
+    );
+    await expect(
+      services.knowledgeBase.updateSettings(storeA1User, {
+        revisionSlaPolicy: null,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    const networkReport = await services.knowledgeBase.getArticles(networkUser);
+    expect(networkReport.accessScope).toBe('NETWORK');
+    expect(networkReport.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: storeA2ArticleId, canManage: true }),
+      ]),
+    );
+    expect(
+      networkReport.rows
+        .find((row) => row.id === ownDraft.id)
+        ?.readReceipts.map((receipt) => receipt.user.id),
+    ).toContain(fixture.userA2Id);
+    expect(networkReport.settings.updatedByUser?.id).toBe(
+      fixture.userANetworkId,
+    );
+    expect(networkReport.settings.history).toHaveLength(1);
   });
 
   it('atomically binds native writer references for all five staff parent kinds', async () => {
@@ -1046,6 +1197,9 @@ function buildServices(prisma: PrismaService) {
     createSystemNotification: jest.fn().mockResolvedValue(undefined),
   } as unknown as StaffTeamChatService;
   const tenantContext = new TenantContextService();
+  const knowledgeAccessPolicy = new StaffKnowledgeAccessPolicyService(
+    freshStoreScopeService,
+  );
 
   return {
     attachments: new StaffAttachmentsService(
@@ -1055,6 +1209,7 @@ function buildServices(prisma: PrismaService) {
       teamChat,
       staffTasks,
       freshStoreScopeService,
+      knowledgeAccessPolicy,
     ),
     bindings,
     shiftRegulations: new StaffShiftRegulationsService(
@@ -1065,8 +1220,8 @@ function buildServices(prisma: PrismaService) {
     ),
     knowledgeBase: new StaffKnowledgeBaseService(
       prisma,
-      tenantContext,
       bindings,
+      knowledgeAccessPolicy,
     ),
     trainingCourses: new StaffTrainingCoursesService(
       prisma,

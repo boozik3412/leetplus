@@ -1,12 +1,28 @@
-import { NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  ExecutionContext,
+  INestApplication,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { Test } from '@nestjs/testing';
 import { PrismaClient, UserRole } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import type { AuthenticatedUser } from '../src/auth/auth.types';
+import request from 'supertest';
+import type { App } from 'supertest/types';
+import type {
+  AuthenticatedRequest,
+  AuthenticatedUser,
+} from '../src/auth/auth.types';
 import { resolveUserCapabilities } from '../src/auth/capabilities';
+import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
+import { RolesGuard } from '../src/auth/roles.guard';
 import { PrismaService } from '../src/prisma/prisma.service';
 import type { StaffAttachmentBindingsService } from '../src/staff/staff-attachment-bindings.service';
+import { StaffTeamChatController } from '../src/staff/staff-team-chat.controller';
 import { StaffTeamChatService } from '../src/staff/staff-team-chat.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
+import { FreshStoreScopeGuard } from '../src/tenancy/fresh-store-scope.guard';
 import { FreshStoreScopeService } from '../src/tenancy/fresh-store-scope.service';
 
 const integrationConfirmation =
@@ -125,6 +141,58 @@ describePostgres('Gate 1MT team chat PostgreSQL tenant/store matrix', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('keeps the real Nest SSE route inside fresh tenant and store authority', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    let currentUser = buildUser(fixture, 'A1');
+    const app = await buildTeamChatHttpApp(prisma, () => currentUser);
+    const httpServer = app.getHttpServer() as App;
+
+    try {
+      const allowedA1 = await request(httpServer)
+        .get(`/staff/team-chat/events?channelId=${fixture.channelA1Id}`)
+        .expect(200)
+        .expect('Content-Type', /text\/event-stream/);
+      expect(allowedA1.text).toContain('event: team-chat-state');
+      expect(allowedA1.text).toContain(fixture.channelA1Id);
+      expect(allowedA1.text).not.toContain(fixture.channelA2Id);
+      expect(allowedA1.text).not.toContain(fixture.channelB1Id);
+
+      await request(httpServer)
+        .get(`/staff/team-chat/events?channelId=${fixture.channelA2Id}`)
+        .expect(404);
+      await request(httpServer)
+        .get(`/staff/team-chat/events?channelId=${fixture.channelB1Id}`)
+        .expect(404);
+
+      currentUser = buildUser(fixture, 'B_NETWORK');
+      const allowedB1 = await request(httpServer)
+        .get(`/staff/team-chat/events?channelId=${fixture.channelB1Id}`)
+        .expect(200)
+        .expect('Content-Type', /text\/event-stream/);
+      expect(allowedB1.text).toContain(fixture.channelB1Id);
+      expect(allowedB1.text).not.toContain(fixture.channelA1Id);
+
+      currentUser = buildUser(fixture, 'A1');
+      await prisma.$transaction([
+        prisma.userStoreAccess.deleteMany({
+          where: { userId: fixture.userA1Id },
+        }),
+        prisma.userStoreAccess.create({
+          data: {
+            userId: fixture.userA1Id,
+            storeId: fixture.storeA2Id,
+          },
+        }),
+      ]);
+      await request(httpServer)
+        .get(`/staff/team-chat/events?channelId=${fixture.channelA1Id}`)
+        .expect(401);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('isolates create, update and read-receipt mutations', async () => {
     const fixture = await createFixture(prisma);
     rememberFixture(fixtureTenantIds, fixture);
@@ -233,6 +301,48 @@ function buildService(prisma: PrismaService) {
   } as unknown as StaffAttachmentBindingsService;
 
   return new StaffTeamChatService(prisma, freshStoreScopeService, attachments);
+}
+
+async function buildTeamChatHttpApp(
+  prisma: PrismaService,
+  getUser: () => AuthenticatedUser,
+): Promise<INestApplication> {
+  const freshStoreScopeService = new FreshStoreScopeService(
+    prisma,
+    new AccessScopeService(),
+  );
+  const attachments = {
+    bindPendingChatAttachments: jest.fn(),
+  } as unknown as StaffAttachmentBindingsService;
+  const service = new StaffTeamChatService(
+    prisma,
+    freshStoreScopeService,
+    attachments,
+  );
+  const testingModule = await Test.createTestingModule({
+    controllers: [StaffTeamChatController],
+    providers: [
+      { provide: StaffTeamChatService, useValue: service },
+      { provide: FreshStoreScopeService, useValue: freshStoreScopeService },
+      FreshStoreScopeGuard,
+    ],
+  })
+    .overrideGuard(JwtAuthGuard)
+    .useValue({
+      canActivate(context: ExecutionContext) {
+        const authenticatedRequest = context
+          .switchToHttp()
+          .getRequest<AuthenticatedRequest>();
+        authenticatedRequest.user = getUser();
+        return true;
+      },
+    })
+    .overrideGuard(RolesGuard)
+    .useValue(new RolesGuard(new Reflector()))
+    .compile();
+  const app = testingModule.createNestApplication();
+  await app.init();
+  return app;
 }
 
 function buildUser(

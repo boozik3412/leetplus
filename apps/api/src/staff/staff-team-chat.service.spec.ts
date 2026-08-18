@@ -696,7 +696,11 @@ describe('StaffTeamChatService AccessScope boundary', () => {
     });
 
     await expect(
-      service.canReadAnyAttachmentMessage(actor, ['message-a1'], prisma as never),
+      service.canReadAnyAttachmentMessage(
+        actor,
+        ['message-a1'],
+        prisma as never,
+      ),
     ).resolves.toBe(true);
 
     const query = serializedCall(prisma.staffChatMessage.findMany, 0);
@@ -721,7 +725,11 @@ describe('StaffTeamChatService AccessScope boundary', () => {
     });
 
     await expect(
-      service.canReadAnyAttachmentMessage(actor, ['message-a1'], prisma as never),
+      service.canReadAnyAttachmentMessage(
+        actor,
+        ['message-a1'],
+        prisma as never,
+      ),
     ).resolves.toBe(false);
     expect(prisma.staffChatMessage.findMany).not.toHaveBeenCalled();
   });
@@ -741,7 +749,11 @@ describe('StaffTeamChatService AccessScope boundary', () => {
     });
 
     await expect(
-      service.canReadAnyAttachmentMessage(actor, ['message-a1'], prisma as never),
+      service.canReadAnyAttachmentMessage(
+        actor,
+        ['message-a1'],
+        prisma as never,
+      ),
     ).resolves.toBe(false);
   });
 
@@ -785,9 +797,8 @@ describe('StaffTeamChatController scope refresh boundary', () => {
       getLiveState,
     } as never);
 
-    const events = await lastValueFrom(
-      controller.events(storeActor, {}).pipe(toArray()),
-    );
+    const stream = await controller.events(storeActor, {});
+    const events = await lastValueFrom(stream.pipe(toArray()));
 
     expect(events).toEqual([
       {
@@ -796,6 +807,15 @@ describe('StaffTeamChatController scope refresh boundary', () => {
         data: state,
       },
     ]);
+    expect(getLiveState).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects stale or hidden authority before opening the SSE stream', async () => {
+    const denied = new NotFoundException('Chat channel not found');
+    const getLiveState = jest.fn().mockRejectedValue(denied);
+    const controller = new StaffTeamChatController({ getLiveState } as never);
+
+    await expect(controller.events(storeActor, {})).rejects.toBe(denied);
     expect(getLiveState).toHaveBeenCalledTimes(1);
   });
 });

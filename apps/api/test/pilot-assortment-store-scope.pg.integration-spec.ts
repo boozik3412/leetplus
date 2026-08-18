@@ -15,6 +15,8 @@ import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
 import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsService } from '../src/products/products.service';
+import { ReportsExportService } from '../src/reports/reports-export.service';
+import { ReportsService } from '../src/reports/reports.service';
 import { StoresService } from '../src/stores/stores.service';
 import { SuppliersService } from '../src/suppliers/suppliers.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
@@ -628,6 +630,149 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       service.importSales(salesCsv, userANetwork),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it('keeps assortment and sales reports inside fresh tenant/store scope', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const service = buildReportsService(prisma);
+    const userANetwork = buildUser(fixture, 'A_NETWORK');
+    const userA1 = buildUser(fixture, 'A1');
+    const userBNetwork = buildUser(fixture, 'B_NETWORK');
+
+    await expect(service.getAssortmentReport(userA1)).resolves.toEqual(
+      expect.objectContaining({
+        tenantId: fixture.tenantAId,
+        totalSku: 1,
+        activeSku: 1,
+        categoryBreakdown: [
+          expect.objectContaining({
+            id: fixture.categoryA1Id,
+            name: 'Tenant A category 1',
+          }),
+        ],
+      }),
+    );
+    await expect(service.getAssortmentReport(userANetwork)).resolves.toEqual(
+      expect.objectContaining({
+        tenantId: fixture.tenantAId,
+        totalSku: 2,
+        activeSku: 2,
+      }),
+    );
+    await expect(service.getAssortmentReport(userBNetwork)).resolves.toEqual(
+      expect.objectContaining({
+        tenantId: fixture.tenantBId,
+        totalSku: 1,
+        activeSku: 1,
+      }),
+    );
+
+    const period = { from: '2030-02-01', to: '2030-02-28' };
+    await expect(
+      service.getSalesDetailReport(userA1, {
+        ...period,
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.getSalesDetailReport(userANetwork, {
+        ...period,
+        storeId: fixture.storeB1Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('exports CSV without foreign tenant/store rows and rejects stale scope', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const exportService = new ReportsExportService(buildReportsService(prisma));
+    const userANetwork = buildUser(fixture, 'A_NETWORK');
+    const userA1 = buildUser(fixture, 'A1');
+    const userBNetwork = buildUser(fixture, 'B_NETWORK');
+    const saleDate = new Date('2030-02-03');
+
+    await prisma.salesFact.createMany({
+      data: [
+        {
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA1Id,
+          productId: fixture.productA1Id,
+          saleDate,
+          quantity: 1,
+          revenue: 20,
+          cost: 10,
+          productNameAtSale: 'A1 product',
+          storeNameAtSale: 'A1',
+        },
+        {
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA2Id,
+          productId: fixture.productA2Id,
+          saleDate,
+          quantity: 2,
+          revenue: 40,
+          cost: 20,
+          productNameAtSale: 'A2 product',
+          storeNameAtSale: 'A2',
+        },
+        {
+          tenantId: fixture.tenantBId,
+          storeId: fixture.storeB1Id,
+          productId: fixture.productB1Id,
+          saleDate,
+          quantity: 3,
+          revenue: 60,
+          cost: 30,
+          productNameAtSale: 'B1 product',
+          storeNameAtSale: 'B1',
+        },
+      ],
+    });
+
+    const query = {
+      report: 'sales-detail',
+      format: 'csv',
+      from: '2030-02-01',
+      to: '2030-02-28',
+    };
+    const a1Csv = (
+      await exportService.exportReports(userA1, query)
+    ).buffer.toString('utf8');
+    expect(a1Csv).toContain('A1 product');
+    expect(a1Csv).not.toContain('A2 product');
+    expect(a1Csv).not.toContain('B1 product');
+
+    const tenantACsv = (
+      await exportService.exportReports(userANetwork, query)
+    ).buffer.toString('utf8');
+    expect(tenantACsv).toContain('A1 product');
+    expect(tenantACsv).toContain('A2 product');
+    expect(tenantACsv).not.toContain('B1 product');
+
+    const tenantBCsv = (
+      await exportService.exportReports(userBNetwork, query)
+    ).buffer.toString('utf8');
+    expect(tenantBCsv).toContain('B1 product');
+    expect(tenantBCsv).not.toContain('A1 product');
+    expect(tenantBCsv).not.toContain('A2 product');
+
+    await prisma.$transaction([
+      prisma.userStoreAccess.deleteMany({
+        where: { userId: fixture.userA1Id },
+      }),
+      prisma.userStoreAccess.create({
+        data: {
+          userId: fixture.userA1Id,
+          storeId: fixture.storeA2Id,
+        },
+      }),
+    ]);
+    await expect(
+      exportService.exportReports(userA1, query),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
 });
 
 function buildProductsService(prisma: PrismaService) {
@@ -703,6 +848,19 @@ function buildFactCsvImportService(prisma: PrismaService) {
   );
 
   return new FactCsvImportService(
+    prisma,
+    new TenantContextService(),
+    freshStoreScopeService,
+  );
+}
+
+function buildReportsService(prisma: PrismaService) {
+  const freshStoreScopeService = new FreshStoreScopeService(
+    prisma,
+    new AccessScopeService(),
+  );
+
+  return new ReportsService(
     prisma,
     new TenantContextService(),
     freshStoreScopeService,

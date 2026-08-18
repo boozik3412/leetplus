@@ -647,6 +647,35 @@ const shiftStaffDeniedPrefixes = [
   "/staff/ai-assistant",
 ];
 
+// Transitional Gate 1MT boundary. These workspaces still use tenant-wide
+// selectors and their API controllers are protected by FreshNetworkScopeGuard.
+// Keep STORES subjects out of their navigation until the selectors become
+// store-aware; the API guard remains the authoritative boundary.
+const networkOnlyStaffPrefixes = [
+  "/staff/ai-assistant",
+  "/staff/assessments",
+  "/staff/checklist-templates",
+  "/staff/checklists",
+  "/staff/discipline",
+  "/staff/knowledge-base",
+  "/staff/onboarding",
+  "/staff/operations-dashboard",
+  "/staff/readiness-report",
+  "/staff/salary",
+  "/staff/shift-regulations",
+  "/staff/shift-workspace",
+  "/staff/training-courses",
+  "/staff/training-profiles",
+];
+
+function isNetworkOnlyStaffPath(href: string) {
+  const path = href.split("?")[0]?.split("#")[0] ?? href;
+
+  return networkOnlyStaffPrefixes.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+  );
+}
+
 function capabilityMatches(owned: Capability, requested: Capability) {
   if (owned === requested) {
     return true;
@@ -707,9 +736,9 @@ function canAccessOwnDisciplinePath(user: AuthUser | null, href: string) {
 
   return Boolean(
     user &&
-      path === "/staff/discipline" &&
-      (user.role === "SENIOR_ADMINISTRATOR" ||
-        user.role === "CLUB_ADMINISTRATOR"),
+    path === "/staff/discipline" &&
+    (user.role === "SENIOR_ADMINISTRATOR" ||
+      user.role === "CLUB_ADMINISTRATOR"),
   );
 }
 
@@ -846,6 +875,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {
+    if (user?.accessScope === "STORES" && isNetworkOnlyStaffPath(href)) {
+      return false;
+    }
+
     if (canAccessOwnDisciplinePath(user, href)) {
       return true;
     }

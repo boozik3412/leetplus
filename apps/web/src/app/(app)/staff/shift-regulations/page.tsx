@@ -3,7 +3,7 @@ import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffShiftOperationsOverview } from "@/components/staff-shift-operations-overview";
 import { StaffShiftRegulationBuilder } from "@/components/staff-shift-regulation-builder";
 import { StaffShiftRegulationCatalog } from "@/components/staff-shift-regulation-catalog";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { getStaffChecklistExecutionReport } from "@/lib/staff-checklists";
 import {
@@ -66,7 +66,9 @@ function isStatus(
   );
 }
 
-function isShiftKind(value: string | undefined): value is StaffShiftKind | "all" {
+function isShiftKind(
+  value: string | undefined,
+): value is StaffShiftKind | "all" {
   return (
     value === "all" ||
     value === "OPENING" ||
@@ -81,7 +83,9 @@ function isShiftKind(value: string | undefined): value is StaffShiftKind | "all"
   );
 }
 
-function resolveFilters(params: Awaited<SearchParams>): StaffShiftRegulationFilters {
+function resolveFilters(
+  params: Awaited<SearchParams>,
+): StaffShiftRegulationFilters {
   const status = searchParam(params.status);
   const shiftKind = searchParam(params.shiftKind);
 
@@ -158,7 +162,7 @@ export default async function StaffShiftRegulationsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const user = await requireCurrentUser();
+  const user = await requireNetworkScopedUser();
   const params = await searchParams;
   const requestedFilters = resolveFilters(params);
   const canManageRegulations =
@@ -256,10 +260,7 @@ export default async function StaffShiftRegulationsPage({
               </Link>
             ) : null}
             {canManageRegulations ? (
-              <Link
-                href="/staff/checklists"
-                className={headerActionSecondary}
-              >
+              <Link href="/staff/checklists" className={headerActionSecondary}>
                 Открыть чек-листы
               </Link>
             ) : null}

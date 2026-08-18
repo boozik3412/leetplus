@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffChecklistTemplateBuilder } from "@/components/staff-checklist-template-builder";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import { isShiftWorkspaceRole } from "@/lib/landing";
 import {
   getStaffChecklistTemplateReport,
@@ -48,7 +48,9 @@ function isStatus(
   );
 }
 
-function isShiftKind(value: string | undefined): value is StaffChecklistShiftKind | "all" {
+function isShiftKind(
+  value: string | undefined,
+): value is StaffChecklistShiftKind | "all" {
   return (
     value === "all" ||
     value === "OPENING" ||
@@ -86,7 +88,7 @@ export default async function StaffChecklistTemplatesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const user = await requireCurrentUser();
+  const user = await requireNetworkScopedUser();
   const params = await searchParams;
 
   if (isShiftWorkspaceRole(user.role)) {

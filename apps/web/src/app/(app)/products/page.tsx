@@ -8,13 +8,14 @@ import { can } from "@/lib/permissions";
 import { getProductCatalogSummary } from "@/lib/products";
 
 export default async function ProductsPage() {
-  const [user, summary, categories, suppliers] = await Promise.all([
-    requireCurrentUser(),
+  const user = await requireCurrentUser();
+  const canEditProducts =
+    user.accessScope === "NETWORK" && can(user, "edit_products");
+  const [summary, categories, suppliers] = await Promise.all([
     getProductCatalogSummary(),
-    getCategories(),
-    getSuppliers(),
+    canEditProducts ? getCategories() : Promise.resolve([]),
+    canEditProducts ? getSuppliers() : Promise.resolve([]),
   ]);
-  const canEditProducts = can(user, "edit_products");
 
   return (
     <main className="px-6 py-8 text-zinc-950">

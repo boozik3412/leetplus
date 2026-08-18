@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffOnboardingWorkspace } from "@/components/staff-onboarding-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffOnboardingReport,
   type StaffOnboardingFilters,
@@ -78,7 +78,7 @@ export default async function StaffOnboardingPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffOnboardingReport(filters);

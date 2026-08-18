@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { HeaderFilterDetails } from "./header-filter-details";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffChecklistExecutionReport,
   type StaffChecklistExecutionProblemFilter,
@@ -92,7 +92,9 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function isStatus(value: string | undefined): value is StaffChecklistFilterStatus {
+function isStatus(
+  value: string | undefined,
+): value is StaffChecklistFilterStatus {
   return (
     value === "all" ||
     value === "OPEN" ||
@@ -237,7 +239,9 @@ function reportHref(
   });
 
   const query = params.toString();
-  return query ? `/staff/checklists/report?${query}` : "/staff/checklists/report";
+  return query
+    ? `/staff/checklists/report?${query}`
+    : "/staff/checklists/report";
 }
 
 function problemCount(run: StaffChecklistExecutionRun) {
@@ -305,7 +309,7 @@ export default async function StaffChecklistExecutionReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffChecklistExecutionReport(filters);
@@ -400,7 +404,13 @@ export default async function StaffChecklistExecutionReportPage({
         <form className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <HiddenReportFilters
             filters={report.filters}
-            names={["sort", "direction", "problems", "scoreRange", "sourceType"]}
+            names={[
+              "sort",
+              "direction",
+              "problems",
+              "scoreRange",
+              "sourceType",
+            ]}
           />
           <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-7">
             <label className="block text-sm">
@@ -805,7 +815,10 @@ function HeaderFilterForm({
   ) as Record<string, null>;
 
   return (
-    <form method="get" className="mt-3 space-y-3 border-t border-zinc-200 pt-3 normal-case dark:border-zinc-800">
+    <form
+      method="get"
+      className="mt-3 space-y-3 border-t border-zinc-200 pt-3 normal-case dark:border-zinc-800"
+    >
       <HiddenReportFilters filters={filters} names={hiddenNames} />
       <div className="space-y-3">{children}</div>
       <div className="flex gap-2">
@@ -857,8 +870,8 @@ function TableHeaderMenu({
       <HeaderFilterDetails
         className="group relative inline-block max-w-[18rem] text-left"
         summaryClassName={`inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 transition hover:bg-zinc-100 hover:text-zinc-950 group-open:bg-zinc-100 group-open:text-zinc-950 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 dark:group-open:bg-zinc-900 dark:group-open:text-zinc-100 [&::-webkit-details-marker]:hidden ${
-            activeSort || activeFilter ? "text-zinc-950 dark:text-zinc-100" : ""
-          }`}
+          activeSort || activeFilter ? "text-zinc-950 dark:text-zinc-100" : ""
+        }`}
         summary={
           <>
             <span>{label}</span>
@@ -877,35 +890,35 @@ function TableHeaderMenu({
           </>
         }
         panelClassName={`absolute top-full z-50 mt-2 w-72 max-w-[75vw] rounded-lg border border-zinc-200 bg-white p-3 text-left text-sm font-normal normal-case text-zinc-950 shadow-lg dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 ${
-            align === "right" ? "right-0" : "left-0"
-          }`}
+          align === "right" ? "right-0" : "left-0"
+        }`}
       >
-          <p className="text-xs font-semibold uppercase text-zinc-500">
-            Сортировка
-          </p>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <Link
-              href={reportHref(filters, { sort, direction: "asc" })}
-              className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-                activeSort && filters.direction === "asc"
-                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
-                  : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
-              }`}
-            >
-              По возрастанию
-            </Link>
-            <Link
-              href={reportHref(filters, { sort, direction: "desc" })}
-              className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-                activeSort && filters.direction === "desc"
-                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
-                  : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
-              }`}
-            >
-              По убыванию
-            </Link>
-          </div>
-          {children}
+        <p className="text-xs font-semibold uppercase text-zinc-500">
+          Сортировка
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <Link
+            href={reportHref(filters, { sort, direction: "asc" })}
+            className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+              activeSort && filters.direction === "asc"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            }`}
+          >
+            По возрастанию
+          </Link>
+          <Link
+            href={reportHref(filters, { sort, direction: "desc" })}
+            className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+              activeSort && filters.direction === "desc"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            }`}
+          >
+            По убыванию
+          </Link>
+        </div>
+        {children}
       </HeaderFilterDetails>
     </th>
   );
@@ -932,8 +945,8 @@ function GroupTable({
               <th className="px-4 py-3 text-right font-medium">Принято</th>
               <th className="px-4 py-3 text-right font-medium">Эскалации</th>
               <th className="px-4 py-3 text-right font-medium">Проблемы</th>
-                            <th className="px-4 py-3 text-right font-medium">Время</th>
-<th className="px-4 py-3 text-right font-medium">Оценка</th>
+              <th className="px-4 py-3 text-right font-medium">Время</th>
+              <th className="px-4 py-3 text-right font-medium">Оценка</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -955,7 +968,9 @@ function GroupTable({
                     <p className="mt-1 text-xs text-zinc-500">{row.caption}</p>
                   ) : null}
                 </td>
-                <td className="px-4 py-3 text-right">{formatNumber(row.total)}</td>
+                <td className="px-4 py-3 text-right">
+                  {formatNumber(row.total)}
+                </td>
                 <td className="px-4 py-3 text-right">
                   {formatNumber(row.accepted)}
                 </td>
@@ -981,19 +996,20 @@ function GroupTable({
                     {formatNumber(row.failedItems)}
                   </span>
                 </td>
-                                <td className="px-4 py-3 text-right">
+                <td className="px-4 py-3 text-right">
                   {row.timedItemsTotal > 0 ? (
                     <>
                       {row.timingCompliancePercent}%
                       <p className="mt-1 text-xs text-zinc-500">
-                        {formatNumber(row.timedItemsOnTime)}/{formatNumber(row.timedItemsTotal)}
+                        {formatNumber(row.timedItemsOnTime)}/
+                        {formatNumber(row.timedItemsTotal)}
                       </p>
                     </>
                   ) : (
                     <span className="text-zinc-500">нет</span>
                   )}
                 </td>
-<td className="px-4 py-3 text-right">{row.scorePercent}%</td>
+                <td className="px-4 py-3 text-right">{row.scorePercent}%</td>
               </tr>
             ))}
           </tbody>
@@ -1033,11 +1049,15 @@ function ExecutionRow({ run }: { run: StaffChecklistExecutionRun }) {
       <td className="px-4 py-3">
         <p>{run.store?.name ?? "Вся сеть / клуб не указан"}</p>
         <p className="mt-1 text-xs text-zinc-500">
-          {run.shift ? `Смена ${run.shift.externalShiftId}` : "смена не привязана"}
+          {run.shift
+            ? `Смена ${run.shift.externalShiftId}`
+            : "смена не привязана"}
         </p>
       </td>
       <td className="px-4 py-3">
-        {run.assignedToUser?.fullName ?? run.assignedToUser?.email ?? "не назначен"}
+        {run.assignedToUser?.fullName ??
+          run.assignedToUser?.email ??
+          "не назначен"}
       </td>
       <td className="px-4 py-3">{formatDate(run.activityDate)}</td>
       <td className="px-4 py-3 text-right">

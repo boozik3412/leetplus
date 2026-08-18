@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { StaffDisciplineWorkspace } from "@/components/staff-discipline-workspace";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffDisciplineReport,
   type StaffDisciplineFilters,
@@ -49,7 +49,7 @@ export default async function StaffDisciplinePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffDisciplineReport(filters);
@@ -63,12 +63,18 @@ export default async function StaffDisciplinePage({
         { label: "Записи", value: report.summary.recordsTotal },
         { label: "Предупреждения", value: report.summary.warnings },
         { label: "Штрафы", value: report.summary.fines },
-        { label: "Сумма штрафов", value: formatMoney(report.summary.fineAmount) },
+        {
+          label: "Сумма штрафов",
+          value: formatMoney(report.summary.fineAmount),
+        },
       ]
     : [
         { label: "Предупреждения", value: report.summary.warnings },
         { label: "Штрафы", value: report.summary.fines },
-        { label: "Сумма штрафов", value: formatMoney(report.summary.fineAmount) },
+        {
+          label: "Сумма штрафов",
+          value: formatMoney(report.summary.fineAmount),
+        },
         { label: "Активные правила", value: report.summary.activeRules },
       ];
 

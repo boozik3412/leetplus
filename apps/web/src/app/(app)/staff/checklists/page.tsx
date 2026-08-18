@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffChecklistWorkspace } from "@/components/staff-checklist-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffChecklistReport,
   type StaffChecklistFilterStatus,
@@ -47,7 +47,9 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function isStatus(value: string | undefined): value is StaffChecklistFilterStatus {
+function isStatus(
+  value: string | undefined,
+): value is StaffChecklistFilterStatus {
   return (
     value === "all" ||
     value === "OPEN" ||
@@ -107,7 +109,7 @@ export default async function StaffChecklistsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const user = await requireCurrentUser();
+  const user = await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffChecklistReport(filters);
@@ -132,10 +134,7 @@ export default async function StaffChecklistsPage({
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
-        <ReportBreadcrumbs
-          current="Чеклисты смены"
-          items={breadcrumbItems}
-        />
+        <ReportBreadcrumbs current="Чеклисты смены" items={breadcrumbItems} />
 
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>

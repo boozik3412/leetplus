@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffOperators,
   type StaffOperatorReport,
@@ -155,7 +155,9 @@ async function startChecklistFromTemplate(formData: FormData) {
   }
 
   const run = (await response.json()) as StaffChecklistRun;
-  redirect(`/staff/shift-workspace?checklistRunId=${encodeURIComponent(run.id)}`);
+  redirect(
+    `/staff/shift-workspace?checklistRunId=${encodeURIComponent(run.id)}`,
+  );
 }
 
 function searchParam(value: string | string[] | undefined) {
@@ -397,15 +399,23 @@ function sortEscalatedChecklists(rows: StaffChecklistRun[]) {
   );
 }
 
-function filterClubChecklistRows(rows: StaffChecklistRun[], storeId: string | null) {
-  return rows.filter((run) => !run.store?.id || !storeId || run.store.id === storeId);
+function filterClubChecklistRows(
+  rows: StaffChecklistRun[],
+  storeId: string | null,
+) {
+  return rows.filter(
+    (run) => !run.store?.id || !storeId || run.store.id === storeId,
+  );
 }
 
 function filterClubChecklistTemplates(
   rows: StaffChecklistTemplateOption[],
   storeId: string | null,
 ) {
-  return rows.filter((template) => !template.store?.id || !storeId || template.store.id === storeId);
+  return rows.filter(
+    (template) =>
+      !template.store?.id || !storeId || template.store.id === storeId,
+  );
 }
 
 function findCurrentChecklistRun(
@@ -474,7 +484,10 @@ function buildChecklistTodoItems(run: StaffChecklistRun | null) {
   }
 
   const answerMap = new Map(
-    run.answers.map((answer) => [`${answer.sectionId}:${answer.itemId}`, answer]),
+    run.answers.map((answer) => [
+      `${answer.sectionId}:${answer.itemId}`,
+      answer,
+    ]),
   );
   let activeAssigned = false;
 
@@ -549,12 +562,13 @@ function checklistItemStateTone(item: ChecklistTodoItem) {
     return "amber";
   }
 
-  const tones: Record<ChecklistItemState, "emerald" | "red" | "cyan" | "blue"> = {
-    done: "emerald",
-    overdue: "red",
-    active: "cyan",
-    planned: "blue",
-  };
+  const tones: Record<ChecklistItemState, "emerald" | "red" | "cyan" | "blue"> =
+    {
+      done: "emerald",
+      overdue: "red",
+      active: "cyan",
+      planned: "blue",
+    };
 
   return tones[item.state];
 }
@@ -581,13 +595,9 @@ function canReviewStaffTaskQueue(user: {
 }) {
   return (
     user.isPlatformAdmin ||
-    [
-      "OWNER",
-      "ADMIN",
-      "MANAGER",
-      "CLUB_MANAGER",
-      "STANDARDS_MANAGER",
-    ].includes(user.role)
+    ["OWNER", "ADMIN", "MANAGER", "CLUB_MANAGER", "STANDARDS_MANAGER"].includes(
+      user.role,
+    )
   );
 }
 
@@ -596,7 +606,7 @@ export default async function StaffShiftWorkspacePage({
 }: {
   searchParams: SearchParams;
 }) {
-  const user = await requireCurrentUser();
+  const user = await requireNetworkScopedUser();
   const params = await searchParams;
   const selectedChecklistId = searchParam(params.checklistRunId);
   const isChecklistPickerOpen = searchParam(params.checklistPicker) === "1";
@@ -642,10 +652,9 @@ export default async function StaffShiftWorkspacePage({
     }),
     emptyChecklistReport,
   );
-  const profilePromise = safeValue(
-    getStaffShiftWorkspaceProfile(),
-    { staffMember: null },
-  );
+  const profilePromise = safeValue(getStaffShiftWorkspaceProfile(), {
+    staffMember: null,
+  });
 
   const [myTasks, reviewTasks, checklists, escalatedReport, profile] =
     await Promise.all([
@@ -690,22 +699,26 @@ export default async function StaffShiftWorkspacePage({
   );
   const activeChecklists = mergeChecklistRows(
     escalatedChecklists,
-    filterClubChecklistRows(activeChecklistRows(checklists.rows, user.id), staffStoreId),
+    filterClubChecklistRows(
+      activeChecklistRows(checklists.rows, user.id),
+      staffStoreId,
+    ),
   );
   const availableChecklistTemplates = filterClubChecklistTemplates(
     checklists.checklistTemplates,
     staffStoreId,
   );
   const recommendedChecklist =
-    escalatedChecklists[0] ?? findCurrentChecklistRun(activeChecklists, currentShift);
+    escalatedChecklists[0] ??
+    findCurrentChecklistRun(activeChecklists, currentShift);
   const selectedChecklist = isChecklistPickerOpen
     ? null
     : selectedChecklistId
-      ? activeChecklists.find((run) => run.id === selectedChecklistId) ??
+      ? (activeChecklists.find((run) => run.id === selectedChecklistId) ??
         recommendedChecklist ??
         activeChecklists[0] ??
-        null
-      : recommendedChecklist ?? activeChecklists[0] ?? null;
+        null)
+      : (recommendedChecklist ?? activeChecklists[0] ?? null);
   const selectedChecklistItems = buildChecklistTodoItems(selectedChecklist);
   const selectedChecklistSummary = checklistTodoSummary(selectedChecklistItems);
   const selectedChecklistCurrentItem = currentTodoItem(selectedChecklistItems);
@@ -915,23 +928,39 @@ function ShiftSummaryPanel({
       <div className="mt-3 grid min-w-0 gap-x-6 gap-y-3 border-t border-zinc-200 pt-3 sm:grid-cols-2 xl:grid-cols-4 dark:border-zinc-800">
         <SummaryMetric
           label="Выручка"
-          value={totalRevenue === null ? "нет данных" : formatMoney(totalRevenue)}
-          hint={totalRevenue === null ? "нужна активная смена" : "оплаты, возвраты и бар"}
+          value={
+            totalRevenue === null ? "нет данных" : formatMoney(totalRevenue)
+          }
+          hint={
+            totalRevenue === null
+              ? "нужна активная смена"
+              : "оплаты, возвраты и бар"
+          }
         />
         <SummaryMetric
           label="Бар"
           value={barRevenue === null ? "нет данных" : formatMoney(barRevenue)}
-          hint={barRevenue === null ? "нет продаж в смене" : "товары в окне смены"}
+          hint={
+            barRevenue === null ? "нет продаж в смене" : "товары в окне смены"
+          }
         />
         <SummaryMetric
           label="Гости"
           value={guests === null ? "нет данных" : formatNumber(guests.unique)}
-          hint={guests === null ? "нет сессий" : `${formatNumber(guests.visits)} сессий`}
+          hint={
+            guests === null
+              ? "нет сессий"
+              : `${formatNumber(guests.visits)} сессий`
+          }
         />
         <SummaryMetric
           label="Окно"
           value={shift?.startedAt ? formatShiftWindow(shift) : "нет смены"}
-          hint={shift ? `длительность ${formatShiftDuration(shift)}` : "смена не найдена"}
+          hint={
+            shift
+              ? `длительность ${formatShiftDuration(shift)}`
+              : "смена не найдена"
+          }
         />
       </div>
     </section>
@@ -959,7 +988,9 @@ function SummaryCell({
       <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-500">
         {label}
       </p>
-      <p className={["mt-1 truncate text-sm font-semibold", toneClass].join(" ")}>
+      <p
+        className={["mt-1 truncate text-sm font-semibold", toneClass].join(" ")}
+      >
         {value}
       </p>
     </div>
@@ -1116,10 +1147,26 @@ function WorkPanel({
               </div>
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-4">
-              <ChecklistCounter label="Выполнено" value={checklistSummary.done} tone="emerald" />
-              <ChecklistCounter label="Просрочено" value={checklistSummary.overdue} tone="red" />
-              <ChecklistCounter label="Активно" value={checklistSummary.active} tone="cyan" />
-              <ChecklistCounter label="Запланировано" value={checklistSummary.planned} tone="blue" />
+              <ChecklistCounter
+                label="Выполнено"
+                value={checklistSummary.done}
+                tone="emerald"
+              />
+              <ChecklistCounter
+                label="Просрочено"
+                value={checklistSummary.overdue}
+                tone="red"
+              />
+              <ChecklistCounter
+                label="Активно"
+                value={checklistSummary.active}
+                tone="cyan"
+              />
+              <ChecklistCounter
+                label="Запланировано"
+                value={checklistSummary.planned}
+                tone="blue"
+              />
             </div>
             <div className="mt-4 rounded-md border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1128,7 +1175,8 @@ function WorkPanel({
                 </p>
                 <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-500">
                   {formatNumber(checklistProgress.done)} из{" "}
-                  {formatNumber(checklistProgress.total)} · {checklistProgress.percent}%
+                  {formatNumber(checklistProgress.total)} ·{" "}
+                  {checklistProgress.percent}%
                 </p>
               </div>
               {currentItem ? (
@@ -1180,7 +1228,9 @@ function WorkPanel({
                 Основной чек-лист на смену не выбран
               </h3>
               <p className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-500">
-                Сначала выберите действующий чек-лист клуба. После выбора здесь появятся актуальное действие, весь список дел и счетчики статусов.
+                Сначала выберите действующий чек-лист клуба. После выбора здесь
+                появятся актуальное действие, весь список дел и счетчики
+                статусов.
               </p>
             </div>
             <details className="min-w-0 max-w-full lg:min-w-80">
@@ -1276,7 +1326,10 @@ function EscalatedChecklistBlock({
                   {run.title}
                 </p>
                 <p className="mt-1 truncate text-xs text-zinc-600 dark:text-zinc-400">
-                  {run.store?.name ?? "вся сеть"} · {formatDateTime(run.reviewedAt ?? run.updatedAt)} · {formatNumber(progress.done)} из {formatNumber(progress.total)}
+                  {run.store?.name ?? "вся сеть"} ·{" "}
+                  {formatDateTime(run.reviewedAt ?? run.updatedAt)} ·{" "}
+                  {formatNumber(progress.done)} из{" "}
+                  {formatNumber(progress.total)}
                 </p>
                 {run.reviewComment ? (
                   <p className="mt-2 line-clamp-2 text-xs leading-5 text-red-800 dark:text-red-100/75">
@@ -1305,7 +1358,8 @@ function ChecklistCounter({
   tone: "emerald" | "red" | "cyan" | "blue";
 }) {
   const tones: Record<typeof tone, string> = {
-    emerald: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200",
+    emerald:
+      "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200",
     red: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200",
     cyan: "bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-200",
     blue: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-200",
@@ -1314,7 +1368,9 @@ function ChecklistCounter({
   return (
     <div className={["rounded-md px-3 py-2", tones[tone]].join(" ")}>
       <p className="text-[11px] font-bold uppercase opacity-75">{label}</p>
-      <p className="mt-1 text-xl font-semibold tabular-nums">{formatNumber(value)}</p>
+      <p className="mt-1 text-xl font-semibold tabular-nums">
+        {formatNumber(value)}
+      </p>
     </div>
   );
 }
@@ -1340,7 +1396,9 @@ function ChecklistChoiceRow({
             {run.store?.name ?? "вся сеть"} · {formatDateTime(run.scheduledAt)}
           </p>
         </div>
-        {isRecommended ? <StatusPill label="Рекомендован" tone="emerald" /> : null}
+        {isRecommended ? (
+          <StatusPill label="Рекомендован" tone="emerald" />
+        ) : null}
       </div>
     </Link>
   );
@@ -1703,10 +1761,14 @@ function TrainingPanel({ role }: { role: string }) {
             Фокус сейчас
           </p>
           <p className="mt-2 text-lg font-semibold text-zinc-950 dark:text-zinc-100">
-            {isTrainee ? "Стандарты сервиса в клубе" : "Актуальные материалы роли"}
+            {isTrainee
+              ? "Стандарты сервиса в клубе"
+              : "Актуальные материалы роли"}
           </p>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
-            {isTrainee ? "Начните с открытия смены и общения с гостем." : "Проверьте новые инструкции и аттестации."}
+            {isTrainee
+              ? "Начните с открытия смены и общения с гостем."
+              : "Проверьте новые инструкции и аттестации."}
           </p>
         </div>
         <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
@@ -1764,7 +1826,12 @@ function WorkspaceLink({
   );
 }
 
-type WorkspaceLinkIcon = "regulations" | "training" | "chat" | "knowledge" | "tasks";
+type WorkspaceLinkIcon =
+  | "regulations"
+  | "training"
+  | "chat"
+  | "knowledge"
+  | "tasks";
 
 function WorkspaceLinkIconView({ icon }: { icon: WorkspaceLinkIcon }) {
   const common = {

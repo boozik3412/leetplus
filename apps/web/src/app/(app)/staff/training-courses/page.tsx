@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTrainingCoursesWorkspace } from "@/components/staff-training-courses-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffTrainingCoursesReport,
   type StaffTrainingCourseStatus,
@@ -61,7 +61,9 @@ function isRequired(value: string | undefined) {
   return value === "true" || value === "false" || value === "all";
 }
 
-function resolveFilters(params: Awaited<SearchParams>): StaffTrainingCoursesFilters {
+function resolveFilters(
+  params: Awaited<SearchParams>,
+): StaffTrainingCoursesFilters {
   const status = searchParam(params.status);
   const roleScope = searchParam(params.roleScope);
   const required = searchParam(params.required);
@@ -84,7 +86,7 @@ export default async function StaffTrainingCoursesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTrainingCoursesReport(filters);

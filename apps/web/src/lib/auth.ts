@@ -1,5 +1,5 @@
 import { getApiUrl, getAuthHeaders } from "./api";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getDefaultLandingPath } from "./landing";
 import { cache } from "react";
 
@@ -89,6 +89,22 @@ export async function requireCurrentUser() {
 
   if (!user) {
     redirect("/login");
+  }
+
+  return user;
+}
+
+/**
+ * UI companion for API workspaces protected by FreshNetworkScopeGuard.
+ * The API guard remains the authoritative, database-fresh boundary; this
+ * helper prevents a STORES subject from reaching a server component that
+ * would otherwise turn the expected 403 into a generic RSC failure.
+ */
+export async function requireNetworkScopedUser() {
+  const user = await requireCurrentUser();
+
+  if (user.accessScope !== "NETWORK") {
+    notFound();
   }
 
   return user;

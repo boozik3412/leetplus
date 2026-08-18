@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffKnowledgeBaseWorkspace } from "@/components/staff-knowledge-base-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffKnowledgeBaseReport,
   type StaffKnowledgeArticleStatus,
@@ -67,7 +67,9 @@ function isRoleScope(
   );
 }
 
-function resolveFilters(params: Awaited<SearchParams>): StaffKnowledgeBaseFilters {
+function resolveFilters(
+  params: Awaited<SearchParams>,
+): StaffKnowledgeBaseFilters {
   const status = searchParam(params.status);
   const roleScope = searchParam(params.roleScope);
   const requiredReading = searchParam(params.requiredReading);
@@ -94,7 +96,7 @@ export default async function StaffKnowledgeBasePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffKnowledgeBaseReport(filters);

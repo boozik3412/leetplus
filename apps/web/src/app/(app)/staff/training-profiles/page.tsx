@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTrainingProfilesWorkspace } from "@/components/staff-training-profiles-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffTrainingProfilesReport,
   type StaffTrainingProfileRole,
@@ -36,7 +36,9 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function isRole(value: string | undefined): value is StaffTrainingProfileRole | "all" {
+function isRole(
+  value: string | undefined,
+): value is StaffTrainingProfileRole | "all" {
   return roleOptions.includes(value as StaffTrainingProfileRole | "all");
 }
 
@@ -71,7 +73,10 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
-function exportHref(format: "csv" | "xlsx", filters: StaffTrainingProfilesFilters) {
+function exportHref(
+  format: "csv" | "xlsx",
+  filters: StaffTrainingProfilesFilters,
+) {
   const params = new URLSearchParams();
 
   Object.entries({ ...filters, format }).forEach(([key, value]) => {
@@ -88,13 +93,16 @@ export default async function StaffTrainingProfilesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTrainingProfilesReport(filters);
   const summaryCards = [
     { label: "Сотрудники", value: report.summary.employees },
-    { label: "Средний прогресс", value: `${report.summary.averageProgressPercent}%` },
+    {
+      label: "Средний прогресс",
+      value: `${report.summary.averageProgressPercent}%`,
+    },
     { label: "Просрочки", value: report.summary.overdueCourses },
     { label: "Аттестации", value: report.summary.pendingAssessments },
     { label: "Сертификаты", value: report.summary.validCertificates },

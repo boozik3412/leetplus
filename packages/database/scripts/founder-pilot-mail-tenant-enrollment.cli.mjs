@@ -119,7 +119,7 @@ function safeFailure(error) {
     /^[0-9A-Z]{2,16}$/u.test(error.meta.code)
       ? error.meta.code
       : null;
-  return {
+  const failure = {
     contractVersion: "FOUNDER_PILOT_MAIL_TENANT_ENROLLMENT_V1",
     decision: "BLOCKED_MANUAL",
     reasonCode:
@@ -131,6 +131,13 @@ function safeFailure(error) {
             ? "FOUNDER_PILOT_MAIL_TENANT_ENROLLMENT_CLI_FAILURE"
             : `FOUNDER_PILOT_MAIL_TENANT_ENROLLMENT_DATABASE_${databaseCode}${databaseSubcode === null ? "" : `_${databaseSubcode}`}`,
   };
+  if (
+    error instanceof FounderPilotMailTenantEnrollmentError &&
+    error.violationCodes.length > 0
+  ) {
+    return { ...failure, violationCodes: error.violationCodes };
+  }
+  return failure;
 }
 
 export async function main(

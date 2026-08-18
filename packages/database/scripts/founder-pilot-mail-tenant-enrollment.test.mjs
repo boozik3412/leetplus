@@ -288,7 +288,10 @@ test("worker grant drift and claimed delivery block mutation", async () => {
       adapter: fakeAdapter(grantDrift).adapter,
       request: request("plan"),
     }),
-    { reasonCode: "FOUNDER_PILOT_MAIL_TENANT_ENROLLMENT_WORKER_NOT_COMPLIANT" },
+    {
+      reasonCode: "FOUNDER_PILOT_MAIL_TENANT_ENROLLMENT_WORKER_NOT_COMPLIANT",
+      violationCodes: ["EFFECTIVE_FUNCTION_ALLOWLIST_MISMATCH"],
+    },
   );
 
   const claimed = state();

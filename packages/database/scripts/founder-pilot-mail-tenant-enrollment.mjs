@@ -33,21 +33,32 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_DATABASE = /^[a-z][a-z0-9_]{0,62}$/u;
 const SAFE_ROLE = /^[a-z_][a-z0-9_]{2,62}$/u;
 const SAFE_ENVIRONMENT = /^(ci|production|staging)$/u;
+const SAFE_VIOLATION_CODE = /^[A-Za-z][A-Za-z0-9_:-]{0,127}$/u;
 const MAX_POSTGRES_OID = 4_294_967_295n;
 const LOCK_DOMAIN = "leetplus:founder-pilot:mail-tenant-enrollment:v1";
 const ADAPTERS = new WeakSet();
 
 export class FounderPilotMailTenantEnrollmentError extends Error {
-  constructor(reasonCode) {
+  constructor(reasonCode, violationCodes = []) {
     super(reasonCode);
     this.name = "FounderPilotMailTenantEnrollmentError";
     this.reasonCode = reasonCode;
     this.safeContractError = true;
+    this.violationCodes = Object.freeze(
+      [...new Set(Array.isArray(violationCodes) ? violationCodes : [])]
+        .filter(
+          (candidate) =>
+            typeof candidate === "string" &&
+            SAFE_VIOLATION_CODE.test(candidate),
+        )
+        .sort()
+        .slice(0, 64),
+    );
   }
 }
 
-function fail(reasonCode) {
-  throw new FounderPilotMailTenantEnrollmentError(reasonCode);
+function fail(reasonCode, violationCodes) {
+  throw new FounderPilotMailTenantEnrollmentError(reasonCode, violationCodes);
 }
 
 function stableJson(value) {
@@ -374,7 +385,10 @@ function validateSnapshot(snapshot, request) {
   }
   const violations = workerViolations(snapshot.worker, request);
   if (violations.length > 0) {
-    fail("FOUNDER_PILOT_MAIL_TENANT_ENROLLMENT_WORKER_NOT_COMPLIANT");
+    fail(
+      "FOUNDER_PILOT_MAIL_TENANT_ENROLLMENT_WORKER_NOT_COMPLIANT",
+      violations,
+    );
   }
   assertOperationalState(snapshot, request);
 }

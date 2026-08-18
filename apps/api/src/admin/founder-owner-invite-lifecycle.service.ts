@@ -337,7 +337,7 @@ export class FounderOwnerInviteLifecycleService {
           providerAuthorityDigest: null,
           messageIdDigest: null,
           secretCiphertext: null,
-          ciphertextClearedAt: revokedAt,
+          ciphertextClearedAt: null,
           providerOutcomeClass: 'CANCELED',
           providerObservedAt: revokedAt,
           providerReceiptDigest: null,

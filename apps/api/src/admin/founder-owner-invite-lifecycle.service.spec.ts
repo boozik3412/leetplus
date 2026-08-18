@@ -261,6 +261,7 @@ describe('FounderOwnerInviteLifecycleService', () => {
         status: IdentityMailOutboxStatus.CANCELED,
         stateReasonCode: 'OWNER_INVITE_REVOKED',
         secretCiphertext: null,
+        ciphertextClearedAt: null,
       },
     });
     expect(releaseInvite).toHaveBeenCalledWith(prisma, {

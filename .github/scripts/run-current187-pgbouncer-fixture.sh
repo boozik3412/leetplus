@@ -82,10 +82,12 @@ signer_not_before="$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%S.000Z')"
 signer_not_after="$(date -u -d '30 minutes' '+%Y-%m-%dT%H:%M:%S.000Z')"
 original_hba_path="$fixture_root/pg_hba.before.conf"
 fixture_hba_path="$fixture_root/pg_hba.fixture.conf"
+original_auto_conf_path="$fixture_root/postgresql.auto.conf.before"
 hosts_backup_path="$fixture_root/hosts.before"
 pooler_pid=""
 hosts_modified=0
 hba_modified=0
+auto_conf_modified=0
 roles_created=0
 
 cleanup() {
@@ -106,6 +108,39 @@ cleanup() {
     ' >/dev/null 2>&1 || status=1
     docker exec --user postgres "$POSTGRES_SERVICE_CONTAINER_ID" \
       pg_ctl reload -D /var/lib/postgresql/data >/dev/null 2>&1 || status=1
+  fi
+  if [[ $auto_conf_modified -eq 1 && -f "$original_auto_conf_path" ]]; then
+    docker cp \
+      "$original_auto_conf_path" \
+      "$POSTGRES_SERVICE_CONTAINER_ID:/var/lib/postgresql/data/postgresql.auto.conf" \
+      >/dev/null 2>&1 || status=1
+    docker exec --user root "$POSTGRES_SERVICE_CONTAINER_ID" sh -ceu '
+      chown postgres:postgres /var/lib/postgresql/data/postgresql.auto.conf
+      chmod 600 /var/lib/postgresql/data/postgresql.auto.conf
+    ' >/dev/null 2>&1 || status=1
+    if docker restart "$POSTGRES_SERVICE_CONTAINER_ID" >/dev/null 2>&1; then
+      postgres_restored=0
+      for _ in $(seq 1 100); do
+        if docker exec --user postgres "$POSTGRES_SERVICE_CONTAINER_ID" \
+          pg_isready --dbname postgres >/dev/null 2>&1; then
+          postgres_restored=1
+          break
+        fi
+        sleep 0.1
+      done
+      if [[ $postgres_restored -ne 1 ]]; then
+        status=1
+      else
+        docker exec --user root "$POSTGRES_SERVICE_CONTAINER_ID" \
+          rm -f -- \
+            /var/lib/postgresql/data/current187-ca.crt \
+            /var/lib/postgresql/data/current187-server.crt \
+            /var/lib/postgresql/data/current187-server.key \
+          >/dev/null 2>&1 || status=1
+      fi
+    else
+      status=1
+    fi
   fi
   if [[ $roles_created -eq 1 ]]; then
     PGPASSWORD=postgres psql \
@@ -260,6 +295,10 @@ if [[ ! "$signer_public_key_sha256" =~ ^[0-9a-f]{64}$ ]]; then
 fi
 
 docker cp \
+  "$POSTGRES_SERVICE_CONTAINER_ID:/var/lib/postgresql/data/postgresql.auto.conf" \
+  "$original_auto_conf_path"
+
+docker cp \
   "$ca_certificate_path" \
   "$POSTGRES_SERVICE_CONTAINER_ID:/var/lib/postgresql/data/current187-ca.crt"
 docker cp \
@@ -275,6 +314,7 @@ docker exec --user root "$POSTGRES_SERVICE_CONTAINER_ID" sh -ceu '
     /var/lib/postgresql/data/current187-server.key
   chmod 600 /var/lib/postgresql/data/current187-server.key
 '
+auto_conf_modified=1
 docker exec --interactive --user postgres "$POSTGRES_SERVICE_CONTAINER_ID" \
   psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
 ALTER SYSTEM SET ssl = 'on';

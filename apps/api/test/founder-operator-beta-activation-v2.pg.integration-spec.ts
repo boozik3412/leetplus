@@ -51,10 +51,13 @@ const describePostgres = integrationEnabled ? describe : describe.skip;
 const DISPOSABLE_DATABASE_PATTERN =
   /^lp_founder_beta_v2_pg_test_[0-9a-f]{32}$/u;
 const DISPOSABLE_WORKER_ROLE_PATTERN = /^lp_founder_mail_[0-9a-f]{24}$/u;
+const RESTORED_COPY_TEMPLATE_PATTERN = /^leetplus_restored_[a-z0-9_]{1,96}$/u;
+const RESTORED_COPY_TEMPLATE_ENV =
+  'FOUNDER_PILOT_MAIL_PG_RESTORED_COPY_TEMPLATE';
 const CURRENT_MIGRATION =
   '20260818020000_identity_mail_delivery_current_head_v1';
 const CURRENT_MIGRATION_COUNT = 185;
-const RELEASE_SHA = 'd'.repeat(40);
+const RELEASE_SHA = resolveReleaseSha();
 const FINGERPRINT_KEY =
   'founder-beta-v2-fixture-fingerprint-key-aaaaaaaaaaaaaaaa';
 const WORKER_RPC_SIGNATURES = [
@@ -89,6 +92,7 @@ describePostgres(
 
     beforeAll(async () => {
       const sourceUrl = assertSafeIntegrationDatabase();
+      const restoredCopyTemplate = restoredCopyTemplateDatabase(sourceUrl);
       disposableDatabase = `lp_founder_beta_v2_pg_test_${randomUUID().replaceAll('-', '')}`;
       assertDisposableDatabaseName(disposableDatabase);
       disposableDatabaseUrl = databaseUrlFor(sourceUrl, disposableDatabase);
@@ -110,14 +114,46 @@ describePostgres(
         can_create_database: true,
       });
 
-      await maintenance.$executeRawUnsafe(
-        `CREATE DATABASE "${disposableDatabase}" TEMPLATE template0`,
-      );
-      deployCanonicalPrismaMigrations(disposableDatabaseUrl, {
-        failureMessage:
-          'Unable to deploy canonical migrations for founder beta v2 fixture',
-        timeoutMs: 120_000,
-      });
+      if (restoredCopyTemplate === null) {
+        await maintenance.$executeRawUnsafe(
+          `CREATE DATABASE "${disposableDatabase}" TEMPLATE template0`,
+        );
+        deployCanonicalPrismaMigrations(disposableDatabaseUrl, {
+          failureMessage:
+            'Unable to deploy canonical migrations for founder beta v2 fixture',
+          timeoutMs: 120_000,
+        });
+      } else {
+        const [template] = await maintenance.$queryRaw<
+          Array<{
+            database_name: string;
+            database_oid: bigint;
+            other_session_count: number;
+          }>
+        >(Prisma.sql`
+          SELECT
+            database.datname AS database_name,
+            database.oid::BIGINT AS database_oid,
+            (
+              SELECT count(*)::int
+              FROM pg_catalog.pg_stat_activity AS activity
+              WHERE activity.datname = database.datname
+                AND activity.pid <> pg_backend_pid()
+            ) AS other_session_count
+          FROM pg_catalog.pg_database AS database
+          WHERE database.datname = ${restoredCopyTemplate}
+            AND database.datallowconn
+            AND NOT database.datistemplate
+        `);
+        expect(template).toMatchObject({
+          database_name: restoredCopyTemplate,
+          other_session_count: 0,
+        });
+        expect(template?.database_oid).toBeGreaterThan(0n);
+        await maintenance.$executeRawUnsafe(
+          `CREATE DATABASE "${disposableDatabase}" TEMPLATE "${restoredCopyTemplate}"`,
+        );
+      }
 
       prisma = new PrismaService({
         datasources: { db: { url: disposableDatabaseUrl } },
@@ -1023,15 +1059,47 @@ function assertSafeIntegrationDatabase(): string {
     throw new Error('DATABASE_URL is required for founder beta v2 PG fixture');
   }
   const parsed = new URL(raw);
+  const databaseName = parsed.pathname.replace(/^\/+|\/+$/gu, '').toLowerCase();
+  const restoredCopyTemplate = process.env[RESTORED_COPY_TEMPLATE_ENV]?.trim();
+  const restoredCopyMode = restoredCopyTemplate !== undefined;
   if (
     parsed.protocol !== 'postgresql:' ||
-    !['127.0.0.1', 'localhost'].includes(parsed.hostname)
+    !['127.0.0.1', 'localhost'].includes(parsed.hostname) ||
+    (restoredCopyMode &&
+      (parsed.hostname !== '127.0.0.1' ||
+        parsed.port === '' ||
+        parsed.port === '5432' ||
+        !RESTORED_COPY_TEMPLATE_PATTERN.test(databaseName) ||
+        restoredCopyTemplate !== databaseName))
   ) {
     throw new Error(
       'Founder beta v2 PG fixture requires an isolated local PostgreSQL URL',
     );
   }
   return raw;
+}
+
+function restoredCopyTemplateDatabase(databaseUrl: string): string | null {
+  const value = process.env[RESTORED_COPY_TEMPLATE_ENV]?.trim();
+  if (value === undefined) return null;
+  const databaseName = new URL(databaseUrl).pathname
+    .replace(/^\/+|\/+$/gu, '')
+    .toLowerCase();
+  if (!RESTORED_COPY_TEMPLATE_PATTERN.test(value) || value !== databaseName) {
+    throw new Error(
+      'Refusing founder beta v2 PG fixture with an unsafe restored-copy template',
+    );
+  }
+  return value;
+}
+
+function resolveReleaseSha(): string {
+  const value = process.env.CI_RELEASE_SHA;
+  if (value === undefined) return 'd'.repeat(40);
+  if (!/^[0-9a-f]{40}$/u.test(value)) {
+    throw new Error('CI_RELEASE_SHA must be exact lowercase hexadecimal');
+  }
+  return value;
 }
 
 function safeReissueDatabaseDiagnostic(error: unknown): Error {

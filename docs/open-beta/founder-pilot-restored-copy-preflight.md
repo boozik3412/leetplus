@@ -149,9 +149,12 @@ Read-only V2 preflight выполнен на свежей копии насто�
 
 ## Что остаётся после принятого rehearsal
 
-1. Собрать изменённый controller и V2 contracts в новый exact-SHA CI artifact.
-2. Повторить artifact-bound admission на сохранённой копии.
-3. Выполнить trusted SMTP canary и worker enrollment.
-4. Закрыть Gate 1MT/2 и отдельный production cutover GO.
+1. `DONE`: собрать controller/V2 contracts в exact-SHA CI artifact и повторить
+   artifact-bound admission.
+2. `DONE`: выполнить trusted TLS SMTP worker и protected enrollment/SENT/accept
+   на disposable clones сохранённой copy.
+3. Закрыть Gate 1MT/2 и отдельный production cutover GO.
+4. В production `PREPARE` создать exact roles, настроить независимые
+   encryption/SMTP secrets и выполнить controlled SMTP canary.
 5. Удалить одноразовые credentials, restored DB и backup copy не позднее
    `deleteBy` после завершения artifact-bound проверки.

@@ -6,10 +6,10 @@
 repeat-deploy, data zero-drift и activation-role TLS/HBA/SCRAM lifecycle на
 изолированной копии.
 
-Это не является production deploy или разрешением внешнего доступа. Следующий
-release gate — собрать эти изменения в новый exact SHA, принять CI artifact и
-повторить artifact-bound preflight. После него остаются trusted SMTP canary,
-Gate 1MT/2 и отдельный production cutover GO.
+Это не является production deploy или разрешением внешнего доступа. Изменения
+собраны в exact SHA, приняты CI и повторно проверены из скачанного SHA-bound
+artifact на сохранённой clean copy. Следующие release gates — trusted SMTP
+canary/worker enrollment, Gate 1MT/2 и отдельный production cutover GO.
 
 ## Границы прогона
 
@@ -146,6 +146,47 @@ table count не используется как zero-diff метрика; ср�
 CA и server certificate были одноразовыми локальными rehearsal fixtures. Они
 не являются production credentials и не переносятся в production.
 
+## Artifact-bound повторная приёмка
+
+Commit `3f325acc2428b1e3c3797075b218efeb454fae91` принят четырьмя GitHub
+Actions runs:
+
+- push CI `32128049790` — `SUCCESS`;
+- push founder mail enrollment PostgreSQL gate `32128049799` — `SUCCESS`;
+- PR CI `32128053592` — `SUCCESS`;
+- PR founder mail enrollment PostgreSQL gate `32128053724` — `SUCCESS`.
+
+Artifact `9321380247` имеет имя
+`leetplus-release-3f325acc2428b1e3c3797075b218efeb454fae91`.
+
+| Evidence                          | Значение                                                           |
+| --------------------------------- | ------------------------------------------------------------------ |
+| Downloaded archive size           | `28 487 516` bytes                                                 |
+| Downloaded archive SHA-256        | `adb75120f35ca54bbd80924f467c78296d425f3c94de86f437998b9046b5b7f4` |
+| Outer checksum                    | `PASS`                                                             |
+| Per-file internal `SHA256SUMS`    | `PASS`                                                             |
+| Offline frozen production install | `618 reused / 0 downloaded`                                        |
+| Prisma generate                   | `PASS`, Prisma `6.19.3`                                            |
+| Release migration count           | `185`                                                              |
+| Operational scripts               | `16 = 10 founder + 6 runtime`                                      |
+| Restored-copy manifest digest     | `1c0ecb7c77105422545a331501721a025c9bdf71df9969a2b77c47f242261d6c` |
+| Restored-copy evidence digest     | `51efd85cdaf2baec1d81439ab296d2412f94373eea7d31f6521412e15d049cd0` |
+
+Downloaded artifact повторно подтвердил на clean production-backup copy:
+
+- `READY_FOR_RESTORED_COPY_DATABASE_REHEARSAL`;
+- `PRODUCTION_HISTORY_REHEARSAL_VERIFIED`;
+- `185 applied / 4 historical rolled back / 0 unfinished`;
+- exact materialized tree, preterminal manifest и worker function digests;
+- activation role lifecycle
+  `PLAN → APPLIED → ATTESTED → TLS NETWORK ACCEPTED → ROLLED_BACK`;
+- TLS `1.3`, `TLS_AES_256_GCM_SHA384`, network evidence digest
+  `5170ed527a90255241beed6ed3b219a43dd40d755130f2ba55f2545af4ae90a5`;
+- после rollback финальный preflight снова `READY`, role count `0`.
+
+Raw database/role secrets не записывались в artifact, receipt или журнал.
+Production application, database, migrations, roles и services не менялись.
+
 ## Реализованные изменения
 
 - restored-copy preflight V2 отдельно связывает applied и rolled-back history;
@@ -160,14 +201,13 @@ CA и server certificate были одноразовыми локальными 
 
 ## Что ещё обязательно до первого внешнего tenant
 
-1. Закоммитить изменения в clean SHA и получить зелёный CI artifact.
-2. Скачать новый artifact, проверить outer/inner hashes и повторить его
-   read-only admission на preserved backup/copy.
-3. Принять production-like trusted SMTP canary и worker enrollment.
-4. Закрыть полную Gate 1MT A/B matrix и Gate 2 для текущей сети A1–A4.
-5. Подготовить production backup/rollback window и выполнить отдельный
+1. `DONE`: trusted TLS SMTP worker и protected enrollment/SENT/accept/disable
+   на disposable клонах изолированной восстановленной копии.
+2. Закрыть полную Gate 1MT A/B matrix, включая jobs/Telegram/files/SSE, и
+   Gate 2 для текущей сети A1–A4.
+3. Подготовить production backup/rollback window и выполнить отдельный
    reviewed cutover в `PREPARE`, затем `ACTIVE`.
-6. Только после этого создать отдельный Tenant B/Store B1 и отправить OWNER
+4. Только после этого создать отдельный Tenant B/Store B1 и отправить OWNER
    email invite с самостоятельной установкой пароля.
 
 Временный пароль, public signup, добавление tester в существующий tenant и

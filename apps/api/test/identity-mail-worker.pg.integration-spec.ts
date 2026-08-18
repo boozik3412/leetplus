@@ -36,12 +36,15 @@ const describePostgres = integrationEnabled ? describe : describe.skip;
 const CURRENT_MIGRATION =
   '20260818020000_identity_mail_delivery_current_head_v1';
 const CURRENT_MIGRATION_COUNT = 185;
-const RELEASE_SHA = 'a'.repeat(40);
+const RELEASE_SHA = resolveReleaseSha();
 const AAD_ENVIRONMENT = 'pg-worker-e2e';
 const TRIAL_DURATION_SECONDS = 7 * 24 * 60 * 60;
 const SMTP_SERVERNAME = 'smtp.test.local';
 const DISPOSABLE_DATABASE_PATTERN = /^lp_iw_e2e_[0-9a-f]{32}$/u;
 const DISPOSABLE_ROLE_PATTERN = /^lp_iw_pg_[0-9a-f]{24}$/u;
+const RESTORED_COPY_TEMPLATE_PATTERN = /^leetplus_restored_[a-z0-9_]{1,96}$/u;
+const RESTORED_COPY_TEMPLATE_ENV =
+  'IDENTITY_MAIL_WORKER_PG_RESTORED_COPY_TEMPLATE';
 const TEST_FIXTURE_DIRECTORY = join(
   __dirname,
   'fixtures',
@@ -298,6 +301,7 @@ describePostgres(
 
       const maintenanceUrl = databaseUrlFor(databaseUrl, 'postgres');
       disposableDatabaseUrl = databaseUrlFor(databaseUrl, disposableDatabase);
+      const restoredCopyTemplate = restoredCopyTemplateDatabase(databaseUrl);
       maintenance = prismaFor(maintenanceUrl);
       await maintenance.$connect();
       const [server] = await maintenance.$queryRaw<
@@ -318,10 +322,42 @@ describePostgres(
       await maintenance.$executeRawUnsafe(
         `CREATE ROLE "${workerRoleName}" LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '${workerPassword}'`,
       );
-      await maintenance.$executeRawUnsafe(
-        `CREATE DATABASE "${disposableDatabase}" TEMPLATE template0`,
-      );
-      deployMigrations(disposableDatabaseUrl);
+      if (restoredCopyTemplate === null) {
+        await maintenance.$executeRawUnsafe(
+          `CREATE DATABASE "${disposableDatabase}" TEMPLATE template0`,
+        );
+        deployMigrations(disposableDatabaseUrl);
+      } else {
+        const [template] = await maintenance.$queryRaw<
+          Array<{
+            database_name: string;
+            database_oid: bigint;
+            other_session_count: number;
+          }>
+        >(Prisma.sql`
+          SELECT
+            database.datname AS database_name,
+            database.oid::BIGINT AS database_oid,
+            (
+              SELECT count(*)::int
+              FROM pg_catalog.pg_stat_activity AS activity
+              WHERE activity.datname = database.datname
+                AND activity.pid <> pg_backend_pid()
+            ) AS other_session_count
+          FROM pg_catalog.pg_database AS database
+          WHERE database.datname = ${restoredCopyTemplate}
+            AND database.datallowconn
+            AND NOT database.datistemplate
+        `);
+        expect(template).toMatchObject({
+          database_name: restoredCopyTemplate,
+          other_session_count: 0,
+        });
+        expect(template?.database_oid).toBeGreaterThan(0n);
+        await maintenance.$executeRawUnsafe(
+          `CREATE DATABASE "${disposableDatabase}" TEMPLATE "${restoredCopyTemplate}"`,
+        );
+      }
 
       admin = prismaFor(disposableDatabaseUrl);
       await admin.$connect();
@@ -1494,15 +1530,46 @@ function assertSafeIntegrationDatabase(): URL {
   const parsed = new URL(databaseUrl);
   const normalizedHostname = parsed.hostname.replace(/^\[([^\]]+)\]$/u, '$1');
   const databaseName = parsed.pathname.replace(/^\/+|\/+$/gu, '').toLowerCase();
+  const restoredCopyTemplate = process.env[RESTORED_COPY_TEMPLATE_ENV]?.trim();
+  const restoredCopyMode = restoredCopyTemplate !== undefined;
   if (
     !new Set(['127.0.0.1', 'localhost', '::1']).has(normalizedHostname) ||
-    !/(?:^|[_-])(ci|test)(?:$|[_-])/u.test(databaseName)
+    (restoredCopyMode
+      ? normalizedHostname !== '127.0.0.1' ||
+        parsed.port === '' ||
+        parsed.port === '5432' ||
+        !RESTORED_COPY_TEMPLATE_PATTERN.test(databaseName) ||
+        restoredCopyTemplate !== databaseName
+      : !/(?:^|[_-])(ci|test)(?:$|[_-])/u.test(databaseName))
   ) {
     throw new Error(
       'Refusing identity-mail worker E2E outside a local CI/test database',
     );
   }
   return parsed;
+}
+
+function restoredCopyTemplateDatabase(databaseUrl: URL): string | null {
+  const value = process.env[RESTORED_COPY_TEMPLATE_ENV]?.trim();
+  if (value === undefined) return null;
+  const databaseName = databaseUrl.pathname
+    .replace(/^\/+|\/+$/gu, '')
+    .toLowerCase();
+  if (!RESTORED_COPY_TEMPLATE_PATTERN.test(value) || value !== databaseName) {
+    throw new Error(
+      'Refusing identity-mail worker E2E with an unsafe restored-copy template',
+    );
+  }
+  return value;
+}
+
+function resolveReleaseSha(): string {
+  const value = process.env.CI_RELEASE_SHA;
+  if (value === undefined) return 'a'.repeat(40);
+  if (!/^[0-9a-f]{40}$/u.test(value)) {
+    throw new Error('CI_RELEASE_SHA must be exact lowercase hexadecimal');
+  }
+  return value;
 }
 
 function assertDisposableDatabaseName(databaseName: string) {

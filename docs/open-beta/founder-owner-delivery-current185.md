@@ -68,9 +68,10 @@ roles, не включал outbound, не создавал новый tenant и 
 
 1. `DONE`: production backup restore, CURRENT185 production-history migration,
    repeat, data zero-diff и activation-role TLS rollback.
-2. Собрать и скачать новый SHA-bound artifact с принятым history controller.
-3. На сохранённой restored copy повторить artifact-bound readiness и worker
-   enrollment/`SENT`/accept/disable.
+2. `DONE`: собрать и скачать новый SHA-bound artifact с принятым history
+   controller и повторить artifact-bound readiness.
+3. `DONE`: на disposable клонах сохранённой restored copy пройти trusted TLS
+   SMTP worker и enrollment/`SENT`/accept/disable.
 4. Перед production cutover подготовить новый recovery point, развернуть exact
    artifact/migration, создать и аттестовать least-privilege
    runtime/worker roles, настроить production encryption и trusted SMTP.

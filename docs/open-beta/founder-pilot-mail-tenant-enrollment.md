@@ -141,12 +141,15 @@ Exact head принят:
 
 1. `DONE`: immutable production backup и clean isolated restored-copy
    migration/activation-role rehearsal;
-2. собрать новый exact-SHA artifact с production-history controller и повторить
-   artifact-bound admission;
-3. создать и attested-проверить production runtime/activation/mail-worker roles;
-4. настроить production encryption/SMTP secrets и выполнить trusted-SMTP canary;
-5. закрыть Gate 1MT/2 production-like acceptance текущего `Tenant A/A1..A4`;
-6. выполнить production deploy в `PREPARE`, recovery point и только затем отдельный
+2. `DONE`: exact-SHA artifact с production-history controller, download,
+   outer/inner checksum, offline hydration и artifact-bound admission;
+3. `DONE на restored copy`: protected mail enrollment и trusted TLS SMTP/SENT
+   rehearsal на disposable клонах clean production-backup copy;
+4. создать и attested-проверить production runtime/activation/mail-worker roles;
+5. настроить production encryption/SMTP secrets и выполнить один controlled
+   production SMTP canary;
+6. закрыть Gate 1MT/2 production-like acceptance текущего `Tenant A/A1..A4`;
+7. выполнить production deploy в `PREPARE`, recovery point и только затем отдельный
    `Tenant B/Store B1`, persisted GO, controlled activation и этот enrollment.
 
 USB/offline key ceremony остаётся post-beta hardening и в этот список не

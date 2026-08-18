@@ -18,8 +18,10 @@ Unit `6/6`; synthetic PostgreSQL full lifecycle и zero-residue приняты. 
 HBA/TLS/SCRAM direct handshake также принят на отдельном synthetic cluster:
 [network acceptance](./founder-pilot-activation-role-network-acceptance.md).
 Production-history migration lane и direct TLS role lifecycle на настоящем
-backup приняты. Новый exact-SHA artifact, trusted SMTP canary, Gate 1MT/2 и
-production cutover ещё обязательны.
+backup приняты. Новый exact-SHA artifact и restored-copy trusted TLS SMTP +
+protected enrollment/SENT/accept/disable также приняты. Gate 1MT/2,
+production roles/secrets, controlled SMTP canary и production cutover ещё
+обязательны.
 
 ## Входные условия
 
@@ -44,8 +46,10 @@ production cutover ещё обязательны.
 9. `DONE`: принять direct TLS 1.3/HBA/SCRAM matrix.
 10. `DONE`: сохранить PII-free отчёт с SHA/artifact, backup checksum, target identity,
     timestamps, RPO/RTO и результатами всех gates.
-11. `NEXT`: собрать новый exact-SHA artifact и повторить artifact-bound gate.
-12. После следующего gate удалить одноразовые credentials/copy и зафиксировать
+11. `DONE`: собрать новый exact-SHA artifact и повторить artifact-bound gate.
+12. `DONE`: на disposable clones выполнить trusted TLS SMTP worker и полный
+    protected enrollment/SENT/accept/disable workflow.
+13. После следующих Gate 1MT/2 удалить одноразовые credentials/copy и зафиксировать
     cleanup evidence.
 
 Любая неоднозначность, outbound effect, mismatch или ненулевой residue даёт

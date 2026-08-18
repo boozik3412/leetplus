@@ -71,6 +71,10 @@ Dedicated database boundary:
 lane, data zero-diff и TLS activation-role rollback:
 [production restored-copy rehearsal 18.08.2026](./founder-production-restored-copy-rehearsal-2026-08-18.md).
 
+Trusted TLS SMTP, protected mail enrollment и полный OWNER workflow на
+disposable клонах clean restored copy:
+[restored-copy mail rehearsal 18.08.2026](./founder-restored-copy-mail-rehearsal-2026-08-18.md).
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 

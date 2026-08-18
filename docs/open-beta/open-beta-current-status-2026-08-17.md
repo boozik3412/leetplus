@@ -12,7 +12,17 @@
 Restored-copy gate 18.08.2026: настоящий production backup восстановлен в
 изолированный PostgreSQL; clean migration/repeat/data-zero-diff и полный
 activation-role TLS/HBA/SCRAM apply/attest/rollback завершены `PASS`.
+Exact SHA `3f325acc2428b1e3c3797075b218efeb454fae91` принят четырьмя CI
+runs; скачанный artifact `9321380247`, archive SHA-256
+`adb75120f35ca54bbd80924f467c78296d425f3c94de86f437998b9046b5b7f4`,
+полностью прошёл outer/inner checksum, offline hydration и повторную
+artifact-bound приёмку на clean copy. Production не изменён.
 [Полный отчёт](./founder-production-restored-copy-rehearsal-2026-08-18.md).
+
+Restored-copy mail gate также принят: trusted TLS SMTP worker `1/1`, полный
+protected founder activation/enrollment/SENT/accept/disable `1/1`, после обоих
+disposable clone database/role residue `0`, исходный preflight снова `READY`.
+[Отчёт mail rehearsal](./founder-restored-copy-mail-rehearsal-2026-08-18.md).
 
 ## Что уже реализовано
 
@@ -185,12 +195,12 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 
 ## Что блокирует выдачу доступа
 
-1. Production backup/restore, clean migration/repeat/data zero-diff и
-   activation-role TLS/HBA/SCRAM lifecycle приняты. Изменения ещё нужно собрать
-   в новый clean SHA/CI artifact и повторить artifact-bound admission.
-2. Локальный `SENT` barrier, полный owner accept и безопасный one-tenant
-   enrollment доказаны на canonical CURRENT185. Ещё не выполнены production
-   worker enrollment и реальный trusted-SMTP canary.
+1. Production backup/restore, clean migration/repeat/data zero-diff,
+   activation-role TLS/HBA/SCRAM lifecycle и повторная приёмка скачанного
+   exact-SHA artifact закрыты.
+2. `SENT`, owner accept, one-tenant enrollment и trusted TLS SMTP доказаны на
+   disposable клонах restored copy. Ещё не выполнены production worker-role
+   enrollment, production SMTP secret/config и controlled production canary.
 3. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
    production-like A/B matrix, jobs/Telegram/files/SSE и Gate 2 для текущей
    сети из четырёх клубов не закрыты.
@@ -205,14 +215,16 @@ clean SHA + CI artifact [DONE]
   → [DONE restored copy] production-history migrate + repeat + zero-diff
   → [DONE restored copy] execute-only runtime role/grant/attestation
   → [DONE restored copy] direct HBA/TLS/SCRAM + rollback
-  → new exact-SHA CI artifact + artifact-bound recheck
+  → [DONE] exact-SHA CI artifact + outer/inner SHA + offline hydration
+  → [DONE restored copy] downloaded-artifact preflight/history/role/TLS/rollback
   → [DONE synthetic] dedicated pool + in-process HTTP/PG
   → [DONE synthetic] downloaded artifact API child process
   → [DONE] owner invite status/revoke
   → [DONE engineering/CI] immutable owner invite reissue
   → [DONE local PostgreSQL] CURRENT185 worker + SENT/reissue/accept
   → [DONE exact-SHA CI] exact one-tenant mail enrollment plan/apply/check/disable
-  → trusted production-like SMTP canary
+  → [DONE restored-copy clones] trusted TLS SMTP + enrollment/SENT/accept/disable
+  → production roles/secrets + controlled SMTP canary
   → Gate 1MT browser/store-scope
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE

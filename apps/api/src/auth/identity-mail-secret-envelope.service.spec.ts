@@ -83,7 +83,7 @@ function typeScriptFiles(directory: string): string[] {
 }
 
 describe('IdentityMailSecretEnvelopeService', () => {
-  it('is referenced only by the founder activation producer and standalone worker consumer', () => {
+  it('is referenced only by approved owner-invite producers and the standalone worker consumer', () => {
     const implementationPath = join(
       __dirname,
       'identity-mail-secret-envelope.service.ts',
@@ -94,6 +94,12 @@ describe('IdentityMailSecretEnvelopeService', () => {
         '..',
         'admin',
         'founder-operator-beta-activation.service.ts',
+      ),
+      join(
+        __dirname,
+        '..',
+        'admin',
+        'founder-owner-invite-lifecycle.service.ts',
       ),
       join(
         __dirname,

@@ -242,6 +242,7 @@ describePostgres(
       const ownerInviteLifecycle = new FounderOwnerInviteLifecycleService(
         prisma,
         identity,
+        config,
       );
       const effectiveSecurityDefiners = await activationPrisma.$queryRaw<
         Array<{ signature: string }>
@@ -553,6 +554,120 @@ describePostgres(
         cancelEvents: 1,
         auditCount: 1,
         responseContainsOwnerEmail: false,
+      });
+
+      const reissueExpiresAt = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1_000,
+      ).toISOString();
+      const reissueBody = {
+        confirmation: `REISSUE OWNER INVITE ${provisioned.tenant.id}`,
+        requestId: randomUUID(),
+        reason: 'Create a fresh owner credential after atomic revocation',
+        supportTicket: 'FOUNDER-V2-PG-REISSUE',
+        expectedInviteId: invite.id,
+        expiresAt: reissueExpiresAt,
+      };
+      const reissued = await ownerInviteLifecycle.reissue(
+        actor,
+        provisioned.tenant.id,
+        reissueBody,
+      );
+      const reissueReplay = await ownerInviteLifecycle.reissue(
+        actor,
+        provisioned.tenant.id,
+        reissueBody,
+      );
+      const [
+        reissueCommand,
+        replacementInvite,
+        replacementOutbox,
+        replacementClaim,
+        inviteCount,
+        outboxCount,
+        issueCount,
+        reissueAuditCount,
+      ] = await Promise.all([
+        prisma.founderOwnerInviteReissueCommand.findUniqueOrThrow({
+          where: { id: reissued.commandId },
+        }),
+        prisma.userInvite.findUniqueOrThrow({
+          where: { id: reissued.inviteId },
+        }),
+        prisma.identityMailOutbox.findUniqueOrThrow({
+          where: { id: reissued.outboxId },
+        }),
+        prisma.identityEmailClaim.findFirstOrThrow({
+          where: { tenantId: provisioned.tenant.id },
+        }),
+        prisma.userInvite.count({ where: { tenantId: provisioned.tenant.id } }),
+        prisma.identityMailOutbox.count({
+          where: { tenantId: provisioned.tenant.id },
+        }),
+        prisma.identityOwnerInviteIssueCommand.count({
+          where: { tenantId: provisioned.tenant.id },
+        }),
+        prisma.platformAdminAuditEvent.count({
+          where: {
+            tenantId: provisioned.tenant.id,
+            action: 'FOUNDER_OWNER_INVITE_REISSUED',
+            requestId: reissueBody.requestId,
+          },
+        }),
+      ]);
+      const reissueJson = JSON.stringify([reissued, reissueReplay]);
+      expect({
+        decision: reissued.decision,
+        replayDecision: reissueReplay.decision,
+        sameCommand: reissueReplay.commandId === reissued.commandId,
+        sequence: reissueCommand.sequence,
+        predecessor: reissueCommand.predecessorInviteId,
+        replacementInviteId: replacementInvite.id,
+        replacementRole: replacementInvite.role,
+        replacementScope: replacementInvite.accessScope,
+        replacementRevoked: replacementInvite.revokedAt,
+        replacementOutboxStatus: replacementOutbox.status,
+        replacementOutboxReleased:
+          replacementOutbox.releasedAt?.getTime() ===
+          replacementOutbox.availableAt?.getTime(),
+        claimSubject: replacementClaim.subjectId,
+        claimLocator: replacementClaim.workflowLocator,
+        inviteCount,
+        outboxCount,
+        issueCount,
+        reissueAuditCount,
+        responseContainsOwnerEmail: reissueJson.includes(ownerEmail),
+        responseContainsSecretMaterial:
+          /tokenHash|secretCiphertext|registrationUrl/u.test(reissueJson),
+      }).toEqual({
+        decision: 'REISSUED',
+        replayDecision: 'REPLAYED',
+        sameCommand: true,
+        sequence: 1,
+        predecessor: invite.id,
+        replacementInviteId: reissued.inviteId,
+        replacementRole: 'OWNER',
+        replacementScope: 'NETWORK',
+        replacementRevoked: null,
+        replacementOutboxStatus: 'PENDING',
+        replacementOutboxReleased: true,
+        claimSubject: reissued.inviteId,
+        claimLocator: reissueCommand.workflowLocator,
+        inviteCount: 2,
+        outboxCount: 2,
+        issueCount: 2,
+        reissueAuditCount: 1,
+        responseContainsOwnerEmail: false,
+        responseContainsSecretMaterial: false,
+      });
+      await expect(
+        ownerInviteLifecycle.status(actor, provisioned.tenant.id),
+      ).resolves.toMatchObject({
+        ownerInvite: {
+          id: reissued.inviteId,
+          state: 'ACTIVE',
+          deliveryStatus: 'PENDING',
+        },
+        actions: { revokeAllowed: true, reissueRequired: false },
       });
     });
   },

@@ -28,6 +28,15 @@ const TENANT_ID = '22222222-2222-4222-8222-222222222222';
 const INVITE_ID = '33333333-3333-4333-8333-333333333333';
 const OUTBOX_ID = '44444444-4444-4444-8444-444444444444';
 const OWNER_EMAIL = 'owner@example.test';
+const REISSUE_REQUEST_ID = '55555555-5555-4555-8555-555555555555';
+const REISSUE_COMMAND_ID = '66666666-6666-4666-8666-666666666666';
+const RESERVATION_ID = '77777777-7777-4777-8777-777777777777';
+const ISSUE_COMMAND_ID = '88888888-8888-4888-8888-888888888888';
+const NEW_INVITE_ID = '99999999-9999-4999-8999-999999999999';
+const NEW_OUTBOX_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const MESSAGE_KEY = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const NOW = new Date('2026-08-18T01:00:00.000Z');
+const REISSUE_EXPIRES_AT = new Date('2026-08-25T01:00:00.000Z');
 
 type PrismaMock = {
   tenant: { findUnique: jest.Mock };
@@ -52,6 +61,18 @@ function revokeBody(overrides: Record<string, unknown> = {}) {
     reason: 'Owner mailbox must be replaced before onboarding',
     supportTicket: 'BETA-OWNER-1',
     expectedInviteId: INVITE_ID,
+    ...overrides,
+  };
+}
+
+function reissueBody(overrides: Record<string, unknown> = {}) {
+  return {
+    confirmation: `REISSUE OWNER INVITE ${TENANT_ID}`,
+    requestId: REISSUE_REQUEST_ID,
+    reason: 'Issue a fresh owner credential after revocation',
+    supportTicket: 'BETA-OWNER-2',
+    expectedInviteId: INVITE_ID,
+    expiresAt: REISSUE_EXPIRES_AT.toISOString(),
     ...overrides,
   };
 }
@@ -120,6 +141,7 @@ describe('FounderOwnerInviteLifecycleService', () => {
     IdentityEmailClaimService['releaseInvite']
   >;
   let service: FounderOwnerInviteLifecycleService;
+  let uuidFactory: jest.Mock<string, []>;
   let invite: {
     id: string;
     email: string;
@@ -129,7 +151,7 @@ describe('FounderOwnerInviteLifecycleService', () => {
     storeIds: string[];
     expiresAt: Date;
     acceptedAt: null;
-    revokedAt: null;
+    revokedAt: Date | null;
     revokedByUserId: null;
     identityClaimRevision: number;
     updatedAt: Date;
@@ -154,9 +176,31 @@ describe('FounderOwnerInviteLifecycleService', () => {
       subjectId: INVITE_ID,
       releasedRevision: 2,
     });
+    uuidFactory = jest
+      .fn<string, []>()
+      .mockReturnValueOnce(REISSUE_COMMAND_ID)
+      .mockReturnValueOnce(RESERVATION_ID)
+      .mockReturnValueOnce(ISSUE_COMMAND_ID)
+      .mockReturnValueOnce(NEW_INVITE_ID)
+      .mockReturnValueOnce(NEW_OUTBOX_ID)
+      .mockReturnValueOnce(MESSAGE_KEY);
     service = new FounderOwnerInviteLifecycleService(
       prisma as unknown as PrismaService,
       identity,
+      {
+        get: jest.fn((key: string) => {
+          if (key === 'IDENTITY_MAIL_ENCRYPTION_KEY') {
+            return Buffer.from(
+              Array.from({ length: 32 }, (_, index) => index + 1),
+            ).toString('base64url');
+          }
+          if (key === 'IDENTITY_MAIL_ENCRYPTION_KEY_VERSION') return 'v1';
+          if (key === 'IDENTITY_MAIL_AAD_ENVIRONMENT') return 'test';
+          return undefined;
+        }),
+      } as unknown as ConfigService,
+      () => NOW,
+      uuidFactory,
     );
 
     prisma.user.findUnique.mockResolvedValue({
@@ -436,6 +480,73 @@ describe('FounderOwnerInviteLifecycleService', () => {
     });
     expect(prisma.userInvite.updateMany).not.toHaveBeenCalled();
     expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('reissues only a revoked invite as a fresh immutable token aggregate', async () => {
+    invite.revokedAt = new Date('2026-08-18T00:30:00.000Z');
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          receipt: {
+            schemaVersion: 1,
+            operation: 'REISSUE_INITIAL_OWNER_INVITE',
+            decision: 'REISSUED',
+            tenantId: TENANT_ID,
+            commandId: REISSUE_COMMAND_ID,
+            sequence: 1,
+            predecessorInviteId: INVITE_ID,
+            inviteId: NEW_INVITE_ID,
+            outboxId: NEW_OUTBOX_ID,
+            outboxStatus: 'PENDING',
+            expiresAtEpochMs: REISSUE_EXPIRES_AT.getTime(),
+            createdTransactionId: '123',
+          },
+        },
+      ]);
+
+    const result = await service.reissue(actor, TENANT_ID, reissueBody());
+
+    expect(result).toEqual({
+      ok: true,
+      contractVersion: FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT,
+      decision: 'REISSUED',
+      replayed: false,
+      tenantId: TENANT_ID,
+      commandId: REISSUE_COMMAND_ID,
+      sequence: 1,
+      predecessorInviteId: INVITE_ID,
+      inviteId: NEW_INVITE_ID,
+      outboxId: NEW_OUTBOX_ID,
+      deliveryStatus: IdentityMailOutboxStatus.PENDING,
+      expiresAt: REISSUE_EXPIRES_AT.toISOString(),
+    });
+    expect(result.inviteId).not.toBe(INVITE_ID);
+    expect(result.outboxId).not.toBe(OUTBOX_ID);
+    expect(JSON.stringify(result)).not.toContain(OWNER_EMAIL);
+    expect(uuidFactory).toHaveBeenCalledTimes(6);
+    expect(prisma.userInvite.updateMany).not.toHaveBeenCalled();
+    expect(prisma.identityMailOutbox.updateMany).not.toHaveBeenCalled();
+    expect(releaseInvite).not.toHaveBeenCalled();
+  });
+
+  it('blocks reissue of an active invite and rejects blind-resend fields', async () => {
+    await expect(
+      service.reissue(actor, TENANT_ID, reissueBody()),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'FOUNDER_OWNER_INVITE_REISSUE_NOT_ALLOWED' },
+    });
+
+    await expect(
+      service.reissue(
+        actor,
+        TENANT_ID,
+        reissueBody({ resendExistingToken: true }),
+      ),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'FOUNDER_OWNER_INVITE_FIELD_NOT_ALLOWED' },
+    });
   });
 
   it('uses the common tenant-lock transaction options for status and revoke', async () => {

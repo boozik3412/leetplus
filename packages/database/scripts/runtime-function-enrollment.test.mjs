@@ -8,6 +8,8 @@ import {
   EXCLUDED_RUNTIME_RELEASE_FUNCTIONS,
   EXCLUDED_WORKER_FUNCTIONS,
   RUNTIME_RELEASE_SEALED_RUNTIME_TABLES,
+  RUNTIME_FUNCTION_ENROLLMENT_MIGRATION,
+  RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT,
   SEALED_RUNTIME_TABLES,
   SEALED_RUNTIME_TYPES,
   RuntimeFunctionEnrollmentError,
@@ -52,10 +54,9 @@ function compliantSnapshot() {
     migration: {
       completedTargetCount: 1,
       completedRequiredCount: 1,
-      completedCount: 183,
+      completedCount: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT,
       unfinishedCount: 0,
-      latestCompletedMigration:
-        "20260817030000_founder_operator_beta_activation_runtime_v1",
+      latestCompletedMigration: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION,
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -229,7 +230,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260817030000_founder_operator_beta_activation_runtime_v1 183$/u,
+    /20260818010000_founder_owner_invite_reissue_v1 184$/u,
   );
 });
 
@@ -774,7 +775,7 @@ test("rejects every activation-bound role before general enrollment", () => {
   );
 });
 
-test("binds enrollment to exact terminal migration 183 and exact count 183", () => {
+test("binds enrollment to exact terminal migration 184 and exact count 184", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

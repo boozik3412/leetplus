@@ -426,105 +426,105 @@ model User {
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 
-  tenant                               Tenant                                @relation(fields: [tenantId], references: [id])
-  customRole                           UserAccessRole?                       @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  tenant                               Tenant                                 @relation(fields: [tenantId], references: [id])
+  customRole                           UserAccessRole?                        @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
   emailVerificationTokens              EmailVerificationToken[]
   importJobs                           ImportJob[]
   guestCrmEvents                       GuestCrmEvent[]
   guestCrmLeads                        GuestCrmLead[]
-  guestCrmTasks                        GuestCrmTask[]                        @relation("GuestCrmTaskCreatedBy")
-  assignedGuestCrmTasks                GuestCrmTask[]                        @relation("GuestCrmTaskAssignedTo")
+  guestCrmTasks                        GuestCrmTask[]                         @relation("GuestCrmTaskCreatedBy")
+  assignedGuestCrmTasks                GuestCrmTask[]                         @relation("GuestCrmTaskAssignedTo")
   guestCrmContactEvents                GuestCrmContactEvent[]
-  createdMarketingCampaigns            MarketingCampaign[]                   @relation("MarketingCampaignCreatedBy")
-  ownedMarketingCampaigns              MarketingCampaign[]                   @relation("MarketingCampaignOwner")
-  createdMarketingPromoBundles         MarketingPromoBundle[]                @relation("MarketingPromoBundleCreatedBy")
-  createdMarketingPromoBundleLaunches  MarketingPromoBundleLaunch[]          @relation("MarketingPromoBundleLaunchCreatedBy")
-  createdMarketingPromoBundleUsages    MarketingPromoBundleUsage[]           @relation("MarketingPromoBundleUsageCreatedBy")
-  createdMarketingMissions             MarketingMission[]                    @relation("MarketingMissionCreatedBy")
-  createdMarketingMissionRewards       MarketingMissionReward[]              @relation("MarketingMissionRewardCreatedBy")
-  approvedMarketingMissionRewards      MarketingMissionReward[]              @relation("MarketingMissionRewardApprovedBy")
-  createdGuestGameProfiles             GuestGameProfile[]                    @relation("GuestGameProfileCreatedBy")
-  createdGuestGameLootBoxes            GuestGameLootBox[]                    @relation("GuestGameLootBoxCreatedBy")
-  createdGuestGameMissions             GuestGameMission[]                    @relation("GuestGameMissionCreatedBy")
-  createdGuestGameSeasons              GuestGameSeason[]                     @relation("GuestGameSeasonCreatedBy")
-  createdGuestGameRewards              GuestGameReward[]                     @relation("GuestGameRewardCreatedBy")
-  approvedGuestGameRewards             GuestGameReward[]                     @relation("GuestGameRewardApprovedBy")
-  createdGuestBonusLedgerEntries       GuestBonusLedgerEntry[]               @relation("GuestBonusLedgerCreatedBy")
-  processedGuestBonusLedgerEntries     GuestBonusLedgerEntry[]               @relation("GuestBonusLedgerProcessedBy")
-  createdGuestGameDeliveries           GuestGameDelivery[]                   @relation("GuestGameDeliveryCreatedBy")
-  guestGameDeliveryEvents              GuestGameDeliveryEvent[]              @relation("GuestGameDeliveryEventActor")
-  createdGuestGameEvents               GuestGameEvent[]                      @relation("GuestGameEventCreatedBy")
-  createdGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingCreatedBy")
-  updatedGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingUpdatedBy")
-  createdGuestGamePromoCards           GuestGamePromoCard[]                  @relation("GuestGamePromoCardCreatedBy")
-  createdGuestGameVisualDrafts         GuestGameVisualDraft[]                @relation("GuestGameVisualDraftCreatedBy")
-  updatedGuestGameVisualDrafts         GuestGameVisualDraft[]                @relation("GuestGameVisualDraftUpdatedBy")
-  confirmedCategorySourceMappings      CategorySourceMapping[]               @relation("CategorySourceMappingConfirmedBy")
-  categorySourceMappingEvents          CategorySourceMappingEvent[]          @relation("CategorySourceMappingEventActor")
-  publishedGuestGameVisualDrafts       GuestGameVisualDraft[]                @relation("GuestGameVisualDraftPublishedBy")
+  createdMarketingCampaigns            MarketingCampaign[]                    @relation("MarketingCampaignCreatedBy")
+  ownedMarketingCampaigns              MarketingCampaign[]                    @relation("MarketingCampaignOwner")
+  createdMarketingPromoBundles         MarketingPromoBundle[]                 @relation("MarketingPromoBundleCreatedBy")
+  createdMarketingPromoBundleLaunches  MarketingPromoBundleLaunch[]           @relation("MarketingPromoBundleLaunchCreatedBy")
+  createdMarketingPromoBundleUsages    MarketingPromoBundleUsage[]            @relation("MarketingPromoBundleUsageCreatedBy")
+  createdMarketingMissions             MarketingMission[]                     @relation("MarketingMissionCreatedBy")
+  createdMarketingMissionRewards       MarketingMissionReward[]               @relation("MarketingMissionRewardCreatedBy")
+  approvedMarketingMissionRewards      MarketingMissionReward[]               @relation("MarketingMissionRewardApprovedBy")
+  createdGuestGameProfiles             GuestGameProfile[]                     @relation("GuestGameProfileCreatedBy")
+  createdGuestGameLootBoxes            GuestGameLootBox[]                     @relation("GuestGameLootBoxCreatedBy")
+  createdGuestGameMissions             GuestGameMission[]                     @relation("GuestGameMissionCreatedBy")
+  createdGuestGameSeasons              GuestGameSeason[]                      @relation("GuestGameSeasonCreatedBy")
+  createdGuestGameRewards              GuestGameReward[]                      @relation("GuestGameRewardCreatedBy")
+  approvedGuestGameRewards             GuestGameReward[]                      @relation("GuestGameRewardApprovedBy")
+  createdGuestBonusLedgerEntries       GuestBonusLedgerEntry[]                @relation("GuestBonusLedgerCreatedBy")
+  processedGuestBonusLedgerEntries     GuestBonusLedgerEntry[]                @relation("GuestBonusLedgerProcessedBy")
+  createdGuestGameDeliveries           GuestGameDelivery[]                    @relation("GuestGameDeliveryCreatedBy")
+  guestGameDeliveryEvents              GuestGameDeliveryEvent[]               @relation("GuestGameDeliveryEventActor")
+  createdGuestGameEvents               GuestGameEvent[]                       @relation("GuestGameEventCreatedBy")
+  createdGuestGameLogTypeMappings      GuestGameLogTypeMapping[]              @relation("GuestGameLogTypeMappingCreatedBy")
+  updatedGuestGameLogTypeMappings      GuestGameLogTypeMapping[]              @relation("GuestGameLogTypeMappingUpdatedBy")
+  createdGuestGamePromoCards           GuestGamePromoCard[]                   @relation("GuestGamePromoCardCreatedBy")
+  createdGuestGameVisualDrafts         GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftCreatedBy")
+  updatedGuestGameVisualDrafts         GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftUpdatedBy")
+  confirmedCategorySourceMappings      CategorySourceMapping[]                @relation("CategorySourceMappingConfirmedBy")
+  categorySourceMappingEvents          CategorySourceMappingEvent[]           @relation("CategorySourceMappingEventActor")
+  publishedGuestGameVisualDrafts       GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftPublishedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   guestStaffIdentityMappingEvents      GuestStaffIdentityMappingEvent[]
-  staffMember                          StaffMember?                          @relation("StaffMemberUser")
-  createdStaffMembers                  StaffMember[]                         @relation("StaffMemberCreatedBy")
-  createdStaffTasks                    StaffTask[]                           @relation("StaffTaskCreatedBy")
-  createdStaffTaskTemplates            StaffTaskTemplate[]                   @relation("StaffTaskTemplateCreatedBy")
-  createdStaffTaskRecurringRules       StaffTaskRecurringRule[]              @relation("StaffTaskRecurringRuleCreatedBy")
-  assignedStaffTaskRecurringRules      StaffTaskRecurringRule[]              @relation("StaffTaskRecurringRuleAssignedTo")
-  assignedStaffTasks                   StaffTask[]                           @relation("StaffTaskAssignedTo")
-  observedStaffTasks                   StaffTaskObserver[]                   @relation("StaffTaskObserverUser")
-  staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
-  staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
-  staffTaskCatalogAuditEvents          StaffTaskCatalogAuditEvent[]          @relation("StaffTaskCatalogAuditActor")
-  updatedStaffKnowledgeSettings        StaffKnowledgeSettings[]              @relation("StaffKnowledgeSettingsUpdatedBy")
-  staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]         @relation("StaffKnowledgeSettingsEventActor")
-  createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
-  approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleApprovedBy")
-  createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]        @relation("StaffKnowledgeArticleVersionCreatedBy")
-  staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]    @relation("StaffKnowledgeArticleReadReceiptUser")
-  createdStaffTrainingCourses          StaffTrainingCourse[]                 @relation("StaffTrainingCourseCreatedBy")
-  staffTrainingProgresses              StaffTrainingProgress[]               @relation("StaffTrainingProgressUser")
-  updatedStaffTrainingProgresses       StaffTrainingProgress[]               @relation("StaffTrainingProgressUpdatedBy")
-  createdStaffOnboardingPlans          StaffOnboardingPlan[]                 @relation("StaffOnboardingPlanCreatedBy")
-  createdStaffAssessments              StaffAssessment[]                     @relation("StaffAssessmentCreatedBy")
-  staffAssessmentResults               StaffAssessmentResult[]               @relation("StaffAssessmentUser")
-  reviewedStaffAssessmentResults       StaffAssessmentResult[]               @relation("StaffAssessmentReviewedBy")
-  createdStaffShiftRegulations         StaffShiftRegulation[]                @relation("StaffShiftRegulationCreatedBy")
-  createdStaffShiftRegulationVersions  StaffShiftRegulationVersion[]         @relation("StaffShiftRegulationVersionCreatedBy")
+  staffMember                          StaffMember?                           @relation("StaffMemberUser")
+  createdStaffMembers                  StaffMember[]                          @relation("StaffMemberCreatedBy")
+  createdStaffTasks                    StaffTask[]                            @relation("StaffTaskCreatedBy")
+  createdStaffTaskTemplates            StaffTaskTemplate[]                    @relation("StaffTaskTemplateCreatedBy")
+  createdStaffTaskRecurringRules       StaffTaskRecurringRule[]               @relation("StaffTaskRecurringRuleCreatedBy")
+  assignedStaffTaskRecurringRules      StaffTaskRecurringRule[]               @relation("StaffTaskRecurringRuleAssignedTo")
+  assignedStaffTasks                   StaffTask[]                            @relation("StaffTaskAssignedTo")
+  observedStaffTasks                   StaffTaskObserver[]                    @relation("StaffTaskObserverUser")
+  staffTaskComments                    StaffTaskComment[]                     @relation("StaffTaskCommentAuthor")
+  staffTaskAuditEvents                 StaffTaskAuditEvent[]                  @relation("StaffTaskAuditActor")
+  staffTaskCatalogAuditEvents          StaffTaskCatalogAuditEvent[]           @relation("StaffTaskCatalogAuditActor")
+  updatedStaffKnowledgeSettings        StaffKnowledgeSettings[]               @relation("StaffKnowledgeSettingsUpdatedBy")
+  staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]          @relation("StaffKnowledgeSettingsEventActor")
+  createdStaffKnowledgeArticles        StaffKnowledgeArticle[]                @relation("StaffKnowledgeArticleCreatedBy")
+  approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]                @relation("StaffKnowledgeArticleApprovedBy")
+  createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]         @relation("StaffKnowledgeArticleVersionCreatedBy")
+  staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]     @relation("StaffKnowledgeArticleReadReceiptUser")
+  createdStaffTrainingCourses          StaffTrainingCourse[]                  @relation("StaffTrainingCourseCreatedBy")
+  staffTrainingProgresses              StaffTrainingProgress[]                @relation("StaffTrainingProgressUser")
+  updatedStaffTrainingProgresses       StaffTrainingProgress[]                @relation("StaffTrainingProgressUpdatedBy")
+  createdStaffOnboardingPlans          StaffOnboardingPlan[]                  @relation("StaffOnboardingPlanCreatedBy")
+  createdStaffAssessments              StaffAssessment[]                      @relation("StaffAssessmentCreatedBy")
+  staffAssessmentResults               StaffAssessmentResult[]                @relation("StaffAssessmentUser")
+  reviewedStaffAssessmentResults       StaffAssessmentResult[]                @relation("StaffAssessmentReviewedBy")
+  createdStaffShiftRegulations         StaffShiftRegulation[]                 @relation("StaffShiftRegulationCreatedBy")
+  createdStaffShiftRegulationVersions  StaffShiftRegulationVersion[]          @relation("StaffShiftRegulationVersionCreatedBy")
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
-  createdStaffChecklistTemplates       StaffChecklistTemplate[]              @relation("StaffChecklistTemplateCreatedBy")
-  createdStaffChecklistRuns            StaffChecklistRun[]                   @relation("StaffChecklistRunCreatedBy")
-  assignedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunAssignedTo")
-  reviewedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunReviewedBy")
-  updatedStaffDisciplinePolicies       StaffDisciplinePolicy[]               @relation("StaffDisciplinePolicyUpdatedBy")
-  createdStaffDisciplineRules          StaffDisciplineRule[]                 @relation("StaffDisciplineRuleCreatedBy")
-  staffDisciplineRecords               StaffDisciplineRecord[]               @relation("StaffDisciplineRecordUser")
-  createdStaffDisciplineRecords        StaffDisciplineRecord[]               @relation("StaffDisciplineRecordCreatedBy")
-  createdStaffSalarySchemes            StaffSalaryScheme[]                   @relation("StaffSalarySchemeCreatedBy")
+  createdStaffChecklistTemplates       StaffChecklistTemplate[]               @relation("StaffChecklistTemplateCreatedBy")
+  createdStaffChecklistRuns            StaffChecklistRun[]                    @relation("StaffChecklistRunCreatedBy")
+  assignedStaffChecklistRuns           StaffChecklistRun[]                    @relation("StaffChecklistRunAssignedTo")
+  reviewedStaffChecklistRuns           StaffChecklistRun[]                    @relation("StaffChecklistRunReviewedBy")
+  updatedStaffDisciplinePolicies       StaffDisciplinePolicy[]                @relation("StaffDisciplinePolicyUpdatedBy")
+  createdStaffDisciplineRules          StaffDisciplineRule[]                  @relation("StaffDisciplineRuleCreatedBy")
+  staffDisciplineRecords               StaffDisciplineRecord[]                @relation("StaffDisciplineRecordUser")
+  createdStaffDisciplineRecords        StaffDisciplineRecord[]                @relation("StaffDisciplineRecordCreatedBy")
+  createdStaffSalarySchemes            StaffSalaryScheme[]                    @relation("StaffSalarySchemeCreatedBy")
   guestSavedFilters                    GuestSavedFilter[]
   guestAudiences                       GuestAudience[]
   storeAccesses                        UserStoreAccess[]
-  createdUserInvites                   UserInvite[]                          @relation("UserInviteCreatedBy")
-  acceptedUserInvites                  UserInvite[]                          @relation("UserInviteAcceptedBy")
-  revokedUserInvites                   UserInvite[]                          @relation("UserInviteRevokedBy")
-  createdStaffChatChannels             StaffChatChannel[]                    @relation("StaffChatChannelCreatedBy")
-  staffChatChannelMemberships          StaffChatChannelMember[]              @relation("StaffChatChannelMemberUser")
-  addedStaffChatChannelMembers         StaffChatChannelMember[]              @relation("StaffChatChannelMemberAddedBy")
-  authoredStaffChatMessages            StaffChatMessage[]                    @relation("StaffChatMessageAuthor")
-  staffChatMessageEdits                StaffChatMessageEdit[]                @relation("StaffChatMessageEditActor")
-  staffChatMentions                    StaffChatMention[]                    @relation("StaffChatMentionUser")
+  createdUserInvites                   UserInvite[]                           @relation("UserInviteCreatedBy")
+  acceptedUserInvites                  UserInvite[]                           @relation("UserInviteAcceptedBy")
+  revokedUserInvites                   UserInvite[]                           @relation("UserInviteRevokedBy")
+  createdStaffChatChannels             StaffChatChannel[]                     @relation("StaffChatChannelCreatedBy")
+  staffChatChannelMemberships          StaffChatChannelMember[]               @relation("StaffChatChannelMemberUser")
+  addedStaffChatChannelMembers         StaffChatChannelMember[]               @relation("StaffChatChannelMemberAddedBy")
+  authoredStaffChatMessages            StaffChatMessage[]                     @relation("StaffChatMessageAuthor")
+  staffChatMessageEdits                StaffChatMessageEdit[]                 @relation("StaffChatMessageEditActor")
+  staffChatMentions                    StaffChatMention[]                     @relation("StaffChatMentionUser")
   staffChatReadReceipts                StaffChatReadReceipt[]
-  uploadedStaffAttachments             StaffAttachment[]                     @relation("StaffAttachmentUploadedBy")
-  createdStaffAttachmentBindings       StaffAttachmentBinding[]              @relation("StaffAttachmentBindingCreatedBy")
-  acknowledgedStaffNotifications       StaffNotification[]                   @relation("StaffNotificationAcknowledgedBy")
-  resolvedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationResolvedBy")
-  targetedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationTargetUser")
-  approvedTenantAdmissionDecisions     TenantAdmissionDecision[]             @relation("TenantAdmissionDecisionApprovedBy")
-  approvedFounderOperatorBetaGos       FounderOperatorBetaGo[]               @relation("FounderOperatorBetaGoApprovedBy")
-  rollbackFounderOperatorBetaGos       FounderOperatorBetaGo[]               @relation("FounderOperatorBetaGoRollbackOwner")
+  uploadedStaffAttachments             StaffAttachment[]                      @relation("StaffAttachmentUploadedBy")
+  createdStaffAttachmentBindings       StaffAttachmentBinding[]               @relation("StaffAttachmentBindingCreatedBy")
+  acknowledgedStaffNotifications       StaffNotification[]                    @relation("StaffNotificationAcknowledgedBy")
+  resolvedStaffNotifications           StaffNotification[]                    @relation("StaffNotificationResolvedBy")
+  targetedStaffNotifications           StaffNotification[]                    @relation("StaffNotificationTargetUser")
+  approvedTenantAdmissionDecisions     TenantAdmissionDecision[]              @relation("TenantAdmissionDecisionApprovedBy")
+  approvedFounderOperatorBetaGos       FounderOperatorBetaGo[]                @relation("FounderOperatorBetaGoApprovedBy")
+  rollbackFounderOperatorBetaGos       FounderOperatorBetaGo[]                @relation("FounderOperatorBetaGoRollbackOwner")
   founderOperatorBetaActivations       FounderOperatorBetaActivationCommand[] @relation("FounderOperatorBetaActivationActor")
-  sharedBetaTenantActivations          SharedBetaTenantActivationCommand[]   @relation("SharedBetaTenantActivationActor")
-  platformAdminAuditEvents             PlatformAdminAuditEvent[]             @relation("PlatformAdminAuditActor")
-  supportedTenants                     Tenant[]                              @relation("TenantSupportOwner")
+  sharedBetaTenantActivations          SharedBetaTenantActivationCommand[]    @relation("SharedBetaTenantActivationActor")
+  platformAdminAuditEvents             PlatformAdminAuditEvent[]              @relation("PlatformAdminAuditActor")
+  supportedTenants                     Tenant[]                               @relation("TenantSupportOwner")
 
   @@unique([tenantId, id], map: "user_tenant_id_uidx")
   @@index([tenantId])
@@ -611,16 +611,16 @@ model UserInvite {
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 
-  tenant                   Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customRole               UserAccessRole?                    @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
-  createdBy                User?                              @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  acceptedBy               User?                              @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
-  revokedBy                User?                              @relation("UserInviteRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
-  initialOwnerIssueCommand IdentityOwnerInviteIssueCommand?   @relation("IdentityOwnerInviteIssueCommandInvite")
-  identityMailOutbox       IdentityMailOutbox?                @relation("IdentityMailOutboxInvite")
-  identityMailDeliveryEvents IdentityMailDeliveryEvent[]      @relation("IdentityMailDeliveryEventInvite")
+  tenant                        Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customRole                    UserAccessRole?                       @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  createdBy                     User?                                 @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  acceptedBy                    User?                                 @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  revokedBy                     User?                                 @relation("UserInviteRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  initialOwnerIssueCommand      IdentityOwnerInviteIssueCommand?      @relation("IdentityOwnerInviteIssueCommandInvite")
+  identityMailOutbox            IdentityMailOutbox?                   @relation("IdentityMailOutboxInvite")
+  identityMailDeliveryEvents    IdentityMailDeliveryEvent[]           @relation("IdentityMailDeliveryEventInvite")
   founderOperatorBetaActivation FounderOperatorBetaActivationCommand? @relation("FounderOperatorBetaActivationInvite")
-  sharedBetaActivation     SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationInvite")
+  sharedBetaActivation          SharedBetaTenantActivationCommand?    @relation("SharedBetaTenantActivationInvite")
 
   @@unique([tenantId, id], map: "UserInvite_tenantId_id_key")
   @@index([tenantId, createdAt])
@@ -678,11 +678,11 @@ model IdentityOwnerInviteIssueCommand {
   claimRevision            Int
   createdAt                DateTime             @default(now()) @db.Timestamptz(3)
 
-  tenant               Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  invite               UserInvite                         @relation("IdentityOwnerInviteIssueCommandInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityOwnerInviteIssueCommand_invite_fkey")
-  outbox               IdentityMailOutbox?                @relation("IdentityOwnerInviteIssueCommandOutbox")
+  tenant                        Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  invite                        UserInvite                            @relation("IdentityOwnerInviteIssueCommandInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityOwnerInviteIssueCommand_invite_fkey")
+  outbox                        IdentityMailOutbox?                   @relation("IdentityOwnerInviteIssueCommandOutbox")
   founderOperatorBetaActivation FounderOperatorBetaActivationCommand? @relation("FounderOperatorBetaActivationIssue")
-  sharedBetaActivation SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationIssue")
+  sharedBetaActivation          SharedBetaTenantActivationCommand?    @relation("SharedBetaTenantActivationIssue")
 
   @@unique([tenantId, id], map: "identity_owner_invite_issue_command_tenant_id_key")
   @@unique([tenantId, action, requestId], map: "identity_owner_invite_issue_command_request_uidx")
@@ -696,53 +696,53 @@ model IdentityOwnerInviteIssueCommand {
 /// leased delivery state machine through sealed RPCs. Application and worker
 /// roles receive no direct relation access.
 model IdentityMailOutbox {
-  id                         String                   @id
-  tenantId                   String
-  issueCommandId             String
-  inviteId                   String
-  workflowLocator            String
-  aadEnvironment             String                   @db.VarChar(64)
-  template                   IdentityMailTemplate     @default(INITIAL_OWNER_INVITE)
-  status                     IdentityMailOutboxStatus @default(HOLD)
-  messageKey                 String
-  issueRequestDigest         String                   @db.VarChar(64)
-  tokenHash                  String                   @db.VarChar(64)
-  tokenDigestVersion         String                   @default("sha256-v1") @db.VarChar(16)
-  secretCiphertext           Bytes?
-  envelopeVersion            Int                      @default(1)
-  keyVersion                 String                   @default("v1") @db.VarChar(16)
-  expiresAt                  DateTime                 @db.Timestamptz(3)
-  releasedAt                 DateTime?                @db.Timestamptz(3)
-  attempts                   Int                      @default(0)
-  leaseVersion               Int                      @default(0)
-  transitionRevision         BigInt                   @default(0)
-  availableAt                DateTime?                @db.Timestamptz(3)
-  leaseOwnerDigest           String?                  @db.Char(64)
-  leaseTokenDigest           String?                  @db.Char(64)
-  claimedAt                  DateTime?                @db.Timestamptz(3)
-  leaseExpiresAt             DateTime?                @db.Timestamptz(3)
-  providerAttemptKey         String?                  @db.VarChar(96)
-  providerAttemptedAt        DateTime?                @db.Timestamptz(3)
-  providerAcknowledgeUntil   DateTime?                @db.Timestamptz(3)
-  providerAuthorityDigest    String?                  @db.Char(64)
-  messageIdDigest            String?                  @db.Char(64)
-  providerOutcomeClass       String?                  @db.VarChar(32)
-  providerObservedAt         DateTime?                @db.Timestamptz(3)
-  providerReceiptDigest      String?                  @db.Char(64)
-  terminalAckDigest          String?                  @db.Char(64)
-  ciphertextClearedAt        DateTime?                @db.Timestamptz(3)
-  sentAt                     DateTime?                @db.Timestamptz(3)
-  terminalAt                 DateTime?                @db.Timestamptz(3)
-  stateReasonCode            String?                  @db.VarChar(64)
-  createdAt                  DateTime                 @default(now()) @db.Timestamptz(3)
-  updatedAt                  DateTime                 @default(now()) @updatedAt @db.Timestamptz(3)
+  id                       String                   @id
+  tenantId                 String
+  issueCommandId           String
+  inviteId                 String
+  workflowLocator          String
+  aadEnvironment           String                   @db.VarChar(64)
+  template                 IdentityMailTemplate     @default(INITIAL_OWNER_INVITE)
+  status                   IdentityMailOutboxStatus @default(HOLD)
+  messageKey               String
+  issueRequestDigest       String                   @db.VarChar(64)
+  tokenHash                String                   @db.VarChar(64)
+  tokenDigestVersion       String                   @default("sha256-v1") @db.VarChar(16)
+  secretCiphertext         Bytes?
+  envelopeVersion          Int                      @default(1)
+  keyVersion               String                   @default("v1") @db.VarChar(16)
+  expiresAt                DateTime                 @db.Timestamptz(3)
+  releasedAt               DateTime?                @db.Timestamptz(3)
+  attempts                 Int                      @default(0)
+  leaseVersion             Int                      @default(0)
+  transitionRevision       BigInt                   @default(0)
+  availableAt              DateTime?                @db.Timestamptz(3)
+  leaseOwnerDigest         String?                  @db.Char(64)
+  leaseTokenDigest         String?                  @db.Char(64)
+  claimedAt                DateTime?                @db.Timestamptz(3)
+  leaseExpiresAt           DateTime?                @db.Timestamptz(3)
+  providerAttemptKey       String?                  @db.VarChar(96)
+  providerAttemptedAt      DateTime?                @db.Timestamptz(3)
+  providerAcknowledgeUntil DateTime?                @db.Timestamptz(3)
+  providerAuthorityDigest  String?                  @db.Char(64)
+  messageIdDigest          String?                  @db.Char(64)
+  providerOutcomeClass     String?                  @db.VarChar(32)
+  providerObservedAt       DateTime?                @db.Timestamptz(3)
+  providerReceiptDigest    String?                  @db.Char(64)
+  terminalAckDigest        String?                  @db.Char(64)
+  ciphertextClearedAt      DateTime?                @db.Timestamptz(3)
+  sentAt                   DateTime?                @db.Timestamptz(3)
+  terminalAt               DateTime?                @db.Timestamptz(3)
+  stateReasonCode          String?                  @db.VarChar(64)
+  createdAt                DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime                 @default(now()) @updatedAt @db.Timestamptz(3)
 
-  tenant               Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  issueCommand         IdentityOwnerInviteIssueCommand    @relation("IdentityOwnerInviteIssueCommandOutbox", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey")
-  invite               UserInvite                         @relation("IdentityMailOutboxInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_invite_fkey")
+  tenant                        Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  issueCommand                  IdentityOwnerInviteIssueCommand       @relation("IdentityOwnerInviteIssueCommandOutbox", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey")
+  invite                        UserInvite                            @relation("IdentityMailOutboxInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_invite_fkey")
   founderOperatorBetaActivation FounderOperatorBetaActivationCommand? @relation("FounderOperatorBetaActivationOutbox")
-  sharedBetaActivation SharedBetaTenantActivationCommand? @relation("SharedBetaTenantActivationOutbox")
-  deliveryEvents       IdentityMailDeliveryEvent[]
+  sharedBetaActivation          SharedBetaTenantActivationCommand?    @relation("SharedBetaTenantActivationOutbox")
+  deliveryEvents                IdentityMailDeliveryEvent[]
 
   @@unique([tenantId, id], map: "identity_mail_outbox_tenant_id_key")
   @@unique([tenantId, issueCommandId], map: "identity_mail_outbox_issue_command_uidx")
@@ -957,9 +957,9 @@ model FounderOperatorBetaGo {
   consumedAt                         DateTime? @db.Timestamptz(3)
   createdAt                          DateTime  @default(now()) @db.Timestamptz(3)
 
-  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  approvedBy    User   @relation("FounderOperatorBetaGoApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  rollbackOwner User   @relation("FounderOperatorBetaGoRollbackOwner", fields: [rollbackOwnerUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tenant        Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy    User                                  @relation("FounderOperatorBetaGoApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  rollbackOwner User                                  @relation("FounderOperatorBetaGoRollbackOwner", fields: [rollbackOwnerUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   activation    FounderOperatorBetaActivationCommand?
 
   @@unique([tenantId, requestId], map: "founder_operator_beta_go_request_uidx")
@@ -975,38 +975,38 @@ model FounderOperatorBetaGo {
 /// tenant and releases exactly one initial-owner outbox in one SERIALIZABLE
 /// transaction. Application roles never receive direct table writes.
 model FounderOperatorBetaActivationCommand {
-  id                                 String   @id
-  tenantId                           String   @unique(map: "founder_operator_beta_activation_tenant_uidx")
-  action                             String   @default("ACTIVATE_AND_RELEASE_OWNER_INVITE") @db.VarChar(64)
-  requestId                          String
-  requestDigest                      String   @db.Char(64)
-  goId                               String   @unique(map: "founder_operator_beta_activation_go_uidx")
-  releaseSha                         String   @db.Char(40)
-  environment                        String   @db.VarChar(64)
-  shellEvidenceDigest                String   @db.Char(64)
-  actualShellDigest                  String   @db.Char(64)
-  reservationSubjectId               String
-  reservationClaimRevision           Int
-  issueRequestId                     String
-  issueRequestDigest                 String   @db.Char(64)
-  issueCommandId                     String   @unique(map: "founder_operator_beta_activation_issue_uidx")
-  inviteId                           String   @unique(map: "founder_operator_beta_activation_invite_uidx")
-  outboxId                           String   @unique(map: "founder_operator_beta_activation_outbox_uidx")
-  messageKey                         String
-  tokenHash                          String   @db.Char(64)
-  secretCiphertextDigest             String   @db.Char(64)
-  workflowLocator                    String   @unique(map: "founder_operator_beta_activation_locator_uidx")
-  activatedByUserId                  String
-  entitlementProfileRevision         Int
-  executionRevisionBefore            Int
-  executionRevisionAfter             Int
-  trialPolicyVersion                 String   @db.VarChar(64)
-  trialDurationSeconds               Int
-  trialStartsAt                      DateTime @db.Timestamptz(3)
-  trialEndsAt                        DateTime @db.Timestamptz(3)
-  receipt                            Json
-  createdTransactionId               String
-  activatedAt                        DateTime @db.Timestamptz(3)
+  id                         String   @id
+  tenantId                   String   @unique(map: "founder_operator_beta_activation_tenant_uidx")
+  action                     String   @default("ACTIVATE_AND_RELEASE_OWNER_INVITE") @db.VarChar(64)
+  requestId                  String
+  requestDigest              String   @db.Char(64)
+  goId                       String   @unique(map: "founder_operator_beta_activation_go_uidx")
+  releaseSha                 String   @db.Char(40)
+  environment                String   @db.VarChar(64)
+  shellEvidenceDigest        String   @db.Char(64)
+  actualShellDigest          String   @db.Char(64)
+  reservationSubjectId       String
+  reservationClaimRevision   Int
+  issueRequestId             String
+  issueRequestDigest         String   @db.Char(64)
+  issueCommandId             String   @unique(map: "founder_operator_beta_activation_issue_uidx")
+  inviteId                   String   @unique(map: "founder_operator_beta_activation_invite_uidx")
+  outboxId                   String   @unique(map: "founder_operator_beta_activation_outbox_uidx")
+  messageKey                 String
+  tokenHash                  String   @db.Char(64)
+  secretCiphertextDigest     String   @db.Char(64)
+  workflowLocator            String   @unique(map: "founder_operator_beta_activation_locator_uidx")
+  activatedByUserId          String
+  entitlementProfileRevision Int
+  executionRevisionBefore    Int
+  executionRevisionAfter     Int
+  trialPolicyVersion         String   @db.VarChar(64)
+  trialDurationSeconds       Int
+  trialStartsAt              DateTime @db.Timestamptz(3)
+  trialEndsAt                DateTime @db.Timestamptz(3)
+  receipt                    Json
+  createdTransactionId       String
+  activatedAt                DateTime @db.Timestamptz(3)
 
   tenant      Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_tenant_fkey")
   go          FounderOperatorBetaGo           @relation(fields: [goId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_go_fkey")
@@ -1020,6 +1020,43 @@ model FounderOperatorBetaActivationCommand {
   @@unique([tenantId, issueCommandId], map: "founder_operator_beta_activation_tenant_issue_uidx")
   @@unique([tenantId, inviteId], map: "founder_operator_beta_activation_tenant_invite_uidx")
   @@unique([tenantId, outboxId], map: "founder_operator_beta_activation_tenant_outbox_uidx")
+}
+
+/// Immutable, PII-free authority for replacing a revoked or naturally expired
+/// initial OWNER invite. Each command creates a new invite, issue command,
+/// encrypted outbox and token; an existing secret is never resent.
+model FounderOwnerInviteReissueCommand {
+  id                     String   @id
+  tenantId               String
+  action                 String   @default("FOUNDER_OWNER_INVITE_REISSUE") @db.VarChar(64)
+  requestId              String
+  requestDigest          String   @db.Char(64)
+  sequence               Int
+  predecessorInviteId    String   @unique(map: "founder_owner_invite_reissue_predecessor_uidx")
+  predecessorOutboxId    String
+  reservationSubjectId   String   @unique(map: "founder_owner_invite_reissue_reservation_uidx")
+  workflowLocator        String   @unique(map: "founder_owner_invite_reissue_locator_uidx")
+  issueRequestId         String
+  issueRequestDigest     String   @db.Char(64)
+  issueCommandId         String   @unique(map: "founder_owner_invite_reissue_issue_uidx")
+  inviteId               String   @unique(map: "founder_owner_invite_reissue_invite_uidx")
+  outboxId               String   @unique(map: "founder_owner_invite_reissue_outbox_uidx")
+  messageKey             String   @unique(map: "founder_owner_invite_reissue_message_key_uidx")
+  tokenHash              String   @db.Char(64)
+  secretCiphertextDigest String   @db.Char(64)
+  expiresAt              DateTime @db.Timestamptz(3)
+  reissuedByUserId       String
+  reasonDigest           String   @db.Char(64)
+  supportTicketDigest    String?  @db.Char(64)
+  receipt                Json
+  createdTransactionId   String
+  reissuedAt             DateTime @db.Timestamptz(3)
+
+  @@unique([tenantId, action, requestId], map: "founder_owner_invite_reissue_request_uidx")
+  @@unique([tenantId, sequence], map: "founder_owner_invite_reissue_sequence_uidx")
+  @@unique([tenantId, inviteId], map: "founder_owner_invite_reissue_tenant_invite_uidx")
+  @@unique([tenantId, outboxId], map: "founder_owner_invite_reissue_tenant_outbox_uidx")
+  @@index([tenantId, sequence], map: "founder_owner_invite_reissue_tenant_sequence_idx")
 }
 
 /// Sealed CI-build provenance for one exact artifact, migration manifest,
@@ -3117,14 +3154,14 @@ model GuestGameEntitlement {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  tenant       Tenant           @relation(fields: [tenantId], references: [id])
-  profile      GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  guest        Guest?           @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  store        Store?           @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  event        GuestGameEvent?  @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  reward       GuestGameReward?  @relation("GuestGameEntitlementOutcomeReward", fields: [rewardId], references: [id], onDelete: SetNull)
-  sourceReward GuestGameReward?  @relation("GuestGameEntitlementSourceReward", fields: [sourceRewardId], references: [id], onDelete: Restrict)
-  walletItems GuestGameRewardWalletItem[]
+  tenant       Tenant                      @relation(fields: [tenantId], references: [id])
+  profile      GuestGameProfile?           @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest        Guest?                      @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store        Store?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  event        GuestGameEvent?             @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  reward       GuestGameReward?            @relation("GuestGameEntitlementOutcomeReward", fields: [rewardId], references: [id], onDelete: SetNull)
+  sourceReward GuestGameReward?            @relation("GuestGameEntitlementSourceReward", fields: [sourceRewardId], references: [id], onDelete: Restrict)
+  walletItems  GuestGameRewardWalletItem[]
 
   @@unique([tenantId, idempotencyKey], map: "guest_game_entitlement_idempotency_uidx")
   @@index([tenantId, originKey], map: "guest_game_entitlement_origin_idx")

@@ -60,10 +60,9 @@ function manifest(artifactPath, backupPath) {
       host: "127.0.0.1",
       ownerRoleName: "postgres",
       port: 55439,
-      sourceMigrationCount: 183,
+      sourceMigrationCount: 184,
       sourceMigrationManifestDigest: MIGRATION_DIGEST,
-      sourceSchemaHead:
-        "20260817030000_founder_operator_beta_activation_runtime_v1",
+      sourceSchemaHead: "20260818010000_founder_owner_invite_reissue_v1",
     },
   };
 }
@@ -73,11 +72,11 @@ function targetEvidence(overrides = {}) {
     currentDatabase: "leetplus_restored_founder_a1",
     currentUser: "postgres",
     founderActivationRoleCount: 0,
-    migrationCount: 183,
+    migrationCount: 184,
     migrationManifestDigest: MIGRATION_DIGEST,
     nonAppliedMigrationCount: 0,
     otherTargetSessionCount: 0,
-    schemaHead: "20260817030000_founder_operator_beta_activation_runtime_v1",
+    schemaHead: "20260818010000_founder_owner_invite_reissue_v1",
     serverAddress: "127.0.0.1",
     serverPort: 55439,
     systemIdentifier: SYSTEM_IDENTIFIER,

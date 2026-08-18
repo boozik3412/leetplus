@@ -28,8 +28,7 @@ const SYSTEM_IDENTIFIER = "7612345678901234567";
 const RELEASE_SHA = "a".repeat(40);
 const ARTIFACT_SHA = "b".repeat(64);
 const BACKUP_SHA = "c".repeat(64);
-const MIGRATION_NAME =
-  "20260817030000_founder_operator_beta_activation_runtime_v1";
+const MIGRATION_NAME = "20260818010000_founder_owner_invite_reissue_v1";
 const MIGRATION_CHECKSUM = "d".repeat(64);
 const MIGRATION_DIGEST = createHash("sha256")
   .update(`${MIGRATION_NAME}\0${MIGRATION_CHECKSUM}`, "utf8")

@@ -24,6 +24,7 @@ describe('AdminController shared beta provisioning boundary', () => {
     const founderOwnerInviteLifecycleService = {
       status: jest.fn(),
       revoke: jest.fn(),
+      reissue: jest.fn(),
     };
     return {
       controller: new AdminController(
@@ -121,7 +122,7 @@ describe('AdminController shared beta provisioning boundary', () => {
     );
   });
 
-  it('delegates protected initial-owner status and revoke', async () => {
+  it('delegates protected initial-owner status, revoke and reissue', async () => {
     const { controller: adminController, founderOwnerInviteLifecycleService } =
       controller();
     const user = {
@@ -134,6 +135,9 @@ describe('AdminController shared beta provisioning boundary', () => {
     founderOwnerInviteLifecycleService.revoke.mockResolvedValue({
       decision: 'REVOKED',
     });
+    founderOwnerInviteLifecycleService.reissue.mockResolvedValue({
+      decision: 'REISSUED',
+    });
 
     await expect(
       adminController.getSharedBetaInitialOwnerInviteStatus(user, 'tenant-id'),
@@ -141,11 +145,23 @@ describe('AdminController shared beta provisioning boundary', () => {
     await expect(
       adminController.revokeSharedBetaInitialOwnerInvite(user, 'tenant-id', {}),
     ).resolves.toEqual({ decision: 'REVOKED' });
+    await expect(
+      adminController.reissueSharedBetaInitialOwnerInvite(
+        user,
+        'tenant-id',
+        {},
+      ),
+    ).resolves.toEqual({ decision: 'REISSUED' });
     expect(founderOwnerInviteLifecycleService.status).toHaveBeenCalledWith(
       user,
       'tenant-id',
     );
     expect(founderOwnerInviteLifecycleService.revoke).toHaveBeenCalledWith(
+      user,
+      'tenant-id',
+      {},
+    );
+    expect(founderOwnerInviteLifecycleService.reissue).toHaveBeenCalledWith(
       user,
       'tenant-id',
       {},

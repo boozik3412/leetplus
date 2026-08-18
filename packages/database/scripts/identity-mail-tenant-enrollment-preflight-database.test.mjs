@@ -6,6 +6,8 @@ import test from "node:test";
 
 import {
   IDENTITY_MAIL_WORKER_DENIED_FUNCTIONS,
+  IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION,
+  IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT,
   IDENTITY_MAIL_WORKER_FUNCTIONS,
 } from "./identity-mail-worker-enrollment.mjs";
 import {
@@ -22,7 +24,7 @@ import { parseIdentityMailTenantEnrollmentProposal } from "./identity-mail-tenan
 import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 const NOW = new Date("2026-08-01T08:00:00.000Z");
-const MIGRATION = "20260817030000_founder_operator_beta_activation_runtime_v1";
+const MIGRATION = IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION;
 const TENANT_ID = "11111111-1111-4111-8111-111111111111";
 const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
 const DATABASE_OID = 16_384;
@@ -112,7 +114,7 @@ function createReadOnlyPrismaMock({ roleExists = true } = {}) {
           {
             database_name: "leetplus_beta",
             database_oid: BigInt(DATABASE_OID),
-            migration_count: 183,
+            migration_count: IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT,
             migration_head: MIGRATION,
             server_version_number: 160_013,
             transaction_isolation: "repeatable read",
@@ -179,7 +181,7 @@ function createReadOnlyPrismaMock({ roleExists = true } = {}) {
       if (source.includes("AS completed_target_count")) {
         return [
           {
-            completed_count: 183,
+            completed_count: IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT,
             completed_target_count: 1,
             latest_completed_migration: MIGRATION,
             unfinished_count: 0,
@@ -213,7 +215,8 @@ function createReadOnlyPrismaMock({ roleExists = true } = {}) {
             database_identity_matches: true,
             marker_current: true,
             marker_id: "33333333-3333-4333-8333-333333333333",
-            marker_migration_count: 183,
+            marker_migration_count:
+              IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT,
             marker_migration_head: MIGRATION,
             marker_payload_digest: MARKER_DIGEST,
             marker_revoked_at: null,

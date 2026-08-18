@@ -4,7 +4,10 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   IdentityMailOutboxStatus,
   Prisma,
@@ -14,18 +17,21 @@ import {
   UserAccessScope,
   UserRole,
 } from '@prisma/client';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { IdentityMailSecretEnvelopeService } from '../auth/identity-mail-secret-envelope.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
   IdentityEmailClaimService,
 } from '../auth/identity-email-claim.service';
+import { resolveIdentityMailAadEnvironment } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 
 export const FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT =
   'FOUNDER_OWNER_INVITE_LIFECYCLE_V1' as const;
 
 const REVOKE_ACTION = 'FOUNDER_OWNER_INVITE_REVOKED' as const;
+const REISSUE_ACTION = 'FOUNDER_OWNER_INVITE_REISSUED' as const;
 const REVOKE_FIELDS = new Set([
   'confirmation',
   'requestId',
@@ -33,6 +39,17 @@ const REVOKE_FIELDS = new Set([
   'supportTicket',
   'expectedInviteId',
 ]);
+const REISSUE_FIELDS = new Set([
+  'confirmation',
+  'requestId',
+  'reason',
+  'supportTicket',
+  'expectedInviteId',
+  'expiresAt',
+]);
+const MINIMUM_INVITE_LIFETIME_MS = 15 * 60 * 1_000;
+const MAXIMUM_INVITE_LIFETIME_MS = 30 * 24 * 60 * 60 * 1_000;
+const OWNER_TEMPLATE = 'INITIAL_OWNER_INVITE' as const;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
@@ -48,6 +65,11 @@ type ParsedRevoke = Readonly<{
   requestId: string;
   supportTicket: string | null;
 }>;
+
+type ParsedReissue = ParsedRevoke &
+  Readonly<{
+    expiresAt: Date;
+  }>;
 
 type OwnerInviteAggregate = Readonly<{
   tenant: {
@@ -110,11 +132,44 @@ export type FounderOwnerInviteRevokeResult = Readonly<{
   revokedAt: string;
 }>;
 
+export type FounderOwnerInviteReissueResult = Readonly<{
+  ok: true;
+  contractVersion: typeof FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT;
+  decision: 'REISSUED' | 'REPLAYED';
+  replayed: boolean;
+  tenantId: string;
+  commandId: string;
+  sequence: number;
+  predecessorInviteId: string;
+  inviteId: string;
+  outboxId: string;
+  deliveryStatus: typeof IdentityMailOutboxStatus.PENDING;
+  expiresAt: string;
+}>;
+
+type ReissueDatabaseReceipt = Readonly<{
+  schemaVersion: 1;
+  operation: 'REISSUE_INITIAL_OWNER_INVITE';
+  decision: 'REISSUED' | 'REPLAYED';
+  tenantId: string;
+  commandId: string;
+  sequence: number;
+  predecessorInviteId: string;
+  inviteId: string;
+  outboxId: string;
+  outboxStatus: 'PENDING';
+  expiresAtEpochMs: number;
+  createdTransactionId: string;
+}>;
+
 @Injectable()
 export class FounderOwnerInviteLifecycleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly identityClaimBoundary: IdentityEmailClaimService,
+    private readonly config: ConfigService,
+    @Optional() private readonly clock: () => Date = () => new Date(),
+    @Optional() private readonly uuidFactory: () => string = randomUUID,
   ) {}
 
   async status(
@@ -294,6 +349,108 @@ export class FounderOwnerInviteLifecycleService {
     }, IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
   }
 
+  async reissue(
+    actor: AuthenticatedUser,
+    routeTenantId: unknown,
+    body: unknown,
+  ): Promise<FounderOwnerInviteReissueResult> {
+    this.assertPlatformAdmin(actor);
+    const tenantId = this.uuid(routeTenantId, 'tenantId');
+    const parsed = this.parseReissue(tenantId, body);
+    const environment = this.environment();
+    const requestDigest = this.reissueDigest(actor.id, tenantId, parsed);
+    const identifiers = this.reissueIdentifiers(tenantId, parsed.requestId);
+    const issueRequestDigest = this.digest({
+      contractVersion: FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT,
+      operation: 'ISSUE_REPLACEMENT_INITIAL_OWNER_INVITE',
+      tenantId,
+      reissueRequestId: parsed.requestId,
+      reissueRequestDigest: requestDigest,
+      workflowLocator: identifiers.reservationSubjectId,
+      expiresAt: parsed.expiresAt.toISOString(),
+      environment,
+    });
+    const envelopeService = new IdentityMailSecretEnvelopeService(this.config);
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.identityClaimBoundary.lockTenantTransaction(tx, tenantId);
+      await this.assertFreshPlatformAuthority(tx, actor.id);
+      const aggregate = await this.loadAggregate(tx, tenantId);
+      const state = this.inviteState(aggregate.invite, this.clock());
+      if (!this.ownerInviteStage(aggregate.tenant)) {
+        throw new ConflictException({
+          message: 'Tenant is not awaiting its initial owner',
+          reasonCode: 'FOUNDER_OWNER_INVITE_TENANT_STATE_INVALID',
+        });
+      }
+      if (aggregate.invite.id !== parsed.expectedInviteId) {
+        throw new ConflictException({
+          message: 'Initial owner invite changed before reissue',
+          reasonCode: 'FOUNDER_OWNER_INVITE_CHANGED',
+        });
+      }
+      if (state !== 'REVOKED' && state !== 'EXPIRED') {
+        throw new ConflictException({
+          message: 'Initial owner invite is not eligible for reissue',
+          reasonCode: 'FOUNDER_OWNER_INVITE_REISSUE_NOT_ALLOWED',
+        });
+      }
+      if (!aggregate.invite.email) {
+        throw new ConflictException({
+          message: 'Initial owner invite identity provenance is invalid',
+          reasonCode: 'FOUNDER_OWNER_INVITE_PROVENANCE_INVALID',
+        });
+      }
+      this.assertOwnerIdentityNotCopied(parsed, aggregate.invite.email);
+
+      const sealed = envelopeService.sealInitialOwnerInviteToken({
+        tenantId,
+        workflowLocator: identifiers.reservationSubjectId,
+        inviteId: identifiers.inviteId,
+        outboxId: identifiers.outboxId,
+        template: OWNER_TEMPLATE,
+        messageKey: identifiers.messageKey,
+        requestDigest: issueRequestDigest,
+        recipientEmail: aggregate.invite.email,
+        expiresAt: parsed.expiresAt,
+      });
+      try {
+        const rows = await tx.$queryRaw<Array<{ receipt: Prisma.JsonValue }>>(
+          Prisma.sql`
+            SELECT public."founder_owner_invite_reissue_v1"(
+              ${tenantId}::TEXT,
+              ${parsed.requestId}::TEXT,
+              ${requestDigest}::TEXT,
+              ${parsed.expectedInviteId}::TEXT,
+              ${actor.id}::TEXT,
+              ${parsed.reason}::TEXT,
+              ${this.textDigest(parsed.reason)}::TEXT,
+              ${parsed.supportTicket}::TEXT,
+              ${parsed.supportTicket ? this.textDigest(parsed.supportTicket) : null}::TEXT,
+              ${environment}::TEXT,
+              ${identifiers.commandId}::TEXT,
+              ${identifiers.reservationSubjectId}::TEXT,
+              ${identifiers.issueRequestId}::TEXT,
+              ${issueRequestDigest}::TEXT,
+              ${identifiers.issueCommandId}::TEXT,
+              ${identifiers.inviteId}::TEXT,
+              ${identifiers.outboxId}::TEXT,
+              ${identifiers.messageKey}::TEXT,
+              ${sealed.tokenHash}::TEXT,
+              ${sealed.secretCiphertext}::BYTEA,
+              ${parsed.expiresAt}::TIMESTAMP(3) WITH TIME ZONE
+            ) AS receipt
+          `,
+        );
+        return this.reissueResult(this.reissueReceipt(rows), tenantId, parsed);
+      } catch (error) {
+        throw this.reissueFailure(error);
+      } finally {
+        sealed.secretCiphertext.fill(0);
+      }
+    }, IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+  }
+
   private async stopDelivery(
     tx: Prisma.TransactionClient,
     outbox: OwnerInviteAggregate['outbox'],
@@ -401,12 +558,21 @@ export class FounderOwnerInviteLifecycleService {
     if (!tenant) {
       throw new NotFoundException('Tenant not found');
     }
-    const activation = await tx.founderOperatorBetaActivationCommand.findUnique(
-      {
-        where: { tenantId },
-        select: { inviteId: true, outboxId: true },
-      },
-    );
+    const reissues = await tx.$queryRaw<
+      Array<{ inviteId: string; outboxId: string }>
+    >(Prisma.sql`
+      SELECT "inviteId", "outboxId"
+      FROM public."FounderOwnerInviteReissueCommand"
+      WHERE "tenantId" = ${tenantId}
+      ORDER BY "sequence" DESC
+      LIMIT 1
+    `);
+    const activation = reissues[0]
+      ? reissues[0]
+      : await tx.founderOperatorBetaActivationCommand.findUnique({
+          where: { tenantId },
+          select: { inviteId: true, outboxId: true },
+        });
     if (!activation) {
       throw new NotFoundException('Initial owner invite not found');
     }
@@ -573,6 +739,41 @@ export class FounderOwnerInviteLifecycleService {
     };
   }
 
+  private parseReissue(tenantId: string, body: unknown): ParsedReissue {
+    if (!this.record(body)) {
+      throw new BadRequestException(
+        'Owner invite reissue body must be an object',
+      );
+    }
+    const unexpected = Object.keys(body).filter(
+      (field) => !REISSUE_FIELDS.has(field),
+    );
+    if (unexpected.length > 0) {
+      throw new BadRequestException({
+        message: 'Owner invite reissue body contains unsupported fields',
+        reasonCode: 'FOUNDER_OWNER_INVITE_FIELD_NOT_ALLOWED',
+      });
+    }
+    const expectedConfirmation = `REISSUE OWNER INVITE ${tenantId}`;
+    if (body.confirmation !== expectedConfirmation) {
+      throw new BadRequestException(
+        `confirmation must exactly equal "${expectedConfirmation}"`,
+      );
+    }
+    const expiresAt = this.futureTimestamp(body.expiresAt);
+    return {
+      requestId: this.uuid(body.requestId, 'requestId'),
+      reason: this.requiredText(body.reason, 'reason', 10, 500),
+      supportTicket: this.optionalText(
+        body.supportTicket,
+        'supportTicket',
+        200,
+      ),
+      expectedInviteId: this.uuid(body.expectedInviteId, 'expectedInviteId'),
+      expiresAt,
+    };
+  }
+
   private revokeDigest(
     actorUserId: string,
     tenantId: string,
@@ -585,11 +786,274 @@ export class FounderOwnerInviteLifecycleService {
       tenantId,
       expectedInviteId: input.expectedInviteId,
       requestId: input.requestId,
-      reasonDigest: this.digest(input.reason),
+      reasonDigest: this.textDigest(input.reason),
       supportTicketDigest: input.supportTicket
-        ? this.digest(input.supportTicket)
+        ? this.textDigest(input.supportTicket)
         : null,
     });
+  }
+
+  private reissueDigest(
+    actorUserId: string,
+    tenantId: string,
+    input: ParsedReissue,
+  ): string {
+    return this.digest({
+      contractVersion: FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT,
+      operation: REISSUE_ACTION,
+      actorUserId,
+      tenantId,
+      expectedInviteId: input.expectedInviteId,
+      requestId: input.requestId,
+      expiresAt: input.expiresAt.toISOString(),
+      reasonDigest: this.textDigest(input.reason),
+      supportTicketDigest: input.supportTicket
+        ? this.textDigest(input.supportTicket)
+        : null,
+    });
+  }
+
+  private reissueIdentifiers(
+    tenantId: string,
+    requestId: string,
+  ): {
+    commandId: string;
+    reservationSubjectId: string;
+    issueRequestId: string;
+    issueCommandId: string;
+    inviteId: string;
+    outboxId: string;
+    messageKey: string;
+  } {
+    const generated = Array.from({ length: 6 }, () =>
+      this.uuid(this.uuidFactory(), 'generatedId'),
+    );
+    const issueRequestId = this.derivedUuid(
+      'owner-invite-reissue-issue',
+      tenantId,
+      requestId,
+    );
+    const values = [...generated, issueRequestId];
+    if (new Set(values).size !== values.length) {
+      throw new ServiceUnavailableException({
+        message: 'Owner invite reissue identifier generation failed',
+        reasonCode: 'FOUNDER_OWNER_INVITE_IDENTIFIER_GENERATION_FAILED',
+      });
+    }
+    const [
+      commandId,
+      reservationSubjectId,
+      issueCommandId,
+      inviteId,
+      outboxId,
+      messageKey,
+    ] = generated;
+    if (
+      !commandId ||
+      !reservationSubjectId ||
+      !issueCommandId ||
+      !inviteId ||
+      !outboxId ||
+      !messageKey
+    ) {
+      throw new ServiceUnavailableException({
+        message: 'Owner invite reissue identifier generation failed',
+        reasonCode: 'FOUNDER_OWNER_INVITE_IDENTIFIER_GENERATION_FAILED',
+      });
+    }
+    return {
+      commandId,
+      reservationSubjectId,
+      issueRequestId,
+      issueCommandId,
+      inviteId,
+      outboxId,
+      messageKey,
+    };
+  }
+
+  private reissueReceipt(
+    rows: Array<{ receipt: Prisma.JsonValue }>,
+  ): ReissueDatabaseReceipt {
+    if (
+      rows.length !== 1 ||
+      !this.record(rows[0]?.receipt) ||
+      !this.hasExactKeys(rows[0].receipt, [
+        'schemaVersion',
+        'operation',
+        'decision',
+        'tenantId',
+        'commandId',
+        'sequence',
+        'predecessorInviteId',
+        'inviteId',
+        'outboxId',
+        'outboxStatus',
+        'expiresAtEpochMs',
+        'createdTransactionId',
+      ])
+    ) {
+      throw new ServiceUnavailableException(
+        'Owner invite reissue receipt is invalid',
+      );
+    }
+    const receipt = rows[0].receipt;
+    if (
+      receipt.schemaVersion !== 1 ||
+      receipt.operation !== 'REISSUE_INITIAL_OWNER_INVITE' ||
+      (receipt.decision !== 'REISSUED' && receipt.decision !== 'REPLAYED') ||
+      receipt.outboxStatus !== 'PENDING' ||
+      typeof receipt.sequence !== 'number' ||
+      !Number.isSafeInteger(receipt.sequence) ||
+      receipt.sequence < 1 ||
+      typeof receipt.expiresAtEpochMs !== 'number' ||
+      !Number.isSafeInteger(receipt.expiresAtEpochMs) ||
+      typeof receipt.createdTransactionId !== 'string' ||
+      !/^[1-9][0-9]*$/u.test(receipt.createdTransactionId)
+    ) {
+      throw new ServiceUnavailableException(
+        'Owner invite reissue receipt is invalid',
+      );
+    }
+    return {
+      schemaVersion: 1,
+      operation: 'REISSUE_INITIAL_OWNER_INVITE',
+      decision: receipt.decision,
+      tenantId: this.uuid(receipt.tenantId, 'receipt.tenantId'),
+      commandId: this.uuid(receipt.commandId, 'receipt.commandId'),
+      sequence: receipt.sequence,
+      predecessorInviteId: this.uuid(
+        receipt.predecessorInviteId,
+        'receipt.predecessorInviteId',
+      ),
+      inviteId: this.uuid(receipt.inviteId, 'receipt.inviteId'),
+      outboxId: this.uuid(receipt.outboxId, 'receipt.outboxId'),
+      outboxStatus: 'PENDING',
+      expiresAtEpochMs: receipt.expiresAtEpochMs,
+      createdTransactionId: receipt.createdTransactionId,
+    };
+  }
+
+  private reissueResult(
+    receipt: ReissueDatabaseReceipt,
+    tenantId: string,
+    input: ParsedReissue,
+  ): FounderOwnerInviteReissueResult {
+    if (
+      receipt.tenantId !== tenantId ||
+      receipt.predecessorInviteId !== input.expectedInviteId ||
+      receipt.expiresAtEpochMs !== input.expiresAt.getTime()
+    ) {
+      throw new ServiceUnavailableException(
+        'Owner invite reissue receipt is invalid',
+      );
+    }
+    return {
+      ok: true,
+      contractVersion: FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT,
+      decision: receipt.decision,
+      replayed: receipt.decision === 'REPLAYED',
+      tenantId,
+      commandId: receipt.commandId,
+      sequence: receipt.sequence,
+      predecessorInviteId: receipt.predecessorInviteId,
+      inviteId: receipt.inviteId,
+      outboxId: receipt.outboxId,
+      deliveryStatus: IdentityMailOutboxStatus.PENDING,
+      expiresAt: new Date(receipt.expiresAtEpochMs).toISOString(),
+    };
+  }
+
+  private reissueFailure(error: unknown): Error {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof ConflictException ||
+      error instanceof ForbiddenException ||
+      error instanceof ServiceUnavailableException
+    ) {
+      return error;
+    }
+    const state = this.sqlState(error);
+    if (state === '22023') {
+      return new BadRequestException({
+        message: 'Owner invite reissue command is invalid',
+        reasonCode: 'FOUNDER_OWNER_INVITE_REISSUE_INVALID',
+      });
+    }
+    if (
+      ['23503', '23505', '23514', '40001', '40P01', '55000'].includes(state)
+    ) {
+      return new ConflictException({
+        message: 'Owner invite reissue preconditions are not satisfied',
+        reasonCode: 'FOUNDER_OWNER_INVITE_REISSUE_PRECONDITION_FAILED',
+      });
+    }
+    if (state === '42501') {
+      return new ForbiddenException(
+        'Owner invite reissue authority is no longer active',
+      );
+    }
+    return new ServiceUnavailableException({
+      message: 'Owner invite reissue failed closed',
+      reasonCode: 'FOUNDER_OWNER_INVITE_REISSUE_CONTAINED',
+    });
+  }
+
+  private sqlState(error: unknown): string {
+    if (!this.record(error) || typeof error.code !== 'string') return '';
+    if (
+      error.code === 'P2010' &&
+      this.record(error.meta) &&
+      typeof error.meta.code === 'string'
+    ) {
+      return error.meta.code;
+    }
+    return error.code;
+  }
+
+  private futureTimestamp(value: unknown): Date {
+    if (typeof value !== 'string') {
+      throw new BadRequestException('expiresAt must be an ISO timestamp');
+    }
+    const expiresAt = new Date(value);
+    const now = this.clock();
+    if (
+      !Number.isFinite(expiresAt.getTime()) ||
+      expiresAt.toISOString() !== value ||
+      expiresAt.getTime() < now.getTime() + MINIMUM_INVITE_LIFETIME_MS ||
+      expiresAt.getTime() > now.getTime() + MAXIMUM_INVITE_LIFETIME_MS
+    ) {
+      throw new BadRequestException('expiresAt is outside the allowed window');
+    }
+    return expiresAt;
+  }
+
+  private environment(): string {
+    const environment = resolveIdentityMailAadEnvironment(
+      this.config.get<unknown>('IDENTITY_MAIL_AAD_ENVIRONMENT'),
+    );
+    if (!environment) {
+      throw new ServiceUnavailableException({
+        message: 'Owner invite reissue environment is unavailable',
+        reasonCode: 'FOUNDER_OWNER_INVITE_ENVIRONMENT_INVALID',
+      });
+    }
+    return environment;
+  }
+
+  private derivedUuid(domain: string, ...parts: string[]): string {
+    const bytes = createHash('sha256')
+      .update(`${FOUNDER_OWNER_INVITE_LIFECYCLE_CONTRACT}\0${domain}\0`)
+      .update(parts.join('\0'))
+      .digest()
+      .subarray(0, 16);
+    bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50;
+    bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+    const hex = bytes.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(
+      12,
+      16,
+    )}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
   private assertOwnerIdentityNotCopied(
@@ -676,6 +1140,10 @@ export class FounderOwnerInviteLifecycleService {
 
   private digest(value: unknown): string {
     return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  }
+
+  private textDigest(value: string): string {
+    return createHash('sha256').update(value, 'utf8').digest('hex');
   }
 
   private hasControlCharacter(value: string): boolean {

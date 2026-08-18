@@ -143,8 +143,9 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    readiness evidence.
 3. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
    `SENT` barrier и полная reissue/suspend/accept acceptance. PII-free status и
-   атомарный revoke initial OWNER invite реализованы локально и ожидают
-   exact-SHA CI/PostgreSQL acceptance.
+   атомарный revoke initial OWNER invite приняты exact-SHA CI/PostgreSQL;
+   immutable reissue реализован локально и ожидает свой exact-SHA PostgreSQL
+   acceptance.
 4. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
    production-like A/B matrix, jobs/Telegram/files/SSE и Gate 2 для текущей
    сети из четырёх клубов не закрыты.
@@ -161,7 +162,8 @@ clean SHA + CI artifact [DONE]
   → [DONE synthetic] dedicated pool + in-process HTTP/PG
   → [DONE synthetic] downloaded artifact API child process
   → restored-copy apply/replay/rollback + backup/readiness
-  → [IMPLEMENTED, CI PENDING] owner invite status/revoke
+  → [DONE] owner invite status/revoke
+  → [IMPLEMENTED, CI PENDING] immutable owner invite reissue
   → SMTP canary + SENT/reissue/accept evidence
   → Gate 1MT browser/store-scope
   → Gate 2 current Tenant A/A1..A4

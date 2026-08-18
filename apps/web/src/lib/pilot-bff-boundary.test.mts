@@ -221,6 +221,20 @@ test("keeps report exports and mutations inside hardened cookie-backed proxies",
   assert.match(recommendationRoute, /privateNoStore:\s*true/);
 });
 
+test("returns a canonical same-origin locator for uploaded staff attachments", async () => {
+  const source = await readFile(
+    path.join(API_ROUTE_ROOT, "staff/attachments/route.ts"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /const url = `\/api\/staff\/attachments\/\$\{encodeURIComponent\(data\.id\)\}`/,
+  );
+  assert.doesNotMatch(source, /new URL\([\s\S]*request\.url/);
+  assert.doesNotMatch(source, /\.toString\(\)/);
+});
+
 test("bounds the reports SSR fan-out to two upstream loaders at a time", async () => {
   const source = await readFile(
     fileURLToPath(new URL("../app/(app)/reports/page.tsx", import.meta.url)),

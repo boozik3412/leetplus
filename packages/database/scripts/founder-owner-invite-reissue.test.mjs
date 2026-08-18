@@ -89,6 +89,11 @@ test("reissue is private, tenant-locked and PII-free at the API boundary", () =>
 });
 
 test("reissue replay is exact and does not repeat mutations", () => {
+  assert.doesNotMatch(migration, /pg_catalog\.extract\(/u);
+  assert.match(
+    migration,
+    /pg_catalog\.floor\(EXTRACT\(EPOCH FROM candidate_expires_at\) \* 1000\)/u,
+  );
   const replayIndex = migration.indexOf(
     "IF FOUND THEN",
     migration.indexOf(

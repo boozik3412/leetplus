@@ -681,7 +681,7 @@ BEGIN
     'inviteId', invite_id,
     'outboxId', outbox_id,
     'outboxStatus', 'PENDING',
-    'expiresAtEpochMs', pg_catalog.floor(pg_catalog.extract(epoch FROM candidate_expires_at) * 1000)::BIGINT,
+    'expiresAtEpochMs', pg_catalog.floor(EXTRACT(EPOCH FROM candidate_expires_at) * 1000)::BIGINT,
     'createdTransactionId', transaction_id
   );
 

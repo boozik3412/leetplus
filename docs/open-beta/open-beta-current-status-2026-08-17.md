@@ -128,6 +128,16 @@ held permission revoke, после commit fresh scope дал `Unauthorized` бе
 Role/attachment focused unit `56/56`, expanded users/staff regression `85/85`,
 API build зелёный; все `156` table counts zero-diff, sessions/residue `0`.
 
+Production-build attachment browser slice принят на exact implementation
+`97648308…`. Первый run обнаружил и отклонил absolute-locator дефект Web BFF;
+после исправления fresh clone прошёл OWNER upload→bind→download→remove→
+quarantine→404. Database blob и browser download совпали с исходником по
+SHA-256, положительный console `0/0`, whole-schema postflight: только семь
+ожидаемых deltas из `156` таблиц, database residue `0`. STORES(B1) direct URL
+к network-only knowledge parent дал штатный 404 с чистой console; parent-level
+STORES adoption остаётся отдельным blocker.
+[Полный browser-отчёт](./gate-1mt-attachment-browser-evidence-2026-08-19.md).
+
 Pilot HTTP inventory повторно связан с production source: `295` exact routes,
 `241 ALLOW / 54 BLOCKED`. `POST /stores` имеет fresh NETWORK assertion; для
 внешнего `PILOT` tenant generic creation остаётся закрыт `409` до dedicated
@@ -314,9 +324,10 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    writer/lifecycle, real
    HTTP SSE и latest
    assortment HTTP `15/15`), browser read/admission и report/download/mutation
-   journey приняты на restored copy. Не закрыты outbound digest, attachment
-   production-build browser/STORES policy, jobs/Telegram/public guest binding
-   и Gate 2 текущей сети.
+   journey и OWNER attachment lifecycle приняты на restored copy. Не закрыты
+   outbound digest, STORES adoption пяти network-only staff parents,
+   archive/orphan browser matrix остальных attachment parents,
+   jobs/Telegram/public guest binding и Gate 2 текущей сети.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
@@ -348,8 +359,11 @@ clean SHA + CI artifact [DONE]
   → [DONE restored-copy clones] native bind/unbind/replacement race matrix
   → [DONE restored-copy clones] direct persisted-user revoke/download race
   → [DONE restored-copy clones] custom/system-role revoke/download races
+  → [DONE restored-copy clone] OWNER attachment upload/bind/download/unbind/quarantine
+  → [DONE restored-copy clone] STORES side-door deny for network-only staff parents
   → production roles/secrets + controlled SMTP canary
-  → Gate 1MT attachment production-build browser/STORES + jobs/Telegram/public-guest/outbound
+  → Gate 1MT STORES parent adoption + remaining attachment archive/orphan browser matrix
+  → Gate 1MT jobs/Telegram/public-guest/outbound
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE
   → create Tenant B/Store B1 + persisted GO

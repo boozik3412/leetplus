@@ -11,6 +11,8 @@ reader implementation:
 evidence: `7928b7f869a571174c532bb92f060ff37cb589d0`; exact direct subject-revoke
 implementation: `c5b86abadeca5bc55e5f5b231eda3a37ad0a49fc`; exact custom/system-role
 authority implementation: `bc8fffd268b4bcab8b81847d005136e5fe1a31ad`.
+Production-build OWNER browser implementation:
+`976483085d411c3e0e1e8512dd493e0db9ef70f6`.
 
 Принятые parent kinds:
 
@@ -142,6 +144,16 @@ permissions, вернул `Unauthorized` без bytes. Первый технич
 второй — некорректную fixture-role; оба неуспешных клона прошли полный
 zero-diff postflight и были удалены до accepted прогонов.
 
+Production-build browser extension принят на fresh restored-copy clone для
+`KNOWLEDGE_ARTICLE`: upload BFF вернул канонический относительный locator,
+parent save создал exact B1 native binding, PostgreSQL blob и browser download
+совпали с исходником по SHA-256, remove+save перевёл последнюю ссылку в
+`QUARANTINED`, а повторный GET вернул hidden `404`. Whole-schema postflight
+проверил все `156` таблиц; изменились только семь ожидаемых fixture/workflow
+таблиц, disposable database residue `0`. Отдельная STORES(B1) сессия получила
+штатный `404` на network-only parent без ошибок console.
+[Полный browser-отчёт](./gate-1mt-attachment-browser-evidence-2026-08-19.md).
+
 ## Postflight
 
 Для всех принятых disposable прогонов:
@@ -172,7 +184,6 @@ Reader coverage не равна полной file workflow readiness. До вн�
 1. корректные STORES visibility policies самих checklist/knowledge/regulation/
    training/onboarding workspaces, после чего network-only file deny можно
    безопасно сузить;
-2. production-build upload→create/update/remove/delete→download browser matrix;
-3. archive/move policy для остальных parent kinds и orphan retention;
-4. tenant-aware jobs, Telegram/public guest binding, controlled outbound,
+2. archive/delete/orphan-retention browser matrix для остальных parent kinds;
+3. tenant-aware jobs, Telegram/public guest binding, controlled outbound,
    Gate 2 и production `PREPARE`.

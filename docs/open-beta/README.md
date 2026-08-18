@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.160                                        |
+| Версия           | 1.161                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -90,6 +90,10 @@ Nest/PostgreSQL A/A1/A2↔B/B1 evidence:
 Staff attachment reader coverage всех семи parent kinds:
 [Gate 1MT attachment parent evidence 18.08.2026](./gate-1mt-attachment-parent-evidence-2026-08-18.md).
 
+Production-build OWNER upload/bind/download/unbind/quarantine lifecycle и
+STORES side-door deny для network-only staff parent:
+[Gate 1MT attachment browser evidence 19.08.2026](./gate-1mt-attachment-browser-evidence-2026-08-19.md).
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 
@@ -161,8 +165,10 @@ checksum. Production и текущая сеть не изменялись.
    Team-chat real HTTP SSE extension принят на `ccf81a28…`/`dfe5e0f8…`:
    pre-stream `404/401`, Web BFF `10/10`, unit `22/22`, два PG/HTTP run
    `4/4 + 4/4`, `156` table counts zero-diff и database residue `0`.
-   Outbound digest, attachment production-build browser и
-   job/Telegram/public-guest остаток не закрыты. HTTP
+   OWNER attachment production-build browser lifecycle также принят;
+   STORES adoption пяти network-only staff parents, remaining attachment
+   archive/orphan matrix, outbound digest и job/Telegram/public-guest остаток
+   не закрыты. HTTP
    inventory: `295 = 241 ALLOW + 54
    BLOCKED`.
    0a.5. [Gate 1MT report browser evidence](./gate-1mt-report-browser-evidence-2026-08-18.md) —
@@ -183,7 +189,12 @@ checksum. Production и текущая сеть не изменялись.
    `bc8fffd2…` сериализует custom/system-role capability revoke с reader.
    Role/attachment focused unit `56/56`, restored-copy `4/4 + 4/4` и
    `8/8 + 8/8`, `156` table count zero-diff и database residue `0`;
-   production-build browser и STORES policies ещё обязательны.
+   STORES parent policies ещё обязательны.
+   0a.8. [Gate 1MT attachment browser evidence](./gate-1mt-attachment-browser-evidence-2026-08-19.md) —
+   exact `97648308…`, production-build OWNER
+   upload→bind→download→remove→quarantine→404, byte-identical SHA-256,
+   positive console `0/0`, `156`-table postflight и database residue `0`;
+   независимый STORES(B1) direct URL получил штатный network-only `404`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;
@@ -1379,9 +1390,9 @@ PASS`, PostgreSQL `FAIL`). Previous accepted exact-head `d525b73...` / CI
 до уничтожения disposable snapshot.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
-непроверенные staff surfaces, attachment browser/STORES policies, полный
-gamification/assortment adoption, tenant entitlements/lifecycle, browser E2E,
-operations, backup/restore и production canary.
+STORES adoption пяти network-only staff parents, attachment archive/orphan
+browser matrix, полный gamification/assortment adoption, tenant-aware
+jobs/Telegram/public guest, Gate 2, production operations и canary.
 
 Section 5.26 с isolated DP-1 сохраняется как contingency/enterprise-isolation
 lane. Legacy identity creation/rotation в ней disabled; полезными остаются

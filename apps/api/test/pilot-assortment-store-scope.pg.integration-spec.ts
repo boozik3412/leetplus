@@ -6,7 +6,15 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaClient, TenantCustomerStage, UserRole } from '@prisma/client';
+import {
+  PrismaClient,
+  ProductOosExclusionType,
+  RecommendationRole,
+  RecommendationStatus,
+  TenantCustomerStage,
+  UserRole,
+} from '@prisma/client';
+import ExcelJS from 'exceljs';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
 import { resolveUserCapabilities } from '../src/auth/capabilities';
@@ -773,6 +781,174 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       exportService.exportReports(userA1, query),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it('keeps every local report variant inside fresh tenant/store scope', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const service = buildReportsService(prisma);
+    const userANetwork = buildUser(fixture, 'A_NETWORK');
+    const userA1 = buildUser(fixture, 'A1');
+    const seeded = await seedReportFacts(prisma, fixture);
+
+    const storeReports = [
+      await service.getOperationalReport(userA1, seeded.query),
+      await service.getInventoryTurnoverReport(userA1, seeded.query),
+      await service.getAssortmentMatrixReport(userA1, seeded.query),
+      await service.getPlanFactReport(userA1, seeded.query),
+      await service.getSalesDetailReport(userA1, seeded.query),
+      await service.getSkuPerformanceReport(userA1, seeded.query),
+      await service.getSuppliersPerformanceReport(userA1, seeded.query),
+      await service.getReplenishmentReport(userA1, seeded.query),
+      await service.getNewProductsReport(userA1),
+      await service.getLflReport(userA1, { period: 'day' }),
+    ];
+    storeReports.forEach((report) => {
+      expect(report.tenantId).toBe(fixture.tenantAId);
+    });
+    const storeEvidence = JSON.stringify(storeReports);
+    expect(storeEvidence).toContain(fixture.productA1Id);
+    expect(storeEvidence).not.toContain(fixture.productA2Id);
+    expect(storeEvidence).not.toContain(fixture.productB1Id);
+    expect(storeEvidence).not.toContain(fixture.storeA2Id);
+    expect(storeEvidence).not.toContain(fixture.storeB1Id);
+    expect(storeEvidence).not.toContain('A2 product');
+    expect(storeEvidence).not.toContain('B1 product');
+
+    const networkReports = [
+      await service.getInventoryTurnoverReport(userANetwork, seeded.query),
+      await service.getAssortmentMatrixReport(userANetwork, seeded.query),
+      await service.getSkuPerformanceReport(userANetwork, seeded.query),
+      await service.getSuppliersPerformanceReport(userANetwork, seeded.query),
+      await service.getReplenishmentReport(userANetwork, seeded.query),
+      await service.getNewProductsReport(userANetwork),
+      await service.getLflReport(userANetwork, { period: 'day' }),
+    ];
+    const networkEvidence = JSON.stringify(networkReports);
+    expect(networkEvidence).toContain(fixture.productA1Id);
+    expect(networkEvidence).toContain(fixture.productA2Id);
+    expect(networkEvidence).not.toContain(fixture.productB1Id);
+    expect(networkEvidence).not.toContain(fixture.storeB1Id);
+    expect(networkEvidence).not.toContain('B1 product');
+  });
+
+  it('keeps every local CSV/XLSX export inside Store scope', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const exportService = new ReportsExportService(buildReportsService(prisma));
+    const userA1 = buildUser(fixture, 'A1');
+    const seeded = await seedReportFacts(prisma, fixture);
+    const variants = [
+      undefined,
+      'lfl',
+      'sales-detail',
+      'replenishment',
+      'product-movement',
+    ] as const;
+
+    for (const report of variants) {
+      const csv = await exportService.exportReports(userA1, {
+        ...seeded.query,
+        format: 'csv',
+        report,
+        lflPeriod: 'day',
+      });
+      const csvEvidence = csv.buffer.toString('utf8');
+      expect(csv.contentType).toBe('text/csv; charset=utf-8');
+      expect(csv.tenantSlug).toBe(fixture.tenantASlug);
+      expect(csvEvidence).toContain('A1 product');
+      expect(csvEvidence).not.toContain('A2 product');
+      expect(csvEvidence).not.toContain('B1 product');
+
+      const xlsx = await exportService.exportReports(userA1, {
+        ...seeded.query,
+        format: 'xlsx',
+        report,
+        lflPeriod: 'day',
+      });
+      const xlsxEvidence = await workbookText(xlsx.buffer);
+      expect(xlsx.contentType).toBe(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      expect(xlsx.tenantSlug).toBe(fixture.tenantASlug);
+      expect(xlsxEvidence).toContain('A1 product');
+      expect(xlsxEvidence).not.toContain('A2 product');
+      expect(xlsxEvidence).not.toContain('B1 product');
+    }
+  });
+
+  it('keeps OOS exclusions and recommendation state network- and tenant-bound', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const service = buildReportsService(prisma);
+    const userANetwork = buildUser(fixture, 'A_NETWORK');
+    const userA1 = buildUser(fixture, 'A1');
+    const userBNetwork = buildUser(fixture, 'B_NETWORK');
+
+    await expect(service.getOosExclusions(userA1)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    const exclusion = await service.createOosExclusion(userANetwork, {
+      productId: fixture.productA1Id,
+      type: ProductOosExclusionType.SERVICE,
+    });
+    await expect(service.getOosExclusions(userANetwork)).resolves.toEqual([
+      expect.objectContaining({
+        id: exclusion.id,
+        productId: fixture.productA1Id,
+        type: ProductOosExclusionType.SERVICE,
+      }),
+    ]);
+    await expect(service.getOosExclusions(userBNetwork)).resolves.toEqual([]);
+    await expect(
+      service.createOosExclusion(userBNetwork, {
+        productId: fixture.productA1Id,
+        type: ProductOosExclusionType.OOS_EXCLUDED,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.deleteOosExclusion(userBNetwork, exclusion.id),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    const recommendationKey = `shared:${randomUUID()}`;
+    await service.updateRecommendationState(userANetwork, recommendationKey, {
+      status: RecommendationStatus.IN_PROGRESS,
+      role: RecommendationRole.BUYER,
+      note: 'Tenant A state',
+    });
+    await service.updateRecommendationState(userBNetwork, recommendationKey, {
+      status: RecommendationStatus.DONE,
+      role: RecommendationRole.CLUB_MANAGER,
+      note: 'Tenant B state',
+    });
+    await expect(
+      service.updateRecommendationState(userA1, recommendationKey, {
+        status: RecommendationStatus.DONE,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      prisma.recommendationState.findMany({
+        where: { recommendationKey },
+        orderBy: { tenantId: 'asc' },
+        select: { tenantId: true, status: true, note: true },
+      }),
+    ).resolves.toEqual(
+      [
+        {
+          tenantId: fixture.tenantAId,
+          status: RecommendationStatus.IN_PROGRESS,
+          note: 'Tenant A state',
+        },
+        {
+          tenantId: fixture.tenantBId,
+          status: RecommendationStatus.DONE,
+          note: 'Tenant B state',
+        },
+      ].sort((left, right) => left.tenantId.localeCompare(right.tenantId)),
+    );
+  });
 });
 
 function buildProductsService(prisma: PrismaService) {
@@ -865,6 +1041,96 @@ function buildReportsService(prisma: PrismaService) {
     new TenantContextService(),
     freshStoreScopeService,
   );
+}
+
+async function seedReportFacts(prisma: PrismaClient, fixture: Fixture) {
+  const currentDate = new Date();
+  currentDate.setUTCDate(currentDate.getUTCDate() - 1);
+  currentDate.setUTCHours(0, 0, 0, 0);
+  const previousDate = new Date(currentDate);
+  previousDate.setUTCFullYear(previousDate.getUTCFullYear() - 1);
+
+  await prisma.$transaction([
+    prisma.inventorySnapshot.createMany({
+      data: [
+        {
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA1Id,
+          productId: fixture.productA1Id,
+          snapshotDate: currentDate,
+          quantity: 11,
+        },
+        {
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA2Id,
+          productId: fixture.productA2Id,
+          snapshotDate: currentDate,
+          quantity: 22,
+        },
+        {
+          tenantId: fixture.tenantBId,
+          storeId: fixture.storeB1Id,
+          productId: fixture.productB1Id,
+          snapshotDate: currentDate,
+          quantity: 33,
+        },
+      ],
+    }),
+    prisma.salesFact.createMany({
+      data: [
+        ...[currentDate, previousDate].map((saleDate) => ({
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA1Id,
+          productId: fixture.productA1Id,
+          saleDate,
+          quantity: 1,
+          revenue: 20,
+          cost: 10,
+          productNameAtSale: 'A1 product',
+          storeNameAtSale: 'A1',
+        })),
+        ...[currentDate, previousDate].map((saleDate) => ({
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA2Id,
+          productId: fixture.productA2Id,
+          saleDate,
+          quantity: 2,
+          revenue: 40,
+          cost: 20,
+          productNameAtSale: 'A2 product',
+          storeNameAtSale: 'A2',
+        })),
+        ...[currentDate, previousDate].map((saleDate) => ({
+          tenantId: fixture.tenantBId,
+          storeId: fixture.storeB1Id,
+          productId: fixture.productB1Id,
+          saleDate,
+          quantity: 3,
+          revenue: 60,
+          cost: 30,
+          productNameAtSale: 'B1 product',
+          storeNameAtSale: 'B1',
+        })),
+      ],
+    }),
+  ]);
+
+  const date = currentDate.toISOString().slice(0, 10);
+  return { query: { from: date, to: date } };
+}
+
+async function workbookText(buffer: Buffer) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const values: string[] = [];
+  workbook.eachSheet((worksheet) => {
+    worksheet.eachRow((row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        values.push(cell.text);
+      });
+    });
+  });
+  return values.join('\n');
 }
 
 function buildUser(
@@ -1109,6 +1375,8 @@ async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
     prisma.salesFact.deleteMany({ where: { tenantId } }),
     prisma.stockMovement.deleteMany({ where: { tenantId } }),
     prisma.importJob.deleteMany({ where: { tenantId } }),
+    prisma.productOosExclusion.deleteMany({ where: { tenantId } }),
+    prisma.recommendationState.deleteMany({ where: { tenantId } }),
     prisma.product.deleteMany({ where: { tenantId } }),
     prisma.categorySourceMappingEvent.deleteMany({ where: { tenantId } }),
     prisma.categorySourceMapping.deleteMany({ where: { tenantId } }),

@@ -2196,7 +2196,7 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     result: "trigger",
     securityDefiner: false,
     definitionSha256:
-      "8cd392748b9acd749c7be0ffc545da0ab0de347b75888ccec51e53df7d3865bc",
+      "cc6948e28e24e8c6985cf1939983fdaf71239d03ae48751599814a282eb5f151",
   },
   {
     name: "identity_owner_invite_issue_command_immutable_v1",

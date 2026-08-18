@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 18.08.2026
-- Версия: 3.02
+- Версия: 3.03
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -46,7 +46,10 @@
   разрешены, cross-store/cross-tenant/stale scope запрещены; `3/3 PASS`,
   fixture/database residue `0`. Production roles/SMTP canary, deep mutation/
   export, остальные file parents, job/SSE/Telegram matrix Gate 1MT, Gate 2 и
-  cutover ещё обязательны, поэтому release decision остаётся `NO-GO`
+  cutover ещё обязательны, поэтому release decision остаётся `NO-GO`.
+  HTTP inventory уточнён до `295 = 241 ALLOW + 54 BLOCKED`: `POST /stores`
+  доказан fresh-NETWORK-bound, но для внешнего `PILOT` tenant остаётся `409`
+  до dedicated provisioning/quota workflow
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

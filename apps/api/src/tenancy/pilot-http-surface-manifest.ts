@@ -206,7 +206,7 @@ const definitions: readonly ControllerDefinition[] = [
     overrides: {
       ...assortmentOutboundOverrides,
       'GET /stores': { profile: 'STORES_VERIFIED' },
-      'POST /stores': { profile: 'NETWORK_GAP' },
+      'POST /stores': { profile: 'NETWORK_VERIFIED' },
       'PATCH /stores/:id': { profile: 'NETWORK_VERIFIED' },
       'DELETE /stores/:id': { profile: 'NETWORK_VERIFIED' },
     },

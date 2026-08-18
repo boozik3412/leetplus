@@ -38,6 +38,11 @@ Network-only staff links для STORES скрыты, прямые URL завер
 upstream request вместо RSC error; OWNER сохранил полный staff-доступ.
 Disposable browser DB удалена, residue `0`.
 
+Pilot HTTP inventory повторно связан с production source: `295` exact routes,
+`241 ALLOW / 54 BLOCKED`. `POST /stores` имеет fresh NETWORK assertion; для
+внешнего `PILOT` tenant generic creation остаётся закрыт `409` до dedicated
+provisioning/quota workflow.
+
 ## Что уже реализовано
 
 Первый внешний клуб создаётся как отдельный tenant общей SaaS-платформы, а не

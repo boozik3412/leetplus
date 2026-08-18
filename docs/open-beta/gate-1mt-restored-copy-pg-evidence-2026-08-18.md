@@ -85,6 +85,13 @@ web lint:               0 errors / 30 pre-existing warnings
 browser OWNER/STORES:   PASS
 ```
 
+HTTP surface manifest после fresh source-binding recheck содержит exact
+`295` routes: `241 ALLOW / 54 BLOCKED`. `POST /stores` больше не несёт ложный
+`NETWORK_SCOPE_NOT_ASSERTED`: production service начинает с fresh
+`assertNetwork`, а для `PILOT` tenant по-прежнему возвращает `409` и требует
+dedicated provisioning/quota workflow. Focused boundary —
+`15 suites / 159 tests PASS`.
+
 ## Postflight и cleanup
 
 После тестов:

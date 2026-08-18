@@ -175,6 +175,11 @@ const NETWORK_MUTATION_BINDINGS: readonly NetworkMutationBinding[] = [
     method: 'archive',
   },
   {
+    id: 'POST /stores',
+    source: 'src/stores/stores.service.ts',
+    method: 'create',
+  },
+  {
     id: 'PATCH /stores/:id',
     source: 'src/stores/stores.service.ts',
     method: 'update',
@@ -641,8 +646,8 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
     );
 
     expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(295);
-    expect(allowed).toHaveLength(240);
-    expect(blocked).toHaveLength(55);
+    expect(allowed).toHaveLength(241);
+    expect(blocked).toHaveLength(54);
     expect(outbound).toHaveLength(21);
     expect(
       PILOT_HTTP_SURFACE_MANIFEST.filter((entry) =>
@@ -714,6 +719,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       'POST /imports/sales',
       'POST /imports/sales/preview',
       'POST /products',
+      'POST /stores',
       'POST /reports/oos-exclusions',
       'POST /suppliers',
       'POST /utilities/product-parsing/analyze',

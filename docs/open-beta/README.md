@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.151                                        |
+| Версия           | 1.152                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -136,7 +136,8 @@ checksum. Production и текущая сеть не изменялись.
    CURRENT185 production-backup clones, пять A/B suites, `17/17 PASS`
    (включая staff attachments), затем production-build OWNER/STORES browser
    read/admission slice на `771bbd5f…`; fixture/database residue `0`. Deep
-   mutation/remaining-file/job/SSE/Telegram остаток не закрыт.
+   mutation/remaining-file/job/SSE/Telegram остаток не закрыт. HTTP inventory:
+   `295 = 241 ALLOW + 54 BLOCKED`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;

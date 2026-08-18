@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -10,6 +11,8 @@ import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
 import { resolveUserCapabilities } from '../src/auth/capabilities';
 import { CategoriesService } from '../src/categories/categories.service';
+import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
+import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsService } from '../src/products/products.service';
 import { StoresService } from '../src/stores/stores.service';
@@ -408,6 +411,223 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       isActive: true,
     });
   });
+
+  it('keeps product CSV imports tenant-bound and network-only', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const service = buildProductCsvImportService(prisma);
+    const userANetwork = buildUser(fixture, 'A_NETWORK');
+    const userA1 = buildUser(fixture, 'A1');
+    const userBNetwork = buildUser(fixture, 'B_NETWORK');
+    const sharedArticle = `SHARED-${randomUUID()}`;
+    const csv = [
+      'article,name,category,supplier,purchasePrice,salePrice',
+      `${sharedArticle},Tenant A imported product,Tenant A category 1,Tenant A supplier 1,12,24`,
+    ].join('\n');
+
+    await prisma.product.create({
+      data: {
+        tenantId: fixture.tenantBId,
+        article: sharedArticle,
+        name: 'Tenant B same-article product',
+        purchasePrice: 100,
+        salePrice: 200,
+      },
+    });
+
+    await expect(service.preview(csv, userA1)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(
+      service.import(csv, userANetwork, 'products-a.csv'),
+    ).resolves.toEqual(expect.objectContaining({ importedRows: 1 }));
+    await expect(
+      prisma.product.findUniqueOrThrow({
+        where: {
+          tenantId_article: {
+            tenantId: fixture.tenantAId,
+            article: sharedArticle,
+          },
+        },
+        select: {
+          tenantId: true,
+          name: true,
+          categoryId: true,
+          supplierId: true,
+        },
+      }),
+    ).resolves.toEqual({
+      tenantId: fixture.tenantAId,
+      name: 'Tenant A imported product',
+      categoryId: fixture.categoryA1Id,
+      supplierId: fixture.supplierA1Id,
+    });
+    await expect(
+      prisma.product.findUniqueOrThrow({
+        where: {
+          tenantId_article: {
+            tenantId: fixture.tenantBId,
+            article: sharedArticle,
+          },
+        },
+        select: { tenantId: true, name: true },
+      }),
+    ).resolves.toEqual({
+      tenantId: fixture.tenantBId,
+      name: 'Tenant B same-article product',
+    });
+
+    const tenantBPreview = await service.preview(csv, userBNetwork);
+    expect(tenantBPreview.validRows).toBe(1);
+    expect(tenantBPreview.errors.map(({ field }) => field).sort()).toEqual([
+      'category',
+      'supplier',
+    ]);
+    expect(tenantBPreview.rows).toEqual([
+      expect.objectContaining({ categoryId: null, supplierId: null }),
+    ]);
+    await expect(service.import(csv, userBNetwork)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    await expect(
+      prisma.product.findUniqueOrThrow({
+        where: {
+          tenantId_article: {
+            tenantId: fixture.tenantBId,
+            article: sharedArticle,
+          },
+        },
+        select: { name: true },
+      }),
+    ).resolves.toEqual({ name: 'Tenant B same-article product' });
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: fixture.userANetworkId },
+        data: { accessScope: 'STORES' },
+      }),
+      prisma.userStoreAccess.create({
+        data: {
+          userId: fixture.userANetworkId,
+          storeId: fixture.storeA1Id,
+        },
+      }),
+    ]);
+    await expect(
+      service.import(
+        'article,name,purchasePrice,salePrice\nSTALE-1,Stale import,1,2',
+        userANetwork,
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('keeps inventory, sales and movement CSV imports inside the tenant network', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const service = buildFactCsvImportService(prisma);
+    const userANetwork = buildUser(fixture, 'A_NETWORK');
+    const userA1 = buildUser(fixture, 'A1');
+    const userBNetwork = buildUser(fixture, 'B_NETWORK');
+    const { article } = await prisma.product.findUniqueOrThrow({
+      where: { id: fixture.productA1Id },
+      select: { article: true },
+    });
+    const date = '2030-01-02';
+    const inventoryCsv = `date,store,article,quantity\n${date},A1,${article},17`;
+    const salesCsv = `date,store,article,quantity,revenue,cost\n${date},A1,${article},2,48,24`;
+    const movementCsv = `date,store,article,type,quantity,amount,reason\n${date},A1,${article},WRITEOFF,1,12,Damaged`;
+
+    await expect(
+      service.importInventory(inventoryCsv, userA1),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.importInventory(inventoryCsv, userANetwork, 'inventory-a.csv'),
+    ).resolves.toEqual(expect.objectContaining({ importedRows: 1 }));
+    await expect(
+      service.importSales(salesCsv, userANetwork, 'sales-a.csv'),
+    ).resolves.toEqual(expect.objectContaining({ importedRows: 1 }));
+    await expect(
+      service.importStockMovements(
+        movementCsv,
+        userANetwork,
+        'movements-a.csv',
+      ),
+    ).resolves.toEqual(expect.objectContaining({ importedRows: 1 }));
+
+    await expect(
+      Promise.all([
+        prisma.inventorySnapshot.count({
+          where: {
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA1Id,
+            productId: fixture.productA1Id,
+            snapshotDate: new Date(date),
+          },
+        }),
+        prisma.salesFact.count({
+          where: {
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA1Id,
+            productId: fixture.productA1Id,
+            saleDate: new Date(date),
+          },
+        }),
+        prisma.stockMovement.count({
+          where: {
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA1Id,
+            productId: fixture.productA1Id,
+            movementDate: new Date(date),
+          },
+        }),
+      ]),
+    ).resolves.toEqual([1, 1, 1]);
+    await expect(
+      Promise.all([
+        prisma.inventorySnapshot.count({
+          where: { tenantId: fixture.tenantBId, snapshotDate: new Date(date) },
+        }),
+        prisma.salesFact.count({
+          where: { tenantId: fixture.tenantBId, saleDate: new Date(date) },
+        }),
+        prisma.stockMovement.count({
+          where: { tenantId: fixture.tenantBId, movementDate: new Date(date) },
+        }),
+      ]),
+    ).resolves.toEqual([0, 0, 0]);
+
+    await expect(
+      service.importInventory(inventoryCsv, userBNetwork),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      prisma.importJob.findFirstOrThrow({
+        where: { tenantId: fixture.tenantBId, type: 'INVENTORY_CSV' },
+        select: { tenantId: true, status: true, importedRows: true },
+      }),
+    ).resolves.toEqual({
+      tenantId: fixture.tenantBId,
+      status: 'FAILED',
+      importedRows: 0,
+    });
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: fixture.userANetworkId },
+        data: { accessScope: 'STORES' },
+      }),
+      prisma.userStoreAccess.create({
+        data: {
+          userId: fixture.userANetworkId,
+          storeId: fixture.storeA1Id,
+        },
+      }),
+    ]);
+    await expect(
+      service.importSales(salesCsv, userANetwork),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
 });
 
 function buildProductsService(prisma: PrismaService) {
@@ -457,6 +677,32 @@ function buildSuppliersService(prisma: PrismaService) {
   );
 
   return new SuppliersService(
+    prisma,
+    new TenantContextService(),
+    freshStoreScopeService,
+  );
+}
+
+function buildProductCsvImportService(prisma: PrismaService) {
+  const freshStoreScopeService = new FreshStoreScopeService(
+    prisma,
+    new AccessScopeService(),
+  );
+
+  return new ProductCsvImportService(
+    prisma,
+    new TenantContextService(),
+    freshStoreScopeService,
+  );
+}
+
+function buildFactCsvImportService(prisma: PrismaService) {
+  const freshStoreScopeService = new FreshStoreScopeService(
+    prisma,
+    new AccessScopeService(),
+  );
+
+  return new FactCsvImportService(
     prisma,
     new TenantContextService(),
     freshStoreScopeService,
@@ -702,6 +948,9 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
 async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
   await prisma.$transaction([
     prisma.inventorySnapshot.deleteMany({ where: { tenantId } }),
+    prisma.salesFact.deleteMany({ where: { tenantId } }),
+    prisma.stockMovement.deleteMany({ where: { tenantId } }),
+    prisma.importJob.deleteMany({ where: { tenantId } }),
     prisma.product.deleteMany({ where: { tenantId } }),
     prisma.categorySourceMappingEvent.deleteMany({ where: { tenantId } }),
     prisma.categorySourceMapping.deleteMany({ where: { tenantId } }),

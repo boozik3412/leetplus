@@ -244,6 +244,13 @@ describePostgres(
         identity,
         config,
       );
+      expect(
+        Reflect.set(
+          ownerInviteLifecycle,
+          'reissueFailure',
+          safeReissueDatabaseDiagnostic,
+        ),
+      ).toBe(true);
       const effectiveSecurityDefiners = await activationPrisma.$queryRaw<
         Array<{ signature: string }>
       >(Prisma.sql`
@@ -688,6 +695,29 @@ function assertSafeIntegrationDatabase(): string {
     );
   }
   return raw;
+}
+
+function safeReissueDatabaseDiagnostic(error: unknown): Error {
+  const source = record(error) ? error : {};
+  const meta = record(source.meta) ? source.meta : {};
+  const rawPrimary =
+    typeof meta.message === 'string'
+      ? (/ERROR: ([^\r\n]{1,300})/u.exec(meta.message)?.[1] ?? 'UNAVAILABLE')
+      : 'UNAVAILABLE';
+  const primary = rawPrimary.replace(/[^A-Za-z0-9 _.:"'()/-]/gu, '?');
+  return new Error(
+    [
+      'OWNER_INVITE_REISSUE_DATABASE_FAILURE',
+      `class=${error instanceof Error ? error.constructor.name : typeof error}`,
+      `prismaCode=${typeof source.code === 'string' ? source.code : 'UNAVAILABLE'}`,
+      `sqlState=${typeof meta.code === 'string' ? meta.code : 'UNAVAILABLE'}`,
+      `primary=${primary}`,
+    ].join(' '),
+  );
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function assertDisposableDatabaseName(databaseName: string): void {

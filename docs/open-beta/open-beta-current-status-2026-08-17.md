@@ -147,12 +147,25 @@ network articles и получает hidden `404` для B2. Focused unit `32/32
 `12/12`, restored-copy PostgreSQL `9/9`, API/Web typecheck/build и
 production-build browser A/B прошли. B1 upload/bind/download дал `BOUND`
 binding с exact B1 Store; authenticated B2 GET того же файла вернул hidden
-`404`. Остались четыре network-only staff parent families.
+`404`. После этого среза оставались четыре network-only staff parent families.
 [Полный отчёт](./gate-1mt-knowledge-stores-evidence-2026-08-19.md).
 
-Предыдущий clean head `6c6bf7adca71c8ee27d1e0fc2a61819dd7e149f8`
-принят GitHub Actions run `32178680887` как `4/4 SUCCESS`. Новый knowledge
-candidate считается remote accepted только после exact-head CI pushed SHA.
+Shift-regulations STORES adoption реализован на exact implementation
+`6ce36a41494e488076c60ac1776b765e24731d5e`. Fresh parent policy теперь
+ограничивает list/detail/create/update, версии, оценки, подтверждения и
+attachment download. `STORES(B1)` управляет только B1 regulation, читает и
+подтверждает опубликованный network regulation read-only, не видит B2 и не
+может назначить assessment B2. Focused unit `53/53`, Web BFF `13/13`, pilot
+HTTP/guard `160/160`, restored-copy PostgreSQL `10/10`, typecheck/lint/build и
+production-build browser A/B прошли. Остались три network-only staff parent
+families: training, onboarding и checklists/templates.
+[Полный отчёт](./gate-1mt-shift-regulations-stores-evidence-2026-08-19.md).
+
+Clean head `6c6bf7adca71c8ee27d1e0fc2a61819dd7e149f8` принят GitHub Actions run
+`32178680887` как `4/4 SUCCESS`. Exact `94a146d2…` принял founder-mail gate,
+но application CI отклонил одно устаревшее network-guard ожидание; остальные
+`158/159` тестов прошли. Successor исправляет inventory и считается remote
+accepted только после exact-head CI нового pushed SHA.
 
 Pilot HTTP inventory повторно связан с production source: `295` exact routes,
 `241 ALLOW / 54 BLOCKED`. `POST /stores` имеет fresh NETWORK assertion; для
@@ -340,8 +353,8 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    writer/lifecycle, real
    HTTP SSE и latest
    assortment HTTP `15/15`), browser read/admission и report/download/mutation
-   journey, OWNER attachment lifecycle и knowledge STORES adoption приняты на
-   restored copy. Не закрыты outbound digest, STORES adoption четырёх
+   journey, OWNER attachment lifecycle, knowledge и shift-regulations STORES
+   adoption приняты на restored copy. Не закрыты outbound digest, STORES adoption трёх
    оставшихся network-only staff parent families,
    archive/orphan browser matrix остальных attachment parents,
    jobs/Telegram/public guest binding и Gate 2 текущей сети.
@@ -379,8 +392,9 @@ clean SHA + CI artifact [DONE]
   → [DONE restored-copy clone] OWNER attachment upload/bind/download/unbind/quarantine
   → [DONE restored-copy clone] STORES side-door deny for network-only staff parents
   → [DONE restored-copy clone] knowledge-base STORES parent + attachment adoption
+  → [DONE restored-copy clone] shift-regulations STORES parent + attachment adoption
   → production roles/secrets + controlled SMTP canary
-  → Gate 1MT four remaining STORES staff parents + attachment archive/orphan browser matrix
+  → Gate 1MT three remaining STORES staff parents + attachment archive/orphan browser matrix
   → Gate 1MT jobs/Telegram/public-guest/outbound
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE

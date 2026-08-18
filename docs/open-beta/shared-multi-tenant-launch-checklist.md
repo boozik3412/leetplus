@@ -452,8 +452,12 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [x] Knowledge base использует fresh `NETWORK | STORES` parent policy для
       list/detail/mutation/audit/files; restored-copy PostgreSQL `9/9` и
       production-build B1↔B2 browser matrix приняты на `085f8bbd…`.
-- [ ] Shift regulations, training, onboarding и checklists/templates получают
-      ту же store-aware parent/file policy.
+- [x] Shift regulations используют fresh `NETWORK | STORES` parent policy для
+      list/detail/mutation/assessment/acknowledgement/files; restored-copy
+      PostgreSQL `10/10` и production-build B1↔B2 browser matrix приняты на
+      `6ce36a41…`.
+- [ ] Training, onboarding и checklists/templates получают ту же store-aware
+      parent/file policy.
 - [ ] Control/ratings/motivation/discipline защищены и аудируются.
 - [ ] Salary работает только как planning; payout отсутствует.
 - [ ] Attachments имеют live parent ACL, revoke и tenant/store negative tests.

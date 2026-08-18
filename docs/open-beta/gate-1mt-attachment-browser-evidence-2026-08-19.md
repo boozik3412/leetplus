@@ -91,10 +91,12 @@ commit `085f8bbdd3115b3ec7a4438e7614c815004dd844`.
 [Новая A/B приёмка](./gate-1mt-knowledge-stores-evidence-2026-08-19.md)
 подтвердила B1 edit/upload/download и hidden `404` для authenticated B2.
 
-Shift regulations, training, onboarding и checklist/templates всё ещё требуют
-отдельной store-aware parent policy. Для каждого следующего parent необходимо
-синхронно расширять attachment reader; открывать download отдельно от parent
-запрещено.
+Shift regulations затем также переведены на store-aware parent policy в exact
+commit `6ce36a41494e488076c60ac1776b765e24731d5e` и приняты отдельной
+[A/B приёмкой](./gate-1mt-shift-regulations-stores-evidence-2026-08-19.md).
+Training, onboarding и checklist/templates всё ещё требуют отдельной policy.
+Для каждого следующего parent необходимо синхронно расширять attachment
+reader; открывать download отдельно от parent запрещено.
 
 ## Static acceptance
 
@@ -132,9 +134,9 @@ database sessions были `0`; exact `a2` database удалена. Совоку
 
 ## Остаток до внешнего теста
 
-1. Реализовать и принять STORES parent policy для четырёх оставшихся staff
-   parent families: shift regulations, training, onboarding и
-   checklists/templates; attachment reader должен следовать parent policy.
+1. Реализовать и принять STORES parent policy для трёх оставшихся staff parent
+   families: training, onboarding и checklists/templates; attachment reader
+   должен следовать parent policy.
 2. Закрыть archive/delete/orphan-retention browser matrix остальных parent
    kinds.
 3. Закрыть tenant-aware background jobs, Telegram/public guest binding и

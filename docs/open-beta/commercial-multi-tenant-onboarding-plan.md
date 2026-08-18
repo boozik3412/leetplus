@@ -108,18 +108,18 @@ Entitlements и execution revisions управляют включением мо
 
 ## 4. Текущий статус
 
-| Контур                                       | Статус                                                                                                                                         |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Multi-tenant data model, roles, capabilities | реализован; production gates ещё не полностью закрыты                                                                                          |
-| CURRENT198–202 trust foundation              | V2 global successor exact-SHA CI accepted, deny-only; production root не enrolled                                                              |
-| Owner invite/activation database boundary    | engineering accepted; route закрыт `503`, не deployed                                                                                          |
-| SMTP/mail worker foundation                  | engineering accepted; production enrollment/config отсутствуют                                                                                 |
-| Langame runtime/import foundation            | глубокая deny-only/runtime foundation готова; self-service production flow не включён                                                          |
-| Gate 1MT tenant/store isolation              | PostgreSQL A/B `35/35 PASS`; report/SSE/OWNER attachment и knowledge STORES browser приняты; четыре staff parents и background остаток открыты |
-| Restored-copy rehearsal                      | production backup migration/repeat/data-zero-diff/TLS-role, downloaded artifact и mail/SENT/accept `PASS`                                      |
-| Первый внешний tester                        | учётная запись и Tenant B не создавались                                                                                                       |
-| Текущая сеть из четырёх клубов               | без изменений, один существующий tenant                                                                                                        |
-| Release decision                             | `NO-GO` до production roles/SMTP canary, Gate 1MT, Gate 2 и отдельного persisted GO                                                            |
+| Контур                                       | Статус                                                                                                                                             |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Multi-tenant data model, roles, capabilities | реализован; production gates ещё не полностью закрыты                                                                                              |
+| CURRENT198–202 trust foundation              | V2 global successor exact-SHA CI accepted, deny-only; production root не enrolled                                                                  |
+| Owner invite/activation database boundary    | engineering accepted; route закрыт `503`, не deployed                                                                                              |
+| SMTP/mail worker foundation                  | engineering accepted; production enrollment/config отсутствуют                                                                                     |
+| Langame runtime/import foundation            | глубокая deny-only/runtime foundation готова; self-service production flow не включён                                                              |
+| Gate 1MT tenant/store isolation              | PostgreSQL A/B `35/35 PASS`; report/SSE/OWNER attachment, knowledge и shift STORES browser приняты; три staff parents и background остаток открыты |
+| Restored-copy rehearsal                      | production backup migration/repeat/data-zero-diff/TLS-role, downloaded artifact и mail/SENT/accept `PASS`                                          |
+| Первый внешний tester                        | учётная запись и Tenant B не создавались                                                                                                           |
+| Текущая сеть из четырёх клубов               | без изменений, один существующий tenant                                                                                                            |
+| Release decision                             | `NO-GO` до production roles/SMTP canary, Gate 1MT, Gate 2 и отдельного persisted GO                                                                |
 
 ## 5. Критический путь до тестового доступа
 
@@ -129,11 +129,12 @@ Entitlements и execution revisions управляют включением мо
 4. `DONE ON RESTORED COPY`: activation role/grants/readiness и TLS/HBA/SCRAM rollback.
 5. `DONE`: exact-SHA artifact, artifact-bound admission и restored-copy trusted
    TLS SMTP + enrollment/SENT/accept.
-6. Закрыть STORES adoption четырёх оставшихся network-only staff parent
-   families (shift regulations, training, onboarding, checklists/templates),
+6. Закрыть STORES adoption трёх оставшихся network-only staff parent
+   families (training, onboarding, checklists/templates),
    remaining attachment archive/orphan matrix, jobs/Telegram/public
    guest/outbound и Gate 2; PostgreSQL A/B `35/35`, reports/SSE, OWNER
-   attachment lifecycle и knowledge STORES adoption уже приняты.
+   attachment lifecycle, knowledge и shift-regulations STORES adoption уже
+   приняты.
 7. В `PREPARE` создать production roles/secrets, принять controlled SMTP
    canary, затем включить protected tenant factory, owner route и mail worker.
 8. Выпустить отдельный `SHARED BETA GO`, создать Tenant B/Store B1 и отправить

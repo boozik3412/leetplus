@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.162                                        |
+| Версия           | 1.163                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -98,6 +98,10 @@ Store-aware knowledge parent, per-row mutation authority и совпадающа
 attachment download policy для `NETWORK | STORES`:
 [Gate 1MT knowledge STORES evidence 19.08.2026](./gate-1mt-knowledge-stores-evidence-2026-08-19.md).
 
+Store-aware shift-regulations parent, assessment/acknowledgement authority и
+совпадающая attachment download policy для `NETWORK | STORES`:
+[Gate 1MT shift-regulations STORES evidence 19.08.2026](./gate-1mt-shift-regulations-stores-evidence-2026-08-19.md).
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 
@@ -169,8 +173,8 @@ checksum. Production и текущая сеть не изменялись.
    Team-chat real HTTP SSE extension принят на `ccf81a28…`/`dfe5e0f8…`:
    pre-stream `404/401`, Web BFF `10/10`, unit `22/22`, два PG/HTTP run
    `4/4 + 4/4`, `156` table counts zero-diff и database residue `0`.
-   OWNER attachment production-build browser lifecycle и knowledge STORES
-   adoption также приняты; STORES adoption четырёх оставшихся network-only
+   OWNER attachment production-build browser lifecycle, knowledge и shift
+   regulations STORES adoption также приняты; STORES adoption трёх оставшихся network-only
    staff parent families, remaining attachment archive/orphan matrix, outbound
    digest и job/Telegram/public-guest остаток не закрыты. HTTP
    inventory: `295 = 241 ALLOW + 54
@@ -204,6 +208,11 @@ checksum. Production и текущая сеть не изменялись.
    unit `32/32`, Web BFF `12/12`, restored-copy PostgreSQL `9/9` и
    production-build B1↔B2 browser matrix; B1 edit/upload/download принят,
    authenticated B2 foreign attachment получил hidden `404`.
+   0a.10. [Gate 1MT shift-regulations STORES evidence](./gate-1mt-shift-regulations-stores-evidence-2026-08-19.md) —
+   exact `6ce36a41…`, общая parent/attachment policy для `NETWORK | STORES`,
+   assessment/acknowledgement scope, unit `53/53`, Web BFF `13/13`, pilot
+   HTTP/guard `160/160`, restored-copy PostgreSQL `10/10` и production-build
+   B1↔B2 browser matrix; B1 edit/ack принят, B2 foreign mutation скрыта `404`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;
@@ -1399,8 +1408,8 @@ PASS`, PostgreSQL `FAIL`). Previous accepted exact-head `d525b73...` / CI
 до уничтожения disposable snapshot.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
-STORES adoption четырёх network-only staff parent families (shift regulations,
-training, onboarding, checklists/templates), attachment archive/orphan browser
+STORES adoption трёх network-only staff parent families (training, onboarding,
+checklists/templates), attachment archive/orphan browser
 matrix, полный gamification/assortment adoption, tenant-aware jobs/Telegram/
 public guest, Gate 2, production operations и canary.
 

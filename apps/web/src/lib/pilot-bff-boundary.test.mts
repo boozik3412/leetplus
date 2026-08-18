@@ -4,6 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { resolveTeamChatEventUpstreamQuery } from "./team-chat-events.ts";
 
 const API_ROUTE_ROOT = fileURLToPath(new URL("../app/api", import.meta.url));
 
@@ -238,6 +239,52 @@ test("bounds the reports SSR fan-out to two upstream loaders at a time", async (
     boundedBlocks.reduce((total, count) => total + count, 0),
     12,
   );
+});
+
+test("keeps team-chat SSE cookie-bound and rejects client-controlled selectors", async () => {
+  const source = await readFile(
+    path.join(API_ROUTE_ROOT, "staff/team-chat/events/route.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /await getAuthHeaders\(\)/);
+  assert.match(source, /if \(!headers\.Authorization\)/);
+  assert.match(source, /resolveTeamChatEventUpstreamQuery\(request\.url\)/);
+  assert.doesNotMatch(source, /events\$\{url\.search\}/);
+  assert.match(source, /Accept:\s*["']text\/event-stream["']/);
+  assert.match(source, /signal:\s*request\.signal/);
+  for (const headerValue of [
+    "private, no-store, no-transform, max-age=0",
+    "Cookie, Authorization",
+    "no-referrer",
+    "nosniff",
+    "same-origin",
+  ]) {
+    assert.ok(
+      source.includes(`\"${headerValue}\"`),
+      `missing SSE response header value: ${headerValue}`,
+    );
+  }
+  assert.doesNotMatch(source, /Connection:\s*["']keep-alive["']/);
+
+  const channelId = "123e4567-e89b-42d3-a456-426614174000";
+  assert.equal(
+    resolveTeamChatEventUpstreamQuery("https://leetplus.invalid/events"),
+    "",
+  );
+  assert.equal(
+    resolveTeamChatEventUpstreamQuery(
+      `https://leetplus.invalid/events?channelId=${channelId}`,
+    ),
+    `?channelId=${channelId}`,
+  );
+  for (const invalidUrl of [
+    "https://leetplus.invalid/events?storeId=hidden",
+    `https://leetplus.invalid/events?channelId=${channelId}&channelId=${channelId}`,
+    "https://leetplus.invalid/events?channelId=not-a-uuid",
+  ]) {
+    assert.equal(resolveTeamChatEventUpstreamQuery(invalidUrl), null);
+  }
 });
 
 test("keeps transitional tenant-wide staff workspaces out of STORES scope", async () => {

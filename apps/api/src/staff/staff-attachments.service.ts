@@ -139,6 +139,18 @@ export class StaffAttachmentsService {
 
     const file = await this.prisma.$transaction(
       async (tx) => {
+        if (
+          aclMode === 'ENFORCED' &&
+          !(await this.lockAttachmentAuthority(
+            tx,
+            id,
+            tenant.tenantId,
+            user.id,
+          ))
+        ) {
+          return null;
+        }
+
         const now = new Date();
         const metadata = await tx.staffAttachment.findFirst({
           where: { id, tenantId: tenant.tenantId },
@@ -216,7 +228,7 @@ export class StaffAttachmentsService {
         };
       },
       {
-        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
       },
     );
 
@@ -225,6 +237,34 @@ export class StaffAttachmentsService {
     }
 
     return file;
+  }
+
+  private async lockAttachmentAuthority(
+    tx: Prisma.TransactionClient,
+    attachmentId: string,
+    tenantId: string,
+    userId: string,
+  ) {
+    const rows = await tx.$queryRaw<
+      Array<{ attachmentId: string; userId: string }>
+    >(Prisma.sql`
+      SELECT
+        attachment."id" AS "attachmentId",
+        subject."id" AS "userId"
+      FROM "StaffAttachment" AS attachment
+      INNER JOIN "User" AS subject
+        ON subject."id" = ${userId}
+        AND subject."tenantId" = ${tenantId}
+      WHERE attachment."id" = ${attachmentId}
+        AND attachment."tenantId" = ${tenantId}
+      FOR SHARE OF attachment, subject
+    `);
+
+    return (
+      rows.length === 1 &&
+      rows[0]?.attachmentId === attachmentId &&
+      rows[0]?.userId === userId
+    );
   }
 
   private async canReadStrict(

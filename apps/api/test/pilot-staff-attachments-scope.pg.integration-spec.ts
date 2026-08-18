@@ -721,6 +721,66 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       }),
     ).resolves.toBe(0);
   });
+
+  it('denies attachment bytes when persisted user authority is revoked first', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const services = buildServices(prisma);
+    const user = buildUser(fixture, 'A_NETWORK');
+    const attachment = await services.attachments.createAttachment(user, {
+      originalname: `PG attachment fixture scope revoke ${randomUUID()}.txt`,
+      mimetype: 'text/plain',
+      buffer: Buffer.from('scope-revoke-race'),
+    });
+    const article = await services.knowledgeBase.createArticle(user, {
+      title: `Scope revoke article ${randomUUID()}`,
+      content: `<a href="${attachment.url}">Protected attachment</a>`,
+    });
+    await expect(
+      services.attachments.getAttachment(user, attachment.id),
+    ).resolves.toEqual(
+      expect.objectContaining({ buffer: Buffer.from('scope-revoke-race') }),
+    );
+
+    const heldRevocation = await holdDatabaseLock(
+      concurrentPrisma,
+      async (tx) => {
+        await tx.user.update({
+          where: { id: fixture.userANetworkId },
+          data: { isActive: false },
+        });
+      },
+    );
+    const download = observeOperation(
+      services.attachments.getAttachment(user, attachment.id),
+    );
+
+    try {
+      await expect(
+        waitForBlockedOperation(prisma, heldRevocation.blockerPid, [download]),
+      ).resolves.toBe(true);
+    } finally {
+      heldRevocation.release();
+      await heldRevocation.finished;
+    }
+
+    const result = await download.result;
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(UnauthorizedException);
+    }
+    await expect(
+      prisma.staffAttachmentBinding.count({
+        where: {
+          tenantId: fixture.tenantAId,
+          attachmentId: attachment.id,
+          resourceKind: StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+          resourceId: article.id,
+          state: 'BOUND',
+        },
+      }),
+    ).resolves.toBe(1);
+  });
 });
 
 async function holdDatabaseLock(

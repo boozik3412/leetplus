@@ -82,6 +82,14 @@ describe('StaffAttachmentsService', () => {
       events.push(findFirstArgs.length === 1 ? 'metadata-query' : 'blob-query');
       return Promise.resolve(findResults.shift());
     };
+    const queryRaw = jest
+      .fn()
+      .mockImplementation((query: { values: unknown[] }) => {
+        events.push('authority-lock');
+        return Promise.resolve([
+          { attachmentId: query.values[2], userId: query.values[0] },
+        ]);
+      });
     const updateMany = jest.fn().mockResolvedValue({ count: 1 });
     const parentFindFirst = jest.fn().mockResolvedValue(null);
     const tx = {
@@ -91,6 +99,7 @@ describe('StaffAttachmentsService', () => {
       staffShiftRegulation: { findFirst: parentFindFirst },
       staffTrainingCourse: { findFirst: parentFindFirst },
       staffOnboardingPlan: { findFirst: parentFindFirst },
+      $queryRaw: queryRaw,
     };
     const transaction = jest
       .fn()
@@ -140,6 +149,7 @@ describe('StaffAttachmentsService', () => {
       create,
       findResults,
       findFirstArgs,
+      queryRaw,
       updateMany,
       transaction,
       tx,
@@ -302,8 +312,20 @@ describe('StaffAttachmentsService', () => {
     });
     expect(canReadAnyAttachmentMessage).not.toHaveBeenCalled();
     expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: 'RepeatableRead',
+      isolationLevel: 'ReadCommitted',
     });
+  });
+
+  it('fails before metadata or blob reads when the authority rows cannot be locked', async () => {
+    const { service, queryRaw, findFirstArgs } = createSubject();
+    queryRaw.mockResolvedValueOnce([]);
+
+    await expect(
+      service.getAttachment(user, 'attachment-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(findFirstArgs).toHaveLength(0);
   });
 
   it('denies another uploader and never loads the blob', async () => {
@@ -425,7 +447,12 @@ describe('StaffAttachmentsService', () => {
       ['message-1', 'message-2'],
       tx,
     );
-    expect(events).toEqual(['metadata-query', 'chat-authorizer', 'blob-query']);
+    expect(events).toEqual([
+      'authority-lock',
+      'metadata-query',
+      'chat-authorizer',
+      'blob-query',
+    ]);
     const blobQuery = findFirstArgs[1];
     expect(blobQuery?.where.state).toBe('BOUND');
   });

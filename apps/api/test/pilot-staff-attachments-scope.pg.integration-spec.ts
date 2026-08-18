@@ -1,6 +1,11 @@
-import { NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  Prisma,
   PrismaClient,
   StaffAttachmentResourceKind,
   UserRole,
@@ -52,14 +57,26 @@ type Fixture = {
   onboardingPlanA1Id: string;
 };
 
+type HeldDatabaseLock = {
+  blockerPid: number;
+  release: () => void;
+  finished: Promise<void>;
+};
+
+type OperationResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: unknown };
+
 describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
   let prisma: PrismaService;
+  let concurrentPrisma: PrismaClient;
   const fixtureTenantIds = new Set<string>();
 
   beforeAll(async () => {
     assertSafeIntegrationDatabase();
     prisma = new PrismaService();
-    await prisma.$connect();
+    concurrentPrisma = new PrismaClient();
+    await Promise.all([prisma.$connect(), concurrentPrisma.$connect()]);
   });
 
   afterEach(async () => {
@@ -90,7 +107,10 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       userResidue: 0,
       attachmentResidue: 0,
     });
-    await prisma?.$disconnect();
+    await Promise.allSettled([
+      prisma?.$disconnect(),
+      concurrentPrisma?.$disconnect(),
+    ]);
   });
 
   it('keeps a pending upload private to its exact uploader and tenant', async () => {
@@ -471,7 +491,327 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       }),
     ).resolves.toBe(0);
   });
+
+  it('serializes native bind, unbind, and replacement races without orphan authority', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const services = buildServices(prisma);
+    const user = buildUser(fixture, 'A_NETWORK');
+    const sharedAttachment = await services.attachments.createAttachment(user, {
+      originalname: `PG attachment fixture bind race ${randomUUID()}.txt`,
+      mimetype: 'text/plain',
+      buffer: Buffer.from('bind-race'),
+    });
+    const firstTitle = `Bind race first ${randomUUID()}`;
+    const secondTitle = `Bind race second ${randomUUID()}`;
+    const heldAttachment = await holdDatabaseLock(
+      concurrentPrisma,
+      async (tx) => {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT attachment."id"
+          FROM "StaffAttachment" AS attachment
+          WHERE attachment."id" = ${sharedAttachment.id}
+            AND attachment."tenantId" = ${fixture.tenantAId}
+          FOR UPDATE
+        `);
+      },
+    );
+    const firstCreate = observeOperation(
+      services.trainingCourses.createCourse(user, {
+        title: firstTitle,
+        steps: [
+          {
+            title: 'Shared race attachment',
+            type: 'LINK',
+            url: sharedAttachment.url,
+          },
+        ],
+      }),
+    );
+    const secondCreate = observeOperation(
+      services.trainingCourses.createCourse(user, {
+        title: secondTitle,
+        steps: [
+          {
+            title: 'Shared race attachment',
+            type: 'LINK',
+            url: sharedAttachment.url,
+          },
+        ],
+      }),
+    );
+
+    try {
+      await expect(
+        waitForBlockedOperation(prisma, heldAttachment.blockerPid, [
+          firstCreate,
+          secondCreate,
+        ]),
+      ).resolves.toBe(true);
+    } finally {
+      heldAttachment.release();
+      await heldAttachment.finished;
+    }
+
+    const createResults = await Promise.all([
+      firstCreate.result,
+      secondCreate.result,
+    ]);
+    expect(createResults.filter((result) => result.ok)).toHaveLength(1);
+    const rejectedCreate = createResults.find((result) => !result.ok);
+    expect(rejectedCreate?.ok).toBe(false);
+    if (rejectedCreate && !rejectedCreate.ok) {
+      expect(rejectedCreate.error).toBeInstanceOf(BadRequestException);
+    }
+
+    const createdCourses = await prisma.staffTrainingCourse.findMany({
+      where: {
+        tenantId: fixture.tenantAId,
+        title: { in: [firstTitle, secondTitle] },
+      },
+      select: { id: true, steps: true },
+    });
+    expect(createdCourses).toHaveLength(1);
+    expect(JSON.stringify(createdCourses[0]?.steps)).toContain(
+      sharedAttachment.url,
+    );
+    await expect(
+      prisma.staffAttachmentBinding.findMany({
+        where: {
+          tenantId: fixture.tenantAId,
+          attachmentId: sharedAttachment.id,
+          state: 'BOUND',
+        },
+        select: { resourceKind: true, resourceId: true },
+      }),
+    ).resolves.toEqual([
+      {
+        resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
+        resourceId: createdCourses[0]?.id,
+      },
+    ]);
+
+    const originalAttachment = await services.attachments.createAttachment(
+      user,
+      {
+        originalname: `PG attachment fixture unbind race original ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: Buffer.from('unbind-race-original'),
+      },
+    );
+    const replacementAttachment = await services.attachments.createAttachment(
+      user,
+      {
+        originalname: `PG attachment fixture unbind race replacement ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: Buffer.from('unbind-race-replacement'),
+      },
+    );
+    const lifecycleCourse = await services.trainingCourses.createCourse(user, {
+      title: `Unbind race course ${randomUUID()}`,
+      steps: [
+        {
+          title: 'Original race attachment',
+          type: 'LINK',
+          url: originalAttachment.url,
+        },
+      ],
+    });
+    const heldParent = await holdDatabaseLock(concurrentPrisma, async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+          SELECT course."id"
+          FROM "StaffTrainingCourse" AS course
+          WHERE course."id" = ${lifecycleCourse.id}
+            AND course."tenantId" = ${fixture.tenantAId}
+          FOR UPDATE
+        `);
+    });
+    const remove = observeOperation(
+      services.trainingCourses.updateCourse(user, lifecycleCourse.id, {
+        steps: [],
+      }),
+    );
+    const replace = observeOperation(
+      services.trainingCourses.updateCourse(user, lifecycleCourse.id, {
+        steps: [
+          {
+            title: 'Replacement race attachment',
+            type: 'LINK',
+            url: replacementAttachment.url,
+          },
+        ],
+      }),
+    );
+
+    try {
+      await expect(
+        waitForBlockedOperation(prisma, heldParent.blockerPid, [
+          remove,
+          replace,
+        ]),
+      ).resolves.toBe(true);
+    } finally {
+      heldParent.release();
+      await heldParent.finished;
+    }
+
+    const lifecycleResults = await Promise.all([remove.result, replace.result]);
+    expect(lifecycleResults.map((result) => result.ok)).toEqual([true, true]);
+    const finalCourse = await prisma.staffTrainingCourse.findUniqueOrThrow({
+      where: { id: lifecycleCourse.id },
+      select: { steps: true },
+    });
+    const finalHasReplacement = JSON.stringify(finalCourse.steps).includes(
+      replacementAttachment.url,
+    );
+    const finalBindings = await prisma.staffAttachmentBinding.findMany({
+      where: {
+        tenantId: fixture.tenantAId,
+        resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
+        resourceId: lifecycleCourse.id,
+        state: 'BOUND',
+      },
+      select: { attachmentId: true },
+    });
+    expect(finalBindings).toEqual(
+      finalHasReplacement ? [{ attachmentId: replacementAttachment.id }] : [],
+    );
+    await expect(
+      prisma.staffAttachment.findUniqueOrThrow({
+        where: { id: originalAttachment.id },
+        select: { state: true, stateReasonCode: true },
+      }),
+    ).resolves.toEqual({
+      state: 'QUARANTINED',
+      stateReasonCode: 'NATIVE_REFERENCE_REMOVED',
+    });
+    await expect(
+      prisma.staffAttachment.findUniqueOrThrow({
+        where: { id: replacementAttachment.id },
+        select: { state: true, stateReasonCode: true },
+      }),
+    ).resolves.toEqual(
+      finalHasReplacement
+        ? { state: 'BOUND', stateReasonCode: null }
+        : {
+            state: 'QUARANTINED',
+            stateReasonCode: 'NATIVE_REFERENCE_REMOVED',
+          },
+    );
+
+    const forbiddenRebindTitle = `Quarantined rebind ${randomUUID()}`;
+    await expect(
+      services.trainingCourses.createCourse(user, {
+        title: forbiddenRebindTitle,
+        steps: [
+          {
+            title: 'Quarantined original attachment',
+            type: 'LINK',
+            url: originalAttachment.url,
+          },
+        ],
+      }),
+    ).rejects.toThrow('Attachment is not available');
+    await expect(
+      prisma.staffTrainingCourse.count({
+        where: {
+          tenantId: fixture.tenantAId,
+          title: forbiddenRebindTitle,
+        },
+      }),
+    ).resolves.toBe(0);
+  });
 });
+
+async function holdDatabaseLock(
+  prismaClient: PrismaClient,
+  lock: (tx: Prisma.TransactionClient) => Promise<void>,
+): Promise<HeldDatabaseLock> {
+  let releaseLock: () => void = () => undefined;
+  let resolveReady: (pid: number) => void = () => undefined;
+  let rejectReady: (reason?: unknown) => void = () => undefined;
+  const releasePromise = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  const readyPromise = new Promise<number>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  const finished = prismaClient
+    .$transaction(
+      async (tx) => {
+        const [backend] = await tx.$queryRaw<Array<{ pid: number }>>(
+          Prisma.sql`SELECT pg_backend_pid()::int AS pid`,
+        );
+        await lock(tx);
+        resolveReady(backend.pid);
+        await releasePromise;
+      },
+      { timeout: 15_000 },
+    )
+    .catch((error: unknown) => {
+      rejectReady(error);
+      throw error;
+    });
+
+  return {
+    blockerPid: await readyPromise,
+    release: releaseLock,
+    finished,
+  };
+}
+
+function observeOperation<T>(promise: Promise<T>) {
+  let settled = false;
+  const result = promise.then<OperationResult<T>>(
+    (value) => {
+      settled = true;
+      return { ok: true, value };
+    },
+    (error: unknown) => {
+      settled = true;
+      return { ok: false, error };
+    },
+  );
+
+  return {
+    isSettled: () => settled,
+    result,
+  };
+}
+
+async function waitForBlockedOperation(
+  prismaClient: PrismaClient,
+  blockerPid: number,
+  operations: Array<{ isSettled: () => boolean }>,
+) {
+  const deadline = Date.now() + 5_000;
+
+  while (Date.now() < deadline) {
+    if (operations.every((operation) => operation.isSettled())) {
+      return false;
+    }
+
+    const [row] = await prismaClient.$queryRaw<Array<{ blocked: boolean }>>(
+      Prisma.sql`
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_stat_activity AS activity
+          WHERE activity.datname = current_database()
+            AND ${blockerPid} = ANY(pg_blocking_pids(activity.pid))
+        ) AS blocked
+      `,
+    );
+
+    if (row.blocked) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  return false;
+}
 
 function buildServices(prisma: PrismaService) {
   const freshStoreScopeService = new FreshStoreScopeService(

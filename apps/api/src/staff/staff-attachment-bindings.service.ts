@@ -84,13 +84,35 @@ export class StaffAttachmentBindingsService {
       ORDER BY attachment."id"
       FOR UPDATE
     `);
+    const existingBindings = await tx.staffAttachmentBinding.findMany({
+      where: {
+        tenantId: input.tenantId,
+        resourceKind: input.resourceKind,
+        resourceId: input.resourceId,
+        state: 'BOUND',
+        attachmentId: { in: attachmentIds },
+      },
+      select: { attachmentId: true },
+    });
     const now = new Date();
     const rowsById = new Map(rows.map((row) => [row.id, row]));
+    const alreadyBoundIds = new Set(
+      existingBindings.flatMap((binding) =>
+        binding.attachmentId ? [binding.attachmentId] : [],
+      ),
+    );
     const allAvailable = attachmentIds.every((attachmentId) => {
       const row = rowsById.get(attachmentId);
 
+      if (row?.tenantId !== input.tenantId) {
+        return false;
+      }
+
+      if (row.state === 'BOUND') {
+        return alreadyBoundIds.has(attachmentId);
+      }
+
       return (
-        row?.tenantId === input.tenantId &&
         row.uploadedByUserId === input.actorUserId &&
         row.state === 'PENDING' &&
         row.pendingExpiresAt !== null &&
@@ -104,8 +126,16 @@ export class StaffAttachmentBindingsService {
 
     await beforeBinding?.(attachmentIds);
 
+    const pendingAttachmentIds = attachmentIds.filter(
+      (attachmentId) => !alreadyBoundIds.has(attachmentId),
+    );
+
+    if (pendingAttachmentIds.length === 0) {
+      return;
+    }
+
     await tx.staffAttachmentBinding.createMany({
-      data: attachmentIds.map((attachmentId) => ({
+      data: pendingAttachmentIds.map((attachmentId) => ({
         tenantId: input.tenantId,
         attachmentId,
         candidateAttachmentId: attachmentId,
@@ -124,7 +154,7 @@ export class StaffAttachmentBindingsService {
 
     const transition = await tx.staffAttachment.updateMany({
       where: {
-        id: { in: attachmentIds },
+        id: { in: pendingAttachmentIds },
         tenantId: input.tenantId,
         uploadedByUserId: input.actorUserId,
         state: 'PENDING',
@@ -138,7 +168,7 @@ export class StaffAttachmentBindingsService {
       },
     });
 
-    if (transition.count !== attachmentIds.length) {
+    if (transition.count !== pendingAttachmentIds.length) {
       throw new BadRequestException('Attachment is not available');
     }
   }

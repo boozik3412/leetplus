@@ -11,8 +11,13 @@ import { resolveUserCapabilities } from '../src/auth/capabilities';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { StaffAttachmentBindingsService } from '../src/staff/staff-attachment-bindings.service';
 import { StaffAttachmentsService } from '../src/staff/staff-attachments.service';
+import { StaffChecklistsService } from '../src/staff/staff-checklists.service';
+import { StaffKnowledgeBaseService } from '../src/staff/staff-knowledge-base.service';
+import { StaffOnboardingPlansService } from '../src/staff/staff-onboarding-plans.service';
+import { StaffShiftRegulationsService } from '../src/staff/staff-shift-regulations.service';
 import type { StaffTasksService } from '../src/staff/staff-tasks.service';
 import { StaffTeamChatService } from '../src/staff/staff-team-chat.service';
+import { StaffTrainingCoursesService } from '../src/staff/staff-training-courses.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
 import { FreshStoreScopeService } from '../src/tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../src/tenancy/tenant-context.service';
@@ -229,6 +234,185 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     }
   });
+
+  it('atomically binds native writer references for all five staff parent kinds', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const services = buildServices(prisma);
+    const user = buildUser(fixture, 'A_NETWORK');
+    const parentRows: Array<{
+      attachmentId: string;
+      resourceId: string;
+      resourceKind: StaffAttachmentResourceKind;
+    }> = [];
+
+    const upload = async (label: string) =>
+      services.attachments.createAttachment(user, {
+        originalname: `PG attachment fixture writer ${label} ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: Buffer.from(`writer-${label}`),
+      });
+
+    const regulationAttachment = await upload('regulation');
+    const regulation = await services.shiftRegulations.createRegulation(user, {
+      title: `Writer regulation ${randomUUID()}`,
+      attachments: [
+        {
+          title: 'Native regulation file',
+          type: 'DOCUMENT',
+          url: regulationAttachment.url,
+        },
+      ],
+    });
+    parentRows.push({
+      attachmentId: regulationAttachment.id,
+      resourceId: regulation.id,
+      resourceKind: StaffAttachmentResourceKind.SHIFT_REGULATION,
+    });
+
+    const articleAttachment = await upload('article');
+    const article = await services.knowledgeBase.createArticle(user, {
+      title: `Writer article ${randomUUID()}`,
+      content: `<p><a href="${articleAttachment.url}">Native file</a></p>`,
+    });
+    parentRows.push({
+      attachmentId: articleAttachment.id,
+      resourceId: article.id,
+      resourceKind: StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+    });
+
+    const courseAttachment = await upload('course');
+    const course = await services.trainingCourses.createCourse(user, {
+      title: `Writer course ${randomUUID()}`,
+      steps: [
+        {
+          title: 'Native course file',
+          type: 'LINK',
+          url: courseAttachment.url,
+        },
+      ],
+    });
+    parentRows.push({
+      attachmentId: courseAttachment.id,
+      resourceId: course.id,
+      resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
+    });
+
+    const planAttachment = await upload('onboarding');
+    const plan = await services.onboardingPlans.createPlan(user, {
+      title: `Writer onboarding ${randomUUID()}`,
+      steps: [
+        {
+          title: 'Native onboarding file',
+          type: 'LINK',
+          url: planAttachment.url,
+        },
+      ],
+    });
+    parentRows.push({
+      attachmentId: planAttachment.id,
+      resourceId: plan.id,
+      resourceKind: StaffAttachmentResourceKind.ONBOARDING_PLAN,
+    });
+
+    const checklistAttachment = await upload('checklist');
+    await services.checklists.updateChecklist(user, fixture.checklistRunA1Id, {
+      status: 'IN_PROGRESS',
+      answers: [
+        {
+          sectionId: 'section-a',
+          itemId: 'item-a',
+          evidenceAttachments: [
+            {
+              id: checklistAttachment.id,
+              fileName: checklistAttachment.fileName,
+              contentType: checklistAttachment.contentType,
+              byteSize: checklistAttachment.byteSize,
+              url: checklistAttachment.url,
+              createdAt: checklistAttachment.createdAt,
+            },
+          ],
+        },
+      ],
+    });
+    parentRows.push({
+      attachmentId: checklistAttachment.id,
+      resourceId: fixture.checklistRunA1Id,
+      resourceKind: StaffAttachmentResourceKind.CHECKLIST_RUN,
+    });
+
+    for (const expected of parentRows) {
+      await expect(
+        prisma.staffAttachment.findUniqueOrThrow({
+          where: { id: expected.attachmentId },
+          select: { state: true, pendingExpiresAt: true },
+        }),
+      ).resolves.toEqual({ state: 'BOUND', pendingExpiresAt: null });
+      await expect(
+        prisma.staffAttachmentBinding.findMany({
+          where: {
+            tenantId: fixture.tenantAId,
+            attachmentId: expected.attachmentId,
+          },
+          select: { resourceKind: true, resourceId: true, state: true },
+        }),
+      ).resolves.toEqual([
+        {
+          resourceKind: expected.resourceKind,
+          resourceId: expected.resourceId,
+          state: 'BOUND',
+        },
+      ]);
+    }
+
+    await services.trainingCourses.updateCourse(user, course.id, {
+      steps: [
+        {
+          title: 'Native course file',
+          type: 'LINK',
+          url: courseAttachment.url,
+        },
+      ],
+    });
+    await expect(
+      prisma.staffAttachmentBinding.count({
+        where: {
+          tenantId: fixture.tenantAId,
+          attachmentId: courseAttachment.id,
+          resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
+          resourceId: course.id,
+          state: 'BOUND',
+        },
+      }),
+    ).resolves.toBe(1);
+
+    const foreignAttachment = await services.attachments.createAttachment(
+      buildUser(fixture, 'B_NETWORK'),
+      {
+        originalname: `PG attachment fixture foreign ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: Buffer.from('foreign-writer'),
+      },
+    );
+    const rolledBackTitle = `Writer rollback ${randomUUID()}`;
+    await expect(
+      services.trainingCourses.createCourse(user, {
+        title: rolledBackTitle,
+        steps: [
+          {
+            title: 'Foreign native file',
+            type: 'LINK',
+            url: foreignAttachment.url,
+          },
+        ],
+      }),
+    ).rejects.toThrow('Attachment is not available');
+    await expect(
+      prisma.staffTrainingCourse.count({
+        where: { tenantId: fixture.tenantAId, title: rolledBackTitle },
+      }),
+    ).resolves.toBe(0);
+  });
 });
 
 function buildServices(prisma: PrismaService) {
@@ -245,17 +429,44 @@ function buildServices(prisma: PrismaService) {
   const staffTasks = {
     canReadAnyAttachmentTask: jest.fn().mockResolvedValue(false),
   } as unknown as StaffTasksService;
+  const notificationChat = {
+    createSystemNotification: jest.fn().mockResolvedValue(undefined),
+  } as unknown as StaffTeamChatService;
+  const tenantContext = new TenantContextService();
 
   return {
     attachments: new StaffAttachmentsService(
       prisma,
       new ConfigService({ STAFF_ATTACHMENT_ACL_MODE: 'ENFORCED' }),
-      new TenantContextService(),
+      tenantContext,
       teamChat,
       staffTasks,
       freshStoreScopeService,
     ),
     bindings,
+    shiftRegulations: new StaffShiftRegulationsService(
+      prisma,
+      tenantContext,
+      notificationChat,
+      bindings,
+    ),
+    knowledgeBase: new StaffKnowledgeBaseService(
+      prisma,
+      tenantContext,
+      bindings,
+    ),
+    trainingCourses: new StaffTrainingCoursesService(
+      prisma,
+      tenantContext,
+      notificationChat,
+      bindings,
+    ),
+    onboardingPlans: new StaffOnboardingPlansService(
+      prisma,
+      tenantContext,
+      bindings,
+    ),
+    checklists: new StaffChecklistsService(prisma, tenantContext, bindings),
   };
 }
 
@@ -417,8 +628,45 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
         createdByUserId: fixture.userANetworkId,
         assignedToUserId: fixture.userA1Id,
         title: `Attachment checklist ${suffix}`,
-        sectionsSnapshot: [],
-        answers: [],
+        sectionsSnapshot: [
+          {
+            id: 'section-a',
+            title: 'Attachment section',
+            description: null,
+            items: [
+              {
+                id: 'item-a',
+                title: 'Attachment item',
+                instruction: null,
+                valueType: 'FILE_LINK',
+                required: false,
+                evidenceRequired: false,
+                score: 0,
+                timing: {
+                  mode: 'NONE',
+                  offsetMinutes: null,
+                  timeOfDay: null,
+                  toleranceMinutes: 0,
+                  affectsDiscipline: false,
+                },
+              },
+            ],
+          },
+        ],
+        answers: [
+          {
+            sectionId: 'section-a',
+            itemId: 'item-a',
+            value: null,
+            status: null,
+            note: null,
+            evidenceUrl: null,
+            evidenceAttachments: [],
+            reviewThreads: [],
+            completedAt: null,
+            timing: null,
+          },
+        ],
       },
     });
     await tx.staffKnowledgeArticle.create({

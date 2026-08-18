@@ -3,10 +3,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
+import {
+  extractStaffAttachmentIds,
+  isExactStaffAttachmentUrl,
+} from './staff-attachment-references';
 import {
   StaffTeamChatService,
   type StaffChatSystemNotificationDto,
@@ -118,6 +123,7 @@ export class StaffTrainingCoursesService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly staffTeamChatService: StaffTeamChatService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getCourses(
@@ -193,13 +199,28 @@ export class StaffTrainingCoursesService {
     const normalized = await this.normalizeCourseData(tenantId, dto, {
       requireTitle: true,
     });
-    const created = await this.prisma.staffTrainingCourse.create({
-      data: {
-        ...(normalized.data as Prisma.StaffTrainingCourseUncheckedCreateInput),
-        tenantId,
-        createdByUserId: user.id,
-      },
-      include: courseInclude,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const course = await tx.staffTrainingCourse.create({
+        data: {
+          ...(normalized.data as Prisma.StaffTrainingCourseUncheckedCreateInput),
+          tenantId,
+          createdByUserId: user.id,
+        },
+        include: courseInclude,
+      });
+
+      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
+          resourceId: course.id,
+          attachmentIds: extractStaffAttachmentIds([normalized.data.steps]),
+        },
+      );
+
+      return course;
     });
 
     if (created.status === 'ACTIVE') {
@@ -242,10 +263,25 @@ export class StaffTrainingCoursesService {
     const normalized = await this.normalizeCourseData(tenantId, dto, {
       requireTitle: false,
     });
-    const updated = await this.prisma.staffTrainingCourse.update({
-      where: { id: current.id },
-      data: normalized.data,
-      include: courseInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const course = await tx.staffTrainingCourse.update({
+        where: { id: current.id },
+        data: normalized.data,
+        include: courseInclude,
+      });
+
+      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
+          resourceId: course.id,
+          attachmentIds: extractStaffAttachmentIds([normalized.data.steps]),
+        },
+      );
+
+      return course;
     });
 
     if (this.shouldNotifyCourseUpdate(current, updated, normalized.data)) {
@@ -539,7 +575,7 @@ export class StaffTrainingCoursesService {
 
       if (url && !this.isAllowedUrl(url)) {
         throw new BadRequestException(
-          'Course step URL must start with http:// or https://',
+          'Course step URL must be a native attachment path or start with http:// or https://',
         );
       }
 
@@ -731,7 +767,7 @@ export class StaffTrainingCoursesService {
   }
 
   private isAllowedUrl(value: string) {
-    return /^https?:\/\//i.test(value);
+    return isExactStaffAttachmentUrl(value) || /^https?:\/\//i.test(value);
   }
 
   private asRecord(value: unknown): Record<string, unknown> {

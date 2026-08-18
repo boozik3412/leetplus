@@ -4,11 +4,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { formatStaffDateTime } from './staff-export';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
+import {
+  extractStaffAttachmentIds,
+  isExactStaffAttachmentUrl,
+} from './staff-attachment-references';
 import {
   StaffTeamChatService,
   type StaffChatSystemNotificationDto,
@@ -271,6 +276,7 @@ export class StaffShiftRegulationsService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly staffTeamChatService: StaffTeamChatService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getRegulations(
@@ -350,6 +356,17 @@ export class StaffShiftRegulationsService {
         include: regulationInclude,
       });
 
+      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.SHIFT_REGULATION,
+          resourceId: created.id,
+          attachmentIds: extractStaffAttachmentIds([data.attachments]),
+        },
+      );
+
       if (status === 'PUBLISHED') {
         await this.createVersionSnapshot(tx, created, user.id);
       }
@@ -411,6 +428,17 @@ export class StaffShiftRegulationsService {
         },
         include: regulationInclude,
       });
+
+      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.SHIFT_REGULATION,
+          resourceId: updated.id,
+          attachmentIds: extractStaffAttachmentIds([data.attachments]),
+        },
+      );
 
       if (shouldPublish) {
         await this.createVersionSnapshot(tx, updated, user.id);
@@ -1125,7 +1153,7 @@ export class StaffShiftRegulationsService {
 
       if (!this.isAllowedAttachmentUrl(url)) {
         throw new BadRequestException(
-          'Attachment URL must start with http:// or https://',
+          'Attachment URL must be a native attachment path or start with http:// or https://',
         );
       }
 
@@ -1148,7 +1176,7 @@ export class StaffShiftRegulationsService {
   }
 
   private isAllowedAttachmentUrl(value: string) {
-    return /^https?:\/\//i.test(value);
+    return isExactStaffAttachmentUrl(value) || /^https?:\/\//i.test(value);
   }
 
   private normalizeSections(value: unknown): StaffShiftRegulationSection[] {

@@ -3,10 +3,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
+import {
+  extractStaffAttachmentIds,
+  isExactStaffAttachmentUrl,
+} from './staff-attachment-references';
 
 const planStatuses = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
 const roleScopes = [
@@ -125,6 +130,7 @@ export class StaffOnboardingPlansService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getPlans(
@@ -270,13 +276,28 @@ export class StaffOnboardingPlansService {
     const normalized = await this.normalizePlanData(tenantId, dto, {
       requireTitle: true,
     });
-    const created = await this.prisma.staffOnboardingPlan.create({
-      data: {
-        ...(normalized.data as Prisma.StaffOnboardingPlanUncheckedCreateInput),
-        tenantId,
-        createdByUserId: user.id,
-      },
-      include: planInclude,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const plan = await tx.staffOnboardingPlan.create({
+        data: {
+          ...(normalized.data as Prisma.StaffOnboardingPlanUncheckedCreateInput),
+          tenantId,
+          createdByUserId: user.id,
+        },
+        include: planInclude,
+      });
+
+      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.ONBOARDING_PLAN,
+          resourceId: plan.id,
+          attachmentIds: extractStaffAttachmentIds([normalized.data.steps]),
+        },
+      );
+
+      return plan;
     });
 
     return this.toPlanResponse(created);
@@ -305,10 +326,25 @@ export class StaffOnboardingPlansService {
     const normalized = await this.normalizePlanData(tenantId, dto, {
       requireTitle: false,
     });
-    const updated = await this.prisma.staffOnboardingPlan.update({
-      where: { id: current.id },
-      data: normalized.data,
-      include: planInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const plan = await tx.staffOnboardingPlan.update({
+        where: { id: current.id },
+        data: normalized.data,
+        include: planInclude,
+      });
+
+      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.ONBOARDING_PLAN,
+          resourceId: plan.id,
+          attachmentIds: extractStaffAttachmentIds([normalized.data.steps]),
+        },
+      );
+
+      return plan;
     });
 
     return this.toPlanResponse(updated);
@@ -566,7 +602,7 @@ export class StaffOnboardingPlansService {
 
       if (type === 'LINK' && url && !this.isAllowedUrl(url)) {
         throw new BadRequestException(
-          'Onboarding step URL must start with http:// or https://',
+          'Onboarding step URL must be a native attachment path or start with http:// or https://',
         );
       }
 
@@ -806,7 +842,7 @@ export class StaffOnboardingPlansService {
   }
 
   private isAllowedUrl(value: string) {
-    return /^https?:\/\//i.test(value);
+    return isExactStaffAttachmentUrl(value) || /^https?:\/\//i.test(value);
   }
 
   private asRecord(value: unknown): Record<string, unknown> {

@@ -3,11 +3,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { hasCapability } from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
+import {
+  extractStaffAttachmentIds,
+  isExactStaffAttachmentUrl,
+} from './staff-attachment-references';
 
 const articleStatuses = [
   'DRAFT',
@@ -432,6 +437,7 @@ export class StaffKnowledgeBaseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getArticles(
@@ -732,6 +738,21 @@ export class StaffKnowledgeBaseService {
         },
       });
 
+      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+          resourceId: article.id,
+          attachmentIds: extractStaffAttachmentIds([
+            data.content,
+            data.materials,
+            data.relatedLinks,
+          ]),
+        },
+      );
+
       if (status === 'PUBLISHED') {
         await this.createArticleVersion(tx, article, user.id);
       }
@@ -870,6 +891,21 @@ export class StaffKnowledgeBaseService {
           version: shouldCreateVersion ? { increment: 1 } : undefined,
         },
       });
+
+      await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+          resourceId: article.id,
+          attachmentIds: extractStaffAttachmentIds([
+            data.content,
+            data.materials,
+            data.relatedLinks,
+          ]),
+        },
+      );
 
       if (shouldCreateVersion) {
         await this.createArticleVersion(tx, article, user.id);
@@ -1768,7 +1804,7 @@ export class StaffKnowledgeBaseService {
 
       if (url && !this.isAllowedUrl(url)) {
         throw new BadRequestException(
-          'Material URL must start with http:// or https://',
+          'Material URL must be a native attachment path or start with http:// or https://',
         );
       }
 
@@ -2718,7 +2754,7 @@ export class StaffKnowledgeBaseService {
   }
 
   private isAllowedUrl(value: string) {
-    return /^https?:\/\//i.test(value);
+    return isExactStaffAttachmentUrl(value) || /^https?:\/\//i.test(value);
   }
 
   private isAllowedInternalOrExternalUrl(value: string) {

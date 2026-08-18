@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { Prisma } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { parseLangameDate } from '../integrations/langame-date';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +14,8 @@ import {
   normalizeStoreTimeZone,
 } from '../stores/store-timezones';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
+import { extractStaffAttachmentIds } from './staff-attachment-references';
 import {
   buildStaffExportFile,
   formatStaffDateTime,
@@ -594,6 +596,7 @@ export class StaffChecklistsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getChecklists(
@@ -1063,6 +1066,19 @@ export class StaffChecklistsService {
         },
         select: { id: true },
       });
+
+      if (dto.answers !== undefined) {
+        await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+          tx,
+          {
+            tenantId,
+            actorUserId: user.id,
+            resourceKind: StaffAttachmentResourceKind.CHECKLIST_RUN,
+            resourceId: current.id,
+            attachmentIds: extractStaffAttachmentIds([answers]),
+          },
+        );
+      }
 
       if (
         isSubmit &&

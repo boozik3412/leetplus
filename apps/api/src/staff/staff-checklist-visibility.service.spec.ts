@@ -153,9 +153,13 @@ describe('Staff checklist catalog visibility', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
     };
-    const service = new StaffChecklistsService(prisma as never, {
-      resolve: jest.fn().mockResolvedValue({ tenantId }),
-    });
+    const service = new StaffChecklistsService(
+      prisma as never,
+      {
+        resolve: jest.fn().mockReturnValue({ tenantId }),
+      },
+      {} as never,
+    );
 
     const report = await service.getChecklists(
       actor(UserRole.CLUB_ADMINISTRATOR),
@@ -181,7 +185,7 @@ describe('Staff checklist catalog visibility', () => {
 
 describe('Staff checklist time-of-day planning', () => {
   function createService() {
-    return new StaffChecklistsService({} as never, {} as never);
+    return new StaffChecklistsService({} as never, {} as never, {} as never);
   }
 
   function resolveTimeOfDayPlannedAt(

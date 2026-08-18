@@ -25,7 +25,8 @@ disposable clone database/role residue `0`, исходный preflight снов�
 [Отчёт mail rehearsal](./founder-restored-copy-mail-rehearsal-2026-08-18.md).
 
 Gate 1MT PostgreSQL A/B matrix на disposable клонах той же clean restored copy
-расширена до `29/29`: ассортимент HTTP `15/15`, team chat `3/3`, CRM `4/4`,
+расширена до `30/30`: ассортимент HTTP `15/15`, team chat `4/4` с real HTTP
+SSE, CRM `4/4`,
 users/roles `4/4`, staff attachments `3/3`. Fixture residue равен нулю,
 контрольные row counts клонов совпали с источником, одноразовые БД удалены.
 [Отчёт Gate 1MT](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md).
@@ -68,6 +69,16 @@ postflight сравнил все `156` public tables: только десять 
 workflow deltas, неожиданных изменений нет; exact disposable DB удалена,
 residue `0`. Отдельно зафиксированы и устранены Prisma `P2002` race и `P2037`
 connection exhaustion. [Полный browser report](./gate-1mt-report-browser-evidence-2026-08-18.md).
+
+Team-chat SSE boundary принят на exact `ccf81a28…`/`dfe5e0f8…`. Web BFF
+локально отклоняет отсутствие cookie, unknown/duplicate/malformed selectors и
+передаёт upstream только один UUID с private/no-store (`10/10`). API завершает
+fresh tenant/store authority до фиксации `200 text/event-stream`: hidden
+cross-store/cross-tenant channel возвращает `404`, stale persisted scope —
+`401`. Unit `22/22`, API/Web lint/typecheck/build зелёные; два restored-copy
+PG/HTTP run дали `4/4 + 4/4`, все `156` table counts совпали с source,
+database residue `0`.
+[Полный SSE-отчёт](./gate-1mt-team-chat-sse-evidence-2026-08-18.md).
 
 Pilot HTTP inventory повторно связан с production source: `295` exact routes,
 `241 ALLOW / 54 BLOCKED`. `POST /stores` имеет fresh NETWORK assertion; для
@@ -251,10 +262,11 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 2. `SENT`, owner accept, one-tenant enrollment и trusted TLS SMTP доказаны на
    disposable клонах restored copy. Ещё не выполнены production worker-role
    enrollment, production SMTP secret/config и controlled production canary.
-3. Gate 1MT PostgreSQL A/B matrix (`29/29`, включая attachment scope и latest
+3. Gate 1MT PostgreSQL A/B matrix (`30/30`, включая attachment scope, real
+   HTTP SSE и latest
    assortment HTTP `15/15`), browser read/admission и report/download/mutation
    journey приняты на restored copy. Не закрыты outbound digest, remaining file
-   parents, jobs/Telegram/SSE и Gate 2 текущей сети.
+   parents, jobs/Telegram/public guest binding и Gate 2 текущей сети.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
@@ -275,12 +287,13 @@ clean SHA + CI artifact [DONE]
   → [DONE local PostgreSQL] CURRENT185 worker + SENT/reissue/accept
   → [DONE exact-SHA CI] exact one-tenant mail enrollment plan/apply/check/disable
   → [DONE restored-copy clones] trusted TLS SMTP + enrollment/SENT/accept/disable
-  → [DONE restored-copy clones] Gate 1MT PostgreSQL A/B matrix 29/29
+  → [DONE restored-copy clones] Gate 1MT PostgreSQL A/B matrix 30/30
   → [DONE restored-copy clone] assortment service + HTTP + BFF 15/15 and 9/9
   → [DONE restored-copy clone] production-build OWNER/STORES browser read/admission
   → [DONE restored-copy clone] production-build reports/downloads/mutations
+  → [DONE restored-copy clone] team-chat Web BFF + real API SSE pre-header deny
   → production roles/secrets + controlled SMTP canary
-  → Gate 1MT files/jobs/SSE/Telegram/outbound remainder
+  → Gate 1MT remaining files/jobs/Telegram/public-guest/outbound remainder
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE
   → create Tenant B/Store B1 + persisted GO

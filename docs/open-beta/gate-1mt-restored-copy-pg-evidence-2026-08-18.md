@@ -43,21 +43,29 @@ inventory/sales/stock-movement CSV, все локальные варианты
 bytes `f59c32fc…` дали два последовательных зелёных прогона на отдельном
 чистом PostgreSQL 16.14 после canonical LF migration deploy и два — на disposable
 клоне `leetplus_gate1mt_assortment_test_reports_a4` clean
-production-backup copy. Restored-copy матрица тем самым расширена до
+production-backup copy. Restored-copy матрица после report extension была
 `29/29`: два дополнительных test проводят те же services через
 реальный Nest HTTP controller и RolesGuard, а новый test доказывает atomic
 RecommendationState materialization при четырёх параллельных report reads.
+
+Team-chat SSE extension exact `ccf81a28…`/`dfe5e0f8…` добавил real Nest HTTP
+проверку поверх restored-copy clone. Fresh authority теперь завершается до
+фиксации SSE `200`: cross-store/cross-tenant channel возвращает `404`, stale
+persisted scope — `401`; разрешённый A1/B1 stream содержит только свой channel.
+Два последовательных run дали `4/4 + 4/4`, все `156` table counts совпали с
+source, exact disposable DB удалена. Текущая матрица — `30/30`.
+[Полное SSE evidence](./gate-1mt-team-chat-sse-evidence-2026-08-18.md).
 
 ## Выполненная матрица
 
 | Контур                      | Набор                                                  |      Результат |
 | --------------------------- | ------------------------------------------------------ | -------------: |
 | Ассортимент и Store scope   | `pilot-assortment-store-scope.pg.integration-spec.ts`  |   `15/15 PASS` |
-| Командный чат и fresh scope | `pilot-team-chat-fresh-scope.pg.integration-spec.ts`   |     `3/3 PASS` |
+| Командный чат и fresh scope | `pilot-team-chat-fresh-scope.pg.integration-spec.ts`   |     `4/4 PASS` |
 | CRM-коммуникации            | `pilot-crm-communications.pg.integration-spec.ts`      |     `4/4 PASS` |
 | Пользователи и роли         | `pilot-users-roles-fresh-scope.pg.integration-spec.ts` |     `4/4 PASS` |
 | Файловые вложения staff     | `pilot-staff-attachments-scope.pg.integration-spec.ts` |     `3/3 PASS` |
-| **Итого**                   | **5 PostgreSQL suites**                                | **29/29 PASS** |
+| **Итого**                   | **5 PostgreSQL suites**                                | **30/30 PASS** |
 
 Матрица включает Tenant A/Tenant B, network scope, Store A1/A2 и Store B1,
 cross-tenant deny, cross-store deny, stale authority и допустимые операции
@@ -245,7 +253,8 @@ drop database residue равен `0`.
 
 1. controlled outbound email/digest canary: report browser/download/mutation
    journey закрыт, но send actions были выключены и не вызывались;
-2. background jobs, Telegram, remaining files/attachments, SSE и outbound fail-closed
+2. background jobs, Telegram, remaining files/attachments, public guest binding
+   и outbound fail-closed
    matrix;
 3. Gate 2 текущей сети A1–A4 и стабильное internal-alpha окно;
 4. production `PREPARE`: roles, secrets, monitoring, rollback и controlled SMTP

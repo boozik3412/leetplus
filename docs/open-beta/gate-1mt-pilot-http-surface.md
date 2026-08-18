@@ -275,8 +275,9 @@ pnpm --filter web test:guest-session-transport
 ```
 
 Локальный manifest-прогон текущего candidate: `15 suites / 159 tests`; CRM communications gate:
-`6 suites / 162 tests`; отдельный team-chat service прогон:
-`1 suite / 21 tests`. Focused ESLint и API production typecheck также проходят.
+`6 suites / 162 tests`; отдельный team-chat service прогон после pre-header
+SSE authorization: `1 suite / 22 tests`. Focused ESLint и API production
+typecheck также проходят.
 
 Real PostgreSQL Gate 1MT fixture:
 
@@ -296,8 +297,9 @@ update/archive клуба требуют fresh NETWORK, Tenant B не меняе
 а внешний PILOT не создаёт B2 в обход provisioning. Финальный fixture residue:
 `0 tenants / 0 integration users`.
 
-Отдельная exact CURRENT179 team-chat fixture принята: `1 suite / 3 tests`.
-Она проверяет A/A1/A2↔B/B1 report и SSE reads, create/update/read-receipt
+Отдельная team-chat fixture расширена до `1 suite / 4 tests` и дважды принята
+на restored-copy clone. Она проверяет A/A1/A2↔B/B1 report, real Nest HTTP SSE
+с pre-stream `404/401`, create/update/read-receipt
 mutations, cross-tenant/cross-store IDOR и stale JWT. Fresh denial происходит
 до создания default channel или сообщения; финальный residue равен
 `0 tenants / 0 users / 0 fixture messages`.

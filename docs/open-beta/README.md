@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.153                                        |
+| Версия           | 1.154                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -83,6 +83,10 @@ Production-build report/download/mutation acceptance на clean restored-copy
 clone:
 [Gate 1MT report browser evidence 18.08.2026](./gate-1mt-report-browser-evidence-2026-08-18.md).
 
+Team-chat SSE cookie/BFF, pre-header API authorization и real
+Nest/PostgreSQL A/A1/A2↔B/B1 evidence:
+[Gate 1MT team-chat SSE evidence 18.08.2026](./gate-1mt-team-chat-sse-evidence-2026-08-18.md).
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 
@@ -137,7 +141,7 @@ checksum. Production и текущая сеть не изменялись.
    allowed/denied Store direct-URL matrix и invite-only employee flow;
    `PARTIAL PASS`, не production/shared-beta GO.
    0a.4. [Gate 1MT restored-copy PostgreSQL evidence](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md) —
-   CURRENT185 production-backup clones, пять A/B suites, `29/29 PASS`
+   CURRENT185 production-backup clones, пять A/B suites, `30/30 PASS`
    (включая staff attachments), затем production-build OWNER/STORES browser
    read/admission slice на `771bbd5f…`; fixture/database residue `0`. Latest
    assortment candidate `f59c32fc…` добавил category/supplier,
@@ -151,12 +155,19 @@ checksum. Production и текущая сеть не изменялись.
    RecommendationState concurrency и bounded SSR fan-out: `15/15 + 15/15`,
    BFF acceptance `9/9`, production-build report/download/mutation journey,
    whole-schema `156`-table postflight и zero database residue приняты.
-   Outbound digest и remaining-file/job/SSE/Telegram остаток не закрыт. HTTP
+   Team-chat real HTTP SSE extension принят на `ccf81a28…`/`dfe5e0f8…`:
+   pre-stream `404/401`, Web BFF `10/10`, unit `22/22`, два PG/HTTP run
+   `4/4 + 4/4`, `156` table counts zero-diff и database residue `0`.
+   Outbound digest и remaining-file/job/Telegram/public-guest остаток не закрыт. HTTP
    inventory: `295 = 241 ALLOW + 54
    BLOCKED`.
    0a.5. [Gate 1MT report browser evidence](./gate-1mt-report-browser-evidence-2026-08-18.md) —
    exact `94db1fdd…`, реальные CSV/XLSX, recommendation/OOS mutations,
    `0` console errors/warnings и unexpected table deltas, database residue `0`.
+   0a.6. [Gate 1MT team-chat SSE evidence](./gate-1mt-team-chat-sse-evidence-2026-08-18.md) —
+   exact `ccf81a28…`/`dfe5e0f8…`, cookie-only selector-allowlisted BFF,
+   authorization до SSE headers, real Nest/PostgreSQL `4/4 + 4/4`, zero table
+   diff и database residue `0`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;

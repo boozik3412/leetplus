@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.155                                        |
+| Версия           | 1.156                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -144,7 +144,7 @@ checksum. Production и текущая сеть не изменялись.
    allowed/denied Store direct-URL matrix и invite-only employee flow;
    `PARTIAL PASS`, не production/shared-beta GO.
    0a.4. [Gate 1MT restored-copy PostgreSQL evidence](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md) —
-   CURRENT185 production-backup clones, пять A/B suites, `31/31 PASS`
+   CURRENT185 production-backup clones, пять A/B suites, `32/32 PASS`
    (включая staff attachments), затем production-build OWNER/STORES browser
    read/admission slice на `771bbd5f…`; fixture/database residue `0`. Latest
    assortment candidate `f59c32fc…` добавил category/supplier,
@@ -161,7 +161,7 @@ checksum. Production и текущая сеть не изменялись.
    Team-chat real HTTP SSE extension принят на `ccf81a28…`/`dfe5e0f8…`:
    pre-stream `404/401`, Web BFF `10/10`, unit `22/22`, два PG/HTTP run
    `4/4 + 4/4`, `156` table counts zero-diff и database residue `0`.
-   Outbound digest, native attachment writers/browser/races и
+   Outbound digest, attachment browser/unbind/races и
    job/Telegram/public-guest остаток не закрыты. HTTP
    inventory: `295 = 241 ALLOW + 54
    BLOCKED`.
@@ -174,9 +174,11 @@ checksum. Production и текущая сеть не изменялись.
    diff и database residue `0`.
    0a.7. [Gate 1MT attachment parent evidence](./gate-1mt-attachment-parent-evidence-2026-08-18.md) —
    exact `abb8a667…`, fresh NETWORK/capability/exact-parent reader для всех
-   семи kinds, unit `26/26`, restored-copy `4/4 + 4/4`, `156` table count
-   zero-diff и database residue `0`; native writers и STORES policies ещё
-   обязательны.
+   семи kinds; exact `fc07e959…` добавил atomic create/update binding пяти
+   content parents, same-parent replay и foreign-tenant rollback. Unit
+   `26/26` + `24/24`, restored-copy `4/4 + 4/4` и `5/5 + 5/5`, `156` table
+   count zero-diff и database residue `0`; browser/unbind/races и STORES
+   policies ещё обязательны.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;
@@ -1372,7 +1374,7 @@ PASS`, PostgreSQL `FAIL`). Previous accepted exact-head `d525b73...` / CI
 до уничтожения disposable snapshot.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
-непроверенные staff surfaces, native attachment writers/STORES policies, полный
+непроверенные staff surfaces, attachment browser/unbind/races/STORES policies, полный
 gamification/assortment adoption, tenant entitlements/lifecycle, browser E2E,
 operations, backup/restore и production canary.
 

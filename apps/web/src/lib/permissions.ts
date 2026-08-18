@@ -661,7 +661,6 @@ const networkOnlyStaffPrefixes = [
   "/staff/operations-dashboard",
   "/staff/readiness-report",
   "/staff/salary",
-  "/staff/shift-regulations",
   "/staff/shift-workspace",
   "/staff/training-courses",
   "/staff/training-profiles",

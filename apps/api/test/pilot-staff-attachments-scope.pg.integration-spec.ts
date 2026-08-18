@@ -20,6 +20,7 @@ import { StaffAttachmentsService } from '../src/staff/staff-attachments.service'
 import { StaffChecklistsService } from '../src/staff/staff-checklists.service';
 import { StaffKnowledgeBaseService } from '../src/staff/staff-knowledge-base.service';
 import { StaffKnowledgeAccessPolicyService } from '../src/staff/staff-knowledge-access-policy.service';
+import { StaffShiftRegulationAccessPolicyService } from '../src/staff/staff-shift-regulation-access-policy.service';
 import { StaffOnboardingPlansService } from '../src/staff/staff-onboarding-plans.service';
 import { StaffShiftRegulationsService } from '../src/staff/staff-shift-regulations.service';
 import type { StaffTasksService } from '../src/staff/staff-tasks.service';
@@ -69,6 +70,27 @@ type HeldDatabaseLock = {
 type OperationResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: unknown };
+
+function validRegulationSections(label: string) {
+  return [
+    {
+      id: `section-${label}`,
+      title: `Section ${label}`,
+      description: null,
+      items: [
+        {
+          id: `item-${label}`,
+          title: `Item ${label}`,
+          instruction: null,
+          valueType: 'CHECKBOX',
+          required: true,
+          evidenceRequired: false,
+          score: 1,
+        },
+      ],
+    },
+  ];
+}
 
 describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
   let prisma: PrismaService;
@@ -213,7 +235,7 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('adopts store-aware knowledge parents while other parent kinds remain NETWORK-only', async () => {
+  it('adopts store-aware knowledge and shift-regulation parents while other kinds remain NETWORK-only', async () => {
     const fixture = await createFixture(prisma);
     rememberFixture(fixtureTenantIds, fixture);
     const { attachments: service, bindings } = buildServices(prisma);
@@ -253,7 +275,10 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       await expect(
         service.getAttachment(networkUser, attachment.id),
       ).resolves.toEqual(expect.objectContaining({ buffer: payload }));
-      if (resourceKind === StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE) {
+      if (
+        resourceKind === StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE ||
+        resourceKind === StaffAttachmentResourceKind.SHIFT_REGULATION
+      ) {
         await expect(
           service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
         ).resolves.toEqual(expect.objectContaining({ buffer: payload }));
@@ -409,6 +434,172 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       fixture.userANetworkId,
     );
     expect(networkReport.settings.history).toHaveLength(1);
+  });
+
+  it('enforces shift-regulation catalog, writer, acknowledgement and store boundaries', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const services = buildServices(prisma);
+    const networkUser = buildUser(fixture, 'A_NETWORK');
+    const storeA1User = buildUser(fixture, 'A1');
+    const networkRegulationId = randomUUID();
+    const storeA2RegulationId = randomUUID();
+    const storeA1AssessmentId = randomUUID();
+    const storeA2AssessmentId = randomUUID();
+
+    await prisma.staffAssessment.createMany({
+      data: [
+        {
+          id: storeA1AssessmentId,
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA1Id,
+          createdByUserId: fixture.userANetworkId,
+          title: `A1 active assessment ${randomUUID()}`,
+          status: 'ACTIVE',
+          questions: [],
+        },
+        {
+          id: storeA2AssessmentId,
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA2Id,
+          createdByUserId: fixture.userANetworkId,
+          title: `A2 active assessment ${randomUUID()}`,
+          status: 'ACTIVE',
+          questions: [],
+        },
+      ],
+    });
+
+    await prisma.staffShiftRegulation.createMany({
+      data: [
+        {
+          id: networkRegulationId,
+          tenantId: fixture.tenantAId,
+          createdByUserId: fixture.userANetworkId,
+          title: `Network published regulation ${randomUUID()}`,
+          status: 'PUBLISHED',
+          version: 1,
+          roleScope: 'ALL_STAFF',
+          sections: validRegulationSections('network'),
+          publishedAt: new Date(),
+        },
+        {
+          id: storeA2RegulationId,
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA2Id,
+          createdByUserId: fixture.userANetworkId,
+          title: `A2 private regulation ${randomUUID()}`,
+          status: 'DRAFT',
+          sections: validRegulationSections('a2'),
+        },
+      ],
+    });
+
+    const ownDraft = await services.shiftRegulations.createRegulation(
+      storeA1User,
+      {
+        title: `A1 regulation ${randomUUID()}`,
+        storeId: fixture.storeA1Id,
+        status: 'DRAFT',
+      },
+    );
+    const report = await services.shiftRegulations.getRegulations(storeA1User);
+    const visibleIds = report.rows.map((row) => row.id);
+
+    expect(report.accessScope).toBe('STORES');
+    expect(report.canManageStandards).toBe(true);
+    expect(report.stores.map((store) => store.id)).toEqual([fixture.storeA1Id]);
+    expect(report.assessments.map((assessment) => assessment.id)).toEqual([
+      storeA1AssessmentId,
+    ]);
+    expect(visibleIds).toEqual(
+      expect.arrayContaining([
+        fixture.shiftRegulationA1Id,
+        networkRegulationId,
+        ownDraft.id,
+      ]),
+    );
+    expect(visibleIds).not.toContain(storeA2RegulationId);
+    expect(
+      report.rows.find((row) => row.id === networkRegulationId)?.canManage,
+    ).toBe(false);
+    expect(report.rows.find((row) => row.id === ownDraft.id)?.canManage).toBe(
+      true,
+    );
+
+    await expect(
+      services.shiftRegulations.createRegulation(storeA1User, {
+        title: `Network escape ${randomUUID()}`,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.shiftRegulations.createRegulation(storeA1User, {
+        title: `A2 escape ${randomUUID()}`,
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.shiftRegulations.createRegulation(storeA1User, {
+        title: `A2 assessment escape ${randomUUID()}`,
+        storeId: fixture.storeA1Id,
+        requiresAssessmentRetake: true,
+        assessmentId: storeA2AssessmentId,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      services.shiftRegulations.getRegulations(storeA1User, {
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.shiftRegulations.updateRegulation(
+        storeA1User,
+        networkRegulationId,
+        { title: 'Forbidden network edit' },
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      services.shiftRegulations.updateRegulation(
+        storeA1User,
+        storeA2RegulationId,
+        { title: 'Forbidden A2 edit' },
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    const updatedOwnDraft = await services.shiftRegulations.updateRegulation(
+      storeA1User,
+      ownDraft.id,
+      { title: 'Allowed A1 regulation edit' },
+    );
+    expect(updatedOwnDraft).toEqual(
+      expect.objectContaining({
+        title: 'Allowed A1 regulation edit',
+        canManage: true,
+      }),
+    );
+    expect(updatedOwnDraft.store?.id).toBe(fixture.storeA1Id);
+
+    await expect(
+      services.shiftRegulations.acknowledgeRegulation(
+        storeA1User,
+        networkRegulationId,
+      ),
+    ).resolves.toEqual(expect.objectContaining({ userId: fixture.userA1Id }));
+
+    const acknowledged =
+      await services.shiftRegulations.getRegulations(storeA1User);
+    expect(
+      acknowledged.rows.find((row) => row.id === networkRegulationId)
+        ?.acknowledgementSummary.acknowledgedByMe,
+    ).toBe(true);
+
+    const networkReport =
+      await services.shiftRegulations.getRegulations(networkUser);
+    expect(networkReport.accessScope).toBe('NETWORK');
+    expect(networkReport.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: storeA2RegulationId, canManage: true }),
+      ]),
+    );
   });
 
   it('atomically binds native writer references for all five staff parent kinds', async () => {
@@ -1200,6 +1391,8 @@ function buildServices(prisma: PrismaService) {
   const knowledgeAccessPolicy = new StaffKnowledgeAccessPolicyService(
     freshStoreScopeService,
   );
+  const shiftRegulationAccessPolicy =
+    new StaffShiftRegulationAccessPolicyService(freshStoreScopeService);
 
   return {
     attachments: new StaffAttachmentsService(
@@ -1210,11 +1403,12 @@ function buildServices(prisma: PrismaService) {
       staffTasks,
       freshStoreScopeService,
       knowledgeAccessPolicy,
+      shiftRegulationAccessPolicy,
     ),
     bindings,
     shiftRegulations: new StaffShiftRegulationsService(
       prisma,
-      tenantContext,
+      shiftRegulationAccessPolicy,
       notificationChat,
       bindings,
     ),
@@ -1455,7 +1649,7 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
         storeId: fixture.storeA1Id,
         createdByUserId: fixture.userANetworkId,
         title: `Attachment regulation ${suffix}`,
-        sections: [],
+        sections: validRegulationSections('fixture-a1'),
         status: 'PUBLISHED',
       },
     });
@@ -1505,6 +1699,7 @@ async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
     prisma.staffChecklistRun.deleteMany({ where: { tenantId } }),
     prisma.staffKnowledgeArticle.deleteMany({ where: { tenantId } }),
     prisma.staffShiftRegulation.deleteMany({ where: { tenantId } }),
+    prisma.staffAssessment.deleteMany({ where: { tenantId } }),
     prisma.staffTrainingCourse.deleteMany({ where: { tenantId } }),
     prisma.staffOnboardingPlan.deleteMany({ where: { tenantId } }),
     prisma.userStoreAccess.deleteMany({ where: { user: { tenantId } } }),

@@ -36,6 +36,7 @@ import { StaffSalaryController } from './staff-salary.controller';
 import { StaffSalaryService } from './staff-salary.service';
 import { StaffShiftRegulationsController } from './staff-shift-regulations.controller';
 import { StaffShiftRegulationsService } from './staff-shift-regulations.service';
+import { StaffShiftRegulationAccessPolicyService } from './staff-shift-regulation-access-policy.service';
 import { StaffShiftReportsController } from './staff-shift-reports.controller';
 import { StaffShiftReportsService } from './staff-shift-reports.service';
 import { StaffShiftWorkspaceController } from './staff-shift-workspace.controller';
@@ -98,6 +99,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffAttachmentBindingsService,
     StaffAttachmentsService,
     StaffShiftRegulationsService,
+    StaffShiftRegulationAccessPolicyService,
     StaffShiftReportsService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,

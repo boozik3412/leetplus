@@ -74,18 +74,6 @@ const CONTROLLER_BOUNDARIES: readonly ControllerBoundary[] = [
     routeIds: ['GET /staff/administrator-ratings'],
   },
   {
-    source: 'staff/staff-knowledge-base.controller.ts',
-    className: 'StaffKnowledgeBaseController',
-    routeIds: [
-      'GET /staff/knowledge-base',
-      'GET /staff/knowledge-base/settings',
-      'PATCH /staff/knowledge-base/:id',
-      'POST /staff/knowledge-base',
-      'POST /staff/knowledge-base/:id/read-receipts',
-      'PUT /staff/knowledge-base/settings',
-    ],
-  },
-  {
     source: 'staff/staff-onboarding-plans.controller.ts',
     className: 'StaffOnboardingPlansController',
     routeIds: [
@@ -98,17 +86,6 @@ const CONTROLLER_BOUNDARIES: readonly ControllerBoundary[] = [
     source: 'staff/staff-readiness-report.controller.ts',
     className: 'StaffReadinessReportController',
     routeIds: ['GET /staff/readiness-report'],
-  },
-  {
-    source: 'staff/staff-shift-regulations.controller.ts',
-    className: 'StaffShiftRegulationsController',
-    routeIds: [
-      'DELETE /staff/shift-regulations/:id',
-      'GET /staff/shift-regulations',
-      'PATCH /staff/shift-regulations/:id',
-      'POST /staff/shift-regulations',
-      'POST /staff/shift-regulations/:id/acknowledgements',
-    ],
   },
   {
     source: 'staff/staff-salary.controller.ts',
@@ -283,6 +260,32 @@ const STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
   },
 ] as const;
 
+const ADOPTED_STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
+  {
+    source: 'staff/staff-knowledge-base.controller.ts',
+    className: 'StaffKnowledgeBaseController',
+    routeIds: [
+      'GET /staff/knowledge-base',
+      'GET /staff/knowledge-base/settings',
+      'PATCH /staff/knowledge-base/:id',
+      'POST /staff/knowledge-base',
+      'POST /staff/knowledge-base/:id/read-receipts',
+      'PUT /staff/knowledge-base/settings',
+    ],
+  },
+  {
+    source: 'staff/staff-shift-regulations.controller.ts',
+    className: 'StaffShiftRegulationsController',
+    routeIds: [
+      'DELETE /staff/shift-regulations/:id',
+      'GET /staff/shift-regulations',
+      'PATCH /staff/shift-regulations/:id',
+      'POST /staff/shift-regulations',
+      'POST /staff/shift-regulations/:id/acknowledgements',
+    ],
+  },
+] as const;
+
 const TEAM_CHAT_FRESH_SCOPE_METHODS = [
   'getReport',
   'getLiveState',
@@ -411,8 +414,8 @@ function namedMethod(
   return matches[0];
 }
 
-describe('Gate 1MT staff NETWORK boundary', () => {
-  it('binds exactly 50 staff workspace routes to a fresh NETWORK class guard', () => {
+describe('Gate 1MT staff scope boundaries', () => {
+  it('binds exactly 39 staff workspace routes to a fresh NETWORK class guard', () => {
     const allRouteIds: string[] = [];
 
     for (const boundary of CONTROLLER_BOUNDARIES) {
@@ -428,7 +431,7 @@ describe('Gate 1MT staff NETWORK boundary', () => {
       allRouteIds.push(...boundary.routeIds);
     }
 
-    expect(allRouteIds).toHaveLength(50);
+    expect(allRouteIds).toHaveLength(39);
     expect(new Set(allRouteIds).size).toBe(allRouteIds.length);
     expect(allRouteIds.some((id) => id.includes('/scheduled/'))).toBe(false);
   });
@@ -470,7 +473,7 @@ describe('Gate 1MT staff NETWORK boundary', () => {
       ...STAFF_CONTROL_METHOD_BOUNDARIES.map(({ routeId }) => routeId),
     ];
 
-    expect(selected).toHaveLength(60);
+    expect(selected).toHaveLength(49);
     expect(
       selected.every(
         (id) =>
@@ -552,6 +555,26 @@ describe('Gate 1MT staff NETWORK boundary', () => {
     }
 
     expect(routeIds).toHaveLength(23);
+    expect(new Set(routeIds).size).toBe(routeIds.length);
+  });
+
+  it('binds all 11 adopted knowledge and regulation routes to fresh NETWORK or STORES authority', () => {
+    const routeIds: string[] = [];
+
+    for (const boundary of ADOPTED_STAFF_STORE_BOUNDARIES) {
+      const source = parseSource(boundary.source);
+      const controller = classDeclaration(source, boundary.className);
+
+      expect(guardNames(controller)).toEqual([
+        'JwtAuthGuard',
+        'RolesGuard',
+        'FreshStoreScopeGuard',
+      ]);
+      expect(classRouteIds(controller)).toEqual([...boundary.routeIds].sort());
+      routeIds.push(...boundary.routeIds);
+    }
+
+    expect(routeIds).toHaveLength(11);
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 });

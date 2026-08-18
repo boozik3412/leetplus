@@ -313,7 +313,6 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
     "operations-dashboard/page.tsx",
     "readiness-report/page.tsx",
     "salary/page.tsx",
-    "shift-regulations/page.tsx",
     "shift-workspace/page.tsx",
     "training-courses/page.tsx",
     "training-profiles/page.tsx",
@@ -365,6 +364,23 @@ test("keeps the store-aware knowledge workspace behind authenticated API authori
     /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
   );
   assert.match(pageSource, /await requireCurrentUser\(\)/);
+  assert.doesNotMatch(pageSource, /requireNetworkScopedUser/);
+});
+
+test("keeps store-aware shift regulations behind authenticated API authority", async () => {
+  const pageSource = await readFile(
+    fileURLToPath(
+      new URL("../app/(app)/staff/shift-regulations/page.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    pageSource,
+    /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+  );
+  assert.match(pageSource, /await requireCurrentUser\(\)/);
+  assert.match(pageSource, /report\.rows\.filter\(\(row\) => row\.canManage\)/);
   assert.doesNotMatch(pageSource, /requireNetworkScopedUser/);
 });
 

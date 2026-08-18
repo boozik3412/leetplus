@@ -19,6 +19,7 @@ import { lockUserRoleAuthority } from '../users/user-role-authority-lock';
 import { StaffTeamChatService } from './staff-team-chat.service';
 import { StaffTasksService } from './staff-tasks.service';
 import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-policy.service';
+import { StaffShiftRegulationAccessPolicyService } from './staff-shift-regulation-access-policy.service';
 
 export const STAFF_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
 export const STAFF_ATTACHMENT_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
@@ -88,6 +89,7 @@ export class StaffAttachmentsService {
     private readonly staffTasksService: StaffTasksService,
     private readonly freshStoreScopeService: FreshStoreScopeService,
     private readonly staffKnowledgeAccessPolicyService: StaffKnowledgeAccessPolicyService,
+    private readonly staffShiftRegulationAccessPolicyService: StaffShiftRegulationAccessPolicyService,
   ) {}
 
   async createAttachment(
@@ -427,6 +429,26 @@ export class StaffAttachmentsService {
     }
 
     grouped.delete('KNOWLEDGE_ARTICLE');
+
+    const shiftRegulationIds = grouped.get('SHIFT_REGULATION');
+    if (shiftRegulationIds && shiftRegulationIds.size > 0) {
+      const regulationAccess =
+        await this.staffShiftRegulationAccessPolicyService.resolve(user);
+      const regulation = await tx.staffShiftRegulation.findFirst({
+        where:
+          this.staffShiftRegulationAccessPolicyService.readableRegulationIdsWhere(
+            regulationAccess,
+            [...shiftRegulationIds],
+          ),
+        select: { id: true },
+      });
+
+      if (regulation) {
+        return true;
+      }
+    }
+
+    grouped.delete('SHIFT_REGULATION');
     if (grouped.size === 0) {
       return false;
     }
@@ -450,12 +472,6 @@ export class StaffAttachmentsService {
       switch (resourceKind) {
         case 'CHECKLIST_RUN':
           parent = await tx.staffChecklistRun.findFirst({
-            where,
-            select: { id: true },
-          });
-          break;
-        case 'SHIFT_REGULATION':
-          parent = await tx.staffShiftRegulation.findFirst({
             where,
             select: { id: true },
           });

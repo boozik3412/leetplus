@@ -12,6 +12,7 @@ import {
   StaffAttachmentsService,
 } from './staff-attachments.service';
 import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-policy.service';
+import { StaffShiftRegulationAccessPolicyService } from './staff-shift-regulation-access-policy.service';
 import type { StaffTeamChatService } from './staff-team-chat.service';
 import type { StaffTasksService } from './staff-tasks.service';
 
@@ -157,6 +158,9 @@ describe('StaffAttachmentsService', () => {
       staffTasks as unknown as StaffTasksService,
       { resolve: resolveFreshStoreScope } as never,
       new StaffKnowledgeAccessPolicyService({
+        resolve: resolveFreshStoreScope,
+      } as never),
+      new StaffShiftRegulationAccessPolicyService({
         resolve: resolveFreshStoreScope,
       } as never),
     );
@@ -567,7 +571,7 @@ describe('StaffAttachmentsService', () => {
     ['TRAINING_COURSE', 'staffTrainingCourse', 'course-1'],
     ['ONBOARDING_PLAN', 'staffOnboardingPlan', 'plan-1'],
   ] as const)(
-    'loads a %s attachment only after fresh NETWORK parent authorization',
+    'loads a %s attachment only after fresh live parent authorization',
     async (resourceKind, delegateName, resourceId) => {
       const {
         service,
@@ -617,10 +621,28 @@ describe('StaffAttachmentsService', () => {
                   },
                 ],
               }
-            : {
-                id: { in: [resourceId] },
-                tenantId: 'tenant-a',
-              },
+            : resourceKind === 'SHIFT_REGULATION'
+              ? {
+                  id: { in: [resourceId] },
+                  tenantId: 'tenant-a',
+                  AND: [
+                    {
+                      status: 'PUBLISHED',
+                      roleScope: {
+                        in: [
+                          'ADMINISTRATOR',
+                          'SENIOR_ADMINISTRATOR',
+                          'MANAGER',
+                          'ALL_STAFF',
+                        ],
+                      },
+                    },
+                  ],
+                }
+              : {
+                  id: { in: [resourceId] },
+                  tenantId: 'tenant-a',
+                },
         select: { id: true },
       });
       expect(canReadAnyAttachmentMessage).not.toHaveBeenCalled();

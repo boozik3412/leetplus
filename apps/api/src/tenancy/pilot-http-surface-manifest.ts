@@ -739,7 +739,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
     staffController(
       'staff-knowledge-base.controller.ts',
       'knowledge-base',
-      'NETWORK_VERIFIED',
+      'STORES_VERIFIED',
       [
         ['GET', ['', 'settings']],
         ['PUT', ['settings']],
@@ -791,7 +791,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
     staffController(
       'staff-shift-regulations.controller.ts',
       'shift-regulations',
-      'NETWORK_VERIFIED',
+      'STORES_VERIFIED',
       [
         ['GET', ['']],
         ['POST', ['', ':id/acknowledgements']],

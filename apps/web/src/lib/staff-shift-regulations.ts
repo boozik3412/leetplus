@@ -108,6 +108,7 @@ export type StaffShiftRegulationVersion = {
 };
 
 export type StaffShiftRegulation = {
+  canManage: boolean;
   id: string;
   title: string;
   description: string | null;
@@ -162,6 +163,8 @@ export type StaffShiftRegulationFilters = {
 };
 
 export type StaffShiftRegulationReport = {
+  accessScope: "NETWORK" | "STORES";
+  canManageStandards: boolean;
   filters: {
     status: StaffShiftRegulationFilterStatus;
     shiftKind: StaffShiftKind | "all";

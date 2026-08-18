@@ -9,9 +9,11 @@ import { PrismaClient, TenantCustomerStage, UserRole } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
 import { resolveUserCapabilities } from '../src/auth/capabilities';
+import { CategoriesService } from '../src/categories/categories.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsService } from '../src/products/products.service';
 import { StoresService } from '../src/stores/stores.service';
+import { SuppliersService } from '../src/suppliers/suppliers.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
 import { FreshStoreScopeService } from '../src/tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../src/tenancy/tenant-context.service';
@@ -36,6 +38,11 @@ type Fixture = {
   productA1Id: string;
   productA2Id: string;
   productB1Id: string;
+  categoryA1Id: string;
+  categoryA2Id: string;
+  categoryB1Id: string;
+  supplierA1Id: string;
+  supplierB1Id: string;
 };
 
 describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
@@ -239,6 +246,168 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it('keeps category reads and merge mutations tenant-bound and network-only', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const service = buildCategoriesService(prisma);
+    const userANetwork = buildUser(fixture, 'A_NETWORK');
+    const userA1 = buildUser(fixture, 'A1');
+    const userBNetwork = buildUser(fixture, 'B_NETWORK');
+
+    await expect(service.findAll(userA1)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(service.findAll(userANetwork)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: fixture.categoryA1Id }),
+        expect.objectContaining({ id: fixture.categoryA2Id }),
+      ]),
+    );
+    await expect(service.findAll(userBNetwork)).resolves.toEqual([
+      expect.objectContaining({ id: fixture.categoryB1Id }),
+    ]);
+
+    await expect(
+      service.update(
+        fixture.categoryA1Id,
+        { name: 'Cross-tenant category overwrite' },
+        userBNetwork,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.merge(
+        {
+          categoryIds: [fixture.categoryA1Id, fixture.categoryB1Id],
+          targetCategoryId: fixture.categoryA1Id,
+        },
+        userANetwork,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    await expect(
+      service.merge(
+        {
+          categoryIds: [fixture.categoryA1Id, fixture.categoryA2Id],
+          targetCategoryId: fixture.categoryA1Id,
+        },
+        userANetwork,
+      ),
+    ).resolves.toEqual({
+      targetCategory: {
+        id: fixture.categoryA1Id,
+        name: 'Tenant A category 1',
+      },
+      mergedCategories: 1,
+      productsUpdated: 1,
+      mappingsUpdated: 0,
+    });
+    await expect(
+      prisma.product.findUniqueOrThrow({
+        where: { id: fixture.productA2Id },
+        select: { categoryId: true, tenantId: true },
+      }),
+    ).resolves.toEqual({
+      categoryId: fixture.categoryA1Id,
+      tenantId: fixture.tenantAId,
+    });
+    await expect(
+      prisma.category.findUnique({ where: { id: fixture.categoryB1Id } }),
+    ).resolves.toEqual(
+      expect.objectContaining({ tenantId: fixture.tenantBId }),
+    );
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: fixture.userANetworkId },
+        data: { accessScope: 'STORES' },
+      }),
+      prisma.userStoreAccess.create({
+        data: {
+          userId: fixture.userANetworkId,
+          storeId: fixture.storeA1Id,
+        },
+      }),
+    ]);
+    await expect(
+      service.create({ name: 'Stale category write' }, userANetwork),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('keeps supplier lifecycle tenant-bound and rejects store-only or stale writers', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const service = buildSuppliersService(prisma);
+    const userANetwork = buildUser(fixture, 'A_NETWORK');
+    const userA1 = buildUser(fixture, 'A1');
+    const userBNetwork = buildUser(fixture, 'B_NETWORK');
+
+    await expect(service.findAll(userA1)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(service.findAll(userANetwork)).resolves.toEqual([
+      expect.objectContaining({ id: fixture.supplierA1Id }),
+    ]);
+    await expect(service.findAll(userBNetwork)).resolves.toEqual([
+      expect.objectContaining({ id: fixture.supplierB1Id }),
+    ]);
+
+    const created = await service.create(
+      { name: 'Tenant A supplier 2' },
+      userANetwork,
+    );
+    expect(created.tenantId).toBe(fixture.tenantAId);
+    await expect(
+      service.update(
+        created.id,
+        { name: 'Cross-tenant supplier overwrite' },
+        userBNetwork,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.archive(created.id, userBNetwork),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.update(
+        created.id,
+        { name: 'Tenant A supplier updated' },
+        userANetwork,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({ name: 'Tenant A supplier updated' }),
+    );
+    await expect(service.archive(created.id, userANetwork)).resolves.toEqual(
+      expect.objectContaining({ isActive: false }),
+    );
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: fixture.userANetworkId },
+        data: { accessScope: 'STORES' },
+      }),
+      prisma.userStoreAccess.create({
+        data: {
+          userId: fixture.userANetworkId,
+          storeId: fixture.storeA1Id,
+        },
+      }),
+    ]);
+    await expect(
+      service.create({ name: 'Stale supplier write' }, userANetwork),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(
+      prisma.supplier.findUniqueOrThrow({
+        where: { id: fixture.supplierB1Id },
+        select: { tenantId: true, name: true, isActive: true },
+      }),
+    ).resolves.toEqual({
+      tenantId: fixture.tenantBId,
+      name: 'Tenant B supplier 1',
+      isActive: true,
+    });
+  });
 });
 
 function buildProductsService(prisma: PrismaService) {
@@ -264,6 +433,32 @@ function buildStoresService(prisma: PrismaService) {
     prisma,
     new TenantContextService(),
     new ConfigService(),
+    freshStoreScopeService,
+  );
+}
+
+function buildCategoriesService(prisma: PrismaService) {
+  const freshStoreScopeService = new FreshStoreScopeService(
+    prisma,
+    new AccessScopeService(),
+  );
+
+  return new CategoriesService(
+    prisma,
+    new TenantContextService(),
+    freshStoreScopeService,
+  );
+}
+
+function buildSuppliersService(prisma: PrismaService) {
+  const freshStoreScopeService = new FreshStoreScopeService(
+    prisma,
+    new AccessScopeService(),
+  );
+
+  return new SuppliersService(
+    prisma,
+    new TenantContextService(),
     freshStoreScopeService,
   );
 }
@@ -332,6 +527,11 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
     productA1Id: randomUUID(),
     productA2Id: randomUUID(),
     productB1Id: randomUUID(),
+    categoryA1Id: randomUUID(),
+    categoryA2Id: randomUUID(),
+    categoryB1Id: randomUUID(),
+    supplierA1Id: randomUUID(),
+    supplierB1Id: randomUUID(),
   };
 
   await prisma.$transaction(async (tx) => {
@@ -402,6 +602,39 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
     await tx.userStoreAccess.create({
       data: { userId: fixture.userA1Id, storeId: fixture.storeA1Id },
     });
+    await tx.category.createMany({
+      data: [
+        {
+          id: fixture.categoryA1Id,
+          tenantId: fixture.tenantAId,
+          name: 'Tenant A category 1',
+        },
+        {
+          id: fixture.categoryA2Id,
+          tenantId: fixture.tenantAId,
+          name: 'Tenant A category 2',
+        },
+        {
+          id: fixture.categoryB1Id,
+          tenantId: fixture.tenantBId,
+          name: 'Tenant B category 1',
+        },
+      ],
+    });
+    await tx.supplier.createMany({
+      data: [
+        {
+          id: fixture.supplierA1Id,
+          tenantId: fixture.tenantAId,
+          name: 'Tenant A supplier 1',
+        },
+        {
+          id: fixture.supplierB1Id,
+          tenantId: fixture.tenantBId,
+          name: 'Tenant B supplier 1',
+        },
+      ],
+    });
     await tx.product.createMany({
       data: [
         {
@@ -411,6 +644,8 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
           name: 'A1 product',
           purchasePrice: 10,
           salePrice: 20,
+          categoryId: fixture.categoryA1Id,
+          supplierId: fixture.supplierA1Id,
         },
         {
           id: fixture.productA2Id,
@@ -419,6 +654,7 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
           name: 'A2 product',
           purchasePrice: 10,
           salePrice: 20,
+          categoryId: fixture.categoryA2Id,
         },
         {
           id: fixture.productB1Id,
@@ -427,6 +663,8 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
           name: 'B1 product',
           purchasePrice: 10,
           salePrice: 20,
+          categoryId: fixture.categoryB1Id,
+          supplierId: fixture.supplierB1Id,
         },
       ],
     });
@@ -465,6 +703,10 @@ async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
   await prisma.$transaction([
     prisma.inventorySnapshot.deleteMany({ where: { tenantId } }),
     prisma.product.deleteMany({ where: { tenantId } }),
+    prisma.categorySourceMappingEvent.deleteMany({ where: { tenantId } }),
+    prisma.categorySourceMapping.deleteMany({ where: { tenantId } }),
+    prisma.category.deleteMany({ where: { tenantId } }),
+    prisma.supplier.deleteMany({ where: { tenantId } }),
     prisma.userStoreAccess.deleteMany({ where: { user: { tenantId } } }),
     prisma.user.deleteMany({ where: { tenantId } }),
     prisma.store.deleteMany({ where: { tenantId } }),

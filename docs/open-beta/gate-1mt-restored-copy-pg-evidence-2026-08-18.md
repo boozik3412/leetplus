@@ -26,6 +26,10 @@ Production, исходная restored copy и текущий tenant из чет�
 - migration state источника: CURRENT185, `185 applied / 4 rolled back /
 0 unfinished`.
 
+Дополнительный HTTP/BFF/browser-срез выполнен на exact implementation commit
+`771bbd5fa73e0be3b41d74dbb107495824987554` и одноразовом клоне
+`leetplus_gate1mt_browser_test_d2f89b7b` того же clean template.
+
 ## Выполненная матрица
 
 | Контур                      | Набор                                                  |      Результат |
@@ -40,6 +44,42 @@ Production, исходная restored copy и текущий tenant из чет�
 cross-tenant deny, cross-store deny, stale authority и допустимые операции
 внутри собственной сети/клуба.
 
+## HTTP/BFF/browser-срез
+
+В production-сборке локально были подняты настоящий Nest API и два web-origin,
+чтобы cookie сессии `OWNER/NETWORK` и `CLUB_MANAGER/STORES(B1)` не
+пересекались. В одноразовом клоне создана синтетическая независимая сеть B с
+двумя Store, двумя пользователями, двумя раздельными товарами и exact six-row
+beta profile (`read/write=ON`, `outbound=OFF`).
+
+| Проверка                                                                                                                                          | Результат                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| OWNER: dashboard, gamification, assortment/products, staff, regulations, checklists, knowledge, training/assessments, communications, users/roles | `PASS`                                                                           |
+| STORES(B1): dashboard и каталог содержат только B1; B2 и настоящий Tenant A отсутствуют                                                           | `PASS`                                                                           |
+| Явный product filter по B2 или Tenant A                                                                                                           | штатный `404`, данных нет                                                        |
+| STORES staff navigation                                                                                                                           | store-aware tasks/directory/communications видимы; tenant-wide workspaces скрыты |
+| Прямой STORES URL к checklists/regulations/knowledge/training                                                                                     | штатный `404` до upstream data call; RSC error отсутствует                       |
+
+В ходе прогона закрыты две UI-границы:
+
+- STORES assortment переведён в read-only и больше не загружает network-only
+  categories/suppliers; edit controls отсутствуют;
+- все staff pages, чьи API-контроллеры временно защищены
+  `FreshNetworkScopeGuard`, используют единый `requireNetworkScopedUser`, а
+  `canAccessPath` не показывает их STORES-пользователю.
+
+Проверки exact implementation:
+
+```text
+pilot BFF policy:       7/7 PASS
+users/roles BFF:        5/5 PASS
+invite transport:       7/7 PASS
+web typecheck:          PASS
+web production build:   PASS (205 pages)
+web lint:               0 errors / 30 pre-existing warnings
+browser OWNER/STORES:   PASS
+```
+
 ## Postflight и cleanup
 
 После тестов:
@@ -52,6 +92,12 @@ source core rows = 3 tenants / 4 stores / 30 users / 1483 products / 51257 guest
 disposable database residue = 0
 ```
 
+Для browser-клона перед cleanup было подтверждено ровно
+`1 tenant / 2 stores / 2 users / 2 products / 6 entitlements`. Его core counts
+были `4/6/32/1485/51257`, source template остался
+`3/4/30/1483/51257`; после exact `DROP DATABASE ... WITH (FORCE)` database
+residue равен `0`.
+
 Пароль PostgreSQL не выводился и не сохранялся в Git. Одноразовая БД была
 удалена только после проверки отсутствия fixture-данных и совпадения ключевых
 контрольных агрегатов с источником.
@@ -60,7 +106,7 @@ disposable database residue = 0
 
 До первого внешнего клуба остаются:
 
-1. полный HTTP/BFF/browser A/B срез согласованного beta profile;
+1. глубокая HTTP mutation/export/file A/B matrix всех согласованных модулей;
 2. background jobs, Telegram, files/attachments, SSE и outbound fail-closed
    matrix;
 3. Gate 2 текущей сети A1–A4 и стабильное internal-alpha окно;

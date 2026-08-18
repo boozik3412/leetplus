@@ -29,6 +29,14 @@ Gate 1MT PostgreSQL A/B matrix на отдельном клоне той же cl
 `4/4`. Fixture residue равен нулю, контрольные row counts клона совпали с
 источником, одноразовая БД удалена. [Отчёт Gate 1MT](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md).
 
+На exact implementation SHA `771bbd5fa73e0be3b41d74dbb107495824987554`
+принят следующий restored-copy production-build browser slice. Независимые
+OWNER и STORES(B1) cookie sessions прошли согласованные entry/read journeys;
+B1 не увидел B2 или Tenant A, foreign product store filters дали штатный 404.
+Network-only staff links для STORES скрыты, прямые URL завершаются 404 до
+upstream request вместо RSC error; OWNER сохранил полный staff-доступ.
+Disposable browser DB удалена, residue `0`.
+
 ## Что уже реализовано
 
 Первый внешний клуб создаётся как отдельный tenant общей SaaS-платформы, а не
@@ -206,9 +214,9 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 2. `SENT`, owner accept, one-tenant enrollment и trusted TLS SMTP доказаны на
    disposable клонах restored copy. Ещё не выполнены production worker-role
    enrollment, production SMTP secret/config и controlled production canary.
-3. Gate 1MT PostgreSQL A/B matrix принята на restored copy (`14/14`), но полный
-   HTTP/BFF/browser срез, jobs/Telegram/files/SSE и Gate 2 для текущей сети из
-   четырёх клубов не закрыты.
+3. Gate 1MT PostgreSQL A/B matrix (`14/14`) и browser read/admission slice
+   приняты на restored copy, но deep HTTP mutations/exports/files,
+   jobs/Telegram/SSE и Gate 2 для текущей сети из четырёх клубов не закрыты.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
@@ -230,8 +238,9 @@ clean SHA + CI artifact [DONE]
   → [DONE exact-SHA CI] exact one-tenant mail enrollment plan/apply/check/disable
   → [DONE restored-copy clones] trusted TLS SMTP + enrollment/SENT/accept/disable
   → [DONE restored-copy clone] Gate 1MT PostgreSQL A/B matrix 14/14
+  → [DONE restored-copy clone] production-build OWNER/STORES browser read/admission
   → production roles/secrets + controlled SMTP canary
-  → Gate 1MT HTTP/BFF/browser/background remainder
+  → Gate 1MT mutations/files/jobs/SSE/Telegram remainder
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE
   → create Tenant B/Store B1 + persisted GO

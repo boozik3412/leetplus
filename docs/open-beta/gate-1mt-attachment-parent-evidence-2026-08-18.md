@@ -7,7 +7,8 @@ binding/lifecycle для пяти content parent kinds приняты на resto
 reader implementation:
 `abb8a667c986fb92c1a8da475f764733b1c395c1`; exact writer implementation:
 `fc07e959d6beab79a98c4bbd8c41e8ddf09b98de`; exact lifecycle implementation:
-`f2e9e6ca2d4804fe62ca1d51b04ef60abd8d7fcf`.
+`f2e9e6ca2d4804fe62ca1d51b04ef60abd8d7fcf`; exact PostgreSQL race
+evidence: `7928b7f869a571174c532bb92f060ff37cb589d0`.
 
 Принятые parent kinds:
 
@@ -111,6 +112,14 @@ fresh-clone прогона дополнительно подтвердили sta
 training reference с `BOUND→QUARANTINED` и недоступным reader, а также
 shift-regulation delete с удалением binding и quarantine последнего blob.
 
+Race extension дважды прошёл `6/6 + 6/6` на следующих fresh restored-copy
+клонах. Две настоящие createCourse transactions конкурировали за один PENDING
+blob под наблюдаемым PostgreSQL row lock: ровно одна создала parent/binding,
+вторая fail-closed откатила parent. Два updateCourse одновременно выполняли
+remove и replacement одного parent: обе операции сериализовались, финальные
+parent steps совпали с единственным BOUND binding, старый blob остался
+QUARANTINED, а его повторная привязка к новому parent была отклонена.
+
 ## Postflight
 
 Для обоих exact-commit прогонов:
@@ -122,16 +131,16 @@ shift-regulation delete с удалением binding и quarantine послед
 - exact disposable database удалена;
 - database residue: `0`.
 
-После этого Gate 1MT PostgreSQL matrix составляет `32/32`:
+После этого Gate 1MT PostgreSQL matrix составляет `33/33`:
 
-| Slice                                      |        Результат |
-| ------------------------------------------ | ---------------: |
-| Ассортимент/reports/import/export          |          `15/15` |
-| Team chat, включая real HTTP SSE           |            `4/4` |
-| CRM communications                         |            `4/4` |
-| Users/roles                                |            `4/4` |
-| Staff attachments, reader + native writers |            `5/5` |
-| **Итого**                                  | **`32/32 PASS`** |
+| Slice                                              |        Результат |
+| -------------------------------------------------- | ---------------: |
+| Ассортимент/reports/import/export                  |          `15/15` |
+| Team chat, включая real HTTP SSE                   |            `4/4` |
+| CRM communications                                 |            `4/4` |
+| Users/roles                                        |            `4/4` |
+| Staff attachments, reader + writer/lifecycle/races |            `6/6` |
+| **Итого**                                          | **`33/33 PASS`** |
 
 ## Что ещё не закрыто
 
@@ -143,6 +152,6 @@ Reader coverage не равна полной file workflow readiness. До вн�
    безопасно сузить;
 2. production-build upload→create/update/remove/delete→download browser matrix;
 3. archive/move policy для остальных parent kinds, orphan retention и
-   конкурентные bind/unbind/rebind races;
+   scope-revoke/download race;
 4. tenant-aware jobs, Telegram/public guest binding, controlled outbound,
    Gate 2 и production `PREPARE`.

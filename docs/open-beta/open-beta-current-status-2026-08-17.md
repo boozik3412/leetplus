@@ -30,6 +30,14 @@ users/roles `4/4`, staff attachments `3/3`. Fixture residue равен нулю,
 контрольные row counts клонов совпали с источником, одноразовые БД удалены.
 [Отчёт Gate 1MT](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md).
 
+Latest assortment candidate `230d62b1…` расширяет ту же suite до `5/5`:
+добавлены реальные PostgreSQL-проверки `CategoriesService` и
+`SuppliersService` для NETWORK-only reads/mutations, cross-tenant deny и
+stale-scope deny. На чистом CURRENT185+ current-head PostgreSQL выполнены два
+последовательных run `5/5 + 5/5`; fixture residue `0|0|0|0`, одноразовый
+кластер удалён. Это engineering evidence; replay двух новых checks на
+restored-copy clone и exact-head CI ещё обязательны.
+
 На exact implementation SHA `771bbd5fa73e0be3b41d74dbb107495824987554`
 принят следующий restored-copy production-build browser slice. Независимые
 OWNER и STORES(B1) cookie sessions прошли согласованные entry/read journeys;
@@ -221,9 +229,10 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    disposable клонах restored copy. Ещё не выполнены production worker-role
    enrollment, production SMTP secret/config и controlled production canary.
 3. Gate 1MT PostgreSQL A/B matrix (`17/17`, включая attachment scope) и browser
-   read/admission slice приняты на restored copy, но deep HTTP mutations/
-   exports, остальные file parents, jobs/Telegram/SSE и Gate 2 для текущей
-   сети из четырёх клубов не закрыты.
+   read/admission slice приняты на restored copy. Latest assortment suite уже
+   `5/5` на clean current-head PostgreSQL, но её два новых category/supplier
+   checks ещё не повторены на restored copy; imports/reports/exports, остальные
+   file parents, jobs/Telegram/SSE и Gate 2 текущей сети не закрыты.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
@@ -245,6 +254,7 @@ clean SHA + CI artifact [DONE]
   → [DONE exact-SHA CI] exact one-tenant mail enrollment plan/apply/check/disable
   → [DONE restored-copy clones] trusted TLS SMTP + enrollment/SENT/accept/disable
   → [DONE restored-copy clones] Gate 1MT PostgreSQL A/B matrix 17/17
+  → [DONE current-head PG; restored-copy replay pending] assortment categories/suppliers 5/5
   → [DONE restored-copy clone] production-build OWNER/STORES browser read/admission
   → production roles/secrets + controlled SMTP canary
   → Gate 1MT mutations/files/jobs/SSE/Telegram remainder

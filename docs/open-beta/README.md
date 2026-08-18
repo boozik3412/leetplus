@@ -135,9 +135,12 @@ checksum. Production и текущая сеть не изменялись.
    0a.4. [Gate 1MT restored-copy PostgreSQL evidence](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md) —
    CURRENT185 production-backup clones, пять A/B suites, `17/17 PASS`
    (включая staff attachments), затем production-build OWNER/STORES browser
-   read/admission slice на `771bbd5f…`; fixture/database residue `0`. Deep
-   mutation/remaining-file/job/SSE/Telegram остаток не закрыт. HTTP inventory:
-   `295 = 241 ALLOW + 54 BLOCKED`.
+   read/admission slice на `771bbd5f…`; fixture/database residue `0`. Latest
+   assortment candidate `230d62b1…` добавил category/supplier PostgreSQL
+   boundary и дважды прошёл `5/5` на clean current-head DB; restored-copy replay
+   двух новых checks ещё обязателен. Imports/reports/export/remaining-file/job/
+   SSE/Telegram остаток не закрыт. HTTP inventory: `295 = 241 ALLOW + 54
+   BLOCKED`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;

@@ -368,9 +368,9 @@ async function readMigrationPlan() {
   ]);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260818010000_founder_owner_invite_reissue_v1",
+    "20260818020000_identity_mail_delivery_current_head_v1",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_184");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_185");
   const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
   assert.equal(
     targetIndex,

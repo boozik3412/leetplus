@@ -132,8 +132,8 @@ function readinessInput() {
     expectedDatabase: 'leetplus_beta',
     expectedRole: 'leetplus_identity_mail_worker',
     databaseTlsRequired: true,
-    expectedMigration: '20260731120000_identity_mail_delivery_release_head',
-    expectedMigrationCount: 179,
+    expectedMigration: '20260818020000_identity_mail_delivery_current_head_v1',
+    expectedMigrationCount: 185,
     releaseSha: 'e'.repeat(40),
     canaryTenantIds: [TENANT_ID],
     providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
@@ -192,10 +192,10 @@ function readinessReceipt(
     operation: 'ASSERT_IDENTITY_MAIL_DELIVERY_WORKER',
     decision: 'READY',
     tenantId: TENANT_ID,
-    migrationHead: '20260731120000_identity_mail_delivery_release_head',
-    migrationCount: 179,
+    migrationHead: '20260818020000_identity_mail_delivery_current_head_v1',
+    migrationCount: 185,
     preterminalManifestDigest:
-      '7f9867971a39e010b2dac03be18fc083dabe67b98d1d6ed15a0cc4540a8cfd14',
+      'f269f0878c9940b7ee2619e778e032361acc844364ab876bbe7fcc01e15a9fcd',
     policyRevision: 1,
     maxAttempts: 5,
     leaseSeconds: 120,
@@ -481,7 +481,7 @@ const TENANT_RPC_CASES: TenantRpcCase[] = [
 
 describe('PrismaIdentityMailWorkerRepository', () => {
   it.each(TENANT_RPC_CASES)(
-    'executes $label as settings -> tenant lock -> CURRENT179 RPC on one bounded transaction',
+    'executes $label as settings -> tenant lock -> CURRENT185 RPC on one bounded transaction',
     async ({ arrange, binding, invoke, rootQueryCount, rpcName }) => {
       const { prisma, repository } = harness();
       if (binding === 'CLAIMED') {

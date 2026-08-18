@@ -113,12 +113,12 @@ function compliantSnapshot(config = checkConfig()) {
   };
 }
 
-test("pins terminal CURRENT_184 and exactly five CURRENT_176 worker RPCs", () => {
+test("pins terminal CURRENT_185 and exactly five CURRENT_176 worker RPCs", () => {
   assert.equal(
     IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION,
-    "20260818010000_founder_owner_invite_reissue_v1",
+    "20260818020000_identity_mail_delivery_current_head_v1",
   );
-  assert.equal(IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT, 184);
+  assert.equal(IDENTITY_MAIL_WORKER_ENROLLMENT_MIGRATION_COUNT, 185);
   assert.deepEqual(
     IDENTITY_MAIL_WORKER_FUNCTIONS.map(({ key }) => key),
     ["workerAssert", "claim", "providerMark", "complete", "reap"],
@@ -178,7 +178,7 @@ test("requires an exact apply confirmation bound to role OID and head", () => {
   );
   assert.equal(config.requiredConfirmation, confirmation);
   assert.match(confirmation, / 16384 /u);
-  assert.match(confirmation, /founder_owner_invite_reissue_v1 184$/u);
+  assert.match(confirmation, /identity_mail_delivery_current_head_v1 185$/u);
 });
 
 for (const [name, overrides, code] of [

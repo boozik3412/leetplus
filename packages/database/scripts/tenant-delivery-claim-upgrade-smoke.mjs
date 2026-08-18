@@ -339,7 +339,7 @@ async function readMigrationPlan() {
   );
   assert.equal(migrationDirectories.length, CURRENT_EXPECTED_MIGRATION_COUNT);
   assert.equal(migrationDirectories.at(-1), CURRENT_EXPECTED_LATEST_MIGRATION);
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_184");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_185");
   const additiveTargetIndex =
     STAFF_TASK_ALLOWED_ADDITIVE_TAIL.indexOf(TARGET_MIGRATION);
   assert.deepEqual(

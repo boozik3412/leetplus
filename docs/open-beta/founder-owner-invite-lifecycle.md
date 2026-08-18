@@ -1,7 +1,7 @@
 # Founder pilot: initial owner invite lifecycle
 
 Статус:
-`STATUS + REVOKE + REISSUE EXACT-SHA ACCEPTED / PRODUCTION NO-GO`.
+`STATUS + REVOKE + REISSUE EXACT-SHA ACCEPTED / CURRENT185 SENT+ACCEPT LOCAL PASS / PRODUCTION NO-GO`.
 
 ## Назначение
 
@@ -111,11 +111,27 @@ Status/revoke принят на exact SHA
 artifact `9311012974`, digest
 `sha256:f0843edc24b9664436258910b2149b60d999fc58ed9bad5ca48c8ed248c77e81`.
 
+Следующий локальный successor добавляет только forward-only readiness re-pin
+`20260818020000_identity_mail_delivery_current_head_v1`. Active worker теперь
+принимает ровно `185` canonical migrations и прежний точный delivery RPC/ACL
+контур. Disposable PostgreSQL acceptance выполняет полную цепочку
+`activate→revoke→reissue→replay→SENT→preview→accept`: отдельная
+least-privilege worker role переводит outbox в `SENT`, после чего production
+`AuthService.acceptInvite` создаёт ровно одного `OWNER/NETWORK`, переводит
+tenant в `ONBOARDING`, claim в `USER` и очищает ciphertext. Пароль задаётся
+получателем; raw token, пароль и ciphertext не попадают в response.
+
+Это доказательство разделено на два независимых fixture: strict trusted-TLS
+SMTP проверяет реальный transport boundary, а deterministic provider seam
+проверяет полный state machine и owner acceptance без внешнего письма. Новый
+successor ещё не имеет принятого exact-SHA CI artifact и не развёрнут в
+production.
+
 ## Что ещё не реализовано
 
 - resend уже созданного токена запрещён: используется только reissue;
-- production SMTP canary и подтверждённый `SENT`;
-- production-like accept нового reissued invite;
+- production-like restored-copy worker enrollment и trusted SMTP canary;
+- production canary нового reissued invite с подтверждённым `SENT` и accept;
 - restored-copy rehearsal, Gate 1MT/2 и production activation.
 
 Production, текущая сеть из четырёх клубов и внешний tester этим этапом не

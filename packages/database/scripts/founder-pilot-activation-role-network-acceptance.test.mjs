@@ -64,9 +64,9 @@ function manifest() {
       host: "127.0.0.1",
       ownerRoleName: "postgres",
       port: 55439,
-      sourceMigrationCount: 184,
+      sourceMigrationCount: 185,
       sourceMigrationManifestDigest: MIGRATION_DIGEST,
-      sourceSchemaHead: "20260818010000_founder_owner_invite_reissue_v1",
+      sourceSchemaHead: "20260818020000_identity_mail_delivery_current_head_v1",
     },
   };
 }

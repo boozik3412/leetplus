@@ -141,6 +141,18 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
   [32098806708](https://github.com/boozik3412/leetplus/actions/runs/32098806708)
   — `3/3 SUCCESS`; artifact `9311012974`, digest
   `sha256:f0843edc24b9664436258910b2149b60d999fc58ed9bad5ca48c8ed248c77e81`.
+- На локальном canonical head добавлен forward-only
+  `20260818020000_identity_mail_delivery_current_head_v1`. Он не расширяет
+  delivery RPC, а fail-closed перепривязывает active worker к точному набору
+  из `185` завершённых migrations. Clean PostgreSQL deploy всех `185`
+  migrations, отдельный strict-TLS SMTP worker fixture и полный disposable
+  PostgreSQL сценарий
+  `ACTIVATED→REVOKED→REISSUED→REPLAYED→SENT→PREVIEW→ACCEPTED` прошли `1/1`.
+  После accept создан ровно один `OWNER/NETWORK`, tenant перешёл
+  `OWNER_INVITED→ONBOARDING`, identity claim — `INVITE→USER`, ciphertext
+  очищен, пароль проверен как самостоятельно заданный получателем. Full API:
+  `157 suites / 3144 passed / 2 todo`. Exact SHA и CI artifact этого
+  successor ещё не приняты; production не менялся.
 
 ## Что блокирует выдачу доступа
 
@@ -150,10 +162,9 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    production PgBouncer/session-drain acceptance ещё не выполнены.
 2. Не выполнен production-like restored-copy apply/replay/rollback с backup и
    readiness evidence.
-3. Production SMTP/worker ещё не принят real-send canary; отсутствует финальный
-   `SENT` barrier и полная suspend/accept acceptance. PII-free status, атомарный
-   revoke и immutable fresh-token reissue initial OWNER invite приняты
-   exact-SHA CI/PostgreSQL.
+3. Локальный `SENT` barrier и полный owner accept доказаны на canonical
+   CURRENT185. Ещё не выполнены production-like restored-copy прогон exact
+   artifact, production worker role/enrollment и реальный trusted-SMTP canary.
 4. Gate 1MT имеет локальный browser/store-scope partial pass, но полная
    production-like A/B matrix, jobs/Telegram/files/SSE и Gate 2 для текущей
    сети из четырёх клубов не закрыты.
@@ -172,7 +183,8 @@ clean SHA + CI artifact [DONE]
   → restored-copy apply/replay/rollback + backup/readiness
   → [DONE] owner invite status/revoke
   → [DONE engineering/CI] immutable owner invite reissue
-  → SMTP canary + SENT/reissue/accept evidence
+  → [DONE local PostgreSQL] CURRENT185 worker + SENT/reissue/accept
+  → trusted production-like SMTP canary
   → Gate 1MT browser/store-scope
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE

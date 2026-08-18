@@ -27,14 +27,15 @@ import type {
   IdentityMailWorkerRepository,
   IdentityMailWorkerSmtpConfig,
 } from '../src/identity-mail-worker/identity-mail-worker.types';
-import { deployIdentityMailCurrent179CanonicalPrefix } from './canonical-prisma-migration-deploy';
+import { deployCanonicalPrismaMigrations } from './canonical-prisma-migration-deploy';
 
 const REQUIRED_CONFIRMATION = 'run-identity-mail-worker-postgres-smtp-e2e';
 const integrationEnabled =
   process.env.IDENTITY_MAIL_WORKER_PG_E2E_CONFIRM === REQUIRED_CONFIRMATION;
 const describePostgres = integrationEnabled ? describe : describe.skip;
-const CURRENT_MIGRATION = '20260731120000_identity_mail_delivery_release_head';
-const CURRENT_MIGRATION_COUNT = 179;
+const CURRENT_MIGRATION =
+  '20260818020000_identity_mail_delivery_current_head_v1';
+const CURRENT_MIGRATION_COUNT = 185;
 const RELEASE_SHA = 'a'.repeat(40);
 const AAD_ENVIRONMENT = 'pg-worker-e2e';
 const TRIAL_DURATION_SECONDS = 7 * 24 * 60 * 60;
@@ -1446,7 +1447,7 @@ function prismaFor(databaseUrl: string): PrismaClient {
 }
 
 function deployMigrations(databaseUrl: string) {
-  deployIdentityMailCurrent179CanonicalPrefix(databaseUrl, {
+  deployCanonicalPrismaMigrations(databaseUrl, {
     failureMessage:
       'Failed to deploy migrations into the disposable identity-mail worker database',
     timeoutMs: 120_000,

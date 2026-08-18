@@ -50,7 +50,7 @@ const HELP = `
 ${SCRIPT_NAME}
 
 Read-only PostgreSQL 16 evidence for the protected mail-worker tenant
-enrollment preflight. The smoke clones an exact CURRENT_184 loopback *_ci
+enrollment preflight. The smoke clones an exact CURRENT_185 loopback *_ci
 database, creates two PII-free tenant fixtures only in that clone, and proves:
   - one DISABLED enrollment and one ABSENT enrollment are tenant-isolated;
   - inspect/check use REPEATABLE READ and READ ONLY transaction metadata;
@@ -66,7 +66,7 @@ Usage:
 
 Required for the real smoke:
   NODE_ENV=test
-  DATABASE_URL=<numeric-loopback PostgreSQL 16 dedicated *_ci CURRENT_184>
+  DATABASE_URL=<numeric-loopback PostgreSQL 16 dedicated *_ci CURRENT_185>
   ${CONFIRMATION_ENVIRONMENT}=${REQUIRED_CONFIRMATION}
 
 The connection must be the source database owner and a disposable test

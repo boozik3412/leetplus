@@ -238,7 +238,7 @@ test("runtime limits are bounded and ordered", () => {
   );
 });
 
-test("planner defaults to CURRENT_184 and permits only sanctioned schema contracts", () => {
+test("planner defaults to CURRENT_185 and permits only sanctioned schema contracts", () => {
   const current = buildPlan(planInput());
   assert.equal(current.schema.ready, true);
   assert.equal(
@@ -249,7 +249,7 @@ test("planner defaults to CURRENT_184 and permits only sanctioned schema contrac
     current.schema.expected.latestMigration,
     CURRENT_SCHEMA_CONTRACT.latestMigration,
   );
-  assert.equal(CURRENT_SCHEMA_CONTRACT.state, "CURRENT_184");
+  assert.equal(CURRENT_SCHEMA_CONTRACT.state, "CURRENT_185");
 
   const frozen = buildPlan(
     planInput({

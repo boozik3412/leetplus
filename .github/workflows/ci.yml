@@ -423,6 +423,9 @@ jobs:
       - name: Verify immutable founder owner invite reissue migration
         run: pnpm --filter database check:founder-owner-invite-reissue
 
+      - name: Verify active identity-mail worker CURRENT185 receipt
+        run: pnpm --filter database check:identity-mail-delivery-current-head
+
       - name: Test dormant CURRENT184 provider lost-response boundary
         run: pnpm --filter api test:ci:identity-mail-provider-boundary
 
@@ -497,8 +500,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260818010000_founder_owner_invite_reissue_v1
-          EXPECTED_DATABASE_MIGRATION_COUNT: "184"
+          EXPECTED_DATABASE_MIGRATION: 20260818020000_identity_mail_delivery_current_head_v1
+          EXPECTED_DATABASE_MIGRATION_COUNT: "185"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -575,8 +578,8 @@ jobs:
             "  \"releaseSha\": \"$CI_RELEASE_SHA\"," \
             '  "nodeVersion": "22",' \
             '  "pnpmVersion": "10.33.2",' \
-            '  "databaseMigration": "20260818010000_founder_owner_invite_reissue_v1",' \
-            '  "databaseMigrationCount": 184,' \
+            '  "databaseMigration": "20260818020000_identity_mail_delivery_current_head_v1",' \
+            '  "databaseMigrationCount": 185,' \
             '  "runtimePackageManifestsIncluded": true,' \
             '  "founderPilotOperationalScriptsIncluded": true,' \
             '  "founderPilotOperationalScriptCount": 6,' \

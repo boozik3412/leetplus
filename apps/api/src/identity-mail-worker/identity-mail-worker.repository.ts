@@ -15,10 +15,10 @@ import type {
 } from './identity-mail-worker.types';
 
 const CURRENT_MIGRATION =
-  '20260731120000_identity_mail_delivery_release_head' as const;
-const CURRENT_MIGRATION_COUNT = 179 as const;
+  '20260818020000_identity_mail_delivery_current_head_v1' as const;
+const CURRENT_MIGRATION_COUNT = 185 as const;
 const PRETERMINAL_MIGRATION_MANIFEST_DIGEST =
-  '7f9867971a39e010b2dac03be18fc083dabe67b98d1d6ed15a0cc4540a8cfd14' as const;
+  'f269f0878c9940b7ee2619e778e032361acc844364ab876bbe7fcc01e15a9fcd' as const;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const UUID_PATTERN =

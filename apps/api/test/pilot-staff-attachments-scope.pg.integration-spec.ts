@@ -1,6 +1,10 @@
 import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaClient, UserRole } from '@prisma/client';
+import {
+  PrismaClient,
+  StaffAttachmentResourceKind,
+  UserRole,
+} from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../src/auth/auth.types';
 import { resolveUserCapabilities } from '../src/auth/capabilities';
@@ -36,6 +40,11 @@ type Fixture = {
   userBNetworkId: string;
   channelA1Id: string;
   messageA1Id: string;
+  checklistRunA1Id: string;
+  knowledgeArticleA1Id: string;
+  shiftRegulationA1Id: string;
+  trainingCourseA1Id: string;
+  onboardingPlanA1Id: string;
 };
 
 describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
@@ -171,6 +180,55 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       service.getAttachment(staleUserA1, attachment.id),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it('authorizes all remaining parent kinds only through fresh NETWORK visibility', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const { attachments: service, bindings } = buildServices(prisma);
+    const networkUser = buildUser(fixture, 'A_NETWORK');
+    const parents = [
+      [StaffAttachmentResourceKind.CHECKLIST_RUN, fixture.checklistRunA1Id],
+      [
+        StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+        fixture.knowledgeArticleA1Id,
+      ],
+      [
+        StaffAttachmentResourceKind.SHIFT_REGULATION,
+        fixture.shiftRegulationA1Id,
+      ],
+      [StaffAttachmentResourceKind.TRAINING_COURSE, fixture.trainingCourseA1Id],
+      [StaffAttachmentResourceKind.ONBOARDING_PLAN, fixture.onboardingPlanA1Id],
+    ] as const;
+
+    for (const [resourceKind, resourceId] of parents) {
+      const payload = Buffer.from(`network-parent-${resourceKind}`);
+      const attachment = await service.createAttachment(networkUser, {
+        originalname: `PG attachment fixture ${resourceKind} ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: payload,
+      });
+
+      await prisma.$transaction((tx) =>
+        bindings.bindPendingResourceAttachments(tx, {
+          tenantId: fixture.tenantAId,
+          actorUserId: fixture.userANetworkId,
+          resourceKind,
+          resourceId,
+          attachmentIds: [attachment.id],
+        }),
+      );
+
+      await expect(
+        service.getAttachment(networkUser, attachment.id),
+      ).resolves.toEqual(expect.objectContaining({ buffer: payload }));
+      await expect(
+        service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.getAttachment(buildUser(fixture, 'B_NETWORK'), attachment.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    }
+  });
 });
 
 function buildServices(prisma: PrismaService) {
@@ -195,6 +253,7 @@ function buildServices(prisma: PrismaService) {
       new TenantContextService(),
       teamChat,
       staffTasks,
+      freshStoreScopeService,
     ),
     bindings,
   };
@@ -255,6 +314,11 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
     userBNetworkId: randomUUID(),
     channelA1Id: randomUUID(),
     messageA1Id: randomUUID(),
+    checklistRunA1Id: randomUUID(),
+    knowledgeArticleA1Id: randomUUID(),
+    shiftRegulationA1Id: randomUUID(),
+    trainingCourseA1Id: randomUUID(),
+    onboardingPlanA1Id: randomUUID(),
   };
 
   await prisma.$transaction(async (tx) => {
@@ -345,6 +409,62 @@ async function createFixture(prisma: PrismaClient): Promise<Fixture> {
         body: `PG attachment fixture A1 ${suffix}`,
       },
     });
+    await tx.staffChecklistRun.create({
+      data: {
+        id: fixture.checklistRunA1Id,
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        createdByUserId: fixture.userANetworkId,
+        assignedToUserId: fixture.userA1Id,
+        title: `Attachment checklist ${suffix}`,
+        sectionsSnapshot: [],
+        answers: [],
+      },
+    });
+    await tx.staffKnowledgeArticle.create({
+      data: {
+        id: fixture.knowledgeArticleA1Id,
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        createdByUserId: fixture.userANetworkId,
+        title: `Attachment article ${suffix}`,
+        content: 'Fixture article',
+        status: 'PUBLISHED',
+      },
+    });
+    await tx.staffShiftRegulation.create({
+      data: {
+        id: fixture.shiftRegulationA1Id,
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        createdByUserId: fixture.userANetworkId,
+        title: `Attachment regulation ${suffix}`,
+        sections: [],
+        status: 'PUBLISHED',
+      },
+    });
+    await tx.staffTrainingCourse.create({
+      data: {
+        id: fixture.trainingCourseA1Id,
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        createdByUserId: fixture.userANetworkId,
+        title: `Attachment course ${suffix}`,
+        steps: [],
+        status: 'ACTIVE',
+      },
+    });
+    await tx.staffOnboardingPlan.create({
+      data: {
+        id: fixture.onboardingPlanA1Id,
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        createdByUserId: fixture.userANetworkId,
+        title: `Attachment onboarding ${suffix}`,
+        steps: [],
+        status: 'ACTIVE',
+      },
+    });
   });
 
   return fixture;
@@ -366,6 +486,11 @@ async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
     prisma.staffChatMessage.deleteMany({ where: { tenantId } }),
     prisma.staffChatChannelMember.deleteMany({ where: { tenantId } }),
     prisma.staffChatChannel.deleteMany({ where: { tenantId } }),
+    prisma.staffChecklistRun.deleteMany({ where: { tenantId } }),
+    prisma.staffKnowledgeArticle.deleteMany({ where: { tenantId } }),
+    prisma.staffShiftRegulation.deleteMany({ where: { tenantId } }),
+    prisma.staffTrainingCourse.deleteMany({ where: { tenantId } }),
+    prisma.staffOnboardingPlan.deleteMany({ where: { tenantId } }),
     prisma.userStoreAccess.deleteMany({ where: { user: { tenantId } } }),
     prisma.user.deleteMany({ where: { tenantId } }),
     prisma.store.deleteMany({ where: { tenantId } }),

@@ -7,11 +7,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { type AccessCapability, hasCapability } from '../auth/capabilities';
 import {
   resolveStaffAttachmentAclMode,
   type StaffAttachmentAclMode,
 } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { StaffTeamChatService } from './staff-team-chat.service';
 import { StaffTasksService } from './staff-tasks.service';
@@ -57,6 +59,21 @@ type StaffAttachmentRow = Prisma.StaffAttachmentGetPayload<{
   select: typeof attachmentSelect;
 }>;
 
+type BoundAttachmentResource = {
+  resourceKind: string;
+  resourceId: string;
+};
+
+const networkParentCapabilities = {
+  CHECKLIST_RUN: 'view_staff_standards',
+  KNOWLEDGE_ARTICLE: 'view_staff_knowledge',
+  SHIFT_REGULATION: 'view_staff_standards',
+  TRAINING_COURSE: 'view_staff_training',
+  ONBOARDING_PLAN: 'view_staff_training',
+} as const satisfies Record<string, AccessCapability>;
+
+type NetworkAttachmentResourceKind = keyof typeof networkParentCapabilities;
+
 @Injectable()
 export class StaffAttachmentsService {
   private readonly logger = new Logger(StaffAttachmentsService.name);
@@ -67,6 +84,7 @@ export class StaffAttachmentsService {
     private readonly tenantContextService: TenantContextService,
     private readonly staffTeamChatService: StaffTeamChatService,
     private readonly staffTasksService: StaffTasksService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
   async createAttachment(
@@ -278,11 +296,108 @@ export class StaffAttachmentsService {
       .filter((binding) => binding.resourceKind === 'STAFF_TASK')
       .map((binding) => binding.resourceId);
 
-    if (taskIds.length === 0) {
+    if (
+      taskIds.length > 0 &&
+      (await this.staffTasksService.canReadAnyAttachmentTask(user, taskIds, tx))
+    ) {
+      return true;
+    }
+
+    return this.canReadAnyNetworkParent(user, metadata.bindings, tx);
+  }
+
+  private async canReadAnyNetworkParent(
+    user: AuthenticatedUser,
+    bindings: readonly BoundAttachmentResource[],
+    tx: Prisma.TransactionClient,
+  ): Promise<boolean> {
+    const grouped = new Map<NetworkAttachmentResourceKind, Set<string>>();
+
+    for (const binding of bindings) {
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          networkParentCapabilities,
+          binding.resourceKind,
+        )
+      ) {
+        continue;
+      }
+
+      const resourceKind =
+        binding.resourceKind as NetworkAttachmentResourceKind;
+      if (!hasCapability(user, networkParentCapabilities[resourceKind])) {
+        continue;
+      }
+
+      const resourceId = binding.resourceId.trim();
+      if (!resourceId) {
+        continue;
+      }
+
+      const ids = grouped.get(resourceKind) ?? new Set<string>();
+      ids.add(resourceId);
+      grouped.set(resourceKind, ids);
+    }
+
+    if (grouped.size === 0) {
       return false;
     }
 
-    return this.staffTasksService.canReadAnyAttachmentTask(user, taskIds, tx);
+    const scope = await this.freshStoreScopeService.resolve(user);
+
+    // The parent workspaces are still protected by FreshNetworkScopeGuard.
+    // Do not let their files become a side door for a STORES subject before
+    // each parent receives its own store-aware visibility policy.
+    if (scope.mode !== 'NETWORK') {
+      return false;
+    }
+
+    for (const [resourceKind, resourceIds] of grouped) {
+      const where = {
+        id: { in: [...resourceIds] },
+        tenantId: scope.tenantId,
+      };
+      let parent: { id: string } | null = null;
+
+      switch (resourceKind) {
+        case 'CHECKLIST_RUN':
+          parent = await tx.staffChecklistRun.findFirst({
+            where,
+            select: { id: true },
+          });
+          break;
+        case 'KNOWLEDGE_ARTICLE':
+          parent = await tx.staffKnowledgeArticle.findFirst({
+            where,
+            select: { id: true },
+          });
+          break;
+        case 'SHIFT_REGULATION':
+          parent = await tx.staffShiftRegulation.findFirst({
+            where,
+            select: { id: true },
+          });
+          break;
+        case 'TRAINING_COURSE':
+          parent = await tx.staffTrainingCourse.findFirst({
+            where,
+            select: { id: true },
+          });
+          break;
+        case 'ONBOARDING_PLAN':
+          parent = await tx.staffOnboardingPlan.findFirst({
+            where,
+            select: { id: true },
+          });
+          break;
+      }
+
+      if (parent) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private logShadowMismatch(

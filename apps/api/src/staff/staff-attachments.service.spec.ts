@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -18,8 +22,13 @@ const user: AuthenticatedUser = {
   isPlatformAdmin: false,
   tenantId: 'tenant-a',
   tenantSlug: 'tenant-a',
-  accessScope: 'STORES',
-  allowedStoreIds: ['store-a1'],
+  accessScope: 'NETWORK',
+  allowedStoreIds: [],
+  permissions: [
+    'view_staff_standards',
+    'view_staff_training',
+    'view_staff_knowledge',
+  ],
 };
 
 type AttachmentMetadata = {
@@ -74,8 +83,14 @@ describe('StaffAttachmentsService', () => {
       return Promise.resolve(findResults.shift());
     };
     const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const parentFindFirst = jest.fn().mockResolvedValue(null);
     const tx = {
       staffAttachment: { findFirst, updateMany },
+      staffChecklistRun: { findFirst: parentFindFirst },
+      staffKnowledgeArticle: { findFirst: parentFindFirst },
+      staffShiftRegulation: { findFirst: parentFindFirst },
+      staffTrainingCourse: { findFirst: parentFindFirst },
+      staffOnboardingPlan: { findFirst: parentFindFirst },
     };
     const transaction = jest
       .fn()
@@ -104,12 +119,20 @@ describe('StaffAttachmentsService', () => {
     const teamChat = { canReadAnyAttachmentMessage };
     const canReadAnyAttachmentTask = jest.fn().mockReturnValue(false);
     const staffTasks = { canReadAnyAttachmentTask };
+    const resolveFreshStoreScope = jest.fn().mockResolvedValue({
+      userId: user.id,
+      tenantId: user.tenantId,
+      tenantSlug: user.tenantSlug,
+      mode: 'NETWORK',
+      allowedStoreIds: [],
+    });
     const service = new StaffAttachmentsService(
       prisma as unknown as PrismaService,
       config as never,
       tenantContext,
       teamChat as unknown as StaffTeamChatService,
       staffTasks as unknown as StaffTasksService,
+      { resolve: resolveFreshStoreScope } as never,
     );
 
     return {
@@ -124,6 +147,8 @@ describe('StaffAttachmentsService', () => {
       config,
       canReadAnyAttachmentMessage,
       canReadAnyAttachmentTask,
+      parentFindFirst,
+      resolveFreshStoreScope,
       events,
     };
   }
@@ -487,6 +512,118 @@ describe('StaffAttachmentsService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
 
     expect(canReadAnyAttachmentTask).toHaveBeenCalledTimes(1);
+    expect(findFirstArgs).toHaveLength(1);
+  });
+
+  it.each([
+    ['CHECKLIST_RUN', 'staffChecklistRun', 'checklist-1'],
+    ['KNOWLEDGE_ARTICLE', 'staffKnowledgeArticle', 'article-1'],
+    ['SHIFT_REGULATION', 'staffShiftRegulation', 'regulation-1'],
+    ['TRAINING_COURSE', 'staffTrainingCourse', 'course-1'],
+    ['ONBOARDING_PLAN', 'staffOnboardingPlan', 'plan-1'],
+  ] as const)(
+    'loads a %s attachment only after fresh NETWORK parent authorization',
+    async (resourceKind, delegateName, resourceId) => {
+      const {
+        service,
+        findResults,
+        tx,
+        resolveFreshStoreScope,
+        canReadAnyAttachmentMessage,
+        canReadAnyAttachmentTask,
+      } = createSubject();
+      const parentDelegate = tx[delegateName];
+      parentDelegate.findFirst.mockResolvedValueOnce({ id: resourceId });
+      findResults.push(
+        pendingMetadata({
+          state: 'BOUND',
+          pendingExpiresAt: null,
+          bindings: [{ resourceKind, resourceId }],
+        }),
+        attachmentBlob,
+      );
+
+      await expect(
+        service.getAttachment(user, 'attachment-1'),
+      ).resolves.toEqual({
+        fileName: attachmentBlob.fileName,
+        contentType: attachmentBlob.contentType,
+        buffer: Buffer.from(attachmentBlob.data),
+      });
+
+      expect(resolveFreshStoreScope).toHaveBeenCalledWith(user);
+      expect(parentDelegate.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: { in: [resourceId] },
+          tenantId: 'tenant-a',
+        },
+        select: { id: true },
+      });
+      expect(canReadAnyAttachmentMessage).not.toHaveBeenCalled();
+      expect(canReadAnyAttachmentTask).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps network-only parent files hidden from a STORES subject', async () => {
+    const {
+      service,
+      findResults,
+      findFirstArgs,
+      parentFindFirst,
+      resolveFreshStoreScope,
+    } = createSubject();
+    const storeUser: AuthenticatedUser = {
+      ...user,
+      accessScope: 'STORES',
+      allowedStoreIds: ['store-a1'],
+    };
+    resolveFreshStoreScope.mockResolvedValueOnce({
+      userId: storeUser.id,
+      tenantId: storeUser.tenantId,
+      tenantSlug: storeUser.tenantSlug,
+      mode: 'STORES',
+      allowedStoreIds: ['store-a1'],
+    });
+    findResults.push(
+      pendingMetadata({
+        state: 'BOUND',
+        pendingExpiresAt: null,
+        bindings: [
+          { resourceKind: 'KNOWLEDGE_ARTICLE', resourceId: 'article-1' },
+        ],
+      }),
+    );
+
+    await expect(
+      service.getAttachment(storeUser, 'attachment-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(parentFindFirst).not.toHaveBeenCalled();
+    expect(findFirstArgs).toHaveLength(1);
+  });
+
+  it('fails before parent or blob reads when NETWORK authority is stale', async () => {
+    const {
+      service,
+      findResults,
+      findFirstArgs,
+      parentFindFirst,
+      resolveFreshStoreScope,
+    } = createSubject();
+    resolveFreshStoreScope.mockRejectedValueOnce(
+      new UnauthorizedException('Authorization scope is stale'),
+    );
+    findResults.push(
+      pendingMetadata({
+        state: 'BOUND',
+        pendingExpiresAt: null,
+        bindings: [{ resourceKind: 'TRAINING_COURSE', resourceId: 'course-1' }],
+      }),
+    );
+
+    await expect(
+      service.getAttachment(user, 'attachment-1'),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(parentFindFirst).not.toHaveBeenCalled();
     expect(findFirstArgs).toHaveLength(1);
   });
 

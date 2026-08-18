@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 18.08.2026
-- Версия: 3.01
+- Версия: 3.02
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -41,9 +41,12 @@
   workspaces, STORES(B1) не увидел B2/Tenant A, foreign store filters дали
   штатный `404`, а временно tenant-wide staff routes теперь скрываются и
   fail-closed завершаются до upstream request. Одноразовая browser DB удалена,
-  residue `0`. Production roles/SMTP canary, deep mutation/export/file/job/SSE/
-  Telegram matrix Gate 1MT, Gate 2 и cutover ещё обязательны, поэтому release
-  decision остаётся `NO-GO`
+  residue `0`. Следующий real PostgreSQL file slice на `e6e8d2aa…` принял
+  `PENDING/BOUND` staff attachments: exact uploader и live chat authority
+  разрешены, cross-store/cross-tenant/stale scope запрещены; `3/3 PASS`,
+  fixture/database residue `0`. Production roles/SMTP canary, deep mutation/
+  export, остальные file parents, job/SSE/Telegram matrix Gate 1MT, Gate 2 и
+  cutover ещё обязательны, поэтому release decision остаётся `NO-GO`
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch
@@ -2533,7 +2536,7 @@ tenant lifecycle/stage/trial
 | BETA-MT-004 | P0        | В работе      | Реализовать shell provisioning, protected activation и owner invite | Platform Admin provisioning создаёт только `PILOT/SUSPENDED/PROVISIONING` shell, inactive `Store B1`, OWNER override, exact six-row `read/write=ON + outbound=OFF` profile и canonical email claim; dormant invite/hash/encrypted `HOLD` aggregate реализован отдельно, но trial и отправка появляются только при activation по persisted GO и controlled delivery transition; ни один response/replay не раскрывает email/token/URL/ciphertext; reissue/revoke/accept и real PostgreSQL concurrency доказаны | BETA-TEN-003, BETA-TEN-008, BETA-SEC-009, BETA-IAM-001..005, BETA-IAM-004E..004G |
 | BETA-MT-005 | P0        | В работе      | Закрыть delegation и store authority во всех beta-модулях           | OWNER/ADMIN не могут назначить роль/scope/capability выше допустимого; generic API не назначает OWNER, а отдельный owner-transfer workflow сохраняет последнего active NETWORK OWNER; Store list/detail/write и все GAMIFICATION/ASSORTMENT/STAFF/COMMUNICATIONS/USERS_ROLES surfaces применяют тот же `NETWORK \| STORES` authority                                                                                                                                                                          | BETA-IAM-001..007, соответствующие BETA-MOD-\*                                   |
 | BETA-MT-006 | P0        | Запланировано | Сделать безопасный self-service `INTEGRATIONS` control-plane        | Tenant owner сохраняет только свои зашифрованные credentials; endpoint allowlist, DNS/IP recheck, timeout/retry/circuit breaker и audit обязательны; preview показывает доступные внешние клубы, exact mapping создаёт только выбранный Store; ключ не импортирует остальные клубы domain/account                                                                                                                                                                                                             | BETA-MOD-ASSORT-006, BETA-SEC-008                                                |
-| BETA-MT-007 | P0        | В работе      | Доказать двухtenantную изоляцию на общем PostgreSQL/runtime         | Restored-copy PostgreSQL A/B foundation `14/14` и production-build browser read/admission slice для OWNER/STORES приняты на `771bbd5f…`: B1 не видит B2/Tenant A, foreign Store filter и tenant-wide staff URL fail-closed. До готовности остаётся полная list/detail/aggregate/write/export/file/BFF/browser/job/SSE/Telegram negative matrix пяти product modules и supporting `INTEGRATIONS`, включая stale token, hidden UUID, scope change и owner delegation без test-only bypass                       | BETA-MT-003..006, BETA-OPS-002, BETA-OPS-003                                     |
+| BETA-MT-007 | P0        | В работе      | Доказать двухtenantную изоляцию на общем PostgreSQL/runtime         | Restored-copy PostgreSQL A/B foundation расширена до `17/17`: ассортимент/chat/CRM/users и `PENDING/BOUND` staff attachments; production-build browser read/admission slice для OWNER/STORES принят на `771bbd5f…`. До готовности остаётся полная list/detail/aggregate/write/export/file/BFF/browser/job/SSE/Telegram negative matrix пяти product modules и supporting `INTEGRATIONS`, включая остальные file parents, stale token, hidden UUID, scope change и owner delegation без test-only bypass       | BETA-MT-003..006, BETA-OPS-002, BETA-OPS-003                                     |
 | BETA-MT-008 | P0        | В работе      | Подготовить общий worker/Telegram execution plane                   | Jobs получают явную tenant/store system identity, durable lease/fencing и idempotency; один shared Telegram bot маршрутизирует update в правильный tenant/store; update ID дедуплицируется durable; tenant suspend и per-store kill switch останавливают effects; hardcoded tenant/store отсутствуют                                                                                                                                                                                                          | BETA-MT-003, BETA-OPS-006, BETA-MOD-GAME-006                                     |
 | BETA-MT-009 | P0        | Запланировано | Пройти полный module acceptance первого `Tenant B`                  | Все пять product modules и supporting `INTEGRATIONS` доступны согласно полному six-row профилю; staff включает контроль, мотивацию, регламенты, checklist, обучение и knowledge base; salary только planning; in-app communications включены; integrations прошли preview/read-only sync; каждый outbound effect остаётся отдельно gated                                                                                                                                                                      | BETA-MT-005..008, все BETA-MOD-\* P0                                             |
 | BETA-MT-010 | P0        | Запланировано | Принять shared beta access decision и выполнить day-0               | Gate 1MT и Gate 2 закрыты; exact SHA/CI/backup/restore/rollback/alerts приняты; protected `SHARED BETA GO` содержит Tenant/Store aliases, entitlement revision, trial, approver, support/rollback owner и stop conditions; owner invite создаётся после GO; day-0 login/scope/feedback/kill-switch smoke зелёный                                                                                                                                                                                              | BETA-MT-001..009, BETA-CUT-009, BETA-PILOT-005..006                              |
@@ -3903,9 +3906,9 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
 18. Реализовать `BETA-MT-007..009`: полную shared PostgreSQL/API/BFF/browser/
     file/job/SSE/Telegram isolation matrix, tenant-aware worker/Telegram
     execution и full-scope module acceptance для `Tenant B/Store B1`.
-    PostgreSQL foundation `14/14` и browser read/admission slice на
-    `771bbd5f…` уже приняты; следующий срез — mutations/exports/files, затем
-    background/SSE/Telegram.
+    PostgreSQL foundation `17/17`, включая staff attachment scope, и browser
+    read/admission slice на `771bbd5f…` уже приняты; следующий срез — HTTP
+    mutations/exports и остальные file parents, затем background/SSE/Telegram.
 19. Завершить эксплуатационный контур: immutable artifact, versioned
     infrastructure, external probes/alerts, scheduler ownership,
     backup/restore и rollback drills.

@@ -2,11 +2,11 @@
 
 ## Решение
 
-PostgreSQL-срез Gate 1MT для согласованного beta scope принят на одноразовом
-клоне чистой restored copy production backup. Это закрывает database/service
-A/B matrix для ассортимента, командного чата, CRM-коммуникаций и
-пользователей/ролей, но само по себе не разрешает production deployment или
-выдачу внешнего OWNER invite.
+PostgreSQL-срез Gate 1MT для согласованного beta scope принят на одноразовых
+клонах чистой restored copy production backup. Это закрывает database/service
+A/B matrix для ассортимента, командного чата, CRM-коммуникаций,
+пользователей/ролей и файловых вложений, но само по себе не разрешает
+production deployment или выдачу внешнего OWNER invite.
 
 Production, исходная restored copy и текущий tenant из четырёх клубов не
 изменялись.
@@ -30,6 +30,10 @@ Production, исходная restored copy и текущий tenant из чет�
 `771bbd5fa73e0be3b41d74dbb107495824987554` и одноразовом клоне
 `leetplus_gate1mt_browser_test_d2f89b7b` того же clean template.
 
+File/attachment PostgreSQL slice добавлен exact commit
+`e6e8d2aa4e5655fa55a715b0d71dc7d2c848a036` и выполнен на одноразовом клоне
+`leetplus_gate1mt_attachment_test_800b246d`.
+
 ## Выполненная матрица
 
 | Контур                      | Набор                                                  |      Результат |
@@ -38,7 +42,8 @@ Production, исходная restored copy и текущий tenant из чет�
 | Командный чат и fresh scope | `pilot-team-chat-fresh-scope.pg.integration-spec.ts`   |     `3/3 PASS` |
 | CRM-коммуникации            | `pilot-crm-communications.pg.integration-spec.ts`      |     `4/4 PASS` |
 | Пользователи и роли         | `pilot-users-roles-fresh-scope.pg.integration-spec.ts` |     `4/4 PASS` |
-| **Итого**                   | **4 PostgreSQL suites**                                | **14/14 PASS** |
+| Файловые вложения staff     | `pilot-staff-attachments-scope.pg.integration-spec.ts` |     `3/3 PASS` |
+| **Итого**                   | **5 PostgreSQL suites**                                | **17/17 PASS** |
 
 Матрица включает Tenant A/Tenant B, network scope, Store A1/A2 и Store B1,
 cross-tenant deny, cross-store deny, stale authority и допустимые операции
@@ -97,6 +102,11 @@ disposable database residue = 0
 были `4/6/32/1485/51257`, source template остался
 `3/4/30/1483/51257`; после exact `DROP DATABASE ... WITH (FORCE)` database
 residue равен `0`.
+
+Attachment-клон после двух успешных прогонов подтвердил fixture residue
+`0 tenants / 0 users / 0 attachments / 0 bindings`; его core counts точно
+совпали с source template (`3/4/30/1483/51257`). Exact disposable database
+удалена, database residue равен `0`.
 
 Пароль PostgreSQL не выводился и не сохранялся в Git. Одноразовая БД была
 удалена только после проверки отсутствия fixture-данных и совпадения ключевых

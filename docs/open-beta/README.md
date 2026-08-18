@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.150                                        |
+| Версия           | 1.151                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -133,10 +133,10 @@ checksum. Production и текущая сеть не изменялись.
    allowed/denied Store direct-URL matrix и invite-only employee flow;
    `PARTIAL PASS`, не production/shared-beta GO.
    0a.4. [Gate 1MT restored-copy PostgreSQL evidence](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md) —
-   CURRENT185 production-backup clone, четыре A/B suites, `14/14 PASS`, затем
-   production-build OWNER/STORES browser read/admission slice на `771bbd5f…`;
-   fixture/database residue `0`. Deep mutation/file/job/SSE/Telegram остаток
-   не закрыт.
+   CURRENT185 production-backup clones, пять A/B suites, `17/17 PASS`
+   (включая staff attachments), затем production-build OWNER/STORES browser
+   read/admission slice на `771bbd5f…`; fixture/database residue `0`. Deep
+   mutation/remaining-file/job/SSE/Telegram остаток не закрыт.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;

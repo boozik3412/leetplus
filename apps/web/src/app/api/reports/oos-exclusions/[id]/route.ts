@@ -5,5 +5,10 @@ type Params = Promise<{ id: string }>;
 export async function DELETE(request: Request, { params }: { params: Params }) {
   const { id } = await params;
 
-  return proxyJsonRequest(request, `/reports/oos-exclusions/${id}`, "DELETE");
+  return proxyJsonRequest(
+    request,
+    `/reports/oos-exclusions/${encodeURIComponent(id)}`,
+    "DELETE",
+    { privateNoStore: true },
+  );
 }

@@ -189,6 +189,37 @@ test("rejects an unavailable product store filter before the catalog request", a
   assert.match(source, /notFound\(\)/);
 });
 
+test("keeps report exports and mutations inside hardened cookie-backed proxies", async () => {
+  const [exportRoute, oosRoute, oosDeleteRoute, recommendationRoute] =
+    await Promise.all(
+      [
+        "reports/export/route.ts",
+        "reports/oos-exclusions/route.ts",
+        "reports/oos-exclusions/[id]/route.ts",
+        "reports/recommendations/[key]/state/route.ts",
+      ].map((route) => readFile(path.join(API_ROUTE_ROOT, route), "utf8")),
+    );
+
+  assert.match(
+    exportRoute,
+    /proxyFileRequest\(request, ["']\/reports\/export["'], ["']leetplus-reports\.csv["']\)/,
+  );
+  assert.doesNotMatch(exportRoute, /getApiUrl|getAuthHeaders|\bfetch\s*\(/);
+
+  assert.match(
+    oosRoute,
+    /proxyJsonRequest\(request, ["']\/reports\/oos-exclusions["'], ["']GET["'],\s*\{\s*privateNoStore:\s*true,?\s*\}\)/,
+  );
+  assert.match(
+    oosRoute,
+    /proxyJsonRequest\(request, ["']\/reports\/oos-exclusions["'], ["']POST["'],\s*\{\s*privateNoStore:\s*true,?\s*\}\)/,
+  );
+  assert.match(oosDeleteRoute, /encodeURIComponent\(id\)/);
+  assert.match(oosDeleteRoute, /privateNoStore:\s*true/);
+  assert.match(recommendationRoute, /encodeURIComponent\(key\)/);
+  assert.match(recommendationRoute, /privateNoStore:\s*true/);
+});
+
 test("keeps transitional tenant-wide staff workspaces out of STORES scope", async () => {
   const networkOnlyPages = [
     "ai-assistant/page.tsx",

@@ -1,11 +1,15 @@
 import {
   BadRequestException,
   ConflictException,
+  type ExecutionContext,
   ForbiddenException,
+  type INestApplication,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Reflector } from '@nestjs/core';
+import { Test } from '@nestjs/testing';
 import {
   PrismaClient,
   ProductOosExclusionType,
@@ -16,13 +20,24 @@ import {
 } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import { randomUUID } from 'node:crypto';
-import type { AuthenticatedUser } from '../src/auth/auth.types';
+import type { IncomingMessage } from 'node:http';
+import request from 'supertest';
+import type { App } from 'supertest/types';
+import type {
+  AuthenticatedRequest,
+  AuthenticatedUser,
+} from '../src/auth/auth.types';
 import { resolveUserCapabilities } from '../src/auth/capabilities';
+import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
+import { RolesGuard } from '../src/auth/roles.guard';
 import { CategoriesService } from '../src/categories/categories.service';
 import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
 import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsService } from '../src/products/products.service';
+import { ReportsController } from '../src/reports/reports.controller';
+import { ReportsDigestService } from '../src/reports/reports-digest.service';
+import { ReportsEmailService } from '../src/reports/reports-email.service';
 import { ReportsExportService } from '../src/reports/reports-export.service';
 import { ReportsService } from '../src/reports/reports.service';
 import { StoresService } from '../src/stores/stores.service';
@@ -949,6 +964,195 @@ describePostgres('Gate 1MT assortment PostgreSQL tenant/store matrix', () => {
       ].sort((left, right) => left.tenantId.localeCompare(right.tenantId)),
     );
   });
+
+  it('keeps real report HTTP reads tenant- and Store-bound for OWNER and CLUB_MANAGER', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const seeded = await seedReportFacts(prisma, fixture);
+    let currentUser = buildUser(fixture, 'A_NETWORK');
+    const app = await buildReportsHttpApp(prisma, () => currentUser);
+    const httpServer = app.getHttpServer() as App;
+
+    try {
+      const query = new URLSearchParams(seeded.query).toString();
+      const endpoints = [
+        `/reports/assortment`,
+        `/reports/operations?${query}`,
+        `/reports/inventory-turnover?${query}`,
+        `/reports/assortment-matrix?${query}`,
+        `/reports/plan-fact?${query}`,
+        `/reports/sales-detail?${query}`,
+        `/reports/sku-performance?${query}`,
+        `/reports/suppliers-performance?${query}`,
+        `/reports/replenishment?${query}`,
+        `/reports/new-products`,
+        `/reports/lfl?period=day`,
+      ];
+      const networkAResponses: unknown[] = [];
+
+      for (const endpoint of endpoints) {
+        const response = await request(httpServer).get(endpoint).expect(200);
+        networkAResponses.push(response.body);
+      }
+
+      const networkAEvidence = JSON.stringify(networkAResponses);
+      expect(networkAEvidence).toContain(fixture.productA1Id);
+      expect(networkAEvidence).toContain(fixture.productA2Id);
+      expect(networkAEvidence).not.toContain(fixture.productB1Id);
+      expect(networkAEvidence).not.toContain('B1 product');
+
+      currentUser = buildUser(fixture, 'B_NETWORK');
+      const networkBResponse = await request(httpServer)
+        .get(`/reports/sales-detail?${query}`)
+        .expect(200);
+      const networkBEvidence = JSON.stringify(networkBResponse.body);
+      expect(networkBEvidence).toContain(fixture.productB1Id);
+      expect(networkBEvidence).not.toContain(fixture.productA1Id);
+      expect(networkBEvidence).not.toContain(fixture.productA2Id);
+
+      currentUser = buildUser(fixture, 'A1');
+      const storeA1Response = await request(httpServer)
+        .get(`/reports/operations?${query}`)
+        .expect(200);
+      const storeA1Report = JSON.parse(storeA1Response.text) as {
+        stockQuantity: number;
+        tenantId: string;
+        totalRevenue: number;
+      };
+      const storeA1Evidence = JSON.stringify(storeA1Response.body);
+      expect(storeA1Report).toEqual(
+        expect.objectContaining({
+          stockQuantity: 11,
+          tenantId: fixture.tenantAId,
+          totalRevenue: 20,
+        }),
+      );
+      expect(storeA1Evidence).not.toContain(fixture.productA2Id);
+      expect(storeA1Evidence).not.toContain(fixture.productB1Id);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps real report HTTP exports and mutations inside tenant authority', async () => {
+    const fixture = await createFixture(prisma);
+    fixtureTenantIds.add(fixture.tenantAId);
+    fixtureTenantIds.add(fixture.tenantBId);
+    const seeded = await seedReportFacts(prisma, fixture);
+    let currentUser = buildUser(fixture, 'A_NETWORK');
+    const app = await buildReportsHttpApp(prisma, () => currentUser);
+    const httpServer = app.getHttpServer() as App;
+
+    try {
+      const query = new URLSearchParams({
+        ...seeded.query,
+        format: 'csv',
+        report: 'sales-detail',
+      }).toString();
+      const csv = await request(httpServer)
+        .get(`/reports/export?${query}`)
+        .expect(200)
+        .expect('Content-Type', /text\/csv/)
+        .expect('Content-Disposition', /attachment/);
+      expect(csv.text).toContain('A1 product');
+      expect(csv.text).toContain('A2 product');
+      expect(csv.text).not.toContain('B1 product');
+
+      const xlsxQuery = new URLSearchParams({
+        ...seeded.query,
+        format: 'xlsx',
+        report: 'replenishment',
+      }).toString();
+      const xlsx = await request(httpServer)
+        .get(`/reports/export?${xlsxQuery}`)
+        .buffer(true)
+        .parse(parseBinaryResponse)
+        .expect(200)
+        .expect(
+          'Content-Type',
+          /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/,
+        )
+        .expect('Content-Disposition', /attachment/);
+      const xlsxEvidence = await workbookText(requireBuffer(xlsx.body));
+      expect(xlsxEvidence).toContain('A1 product');
+      expect(xlsxEvidence).toContain('A2 product');
+      expect(xlsxEvidence).not.toContain('B1 product');
+
+      const created = await request(httpServer)
+        .post('/reports/oos-exclusions')
+        .send({
+          productId: fixture.productA1Id,
+          type: ProductOosExclusionType.SERVICE,
+        })
+        .expect(201);
+      const createdBody = JSON.parse(created.text) as {
+        id: string;
+        productId: string;
+      };
+      expect(createdBody).toEqual(
+        expect.objectContaining({ productId: fixture.productA1Id }),
+      );
+
+      currentUser = buildUser(fixture, 'B_NETWORK');
+      await request(httpServer)
+        .delete(`/reports/oos-exclusions/${createdBody.id}`)
+        .expect(400);
+
+      const recommendationKey = `http:${randomUUID()}`;
+      await request(httpServer)
+        .patch(
+          `/reports/recommendations/${encodeURIComponent(recommendationKey)}/state`,
+        )
+        .send({
+          status: RecommendationStatus.DONE,
+          note: 'Tenant B HTTP state',
+        })
+        .expect(200);
+
+      currentUser = buildUser(fixture, 'A_NETWORK');
+      await request(httpServer)
+        .patch(
+          `/reports/recommendations/${encodeURIComponent(recommendationKey)}/state`,
+        )
+        .send({
+          status: RecommendationStatus.IN_PROGRESS,
+          note: 'Tenant A HTTP state',
+        })
+        .expect(200);
+      await expect(
+        prisma.recommendationState.findMany({
+          where: { recommendationKey },
+          orderBy: { tenantId: 'asc' },
+          select: { tenantId: true, status: true, note: true },
+        }),
+      ).resolves.toEqual(
+        [
+          {
+            tenantId: fixture.tenantAId,
+            status: RecommendationStatus.IN_PROGRESS,
+            note: 'Tenant A HTTP state',
+          },
+          {
+            tenantId: fixture.tenantBId,
+            status: RecommendationStatus.DONE,
+            note: 'Tenant B HTTP state',
+          },
+        ].sort((left, right) => left.tenantId.localeCompare(right.tenantId)),
+      );
+
+      currentUser = buildUser(fixture, 'A1');
+      await request(httpServer)
+        .post('/reports/oos-exclusions')
+        .send({
+          productId: fixture.productA1Id,
+          type: ProductOosExclusionType.SERVICE,
+        })
+        .expect(403);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 function buildProductsService(prisma: PrismaService) {
@@ -1043,6 +1247,41 @@ function buildReportsService(prisma: PrismaService) {
   );
 }
 
+async function buildReportsHttpApp(
+  prisma: PrismaService,
+  getUser: () => AuthenticatedUser,
+): Promise<INestApplication> {
+  const reportsService = buildReportsService(prisma);
+  const testingModule = await Test.createTestingModule({
+    controllers: [ReportsController],
+    providers: [
+      { provide: ReportsService, useValue: reportsService },
+      {
+        provide: ReportsExportService,
+        useValue: new ReportsExportService(reportsService),
+      },
+      { provide: ReportsEmailService, useValue: { sendReport: jest.fn() } },
+      { provide: ReportsDigestService, useValue: { sendDigest: jest.fn() } },
+    ],
+  })
+    .overrideGuard(JwtAuthGuard)
+    .useValue({
+      canActivate(context: ExecutionContext) {
+        const authenticatedRequest = context
+          .switchToHttp()
+          .getRequest<AuthenticatedRequest>();
+        authenticatedRequest.user = getUser();
+        return true;
+      },
+    })
+    .overrideGuard(RolesGuard)
+    .useValue(new RolesGuard(new Reflector()))
+    .compile();
+  const app = testingModule.createNestApplication();
+  await app.init();
+  return app;
+}
+
 async function seedReportFacts(prisma: PrismaClient, fixture: Fixture) {
   const currentDate = new Date();
   currentDate.setUTCDate(currentDate.getUTCDate() - 1);
@@ -1131,6 +1370,25 @@ async function workbookText(buffer: Buffer) {
     });
   });
   return values.join('\n');
+}
+
+function parseBinaryResponse(
+  response: IncomingMessage,
+  callback: (error: Error | null, body?: Buffer) => void,
+) {
+  const chunks: Buffer[] = [];
+  response.on('data', (chunk: Buffer | string) => {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  response.on('end', () => callback(null, Buffer.concat(chunks)));
+  response.on('error', (error) => callback(error));
+}
+
+function requireBuffer(value: unknown): Buffer {
+  if (!Buffer.isBuffer(value)) {
+    throw new Error('Expected a binary HTTP response');
+  }
+  return value;
 }
 
 function buildUser(

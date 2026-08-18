@@ -136,10 +136,11 @@ checksum. Production и текущая сеть не изменялись.
    CURRENT185 production-backup clones, пять A/B suites, `17/17 PASS`
    (включая staff attachments), затем production-build OWNER/STORES browser
    read/admission slice на `771bbd5f…`; fixture/database residue `0`. Latest
-   assortment candidate `230d62b1…` добавил category/supplier PostgreSQL
-   boundary и дважды прошёл `5/5` на clean current-head DB; restored-copy replay
-   двух новых checks ещё обязателен. Imports/reports/export/remaining-file/job/
-   SSE/Telegram остаток не закрыт. HTTP inventory: `295 = 241 ALLOW + 54
+   assortment candidate `d3a2d8b6…` добавил category/supplier и product/fact
+   CSV PostgreSQL boundary и дважды прошёл `7/7` на clean current-head DB;
+   restored-copy replay четырёх добавленных checks ещё обязателен.
+   Reports/export/remaining-file/job/SSE/Telegram остаток не закрыт. HTTP
+   inventory: `295 = 241 ALLOW + 54
    BLOCKED`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и

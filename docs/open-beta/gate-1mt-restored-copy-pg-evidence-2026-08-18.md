@@ -34,12 +34,13 @@ File/attachment PostgreSQL slice добавлен exact commit
 `e6e8d2aa4e5655fa55a715b0d71dc7d2c848a036` и выполнен на одноразовом клоне
 `leetplus_gate1mt_attachment_test_800b246d`.
 
-Latest assortment candidate `230d62b1…` добавил в существующую suite две
-реальные PostgreSQL-проверки категорий и поставщиков. Они дважды прошли на
-отдельном чистом PostgreSQL 16.14 после canonical LF migration deploy. Это
-дополнительное current-head engineering evidence, а не подмена уже принятой
-restored-copy матрицы; replay двух новых checks на restored-copy clone остаётся
-обязательным перед Gate 1MT GO.
+Latest assortment candidates `230d62b1…` и `d3a2d8b6…` добавили в
+существующую suite четыре реальные PostgreSQL-проверки: категории,
+поставщики, product CSV и inventory/sales/stock-movement CSV. Они дважды
+прошли на отдельном чистом PostgreSQL 16.14 после canonical LF migration
+deploy. Это дополнительное current-head engineering evidence, а не подмена
+уже принятой restored-copy матрицы; replay четырёх добавленных checks на
+restored-copy clone остаётся обязательным перед Gate 1MT GO.
 
 ## Выполненная матрица
 
@@ -59,17 +60,23 @@ cross-tenant deny, cross-store deny, stale authority и допустимые о�
 ## Latest assortment extension
 
 `pilot-assortment-store-scope.pg.integration-spec.ts` расширен с `3/3` до
-`5/5` без test-only service substitutes:
+`7/7` без test-only service substitutes:
 
 - `CategoriesService`: NETWORK-only list, cross-tenant update/merge deny,
   допустимый same-tenant merge с проверкой переноса Product и stale JWT/DB
   scope deny;
 - `SuppliersService`: NETWORK-only list/create/update/archive,
   cross-tenant update/archive deny и stale JWT/DB scope deny.
+- `ProductCsvImportService`: STORES deny, same-article isolation между
+  tenant, tenant-bound category/supplier lookup, invalid foreign reference
+  rejection и stale JWT/DB scope deny;
+- `FactCsvImportService`: NETWORK-only inventory/sales/stock-movement imports,
+  exact Store/Product binding внутри tenant, foreign Store/article rejection,
+  zero cross-tenant facts и stale JWT/DB scope deny.
 
-Два последовательных прогона завершились `5/5 + 5/5 PASS`; postflight:
-`0 fixture tenants | 0 fixture users | 0 fixture categories | 0 fixture
-suppliers`. Одноразовый PostgreSQL cluster и временная LF-копия migrations
+Два последовательных прогона завершились `7/7 + 7/7 PASS`; postflight:
+`0 fixture tenants / 0 fixture users / 0 import jobs / 0 sales facts / 0 stock
+movements`. Одноразовый PostgreSQL cluster и временная LF-копия migrations
 удалены. Production, restored-copy template и текущая сеть не изменялись.
 
 ## HTTP/BFF/browser-срез
@@ -146,8 +153,9 @@ Attachment-клон после двух успешных прогонов под
 
 До первого внешнего клуба остаются:
 
-1. restored-copy replay двух новых category/supplier checks, затем глубокая
-   HTTP mutation/export/file A/B matrix imports/reports и остальных модулей;
+1. restored-copy replay четырёх добавленных category/supplier/product CSV/fact
+   CSV checks, затем глубокая HTTP mutation/export/file A/B matrix reports и
+   остальных модулей;
 2. background jobs, Telegram, files/attachments, SSE и outbound fail-closed
    matrix;
 3. Gate 2 текущей сети A1–A4 и стабильное internal-alpha окно;

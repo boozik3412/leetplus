@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.156                                        |
+| Версия           | 1.157                                        |
 | Дата             | 18.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -161,7 +161,7 @@ checksum. Production и текущая сеть не изменялись.
    Team-chat real HTTP SSE extension принят на `ccf81a28…`/`dfe5e0f8…`:
    pre-stream `404/401`, Web BFF `10/10`, unit `22/22`, два PG/HTTP run
    `4/4 + 4/4`, `156` table counts zero-diff и database residue `0`.
-   Outbound digest, attachment browser/unbind/races и
+   Outbound digest, attachment browser/concurrent races и
    job/Telegram/public-guest остаток не закрыты. HTTP
    inventory: `295 = 241 ALLOW + 54
    BLOCKED`.
@@ -175,10 +175,12 @@ checksum. Production и текущая сеть не изменялись.
    0a.7. [Gate 1MT attachment parent evidence](./gate-1mt-attachment-parent-evidence-2026-08-18.md) —
    exact `abb8a667…`, fresh NETWORK/capability/exact-parent reader для всех
    семи kinds; exact `fc07e959…` добавил atomic create/update binding пяти
-   content parents, same-parent replay и foreign-tenant rollback. Unit
-   `26/26` + `24/24`, restored-copy `4/4 + 4/4` и `5/5 + 5/5`, `156` table
-   count zero-diff и database residue `0`; browser/unbind/races и STORES
-   policies ещё обязательны.
+   content parents, same-parent replay и foreign-tenant rollback. Exact
+   `f2e9e6ca…` добавил full-set synchronization: status-only retention,
+   unbind, last-reference quarantine и shift-regulation delete lifecycle.
+   Final attachment-focused unit `48/48`, restored-copy `4/4 + 4/4` и
+   `5/5 + 5/5`, `156` table count zero-diff и database residue `0`;
+   browser/concurrent races и STORES policies ещё обязательны.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;
@@ -1374,7 +1376,7 @@ PASS`, PostgreSQL `FAIL`). Previous accepted exact-head `d525b73...` / CI
 до уничтожения disposable snapshot.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
-непроверенные staff surfaces, attachment browser/unbind/races/STORES policies, полный
+непроверенные staff surfaces, attachment browser/concurrent races/STORES policies, полный
 gamification/assortment adoption, tenant entitlements/lifecycle, browser E2E,
 operations, backup/restore и production canary.
 

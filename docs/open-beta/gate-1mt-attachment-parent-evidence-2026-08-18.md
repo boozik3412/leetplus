@@ -3,10 +3,11 @@
 ## Вердикт
 
 Read authorization для всех семи `StaffAttachmentResourceKind` и native atomic
-binding для пяти content parent kinds приняты на restored-copy clones. Exact
+binding/lifecycle для пяти content parent kinds приняты на restored-copy clones. Exact
 reader implementation:
 `abb8a667c986fb92c1a8da475f764733b1c395c1`; exact writer implementation:
-`fc07e959d6beab79a98c4bbd8c41e8ddf09b98de`.
+`fc07e959d6beab79a98c4bbd8c41e8ddf09b98de`; exact lifecycle implementation:
+`f2e9e6ca2d4804fe62ca1d51b04ef60abd8d7fcf`.
 
 Принятые parent kinds:
 
@@ -67,6 +68,16 @@ fail-closed до binding. Обычные внешние URL не превращ�
 выполняет `PENDING→BOUND` только для новых файлов; перенос BOUND-файла к другому
 parent запрещён.
 
+Lifecycle extension синхронизирует полный набор native references внутри той
+же parent transaction. Удалённая из parent ссылка удаляет только exact
+`source=NATIVE` binding; если других `BOUND` bindings нет, blob атомарно
+переходит `BOUND→QUARANTINED` с `NATIVE_REFERENCE_REMOVED` и больше не
+скачивается. Если другой parent всё ещё связан с blob, состояние остаётся
+`BOUND`. Status-only update сохраняет существующие ссылки. Удаление shift
+regulation сначала блокирует parent row, снимает native bindings и только затем
+удаляет parent; несогласованное количество затронутых строк завершает всю
+транзакцию fail-closed.
+
 ## Приёмка
 
 Static/local:
@@ -74,6 +85,7 @@ Static/local:
 ```text
 StaffAttachmentsService unit: 26/26 PASS
 Writer/binder focused unit:      24/24 PASS
+Final attachment-focused unit:   48/48 PASS
 targeted API ESLint:           PASS
 API production typecheck:     PASS
 API production build:         PASS
@@ -94,7 +106,10 @@ clean restored-copy source.
 Writer extension дважды прошёл `5/5 + 5/5` на двух новых disposable клонах.
 Реальные service calls создали и привязали файлы всех пяти kinds, подтвердили
 same-parent replay без второго binding и доказали rollback parent create при
-подстановке attachment другого tenant.
+подстановке attachment другого tenant. На exact lifecycle bytes те же два
+fresh-clone прогона дополнительно подтвердили status-only retention, снятие
+training reference с `BOUND→QUARANTINED` и недоступным reader, а также
+shift-regulation delete с удалением binding и quarantine последнего blob.
 
 ## Postflight
 
@@ -126,8 +141,8 @@ Reader coverage не равна полной file workflow readiness. До вн�
 1. корректные STORES visibility policies самих checklist/knowledge/regulation/
    training/onboarding workspaces, после чего network-only file deny можно
    безопасно сузить;
-2. production-build upload→create/update→download browser matrix;
-3. reference removal, parent delete/archive/move, orphan retention и
+2. production-build upload→create/update/remove/delete→download browser matrix;
+3. archive/move policy для остальных parent kinds, orphan retention и
    конкурентные bind/unbind/rebind races;
 4. tenant-aware jobs, Telegram/public guest binding, controlled outbound,
    Gate 2 и production `PREPARE`.

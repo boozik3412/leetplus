@@ -28,7 +28,7 @@ Gate 1MT PostgreSQL A/B matrix на disposable клонах той же clean re
 расширена до `32/32`: ассортимент HTTP `15/15`, team chat `4/4` с real HTTP
 SSE, CRM `4/4`,
 users/roles `4/4`, staff attachments `5/5` со всеми семью reader parent kinds
-и native writer flow пяти content parents.
+и native writer/lifecycle flow пяти content parents.
 Fixture residue равен нулю,
 контрольные row counts клонов совпали с источником, одноразовые БД удалены.
 [Отчёт Gate 1MT](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md).
@@ -96,6 +96,14 @@ checklist. Same-parent replay идемпотентен, BOUND cross-parent reuse
 foreign-tenant ссылка откатывает parent write. Focused unit `24/24`; два
 restored-copy run дали `5/5 + 5/5`, все `156` table counts zero-diff,
 database residue `0`.
+
+Attachment lifecycle exact `f2e9e6ca…` синхронизирует полный набор native
+references в parent transaction. Status-only update сохраняет binding;
+удалённая ссылка снимает только exact native binding, последний blob переходит
+в `QUARANTINED` и становится недоступным reader; shift-regulation delete
+выполняет тот же cleanup под parent lock. Final attachment-focused unit
+`48/48`; два fresh restored-copy run дали `5/5 + 5/5`, все `156` table counts
+zero-diff, active sessions `0`, database residue `0`.
 
 Pilot HTTP inventory повторно связан с production source: `295` exact routes,
 `241 ALLOW / 54 BLOCKED`. `POST /stores` имеет fresh NETWORK assertion; для
@@ -280,11 +288,11 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    disposable клонах restored copy. Ещё не выполнены production worker-role
    enrollment, production SMTP secret/config и controlled production canary.
 3. Gate 1MT PostgreSQL A/B matrix (`32/32`, включая attachment reader и native
-   writers, real
+   writer/lifecycle, real
    HTTP SSE и latest
    assortment HTTP `15/15`), browser read/admission и report/download/mutation
    journey приняты на restored copy. Не закрыты outbound digest, attachment
-   browser/unbind/races, jobs/Telegram/public guest binding
+   browser/concurrent races, jobs/Telegram/public guest binding
    и Gate 2 текущей сети.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
@@ -313,8 +321,9 @@ clean SHA + CI artifact [DONE]
   → [DONE restored-copy clone] team-chat Web BFF + real API SSE pre-header deny
   → [DONE restored-copy clones] all seven attachment reader parent kinds
   → [DONE restored-copy clones] five native attachment writer parent kinds
+  → [DONE restored-copy clones] native unbind/quarantine/delete lifecycle
   → production roles/secrets + controlled SMTP canary
-  → Gate 1MT attachment browser/unbind/races + jobs/Telegram/public-guest/outbound
+  → Gate 1MT attachment browser/concurrent races + jobs/Telegram/public-guest/outbound
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE
   → create Tenant B/Store B1 + persisted GO

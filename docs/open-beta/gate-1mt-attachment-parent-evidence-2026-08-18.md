@@ -1,4 +1,4 @@
-# Gate 1MT: staff attachment parent coverage — 18.08.2026
+# Gate 1MT: staff attachment parent coverage — 18–19.08.2026
 
 ## Вердикт
 
@@ -9,7 +9,8 @@ reader implementation:
 `fc07e959d6beab79a98c4bbd8c41e8ddf09b98de`; exact lifecycle implementation:
 `f2e9e6ca2d4804fe62ca1d51b04ef60abd8d7fcf`; exact PostgreSQL race
 evidence: `7928b7f869a571174c532bb92f060ff37cb589d0`; exact direct subject-revoke
-implementation: `c5b86abadeca5bc55e5f5b231eda3a37ad0a49fc`.
+implementation: `c5b86abadeca5bc55e5f5b231eda3a37ad0a49fc`; exact custom/system-role
+authority implementation: `bc8fffd268b4bcab8b81847d005136e5fe1a31ad`.
 
 Принятые parent kinds:
 
@@ -33,7 +34,8 @@ Production и текущий Tenant A/A1–A4 не изменялись.
 3. повторно получает persisted role/custom-role/capabilities и access scope;
 4. разрешает эти временно network-only workspaces только при fresh `NETWORK`;
 5. в `ENFORCED` режиме до metadata берёт exact tenant-scoped shared row lock
-   на subject и attachment, затем выполняет `tenantId + parent id` lookup в той
+   на subject и attachment, затем общий transaction-scoped advisory lock на
+   custom/system-role authority и выполняет `tenantId + parent id` lookup в той
    же read-committed транзакции;
 6. загружает blob bytes только после положительного решения.
 
@@ -89,6 +91,7 @@ Static/local:
 StaffAttachmentsService unit: 26/26 PASS
 Writer/binder focused unit:      24/24 PASS
 Final attachment-focused unit:   49/49 PASS
+Role/attachment focused unit:    56/56 PASS
 targeted API ESLint:           PASS
 API production typecheck:     PASS
 API production build:         PASS
@@ -129,9 +132,19 @@ tenant-scoped `User + StaffAttachment`; lifecycle/user writers использу�
 старта download: reader реально заблокировался, после commit повторно увидел
 неактивного subject, вернул `Unauthorized` без bytes и не повредил binding.
 
+Custom/system-role capability-revoke extension дважды прошёл `8/8 + 8/8`.
+Reader и реальные `updateAccessRole`/`updateSystemRole` workflows используют
+один exact tenant+role transaction-scoped advisory key. В fixture custom role
+и впервые созданный system override удерживали permission revoke до старта
+download; reader наблюдаемым образом ждал lock, после commit перечитал fresh
+permissions, вернул `Unauthorized` без bytes. Первый технический прогон выявил
+и устранил Prisma `void`-deserialization (`pg_advisory_xact_lock(...)::text`),
+второй — некорректную fixture-role; оба неуспешных клона прошли полный
+zero-diff postflight и были удалены до accepted прогонов.
+
 ## Postflight
 
-Для обоих exact-commit прогонов:
+Для всех принятых disposable прогонов:
 
 - fixture cleanup завершён;
 - все `156` public table counts target точно совпали с source;
@@ -140,7 +153,7 @@ tenant-scoped `User + StaffAttachment`; lifecycle/user writers использу�
 - exact disposable database удалена;
 - database residue: `0`.
 
-После этого Gate 1MT PostgreSQL matrix составляет `34/34`:
+После этого Gate 1MT PostgreSQL matrix составляет `35/35`:
 
 | Slice                                              |        Результат |
 | -------------------------------------------------- | ---------------: |
@@ -148,8 +161,8 @@ tenant-scoped `User + StaffAttachment`; lifecycle/user writers использу�
 | Team chat, включая real HTTP SSE                   |            `4/4` |
 | CRM communications                                 |            `4/4` |
 | Users/roles                                        |            `4/4` |
-| Staff attachments, reader + writer/lifecycle/races |            `7/7` |
-| **Итого**                                          | **`34/34 PASS`** |
+| Staff attachments, reader + writer/lifecycle/races |            `8/8` |
+| **Итого**                                          | **`35/35 PASS`** |
 
 ## Что ещё не закрыто
 
@@ -160,7 +173,6 @@ Reader coverage не равна полной file workflow readiness. До вн�
    training/onboarding workspaces, после чего network-only file deny можно
    безопасно сузить;
 2. production-build upload→create/update/remove/delete→download browser matrix;
-3. archive/move policy для остальных parent kinds, orphan retention и
-   capability-revoke race через изменение custom/system role;
+3. archive/move policy для остальных parent kinds и orphan retention;
 4. tenant-aware jobs, Telegram/public guest binding, controlled outbound,
    Gate 2 и production `PREPARE`.

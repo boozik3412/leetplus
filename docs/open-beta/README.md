@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.159                                        |
-| Дата             | 18.08.2026                                   |
+| Версия           | 1.160                                        |
+| Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -144,7 +144,7 @@ checksum. Production и текущая сеть не изменялись.
    allowed/denied Store direct-URL matrix и invite-only employee flow;
    `PARTIAL PASS`, не production/shared-beta GO.
    0a.4. [Gate 1MT restored-copy PostgreSQL evidence](./gate-1mt-restored-copy-pg-evidence-2026-08-18.md) —
-   CURRENT185 production-backup clones, пять A/B suites, `34/34 PASS`
+   CURRENT185 production-backup clones, пять A/B suites, `35/35 PASS`
    (включая staff attachments), затем production-build OWNER/STORES browser
    read/admission slice на `771bbd5f…`; fixture/database residue `0`. Latest
    assortment candidate `f59c32fc…` добавил category/supplier,
@@ -161,7 +161,7 @@ checksum. Production и текущая сеть не изменялись.
    Team-chat real HTTP SSE extension принят на `ccf81a28…`/`dfe5e0f8…`:
    pre-stream `404/401`, Web BFF `10/10`, unit `22/22`, два PG/HTTP run
    `4/4 + 4/4`, `156` table counts zero-diff и database residue `0`.
-   Outbound digest, attachment browser/capability-revoke race и
+   Outbound digest, attachment production-build browser и
    job/Telegram/public-guest остаток не закрыты. HTTP
    inventory: `295 = 241 ALLOW + 54
    BLOCKED`.
@@ -180,9 +180,10 @@ checksum. Production и текущая сеть не изменялись.
    unbind, last-reference quarantine и shift-regulation delete lifecycle.
    Exact `7928b7f8…` принял PostgreSQL bind/unbind/replacement races; exact
    `c5b86aba…` — direct persisted-user revoke до blob read. Final
-   attachment-focused unit `49/49`, restored-copy `4/4 + 4/4` и
-   `7/7 + 7/7`, `156` table count zero-diff и database residue `0`;
-   browser/capability-revoke race и STORES policies ещё обязательны.
+   `bc8fffd2…` сериализует custom/system-role capability revoke с reader.
+   Role/attachment focused unit `56/56`, restored-copy `4/4 + 4/4` и
+   `8/8 + 8/8`, `156` table count zero-diff и database residue `0`;
+   production-build browser и STORES policies ещё обязательны.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;
@@ -1378,7 +1379,7 @@ PASS`, PostgreSQL `FAIL`). Previous accepted exact-head `d525b73...` / CI
 до уничтожения disposable snapshot.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
-непроверенные staff surfaces, attachment browser/capability-revoke race/STORES policies, полный
+непроверенные staff surfaces, attachment browser/STORES policies, полный
 gamification/assortment adoption, tenant entitlements/lifecycle, browser E2E,
 operations, backup/restore и production canary.
 

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.181                                        |
+| Версия           | 1.182                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -123,6 +123,13 @@ Successor staff attachment file BFF hardening: download route теперь
 selector-free (`forwardQuery: false`), upload locator остаётся canonical
 same-origin, а Web BFF boundary расширен до `18/18`. Это частичный file-policy
 gate; полный production-build archive/delete/orphan browser matrix ещё открыт.
+
+Gate 1MT staff attachment browser-boundary CI guard связывает selector-free
+file BFF, Web production build, PostgreSQL matrix всех семи parent kinds и
+принятые STORES browser evidence в обязательный GitHub Actions step:
+[Gate 1MT staff attachments browser-boundary CI evidence 19.08.2026](./gate-1mt-staff-attachments-browser-boundary-ci-evidence-2026-08-19.md).
+Это `LOCAL GUARD PASS / PUSH CI PENDING`; полноценный live
+archive/delete/orphan browser journey всё ещё открыт.
 
 Successor Telegram edge config hardening: edge adapter больше не имеет
 production API URL по умолчанию и fail-closed требует явный LeetPlus API URL до

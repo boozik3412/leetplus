@@ -523,6 +523,9 @@ jobs:
       - name: Test users and roles BFF boundary
         run: pnpm --filter web test:users-roles-bff-boundary
 
+      - name: Test Gate 1MT staff attachment browser boundary
+        run: pnpm --filter web test:gate-1mt-staff-attachments-browser-boundary
+
       - name: Test reproducible web build boundary
         run: pnpm --filter web test:release-build-boundary
 

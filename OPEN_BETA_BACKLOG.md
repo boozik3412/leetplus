@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.34
+- Версия: 3.35
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -15,24 +15,24 @@
   shell, 30-дневной trial policy, rollback owner и пяти stop conditions. Это не
   отменяет обычные серверные JWT/encryption/SMTP secrets, tenant isolation,
   email-bound OWNER invite, CI, backup/restore или rollback
-- Контрольная точка 19.08.2026: latest candidate `de613c51…` не принят для
-  promotion. Founder pilot mail PostgreSQL gate зелёный, но основной CI красный:
-  один OWNER invite PostgreSQL fixture всё ещё ожидает `CURRENT185/185`, хотя
-  рабочая схема уже `CURRENT186/186`; независимый staff snapshot-admission
-  smoke также завершился `SNAPSHOT_ADMISSION_SMOKE_FAILED`. Следующий
-  engineering slice сначала возвращает весь CI в зелёный статус и только затем
-  продолжает Gate 1MT. Это не меняет `NO-GO` и не затрагивает production,
-  Tenant A/A1..A4 или внешний доступ.
-- Repair candidate после `de613c51…`: OWNER invite PostgreSQL fixture
-  перепривязан к canonical `CURRENT186/186`; StaffTask admission smoke сохраняет
-  запрет любых later touches frozen `StaffTask*`, кроме одного exact
-  `20260819010000_staff_attachment_parent_delete_guard`, чьи SQL bytes
-  дополнительно pinned SHA-256. Локальный contract gate прошёл: smoke `48`,
-  admission tests `21`; API fixture отформатирован. На рабочей машине нет
-  локального PostgreSQL runtime (`DATABASE_URL`, `psql`, service и Docker
-  отсутствуют), поэтому реальный disposable PostgreSQL test ещё обязан пройти
-  на GitHub Actions. До этого candidate не является CI accepted, а статус
-  `NO-GO` неизменен.
+- Контрольная точка 19.08.2026: CI admission blocker после `de613c51…` закрыт.
+  Exact SHA `849d62db840082e883e9c677dad8d9c50aef2f18` принят GitHub Actions
+  run `32261064817` как `success`: OWNER invite fixture перепривязан к
+  canonical `CURRENT186/186`, StaffTask admission smoke сохраняет frozen
+  `StaffTask*` boundary, legacy identity inventory pinned к актуальному
+  `identity_mail_delivery_worker_assert_v1` digest
+  `ea8305627b1e23481f1f735b6cad4114aa9702f3e9f768a48131aa522d3c46c1`.
+  Production, Tenant A/A1..A4 и внешний tester не изменялись; release decision
+  остаётся `NO-GO`.
+- Следующий Gate 1MT slice после зелёного baseline добавляет Web
+  `test:gate-1mt-staff-attachments-browser-boundary`: CI-visible guard связывает
+  selector-free staff attachment file BFF, Web production build, PostgreSQL
+  matrix всех семи parent kinds и принятые STORES browser evidence. Локально
+  пройдено: syntax check, новый guard `4/4`, `test:pilot-bff-boundary` `21/21`,
+  `git diff --check`. В текущем workspace нет локального PostgreSQL runtime
+  (`psql`, Docker/service и listening loopback database отсутствуют), поэтому
+  полноценный headed production-build archive/delete/orphan browser journey
+  остаётся отдельным restored-copy evidence перед внешним доступом.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day

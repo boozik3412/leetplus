@@ -22,6 +22,19 @@ import { EXCLUDED_RUNTIME_RELEASE_FUNCTIONS } from "./runtime-function-enrollmen
 const SCRIPT_NAME = "identity-legacy-backfill-inventory-smoke";
 const SMOKE_CONFIRMATION = "run-identity-legacy-inventory-smoke";
 const INVENTORY_CONFIRMATION = "run-identity-legacy-inventory";
+const FAILURE_STAGES = new Set([
+  "PRECONDITIONS",
+  "INVENTORY_MODULE",
+  "RELEASE_ARTIFACT",
+  "CLUSTER_ADMISSION",
+  "CLONE_PROVISIONING",
+  "RESET_GUARD",
+  "HEALTHY_SCENARIO",
+  "REVIEW_SCENARIO",
+  "BLOCKED_SCENARIO",
+  "CLEANUP",
+]);
+const FAILURE_STAGE_BY_ERROR = new WeakMap();
 const INVENTORY_MODULE_URL = new URL(
   "./identity-legacy-backfill-inventory.mjs",
   import.meta.url,
@@ -142,6 +155,26 @@ function contractError(code) {
   error.code = code;
   error.safeContractError = true;
   throw error;
+}
+
+function withFailureStage(error, stage) {
+  if (
+    !FAILURE_STAGES.has(stage) ||
+    error === null ||
+    (typeof error !== "object" && typeof error !== "function")
+  ) {
+    return error;
+  }
+  FAILURE_STAGE_BY_ERROR.set(error, stage);
+  return error;
+}
+
+function errorFailureStage(error) {
+  const stage =
+    error !== null && (typeof error === "object" || typeof error === "function")
+      ? FAILURE_STAGE_BY_ERROR.get(error)
+      : undefined;
+  return FAILURE_STAGES.has(stage) ? stage : "PRECONDITIONS";
 }
 
 function parseArguments(argv) {
@@ -2340,6 +2373,18 @@ async function assertAuthorityAndCatalogDriftRejected(
 }
 
 export function runSelfTest() {
+  assert.equal(
+    errorFailureStage(
+      withFailureStage(new Error("fixture"), "HEALTHY_SCENARIO"),
+    ),
+    "HEALTHY_SCENARIO",
+  );
+  assert.equal(
+    errorFailureStage(
+      withFailureStage(new Error("fixture"), "UNTRUSTED_STAGE"),
+    ),
+    "PRECONDITIONS",
+  );
   assert.deepEqual(parseArguments(["--help", "--apply"]), {
     help: true,
     selfTest: false,
@@ -2491,7 +2536,7 @@ export function runSelfTest() {
     /statement_timeout=120000/u,
   );
   return {
-    checks: 23,
+    checks: 25,
     destructiveTarget: "generated-clones-only",
     script: SCRIPT_NAME,
     sourceDatabaseWrites: false,
@@ -2500,6 +2545,7 @@ export function runSelfTest() {
 }
 
 export async function runSmoke(environment = process.env) {
+  let failureStage = "PRECONDITIONS";
   if (
     String(environment.NODE_ENV ?? "")
       .trim()
@@ -2517,6 +2563,7 @@ export async function runSmoke(environment = process.env) {
   }
   const { databaseName: sourceDatabaseName, parsed: sourceUrl } =
     parseSourceDatabaseUrl(environment.DATABASE_URL);
+  failureStage = "INVENTORY_MODULE";
   const inventory = await loadInventoryModule();
   const manifestCodes = findingManifestCodes(inventory.FINDING_MANIFEST);
   assertManifestIncludes(manifestCodes, [
@@ -2525,6 +2572,7 @@ export async function runSmoke(environment = process.env) {
     "USER_CLAIM_CREATE_CANDIDATE",
   ]);
 
+  failureStage = "RELEASE_ARTIFACT";
   const expectedMigrationArtifact =
     await inventory.loadExpectedMigrationArtifact(environment.RELEASE_SHA);
   assert.equal(
@@ -2560,6 +2608,7 @@ export async function runSmoke(environment = process.env) {
   );
 
   try {
+    failureStage = "CLUSTER_ADMISSION";
     const [server] = await maintenance.$queryRawUnsafe(`
       SELECT
         current_database() AS database_name,
@@ -2588,6 +2637,7 @@ export async function runSmoke(environment = process.env) {
       );
     }
 
+    failureStage = "CLONE_PROVISIONING";
     for (const descriptor of descriptors) {
       const quotedDatabase = quoteIdentifier(descriptor.databaseName);
       const quotedSource = quoteIdentifier(sourceDatabaseName);
@@ -2633,8 +2683,10 @@ export async function runSmoke(environment = process.env) {
       );
     }
 
+    failureStage = "RESET_GUARD";
     await assertDisposableResetRejectsDisabledGuard(sourceUrl, descriptors[0]);
 
+    failureStage = "HEALTHY_SCENARIO";
     const healthy = await runScenario(
       inventory,
       environment,
@@ -2668,6 +2720,7 @@ export async function runSmoke(environment = process.env) {
       roleCreationAttempts,
     );
 
+    failureStage = "REVIEW_SCENARIO";
     const review = await runScenario(
       inventory,
       environment,
@@ -2689,6 +2742,7 @@ export async function runSmoke(environment = process.env) {
       assert.equal(findingOccurrences(review.report, code), occurrences);
     }
 
+    failureStage = "BLOCKED_SCENARIO";
     const blocked = await runScenario(
       inventory,
       environment,
@@ -2768,7 +2822,7 @@ export async function runSmoke(environment = process.env) {
       status: "PASS",
     };
   } catch (error) {
-    primaryError = error;
+    primaryError = withFailureStage(error, failureStage);
   } finally {
     for (const databaseName of [...databaseCreationAttempts].reverse()) {
       try {
@@ -2849,16 +2903,22 @@ export async function runSmoke(environment = process.env) {
   }
 
   if (primaryError && cleanupErrors.length > 0) {
-    throw new AggregateError(
-      [primaryError, ...cleanupErrors],
-      "Smoke failed and cleanup was incomplete.",
+    throw withFailureStage(
+      new AggregateError(
+        [primaryError, ...cleanupErrors],
+        "Smoke failed and cleanup was incomplete.",
+      ),
+      errorFailureStage(primaryError),
     );
   }
   if (primaryError) {
     throw primaryError;
   }
   if (cleanupErrors.length > 0) {
-    throw new AggregateError(cleanupErrors, "Smoke cleanup failed.");
+    throw withFailureStage(
+      new AggregateError(cleanupErrors, "Smoke cleanup failed."),
+      "CLEANUP",
+    );
   }
   assert.ok(smokeResult);
   return {
@@ -2893,7 +2953,7 @@ export async function main(
       : "IDENTITY_LEGACY_INVENTORY_SMOKE_FAILED";
     process.stderr.write(
       `${JSON.stringify({
-        error: { code },
+        error: { code, stage: errorFailureStage(error) },
         script: SCRIPT_NAME,
         status: "ERROR",
       })}\n`,

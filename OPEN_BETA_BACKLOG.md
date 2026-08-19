@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.23
+- Версия: 3.24
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -152,6 +152,13 @@
   `12/12`, targeted ESLint и Prettier зелёные. Это частичный jobs/Telegram
   hardening; tenant-aware public guest binding, outbound digest и production
   canary остаются открыты.
+- Gate 1MT public guest club selector binding: `selectGameClub` теперь
+  fail-closed отклоняет конфликтующие `clubId = tenant:store` плюс явные
+  `tenantSlug/storeId` до tenant/store lookup, profile mutation и JWT signing.
+  Targeted guest portal service suite прошла `195/195`, targeted ESLint и
+  Prettier по изменённым файлам зелёные. Это частичный public guest hardening;
+  общий Telegram/public guest/outbound matrix и production canary остаются
+  открыты.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

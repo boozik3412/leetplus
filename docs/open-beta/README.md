@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.170                                        |
+| Версия           | 1.171                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -128,6 +128,12 @@ Successor Telegram edge config hardening: edge adapter больше не име�
 production API URL по умолчанию и fail-closed требует явный LeetPlus API URL до
 network/provider effects. Targeted Telegram edge/poller tests `12/12`; полный
 tenant-aware Telegram/public-guest/outbound matrix ещё открыт.
+
+Successor public guest club selector hardening: `selectGameClub` отклоняет
+конфликтующие `clubId = tenant:store` и явные `tenantSlug/storeId` до
+tenant/store lookup, profile mutation и JWT signing. Targeted guest portal
+service suite `195/195`; полный Telegram/public-guest/outbound matrix ещё
+открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

@@ -15710,8 +15710,20 @@ function normalizeMiniAppClubSelection(dto: {
   const [clubTenantSlug, clubStoreId] = clubId?.includes(':')
     ? clubId.split(':', 2)
     : [null, null];
-  const tenantSlug = stringOrNull(dto.tenantSlug) ?? clubTenantSlug;
-  const storeId = stringOrNull(dto.storeId) ?? clubStoreId;
+  const explicitTenantSlug = stringOrNull(dto.tenantSlug);
+  const explicitStoreId = stringOrNull(dto.storeId);
+
+  if (
+    (clubTenantSlug &&
+      explicitTenantSlug &&
+      explicitTenantSlug !== clubTenantSlug) ||
+    (clubStoreId && explicitStoreId && explicitStoreId !== clubStoreId)
+  ) {
+    return null;
+  }
+
+  const tenantSlug = explicitTenantSlug ?? clubTenantSlug;
+  const storeId = explicitStoreId ?? clubStoreId;
 
   if (!clubId && !tenantSlug && !storeId) {
     return null;

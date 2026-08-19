@@ -7097,6 +7097,44 @@ describe('GuestPortalService', () => {
   });
 
   describe('selectGameClub', () => {
+    it('rejects conflicting club selectors before store lookup or profile mutation', async () => {
+      const { jwtService, prisma, service } = createService();
+      const tokenPayload = {
+        sub: 'guest-portal:profile-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash-1',
+      };
+
+      jest
+        .spyOn(service as any, 'verifyGuestToken')
+        .mockResolvedValue(tokenPayload);
+      jest.spyOn(service as any, 'getTenantStore');
+
+      await expect(
+        service.selectGameClub('Bearer guest-token', {
+          clubId: 'leet:club-2',
+          tenantSlug: 'other-tenant',
+          storeId: 'club-2',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.selectGameClub('Bearer guest-token', {
+          clubId: 'leet:club-2',
+          tenantSlug: 'leet',
+          storeId: 'club-3',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(service['getTenantStore']).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
     it('issues a scoped guest token for the selected game club without creating a common guest', async () => {
       const { jwtService, prisma, service } = createService({
         GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
@@ -8496,16 +8534,13 @@ describe('GuestPortalService', () => {
           },
         ]);
 
-        const result = await service.handleTelegramWebhook(
-          'telegram-secret',
-          {
-            message: {
-              text: '/stop',
-              chat: { id: 123456 },
-              from: { id: 123456 },
-            },
+        const result = await service.handleTelegramWebhook('telegram-secret', {
+          message: {
+            text: '/stop',
+            chat: { id: 123456 },
+            from: { id: 123456 },
           },
-        );
+        });
 
         expect(prisma.guest.updateMany).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -8553,9 +8588,7 @@ describe('GuestPortalService', () => {
           },
         });
         expect(prisma.guestGameDelivery.updateMany).not.toHaveBeenCalled();
-        expect(
-          prisma.guestGameDeliveryEvent.createMany,
-        ).not.toHaveBeenCalled();
+        expect(prisma.guestGameDeliveryEvent.createMany).not.toHaveBeenCalled();
         expect(result).toMatchObject({
           status: 'UNSUBSCRIBED',
           action: 'UNSUBSCRIBE',

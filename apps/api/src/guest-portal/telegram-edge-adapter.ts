@@ -90,11 +90,12 @@ const defaultMaxBodyBytes = 128 * 1024;
 export function loadTelegramEdgeConfig(
   env: TelegramEdgeEnv = process.env,
 ): TelegramEdgeConfig {
-  const leetPlusApiUrl = normalizeBaseUrl(
+  const leetPlusApiUrl = normalizeHttpBaseUrl(
     env.GUEST_GAME_TG_EDGE_LEETPLUS_API_URL ??
       env.GUEST_GAME_BOT_CONSUMER_API_URL ??
       env.API_URL ??
       '',
+    'GUEST_GAME_TG_EDGE_LEETPLUS_API_URL',
   );
   const webhookSecret =
     trimmed(env.GUEST_GAME_TG_EDGE_WEBHOOK_SECRET) ??
@@ -117,10 +118,11 @@ export function loadTelegramEdgeConfig(
       '/guest-portal/telegram/webhook',
     webhookSecret,
     botToken,
-    telegramApiBaseUrl: normalizeBaseUrl(
+    telegramApiBaseUrl: normalizeHttpBaseUrl(
       env.GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL ??
         env.TELEGRAM_API_BASE_URL ??
         'https://api.telegram.org',
+      'GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL',
     ),
     dryRun: parseBoolean(env.GUEST_GAME_TG_EDGE_DRY_RUN, true),
     requestTimeoutMs: parseBoundedInt(
@@ -633,6 +635,28 @@ function normalizeBaseUrl(value: string) {
   const normalized = value.trim();
 
   return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+}
+
+function normalizeHttpBaseUrl(value: string, settingName: string) {
+  const normalized = normalizeBaseUrl(value);
+
+  if (!normalized) {
+    return '';
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(normalized);
+  } catch {
+    throw new Error(`${settingName} must be a valid http(s) URL.`);
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`${settingName} must use http or https protocol.`);
+  }
+
+  return normalized;
 }
 
 function parseBoundedInt(

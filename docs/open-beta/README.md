@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.178                                        |
+| Версия           | 1.179                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -176,6 +176,13 @@ Successor API Telegram webhook reply timeout: active
 `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS`: default `15000`, clamp
 `1000..120000`. Это не включает outbound для beta tenant; полный tenant-aware
 public guest/Telegram/outbound matrix ещё открыт.
+
+Successor Telegram edge outbound base URL protocol admission: active
+`loadTelegramEdgeConfig()` принимает только валидные `http(s)` base URL для
+LeetPlus API и Telegram Bot API/proxy base. Non-http protocols и битые URL
+падают до webhook/poller network effects. Targeted Telegram/poller/API tests
+`214/214`; полный tenant-aware public guest/Telegram/outbound matrix ещё
+открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

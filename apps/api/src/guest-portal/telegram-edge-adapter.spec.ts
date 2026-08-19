@@ -46,6 +46,27 @@ describe('telegram edge adapter', () => {
     ).toThrow('GUEST_GAME_TG_EDGE_LEETPLUS_API_URL is required.');
   });
 
+  it('rejects non-http edge outbound base URLs', () => {
+    expect(() =>
+      loadTelegramEdgeConfig({
+        GUEST_GAME_TG_EDGE_LEETPLUS_API_URL: 'ftp://api.leetplus.test',
+        GUEST_GAME_TG_EDGE_WEBHOOK_SECRET: 'telegram-secret',
+        GUEST_GAME_TG_EDGE_BOT_TOKEN: 'bot-token',
+      }),
+    ).toThrow('GUEST_GAME_TG_EDGE_LEETPLUS_API_URL must use http or https');
+
+    expect(() =>
+      loadTelegramEdgeConfig({
+        GUEST_GAME_TG_EDGE_LEETPLUS_API_URL: 'https://api.leetplus.test',
+        GUEST_GAME_TG_EDGE_WEBHOOK_SECRET: 'telegram-secret',
+        GUEST_GAME_TG_EDGE_BOT_TOKEN: 'bot-token',
+        GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL: 'file://telegram',
+      }),
+    ).toThrow(
+      'GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL must use http or https',
+    );
+  });
+
   it('forwards Telegram webhook to LeetPlus and sends safe reply through proxy base URL', async () => {
     const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest
       .fn<TelegramEdgeFetch>()

@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.31
+- Версия: 3.32
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -212,6 +212,14 @@
   targeted ESLint зелёные. Это не включает outbound для beta tenant; full
   tenant-aware public guest/Telegram/outbound matrix и production canary
   остаются открыты.
+- Gate 1MT Telegram edge outbound base URL protocol admission: active
+  `loadTelegramEdgeConfig()` теперь нормализует и проверяет оба outbound base
+  URL: LeetPlus API и Telegram Bot API/proxy base принимают только валидные
+  `http(s)` URL. `ftp:`, `file:` и синтаксически битые значения падают на
+  startup config validation до webhook/poller network effects. Targeted
+  Telegram/poller/API tests `214/214`, API typecheck и targeted ESLint зелёные.
+  Это protocol-level config gate; полный tenant-aware
+  public guest/Telegram/outbound matrix и production canary остаются открыты.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

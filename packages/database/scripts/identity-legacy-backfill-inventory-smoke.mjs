@@ -2420,10 +2420,10 @@ export function runSelfTest() {
     [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
     [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
   );
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 185);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 186);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260818020000_identity_mail_delivery_current_head_v1",
+    "20260819010000_staff_attachment_parent_delete_guard",
   );
   assert.deepEqual(DISPOSABLE_RESET_TRUNCATE_GUARDS, [
     {

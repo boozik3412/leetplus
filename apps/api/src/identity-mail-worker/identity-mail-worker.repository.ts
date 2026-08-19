@@ -15,14 +15,14 @@ import type {
 } from './identity-mail-worker.types';
 
 const CURRENT_MIGRATION =
-  '20260818020000_identity_mail_delivery_current_head_v1' as const;
-const CURRENT_MIGRATION_COUNT = 185 as const;
+  '20260819010000_staff_attachment_parent_delete_guard' as const;
+const CURRENT_MIGRATION_COUNT = 186 as const;
 const PRETERMINAL_MIGRATION_MANIFEST_DIGESTS = new Set<string>([
   // Canonical clean install.
-  'f269f0878c9940b7ee2619e778e032361acc844364ab876bbe7fcc01e15a9fcd',
+  '589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda',
   // Exact production-history restored-copy lane: two reviewed comment-only
   // legacy checksums plus the CURRENT179/CURRENT185 history bridges.
-  '7a0bb533293e9ddf69d689a1215f3589872d399dccecde5a598bf79175923bcc',
+  '094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b',
 ]);
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;

@@ -1469,6 +1469,138 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
     ).resolves.toBe(0);
   });
 
+  it('rejects raw parent deletes that would orphan bound attachment authority', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const { attachments: service, bindings } = buildServices(prisma);
+    const user = buildUser(fixture, 'A_NETWORK');
+    const taskId = randomUUID();
+    await prisma.staffTask.create({
+      data: {
+        id: taskId,
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        createdByUserId: fixture.userANetworkId,
+        title: `Attachment delete guard task ${randomUUID()}`,
+      },
+    });
+
+    const parents = [
+      [StaffAttachmentResourceKind.CHAT_MESSAGE, fixture.messageA1Id],
+      [StaffAttachmentResourceKind.STAFF_TASK, taskId],
+      [StaffAttachmentResourceKind.CHECKLIST_RUN, fixture.checklistRunA1Id],
+      [
+        StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+        fixture.knowledgeArticleA1Id,
+      ],
+      [
+        StaffAttachmentResourceKind.SHIFT_REGULATION,
+        fixture.shiftRegulationA1Id,
+      ],
+      [StaffAttachmentResourceKind.TRAINING_COURSE, fixture.trainingCourseA1Id],
+      [StaffAttachmentResourceKind.ONBOARDING_PLAN, fixture.onboardingPlanA1Id],
+    ] as const;
+    await expect(
+      countAttachmentParentDeleteGuardTriggers(prisma),
+    ).resolves.toBe(parents.length);
+
+    for (const [resourceKind, resourceId] of parents) {
+      const attachment = await service.createAttachment(user, {
+        originalname: `PG attachment fixture parent guard ${resourceKind} ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: Buffer.from(`parent-guard-${resourceKind}`),
+      });
+
+      await prisma.$transaction((tx) =>
+        bindings.bindPendingResourceAttachments(tx, {
+          tenantId: fixture.tenantAId,
+          actorUserId: fixture.userANetworkId,
+          resourceKind,
+          resourceId,
+          attachmentIds: [attachment.id],
+        }),
+      );
+
+      await expect(
+        prisma.$transaction((tx) =>
+          deleteAttachmentParentRaw(tx, resourceKind, resourceId),
+        ),
+      ).rejects.toThrow(/Foreign key constraint|Staff attachment parent/);
+      await expect(
+        prisma.staffAttachmentBinding.count({
+          where: {
+            tenantId: fixture.tenantAId,
+            attachmentId: attachment.id,
+            resourceKind,
+            resourceId,
+            state: 'BOUND',
+          },
+        }),
+      ).resolves.toBe(1);
+    }
+
+    const allowedAttachment = await service.createAttachment(user, {
+      originalname: `PG attachment fixture parent guard allowed ${randomUUID()}.txt`,
+      mimetype: 'text/plain',
+      buffer: Buffer.from('parent-guard-allowed'),
+    });
+    const allowedCourse = await prisma.staffTrainingCourse.create({
+      data: {
+        tenantId: fixture.tenantAId,
+        storeId: fixture.storeA1Id,
+        createdByUserId: fixture.userANetworkId,
+        title: `Attachment delete guard allowed ${randomUUID()}`,
+        status: 'ACTIVE',
+        steps: [],
+      },
+    });
+    await prisma.$transaction((tx) =>
+      bindings.bindPendingResourceAttachments(tx, {
+        tenantId: fixture.tenantAId,
+        actorUserId: fixture.userANetworkId,
+        resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
+        resourceId: allowedCourse.id,
+        attachmentIds: [allowedAttachment.id],
+      }),
+    );
+
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await tx.staffAttachmentBinding.deleteMany({
+          where: {
+            tenantId: fixture.tenantAId,
+            attachmentId: allowedAttachment.id,
+            resourceKind: StaffAttachmentResourceKind.TRAINING_COURSE,
+            resourceId: allowedCourse.id,
+            state: 'BOUND',
+          },
+        });
+        await tx.staffAttachment.update({
+          where: { id: allowedAttachment.id },
+          data: {
+            state: 'QUARANTINED',
+            pendingExpiresAt: null,
+            stateReasonCode: 'NATIVE_REFERENCE_REMOVED',
+            stateChangedAt: new Date(),
+          },
+        });
+        await deleteAttachmentParentRaw(
+          tx,
+          StaffAttachmentResourceKind.TRAINING_COURSE,
+          allowedCourse.id,
+        );
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      prisma.staffTrainingCourse.count({ where: { id: allowedCourse.id } }),
+    ).resolves.toBe(0);
+    await expect(
+      prisma.staffAttachmentBinding.count({
+        where: { attachmentId: allowedAttachment.id },
+      }),
+    ).resolves.toBe(0);
+  });
+
   it('serializes native bind, unbind, and replacement races without orphan authority', async () => {
     const fixture = await createFixture(prisma);
     rememberFixture(fixtureTenantIds, fixture);
@@ -2339,6 +2471,66 @@ function rememberFixture(tenantIds: Set<string>, fixture: Fixture) {
   tenantIds.add(fixture.tenantBId);
 }
 
+async function countAttachmentParentDeleteGuardTriggers(prisma: PrismaClient) {
+  const [row] = await prisma.$queryRaw<Array<{ triggerCount: number }>>(
+    Prisma.sql`
+      SELECT COUNT(*)::INTEGER AS "triggerCount"
+      FROM pg_catalog.pg_trigger AS trigger
+      WHERE NOT trigger.tgisinternal
+        AND trigger.tgname IN (
+          'StaffAttachmentBinding_chat_message_parent_delete_check',
+          'StaffAttachmentBinding_staff_task_parent_delete_check',
+          'StaffAttachmentBinding_checklist_run_parent_delete_check',
+          'StaffAttachmentBinding_knowledge_article_parent_delete_check',
+          'StaffAttachmentBinding_shift_regulation_parent_delete_check',
+          'StaffAttachmentBinding_training_course_parent_delete_check',
+          'StaffAttachmentBinding_onboarding_plan_parent_delete_check'
+        )
+        AND pg_catalog.pg_get_triggerdef(trigger.oid) LIKE
+          '%assert_staff_attachment_parent_delete%'
+    `,
+  );
+
+  return row?.triggerCount ?? 0;
+}
+
+function deleteAttachmentParentRaw(
+  tx: Prisma.TransactionClient,
+  resourceKind: StaffAttachmentResourceKind,
+  resourceId: string,
+) {
+  switch (resourceKind) {
+    case StaffAttachmentResourceKind.CHAT_MESSAGE:
+      return tx.$executeRaw(
+        Prisma.sql`DELETE FROM "StaffChatMessage" WHERE "id" = ${resourceId}`,
+      );
+    case StaffAttachmentResourceKind.STAFF_TASK:
+      return tx.$executeRaw(
+        Prisma.sql`DELETE FROM "StaffTask" WHERE "id" = ${resourceId}`,
+      );
+    case StaffAttachmentResourceKind.CHECKLIST_RUN:
+      return tx.$executeRaw(
+        Prisma.sql`DELETE FROM "StaffChecklistRun" WHERE "id" = ${resourceId}`,
+      );
+    case StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE:
+      return tx.$executeRaw(
+        Prisma.sql`DELETE FROM "StaffKnowledgeArticle" WHERE "id" = ${resourceId}`,
+      );
+    case StaffAttachmentResourceKind.SHIFT_REGULATION:
+      return tx.$executeRaw(
+        Prisma.sql`DELETE FROM "StaffShiftRegulation" WHERE "id" = ${resourceId}`,
+      );
+    case StaffAttachmentResourceKind.TRAINING_COURSE:
+      return tx.$executeRaw(
+        Prisma.sql`DELETE FROM "StaffTrainingCourse" WHERE "id" = ${resourceId}`,
+      );
+    case StaffAttachmentResourceKind.ONBOARDING_PLAN:
+      return tx.$executeRaw(
+        Prisma.sql`DELETE FROM "StaffOnboardingPlan" WHERE "id" = ${resourceId}`,
+      );
+  }
+}
+
 async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
   await prisma.$transaction([
     prisma.staffAttachmentBinding.deleteMany({ where: { tenantId } }),
@@ -2352,6 +2544,7 @@ async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
     prisma.staffChatChannel.deleteMany({ where: { tenantId } }),
     prisma.staffChecklistRun.deleteMany({ where: { tenantId } }),
     prisma.staffChecklistTemplate.deleteMany({ where: { tenantId } }),
+    prisma.staffTask.deleteMany({ where: { tenantId } }),
     prisma.staffTaskTemplate.deleteMany({ where: { tenantId } }),
     prisma.staffKnowledgeArticle.deleteMany({ where: { tenantId } }),
     prisma.staffShiftRegulation.deleteMany({ where: { tenantId } }),

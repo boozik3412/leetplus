@@ -277,9 +277,9 @@ async function readMigrationPlan() {
   assert.equal(migrationDirectories[targetIndex - 1], PREVIOUS_MIGRATION);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260818020000_identity_mail_delivery_current_head_v1",
+    "20260819010000_staff_attachment_parent_delete_guard",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_185");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_186");
   const historicalMigrations = migrationDirectories.slice(0, targetIndex + 1);
   return {
     sourcePrismaDir,

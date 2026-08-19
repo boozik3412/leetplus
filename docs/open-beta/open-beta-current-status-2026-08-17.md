@@ -196,6 +196,22 @@ STAFF и Gate 1MT ещё не закрыты. Exact push CI `32223728916` при
 implementation SHA как `4/4 SUCCESS`.
 [Полный отчёт](./gate-1mt-checklists-stores-evidence-2026-08-19.md).
 
+Attachment parent-delete DB guard добавлен как следующий bounded engineering
+slice. Migration `20260819010000_staff_attachment_parent_delete_guard`
+ставит deferred constraint triggers на все семь polymorphic attachment parent
+tables и запрещает raw parent delete, пока существует `BOUND`
+`StaffAttachmentBinding`. Focused local PostgreSQL matrix прошла `14/14`: все
+trigger names установлены, raw-delete reject и unbind/quarantine→delete allow
+проверены. Этот же migration теперь является canonical `CURRENT_186` release
+head для identity-mail readiness: count `186`, clean preterminal
+`589dd0a3…`, production-history preterminal `094f3ad3…`. Current-head gate
+`3/3`, identity-mail repository `67/67`, production-history lane `7/7` и
+focused evidence pack `110/110` прошли. Полный local clean deploy всё ещё
+останавливается до `CURRENT_186` на pre-existing
+`20260731120000_identity_mail_delivery_release_head`, поэтому production,
+текущий tenant из четырёх клубов и внешние тестеры не изменялись.
+[Полный отчёт](./gate-1mt-attachment-parent-delete-guard-evidence-2026-08-19.md).
+
 Clean head `6c6bf7adca71c8ee27d1e0fc2a61819dd7e149f8` принят GitHub Actions run
 `32178680887` как `4/4 SUCCESS`. Exact `94a146d2…` принял founder-mail gate,
 но application CI отклонил одно устаревшее network-guard ожидание; остальные

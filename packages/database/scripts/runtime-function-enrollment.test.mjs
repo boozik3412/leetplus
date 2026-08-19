@@ -230,7 +230,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260818020000_identity_mail_delivery_current_head_v1 185$/u,
+    /20260819010000_staff_attachment_parent_delete_guard 186$/u,
   );
 });
 
@@ -775,7 +775,7 @@ test("rejects every activation-bound role before general enrollment", () => {
   );
 });
 
-test("binds enrollment to exact terminal migration 185 and exact count 185", () => {
+test("binds enrollment to exact terminal migration 186 and exact count 186", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

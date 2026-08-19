@@ -132,8 +132,8 @@ function readinessInput() {
     expectedDatabase: 'leetplus_beta',
     expectedRole: 'leetplus_identity_mail_worker',
     databaseTlsRequired: true,
-    expectedMigration: '20260818020000_identity_mail_delivery_current_head_v1',
-    expectedMigrationCount: 185,
+    expectedMigration: '20260819010000_staff_attachment_parent_delete_guard',
+    expectedMigrationCount: 186,
     releaseSha: 'e'.repeat(40),
     canaryTenantIds: [TENANT_ID],
     providerAuthorityDigest: PROVIDER_AUTHORITY_DIGEST,
@@ -192,10 +192,10 @@ function readinessReceipt(
     operation: 'ASSERT_IDENTITY_MAIL_DELIVERY_WORKER',
     decision: 'READY',
     tenantId: TENANT_ID,
-    migrationHead: '20260818020000_identity_mail_delivery_current_head_v1',
-    migrationCount: 185,
+    migrationHead: '20260819010000_staff_attachment_parent_delete_guard',
+    migrationCount: 186,
     preterminalManifestDigest:
-      'f269f0878c9940b7ee2619e778e032361acc844364ab876bbe7fcc01e15a9fcd',
+      '589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda',
     policyRevision: 1,
     maxAttempts: 5,
     leaseSeconds: 120,
@@ -481,7 +481,7 @@ const TENANT_RPC_CASES: TenantRpcCase[] = [
 
 describe('PrismaIdentityMailWorkerRepository', () => {
   it.each(TENANT_RPC_CASES)(
-    'executes $label as settings -> tenant lock -> CURRENT185 RPC on one bounded transaction',
+    'executes $label as settings -> tenant lock -> CURRENT186 RPC on one bounded transaction',
     async ({ arrange, binding, invoke, rootQueryCount, rpcName }) => {
       const { prisma, repository } = harness();
       if (binding === 'CLAIMED') {
@@ -726,14 +726,14 @@ describe('PrismaIdentityMailWorkerRepository', () => {
     expect(sealedAssertion.values).toEqual([TENANT_ID]);
   });
 
-  it('accepts the exact reviewed production-history CURRENT185 receipt', async () => {
+  it('accepts the exact reviewed production-history CURRENT186 receipt', async () => {
     const { prisma, repository } = harness();
     prisma.$queryRaw.mockResolvedValueOnce([readinessRow()]);
     prisma.rpcQueryRaw.mockResolvedValueOnce([
       {
         result: readinessReceipt({
           preterminalManifestDigest:
-            '7a0bb533293e9ddf69d689a1215f3589872d399dccecde5a598bf79175923bcc',
+            '094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b',
         }),
       },
     ]);

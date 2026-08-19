@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.166                                        |
+| Версия           | 1.168                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -114,6 +114,10 @@ Store-aware checklist templates/runs, answers/review, reports/exports,
 reference catalogs и совпадающая attachment download policy для
 `NETWORK | STORES`:
 [Gate 1MT checklists STORES evidence 19.08.2026](./gate-1mt-checklists-stores-evidence-2026-08-19.md).
+
+DB-level parent-delete guard для всех семи staff attachment parent kinds и
+canonical `CURRENT_186` identity-mail readiness bump:
+[Gate 1MT attachment parent-delete guard evidence 19.08.2026](./gate-1mt-attachment-parent-delete-guard-evidence-2026-08-19.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

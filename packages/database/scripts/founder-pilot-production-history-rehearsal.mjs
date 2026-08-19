@@ -22,13 +22,13 @@ const SOURCE_MIGRATION_MANIFEST_DIGEST =
 const SOURCE_ROLLED_BACK_MIGRATION_COUNT = 4;
 const SOURCE_ROLLED_BACK_MIGRATION_MANIFEST_DIGEST =
   "ae018d0beb9df8934dba01c0089b6219e774ac1fca78c5eaf415c36509400572";
-const FINAL_MIGRATION_COUNT = 185;
+const FINAL_MIGRATION_COUNT = 186;
 const FINAL_MIGRATION_HEAD =
-  "20260818020000_identity_mail_delivery_current_head_v1";
+  "20260819010000_staff_attachment_parent_delete_guard";
 const FINAL_PRETERMINAL_MANIFEST_DIGEST =
-  "7a0bb533293e9ddf69d689a1215f3589872d399dccecde5a598bf79175923bcc";
+  "094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b";
 const FINAL_WORKER_FUNCTION_DIGEST =
-  "d2025dca020c73fd9e3bfdfe251566fff69c48880b4caeaa8a37349a223f4465";
+  "645feb480c46c42d7d8ca2dae07ec1c82f88264ac5d0e30d26593a8e566f3f66";
 const SOURCE_CURRENT179_SHA256 =
   "c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519";
 const MATERIALIZED_CURRENT179_SHA256 =
@@ -37,6 +37,10 @@ const SOURCE_CURRENT185_SHA256 =
   "fd7002d70074c6a5e2383649ecc527b2a5cd7bb4c4f0be7ae0cc345080bc28d6";
 const MATERIALIZED_CURRENT185_SHA256 =
   "2979599d1b17829d497ea7def3f9d7b64659b5e6796e357ba5eca971d497b674";
+const CURRENT185_PRODUCTION_HISTORY_PRETERMINAL_MANIFEST_DIGEST =
+  "7a0bb533293e9ddf69d689a1215f3589872d399dccecde5a598bf79175923bcc";
+const MATERIALIZED_CURRENT185_WORKER_FUNCTION_DIGEST =
+  "d2025dca020c73fd9e3bfdfe251566fff69c48880b4caeaa8a37349a223f4465";
 const CURRENT179 = "20260731120000_identity_mail_delivery_release_head";
 const CURRENT185 = "20260818020000_identity_mail_delivery_current_head_v1";
 const RECONCILIATION_MARKER =
@@ -229,7 +233,7 @@ export function materializeFounderPilotProductionHistorySql(
     sql = replaceExact(
       sql,
       "f269f0878c9940b7ee2619e778e032361acc844364ab876bbe7fcc01e15a9fcd",
-      FINAL_PRETERMINAL_MANIFEST_DIGEST,
+      CURRENT185_PRODUCTION_HISTORY_PRETERMINAL_MANIFEST_DIGEST,
       2,
       "FOUNDER_PILOT_HISTORY_CURRENT185_TRANSFORM_DRIFT",
     );
@@ -243,7 +247,7 @@ export function materializeFounderPilotProductionHistorySql(
     sql = replaceExact(
       sql,
       "47690501257272fd455475a00bea0e21b13f27187a669adef2115de349633315",
-      FINAL_WORKER_FUNCTION_DIGEST,
+      MATERIALIZED_CURRENT185_WORKER_FUNCTION_DIGEST,
       1,
       "FOUNDER_PILOT_HISTORY_CURRENT185_TRANSFORM_DRIFT",
     );
@@ -696,7 +700,7 @@ export async function createFounderPilotProductionHistoryPgAdapter(
                 ORDER BY migration."migration_name" COLLATE "C"
               ) FILTER (
                 WHERE migration."migration_name" <>
-                  '20260818020000_identity_mail_delivery_current_head_v1'
+                  '20260819010000_staff_attachment_parent_delete_guard'
               ) || E'\\n',
               'UTF8'
             )

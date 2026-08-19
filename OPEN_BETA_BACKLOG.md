@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.19
+- Версия: 3.21
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -116,6 +116,22 @@
   foreign mutation `404` и forbidden foreign Store filter `403`. Последняя
   прежняя network-only staff parent family закрыта; полный STAFF/Gate 1MT и
   release decision остаются `NO-GO`.
+- Gate 1MT staff attachment parent-delete guard: migration
+  `20260819010000_staff_attachment_parent_delete_guard` добавляет deferred DB
+  constraint triggers для всех семи polymorphic attachment parent tables.
+  Focused local PostgreSQL matrix прошла `14/14`: все trigger names установлены,
+  raw parent delete с `BOUND` authority отклоняется, unbind/quarantine затем
+  parent delete разрешается. Этот же migration теперь перепривязывает
+  identity-mail worker readiness к canonical `CURRENT_186`, count `186`, head
+  `20260819010000_staff_attachment_parent_delete_guard`; clean preterminal
+  digest `589dd0a3…`, production-history preterminal digest `094f3ad3…`.
+  Current-head gate `3/3`, identity-mail repository `67/67`,
+  production-history materialized lane `7/7` и focused migration/evidence pack
+  `110/110` прошли. Локальный clean `prisma migrate deploy` по-прежнему
+  останавливается до `CURRENT_186` на pre-existing
+  `20260731120000_identity_mail_delivery_release_head`, поэтому production
+  deployment/rehearsal остаётся `NO-GO`; production и текущая сеть не
+  изменялись.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

@@ -301,7 +301,7 @@ test("migration 166 is transactional and requires the exact CURRENT_165 Store fe
 
   assert.equal(migrationNames.length, CURRENT_EXPECTED_MIGRATION_COUNT);
   assert.equal(migrationNames.at(-1), CURRENT_EXPECTED_LATEST_MIGRATION);
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_185");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_186");
   const additiveTargetIndex =
     STAFF_TASK_ALLOWED_ADDITIVE_TAIL.indexOf(TARGET_MIGRATION);
   assert.deepEqual(

@@ -54,6 +54,7 @@ import { acquireGuestGameLootBoxRuleLock } from '../guest-gamification/guest-gam
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
+import { buildTelegramSendMessageBody } from './telegram-send-message-payload';
 import {
   evaluateGuestGameProgress,
   guestGameProgressPeriodicity,
@@ -16858,15 +16859,7 @@ async function sendTelegramWebhookReply({
     GuestPortalTelegramWebhookResponse['reply']
   >['replyMarkup'];
 }) {
-  const body: Record<string, unknown> = {
-    chat_id: chatId,
-    text,
-    disable_web_page_preview: true,
-  };
-
-  if (replyMarkup) {
-    body.reply_markup = replyMarkup;
-  }
+  const body = buildTelegramSendMessageBody({ chatId, text, replyMarkup });
 
   const response = await fetch(
     `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`,

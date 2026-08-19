@@ -1,4 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
+import {
+  buildTelegramSendMessageBody,
+  isTelegramSendMessageProjectionError,
+  type TelegramSendMessageBody,
+} from './telegram-send-message-payload';
 
 export type TelegramEdgeEnv = Record<string, string | undefined>;
 export type TelegramEdgeFetch = typeof fetch;
@@ -271,6 +276,26 @@ export async function handleTelegramEdgeWebhook(
     };
   }
 
+  const replyBody = safelyBuildTelegramReplyBody(
+    logger,
+    chatId,
+    replyText,
+    reply.replyMarkup,
+  );
+
+  if (!replyBody) {
+    return {
+      ok: true,
+      upstreamStatus: leetPlusResponse.status ?? null,
+      upstreamAction: leetPlusResponse.action ?? null,
+      replySent: false,
+      dryRun: false,
+      chatIdMasked,
+      outboundRejected: true,
+      note: 'Unsafe Telegram reply payload.',
+    };
+  }
+
   const callbackAnswered = await answerTelegramCallbackQueryIfNeeded(
     config,
     telegramFetchImpl,
@@ -280,9 +305,7 @@ export async function handleTelegramEdgeWebhook(
   const telegramResult = await sendTelegramReply(
     config,
     telegramFetchImpl,
-    chatId,
-    replyText,
-    reply.replyMarkup,
+    replyBody,
   );
 
   logger.log(
@@ -398,22 +421,10 @@ async function routeTelegramEdgeRequest(
 async function sendTelegramReply(
   config: TelegramEdgeConfig,
   fetchImpl: TelegramEdgeFetch,
-  chatId: string,
-  text: string,
-  replyMarkup: unknown,
+  body: TelegramSendMessageBody,
 ): Promise<{ messageId: string | null }> {
   if (!config.botToken) {
     throw new Error('Telegram bot token is not configured.');
-  }
-
-  const body: JsonBody = {
-    chat_id: chatId,
-    text,
-    disable_web_page_preview: true,
-  };
-
-  if (replyMarkup && typeof replyMarkup === 'object') {
-    body.reply_markup = replyMarkup;
   }
 
   const response = await postJson<TelegramSendMessageResponse>(
@@ -439,6 +450,28 @@ async function sendTelegramReply(
         ? String(rawMessageId)
         : null,
   };
+}
+
+function safelyBuildTelegramReplyBody(
+  logger: TelegramEdgeLogger,
+  chatId: string,
+  text: string,
+  replyMarkup: unknown,
+) {
+  try {
+    return buildTelegramSendMessageBody({ chatId, text, replyMarkup });
+  } catch (error) {
+    if (isTelegramSendMessageProjectionError(error)) {
+      logger.warn(
+        `Telegram edge rejected unsafe reply payload: ${safeErrorMessage(
+          error,
+        )}`,
+      );
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 async function answerTelegramCallbackQueryIfNeeded(

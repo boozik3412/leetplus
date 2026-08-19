@@ -319,6 +319,58 @@ describe('telegram edge adapter', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('rejects unsafe reply markup before any Telegram outbound call', async () => {
+    const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest
+      .fn<TelegramEdgeFetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: 'CONFIRMED',
+            action: 'TELEGRAM_BOT_MENU',
+            reply: {
+              provider: 'TELEGRAM',
+              method: 'sendMessage',
+              text: 'Меню',
+              replyMarkup: {
+                inline_keyboard: [
+                  [
+                    {
+                      text: 'Опасная кнопка',
+                      url: 'javascript:alert(1)',
+                      leak: 'unexpected',
+                    },
+                  ],
+                ],
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+    const result = await handleTelegramEdgeWebhook(
+      baseConfig,
+      {
+        update_id: 4,
+        message: {
+          chat: { id: 123456 },
+          text: '/menu',
+        },
+      },
+      { fetch: fetchMock, logger: silentLogger },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      replySent: false,
+      dryRun: false,
+      chatIdMasked: 'ch...56',
+      outboundRejected: true,
+      note: 'Unsafe Telegram reply payload.',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 const silentLogger = {

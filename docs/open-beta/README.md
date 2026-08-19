@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.176                                        |
+| Версия           | 1.177                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -159,6 +159,16 @@ public config, authenticated session, game summary и missions paging.
 Legacy/dormant media и unknown GET paths получают `404` до upstream fetch;
 query validation по-прежнему даёт `400`. Web `test:pilot-bff-boundary`
 `21/21`; полный public guest/Telegram/outbound matrix ещё открыт.
+
+Successor Telegram `sendMessage` outbound projection: active
+Telegram edge и основной API webhook reply sender строят строгий
+`sendMessage` body перед Bot API: numeric `chat_id`, text до 4096 символов,
+bounded contact keyboard, inline `callback_data`, HTTPS `url`/`web_app` и
+`remove_keyboard`. Unknown fields, control chars, oversized callback data и
+non-HTTPS URLs отклоняются до Telegram fetch; edge возвращает safe
+`replySent=false/outboundRejected=true` для unsafe upstream reply. Targeted API
+tests `207/207`, API typecheck, targeted ESLint и Prettier зелёные. Полный
+tenant-aware public guest/Telegram/outbound matrix ещё открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.29
+- Версия: 3.30
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -190,6 +190,18 @@
   validation по-прежнему даёт `400`. Web `test:pilot-bff-boundary` расширен до
   `21/21`, targeted ESLint и Prettier зелёные. Это частичный public guest BFF
   hardening; полный public guest/Telegram/outbound matrix остаётся открытым.
+- Gate 1MT Telegram `sendMessage` outbound projection: active
+  Telegram edge и основной API webhook reply sender больше не передают opaque
+  `replyMarkup` в Bot API. Перед provider call строится строгий
+  `sendMessage` body: только numeric `chat_id`, text до 4096 символов,
+  bounded contact keyboard, inline `callback_data`, HTTPS `url`/`web_app` и
+  `remove_keyboard`; unknown fields, control chars, oversized callback data и
+  non-HTTPS URLs блокируются до Telegram fetch. Edge на unsafe upstream reply
+  возвращает safe `replySent=false/outboundRejected=true` без provider call.
+  Targeted API tests `207/207`, `telegram-send-message-payload` unit `4/4`,
+  API typecheck, targeted ESLint и Prettier зелёные. Это закрывает только
+  shape-level Telegram reply projection; полный tenant-aware
+  public guest/Telegram/outbound matrix и production canary остаются открыты.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

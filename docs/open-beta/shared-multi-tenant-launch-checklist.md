@@ -2,8 +2,8 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.30                                                       |
-| Дата       | 02.08.2026                                                 |
+| Версия     | 1.31                                                       |
+| Дата       | 19.08.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
 | Topology   | `Tenant A/A1..A4` + новый `Tenant B/B1`                    |
@@ -460,8 +460,10 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
       policy для list/detail/mutation/progress/export/files; restored-copy
       PostgreSQL `11/11` и production-build B1↔B2 browser matrix приняты на
       `40a8e828…`.
-- [ ] Onboarding и checklists/templates получают ту же store-aware parent/file
-      policy.
+- [x] Onboarding plans используют fresh `NETWORK | STORES` parent policy для
+      list/detail/mutation/reference catalogs/files; local PostgreSQL `12/12`
+      и production-build B1↔B2 browser matrix приняты на `26b9f442…`.
+- [ ] Checklists/templates получают ту же store-aware parent/file policy.
 - [ ] Control/ratings/motivation/discipline защищены и аудируются.
 - [ ] Salary работает только как planning; payout отсутствует.
 - [ ] Attachments имеют live parent ACL, revoke и tenant/store negative tests.

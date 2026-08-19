@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.164                                        |
+| Версия           | 1.165                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -106,6 +106,10 @@ Store-aware training courses/profiles, progress/export authority и совпад
 attachment download policy для `NETWORK | STORES`:
 [Gate 1MT training STORES evidence 19.08.2026](./gate-1mt-training-stores-evidence-2026-08-19.md).
 
+Store-aware staff onboarding plans, reference catalogs и совпадающая
+attachment download policy для `NETWORK | STORES`:
+[Gate 1MT onboarding STORES evidence 19.08.2026](./gate-1mt-onboarding-stores-evidence-2026-08-19.md).
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 
@@ -178,8 +182,9 @@ checksum. Production и текущая сеть не изменялись.
    pre-stream `404/401`, Web BFF `10/10`, unit `22/22`, два PG/HTTP run
    `4/4 + 4/4`, `156` table counts zero-diff и database residue `0`.
    OWNER attachment production-build browser lifecycle, knowledge, shift
-   regulations и training STORES adoption также приняты; STORES adoption двух
-   оставшихся network-only staff parent families, remaining attachment archive/orphan matrix, outbound
+   regulations, training и onboarding STORES adoption также приняты; STORES
+   adoption одной оставшейся network-only staff parent family, remaining
+   attachment archive/orphan matrix, outbound
    digest и job/Telegram/public-guest остаток не закрыты. HTTP
    inventory: `295 = 241 ALLOW + 54
    BLOCKED`.
@@ -225,6 +230,12 @@ checksum. Production и текущая сеть не изменялись.
    `160/160`, restored-copy PostgreSQL `11/11` и production-build B1↔B2
    browser matrix; B1/B2 видят только свой Store и published network course,
    foreign mutation скрыта `404`, foreign filter отклонён `403`.
+   0a.12. [Gate 1MT onboarding STORES evidence](./gate-1mt-onboarding-stores-evidence-2026-08-19.md) —
+   exact `26b9f442…`, общая plan/reference/attachment policy для
+   `NETWORK | STORES`, unit `55/55`, Web BFF `15/15`, pilot HTTP/guard
+   `160/160`, local PostgreSQL `12/12` и production-build B1↔B2 browser;
+   network plan read-only, foreign mutation скрыта `404`, foreign filter
+   отклонён `403`; exact push CI `32220369599` завершился `4/4 SUCCESS`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;
@@ -1420,8 +1431,8 @@ PASS`, PostgreSQL `FAIL`). Previous accepted exact-head `d525b73...` / CI
 до уничтожения disposable snapshot.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
-STORES adoption двух network-only staff parent families (onboarding и
-checklists/templates), attachment archive/orphan browser
+STORES adoption одной network-only staff parent family (checklists/templates),
+attachment archive/orphan browser
 matrix, полный gamification/assortment adoption, tenant-aware jobs/Telegram/
 public guest, Gate 2, production operations и canary.
 

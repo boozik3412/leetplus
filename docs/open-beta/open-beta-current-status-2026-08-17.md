@@ -172,6 +172,18 @@ build и production-build browser A/B прошли. Остались две netw
 parent families: onboarding и checklists/templates.
 [Полный отчёт](./gate-1mt-training-stores-evidence-2026-08-19.md).
 
+Onboarding STORES adoption реализован на exact implementation
+`26b9f4425e4fc416fb1e741949be2a30a53576d7`. Fresh plan/reference policy
+ограничивает list/detail/create/update, Store и task/checklist/regulation/
+course choices, а attachment download повторяет ту же parent authority.
+`STORES(B1)` управляет только B1 plan, читает active network plan read-only и
+не видит B2; B2 получает симметричный контур. Focused unit `55/55`, Web BFF
+`15/15`, pilot HTTP/guard `160/160`, local PostgreSQL `12/12`, typecheck/lint/
+build и production-build browser A/B прошли. Осталась одна ранее network-only
+staff parent family: checklists/checklist templates.
+Exact push CI `32220369599` принял implementation SHA как `4/4 SUCCESS`.
+[Полный отчёт](./gate-1mt-onboarding-stores-evidence-2026-08-19.md).
+
 Clean head `6c6bf7adca71c8ee27d1e0fc2a61819dd7e149f8` принят GitHub Actions run
 `32178680887` как `4/4 SUCCESS`. Exact `94a146d2…` принял founder-mail gate,
 но application CI отклонил одно устаревшее network-guard ожидание; остальные
@@ -364,9 +376,9 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    writer/lifecycle, real
    HTTP SSE и latest
    assortment HTTP `15/15`), browser read/admission и report/download/mutation
-   journey, OWNER attachment lifecycle, knowledge, shift-regulations и
-   training STORES adoption приняты на restored copy. Не закрыты outbound
-   digest, STORES adoption двух оставшихся network-only staff parent families,
+   journey, OWNER attachment lifecycle, knowledge, shift-regulations,
+   training и onboarding STORES adoption приняты. Не закрыты outbound digest,
+   STORES adoption одной оставшейся network-only staff parent family,
    archive/orphan browser matrix остальных attachment parents,
    jobs/Telegram/public guest binding и Gate 2 текущей сети.
 4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
@@ -405,8 +417,9 @@ clean SHA + CI artifact [DONE]
   → [DONE restored-copy clone] knowledge-base STORES parent + attachment adoption
   → [DONE restored-copy clone] shift-regulations STORES parent + attachment adoption
   → [DONE restored-copy/browser] training STORES parent + attachment adoption
+  → [DONE local PostgreSQL/browser] onboarding STORES parent + attachment adoption
   → production roles/secrets + controlled SMTP canary
-  → Gate 1MT two remaining STORES staff parents + attachment archive/orphan browser matrix
+  → Gate 1MT remaining checklist STORES parent + attachment archive/orphan browser matrix
   → Gate 1MT jobs/Telegram/public-guest/outbound
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE

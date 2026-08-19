@@ -562,7 +562,6 @@ async function createLegacyClaimBypassingRevisionGuard(prisma, state, claim) {
   await prisma.$executeRawUnsafe(
     `ALTER TABLE public."IdentityEmailClaim" DISABLE TRIGGER ${trigger}`,
   );
-  let failureStage = "SCENARIO_RESET";
   try {
     await createClaim(prisma, state, claim);
   } finally {
@@ -1456,6 +1455,7 @@ async function runScenario(
     descriptor.password,
     hmacKey,
   );
+  let failureStage = "SCENARIO_RESET";
   try {
     // CURRENT_176 makes the delivery-event ledger and tenant enrollment
     // non-truncatable. This setup is restricted to generated disposable

@@ -213,6 +213,13 @@ scheduler call-site переключён на отдельный runtime actor; 
 acceptance:
 [background runtime identity foundation evidence 19.08.2026](./background-runtime-identity-foundation-ci-evidence-2026-08-19.md).
 
+Successor report digest runtime identity adoption: `REPORT_DIGEST_SMTP`
+подключён к runtime identity foundation в scheduler и на последней SMTP effect
+boundary. Scheduled digest теперь требует exact `TENANT_SYSTEM` actor для
+своего tenant; missing runtime tenant identity даёт deterministic `SKIPPED` и
+не вызывает provider effect. Exact-SHA CI acceptance:
+[report digest runtime identity evidence 19.08.2026](./background-report-digest-runtime-identity-ci-evidence-2026-08-19.md).
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 

@@ -89,6 +89,11 @@ Stable reason codes:
 module entitlement, capability, scope, provider configuration и отдельный
 outbound `GO` продолжают действовать.
 
+`REPORT_DIGEST_SMTP` дополнительно подключён к runtime identity foundation:
+scheduler требует exact `TENANT_SYSTEM` actor до digest generation, а
+`ReportsDigestService` повторяет эту проверку на последней границе перед SMTP
+effect.
+
 ### 3.2. Внешнее выполнение запрещено
 
 До отдельного durable fencing имеют `EXTERNAL_DENY`:
@@ -254,6 +259,9 @@ Suite проверяет:
   всех job kinds;
 - runtime identity foundation: deny shared service token, exact tenant/store
   actor match, missing store id и policy-denial precedence;
+- report digest runtime identity adoption: exact tenant system actor в
+  scheduler и на SMTP effect boundary, missing tenant identity → deterministic
+  `SKIPPED` без provider effect;
 - совместимость `INTERNAL`;
 - deny для admitted `PILOT/BETA/LIVE`;
 - отсутствие provider/credential и защищённой business mutation после denial;
@@ -270,6 +278,9 @@ Successor identity metadata exact-SHA CI acceptance:
 
 Runtime identity foundation exact-SHA CI acceptance:
 [background runtime identity foundation evidence 19.08.2026](./background-runtime-identity-foundation-ci-evidence-2026-08-19.md).
+
+Report digest runtime identity exact-SHA CI acceptance:
+[background report digest runtime identity evidence 19.08.2026](./background-report-digest-runtime-identity-ci-evidence-2026-08-19.md).
 
 Последний принятый baseline-результат до расширения migration-166 containment:
 

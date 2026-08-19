@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.38
+- Версия: 3.39
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -61,6 +61,21 @@
   `docs/open-beta/background-runtime-identity-foundation-ci-evidence-2026-08-19.md`.
   Это foundation, не полное переключение legacy scheduler call-sites; внешний
   доступ остаётся `NO-GO`.
+- Первый реальный background call-site подключён к runtime identity foundation:
+  `REPORT_DIGEST_SMTP` теперь проверяет exact `TENANT_SYSTEM` runtime actor в
+  scheduler до digest generation и в `ReportsDigestService` на последней
+  границе перед SMTP effect. Runtime-deny сохраняется как deterministic
+  `SKIPPED` и не вызывает provider effect. Локально зелёные:
+  targeted digest specs (`2/2 suites`, `16/16 tests`),
+  `test:ci:background-execution` (`16/16 suites`, `794/794 tests`),
+  `test:ci:tenant-execution` (`18/18 suites`, `1000/1000 tests`),
+  `lint:ci:tenant-execution`, API typecheck и `git diff --check`. Exact-SHA
+  `1fa0806363dffbdb43ba62e2c5f2056b100aa248` принят GitHub Actions run
+  `32278267729` attempt `2` как `4/4 SUCCESS`; evidence:
+  `docs/open-beta/background-report-digest-runtime-identity-ci-evidence-2026-08-19.md`.
+  Attempt `1` отменён вручную во время suspected external PgBouncer install
+  hang и не считается accepted evidence. Остальные worker call-sites ещё не
+  переведены; внешний доступ остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.183                                        |
+| Версия           | 1.184                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -201,6 +201,15 @@ registry-level hardening, а не полноценный durable worker plane; r
 distributed lease, suspend/drain и tenant-aware Telegram/outbound matrix ещё
 открыты. Exact-SHA CI acceptance:
 [background execution identity metadata evidence 19.08.2026](./background-execution-identity-metadata-ci-evidence-2026-08-19.md).
+
+Successor runtime identity foundation: `evaluateTenantBackgroundRuntimeIdentity`
+принимает policy decision и фактический runtime actor kind, fail-closed
+отклоняет `SHARED_SERVICE_TOKEN` как worker identity, требует exact tenant
+system actor для tenant-wide jobs и tenant+store actor для store-bound jobs.
+Локально зелёные targeted background/tenant execution suites, tenant-execution
+ESLint, API typecheck и diff-check. Это ещё не означает, что каждый legacy
+scheduler call-site переключён на отдельный runtime actor; подключение
+конкретных job paths остаётся следующим worker-plane этапом.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.10                                                    |
+| Версия           | 1.11                                                    |
 | Дата             | 29.07.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -56,6 +56,13 @@ Policy использует только два execution-stage:
 7. Общий `SYNC_SERVICE_TOKEN` остаётся только HTTP/scheduler admission secret и
    не считается worker identity. Registry-level
    `sharedServiceTokenAllowed=false` закреплён для всех job kinds.
+8. Runtime identity foundation обязан отдельно сопоставлять принятое policy
+   decision с фактическим actor kind. `SHARED_SERVICE_TOKEN` всегда
+   отклоняется как worker identity; `TENANT_SYSTEM_IDENTITY` требует
+   `TENANT_SYSTEM`, `TENANT_STORE_SYSTEM_IDENTITY` требует
+   `TENANT_STORE_SYSTEM` + store id, а
+   `TENANT_OR_STORE_SYSTEM_IDENTITY` допускает tenant actor либо store actor со
+   store id.
 
 Stable reason codes:
 
@@ -176,6 +183,9 @@ retention и quality collection не объявляются unattended entrypoin
 - Даже для разрешённых revision-fenced effects решение policy возвращает
   `sharedServiceTokenAllowed=false`: all-tenant/service-token admission не
   является worker identity и не заменяет tenant/store-scoped runtime actor.
+- Runtime identity foundation fail-closed блокирует shared-token worker,
+  missing actor kind, missing tenant id, missing store id и несовпадение
+  required actor kind до подключения effect path.
 - Текущий `INTERNAL` tenant сохраняет совместимость разрешённых registry
   paths, но legacy provider delivery effects намеренно отключены до
   coordinator.
@@ -199,6 +209,9 @@ retention и quality collection не объявляются unattended entrypoin
 - registry-level identity metadata не создаёт сами runtime roles и не
   доказывает, что каждый legacy scheduler уже исполняется под отдельным
   tenant/store system actor;
+- runtime identity helper пока является foundation/contract: конкретные
+  legacy scheduler call-sites должны быть переведены на него отдельными
+  bounded patches с job-specific tests;
 - activity jobs внешнего tenant могут накапливаться unclaimed;
 - не завершены shared Telegram tenant/store identity, durable update dedupe и
   per-store kill switch;
@@ -239,6 +252,8 @@ Suite проверяет:
 - точность registry и deny для unknown values;
 - точность identity metadata registry и `sharedServiceTokenAllowed=false` для
   всех job kinds;
+- runtime identity foundation: deny shared service token, exact tenant/store
+  actor match, missing store id и policy-denial precedence;
 - совместимость `INTERNAL`;
 - deny для admitted `PILOT/BETA/LIVE`;
 - отсутствие provider/credential и защищённой business mutation после denial;

@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.36
+- Версия: 3.37
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -48,6 +48,16 @@
   `docs/open-beta/background-execution-identity-metadata-ci-evidence-2026-08-19.md`.
   Это не закрывает runtime roles, distributed lease, suspend/drain и
   tenant-aware Telegram/outbound matrix; release decision остаётся `NO-GO`.
+- Runtime identity foundation добавлен поверх registry metadata:
+  `evaluateTenantBackgroundRuntimeIdentity` fail-closed отклоняет
+  `SHARED_SERVICE_TOKEN` как worker identity, требует exact `TENANT_SYSTEM`
+  для tenant-wide jobs и `TENANT_STORE_SYSTEM + storeId` для store-bound jobs,
+  а policy-deny имеет приоритет над любым actor. Локально зелёные:
+  `test:ci:background-execution` (`16/16 suites`, `792/792 tests`),
+  `test:ci:tenant-execution` (`18/18 suites`, `998/998 tests`),
+  `lint:ci:tenant-execution`, API typecheck и `git diff --check`. Это
+  foundation, не полное переключение legacy scheduler call-sites; внешний
+  доступ остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day

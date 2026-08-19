@@ -45,6 +45,11 @@ export type TenantBackgroundJobExecutionMetadata = Readonly<{
   sharedServiceTokenAllowed: false;
 }>;
 
+export type TenantBackgroundRuntimeActorKind =
+  | 'TENANT_SYSTEM'
+  | 'TENANT_STORE_SYSTEM'
+  | 'SHARED_SERVICE_TOKEN';
+
 export const TENANT_BACKGROUND_EXECUTION_REGISTRY = Object.freeze({
   REPORT_DIGEST_SMTP: 'REVISION_FENCED',
   GUEST_BONUS_LEDGER_LANGAME: 'REVISION_FENCED',
@@ -164,6 +169,36 @@ export type TenantBackgroundExecutionPolicyInput = Readonly<{
   jobKind?: unknown;
 }>;
 
+export type TenantBackgroundRuntimeIdentityInput = Readonly<{
+  decision: TenantBackgroundExecutionPolicyDecision;
+  actorKind?: unknown;
+  tenantId?: unknown;
+  storeId?: unknown;
+}>;
+
+export type TenantBackgroundRuntimeIdentityReasonCode =
+  | 'BACKGROUND_POLICY_DENIED'
+  | 'BACKGROUND_RUNTIME_ACTOR_KIND_REQUIRED'
+  | 'BACKGROUND_RUNTIME_ACTOR_KIND_UNKNOWN'
+  | 'BACKGROUND_SHARED_SERVICE_TOKEN_DENIED'
+  | 'BACKGROUND_TENANT_SYSTEM_IDENTITY_REQUIRED'
+  | 'BACKGROUND_TENANT_STORE_SYSTEM_IDENTITY_REQUIRED'
+  | 'BACKGROUND_TENANT_ID_REQUIRED'
+  | 'BACKGROUND_STORE_ID_REQUIRED'
+  | 'BACKGROUND_RUNTIME_IDENTITY_ACCEPTED';
+
+export type TenantBackgroundRuntimeIdentityDecision = Readonly<{
+  accepted: boolean;
+  reasonCode: TenantBackgroundRuntimeIdentityReasonCode;
+  policyReasonCode: TenantBackgroundExecutionPolicyReasonCode;
+  jobKind: TenantBackgroundJobKind | null;
+  systemIdentity: TenantBackgroundSystemIdentityRequirement | null;
+  actorKind: TenantBackgroundRuntimeActorKind | null;
+  tenantId: string | null;
+  storeId: string | null;
+  sharedServiceTokenAllowed: false;
+}>;
+
 const policyNotes = Object.freeze({
   ALLOWED_INTERNAL_LEGACY:
     'Known background job is allowed in the legacy internal stage.',
@@ -267,6 +302,136 @@ export function tenantBackgroundExecutionNote(
   return `Background execution ${decision.reasonCode}: ${decision.note}`;
 }
 
+export function evaluateTenantBackgroundRuntimeIdentity(
+  input: TenantBackgroundRuntimeIdentityInput,
+): TenantBackgroundRuntimeIdentityDecision {
+  const { decision } = input;
+  const actorKind = parseTenantBackgroundRuntimeActorKind(input.actorKind);
+  const tenantId = parseNonEmptyString(input.tenantId);
+  const storeId = parseNonEmptyString(input.storeId);
+
+  if (!decision.allowed) {
+    return runtimeIdentityDecision(
+      false,
+      'BACKGROUND_POLICY_DENIED',
+      decision,
+      actorKind,
+      tenantId,
+      storeId,
+    );
+  }
+
+  if (isMissingPolicyValue(input.actorKind)) {
+    return runtimeIdentityDecision(
+      false,
+      'BACKGROUND_RUNTIME_ACTOR_KIND_REQUIRED',
+      decision,
+      null,
+      tenantId,
+      storeId,
+    );
+  }
+
+  if (actorKind === null) {
+    return runtimeIdentityDecision(
+      false,
+      'BACKGROUND_RUNTIME_ACTOR_KIND_UNKNOWN',
+      decision,
+      null,
+      tenantId,
+      storeId,
+    );
+  }
+
+  if (actorKind === 'SHARED_SERVICE_TOKEN') {
+    return runtimeIdentityDecision(
+      false,
+      'BACKGROUND_SHARED_SERVICE_TOKEN_DENIED',
+      decision,
+      actorKind,
+      tenantId,
+      storeId,
+    );
+  }
+
+  if (tenantId === null) {
+    return runtimeIdentityDecision(
+      false,
+      'BACKGROUND_TENANT_ID_REQUIRED',
+      decision,
+      actorKind,
+      null,
+      storeId,
+    );
+  }
+
+  if (
+    decision.systemIdentity === 'TENANT_SYSTEM_IDENTITY' &&
+    actorKind !== 'TENANT_SYSTEM'
+  ) {
+    return runtimeIdentityDecision(
+      false,
+      'BACKGROUND_TENANT_SYSTEM_IDENTITY_REQUIRED',
+      decision,
+      actorKind,
+      tenantId,
+      storeId,
+    );
+  }
+
+  if (
+    decision.systemIdentity === 'TENANT_STORE_SYSTEM_IDENTITY' &&
+    actorKind !== 'TENANT_STORE_SYSTEM'
+  ) {
+    return runtimeIdentityDecision(
+      false,
+      'BACKGROUND_TENANT_STORE_SYSTEM_IDENTITY_REQUIRED',
+      decision,
+      actorKind,
+      tenantId,
+      storeId,
+    );
+  }
+
+  if (
+    decision.systemIdentity === 'TENANT_STORE_SYSTEM_IDENTITY' &&
+    storeId === null
+  ) {
+    return runtimeIdentityDecision(
+      false,
+      'BACKGROUND_STORE_ID_REQUIRED',
+      decision,
+      actorKind,
+      tenantId,
+      null,
+    );
+  }
+
+  if (
+    decision.systemIdentity === 'TENANT_OR_STORE_SYSTEM_IDENTITY' &&
+    actorKind === 'TENANT_STORE_SYSTEM' &&
+    storeId === null
+  ) {
+    return runtimeIdentityDecision(
+      false,
+      'BACKGROUND_STORE_ID_REQUIRED',
+      decision,
+      actorKind,
+      tenantId,
+      null,
+    );
+  }
+
+  return runtimeIdentityDecision(
+    true,
+    'BACKGROUND_RUNTIME_IDENTITY_ACCEPTED',
+    decision,
+    actorKind,
+    tenantId,
+    actorKind === 'TENANT_STORE_SYSTEM' ? storeId : null,
+  );
+}
+
 export function isTenantBackgroundJobKind(
   value: unknown,
 ): value is TenantBackgroundJobKind {
@@ -284,6 +449,50 @@ export function isTenantBackgroundExecutionStage(
 
 function isMissingPolicyValue(value: unknown): boolean {
   return value === undefined || value === null || value === '';
+}
+
+function parseTenantBackgroundRuntimeActorKind(
+  value: unknown,
+): TenantBackgroundRuntimeActorKind | null {
+  if (
+    value === 'TENANT_SYSTEM' ||
+    value === 'TENANT_STORE_SYSTEM' ||
+    value === 'SHARED_SERVICE_TOKEN'
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function parseNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function runtimeIdentityDecision(
+  accepted: boolean,
+  reasonCode: TenantBackgroundRuntimeIdentityReasonCode,
+  decision: TenantBackgroundExecutionPolicyDecision,
+  actorKind: TenantBackgroundRuntimeActorKind | null,
+  tenantId: string | null,
+  storeId: string | null,
+): TenantBackgroundRuntimeIdentityDecision {
+  return {
+    accepted,
+    reasonCode,
+    policyReasonCode: decision.reasonCode,
+    jobKind: decision.jobKind,
+    systemIdentity: decision.systemIdentity,
+    actorKind,
+    tenantId,
+    storeId,
+    sharedServiceTokenAllowed: false,
+  };
 }
 
 function allowedDecision(

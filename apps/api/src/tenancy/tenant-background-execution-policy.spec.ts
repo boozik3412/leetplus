@@ -4,6 +4,7 @@ import {
   TENANT_BACKGROUND_JOB_EXECUTION_METADATA,
   TENANT_BACKGROUND_JOB_KINDS,
   evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
   isTenantBackgroundJobKind,
   tenantBackgroundExecutionNote,
   tenantBackgroundStageForCustomerStage,
@@ -128,6 +129,151 @@ describe('tenant background execution policy', () => {
     });
   });
 
+  it('requires a tenant-scoped runtime actor for tenant-wide background jobs', () => {
+    const decision = evaluateTenantBackgroundExecutionPolicy({
+      stage: 'EXTERNAL',
+      jobKind: 'REPORT_DIGEST_SMTP',
+    });
+
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision,
+        actorKind: 'SHARED_SERVICE_TOKEN',
+        tenantId: 'tenant-b',
+      }),
+    ).toMatchObject({
+      accepted: false,
+      reasonCode: 'BACKGROUND_SHARED_SERVICE_TOKEN_DENIED',
+      policyReasonCode: 'ALLOWED_EXTERNAL_REVISION_FENCED',
+      jobKind: 'REPORT_DIGEST_SMTP',
+      systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+      actorKind: 'SHARED_SERVICE_TOKEN',
+      tenantId: 'tenant-b',
+      storeId: null,
+      sharedServiceTokenAllowed: false,
+    });
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: 'tenant-b',
+        storeId: 'store-b1',
+      }),
+    ).toMatchObject({
+      accepted: false,
+      reasonCode: 'BACKGROUND_TENANT_SYSTEM_IDENTITY_REQUIRED',
+      actorKind: 'TENANT_STORE_SYSTEM',
+      tenantId: 'tenant-b',
+      storeId: 'store-b1',
+    });
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision,
+        actorKind: 'TENANT_SYSTEM',
+        tenantId: ' tenant-b ',
+        storeId: 'ignored-store',
+      }),
+    ).toMatchObject({
+      accepted: true,
+      reasonCode: 'BACKGROUND_RUNTIME_IDENTITY_ACCEPTED',
+      actorKind: 'TENANT_SYSTEM',
+      tenantId: 'tenant-b',
+      storeId: null,
+    });
+  });
+
+  it('requires a store-scoped runtime actor for store-bound background jobs', () => {
+    const decision = evaluateTenantBackgroundExecutionPolicy({
+      stage: 'INTERNAL',
+      jobKind: 'GUEST_BONUS_LEDGER_LANGAME',
+    });
+
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision,
+        actorKind: 'TENANT_SYSTEM',
+        tenantId: 'tenant-a',
+      }),
+    ).toMatchObject({
+      accepted: false,
+      reasonCode: 'BACKGROUND_TENANT_STORE_SYSTEM_IDENTITY_REQUIRED',
+      systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+      actorKind: 'TENANT_SYSTEM',
+      tenantId: 'tenant-a',
+    });
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: 'tenant-a',
+      }),
+    ).toMatchObject({
+      accepted: false,
+      reasonCode: 'BACKGROUND_STORE_ID_REQUIRED',
+      actorKind: 'TENANT_STORE_SYSTEM',
+      tenantId: 'tenant-a',
+      storeId: null,
+    });
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: 'tenant-a',
+        storeId: 'store-a1',
+      }),
+    ).toMatchObject({
+      accepted: true,
+      reasonCode: 'BACKGROUND_RUNTIME_IDENTITY_ACCEPTED',
+      actorKind: 'TENANT_STORE_SYSTEM',
+      tenantId: 'tenant-a',
+      storeId: 'store-a1',
+      sharedServiceTokenAllowed: false,
+    });
+  });
+
+  it('supports explicit tenant-or-store identity without admitting shared tokens', () => {
+    const decision = evaluateTenantBackgroundExecutionPolicy({
+      stage: 'INTERNAL',
+      jobKind: 'GUEST_GAME_QUALITY_MONITORING',
+    });
+
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision,
+        actorKind: 'TENANT_SYSTEM',
+        tenantId: 'tenant-a',
+      }),
+    ).toMatchObject({
+      accepted: true,
+      reasonCode: 'BACKGROUND_RUNTIME_IDENTITY_ACCEPTED',
+      actorKind: 'TENANT_SYSTEM',
+      storeId: null,
+    });
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: 'tenant-a',
+      }),
+    ).toMatchObject({
+      accepted: false,
+      reasonCode: 'BACKGROUND_STORE_ID_REQUIRED',
+    });
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: 'tenant-a',
+        storeId: 'store-a1',
+      }),
+    ).toMatchObject({
+      accepted: true,
+      reasonCode: 'BACKGROUND_RUNTIME_IDENTITY_ACCEPTED',
+      actorKind: 'TENANT_STORE_SYSTEM',
+      storeId: 'store-a1',
+    });
+  });
+
   it('denies missing, unknown and future job kinds fail-closed', () => {
     expect(
       evaluateTenantBackgroundExecutionPolicy({
@@ -185,6 +331,32 @@ describe('tenant background execution policy', () => {
     ).toMatchObject({
       allowed: false,
       reasonCode: 'BACKGROUND_EXECUTION_STAGE_UNKNOWN',
+    });
+  });
+
+  it('propagates policy denial before accepting any runtime actor', () => {
+    const deniedDecision = evaluateTenantBackgroundExecutionPolicy({
+      stage: 'EXTERNAL',
+      jobKind: 'GUEST_GAME_DELIVERY_BOT_PULL',
+    });
+
+    expect(
+      evaluateTenantBackgroundRuntimeIdentity({
+        decision: deniedDecision,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: 'tenant-b',
+        storeId: 'store-b1',
+      }),
+    ).toMatchObject({
+      accepted: false,
+      reasonCode: 'BACKGROUND_POLICY_DENIED',
+      policyReasonCode: 'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+      jobKind: 'GUEST_GAME_DELIVERY_BOT_PULL',
+      systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+      actorKind: 'TENANT_STORE_SYSTEM',
+      tenantId: 'tenant-b',
+      storeId: 'store-b1',
+      sharedServiceTokenAllowed: false,
     });
   });
 });

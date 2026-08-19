@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.173                                        |
+| Версия           | 1.174                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -143,6 +143,14 @@ public club directory и `offset/limit` для authenticated missions paging. В
 прочие query, включая tenant/store-like selectors на session/public-config
 paths, получают `400` до upstream fetch. Web `test:pilot-bff-boundary` `19/19`;
 полный public guest/Telegram/outbound matrix ещё открыт.
+
+Successor public guest BFF POST body allowlist: active
+`/api/guest-portal/[...path]` POST пересылает только route-scoped JSON поля;
+unknown route получает `404` до upstream, unknown body fields получают `400`.
+Provider/webhook-like paths не доступны через web BFF; Mini App edge path
+по-прежнему пересобирает `telegramUserId/authDate` server-side после подписи.
+Web `test:pilot-bff-boundary` `20/20`; полный public guest/Telegram/outbound
+matrix ещё открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

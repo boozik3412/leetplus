@@ -2,7 +2,10 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getApiUrl, readApiError } from "@/lib/api";
-import { resolveGuestPortalGetUpstreamQuery } from "@/lib/guest-portal-bff";
+import {
+  projectGuestPortalPostBody,
+  resolveGuestPortalGetUpstreamQuery,
+} from "@/lib/guest-portal-bff";
 import { GUEST_AUTH_COOKIE_NAME } from "@/lib/guest-portal";
 import { sanitizeGuestSessionResponse } from "@/lib/guest-session-transport";
 
@@ -88,8 +91,18 @@ export async function POST(request: Request, { params }: RouteContext) {
     );
   }
 
-  const requestBody = miniAppEdgePayload?.ok ? miniAppEdgePayload.body : body;
-  const headers: Record<string, string> = body
+  const projectedBody = miniAppEdgePayload?.ok
+    ? { ok: true as const, body: miniAppEdgePayload.body }
+    : projectGuestPortalPostBody(path, body);
+
+  if (!projectedBody.ok) {
+    return NextResponse.json(
+      { message: projectedBody.message },
+      { status: projectedBody.status },
+    );
+  }
+
+  const headers: Record<string, string> = projectedBody.body
     ? { "Content-Type": "application/json" }
     : {};
 
@@ -115,7 +128,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   const response = await fetch(`${getApiUrl()}${guestPortalPath(path)}`, {
     method: "POST",
     headers,
-    body: requestBody,
+    body: projectedBody.body,
   });
 
   if (!response.ok) {

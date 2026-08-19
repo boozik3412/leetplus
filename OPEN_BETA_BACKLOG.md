@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.26
+- Версия: 3.27
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -170,6 +170,17 @@
   `400` до upstream fetch. Web `test:pilot-bff-boundary` расширен до `19/19`,
   targeted ESLint и Prettier зелёные. Это частичный BFF hardening; полный
   public guest/Telegram/outbound matrix остаётся открытым.
+- Gate 1MT public guest BFF POST body allowlist: active
+  `/api/guest-portal/[...path]` POST больше не пересылает произвольный client
+  JSON body. Каждый клиентский guest route имеет явный список разрешённых
+  полей; unknown route получает `404` до upstream, unknown body fields
+  получают `400`. Provider/webhook-like paths не доступны через web BFF.
+  Telegram Mini App без edge допускает только `initData` и club selectors, а
+  edge-validated path по-прежнему пересобирает server-side
+  `telegramUserId/authDate` после подписи. Web `test:pilot-bff-boundary`
+  расширен до `20/20`, Web typecheck, targeted ESLint и Prettier зелёные.
+  Это частичный BFF hardening; полный public guest/Telegram/outbound matrix
+  остаётся открытым.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

@@ -4,7 +4,10 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { resolveGuestPortalGetUpstreamQuery } from "./guest-portal-bff.ts";
+import {
+  projectGuestPortalPostBody,
+  resolveGuestPortalGetUpstreamQuery,
+} from "./guest-portal-bff.ts";
 import { resolveTeamChatEventUpstreamQuery } from "./team-chat-events.ts";
 
 const API_ROUTE_ROOT = fileURLToPath(new URL("../app/api", import.meta.url));
@@ -170,6 +173,92 @@ test("keeps guest portal GET queries allowlisted before upstream fetch", async (
       null,
     );
   }
+});
+
+test("keeps guest portal POST bodies route-scoped before upstream fetch", async () => {
+  const route = await readFile(
+    path.join(API_ROUTE_ROOT, "guest-portal", "[...path]", "route.ts"),
+    "utf8",
+  );
+
+  assert.match(route, /projectGuestPortalPostBody\(path, body\)/);
+  assert.match(route, /!projectedBody\.ok/);
+  assert.doesNotMatch(
+    route,
+    /const requestBody = miniAppEdgePayload\?\.ok \? miniAppEdgePayload\.body : body/,
+  );
+
+  assert.deepEqual(
+    projectGuestPortalPostBody(
+      ["leet", "club-1337", "otp", "start"],
+      JSON.stringify({
+        phone: "+79990000000",
+        gameConsentAccepted: true,
+      }),
+    ),
+    {
+      ok: true,
+      body: JSON.stringify({
+        phone: "+79990000000",
+        gameConsentAccepted: true,
+      }),
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(
+      ["leet", "club-1337", "otp", "start"],
+      JSON.stringify({
+        phone: "+79990000000",
+        tenantId: "other",
+      }),
+    ),
+    {
+      ok: false,
+      status: 400,
+      message: "Недопустимые поля запроса гостевого модуля.",
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(
+      ["telegram-mini-app", "session"],
+      JSON.stringify({
+        initData: "signed-init-data",
+        clubId: "leet:club-1337",
+        telegramUserId: "attacker-controlled",
+      }),
+    ),
+    {
+      ok: false,
+      status: 400,
+      message: "Недопустимые поля запроса гостевого модуля.",
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(["session", "loot-boxes", "loot-1", "open"], ""),
+    { ok: true, body: "" },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(
+      ["session", "loot-boxes", "loot-1", "open"],
+      JSON.stringify({ storeId: "hidden" }),
+    ),
+    {
+      ok: false,
+      status: 400,
+      message: "Недопустимые поля запроса гостевого модуля.",
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalPostBody(
+      ["telegram", "webhook"],
+      JSON.stringify({ update_id: 1 }),
+    ),
+    {
+      ok: false,
+      status: 404,
+      message: "Маршрут гостевого модуля недоступен через web BFF.",
+    },
+  );
 });
 
 test("sets a defensive private/no-store response policy on every BFF API path", async () => {

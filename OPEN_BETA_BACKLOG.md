@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.32
+- Версия: 3.34
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -15,6 +15,24 @@
   shell, 30-дневной trial policy, rollback owner и пяти stop conditions. Это не
   отменяет обычные серверные JWT/encryption/SMTP secrets, tenant isolation,
   email-bound OWNER invite, CI, backup/restore или rollback
+- Контрольная точка 19.08.2026: latest candidate `de613c51…` не принят для
+  promotion. Founder pilot mail PostgreSQL gate зелёный, но основной CI красный:
+  один OWNER invite PostgreSQL fixture всё ещё ожидает `CURRENT185/185`, хотя
+  рабочая схема уже `CURRENT186/186`; независимый staff snapshot-admission
+  smoke также завершился `SNAPSHOT_ADMISSION_SMOKE_FAILED`. Следующий
+  engineering slice сначала возвращает весь CI в зелёный статус и только затем
+  продолжает Gate 1MT. Это не меняет `NO-GO` и не затрагивает production,
+  Tenant A/A1..A4 или внешний доступ.
+- Repair candidate после `de613c51…`: OWNER invite PostgreSQL fixture
+  перепривязан к canonical `CURRENT186/186`; StaffTask admission smoke сохраняет
+  запрет любых later touches frozen `StaffTask*`, кроме одного exact
+  `20260819010000_staff_attachment_parent_delete_guard`, чьи SQL bytes
+  дополнительно pinned SHA-256. Локальный contract gate прошёл: smoke `48`,
+  admission tests `21`; API fixture отформатирован. На рабочей машине нет
+  локального PostgreSQL runtime (`DATABASE_URL`, `psql`, service и Docker
+  отсутствуют), поэтому реальный disposable PostgreSQL test ещё обязан пройти
+  на GitHub Actions. До этого candidate не является CI accepted, а статус
+  `NO-GO` неизменен.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day
@@ -916,6 +934,29 @@ artifact `sha256:9ac538fa…b00a4`. Это не key ceremony/root enrollment и 
 5. Описаны rollout, rollback и эксплуатационные действия.
 6. Критерии приёмки выполнены на staging или production canary.
 7. Результат привязан к exact release SHA.
+
+### 4.1. Режим разработки в Codex и экономия лимитов
+
+Для remaining open-beta work базовая модель — `GPT-5.6 Terra` с reasoning
+`Medium`: она применяется к обычной реализации, диагностике CI, тестам и
+bounded API/Web changes. Это не разрешение автоматически менять модель:
+перед началом slice, требующего другого профиля, Codex обязан в commentary
+явно сообщить рекомендуемые model/reasoning, причину и пометить switch как
+`required` или `optional`; выбор остаётся у оператора.
+
+| Тип следующей работы | Рекомендованный профиль | Правило переключения |
+| --- | --- | --- |
+| Документация, форматирование, локальный fixture update, narrow log triage | `GPT-5.6 Luna`, `Low` или `Medium` | Optional; не использовать для самостоятельного решения security/tenant риска |
+| Обычная реализация API/Web, CI repair, focused/PostgreSQL test coverage | `GPT-5.6 Terra`, `Medium` | Default |
+| Tenant isolation, IAM/RBAC, migrations, concurrency, provider/Telegram outbound, jobs, секреты | `GPT-5.6 Terra`, `High` | Required до анализа/изменения такого slice |
+| Независимый security review, необратимый production action, release/canary/GO-NO-GO | `GPT-5.6 Sol`, `High` или `xHigh` | Required; не заменять на Luna/Terra Medium ради экономии |
+
+`Sol`, `xHigh`, `max` и multi-agent режим не применяются по умолчанию: они
+допустимы только для обозначенного high-risk slice или независимой проверки.
+Чтобы не расходовать контекст, каждый завершённый slice оформляется отдельной
+задачей Codex с коротким handoff на этот backlog, exact SHA, текущий CI и
+конкретный acceptance criterion. Изменение модели не меняет release gate,
+scope или обязанность запускать relevant tests.
 
 ## 5. Исполнимый backlog
 

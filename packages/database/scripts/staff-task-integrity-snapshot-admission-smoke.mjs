@@ -35,6 +35,10 @@ const EXPAND_MIGRATIONS = Object.freeze([
   "20260727130500_staff_task_tenant_key",
   "20260727131000_staff_task_integrity_expand",
 ]);
+const STAFF_ATTACHMENT_PARENT_DELETE_GUARD_MIGRATION =
+  "20260819010000_staff_attachment_parent_delete_guard";
+const STAFF_ATTACHMENT_PARENT_DELETE_GUARD_SHA256 =
+  "cc95b88495113ac789a52956b2bdc9ba86915c64846a46c146e96532b32d8db5";
 const SNAPSHOT_CLASSIFICATION = "SYNTHETIC";
 const CLONE_PREFIX = "lp_snapshot_admission_ci_";
 const READER_PREFIX = "lp_snapshot_admission_reader_";
@@ -393,9 +397,19 @@ async function readMigrationPlan() {
       path.join(sourcePrismaDir, "migrations", migrationName, "migration.sql"),
       "utf8",
     );
-    assert(
-      !/"StaffTask[A-Za-z]*"/.test(sql),
+    if (!/"StaffTask[A-Za-z]*"/.test(sql)) {
+      continue;
+    }
+
+    assert.equal(
+      migrationName,
+      STAFF_ATTACHMENT_PARENT_DELETE_GUARD_MIGRATION,
       `Additive migration ${migrationName} touches a frozen StaffTask relation.`,
+    );
+    assert.equal(
+      createHash("sha256").update(sql, "utf8").digest("hex"),
+      STAFF_ATTACHMENT_PARENT_DELETE_GUARD_SHA256,
+      "The reviewed StaffTask parent-delete guard migration bytes changed.",
     );
   }
 

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.179                                        |
+| Версия           | 1.181                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -1525,6 +1525,44 @@ runtime admission. Отдельный runtime/DB больше не являет�
 Текущий плановый ориентир первого shared friendly external club —
 `31.08–07.09.2026`, если Gate 1MT и Gate 2 закрыты без stop condition. Это не
 обещание даты.
+
+Контрольная точка 19.08.2026: candidate `de613c51…` не принят для promotion.
+Founder pilot mail PostgreSQL gate прошёл, но основной CI красный: OWNER invite
+fixture ожидает устаревший `CURRENT185/185` вместо `CURRENT186/186`, а staff
+snapshot-admission smoke завершился `SNAPSHOT_ADMISSION_SMOKE_FAILED`.
+Следующий slice — CI repair; внешний доступ, production и Tenant A/A1..A4 не
+изменяются.
+
+Repair candidate: OWNER invite PostgreSQL fixture уже перепривязан к
+canonical `CURRENT186/186`; staff snapshot smoke теперь принимает только один
+reviewed parent-delete guard, pinned exact SHA-256 SQL bytes, и не разрешает
+другие поздние обращения к frozen `StaffTask*`. Локально прошли staff contract
+smoke `48` и admission tests `21`; API fixture соответствует Prettier. На
+рабочем компьютере нет локального PostgreSQL runtime (`DATABASE_URL`, `psql`,
+service и Docker отсутствуют), поэтому disposable PostgreSQL integration
+остаётся обязательным в GitHub Actions. До его успеха CI и внешний доступ
+остаются `NO-GO`.
+
+## Режим работы Codex
+
+По умолчанию для open-beta implementation используется `GPT-5.6 Terra` с
+reasoning `Medium`. Перед началом работ, которые требуют другого профиля,
+Codex явно предупреждает в commentary: рекомендованная model/reasoning,
+причина и необходимость (`required` либо `optional`). Модель не переключается
+автоматически: решение остаётся за оператором.
+
+| Тип работ | Рекомендация |
+| --- | --- |
+| Документация, форматирование, isolated fixtures, narrow log triage | `GPT-5.6 Luna` с `Low`/`Medium`; optional switch |
+| Обычная реализация, CI repair, focused API/Web/PostgreSQL tests | `GPT-5.6 Terra` с `Medium`; default |
+| Tenant/IAM/RBAC, migrations, races, Telegram/provider outbound, jobs, secrets | `GPT-5.6 Terra` с `High`; required switch |
+| Security acceptance, irreversible production action, canary, GO/NO-GO | `GPT-5.6 Sol` с `High`/`xHigh`; required switch |
+
+`Sol`, `xHigh`, `max` и multi-agent не используются по умолчанию. Для экономии
+контекста следующий завершённый slice лучше вести отдельной задачей Codex с
+ссылкой на этот README, `OPEN_BETA_BACKLOG.md`, exact SHA, CI status и одним
+приёмочным критерием. Выбор модели не ослабляет release gates или требования к
+тестам.
 
 ## Рабочий цикл каждой реализации
 

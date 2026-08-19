@@ -128,8 +128,8 @@ Gate 1MT staff attachment browser-boundary CI guard связывает selector-
 file BFF, Web production build, PostgreSQL matrix всех семи parent kinds и
 принятые STORES browser evidence в обязательный GitHub Actions step:
 [Gate 1MT staff attachments browser-boundary CI evidence 19.08.2026](./gate-1mt-staff-attachments-browser-boundary-ci-evidence-2026-08-19.md).
-Это `LOCAL GUARD PASS / PUSH CI PENDING`; полноценный live
-archive/delete/orphan browser journey всё ещё открыт.
+Exact SHA `3542b197…` принят CI run `32263277942` как `4/4 SUCCESS`;
+полноценный live archive/delete/orphan browser journey всё ещё открыт.
 
 Successor Telegram edge config hardening: edge adapter больше не имеет
 production API URL по умолчанию и fail-closed требует явный LeetPlus API URL до

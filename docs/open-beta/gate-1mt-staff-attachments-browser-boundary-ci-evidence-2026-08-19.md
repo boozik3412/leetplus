@@ -1,6 +1,6 @@
 # Gate 1MT staff attachments browser-boundary CI evidence — 19.08.2026
 
-Статус: `LOCAL GUARD PASS / PUSH CI PENDING / PRODUCTION NO-GO`.
+Статус: `EXACT-SHA CI ACCEPTED / PRODUCTION NO-GO`.
 
 ## Цель
 
@@ -47,6 +47,21 @@ git diff --check                                                    # PASS
 `pnpm --filter web exec`, поэтому форматирование подтверждено
 `git diff --check` и существующим style-compatible layout. GitHub Actions
 выполнит тот же новый test перед `web build`.
+
+## GitHub Actions acceptance
+
+Exact SHA `3542b197066065f2d7185fe4e9cdd688672fd089` принят GitHub Actions
+run
+[`32263277942`](https://github.com/boozik3412/leetplus/actions/runs/32263277942)
+как `4/4 SUCCESS`:
+
+- `Application checks` — success, включая новый
+  `Test Gate 1MT staff attachment browser boundary`, `web lint`,
+  `web typecheck`, `web build` и deterministic release artifact;
+- `PostgreSQL migration smoke` — success, включая Gate 1MT staff attachment
+  PostgreSQL matrix;
+- `Authority root trust gate` — success;
+- `Release artifact API child process` — success.
 
 ## Что это закрывает
 

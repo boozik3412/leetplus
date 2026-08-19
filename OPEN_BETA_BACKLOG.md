@@ -27,10 +27,12 @@
 - Следующий Gate 1MT slice после зелёного baseline добавляет Web
   `test:gate-1mt-staff-attachments-browser-boundary`: CI-visible guard связывает
   selector-free staff attachment file BFF, Web production build, PostgreSQL
-  matrix всех семи parent kinds и принятые STORES browser evidence. Локально
-  пройдено: syntax check, новый guard `4/4`, `test:pilot-bff-boundary` `21/21`,
-  `git diff --check`. В текущем workspace нет локального PostgreSQL runtime
-  (`psql`, Docker/service и listening loopback database отсутствуют), поэтому
+  matrix всех семи parent kinds и принятые STORES browser evidence. Exact SHA
+  `3542b197066065f2d7185fe4e9cdd688672fd089` принят GitHub Actions run
+  `32263277942` как `4/4 SUCCESS`; новый guard прошёл внутри Application
+  checks, PostgreSQL migration smoke и release artifact child process также
+  зелёные. В текущем workspace нет локального PostgreSQL runtime (`psql`,
+  Docker/service и listening loopback database отсутствуют), поэтому
   полноценный headed production-build archive/delete/orphan browser journey
   остаётся отдельным restored-copy evidence перед внешним доступом.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current

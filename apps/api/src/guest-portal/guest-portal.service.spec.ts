@@ -9686,6 +9686,30 @@ describe('GuestPortalService', () => {
       );
     });
 
+    it('rejects conflicting Telegram Mini App club selectors before profile lookup', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_TG_EDGE_SHARED_SECRET: 'edge-secret',
+      });
+
+      const result = await service.exchangeTelegramMiniAppSession({
+        edgeSecret: 'edge-secret',
+        telegramUserId: '123456',
+        authDate: Math.floor(Date.now() / 1000),
+        clubId: 'leet:club-1337',
+        tenantSlug: 'other-tenant',
+        storeId: 'club-1337',
+      });
+
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        profileId: null,
+        telegramIdentityMasked: 'ch...56',
+        message: expect.stringContaining('параметры tenant/store конфликтуют'),
+      });
+      expect(prisma.guestGameProfile.findMany).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
     it('rejects Telegram Mini App initData with an invalid hash before profile lookup', async () => {
       const { jwtService, prisma, service } = createService({
         GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',

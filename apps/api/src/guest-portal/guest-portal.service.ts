@@ -7468,7 +7468,19 @@ export class GuestPortalService {
 
     const telegramIdentity = `chat:${validation.userId}`;
     const telegramIdentityMasked = maskExternalIdentity(telegramIdentity);
-    const selectedClub = normalizeMiniAppClubSelection(dto);
+    const selectedClubParts = parseMiniAppClubSelection(dto);
+
+    if (hasMiniAppClubSelectionConflict(selectedClubParts)) {
+      return {
+        status: 'FAILED',
+        profileId: null,
+        telegramIdentityMasked,
+        message:
+          'Выбор клуба отклонен: параметры tenant/store конфликтуют. Откройте Mini App заново или выберите клуб из списка.',
+      };
+    }
+
+    const selectedClub = normalizeParsedMiniAppClubSelection(selectedClubParts);
     const candidates = await this.findTelegramMiniAppClubs(telegramIdentity);
 
     if (candidates.length === 0) {
@@ -15692,6 +15704,59 @@ function stringOrNull(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function parseMiniAppClubSelection(dto: {
+  clubId?: unknown;
+  tenantSlug?: unknown;
+  storeId?: unknown;
+}) {
+  const clubId = stringOrNull(dto.clubId);
+  const [clubTenantSlug, clubStoreId] = clubId?.includes(':')
+    ? clubId.split(':', 2)
+    : [null, null];
+
+  return {
+    clubId,
+    clubTenantSlug,
+    clubStoreId,
+    explicitTenantSlug: stringOrNull(dto.tenantSlug),
+    explicitStoreId: stringOrNull(dto.storeId),
+  };
+}
+
+function hasMiniAppClubSelectionConflict(
+  selection: ReturnType<typeof parseMiniAppClubSelection>,
+) {
+  return (
+    (selection.clubTenantSlug &&
+      selection.explicitTenantSlug &&
+      selection.explicitTenantSlug !== selection.clubTenantSlug) ||
+    (selection.clubStoreId &&
+      selection.explicitStoreId &&
+      selection.explicitStoreId !== selection.clubStoreId)
+  );
+}
+
+function normalizeParsedMiniAppClubSelection(
+  selection: ReturnType<typeof parseMiniAppClubSelection>,
+): TelegramMiniAppClubSelection | null {
+  if (hasMiniAppClubSelectionConflict(selection)) {
+    return null;
+  }
+
+  const tenantSlug = selection.explicitTenantSlug ?? selection.clubTenantSlug;
+  const storeId = selection.explicitStoreId ?? selection.clubStoreId;
+
+  if (!selection.clubId && !tenantSlug && !storeId) {
+    return null;
+  }
+
+  return {
+    clubId: selection.clubId,
+    tenantSlug,
+    storeId,
+  };
+}
+
 function telegramUserIdString(value: unknown) {
   const raw =
     typeof value === 'number' && Number.isFinite(value)
@@ -15706,34 +15771,7 @@ function normalizeMiniAppClubSelection(dto: {
   tenantSlug?: unknown;
   storeId?: unknown;
 }): TelegramMiniAppClubSelection | null {
-  const clubId = stringOrNull(dto.clubId);
-  const [clubTenantSlug, clubStoreId] = clubId?.includes(':')
-    ? clubId.split(':', 2)
-    : [null, null];
-  const explicitTenantSlug = stringOrNull(dto.tenantSlug);
-  const explicitStoreId = stringOrNull(dto.storeId);
-
-  if (
-    (clubTenantSlug &&
-      explicitTenantSlug &&
-      explicitTenantSlug !== clubTenantSlug) ||
-    (clubStoreId && explicitStoreId && explicitStoreId !== clubStoreId)
-  ) {
-    return null;
-  }
-
-  const tenantSlug = explicitTenantSlug ?? clubTenantSlug;
-  const storeId = explicitStoreId ?? clubStoreId;
-
-  if (!clubId && !tenantSlug && !storeId) {
-    return null;
-  }
-
-  return {
-    clubId,
-    tenantSlug,
-    storeId,
-  };
+  return normalizeParsedMiniAppClubSelection(parseMiniAppClubSelection(dto));
 }
 
 function guestPortalAppOpenSurface(value: unknown): GuestPortalAppOpenSurface {

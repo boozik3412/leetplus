@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.171                                        |
+| Версия           | 1.172                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -129,11 +129,13 @@ production API URL по умолчанию и fail-closed требует явн�
 network/provider effects. Targeted Telegram edge/poller tests `12/12`; полный
 tenant-aware Telegram/public-guest/outbound matrix ещё открыт.
 
-Successor public guest club selector hardening: `selectGameClub` отклоняет
-конфликтующие `clubId = tenant:store` и явные `tenantSlug/storeId` до
-tenant/store lookup, profile mutation и JWT signing. Targeted guest portal
-service suite `195/195`; полный Telegram/public-guest/outbound matrix ещё
-открыт.
+Successor public guest club selector hardening: `selectGameClub` и Telegram
+Mini App session exchange отклоняют конфликтующие `clubId = tenant:store` и
+явные `tenantSlug/storeId`. Обычный selector reject происходит до tenant/store
+lookup, profile mutation и JWT signing; Mini App reject происходит до
+candidate/profile lookup и JWT signing, чтобы один доступный кандидат не
+выбирался молча при конфликтующих selectors. Targeted guest portal service
+suite `196/196`; полный Telegram/public-guest/outbound matrix ещё открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

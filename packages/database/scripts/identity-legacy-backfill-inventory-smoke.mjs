@@ -30,6 +30,14 @@ const FAILURE_STAGES = new Set([
   "CLONE_PROVISIONING",
   "RESET_GUARD",
   "HEALTHY_SCENARIO",
+  "HEALTHY_ASSERTIONS",
+  "HEALTHY_AUTHORITY_DRIFT",
+  "SCENARIO_RESET",
+  "SCENARIO_SEED",
+  "SCENARIO_READER_GRANT",
+  "SCENARIO_READER_ADMISSION",
+  "SCENARIO_INVENTORY",
+  "SCENARIO_REDACTION",
   "REVIEW_SCENARIO",
   "BLOCKED_SCENARIO",
   "CLEANUP",
@@ -175,6 +183,12 @@ function errorFailureStage(error) {
       ? FAILURE_STAGE_BY_ERROR.get(error)
       : undefined;
   return FAILURE_STAGES.has(stage) ? stage : "PRECONDITIONS";
+}
+
+function withFallbackFailureStage(error, fallbackStage) {
+  return errorFailureStage(error) === "PRECONDITIONS"
+    ? withFailureStage(error, fallbackStage)
+    : error;
 }
 
 function parseArguments(argv) {
@@ -548,6 +562,7 @@ async function createLegacyClaimBypassingRevisionGuard(prisma, state, claim) {
   await prisma.$executeRawUnsafe(
     `ALTER TABLE public."IdentityEmailClaim" DISABLE TRIGGER ${trigger}`,
   );
+  let failureStage = "SCENARIO_RESET";
   try {
     await createClaim(prisma, state, claim);
   } finally {
@@ -1462,8 +1477,11 @@ async function runScenario(
       tenant_count: 0,
       user_count: 0,
     });
+    failureStage = "SCENARIO_SEED";
     const expectations = await seed(admin, state);
+    failureStage = "SCENARIO_READER_GRANT";
     await grantReaderRole(admin, descriptor);
+    failureStage = "SCENARIO_READER_ADMISSION";
     await assertReaderRole(admin, reader, descriptor);
     const scopedEnvironment = inventoryEnvironment(
       environment,
@@ -1472,11 +1490,15 @@ async function runScenario(
       hmacKey,
     );
     const config = inventory.parseRuntimeContract(scopedEnvironment);
+    failureStage = "SCENARIO_INVENTORY";
     const report = await inventory.inspectDatabase(scopedEnvironment, config, {
       expectedMigrationArtifact,
     });
+    failureStage = "SCENARIO_REDACTION";
     assertSensitiveValuesAbsent(report, state.sensitive);
     return { config, expectations, report };
+  } catch (error) {
+    throw withFailureStage(error, failureStage);
   } finally {
     await Promise.allSettled([reader.$disconnect(), admin.$disconnect()]);
   }
@@ -2696,6 +2718,7 @@ export async function runSmoke(environment = process.env) {
       stateByScenario.get("healthy"),
       expectedMigrationArtifact,
     );
+    failureStage = "HEALTHY_ASSERTIONS";
     assertSummary(healthy.report, healthy.expectations.expected);
     assert.deepEqual(
       healthy.report.metrics,
@@ -2709,6 +2732,7 @@ export async function runSmoke(environment = process.env) {
       inventory.exitCodeForReport(healthy.report, healthy.config.hmacKey),
       0,
     );
+    failureStage = "HEALTHY_AUTHORITY_DRIFT";
     await assertAuthorityAndCatalogDriftRejected(
       inventory,
       environment,
@@ -2822,7 +2846,7 @@ export async function runSmoke(environment = process.env) {
       status: "PASS",
     };
   } catch (error) {
-    primaryError = withFailureStage(error, failureStage);
+    primaryError = withFallbackFailureStage(error, failureStage);
   } finally {
     for (const databaseName of [...databaseCreationAttempts].reverse()) {
       try {

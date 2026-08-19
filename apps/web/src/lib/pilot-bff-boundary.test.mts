@@ -314,8 +314,6 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
     "readiness-report/page.tsx",
     "salary/page.tsx",
     "shift-workspace/page.tsx",
-    "training-courses/page.tsx",
-    "training-profiles/page.tsx",
   ] as const;
   const [authSource, permissionsSource, ...pageSources] = await Promise.all([
     readFile(fileURLToPath(new URL("auth.ts", import.meta.url)), "utf8"),
@@ -382,6 +380,26 @@ test("keeps store-aware shift regulations behind authenticated API authority", a
   assert.match(pageSource, /await requireCurrentUser\(\)/);
   assert.match(pageSource, /report\.rows\.filter\(\(row\) => row\.canManage\)/);
   assert.doesNotMatch(pageSource, /requireNetworkScopedUser/);
+});
+
+test("keeps store-aware training courses and profiles behind authenticated API authority", async () => {
+  const pageSources = await Promise.all(
+    ["training-courses/page.tsx", "training-profiles/page.tsx"].map((page) =>
+      readFile(
+        fileURLToPath(new URL(`../app/(app)/staff/${page}`, import.meta.url)),
+        "utf8",
+      ),
+    ),
+  );
+
+  for (const source of pageSources) {
+    assert.match(
+      source,
+      /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+    );
+    assert.match(source, /await requireCurrentUser\(\)/);
+    assert.doesNotMatch(source, /requireNetworkScopedUser/);
+  }
 });
 
 async function routeInventory(): Promise<readonly RouteInventoryRow[]> {

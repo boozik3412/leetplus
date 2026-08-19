@@ -662,8 +662,6 @@ const networkOnlyStaffPrefixes = [
   "/staff/readiness-report",
   "/staff/salary",
   "/staff/shift-workspace",
-  "/staff/training-courses",
-  "/staff/training-profiles",
 ];
 
 function isNetworkOnlyStaffPath(href: string) {

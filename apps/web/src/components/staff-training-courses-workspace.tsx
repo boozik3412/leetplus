@@ -140,7 +140,7 @@ function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function defaultDraft(): DraftCourse {
+function defaultDraft(defaultStoreId = ""): DraftCourse {
   return {
     id: null,
     title: "",
@@ -149,7 +149,7 @@ function defaultDraft(): DraftCourse {
     status: "DRAFT",
     required: true,
     dueDays: "",
-    storeId: "",
+    storeId: defaultStoreId,
     steps: [],
   };
 }
@@ -194,8 +194,10 @@ export function StaffTrainingCoursesWorkspace({
   report: StaffTrainingCoursesReport;
 }) {
   const router = useRouter();
+  const defaultStoreId =
+    report.accessScope === "STORES" ? (report.stores[0]?.id ?? "") : "";
   const [draft, setDraft] = useState<DraftCourse>(() =>
-    report.rows[0] ? fromCourse(report.rows[0]) : defaultDraft(),
+    report.rows[0] ? fromCourse(report.rows[0]) : defaultDraft(defaultStoreId),
   );
   const [isPending, setIsPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -205,6 +207,9 @@ export function StaffTrainingCoursesWorkspace({
     () => report.rows.find((row) => row.id === draft.id) ?? null,
     [draft.id, report.rows],
   );
+  const canEditSelected = draft.id
+    ? selectedCourse?.canManage === true
+    : report.canManageTraining;
 
   function updateDraft(patch: Partial<DraftCourse>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -213,7 +218,7 @@ export function StaffTrainingCoursesWorkspace({
   }
 
   function loadSeed(seed: Omit<DraftCourse, "id" | "storeId">) {
-    setDraft({ ...seed, id: null, storeId: "" });
+    setDraft({ ...seed, id: null, storeId: defaultStoreId });
     setMessage("Шаблон курса загружен. Проверьте шаги и сохраните.");
     setError(null);
   }
@@ -319,7 +324,7 @@ export function StaffTrainingCoursesWorkspace({
             </div>
             <button
               type="button"
-              onClick={() => setDraft(defaultDraft())}
+              onClick={() => setDraft(defaultDraft(defaultStoreId))}
               className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
               Новый курс
@@ -408,7 +413,7 @@ export function StaffTrainingCoursesWorkspace({
         </section>
 
         <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          {report.canManageTraining ? (
+          {canEditSelected ? (
             <form onSubmit={save}>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -498,7 +503,9 @@ export function StaffTrainingCoursesWorkspace({
                     }
                     className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
                   >
-                    <option value="">Вся сеть</option>
+                    {report.accessScope === "NETWORK" ? (
+                      <option value="">Вся сеть</option>
+                    ) : null}
                     {report.stores.map((store) => (
                       <option key={store.id} value={store.id}>
                         {store.name}
@@ -556,8 +563,8 @@ export function StaffTrainingCoursesWorkspace({
                       Шаги курса
                     </p>
                     <p className="mt-1 text-sm text-zinc-500">
-                      Добавьте статьи базы знаний, ссылки, задания или
-                      текстовые блоки в порядке прохождения.
+                      Добавьте статьи базы знаний, ссылки, задания или текстовые
+                      блоки в порядке прохождения.
                     </p>
                   </div>
                   <button
@@ -599,8 +606,9 @@ export function StaffTrainingCoursesWorkspace({
                     {
                       label: "Контур",
                       value: draft.storeId
-                        ? report.stores.find((store) => store.id === draft.storeId)
-                            ?.name ?? "Клуб"
+                        ? (report.stores.find(
+                            (store) => store.id === draft.storeId,
+                          )?.name ?? "Клуб")
                         : "Вся сеть",
                     },
                     { label: "Статус", value: statusLabels[draft.status] },
@@ -862,5 +870,7 @@ function CoursePreview({
 function articleTitle(report: StaffTrainingCoursesReport, id: string) {
   const article = report.knowledgeArticles.find((item) => item.id === id);
 
-  return article ? `${article.category} · ${article.title}` : "Статья базы знаний";
+  return article
+    ? `${article.category} · ${article.title}`
+    : "Статья базы знаний";
 }

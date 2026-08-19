@@ -25,7 +25,9 @@ import { StaffOnboardingPlansService } from '../src/staff/staff-onboarding-plans
 import { StaffShiftRegulationsService } from '../src/staff/staff-shift-regulations.service';
 import type { StaffTasksService } from '../src/staff/staff-tasks.service';
 import { StaffTeamChatService } from '../src/staff/staff-team-chat.service';
+import { StaffTrainingAccessPolicyService } from '../src/staff/staff-training-access-policy.service';
 import { StaffTrainingCoursesService } from '../src/staff/staff-training-courses.service';
+import { StaffTrainingProfilesService } from '../src/staff/staff-training-profiles.service';
 import { AccessScopeService } from '../src/tenancy/access-scope.service';
 import { FreshStoreScopeService } from '../src/tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../src/tenancy/tenant-context.service';
@@ -235,7 +237,7 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('adopts store-aware knowledge and shift-regulation parents while other kinds remain NETWORK-only', async () => {
+  it('adopts store-aware knowledge, shift-regulation and training parents while other kinds remain NETWORK-only', async () => {
     const fixture = await createFixture(prisma);
     rememberFixture(fixtureTenantIds, fixture);
     const { attachments: service, bindings } = buildServices(prisma);
@@ -277,7 +279,8 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       ).resolves.toEqual(expect.objectContaining({ buffer: payload }));
       if (
         resourceKind === StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE ||
-        resourceKind === StaffAttachmentResourceKind.SHIFT_REGULATION
+        resourceKind === StaffAttachmentResourceKind.SHIFT_REGULATION ||
+        resourceKind === StaffAttachmentResourceKind.TRAINING_COURSE
       ) {
         await expect(
           service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
@@ -598,6 +601,193 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
     expect(networkReport.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: storeA2RegulationId, canManage: true }),
+      ]),
+    );
+  });
+
+  it('enforces training course, profile, progress and attachment boundaries for STORES', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const services = buildServices(prisma);
+    const networkUser = buildUser(fixture, 'A_NETWORK');
+    const storeA1User = buildUser(fixture, 'A1');
+    const networkCourseId = randomUUID();
+    const storeA2CourseId = randomUUID();
+
+    await prisma.staffTrainingCourse.createMany({
+      data: [
+        {
+          id: networkCourseId,
+          tenantId: fixture.tenantAId,
+          createdByUserId: fixture.userANetworkId,
+          title: `Network active course ${randomUUID()}`,
+          status: 'ACTIVE',
+          roleScope: 'ALL_STAFF',
+          steps: [],
+        },
+        {
+          id: storeA2CourseId,
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA2Id,
+          createdByUserId: fixture.userANetworkId,
+          title: `A2 active course ${randomUUID()}`,
+          status: 'ACTIVE',
+          roleScope: 'ALL_STAFF',
+          steps: [],
+        },
+      ],
+    });
+
+    const ownCourse = await services.trainingCourses.createCourse(storeA1User, {
+      title: `A1 draft course ${randomUUID()}`,
+      storeId: fixture.storeA1Id,
+      status: 'DRAFT',
+    });
+    const report = await services.trainingCourses.getCourses(storeA1User);
+    const visibleIds = report.rows.map((row) => row.id);
+
+    expect(report.accessScope).toBe('STORES');
+    expect(report.canManageTraining).toBe(true);
+    expect(report.stores.map((store) => store.id)).toEqual([fixture.storeA1Id]);
+    expect(visibleIds).toEqual(
+      expect.arrayContaining([
+        fixture.trainingCourseA1Id,
+        networkCourseId,
+        ownCourse.id,
+      ]),
+    );
+    expect(visibleIds).not.toContain(storeA2CourseId);
+    expect(
+      report.rows.find((row) => row.id === networkCourseId)?.canManage,
+    ).toBe(false);
+    expect(report.rows.find((row) => row.id === ownCourse.id)?.canManage).toBe(
+      true,
+    );
+
+    await expect(
+      services.trainingCourses.createCourse(storeA1User, {
+        title: `Network training escape ${randomUUID()}`,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.trainingCourses.createCourse(storeA1User, {
+        title: `A2 training escape ${randomUUID()}`,
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.trainingCourses.getCourses(storeA1User, {
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.trainingCourses.updateCourse(storeA1User, networkCourseId, {
+        title: 'Forbidden network training edit',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      services.trainingCourses.updateCourse(storeA1User, storeA2CourseId, {
+        title: 'Forbidden A2 training edit',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const updatedOwnCourse = await services.trainingCourses.updateCourse(
+      storeA1User,
+      ownCourse.id,
+      { title: 'Allowed A1 training edit' },
+    );
+    expect(updatedOwnCourse).toEqual(
+      expect.objectContaining({
+        title: 'Allowed A1 training edit',
+        canManage: true,
+      }),
+    );
+    expect(updatedOwnCourse.store?.id).toBe(fixture.storeA1Id);
+
+    const attachment = await services.attachments.createAttachment(
+      storeA1User,
+      {
+        originalname: `A1 training ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: Buffer.from('training-a1'),
+      },
+    );
+    const attachedCourse = await services.trainingCourses.createCourse(
+      storeA1User,
+      {
+        title: `A1 attached course ${randomUUID()}`,
+        storeId: fixture.storeA1Id,
+        status: 'ACTIVE',
+        steps: [
+          {
+            title: 'A1 native attachment',
+            type: 'LINK',
+            url: attachment.url,
+          },
+        ],
+      },
+    );
+    await expect(
+      services.attachments.getAttachment(storeA1User, attachment.id),
+    ).resolves.toEqual(
+      expect.objectContaining({ buffer: Buffer.from('training-a1') }),
+    );
+    await expect(
+      services.attachments.getAttachment(
+        buildUser(fixture, 'A2'),
+        attachment.id,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const profiles = await services.trainingProfiles.getProfiles(storeA1User);
+    expect(profiles.accessScope).toBe('STORES');
+    expect(profiles.stores.map((store) => store.id)).toEqual([
+      fixture.storeA1Id,
+    ]);
+    expect(profiles.rows.map((row) => row.user.id)).toEqual([fixture.userA1Id]);
+    expect(profiles.rows[0]?.courses.map((course) => course.id)).toEqual(
+      expect.arrayContaining([
+        fixture.trainingCourseA1Id,
+        networkCourseId,
+        attachedCourse.id,
+      ]),
+    );
+    expect(profiles.rows[0]?.courses.map((course) => course.id)).not.toContain(
+      storeA2CourseId,
+    );
+
+    const savedProgress = await services.trainingProfiles.updateProgress(
+      storeA1User,
+      {
+        userId: fixture.userA1Id,
+        courseId: networkCourseId,
+        status: 'IN_PROGRESS',
+        progressPercent: 25,
+      },
+    );
+    expect(savedProgress.id).toBe(networkCourseId);
+    expect(savedProgress.progress.progressPercent).toBe(25);
+    await expect(
+      services.trainingProfiles.updateProgress(storeA1User, {
+        userId: fixture.userA2Id,
+        courseId: networkCourseId,
+        status: 'COMPLETED',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      services.trainingProfiles.updateProgress(storeA1User, {
+        userId: fixture.userA1Id,
+        courseId: storeA2CourseId,
+        status: 'COMPLETED',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const networkReport =
+      await services.trainingCourses.getCourses(networkUser);
+    expect(networkReport.accessScope).toBe('NETWORK');
+    expect(networkReport.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: storeA2CourseId, canManage: true }),
       ]),
     );
   });
@@ -1393,6 +1583,9 @@ function buildServices(prisma: PrismaService) {
   );
   const shiftRegulationAccessPolicy =
     new StaffShiftRegulationAccessPolicyService(freshStoreScopeService);
+  const trainingAccessPolicy = new StaffTrainingAccessPolicyService(
+    freshStoreScopeService,
+  );
 
   return {
     attachments: new StaffAttachmentsService(
@@ -1404,6 +1597,7 @@ function buildServices(prisma: PrismaService) {
       freshStoreScopeService,
       knowledgeAccessPolicy,
       shiftRegulationAccessPolicy,
+      trainingAccessPolicy,
     ),
     bindings,
     shiftRegulations: new StaffShiftRegulationsService(
@@ -1419,9 +1613,13 @@ function buildServices(prisma: PrismaService) {
     ),
     trainingCourses: new StaffTrainingCoursesService(
       prisma,
-      tenantContext,
+      trainingAccessPolicy,
       notificationChat,
       bindings,
+    ),
+    trainingProfiles: new StaffTrainingProfilesService(
+      prisma,
+      trainingAccessPolicy,
     ),
     onboardingPlans: new StaffOnboardingPlansService(
       prisma,

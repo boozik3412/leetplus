@@ -295,9 +295,6 @@ const STAFF_NETWORK_ROUTE_IDS = [
   'GET /staff/readiness-report',
   'GET /staff/salary',
   'GET /staff/shift-workspace/profile',
-  'GET /staff/training-courses',
-  'GET /staff/training-profiles',
-  'GET /staff/training-profiles/export',
   'PATCH /staff/assessments/:id',
   'PATCH /staff/checklist-templates/:id',
   'PATCH /staff/checklists/:id',
@@ -306,8 +303,6 @@ const STAFF_NETWORK_ROUTE_IDS = [
   'PATCH /staff/onboarding/:id',
   'PATCH /staff/salary/periods/:id/rows/:userId',
   'PATCH /staff/salary/schemes/:id',
-  'PATCH /staff/training-courses/:id',
-  'PATCH /staff/training-profiles/progress',
   'POST /guests/staff-control/identity-mappings',
   'POST /guests/staff-control/identity-mappings/events/:id/rollback',
   'POST /staff/assessments',
@@ -320,7 +315,6 @@ const STAFF_NETWORK_ROUTE_IDS = [
   'POST /staff/onboarding',
   'POST /staff/salary/periods',
   'POST /staff/salary/schemes',
-  'POST /staff/training-courses',
 ] as const;
 
 function normalizeSourcePath(file: string): string {

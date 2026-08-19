@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTrainingProfilesWorkspace } from "@/components/staff-training-profiles-workspace";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { requireCurrentUser } from "@/lib/auth";
 import {
   getStaffTrainingProfilesReport,
   type StaffTrainingProfileRole,
@@ -93,7 +93,7 @@ export default async function StaffTrainingProfilesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTrainingProfilesReport(filters);
@@ -152,12 +152,14 @@ export default async function StaffTrainingProfilesPage({
             >
               Курсы
             </Link>
-            <Link
-              href="/staff/assessments"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              Аттестации
-            </Link>
+            {report.accessScope === "NETWORK" ? (
+              <Link
+                href="/staff/assessments"
+                className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              >
+                Аттестации
+              </Link>
+            ) : null}
           </div>
         </header>
 
@@ -227,7 +229,11 @@ export default async function StaffTrainingProfilesPage({
                   defaultValue={report.filters.storeId ?? ""}
                   className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                 >
-                  <option value="">Вся сеть</option>
+                  <option value="">
+                    {report.accessScope === "NETWORK"
+                      ? "Вся сеть"
+                      : "Все доступные"}
+                  </option>
                   {report.stores.map((store) => (
                     <option key={store.id} value={store.id}>
                       {store.name}

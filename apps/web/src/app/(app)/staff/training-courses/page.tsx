@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTrainingCoursesWorkspace } from "@/components/staff-training-courses-workspace";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { requireCurrentUser } from "@/lib/auth";
 import {
   getStaffTrainingCoursesReport,
   type StaffTrainingCourseStatus,
@@ -86,7 +86,7 @@ export default async function StaffTrainingCoursesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTrainingCoursesReport(filters);
@@ -148,7 +148,7 @@ export default async function StaffTrainingCoursesPage({
         </section>
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <form className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+          <form className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto]">
             {report.canManageTraining ? (
               <label className="space-y-1">
                 <span className="text-xs font-bold uppercase text-zinc-500">
@@ -184,6 +184,30 @@ export default async function StaffTrainingCoursesPage({
                 ))}
               </select>
             </label>
+
+            {report.canManageTraining ? (
+              <label className="space-y-1">
+                <span className="text-xs font-bold uppercase text-zinc-500">
+                  Клуб
+                </span>
+                <select
+                  name="storeId"
+                  defaultValue={report.filters.storeId ?? ""}
+                  className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                >
+                  <option value="">
+                    {report.accessScope === "NETWORK"
+                      ? "Вся сеть"
+                      : "Все доступные"}
+                  </option>
+                  {report.stores.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
 
             <label className="space-y-1">
               <span className="text-xs font-bold uppercase text-zinc-500">

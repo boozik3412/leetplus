@@ -3,10 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, StaffAttachmentResourceKind, UserRole } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
 import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 import {
   extractStaffAttachmentIds,
@@ -16,6 +15,10 @@ import {
   StaffTeamChatService,
   type StaffChatSystemNotificationDto,
 } from './staff-team-chat.service';
+import {
+  StaffTrainingAccessPolicyService,
+  type StaffTrainingAccess,
+} from './staff-training-access-policy.service';
 
 const courseStatuses = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
 const roleScopes = [
@@ -62,6 +65,7 @@ export type StaffTrainingCourseStep = {
 };
 
 export type StaffTrainingCourseReport = {
+  accessScope: 'NETWORK' | 'STORES';
   filters: {
     status: StaffTrainingCourseStatus | 'all';
     roleScope: StaffTrainingRoleScope | 'all';
@@ -97,6 +101,7 @@ export type StaffTrainingCourseResponse = {
   updatedAt: string;
   store: { id: string; name: string; isActive: boolean } | null;
   createdByUser: { id: string; email: string; fullName: string | null } | null;
+  canManage: boolean;
 };
 
 export type StaffTrainingKnowledgeArticleOption = {
@@ -121,7 +126,7 @@ type StaffTrainingCourseRow = Prisma.StaffTrainingCourseGetPayload<{
 export class StaffTrainingCoursesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
+    private readonly accessPolicy: StaffTrainingAccessPolicyService,
     private readonly staffTeamChatService: StaffTeamChatService,
     private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
@@ -130,10 +135,16 @@ export class StaffTrainingCoursesService {
     user: AuthenticatedUser,
     query: StaffTrainingCoursesQuery = {},
   ): Promise<StaffTrainingCourseReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const canManageTraining = this.canManageTraining(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId, canManageTraining } = access;
     const filters = this.resolveFilters(query, canManageTraining);
-    const where = this.buildWhere(tenantId, user, filters, canManageTraining);
+    this.accessPolicy.assertRequestedStore(access, filters.storeId);
+    const where: Prisma.StaffTrainingCourseWhereInput = {
+      AND: [
+        this.buildWhere(tenantId, filters),
+        this.accessPolicy.readableCourseWhere(access),
+      ],
+    };
 
     const [rows, stores, articles] = await Promise.all([
       this.prisma.staffTrainingCourse.findMany({
@@ -147,17 +158,12 @@ export class StaffTrainingCoursesService {
         take: 200,
       }),
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: this.accessPolicy.visibleStoresWhere(access),
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
       this.prisma.staffKnowledgeArticle.findMany({
-        where: {
-          tenantId,
-          status: canManageTraining
-            ? { in: ['PUBLISHED', 'DRAFT'] }
-            : 'PUBLISHED',
-        },
+        where: this.accessPolicy.visibleKnowledgeArticlesWhere(access),
         select: {
           id: true,
           title: true,
@@ -170,9 +176,10 @@ export class StaffTrainingCoursesService {
         take: 300,
       }),
     ]);
-    const responseRows = rows.map((row) => this.toCourseResponse(row));
+    const responseRows = rows.map((row) => this.toCourseResponse(row, access));
 
     return {
+      accessScope: access.mode,
       filters,
       summary: this.buildSummary(responseRows),
       canManageTraining,
@@ -190,13 +197,14 @@ export class StaffTrainingCoursesService {
   }
 
   async createCourse(user: AuthenticatedUser, dto: StaffTrainingCourseDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
+    this.accessPolicy.assertWritableStore(
+      access,
+      this.normalizeOptionalString(dto.storeId),
+    );
 
-    if (!this.canManageTraining(user)) {
-      throw new BadRequestException('Training course editing is not allowed');
-    }
-
-    const normalized = await this.normalizeCourseData(tenantId, dto, {
+    const normalized = await this.normalizeCourseData(access, dto, {
       requireTitle: true,
     });
     const created = await this.prisma.$transaction(async (tx) => {
@@ -230,7 +238,7 @@ export class StaffTrainingCoursesService {
       );
     }
 
-    return this.toCourseResponse(created);
+    return this.toCourseResponse(created, access);
   }
 
   async updateCourse(
@@ -238,11 +246,8 @@ export class StaffTrainingCoursesService {
     id: string,
     dto: StaffTrainingCourseDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-
-    if (!this.canManageTraining(user)) {
-      throw new BadRequestException('Training course editing is not allowed');
-    }
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
 
     const current = await this.prisma.staffTrainingCourse.findFirst({
       where: { id, tenantId },
@@ -261,7 +266,17 @@ export class StaffTrainingCoursesService {
       throw new NotFoundException('Training course not found');
     }
 
-    const normalized = await this.normalizeCourseData(tenantId, dto, {
+    if (!this.accessPolicy.canManageCourse(access, current)) {
+      throw new NotFoundException('Training course not found');
+    }
+
+    this.accessPolicy.assertWritableStore(
+      access,
+      dto.storeId === undefined
+        ? current.storeId
+        : this.normalizeOptionalString(dto.storeId),
+    );
+    const normalized = await this.normalizeCourseData(access, dto, {
       requireTitle: false,
     });
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -296,7 +311,7 @@ export class StaffTrainingCoursesService {
       );
     }
 
-    return this.toCourseResponse(updated);
+    return this.toCourseResponse(updated, access);
   }
 
   private shouldNotifyCourseUpdate(
@@ -403,9 +418,7 @@ export class StaffTrainingCoursesService {
 
   private buildWhere(
     tenantId: string,
-    user: AuthenticatedUser,
     filters: StaffTrainingCourseReport['filters'],
-    canManageTraining: boolean,
   ): Prisma.StaffTrainingCourseWhereInput {
     const where: Prisma.StaffTrainingCourseWhereInput = { tenantId };
 
@@ -415,11 +428,6 @@ export class StaffTrainingCoursesService {
 
     if (filters.roleScope !== 'all') {
       where.roleScope = filters.roleScope;
-    }
-
-    if (!canManageTraining) {
-      where.status = 'ACTIVE';
-      where.roleScope = { in: this.visibleRoleScopes(user.role) };
     }
 
     if (filters.required !== 'all') {
@@ -472,7 +480,7 @@ export class StaffTrainingCoursesService {
   }
 
   private async normalizeCourseData(
-    tenantId: string,
+    access: StaffTrainingAccess,
     dto: StaffTrainingCourseDto,
     options: { requireTitle: boolean },
   ): Promise<{ data: Prisma.StaffTrainingCourseUncheckedUpdateInput }> {
@@ -508,12 +516,12 @@ export class StaffTrainingCoursesService {
       data.dueDays = this.normalizeDueDays(dto.dueDays);
     }
 
-    if (dto.storeId !== undefined) {
-      data.storeId = await this.resolveStoreId(tenantId, dto.storeId);
+    if (dto.storeId !== undefined || options.requireTitle) {
+      data.storeId = await this.resolveStoreId(access, dto.storeId);
     }
 
     if (dto.steps !== undefined || options.requireTitle) {
-      const steps = await this.normalizeSteps(tenantId, dto.steps);
+      const steps = await this.normalizeSteps(access, dto.steps);
       data.steps = steps;
       data.stepsCount = steps.length;
     }
@@ -522,7 +530,7 @@ export class StaffTrainingCoursesService {
   }
 
   private async normalizeSteps(
-    tenantId: string,
+    access: StaffTrainingAccess,
     value: unknown,
   ): Promise<StaffTrainingCourseStep[]> {
     const rawSteps = Array.isArray(value) ? value : [];
@@ -537,7 +545,12 @@ export class StaffTrainingCoursesService {
         ? new Set(
             (
               await this.prisma.staffKnowledgeArticle.findMany({
-                where: { id: { in: articleIds }, tenantId },
+                where: {
+                  id: { in: articleIds },
+                  AND: [
+                    this.accessPolicy.visibleKnowledgeArticlesWhere(access),
+                  ],
+                },
                 select: { id: true },
               })
             ).map((article) => article.id),
@@ -602,7 +615,10 @@ export class StaffTrainingCoursesService {
     return steps;
   }
 
-  private toCourseResponse(row: StaffTrainingCourseRow) {
+  private toCourseResponse(
+    row: StaffTrainingCourseRow,
+    access: StaffTrainingAccess,
+  ) {
     const steps = this.normalizeStepsFromStorage(row.steps);
 
     return {
@@ -619,6 +635,7 @@ export class StaffTrainingCoursesService {
       updatedAt: row.updatedAt.toISOString(),
       store: row.store,
       createdByUser: row.createdByUser,
+      canManage: this.accessPolicy.canManageCourse(access, row),
     };
   }
 
@@ -645,60 +662,6 @@ export class StaffTrainingCoursesService {
         required: this.normalizeBoolean(record.required, true),
       };
     });
-  }
-
-  private canManageTraining(user: AuthenticatedUser) {
-    switch (user.role) {
-      case UserRole.OWNER:
-      case UserRole.ADMIN:
-      case UserRole.MANAGER:
-      case UserRole.CLUB_MANAGER:
-      case UserRole.STANDARDS_MANAGER:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private visibleRoleScopes(role: UserRole): StaffTrainingRoleScope[] {
-    const scopes: StaffTrainingRoleScope[] = ['ALL_STAFF'];
-
-    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
-      scopes.push('ADMINISTRATOR');
-    }
-
-    if (role === UserRole.SENIOR_ADMINISTRATOR) {
-      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR');
-    }
-
-    if (role === UserRole.CLUB_MANAGER) {
-      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'CLUB_MANAGER');
-    }
-
-    if (
-      role === UserRole.MANAGER ||
-      role === UserRole.OWNER ||
-      role === UserRole.ADMIN
-    ) {
-      scopes.push(
-        'ADMINISTRATOR',
-        'SENIOR_ADMINISTRATOR',
-        'CLUB_MANAGER',
-        'MANAGER',
-        'STANDARDS_MANAGER',
-      );
-    }
-
-    if (role === UserRole.STANDARDS_MANAGER) {
-      scopes.push(
-        'ADMINISTRATOR',
-        'SENIOR_ADMINISTRATOR',
-        'CLUB_MANAGER',
-        'STANDARDS_MANAGER',
-      );
-    }
-
-    return Array.from(new Set(scopes));
   }
 
   private resolveOne<T extends readonly string[]>(
@@ -784,7 +747,7 @@ export class StaffTrainingCoursesService {
   }
 
   private async resolveStoreId(
-    tenantId: string,
+    access: StaffTrainingAccess,
     value: string | null | undefined,
   ) {
     const id = this.normalizeOptionalString(value);
@@ -794,7 +757,7 @@ export class StaffTrainingCoursesService {
     }
 
     const store = await this.prisma.store.findFirst({
-      where: { id, tenantId },
+      where: { id, AND: [this.accessPolicy.visibleStoresWhere(access)] },
       select: { id: true },
     });
 

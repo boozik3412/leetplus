@@ -48,6 +48,7 @@ export type StaffTrainingCourse = {
     email: string;
     fullName: string | null;
   } | null;
+  canManage: boolean;
 };
 
 export type StaffTrainingCoursesFilters = {
@@ -59,6 +60,7 @@ export type StaffTrainingCoursesFilters = {
 };
 
 export type StaffTrainingCoursesReport = {
+  accessScope: "NETWORK" | "STORES";
   filters: Required<
     Pick<StaffTrainingCoursesFilters, "status" | "roleScope" | "required">
   > & {

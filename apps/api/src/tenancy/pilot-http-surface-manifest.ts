@@ -857,7 +857,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
     staffController(
       'staff-training-courses.controller.ts',
       'training-courses',
-      'NETWORK_VERIFIED',
+      'STORES_VERIFIED',
       [
         ['GET', ['']],
         ['POST', ['']],
@@ -872,7 +872,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
     staffController(
       'staff-training-profiles.controller.ts',
       'training-profiles',
-      'NETWORK_VERIFIED',
+      'STORES_VERIFIED',
       [
         ['GET', ['', 'export']],
         ['PATCH', ['progress']],

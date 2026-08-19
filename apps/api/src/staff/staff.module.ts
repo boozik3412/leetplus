@@ -47,6 +47,7 @@ import { StaffTaskTemplatesController } from './staff-task-templates.controller'
 import { StaffTaskTemplatesService } from './staff-task-templates.service';
 import { StaffTeamChatController } from './staff-team-chat.controller';
 import { StaffTeamChatService } from './staff-team-chat.service';
+import { StaffTrainingAccessPolicyService } from './staff-training-access-policy.service';
 import { StaffTrainingCoursesController } from './staff-training-courses.controller';
 import { StaffTrainingCoursesService } from './staff-training-courses.service';
 import { StaffTrainingProfilesController } from './staff-training-profiles.controller';
@@ -90,6 +91,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTaskRecurringRulesService,
     StaffKnowledgeAccessPolicyService,
     StaffKnowledgeBaseService,
+    StaffTrainingAccessPolicyService,
     StaffTrainingCoursesService,
     StaffTrainingProfilesService,
     StaffReadinessReportService,

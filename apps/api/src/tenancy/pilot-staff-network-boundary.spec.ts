@@ -99,24 +99,6 @@ const CONTROLLER_BOUNDARIES: readonly ControllerBoundary[] = [
     ],
   },
   {
-    source: 'staff/staff-training-courses.controller.ts',
-    className: 'StaffTrainingCoursesController',
-    routeIds: [
-      'GET /staff/training-courses',
-      'PATCH /staff/training-courses/:id',
-      'POST /staff/training-courses',
-    ],
-  },
-  {
-    source: 'staff/staff-training-profiles.controller.ts',
-    className: 'StaffTrainingProfilesController',
-    routeIds: [
-      'GET /staff/training-profiles',
-      'GET /staff/training-profiles/export',
-      'PATCH /staff/training-profiles/progress',
-    ],
-  },
-  {
     source: 'staff/staff-ai-assistant.controller.ts',
     className: 'StaffAiAssistantController',
     routeIds: ['GET /staff/ai-assistant'],
@@ -284,6 +266,24 @@ const ADOPTED_STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
       'POST /staff/shift-regulations/:id/acknowledgements',
     ],
   },
+  {
+    source: 'staff/staff-training-courses.controller.ts',
+    className: 'StaffTrainingCoursesController',
+    routeIds: [
+      'GET /staff/training-courses',
+      'PATCH /staff/training-courses/:id',
+      'POST /staff/training-courses',
+    ],
+  },
+  {
+    source: 'staff/staff-training-profiles.controller.ts',
+    className: 'StaffTrainingProfilesController',
+    routeIds: [
+      'GET /staff/training-profiles',
+      'GET /staff/training-profiles/export',
+      'PATCH /staff/training-profiles/progress',
+    ],
+  },
 ] as const;
 
 const TEAM_CHAT_FRESH_SCOPE_METHODS = [
@@ -415,7 +415,7 @@ function namedMethod(
 }
 
 describe('Gate 1MT staff scope boundaries', () => {
-  it('binds exactly 39 staff workspace routes to a fresh NETWORK class guard', () => {
+  it('binds exactly 33 staff workspace routes to a fresh NETWORK class guard', () => {
     const allRouteIds: string[] = [];
 
     for (const boundary of CONTROLLER_BOUNDARIES) {
@@ -431,7 +431,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       allRouteIds.push(...boundary.routeIds);
     }
 
-    expect(allRouteIds).toHaveLength(39);
+    expect(allRouteIds).toHaveLength(33);
     expect(new Set(allRouteIds).size).toBe(allRouteIds.length);
     expect(allRouteIds.some((id) => id.includes('/scheduled/'))).toBe(false);
   });
@@ -473,7 +473,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       ...STAFF_CONTROL_METHOD_BOUNDARIES.map(({ routeId }) => routeId),
     ];
 
-    expect(selected).toHaveLength(49);
+    expect(selected).toHaveLength(43);
     expect(
       selected.every(
         (id) =>
@@ -558,7 +558,7 @@ describe('Gate 1MT staff scope boundaries', () => {
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 
-  it('binds all 11 adopted knowledge and regulation routes to fresh NETWORK or STORES authority', () => {
+  it('binds all 17 adopted knowledge, regulation and training routes to fresh NETWORK or STORES authority', () => {
     const routeIds: string[] = [];
 
     for (const boundary of ADOPTED_STAFF_STORE_BOUNDARIES) {
@@ -574,7 +574,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       routeIds.push(...boundary.routeIds);
     }
 
-    expect(routeIds).toHaveLength(11);
+    expect(routeIds).toHaveLength(17);
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 });

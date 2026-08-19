@@ -15,6 +15,7 @@ import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-poli
 import { StaffShiftRegulationAccessPolicyService } from './staff-shift-regulation-access-policy.service';
 import type { StaffTeamChatService } from './staff-team-chat.service';
 import type { StaffTasksService } from './staff-tasks.service';
+import { StaffTrainingAccessPolicyService } from './staff-training-access-policy.service';
 
 const user: AuthenticatedUser = {
   id: 'user-a1',
@@ -161,6 +162,9 @@ describe('StaffAttachmentsService', () => {
         resolve: resolveFreshStoreScope,
       } as never),
       new StaffShiftRegulationAccessPolicyService({
+        resolve: resolveFreshStoreScope,
+      } as never),
+      new StaffTrainingAccessPolicyService({
         resolve: resolveFreshStoreScope,
       } as never),
     );
@@ -639,10 +643,28 @@ describe('StaffAttachmentsService', () => {
                     },
                   ],
                 }
-              : {
-                  id: { in: [resourceId] },
-                  tenantId: 'tenant-a',
-                },
+              : resourceKind === 'TRAINING_COURSE'
+                ? {
+                    id: { in: [resourceId] },
+                    tenantId: 'tenant-a',
+                    AND: [
+                      {
+                        status: 'ACTIVE',
+                        roleScope: {
+                          in: [
+                            'ALL_STAFF',
+                            'ADMINISTRATOR',
+                            'SENIOR_ADMINISTRATOR',
+                            'CLUB_MANAGER',
+                          ],
+                        },
+                      },
+                    ],
+                  }
+                : {
+                    id: { in: [resourceId] },
+                    tenantId: 'tenant-a',
+                  },
         select: { id: true },
       });
       expect(canReadAnyAttachmentMessage).not.toHaveBeenCalled();
@@ -714,6 +736,58 @@ describe('StaffAttachmentsService', () => {
                   ],
                 },
               },
+            ],
+          },
+        ],
+      },
+      select: { id: true },
+    });
+    expect(findFirstArgs).toHaveLength(1);
+  });
+
+  it('keeps a foreign training-course file hidden from a STORES subject', async () => {
+    const {
+      service,
+      findResults,
+      findFirstArgs,
+      parentFindFirst,
+      resolveFreshStoreScope,
+    } = createSubject();
+    const storeUser: AuthenticatedUser = {
+      ...user,
+      accessScope: 'STORES',
+      allowedStoreIds: ['store-a1'],
+      permissions: ['view_staff_training', 'manage_staff_training'],
+    };
+    resolveFreshStoreScope.mockResolvedValueOnce({
+      userId: storeUser.id,
+      tenantId: storeUser.tenantId,
+      tenantSlug: storeUser.tenantSlug,
+      mode: 'STORES',
+      allowedStoreIds: ['store-a1'],
+    });
+    findResults.push(
+      pendingMetadata({
+        state: 'BOUND',
+        pendingExpiresAt: null,
+        bindings: [
+          { resourceKind: 'TRAINING_COURSE', resourceId: 'course-a2' },
+        ],
+      }),
+    );
+
+    await expect(
+      service.getAttachment(storeUser, 'attachment-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(parentFindFirst).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['course-a2'] },
+        tenantId: 'tenant-a',
+        AND: [
+          {
+            OR: [
+              { storeId: { in: ['store-a1'] } },
+              { storeId: null, status: 'ACTIVE' },
             ],
           },
         ],

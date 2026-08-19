@@ -20,6 +20,7 @@ import { StaffTeamChatService } from './staff-team-chat.service';
 import { StaffTasksService } from './staff-tasks.service';
 import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-policy.service';
 import { StaffShiftRegulationAccessPolicyService } from './staff-shift-regulation-access-policy.service';
+import { StaffTrainingAccessPolicyService } from './staff-training-access-policy.service';
 
 export const STAFF_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
 export const STAFF_ATTACHMENT_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
@@ -90,6 +91,7 @@ export class StaffAttachmentsService {
     private readonly freshStoreScopeService: FreshStoreScopeService,
     private readonly staffKnowledgeAccessPolicyService: StaffKnowledgeAccessPolicyService,
     private readonly staffShiftRegulationAccessPolicyService: StaffShiftRegulationAccessPolicyService,
+    private readonly staffTrainingAccessPolicyService: StaffTrainingAccessPolicyService,
   ) {}
 
   async createAttachment(
@@ -449,6 +451,25 @@ export class StaffAttachmentsService {
     }
 
     grouped.delete('SHIFT_REGULATION');
+
+    const trainingCourseIds = grouped.get('TRAINING_COURSE');
+    if (trainingCourseIds && trainingCourseIds.size > 0) {
+      const trainingAccess =
+        await this.staffTrainingAccessPolicyService.resolve(user);
+      const course = await tx.staffTrainingCourse.findFirst({
+        where: this.staffTrainingAccessPolicyService.readableCourseIdsWhere(
+          trainingAccess,
+          [...trainingCourseIds],
+        ),
+        select: { id: true },
+      });
+
+      if (course) {
+        return true;
+      }
+    }
+
+    grouped.delete('TRAINING_COURSE');
     if (grouped.size === 0) {
       return false;
     }
@@ -472,12 +493,6 @@ export class StaffAttachmentsService {
       switch (resourceKind) {
         case 'CHECKLIST_RUN':
           parent = await tx.staffChecklistRun.findFirst({
-            where,
-            select: { id: true },
-          });
-          break;
-        case 'TRAINING_COURSE':
-          parent = await tx.staffTrainingCourse.findFirst({
             where,
             select: { id: true },
           });

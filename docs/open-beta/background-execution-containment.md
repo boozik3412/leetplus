@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.9                                                     |
+| Версия           | 1.10                                                    |
 | Дата             | 29.07.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -249,6 +249,9 @@ Suite проверяет:
   при bonus-ledger revoke/Telegram unsubscribe без отмены основной
   ledger/reward/consent business mutation;
 - сохранение `CASHIER/MANUAL` cancellation.
+
+Successor identity metadata exact-SHA CI acceptance:
+[background execution identity metadata evidence 19.08.2026](./background-execution-identity-metadata-ci-evidence-2026-08-19.md).
 
 Последний принятый baseline-результат до расширения migration-166 containment:
 

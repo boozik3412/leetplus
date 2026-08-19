@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.182                                        |
+| Версия           | 1.183                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -199,7 +199,8 @@ TENANT_OR_STORE_SYSTEM_IDENTITY` для всех 17 job kinds и закрепл�
 tenant-execution ESLint, API typecheck и diff-check зелёные локально. Это
 registry-level hardening, а не полноценный durable worker plane; runtime roles,
 distributed lease, suspend/drain и tenant-aware Telegram/outbound matrix ещё
-открыты.
+открыты. Exact-SHA CI acceptance:
+[background execution identity metadata evidence 19.08.2026](./background-execution-identity-metadata-ci-evidence-2026-08-19.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

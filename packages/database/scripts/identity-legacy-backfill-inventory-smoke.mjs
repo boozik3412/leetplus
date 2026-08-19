@@ -53,6 +53,7 @@ const FAILURE_STAGES = new Set([
   "CLEANUP",
 ]);
 const FAILURE_STAGE_BY_ERROR = new WeakMap();
+const FAILURE_DETAIL_BY_ERROR = new WeakMap();
 const INVENTORY_MODULE_URL = new URL(
   "./identity-legacy-backfill-inventory.mjs",
   import.meta.url,
@@ -193,6 +194,25 @@ function errorFailureStage(error) {
       ? FAILURE_STAGE_BY_ERROR.get(error)
       : undefined;
   return FAILURE_STAGES.has(stage) ? stage : "PRECONDITIONS";
+}
+
+function withFailureDetail(error, detail) {
+  if (
+    error !== null &&
+    (typeof error === "object" || typeof error === "function") &&
+    Array.isArray(detail) &&
+    detail.every((entry) => /^[A-Z0-9_]{1,96}$/u.test(entry))
+  ) {
+    FAILURE_DETAIL_BY_ERROR.set(error, [...new Set(detail)].sort());
+  }
+  return error;
+}
+
+function errorFailureDetail(error) {
+  return error !== null &&
+    (typeof error === "object" || typeof error === "function")
+    ? (FAILURE_DETAIL_BY_ERROR.get(error) ?? [])
+    : [];
 }
 
 function withFallbackFailureStage(error, fallbackStage) {
@@ -389,6 +409,13 @@ function findingOccurrences(report, code) {
 
 function assertSummary(report, expected, setFailureStage = () => {}) {
   setFailureStage("HEALTHY_SUMMARY_ADMISSION");
+  if (report?.summary?.inventoryExecuted !== true) {
+    const detail = [
+      ...(report?.summary?.admissionRejectionCodes ?? []),
+      ...(report?.summary?.schemaRejectionCodes ?? []),
+    ].map((entry) => String(entry));
+    throw withFailureDetail(new Error("Inventory admission failed."), detail);
+  }
   assert.equal(
     report?.summary?.inventoryExecuted,
     true,
@@ -2999,7 +3026,11 @@ export async function main(
       : "IDENTITY_LEGACY_INVENTORY_SMOKE_FAILED";
     process.stderr.write(
       `${JSON.stringify({
-        error: { code, stage: errorFailureStage(error) },
+        error: {
+          code,
+          detail: errorFailureDetail(error),
+          stage: errorFailureStage(error),
+        },
         script: SCRIPT_NAME,
         status: "ERROR",
       })}\n`,

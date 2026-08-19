@@ -456,8 +456,12 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
       list/detail/mutation/assessment/acknowledgement/files; restored-copy
       PostgreSQL `10/10` и production-build B1↔B2 browser matrix приняты на
       `6ce36a41…`.
-- [ ] Training, onboarding и checklists/templates получают ту же store-aware
-      parent/file policy.
+- [x] Training courses/profiles используют fresh `NETWORK | STORES` parent
+      policy для list/detail/mutation/progress/export/files; restored-copy
+      PostgreSQL `11/11` и production-build B1↔B2 browser matrix приняты на
+      `40a8e828…`.
+- [ ] Onboarding и checklists/templates получают ту же store-aware parent/file
+      policy.
 - [ ] Control/ratings/motivation/discipline защищены и аудируются.
 - [ ] Salary работает только как planning; payout отсутствует.
 - [ ] Attachments имеют live parent ACL, revoke и tenant/store negative tests.

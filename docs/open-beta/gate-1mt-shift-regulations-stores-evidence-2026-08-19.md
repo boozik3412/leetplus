@@ -100,6 +100,11 @@ Ports `3108/4108/55444` освобождены, disposable database directory у
 2. onboarding;
 3. checklists/checklist templates.
 
+Successor 19.08.2026: training принят отдельно на implementation
+`40a8e82886e8c98c4fc72b67ff6ef809f22e511c`; актуальный остаток сокращён до
+onboarding и checklists/templates. См.
+[Gate 1MT training STORES evidence](./gate-1mt-training-stores-evidence-2026-08-19.md).
+
 Также остаются archive/delete/orphan browser matrix остальных attachment
 parents, tenant-aware jobs, Telegram/public guest, controlled outbound,
 Gate 2 текущей сети и production `PREPARE/GO`. Поэтому этот `PASS` не меняет

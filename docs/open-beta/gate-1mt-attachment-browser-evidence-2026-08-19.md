@@ -134,8 +134,8 @@ database sessions были `0`; exact `a2` database удалена. Совоку
 
 ## Остаток до внешнего теста
 
-1. Реализовать и принять STORES parent policy для трёх оставшихся staff parent
-   families: training, onboarding и checklists/templates; attachment reader
+1. Реализовать и принять STORES parent policy для двух оставшихся staff parent
+   families: onboarding и checklists/templates; attachment reader
    должен следовать parent policy.
 2. Закрыть archive/delete/orphan-retention browser matrix остальных parent
    kinds.

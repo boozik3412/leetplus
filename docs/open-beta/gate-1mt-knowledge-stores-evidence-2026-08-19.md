@@ -102,6 +102,11 @@ external beta остаются store-aware policies для четырёх parent
 3. onboarding;
 4. checklists/checklist templates.
 
+Successors 19.08.2026: shift regulations и training приняты отдельными
+матрицами; актуальный остаток — onboarding и checklists/templates. См.
+[shift evidence](./gate-1mt-shift-regulations-stores-evidence-2026-08-19.md) и
+[training evidence](./gate-1mt-training-stores-evidence-2026-08-19.md).
+
 Также остаются archive/delete/orphan browser matrix остальных attachment
 parents, tenant-aware jobs, Telegram/public guest, controlled outbound,
 Gate 2 текущей сети и production `PREPARE/GO`. Поэтому этот `PASS` не меняет

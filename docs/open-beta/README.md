@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.174                                        |
+| Версия           | 1.175                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -151,6 +151,13 @@ Provider/webhook-like paths не доступны через web BFF; Mini App e
 по-прежнему пересобирает `telegramUserId/authDate` server-side после подписи.
 Web `test:pilot-bff-boundary` `20/20`; полный public guest/Telegram/outbound
 matrix ещё открыт.
+
+Successor public guest BFF GET path allowlist: active
+`/api/guest-portal/[...path]` GET принимает только public club directory,
+public config, authenticated session, game summary и missions paging.
+Legacy/dormant media и unknown GET paths получают `404` до upstream fetch;
+query validation по-прежнему даёт `400`. Web `test:pilot-bff-boundary`
+`21/21`; полный public guest/Telegram/outbound matrix ещё открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

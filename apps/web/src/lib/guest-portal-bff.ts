@@ -3,9 +3,38 @@ const GUEST_PORTAL_GET_QUERY_ALLOWLIST = new Map<string, readonly string[]>([
   ["session/game-missions", ["offset", "limit"]],
 ]);
 
+type GuestPortalGetProjection =
+  | { ok: true; query: string }
+  | { ok: false; status: 400 | 404; message: string };
+
 type GuestPortalPostBodyProjection =
   | { ok: true; body: string }
   | { ok: false; status: 400 | 404; message: string };
+
+export function projectGuestPortalGetRequest(
+  path: readonly string[],
+  requestUrl: string,
+): GuestPortalGetProjection {
+  if (!isGuestPortalGetPathAllowed(path)) {
+    return {
+      ok: false,
+      status: 404,
+      message: "Маршрут гостевого модуля недоступен через web BFF.",
+    };
+  }
+
+  const query = resolveGuestPortalGetUpstreamQuery(path, requestUrl);
+
+  if (query === null) {
+    return {
+      ok: false,
+      status: 400,
+      message: "Недопустимые параметры запроса гостевого модуля.",
+    };
+  }
+
+  return { ok: true, query };
+}
 
 export function resolveGuestPortalGetUpstreamQuery(
   path: readonly string[],
@@ -37,6 +66,21 @@ export function resolveGuestPortalGetUpstreamQuery(
   const search = upstreamParams.toString();
 
   return search ? `?${search}` : "";
+}
+
+function isGuestPortalGetPathAllowed(path: readonly string[]): boolean {
+  if (path.length === 2) {
+    return (
+      (path[0] === "gamification" && path[1] === "clubs") ||
+      (path[0] === "session" &&
+        (path[1] === "game-summary" || path[1] === "game-missions"))
+    );
+  }
+
+  return (
+    (path.length === 1 && path[0] === "session") ||
+    (path.length === 3 && path[2] === "public-config")
+  );
 }
 
 export function projectGuestPortalPostBody(

@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getApiUrl, readApiError } from "@/lib/api";
 import {
+  projectGuestPortalGetRequest,
   projectGuestPortalPostBody,
-  resolveGuestPortalGetUpstreamQuery,
 } from "@/lib/guest-portal-bff";
 import { GUEST_AUTH_COOKIE_NAME } from "@/lib/guest-portal";
 import { sanitizeGuestSessionResponse } from "@/lib/guest-session-transport";
@@ -21,13 +21,13 @@ function guestPortalPath(path: string[]) {
 
 export async function GET(request: Request, { params }: RouteContext) {
   const { path } = await params;
-  const upstreamQuery = resolveGuestPortalGetUpstreamQuery(path, request.url);
+  const projectedRequest = projectGuestPortalGetRequest(path, request.url);
   const headers: Record<string, string> = {};
 
-  if (upstreamQuery === null) {
+  if (!projectedRequest.ok) {
     return NextResponse.json(
-      { message: "Недопустимые параметры запроса гостевого модуля." },
-      { status: 400 },
+      { message: projectedRequest.message },
+      { status: projectedRequest.status },
     );
   }
 
@@ -46,7 +46,7 @@ export async function GET(request: Request, { params }: RouteContext) {
   }
 
   const response = await fetch(
-    `${getApiUrl()}${guestPortalPath(path)}${upstreamQuery}`,
+    `${getApiUrl()}${guestPortalPath(path)}${projectedRequest.query}`,
     {
       headers,
       cache: "no-store",

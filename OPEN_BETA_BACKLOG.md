@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.27
+- Версия: 3.28
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -181,6 +181,14 @@
   расширен до `20/20`, Web typecheck, targeted ESLint и Prettier зелёные.
   Это частичный BFF hardening; полный public guest/Telegram/outbound matrix
   остаётся открытым.
+- Gate 1MT public guest BFF GET path allowlist: active
+  `/api/guest-portal/[...path]` GET теперь fail-closed принимает только
+  клиентские guest routes: public club directory, public config,
+  authenticated session, game summary и missions paging. Legacy/dormant media
+  и произвольные unknown GET paths получают `404` до upstream fetch; query
+  validation по-прежнему даёт `400`. Web `test:pilot-bff-boundary` расширен до
+  `21/21`, targeted ESLint и Prettier зелёные. Это частичный public guest BFF
+  hardening; полный public guest/Telegram/outbound matrix остаётся открытым.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

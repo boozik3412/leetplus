@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  projectGuestPortalGetRequest,
   projectGuestPortalPostBody,
   resolveGuestPortalGetUpstreamQuery,
 } from "./guest-portal-bff.ts";
@@ -130,11 +131,9 @@ test("keeps guest portal GET queries allowlisted before upstream fetch", async (
     "utf8",
   );
 
-  assert.match(
-    route,
-    /resolveGuestPortalGetUpstreamQuery\(path, request\.url\)/,
-  );
-  assert.match(route, /upstreamQuery === null/);
+  assert.match(route, /projectGuestPortalGetRequest\(path, request\.url\)/);
+  assert.match(route, /!projectedRequest\.ok/);
+  assert.match(route, /projectedRequest\.query/);
   assert.doesNotMatch(route, /guestPortalPath\(path\)\}\$\{url\.search\}/);
 
   assert.equal(
@@ -173,6 +172,57 @@ test("keeps guest portal GET queries allowlisted before upstream fetch", async (
       null,
     );
   }
+});
+
+test("keeps guest portal GET paths route-scoped before upstream fetch", async () => {
+  const route = await readFile(
+    path.join(API_ROUTE_ROOT, "guest-portal", "[...path]", "route.ts"),
+    "utf8",
+  );
+
+  assert.match(route, /projectGuestPortalGetRequest\(path, request\.url\)/);
+  assert.match(route, /!projectedRequest\.ok/);
+  assert.doesNotMatch(
+    route,
+    /resolveGuestPortalGetUpstreamQuery\(path, request\.url\)/,
+  );
+
+  assert.deepEqual(
+    projectGuestPortalGetRequest(
+      ["gamification", "clubs"],
+      "https://leetplus.invalid/api/guest-portal/gamification/clubs",
+    ),
+    { ok: true, query: "" },
+  );
+  assert.deepEqual(
+    projectGuestPortalGetRequest(
+      ["leet", "club-1337", "public-config"],
+      "https://leetplus.invalid/api/guest-portal/leet/club-1337/public-config",
+    ),
+    { ok: true, query: "" },
+  );
+  assert.deepEqual(
+    projectGuestPortalGetRequest(
+      ["session", "media", "asset-1"],
+      "https://leetplus.invalid/api/guest-portal/session/media/asset-1",
+    ),
+    {
+      ok: false,
+      status: 404,
+      message: "Маршрут гостевого модуля недоступен через web BFF.",
+    },
+  );
+  assert.deepEqual(
+    projectGuestPortalGetRequest(
+      ["session"],
+      "https://leetplus.invalid/api/guest-portal/session?tenantSlug=hidden",
+    ),
+    {
+      ok: false,
+      status: 400,
+      message: "Недопустимые параметры запроса гостевого модуля.",
+    },
+  );
 });
 
 test("keeps guest portal POST bodies route-scoped before upstream fetch", async () => {

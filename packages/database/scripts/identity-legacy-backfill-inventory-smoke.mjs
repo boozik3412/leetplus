@@ -31,6 +31,13 @@ const FAILURE_STAGES = new Set([
   "RESET_GUARD",
   "HEALTHY_SCENARIO",
   "HEALTHY_SUMMARY",
+  "HEALTHY_SUMMARY_ADMISSION",
+  "HEALTHY_SUMMARY_DECISION",
+  "HEALTHY_SUMMARY_EVIDENCE",
+  "HEALTHY_SUMMARY_RELEASE",
+  "HEALTHY_SUMMARY_BLOCKING",
+  "HEALTHY_SUMMARY_PROPOSAL",
+  "HEALTHY_SUMMARY_REVIEW",
   "HEALTHY_METRICS",
   "HEALTHY_FINDINGS",
   "HEALTHY_EXIT_CODE",
@@ -380,7 +387,8 @@ function findingOccurrences(report, code) {
   return 0;
 }
 
-function assertSummary(report, expected) {
+function assertSummary(report, expected, setFailureStage = () => {}) {
+  setFailureStage("HEALTHY_SUMMARY_ADMISSION");
   assert.equal(
     report?.summary?.inventoryExecuted,
     true,
@@ -392,12 +400,18 @@ function assertSummary(report, expected) {
       schemaRejectionCodes: report?.summary?.schemaRejectionCodes,
     })}`,
   );
+  setFailureStage("HEALTHY_SUMMARY_DECISION");
   assert.equal(report?.summary?.decision, expected.decision);
+  setFailureStage("HEALTHY_SUMMARY_EVIDENCE");
   assert.equal(report?.summary?.evidenceScope, "SYNTHETIC_FIXTURE");
+  setFailureStage("HEALTHY_SUMMARY_RELEASE");
   assert.equal(report?.safety?.releaseArtifactBound, false);
+  setFailureStage("HEALTHY_SUMMARY_BLOCKING");
   assert.equal(report?.summary?.blockingTotal, expected.blockingTotal);
+  setFailureStage("HEALTHY_SUMMARY_PROPOSAL");
   assert.equal(report?.summary?.proposalTotal, expected.proposalTotal);
   if (expected.reviewTotal !== undefined) {
+    setFailureStage("HEALTHY_SUMMARY_REVIEW");
     assert.equal(report?.summary?.reviewTotal, expected.reviewTotal);
   }
 }
@@ -2722,7 +2736,9 @@ export async function runSmoke(environment = process.env) {
       expectedMigrationArtifact,
     );
     failureStage = "HEALTHY_SUMMARY";
-    assertSummary(healthy.report, healthy.expectations.expected);
+    assertSummary(healthy.report, healthy.expectations.expected, (stage) => {
+      failureStage = stage;
+    });
     failureStage = "HEALTHY_METRICS";
     assert.deepEqual(
       healthy.report.metrics,

@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import {
   evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
   tenantBackgroundStageForCustomerStage,
 } from '../tenancy/tenant-background-execution-policy';
 
@@ -153,6 +154,27 @@ export class ReportsDigestSchedulerService
           });
           this.logger.warn(
             `Skipped ${type} report digest for ${tenant.slug}: ${backgroundExecution.reasonCode}`,
+          );
+          return;
+        }
+
+        const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+          decision: backgroundExecution,
+          actorKind: 'TENANT_SYSTEM',
+          tenantId: tenant.id,
+        });
+        if (!runtimeIdentity.accepted) {
+          await this.prisma.reportDigestScheduleRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'SKIPPED',
+              sentCount: 0,
+              completedAt: new Date(),
+              errorMessage: runtimeIdentity.reasonCode,
+            },
+          });
+          this.logger.warn(
+            `Skipped ${type} report digest for ${tenant.slug}: ${runtimeIdentity.reasonCode}`,
           );
           return;
         }

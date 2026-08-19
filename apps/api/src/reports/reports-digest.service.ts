@@ -17,9 +17,12 @@ import {
 } from '../tenancy/tenant-execution-admission.service';
 import {
   evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
   tenantBackgroundStageForCustomerStage,
   type TenantBackgroundExecutionPolicyDecision,
   type TenantBackgroundExecutionPolicyReasonCode,
+  type TenantBackgroundRuntimeIdentityDecision,
+  type TenantBackgroundRuntimeIdentityReasonCode,
 } from '../tenancy/tenant-background-execution-policy';
 import type {
   ReportDigestType,
@@ -49,6 +52,7 @@ type ScheduledDigestSkippedResult = {
   reasonCode:
     | TenantExecutionAdmissionDecision['reasonCode']
     | TenantBackgroundExecutionPolicyReasonCode
+    | TenantBackgroundRuntimeIdentityReasonCode
     | 'CAPABILITY_EXPORT_REPORTS_REQUIRED'
     | 'RECIPIENT_AUTHORITY_REVOKED';
   failedRequirement: TenantExecutionAdmissionDecision['failedRequirement'];
@@ -291,6 +295,21 @@ export class ReportsDigestService {
         continue;
       }
 
+      const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+        decision: backgroundExecution,
+        actorKind: 'TENANT_SYSTEM',
+        tenantId: freshUser.tenantId,
+      });
+      if (!runtimeIdentity.accepted) {
+        skippedResults.push(
+          this.toBackgroundExecutionSkippedResult(
+            freshRecipient,
+            runtimeIdentity,
+          ),
+        );
+        continue;
+      }
+
       await this.sendDigestEmail(freshRecipient.email, digest);
       results.push({
         tenantSlug: freshUser.tenantSlug,
@@ -489,7 +508,9 @@ export class ReportsDigestService {
 
   private toBackgroundExecutionSkippedResult(
     recipient: Pick<ScheduledDigestRecipient, 'tenantId' | 'email' | 'tenant'>,
-    decision: TenantBackgroundExecutionPolicyDecision,
+    decision:
+      | TenantBackgroundExecutionPolicyDecision
+      | TenantBackgroundRuntimeIdentityDecision,
   ): ScheduledDigestSkippedResult {
     return {
       status: 'SKIPPED',

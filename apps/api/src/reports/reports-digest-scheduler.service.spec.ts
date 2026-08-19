@@ -185,4 +185,73 @@ describe('ReportsDigestSchedulerService admission result handling', () => {
     });
     expect(reportsDigestService.sendScheduledDigests).not.toHaveBeenCalled();
   });
+
+  it('persists a background runtime identity denial before invoking digest generation', async () => {
+    const configService = {
+      get: jest.fn(),
+    };
+    const prisma = {
+      reportDigestScheduleRun: {
+        create: jest.fn().mockResolvedValue({ id: 'run-3' }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const reportsDigestService = {
+      sendScheduledDigests: jest.fn(),
+    };
+    const permitAcquisition = {
+      decision: {
+        allowed: true,
+        tenantId: '',
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        entitlementProfileRevision: 4,
+        executionRevision: 9,
+        customerStage: TenantCustomerStage.BETA,
+        internalEntitlementBypass: false,
+      },
+      permit: {
+        tenantId: '',
+        executionRevision: 9,
+        requirements: [
+          { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+          { module: TenantModule.COMMUNICATIONS, action: 'OUTBOUND' },
+        ],
+      },
+    };
+    const tenantExecutionAdmissionService = {
+      acquirePermit: jest.fn().mockResolvedValue(permitAcquisition),
+    };
+    const service = new ReportsDigestSchedulerService(
+      configService as unknown as ConfigService,
+      prisma as unknown as PrismaService,
+      reportsDigestService as unknown as ReportsDigestService,
+      tenantExecutionAdmissionService as unknown as TenantExecutionAdmissionService,
+    );
+
+    await (
+      service as unknown as RunnableReportsDigestScheduler
+    ).runTenantDigest({
+      tenant: { id: '', slug: 'missing-tenant-id' },
+      type: 'DAILY',
+      dateKey: '2026-07-28',
+    });
+
+    expect(prisma.reportDigestScheduleRun.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'run-3' },
+      data: {
+        executionRevision: 9,
+      },
+    });
+    expect(prisma.reportDigestScheduleRun.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'run-3' },
+      data: {
+        status: 'SKIPPED',
+        sentCount: 0,
+        completedAt: expect.any(Date) as Date,
+        errorMessage: 'BACKGROUND_TENANT_ID_REQUIRED',
+      },
+    });
+    expect(reportsDigestService.sendScheduledDigests).not.toHaveBeenCalled();
+  });
 });

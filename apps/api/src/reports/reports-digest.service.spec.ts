@@ -627,4 +627,41 @@ describe('ReportsDigestService tenant execution admission', () => {
     expect(admissionService.evaluatePermit).toHaveBeenCalledTimes(1);
     expect(mailService.sendReportDigest).not.toHaveBeenCalled();
   });
+
+  it('fails closed at the SMTP effect boundary when runtime tenant identity is missing', async () => {
+    const recipient = {
+      id: 'user-runtime-tenant-missing',
+      email: 'owner@runtime-tenant-missing.example',
+      fullName: 'Owner with missing runtime tenant',
+      role: UserRole.OWNER,
+      isPlatformAdmin: false,
+      tenantId: '',
+      customRoleId: null,
+      customRole: null,
+      tenant: { slug: 'runtime-tenant-missing' },
+    };
+    prisma.user.findMany.mockResolvedValue([recipient]);
+    prisma.user.findFirst.mockResolvedValue(recipient);
+    admissionService.acquirePermit.mockResolvedValue(
+      acquisitionFor(allowedDecision(recipient.tenantId)),
+    );
+    admissionService.evaluatePermit.mockResolvedValue(
+      allowedDecision(recipient.tenantId),
+    );
+
+    await expect(service.sendScheduledDigests({})).resolves.toMatchObject({
+      sent: 0,
+      skipped: 1,
+      skippedResults: [
+        {
+          tenantId: recipient.tenantId,
+          reasonCode: 'BACKGROUND_TENANT_ID_REQUIRED',
+        },
+      ],
+    });
+
+    expect(reportsService.getOperationalReport).toHaveBeenCalledTimes(1);
+    expect(admissionService.evaluatePermit).toHaveBeenCalledTimes(1);
+    expect(mailService.sendReportDigest).not.toHaveBeenCalled();
+  });
 });

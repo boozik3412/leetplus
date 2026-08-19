@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.28
+- Версия: 3.29
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -177,10 +177,11 @@
   получают `400`. Provider/webhook-like paths не доступны через web BFF.
   Telegram Mini App без edge допускает только `initData` и club selectors, а
   edge-validated path по-прежнему пересобирает server-side
-  `telegramUserId/authDate` после подписи. Web `test:pilot-bff-boundary`
-  расширен до `20/20`, Web typecheck, targeted ESLint и Prettier зелёные.
-  Это частичный BFF hardening; полный public guest/Telegram/outbound matrix
-  остаётся открытым.
+  `telegramUserId/authDate` после подписи. Mini App edge body дополнительно
+  отклоняет любые поля вне `initData/clubId/tenantSlug/storeId` до
+  validation/upstream. Web `test:pilot-bff-boundary` расширен до `21/21`, Web
+  typecheck, targeted ESLint и Prettier зелёные. Это частичный BFF hardening;
+  полный public guest/Telegram/outbound matrix остаётся открытым.
 - Gate 1MT public guest BFF GET path allowlist: active
   `/api/guest-portal/[...path]` GET теперь fail-closed принимает только
   клиентские guest routes: public club directory, public config,

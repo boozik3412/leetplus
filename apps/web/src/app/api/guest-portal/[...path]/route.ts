@@ -15,6 +15,13 @@ type RouteContext = {
 
 export const runtime = "nodejs";
 
+const MINI_APP_EDGE_BODY_FIELDS = new Set([
+  "initData",
+  "clubId",
+  "tenantSlug",
+  "storeId",
+]);
+
 function guestPortalPath(path: string[]) {
   return `/guest-portal/${path.map(encodeURIComponent).join("/")}`;
 }
@@ -213,6 +220,16 @@ function maybeBuildMiniAppEdgePayload(path: string[], body: string) {
   }
 
   const payload = parseJsonObject(body);
+  for (const key of Object.keys(payload)) {
+    if (!MINI_APP_EDGE_BODY_FIELDS.has(key)) {
+      return {
+        ok: false as const,
+        status: 400,
+        message: "Telegram Mini App body contains unsupported fields.",
+      };
+    }
+  }
+
   const initData = typeof payload.initData === "string" ? payload.initData : "";
   const validation = validateTelegramMiniAppInitData(initData, botToken);
 

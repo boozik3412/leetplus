@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.175                                        |
+| Версия           | 1.176                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -148,9 +148,10 @@ Successor public guest BFF POST body allowlist: active
 `/api/guest-portal/[...path]` POST пересылает только route-scoped JSON поля;
 unknown route получает `404` до upstream, unknown body fields получают `400`.
 Provider/webhook-like paths не доступны через web BFF; Mini App edge path
-по-прежнему пересобирает `telegramUserId/authDate` server-side после подписи.
-Web `test:pilot-bff-boundary` `20/20`; полный public guest/Telegram/outbound
-matrix ещё открыт.
+по-прежнему пересобирает `telegramUserId/authDate` server-side после подписи и
+отклоняет любые client fields вне `initData/clubId/tenantSlug/storeId` до
+validation/upstream. Web `test:pilot-bff-boundary` `21/21`; полный public
+guest/Telegram/outbound matrix ещё открыт.
 
 Successor public guest BFF GET path allowlist: active
 `/api/guest-portal/[...path]` GET принимает только public club directory,

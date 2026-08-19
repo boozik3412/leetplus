@@ -283,6 +283,9 @@ test("keeps guest portal POST bodies route-scoped before upstream fetch", async 
       message: "Недопустимые поля запроса гостевого модуля.",
     },
   );
+  assert.match(route, /const MINI_APP_EDGE_BODY_FIELDS = new Set/);
+  assert.match(route, /MINI_APP_EDGE_BODY_FIELDS\.has\(key\)/);
+  assert.match(route, /Telegram Mini App body contains unsupported fields/);
   assert.deepEqual(
     projectGuestPortalPostBody(["session", "loot-boxes", "loot-1", "open"], ""),
     { ok: true, body: "" },

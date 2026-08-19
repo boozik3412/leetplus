@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.8                                                     |
+| Версия           | 1.9                                                     |
 | Дата             | 29.07.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -50,6 +50,12 @@ Policy использует только два execution-stage:
    одновременно появиться в registry, тестах и release review.
 5. Policy не принимает tenant/store ID из клиентского запроса и не содержит
    bypass через env.
+6. Каждый зарегистрированный job kind обязан иметь explicit system identity
+   requirement: `TENANT_SYSTEM_IDENTITY`, `TENANT_STORE_SYSTEM_IDENTITY` или
+   `TENANT_OR_STORE_SYSTEM_IDENTITY`.
+7. Общий `SYNC_SERVICE_TOKEN` остаётся только HTTP/scheduler admission secret и
+   не считается worker identity. Registry-level
+   `sharedServiceTokenAllowed=false` закреплён для всех job kinds.
 
 Stable reason codes:
 
@@ -165,6 +171,11 @@ retention и quality collection не объявляются unattended entrypoin
 - Новый tenant, уже находящийся в `PILOT/BETA/LIVE`, не запускает
   перечисленные unfenced scheduled/AUTO jobs.
 - Неизвестный stage/job kind не получает неявного разрешения.
+- Неизвестный или новый job kind не может попасть в registry без явного
+  system identity requirement.
+- Даже для разрешённых revision-fenced effects решение policy возвращает
+  `sharedServiceTokenAllowed=false`: all-tenant/service-token admission не
+  является worker identity и не заменяет tenant/store-scoped runtime actor.
 - Текущий `INTERNAL` tenant сохраняет совместимость разрешённых registry
   paths, но legacy provider delivery effects намеренно отключены до
   coordinator.
@@ -185,6 +196,9 @@ retention и quality collection не объявляются unattended entrypoin
   останавливает stale worker;
 - нет двухфазного suspend/drain для всех очередей;
 - нет единого distributed leader для всех process-local schedulers;
+- registry-level identity metadata не создаёт сами runtime roles и не
+  доказывает, что каждый legacy scheduler уже исполняется под отдельным
+  tenant/store system actor;
 - activity jobs внешнего tenant могут накапливаться unclaimed;
 - не завершены shared Telegram tenant/store identity, durable update dedupe и
   per-store kill switch;
@@ -223,6 +237,8 @@ git diff --check
 Suite проверяет:
 
 - точность registry и deny для unknown values;
+- точность identity metadata registry и `sharedServiceTokenAllowed=false` для
+  всех job kinds;
 - совместимость `INTERNAL`;
 - deny для admitted `PILOT/BETA/LIVE`;
 - отсутствие provider/credential и защищённой business mutation после denial;

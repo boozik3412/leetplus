@@ -35,6 +35,16 @@
   Docker/service и listening loopback database отсутствуют), поэтому
   полноценный headed production-build archive/delete/orphan browser journey
   остаётся отдельным restored-copy evidence перед внешним доступом.
+- Следующий background execution slice добавляет registry-level system identity
+  metadata для всех 17 background job kinds:
+  `TENANT_SYSTEM_IDENTITY | TENANT_STORE_SYSTEM_IDENTITY |
+  TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
+  `sharedServiceTokenAllowed=false`, чтобы общий `SYNC_SERVICE_TOKEN` не
+  считался worker identity. Локально зелёные проверки:
+  `test:ci:background-execution`, `test:ci:tenant-execution`,
+  `lint:ci:tenant-execution`, API typecheck и `git diff --check`. Это не
+  закрывает runtime roles, distributed lease, suspend/drain и
+  tenant-aware Telegram/outbound matrix; release decision остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day

@@ -35,6 +35,16 @@ export type TenantBackgroundExternalPolicy =
   | 'REVISION_FENCED'
   | 'EXTERNAL_DENY';
 
+export type TenantBackgroundSystemIdentityRequirement =
+  | 'TENANT_SYSTEM_IDENTITY'
+  | 'TENANT_STORE_SYSTEM_IDENTITY'
+  | 'TENANT_OR_STORE_SYSTEM_IDENTITY';
+
+export type TenantBackgroundJobExecutionMetadata = Readonly<{
+  systemIdentity: TenantBackgroundSystemIdentityRequirement;
+  sharedServiceTokenAllowed: false;
+}>;
+
 export const TENANT_BACKGROUND_EXECUTION_REGISTRY = Object.freeze({
   REPORT_DIGEST_SMTP: 'REVISION_FENCED',
   GUEST_BONUS_LEDGER_LANGAME: 'REVISION_FENCED',
@@ -55,6 +65,80 @@ export const TENANT_BACKGROUND_EXECUTION_REGISTRY = Object.freeze({
   STAFF_TASK_RECURRING_RULES: 'EXTERNAL_DENY',
 } satisfies Record<TenantBackgroundJobKind, TenantBackgroundExternalPolicy>);
 
+export const TENANT_BACKGROUND_JOB_EXECUTION_METADATA = Object.freeze({
+  REPORT_DIGEST_SMTP: {
+    systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_BONUS_LEDGER_LANGAME: {
+    systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  LANGAME_SCHEDULED_SYNC: {
+    systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  LANGAME_DAILY_SYNC: {
+    systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  LANGAME_BUSINESS_SNAPSHOT: {
+    systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  LANGAME_GUEST_DATA_FOUNDATION: {
+    systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_GAMIFICATION_SNAPSHOT_PIPELINE: {
+    systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_GAMIFICATION_SUPPLEMENTAL_PIPELINE: {
+    systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_GAME_DELIVERY_DISPATCH: {
+    systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_GAME_DELIVERY_BOT_PULL: {
+    systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_ACTIVITY_LEDGER_SYNC: {
+    systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_GAME_DATA_RETENTION: {
+    systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_GAME_LEDGER_FALLBACK: {
+    systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_GAME_LOOT_BOX_RECOVERY: {
+    systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_GAME_QUALITY_MONITORING: {
+    systemIdentity: 'TENANT_OR_STORE_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  GUEST_GAME_REWARD_MATERIALIZER: {
+    systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+  STAFF_TASK_RECURRING_RULES: {
+    systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+    sharedServiceTokenAllowed: false,
+  },
+} satisfies Record<
+  TenantBackgroundJobKind,
+  TenantBackgroundJobExecutionMetadata
+>);
+
 export type TenantBackgroundExecutionPolicyReasonCode =
   | 'ALLOWED_INTERNAL_LEGACY'
   | 'ALLOWED_EXTERNAL_REVISION_FENCED'
@@ -71,6 +155,8 @@ export type TenantBackgroundExecutionPolicyDecision = {
   stage: TenantBackgroundExecutionStage | null;
   jobKind: TenantBackgroundJobKind | null;
   externalPolicy: TenantBackgroundExternalPolicy | null;
+  systemIdentity: TenantBackgroundSystemIdentityRequirement | null;
+  sharedServiceTokenAllowed: false;
 };
 
 export type TenantBackgroundExecutionPolicyInput = Readonly<{
@@ -126,6 +212,7 @@ export function evaluateTenantBackgroundExecutionPolicy(
 
   const jobKind = input.jobKind;
   const externalPolicy = TENANT_BACKGROUND_EXECUTION_REGISTRY[jobKind];
+  const executionMetadata = TENANT_BACKGROUND_JOB_EXECUTION_METADATA[jobKind];
 
   if (stage === 'INTERNAL') {
     return allowedDecision(
@@ -133,6 +220,7 @@ export function evaluateTenantBackgroundExecutionPolicy(
       stage,
       jobKind,
       externalPolicy,
+      executionMetadata,
     );
   }
 
@@ -142,6 +230,7 @@ export function evaluateTenantBackgroundExecutionPolicy(
       stage,
       jobKind,
       externalPolicy,
+      executionMetadata,
     );
   }
 
@@ -150,6 +239,7 @@ export function evaluateTenantBackgroundExecutionPolicy(
     stage,
     jobKind,
     externalPolicy,
+    executionMetadata,
   );
 }
 
@@ -201,6 +291,7 @@ function allowedDecision(
   stage: TenantBackgroundExecutionStage,
   jobKind: TenantBackgroundJobKind,
   externalPolicy: TenantBackgroundExternalPolicy,
+  executionMetadata: TenantBackgroundJobExecutionMetadata,
 ): TenantBackgroundExecutionPolicyDecision {
   return {
     allowed: true,
@@ -209,6 +300,8 @@ function allowedDecision(
     stage,
     jobKind,
     externalPolicy,
+    systemIdentity: executionMetadata.systemIdentity,
+    sharedServiceTokenAllowed: executionMetadata.sharedServiceTokenAllowed,
   };
 }
 
@@ -220,6 +313,7 @@ function deniedDecision(
   stage: TenantBackgroundExecutionStage | null,
   jobKind: TenantBackgroundJobKind | null,
   externalPolicy: TenantBackgroundExternalPolicy | null,
+  executionMetadata: TenantBackgroundJobExecutionMetadata | null = null,
 ): TenantBackgroundExecutionPolicyDecision {
   return {
     allowed: false,
@@ -228,5 +322,7 @@ function deniedDecision(
     stage,
     jobKind,
     externalPolicy,
+    systemIdentity: executionMetadata?.systemIdentity ?? null,
+    sharedServiceTokenAllowed: false,
   };
 }

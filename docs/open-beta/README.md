@@ -191,6 +191,16 @@ LeetPlus API и Telegram Bot API/proxy base. Non-http protocols и битые UR
 `214/214`; полный tenant-aware public guest/Telegram/outbound matrix ещё
 открыт.
 
+Successor background execution identity metadata: центральный
+`TENANT_BACKGROUND_JOB_EXECUTION_METADATA` теперь требует explicit
+`TENANT_SYSTEM_IDENTITY | TENANT_STORE_SYSTEM_IDENTITY |
+TENANT_OR_STORE_SYSTEM_IDENTITY` для всех 17 job kinds и закрепляет
+`sharedServiceTokenAllowed=false`. Targeted background/tenant execution,
+tenant-execution ESLint, API typecheck и diff-check зелёные локально. Это
+registry-level hardening, а не полноценный durable worker plane; runtime roles,
+distributed lease, suspend/drain и tenant-aware Telegram/outbound matrix ещё
+открыты.
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 

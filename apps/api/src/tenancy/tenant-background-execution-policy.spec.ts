@@ -1,6 +1,7 @@
 import { TenantCustomerStage } from '@prisma/client';
 import {
   TENANT_BACKGROUND_EXECUTION_REGISTRY,
+  TENANT_BACKGROUND_JOB_EXECUTION_METADATA,
   TENANT_BACKGROUND_JOB_KINDS,
   evaluateTenantBackgroundExecutionPolicy,
   isTenantBackgroundJobKind,
@@ -37,6 +38,9 @@ describe('tenant background execution policy', () => {
       [...EXPECTED_BACKGROUND_JOB_KINDS].sort(),
     );
     expect(
+      Object.keys(TENANT_BACKGROUND_JOB_EXECUTION_METADATA).sort(),
+    ).toEqual([...EXPECTED_BACKGROUND_JOB_KINDS].sort());
+    expect(
       Object.entries(TENANT_BACKGROUND_EXECUTION_REGISTRY)
         .filter(([, policy]) => policy === 'REVISION_FENCED')
         .map(([jobKind]) => jobKind)
@@ -47,6 +51,37 @@ describe('tenant background execution policy', () => {
         (policy) => policy === 'EXTERNAL_DENY',
       ),
     ).toHaveLength(TENANT_BACKGROUND_JOB_KINDS.length - 2);
+  });
+
+  it('requires every registered job to declare a scoped system identity', () => {
+    for (const jobKind of TENANT_BACKGROUND_JOB_KINDS) {
+      const metadata = TENANT_BACKGROUND_JOB_EXECUTION_METADATA[jobKind];
+
+      expect(metadata.sharedServiceTokenAllowed).toBe(false);
+      expect([
+        'TENANT_SYSTEM_IDENTITY',
+        'TENANT_STORE_SYSTEM_IDENTITY',
+        'TENANT_OR_STORE_SYSTEM_IDENTITY',
+      ]).toContain(metadata.systemIdentity);
+    }
+    expect(
+      TENANT_BACKGROUND_JOB_EXECUTION_METADATA.REPORT_DIGEST_SMTP,
+    ).toMatchObject({
+      systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+      sharedServiceTokenAllowed: false,
+    });
+    expect(
+      TENANT_BACKGROUND_JOB_EXECUTION_METADATA.GUEST_BONUS_LEDGER_LANGAME,
+    ).toMatchObject({
+      systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+      sharedServiceTokenAllowed: false,
+    });
+    expect(
+      TENANT_BACKGROUND_JOB_EXECUTION_METADATA.STAFF_TASK_RECURRING_RULES,
+    ).toMatchObject({
+      systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+      sharedServiceTokenAllowed: false,
+    });
   });
 
   it('allows registered jobs for the legacy INTERNAL network', () => {
@@ -61,6 +96,7 @@ describe('tenant background execution policy', () => {
         reasonCode: 'ALLOWED_INTERNAL_LEGACY',
         stage: 'INTERNAL',
         jobKind,
+        sharedServiceTokenAllowed: false,
       });
     }
   });
@@ -75,6 +111,8 @@ describe('tenant background execution policy', () => {
       allowed: true,
       reasonCode: 'ALLOWED_EXTERNAL_REVISION_FENCED',
       externalPolicy: 'REVISION_FENCED',
+      systemIdentity: 'TENANT_SYSTEM_IDENTITY',
+      sharedServiceTokenAllowed: false,
     });
     expect(
       evaluateTenantBackgroundExecutionPolicy({
@@ -85,6 +123,8 @@ describe('tenant background execution policy', () => {
       allowed: false,
       reasonCode: 'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
       externalPolicy: 'EXTERNAL_DENY',
+      systemIdentity: 'TENANT_STORE_SYSTEM_IDENTITY',
+      sharedServiceTokenAllowed: false,
     });
   });
 
@@ -107,6 +147,8 @@ describe('tenant background execution policy', () => {
       reasonCode: 'BACKGROUND_JOB_KIND_UNKNOWN',
       jobKind: null,
       externalPolicy: null,
+      systemIdentity: null,
+      sharedServiceTokenAllowed: false,
     });
     expect(isTenantBackgroundJobKind('FUTURE_UNREVIEWED_JOB')).toBe(false);
   });

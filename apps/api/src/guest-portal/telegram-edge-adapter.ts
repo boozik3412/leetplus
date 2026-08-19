@@ -89,7 +89,7 @@ export function loadTelegramEdgeConfig(
     env.GUEST_GAME_TG_EDGE_LEETPLUS_API_URL ??
       env.GUEST_GAME_BOT_CONSUMER_API_URL ??
       env.API_URL ??
-      'https://api.leetplus.ru',
+      '',
   );
   const webhookSecret =
     trimmed(env.GUEST_GAME_TG_EDGE_WEBHOOK_SECRET) ??

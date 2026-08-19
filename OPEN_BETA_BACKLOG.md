@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.22
+- Версия: 3.23
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -144,6 +144,14 @@
   targeted ESLint и Prettier по изменённым файлам зелёные. Это не заменяет
   оставшийся production-build browser matrix для archive/delete/orphan
   retention.
+- Gate 1MT Telegram edge fail-closed config: `loadTelegramEdgeConfig()` больше
+  не подставляет production `https://api.leetplus.ru` по умолчанию. Edge
+  adapter/poller должны получить явный `GUEST_GAME_TG_EDGE_LEETPLUS_API_URL`,
+  `GUEST_GAME_BOT_CONSUMER_API_URL` или `API_URL`, иначе config validation
+  падает до network/provider effects. Targeted Telegram edge/poller tests
+  `12/12`, targeted ESLint и Prettier зелёные. Это частичный jobs/Telegram
+  hardening; tenant-aware public guest binding, outbound digest и production
+  canary остаются открыты.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

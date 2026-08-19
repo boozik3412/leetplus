@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.169                                        |
+| Версия           | 1.170                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -123,6 +123,11 @@ Successor staff attachment file BFF hardening: download route теперь
 selector-free (`forwardQuery: false`), upload locator остаётся canonical
 same-origin, а Web BFF boundary расширен до `18/18`. Это частичный file-policy
 gate; полный production-build archive/delete/orphan browser matrix ещё открыт.
+
+Successor Telegram edge config hardening: edge adapter больше не имеет
+production API URL по умолчанию и fail-closed требует явный LeetPlus API URL до
+network/provider effects. Targeted Telegram edge/poller tests `12/12`; полный
+tenant-aware Telegram/public-guest/outbound matrix ещё открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

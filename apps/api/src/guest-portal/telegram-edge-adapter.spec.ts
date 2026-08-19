@@ -37,6 +37,15 @@ describe('telegram edge adapter', () => {
     });
   });
 
+  it('fails closed without an explicit LeetPlus API URL', () => {
+    expect(() =>
+      loadTelegramEdgeConfig({
+        GUEST_GAME_TG_EDGE_WEBHOOK_SECRET: 'telegram-secret',
+        GUEST_GAME_TG_EDGE_BOT_TOKEN: 'bot-token',
+      }),
+    ).toThrow('GUEST_GAME_TG_EDGE_LEETPLUS_API_URL is required.');
+  });
+
   it('forwards Telegram webhook to LeetPlus and sends safe reply through proxy base URL', async () => {
     const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest
       .fn<TelegramEdgeFetch>()

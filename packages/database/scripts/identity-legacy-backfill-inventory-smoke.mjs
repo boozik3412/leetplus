@@ -30,7 +30,10 @@ const FAILURE_STAGES = new Set([
   "CLONE_PROVISIONING",
   "RESET_GUARD",
   "HEALTHY_SCENARIO",
-  "HEALTHY_ASSERTIONS",
+  "HEALTHY_SUMMARY",
+  "HEALTHY_METRICS",
+  "HEALTHY_FINDINGS",
+  "HEALTHY_EXIT_CODE",
   "HEALTHY_AUTHORITY_DRIFT",
   "SCENARIO_RESET",
   "SCENARIO_SEED",
@@ -2718,16 +2721,19 @@ export async function runSmoke(environment = process.env) {
       stateByScenario.get("healthy"),
       expectedMigrationArtifact,
     );
-    failureStage = "HEALTHY_ASSERTIONS";
+    failureStage = "HEALTHY_SUMMARY";
     assertSummary(healthy.report, healthy.expectations.expected);
+    failureStage = "HEALTHY_METRICS";
     assert.deepEqual(
       healthy.report.metrics,
       healthy.expectations.expectedMetrics,
     );
+    failureStage = "HEALTHY_FINDINGS";
     assert.equal(
       healthy.report.findings.every((finding) => finding.count === 0),
       true,
     );
+    failureStage = "HEALTHY_EXIT_CODE";
     assert.equal(
       inventory.exitCodeForReport(healthy.report, healthy.config.hmacKey),
       0,

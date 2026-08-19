@@ -670,7 +670,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
     staffController(
       'staff-checklist-templates.controller.ts',
       'checklist-templates',
-      'NETWORK_VERIFIED',
+      'STORES_VERIFIED',
       [
         ['GET', ['']],
         ['POST', ['']],
@@ -722,7 +722,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
     staffController(
       'staff-checklists.controller.ts',
       'checklists',
-      'NETWORK_VERIFIED',
+      'STORES_VERIFIED',
       [
         ['GET', ['', 'report', 'report/export']],
         [

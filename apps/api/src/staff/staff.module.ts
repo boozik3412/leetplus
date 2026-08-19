@@ -10,6 +10,7 @@ import { StaffAssessmentsService } from './staff-assessments.service';
 import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 import { StaffAttachmentsController } from './staff-attachments.controller';
 import { StaffAttachmentsService } from './staff-attachments.service';
+import { StaffChecklistAccessPolicyService } from './staff-checklist-access-policy.service';
 import { StaffChecklistTemplatesController } from './staff-checklist-templates.controller';
 import { StaffChecklistTemplatesService } from './staff-checklist-templates.service';
 import { StaffChecklistsController } from './staff-checklists.controller';
@@ -103,6 +104,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffShiftRegulationsService,
     StaffShiftRegulationAccessPolicyService,
     StaffShiftReportsService,
+    StaffChecklistAccessPolicyService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,
     StaffTeamChatService,

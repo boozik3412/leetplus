@@ -17,6 +17,8 @@ import { resolveUserCapabilities } from '../src/auth/capabilities';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { StaffAttachmentBindingsService } from '../src/staff/staff-attachment-bindings.service';
 import { StaffAttachmentsService } from '../src/staff/staff-attachments.service';
+import { StaffChecklistAccessPolicyService } from '../src/staff/staff-checklist-access-policy.service';
+import { StaffChecklistTemplatesService } from '../src/staff/staff-checklist-templates.service';
 import { StaffChecklistsService } from '../src/staff/staff-checklists.service';
 import { StaffKnowledgeBaseService } from '../src/staff/staff-knowledge-base.service';
 import { StaffKnowledgeAccessPolicyService } from '../src/staff/staff-knowledge-access-policy.service';
@@ -237,7 +239,7 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('adopts store-aware knowledge, onboarding, shift-regulation and training parents while other kinds remain NETWORK-only', async () => {
+  it('adopts all five staff attachment parents into the same store-aware boundary', async () => {
     const fixture = await createFixture(prisma);
     rememberFixture(fixtureTenantIds, fixture);
     const { attachments: service, bindings } = buildServices(prisma);
@@ -277,27 +279,160 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       await expect(
         service.getAttachment(networkUser, attachment.id),
       ).resolves.toEqual(expect.objectContaining({ buffer: payload }));
-      if (
-        resourceKind === StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE ||
-        resourceKind === StaffAttachmentResourceKind.SHIFT_REGULATION ||
-        resourceKind === StaffAttachmentResourceKind.TRAINING_COURSE ||
-        resourceKind === StaffAttachmentResourceKind.ONBOARDING_PLAN
-      ) {
-        await expect(
-          service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
-        ).resolves.toEqual(expect.objectContaining({ buffer: payload }));
-        await expect(
-          service.getAttachment(buildUser(fixture, 'A2'), attachment.id),
-        ).rejects.toBeInstanceOf(NotFoundException);
-      } else {
-        await expect(
-          service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
-        ).rejects.toBeInstanceOf(NotFoundException);
-      }
+      await expect(
+        service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
+      ).resolves.toEqual(expect.objectContaining({ buffer: payload }));
+      await expect(
+        service.getAttachment(buildUser(fixture, 'A2'), attachment.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
       await expect(
         service.getAttachment(buildUser(fixture, 'B_NETWORK'), attachment.id),
       ).rejects.toBeInstanceOf(NotFoundException);
     }
+  });
+
+  it('enforces checklist template, run, report and mutation boundaries for STORES', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const services = buildServices(prisma);
+    const userA1 = buildUser(fixture, 'A1');
+    const userA2 = buildUser(fixture, 'A2');
+    const networkTemplateId = randomUUID();
+    const storeA1TemplateId = randomUUID();
+    const storeA2TemplateId = randomUUID();
+    const sections = validRegulationSections(`checklist-scope-${randomUUID()}`);
+
+    await prisma.staffChecklistTemplate.createMany({
+      data: [
+        {
+          id: networkTemplateId,
+          tenantId: fixture.tenantAId,
+          createdByUserId: fixture.userANetworkId,
+          title: `Network active checklist ${randomUUID()}`,
+          status: 'ACTIVE',
+          roleScope: 'ALL_STAFF',
+          sections,
+        },
+        {
+          id: storeA1TemplateId,
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA1Id,
+          createdByUserId: fixture.userA1Id,
+          title: `A1 draft checklist ${randomUUID()}`,
+          status: 'DRAFT',
+          roleScope: 'ALL_STAFF',
+          sections,
+        },
+        {
+          id: storeA2TemplateId,
+          tenantId: fixture.tenantAId,
+          storeId: fixture.storeA2Id,
+          createdByUserId: fixture.userA2Id,
+          title: `A2 draft checklist ${randomUUID()}`,
+          status: 'DRAFT',
+          roleScope: 'ALL_STAFF',
+          sections,
+        },
+      ],
+    });
+
+    const [a1Catalog, a2Catalog] = await Promise.all([
+      services.checklistTemplates.getTemplates(userA1, { status: 'all' }),
+      services.checklistTemplates.getTemplates(userA2, { status: 'all' }),
+    ]);
+    expect(a1Catalog.accessScope).toBe('STORES');
+    expect(a1Catalog.stores.map(({ id }) => id)).toEqual([fixture.storeA1Id]);
+    expect(a1Catalog.rows.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([networkTemplateId, storeA1TemplateId]),
+    );
+    expect(a1Catalog.rows.map(({ id }) => id)).not.toContain(storeA2TemplateId);
+    expect(
+      a1Catalog.rows.find(({ id }) => id === networkTemplateId)?.canManage,
+    ).toBe(false);
+    expect(
+      a1Catalog.rows.find(({ id }) => id === storeA1TemplateId)?.canManage,
+    ).toBe(true);
+    expect(a2Catalog.rows.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([networkTemplateId, storeA2TemplateId]),
+    );
+    expect(a2Catalog.rows.map(({ id }) => id)).not.toContain(storeA1TemplateId);
+
+    await expect(
+      services.checklistTemplates.getTemplates(userA1, {
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.checklistTemplates.updateTemplate(userA1, networkTemplateId, {
+        title: 'Forbidden network rewrite',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      services.checklistTemplates.updateTemplate(userA1, storeA2TemplateId, {
+        title: 'Forbidden A2 rewrite',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      services.checklistTemplates.createTemplate(userA1, {
+        title: 'Forbidden network template',
+        storeId: null,
+        sections,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.checklistTemplates.createTemplate(userA1, {
+        title: 'Forbidden A2 template',
+        storeId: fixture.storeA2Id,
+        sections,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    const createdTemplate = await services.checklistTemplates.createTemplate(
+      userA1,
+      {
+        title: `A1 created checklist ${randomUUID()}`,
+        storeId: fixture.storeA1Id,
+        status: 'ACTIVE',
+        roleScope: 'ALL_STAFF',
+        sections,
+      },
+    );
+    expect(createdTemplate.canManage).toBe(true);
+    expect(createdTemplate.store?.id).toBe(fixture.storeA1Id);
+
+    const [runA1, runA2] = await Promise.all([
+      services.checklists.createChecklist(userA1, {
+        templateId: networkTemplateId,
+        storeId: fixture.storeA1Id,
+      }),
+      services.checklists.createChecklist(userA2, {
+        templateId: networkTemplateId,
+        storeId: fixture.storeA2Id,
+      }),
+    ]);
+    const [a1Runs, a2Runs, a1Execution] = await Promise.all([
+      services.checklists.getChecklists(userA1),
+      services.checklists.getChecklists(userA2),
+      services.checklists.getExecutionReport(userA1),
+    ]);
+    expect(a1Runs.accessScope).toBe('STORES');
+    expect(a1Runs.rows.map(({ id }) => id)).toContain(runA1.id);
+    expect(a1Runs.rows.map(({ id }) => id)).not.toContain(runA2.id);
+    expect(a2Runs.rows.map(({ id }) => id)).toContain(runA2.id);
+    expect(a2Runs.rows.map(({ id }) => id)).not.toContain(runA1.id);
+    expect(a1Execution.accessScope).toBe('STORES');
+    expect(a1Execution.runs.map(({ id }) => id)).toContain(runA1.id);
+    expect(a1Execution.runs.map(({ id }) => id)).not.toContain(runA2.id);
+    await expect(
+      services.checklists.getExecutionReport(userA1, {
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.checklists.updateChecklist(userA1, runA2.id, {
+        status: 'CANCELED',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('enforces the knowledge catalog, writer and settings boundary for STORES', async () => {
@@ -1890,6 +2025,9 @@ function buildServices(prisma: PrismaService) {
   const knowledgeAccessPolicy = new StaffKnowledgeAccessPolicyService(
     freshStoreScopeService,
   );
+  const checklistAccessPolicy = new StaffChecklistAccessPolicyService(
+    freshStoreScopeService,
+  );
   const shiftRegulationAccessPolicy =
     new StaffShiftRegulationAccessPolicyService(freshStoreScopeService);
   const trainingAccessPolicy = new StaffTrainingAccessPolicyService(
@@ -1904,6 +2042,7 @@ function buildServices(prisma: PrismaService) {
       teamChat,
       staffTasks,
       freshStoreScopeService,
+      checklistAccessPolicy,
       knowledgeAccessPolicy,
       shiftRegulationAccessPolicy,
       trainingAccessPolicy,
@@ -1935,7 +2074,15 @@ function buildServices(prisma: PrismaService) {
       trainingAccessPolicy,
       bindings,
     ),
-    checklists: new StaffChecklistsService(prisma, tenantContext, bindings),
+    checklistTemplates: new StaffChecklistTemplatesService(
+      prisma,
+      checklistAccessPolicy,
+    ),
+    checklists: new StaffChecklistsService(
+      prisma,
+      checklistAccessPolicy,
+      bindings,
+    ),
   };
 }
 

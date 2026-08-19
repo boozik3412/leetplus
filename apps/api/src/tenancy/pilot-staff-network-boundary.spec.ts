@@ -35,29 +35,6 @@ const CONTROLLER_BOUNDARIES: readonly ControllerBoundary[] = [
     ],
   },
   {
-    source: 'staff/staff-checklist-templates.controller.ts',
-    className: 'StaffChecklistTemplatesController',
-    routeIds: [
-      'DELETE /staff/checklist-templates/:id',
-      'GET /staff/checklist-templates',
-      'PATCH /staff/checklist-templates/:id',
-      'POST /staff/checklist-templates',
-    ],
-  },
-  {
-    source: 'staff/staff-checklists.controller.ts',
-    className: 'StaffChecklistsController',
-    routeIds: [
-      'GET /staff/checklists',
-      'GET /staff/checklists/report',
-      'GET /staff/checklists/report/export',
-      'PATCH /staff/checklists/:id',
-      'POST /staff/checklists',
-      'POST /staff/checklists/:id/items/:itemId/review-messages',
-      'POST /staff/checklists/:id/items/:itemId/review-resolve',
-    ],
-  },
-  {
     source: 'staff/staff-discipline.controller.ts',
     className: 'StaffDisciplineController',
     routeIds: [
@@ -234,6 +211,29 @@ const STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
 ] as const;
 
 const ADOPTED_STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
+  {
+    source: 'staff/staff-checklist-templates.controller.ts',
+    className: 'StaffChecklistTemplatesController',
+    routeIds: [
+      'DELETE /staff/checklist-templates/:id',
+      'GET /staff/checklist-templates',
+      'PATCH /staff/checklist-templates/:id',
+      'POST /staff/checklist-templates',
+    ],
+  },
+  {
+    source: 'staff/staff-checklists.controller.ts',
+    className: 'StaffChecklistsController',
+    routeIds: [
+      'GET /staff/checklists',
+      'GET /staff/checklists/report',
+      'GET /staff/checklists/report/export',
+      'PATCH /staff/checklists/:id',
+      'POST /staff/checklists',
+      'POST /staff/checklists/:id/items/:itemId/review-messages',
+      'POST /staff/checklists/:id/items/:itemId/review-resolve',
+    ],
+  },
   {
     source: 'staff/staff-onboarding-plans.controller.ts',
     className: 'StaffOnboardingPlansController',
@@ -415,7 +415,7 @@ function namedMethod(
 }
 
 describe('Gate 1MT staff scope boundaries', () => {
-  it('binds exactly 30 staff workspace routes to a fresh NETWORK class guard', () => {
+  it('binds exactly 19 staff workspace routes to a fresh NETWORK class guard', () => {
     const allRouteIds: string[] = [];
 
     for (const boundary of CONTROLLER_BOUNDARIES) {
@@ -431,7 +431,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       allRouteIds.push(...boundary.routeIds);
     }
 
-    expect(allRouteIds).toHaveLength(30);
+    expect(allRouteIds).toHaveLength(19);
     expect(new Set(allRouteIds).size).toBe(allRouteIds.length);
     expect(allRouteIds.some((id) => id.includes('/scheduled/'))).toBe(false);
   });
@@ -473,7 +473,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       ...STAFF_CONTROL_METHOD_BOUNDARIES.map(({ routeId }) => routeId),
     ];
 
-    expect(selected).toHaveLength(40);
+    expect(selected).toHaveLength(29);
     expect(
       selected.every(
         (id) =>
@@ -558,7 +558,7 @@ describe('Gate 1MT staff scope boundaries', () => {
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 
-  it('binds all 20 adopted knowledge, onboarding, regulation and training routes to fresh NETWORK or STORES authority', () => {
+  it('binds all 31 adopted checklist, knowledge, onboarding, regulation and training routes to fresh NETWORK or STORES authority', () => {
     const routeIds: string[] = [];
 
     for (const boundary of ADOPTED_STAFF_STORE_BOUNDARIES) {
@@ -574,7 +574,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       routeIds.push(...boundary.routeIds);
     }
 
-    expect(routeIds).toHaveLength(20);
+    expect(routeIds).toHaveLength(31);
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 });

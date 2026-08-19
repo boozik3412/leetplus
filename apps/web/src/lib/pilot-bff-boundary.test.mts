@@ -305,9 +305,6 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
   const networkOnlyPages = [
     "ai-assistant/page.tsx",
     "assessments/page.tsx",
-    "checklist-templates/page.tsx",
-    "checklists/page.tsx",
-    "checklists/report/page.tsx",
     "discipline/page.tsx",
     "operations-dashboard/page.tsx",
     "readiness-report/page.tsx",
@@ -345,6 +342,33 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
       /await requireNetworkScopedUser\(\)/,
       `${networkOnlyPages[index]} must apply the scope gate before data access`,
     );
+  }
+});
+
+test("keeps store-aware checklist workspaces behind authenticated API authority", async () => {
+  const pages = [
+    "checklist-templates/page.tsx",
+    "checklists/page.tsx",
+    "checklists/report/page.tsx",
+  ] as const;
+  const pageSources = await Promise.all(
+    pages.map((page) =>
+      readFile(
+        fileURLToPath(new URL(`../app/(app)/staff/${page}`, import.meta.url)),
+        "utf8",
+      ),
+    ),
+  );
+
+  for (const [index, source] of pageSources.entries()) {
+    assert.match(
+      source,
+      /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+      `${pages[index]} must require an authenticated user`,
+    );
+    assert.match(source, /await requireCurrentUser\(\)/);
+    assert.doesNotMatch(source, /requireNetworkScopedUser/);
+    assert.match(source, /report\.accessScope/);
   }
 });
 

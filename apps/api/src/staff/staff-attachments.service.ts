@@ -18,6 +18,7 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { lockUserRoleAuthority } from '../users/user-role-authority-lock';
 import { StaffTeamChatService } from './staff-team-chat.service';
 import { StaffTasksService } from './staff-tasks.service';
+import { StaffChecklistAccessPolicyService } from './staff-checklist-access-policy.service';
 import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-policy.service';
 import { StaffShiftRegulationAccessPolicyService } from './staff-shift-regulation-access-policy.service';
 import { StaffTrainingAccessPolicyService } from './staff-training-access-policy.service';
@@ -89,6 +90,7 @@ export class StaffAttachmentsService {
     private readonly staffTeamChatService: StaffTeamChatService,
     private readonly staffTasksService: StaffTasksService,
     private readonly freshStoreScopeService: FreshStoreScopeService,
+    private readonly staffChecklistAccessPolicyService: StaffChecklistAccessPolicyService,
     private readonly staffKnowledgeAccessPolicyService: StaffKnowledgeAccessPolicyService,
     private readonly staffShiftRegulationAccessPolicyService: StaffShiftRegulationAccessPolicyService,
     private readonly staffTrainingAccessPolicyService: StaffTrainingAccessPolicyService,
@@ -412,6 +414,25 @@ export class StaffAttachmentsService {
     if (grouped.size === 0) {
       return false;
     }
+
+    const checklistRunIds = grouped.get('CHECKLIST_RUN');
+    if (checklistRunIds && checklistRunIds.size > 0) {
+      const checklistAccess =
+        await this.staffChecklistAccessPolicyService.resolve(user);
+      const checklistRun = await tx.staffChecklistRun.findFirst({
+        where: this.staffChecklistAccessPolicyService.readableRunIdsWhere(
+          checklistAccess,
+          [...checklistRunIds],
+        ),
+        select: { id: true },
+      });
+
+      if (checklistRun) {
+        return true;
+      }
+    }
+
+    grouped.delete('CHECKLIST_RUN');
 
     const knowledgeArticleIds = grouped.get('KNOWLEDGE_ARTICLE');
     if (knowledgeArticleIds && knowledgeArticleIds.size > 0) {

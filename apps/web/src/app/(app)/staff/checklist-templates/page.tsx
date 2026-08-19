@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffChecklistTemplateBuilder } from "@/components/staff-checklist-template-builder";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { requireCurrentUser } from "@/lib/auth";
 import { isShiftWorkspaceRole } from "@/lib/landing";
 import {
   getStaffChecklistTemplateReport,
@@ -88,7 +88,7 @@ export default async function StaffChecklistTemplatesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const user = await requireNetworkScopedUser();
+  const user = await requireCurrentUser();
   const params = await searchParams;
 
   if (isShiftWorkspaceRole(user.role)) {
@@ -211,7 +211,11 @@ export default async function StaffChecklistTemplatesPage({
                 defaultValue={report.filters.storeId ?? ""}
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
               >
-                <option value="">Вся сеть</option>
+                <option value="">
+                  {report.accessScope === "NETWORK"
+                    ? "Вся сеть"
+                    : "Все доступные"}
+                </option>
                 {report.stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}

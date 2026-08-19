@@ -15,7 +15,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
+import { FreshStoreScopeGuard } from '../tenancy/fresh-store-scope.guard';
 import {
   StaffChecklistsService,
   type StaffChecklistCreateDto,
@@ -40,7 +40,7 @@ import {
   UserRole.CLUB_ADMINISTRATOR,
   UserRole.TRAINEE,
 )
-@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshStoreScopeGuard)
 export class StaffChecklistsController {
   constructor(
     private readonly staffChecklistsService: StaffChecklistsService,

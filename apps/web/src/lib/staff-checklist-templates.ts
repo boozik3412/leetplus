@@ -65,6 +65,7 @@ export type StaffChecklistTemplate = {
   scoreTotal: number;
   createdAt: string;
   updatedAt: string;
+  canManage: boolean;
   store: StaffChecklistStore | null;
   sourceRegulation: {
     id: string;
@@ -104,6 +105,8 @@ export type StaffChecklistTemplateReport = {
     timedItemsCount: number;
     scoreTotal: number;
   };
+  accessScope: "NETWORK" | "STORES";
+  canManageTemplates: boolean;
   rows: StaffChecklistTemplate[];
   stores: StaffChecklistStore[];
   publishedRegulations: StaffChecklistTemplateRegulationOption[];

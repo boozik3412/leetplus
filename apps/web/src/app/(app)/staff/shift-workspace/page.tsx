@@ -68,6 +68,8 @@ const emptyTaskReport: StaffTaskReport = {
 };
 
 const emptyChecklistReport: StaffChecklistReport = {
+  accessScope: "NETWORK",
+  canManageChecklistRuns: false,
   filters: {
     status: "all",
     shiftKind: "all",

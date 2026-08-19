@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffChecklistWorkspace } from "@/components/staff-checklist-workspace";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { requireCurrentUser } from "@/lib/auth";
 import {
   getStaffChecklistReport,
   type StaffChecklistFilterStatus,
@@ -109,11 +109,12 @@ export default async function StaffChecklistsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const user = await requireNetworkScopedUser();
+  const user = await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffChecklistReport(filters);
-  const canManageChecklists = !isChecklistUseOnlyRole(user.role);
+  const canManageChecklists =
+    report.canManageChecklistRuns && !isChecklistUseOnlyRole(user.role);
   const breadcrumbItems = [
     { href: "/dashboard", label: "Дашборд" },
     { href: "/staff/tasks", label: "Задачи персонала" },
@@ -235,7 +236,11 @@ export default async function StaffChecklistsPage({
                 defaultValue={report.filters.storeId ?? ""}
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
               >
-                <option value="">Все клубы</option>
+                <option value="">
+                  {report.accessScope === "NETWORK"
+                    ? "Все клубы"
+                    : "Все доступные"}
+                </option>
                 {report.stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { HeaderFilterDetails } from "./header-filter-details";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { requireCurrentUser } from "@/lib/auth";
 import {
   getStaffChecklistExecutionReport,
   type StaffChecklistExecutionProblemFilter,
@@ -309,7 +309,7 @@ export default async function StaffChecklistExecutionReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffChecklistExecutionReport(filters);
@@ -459,7 +459,11 @@ export default async function StaffChecklistExecutionReportPage({
                 defaultValue={report.filters.storeId ?? ""}
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
               >
-                <option value="">Все клубы</option>
+                <option value="">
+                  {report.accessScope === "NETWORK"
+                    ? "Все клубы"
+                    : "Все доступные"}
+                </option>
                 {report.stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}
@@ -601,7 +605,11 @@ export default async function StaffChecklistExecutionReportPage({
                           defaultValue={report.filters.storeId ?? ""}
                           className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                         >
-                          <option value="">Все клубы</option>
+                          <option value="">
+                            {report.accessScope === "NETWORK"
+                              ? "Все клубы"
+                              : "Все доступные"}
+                          </option>
                           {report.stores.map((store) => (
                             <option key={store.id} value={store.id}>
                               {store.name}

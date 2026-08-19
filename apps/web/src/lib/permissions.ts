@@ -654,8 +654,6 @@ const shiftStaffDeniedPrefixes = [
 const networkOnlyStaffPrefixes = [
   "/staff/ai-assistant",
   "/staff/assessments",
-  "/staff/checklist-templates",
-  "/staff/checklists",
   "/staff/discipline",
   "/staff/operations-dashboard",
   "/staff/readiness-report",

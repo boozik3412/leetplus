@@ -11,6 +11,7 @@ import {
   STAFF_ATTACHMENT_PENDING_TTL_MS,
   StaffAttachmentsService,
 } from './staff-attachments.service';
+import { StaffChecklistAccessPolicyService } from './staff-checklist-access-policy.service';
 import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-policy.service';
 import { StaffShiftRegulationAccessPolicyService } from './staff-shift-regulation-access-policy.service';
 import type { StaffTeamChatService } from './staff-team-chat.service';
@@ -158,6 +159,9 @@ describe('StaffAttachmentsService', () => {
       teamChat as unknown as StaffTeamChatService,
       staffTasks as unknown as StaffTasksService,
       { resolve: resolveFreshStoreScope } as never,
+      new StaffChecklistAccessPolicyService({
+        resolve: resolveFreshStoreScope,
+      } as never),
       new StaffKnowledgeAccessPolicyService({
         resolve: resolveFreshStoreScope,
       } as never),
@@ -607,25 +611,13 @@ describe('StaffAttachmentsService', () => {
       expect(resolveFreshStoreScope).toHaveBeenCalledWith(user);
       expect(parentDelegate.findFirst).toHaveBeenCalledWith({
         where:
-          resourceKind === 'KNOWLEDGE_ARTICLE'
+          resourceKind === 'CHECKLIST_RUN'
             ? {
                 id: { in: [resourceId] },
                 tenantId: 'tenant-a',
-                AND: [
-                  {
-                    status: 'PUBLISHED',
-                    roleScope: {
-                      in: [
-                        'ALL_STAFF',
-                        'ADMINISTRATOR',
-                        'SENIOR_ADMINISTRATOR',
-                        'CLUB_MANAGER',
-                      ],
-                    },
-                  },
-                ],
+                AND: [{}],
               }
-            : resourceKind === 'SHIFT_REGULATION'
+            : resourceKind === 'KNOWLEDGE_ARTICLE'
               ? {
                   id: { in: [resourceId] },
                   tenantId: 'tenant-a',
@@ -634,34 +626,34 @@ describe('StaffAttachmentsService', () => {
                       status: 'PUBLISHED',
                       roleScope: {
                         in: [
+                          'ALL_STAFF',
                           'ADMINISTRATOR',
                           'SENIOR_ADMINISTRATOR',
-                          'MANAGER',
-                          'ALL_STAFF',
+                          'CLUB_MANAGER',
                         ],
                       },
                     },
                   ],
                 }
-              : resourceKind === 'TRAINING_COURSE'
+              : resourceKind === 'SHIFT_REGULATION'
                 ? {
                     id: { in: [resourceId] },
                     tenantId: 'tenant-a',
                     AND: [
                       {
-                        status: 'ACTIVE',
+                        status: 'PUBLISHED',
                         roleScope: {
                           in: [
-                            'ALL_STAFF',
                             'ADMINISTRATOR',
                             'SENIOR_ADMINISTRATOR',
-                            'CLUB_MANAGER',
+                            'MANAGER',
+                            'ALL_STAFF',
                           ],
                         },
                       },
                     ],
                   }
-                : resourceKind === 'ONBOARDING_PLAN'
+                : resourceKind === 'TRAINING_COURSE'
                   ? {
                       id: { in: [resourceId] },
                       tenantId: 'tenant-a',
@@ -679,10 +671,28 @@ describe('StaffAttachmentsService', () => {
                         },
                       ],
                     }
-                  : {
-                      id: { in: [resourceId] },
-                      tenantId: 'tenant-a',
-                    },
+                  : resourceKind === 'ONBOARDING_PLAN'
+                    ? {
+                        id: { in: [resourceId] },
+                        tenantId: 'tenant-a',
+                        AND: [
+                          {
+                            status: 'ACTIVE',
+                            roleScope: {
+                              in: [
+                                'ALL_STAFF',
+                                'ADMINISTRATOR',
+                                'SENIOR_ADMINISTRATOR',
+                                'CLUB_MANAGER',
+                              ],
+                            },
+                          },
+                        ],
+                      }
+                    : {
+                        id: { in: [resourceId] },
+                        tenantId: 'tenant-a',
+                      },
         select: { id: true },
       });
       expect(canReadAnyAttachmentMessage).not.toHaveBeenCalled();

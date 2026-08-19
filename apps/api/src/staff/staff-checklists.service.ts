@@ -2655,7 +2655,9 @@ export class StaffChecklistsService {
           metrics.timedItemsOnTime += 1;
         } else if (evaluation.status === 'EARLY') {
           metrics.timedItemsEarly += 1;
-          metrics.timingViolations += 1;
+          // Completing a checklist item before its target time is allowed.
+          // Keep it visible in the early metric, but do not penalize discipline.
+          metrics.timedItemsOnTime += 1;
         } else if (evaluation.status === 'LATE') {
           metrics.timedItemsLate += 1;
           metrics.timingViolations += 1;

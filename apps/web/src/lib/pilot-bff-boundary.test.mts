@@ -4,6 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { resolveGuestPortalGetUpstreamQuery } from "./guest-portal-bff.ts";
 import { resolveTeamChatEventUpstreamQuery } from "./team-chat-events.ts";
 
 const API_ROUTE_ROOT = fileURLToPath(new URL("../app/api", import.meta.url));
@@ -118,6 +119,57 @@ test("keeps guest JWT inside the short-lived HttpOnly cookie boundary", async ()
   assert.match(route, /priority:\s*["']high["']/);
   assert.doesNotMatch(route, /NextResponse\.json\(data\)/);
   assert.doesNotMatch(clubSelect, /handoff\.token/);
+});
+
+test("keeps guest portal GET queries allowlisted before upstream fetch", async () => {
+  const route = await readFile(
+    path.join(API_ROUTE_ROOT, "guest-portal", "[...path]", "route.ts"),
+    "utf8",
+  );
+
+  assert.match(
+    route,
+    /resolveGuestPortalGetUpstreamQuery\(path, request\.url\)/,
+  );
+  assert.match(route, /upstreamQuery === null/);
+  assert.doesNotMatch(route, /guestPortalPath\(path\)\}\$\{url\.search\}/);
+
+  assert.equal(
+    resolveGuestPortalGetUpstreamQuery(
+      ["gamification", "clubs"],
+      "https://leetplus.invalid/api/guest-portal/gamification/clubs?lat=56.8&lng=60.6&radiusKm=15",
+    ),
+    "?lat=56.8&lng=60.6&radiusKm=15",
+  );
+  assert.equal(
+    resolveGuestPortalGetUpstreamQuery(
+      ["session", "game-missions"],
+      "https://leetplus.invalid/api/guest-portal/session/game-missions?offset=10&limit=20",
+    ),
+    "?offset=10&limit=20",
+  );
+
+  for (const invalidUrl of [
+    "https://leetplus.invalid/api/guest-portal/gamification/clubs?tenantSlug=other",
+    "https://leetplus.invalid/api/guest-portal/gamification/clubs?lat=56.8&lat=57.0",
+    "https://leetplus.invalid/api/guest-portal/session/game-missions?storeId=hidden",
+    "https://leetplus.invalid/api/guest-portal/session?tenantSlug=hidden",
+    "https://leetplus.invalid/api/guest-portal/leet/club-1337/public-config?storeId=hidden",
+  ]) {
+    assert.equal(
+      resolveGuestPortalGetUpstreamQuery(
+        invalidUrl.includes("gamification/clubs")
+          ? ["gamification", "clubs"]
+          : invalidUrl.includes("game-missions")
+            ? ["session", "game-missions"]
+            : invalidUrl.includes("public-config")
+              ? ["leet", "club-1337", "public-config"]
+              : ["session"],
+        invalidUrl,
+      ),
+      null,
+    );
+  }
 });
 
 test("sets a defensive private/no-store response policy on every BFF API path", async () => {

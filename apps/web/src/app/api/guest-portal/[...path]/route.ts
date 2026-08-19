@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getApiUrl, readApiError } from "@/lib/api";
+import { resolveGuestPortalGetUpstreamQuery } from "@/lib/guest-portal-bff";
 import { GUEST_AUTH_COOKIE_NAME } from "@/lib/guest-portal";
 import { sanitizeGuestSessionResponse } from "@/lib/guest-session-transport";
 
@@ -17,8 +18,15 @@ function guestPortalPath(path: string[]) {
 
 export async function GET(request: Request, { params }: RouteContext) {
   const { path } = await params;
-  const url = new URL(request.url);
+  const upstreamQuery = resolveGuestPortalGetUpstreamQuery(path, request.url);
   const headers: Record<string, string> = {};
+
+  if (upstreamQuery === null) {
+    return NextResponse.json(
+      { message: "Недопустимые параметры запроса гостевого модуля." },
+      { status: 400 },
+    );
+  }
 
   if (path.length >= 1 && path[0] === "session") {
     const cookieStore = await cookies();
@@ -35,7 +43,7 @@ export async function GET(request: Request, { params }: RouteContext) {
   }
 
   const response = await fetch(
-    `${getApiUrl()}${guestPortalPath(path)}${url.search}`,
+    `${getApiUrl()}${guestPortalPath(path)}${upstreamQuery}`,
     {
       headers,
       cache: "no-store",

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.172                                        |
+| Версия           | 1.173                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -136,6 +136,13 @@ lookup, profile mutation и JWT signing; Mini App reject происходит д
 candidate/profile lookup и JWT signing, чтобы один доступный кандидат не
 выбирался молча при конфликтующих selectors. Targeted guest portal service
 suite `196/196`; полный Telegram/public-guest/outbound matrix ещё открыт.
+
+Successor public guest BFF query allowlist: active
+`/api/guest-portal/[...path]` GET пересылает только `lat/lng/radiusKm` для
+public club directory и `offset/limit` для authenticated missions paging. Все
+прочие query, включая tenant/store-like selectors на session/public-config
+paths, получают `400` до upstream fetch. Web `test:pilot-bff-boundary` `19/19`;
+полный public guest/Telegram/outbound matrix ещё открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

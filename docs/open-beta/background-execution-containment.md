@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.11                                                    |
+| Версия           | 1.12                                                    |
 | Дата             | 29.07.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -267,6 +267,9 @@ Suite проверяет:
 
 Successor identity metadata exact-SHA CI acceptance:
 [background execution identity metadata evidence 19.08.2026](./background-execution-identity-metadata-ci-evidence-2026-08-19.md).
+
+Runtime identity foundation exact-SHA CI acceptance:
+[background runtime identity foundation evidence 19.08.2026](./background-runtime-identity-foundation-ci-evidence-2026-08-19.md).
 
 Последний принятый baseline-результат до расширения migration-166 containment:
 

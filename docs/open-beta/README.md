@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.184                                        |
+| Версия           | 1.185                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -209,7 +209,9 @@ system actor для tenant-wide jobs и tenant+store actor для store-bound jo
 Локально зелёные targeted background/tenant execution suites, tenant-execution
 ESLint, API typecheck и diff-check. Это ещё не означает, что каждый legacy
 scheduler call-site переключён на отдельный runtime actor; подключение
-конкретных job paths остаётся следующим worker-plane этапом.
+конкретных job paths остаётся следующим worker-plane этапом. Exact-SHA CI
+acceptance:
+[background runtime identity foundation evidence 19.08.2026](./background-runtime-identity-foundation-ci-evidence-2026-08-19.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

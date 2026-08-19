@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.37
+- Версия: 3.38
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -55,8 +55,11 @@
   а policy-deny имеет приоритет над любым actor. Локально зелёные:
   `test:ci:background-execution` (`16/16 suites`, `792/792 tests`),
   `test:ci:tenant-execution` (`18/18 suites`, `998/998 tests`),
-  `lint:ci:tenant-execution`, API typecheck и `git diff --check`. Это
-  foundation, не полное переключение legacy scheduler call-sites; внешний
+  `lint:ci:tenant-execution`, API typecheck и `git diff --check`. Exact-SHA
+  `9a247695da70fafca9232972de4b42bcda8eb421` принят GitHub Actions run
+  `32271915712` attempt `2` как `4/4 SUCCESS`; evidence:
+  `docs/open-beta/background-runtime-identity-foundation-ci-evidence-2026-08-19.md`.
+  Это foundation, не полное переключение legacy scheduler call-sites; внешний
   доступ остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;

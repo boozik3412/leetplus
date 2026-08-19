@@ -8091,6 +8091,7 @@ describe('GuestPortalService', () => {
         APP_ENCRYPTION_KEY: 'test-secret',
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
         GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED: 'true',
+        GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS: '1234',
         GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
       });
       const codeHash = createHmac('sha256', 'test-secret')
@@ -8132,6 +8133,7 @@ describe('GuestPortalService', () => {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: expect.any(String),
+            signal: expect.any(AbortSignal),
           }),
         );
 

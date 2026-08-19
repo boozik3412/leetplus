@@ -86,6 +86,9 @@ const GUEST_TOKEN_EXPIRES_IN = '7d';
 const GUEST_PORTAL_PURPOSE = 'guest_portal';
 const TELEGRAM_LINK_TTL_MINUTES = 15;
 const TELEGRAM_MINI_APP_INIT_DATA_TTL_SECONDS = 60 * 60 * 24;
+const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS = 15_000;
+const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MIN_MS = 1000;
+const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MAX_MS = 120_000;
 const TELEGRAM_AUTH_PROFILE_STATUS = 'PENDING_TELEGRAM_AUTH';
 const TELEGRAM_AUTH_MERGED_PROFILE_STATUS = 'MERGED_TELEGRAM_AUTH';
 const TELEGRAM_AUTH_PENDING_STATUS = 'AUTH_PENDING';
@@ -9599,12 +9602,21 @@ export class GuestPortalService {
       };
     }
 
+    const timeoutMs = configBoundedInteger(
+      this.configService,
+      'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS',
+      TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS,
+      TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MIN_MS,
+      TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MAX_MS,
+    );
+
     try {
       await sendTelegramWebhookReply({
         token,
         chatId: telegramChatId,
         text: response.reply.text,
         replyMarkup: response.reply.replyMarkup,
+        timeoutMs,
       });
 
       const responseWithoutReply = { ...response };
@@ -16683,6 +16695,26 @@ function configPositiveInteger(
   return Math.max(0, Math.floor(parsed));
 }
 
+function configBoundedInteger(
+  configService: ConfigService,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+) {
+  const raw = configService.get<string>(key)?.trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
+}
+
 function otpMessage(code: string, context: TenantStoreContext) {
   return [
     `Код LeetPlus: ${code}`,
@@ -16851,6 +16883,7 @@ async function sendTelegramWebhookReply({
   chatId,
   text,
   replyMarkup,
+  timeoutMs,
 }: {
   token: string;
   chatId: string;
@@ -16858,32 +16891,40 @@ async function sendTelegramWebhookReply({
   replyMarkup?: NonNullable<
     GuestPortalTelegramWebhookResponse['reply']
   >['replyMarkup'];
+  timeoutMs: number;
 }) {
   const body = buildTelegramSendMessageBody({ chatId, text, replyMarkup });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  const response = await fetch(
-    `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-  );
-  const payload = await safeJson(response);
-  const ok =
-    payload && typeof payload === 'object' && 'ok' in payload
-      ? Boolean((payload as { ok?: unknown }).ok)
-      : response.ok;
-
-  if (!response.ok || !ok) {
-    throw new Error(
-      `Telegram webhook reply failed: ${
-        providerErrorText(payload) || response.status
-      }`,
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      },
     );
-  }
+    const payload = await safeJson(response);
+    const ok =
+      payload && typeof payload === 'object' && 'ok' in payload
+        ? Boolean((payload as { ok?: unknown }).ok)
+        : response.ok;
 
-  return payload;
+    if (!response.ok || !ok) {
+      throw new Error(
+        `Telegram webhook reply failed: ${
+          providerErrorText(payload) || response.status
+        }`,
+      );
+    }
+
+    return payload;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function safeJson(response: Response) {

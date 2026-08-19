@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.177                                        |
+| Версия           | 1.178                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -169,6 +169,13 @@ non-HTTPS URLs отклоняются до Telegram fetch; edge возвраща
 `replySent=false/outboundRejected=true` для unsafe upstream reply. Targeted API
 tests `207/207`, API typecheck, targeted ESLint и Prettier зелёные. Полный
 tenant-aware public guest/Telegram/outbound matrix ещё открыт.
+
+Successor API Telegram webhook reply timeout: active
+Встроенный API sender для `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED=true`
+отправляет Bot API request с `AbortSignal` и bounded timeout
+`GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS`: default `15000`, clamp
+`1000..120000`. Это не включает outbound для beta tenant; полный tenant-aware
+public guest/Telegram/outbound matrix ещё открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

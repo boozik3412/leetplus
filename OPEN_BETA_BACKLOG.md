@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.30
+- Версия: 3.31
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -202,6 +202,16 @@
   API typecheck, targeted ESLint и Prettier зелёные. Это закрывает только
   shape-level Telegram reply projection; полный tenant-aware
   public guest/Telegram/outbound matrix и production canary остаются открыты.
+- Gate 1MT API Telegram webhook reply timeout: active
+  Встроенный API sender для `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED=true`
+  теперь всегда отправляет Bot API request с `AbortSignal` и bounded timeout
+  `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS` (`15000` по умолчанию,
+  clamp `1000..120000`). Таймер очищается в `finally`, а provider failure
+  остаётся в существующем `replyDispatch.status=FAILED` без повторного
+  раскрытия reply token. Targeted API tests `207/207`, API typecheck и
+  targeted ESLint зелёные. Это не включает outbound для beta tenant; full
+  tenant-aware public guest/Telegram/outbound matrix и production canary
+  остаются открыты.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

@@ -657,7 +657,6 @@ const networkOnlyStaffPrefixes = [
   "/staff/checklist-templates",
   "/staff/checklists",
   "/staff/discipline",
-  "/staff/onboarding",
   "/staff/operations-dashboard",
   "/staff/readiness-report",
   "/staff/salary",
@@ -732,9 +731,9 @@ function canAccessOwnDisciplinePath(user: AuthUser | null, href: string) {
 
   return Boolean(
     user &&
-      path === "/staff/discipline" &&
-      (user.role === "SENIOR_ADMINISTRATOR" ||
-        user.role === "CLUB_ADMINISTRATOR"),
+    path === "/staff/discipline" &&
+    (user.role === "SENIOR_ADMINISTRATOR" ||
+      user.role === "CLUB_ADMINISTRATOR"),
   );
 }
 

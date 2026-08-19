@@ -156,6 +156,71 @@ describe('StaffTrainingAccessPolicyService', () => {
     ).toEqual([{ storeId: 'store-a1', label: 'A1' }]);
   });
 
+  it('keeps STORES onboarding writable only in allowed clubs and references active', async () => {
+    const { policy } = subject('STORES');
+    const access = await policy.resolve(user('STORES', managerPermissions));
+    const activeForRole = {
+      status: 'ACTIVE',
+      roleScope: {
+        in: [
+          'ALL_STAFF',
+          'ADMINISTRATOR',
+          'SENIOR_ADMINISTRATOR',
+          'CLUB_MANAGER',
+        ],
+      },
+    };
+
+    expect(policy.readableOnboardingPlanWhere(access)).toEqual({
+      OR: [
+        { storeId: { in: ['store-a1'] } },
+        { storeId: null, ...activeForRole },
+      ],
+    });
+    expect(
+      policy.canManageOnboardingPlan(access, { storeId: 'store-a1' }),
+    ).toBe(true);
+    expect(policy.canManageOnboardingPlan(access, { storeId: null })).toBe(
+      false,
+    );
+    expect(
+      policy.canManageOnboardingPlan(access, { storeId: 'store-a2' }),
+    ).toBe(false);
+    expect(() =>
+      policy.assertWritableOnboardingStore(access, 'store-a1'),
+    ).not.toThrow();
+    expect(() => policy.assertWritableOnboardingStore(access, null)).toThrow(
+      ForbiddenException,
+    );
+    expect(() =>
+      policy.assertWritableOnboardingStore(access, 'store-a2'),
+    ).toThrow(ForbiddenException);
+
+    expect(policy.visibleTaskTemplatesWhere(access)).toEqual({
+      tenantId: 'tenant-a',
+      status: 'ACTIVE',
+      OR: [{ storeId: { in: ['store-a1'] } }, { storeId: null }],
+    });
+    expect(policy.visibleChecklistTemplatesWhere(access)).toEqual({
+      tenantId: 'tenant-a',
+      OR: [
+        { storeId: { in: ['store-a1'] }, status: 'ACTIVE' },
+        { storeId: null, ...activeForRole },
+      ],
+    });
+    expect(policy.visibleRegulationsWhere(access)).toEqual({
+      tenantId: 'tenant-a',
+      OR: [
+        { storeId: { in: ['store-a1'] }, status: 'PUBLISHED' },
+        {
+          storeId: null,
+          status: 'PUBLISHED',
+          roleScope: activeForRole.roleScope,
+        },
+      ],
+    });
+  });
+
   it('rejects a fresh subject without training visibility', async () => {
     const { policy } = subject('STORES');
 

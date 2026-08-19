@@ -470,15 +470,35 @@ export class StaffAttachmentsService {
     }
 
     grouped.delete('TRAINING_COURSE');
+
+    const onboardingPlanIds = grouped.get('ONBOARDING_PLAN');
+    if (onboardingPlanIds && onboardingPlanIds.size > 0) {
+      const trainingAccess =
+        await this.staffTrainingAccessPolicyService.resolve(user);
+      const plan = await tx.staffOnboardingPlan.findFirst({
+        where:
+          this.staffTrainingAccessPolicyService.readableOnboardingPlanIdsWhere(
+            trainingAccess,
+            [...onboardingPlanIds],
+          ),
+        select: { id: true },
+      });
+
+      if (plan) {
+        return true;
+      }
+    }
+
+    grouped.delete('ONBOARDING_PLAN');
     if (grouped.size === 0) {
       return false;
     }
 
     const scope = await this.freshStoreScopeService.resolve(user);
 
-    // The parent workspaces are still protected by FreshNetworkScopeGuard.
-    // Do not let their files become a side door for a STORES subject before
-    // each parent receives its own store-aware visibility policy.
+    // Remaining parent workspaces are still protected by
+    // FreshNetworkScopeGuard. Do not let their files become a side door for a
+    // STORES subject before each parent receives a store-aware policy.
     if (scope.mode !== 'NETWORK') {
       return false;
     }
@@ -493,12 +513,6 @@ export class StaffAttachmentsService {
       switch (resourceKind) {
         case 'CHECKLIST_RUN':
           parent = await tx.staffChecklistRun.findFirst({
-            where,
-            select: { id: true },
-          });
-          break;
-        case 'ONBOARDING_PLAN':
-          parent = await tx.staffOnboardingPlan.findFirst({
             where,
             select: { id: true },
           });

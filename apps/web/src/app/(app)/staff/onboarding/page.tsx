@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffOnboardingWorkspace } from "@/components/staff-onboarding-workspace";
-import { requireNetworkScopedUser } from "@/lib/auth";
+import { requireCurrentUser } from "@/lib/auth";
 import {
   getStaffOnboardingReport,
   type StaffOnboardingFilters,
@@ -78,7 +78,7 @@ export default async function StaffOnboardingPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireNetworkScopedUser();
+  await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffOnboardingReport(filters);
@@ -185,7 +185,11 @@ export default async function StaffOnboardingPage({
                 defaultValue={report.filters.storeId ?? ""}
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               >
-                <option value="">Вся сеть</option>
+                <option value="">
+                  {report.accessScope === "NETWORK"
+                    ? "Вся сеть"
+                    : "Все доступные"}
+                </option>
                 {report.stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}

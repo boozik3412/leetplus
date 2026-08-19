@@ -309,7 +309,6 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
     "checklists/page.tsx",
     "checklists/report/page.tsx",
     "discipline/page.tsx",
-    "onboarding/page.tsx",
     "operations-dashboard/page.tsx",
     "readiness-report/page.tsx",
     "salary/page.tsx",
@@ -400,6 +399,23 @@ test("keeps store-aware training courses and profiles behind authenticated API a
     assert.match(source, /await requireCurrentUser\(\)/);
     assert.doesNotMatch(source, /requireNetworkScopedUser/);
   }
+});
+
+test("keeps store-aware onboarding behind authenticated API authority", async () => {
+  const pageSource = await readFile(
+    fileURLToPath(
+      new URL("../app/(app)/staff/onboarding/page.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    pageSource,
+    /import \{ requireCurrentUser \} from ["']@\/lib\/auth["']/,
+  );
+  assert.match(pageSource, /await requireCurrentUser\(\)/);
+  assert.match(pageSource, /report\.accessScope === ["']NETWORK["']/);
+  assert.doesNotMatch(pageSource, /requireNetworkScopedUser/);
 });
 
 async function routeInventory(): Promise<readonly RouteInventoryRow[]> {

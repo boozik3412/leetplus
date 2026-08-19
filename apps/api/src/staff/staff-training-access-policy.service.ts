@@ -73,6 +73,40 @@ export class StaffTrainingAccessPolicyService {
     };
   }
 
+  readableOnboardingPlanWhere(
+    access: StaffTrainingAccess,
+  ): Prisma.StaffOnboardingPlanWhereInput {
+    const activeForRole: Prisma.StaffOnboardingPlanWhereInput = {
+      status: 'ACTIVE',
+      roleScope: { in: [...access.visibleRoleScopes] },
+    };
+
+    if (access.mode === 'NETWORK') {
+      return access.canManageTraining ? {} : activeForRole;
+    }
+
+    return {
+      OR: [
+        {
+          storeId: { in: [...access.allowedStoreIds] },
+          ...(access.canManageTraining ? {} : activeForRole),
+        },
+        { storeId: null, ...activeForRole },
+      ],
+    };
+  }
+
+  readableOnboardingPlanIdsWhere(
+    access: StaffTrainingAccess,
+    resourceIds: readonly string[],
+  ): Prisma.StaffOnboardingPlanWhereInput {
+    return {
+      tenantId: access.tenantId,
+      id: { in: [...resourceIds] },
+      AND: [this.readableOnboardingPlanWhere(access)],
+    };
+  }
+
   activeProfileCourseWhere(
     access: StaffTrainingAccess,
   ): Prisma.StaffTrainingCourseWhereInput {
@@ -138,6 +172,81 @@ export class StaffTrainingAccessPolicyService {
     };
   }
 
+  visibleTaskTemplatesWhere(
+    access: StaffTrainingAccess,
+  ): Prisma.StaffTaskTemplateWhereInput {
+    return {
+      tenantId: access.tenantId,
+      status: 'ACTIVE',
+      ...(access.mode === 'STORES'
+        ? {
+            OR: [
+              { storeId: { in: [...access.allowedStoreIds] } },
+              { storeId: null },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  visibleChecklistTemplatesWhere(
+    access: StaffTrainingAccess,
+  ): Prisma.StaffChecklistTemplateWhereInput {
+    const activeForRole: Prisma.StaffChecklistTemplateWhereInput = {
+      status: 'ACTIVE',
+      roleScope: { in: [...access.visibleRoleScopes] },
+    };
+
+    if (access.mode === 'NETWORK') {
+      return {
+        tenantId: access.tenantId,
+        ...(access.canManageTraining ? { status: 'ACTIVE' } : activeForRole),
+      };
+    }
+
+    return {
+      tenantId: access.tenantId,
+      OR: [
+        {
+          storeId: { in: [...access.allowedStoreIds] },
+          ...(access.canManageTraining ? { status: 'ACTIVE' } : activeForRole),
+        },
+        { storeId: null, ...activeForRole },
+      ],
+    };
+  }
+
+  visibleRegulationsWhere(
+    access: StaffTrainingAccess,
+  ): Prisma.StaffShiftRegulationWhereInput {
+    const publishedForRole: Prisma.StaffShiftRegulationWhereInput = {
+      status: 'PUBLISHED',
+      roleScope: { in: [...access.visibleRoleScopes] },
+    };
+
+    if (access.mode === 'NETWORK') {
+      return {
+        tenantId: access.tenantId,
+        ...(access.canManageTraining
+          ? { status: 'PUBLISHED' }
+          : publishedForRole),
+      };
+    }
+
+    return {
+      tenantId: access.tenantId,
+      OR: [
+        {
+          storeId: { in: [...access.allowedStoreIds] },
+          ...(access.canManageTraining
+            ? { status: 'PUBLISHED' }
+            : publishedForRole),
+        },
+        { storeId: null, ...publishedForRole },
+      ],
+    };
+  }
+
   visibleUsersWhere(access: StaffTrainingAccess): Prisma.UserWhereInput {
     if (!access.canManageTraining) {
       return {
@@ -180,6 +289,18 @@ export class StaffTrainingAccessPolicyService {
     );
   }
 
+  canManageOnboardingPlan(
+    access: StaffTrainingAccess,
+    plan: { storeId: string | null },
+  ): boolean {
+    return (
+      access.canManageTraining &&
+      (access.mode === 'NETWORK' ||
+        (plan.storeId !== null &&
+          access.allowedStoreIds.includes(plan.storeId)))
+    );
+  }
+
   canManageUser(
     access: StaffTrainingAccess,
     target: { id: string; storeAccesses: Array<{ storeId: string }> },
@@ -211,6 +332,25 @@ export class StaffTrainingAccessPolicyService {
     if (storeId === null || !access.allowedStoreIds.includes(storeId)) {
       throw new ForbiddenException(
         'Training course is outside your store access scope',
+      );
+    }
+  }
+
+  assertWritableOnboardingStore(
+    access: StaffTrainingAccess,
+    storeId: string | null,
+  ): void {
+    if (!access.canManageTraining) {
+      throw new ForbiddenException('Onboarding plan editing is not allowed');
+    }
+
+    if (access.mode === 'NETWORK') {
+      return;
+    }
+
+    if (storeId === null || !access.allowedStoreIds.includes(storeId)) {
+      throw new ForbiddenException(
+        'Onboarding plan is outside your store access scope',
       );
     }
   }

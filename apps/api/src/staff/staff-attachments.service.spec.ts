@@ -661,10 +661,28 @@ describe('StaffAttachmentsService', () => {
                       },
                     ],
                   }
-                : {
-                    id: { in: [resourceId] },
-                    tenantId: 'tenant-a',
-                  },
+                : resourceKind === 'ONBOARDING_PLAN'
+                  ? {
+                      id: { in: [resourceId] },
+                      tenantId: 'tenant-a',
+                      AND: [
+                        {
+                          status: 'ACTIVE',
+                          roleScope: {
+                            in: [
+                              'ALL_STAFF',
+                              'ADMINISTRATOR',
+                              'SENIOR_ADMINISTRATOR',
+                              'CLUB_MANAGER',
+                            ],
+                          },
+                        },
+                      ],
+                    }
+                  : {
+                      id: { in: [resourceId] },
+                      tenantId: 'tenant-a',
+                    },
         select: { id: true },
       });
       expect(canReadAnyAttachmentMessage).not.toHaveBeenCalled();

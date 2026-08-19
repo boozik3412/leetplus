@@ -290,7 +290,6 @@ const STAFF_NETWORK_ROUTE_IDS = [
   'GET /staff/checklists/report/export',
   'GET /staff/discipline',
   'GET /staff/discipline/export',
-  'GET /staff/onboarding',
   'GET /staff/operations-dashboard',
   'GET /staff/readiness-report',
   'GET /staff/salary',
@@ -300,7 +299,6 @@ const STAFF_NETWORK_ROUTE_IDS = [
   'PATCH /staff/checklists/:id',
   'PATCH /staff/discipline/policy',
   'PATCH /staff/discipline/records/:id',
-  'PATCH /staff/onboarding/:id',
   'PATCH /staff/salary/periods/:id/rows/:userId',
   'PATCH /staff/salary/schemes/:id',
   'POST /guests/staff-control/identity-mappings',
@@ -312,7 +310,6 @@ const STAFF_NETWORK_ROUTE_IDS = [
   'POST /staff/checklists/:id/items/:itemId/review-messages',
   'POST /staff/checklists/:id/items/:itemId/review-resolve',
   'POST /staff/discipline/records',
-  'POST /staff/onboarding',
   'POST /staff/salary/periods',
   'POST /staff/salary/schemes',
 ] as const;

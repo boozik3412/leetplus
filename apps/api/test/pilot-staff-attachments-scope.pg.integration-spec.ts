@@ -237,7 +237,7 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('adopts store-aware knowledge, shift-regulation and training parents while other kinds remain NETWORK-only', async () => {
+  it('adopts store-aware knowledge, onboarding, shift-regulation and training parents while other kinds remain NETWORK-only', async () => {
     const fixture = await createFixture(prisma);
     rememberFixture(fixtureTenantIds, fixture);
     const { attachments: service, bindings } = buildServices(prisma);
@@ -280,7 +280,8 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       if (
         resourceKind === StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE ||
         resourceKind === StaffAttachmentResourceKind.SHIFT_REGULATION ||
-        resourceKind === StaffAttachmentResourceKind.TRAINING_COURSE
+        resourceKind === StaffAttachmentResourceKind.TRAINING_COURSE ||
+        resourceKind === StaffAttachmentResourceKind.ONBOARDING_PLAN
       ) {
         await expect(
           service.getAttachment(buildUser(fixture, 'A1'), attachment.id),
@@ -788,6 +789,314 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
     expect(networkReport.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: storeA2CourseId, canManage: true }),
+      ]),
+    );
+  });
+
+  it('enforces onboarding catalog, references, writer and attachment boundaries for STORES', async () => {
+    const fixture = await createFixture(prisma);
+    rememberFixture(fixtureTenantIds, fixture);
+    const services = buildServices(prisma);
+    const networkUser = buildUser(fixture, 'A_NETWORK');
+    const storeA1User = buildUser(fixture, 'A1');
+    const storeA2User = buildUser(fixture, 'A2');
+    const networkPlanId = randomUUID();
+    const storeA2PlanId = randomUUID();
+    const networkCourseId = randomUUID();
+    const storeA2CourseId = randomUUID();
+    const networkTaskId = randomUUID();
+    const storeA1TaskId = randomUUID();
+    const storeA2TaskId = randomUUID();
+    const networkChecklistId = randomUUID();
+    const storeA1ChecklistId = randomUUID();
+    const storeA2ChecklistId = randomUUID();
+    const networkRegulationId = randomUUID();
+    const storeA1RegulationId = randomUUID();
+    const storeA2RegulationId = randomUUID();
+
+    await prisma.$transaction([
+      prisma.staffOnboardingPlan.createMany({
+        data: [
+          {
+            id: networkPlanId,
+            tenantId: fixture.tenantAId,
+            createdByUserId: fixture.userANetworkId,
+            title: `Network active onboarding ${randomUUID()}`,
+            status: 'ACTIVE',
+            roleScope: 'ALL_STAFF',
+            steps: [],
+          },
+          {
+            id: storeA2PlanId,
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA2Id,
+            createdByUserId: fixture.userA2Id,
+            title: `A2 private onboarding ${randomUUID()}`,
+            status: 'ACTIVE',
+            roleScope: 'ALL_STAFF',
+            steps: [],
+          },
+        ],
+      }),
+      prisma.staffTrainingCourse.createMany({
+        data: [
+          {
+            id: networkCourseId,
+            tenantId: fixture.tenantAId,
+            title: `Network onboarding course ${randomUUID()}`,
+            status: 'ACTIVE',
+            roleScope: 'ALL_STAFF',
+            steps: [],
+          },
+          {
+            id: storeA2CourseId,
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA2Id,
+            title: `A2 onboarding course ${randomUUID()}`,
+            status: 'ACTIVE',
+            roleScope: 'ALL_STAFF',
+            steps: [],
+          },
+        ],
+      }),
+      prisma.staffTaskTemplate.createMany({
+        data: [
+          {
+            id: networkTaskId,
+            tenantId: fixture.tenantAId,
+            title: `Network onboarding task ${randomUUID()}`,
+            status: 'ACTIVE',
+          },
+          {
+            id: storeA1TaskId,
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA1Id,
+            title: `A1 onboarding task ${randomUUID()}`,
+            status: 'ACTIVE',
+          },
+          {
+            id: storeA2TaskId,
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA2Id,
+            title: `A2 onboarding task ${randomUUID()}`,
+            status: 'ACTIVE',
+          },
+        ],
+      }),
+      prisma.staffChecklistTemplate.createMany({
+        data: [
+          {
+            id: networkChecklistId,
+            tenantId: fixture.tenantAId,
+            title: `Network onboarding checklist ${randomUUID()}`,
+            status: 'ACTIVE',
+            roleScope: 'ALL_STAFF',
+            sections: [],
+          },
+          {
+            id: storeA1ChecklistId,
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA1Id,
+            title: `A1 onboarding checklist ${randomUUID()}`,
+            status: 'ACTIVE',
+            roleScope: 'ALL_STAFF',
+            sections: [],
+          },
+          {
+            id: storeA2ChecklistId,
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA2Id,
+            title: `A2 onboarding checklist ${randomUUID()}`,
+            status: 'ACTIVE',
+            roleScope: 'ALL_STAFF',
+            sections: [],
+          },
+        ],
+      }),
+      prisma.staffShiftRegulation.createMany({
+        data: [
+          {
+            id: networkRegulationId,
+            tenantId: fixture.tenantAId,
+            title: `Network onboarding regulation ${randomUUID()}`,
+            status: 'PUBLISHED',
+            roleScope: 'ALL_STAFF',
+            sections: [],
+          },
+          {
+            id: storeA1RegulationId,
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA1Id,
+            title: `A1 onboarding regulation ${randomUUID()}`,
+            status: 'PUBLISHED',
+            roleScope: 'ALL_STAFF',
+            sections: [],
+          },
+          {
+            id: storeA2RegulationId,
+            tenantId: fixture.tenantAId,
+            storeId: fixture.storeA2Id,
+            title: `A2 onboarding regulation ${randomUUID()}`,
+            status: 'PUBLISHED',
+            roleScope: 'ALL_STAFF',
+            sections: [],
+          },
+        ],
+      }),
+    ]);
+
+    const ownPlan = await services.onboardingPlans.createPlan(storeA1User, {
+      title: `A1 draft onboarding ${randomUUID()}`,
+      storeId: fixture.storeA1Id,
+      status: 'DRAFT',
+      steps: [
+        {
+          title: 'A1 task',
+          type: 'TASK_TEMPLATE',
+          taskTemplateId: storeA1TaskId,
+        },
+        {
+          title: 'Network checklist',
+          type: 'CHECKLIST_TEMPLATE',
+          checklistTemplateId: networkChecklistId,
+        },
+        {
+          title: 'A1 regulation',
+          type: 'REGULATION',
+          regulationId: storeA1RegulationId,
+        },
+      ],
+    });
+    const report = await services.onboardingPlans.getPlans(storeA1User);
+    const visibleIds = report.rows.map((row) => row.id);
+
+    expect(report.accessScope).toBe('STORES');
+    expect(report.stores.map((store) => store.id)).toEqual([fixture.storeA1Id]);
+    expect(visibleIds).toEqual(
+      expect.arrayContaining([
+        fixture.onboardingPlanA1Id,
+        networkPlanId,
+        ownPlan.id,
+      ]),
+    );
+    expect(visibleIds).not.toContain(storeA2PlanId);
+    expect(report.rows.find((row) => row.id === networkPlanId)?.canManage).toBe(
+      false,
+    );
+    expect(report.rows.find((row) => row.id === ownPlan.id)?.canManage).toBe(
+      true,
+    );
+    expect(report.courses.map((row) => row.id)).toEqual(
+      expect.arrayContaining([fixture.trainingCourseA1Id, networkCourseId]),
+    );
+    expect(report.courses.map((row) => row.id)).not.toContain(storeA2CourseId);
+    expect(report.taskTemplates.map((row) => row.id)).toEqual(
+      expect.arrayContaining([networkTaskId, storeA1TaskId]),
+    );
+    expect(report.taskTemplates.map((row) => row.id)).not.toContain(
+      storeA2TaskId,
+    );
+    expect(report.checklistTemplates.map((row) => row.id)).toEqual(
+      expect.arrayContaining([networkChecklistId, storeA1ChecklistId]),
+    );
+    expect(report.checklistTemplates.map((row) => row.id)).not.toContain(
+      storeA2ChecklistId,
+    );
+    expect(report.regulations.map((row) => row.id)).toEqual(
+      expect.arrayContaining([networkRegulationId, storeA1RegulationId]),
+    );
+    expect(report.regulations.map((row) => row.id)).not.toContain(
+      storeA2RegulationId,
+    );
+
+    await expect(
+      services.onboardingPlans.createPlan(storeA1User, {
+        title: `Network onboarding escape ${randomUUID()}`,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.onboardingPlans.createPlan(storeA1User, {
+        title: `A2 onboarding escape ${randomUUID()}`,
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      services.onboardingPlans.createPlan(storeA1User, {
+        title: `A2 course reference escape ${randomUUID()}`,
+        storeId: fixture.storeA1Id,
+        steps: [
+          {
+            title: 'Foreign course',
+            type: 'COURSE',
+            courseId: storeA2CourseId,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      services.onboardingPlans.getPlans(storeA1User, {
+        storeId: fixture.storeA2Id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      services.onboardingPlans.updatePlan(storeA1User, networkPlanId, {
+        title: 'Forbidden network onboarding edit',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      services.onboardingPlans.updatePlan(storeA1User, storeA2PlanId, {
+        title: 'Forbidden A2 onboarding edit',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    await expect(
+      services.onboardingPlans.updatePlan(storeA1User, ownPlan.id, {
+        title: 'Allowed A1 onboarding edit',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        title: 'Allowed A1 onboarding edit',
+        canManage: true,
+      }),
+    );
+
+    const attachment = await services.attachments.createAttachment(
+      storeA1User,
+      {
+        originalname: `A1 onboarding ${randomUUID()}.txt`,
+        mimetype: 'text/plain',
+        buffer: Buffer.from('onboarding-a1'),
+      },
+    );
+    await services.onboardingPlans.createPlan(storeA1User, {
+      title: `A1 attached onboarding ${randomUUID()}`,
+      storeId: fixture.storeA1Id,
+      status: 'ACTIVE',
+      steps: [
+        {
+          title: 'A1 native attachment',
+          type: 'LINK',
+          url: attachment.url,
+        },
+      ],
+    });
+    await expect(
+      services.attachments.getAttachment(storeA1User, attachment.id),
+    ).resolves.toEqual(
+      expect.objectContaining({ buffer: Buffer.from('onboarding-a1') }),
+    );
+    await expect(
+      services.attachments.getAttachment(storeA2User, attachment.id),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const storeA2Report = await services.onboardingPlans.getPlans(storeA2User);
+    expect(storeA2Report.rows.map((row) => row.id)).toContain(storeA2PlanId);
+    expect(storeA2Report.rows.map((row) => row.id)).not.toContain(ownPlan.id);
+    const networkReport = await services.onboardingPlans.getPlans(networkUser);
+    expect(networkReport.accessScope).toBe('NETWORK');
+    expect(networkReport.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: storeA2PlanId, canManage: true }),
       ]),
     );
   });
@@ -1623,7 +1932,7 @@ function buildServices(prisma: PrismaService) {
     ),
     onboardingPlans: new StaffOnboardingPlansService(
       prisma,
-      tenantContext,
+      trainingAccessPolicy,
       bindings,
     ),
     checklists: new StaffChecklistsService(prisma, tenantContext, bindings),
@@ -1895,6 +2204,8 @@ async function cleanupFixture(prisma: PrismaClient, tenantId: string) {
     prisma.staffChatChannelMember.deleteMany({ where: { tenantId } }),
     prisma.staffChatChannel.deleteMany({ where: { tenantId } }),
     prisma.staffChecklistRun.deleteMany({ where: { tenantId } }),
+    prisma.staffChecklistTemplate.deleteMany({ where: { tenantId } }),
+    prisma.staffTaskTemplate.deleteMany({ where: { tenantId } }),
     prisma.staffKnowledgeArticle.deleteMany({ where: { tenantId } }),
     prisma.staffShiftRegulation.deleteMany({ where: { tenantId } }),
     prisma.staffAssessment.deleteMany({ where: { tenantId } }),

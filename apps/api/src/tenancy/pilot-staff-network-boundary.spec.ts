@@ -74,15 +74,6 @@ const CONTROLLER_BOUNDARIES: readonly ControllerBoundary[] = [
     routeIds: ['GET /staff/administrator-ratings'],
   },
   {
-    source: 'staff/staff-onboarding-plans.controller.ts',
-    className: 'StaffOnboardingPlansController',
-    routeIds: [
-      'GET /staff/onboarding',
-      'PATCH /staff/onboarding/:id',
-      'POST /staff/onboarding',
-    ],
-  },
-  {
     source: 'staff/staff-readiness-report.controller.ts',
     className: 'StaffReadinessReportController',
     routeIds: ['GET /staff/readiness-report'],
@@ -243,6 +234,15 @@ const STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
 ] as const;
 
 const ADOPTED_STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
+  {
+    source: 'staff/staff-onboarding-plans.controller.ts',
+    className: 'StaffOnboardingPlansController',
+    routeIds: [
+      'GET /staff/onboarding',
+      'PATCH /staff/onboarding/:id',
+      'POST /staff/onboarding',
+    ],
+  },
   {
     source: 'staff/staff-knowledge-base.controller.ts',
     className: 'StaffKnowledgeBaseController',
@@ -415,7 +415,7 @@ function namedMethod(
 }
 
 describe('Gate 1MT staff scope boundaries', () => {
-  it('binds exactly 33 staff workspace routes to a fresh NETWORK class guard', () => {
+  it('binds exactly 30 staff workspace routes to a fresh NETWORK class guard', () => {
     const allRouteIds: string[] = [];
 
     for (const boundary of CONTROLLER_BOUNDARIES) {
@@ -431,7 +431,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       allRouteIds.push(...boundary.routeIds);
     }
 
-    expect(allRouteIds).toHaveLength(33);
+    expect(allRouteIds).toHaveLength(30);
     expect(new Set(allRouteIds).size).toBe(allRouteIds.length);
     expect(allRouteIds.some((id) => id.includes('/scheduled/'))).toBe(false);
   });
@@ -473,7 +473,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       ...STAFF_CONTROL_METHOD_BOUNDARIES.map(({ routeId }) => routeId),
     ];
 
-    expect(selected).toHaveLength(43);
+    expect(selected).toHaveLength(40);
     expect(
       selected.every(
         (id) =>
@@ -558,7 +558,7 @@ describe('Gate 1MT staff scope boundaries', () => {
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 
-  it('binds all 17 adopted knowledge, regulation and training routes to fresh NETWORK or STORES authority', () => {
+  it('binds all 20 adopted knowledge, onboarding, regulation and training routes to fresh NETWORK or STORES authority', () => {
     const routeIds: string[] = [];
 
     for (const boundary of ADOPTED_STAFF_STORE_BOUNDARIES) {
@@ -574,7 +574,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       routeIds.push(...boundary.routeIds);
     }
 
-    expect(routeIds).toHaveLength(17);
+    expect(routeIds).toHaveLength(20);
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 });

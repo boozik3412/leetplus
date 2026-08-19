@@ -760,7 +760,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
     staffController(
       'staff-onboarding-plans.controller.ts',
       'onboarding',
-      'NETWORK_VERIFIED',
+      'STORES_VERIFIED',
       [
         ['GET', ['']],
         ['POST', ['']],

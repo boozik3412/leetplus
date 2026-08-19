@@ -11,8 +11,8 @@ const DATABASE_PATTERN = /^lp_founder_artifact_api_[0-9a-f]{32}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const MAX_CHILD_OUTPUT_BYTES = 256 * 1024;
 const EXPECTED_MIGRATION =
-  "20260818020000_identity_mail_delivery_current_head_v1";
-const EXPECTED_MIGRATION_COUNT = 185;
+  "20260819010000_staff_attachment_parent_delete_guard";
+const EXPECTED_MIGRATION_COUNT = 186;
 
 if (
   process.env.FOUNDER_RELEASE_ARTIFACT_API_CONFIRM !== REQUIRED_CONFIRMATION

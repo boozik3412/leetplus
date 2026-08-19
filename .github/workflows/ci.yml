@@ -509,8 +509,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260818020000_identity_mail_delivery_current_head_v1
-          EXPECTED_DATABASE_MIGRATION_COUNT: "185"
+          EXPECTED_DATABASE_MIGRATION: 20260819010000_staff_attachment_parent_delete_guard
+          EXPECTED_DATABASE_MIGRATION_COUNT: "186"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -597,8 +597,8 @@ jobs:
             "  \"releaseSha\": \"$CI_RELEASE_SHA\"," \
             '  "nodeVersion": "22",' \
             '  "pnpmVersion": "10.33.2",' \
-            '  "databaseMigration": "20260818020000_identity_mail_delivery_current_head_v1",' \
-            '  "databaseMigrationCount": 185,' \
+            '  "databaseMigration": "20260819010000_staff_attachment_parent_delete_guard",' \
+            '  "databaseMigrationCount": 186,' \
             '  "runtimePackageManifestsIncluded": true,' \
             '  "founderPilotOperationalScriptsIncluded": true,' \
             '  "founderPilotOperationalScriptCount": 10,' \

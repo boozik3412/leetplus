@@ -551,59 +551,6 @@ function catalogAdmissionDetails(report) {
   return details;
 }
 
-async function workerAssertV1CatalogDetails(sourceUrl, descriptor) {
-  const prisma = new PrismaClient({
-    datasourceUrl: databaseUrlFor(sourceUrl, descriptor.databaseName),
-    log: [],
-  });
-  try {
-    const [row] = await prisma.$queryRawUnsafe(`
-      SELECT
-        pg_catalog.encode(
-          pg_catalog.sha256(
-            pg_catalog.convert_to(
-              pg_catalog.pg_get_functiondef(
-                'public."identity_mail_delivery_worker_assert_v1"(text)'::regprocedure
-              ),
-              'UTF8'
-            )
-          ),
-          'hex'
-        ) AS definition_sha256,
-        function_row.prosecdef AS security_definer,
-        function_row.proisstrict AS strict,
-        function_row.provolatile::text AS volatility,
-        function_row.proconfig AS config,
-        language_row.lanname AS language
-      FROM pg_catalog.pg_proc AS function_row
-      INNER JOIN pg_catalog.pg_language AS language_row
-        ON language_row.oid = function_row.prolang
-      WHERE function_row.oid =
-        'public."identity_mail_delivery_worker_assert_v1"(text)'::regprocedure
-    `);
-    if (!row) {
-      return ["FUNC_WORKER_ASSERT_V1_MISSING"];
-    }
-    const details = [];
-    const digest = String(row.definition_sha256 ?? "");
-    if (/^[0-9a-f]{64}$/u.test(digest)) {
-      details.push(`FUNC_WORKER_ASSERT_V1_SHA256_${digest.toUpperCase()}`);
-    }
-    if (
-      row.security_definer !== true ||
-      row.strict !== false ||
-      row.volatility !== "v" ||
-      row.language !== "plpgsql" ||
-      JSON.stringify(row.config) !== JSON.stringify(["search_path=pg_catalog"])
-    ) {
-      details.push("FUNC_WORKER_ASSERT_V1_METADATA_MISMATCH");
-    }
-    return details;
-  } finally {
-    await prisma.$disconnect();
-  }
-}
-
 function assertSummary(
   report,
   expected,
@@ -2967,18 +2914,9 @@ export async function runSmoke(environment = process.env) {
       expectedMigrationArtifact,
     );
     failureStage = "HEALTHY_SUMMARY";
-    const healthyAdmissionDetails =
-      healthy.report?.summary?.inventoryExecuted === true
-        ? []
-        : await workerAssertV1CatalogDetails(sourceUrl, descriptors[0]);
-    assertSummary(
-      healthy.report,
-      healthy.expectations.expected,
-      (stage) => {
-        failureStage = stage;
-      },
-      healthyAdmissionDetails,
-    );
+    assertSummary(healthy.report, healthy.expectations.expected, (stage) => {
+      failureStage = stage;
+    });
     failureStage = "HEALTHY_METRICS";
     assert.deepEqual(
       healthy.report.metrics,

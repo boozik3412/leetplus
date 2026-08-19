@@ -2022,7 +2022,7 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     result: "jsonb",
     securityDefiner: true,
     definitionSha256:
-      "4231a5a96d238dfa838551e722b56edf8a3787a2929f865508e94b747743cf80",
+      "ea8305627b1e23481f1f735b6cad4114aa9702f3e9f768a48131aa522d3c46c1",
   },
   {
     name: "identity_email_claim_assert_invite_v1",

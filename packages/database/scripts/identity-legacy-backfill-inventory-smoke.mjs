@@ -407,12 +407,157 @@ function findingOccurrences(report, code) {
   return 0;
 }
 
+function appendCountMismatchDetail(details, code, actual, expected) {
+  if (
+    !Number.isSafeInteger(actual) ||
+    !Number.isSafeInteger(expected) ||
+    actual !== expected
+  ) {
+    details.push(code);
+  }
+}
+
+function appendZeroCountDetail(details, code, value) {
+  if (!Number.isSafeInteger(value) || value !== 0) {
+    details.push(code);
+  }
+}
+
+function catalogAdmissionDetails(report) {
+  const catalog = report?.database?.catalog;
+  if (!catalog || catalog.ready === true) {
+    return [];
+  }
+  const details = ["CATALOG_STATE_MISMATCH"];
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_RELATION_COUNT_MISMATCH",
+    catalog.matchedRelationCount,
+    catalog.expectedRelationCount,
+  );
+  appendZeroCountDetail(
+    details,
+    "CATALOG_DORMANT_RELATION_OWNER_MISMATCH",
+    catalog.dormantRelationOwnerMismatchCount,
+  );
+  appendZeroCountDetail(
+    details,
+    "CATALOG_DORMANT_RELATION_ACL_MISMATCH",
+    catalog.dormantRelationNonownerAclCount,
+  );
+  appendZeroCountDetail(
+    details,
+    "CATALOG_DORMANT_COLUMN_ACL_MISMATCH",
+    catalog.dormantColumnNonownerAclCount,
+  );
+  appendZeroCountDetail(
+    details,
+    "CATALOG_DORMANT_FUNCTION_OWNER_MISMATCH",
+    catalog.dormantFunctionOwnerMismatchCount,
+  );
+  appendZeroCountDetail(
+    details,
+    "CATALOG_DORMANT_FUNCTION_ACL_MISMATCH",
+    catalog.dormantFunctionNonownerAclCount,
+  );
+  appendZeroCountDetail(
+    details,
+    "CATALOG_DORMANT_TYPE_OWNER_MISMATCH",
+    catalog.dormantTypeOwnerMismatchCount,
+  );
+  appendZeroCountDetail(
+    details,
+    "CATALOG_DORMANT_TYPE_ACL_MISMATCH",
+    catalog.dormantTypeNonownerAclCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_COLUMN_COUNT_MISMATCH",
+    catalog.matchedColumnCount,
+    catalog.expectedColumnCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_EXACT_IDENTITY_COLUMN_COUNT_MISMATCH",
+    catalog.actualExactIdentityColumnCount,
+    catalog.expectedExactIdentityColumnCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_CONSTRAINT_COUNT_MISMATCH",
+    catalog.actualConstraintCount,
+    catalog.expectedConstraintCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_CONSTRAINT_MATCH_COUNT_MISMATCH",
+    catalog.matchedConstraintCount,
+    catalog.expectedConstraintCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_INDEX_COUNT_MISMATCH",
+    catalog.actualIndexCount,
+    catalog.expectedIndexCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_INDEX_MATCH_COUNT_MISMATCH",
+    catalog.matchedIndexCount,
+    catalog.expectedIndexCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_FUNCTION_COUNT_MISMATCH",
+    catalog.actualFunctionCount,
+    catalog.expectedFunctionCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_FUNCTION_MATCH_COUNT_MISMATCH",
+    catalog.matchedFunctionCount,
+    catalog.expectedFunctionCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_ENUM_LABEL_COUNT_MISMATCH",
+    catalog.matchedEnumLabelCount,
+    catalog.totalEnumLabelCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_TRIGGER_COUNT_MISMATCH",
+    catalog.actualIdentityTriggerCount,
+    catalog.expectedTriggerCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_TRIGGER_MATCH_COUNT_MISMATCH",
+    catalog.matchedTriggerCount,
+    catalog.expectedTriggerCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_RI_TRIGGER_COUNT_MISMATCH",
+    catalog.actualRiTriggerCount,
+    catalog.expectedRiTriggerCount,
+  );
+  appendCountMismatchDetail(
+    details,
+    "CATALOG_RI_TRIGGER_MATCH_COUNT_MISMATCH",
+    catalog.matchedRiTriggerCount,
+    catalog.expectedRiTriggerCount,
+  );
+  return details;
+}
+
 function assertSummary(report, expected, setFailureStage = () => {}) {
   setFailureStage("HEALTHY_SUMMARY_ADMISSION");
   if (report?.summary?.inventoryExecuted !== true) {
     const detail = [
       ...(report?.summary?.admissionRejectionCodes ?? []),
       ...(report?.summary?.schemaRejectionCodes ?? []),
+      ...catalogAdmissionDetails(report),
     ].map((entry) => String(entry));
     throw withFailureDetail(new Error("Inventory admission failed."), detail);
   }

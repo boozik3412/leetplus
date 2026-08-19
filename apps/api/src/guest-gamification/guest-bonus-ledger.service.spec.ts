@@ -194,7 +194,7 @@ function ledgerEntry(overrides: Record<string, unknown> = {}) {
     guestId: 'guest-1',
     profileId: 'profile-1',
     rewardId: 'reward-1',
-    storeId: null,
+    storeId: 'store-1337',
     externalProvider: IntegrationProvider.LANGAME,
     externalDomain: 'club-1',
     externalGuestId: 'lg-guest-1',
@@ -451,6 +451,7 @@ describe('GuestBonusLedgerService', () => {
       dryRun: false,
       queueApprovedRewards: false,
       limit: 1,
+      storeId: 'store-1337',
     });
 
     expect(result).toMatchObject({
@@ -522,6 +523,7 @@ describe('GuestBonusLedgerService', () => {
     await service.dispatch(user, {
       dryRun: false,
       queueApprovedRewards: false,
+      storeId: 'store-1337',
     });
 
     expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledTimes(1);
@@ -807,6 +809,36 @@ describe('GuestBonusLedgerService', () => {
     expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
   });
 
+  it('does not auto-queue, claim, or call Langame when the store runtime identity is missing', async () => {
+    const { service, prisma, langameClient, langameSettingsService } =
+      createService({
+        LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
+      });
+    prisma.guestBonusLedgerEntry.groupBy.mockResolvedValue([
+      { status: 'PENDING', _count: { _all: 2 } },
+    ]);
+    const queueApprovedRewards = jest.spyOn(service, 'queueApprovedRewards');
+
+    await expect(
+      service.dispatch(user, {
+        dryRun: false,
+        queueApprovedRewards: true,
+      }),
+    ).resolves.toMatchObject({
+      mode: 'READY',
+      ready: true,
+      checked: 0,
+      blocked: 2,
+      note: expect.stringContaining('BACKGROUND_STORE_ID_REQUIRED'),
+    });
+
+    expect(queueApprovedRewards).not.toHaveBeenCalled();
+    expect(prisma.guestBonusLedgerEntry.createMany).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+  });
+
   it('does not pass guest portal pseudo-user as ledger processor id', async () => {
     const { service, prisma, langameSettingsService } = createService({
       LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
@@ -841,6 +873,7 @@ describe('GuestBonusLedgerService', () => {
       dryRun: false,
       queueApprovedRewards: false,
       limit: 1,
+      storeId: 'store-1337',
     });
 
     expect((service as any).processClaimedEntry).toHaveBeenCalledWith(
@@ -2415,6 +2448,81 @@ describe('GuestBonusLedgerService', () => {
         errorMessage: expect.stringContaining(
           'BACKGROUND_EXECUTION_STAGE_REQUIRED',
         ),
+      },
+    });
+  });
+
+  it('rechecks store runtime identity after DISPATCHING and before Langame', async () => {
+    const {
+      service,
+      prisma,
+      langameClient,
+      secretEncryptionService,
+      tenantExecutionAdmission,
+    } = createService();
+    const entry = ledgerEntry({
+      storeId: null,
+      status: 'PROCESSING',
+      attempts: 1,
+      metadata: { rewardType: 'BONUS', langameBalanceType: 'bonus_balance' },
+    });
+
+    prisma.guest.findFirst.mockResolvedValue({
+      phoneEncrypted: 'encrypted-phone',
+      phoneMasked: '+7 *** **-33',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    jest.spyOn(service as any, 'markEntryDispatching').mockResolvedValue(true);
+    tenantExecutionAdmission.evaluatePermit.mockResolvedValue({
+      allowed: true,
+      tenantId: user.tenantId,
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      entitlementProfileRevision: 1,
+      executionRevision: 3,
+      customerStage: 'PILOT',
+      internalEntitlementBypass: false,
+    });
+
+    const result = await (service as any).processClaimedEntry(user.id, entry, {
+      mode: 'READY',
+      dryRun: false,
+      ready: true,
+      enabled: true,
+      path: '/master_api/guests/balance/phone',
+      rewardTypes: ['BONUS'],
+      limit: 50,
+      maxAttempts: 5,
+      retryMinutes: 1,
+      staleLockMinutes: 15,
+    });
+
+    expect(result).toMatchObject({
+      ledgerEntryId: entry.id,
+      status: 'BLOCKED',
+      note: expect.stringContaining('BACKGROUND_STORE_ID_REQUIRED'),
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: entry.id,
+        tenantId: entry.tenantId,
+        status: 'DISPATCHING',
+        attempts: entry.attempts,
+        claimGeneration: entry.claimGeneration,
+        lockedAt: expect.any(Date),
+        executionRevision: entry.executionRevision,
+      },
+      data: {
+        status: 'PENDING',
+        processedByUserId: user.id,
+        attempts: { decrement: 1 },
+        lockedAt: null,
+        processedAt: null,
+        failedAt: null,
+        nextAttemptAt: null,
+        errorCode: 'BACKGROUND_RUNTIME_IDENTITY_NOT_ACCEPTED',
+        errorMessage: expect.stringContaining('BACKGROUND_STORE_ID_REQUIRED'),
       },
     });
   });

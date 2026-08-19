@@ -20,9 +20,11 @@ import {
 } from '../tenancy/tenant-execution-admission.service';
 import {
   evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
   tenantBackgroundExecutionNote,
   tenantBackgroundStageForCustomerStage,
   type TenantBackgroundExecutionPolicyDecision,
+  type TenantBackgroundRuntimeIdentityDecision,
 } from '../tenancy/tenant-background-execution-policy';
 import {
   evaluateLegacyGuestGameDeliveryProtocolGate,
@@ -698,6 +700,32 @@ export class GuestBonusLedgerService {
       };
     }
 
+    const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+      decision: backgroundExecution,
+      actorKind: 'TENANT_STORE_SYSTEM',
+      tenantId: user.tenantId,
+      storeId: config.storeId,
+    });
+    if (!runtimeIdentity.accepted) {
+      const status = await this.getStatus(user, dto);
+
+      return {
+        mode: config.mode,
+        dryRun: false,
+        canary: config.canary,
+        ready: config.ready,
+        queued: null,
+        checked: 0,
+        confirmed: 0,
+        failed: 0,
+        skipped: 0,
+        blocked: status.pending + status.failed,
+        items: [],
+        status,
+        note: tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
+      };
+    }
+
     const queued = shouldQueue
       ? await this.queueApprovedRewards(user, dto)
       : null;
@@ -920,8 +948,9 @@ export class GuestBonusLedgerService {
     }
 
     const config = this.resolveConfig();
-    const deliveryProtocolGate =
-      evaluateLegacyGuestGameDeliveryProtocolGate('LEGACY_PROVIDER_REVOKE');
+    const deliveryProtocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
+      'LEGACY_PROVIDER_REVOKE',
+    );
     const result = await this.prisma.$transaction(async (tx) => {
       // Match the worker lock order (reward -> ledger). The pre-read is only
       // a lock-order hint; all authorization and status decisions use the
@@ -1797,6 +1826,31 @@ export class GuestBonusLedgerService {
         };
       }
 
+      const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+        decision: backgroundExecution,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: sourcedEntry.tenantId,
+        storeId: sourcedEntry.storeId,
+      });
+      if (!runtimeIdentity.accepted) {
+        await this.returnDispatchingEntryAfterRuntimeIdentityDenial(
+          actorUserId,
+          sourcedEntry,
+          runtimeIdentity,
+          dispatchLockedAt,
+        );
+
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note: tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
+        };
+      }
+
       const ownsDispatch = await this.ownsCurrentDispatch(
         sourcedEntry,
         dispatchLockedAt,
@@ -1927,6 +1981,39 @@ export class GuestBonusLedgerService {
         nextAttemptAt: null,
         errorCode: 'BACKGROUND_EXECUTION_NOT_ADMITTED',
         errorMessage: truncate(tenantBackgroundExecutionNote(decision), 1000),
+      },
+    });
+  }
+
+  private async returnDispatchingEntryAfterRuntimeIdentityDenial(
+    actorUserId: string | null,
+    entry: ClaimedBonusLedgerEntry,
+    decision: TenantBackgroundRuntimeIdentityDecision,
+    dispatchLockedAt: Date,
+  ): Promise<void> {
+    await this.prisma.guestBonusLedgerEntry.updateMany({
+      where: {
+        id: entry.id,
+        tenantId: entry.tenantId,
+        status: 'DISPATCHING',
+        attempts: entry.attempts,
+        claimGeneration: entry.claimGeneration,
+        lockedAt: dispatchLockedAt,
+        executionRevision: entry.executionRevision,
+      },
+      data: {
+        status: 'PENDING',
+        processedByUserId: actorUserId,
+        attempts: { decrement: 1 },
+        lockedAt: null,
+        processedAt: null,
+        failedAt: null,
+        nextAttemptAt: null,
+        errorCode: 'BACKGROUND_RUNTIME_IDENTITY_NOT_ACCEPTED',
+        errorMessage: truncate(
+          tenantBackgroundRuntimeIdentityNote(decision),
+          1000,
+        ),
       },
     });
   }
@@ -3327,6 +3414,12 @@ function tenantExecutionAdmissionNote(
     : '';
 
   return `Tenant execution admission denied: ${decision.reasonCode}${failedRequirement}.`;
+}
+
+function tenantBackgroundRuntimeIdentityNote(
+  decision: TenantBackgroundRuntimeIdentityDecision,
+) {
+  return `Background runtime identity denied: ${decision.reasonCode}.`;
 }
 
 function bonusLedgerModeLabel(mode: BonusLedgerMode) {

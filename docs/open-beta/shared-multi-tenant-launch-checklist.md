@@ -463,7 +463,10 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [x] Onboarding plans используют fresh `NETWORK | STORES` parent policy для
       list/detail/mutation/reference catalogs/files; local PostgreSQL `12/12`
       и production-build B1↔B2 browser matrix приняты на `26b9f442…`.
-- [ ] Checklists/templates получают ту же store-aware parent/file policy.
+- [x] Checklists/templates используют fresh `NETWORK | STORES` policy для
+      templates/runs/answers/review/reports/exports/files; local PostgreSQL
+      `13/13`, Web BFF `16/16` и production-build B1↔B2 browser приняты на
+      `70d8301d…`.
 - [ ] Control/ratings/motivation/discipline защищены и аудируются.
 - [ ] Salary работает только как planning; payout отсутствует.
 - [ ] Attachments имеют live parent ACL, revoke и tenant/store negative tests.

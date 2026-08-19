@@ -129,12 +129,10 @@ Entitlements и execution revisions управляют включением мо
 4. `DONE ON RESTORED COPY`: activation role/grants/readiness и TLS/HBA/SCRAM rollback.
 5. `DONE`: exact-SHA artifact, artifact-bound admission и restored-copy trusted
    TLS SMTP + enrollment/SENT/accept.
-6. Закрыть STORES adoption одной оставшейся network-only staff parent
-   family (checklists/templates),
-   remaining attachment archive/orphan matrix, jobs/Telegram/public
-   guest/outbound и Gate 2; PostgreSQL A/B `35/35`, reports/SSE, OWNER
-   attachment lifecycle, knowledge, shift-regulations, training и onboarding
-   STORES adoption уже приняты.
+6. Закрыть remaining attachment archive/orphan matrix, остальные STAFF slices,
+   jobs/Telegram/public guest/outbound и Gate 2; PostgreSQL A/B `35/35`,
+   reports/SSE, OWNER attachment lifecycle, knowledge, shift-regulations,
+   training, onboarding и checklists STORES adoption уже приняты.
 7. В `PREPARE` создать production roles/secrets, принять controlled SMTP
    canary, затем включить protected tenant factory, owner route и mail worker.
 8. Выпустить отдельный `SHARED BETA GO`, создать Tenant B/Store B1 и отправить

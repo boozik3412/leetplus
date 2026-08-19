@@ -220,6 +220,15 @@ boundary. Scheduled digest теперь требует exact `TENANT_SYSTEM` act
 не вызывает provider effect. Exact-SHA CI acceptance:
 [report digest runtime identity evidence 19.08.2026](./background-report-digest-runtime-identity-ci-evidence-2026-08-19.md).
 
+Successor bonus ledger runtime identity adoption:
+`GUEST_BONUS_LEDGER_LANGAME` подключён к runtime identity foundation в live
+batch dispatch и на последней Langame balance effect boundary. Live dispatch
+теперь требует exact `TENANT_STORE_SYSTEM + storeId`; missing store identity
+блокирует batch до queue/claim/provider effects, а потерянная store identity у
+claimed entry возвращает ledger в `PENDING` без Langame call. Exact-SHA CI
+acceptance:
+[bonus ledger runtime identity evidence 19.08.2026](./background-bonus-ledger-runtime-identity-ci-evidence-2026-08-19.md).
+
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).
 
@@ -1587,12 +1596,12 @@ Codex явно предупреждает в commentary: рекомендова�
 причина и необходимость (`required` либо `optional`). Модель не переключается
 автоматически: решение остаётся за оператором.
 
-| Тип работ | Рекомендация |
-| --- | --- |
-| Документация, форматирование, isolated fixtures, narrow log triage | `GPT-5.6 Luna` с `Low`/`Medium`; optional switch |
-| Обычная реализация, CI repair, focused API/Web/PostgreSQL tests | `GPT-5.6 Terra` с `Medium`; default |
-| Tenant/IAM/RBAC, migrations, races, Telegram/provider outbound, jobs, secrets | `GPT-5.6 Terra` с `High`; required switch |
-| Security acceptance, irreversible production action, canary, GO/NO-GO | `GPT-5.6 Sol` с `High`/`xHigh`; required switch |
+| Тип работ                                                                     | Рекомендация                                     |
+| ----------------------------------------------------------------------------- | ------------------------------------------------ |
+| Документация, форматирование, isolated fixtures, narrow log triage            | `GPT-5.6 Luna` с `Low`/`Medium`; optional switch |
+| Обычная реализация, CI repair, focused API/Web/PostgreSQL tests               | `GPT-5.6 Terra` с `Medium`; default              |
+| Tenant/IAM/RBAC, migrations, races, Telegram/provider outbound, jobs, secrets | `GPT-5.6 Terra` с `High`; required switch        |
+| Security acceptance, irreversible production action, canary, GO/NO-GO         | `GPT-5.6 Sol` с `High`/`xHigh`; required switch  |
 
 `Sol`, `xHigh`, `max` и multi-agent не используются по умолчанию. Для экономии
 контекста следующий завершённый slice лучше вести отдельной задачей Codex с

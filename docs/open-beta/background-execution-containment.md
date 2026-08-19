@@ -80,10 +80,10 @@ Stable reason codes:
 
 Только два effect path имеют текущий статус `REVISION_FENCED`:
 
-| Job kind                     | Effect                                      |
-| ---------------------------- | ------------------------------------------- |
-| `REPORT_DIGEST_SMTP`         | persisted report run → fresh check → SMTP   |
-| `GUEST_BONUS_LEDGER_LANGAME` | claim generation/revision → Langame effect  |
+| Job kind                     | Effect                                     |
+| ---------------------------- | ------------------------------------------ |
+| `REPORT_DIGEST_SMTP`         | persisted report run → fresh check → SMTP  |
+| `GUEST_BONUS_LEDGER_LANGAME` | claim generation/revision → Langame effect |
 
 Этот статус не включает внешнее выполнение автоматически: lifecycle, trial,
 module entitlement, capability, scope, provider configuration и отдельный
@@ -94,27 +94,34 @@ scheduler требует exact `TENANT_SYSTEM` actor до digest generation, а
 `ReportsDigestService` повторяет эту проверку на последней границе перед SMTP
 effect.
 
+`GUEST_BONUS_LEDGER_LANGAME` также подключён к runtime identity foundation:
+live batch dispatch требует exact `TENANT_STORE_SYSTEM + storeId` до auto-queue,
+claim и provider effects, а `GuestBonusLedgerService` повторяет проверку после
+`DISPATCHING` на последней границе перед Langame balance write. Missing store
+identity блокирует batch до effects; потерянная store identity возвращает ledger
+entry в `PENDING` без provider call.
+
 ### 3.2. Внешнее выполнение запрещено
 
 До отдельного durable fencing имеют `EXTERNAL_DENY`:
 
-| Группа             | Job kind                                      |
-| ------------------ | --------------------------------------------- |
-| Langame            | `LANGAME_SCHEDULED_SYNC`                      |
-| Langame            | `LANGAME_DAILY_SYNC`                          |
-| Langame            | `LANGAME_BUSINESS_SNAPSHOT`                   |
-| Langame            | `LANGAME_GUEST_DATA_FOUNDATION`               |
-| Gamification       | `GUEST_GAMIFICATION_SNAPSHOT_PIPELINE`        |
-| Gamification       | `GUEST_GAMIFICATION_SUPPLEMENTAL_PIPELINE`    |
-| Delivery           | `GUEST_GAME_DELIVERY_DISPATCH`                |
-| Delivery           | `GUEST_GAME_DELIVERY_BOT_PULL`                |
-| Guest data         | `GUEST_ACTIVITY_LEDGER_SYNC`                  |
-| Guest data         | `GUEST_GAME_DATA_RETENTION`                   |
-| Guest data         | `GUEST_GAME_LEDGER_FALLBACK`                  |
-| Guest data         | `GUEST_GAME_LOOT_BOX_RECOVERY`                |
-| Guest data         | `GUEST_GAME_QUALITY_MONITORING`               |
-| Guest data         | `GUEST_GAME_REWARD_MATERIALIZER`              |
-| Staff              | `STAFF_TASK_RECURRING_RULES`                  |
+| Группа       | Job kind                                   |
+| ------------ | ------------------------------------------ |
+| Langame      | `LANGAME_SCHEDULED_SYNC`                   |
+| Langame      | `LANGAME_DAILY_SYNC`                       |
+| Langame      | `LANGAME_BUSINESS_SNAPSHOT`                |
+| Langame      | `LANGAME_GUEST_DATA_FOUNDATION`            |
+| Gamification | `GUEST_GAMIFICATION_SNAPSHOT_PIPELINE`     |
+| Gamification | `GUEST_GAMIFICATION_SUPPLEMENTAL_PIPELINE` |
+| Delivery     | `GUEST_GAME_DELIVERY_DISPATCH`             |
+| Delivery     | `GUEST_GAME_DELIVERY_BOT_PULL`             |
+| Guest data   | `GUEST_ACTIVITY_LEDGER_SYNC`               |
+| Guest data   | `GUEST_GAME_DATA_RETENTION`                |
+| Guest data   | `GUEST_GAME_LEDGER_FALLBACK`               |
+| Guest data   | `GUEST_GAME_LOOT_BOX_RECOVERY`             |
+| Guest data   | `GUEST_GAME_QUALITY_MONITORING`            |
+| Guest data   | `GUEST_GAME_REWARD_MATERIALIZER`           |
+| Staff        | `STAFF_TASK_RECURRING_RULES`               |
 
 `STAFF_TASK_RECURRING_RULES` зарезервирован в registry, но scheduler и
 all-tenant scheduled route остаются намеренно незарегистрированными в
@@ -371,7 +378,7 @@ production-like, deploy или outbound `GO`.
    позволили закрыть P1. Exact-head `a644b81...` / CI `30447011917`
    (`run #27`) rejected: Application/Authority прошли, PostgreSQL — `FAIL`.
    Exact-head `d525b736...` / CI `30447467729` (`run #28`) принят после `3/3
-   PASS` и закрыл reason/Event и worker durable-event P1. Exact-head
+PASS` и закрыл reason/Event и worker durable-event P1. Exact-head
    `be8c94c4...` / CI `30449026506` (`run #29`) принят после `3/3 PASS`:
    private SECURITY INVOKER `guest_game_reward_delivery_lock_v1` берёт
    advisory seed `166`, same-tenant Reward `FOR UPDATE`, затем `VERIFIED`
@@ -397,4 +404,4 @@ production-like, deploy или outbound `GO`.
 8. Реализовать двухфазный suspend/drain и race tests для stage/revision flip.
 9. Пройти real PostgreSQL A/A1/A2 + B/B1 job/provider negative matrix.
 10. Только после этого переходить к canonical owner-email claim, encrypted
-   outbox, shell provisioning и protected activation.
+    outbox, shell provisioning и protected activation.

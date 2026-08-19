@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.39
+- Версия: 3.40
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -38,7 +38,7 @@
 - Следующий background execution slice добавляет registry-level system identity
   metadata для всех 17 background job kinds:
   `TENANT_SYSTEM_IDENTITY | TENANT_STORE_SYSTEM_IDENTITY |
-  TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
+TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
   `sharedServiceTokenAllowed=false`, чтобы общий `SYNC_SERVICE_TOKEN` не
   считался worker identity. Локально зелёные проверки:
   `test:ci:background-execution`, `test:ci:tenant-execution`,
@@ -76,6 +76,22 @@
   Attempt `1` отменён вручную во время suspected external PgBouncer install
   hang и не считается accepted evidence. Остальные worker call-sites ещё не
   переведены; внешний доступ остаётся `NO-GO`.
+- Второй `REVISION_FENCED` background call-site подключён к runtime identity
+  foundation: `GUEST_BONUS_LEDGER_LANGAME` теперь требует exact
+  `TENANT_STORE_SYSTEM + storeId` до live batch queue/claim и повторяет эту
+  проверку после `DISPATCHING` на последней границе перед Langame balance write.
+  Missing store identity блокирует batch до provider/claim effects; потерянная
+  store identity у claimed ledger возвращает запись в `PENDING` с
+  `BACKGROUND_RUNTIME_IDENTITY_NOT_ACCEPTED` и не вызывает Langame. Локально
+  зелёные: focused bonus ledger spec (`1/1 suite`, `61/61 tests`),
+  `test:ci:background-execution`, `test:ci:tenant-execution`
+  (`18/18 suites`, `1002/1002 tests`), `lint:ci:tenant-execution`,
+  API typecheck, Prettier check на двух изменённых файлах и `git diff --check`.
+  Exact-SHA `cdb1a619f1d3d646cfc62a3250b106b32b081b36` принят GitHub Actions
+  run `32283610426` как `4/4 SUCCESS`; evidence:
+  `docs/open-beta/background-bonus-ledger-runtime-identity-ci-evidence-2026-08-19.md`.
+  Delivery/reward/materializer, retention/recovery/activity и staff recurring
+  worker paths ещё не переведены; внешний доступ остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day
@@ -987,12 +1003,12 @@ bounded API/Web changes. Это не разрешение автоматичес
 явно сообщить рекомендуемые model/reasoning, причину и пометить switch как
 `required` или `optional`; выбор остаётся у оператора.
 
-| Тип следующей работы | Рекомендованный профиль | Правило переключения |
-| --- | --- | --- |
-| Документация, форматирование, локальный fixture update, narrow log triage | `GPT-5.6 Luna`, `Low` или `Medium` | Optional; не использовать для самостоятельного решения security/tenant риска |
-| Обычная реализация API/Web, CI repair, focused/PostgreSQL test coverage | `GPT-5.6 Terra`, `Medium` | Default |
-| Tenant isolation, IAM/RBAC, migrations, concurrency, provider/Telegram outbound, jobs, секреты | `GPT-5.6 Terra`, `High` | Required до анализа/изменения такого slice |
-| Независимый security review, необратимый production action, release/canary/GO-NO-GO | `GPT-5.6 Sol`, `High` или `xHigh` | Required; не заменять на Luna/Terra Medium ради экономии |
+| Тип следующей работы                                                                           | Рекомендованный профиль            | Правило переключения                                                         |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------- |
+| Документация, форматирование, локальный fixture update, narrow log triage                      | `GPT-5.6 Luna`, `Low` или `Medium` | Optional; не использовать для самостоятельного решения security/tenant риска |
+| Обычная реализация API/Web, CI repair, focused/PostgreSQL test coverage                        | `GPT-5.6 Terra`, `Medium`          | Default                                                                      |
+| Tenant isolation, IAM/RBAC, migrations, concurrency, provider/Telegram outbound, jobs, секреты | `GPT-5.6 Terra`, `High`            | Required до анализа/изменения такого slice                                   |
+| Независимый security review, необратимый production action, release/canary/GO-NO-GO            | `GPT-5.6 Sol`, `High` или `xHigh`  | Required; не заменять на Luna/Terra Medium ради экономии                     |
 
 `Sol`, `xHigh`, `max` и multi-agent режим не применяются по умолчанию: они
 допустимы только для обозначенного high-risk slice или независимой проверки.

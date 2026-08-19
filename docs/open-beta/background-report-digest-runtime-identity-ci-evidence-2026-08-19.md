@@ -80,7 +80,9 @@ REPORT_DIGEST_SMTP policy allowed
 
 Это не полное переключение worker plane. Следующие bounded slices:
 
-1. подключить runtime identity gate к `GUEST_BONUS_LEDGER_LANGAME`;
+1. подключить runtime identity gate к `GUEST_BONUS_LEDGER_LANGAME`
+   — закрыто successor evidence
+   `background-bonus-ledger-runtime-identity-ci-evidence-2026-08-19`;
 2. подключить store-scoped gates к delivery/reward/materializer jobs;
 3. подключить tenant/store-scoped gates к retention/recovery/activity jobs;
 4. закрыть `STAFF_TASK_RECURRING_RULES` как отдельный staff worker path;

@@ -6,6 +6,10 @@ type ProxyJsonRequestOptions = {
   privateNoStore?: boolean;
 };
 
+type ProxyFileRequestOptions = {
+  forwardQuery?: boolean;
+};
+
 export async function proxyJsonRequest(
   request: Request,
   path: string,
@@ -64,6 +68,7 @@ export async function proxyFileRequest(
   request: Request,
   path: string,
   fallbackFileName: string,
+  options: ProxyFileRequestOptions = {},
 ) {
   const headers = await getAuthHeaders();
 
@@ -75,7 +80,8 @@ export async function proxyFileRequest(
   }
 
   const url = new URL(request.url);
-  const response = await fetch(`${getApiUrl()}${path}${url.search}`, {
+  const search = options.forwardQuery === false ? "" : url.search;
+  const response = await fetch(`${getApiUrl()}${path}${search}`, {
     headers,
     cache: "no-store",
   });

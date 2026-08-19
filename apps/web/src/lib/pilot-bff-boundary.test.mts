@@ -222,17 +222,83 @@ test("keeps report exports and mutations inside hardened cookie-backed proxies",
 });
 
 test("returns a canonical same-origin locator for uploaded staff attachments", async () => {
+  const [uploadSource, downloadSource, proxySource] = await Promise.all([
+    readFile(path.join(API_ROUTE_ROOT, "staff/attachments/route.ts"), "utf8"),
+    readFile(
+      path.join(API_ROUTE_ROOT, "staff/attachments/[id]/route.ts"),
+      "utf8",
+    ),
+    readFile(fileURLToPath(new URL("proxy.ts", import.meta.url)), "utf8"),
+  ]);
+
+  assert.match(
+    uploadSource,
+    /const url = `\/api\/staff\/attachments\/\$\{encodeURIComponent\(data\.id\)\}`/,
+  );
+  assert.doesNotMatch(uploadSource, /new URL\([\s\S]*request\.url/);
+  assert.doesNotMatch(uploadSource, /\.toString\(\)/);
+
+  assert.match(downloadSource, /encodeURIComponent\(id\)/);
+  assert.match(
+    downloadSource,
+    /proxyFileRequest\([\s\S]*`\/staff\/attachments\/\$\{encodeURIComponent\(id\)\}`[\s\S]*["']staff-attachment["'][\s\S]*forwardQuery:\s*false/,
+  );
+  assert.doesNotMatch(downloadSource, /request\.url/);
+  assert.match(
+    proxySource,
+    /const search = options\.forwardQuery === false \? "" : url\.search/,
+  );
+});
+
+test("keeps export file proxies query-capable while attachment downloads are selector-free", async () => {
+  const routeSources = await Promise.all(
+    [
+      "reports/export/route.ts",
+      "staff/training-profiles/export/route.ts",
+      "staff/discipline/export/route.ts",
+      "staff/tasks/export/route.ts",
+      "admin/audit-events/export/route.ts",
+      "staff/checklists/report/export/route.ts",
+    ].map((route) => readFile(path.join(API_ROUTE_ROOT, route), "utf8")),
+  );
+  const attachmentDownloadSource = await readFile(
+    path.join(API_ROUTE_ROOT, "staff/attachments/[id]/route.ts"),
+    "utf8",
+  );
+  const proxySource = await readFile(
+    fileURLToPath(new URL("proxy.ts", import.meta.url)),
+    "utf8",
+  );
+
+  for (const source of routeSources) {
+    assert.match(source, /proxyFileRequest\(/);
+    assert.doesNotMatch(source, /forwardQuery:\s*false/);
+  }
+
+  assert.match(attachmentDownloadSource, /forwardQuery:\s*false/);
+  assert.match(
+    proxySource,
+    /fetch\(`\$\{getApiUrl\(\)\}\$\{path\}\$\{search\}`,\s*\{/,
+  );
+});
+
+test("keeps staff attachment upload route bounded and uncached", async () => {
   const source = await readFile(
     path.join(API_ROUTE_ROOT, "staff/attachments/route.ts"),
     "utf8",
   );
 
+  assert.match(source, /const MAX_ATTACHMENT_BYTES = 5 \* 1024 \* 1024/);
+  assert.match(source, /if \(!headers\.Authorization\)/);
+  assert.match(source, /status:\s*401/);
+  assert.match(source, /file\.size > MAX_ATTACHMENT_BYTES/);
+  assert.match(source, /formData\.get\(["']file["']\)/);
   assert.match(
     source,
-    /const url = `\/api\/staff\/attachments\/\$\{encodeURIComponent\(data\.id\)\}`/,
+    /upstreamFormData\.set\(["']file["'], file, file\.name\)/,
   );
-  assert.doesNotMatch(source, /new URL\([\s\S]*request\.url/);
-  assert.doesNotMatch(source, /\.toString\(\)/);
+  assert.match(source, /method:\s*["']POST["']/);
+  assert.doesNotMatch(source, /cache:\s*["']force-cache["']/);
 });
 
 test("bounds the reports SSR fan-out to two upstream loaders at a time", async () => {

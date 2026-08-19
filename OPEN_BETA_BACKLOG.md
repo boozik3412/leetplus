@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 19.08.2026
-- Версия: 3.21
+- Версия: 3.22
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -102,7 +102,11 @@
   `8/8 + 8/8`: reader ждал held permission change, затем fresh scope отказал
   без bytes. Gate 1MT стал `35/35`, role/attachment unit `56/56`, expanded
   users/staff regression `85/85`, `156` table counts zero-diff, residue `0`.
-  Production roles/SMTP canary, file production-build browser/STORES, job/Telegram
+  Staff attachment file BFF дополнительно усилен: download route больше не
+  пересылает client query selectors, upload возвращает только canonical
+  same-origin locator, а export file proxies оставлены query-capable; Web BFF
+  boundary расширен до `18/18`. Production roles/SMTP canary, полный
+  archive/delete/orphan production-build browser/STORES journey, job/Telegram
   matrix Gate 1MT, Gate 2 и cutover ещё обязательны, поэтому
   release decision остаётся `NO-GO`.
   HTTP inventory уточнён до `295 = 241 ALLOW + 54 BLOCKED`: `POST /stores`
@@ -132,6 +136,14 @@
   `20260731120000_identity_mail_delivery_release_head`, поэтому production
   deployment/rehearsal остаётся `NO-GO`; production и текущая сеть не
   изменялись.
+- Gate 1MT staff attachment selector-free file BFF: `/api/staff/attachments/[id]`
+  теперь вызывает generic file proxy с `forwardQuery: false`, поэтому exact file
+  download определяется только `id` и server-side cookie authority, без
+  клиентских `tenant/store` selectors. Exports через `proxyFileRequest` остались
+  query-capable. Static Web BFF gate расширен до `18/18`, Web typecheck,
+  targeted ESLint и Prettier по изменённым файлам зелёные. Это не заменяет
+  оставшийся production-build browser matrix для archive/delete/orphan
+  retention.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch
@@ -5419,8 +5431,8 @@ target `4/4`, artifact `sha256:2c0d023a…8e387b`; browser A/B ещё обяза
 1. Завершить Gate 1MT HTTP/BFF/browser/background adoption по всему
    согласованному scope. Restored-copy PostgreSQL A/B `35/35`, report и SSE browser,
    trusted TLS SMTP и protected enrollment/SENT/accept/disable уже приняты.
-   Остались attachment production-build browser/STORES, jobs/Telegram/public guest
-   binding и controlled
+   Остались attachment archive/delete/orphan production-build browser/STORES,
+   jobs/Telegram/public guest binding и controlled
    outbound digest. CURRENT198–202 и USB не входят в critical path и остаются
    deny-only post-beta hardening.
 2. Принять readiness, session drain, monitoring и отдельный

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.168                                        |
+| Версия           | 1.169                                        |
 | Дата             | 19.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -118,6 +118,11 @@ reference catalogs и совпадающая attachment download policy для
 DB-level parent-delete guard для всех семи staff attachment parent kinds и
 canonical `CURRENT_186` identity-mail readiness bump:
 [Gate 1MT attachment parent-delete guard evidence 19.08.2026](./gate-1mt-attachment-parent-delete-guard-evidence-2026-08-19.md).
+
+Successor staff attachment file BFF hardening: download route теперь
+selector-free (`forwardQuery: false`), upload locator остаётся canonical
+same-origin, а Web BFF boundary расширен до `18/18`. Это частичный file-policy
+gate; полный production-build archive/delete/orphan browser matrix ещё открыт.
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

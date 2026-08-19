@@ -1,6 +1,7 @@
 # Gate 1MT: production-build staff attachment browser evidence — 19.08.2026
 
-Статус: `OWNER/NETWORK LIFECYCLE PASS / KNOWLEDGE STORES PASS / PRODUCTION NO-GO`.
+Статус:
+`OWNER/NETWORK LIFECYCLE PASS / STORES SUCCESSORS PASS / SELECTOR-FREE BFF PARTIAL / PRODUCTION NO-GO`.
 
 ## Цель
 
@@ -94,9 +95,9 @@ commit `085f8bbdd3115b3ec7a4438e7614c815004dd844`.
 Shift regulations затем также переведены на store-aware parent policy в exact
 commit `6ce36a41494e488076c60ac1776b765e24731d5e` и приняты отдельной
 [A/B приёмкой](./gate-1mt-shift-regulations-stores-evidence-2026-08-19.md).
-Training, onboarding и checklist/templates всё ещё требуют отдельной policy.
-Для каждого следующего parent необходимо синхронно расширять attachment
-reader; открывать download отдельно от parent запрещено.
+Training, onboarding и checklist/templates затем приняты отдельными
+A/B-матрицами. Для каждого parent сохраняется правило: attachment reader должен
+следовать parent policy; открывать download отдельно от parent запрещено.
 
 ## Static acceptance
 
@@ -106,6 +107,22 @@ web typecheck:       PASS
 targeted Web ESLint: PASS
 web production build: 205/205 pages PASS
 ```
+
+Successor Web BFF hardening 19.08.2026:
+
+```text
+pilot BFF boundary: 18/18 PASS
+web typecheck:       PASS
+targeted Web ESLint: PASS
+targeted Prettier:   PASS
+```
+
+В successor-кандидате `/api/staff/attachments/[id]` вызывает generic file proxy
+с `forwardQuery: false`: file download определяется только exact attachment
+`id` и server-side cookie authority, без client query selectors. Upload route
+по-прежнему возвращает только canonical same-origin locator
+`/api/staff/attachments/<id>`. Export file routes сохраняют query support,
+потому что им нужны фильтры выгрузки.
 
 Предыдущий exact head `80d1105341dc498d06e26a9587df736230f037e3`
 принят GitHub Actions run `32174737412` как `4/4 SUCCESS`, включая application
@@ -134,11 +151,8 @@ database sessions были `0`; exact `a2` database удалена. Совоку
 
 ## Остаток до внешнего теста
 
-1. Реализовать и принять STORES parent policy для двух оставшихся staff parent
-   families: onboarding и checklists/templates; attachment reader
-   должен следовать parent policy.
-2. Закрыть archive/delete/orphan-retention browser matrix остальных parent
+1. Закрыть archive/delete/orphan-retention browser matrix остальных parent
    kinds.
-3. Закрыть tenant-aware background jobs, Telegram/public guest binding и
+2. Закрыть tenant-aware background jobs, Telegram/public guest binding и
    controlled outbound canary.
-4. Выполнить Gate 2 текущей сети и отдельный production `PREPARE/GO`.
+3. Выполнить Gate 2 текущей сети и отдельный production `PREPARE/GO`.

@@ -44,10 +44,13 @@ import {
   type TenantExecutionRequirement,
 } from '../tenancy/tenant-execution-admission.service';
 import {
+  evaluateTenantBackgroundRuntimeIdentity,
   evaluateTenantBackgroundExecutionPolicy,
   tenantBackgroundExecutionNote,
   tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundExecutionPolicyDecision,
   type TenantBackgroundJobKind,
+  type TenantBackgroundRuntimeIdentityDecision,
 } from '../tenancy/tenant-background-execution-policy';
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import {
@@ -7443,7 +7446,6 @@ export class GuestGamificationService {
         });
         continue;
       }
-
       const actor = this.pickScheduledPipelineActor(tenant.users);
 
       if (!actor) {
@@ -8066,6 +8068,15 @@ export class GuestGamificationService {
         id: true,
         slug: true,
         status: true,
+        stores: {
+          where: {
+            isActive: true,
+            backgroundExecutionEnabled: true,
+          },
+          select: { id: true },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
+        },
         users: {
           where: {
             isActive: true,
@@ -8118,6 +8129,10 @@ export class GuestGamificationService {
         });
         continue;
       }
+      const backgroundDecision = tenantBackgroundExecutionDecision(
+        admission,
+        'GUEST_GAME_DELIVERY_DISPATCH',
+      );
 
       const actor = this.pickScheduledPipelineActor(tenant.users);
 
@@ -8132,6 +8147,23 @@ export class GuestGamificationService {
         });
         continue;
       }
+      const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+        decision: backgroundDecision,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: tenant.id,
+        storeId: tenant.stores[0]?.id,
+      });
+      if (!runtimeIdentity.accepted || !runtimeIdentity.storeId) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason: tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
+          result: null,
+        });
+        continue;
+      }
+      const runtimeStoreId = runtimeIdentity.storeId;
 
       try {
         const result = await this.dispatchDeliveries(
@@ -8145,8 +8177,8 @@ export class GuestGamificationService {
             tenantId: tenant.id,
             tenantSlug: tenant.slug,
             tenantStatus: tenant.status,
-            accessScope: 'NETWORK',
-            allowedStoreIds: [],
+            accessScope: 'STORES',
+            allowedStoreIds: [runtimeStoreId],
           },
           {
             ...dto,
@@ -8198,6 +8230,25 @@ export class GuestGamificationService {
         note: backgroundDenialNote,
       };
     }
+    const backgroundDecision = tenantBackgroundExecutionDecision(
+      admission,
+      'GUEST_GAME_DELIVERY_BOT_PULL',
+    );
+    const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+      decision: backgroundDecision,
+      actorKind: 'TENANT_STORE_SYSTEM',
+      tenantId: user.tenantId,
+      storeId: user.allowedStoreIds[0],
+    });
+    if (!runtimeIdentity.accepted || !runtimeIdentity.storeId) {
+      return {
+        checked: 0,
+        ready: 0,
+        skipped: 0,
+        items: [],
+        note: tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
+      };
+    }
 
     const protocolGate =
       evaluateLegacyGuestGameDeliveryProtocolGate('LEGACY_BOT_PULL');
@@ -8216,6 +8267,7 @@ export class GuestGamificationService {
     const rows = await this.prisma.guestGameDelivery.findMany({
       where: {
         tenantId: user.tenantId,
+        ...deliveryStoreScopeWhere(user),
         status: 'READY',
         readinessStatus: 'READY_FOR_BOT',
         channel: { in: channels },
@@ -11267,7 +11319,7 @@ export class GuestGamificationService {
   ): Promise<GuestGameDelivery[]> {
     const take = options.take === null ? undefined : (options.take ?? 100);
     const rows = await this.prisma.guestGameDelivery.findMany({
-      where: { tenantId: user.tenantId },
+      where: { tenantId: user.tenantId, ...deliveryStoreScopeWhere(user) },
       include: deliveryInclude,
       orderBy: [{ preparedAt: 'desc' }, { createdAt: 'desc' }],
       ...(take ? { take } : {}),
@@ -11302,6 +11354,7 @@ export class GuestGamificationService {
     const rows = await this.prisma.guestGameDelivery.findMany({
       where: {
         tenantId: user.tenantId,
+        ...deliveryStoreScopeWhere(user),
         status: 'READY',
         readinessStatus: 'READY_FOR_BOT',
         channel: { in: channels },
@@ -19114,6 +19167,15 @@ export class GuestGamificationService {
         id: true,
         slug: true,
         status: true,
+        stores: {
+          where: {
+            isActive: true,
+            backgroundExecutionEnabled: true,
+          },
+          select: { id: true },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
+        },
         users: {
           where: {
             isActive: true,
@@ -19165,8 +19227,8 @@ export class GuestGamificationService {
         tenantId: tenant.id,
         tenantSlug: tenant.slug,
         tenantStatus: tenant.status,
-        accessScope: 'NETWORK',
-        allowedStoreIds: [],
+        accessScope: 'STORES',
+        allowedStoreIds: tenant.stores[0]?.id ? [tenant.stores[0].id] : [],
       },
       tenantSlug: tenant.slug,
     };
@@ -27562,12 +27624,33 @@ function tenantBackgroundExecutionDenialNote(
     return deliveryExecutionAdmissionNote(admission);
   }
 
-  const decision = evaluateTenantBackgroundExecutionPolicy({
+  const decision = tenantBackgroundExecutionDecision(admission, jobKind);
+
+  return decision.allowed ? null : tenantBackgroundExecutionNote(decision);
+}
+
+function tenantBackgroundExecutionDecision(
+  admission: TenantExecutionAdmissionDecision,
+  jobKind: TenantBackgroundJobKind,
+): TenantBackgroundExecutionPolicyDecision {
+  return evaluateTenantBackgroundExecutionPolicy({
     stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
     jobKind,
   });
+}
 
-  return decision.allowed ? null : tenantBackgroundExecutionNote(decision);
+function tenantBackgroundRuntimeIdentityNote(
+  decision: TenantBackgroundRuntimeIdentityDecision,
+) {
+  return `Background runtime identity denied: ${decision.reasonCode}.`;
+}
+
+function deliveryStoreScopeWhere(
+  user: AuthenticatedUser,
+): Prisma.GuestGameDeliveryWhereInput {
+  return user.accessScope === 'STORES'
+    ? { storeId: { in: [...user.allowedStoreIds] } }
+    : {};
 }
 
 function deliveryProviderMessage(row: DeliveryRow) {

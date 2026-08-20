@@ -2468,6 +2468,7 @@ function scheduledTenantRow(overrides: Record<string, unknown> = {}) {
     id: user.tenantId,
     slug: user.tenantSlug,
     status: TenantLifecycleStatus.ACTIVE,
+    stores: [{ id: 'store-1' }],
     users: [
       {
         id: user.id,
@@ -22987,6 +22988,8 @@ describe('GuestGamificationService', () => {
           id: 'owner-admitted',
           tenantId: 'tenant-admitted',
           tenantSlug: 'admitted',
+          accessScope: 'STORES',
+          allowedStoreIds: ['store-1'],
         }),
         expect.objectContaining({ dryRun: true }),
       );
@@ -23047,6 +23050,34 @@ describe('GuestGamificationService', () => {
             reason: expect.stringContaining(
               'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
             ),
+            result: null,
+          }),
+        ],
+      });
+    });
+
+    it('skips scheduled delivery dispatch before claims when runtime store identity is missing', async () => {
+      const { service, prisma } = createService();
+      const dispatch = jest.spyOn(service, 'dispatchDeliveries');
+      prisma.tenant.findMany.mockResolvedValue([
+        scheduledTenantRow({ stores: [] }),
+      ]);
+
+      const result = await service.runDeliveryDispatchScheduled({
+        dryRun: true,
+      });
+
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        checkedTenants: 1,
+        processedTenants: 0,
+        skippedTenants: 1,
+        tenants: [
+          expect.objectContaining({
+            tenantId: user.tenantId,
+            status: 'SKIPPED',
+            reason:
+              'Background runtime identity denied: BACKGROUND_STORE_ID_REQUIRED.',
             result: null,
           }),
         ],
@@ -23226,6 +23257,27 @@ describe('GuestGamificationService', () => {
         skipped: 0,
         items: [],
         note: expect.stringContaining('BACKGROUND_EXTERNAL_EXECUTION_DENIED'),
+      });
+    });
+
+    it('returns an empty deterministic bot pull when runtime store identity is missing', async () => {
+      const { service, prisma } = createService();
+      prisma.tenant.findFirst.mockResolvedValue(
+        scheduledTenantRow({ stores: [] }),
+      );
+
+      const result = await service.pullBotDeliveries({
+        tenantSlug: user.tenantSlug,
+        channels: 'telegram',
+      });
+
+      expect(prisma.guestGameDelivery.findMany).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        checked: 0,
+        ready: 0,
+        skipped: 0,
+        items: [],
+        note: 'Background runtime identity denied: BACKGROUND_STORE_ID_REQUIRED.',
       });
     });
 

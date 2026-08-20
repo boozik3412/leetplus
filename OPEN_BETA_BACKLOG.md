@@ -61,6 +61,11 @@
   migration и production data не меняются; требуется controller fix, новый
   accepted artifact и fresh replay с original verified backup before this gate
   may be marked done.
+  CURRENT186 fix позволил fresh lane reach 187 migrations and second deploy
+  proved zero pending; final check обнаружил отдельный stale pre-CURRENT187
+  worker-function pin. Exact CURRENT187 `a7dd1703…` digest independently
+  accepted by the legacy inventory must be the controller's final pin. Новый
+  regression test, artifact и clean replay остаются обязательными.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta

@@ -78,9 +78,18 @@ focused regression test. Existing isolated database с applied CURRENT185 и
 unfinished CURRENT186 — diagnostic evidence only; она не может быть accepted
 или reused for retry.
 
+Следующий clean replay с этим fix дошёл до CURRENT187, а второй Prisma deploy
+подтвердил zero pending migrations. Final controller check снова корректно
+fail-closed: его runtime pin ожидал pre-CURRENT187 function digest, тогда как
+exact CURRENT187 migration materializes independently inventory-accepted
+digest `a7dd1703…`. Final migration manifest уже совпал; требуется только
+исправить этот stale controller pin с отдельным regression test и повторить
+replay against a new accepted artifact. Existing 187-migration copy остаётся
+diagnostic evidence only и не является release acceptance.
+
 ## Следующая clean acceptance
 
-1. Принять controller fix в clean SHA и full CI artifact.
+1. Принять controller final-fingerprint fix в clean SHA и full CI artifact.
 2. Удалить только failed isolated database/lane, сохранить PII-free evidence,
    затем восстановить тот же verified backup в fresh target database.
 3. Повторить V2 preflight, `plan → digest-confirmed apply`, exact Prisma deploy

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,6 +11,7 @@ import {
   buildFounderPilotProductionHistoryPlan,
   materializeFounderPilotProductionHistoryLane,
   materializeFounderPilotProductionHistorySql,
+  verifyFounderPilotProductionHistoryRehearsal,
 } from "./founder-pilot-production-history-rehearsal.mjs";
 import { FOUNDER_PILOT_RESTORED_COPY_PREFLIGHT_CONTRACT } from "./founder-pilot-restored-copy-preflight.mjs";
 
@@ -18,6 +19,16 @@ const SCRIPT_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PRISMA_ROOT = path.resolve(SCRIPT_ROOT, "../prisma");
 const CAPTURED_AT = "2026-08-18T09:28:19.706Z";
 const SYSTEM_IDENTIFIER = "7675301746759083084";
+const LEGACY_APPLIED_CHECKSUMS = new Map([
+  [
+    "20260518120000_guest_data_foundation",
+    "98de87e5d79eb6611b0722e954fe0e7b2eb6480c7b485d9cf451ecff6dcf4341",
+  ],
+  [
+    "20260519142000_guest_working_shifts",
+    "226614a5e628a3d40a0fe584323d6ed2134f229092e35081ec9b05a24378eff5",
+  ],
+]);
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -110,6 +121,40 @@ async function temporaryRoot(t) {
   );
   t.after(() => rm(root, { force: true, recursive: true }));
   return root;
+}
+
+async function finalEvidence(laneRoot) {
+  const migrationRoot = path.join(laneRoot, "migrations");
+  const migrationRows = await Promise.all(
+    (await readdir(migrationRoot, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+      .map(async (migrationName) => ({
+        applied: true,
+        checksum:
+          LEGACY_APPLIED_CHECKSUMS.get(migrationName) ??
+          sha256(
+            await readFile(
+              path.join(migrationRoot, migrationName, "migration.sql"),
+            ),
+          ),
+        migrationName,
+      })),
+  );
+  return {
+    migrationCount:
+      FOUNDER_PILOT_PRODUCTION_HISTORY_CONSTANTS.finalMigrationCount,
+    migrationHead:
+      FOUNDER_PILOT_PRODUCTION_HISTORY_CONSTANTS.finalMigrationHead,
+    migrationRows,
+    rolledBackMigrationCount:
+      FOUNDER_PILOT_PRODUCTION_HISTORY_CONSTANTS.sourceRolledBackMigrationCount,
+    rolledBackMigrationManifestDigest:
+      FOUNDER_PILOT_PRODUCTION_HISTORY_CONSTANTS.sourceRolledBackMigrationManifestDigest,
+    runningDigestRows: [],
+    unfinishedMigrationCount: 0,
+  };
 }
 
 test("materializes exact production-history CURRENT179, CURRENT185, and CURRENT186 bytes", async () => {
@@ -225,6 +270,35 @@ test("creates a sealed 187-migration disposable Prisma lane", async (t) => {
     sourcePrismaRoot: PRISMA_ROOT,
   });
   assert.equal(replay.treeDigest, receipt.treeDigest);
+});
+
+test("accepts the exact materialized CURRENT187 runtime fingerprint", async (t) => {
+  const root = await temporaryRoot(t);
+  const laneRoot = path.join(
+    root,
+    "leetplus-founder-production-history-current187-a1",
+  );
+  await materializeFounderPilotProductionHistoryLane({
+    laneRoot,
+    sourcePrismaRoot: PRISMA_ROOT,
+  });
+  const result = await verifyFounderPilotProductionHistoryRehearsal({
+    adapter: {
+      inspectFinal: async () => ({
+        preterminalManifestDigest:
+          FOUNDER_PILOT_PRODUCTION_HISTORY_CONSTANTS.finalPreterminalManifestDigest,
+        workerFunctionDigest:
+          "a7dd17037ceaccb294953dce145e0fcc589fb2646962db724d919c24ba87c53c",
+      }),
+      inspectTarget: async () => finalEvidence(laneRoot),
+    },
+    laneRoot,
+  });
+  assert.equal(result.decision, "PRODUCTION_HISTORY_REHEARSAL_VERIFIED");
+  assert.equal(
+    result.workerFunctionDigest,
+    "a7dd17037ceaccb294953dce145e0fcc589fb2646962db724d919c24ba87c53c",
+  );
 });
 
 test("binds exact restored migration state and stale run set into a plan", async (t) => {

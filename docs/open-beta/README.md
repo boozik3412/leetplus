@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.189                                        |
+| Версия           | 1.190                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -265,6 +265,16 @@ tenant-wide job. Recovery enqueue требует exact `TENANT_SYSTEM + tenantId
 actor до `updateMany` lock/claim. Missing tenant identity превращается в
 deterministic no-op без `syncProfile`. Exact-SHA CI acceptance:
 [activity ledger runtime identity evidence 20.08.2026](./background-activity-ledger-runtime-identity-ci-evidence-2026-08-20.md).
+
+Successor ledger fallback runtime identity adoption:
+`GUEST_GAME_LEDGER_FALLBACK` подключён к runtime identity foundation как
+store-bound job. Scheduler выбирает tenant-local active/background-enabled
+store, требует exact `TENANT_STORE_SYSTEM + storeId` до ledger/activity reads,
+origin receipt claim, dry-run, rule-decision записи и `processEvent()`, а
+fallback actor запускается как `STORES/[runtimeStoreId]`. Missing store
+identity возвращает deterministic `SKIPPED / BACKGROUND_STORE_ID_REQUIRED` до
+side effects. Exact-SHA CI acceptance:
+[ledger fallback runtime identity evidence 20.08.2026](./background-ledger-fallback-runtime-identity-ci-evidence-2026-08-20.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

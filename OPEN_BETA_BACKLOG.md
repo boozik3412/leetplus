@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 20.08.2026
-- Версия: 3.44
+- Версия: 3.45
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -156,6 +156,24 @@ TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
   `docs/open-beta/background-activity-ledger-runtime-identity-ci-evidence-2026-08-20.md`.
   Ledger fallback, loot-box recovery и staff recurring worker paths ещё не
   переведены; внешний доступ остаётся `NO-GO`.
+- Ledger fallback background path подключён к runtime identity foundation:
+  `GUEST_GAME_LEDGER_FALLBACK` теперь выбирает runtime store identity из
+  активных `backgroundExecutionEnabled` stores tenant, требует exact
+  `TENANT_STORE_SYSTEM + storeId` до ledger/activity reads, origin receipt
+  claim, dry-run, rule-decision записи и `processEvent()`, а fallback actor
+  запускается как `STORES/[runtimeStoreId]` вместо tenant-wide `NETWORK`.
+  Missing store identity даёт deterministic `SKIPPED` с
+  `BACKGROUND_STORE_ID_REQUIRED` до side effects. Локально зелёные: focused
+  ledger fallback spec (`1/1 suite`, `85/85 tests`),
+  `test:ci:background-execution` (`16/16 suites`, `804/804 tests`),
+  `test:ci:tenant-execution` (`18/18 suites`, `1004/1004 tests`),
+  `lint:ci:tenant-execution`, API typecheck, Prettier check изменённых файлов
+  и `git diff --check`. Exact-SHA
+  `6f8008a2551d4a96962c65e58a385e86e7b2f471` принят GitHub Actions run
+  `32338344266` как `4/4 SUCCESS`; evidence:
+  `docs/open-beta/background-ledger-fallback-runtime-identity-ci-evidence-2026-08-20.md`.
+  Loot-box recovery и staff recurring worker paths ещё не переведены; внешний
+  доступ остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day

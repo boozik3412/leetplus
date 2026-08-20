@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.16                                                    |
+| Версия           | 1.17                                                    |
 | Дата             | 20.08.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -132,6 +132,14 @@ claim требует такой же runtime actor до `updateMany` lock/claim.
 identity превращается в deterministic no-op: recovery state не мутируется,
 queued job не claim-ится и `syncProfile` не вызывается.
 
+`GUEST_GAME_LEDGER_FALLBACK` подключён к runtime identity foundation как
+store-bound background job. Scheduler выбирает runtime store identity только из
+активных `backgroundExecutionEnabled` stores текущего tenant, требует exact
+`TENANT_STORE_SYSTEM + storeId` до ledger/activity reads, origin receipt claim,
+dry-run, rule-decision записи и `processEvent()`, а fallback actor запускается
+со scope `STORES/[runtimeStoreId]`. Missing store identity даёт deterministic
+`SKIPPED` до side effects.
+
 ### 3.2. Внешнее выполнение запрещено
 
 До отдельного durable fencing имеют `EXTERNAL_DENY`:
@@ -202,6 +210,9 @@ application graph.
   глобальные cleanup query;
 - ledger fallback, loot-box recovery, quality monitoring и reward
   materializer проверяют policy до чтения рабочих данных и side effects;
+- ledger fallback дополнительно требует accepted `TENANT_STORE_SYSTEM` runtime
+  identity и tenant-local active/background-enabled Store до fallback reads,
+  claims, dry-run и `processEvent`;
 - data retention и quality monitoring дополнительно требуют accepted
   `TENANT_SYSTEM` runtime identity до unattended cleanup/collection effects;
 - external queue rows могут оставаться сохранёнными, но не claim-ятся.
@@ -239,6 +250,9 @@ retention и quality collection не объявляются unattended entrypoin
 - Activity ledger sync больше не выполняет recovery mutation/enqueue или queued
   job claim только на основании service-token/policy admission: accepted
   runtime tenant identity требуется до обоих unattended paths.
+- Ledger fallback больше не выполняет unattended reads/claims/dry-run/event
+  processing только на основании service-token/policy admission: accepted
+  runtime store identity требуется до fallback work.
 - Текущий `INTERNAL` tenant сохраняет совместимость разрешённых registry
   paths, но legacy provider delivery effects намеренно отключены до
   coordinator.
@@ -326,6 +340,9 @@ Suite проверяет:
   `collectTenant` before snapshot/alert writes;
 - activity ledger runtime identity adoption: missing tenant identity blocks
   recovery mutation/enqueue and queued job claim before `syncProfile`;
+- ledger fallback runtime identity adoption: missing store identity blocks
+  fallback reads, origin receipt claim, dry-run, rule decisions and
+  `processEvent`;
 - сохранение `CASHIER/MANUAL` cancellation.
 
 Successor identity metadata exact-SHA CI acceptance:
@@ -342,6 +359,9 @@ Retention and quality runtime identity exact-SHA CI acceptance:
 
 Activity ledger runtime identity exact-SHA CI acceptance:
 [background activity ledger runtime identity evidence 20.08.2026](./background-activity-ledger-runtime-identity-ci-evidence-2026-08-20.md).
+
+Ledger fallback runtime identity exact-SHA CI acceptance:
+[background ledger fallback runtime identity evidence 20.08.2026](./background-ledger-fallback-runtime-identity-ci-evidence-2026-08-20.md).
 
 Последний принятый baseline-результат до расширения migration-166 containment:
 

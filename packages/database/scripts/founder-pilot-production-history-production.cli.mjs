@@ -270,12 +270,21 @@ function childEnvironment(databaseUrl) {
 }
 
 function killChild(child, signal) {
-  if (child.pid === undefined) return;
+  if (
+    !Number.isSafeInteger(child.pid) ||
+    child.pid <= 0 ||
+    (child.exitCode !== null && child.exitCode !== undefined) ||
+    (child.signalCode !== null && child.signalCode !== undefined)
+  ) {
+    return false;
+  }
   try {
-    if (process.platform === "win32") child.kill(signal);
-    else process.kill(-child.pid, signal);
+    if (process.platform === "win32") return child.kill(signal) !== false;
+    process.kill(-child.pid, signal);
+    return true;
   } catch {
     // The close event is authoritative; the child may already have exited.
+    return false;
   }
 }
 
@@ -283,6 +292,9 @@ export async function runBoundedFounderPilotProductionHistoryPrismaDeploy({
   databaseUrl,
   laneRoot,
   prismaCliPath,
+  cancelTimer = clearTimeout,
+  scheduleTimer = setTimeout,
+  signalProcess = killChild,
   spawnProcess = spawn,
   timeoutSeconds,
 }) {
@@ -309,6 +321,12 @@ export async function runBoundedFounderPilotProductionHistoryPrismaDeploy({
     let timedOut = false;
     let overflow = false;
     let spawnError = false;
+    let finished = false;
+    let forceKillRequested = false;
+    let terminationRequested = false;
+    let terminationSignalSent = false;
+    let escalationTimer = null;
+    let watchdogTimer = null;
     const child = spawnProcess(
       process.execPath,
       [cli, "migrate", "deploy", "--schema", schema],
@@ -321,6 +339,42 @@ export async function runBoundedFounderPilotProductionHistoryPrismaDeploy({
         windowsHide: true,
       },
     );
+    const childHasExited = () =>
+      finished ||
+      spawnError ||
+      (child.exitCode !== null && child.exitCode !== undefined) ||
+      (child.signalCode !== null && child.signalCode !== undefined);
+    const clearTimers = () => {
+      if (watchdogTimer !== null) {
+        cancelTimer(watchdogTimer);
+        watchdogTimer = null;
+      }
+      if (escalationTimer !== null) {
+        cancelTimer(escalationTimer);
+        escalationTimer = null;
+      }
+    };
+    const requestTermination = () => {
+      if (childHasExited()) return;
+      if (!terminationRequested) {
+        terminationRequested = true;
+        terminationSignalSent = signalProcess(child, "SIGTERM") === true;
+      }
+      if (
+        !terminationSignalSent ||
+        escalationTimer !== null ||
+        childHasExited()
+      ) {
+        return;
+      }
+      escalationTimer = scheduleTimer(() => {
+        escalationTimer = null;
+        if (childHasExited() || forceKillRequested) return;
+        forceKillRequested = true;
+        signalProcess(child, "SIGKILL");
+      }, 5000);
+      escalationTimer?.unref?.();
+    };
     const consume = (hash, kind) => (chunk) => {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       hash.update(bytes);
@@ -328,22 +382,26 @@ export async function runBoundedFounderPilotProductionHistoryPrismaDeploy({
       else stderrBytes += bytes.length;
       if (stdoutBytes + stderrBytes > MAX_CHILD_OUTPUT_BYTES && !overflow) {
         overflow = true;
-        killChild(child, "SIGTERM");
+        requestTermination();
       }
     };
     child.stdout?.on("data", consume(stdoutHash, "stdout"));
     child.stderr?.on("data", consume(stderrHash, "stderr"));
     child.once("error", () => {
       spawnError = true;
+      clearTimers();
     });
-    const watchdog = setTimeout(() => {
+    watchdogTimer = scheduleTimer(() => {
+      watchdogTimer = null;
+      if (childHasExited()) return;
       timedOut = true;
-      killChild(child, "SIGTERM");
-      setTimeout(() => killChild(child, "SIGKILL"), 5000).unref();
+      requestTermination();
     }, timeoutSeconds * 1000);
-    watchdog.unref();
+    watchdogTimer?.unref?.();
     child.once("close", (code, signal) => {
-      clearTimeout(watchdog);
+      if (finished) return;
+      finished = true;
+      clearTimers();
       const evidence = {
         exitCode: Number.isInteger(code) ? code : null,
         signal: typeof signal === "string" ? signal : null,

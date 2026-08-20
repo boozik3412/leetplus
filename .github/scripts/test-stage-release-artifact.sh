@@ -80,6 +80,7 @@ hydration_stage_root="${TEST_ROOT}/hydration-staged"
 mkdir -p "$hydration_stage_root"
 if env -u DATABASE_URL -u JWT_SECRET -u GUEST_PORTAL_JWT_SECRET \
   -u APP_ENCRYPTION_KEY -u INTEGRATION_ENCRYPTION_KEY -u SYNC_SERVICE_TOKEN -u LANGAME_API_KEY \
+  -u INVOCATION_ID \
   PATH="${failing_pnpm_root}:${PATH}" bash "$STAGER" \
   --release-sha "$RELEASE_SHA" \
   --artifact "$archive" \

@@ -109,7 +109,7 @@
   Cross-audit дополнительно закрыл риск ownership новых migration objects:
   production controller теперь требует temporary `LOGIN NOINHERIT` session,
   canonical `SET ROLE` в existing database/object owner, exact direct
-  membership options и совпадение owner с runtime role. Unit contract `19/19`
+  membership options и совпадение owner с runtime role. Unit contract `23/23`
   зелёный; реальный owner/runtime-access proof остаётся частью exact-artifact
   replay, до него production switch запрещён.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение

@@ -65,6 +65,49 @@ async function temporaryRoot(t) {
   return root;
 }
 
+async function boundedDeployFixture(t) {
+  const root = await temporaryRoot(t);
+  const laneRoot = path.join(root, "lane");
+  await mkdir(laneRoot, { recursive: true });
+  const prismaCliPath = path.join(root, "prisma.js");
+  await writeFile(prismaCliPath, "// fixture\n");
+  await writeFile(path.join(laneRoot, "schema.prisma"), "datasource db {}\n");
+  return { laneRoot, prismaCliPath };
+}
+
+function controlledTimers() {
+  const handles = [];
+  return {
+    cancelTimer: (handle) => {
+      handle.cancelled = true;
+    },
+    handles,
+    scheduleTimer: (callback, delay) => {
+      const handle = {
+        callback,
+        cancelled: false,
+        delay,
+        unref: () => {
+          handle.unrefed = true;
+        },
+        unrefed: false,
+      };
+      handles.push(handle);
+      return handle;
+    },
+  };
+}
+
+function deployChild(pid = 12345) {
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.pid = pid;
+  child.signalCode = null;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  return child;
+}
+
 function keys() {
   const pair = generateKeyPairSync("ed25519");
   const publicKeyPem = pair.publicKey.export({
@@ -792,26 +835,27 @@ test("resumes from a durable reconciliation marker without repeating reconciliat
 });
 
 test("bounded deploy runner exposes only digests and a minimal child environment", async (t) => {
-  const root = await temporaryRoot(t);
-  const laneRoot = path.join(root, "lane");
-  await mkdir(laneRoot, { recursive: true });
-  const prismaCliPath = path.join(root, "prisma.js");
-  await writeFile(prismaCliPath, "// fixture\n");
-  await writeFile(path.join(laneRoot, "schema.prisma"), "datasource db {}\n");
+  const { laneRoot, prismaCliPath } = await boundedDeployFixture(t);
+  const timers = controlledTimers();
+  const signals = [];
   let childOptions = null;
   const result = await runBoundedFounderPilotProductionHistoryPrismaDeploy({
+    cancelTimer: timers.cancelTimer,
     databaseUrl: PRODUCTION_DATABASE_URL,
     laneRoot,
     prismaCliPath,
+    scheduleTimer: timers.scheduleTimer,
+    signalProcess: (_child, signal) => {
+      signals.push(signal);
+      return true;
+    },
     spawnProcess: (_command, _args, options) => {
       childOptions = options;
-      const child = new EventEmitter();
-      child.pid = 12345;
-      child.stdout = new PassThrough();
-      child.stderr = new PassThrough();
+      const child = deployChild();
       queueMicrotask(() => {
         child.stdout.end("applied\n");
         child.stderr.end();
+        child.exitCode = 0;
         child.emit("close", 0, null);
       });
       return child;
@@ -819,6 +863,10 @@ test("bounded deploy runner exposes only digests and a minimal child environment
     timeoutSeconds: 60,
   });
   assert.equal(result.status, "SUCCEEDED");
+  assert.deepEqual(signals, []);
+  assert.equal(timers.handles.length, 1);
+  assert.equal(timers.handles[0].cancelled, true);
+  assert.equal(timers.handles[0].unrefed, true);
   assert.match(result.stdoutSha256, /^[0-9a-f]{64}$/u);
   assert.equal("SYNC_SERVICE_TOKEN" in childOptions.env, false);
   assert.equal(childOptions.env.DATABASE_URL, PRODUCTION_DATABASE_URL);
@@ -835,6 +883,172 @@ test("bounded deploy runner exposes only digests and a minimal child environment
       ? path.dirname(process.execPath)
       : "/usr/bin:/bin",
   );
+});
+
+test("bounded deploy watchdog cannot SIGKILL a completed or reused child", async (t) => {
+  const { laneRoot, prismaCliPath } = await boundedDeployFixture(t);
+  const timers = controlledTimers();
+  const signals = [];
+  let child;
+  let spawnedResolve;
+  const spawned = new Promise((resolve) => {
+    spawnedResolve = resolve;
+  });
+  const execution = runBoundedFounderPilotProductionHistoryPrismaDeploy({
+    cancelTimer: timers.cancelTimer,
+    databaseUrl: PRODUCTION_DATABASE_URL,
+    laneRoot,
+    prismaCliPath,
+    scheduleTimer: timers.scheduleTimer,
+    signalProcess: (_child, signal) => {
+      signals.push(signal);
+      return true;
+    },
+    spawnProcess: () => {
+      child = deployChild();
+      spawnedResolve();
+      return child;
+    },
+    timeoutSeconds: 60,
+  });
+  await spawned;
+  assert.equal(timers.handles.length, 1);
+  timers.handles[0].callback();
+  timers.handles[0].callback();
+  assert.deepEqual(signals, ["SIGTERM"]);
+  assert.equal(timers.handles.length, 2);
+  const escalation = timers.handles[1];
+  assert.equal(escalation.delay, 5000);
+  assert.equal(escalation.unrefed, true);
+
+  child.exitCode = 0;
+  child.emit("close", 0, null);
+  const result = await execution;
+  assert.equal(result.status, "AMBIGUOUS");
+  assert.equal(escalation.cancelled, true);
+  escalation.callback();
+  assert.deepEqual(signals, ["SIGTERM"]);
+});
+
+test("bounded deploy watchdog escalates a live child at most once", async (t) => {
+  const { laneRoot, prismaCliPath } = await boundedDeployFixture(t);
+  const timers = controlledTimers();
+  const signals = [];
+  let child;
+  let spawnedResolve;
+  const spawned = new Promise((resolve) => {
+    spawnedResolve = resolve;
+  });
+  const execution = runBoundedFounderPilotProductionHistoryPrismaDeploy({
+    cancelTimer: timers.cancelTimer,
+    databaseUrl: PRODUCTION_DATABASE_URL,
+    laneRoot,
+    prismaCliPath,
+    scheduleTimer: timers.scheduleTimer,
+    signalProcess: (_child, signal) => {
+      signals.push(signal);
+      return signal === "SIGTERM";
+    },
+    spawnProcess: () => {
+      child = deployChild();
+      spawnedResolve();
+      return child;
+    },
+    timeoutSeconds: 60,
+  });
+  await spawned;
+  timers.handles[0].callback();
+  const escalation = timers.handles[1];
+  escalation.callback();
+  escalation.callback();
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  child.signalCode = "SIGKILL";
+  child.emit("close", null, "SIGKILL");
+  const result = await execution;
+  assert.equal(result.status, "AMBIGUOUS");
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("bounded deploy watchdog never escalates after a rejected SIGTERM", async (t) => {
+  const { laneRoot, prismaCliPath } = await boundedDeployFixture(t);
+  const timers = controlledTimers();
+  const signals = [];
+  let child;
+  let spawnedResolve;
+  const spawned = new Promise((resolve) => {
+    spawnedResolve = resolve;
+  });
+  const execution = runBoundedFounderPilotProductionHistoryPrismaDeploy({
+    cancelTimer: timers.cancelTimer,
+    databaseUrl: PRODUCTION_DATABASE_URL,
+    laneRoot,
+    prismaCliPath,
+    scheduleTimer: timers.scheduleTimer,
+    signalProcess: (_child, signal) => {
+      signals.push(signal);
+      return false;
+    },
+    spawnProcess: () => {
+      child = deployChild();
+      spawnedResolve();
+      return child;
+    },
+    timeoutSeconds: 60,
+  });
+  await spawned;
+  const watchdog = timers.handles[0];
+  watchdog.callback();
+  watchdog.callback();
+  assert.deepEqual(signals, ["SIGTERM"]);
+  assert.equal(timers.handles.length, 1);
+
+  child.exitCode = 0;
+  child.emit("close", 0, null);
+  const result = await execution;
+  assert.equal(result.status, "AMBIGUOUS");
+  watchdog.callback();
+  assert.deepEqual(signals, ["SIGTERM"]);
+  assert.equal(timers.handles.length, 1);
+});
+
+test("bounded deploy spawn error cancels all timers idempotently", async (t) => {
+  const { laneRoot, prismaCliPath } = await boundedDeployFixture(t);
+  const timers = controlledTimers();
+  const signals = [];
+  let child;
+  let spawnedResolve;
+  const spawned = new Promise((resolve) => {
+    spawnedResolve = resolve;
+  });
+  const execution = runBoundedFounderPilotProductionHistoryPrismaDeploy({
+    cancelTimer: timers.cancelTimer,
+    databaseUrl: PRODUCTION_DATABASE_URL,
+    laneRoot,
+    prismaCliPath,
+    scheduleTimer: timers.scheduleTimer,
+    signalProcess: (_child, signal) => {
+      signals.push(signal);
+      return true;
+    },
+    spawnProcess: () => {
+      child = deployChild();
+      spawnedResolve();
+      return child;
+    },
+    timeoutSeconds: 60,
+  });
+  await spawned;
+  const watchdog = timers.handles[0];
+  child.emit("error", new Error("spawn failed"));
+  assert.equal(watchdog.cancelled, true);
+  watchdog.callback();
+  watchdog.callback();
+  assert.deepEqual(signals, []);
+  child.exitCode = 1;
+  child.emit("close", 1, null);
+  const result = await execution;
+  assert.equal(result.status, "AMBIGUOUS");
+  assert.deepEqual(signals, []);
 });
 
 test("phase journal is exclusive, append-only, hash chained and fsynced by record", async (t) => {

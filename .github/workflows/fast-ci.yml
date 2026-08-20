@@ -37,6 +37,13 @@ jobs:
         shell: bash
         run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
 
+      - name: Validate SHA-bound artifact staging script syntax
+        shell: bash
+        run: |
+          bash -n docs/deployment/production-artifact/stage-release-artifact.sh
+          bash -n .github/scripts/test-stage-release-artifact.sh
+          bash .github/scripts/test-stage-release-artifact.sh
+
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

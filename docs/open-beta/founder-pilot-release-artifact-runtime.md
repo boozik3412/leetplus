@@ -15,10 +15,11 @@ exact `pnpm-lock.yaml`.
 - `apps/api/dist` и exact `apps/api/package.json`;
 - production `.next`, `apps/web/package.json`, `next.config.ts` и `public`;
 - Prisma schema и все `183` канонические migrations;
-- exact `packages/database/package.json` и только шесть runtime/CLI MJS файлов
-  для restored-copy preflight, activation-role lifecycle и direct network
-  acceptance; test fixtures и прочие scripts в artifact не копируются, exact
-  file count равен `6`;
+- exact `packages/database/package.json` и 16 runtime/CLI MJS файлов: десять
+  founder-pilot scripts для restored-copy, activation-role и mail-enrollment
+  lifecycle, плюс шесть scripts для runtime-function и worker enrollment;
+  test fixtures и прочие scripts в artifact не копируются, exact file count
+  равен `16`;
 - root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`;
 - `release-provenance.json` и отсортированный `SHA256SUMS`.
 

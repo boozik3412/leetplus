@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+#
+# Verify and stage one exact LeetPlus release artifact.
+#
+# This script deliberately has no database, systemd, network-download or
+# symlink-switch capability. It can prepare a verified immutable directory;
+# migration, runtime switch and rollback remain separately reviewed operations.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+readonly RELEASE_SHA_PATTERN='^[0-9a-f]{40}$'
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  stage-release-artifact.sh \
+    --release-sha <40-lowercase-hex> \
+    --artifact <leetplus-release-<sha>.tar.gz> \
+    --artifact-sha256 <artifact>.sha256 \
+    --output-root <existing-absolute-directory> \
+    [--hydrate]
+
+Verifies the outer artifact checksum, gzip stream, archive paths, absence of
+symlinks/node_modules, internal SHA256SUMS and release provenance. It then
+atomically moves the verified tree to <output-root>/<sha>.
+
+--hydrate additionally runs the locked, offline production dependency install
+and Prisma generate inside that new directory, then repeats SHA256SUMS checks.
+It never reads runtime secrets, connects to PostgreSQL, switches a live release
+or restarts systemd.
+USAGE
+}
+
+die() {
+  printf 'stage-release-artifact: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command is unavailable: $1"
+}
+
+is_regular_nonsymlink() {
+  [[ -f "$1" && ! -L "$1" ]]
+}
+
+release_sha=''
+artifact=''
+artifact_sha256=''
+output_root=''
+hydrate=false
+
+while (($# > 0)); do
+  case "$1" in
+    --release-sha)
+      (($# >= 2)) || die '--release-sha requires a value'
+      release_sha="$2"
+      shift 2
+      ;;
+    --artifact)
+      (($# >= 2)) || die '--artifact requires a value'
+      artifact="$2"
+      shift 2
+      ;;
+    --artifact-sha256)
+      (($# >= 2)) || die '--artifact-sha256 requires a value'
+      artifact_sha256="$2"
+      shift 2
+      ;;
+    --output-root)
+      (($# >= 2)) || die '--output-root requires a value'
+      output_root="$2"
+      shift 2
+      ;;
+    --hydrate)
+      hydrate=true
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+[[ "$release_sha" =~ $RELEASE_SHA_PATTERN ]] || die 'release SHA must be 40 lowercase hexadecimal characters'
+[[ -n "$artifact" && -n "$artifact_sha256" && -n "$output_root" ]] || {
+  usage >&2
+  exit 1
+}
+
+for command_name in awk basename find gzip mktemp node realpath sha256sum tar; do
+  require_command "$command_name"
+done
+
+artifact="$(realpath -e -- "$artifact")"
+artifact_sha256="$(realpath -e -- "$artifact_sha256")"
+output_root="$(realpath -e -- "$output_root")"
+
+is_regular_nonsymlink "$artifact" || die 'artifact must be a regular non-symlink file'
+is_regular_nonsymlink "$artifact_sha256" || die 'artifact checksum must be a regular non-symlink file'
+[[ -d "$output_root" && ! -L "$output_root" && "$output_root" != '/' ]] || die 'output root must be an existing non-root directory, not a symlink'
+
+artifact_name="$(basename -- "$artifact")"
+[[ "$artifact_name" == "leetplus-release-${release_sha}.tar.gz" ]] || die 'artifact file name is not bound to release SHA'
+[[ "$(basename -- "$artifact_sha256")" == "${artifact_name}.sha256" ]] || die 'checksum file name is not bound to artifact'
+
+release_directory="${output_root}/${release_sha}"
+[[ ! -e "$release_directory" && ! -L "$release_directory" ]] || die 'release directory already exists; refusing overwrite'
+
+checksum_directory="$(dirname -- "$artifact_sha256")"
+(
+  cd -- "$checksum_directory"
+  checksum_file="$(basename -- "$artifact_sha256")"
+  expected_digest="$(sha256sum -- "$artifact" | awk '{ print $1 }')"
+  checksum_line_count="$(awk 'NF { count += 1 } END { print count + 0 }' "$checksum_file")"
+  matching_checksum_line_count="$(awk -v digest="$expected_digest" -v artifact_name="$artifact_name" '
+    $1 == digest && ($2 == artifact_name || $2 == "*" artifact_name) { count += 1 }
+    END { print count + 0 }
+  ' "$checksum_file")"
+  [[ "$checksum_line_count" == '1' && "$matching_checksum_line_count" == '1' ]] || die 'checksum file must contain exactly the expected artifact checksum line'
+  sha256sum --strict --check "$(basename -- "$artifact_sha256")" --status
+) || die 'outer artifact checksum verification failed'
+
+gzip --test -- "$artifact" || die 'gzip stream verification failed'
+
+archive_listing="$(mktemp "${output_root}/.${release_sha}.listing.XXXXXX")"
+staging_directory=''
+cleanup_listing() {
+  rm -f -- "$archive_listing"
+}
+trap cleanup_listing EXIT
+
+tar -tzf "$artifact" > "$archive_listing" || die 'cannot list artifact archive'
+grep -Eq '(^/|(^|/)\.\.(/|$))' "$archive_listing" && die 'archive contains an unsafe path'
+grep -Eq '(^|/)node_modules(/|$)' "$archive_listing" && die 'artifact embeds node_modules'
+tar -tvzf "$artifact" | grep -Eq '^[lh]' && die 'artifact contains a symlink or hardlink'
+
+staging_directory="$(mktemp -d "${output_root}/.${release_sha}.staging.XXXXXX")"
+tar -xzf "$artifact" \
+  --no-same-owner \
+  --no-same-permissions \
+  --warning=no-unknown-keyword \
+  -C "$staging_directory" || die "artifact extraction failed; retained $staging_directory for inspection"
+
+(
+  cd -- "$staging_directory"
+  find . -type l -print -quit | grep -q . && die 'extracted artifact contains a symlink'
+  find . -path './node_modules' -prune -o -type d -name node_modules -print -quit | grep -q . && die 'extracted artifact contains node_modules'
+  sha256sum --strict --check --quiet SHA256SUMS || die 'internal SHA256SUMS verification failed'
+  node - "$release_sha" <<'NODE'
+const fs = require('node:fs');
+
+const [releaseSha] = process.argv.slice(2);
+const provenance = JSON.parse(fs.readFileSync('release-provenance.json', 'utf8'));
+const requiredFiles = [
+  'apps/api/dist/main.js',
+  'apps/api/package.json',
+  'apps/web/.next/BUILD_ID',
+  'apps/web/package.json',
+  'packages/database/package.json',
+  'packages/database/prisma/schema.prisma',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+];
+
+if (provenance.releaseSha !== releaseSha) {
+  throw new Error('release-provenance SHA mismatch');
+}
+if (!Number.isSafeInteger(provenance.databaseMigrationCount) || provenance.databaseMigrationCount < 1) {
+  throw new Error('release-provenance migration count is invalid');
+}
+if (typeof provenance.databaseMigration !== 'string' || !/^\d{14}_[a-z0-9_]+$/u.test(provenance.databaseMigration)) {
+  throw new Error('release-provenance migration name is invalid');
+}
+for (const requiredFile of requiredFiles) {
+  const stat = fs.statSync(requiredFile);
+  if (!stat.isFile() || stat.size === 0) {
+    throw new Error(`required release file is absent or empty: ${requiredFile}`);
+  }
+}
+if (!fs.statSync('apps/web/public').isDirectory()) {
+  throw new Error('release web public directory is absent');
+}
+NODE
+)
+
+if [[ "$hydrate" == true ]]; then
+  require_command pnpm
+  (
+    cd -- "$staging_directory"
+    pnpm install --prod --offline --frozen-lockfile
+    pnpm --filter database db:generate
+    sha256sum --strict --check --quiet SHA256SUMS
+  ) || die "locked offline hydration failed; retained $staging_directory for inspection"
+fi
+
+mv -- "$staging_directory" "$release_directory"
+staging_directory=''
+
+printf 'STAGED_RELEASE_SHA=%s\n' "$release_sha"
+printf 'STAGED_RELEASE_DIRECTORY=%s\n' "$release_directory"
+printf 'STAGED_RELEASE_HYDRATED=%s\n' "$hydrate"
+printf 'NEXT_STEP=reviewed migration and runtime switch; this script performed neither\n'

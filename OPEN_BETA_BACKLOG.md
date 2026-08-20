@@ -19,6 +19,21 @@
   запущен для каждого будущего deploy SHA.
   Critical path, границы и порядок работ зафиксированы в
   [`controlled-beta-1-delivery-plan.md`](./docs/open-beta/controlled-beta-1-delivery-plan.md).
+  Последующий documentation SHA `299c5a8b…` принят Fast CI `32371094962` как
+  `2/2 SUCCESS` и Full Release Admission `32371530743` как `4/4 SUCCESS`.
+  Последний создал artifact `9407707351` `leetplus-release-299c5a8b…`,
+  `28 563 832` bytes,
+  `sha256:f91b0ef6130fdf8148af97efa406a93fb6ce5194b9a10a169543137fde28c774`;
+  downloaded-artifact API child process также зелёный. Это exact artifact
+  candidate, но не production GO. Production preflight выявил legacy mutable
+  deploy из ветки и неинвентаризированные sensitive backup-артефакты в
+  checkout. Подготовлен
+  [`controlled-beta-1-production-canary-plan.md`](./docs/open-beta/controlled-beta-1-production-canary-plan.md):
+  он требует artifact/SHA-bound switch, защищённое архивирование residue и
+  explicit production approval; никакие production changes этим commit не
+  выполняются. Для первоначальной isolated-проверки artifact добавлен
+  [`stage-release-artifact.sh`](./docs/deployment/production-artifact/stage-release-artifact.sh):
+  он не имеет DB/systemd/current-switch capability и проверяется Fast CI.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta

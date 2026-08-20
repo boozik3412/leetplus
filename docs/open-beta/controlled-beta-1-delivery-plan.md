@@ -2,7 +2,7 @@
 
 | Поле              | Значение                                       |
 | ----------------- | ---------------------------------------------- |
-| Версия            | 1.0                                            |
+| Версия            | 1.1                                            |
 | Дата              | 20.08.2026                                     |
 | Статус            | `NO-GO`, delivery plan active                  |
 | Цель              | Один приглашённый владелец `Tenant B/Store B1` |
@@ -45,12 +45,24 @@ gamification, assortment, staff, communications, users/roles и integrations.
 отдельно запущенным зелёным Full Release Admission. Если их SHA не совпадает,
 деплой запрещён.
 
+Последующая документационная фиксация `299c5a8b…` принята Fast CI
+[`32371094962`](https://github.com/boozik3412/leetplus/actions/runs/32371094962)
+как `2/2 SUCCESS`. Для этого exact SHA Full Release Admission
+[`32371530743`](https://github.com/boozik3412/leetplus/actions/runs/32371530743)
+принят как `4/4 SUCCESS`: authority roots, application checks, PostgreSQL
+migration smoke и downloaded-artifact API child process. Создан
+`leetplus-release-299c5a8b…` artifact `9407707351`, размер `28 563 832` bytes,
+GitHub digest
+`sha256:f91b0ef6130fdf8148af97efa406a93fb6ce5194b9a10a169543137fde28c774`.
+Это допустимый artifact candidate, но не production GO: backup/rehearsal,
+runtime enrollment и canary всё ещё обязательны.
+
 ## Critical path до первого invite
 
 1. Получить exact candidate SHA с зелёным Fast CI.
 2. Запустить Full Release Admission для этого SHA и получить SHA-bound artifact.
 3. Выполнить backup verification, rollback drill и production canary на этом
-   artifact.
+   artifact по [SHA-bound production canary plan](./controlled-beta-1-production-canary-plan.md).
 4. Enroll production runtime roles, SMTP worker configuration и health/alert
    checks ровно по reviewed operational runbook.
 5. Создать `Tenant B/Store B1` через protected shell/GO/activation workflow и

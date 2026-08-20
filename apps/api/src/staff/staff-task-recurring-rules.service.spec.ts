@@ -4,7 +4,11 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import {
+  TenantCustomerStage,
+  TenantLifecycleStatus,
+  UserRole,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { StaffTaskRecurringRulesService } from './staff-task-recurring-rules.service';
 
@@ -221,6 +225,7 @@ describe('StaffTaskRecurringRulesService actor access scope', () => {
       },
       staffTask: {
         count: jest.fn().mockResolvedValue(0),
+        create: jest.fn(),
       },
       store: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -232,6 +237,7 @@ describe('StaffTaskRecurringRulesService actor access scope', () => {
       },
       tenant: {
         findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn(),
       },
       $transaction: jest.fn(),
       $queryRaw: jest.fn(),
@@ -1017,6 +1023,138 @@ describe('StaffTaskRecurringRulesService actor access scope', () => {
       expect(prisma.staffTaskRecurringRule.findMany).not.toHaveBeenCalled();
     },
   );
+
+  it('runs scheduled tenant rules only through store-scoped background runtime identities', async () => {
+    const prisma = createPrisma();
+    prisma.tenant.findFirst.mockResolvedValue({
+      id: tenantId,
+      customerStage: TenantCustomerStage.INTERNAL,
+      status: TenantLifecycleStatus.ACTIVE,
+      stores: [{ id: allowedStoreId }, { id: foreignStoreId }],
+    });
+    prisma.staffTaskRecurringRule.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'rule-a1',
+          title: 'Opening control',
+          nextRunAt: scheduledFor,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    const { service } = createService({ prisma });
+
+    const result = await service.runDueRulesForTenant(tenantId, {
+      limit: 10,
+      dryRun: true,
+      now: now.toISOString(),
+    });
+
+    expect(prisma.tenant.findFirst).toHaveBeenCalledWith({
+      where: { id: tenantId },
+      select: expect.objectContaining({
+        id: true,
+        customerStage: true,
+        status: true,
+        stores: expect.objectContaining({
+          where: { isActive: true, backgroundExecutionEnabled: true },
+          select: { id: true },
+          orderBy: { createdAt: 'asc' },
+        }),
+      }),
+    });
+    expect(prisma.staffTaskRecurringRule.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId,
+          storeId: allowedStoreId,
+          status: 'ACTIVE',
+          nextRunAt: { lte: now },
+        }),
+        take: 10,
+      }),
+    );
+    expect(prisma.staffTaskRecurringRule.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId,
+          storeId: foreignStoreId,
+          status: 'ACTIVE',
+          nextRunAt: { lte: now },
+        }),
+        take: 10,
+      }),
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      now: now.toISOString(),
+      dryRun: true,
+      limit: 10,
+      due: 1,
+      created: 0,
+      skipped: 0,
+      failed: 0,
+      runs: [
+        {
+          ruleId: 'rule-a1',
+          ruleTitle: 'Opening control',
+          scheduledFor: scheduledFor.toISOString(),
+          status: 'DUE',
+          taskId: null,
+          message: null,
+        },
+      ],
+    });
+  });
+
+  it('does not read recurring rules when scheduled runtime has no active background-enabled store', async () => {
+    const prisma = createPrisma();
+    prisma.tenant.findFirst.mockResolvedValue({
+      id: tenantId,
+      customerStage: TenantCustomerStage.INTERNAL,
+      status: TenantLifecycleStatus.ACTIVE,
+      stores: [],
+    });
+    const { service } = createService({ prisma });
+
+    const result = await service.runDueRulesForTenant(tenantId, {
+      now: now.toISOString(),
+    });
+
+    expect(prisma.staffTaskRecurringRule.findMany).not.toHaveBeenCalled();
+    expect(prisma.staffTaskRecurringRuleRun.create).not.toHaveBeenCalled();
+    expect(prisma.staffTask.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      now: now.toISOString(),
+      due: 0,
+      created: 0,
+      skipped: 0,
+      failed: 0,
+      runs: [],
+    });
+  });
+
+  it('denies scheduled recurring rules for non-internal customer stages before rule reads', async () => {
+    const prisma = createPrisma();
+    prisma.tenant.findFirst.mockResolvedValue({
+      id: tenantId,
+      customerStage: TenantCustomerStage.PILOT,
+      status: TenantLifecycleStatus.ACTIVE,
+      stores: [{ id: allowedStoreId }],
+    });
+    const { service } = createService({ prisma });
+
+    const result = await service.runDueRulesForTenant(tenantId, {
+      now: now.toISOString(),
+    });
+
+    expect(prisma.staffTaskRecurringRule.findMany).not.toHaveBeenCalled();
+    expect(prisma.staffTaskRecurringRuleRun.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(result.runs).toEqual([]);
+  });
 
   it('uses server time and the actor-scoped rule predicate for dry-run', async () => {
     const prisma = createPrisma();

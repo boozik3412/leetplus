@@ -4,10 +4,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { Prisma, TenantLifecycleStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ResolvedAccessScope } from '../tenancy/access-scope.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
 import { StaffTaskCatalogAccessPolicyService } from './staff-task-catalog-access-policy.service';
 import {
   resolveStaffTaskRecurringNextRunAt,
@@ -642,8 +647,58 @@ export class StaffTaskRecurringRulesService {
     dto: StaffTaskRecurringRuleRunDueDto = {},
   ): Promise<StaffTaskRecurringRuleRunDueResult> {
     const options = this.resolveRunDueOptions(dto);
+    const tenant = await this.prisma.tenant.findFirst({
+      where: { id: tenantId },
+      select: {
+        id: true,
+        customerStage: true,
+        status: true,
+        stores: {
+          where: { isActive: true, backgroundExecutionEnabled: true },
+          select: { id: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
 
-    return this.runDueRules(tenantId, options);
+    if (!tenant || tenant.status !== TenantLifecycleStatus.ACTIVE) {
+      return this.emptyRunDueResult(options);
+    }
+
+    const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+      stage: tenantBackgroundStageForCustomerStage(tenant.customerStage),
+      jobKind: 'STAFF_TASK_RECURRING_RULES',
+    });
+    if (!executionDecision.allowed) {
+      return this.emptyRunDueResult(options);
+    }
+
+    const aggregate = this.emptyRunDueResult(options);
+
+    for (const store of tenant.stores) {
+      const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+        decision: executionDecision,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: tenant.id,
+        storeId: store.id,
+      });
+      if (!runtimeIdentity.accepted || !runtimeIdentity.storeId) {
+        continue;
+      }
+
+      const result = await this.runDueRules(
+        tenant.id,
+        options,
+        runtimeIdentity.storeId,
+      );
+      aggregate.due += result.due;
+      aggregate.created += result.created;
+      aggregate.skipped += result.skipped;
+      aggregate.failed += result.failed;
+      aggregate.runs.push(...result.runs);
+    }
+
+    return aggregate;
   }
 
   async runDueRulesForAllTenants(
@@ -659,7 +714,11 @@ export class StaffTaskRecurringRulesService {
     const aggregate = this.emptyRunDueResult(options);
 
     for (const tenant of tenants) {
-      const result = await this.runDueRules(tenant.id, options);
+      const result = await this.runDueRulesForTenant(tenant.id, {
+        now: options.now.toISOString(),
+        limit: options.limit,
+        dryRun: options.dryRun,
+      });
       aggregate.due += result.due;
       aggregate.created += result.created;
       aggregate.skipped += result.skipped;
@@ -1005,11 +1064,13 @@ export class StaffTaskRecurringRulesService {
   private async runDueRules(
     tenantId: string,
     options: RunDueOptions,
+    runtimeStoreId: string,
   ): Promise<StaffTaskRecurringRuleRunDueResult> {
     const result = this.emptyRunDueResult(options);
     const dueRules = await this.prisma.staffTaskRecurringRule.findMany({
       where: {
         tenantId,
+        storeId: runtimeStoreId,
         status: 'ACTIVE',
         nextRunAt: { lte: options.now },
       },
@@ -2188,11 +2249,7 @@ export class StaffTaskRecurringRulesService {
     from = new Date(),
     storeTimeZone?: string | null,
   ) {
-    return resolveStaffTaskRecurringNextRunAt(
-      input,
-      from,
-      storeTimeZone,
-    );
+    return resolveStaffTaskRecurringNextRunAt(input, from, storeTimeZone);
   }
 
   private resolveOne<T extends readonly string[]>(

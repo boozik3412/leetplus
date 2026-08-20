@@ -33,6 +33,11 @@ function tenant() {
         isPlatformAdmin: false,
       },
     ],
+    stores: [
+      {
+        id: 'store-1',
+      },
+    ],
   };
 }
 
@@ -516,6 +521,36 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(prisma.guestGameMission.findMany).not.toHaveBeenCalled();
     expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('skips an internal tenant before reading or claiming ledger work when store runtime identity is missing', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.tenant.findMany.mockResolvedValueOnce([
+      {
+        ...tenant(),
+        stores: [],
+      },
+    ]);
+
+    const result = await service.runScheduled({
+      mode: 'SHADOW',
+      tenantId: 'tenant-1',
+    });
+
+    expect(result).toMatchObject({
+      checkedTenants: 1,
+      processedTenants: 0,
+      skippedTenants: 1,
+      tenants: [{ tenantId: 'tenant-1', status: 'SKIPPED' }],
+    });
+    expect(result.tenants[0]?.reason).toContain('BACKGROUND_STORE_ID_REQUIRED');
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.guestGameMission.findMany).not.toHaveBeenCalled();
+    expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
     expect(gamification.dryRun).not.toHaveBeenCalled();
     expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
     expect(gamification.processEvent).not.toHaveBeenCalled();

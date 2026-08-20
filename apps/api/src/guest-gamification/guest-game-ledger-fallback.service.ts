@@ -8,8 +8,10 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
   tenantBackgroundExecutionNote,
   tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundRuntimeIdentityDecision,
 } from '../tenancy/tenant-background-execution-policy';
 import {
   GuestGamificationService,
@@ -182,6 +184,15 @@ export class GuestGameLedgerFallbackService {
           orderBy: { createdAt: 'asc' },
           take: 1,
         },
+        stores: {
+          where: {
+            isActive: true,
+            backgroundExecutionEnabled: true,
+          },
+          select: { id: true },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
+        },
       },
       orderBy: { slug: 'asc' },
     });
@@ -228,6 +239,24 @@ export class GuestGameLedgerFallbackService {
         );
         continue;
       }
+      const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+        decision: executionDecision,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: tenant.id,
+        storeId: tenant.stores[0]?.id,
+      });
+      if (!runtimeIdentity.accepted || !runtimeIdentity.storeId) {
+        results.push(
+          emptyTenantResult(
+            tenant.id,
+            tenant.slug,
+            'SKIPPED',
+            tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
+          ),
+        );
+        continue;
+      }
+      const runtimeStoreId = runtimeIdentity.storeId;
 
       try {
         results.push(
@@ -237,8 +266,8 @@ export class GuestGameLedgerFallbackService {
               tenantId: tenant.id,
               tenantSlug: tenant.slug,
               tenantStatus: tenant.status,
-              accessScope: 'NETWORK',
-              allowedStoreIds: [],
+              accessScope: 'STORES',
+              allowedStoreIds: [runtimeStoreId],
             },
             mode,
             factTypes,
@@ -3454,6 +3483,12 @@ function safeErrorMessage(error: unknown) {
   return error instanceof Error && error.message
     ? error.message
     : 'Ledger fallback failed.';
+}
+
+function tenantBackgroundRuntimeIdentityNote(
+  decision: TenantBackgroundRuntimeIdentityDecision,
+) {
+  return `Background runtime identity denied: ${decision.reasonCode}.`;
 }
 
 function exactOwnerQuarantineError(error: unknown) {

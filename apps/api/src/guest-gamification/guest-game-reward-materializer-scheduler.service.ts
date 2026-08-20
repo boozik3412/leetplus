@@ -11,8 +11,10 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
   tenantBackgroundExecutionNote,
   tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundRuntimeIdentityDecision,
 } from '../tenancy/tenant-background-execution-policy';
 import {
   type GuestGameEffectMaterializeResult,
@@ -485,6 +487,18 @@ export class GuestGameRewardMaterializerSchedulerService
             orderBy: { createdAt: 'asc' },
             take: 1,
           },
+          stores: {
+            where: {
+              isActive: true,
+              backgroundExecutionEnabled: true,
+              ...(policy.allowAllTenants || !policy.storeId
+                ? {}
+                : { id: policy.storeId }),
+            },
+            select: { id: true },
+            orderBy: { createdAt: 'asc' },
+            take: 1,
+          },
         },
         orderBy: { slug: 'asc' },
       });
@@ -530,13 +544,32 @@ export class GuestGameRewardMaterializerSchedulerService
           continue;
         }
 
+        const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+          decision: executionDecision,
+          actorKind: 'TENANT_STORE_SYSTEM',
+          tenantId: tenant.id,
+          storeId: tenant.stores[0]?.id,
+        });
+        if (!runtimeIdentity.accepted || !runtimeIdentity.storeId) {
+          results.push(
+            emptyTenantResult(
+              tenant.id,
+              tenant.slug,
+              'SKIPPED',
+              tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
+            ),
+          );
+          continue;
+        }
+        const runtimeStoreId = runtimeIdentity.storeId;
+
         const user = {
           ...actor,
           tenantId: tenant.id,
           tenantSlug: tenant.slug,
           tenantStatus: tenant.status,
-          accessScope: 'NETWORK' as const,
-          allowedStoreIds: [],
+          accessScope: 'STORES' as const,
+          allowedStoreIds: [runtimeStoreId],
         };
         const dto = {
           limit: this.batchSize(),
@@ -888,4 +921,10 @@ function materializerNotReadyReason(
   if (!policy.enabled) return 'background materializer is disabled';
   if (!policy.scopeConfigured) return 'tenant scope is not configured';
   return 'background materializer policy is not ready';
+}
+
+function tenantBackgroundRuntimeIdentityNote(
+  decision: TenantBackgroundRuntimeIdentityDecision,
+) {
+  return `Background runtime identity denied: ${decision.reasonCode}.`;
 }

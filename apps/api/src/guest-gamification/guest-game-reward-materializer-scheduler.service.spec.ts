@@ -41,6 +41,11 @@ function tenant(
         isPlatformAdmin: false,
       },
     ],
+    stores: [
+      {
+        id: 'store-1',
+      },
+    ],
     ...overrides,
   };
 }
@@ -345,6 +350,7 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     const { scheduler, prisma, gamification } = createScheduler({
       GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
       GUEST_GAME_REWARD_MATERIALIZER_TENANT_SLUG: 'demo',
+      GUEST_GAME_REWARD_MATERIALIZER_STORE_ID: 'store-1',
       GUEST_GAME_REWARD_MATERIALIZER_BATCH_SIZE: '12',
       GUEST_GAME_REWARD_MATERIALIZER_CLAIM_LEASE_MS: '90000',
       GUEST_GAME_REWARD_MATERIALIZER_MAX_ATTEMPTS: '7',
@@ -368,7 +374,18 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
       effects: { claimed: 1, recovered: 1, rewardIds: ['reward-1'] },
     });
     expect(prisma.tenant.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { slug: 'demo' } }),
+      expect.objectContaining({
+        where: { slug: 'demo' },
+        select: expect.objectContaining({
+          stores: expect.objectContaining({
+            where: {
+              isActive: true,
+              backgroundExecutionEnabled: true,
+              id: 'store-1',
+            },
+          }),
+        }),
+      }),
     );
     const expectedDto = {
       limit: 12,
@@ -376,11 +393,21 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
       maxAttempts: 7,
     };
     expect(gamification.materializeRewardIntents).toHaveBeenCalledWith(
-      expect.objectContaining({ tenantId: 'tenant-1', tenantSlug: 'demo' }),
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        tenantSlug: 'demo',
+        accessScope: 'STORES',
+        allowedStoreIds: ['store-1'],
+      }),
       expectedDto,
     );
     expect(gamification.materializeRewardEffects).toHaveBeenCalledWith(
-      expect.objectContaining({ tenantId: 'tenant-1', tenantSlug: 'demo' }),
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        tenantSlug: 'demo',
+        accessScope: 'STORES',
+        allowedStoreIds: ['store-1'],
+      }),
       expectedDto,
     );
     expect(
@@ -446,10 +473,35 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     expect(gamification.materializeRewardEffects).not.toHaveBeenCalled();
   });
 
+  it('skips an internal background tenant before materializer claims when store runtime identity is missing', async () => {
+    const { scheduler, gamification } = createScheduler(
+      {
+        GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
+        GUEST_GAME_REWARD_MATERIALIZER_TENANT_SLUG: 'demo',
+      },
+      [tenant({ stores: [] })],
+    );
+
+    const result = await scheduler.runOnce();
+
+    expect(result).toMatchObject({
+      checkedTenants: 1,
+      processedTenants: 0,
+      skippedTenants: 1,
+      tenants: [{ tenantId: 'tenant-1', status: 'SKIPPED' }],
+    });
+    expect(result?.tenants[0]?.reason).toContain(
+      'BACKGROUND_STORE_ID_REQUIRED',
+    );
+    expect(gamification.materializeRewardIntents).not.toHaveBeenCalled();
+    expect(gamification.materializeRewardEffects).not.toHaveBeenCalled();
+  });
+
   it('requires an explicit opt-in before processing all tenants', async () => {
     const { scheduler, prisma } = createScheduler({
       GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
       GUEST_GAME_REWARD_MATERIALIZER_ALLOW_ALL_TENANTS: 'true',
+      GUEST_GAME_REWARD_MATERIALIZER_STORE_ID: 'store-1',
     });
 
     await expect(scheduler.runOnce()).resolves.toMatchObject({
@@ -457,7 +509,17 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
       processedTenants: 1,
     });
     expect(prisma.tenant.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: {} }),
+      expect.objectContaining({
+        where: {},
+        select: expect.objectContaining({
+          stores: expect.objectContaining({
+            where: {
+              isActive: true,
+              backgroundExecutionEnabled: true,
+            },
+          }),
+        }),
+      }),
     );
   });
 
@@ -484,6 +546,7 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
       {
         GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
         GUEST_GAME_REWARD_MATERIALIZER_ALLOW_ALL_TENANTS: 'true',
+        GUEST_GAME_REWARD_MATERIALIZER_STORE_ID: 'store-1',
       },
       [
         tenant({
@@ -515,6 +578,7 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     const { scheduler, gamification } = createScheduler({
       GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
       GUEST_GAME_REWARD_MATERIALIZER_TENANT_ID: 'tenant-1',
+      GUEST_GAME_REWARD_MATERIALIZER_STORE_ID: 'store-1',
     });
     gamification.materializeRewardIntents.mockRejectedValue(
       new Error('intent drain failed'),
@@ -551,6 +615,7 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
       {
         GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
         GUEST_GAME_REWARD_MATERIALIZER_ALLOW_ALL_TENANTS: 'true',
+        GUEST_GAME_REWARD_MATERIALIZER_STORE_ID: 'store-1',
       },
       [
         tenant({ id: 'tenant-error', slug: 'a-error' }),
@@ -595,6 +660,7 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
       {
         GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
         GUEST_GAME_REWARD_MATERIALIZER_TENANT_SLUG: 'other',
+        GUEST_GAME_REWARD_MATERIALIZER_STORE_ID: 'store-2',
       },
       [tenant({ id: 'tenant-2', slug: 'other' })],
     );
@@ -661,6 +727,7 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     const { scheduler, gamification } = createScheduler({
       GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
       GUEST_GAME_REWARD_MATERIALIZER_TENANT_SLUG: 'demo',
+      GUEST_GAME_REWARD_MATERIALIZER_STORE_ID: 'store-1',
     });
     gamification.materializeRewardIntents.mockImplementation(
       () =>

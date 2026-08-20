@@ -17,6 +17,7 @@ concurrency:
 
 env:
   CI_RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci?schema=public
 
 jobs:
   authority-root-trust:

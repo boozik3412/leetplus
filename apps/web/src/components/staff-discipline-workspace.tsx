@@ -373,9 +373,9 @@ export function StaffDisciplineWorkspace({
           </div>
           <span className="text-xs text-zinc-500">
             {report.summary.recordsTotal}{" "}
-            {report.filters.dateFrom || report.filters.dateTo
-              ? "записей за период"
-              : "активных записей за всё время"}
+            {report.filters.period === "all"
+              ? "записей за весь период"
+              : "записей за период"}
           </span>
         </div>
         <div className="mt-4 space-y-3">
@@ -439,9 +439,9 @@ export function StaffDisciplineWorkspace({
             ))
           ) : (
             <div className="rounded-lg border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-700">
-              {report.filters.dateFrom || report.filters.dateTo
-                ? "За выбранный период записей нет."
-                : "Активных записей пока нет."}
+              {report.filters.period === "all"
+                ? "За весь период записей нет."
+                : "За выбранный период записей нет."}
             </div>
           )}
         </div>

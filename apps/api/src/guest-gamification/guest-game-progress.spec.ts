@@ -1046,6 +1046,90 @@ describe('guest game progress trigger matching', () => {
     });
   });
 
+  it('does not reuse a completed purchase when the next event has the same timestamp', () => {
+    const completedAt = new Date('2026-08-08T09:18:14.000Z');
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PRODUCT_PURCHASE',
+        progressTarget: 1,
+        repeatCompletedAt: completedAt,
+        conditions: {
+          purchaseSource: 'CATEGORY',
+          metric: {
+            aggregation: 'count',
+            eventTypes: ['PRODUCT_PURCHASE'],
+            purchaseSource: 'CATEGORY',
+            externalCategoryKeys: ['46.langamepro.ru:16'],
+            target: 1,
+          },
+        },
+      },
+      {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: completedAt,
+        externalCategoryKey: '46.langamepro.ru:3',
+        spendAmount: 150,
+      },
+      [
+        {
+          eventType: 'PRODUCT_PURCHASE',
+          occurredAt: completedAt,
+          externalCategoryKey: '46.langamepro.ru:16',
+          spendAmount: 150,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 0,
+      completed: false,
+      matchedEvents: 0,
+      repeatCycleReset: false,
+    });
+  });
+
+  it('starts a new accumulation for non-periodic rules after a reward', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'BALANCE_TOPUP',
+        progressTarget: 1_000,
+        repeatCompletedAt: new Date('2026-08-08T10:00:00.000Z'),
+        conditions: {
+          metric: {
+            aggregation: 'sum',
+            eventTypes: ['BALANCE_TOPUP'],
+            target: 1_000,
+          },
+        },
+      },
+      {
+        eventType: 'BALANCE_TOPUP',
+        occurredAt: new Date('2026-08-09T10:00:00.000Z'),
+        spendAmount: 400,
+      },
+      [
+        {
+          eventType: 'BALANCE_TOPUP',
+          occurredAt: new Date('2026-08-08T09:00:00.000Z'),
+          spendAmount: 600,
+        },
+        {
+          eventType: 'BALANCE_TOPUP',
+          occurredAt: new Date('2026-08-08T10:00:00.000Z'),
+          spendAmount: 400,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 400,
+      target: 1_000,
+      completed: false,
+      matchedEvents: 1,
+      repeatCycleReset: false,
+    });
+  });
+
   it('allows a fresh matching purchase after a non-periodic mission completion', () => {
     const result = evaluateGuestGameProgress(
       {

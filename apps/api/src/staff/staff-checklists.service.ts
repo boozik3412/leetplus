@@ -527,7 +527,25 @@ const checklistRunInclude = {
     },
   },
   createdByUser: { select: { id: true, email: true, fullName: true } },
-  assignedToUser: { select: { id: true, email: true, fullName: true } },
+  assignedToUser: {
+    select: {
+      id: true,
+      email: true,
+      fullName: true,
+      staffMember: {
+        select: {
+          store: {
+            select: {
+              id: true,
+              city: true,
+              address: true,
+              timeZone: true,
+            },
+          },
+        },
+      },
+    },
+  },
   reviewedByUser: { select: { id: true, email: true, fullName: true } },
 } satisfies Prisma.StaffChecklistRunInclude;
 
@@ -577,6 +595,15 @@ type ChecklistTimingRun = {
       city: string | null;
       address: string | null;
       timeZone: string | null;
+    } | null;
+  } | null;
+  assignedToUser?: {
+    staffMember: {
+      store: {
+        city: string | null;
+        address: string | null;
+        timeZone: string | null;
+      } | null;
     } | null;
   } | null;
 };
@@ -961,18 +988,22 @@ export class StaffChecklistsService {
     }
 
     const shift = await this.resolveShift(access, dto.shiftId);
+    const assignedToUserId = isUseOnlyUser
+      ? user.id
+      : await this.resolveUserId(access, dto.assignedToUserId);
+    const assignedStoreId = await this.resolveAssignedUserStoreId(
+      access,
+      assignedToUserId,
+    );
     const storeId = await this.resolveStoreId(
       access,
-      source.storeId ?? requestedStoreId ?? shift?.storeId,
+      source.storeId ?? requestedStoreId ?? shift?.storeId ?? assignedStoreId,
     );
     this.accessPolicy.assertOperationalStore(access, storeId);
     if (shift && shift.storeId !== storeId) {
       throw new BadRequestException('Checklist store must match shift store');
     }
     const shiftId = shift?.id ?? null;
-    const assignedToUserId = isUseOnlyUser
-      ? user.id
-      : await this.resolveUserId(access, dto.assignedToUserId);
 
     const sections = this.normalizeSections(source.sections);
     const answers = this.defaultAnswers(sections);
@@ -2243,9 +2274,9 @@ export class StaffChecklistsService {
             store: row.shift.store,
           }
         : null,
-      createdByUser: row.createdByUser,
-      assignedToUser: row.assignedToUser,
-      reviewedByUser: row.reviewedByUser,
+      createdByUser: this.toChecklistUser(row.createdByUser),
+      assignedToUser: this.toChecklistUser(row.assignedToUser),
+      reviewedByUser: this.toChecklistUser(row.reviewedByUser),
     };
   }
 
@@ -2264,7 +2295,7 @@ export class StaffChecklistsService {
       scheduledAt: row.scheduledAt?.toISOString() ?? null,
       submittedAt: row.submittedAt?.toISOString() ?? null,
       store: row.store,
-      assignedToUser: row.assignedToUser,
+      assignedToUser: this.toChecklistUser(row.assignedToUser),
       checklist: {
         id: source.id,
         title: source.title,
@@ -2644,7 +2675,9 @@ export class StaffChecklistsService {
           metrics.timedItemsOnTime += 1;
         } else if (evaluation.status === 'EARLY') {
           metrics.timedItemsEarly += 1;
-          metrics.timingViolations += 1;
+          // Completing a checklist item before its target time is allowed.
+          // Keep it visible in the early metric, but do not penalize discipline.
+          metrics.timedItemsOnTime += 1;
         } else if (evaluation.status === 'LATE') {
           metrics.timedItemsLate += 1;
           metrics.timingViolations += 1;
@@ -2905,15 +2938,12 @@ export class StaffChecklistsService {
   }
 
   private resolveChecklistTimeZone(row: ChecklistTimingRun): string {
+    const assignedStore = row.assignedToUser?.staffMember?.store;
+    const store = row.store ?? row.shift?.store ?? assignedStore;
+
     return (
-      normalizeStoreTimeZone(
-        row.store?.city ?? row.shift?.store?.city ?? null,
-        row.store?.timeZone ?? row.shift?.store?.timeZone ?? null,
-      ) ??
-      normalizeStoreTimeZone(
-        cityFromStoreAddress(row.store?.address ?? row.shift?.store?.address),
-        null,
-      ) ??
+      normalizeStoreTimeZone(store?.city ?? null, store?.timeZone ?? null) ??
+      normalizeStoreTimeZone(cityFromStoreAddress(store?.address), null) ??
       'UTC'
     );
   }
@@ -3865,5 +3895,29 @@ export class StaffChecklistsService {
     }
 
     return user.id;
+  }
+
+  private async resolveAssignedUserStoreId(
+    access: StaffChecklistAccess,
+    userId: string | null,
+  ) {
+    if (!userId) {
+      return null;
+    }
+
+    const staffMember = await this.prisma.staffMember.findFirst({
+      where: { tenantId: access.tenantId, userId },
+      select: { storeId: true },
+    });
+
+    return staffMember?.storeId ?? null;
+  }
+
+  private toChecklistUser(
+    user: { id: string; email: string; fullName: string | null } | null,
+  ) {
+    return user
+      ? { id: user.id, email: user.email, fullName: user.fullName }
+      : null;
   }
 }

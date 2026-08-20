@@ -7,6 +7,7 @@ export type StaffDisciplineRiskLevel = "LOW" | "MEDIUM" | "HIGH";
 export type StaffDisciplineFilters = {
   dateFrom?: string;
   dateTo?: string;
+  period?: "all" | "range";
   storeId?: string;
   userId?: string;
   status?: "ACTIVE" | "CANCELED" | "RESET" | "all";
@@ -65,6 +66,7 @@ export type StaffDisciplineReport = {
     canExport: boolean;
   };
   filters: {
+    period: "all" | "range";
     dateFrom: string | null;
     dateTo: string | null;
     storeId: string | null;

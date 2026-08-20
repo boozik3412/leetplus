@@ -273,13 +273,17 @@ function formatTimingLabel(timing: StaffChecklistAnswer["timing"]) {
 
   if (timing.status === "EARLY") {
     return timing.deviationMinutes !== null
-      ? `раньше на ${Math.abs(timing.deviationMinutes)} мин`
+      ? planned
+        ? `раньше плана ${planned} на ${Math.abs(timing.deviationMinutes)} мин`
+        : `раньше на ${Math.abs(timing.deviationMinutes)} мин`
       : "раньше окна";
   }
 
   if (timing.status === "LATE") {
     return timing.deviationMinutes !== null
-      ? `позже на ${Math.abs(timing.deviationMinutes)} мин`
+      ? planned
+        ? `позже плана ${planned} на ${Math.abs(timing.deviationMinutes)} мин`
+        : `позже на ${Math.abs(timing.deviationMinutes)} мин`
       : "позже окна";
   }
 
@@ -1191,7 +1195,7 @@ function ChecklistRunEditor({
             tone={run.failedItems > 0 ? "bad" : "good"}
           />
           <Metric
-            label="Вовремя"
+            label="В срок"
             value={
               run.timedItemsTotal > 0
                 ? `${formatNumber(run.timedItemsOnTime)}/${formatNumber(run.timedItemsTotal)}`

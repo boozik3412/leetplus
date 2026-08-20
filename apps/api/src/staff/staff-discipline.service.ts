@@ -154,6 +154,7 @@ type StaffDisciplineAccess = {
 export type StaffDisciplineQuery = {
   dateFrom?: string;
   dateTo?: string;
+  period?: 'all' | 'range';
   storeId?: string;
   userId?: string;
   status?: StaffDisciplineRecordStatus | 'all';
@@ -190,6 +191,7 @@ export type StaffDisciplineRecordUpdateDto = {
 };
 
 type ResolvedDisciplineFilters = {
+  period: 'all' | 'range';
   dateFrom: string | null;
   dateTo: string | null;
   start: Date | null;
@@ -229,7 +231,7 @@ export class StaffDisciplineService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     await this.ensureDefaultRules(tenantId);
     const access = this.resolveDisciplineAccess(user);
-    const filters = this.resolveFilters(query, access.userId, false);
+    const filters = this.resolveFilters(query, access.userId, 'all');
 
     const [rules, records, stores, users, policies] = await Promise.all([
       this.prisma.staffDisciplineRule.findMany({
@@ -264,6 +266,7 @@ export class StaffDisciplineService {
         canExport: access.canExport,
       },
       filters: {
+        period: filters.period,
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
         storeId: filters.storeId,
@@ -303,7 +306,7 @@ export class StaffDisciplineService {
       );
     }
 
-    const filters = this.resolveFilters(query, null, false);
+    const filters = this.resolveFilters(query, undefined, 'all');
     const format = resolveStaffExportFormat(query.format);
     const records = await this.prisma.staffDisciplineRecord.findMany({
       where: this.buildRecordWhere(tenantId, filters),
@@ -719,7 +722,7 @@ export class StaffDisciplineService {
   ): Prisma.StaffDisciplineRecordWhereInput {
     const where: Prisma.StaffDisciplineRecordWhereInput = {
       tenantId,
-      ...(filters.start && filters.end
+      ...(filters.period === 'range' && filters.start && filters.end
         ? { occurredAt: { gte: filters.start, lte: filters.end } }
         : {}),
     };
@@ -1222,33 +1225,38 @@ export class StaffDisciplineService {
   private resolveFilters(
     query: StaffDisciplineQuery,
     forcedUserId: string | null | undefined,
-    useDefaultPeriod: false,
+    defaultPeriod: 'all',
   ): ResolvedDisciplineFilters;
   private resolveFilters(
     query: StaffDisciplineQuery,
     forcedUserId?: string | null,
-    useDefaultPeriod?: true,
+    defaultPeriod?: 'range',
   ): ResolvedBoundedDisciplineFilters;
   private resolveFilters(
     query: StaffDisciplineQuery,
     forcedUserId?: string | null,
-    useDefaultPeriod = true,
+    defaultPeriod: 'all' | 'range' = 'range',
   ): ResolvedDisciplineFilters {
     const requestedDateFrom = this.normalizeDate(query.dateFrom);
     const requestedDateTo = this.normalizeDate(query.dateTo);
     const hasRequestedPeriod = Boolean(requestedDateFrom || requestedDateTo);
+    const period =
+      query.period === 'all'
+        ? 'all'
+        : query.period === 'range' || hasRequestedPeriod
+          ? 'range'
+          : defaultPeriod;
     const dateTo =
-      requestedDateTo ??
-      (hasRequestedPeriod || useDefaultPeriod
-        ? this.toDateOnly(new Date())
-        : null);
+      period === 'range'
+        ? (requestedDateTo ?? this.toDateOnly(new Date()))
+        : null;
     const dateFrom =
-      requestedDateFrom ??
-      (dateTo
-        ? this.toDateOnly(
+      period === 'range' && dateTo
+        ? (requestedDateFrom ??
+          this.toDateOnly(
             this.addDays(new Date(`${dateTo}T00:00:00.000Z`), -29),
-          )
-        : null);
+          ))
+        : null;
     const start = dateFrom ? new Date(`${dateFrom}T00:00:00.000Z`) : null;
     const end = dateTo ? new Date(`${dateTo}T23:59:59.999Z`) : null;
 
@@ -1257,6 +1265,7 @@ export class StaffDisciplineService {
     }
 
     return {
+      period,
       dateFrom,
       dateTo,
       start,

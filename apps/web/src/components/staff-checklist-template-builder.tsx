@@ -119,6 +119,16 @@ function normalizeTiming(
   };
 }
 
+function timeOfDayFromItemTitle(title: string) {
+  const match = /^\s*([01]?\d|2[0-3]):([0-5]\d)\b/.exec(title);
+
+  if (!match) {
+    return null;
+  }
+
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
 function normalizeSectionsTiming(
   sections: StaffChecklistTemplateSection[],
 ): StaffChecklistTemplateSection[] {
@@ -1196,7 +1206,6 @@ export function StaffChecklistTemplateBuilder({
                         Убрать
                       </button>
                     </div>
-
                     <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
                       {section.items.map((item, itemIndex) => (
                         <div
@@ -1212,7 +1221,6 @@ export function StaffChecklistTemplateBuilder({
                             ) {
                               return;
                             }
-
                             setDragOverItem(null);
                           }}
                           onDrop={(event) =>
@@ -1366,26 +1374,32 @@ export function StaffChecklistTemplateBuilder({
                                 onChange={(event) => {
                                   const mode = event.target
                                     .value as StaffChecklistItemTimingMode;
+                                  const currentTiming = normalizeTiming(
+                                    item.timing,
+                                  );
                                   patchItem(section.id, item.id, {
                                     timing:
                                       mode === "NONE"
                                         ? defaultTiming()
                                         : {
-                                            ...normalizeTiming(item.timing),
+                                            ...currentTiming,
                                             mode,
                                             offsetMinutes:
                                               mode === "TIME_OF_DAY"
                                                 ? null
-                                                : (normalizeTiming(item.timing)
-                                                    .offsetMinutes ?? 0),
+                                                : (currentTiming.offsetMinutes ??
+                                                  0),
                                             timeOfDay:
                                               mode === "TIME_OF_DAY"
-                                                ? (normalizeTiming(item.timing)
-                                                    .timeOfDay ?? "09:00")
+                                                ? (timeOfDayFromItemTitle(
+                                                    item.title,
+                                                  ) ??
+                                                  currentTiming.timeOfDay ??
+                                                  "09:00")
                                                 : null,
                                             toleranceMinutes:
-                                              normalizeTiming(item.timing)
-                                                .toleranceMinutes || 10,
+                                              currentTiming.toleranceMinutes ||
+                                              10,
                                             affectsDiscipline: true,
                                           },
                                   });

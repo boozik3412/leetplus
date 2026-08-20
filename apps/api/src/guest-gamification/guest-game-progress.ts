@@ -96,7 +96,7 @@ export function evaluateGuestGameProgress(
   const resetImmediatelyAfterCompletion = Boolean(
     completedAt &&
     !rule.repeatPeriodicity &&
-    completedAt.getTime() < referenceEvent.occurredAt.getTime(),
+    completedAt.getTime() <= referenceEvent.occurredAt.getTime(),
   );
 
   if (!hasMetric && (!target || target <= 1)) {
@@ -395,7 +395,9 @@ function matchesProgressEvent(
 
   // A completed non-periodic mission starts a fresh accumulation immediately.
   // Facts that contributed to the previous reward must never be reused to
-  // qualify another reward when an unrelated later event triggers evaluation.
+  // qualify another reward when an unrelated event triggers evaluation. The
+  // boundary is inclusive because providers can emit several events with the
+  // same second-level timestamp as the completed reward.
   if (
     options.resetImmediatelyAfterCompletion &&
     options.completedAt &&

@@ -347,6 +347,158 @@ describe('Staff checklist time-of-day planning', () => {
     );
   });
 
+  it('uses the assigned employee store time zone for a network-wide checklist', () => {
+    const service = createService();
+    const startedAt = new Date('2026-08-19T04:05:00.000Z');
+    const item = {
+      id: 'item-morning',
+      title: 'Morning check',
+      instruction: null,
+      valueType: 'CHECKBOX',
+      required: true,
+      evidenceRequired: false,
+      score: 1,
+      timing: {
+        mode: 'TIME_OF_DAY',
+        offsetMinutes: null,
+        timeOfDay: '09:00',
+        toleranceMinutes: 15,
+        affectsDiscipline: true,
+      },
+    } as const;
+    const row = {
+      status: 'IN_PROGRESS',
+      scheduledAt: null,
+      startedAt,
+      createdAt: startedAt,
+      sectionsSnapshot: [],
+      answers: [],
+      store: null,
+      shift: null,
+      assignedToUser: {
+        staffMember: {
+          store: {
+            city: 'Екатеринбург',
+            address: null,
+            timeZone: 'Asia/Yekaterinburg',
+          },
+        },
+      },
+    };
+    const answer = {
+      sectionId: 'section-1',
+      itemId: item.id,
+      value: 'done',
+      status: 'PASS',
+      note: null,
+      evidenceUrl: null,
+      evidenceAttachments: [],
+      reviewThreads: [],
+      completedAt: '2026-08-19T04:05:00.000Z',
+      timing: null,
+    };
+    const timing = (
+      service as unknown as {
+        evaluateAnswerTiming: (
+          row: typeof row,
+          item: typeof item,
+          answer: typeof answer,
+        ) => {
+          status: string;
+          plannedAt: string | null;
+          deviationMinutes: number | null;
+        } | null;
+      }
+    ).evaluateAnswerTiming(row, item, answer);
+
+    expect(timing).toEqual(
+      expect.objectContaining({
+        status: 'ON_TIME',
+        plannedAt: '2026-08-19T04:00:00.000Z',
+        deviationMinutes: 5,
+      }),
+    );
+  });
+
+  it('counts an early item as compliant without treating it as a discipline violation', () => {
+    const service = createService();
+    const shiftStartedAt = new Date('2026-07-19T17:00:00.000Z');
+    const row = {
+      status: 'IN_PROGRESS',
+      scheduledAt: null,
+      startedAt: shiftStartedAt,
+      createdAt: shiftStartedAt,
+      sectionsSnapshot: [
+        {
+          id: 'section-1',
+          title: 'Night shift',
+          description: null,
+          items: [
+            {
+              id: 'item-1',
+              title: 'Night shift preparation',
+              instruction: null,
+              valueType: 'CHECKBOX',
+              required: true,
+              evidenceRequired: false,
+              score: 1,
+              timing: {
+                mode: 'TIME_OF_DAY',
+                offsetMinutes: null,
+                timeOfDay: '23:00',
+                toleranceMinutes: 10,
+                affectsDiscipline: true,
+              },
+            },
+          ],
+        },
+      ],
+      answers: [
+        {
+          sectionId: 'section-1',
+          itemId: 'item-1',
+          value: 'done',
+          status: 'PASS',
+          note: null,
+          evidenceUrl: null,
+          evidenceAttachments: [],
+          reviewThreads: [],
+          completedAt: '2026-07-19T17:30:00.000Z',
+          timing: null,
+        },
+      ],
+      store: {
+        city: 'Ekaterinburg',
+        address: null,
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      shift: {
+        startedAt: shiftStartedAt,
+        stoppedAt: null,
+        store: null,
+      },
+    };
+    const metrics = (
+      service as unknown as {
+        calculateTimingMetrics: (input: typeof row) => {
+          timedItemsEarly: number;
+          timedItemsOnTime: number;
+          timingViolations: number;
+          timingCompliancePercent: number;
+        };
+      }
+    ).calculateTimingMetrics(row);
+
+    expect(metrics).toEqual(
+      expect.objectContaining({
+        timedItemsEarly: 1,
+        timedItemsOnTime: 1,
+        timingViolations: 0,
+        timingCompliancePercent: 100,
+      }),
+    );
+  });
+
   it('uses the server timestamp instead of a timestamp sent by the device', () => {
     const service = createService();
     const sections = [

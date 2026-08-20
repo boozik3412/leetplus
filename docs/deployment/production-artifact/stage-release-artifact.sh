@@ -191,12 +191,14 @@ NODE
 
 if [[ "$hydrate" == true ]]; then
   require_command pnpm
-  (
+  if ! (
     cd -- "$staging_directory"
-    pnpm install --prod --offline --frozen-lockfile
-    pnpm --filter database db:generate
-    sha256sum --strict --check --quiet SHA256SUMS
-  ) || die "locked offline hydration failed; retained $staging_directory for inspection"
+    pnpm install --prod --offline --frozen-lockfile || exit 1
+    pnpm --filter database db:generate || exit 1
+    sha256sum --strict --check --quiet SHA256SUMS || exit 1
+  ); then
+    die "locked offline hydration failed; retained $staging_directory for inspection"
+  fi
 fi
 
 mv -- "$staging_directory" "$release_directory"

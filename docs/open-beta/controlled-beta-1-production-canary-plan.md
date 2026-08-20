@@ -23,6 +23,15 @@ secrets, не меняла production и не выполняла hydration. Loca
 использовался только как evidence целостности stage-инструмента, не заменяет
 restored-copy rehearsal.
 
+Первый server-side `--hydrate` rehearsal не был принят: pinned offline pnpm
+store не содержал весь уже зафиксированный dependency set. Partial directory
+был перемещён в отдельный `rehearsal-quarantine`, не использовался как release,
+не подключался к БД и не менял runtime. В ходе этого обнаружения исправлена
+regression в staging tool: failed install/generate теперь не может выполнить
+финальный move. Повторная hydration разрешается только после Fast CI этого
+fix и pre-warm exact lockfile store; fallback на live runtime directory или
+неприкреплённые package versions запрещён.
+
 ## Зафиксированное исходное состояние
 
 На 20.08.2026 read-only preflight подтвердил, что публичные API и Web доступны,

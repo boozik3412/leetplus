@@ -42,6 +42,11 @@
   `/etc/leetplus/runtime.env` и separate exact-SHA migration unit; их
   installation, перенос env и отключение legacy timer — только после backup
   rehearsal и explicit production approval.
+  Server-side artifact hydration выявил неполный offline pnpm store. Partial
+  rehearsal directory quarantined, не был использован для DB/runtime; P1
+  fail-closed regression staging tool исправлена с отдельным test. Следующий
+  blocker: pre-warm exact locked dependency store и повторить hydration до
+  restored-copy migration rehearsal.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta

@@ -64,6 +64,24 @@ test -f "${stage_root}/${RELEASE_SHA}/SHA256SUMS"
 test ! -e "${stage_root}/${RELEASE_SHA}/node_modules"
 grep -F -x "STAGED_RELEASE_SHA=${RELEASE_SHA}" "${TEST_ROOT}/accepted.out" > /dev/null
 
+failing_pnpm_root="${TEST_ROOT}/failing-pnpm-bin"
+mkdir -p "$failing_pnpm_root"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 73' > "${failing_pnpm_root}/pnpm"
+chmod 0700 "${failing_pnpm_root}/pnpm"
+hydration_stage_root="${TEST_ROOT}/hydration-staged"
+mkdir -p "$hydration_stage_root"
+if PATH="${failing_pnpm_root}:${PATH}" bash "$STAGER" \
+  --release-sha "$RELEASE_SHA" \
+  --artifact "$archive" \
+  --artifact-sha256 "${archive}.sha256" \
+  --output-root "$hydration_stage_root" \
+  --hydrate > "${TEST_ROOT}/hydration-rejected.out" 2>&1; then
+  printf 'failed offline hydration was unexpectedly accepted\n' >&2
+  exit 1
+fi
+test ! -e "${hydration_stage_root}/${RELEASE_SHA}"
+test -d "$(find "$hydration_stage_root" -mindepth 1 -maxdepth 1 -type d -name ".${RELEASE_SHA}.staging.*" -print -quit)"
+
 printf 'corruption' >> "$archive"
 negative_stage_root="${TEST_ROOT}/negative-staged"
 mkdir -p "$negative_stage_root"

@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import {
   DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
   FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE,
+  LANGAME_DISCREPANCY_LOG_ROOT_KEY,
   PRODUCTION_SECRET_KEYS,
   resolveAccessScopeEnforcementMode,
   resolveSecuritySecret,
@@ -33,6 +34,7 @@ function validProductionEnvironment() {
     BUILD_TIME: '2026-07-26T15:00:00.000Z',
     EXPECTED_DATABASE_MIGRATION: '20260727090000_access_scope_expand',
     EXPECTED_DATABASE_MIGRATION_COUNT: '151',
+    LANGAME_DISCREPANCY_LOG_ROOT: '/var/lib/leetplus/langame-sync',
     ACCESS_SCOPE_ENFORCEMENT_MODE: 'SHADOW',
     STAFF_ATTACHMENT_ACL_MODE: 'SHADOW',
   };
@@ -338,6 +340,31 @@ describe('validateEnvironment', () => {
     expect(() => validateEnvironment(environment)).toThrow(
       /EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer/,
     );
+  });
+
+  it('requires a stable absolute Langame discrepancy-log root in production', () => {
+    const valid = validProductionEnvironment();
+    expect(validateEnvironment(valid)[LANGAME_DISCREPANCY_LOG_ROOT_KEY]).toBe(
+      '/var/lib/leetplus/langame-sync',
+    );
+
+    for (const value of [
+      undefined,
+      'logs/langame-sync',
+      '/',
+      '/var/lib/../tmp/langame-sync',
+      ' /var/lib/leetplus/langame-sync',
+      'C:\\leetplus\\langame-sync',
+    ]) {
+      expect(() =>
+        validateEnvironment({
+          ...validProductionEnvironment(),
+          LANGAME_DISCREPANCY_LOG_ROOT: value,
+        }),
+      ).toThrow(
+        /LANGAME_DISCREPANCY_LOG_ROOT must be a non-root absolute POSIX path/,
+      );
+    }
   });
 
   it('rejects uppercase release identity in production', () => {

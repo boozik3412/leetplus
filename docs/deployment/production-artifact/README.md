@@ -55,6 +55,18 @@ download, install или build capability.
 legacy deploy timer остаётся production blocker и не должен отключаться
 автоматически.
 
+Mutable Langame discrepancy evidence не записывается в immutable release.
+До запуска API оператор создаёт отдельный persistent root и фиксирует тот же
+абсолютный путь в `/etc/leetplus/runtime.env`:
+
+```bash
+install -d -o admin -g admin -m 0750 /var/lib/leetplus/langame-sync
+```
+
+`LANGAME_DISCREPANCY_LOG_ROOT=/var/lib/leetplus/langame-sync` обязателен для
+production startup. Относительный путь, filesystem root и путь с `..`
+отклоняются до запуска приложения.
+
 Минимальный acceptance test `/.github/scripts/test-stage-release-artifact.sh`
 собирает disposable artifact, принимает его и доказывает fail-closed отказ для
 повреждённого archive без созданного release directory. Он выполняется в Fast

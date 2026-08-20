@@ -1,5 +1,6 @@
 import type { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
+import { posix } from 'node:path';
 
 const MINIMUM_PRODUCTION_SECRET_LENGTH = 32;
 const ENVIRONMENT_MARKER_KEYS = [
@@ -39,6 +40,36 @@ export const PRODUCTION_RELEASE_KEYS = [
   'EXPECTED_DATABASE_MIGRATION',
   'EXPECTED_DATABASE_MIGRATION_COUNT',
 ] as const;
+
+export const LANGAME_DISCREPANCY_LOG_ROOT_KEY =
+  'LANGAME_DISCREPANCY_LOG_ROOT' as const;
+
+export function resolveProductionLangameDiscrepancyLogRoot(
+  value: unknown,
+): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value !== value.trim()
+  ) {
+    return undefined;
+  }
+  if (
+    value.includes('\0') ||
+    value.includes('\\') ||
+    !posix.isAbsolute(value) ||
+    value.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
+    return undefined;
+  }
+
+  const normalized = posix.normalize(value).replace(/\/$/u, '');
+  if (!normalized || normalized === posix.parse(normalized).root) {
+    return undefined;
+  }
+
+  return normalized;
+}
 
 export const ACCESS_SCOPE_ENFORCEMENT_MODES = ['SHADOW', 'ENFORCED'] as const;
 
@@ -425,6 +456,9 @@ export function validateEnvironment(config: EnvironmentValues) {
   const expectedMigrationCount = stringValue(
     config.EXPECTED_DATABASE_MIGRATION_COUNT,
   );
+  const langameDiscrepancyLogRoot = resolveProductionLangameDiscrepancyLogRoot(
+    config[LANGAME_DISCREPANCY_LOG_ROOT_KEY],
+  );
   const identityEmailFingerprintKeyVersion = stringValue(
     config.IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION,
   );
@@ -490,6 +524,11 @@ export function validateEnvironment(config: EnvironmentValues) {
   if (!/^[1-9]\d*$/.test(expectedMigrationCount)) {
     errors.push('EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer');
   }
+  if (!langameDiscrepancyLogRoot) {
+    errors.push(
+      'LANGAME_DISCREPANCY_LOG_ROOT must be a non-root absolute POSIX path without traversal segments',
+    );
+  }
   if (identityEmailFingerprintKeyVersion !== 'v1') {
     errors.push('IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION must equal v1');
   }
@@ -547,6 +586,7 @@ export function validateEnvironment(config: EnvironmentValues) {
     BUILD_TIME: buildTime,
     EXPECTED_DATABASE_MIGRATION: expectedMigration,
     EXPECTED_DATABASE_MIGRATION_COUNT: expectedMigrationCount,
+    LANGAME_DISCREPANCY_LOG_ROOT: langameDiscrepancyLogRoot,
     IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION:
       identityEmailFingerprintKeyVersion,
     IDENTITY_MAIL_ENCRYPTION_KEY_VERSION: identityMailEncryptionKeyVersion,

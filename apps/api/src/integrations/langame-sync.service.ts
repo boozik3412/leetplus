@@ -3,6 +3,7 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   IntegrationSyncMode,
   IntegrationProvider,
@@ -14,8 +15,9 @@ import {
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { LANGAME_DISCREPANCY_LOG_ROOT_KEY } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import {
@@ -84,6 +86,7 @@ export class LangameSyncService {
     private readonly langameClient: LangameClient,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
+    private readonly configService: ConfigService,
   ) {}
 
   async syncTenant(
@@ -1576,10 +1579,13 @@ export class LangameSyncService {
     syncJobId: string;
     discrepancies: DiscrepancyLogEntry[];
   }) {
-    const directory = join(process.cwd(), 'logs', 'langame-sync', tenantId);
+    const root = this.discrepancyLogRoot();
+    const directory = resolve(root, tenantId);
+    this.assertPathInside(root, directory, 'tenant directory');
     await mkdir(directory, { recursive: true });
-    const fileName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${domain}-${syncJobId}.json`;
-    const filePath = join(directory, fileName);
+    const fileName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${this.safeLogComponent(domain)}-${this.safeLogComponent(syncJobId)}.json`;
+    const filePath = resolve(directory, fileName);
+    this.assertPathInside(directory, filePath, 'log file');
 
     await writeFile(
       filePath,
@@ -1598,6 +1604,40 @@ export class LangameSyncService {
     );
 
     return filePath;
+  }
+
+  private discrepancyLogRoot() {
+    const configured = this.configService
+      .get<string>(LANGAME_DISCREPANCY_LOG_ROOT_KEY)
+      ?.trim();
+    if (configured && !isAbsolute(configured)) {
+      throw new Error(
+        `${LANGAME_DISCREPANCY_LOG_ROOT_KEY} must be an absolute path`,
+      );
+    }
+
+    return configured
+      ? resolve(configured)
+      : resolve(process.cwd(), 'logs', 'langame-sync');
+  }
+
+  private assertPathInside(root: string, candidate: string, label: string) {
+    const relativePath = relative(root, candidate);
+    if (
+      !relativePath ||
+      relativePath === '..' ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath)
+    ) {
+      throw new Error(`Unsafe Langame discrepancy ${label}`);
+    }
+  }
+
+  private safeLogComponent(value: string) {
+    const normalized = value.replace(/[^a-z0-9._-]/giu, '_');
+    return normalized && normalized !== '.' && normalized !== '..'
+      ? normalized
+      : 'unknown';
   }
 
   private knownAddress(domain: string, clubId: number) {

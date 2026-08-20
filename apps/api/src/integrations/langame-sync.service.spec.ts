@@ -4,6 +4,10 @@ import {
   TenantModule,
   UserRole,
 } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -86,6 +90,10 @@ type LangameSettingsMock = {
 type TenantExecutionAdmissionMock = {
   evaluate: jest.Mock;
   assertAllowed: jest.Mock;
+};
+
+type ConfigMock = {
+  get: jest.Mock;
 };
 
 type StoreUpsertCall = [
@@ -245,6 +253,7 @@ describe('LangameSyncService', () => {
   let client: LangameClientMock;
   let settings: LangameSettingsMock;
   let admission: TenantExecutionAdmissionMock;
+  let config: ConfigMock;
   let service: LangameSyncService;
 
   beforeEach(() => {
@@ -373,6 +382,9 @@ describe('LangameSyncService', () => {
         customerStage: TenantCustomerStage.INTERNAL,
       }),
     };
+    config = {
+      get: jest.fn().mockReturnValue(undefined),
+    };
     prisma.product.upsert.mockResolvedValue({
       id: 'product-1',
       name: 'Cola',
@@ -399,6 +411,7 @@ describe('LangameSyncService', () => {
       client as unknown as LangameClient,
       settings as unknown as LangameSettingsService,
       admission as unknown as TenantExecutionAdmissionService,
+      config as unknown as ConfigService,
     );
   });
 
@@ -500,6 +513,47 @@ describe('LangameSyncService', () => {
     expect(syncJobUpdate.data.inventoryCount).toBe(1);
     expect(syncJobUpdate.data.salesCount).toBe(1);
     expect(syncJobUpdate.data.discrepancyCount).toBe(0);
+  });
+
+  it('writes manual discrepancy logs under the configured persistent absolute root', async () => {
+    const temporaryRoot = await mkdtemp(
+      join(tmpdir(), 'leetplus-langame-discrepancy-'),
+    );
+    const persistentRoot = join(temporaryRoot, 'persistent');
+    config.get.mockImplementation((key: string) =>
+      key === 'LANGAME_DISCREPANCY_LOG_ROOT' ? persistentRoot : undefined,
+    );
+    prisma.product.findUnique.mockResolvedValue({
+      name: 'Old product name',
+      isActive: true,
+    });
+
+    try {
+      await service.syncTenant(user, {
+        dateFrom: '2026-04-29',
+        dateTo: '2026-04-29',
+      });
+
+      const successfulUpdate = (
+        prisma.integrationSyncJob.update.mock.calls as SyncJobUpdateCall[]
+      )
+        .map(([call]) => call)
+        .find((call) => call.data.status === 'SUCCESS');
+      const logPath = successfulUpdate?.data.discrepancyLogPath;
+      expect(logPath).toBeTruthy();
+      expect(isAbsolute(logPath ?? '')).toBe(true);
+      expect(logPath).toContain(join(persistentRoot, 'tenant-1'));
+      const payload = JSON.parse(await readFile(logPath ?? '', 'utf8')) as {
+        tenantId: string;
+        discrepancies: Array<{ field: string }>;
+      };
+      expect(payload.tenantId).toBe('tenant-1');
+      expect(payload.discrepancies).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'name' })]),
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
   });
 
   it('does not auto-link synced products to canonical groups', async () => {

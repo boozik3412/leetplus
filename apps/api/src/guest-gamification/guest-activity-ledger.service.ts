@@ -25,6 +25,7 @@ import type {
 import { PrismaService } from '../prisma/prisma.service';
 import {
   evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
   tenantBackgroundStageForCustomerStage,
 } from '../tenancy/tenant-background-execution-policy';
 import {
@@ -523,6 +524,15 @@ export class GuestActivityLedgerService {
         skipped += 1;
         continue;
       }
+      const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+        decision: executionDecision,
+        actorKind: 'TENANT_SYSTEM',
+        tenantId: state.tenantId,
+      });
+      if (!runtimeIdentity.accepted) {
+        skipped += 1;
+        continue;
+      }
       const requiresHourlySessionReplay = !hourlySessionReplayReady(
         state.status,
         state.diagnostics,
@@ -594,6 +604,14 @@ export class GuestActivityLedgerService {
       jobKind: 'GUEST_ACTIVITY_LEDGER_SYNC',
     });
     if (!executionDecision.allowed) {
+      return null;
+    }
+    const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+      decision: executionDecision,
+      actorKind: 'TENANT_SYSTEM',
+      tenantId: candidate.tenantId,
+    });
+    if (!runtimeIdentity.accepted) {
       return null;
     }
 

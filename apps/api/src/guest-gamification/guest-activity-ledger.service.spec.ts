@@ -2651,6 +2651,33 @@ describe('GuestActivityLedgerService', () => {
     expect(syncProfile).not.toHaveBeenCalled();
   });
 
+  it('does not claim queued sync work when runtime tenant identity is missing', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'RUNTIME_IDENTITY_CONTAINMENT',
+    });
+    const job = Array.from(syncJobs.values())[0];
+    (prisma.guestActivitySyncJob.findFirst as jest.Mock).mockResolvedValueOnce({
+      ...job,
+      tenantId: '',
+      tenant: {
+        customerStage: TenantCustomerStage.INTERNAL,
+      },
+    });
+    const syncProfile = jest.spyOn(service, 'syncProfile');
+
+    const result = await service.processQueuedSyncJobs(1, 'test-worker');
+
+    expect(result).toMatchObject({ processed: 0 });
+    expect(
+      (prisma.guestActivitySyncJob.updateMany as jest.Mock).mock.calls,
+    ).toHaveLength(0);
+    expect(syncProfile).not.toHaveBeenCalled();
+  });
+
   it('marks a queued stale external guest sync as skipped', async () => {
     await service.enqueueProfileSync({
       tenantId,
@@ -2807,6 +2834,31 @@ describe('GuestActivityLedgerService', () => {
     const result = await service.enqueueDueRecoverySyncs(10);
 
     expect(result).toEqual({ scanned: 2, queued: 0, skipped: 2 });
+    expect(enqueueProfileSync).not.toHaveBeenCalled();
+    expect(syncStateUpdate).not.toHaveBeenCalled();
+  });
+
+  it('does not enqueue or mutate recovery state when runtime tenant identity is missing', async () => {
+    (prisma.guestActivitySyncState.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 'sync-missing-tenant',
+        tenantId: '',
+        profileId,
+        guestId,
+        storeId,
+        status: 'FAILED',
+        errorMessage: 'upstream timeout',
+        diagnostics: null,
+        tenant: {
+          customerStage: TenantCustomerStage.INTERNAL,
+        },
+      },
+    ]);
+    const enqueueProfileSync = jest.spyOn(service, 'enqueueProfileSync');
+
+    const result = await service.enqueueDueRecoverySyncs(10);
+
+    expect(result).toEqual({ scanned: 1, queued: 0, skipped: 1 });
     expect(enqueueProfileSync).not.toHaveBeenCalled();
     expect(syncStateUpdate).not.toHaveBeenCalled();
   });

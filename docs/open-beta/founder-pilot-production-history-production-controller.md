@@ -1,6 +1,6 @@
 # Production history 153 → 187: fail-closed controller
 
-Статус: `IMPLEMENTED CANDIDATE / PRODUCTION EXECUTION NO-GO`.
+Статус: `REAL-PG FIXES IN WORKTREE / NEW SHA AND ARTIFACT REQUIRED / PRODUCTION EXECUTION NO-GO`.
 
 Этот документ описывает единственный допустимый repository-side путь для
 перехода production history с точного состояния `153 applied / 4 rolled back /
@@ -91,11 +91,48 @@ EXCLUSIVE`, `lock_timeout=3s`, `statement_timeout=20s` и короткую
 - `packages/database/scripts/founder-pilot-production-history-production.mjs`
 - `packages/database/scripts/founder-pilot-production-history-production.cli.mjs`
 - `packages/database/scripts/founder-pilot-production-history-production.test.mjs`
+- `packages/database/scripts/founder-pilot-production-history-production.pg.integration.test.mjs`
 - `pnpm --filter database check:founder-pilot-production-history-production`
+- `pnpm --filter database test:integration:founder-pilot-production-history-production:pg`
 
 Production module/CLI включаются в deterministic release artifact. Unit suite
 использует только fake adapters и filesystem fixtures; она не читает
-`DATABASE_URL` и не соединяется ни с local, ни с production PostgreSQL.
+`DATABASE_URL` и не соединяется ни с local, ни с production PostgreSQL. Поэтому
+Full Release Admission дополнительно обязан запускать opt-in integration suite
+на disposable loopback PostgreSQL 16; успешная unit suite этот gate не заменяет.
+
+## Real PostgreSQL finding — 21.08.2026
+
+SHA `a34eae8e23f5a006662c7e1d850018aad1d3fa36` и его Full Release
+Admission `32414068403` были зелёными до появления real-PostgreSQL controller
+gate. Последующий локальный запуск на faithful production baseline
+последовательно обнаружил `42601`, `42P10` и `42703` в exact adapter SQL до
+любых effects. Поэтому artifact этого SHA имеет статус
+`SUPERSEDED / PRODUCTION FORBIDDEN`.
+
+Worktree fixes устраняют parser-sensitive identity alias, приводят
+`DISTINCT`/`ORDER BY` active-role query к допустимой форме и читают отсутствующую
+до более поздней migration `executionRevision` через backward-compatible row
+projection. Live address нормализуется через `host(inet_server_addr())`, а
+legacy `timestamp without time zone` читаются и записываются с явной UTC
+семантикой. Git history fixture привязана к module-derived repository root и
+`--full-tree`, поэтому `pnpm --filter database` не меняет её результат.
+
+После fixes read-only inventory на PostgreSQL 16 принимает exact `153/4/0`,
+четыре stale rows с aggregate digest `a6b20…`, exact
+migration/effective/database/runtime role topology и zero ownership mismatch.
+Отдельный opt-in integration gate на PostgreSQL `16.15` прошёл `1/1`: он
+исполняет реальные `lock → recover → reconcile(4) → APPLIED → final → unlock`
+paths на faithful legacy fixture, проверяет UTC wall-clock и очищает уникальные
+database/roles независимо. После прогона остаток равен нулю; unit suite —
+`23/23`, independent audit — `P0=0 / P1=0 / P2=0`. Production не подключался и
+не изменялся; Prisma deploy этим gate не выполнялся.
+
+Это не final acceptance: fixes должны получить новый clean SHA, Fast CI и Full
+Release Admission с обязательной real-PG integration suite. Затем только новый
+artifact этого SHA проходит полный restored-copy
+`inventory → plan → approve → apply → check`, lost-response/resume и N/N-1
+replay. `a34eae8e…` не переиспользуется.
 
 ## Manifest
 
@@ -188,9 +225,10 @@ CLI `--help` является каноническим перечнем пара
 
 ## Оставшиеся gates до production execution
 
-1. Merge актуального `origin/main`, новый clean SHA и полностью зелёный Full
-   Release Admission artifact.
-2. Fresh restored-copy replay именно нового controller с реальным PostgreSQL
+1. Новый clean SHA после real-PG fixes и полностью зелёный Full Release
+   Admission, включая обязательную production-history PostgreSQL 16 integration
+   suite; artifact `a34eae8e…` superseded.
+2. Fresh restored-copy replay именно нового exact artifact с реальным PostgreSQL
    16, включая фактическое принятие canonical startup `role` option обоими
    clients, catalog evidence владельца созданных CURRENT154..187 objects,
    kill-after-reconciliation, lost deploy response и exact resume.

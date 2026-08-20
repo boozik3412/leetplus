@@ -1,6 +1,6 @@
 # Controlled Beta-1: production pre-cutover evidence — 20.08.2026
 
-Статус: `BACKUP ACCEPTED / ROLLBACK INPUTS CAPTURED / RUNTIME UNCHANGED / CUTOVER NO-GO`.
+Статус: `BACKUP ACCEPTED / REAL-PG CONTROLLER GATE OPEN / RUNTIME UNCHANGED / CUTOVER NO-GO`.
 
 Этот PII-free record фиксирует только подготовительные проверки и резервные
 копии перед первым artifact cutover. Он не является разрешением на миграцию,
@@ -144,14 +144,65 @@ migration identity напрямую. Его обновлённый fail-closed �
 
 Таким образом pending objects остаются владельцем `leetplus`, а temporary
 migration login после check можно revoke/drop без `REASSIGN OWNED`. Unit
-contract принят `18/18`; реальное доказательство ownership и runtime access
+contract принят `23/23`; реальное доказательство ownership и runtime access
 должно войти в новый exact-artifact restored-copy replay.
+
+## Real PostgreSQL controller gate — 21.08.2026
+
+Exact SHA `a34eae8e23f5a006662c7e1d850018aad1d3fa36` прошёл Fast CI
+[`32413776104`](https://github.com/boozik3412/leetplus/actions/runs/32413776104)
+и Full Release Admission
+[`32414068403`](https://github.com/boozik3412/leetplus/actions/runs/32414068403).
+Однако эта CI matrix не исполняла exact production-history adapter SQL и role
+topology на реальном PostgreSQL 16. Поэтому выпущенный для этого SHA artifact
+`leetplus-release-a34eae8e…` имеет статус `SUPERSEDED / NO-GO`, несмотря на
+зелёный historical CI result.
+
+Локальный production-like запуск на PostgreSQL 16 последовательно обнаружил
+три fail-closed blocker до любых database effects:
+
+- `42601` — parser-level несовместимость identity inventory SQL;
+- `42P10` — несовместимый `DISTINCT`/`ORDER BY` contract active-role inventory;
+- `42703` — обращение к колонке, которой ещё нет на production baseline
+  `153/4/0`.
+
+Исправления находятся в текущем worktree и не считаются принятыми release
+code. Они закрывают также три cross-runtime дефекта: `host(inet_server_addr())`
+вместо значения с `/32`, явную UTC-семантику legacy
+`timestamp without time zone` и package-cwd зависимость Git history fixture.
+После них read-only inventory на faithful baseline вернул:
+
+- exact history `153 applied / 4 rolled back / 0 unfinished`;
+- ровно четыре stale history rows, aggregate digest `a6b20…`;
+- exact migration session, effective owner, database owner и runtime role;
+- zero ownership mismatch в проверяемых `public` catalog objects.
+
+Отдельный opt-in integration gate выполнен на изолированном PostgreSQL `16.15`.
+Он создал только уникальные disposable database/owner/migration role, исполнил
+реальные `inspect → lock → recover → reconcile(4) → APPLIED → final → unlock`
+SQL paths на exact `153 applied / 4 rolled back` fixture без
+`executionRevision` и проверил UTC wall-clock при non-UTC session timezone.
+Результат: `1/1 PASS`; после cleanup — `0` fixture databases, `0` fixture roles
+и `0` fixture sessions. Unit suite: `23/23 PASS`; independent latest-byte audit:
+`P0=0 / P1=0 / P2=0`. Failure diagnostics ограничены по длине, удаляют
+credentials из PostgreSQL URL и сохраняют identity evidence в каноническом
+`evidence.identity` contract.
+
+Gate не выполнял Prisma deploy, production role mutation или runtime switch и
+не является final exact-artifact rehearsal. Production host/database,
+systemd/nginx/timer, tenant data и outbound остались без изменений.
+
+Теперь обязательны: новый clean SHA с исправлениями, real-PostgreSQL controller
+integration в Full Release Admission, новый artifact только этого SHA и полный
+`inventory → plan → approve → apply → check` replay из его LF bytes на свежей
+restored copy. Старый `a34eae8e…` artifact повторно не используется.
 
 ## Stop conditions после preflight
 
 Production migration и switch остаются запрещены, пока одновременно не готовы:
 
-1. новый release SHA, включающий все четыре production fixes из `origin/main`;
+1. новый release SHA, включающий production fixes и три real-PostgreSQL
+   controller fixes после superseded `a34eae8e…`;
 2. persistent Langame evidence path вне immutable artifact;
 3. root-owned blue/green slots, exact Web/API identity и атомарный nginx rollback;
 4. production-safe digest-bound history controller вместо raw Prisma deploy;
@@ -159,7 +210,9 @@ Production migration и switch остаются запрещены, пока о�
 6. production scheduler-free handoff и доказанный drain без двойного owner;
 7. exact migration-session → existing-object-owner role-switch rehearsal,
    ownership inventory новых объектов и последующий revoke/drop login wrapper;
-8. зелёные Fast CI, Full Release Admission и новая restored-copy rehearsal.
+8. зелёные Fast CI и Full Release Admission, где обязательный real-PostgreSQL
+   controller gate исполняет exact adapter SQL/role topology, плюс новая
+   exact-artifact restored-copy rehearsal.
 
 После backup production не мигрировался, timer/units/nginx не изменялись,
 tenant data, outbound и external invite не создавались.

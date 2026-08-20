@@ -25,11 +25,32 @@ production fixes, включая требуемый показ активных 
 обеспечивают N/N-1 compatibility и zero-downtime rollback. Ни stage evidence,
 ни старый зелёный CI не разрешают его запуск.
 
-Нового принятого production candidate пока нет. Им станет только exact SHA
-после интеграции production fixes, blue/green tooling, production-history
-controller и нового полностью зелёного Fast CI + Full Release Admission.
+Следующий промежуточный exact SHA
+`a34eae8e23f5a006662c7e1d850018aad1d3fa36` прошёл Fast CI
+[`32413776104`](https://github.com/boozik3412/leetplus/actions/runs/32413776104)
+и Full Release Admission
+[`32414068403`](https://github.com/boozik3412/leetplus/actions/runs/32414068403),
+который выпустил `leetplus-release-a34eae8e…`. Этот artifact также теперь
+**SUPERSEDED / PRODUCTION FORBIDDEN**: прежняя Full CI matrix не запускала
+production-history adapter на реальном PostgreSQL 16. Локальный faithful
+`153/4/0` baseline последовательно выявил SQL blockers `42601`, `42P10` и
+`42703`. Исправления находятся только в worktree; они ещё не имеют clean SHA,
+зелёного CI и нового artifact. Дополнительно исправлены `/32` в live identity,
+UTC-интерпретация legacy timestamps и package-cwd зависимость Git fixture.
 
-Он был дополнительно скачан в isolated local system-temp directory и принят
+После исправлений read-only inventory подтверждает exact `153/4/0`, четыре
+stale rows с aggregate digest `a6b20…`, exact role/ownership topology и zero
+ownership mismatch без database effects. Отдельный opt-in gate затем прошёл на
+изолированном PostgreSQL `16.15`: `1/1`, с exact `153/4`, четырьмя legacy rows,
+реальными `lock → recover → reconcile → APPLIED`, UTC wall-clock и final digest
+checks. Cleanup доказала нулевой остаток временных databases, roles и sessions;
+unit suite — `23/23`, независимый аудит — `P0=0 / P1=0 / P2=0`. Это всё ещё
+worktree evidence, а не release acceptance. Новым production candidate станет
+только последующий exact SHA после зелёного Fast/Full CI с этим gate и полного
+replay нового artifact на свежей restored copy.
+
+Artifact `d1577642…` был дополнительно скачан в isolated local system-temp
+directory и принят
 `stage-release-artifact.sh`: внешний checksum, gzip, internal `SHA256SUMS`,
 provenance и inventory прошли. Проверка не подключалась к БД, не использовала
 secrets, не меняла production и не выполняла hydration. Local probe
@@ -72,6 +93,9 @@ copies хранятся до declared retention deadline; дополнитель
 1. `releaseSha` — полный lowercase Git SHA-1 из 40 символов.
 2. Fast CI и вручную запущенный Full Release Admission успешны именно для
    `releaseSha`; SHA другого run, nightly или `main` не взаимозаменяемы.
+   Full Release Admission обязательно исполняет production-history adapter SQL
+   и exact migration/owner/runtime role topology на реальном PostgreSQL 16;
+   unit/fake-adapter coverage этот gate не заменяет.
 3. На host перед созданием slot symlink проверяются внешний `.sha256`, gzip,
    внутренний `SHA256SUMS` и `release-provenance.json.releaseSha`.
 4. Распаковка происходит в новый immutable release directory. Старый runtime
@@ -141,6 +165,8 @@ Repository-side implementation:
 ### A. До окна canary
 
 1. Зафиксировать exact SHA и URL/ID Full Release Admission.
+   Проверить, что run содержит успешный real-PostgreSQL production-history
+   controller gate; зелёный historical run без этого шага недействителен.
 2. Скачать оба файла artifact (`.tar.gz` и `.tar.gz.sha256`) по защищённому
    каналу и сверить SHA-256 вне production checkout.
 3. Выполнить immutable backup и отдельную restore verification. Записать
@@ -176,7 +202,8 @@ runtime на `/srv/leetplus/slots/blue|green` и secrets в
 
 ### Release evidence (заполняется release owner перед effect)
 
-- exact candidate SHA / CI run / artifact digest: `PENDING`;
+- exact candidate SHA / CI run с real-PG controller gate / artifact digest:
+  `PENDING`; `a34eae8e…` явно `SUPERSEDED/NO-GO`;
 - production backup UTC / size / SHA-256: `PENDING`;
 - off-host copy size / SHA-256: `PENDING`;
 - globals/roles backup digest: `PENDING`;

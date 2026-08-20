@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 21.08.2026
-- Версия: 3.55
+- Версия: 3.57
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -112,6 +112,28 @@
   membership options и совпадение owner с runtime role. Unit contract `23/23`
   зелёный; реальный owner/runtime-access proof остаётся частью exact-artifact
   replay, до него production switch запрещён.
+  Промежуточный exact SHA `a34eae8e23f5a006662c7e1d850018aad1d3fa36`
+  прошёл Fast CI
+  [`32413776104`](https://github.com/boozik3412/leetplus/actions/runs/32413776104)
+  и Full Release Admission
+  [`32414068403`](https://github.com/boozik3412/leetplus/actions/runs/32414068403);
+  созданный для него `leetplus-release-a34eae8e…` больше не является
+  допустимым production candidate. Реальный локальный PostgreSQL 16 последовательно
+  выявил в production-history adapter SQL blockers `42601`, `42P10` и `42703`,
+  которых не покрывала прежняя Full CI matrix. Исправления находятся только в
+  текущем worktree и ещё не приняты новым exact SHA/CI artifact. Они также
+  нормализуют `inet_server_addr()` без `/32`, фиксируют UTC-семантику legacy
+  `timestamp without time zone` и делают Git fixture независимой от package
+  cwd. Новый real-PostgreSQL gate на изолированном PostgreSQL `16.15` прошёл
+  `1/1`: exact `153/4/0`, четыре legacy rows без `executionRevision`, реальный
+  `lock → recover → reconcile → APPLIED`, UTC wall-clock, final digests и
+  безопасная cleanup. После него подтверждены `0` fixture databases, `0`
+  fixture roles и `0` fixture sessions. Unit contract остаётся `23/23`,
+  независимый latest-byte audit — `P0=0 / P1=0 / P2=0`. Следующий обязательный
+  gate — новый clean SHA, Fast CI, Full Release Admission уже с этим real-PG
+  test, новый artifact и полный exact-artifact replay. Production services,
+  database, timer, текущая сеть, outbound и external invite этим evidence не
+  изменялись.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta
@@ -126,9 +148,9 @@
 
 | Шаг                                                             | Блокирует первый OWNER invite | Состояние                                                       |
 | --------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------- |
-| Fast CI на рабочем коммите                                      | Да                            | merge SHA `df70fb98…`, `32398869119`: `2/2 SUCCESS`; следующий implementation SHA ещё не принят |
-| Full release admission для exact SHA                            | Да                            | `d1577642…` superseded; требуется новый manual run и artifact после hardening |
-| Production backup, rollback и canary                            | Да                            | Backup и N−1 API/schema acceptance приняты; blue/green и exact-artifact controller replay завершаются |
+| Fast CI на рабочем коммите                                      | Да                            | `a34eae8e…`, `32413776104`: green, но SHA superseded; local real-PG fixes/gate green, требуется новый clean SHA |
+| Full release admission для exact SHA                            | Да                            | Real-PG gate реализован и локально `1/1`; `a34eae8e…` artifact `SUPERSEDED/NO-GO`, новый Full run ещё не принят |
+| Production backup, rollback и canary                            | Да                            | Backup и N−1 API/schema acceptance приняты; disposable controller reconcile green, exact-artifact replay и canary не выполнены |
 | Runtime roles, TLS route, SMTP worker и activation               | Да                            | Isolated lifecycle принята; production application предстоит    |
 | `Tenant B/Store B1`, persisted GO и OWNER invite                | Да                            | Предстоит после canary                                          |
 | Day-0 scope/module/kill-switch smoke                            | Да                            | Предстоит сразу после invite                                    |

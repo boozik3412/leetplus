@@ -1499,8 +1499,14 @@ function runningSelectSql() {
   return `
     SELECT
       run."id", run."tenantId", run."type", run."scheduledForDate",
-      run."status", run."sentCount", run."startedAt", run."completedAt",
-      run."executionRevision", run."errorMessage", run."createdAt", run."updatedAt"
+      run."status", run."sentCount",
+      run."startedAt" AT TIME ZONE 'UTC' AS "startedAt",
+      run."completedAt" AT TIME ZONE 'UTC' AS "completedAt",
+      (pg_catalog.to_jsonb(run)->>'executionRevision')::INTEGER
+        AS "executionRevision",
+      run."errorMessage",
+      run."createdAt" AT TIME ZONE 'UTC' AS "createdAt",
+      run."updatedAt" AT TIME ZONE 'UTC' AS "updatedAt"
     FROM public."ReportDigestScheduleRun" AS run
     WHERE run."status" = 'RUNNING'
     ORDER BY run."id" COLLATE "C"
@@ -1632,14 +1638,14 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
           session_role.rolreplication AS "sessionRoleReplication",
           session_role.rolsuper AS "sessionRoleSuperuser",
           session_role.rolbypassrls AS "sessionRoleBypassRls",
-          current_role.rolname AS "currentRoleName",
-          current_role.oid::INTEGER AS "currentRoleOid",
-          current_role.rolcanlogin AS "currentRoleCanLogin",
-          current_role.rolcreatedb AS "currentRoleCreateDb",
-          current_role.rolcreaterole AS "currentRoleCreateRole",
-          current_role.rolreplication AS "currentRoleReplication",
-          current_role.rolsuper AS "currentRoleSuperuser",
-          current_role.rolbypassrls AS "currentRoleBypassRls",
+          effective_role.rolname AS "currentRoleName",
+          effective_role.oid::INTEGER AS "currentRoleOid",
+          effective_role.rolcanlogin AS "currentRoleCanLogin",
+          effective_role.rolcreatedb AS "currentRoleCreateDb",
+          effective_role.rolcreaterole AS "currentRoleCreateRole",
+          effective_role.rolreplication AS "currentRoleReplication",
+          effective_role.rolsuper AS "currentRoleSuperuser",
+          effective_role.rolbypassrls AS "currentRoleBypassRls",
           membership_evidence."currentRoleDirectMembershipCount",
           membership_evidence."sessionDirectMembershipCount",
           membership_evidence."sessionOwnerMembershipCount",
@@ -1649,7 +1655,7 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
           ownership_evidence."publicClassOwnerMismatchCount",
           ownership_evidence."publicProcOwnerMismatchCount",
           ownership_evidence."publicTypeOwnerMismatchCount",
-          pg_catalog.inet_server_addr()::TEXT AS "serverAddress",
+          pg_catalog.host(pg_catalog.inet_server_addr()) AS "serverAddress",
           pg_catalog.inet_server_port()::INTEGER AS "serverPort",
           (pg_catalog.pg_control_system()).system_identifier::TEXT
             AS "systemIdentifier",
@@ -1657,8 +1663,8 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
             AS "serverMajor",
           pg_catalog.pg_is_in_recovery() AS "inRecovery"
         FROM pg_catalog.pg_roles AS session_role
-        JOIN pg_catalog.pg_roles AS current_role
-          ON current_role.rolname = CURRENT_USER
+        JOIN pg_catalog.pg_roles AS effective_role
+          ON effective_role.rolname = CURRENT_USER
         JOIN pg_catalog.pg_database AS target_database
           ON target_database.datname = pg_catalog.current_database()
         JOIN pg_catalog.pg_roles AS database_owner
@@ -1667,7 +1673,7 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
           SELECT
             (
               pg_catalog.count(*) FILTER (
-                WHERE membership.member = current_role.oid
+                WHERE membership.member = effective_role.oid
               )
             )::INTEGER AS "currentRoleDirectMembershipCount",
             (
@@ -1678,32 +1684,32 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
             (
               pg_catalog.count(*) FILTER (
                 WHERE membership.member = session_role.oid
-                  AND membership.roleid = current_role.oid
+                  AND membership.roleid = effective_role.oid
               )
             )::INTEGER AS "sessionOwnerMembershipCount",
             COALESCE(
               pg_catalog.bool_or(membership.admin_option) FILTER (
                 WHERE membership.member = session_role.oid
-                  AND membership.roleid = current_role.oid
+                  AND membership.roleid = effective_role.oid
               ),
               FALSE
             ) AS "sessionOwnerMembershipAdminOption",
             COALESCE(
               pg_catalog.bool_or(membership.inherit_option) FILTER (
                 WHERE membership.member = session_role.oid
-                  AND membership.roleid = current_role.oid
+                  AND membership.roleid = effective_role.oid
               ),
               FALSE
             ) AS "sessionOwnerMembershipInheritOption",
             COALESCE(
               pg_catalog.bool_and(membership.set_option) FILTER (
                 WHERE membership.member = session_role.oid
-                  AND membership.roleid = current_role.oid
+                  AND membership.roleid = effective_role.oid
               ),
               FALSE
             ) AS "sessionOwnerMembershipSetOption"
           FROM pg_catalog.pg_auth_members AS membership
-          WHERE membership.member IN (session_role.oid, current_role.oid)
+          WHERE membership.member IN (session_role.oid, effective_role.oid)
         ) AS membership_evidence
         CROSS JOIN LATERAL (
           SELECT
@@ -1711,19 +1717,19 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
               SELECT pg_catalog.count(*)::INTEGER
               FROM pg_catalog.pg_class AS relation
               WHERE relation.relnamespace = pg_catalog.to_regnamespace('public')
-                AND relation.relowner <> current_role.oid
+                AND relation.relowner <> effective_role.oid
             ) AS "publicClassOwnerMismatchCount",
             (
               SELECT pg_catalog.count(*)::INTEGER
               FROM pg_catalog.pg_proc AS routine
               WHERE routine.pronamespace = pg_catalog.to_regnamespace('public')
-                AND routine.proowner <> current_role.oid
+                AND routine.proowner <> effective_role.oid
             ) AS "publicProcOwnerMismatchCount",
             (
               SELECT pg_catalog.count(*)::INTEGER
               FROM pg_catalog.pg_type AS data_type
               WHERE data_type.typnamespace = pg_catalog.to_regnamespace('public')
-                AND data_type.typowner <> current_role.oid
+                AND data_type.typowner <> effective_role.oid
             ) AS "publicTypeOwnerMismatchCount"
         ) AS ownership_evidence
         WHERE session_role.rolname = SESSION_USER
@@ -1746,12 +1752,12 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
         [manifest.target.applicationRuntimeRoles.map((role) => role.name)],
       );
       const activeRuntimeRoles = await active.query(`
-        SELECT DISTINCT activity.usename AS "name"
+        SELECT DISTINCT activity.usename COLLATE "C" AS "name"
         FROM pg_catalog.pg_stat_activity AS activity
         WHERE activity.datname = pg_catalog.current_database()
           AND activity.pid <> pg_catalog.pg_backend_pid()
           AND activity.backend_type = 'client backend'
-        ORDER BY activity.usename COLLATE "C"
+        ORDER BY "name"
       `);
       const migrations = await active.query(migrationSelectSql());
       const runs = await active.query(runningSelectSql());
@@ -1859,19 +1865,19 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
       );
       const result = await active.query(
         `
-          UPDATE public."ReportDigestScheduleRun"
+          UPDATE public."ReportDigestScheduleRun" AS run
           SET
             "status" = 'FAILED',
-            "completedAt" = $2::timestamptz,
+            "completedAt" = ($2::timestamptz AT TIME ZONE 'UTC'),
             "errorMessage" = $3,
-            "updatedAt" = $2::timestamptz
-          WHERE "id" = ANY($1::text[])
-            AND "status" = 'RUNNING'
-            AND "type" = 'WEEKLY'
-            AND "sentCount" = 0
-            AND "completedAt" IS NULL
-            AND "executionRevision" IS NULL
-            AND "errorMessage" IS NULL
+            "updatedAt" = ($2::timestamptz AT TIME ZONE 'UTC')
+          WHERE run."id" = ANY($1::text[])
+            AND run."status" = 'RUNNING'
+            AND run."type" = 'WEEKLY'
+            AND run."sentCount" = 0
+            AND run."completedAt" IS NULL
+            AND (pg_catalog.to_jsonb(run)->>'executionRevision') IS NULL
+            AND run."errorMessage" IS NULL
         `,
         [
           productionStale.rows.map((row) => row.id),
@@ -1899,7 +1905,7 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
         WHERE run."status" = 'FAILED'
           AND run."sentCount" = 0
           AND run."completedAt" IS NOT NULL
-          AND run."executionRevision" IS NULL
+          AND (pg_catalog.to_jsonb(run)->>'executionRevision') IS NULL
           AND run."errorMessage" = $1
       `,
       [`${RECONCILIATION_MARKER}:${plan.staleRunSetDigest}`],

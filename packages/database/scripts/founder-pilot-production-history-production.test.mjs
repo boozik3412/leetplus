@@ -1206,12 +1206,50 @@ test("production source preserves the bounded lock order and contains no automat
   assert.match(source, /SET LOCAL lock_timeout = '3s'/u);
   assert.match(source, /SET LOCAL statement_timeout = '20s'/u);
   assert.match(source, /session_role\.rolname = SESSION_USER/u);
-  assert.match(source, /current_role\.rolname = CURRENT_USER/u);
+  assert.match(source, /effective_role\.rolname = CURRENT_USER/u);
+  assert.match(source, /JOIN pg_catalog\.pg_roles AS effective_role/u);
+  assert.doesNotMatch(source, /\bcurrent_role\b/iu);
+  assert.match(
+    source,
+    /pg_catalog\.host\(pg_catalog\.inet_server_addr\(\)\) AS "serverAddress"/u,
+  );
+  assert.doesNotMatch(
+    source,
+    /pg_catalog\.inet_server_addr\(\)::TEXT AS "serverAddress"/u,
+  );
   assert.match(source, /session_role\.rolinherit AS "sessionRoleInherit"/u);
   assert.match(source, /FROM pg_catalog\.pg_auth_members AS membership/u);
   assert.match(source, /membership\.admin_option/u);
   assert.match(source, /membership\.inherit_option/u);
   assert.match(source, /membership\.set_option/u);
+  assert.match(
+    source,
+    /SELECT DISTINCT activity\.usename COLLATE "C" AS "name"[\s\S]*?ORDER BY "name"/u,
+  );
+  assert.doesNotMatch(
+    source,
+    /SELECT DISTINCT activity\.usename AS "name"[\s\S]*?ORDER BY activity\.usename COLLATE "C"/u,
+  );
+  assert.match(
+    source,
+    /\(pg_catalog\.to_jsonb\(run\)->>'executionRevision'\)::INTEGER\s+AS "executionRevision"/u,
+  );
+  assert.doesNotMatch(source, /run\."executionRevision"/u);
+  assert.doesNotMatch(source, /AND "executionRevision" IS NULL/u);
+  for (const field of ["startedAt", "completedAt", "createdAt", "updatedAt"]) {
+    assert.match(
+      source,
+      new RegExp(`run\\."${field}" AT TIME ZONE 'UTC' AS "${field}"`, "u"),
+    );
+  }
+  assert.match(
+    source,
+    /"completedAt" = \(\$2::timestamptz AT TIME ZONE 'UTC'\)/u,
+  );
+  assert.match(
+    source,
+    /"updatedAt" = \(\$2::timestamptz AT TIME ZONE 'UTC'\)/u,
+  );
   assert.doesNotMatch(source, /process\.env|pathToFileURL\(process\.argv/u);
   assert.doesNotMatch(source, /DELETE FROM public\."ReportDigestScheduleRun"/u);
 });

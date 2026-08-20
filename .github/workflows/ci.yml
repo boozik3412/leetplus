@@ -899,6 +899,41 @@ jobs:
       - name: Apply all migrations to a clean database
         run: pnpm --filter database db:deploy
 
+      - name: Verify production-history adapter SQL and role topology on PostgreSQL 16
+        shell: bash
+        run: |
+          test -n "$POSTGRES_SERVICE_CONTAINER_ID"
+          [[ "$POSTGRES_SERVICE_CONTAINER_ID" =~ ^[0-9a-f]{64}$ ]]
+          postgres_pid="$(docker inspect --format '{{.State.Pid}}' "$POSTGRES_SERVICE_CONTAINER_ID")"
+          [[ "$postgres_pid" =~ ^[1-9][0-9]*$ ]]
+          sudo -n test -e "/proc/$postgres_pid/ns/net"
+          pnpm_bin="$(command -v pnpm)"
+          test -x "$pnpm_bin"
+          timeout --signal=TERM --kill-after=10s 120s \
+            sudo -n nsenter \
+              --target "$postgres_pid" \
+              --net \
+              --setuid "$(id -u)" \
+              --setgid "$(id -g)" \
+              -- \
+              env \
+                CI_RELEASE_SHA="$CI_RELEASE_SHA" \
+                DATABASE_URL="$DATABASE_URL" \
+                FOUNDER_PILOT_PRODUCTION_HISTORY_PRODUCTION_PG_E2E_CONFIRM="$FOUNDER_PILOT_PRODUCTION_HISTORY_PRODUCTION_PG_E2E_CONFIRM" \
+                HOME="$HOME" \
+                NODE_ENV="$NODE_ENV" \
+                PATH="$PATH" \
+                PGOPTIONS="$PGOPTIONS" \
+                TZ="$TZ" \
+                "$pnpm_bin" \
+                --filter database \
+                test:integration:founder-pilot-production-history-production:pg
+        env:
+          POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
+          NODE_ENV: test
+          FOUNDER_PILOT_PRODUCTION_HISTORY_PRODUCTION_PG_E2E_CONFIRM: run-founder-pilot-production-history-production-postgres-e2e
+          TZ: America/New_York
+
       - name: Rehearse tenant execution control-plane 162 to 163 upgrade and lock timeout
         run: pnpm --filter database db:smoke:tenant-execution-control-plane-upgrade
         env:

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.186                                        |
+| Версия           | 1.187                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -237,6 +237,16 @@ unattended scheduler path. Scheduler выбирает store identity тольк�
 all-tenant sweep. Missing store identity даёт deterministic skip до
 claim/materialization effects. Exact-SHA CI acceptance:
 [reward materializer runtime identity evidence 20.08.2026](./background-reward-materializer-runtime-identity-ci-evidence-2026-08-20.md).
+
+Successor delivery runtime identity adoption:
+`GUEST_GAME_DELIVERY_DISPATCH` и `GUEST_GAME_DELIVERY_BOT_PULL` подключены к
+runtime identity foundation без открытия legacy outbound. Scheduled dispatch
+выбирает tenant-local active/background-enabled store и запускает dispatcher
+как `TENANT_STORE_SYSTEM + STORES/[runtimeStoreId]`; bot pull требует такую же
+store identity до outbox query. `GuestGameDelivery` reads для `STORES` actor
+дополнительно фильтруются по `storeId`. Legacy protocol gate и external
+`EXTERNAL_DENY` остаются включёнными. Exact-SHA CI acceptance:
+[delivery runtime identity evidence 20.08.2026](./background-delivery-runtime-identity-ci-evidence-2026-08-20.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

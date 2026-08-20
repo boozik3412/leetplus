@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.13                                                    |
+| Версия           | 1.14                                                    |
 | Дата             | 20.08.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -107,6 +107,15 @@ unattended scheduler path: scheduler выбирает runtime store identity т�
 `TENANT_STORE_SYSTEM + storeId` до materialization effects и не
 переиспользует один global store id для all-tenant sweep. Missing store
 identity даёт deterministic skip `BACKGROUND_STORE_ID_REQUIRED` до claims.
+
+`GUEST_GAME_DELIVERY_DISPATCH` и `GUEST_GAME_DELIVERY_BOT_PULL` подключены к
+runtime identity foundation без открытия legacy outbound. Scheduled dispatch
+выбирает runtime store identity из активных `backgroundExecutionEnabled`
+stores текущего tenant, передаёт dispatcher synthetic actor
+`STORES/[runtimeStoreId]`, а bot pull требует store identity до outbox query.
+Для `STORES` actor `GuestGameDelivery` reads дополнительно ограничены
+`storeId IN allowedStoreIds`. Legacy protocol gate и `EXTERNAL_DENY` для
+external tenant остаются действующими.
 
 ### 3.2. Внешнее выполнение запрещено
 

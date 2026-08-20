@@ -43,6 +43,8 @@ export const PRODUCTION_RELEASE_KEYS = [
 
 export const LANGAME_DISCREPANCY_LOG_ROOT_KEY =
   'LANGAME_DISCREPANCY_LOG_ROOT' as const;
+export const API_BIND_HOST_KEY = 'API_BIND_HOST' as const;
+export const PRODUCTION_API_BIND_HOST = '127.0.0.1' as const;
 
 export function resolveProductionLangameDiscrepancyLogRoot(
   value: unknown,
@@ -459,6 +461,7 @@ export function validateEnvironment(config: EnvironmentValues) {
   const langameDiscrepancyLogRoot = resolveProductionLangameDiscrepancyLogRoot(
     config[LANGAME_DISCREPANCY_LOG_ROOT_KEY],
   );
+  const apiBindHost = stringValue(config[API_BIND_HOST_KEY]);
   const identityEmailFingerprintKeyVersion = stringValue(
     config.IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION,
   );
@@ -529,6 +532,11 @@ export function validateEnvironment(config: EnvironmentValues) {
       'LANGAME_DISCREPANCY_LOG_ROOT must be a non-root absolute POSIX path without traversal segments',
     );
   }
+  if (apiBindHost !== PRODUCTION_API_BIND_HOST) {
+    errors.push(
+      `${API_BIND_HOST_KEY} must equal ${PRODUCTION_API_BIND_HOST} in production`,
+    );
+  }
   if (identityEmailFingerprintKeyVersion !== 'v1') {
     errors.push('IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION must equal v1');
   }
@@ -587,6 +595,7 @@ export function validateEnvironment(config: EnvironmentValues) {
     EXPECTED_DATABASE_MIGRATION: expectedMigration,
     EXPECTED_DATABASE_MIGRATION_COUNT: expectedMigrationCount,
     LANGAME_DISCREPANCY_LOG_ROOT: langameDiscrepancyLogRoot,
+    API_BIND_HOST: apiBindHost,
     IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION:
       identityEmailFingerprintKeyVersion,
     IDENTITY_MAIL_ENCRYPTION_KEY_VERSION: identityMailEncryptionKeyVersion,

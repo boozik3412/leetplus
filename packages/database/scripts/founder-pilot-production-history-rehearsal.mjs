@@ -397,6 +397,22 @@ async function inspectSourceTree(
   };
 }
 
+// Production admission reuses the exact, already-rehearsed migration
+// materialization.  Expose only the immutable digest/count projection so a
+// read-only production plan can bind the same bytes without creating a lane.
+export async function inspectFounderPilotProductionHistorySourceTree(
+  sourcePrismaRoot,
+) {
+  const tree = await inspectSourceTree(sourcePrismaRoot);
+  return Object.freeze({
+    materializedCurrent179Sha256: MATERIALIZED_CURRENT179_SHA256,
+    materializedCurrent185Sha256: MATERIALIZED_CURRENT185_SHA256,
+    materializedCurrent186Sha256: MATERIALIZED_CURRENT186_SHA256,
+    migrationCount: tree.migrationChecksums.size,
+    treeDigest: tree.treeDigest,
+  });
+}
+
 function assertLaneRoot(laneRoot) {
   exactPath(laneRoot, "FOUNDER_PILOT_HISTORY_LANE_ROOT_INVALID");
   if (!SAFE_LANE.test(path.basename(laneRoot))) {
@@ -539,6 +555,27 @@ function validateSourceEvidence(evidence, capturedAt) {
   return rows;
 }
 
+export function validateFounderPilotProductionHistorySourceEvidence({
+  capturedAt,
+  evidence,
+  expectedStaleRunCount = null,
+  expectedStaleRunSetDigest = null,
+}) {
+  const rows = validateSourceEvidence(evidence, capturedAt);
+  const staleRunSetDigest = digest("stale-report-digest-runs", rows);
+  if (
+    (expectedStaleRunCount !== null && rows.length !== expectedStaleRunCount) ||
+    (expectedStaleRunSetDigest !== null &&
+      staleRunSetDigest !== expectedStaleRunSetDigest)
+  ) {
+    fail("FOUNDER_PILOT_HISTORY_STALE_RUN_SET_MISMATCH");
+  }
+  return Object.freeze({
+    rows: Object.freeze(rows.map((row) => Object.freeze({ ...row }))),
+    staleRunSetDigest,
+  });
+}
+
 export async function buildFounderPilotProductionHistoryPlan({
   inspectTarget,
   manifest,
@@ -619,6 +656,13 @@ function normalizeMigrationEvidence(migrationRows, runningDigestRows) {
     runningDigestRows,
     unfinishedMigrationCount: unfinished.length,
   };
+}
+
+export function normalizeFounderPilotProductionHistoryEvidence(
+  migrationRows,
+  runningDigestRows,
+) {
+  return normalizeMigrationEvidence(migrationRows, runningDigestRows);
 }
 
 export async function createFounderPilotProductionHistoryPgAdapter(

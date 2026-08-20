@@ -4,6 +4,34 @@
 
 Rollback owner: `founder-primary`.
 
+## Runtime cutover rollback before pilot effects
+
+Первый artifact cutover больше не возвращает mutable `current` и не делает
+same-port restart. Legacy API/Web либо предыдущий slot остаются hot, а nginx
+active include переключается атомарно. Для rollback используется только
+root-only `.intent` или accepted `.receipt`, созданный
+`docs/deployment/production-artifact/blue-green-cutover.sh`:
+
+1. проверить exact record/digests и direct liveness + boot-enabled state
+   предыдущих API/Web units до изменения routing;
+2. восстановить exact previous target/digest и повторно доказать, что active
+   link разрешается именно в него;
+3. выполнить `nginx -t` и graceful reload даже если link уже был восстановлен
+   предыдущей оборванной попыткой, не останавливая процессы;
+4. получить HTTP success от `https://api.leetplus.ru/health` и
+   `https://leetplus.ru/`;
+5. при отсутствии внешнего evidence оставить previous link/processes
+   восстановленными, но не объявлять rollback принятым.
+
+Handled exit использует тот же exact guard. `SIGKILL`/host loss оставляет
+root-only intent: pre-nginx recovery восстанавливает link без рекурсивного
+systemd reload, затем отдельный post-start watchdog делает reload/public smoke.
+До архивации intent новый switch запрещён.
+
+Backup restore не является обычным runtime rollback: после migration он
+допустим только при write quiesce/PITR. Штатный DB incident идёт fix-forward
+после заранее принятого N/N-1 old-SHA compatibility smoke.
+
 ## Stop conditions
 
 - tenant/store scope mismatch или cross-tenant read/write;

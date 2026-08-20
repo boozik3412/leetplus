@@ -1,0 +1,46 @@
+[Unit]
+Description=LeetPlus Web blue/green slot %i (SHA-bound artifact)
+After=network-online.target leetplus-api@%i.service
+Requires=leetplus-api@%i.service
+Wants=network-online.target
+Before=nginx.service
+
+[Service]
+Type=simple
+User=leetplus-web-%i
+Group=leetplus-runtime
+WorkingDirectory=/srv/leetplus/slots/%i/apps/web
+EnvironmentFile=/etc/leetplus/web-runtime.env
+EnvironmentFile=/etc/leetplus/slots/%i.env
+EnvironmentFile=/etc/leetplus/canary-safe.env
+ExecStartPre=/usr/local/libexec/leetplus/preflight-release-slot.sh --slot %i --release-sha ${RELEASE_SHA} --web-build-id ${WEB_BUILD_ID} --web-runtime --require-web-cache-bind
+ExecStart=/usr/bin/node /srv/leetplus/slots/%i/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port ${WEB_PORT}
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNetworkInterfaces=lo
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadOnlyPaths=/srv/leetplus/releases /srv/leetplus/slots
+InaccessiblePaths=/etc/leetplus/runtime.env
+CacheDirectory=leetplus-web-%i
+CacheDirectoryMode=0750
+BindPaths=/var/cache/leetplus-web-%i:/srv/leetplus/slots/%i/apps/web/.next/cache
+ReadWritePaths=/var/cache/leetplus-web-%i
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
+
+# Enable only the reviewed candidate slot before cutover. The API dependency
+# and nginx ordering prevent the persistent active upstream from racing a
+# manually started Web process during normal boot.

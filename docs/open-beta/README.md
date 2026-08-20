@@ -86,6 +86,10 @@ Dedicated database boundary:
 lane и data zero-diff:
 [production restored-copy rehearsal 18.08.2026](./founder-production-restored-copy-rehearsal-2026-08-18.md).
 
+Fail-closed production successor для exact `153/4/0 → 187/4/0` (реализован,
+но до нового restored-copy/N/N-1/blue-green evidence остаётся `NO-GO`):
+[production-history controller](./founder-pilot-production-history-production-controller.md).
+
 Свежая isolated репетиция actual production-history и runtime-role
 `plan → apply → check → rollback → reconcile`:
 [Controlled Beta-1 runtime-role rehearsal 20.08.2026](./controlled-beta-1-runtime-role-rehearsal-2026-08-20.md).

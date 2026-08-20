@@ -1,4 +1,5 @@
 [Unit]
+# REHEARSAL ONLY: raw deploy does not reconcile the known production history.
 Description=LeetPlus exact release migration for %i
 After=network-online.target
 Wants=network-online.target

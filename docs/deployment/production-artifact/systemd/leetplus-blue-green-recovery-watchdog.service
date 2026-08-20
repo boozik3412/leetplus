@@ -1,0 +1,21 @@
+[Unit]
+Description=LeetPlus post-start confirmation of recovered blue/green intent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/leetplus-blue-green-cutover recover-pending
+TimeoutStartSec=120
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/usr/local/libexec/leetplus/verify-release-readiness.sh
+ReadWritePaths=/etc/nginx/leetplus /var/lib/leetplus/deploy-receipts
+UMask=0077
+
+# Deliberately has no ordering edge to nginx: this unit may request a bounded
+# nginx start/reload and public serving smoke after boot without a job cycle.

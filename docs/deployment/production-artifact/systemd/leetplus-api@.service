@@ -1,0 +1,44 @@
+[Unit]
+Description=LeetPlus API blue/green slot %i (SHA-bound artifact)
+After=network-online.target
+Wants=network-online.target
+Before=nginx.service
+
+[Service]
+Type=simple
+User=leetplus-api-%i
+Group=leetplus-runtime
+WorkingDirectory=/srv/leetplus/slots/%i
+EnvironmentFile=/etc/leetplus/runtime.env
+EnvironmentFile=/etc/leetplus/slots/%i.env
+EnvironmentFile=/etc/leetplus/canary-safe.env
+ExecStartPre=/usr/local/libexec/leetplus/preflight-release-slot.sh --slot %i --release-sha ${RELEASE_SHA} --web-build-id ${WEB_BUILD_ID} --api-runtime
+ExecStartPre=/usr/bin/node /srv/leetplus/slots/%i/apps/api/dist/config/validate-production-environment.cli.js
+ExecStart=/usr/bin/node /srv/leetplus/slots/%i/apps/api/dist/main.js
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNetworkInterfaces=lo
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadOnlyPaths=/srv/leetplus/releases /srv/leetplus/slots
+ReadWritePaths=/var/lib/leetplus/langame-sync
+LogsDirectory=leetplus/api-%i
+LogsDirectoryMode=0750
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
+
+# Enable only the reviewed candidate slot before cutover. This makes an
+# accepted active target reboot-safe while the other slot and legacy remain
+# available as explicit rollback processes.

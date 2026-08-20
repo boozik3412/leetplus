@@ -10,3 +10,4 @@ packages/database/release-proposals/**/*.sql text eol=lf
 packages/database/release-proposals/**/*.md text eol=lf
 packages/database/release-rehearsals/**/*.json text eol=lf
 packages/database/scripts/current180-current190-disposable-postgresql-rehearsal-*.mjs text eol=lf
+*.sh text eol=lf

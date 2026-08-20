@@ -41,11 +41,19 @@ jobs:
         shell: bash
         run: |
           bash -n docs/deployment/production-artifact/stage-release-artifact.sh
+          bash -n docs/deployment/production-artifact/stage-pnpm-store.sh
           bash -n .github/scripts/test-stage-release-artifact.sh
           bash .github/scripts/test-stage-release-artifact.sh
           bash -n docs/deployment/production-artifact/verify-release-readiness.sh
           bash -n .github/scripts/test-verify-release-readiness.sh
           bash .github/scripts/test-verify-release-readiness.sh
+          bash -n docs/deployment/production-artifact/preflight-release-slot.sh
+          bash -n docs/deployment/production-artifact/prepare-web-slot-cache.sh
+          bash -n docs/deployment/production-artifact/seal-release-artifact.sh
+          bash -n docs/deployment/production-artifact/promote-release-artifact.sh
+          bash -n docs/deployment/production-artifact/blue-green-cutover.sh
+          bash -n .github/scripts/test-production-artifact-blue-green.sh
+          bash .github/scripts/test-production-artifact-blue-green.sh
           bash -n .github/scripts/test-production-artifact-systemd-templates.sh
           bash .github/scripts/test-production-artifact-systemd-templates.sh
 
@@ -119,6 +127,7 @@ jobs:
 
       - name: Run Web boundary tests
         run: |
+          pnpm --filter web test:release-build-boundary
           pnpm --filter web test:pilot-bff-boundary
           pnpm --filter web test:users-roles-bff-boundary
           pnpm --filter web test:gate-1mt-staff-attachments-browser-boundary

@@ -1,4 +1,5 @@
 [Unit]
+# DEPRECATED FOR FIRST ARTIFACT CUTOVER: use leetplus-api@blue|green.service.
 Description=LeetPlus API (SHA-bound artifact release)
 After=network-online.target
 Wants=network-online.target

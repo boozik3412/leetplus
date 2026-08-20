@@ -32,7 +32,7 @@ make_artifact() {
   printf 'generator client { provider = "prisma-client-js" }\n' > "$fixture_root/packages/database/prisma/schema.prisma"
   printf 'lockfileVersion: "9.0"\n' > "$fixture_root/pnpm-lock.yaml"
   printf 'packages:\n  - apps/*\n' > "$fixture_root/pnpm-workspace.yaml"
-  printf '{"releaseSha":"%s","databaseMigration":"20260820010000_fixture","databaseMigrationCount":1}\n' "$RELEASE_SHA" > "$fixture_root/release-provenance.json"
+  printf '{"releaseSha":"%s","nodeVersion":"22","pnpmVersion":"10.33.2","databaseMigration":"20260820010000_fixture","databaseMigrationCount":1}\n' "$RELEASE_SHA" > "$fixture_root/release-provenance.json"
   (
     cd -- "$fixture_root"
     find . -type f ! -name SHA256SUMS -print0 \
@@ -67,15 +67,25 @@ grep -F -x "STAGED_RELEASE_SHA=${RELEASE_SHA}" "${TEST_ROOT}/accepted.out" > /de
 failing_pnpm_root="${TEST_ROOT}/failing-pnpm-bin"
 mkdir -p "$failing_pnpm_root"
 printf '%s\n' '#!/usr/bin/env bash' 'exit 73' > "${failing_pnpm_root}/pnpm"
-chmod 0700 "${failing_pnpm_root}/pnpm"
+cat > "${failing_pnpm_root}/id" <<'ID'
+#!/usr/bin/env bash
+if [[ "${1:-}" == '-un' ]]; then
+  printf 'leetplus-build\n'
+else
+  /usr/bin/id "$@"
+fi
+ID
+chmod 0700 "${failing_pnpm_root}/pnpm" "${failing_pnpm_root}/id"
 hydration_stage_root="${TEST_ROOT}/hydration-staged"
 mkdir -p "$hydration_stage_root"
-if PATH="${failing_pnpm_root}:${PATH}" bash "$STAGER" \
+if env -u DATABASE_URL -u JWT_SECRET -u GUEST_PORTAL_JWT_SECRET \
+  -u APP_ENCRYPTION_KEY -u INTEGRATION_ENCRYPTION_KEY -u SYNC_SERVICE_TOKEN -u LANGAME_API_KEY \
+  PATH="${failing_pnpm_root}:${PATH}" bash "$STAGER" \
   --release-sha "$RELEASE_SHA" \
   --artifact "$archive" \
   --artifact-sha256 "${archive}.sha256" \
   --output-root "$hydration_stage_root" \
-  --hydrate > "${TEST_ROOT}/hydration-rejected.out" 2>&1; then
+  --hydrate --unprivileged-test-mode > "${TEST_ROOT}/hydration-rejected.out" 2>&1; then
   printf 'failed offline hydration was unexpectedly accepted\n' >&2
   exit 1
 fi

@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  API_BIND_HOST_KEY,
   DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
   FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE,
   LANGAME_DISCREPANCY_LOG_ROOT_KEY,
@@ -35,6 +36,7 @@ function validProductionEnvironment() {
     EXPECTED_DATABASE_MIGRATION: '20260727090000_access_scope_expand',
     EXPECTED_DATABASE_MIGRATION_COUNT: '151',
     LANGAME_DISCREPANCY_LOG_ROOT: '/var/lib/leetplus/langame-sync',
+    API_BIND_HOST: '127.0.0.1',
     ACCESS_SCOPE_ENFORCEMENT_MODE: 'SHADOW',
     STAFF_ATTACHMENT_ACL_MODE: 'SHADOW',
   };
@@ -364,6 +366,20 @@ describe('validateEnvironment', () => {
       ).toThrow(
         /LANGAME_DISCREPANCY_LOG_ROOT must be a non-root absolute POSIX path/,
       );
+    }
+  });
+
+  it('requires an explicit loopback API bind host in production', () => {
+    const valid = validProductionEnvironment();
+    expect(validateEnvironment(valid)[API_BIND_HOST_KEY]).toBe('127.0.0.1');
+
+    for (const value of [undefined, '', 'localhost', '0.0.0.0', '::']) {
+      expect(() =>
+        validateEnvironment({
+          ...validProductionEnvironment(),
+          API_BIND_HOST: value,
+        }),
+      ).toThrow(/API_BIND_HOST must equal 127\.0\.0\.1 in production/);
     }
   });
 

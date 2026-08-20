@@ -1,0 +1,26 @@
+[Unit]
+Description=LeetPlus fail-closed recovery of an outstanding blue/green intent
+After=local-fs.target network-online.target leetplus-api.service leetplus-web.service leetplus-api@blue.service leetplus-web@blue.service leetplus-api@green.service leetplus-web@green.service
+Wants=network-online.target
+Before=nginx.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/leetplus-blue-green-cutover recover-before-nginx
+TimeoutStartSec=180
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/usr/local/libexec/leetplus/verify-release-readiness.sh
+ReadWritePaths=/etc/nginx/leetplus /var/lib/leetplus/deploy-receipts
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+
+# nginx has a separate Requires=/After= drop-in for this service. It only
+# restores and syntax-checks the previous link and intentionally never submits
+# an nginx systemd job. The independent post-start watchdog confirms serving.

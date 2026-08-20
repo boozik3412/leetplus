@@ -9,12 +9,17 @@ import {
 } from './auth/invite-secret-body-limit';
 import { assertDesignPartnerDatabaseAdmission } from './config/design-partner-runtime-policy';
 import { PrismaService } from './prisma/prisma.service';
+import {
+  API_BIND_HOST_KEY,
+  PRODUCTION_API_BIND_HOST,
+} from './config/environment-validation';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  const configService = app.get(ConfigService);
   await assertDesignPartnerDatabaseAdmission(
     app.get(PrismaService),
-    app.get(ConfigService),
+    configService,
   );
 
   app.use('/auth/invites/preview', inviteSecretContentTypeGuard());
@@ -32,10 +37,13 @@ async function bootstrap() {
   });
   app.enableShutdownHooks();
 
-  const port = process.env.PORT ?? 4000;
-  await app.listen(port);
+  const port = configService.get<string>('PORT') ?? '4000';
+  const host =
+    configService.get<string>(API_BIND_HOST_KEY)?.trim() ||
+    PRODUCTION_API_BIND_HOST;
+  await app.listen(port, host);
 
-  console.log(`API is running on http://localhost:${port}`);
+  console.log(`API is running on http://${host}:${port}`);
 }
 
 void bootstrap();

@@ -9,6 +9,11 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+if ((EUID == 0)); then
+  PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+  export PATH
+fi
+
 readonly RELEASE_SHA_PATTERN='^[0-9a-f]{40}$'
 
 usage() {
@@ -19,14 +24,16 @@ Usage:
     --artifact <leetplus-release-<sha>.tar.gz> \
     --artifact-sha256 <artifact>.sha256 \
     --output-root <existing-absolute-directory> \
+    [--pnpm-store-dir /srv/leetplus/pnpm-store] \
     [--hydrate]
 
 Verifies the outer artifact checksum, gzip stream, archive paths, absence of
 symlinks/node_modules, internal SHA256SUMS and release provenance. It then
 atomically moves the verified tree to <output-root>/<sha>.
 
---hydrate additionally runs the locked, offline production dependency install
-and Prisma generate inside that new directory, then repeats SHA256SUMS checks.
+--hydrate additionally runs a copy-only locked, offline production dependency
+install and Prisma generate inside that new directory, rejects shared hardlinks,
+then writes a complete post-hydration runtime checksum manifest.
 It never reads runtime secrets, connects to PostgreSQL, switches a live release
 or restarts systemd.
 USAGE
@@ -50,6 +57,8 @@ artifact=''
 artifact_sha256=''
 output_root=''
 hydrate=false
+unprivileged_test_mode=false
+pnpm_store_dir='/srv/leetplus/pnpm-store'
 
 while (($# > 0)); do
   case "$1" in
@@ -77,6 +86,15 @@ while (($# > 0)); do
       hydrate=true
       shift
       ;;
+    --unprivileged-test-mode)
+      unprivileged_test_mode=true
+      shift
+      ;;
+    --pnpm-store-dir)
+      (($# >= 2)) || die '--pnpm-store-dir requires a value'
+      pnpm_store_dir="$2"
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -87,13 +105,40 @@ while (($# > 0)); do
   esac
 done
 
+if [[ "$hydrate" == true && "$unprivileged_test_mode" == false ]]; then
+  PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+  export PATH
+fi
+
+if [[ "$hydrate" == true ]]; then
+  ((EUID != 0)) || die 'hydration must never execute package/project code as root'
+  [[ "$(id -un)" == 'leetplus-build' ]] \
+    || die 'hydration must run as the dedicated leetplus-build identity'
+  for sensitive_key in DATABASE_URL JWT_SECRET GUEST_PORTAL_JWT_SECRET APP_ENCRYPTION_KEY INTEGRATION_ENCRYPTION_KEY SYNC_SERVICE_TOKEN LANGAME_API_KEY; do
+    [[ -z "${!sensitive_key:-}" ]] \
+      || die "hydration inherited a forbidden runtime secret: ${sensitive_key}"
+  done
+  if [[ "$unprivileged_test_mode" == true ]]; then
+    [[ -z "${INVOCATION_ID:-}" ]] || die 'test hydration mode cannot impersonate a systemd invocation'
+  else
+    [[ "$pnpm_store_dir" == '/srv/leetplus/pnpm-store' ]] \
+      || die 'production hydration pnpm store path cannot be overridden'
+    [[ "${LEETPLUS_HYDRATION_SANDBOX:-}" == 'SYSTEMD_IP_DENY_ANY_V1' ]] \
+      || die 'hydration has no reviewed no-egress sandbox marker'
+    [[ "${INVOCATION_ID:-}" =~ ^[0-9a-f]{32}$ ]] \
+      || die 'hydration is not running in a systemd invocation'
+    grep -Eq '/leetplus-release-hydrate@[^/]+\.service($|/)' /proc/self/cgroup \
+      || die 'hydration is outside the reviewed systemd unit cgroup'
+  fi
+fi
+
 [[ "$release_sha" =~ $RELEASE_SHA_PATTERN ]] || die 'release SHA must be 40 lowercase hexadecimal characters'
 [[ -n "$artifact" && -n "$artifact_sha256" && -n "$output_root" ]] || {
   usage >&2
   exit 1
 }
 
-for command_name in awk basename find gzip mktemp node realpath sha256sum tar; do
+for command_name in awk basename chmod dirname find grep gzip id mktemp mv node realpath rm sha256sum sort stat tar xargs; do
   require_command "$command_name"
 done
 
@@ -129,16 +174,20 @@ checksum_directory="$(dirname -- "$artifact_sha256")"
 gzip --test -- "$artifact" || die 'gzip stream verification failed'
 
 archive_listing="$(mktemp "${output_root}/.${release_sha}.listing.XXXXXX")"
+archive_type_listing="$(mktemp "${output_root}/.${release_sha}.types.XXXXXX")"
 staging_directory=''
 cleanup_listing() {
-  rm -f -- "$archive_listing"
+  rm -f -- "$archive_listing" "$archive_type_listing"
 }
 trap cleanup_listing EXIT
 
-tar -tzf "$artifact" > "$archive_listing" || die 'cannot list artifact archive'
+LC_ALL=C tar --quoting-style=escape -tzf "$artifact" > "$archive_listing" || die 'cannot list artifact archive'
 grep -Eq '(^/|(^|/)\.\.(/|$))' "$archive_listing" && die 'archive contains an unsafe path'
 grep -Eq '(^|/)node_modules(/|$)' "$archive_listing" && die 'artifact embeds node_modules'
-tar -tvzf "$artifact" | grep -Eq '^[lh]' && die 'artifact contains a symlink or hardlink'
+LC_ALL=C tar --quoting-style=escape -tvzf "$artifact" > "$archive_type_listing" \
+  || die 'cannot inspect artifact archive member types'
+awk 'substr($0, 1, 1) != "-" && substr($0, 1, 1) != "d" { exit 1 }' "$archive_type_listing" \
+  || die 'artifact contains a non-regular, non-directory member'
 
 staging_directory="$(mktemp -d "${output_root}/.${release_sha}.staging.XXXXXX")"
 tar -xzf "$artifact" \
@@ -149,7 +198,8 @@ tar -xzf "$artifact" \
 
 (
   cd -- "$staging_directory"
-  find . -type l -print -quit | grep -q . && die 'extracted artifact contains a symlink'
+  find . ! -type d ! -type f -print -quit | grep -q . \
+    && die 'extracted artifact contains a non-regular, non-directory entry'
   find . -path './node_modules' -prune -o -type d -name node_modules -print -quit | grep -q . && die 'extracted artifact contains node_modules'
   sha256sum --strict --check --quiet SHA256SUMS || die 'internal SHA256SUMS verification failed'
   node - "$release_sha" <<'NODE'
@@ -177,6 +227,12 @@ if (!Number.isSafeInteger(provenance.databaseMigrationCount) || provenance.datab
 if (typeof provenance.databaseMigration !== 'string' || !/^\d{14}_[a-z0-9_]+$/u.test(provenance.databaseMigration)) {
   throw new Error('release-provenance migration name is invalid');
 }
+if (typeof provenance.nodeVersion !== 'string' || !/^\d+$/u.test(provenance.nodeVersion)) {
+  throw new Error('release-provenance Node major is invalid');
+}
+if (typeof provenance.pnpmVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(provenance.pnpmVersion)) {
+  throw new Error('release-provenance pnpm version is invalid');
+}
 for (const requiredFile of requiredFiles) {
   const stat = fs.statSync(requiredFile);
   if (!stat.isFile() || stat.size === 0) {
@@ -191,11 +247,49 @@ NODE
 
 if [[ "$hydrate" == true ]]; then
   require_command pnpm
+  actual_node_major="$(node -p 'process.versions.node.split(".")[0]')"
+  actual_pnpm_version="$(pnpm --version)"
+  expected_node_major="$(node -p 'require(process.argv[1]).nodeVersion' "$staging_directory/release-provenance.json")"
+  expected_pnpm_version="$(node -p 'require(process.argv[1]).pnpmVersion' "$staging_directory/release-provenance.json")"
+  [[ "$actual_node_major" == "$expected_node_major" ]] || die 'hydration Node major differs from release provenance'
+  [[ "$actual_pnpm_version" == "$expected_pnpm_version" ]] || die 'hydration pnpm version differs from release provenance'
+  if [[ "$unprivileged_test_mode" == false ]]; then
+    [[ -d "$pnpm_store_dir" && ! -L "$pnpm_store_dir" ]] || die 'trusted pnpm store is absent or unsafe'
+    pnpm_store_dir="$(realpath -e -- "$pnpm_store_dir")"
+    [[ "$(stat -c '%U' -- "$pnpm_store_dir")" == 'root' ]] || die 'trusted pnpm store must be root-owned'
+    [[ -z "$(find -P "$pnpm_store_dir" -xdev \( -type d -o -type f \) -perm /022 -print -quit)" ]] \
+      || die 'trusted pnpm store is group/other-writable'
+    store_receipt="${pnpm_store_dir}/LEETPLUS_STORE_RECEIPT"
+    [[ -f "$store_receipt" && ! -L "$store_receipt" ]] || die 'trusted pnpm store receipt is absent'
+    lockfile_sha="$(sha256sum "$staging_directory/pnpm-lock.yaml" | awk '{ print $1 }')"
+    grep -F -x "LOCKFILE_SHA256=${lockfile_sha}" "$store_receipt" >/dev/null || die 'pnpm store lockfile receipt mismatch'
+    grep -F -x "NODE_MAJOR=${expected_node_major}" "$store_receipt" >/dev/null || die 'pnpm store Node receipt mismatch'
+    grep -F -x "PNPM_VERSION=${expected_pnpm_version}" "$store_receipt" >/dev/null || die 'pnpm store version receipt mismatch'
+  fi
   if ! (
     cd -- "$staging_directory"
-    pnpm install --prod --offline --frozen-lockfile || exit 1
+    pnpm install --prod --offline --frozen-lockfile --ignore-scripts \
+      --package-import-method=copy --store-dir "$pnpm_store_dir" || exit 1
     pnpm --filter database db:generate || exit 1
     sha256sum --strict --check --quiet SHA256SUMS || exit 1
+    test -z "$(find -P . -xdev -type f -links +1 -print -quit)" || exit 1
+    test -z "$(find -P . -xdev ! -type d ! -type f ! -type l -print -quit)" || exit 1
+    if [[ "$unprivileged_test_mode" == false ]]; then
+      {
+        printf 'RECORD_VERSION=1\n'
+        printf 'RELEASE_SHA=%s\n' "$release_sha"
+        printf 'SANDBOX=SYSTEMD_IP_DENY_ANY_V1\n'
+        printf 'INVOCATION_ID=%s\n' "$INVOCATION_ID"
+        printf 'PNPM_STORE_LOCKFILE_SHA256=%s\n' "$lockfile_sha"
+      } > HYDRATION_SANDBOX_RECEIPT
+      chmod 0440 HYDRATION_SANDBOX_RECEIPT
+    fi
+    find -P . -xdev \
+      -path './apps/web/.next/cache' -prune -o \
+      -type f ! -name HYDRATED_SHA256SUMS -print0 \
+      | LC_ALL=C sort -z \
+      | xargs -0 sha256sum > HYDRATED_SHA256SUMS
+    sha256sum --strict --check --quiet HYDRATED_SHA256SUMS || exit 1
   ); then
     die "locked offline hydration failed; retained $staging_directory for inspection"
   fi

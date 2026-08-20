@@ -1,0 +1,33 @@
+[Unit]
+Description=LeetPlus isolated no-egress hydration for exact release %i
+ConditionPathIsRegular=/srv/leetplus/release-inbox/leetplus-release-%i.tar.gz
+ConditionPathIsRegular=/srv/leetplus/release-inbox/leetplus-release-%i.tar.gz.sha256
+ConditionPathIsRegular=/run/leetplus-release/hydration.lock
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=leetplus-build
+Group=leetplus-build
+Environment=LEETPLUS_HYDRATION_SANDBOX=SYSTEMD_IP_DENY_ANY_V1
+ExecStart=/usr/bin/flock --exclusive --no-fork /run/leetplus-release/hydration.lock /usr/local/libexec/leetplus/stage-release-artifact.sh --release-sha %i --artifact /srv/leetplus/release-inbox/leetplus-release-%i.tar.gz --artifact-sha256 /srv/leetplus/release-inbox/leetplus-release-%i.tar.gz.sha256 --output-root /srv/leetplus/release-builds --pnpm-store-dir /srv/leetplus/pnpm-store --hydrate
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadOnlyPaths=/srv/leetplus/release-inbox
+ReadOnlyPaths=/srv/leetplus/pnpm-store
+ReadWritePaths=/run/leetplus-release/hydration.lock
+ReadWritePaths=/srv/leetplus/release-builds
+UMask=0077
+TimeoutStartSec=900
+TimeoutStopSec=30
+KillMode=control-group
+
+# Deliberately no [Install]: invoke one exact SHA with `systemctl start` and
+# preserve its journal/INVOCATION_ID as release evidence.

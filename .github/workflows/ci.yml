@@ -327,8 +327,14 @@ jobs:
       - name: Validate founder-pilot restored-copy fail-closed preflight
         run: pnpm --filter database check:founder-pilot-restored-copy-preflight
 
+      - name: Validate N-minus-one restored-copy smoke
+        run: pnpm --filter database check:n-minus-one-restored-copy-smoke
+
       - name: Validate founder-pilot production-history rehearsal lane
         run: pnpm --filter database check:founder-pilot-production-history-rehearsal
+
+      - name: Validate fail-closed founder-pilot production-history controller
+        run: pnpm --filter database check:founder-pilot-production-history-production
 
       - name: Validate founder-pilot exact activation-role deployment
         run: pnpm --filter database check:founder-pilot-activation-role-deployment
@@ -512,6 +518,8 @@ jobs:
           BUILD_TIME: "2026-07-26T00:00:00Z"
           EXPECTED_DATABASE_MIGRATION: 20260820010000_guest_portal_telegram_update_ledger
           EXPECTED_DATABASE_MIGRATION_COUNT: "187"
+          API_BIND_HOST: 127.0.0.1
+          LANGAME_DISCREPANCY_LOG_ROOT: /var/lib/leetplus/langame-sync
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -554,6 +562,9 @@ jobs:
       - name: Validate release artifact API child-process fixture
         run: node --check .github/scripts/run-founder-release-artifact-api-fixture.mjs
 
+      - name: Validate release artifact Web/API pair fixture
+        run: node --check .github/scripts/run-release-artifact-web-pair-fixture.mjs
+
       - name: Create deterministic release artifact
         shell: bash
         run: |
@@ -581,6 +592,8 @@ jobs:
             packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs \
             packages/database/scripts/founder-pilot-production-history-rehearsal.mjs \
             packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs \
+            packages/database/scripts/founder-pilot-production-history-production.mjs \
+            packages/database/scripts/founder-pilot-production-history-production.cli.mjs \
             packages/database/scripts/founder-pilot-activation-role-deployment.mjs \
             packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs \
             packages/database/scripts/founder-pilot-activation-role-network-acceptance.mjs \
@@ -605,10 +618,10 @@ jobs:
             '  "databaseMigrationCount": 187,' \
             '  "runtimePackageManifestsIncluded": true,' \
             '  "founderPilotOperationalScriptsIncluded": true,' \
-            '  "founderPilotOperationalScriptCount": 10,' \
+            '  "founderPilotOperationalScriptCount": 12,' \
             '  "runtimeEnrollmentOperationalScriptsIncluded": true,' \
             '  "runtimeEnrollmentOperationalScriptCount": 6,' \
-            '  "operationalScriptCount": 16,' \
+            '  "operationalScriptCount": 18,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
@@ -664,6 +677,7 @@ jobs:
             './packages/database/prisma/schema.prisma' \
             './packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs' \
             './packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs' \
+            './packages/database/scripts/founder-pilot-production-history-production.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs' \
             './packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs' \
@@ -678,7 +692,7 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '16'
+          test "$script_file_count" = '18'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1
@@ -690,13 +704,14 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").releaseSha')" = "$CI_RELEASE_SHA"
             test "$(node -p 'require("./release-provenance.json").runtimePackageManifestsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptsIncluded')" = 'true'
-            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '10'
+            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '12'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptCount')" = '6'
-            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '16'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '18'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
             node --check packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs
+            node --check packages/database/scripts/founder-pilot-production-history-production.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs
             node --check packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs
@@ -706,6 +721,7 @@ jobs:
             pnpm --filter database db:generate
             node packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs --help > /dev/null
             node packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs --help > /dev/null
+            node packages/database/scripts/founder-pilot-production-history-production.cli.mjs --help > /dev/null
             node packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs --help > /dev/null
             node packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs --help > /dev/null
             node packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs --help > /dev/null
@@ -811,6 +827,15 @@ jobs:
           FOUNDER_RELEASE_ARTIFACT_ROOT: ${{ runner.temp }}/leetplus-release-runtime-${{ env.CI_RELEASE_SHA }}
           FOUNDER_RELEASE_ARTIFACT_MAINTENANCE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
           FOUNDER_RELEASE_ARTIFACT_API_PORT: 4319
+
+      - name: Exercise downloaded Web artifact with its exact slot API origin
+        run: node .github/scripts/run-release-artifact-web-pair-fixture.mjs
+        env:
+          RELEASE_ARTIFACT_WEB_PAIR_CONFIRM: run-release-artifact-web-pair-child-process-fixture
+          RELEASE_ARTIFACT_WEB_PAIR_ROOT: ${{ runner.temp }}/leetplus-release-runtime-${{ env.CI_RELEASE_SHA }}
+          RELEASE_ARTIFACT_WEB_PAIR_SHA: ${{ env.CI_RELEASE_SHA }}
+          RELEASE_ARTIFACT_WEB_PAIR_API_PORT: 4320
+          RELEASE_ARTIFACT_WEB_PAIR_WEB_PORT: 3320
 
   migration-smoke:
     name: PostgreSQL migration smoke

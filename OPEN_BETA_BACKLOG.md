@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
-- Дата актуализации: 20.08.2026
-- Версия: 3.53
+- Дата актуализации: 21.08.2026
+- Версия: 3.55
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -83,6 +83,35 @@
   retained isolated evidence. Следующий blocking gate — SHA-bound production
   canary и production runtime HBA/TLS/SCRAM/dedicated-pool admission; owner
   invite пока запрещён.
+  Production pre-cutover audit затем запретил использование `d1577642…`: этот
+  candidate не содержал четыре свежих исправления live `origin/main`, raw
+  migration unit не воспроизводил принятый materialized history path, а
+  single-instance restart не оставлял работающий rollback runtime. Все четыре
+  production commit объединены в `df70fb989e995a869042cc396a24af7f9ce6a1c8`;
+  Fast CI [`32398869119`](https://github.com/boozik3412/leetplus/actions/runs/32398869119)
+  принят как `2/2 SUCCESS`, включая требование «все активные предупреждения за
+  весь период». Новый artifact ещё не выпущен.
+  Свежий production backup, cluster globals и concrete legacy rollback inputs
+  сохранены на host и off-host с совпавшими SHA-256; units, nginx, timer,
+  migrations, tenants и outbound не менялись. PII-free evidence:
+  [`controlled-beta-1-production-precutover-evidence-2026-08-20.md`](./docs/open-beta/controlled-beta-1-production-precutover-evidence-2026-08-20.md).
+  Persistent Langame storage, production-safe digest-bound history controller
+  и N−1 compatibility tooling реализованы локально. На отдельном loopback
+  PostgreSQL exact legacy SHA `7de04ff4…` прошёл реальный API smoke на schema
+  `187`: `12` probes, zero fixture residue и evidence digest `225e7f74…`.
+  Отдельный scheduler compatibility прогон охватил все шесть legacy families
+  без Prisma/runtime errors (`7e1bfcdd…`), но ожидаемо не разрешил hot scheduler
+  rollback: перед production migration обязателен scheduler-free legacy slot и
+  доказанный drain. Предварительный history deploy применил все `34` migrations;
+  финальный checksum gate запретил Windows CRLF working tree как deploy source.
+  Поэтому следующий blocking gate — закончить blue/green admission, выпустить
+  новый exact CI artifact и повторить controller/N−1 rehearsal из его LF bytes.
+  Cross-audit дополнительно закрыл риск ownership новых migration objects:
+  production controller теперь требует temporary `LOGIN NOINHERIT` session,
+  canonical `SET ROLE` в existing database/object owner, exact direct
+  membership options и совпадение owner с runtime role. Unit contract `19/19`
+  зелёный; реальный owner/runtime-access proof остаётся частью exact-artifact
+  replay, до него production switch запрещён.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta
@@ -97,9 +126,9 @@
 
 | Шаг                                                             | Блокирует первый OWNER invite | Состояние                                                       |
 | --------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------- |
-| Fast CI на рабочем коммите                                      | Да                            | `d1577642…`, `32383168039`: `2/2 SUCCESS`                      |
-| Full release admission для exact SHA                            | Да                            | `d1577642…`, `32383465076`: `4/4 SUCCESS`; manual + nightly далее |
-| Production backup, rollback и canary                            | Да                            | Backup/history/role rehearsal приняты; production canary предстоит |
+| Fast CI на рабочем коммите                                      | Да                            | merge SHA `df70fb98…`, `32398869119`: `2/2 SUCCESS`; следующий implementation SHA ещё не принят |
+| Full release admission для exact SHA                            | Да                            | `d1577642…` superseded; требуется новый manual run и artifact после hardening |
+| Production backup, rollback и canary                            | Да                            | Backup и N−1 API/schema acceptance приняты; blue/green и exact-artifact controller replay завершаются |
 | Runtime roles, TLS route, SMTP worker и activation               | Да                            | Isolated lifecycle принята; production application предстоит    |
 | `Tenant B/Store B1`, persisted GO и OWNER invite                | Да                            | Предстоит после canary                                          |
 | Day-0 scope/module/kill-switch smoke                            | Да                            | Предстоит сразу после invite                                    |

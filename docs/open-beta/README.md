@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.187                                        |
+| Версия           | 1.188                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -247,6 +247,16 @@ store identity до outbox query. `GuestGameDelivery` reads для `STORES` acto
 дополнительно фильтруются по `storeId`. Legacy protocol gate и external
 `EXTERNAL_DENY` остаются включёнными. Exact-SHA CI acceptance:
 [delivery runtime identity evidence 20.08.2026](./background-delivery-runtime-identity-ci-evidence-2026-08-20.md).
+
+Successor retention and quality runtime identity adoption:
+`GUEST_GAME_DATA_RETENTION` и `GUEST_GAME_QUALITY_MONITORING` подключены к
+runtime identity foundation как tenant-wide jobs. Data retention допускает
+tenant в executable cleanup/recovery/policy list только после exact
+`TENANT_SYSTEM + tenantId`; quality monitoring требует такой же runtime actor
+до `collectTenant`. Missing tenant identity возвращает deterministic
+`SKIPPED` до wallet cleanup, policy lookup, quality snapshot или alert writes.
+Exact-SHA CI acceptance:
+[retention and quality runtime identity evidence 20.08.2026](./background-retention-quality-runtime-identity-ci-evidence-2026-08-20.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

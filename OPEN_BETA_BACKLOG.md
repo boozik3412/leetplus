@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 20.08.2026
-- Версия: 3.42
+- Версия: 3.43
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -122,8 +122,25 @@ TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
   `ee1f59e05c8abcb5359ad1f171b3c9b62eefe349` принят GitHub Actions run
   `32330878860` как `4/4 SUCCESS`; evidence:
   `docs/open-beta/background-delivery-runtime-identity-ci-evidence-2026-08-20.md`.
-  Retention/recovery/activity и staff recurring worker paths ещё не переведены;
-  внешний доступ остаётся `NO-GO`.
+  На момент этого delivery slice retention/recovery/activity и staff recurring
+  worker paths ещё не были переведены; внешний доступ остаётся `NO-GO`.
+- Data retention и quality monitoring tenant-wide background paths подключены
+  к runtime identity foundation: `GUEST_GAME_DATA_RETENTION` теперь формирует
+  executable tenant list только после exact `TENANT_SYSTEM + tenantId`
+  acceptance и не запускает global wallet cleanup/recovery/policy lookup для
+  runtime-denied tenant; `GUEST_GAME_QUALITY_MONITORING` требует exact
+  `TENANT_SYSTEM + tenantId` до `collectTenant`. Missing tenant identity даёт
+  deterministic `SKIPPED` до side effects. Локально зелёные: focused
+  retention/quality specs (`2/2 suites`, `30/30 tests`),
+  `test:ci:background-execution` (`16/16 suites`, `801/801 tests`),
+  `test:ci:tenant-execution` (`18/18 suites`, `1004/1004 tests`),
+  `lint:ci:tenant-execution`, API typecheck, Prettier check изменённых файлов
+  и `git diff --check`. Exact-SHA
+  `c58952f798090b2baed89d894b413e71c55c2882` принят GitHub Actions run
+  `32333272180` как `4/4 SUCCESS`; evidence:
+  `docs/open-beta/background-retention-quality-runtime-identity-ci-evidence-2026-08-20.md`.
+  Recovery/activity, ledger fallback, loot-box recovery и staff recurring
+  worker paths ещё не переведены; внешний доступ остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day

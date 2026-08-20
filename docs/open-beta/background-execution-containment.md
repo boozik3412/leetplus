@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.14                                                    |
+| Версия           | 1.15                                                    |
 | Дата             | 20.08.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -117,6 +117,14 @@ stores текущего tenant, передаёт dispatcher synthetic actor
 `storeId IN allowedStoreIds`. Legacy protocol gate и `EXTERNAL_DENY` для
 external tenant остаются действующими.
 
+`GUEST_GAME_DATA_RETENTION` и `GUEST_GAME_QUALITY_MONITORING` подключены к
+runtime identity foundation как tenant-wide background jobs. Data retention
+допускает tenant в executable global cleanup/recovery/policy list только после
+exact `TENANT_SYSTEM + tenantId` acceptance; quality monitoring требует exact
+`TENANT_SYSTEM + tenantId` до `collectTenant`. Missing tenant identity даёт
+deterministic `SKIPPED` до wallet cleanup, policy lookup, quality snapshot или
+alert writes.
+
 ### 3.2. Внешнее выполнение запрещено
 
 До отдельного durable fencing имеют `EXTERNAL_DENY`:
@@ -185,6 +193,8 @@ application graph.
   глобальные cleanup query;
 - ledger fallback, loot-box recovery, quality monitoring и reward
   materializer проверяют policy до чтения рабочих данных и side effects;
+- data retention и quality monitoring дополнительно требуют accepted
+  `TENANT_SYSTEM` runtime identity до unattended cleanup/collection effects;
 - external queue rows могут оставаться сохранёнными, но не claim-ятся.
 
 Прямые/manual методы `enqueueProfileSync`/`syncProfile`, tenant-scoped
@@ -214,6 +224,9 @@ retention и quality collection не объявляются unattended entrypoin
 - Runtime identity foundation fail-closed блокирует shared-token worker,
   missing actor kind, missing tenant id, missing store id и несовпадение
   required actor kind до подключения effect path.
+- Data retention и quality monitoring больше не выполняют unattended
+  tenant-wide effects только на основании service-token/policy admission:
+  accepted runtime tenant identity требуется до global cleanup/collection.
 - Текущий `INTERNAL` tenant сохраняет совместимость разрешённых registry
   paths, но legacy provider delivery effects намеренно отключены до
   coordinator.
@@ -237,9 +250,9 @@ retention и quality collection не объявляются unattended entrypoin
 - registry-level identity metadata не создаёт сами runtime roles и не
   доказывает, что каждый legacy scheduler уже исполняется под отдельным
   tenant/store system actor;
-- runtime identity helper пока является foundation/contract: конкретные
-  legacy scheduler call-sites должны быть переведены на него отдельными
-  bounded patches с job-specific tests;
+- runtime identity helper пока является foundation/contract: оставшиеся legacy
+  scheduler call-sites должны быть переведены на него отдельными bounded
+  patches с job-specific tests;
 - activity jobs внешнего tenant могут накапливаться unclaimed;
 - не завершены shared Telegram tenant/store identity, durable update dedupe и
   per-store kill switch;
@@ -294,6 +307,11 @@ Suite проверяет:
 - запрет legacy provider prepare/update/bot ack и provider delivery mutation
   при bonus-ledger revoke/Telegram unsubscribe без отмены основной
   ledger/reward/consent business mutation;
+- data retention runtime identity adoption: missing tenant identity blocks
+  executable tenant list before wallet cleanup/recovery, policy lookup and
+  retention run writes;
+- quality monitoring runtime identity adoption: missing tenant identity blocks
+  `collectTenant` before snapshot/alert writes;
 - сохранение `CASHIER/MANUAL` cancellation.
 
 Successor identity metadata exact-SHA CI acceptance:
@@ -304,6 +322,9 @@ Runtime identity foundation exact-SHA CI acceptance:
 
 Report digest runtime identity exact-SHA CI acceptance:
 [background report digest runtime identity evidence 19.08.2026](./background-report-digest-runtime-identity-ci-evidence-2026-08-19.md).
+
+Retention and quality runtime identity exact-SHA CI acceptance:
+[background retention and quality runtime identity evidence 20.08.2026](./background-retention-quality-runtime-identity-ci-evidence-2026-08-20.md).
 
 Последний принятый baseline-результат до расширения migration-166 containment:
 

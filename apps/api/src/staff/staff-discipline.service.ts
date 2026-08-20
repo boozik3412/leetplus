@@ -190,14 +190,21 @@ export type StaffDisciplineRecordUpdateDto = {
 };
 
 type ResolvedDisciplineFilters = {
-  dateFrom: string;
-  dateTo: string;
-  start: Date;
-  end: Date;
+  dateFrom: string | null;
+  dateTo: string | null;
+  start: Date | null;
+  end: Date | null;
   storeId: string | null;
   userId: string | null;
   status: StaffDisciplineRecordStatus | 'all';
   search: string | null;
+};
+
+type ResolvedBoundedDisciplineFilters = ResolvedDisciplineFilters & {
+  dateFrom: string;
+  dateTo: string;
+  start: Date;
+  end: Date;
 };
 
 const disciplineRecordInclude = {
@@ -222,7 +229,7 @@ export class StaffDisciplineService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     await this.ensureDefaultRules(tenantId);
     const access = this.resolveDisciplineAccess(user);
-    const filters = this.resolveFilters(query, access.userId);
+    const filters = this.resolveFilters(query, access.userId, false);
 
     const [rules, records, stores, users, policies] = await Promise.all([
       this.prisma.staffDisciplineRule.findMany({
@@ -233,7 +240,6 @@ export class StaffDisciplineService {
         where: this.buildRecordWhere(tenantId, filters),
         include: disciplineRecordInclude,
         orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
-        take: 500,
       }),
       this.prisma.store.findMany({
         where: { tenantId },
@@ -297,7 +303,7 @@ export class StaffDisciplineService {
       );
     }
 
-    const filters = this.resolveFilters(query);
+    const filters = this.resolveFilters(query, null, false);
     const format = resolveStaffExportFormat(query.format);
     const records = await this.prisma.staffDisciplineRecord.findMany({
       where: this.buildRecordWhere(tenantId, filters),
@@ -713,7 +719,9 @@ export class StaffDisciplineService {
   ): Prisma.StaffDisciplineRecordWhereInput {
     const where: Prisma.StaffDisciplineRecordWhereInput = {
       tenantId,
-      occurredAt: { gte: filters.start, lte: filters.end },
+      ...(filters.start && filters.end
+        ? { occurredAt: { gte: filters.start, lte: filters.end } }
+        : {}),
     };
 
     if (filters.storeId) {
@@ -1213,17 +1221,38 @@ export class StaffDisciplineService {
 
   private resolveFilters(
     query: StaffDisciplineQuery,
+    forcedUserId: string | null | undefined,
+    useDefaultPeriod: false,
+  ): ResolvedDisciplineFilters;
+  private resolveFilters(
+    query: StaffDisciplineQuery,
     forcedUserId?: string | null,
+    useDefaultPeriod?: true,
+  ): ResolvedBoundedDisciplineFilters;
+  private resolveFilters(
+    query: StaffDisciplineQuery,
+    forcedUserId?: string | null,
+    useDefaultPeriod = true,
   ): ResolvedDisciplineFilters {
+    const requestedDateFrom = this.normalizeDate(query.dateFrom);
+    const requestedDateTo = this.normalizeDate(query.dateTo);
+    const hasRequestedPeriod = Boolean(requestedDateFrom || requestedDateTo);
     const dateTo =
-      this.normalizeDate(query.dateTo) ?? this.toDateOnly(new Date());
+      requestedDateTo ??
+      (hasRequestedPeriod || useDefaultPeriod
+        ? this.toDateOnly(new Date())
+        : null);
     const dateFrom =
-      this.normalizeDate(query.dateFrom) ??
-      this.toDateOnly(this.addDays(new Date(`${dateTo}T00:00:00.000Z`), -29));
-    const start = new Date(`${dateFrom}T00:00:00.000Z`);
-    const end = new Date(`${dateTo}T23:59:59.999Z`);
+      requestedDateFrom ??
+      (dateTo
+        ? this.toDateOnly(
+            this.addDays(new Date(`${dateTo}T00:00:00.000Z`), -29),
+          )
+        : null);
+    const start = dateFrom ? new Date(`${dateFrom}T00:00:00.000Z`) : null;
+    const end = dateTo ? new Date(`${dateTo}T23:59:59.999Z`) : null;
 
-    if (start > end) {
+    if (start && end && start > end) {
       throw new BadRequestException('dateFrom must be before dateTo');
     }
 

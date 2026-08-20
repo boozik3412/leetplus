@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.196                                        |
+| Версия           | 1.197                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -66,6 +66,9 @@ Fast CI не является production approval и не публикует art
 
 Короткий исполнимый путь, границы отложенных работ и порядок включения Telegram
 зафиксированы в [плане Controlled Beta-1](./controlled-beta-1-delivery-plan.md).
+Fast CI принят для exact SHA `965612c5…`: GitHub Actions
+[`32370680622`](https://github.com/boozik3412/leetplus/actions/runs/32370680622)
+— `2/2 SUCCESS`. Это не заменяет Full Release Admission будущего deploy SHA.
 
 Актуальный successor и его строгая граница:
 [Founder-operator beta GO](./founder-operator-beta-go.md).

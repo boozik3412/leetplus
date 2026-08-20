@@ -8,6 +8,17 @@
 | Цель              | Один приглашённый владелец `Tenant B/Store B1` |
 | Не является целью | Публичная регистрация или массовый запуск      |
 
+## Принятая CI evidence
+
+Workflow split реализован на SHA `965612c5…` и принят GitHub Actions
+[`32370680622`](https://github.com/boozik3412/leetplus/actions/runs/32370680622)
+как `2/2 SUCCESS`: `Fast authority root trust` и `Fast application checks`.
+Непосредственно перед split предыдущий full baseline SHA `1b279c19…` прошёл
+GitHub Actions `32369155466` как `4/4 SUCCESS`, включая PostgreSQL migration
+smoke и downloaded SHA-bound artifact. Это не делает `965612c5…` production
+candidate: перед deploy нового SHA оператор вручную запускает Full Release
+Admission и использует artifact только этого же SHA.
+
 ## Граница первого запуска
 
 Первый внешний тестер получает email-bound `OWNER/NETWORK` invite для своего

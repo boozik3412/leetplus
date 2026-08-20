@@ -12,6 +12,11 @@
   PostgreSQL/artifact admission остаётся обязательным перед deploy, но больше
   не блокирует каждый рабочий коммит: быстрый CI выполняется на каждом push,
   full release admission — вручную для release candidate и nightly на `main`.
+  Реализация `965612c5…` принята Fast CI
+  [`32370680622`](https://github.com/boozik3412/leetplus/actions/runs/32370680622)
+  как `2/2 SUCCESS`; предыдущий full baseline `1b279c19…` принят CI
+  `32369155466` как `4/4 SUCCESS`. Full admission должен быть отдельно
+  запущен для каждого будущего deploy SHA.
   Critical path, границы и порядок работ зафиксированы в
   [`controlled-beta-1-delivery-plan.md`](./docs/open-beta/controlled-beta-1-delivery-plan.md).
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение

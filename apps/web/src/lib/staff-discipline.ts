@@ -7,6 +7,7 @@ export type StaffDisciplineRiskLevel = "LOW" | "MEDIUM" | "HIGH";
 export type StaffDisciplineFilters = {
   dateFrom?: string;
   dateTo?: string;
+  period?: "all" | "range";
   storeId?: string;
   userId?: string;
   status?: "ACTIVE" | "CANCELED" | "RESET" | "all";
@@ -65,6 +66,7 @@ export type StaffDisciplineReport = {
     canExport: boolean;
   };
   filters: Required<Pick<StaffDisciplineFilters, "dateFrom" | "dateTo">> & {
+    period: "all" | "range";
     storeId: string | null;
     userId: string | null;
     status: "ACTIVE" | "CANCELED" | "RESET" | "all";
@@ -144,10 +146,13 @@ export type StaffAdministratorRatingsReport = {
 export async function getStaffDisciplineReport(
   filters: StaffDisciplineFilters = {},
 ): Promise<StaffDisciplineReport> {
-  const response = await fetch(`${getApiUrl()}/staff/discipline${query(filters)}`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${getApiUrl()}/staff/discipline${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch staff discipline report");
@@ -157,7 +162,10 @@ export async function getStaffDisciplineReport(
 }
 
 export async function getStaffAdministratorRatings(
-  filters: Pick<StaffDisciplineFilters, "dateFrom" | "dateTo" | "storeId" | "search"> = {},
+  filters: Pick<
+    StaffDisciplineFilters,
+    "dateFrom" | "dateTo" | "storeId" | "search"
+  > = {},
 ): Promise<StaffAdministratorRatingsReport> {
   const response = await fetch(
     `${getApiUrl()}/staff/administrator-ratings${query(filters)}`,

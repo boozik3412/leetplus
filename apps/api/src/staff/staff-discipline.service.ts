@@ -154,6 +154,7 @@ type StaffDisciplineAccess = {
 export type StaffDisciplineQuery = {
   dateFrom?: string;
   dateTo?: string;
+  period?: 'all' | 'range';
   storeId?: string;
   userId?: string;
   status?: StaffDisciplineRecordStatus | 'all';
@@ -190,6 +191,7 @@ export type StaffDisciplineRecordUpdateDto = {
 };
 
 type ResolvedDisciplineFilters = {
+  period: 'all' | 'range';
   dateFrom: string;
   dateTo: string;
   start: Date;
@@ -222,7 +224,7 @@ export class StaffDisciplineService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     await this.ensureDefaultRules(tenantId);
     const access = this.resolveDisciplineAccess(user);
-    const filters = this.resolveFilters(query, access.userId);
+    const filters = this.resolveFilters(query, access.userId, 'all');
 
     const [rules, records, stores, users, policies] = await Promise.all([
       this.prisma.staffDisciplineRule.findMany({
@@ -258,6 +260,7 @@ export class StaffDisciplineService {
         canExport: access.canExport,
       },
       filters: {
+        period: filters.period,
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
         storeId: filters.storeId,
@@ -297,7 +300,7 @@ export class StaffDisciplineService {
       );
     }
 
-    const filters = this.resolveFilters(query);
+    const filters = this.resolveFilters(query, undefined, 'all');
     const format = resolveStaffExportFormat(query.format);
     const records = await this.prisma.staffDisciplineRecord.findMany({
       where: this.buildRecordWhere(tenantId, filters),
@@ -713,7 +716,9 @@ export class StaffDisciplineService {
   ): Prisma.StaffDisciplineRecordWhereInput {
     const where: Prisma.StaffDisciplineRecordWhereInput = {
       tenantId,
-      occurredAt: { gte: filters.start, lte: filters.end },
+      ...(filters.period === 'range'
+        ? { occurredAt: { gte: filters.start, lte: filters.end } }
+        : {}),
     };
 
     if (filters.storeId) {
@@ -1214,6 +1219,7 @@ export class StaffDisciplineService {
   private resolveFilters(
     query: StaffDisciplineQuery,
     forcedUserId?: string | null,
+    defaultPeriod: 'all' | 'range' = 'range',
   ): ResolvedDisciplineFilters {
     const dateTo =
       this.normalizeDate(query.dateTo) ?? this.toDateOnly(new Date());
@@ -1227,7 +1233,15 @@ export class StaffDisciplineService {
       throw new BadRequestException('dateFrom must be before dateTo');
     }
 
+    const period =
+      query.period === 'all'
+        ? 'all'
+        : query.period === 'range' || query.dateFrom || query.dateTo
+          ? 'range'
+          : defaultPeriod;
+
     return {
+      period,
       dateFrom,
       dateTo,
       start,

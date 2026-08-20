@@ -54,7 +54,10 @@ export function StaffDisciplineWorkspace({
   const [comment, setComment] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const rulesByCategory = useMemo(() => groupRules(report.rules), [report.rules]);
+  const rulesByCategory = useMemo(
+    () => groupRules(report.rules),
+    [report.rules],
+  );
 
   async function togglePolicy(policy: StaffDisciplinePolicy) {
     if (!canManage) {
@@ -72,9 +75,9 @@ export function StaffDisciplineWorkspace({
     });
 
     if (!response.ok) {
-      const data = (await response.json().catch(() => null)) as
-        | { message?: string }
-        | null;
+      const data = (await response.json().catch(() => null)) as {
+        message?: string;
+      } | null;
       setError(data?.message ?? "Не удалось обновить включение системы");
       return;
     }
@@ -107,9 +110,9 @@ export function StaffDisciplineWorkspace({
     setIsSaving(false);
 
     if (!response.ok) {
-      const data = (await response.json().catch(() => null)) as
-        | { message?: string }
-        | null;
+      const data = (await response.json().catch(() => null)) as {
+        message?: string;
+      } | null;
       setError(data?.message ?? "Не удалось добавить запись");
       return;
     }
@@ -137,9 +140,9 @@ export function StaffDisciplineWorkspace({
     );
 
     if (!response.ok) {
-      const data = (await response.json().catch(() => null)) as
-        | { message?: string }
-        | null;
+      const data = (await response.json().catch(() => null)) as {
+        message?: string;
+      } | null;
       setError(data?.message ?? "Не удалось обновить запись");
       return;
     }
@@ -165,8 +168,8 @@ export function StaffDisciplineWorkspace({
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
             В этом режиме показаны записи, оформленные именно на вашу учетную
-            запись. Создание, отмена и сброс записей доступны только
-            управляющим ролям.
+            запись. Создание, отмена и сброс записей доступны только управляющим
+            ролям.
           </p>
         </section>
       ) : null}
@@ -363,11 +366,16 @@ export function StaffDisciplineWorkspace({
               Журнал
             </p>
             <h2 className="mt-1 text-lg font-semibold">
-              {canManage ? "Предупреждения и штрафы" : "Мои предупреждения и штрафы"}
+              {canManage
+                ? "Предупреждения и штрафы"
+                : "Мои предупреждения и штрафы"}
             </h2>
           </div>
           <span className="text-xs text-zinc-500">
-            {report.summary.recordsTotal} записей за период
+            {report.summary.recordsTotal}{" "}
+            {report.filters.period === "all"
+              ? "записей за весь период"
+              : "записей за период"}
           </span>
         </div>
         <div className="mt-4 space-y-3">
@@ -411,7 +419,9 @@ export function StaffDisciplineWorkspace({
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => void updateRecordStatus(record, "CANCELED")}
+                      onClick={() =>
+                        void updateRecordStatus(record, "CANCELED")
+                      }
                       className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
                     >
                       Отменить
@@ -429,7 +439,9 @@ export function StaffDisciplineWorkspace({
             ))
           ) : (
             <div className="rounded-lg border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-700">
-              За выбранный период записей нет.
+              {report.filters.period === "all"
+                ? "За весь период записей нет."
+                : "За выбранный период записей нет."}
             </div>
           )}
         </div>

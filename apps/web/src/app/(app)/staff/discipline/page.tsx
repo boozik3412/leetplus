@@ -14,14 +14,42 @@ function searchParam(value: string | string[] | undefined) {
 }
 
 function resolveFilters(params: Awaited<SearchParams>): StaffDisciplineFilters {
+  const dateFrom = searchParam(params.dateFrom);
+  const dateTo = searchParam(params.dateTo);
+
   return {
-    dateFrom: searchParam(params.dateFrom),
-    dateTo: searchParam(params.dateTo),
+    dateFrom,
+    dateTo,
+    period:
+      searchParam(params.period) === "range" || dateFrom || dateTo
+        ? "range"
+        : "all",
     storeId: searchParam(params.storeId),
     userId: searchParam(params.userId),
     status: searchParam(params.status) as StaffDisciplineFilters["status"],
     search: searchParam(params.search)?.trim(),
   };
+}
+
+function allTimeHref(filters: StaffDisciplineFilters) {
+  const params = new URLSearchParams({
+    period: "all",
+    status: filters.status ?? "ACTIVE",
+  });
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  if (filters.userId) {
+    params.set("userId", filters.userId);
+  }
+
+  if (filters.search) {
+    params.set("search", filters.search);
+  }
+
+  return `/staff/discipline?${params.toString()}`;
 }
 
 function formatNumber(value: number) {
@@ -56,19 +84,25 @@ export default async function StaffDisciplinePage({
   const isSelfView = report.access.mode === "SELF";
   const pageTitle = isSelfView ? "Мотивация" : "Мотивация персонала";
   const pageDescription = isSelfView
-    ? "Здесь отображаются только ваши предупреждения и штрафы за выбранный период. Другие сотрудники в этом режиме недоступны."
+    ? "Здесь отображаются только ваши предупреждения и штрафы. Другие сотрудники в этом режиме недоступны."
     : "Шаблон из файла перенесен в систему: три категории, два предупреждения в категории и штрафная шкала по конкретному нарушению. Включение управляется для всей сети или отдельно по клубам.";
   const cards: Array<{ label: string; value: number | string }> = isSelfView
     ? [
         { label: "Записи", value: report.summary.recordsTotal },
         { label: "Предупреждения", value: report.summary.warnings },
         { label: "Штрафы", value: report.summary.fines },
-        { label: "Сумма штрафов", value: formatMoney(report.summary.fineAmount) },
+        {
+          label: "Сумма штрафов",
+          value: formatMoney(report.summary.fineAmount),
+        },
       ]
     : [
         { label: "Предупреждения", value: report.summary.warnings },
         { label: "Штрафы", value: report.summary.fines },
-        { label: "Сумма штрафов", value: formatMoney(report.summary.fineAmount) },
+        {
+          label: "Сумма штрафов",
+          value: formatMoney(report.summary.fineAmount),
+        },
         { label: "Активные правила", value: report.summary.activeRules },
       ];
 
@@ -152,6 +186,7 @@ export default async function StaffDisciplinePage({
         </section>
 
         <form className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <input type="hidden" name="period" value="range" />
           <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
             <label className="block text-sm">
               <span className="text-xs font-semibold uppercase text-zinc-500">
@@ -160,7 +195,11 @@ export default async function StaffDisciplinePage({
               <input
                 type="date"
                 name="dateFrom"
-                defaultValue={report.filters.dateFrom}
+                defaultValue={
+                  report.filters.period === "range"
+                    ? report.filters.dateFrom
+                    : ""
+                }
                 className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
             </label>
@@ -171,7 +210,9 @@ export default async function StaffDisciplinePage({
               <input
                 type="date"
                 name="dateTo"
-                defaultValue={report.filters.dateTo}
+                defaultValue={
+                  report.filters.period === "range" ? report.filters.dateTo : ""
+                }
                 className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
             </label>
@@ -227,6 +268,19 @@ export default async function StaffDisciplinePage({
                 </button>
               </div>
             </label>
+          </div>
+          <div className="mt-3 flex justify-end">
+            <Link
+              href={allTimeHref(filters)}
+              className={[
+                "inline-flex h-10 items-center rounded-md border px-4 text-sm font-semibold transition",
+                report.filters.period === "all"
+                  ? "border-emerald-500 bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
+                  : "border-zinc-300 bg-white hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:bg-zinc-900",
+              ].join(" ")}
+            >
+              За весь период
+            </Link>
           </div>
         </form>
 

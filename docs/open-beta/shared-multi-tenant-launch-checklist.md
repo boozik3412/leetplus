@@ -2,8 +2,8 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.31                                                       |
-| Дата       | 19.08.2026                                                 |
+| Версия     | 1.32                                                       |
+| Дата       | 20.08.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
 | Topology   | `Tenant A/A1..A4` + новый `Tenant B/B1`                    |
@@ -431,6 +431,11 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
       ресурс другого tenant.
 - [ ] Shared Telegram identity корректно маршрутизируется в B/B1.
 - [ ] Telegram update ID дедуплицируется durable.
+      Partial evidence: poller mode now skips stale/duplicate `update_id`
+      values before webhook handling when they are below the current offset;
+      this is not yet durable DB dedupe across processes/restarts.
+      See
+      [Telegram poller update dedupe CI evidence 20.08.2026](./telegram-poller-update-dedupe-ci-evidence-2026-08-20.md).
 - [ ] Reward posting идемпотентен; loss/duplicate reconciliation зелёный.
 - [ ] External reward write-back остаётся `OFF`.
 - [ ] Store-level `SHADOW → CANARY → LIVE` и kill switch проверены отдельно.
@@ -519,6 +524,8 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [ ] Tenant suspend прекращает новые jobs и messages.
 - [ ] Per-tenant/per-store kill switches проверены.
 - [ ] Shared Telegram routing и multi-profile identity имеют A/B negative tests.
+- [ ] Telegram poller durable update ledger/reconciliation covers process
+      restart and cross-worker races.
 - [ ] Queue backlog, retry, dead-letter/reconciliation и alert видны operator.
 
 ## H. Operations, support и rollback

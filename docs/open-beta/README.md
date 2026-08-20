@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.192                                        |
+| Версия           | 1.193                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -190,6 +190,16 @@ LeetPlus API и Telegram Bot API/proxy base. Non-http protocols и битые UR
 падают до webhook/poller network effects. Targeted Telegram/poller/API tests
 `214/214`; полный tenant-aware public guest/Telegram/outbound matrix ещё
 открыт.
+
+Successor Telegram poller stale/duplicate update guard: active
+`runTelegramPollingTick()` пропускает stale updates до LeetPlus webhook handler,
+если `update_id < currentOffset`; duplicate `update_id` внутри одного
+`getUpdates` batch после первого продвижения offset также не обрабатывается
+повторно. Targeted Telegram/API suite `5/5`, `218/218`; exact SHA
+`b415c5a3…` принят CI run `32346243064` как `4/4 SUCCESS`.
+[Telegram poller update dedupe evidence 20.08.2026](./telegram-poller-update-dedupe-ci-evidence-2026-08-20.md).
+Это poller-level guard, не durable DB dedupe; полный tenant-aware public
+guest/Telegram/outbound matrix ещё открыт.
 
 Successor background execution identity metadata: центральный
 `TENANT_BACKGROUND_JOB_EXECUTION_METADATA` теперь требует explicit

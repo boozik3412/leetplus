@@ -37,12 +37,17 @@ const SOURCE_CURRENT185_SHA256 =
   "fd7002d70074c6a5e2383649ecc527b2a5cd7bb4c4f0be7ae0cc345080bc28d6";
 const MATERIALIZED_CURRENT185_SHA256 =
   "2979599d1b17829d497ea7def3f9d7b64659b5e6796e357ba5eca971d497b674";
+const SOURCE_CURRENT186_SHA256 =
+  "cc95b88495113ac789a52956b2bdc9ba86915c64846a46c146e96532b32d8db5";
+const MATERIALIZED_CURRENT186_SHA256 =
+  "36c911bbded42603e26a55b5be64aaac273a35df629f8439bf97b00dfc883063";
 const CURRENT185_PRODUCTION_HISTORY_PRETERMINAL_MANIFEST_DIGEST =
   "7a0bb533293e9ddf69d689a1215f3589872d399dccecde5a598bf79175923bcc";
 const MATERIALIZED_CURRENT185_WORKER_FUNCTION_DIGEST =
   "d2025dca020c73fd9e3bfdfe251566fff69c48880b4caeaa8a37349a223f4465";
 const CURRENT179 = "20260731120000_identity_mail_delivery_release_head";
 const CURRENT185 = "20260818020000_identity_mail_delivery_current_head_v1";
+const CURRENT186 = "20260819010000_staff_attachment_parent_delete_guard";
 const RECONCILIATION_MARKER =
   "FOUNDER_RESTORED_COPY_STALE_DIGEST_RECONCILED_V1";
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -257,6 +262,23 @@ export function materializeFounderPilotProductionHistorySql(
     }
     return result;
   }
+  if (migrationName === CURRENT186) {
+    if (sourceDigest !== SOURCE_CURRENT186_SHA256) {
+      fail("FOUNDER_PILOT_HISTORY_CURRENT186_SOURCE_DRIFT");
+    }
+    sql = replaceExact(
+      sql,
+      "47690501257272fd455475a00bea0e21b13f27187a669adef2115de349633315",
+      MATERIALIZED_CURRENT185_WORKER_FUNCTION_DIGEST,
+      1,
+      "FOUNDER_PILOT_HISTORY_CURRENT186_TRANSFORM_DRIFT",
+    );
+    const result = Buffer.from(sql, "utf8");
+    if (sha256(result) !== MATERIALIZED_CURRENT186_SHA256) {
+      fail("FOUNDER_PILOT_HISTORY_CURRENT186_OUTPUT_DRIFT");
+    }
+    return result;
+  }
   return sourceBytes;
 }
 
@@ -341,6 +363,10 @@ async function inspectSourceTree(
     } else if (materialized && migrationName === CURRENT185) {
       if (sha256(sourceBytes) !== MATERIALIZED_CURRENT185_SHA256) {
         fail("FOUNDER_PILOT_HISTORY_CURRENT185_OUTPUT_DRIFT");
+      }
+    } else if (materialized && migrationName === CURRENT186) {
+      if (sha256(sourceBytes) !== MATERIALIZED_CURRENT186_SHA256) {
+        fail("FOUNDER_PILOT_HISTORY_CURRENT186_OUTPUT_DRIFT");
       }
     } else {
       outputBytes = materializeFounderPilotProductionHistorySql(
@@ -829,6 +855,7 @@ export const FOUNDER_PILOT_PRODUCTION_HISTORY_CONSTANTS = Object.freeze({
   finalWorkerFunctionDigest: FINAL_WORKER_FUNCTION_DIGEST,
   materializedCurrent179Sha256: MATERIALIZED_CURRENT179_SHA256,
   materializedCurrent185Sha256: MATERIALIZED_CURRENT185_SHA256,
+  materializedCurrent186Sha256: MATERIALIZED_CURRENT186_SHA256,
   sourceMigrationCount: SOURCE_MIGRATION_COUNT,
   sourceMigrationHead: SOURCE_MIGRATION_HEAD,
   sourceMigrationManifestDigest: SOURCE_MIGRATION_MANIFEST_DIGEST,

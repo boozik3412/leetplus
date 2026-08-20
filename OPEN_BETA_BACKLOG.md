@@ -47,6 +47,20 @@
   fail-closed regression staging tool исправлена с отдельным test. Следующий
   blocker: pre-warm exact locked dependency store и повторить hydration до
   restored-copy migration rehearsal.
+  Diagnostic restore, locked-store pre-warm и exact artifact hydration затем
+  выполнены; выявлен release blocker: stale `RUNNING` report-digest rows
+  корректно блокируют revision-fence migration. Evidence и чистый порядок
+  reconciliation на отдельном PostgreSQL instance зафиксированы в
+  [`controlled-beta-1-restored-copy-rehearsal-2026-08-20.md`](./docs/open-beta/controlled-beta-1-restored-copy-rehearsal-2026-08-20.md).
+  Same-instance copies являются только diagnostic evidence и не принимаются
+  как restored-copy gate; следующий шаг — isolated loopback PostgreSQL lane
+  `55439` с controller `plan → apply → deploy → check`.
+  Isolated preflight и exact four-row reconciliation приняты, но first clean
+  deploy доказал fail-closed controller gap: materialized CURRENT185 worker
+  receipt не был propagated into CURRENT186 predecessor prerequisite. Canonical
+  migration и production data не меняются; требуется controller fix, новый
+  accepted artifact и fresh replay с original verified backup before this gate
+  may be marked done.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta

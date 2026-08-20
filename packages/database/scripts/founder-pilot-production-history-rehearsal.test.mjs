@@ -112,7 +112,7 @@ async function temporaryRoot(t) {
   return root;
 }
 
-test("materializes exact production-history CURRENT179 and CURRENT185 bytes", async () => {
+test("materializes exact production-history CURRENT179, CURRENT185, and CURRENT186 bytes", async () => {
   for (const [migrationName, expectedDigest] of [
     [
       "20260731120000_identity_mail_delivery_release_head",
@@ -121,6 +121,10 @@ test("materializes exact production-history CURRENT179 and CURRENT185 bytes", as
     [
       "20260818020000_identity_mail_delivery_current_head_v1",
       FOUNDER_PILOT_PRODUCTION_HISTORY_CONSTANTS.materializedCurrent185Sha256,
+    ],
+    [
+      "20260819010000_staff_attachment_parent_delete_guard",
+      FOUNDER_PILOT_PRODUCTION_HISTORY_CONSTANTS.materializedCurrent186Sha256,
     ],
   ]) {
     const source = await readFile(
@@ -147,6 +151,21 @@ test("rejects a byte-drifted canonical migration before materialization", async 
         Buffer.concat([source, Buffer.from("\n")]),
       ),
     { reasonCode: "FOUNDER_PILOT_HISTORY_CURRENT179_SOURCE_DRIFT" },
+  );
+});
+
+test("rejects a byte-drifted CURRENT186 before materializing its predecessor receipt", async () => {
+  const migrationName = "20260819010000_staff_attachment_parent_delete_guard";
+  const source = await readFile(
+    path.join(PRISMA_ROOT, "migrations", migrationName, "migration.sql"),
+  );
+  assert.throws(
+    () =>
+      materializeFounderPilotProductionHistorySql(
+        migrationName,
+        Buffer.concat([source, Buffer.from("\n")]),
+      ),
+    { reasonCode: "FOUNDER_PILOT_HISTORY_CURRENT186_SOURCE_DRIFT" },
   );
 });
 
@@ -186,7 +205,7 @@ test("creates a sealed 187-migration disposable Prisma lane", async (t) => {
         ),
       ),
     ),
-    "cc95b88495113ac789a52956b2bdc9ba86915c64846a46c146e96532b32d8db5",
+    FOUNDER_PILOT_PRODUCTION_HISTORY_CONSTANTS.materializedCurrent186Sha256,
   );
   assert.equal(
     sha256(

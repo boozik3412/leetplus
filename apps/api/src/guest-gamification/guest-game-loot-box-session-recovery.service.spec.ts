@@ -59,6 +59,7 @@ function tenant() {
         isPlatformAdmin: false,
       },
     ],
+    stores: [{ id: 'store-1' }],
   };
 }
 
@@ -617,6 +618,41 @@ describe('GuestGameLootBoxSessionRecoveryService', () => {
     );
     expect(prisma.guestGameLootBox.findMany).not.toHaveBeenCalled();
     expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
+  });
+
+  it('skips recovery before reads or claims when runtime store identity is missing', async () => {
+    const { service, gamification, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValueOnce([
+      {
+        ...tenant(),
+        stores: [],
+      },
+    ]);
+
+    const result = await service.runScheduled({
+      mode: 'SHADOW',
+      tenantId: 'tenant-1',
+      profileId: 'profile-1',
+      limit: 1,
+      graceMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      checkedTenants: 1,
+      processedTenants: 0,
+      skippedTenants: 1,
+      tenants: [{ tenantId: 'tenant-1', status: 'SKIPPED' }],
+    });
+    expect(result.tenants[0]?.reason).toContain('BACKGROUND_STORE_ID_REQUIRED');
+    expect(prisma.guestGameLootBox.findMany).not.toHaveBeenCalled();
+    expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.findUnique).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.findMany).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.upsert).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(gamification.dryRun).not.toHaveBeenCalled();
     expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();

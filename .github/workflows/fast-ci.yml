@@ -43,6 +43,9 @@ jobs:
           bash -n docs/deployment/production-artifact/stage-release-artifact.sh
           bash -n .github/scripts/test-stage-release-artifact.sh
           bash .github/scripts/test-stage-release-artifact.sh
+          bash -n docs/deployment/production-artifact/verify-release-readiness.sh
+          bash -n .github/scripts/test-verify-release-readiness.sh
+          bash .github/scripts/test-verify-release-readiness.sh
           bash -n .github/scripts/test-production-artifact-systemd-templates.sh
           bash .github/scripts/test-production-artifact-systemd-templates.sh
 

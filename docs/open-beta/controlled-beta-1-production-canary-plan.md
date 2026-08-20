@@ -129,7 +129,10 @@ runtime на `/srv/leetplus/current` и secrets в `/etc/leetplus/runtime.env`;
    переключать `current`; перейти к incident/rollback, не повторять вслепую.
 6. Атомарно обновить `current` на новый release, restart API и Web.
 7. Проверить с loopback и внешней точки: API `/version`, API `/health/ready`,
-   Web status. Все ответы должны соответствовать exact SHA и migration metadata.
+   Web status. Для этого использовать versioned read-only
+   [`verify-release-readiness.sh`](../deployment/production-artifact/verify-release-readiness.sh)
+   с exact SHA, migration name и count из verified provenance. Все ответы
+   должны соответствовать exact SHA и migration metadata.
 
 ### C. Минимальный canary
 

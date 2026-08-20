@@ -41,7 +41,7 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact terminal migration 186 and exact completed count 186 are mandatory.
+  - Exact terminal migration 187 and exact completed count 187 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
   - Deliberate target-role and PUBLIC function/table/column/type ACL drift is

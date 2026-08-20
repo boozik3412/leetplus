@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 20.08.2026
-- Версия: 3.48
+- Версия: 3.49
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -424,6 +424,18 @@ TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
   `32346243064` как `4/4 SUCCESS`. Это poller-level stale/duplicate guard, не
   durable DB dedupe; полный tenant-aware public guest/Telegram/outbound
   matrix, durable update ledger и production canary остаются открыты.
+- Gate 1MT API Telegram durable update ledger: implemented locally / CI
+  pending. Добавлена таблица `GuestPortalTelegramUpdateLedger` с уникальным
+  `(provider, updateId)` для общего Telegram bot ingress; API webhook создаёт
+  `PROCESSING` claim до auth/contact/callback/check-in side effects, переводит
+  успешный update в `COMPLETED`, помечает exception path как `FAILED`, а
+  повторный `update_id` возвращает `IGNORED/DUPLICATE_UPDATE` с
+  `replyDispatch=SKIPPED` без повторной обработки и без повторного Telegram
+  reply. Targeted Telegram/API suite локально прошла `5/5`, `220/220`; API
+  typecheck, targeted ESLint, Prisma validate, Prettier TS и
+  `git diff --check` зелёные. До exact SHA CI/migration smoke этот пункт не
+  закрывает production canary, stale PROCESSING reconciliation/alerts и полный
+  tenant-aware public guest/Telegram/outbound matrix.
 - Dedicated activation Prisma pool admission реализован локально: перед каждым
   callback в той же транзакции сверяются exact `session_user`, `current_user`,
   database и TLS; production `ACTIVE` требует `sslmode=verify-full`, mismatch

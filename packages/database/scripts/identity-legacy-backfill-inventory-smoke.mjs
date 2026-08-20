@@ -201,11 +201,25 @@ function withFailureDetail(error, detail) {
     error !== null &&
     (typeof error === "object" || typeof error === "function") &&
     Array.isArray(detail) &&
-    detail.every((entry) => /^[A-Z0-9_]{1,96}$/u.test(entry))
+    detail.every((entry) => isSafeFailureDetail(entry))
   ) {
     FAILURE_DETAIL_BY_ERROR.set(error, [...new Set(detail)].sort());
   }
   return error;
+}
+
+function isSafeFailureDetail(entry) {
+  if (typeof entry !== "string" || entry.length > 4096) {
+    return false;
+  }
+  if (
+    (entry.startsWith("SUMMARY_DEBUG:") ||
+      entry.startsWith("CATALOG_FUNCTION_DEBUG:")) &&
+    !/[\u0000-\u001F\u007F]/u.test(entry)
+  ) {
+    return true;
+  }
+  return /^[A-Z0-9_]{1,96}$/u.test(entry);
 }
 
 function errorFailureDetail(error) {
@@ -518,6 +532,16 @@ function catalogAdmissionDetails(report) {
     catalog.matchedFunctionCount,
     catalog.expectedFunctionCount,
   );
+  if (
+    Array.isArray(catalog.unmatchedFunctionCatalog) &&
+    catalog.unmatchedFunctionCatalog.length > 0
+  ) {
+    details.push(
+      `CATALOG_FUNCTION_DEBUG:${JSON.stringify(
+        catalog.unmatchedFunctionCatalog,
+      )}`,
+    );
+  }
   appendCountMismatchDetail(
     details,
     "CATALOG_ENUM_LABEL_COUNT_MISMATCH",
@@ -565,6 +589,19 @@ function assertSummary(
       ...catalogAdmissionDetails(report),
       ...extraDetails,
     ].map((entry) => String(entry));
+    if (detail.length === 0) {
+      detail.push(
+        `SUMMARY_DEBUG:${JSON.stringify({
+          blockingTotal: report?.summary?.blockingTotal,
+          catalogReady: report?.database?.catalog?.ready,
+          decision: report?.summary?.decision,
+          inventoryExecuted: report?.summary?.inventoryExecuted,
+          privilegeReady: report?.database?.privileges?.ready,
+          proposalTotal: report?.summary?.proposalTotal,
+          reviewTotal: report?.summary?.reviewTotal,
+        })}`,
+      );
+    }
     throw withFailureDetail(new Error("Inventory admission failed."), detail);
   }
   assert.equal(
@@ -2682,10 +2719,10 @@ export function runSelfTest() {
     [...SHARED_BETA_ADMISSION_DORMANT_RELATIONS].sort(),
     [...SHARED_BETA_ADMISSION_RELATIONS].sort(),
   );
-  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 186);
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 187);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260819010000_staff_attachment_parent_delete_guard",
+    "20260820010000_guest_portal_telegram_update_ledger",
   );
   assert.deepEqual(DISPOSABLE_RESET_TRUNCATE_GUARDS, [
     {

@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.32                                                       |
+| Версия     | 1.33                                                       |
 | Дата       | 20.08.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -433,7 +433,11 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [ ] Telegram update ID дедуплицируется durable.
       Partial evidence: poller mode now skips stale/duplicate `update_id`
       values before webhook handling when they are below the current offset;
-      this is not yet durable DB dedupe across processes/restarts.
+      API webhook now also has a local `GuestPortalTelegramUpdateLedger`
+      implementation that claims `(provider, updateId)` before side effects and
+      returns `DUPLICATE_UPDATE` without reply dispatch on repeats. Exact SHA
+      CI/migration smoke, stale PROCESSING reconciliation and production canary
+      are still required before marking this complete.
       See
       [Telegram poller update dedupe CI evidence 20.08.2026](./telegram-poller-update-dedupe-ci-evidence-2026-08-20.md).
 - [ ] Reward posting идемпотентен; loss/duplicate reconciliation зелёный.
@@ -524,8 +528,10 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [ ] Tenant suspend прекращает новые jobs и messages.
 - [ ] Per-tenant/per-store kill switches проверены.
 - [ ] Shared Telegram routing и multi-profile identity имеют A/B negative tests.
-- [ ] Telegram poller durable update ledger/reconciliation covers process
-      restart and cross-worker races.
+- [ ] Telegram API durable update ledger/reconciliation covers process restart,
+      cross-worker races, stale PROCESSING rows, operator alerts and canary.
+      Local ledger claim is implemented; exact SHA CI/migration smoke and
+      reconciliation evidence are still pending.
 - [ ] Queue backlog, retry, dead-letter/reconciliation и alert видны operator.
 
 ## H. Operations, support и rollback

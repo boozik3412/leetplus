@@ -2022,7 +2022,12 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     result: "jsonb",
     securityDefiner: true,
     definitionSha256:
-      "ea8305627b1e23481f1f735b6cad4114aa9702f3e9f768a48131aa522d3c46c1",
+      "a48f6bf4e52306fcf476178c668a7b5bd130f9e957f16ca14d018e22154f43fc",
+    sourceSha256Candidates: Object.freeze([
+      "35fcd3935f02366fce3d43d4dcc2724334f156bcb22e8599713582a4f523ffce",
+      "e5df3c4b1f785f99925776d72d16a2c2f9f6a2fc7f94c21dd8dd3088d576d9c1",
+      "a7dd17037ceaccb294953dce145e0fcc589fb2646962db724d919c24ba87c53c",
+    ]),
   },
   {
     name: "identity_email_claim_assert_invite_v1",
@@ -2509,6 +2514,7 @@ function expectedFunctionValues() {
       sqlLiteral(language),
       sqlLiteral(`search_path=${searchPath.join(", ")}`),
       sqlLiteral(entry.definitionSha256),
+      sqlTextArray(entry.sourceSha256Candidates ?? []),
     ].join(", ")})`;
   }).join(",\n    ");
 }
@@ -2622,7 +2628,8 @@ WITH
     volatility,
     language_name,
     search_path_setting,
-    definition_sha256
+    definition_sha256,
+    source_sha256_candidates
   ) AS (
     VALUES
     ${expectedFunctionValues()}
@@ -2987,15 +2994,27 @@ SELECT
     JOIN pg_catalog.pg_language AS language_row
       ON language_row.oid = function_row.prolang
      AND language_row.lanname = expected.language_name
-    WHERE pg_catalog.encode(
-      pg_catalog.sha256(
-        pg_catalog.convert_to(
-          pg_catalog.pg_get_functiondef(function_row.oid),
-          'UTF8'
-        )
-      ),
-      'hex'
-    ) = expected.definition_sha256
+    WHERE (
+      expected.definition_sha256 <> ''
+      AND pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            pg_catalog.pg_get_functiondef(function_row.oid),
+            'UTF8'
+          )
+        ),
+        'hex'
+      ) = expected.definition_sha256
+    )
+    OR (
+      pg_catalog.cardinality(expected.source_sha256_candidates) > 0
+      AND pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(function_row.prosrc, 'UTF8')
+        ),
+        'hex'
+      ) = ANY(expected.source_sha256_candidates)
+    )
   ) AS matched_function_count,
   (
     SELECT COUNT(*)::text
@@ -3014,6 +3033,97 @@ SELECT
         OR function_row.proname LIKE 'shared_beta_%'
       )
   ) AS actual_function_count,
+  (
+    SELECT COALESCE(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'name', expected.object_name,
+          'catalogSignature', expected.catalog_signature,
+          'expectedDefinitionSha256', expected.definition_sha256,
+          'expectedSourceSha256Candidates', expected.source_sha256_candidates,
+          'actualDefinitionSha256',
+            pg_catalog.encode(
+              pg_catalog.sha256(
+                pg_catalog.convert_to(
+                  pg_catalog.pg_get_functiondef(function_row.oid),
+                  'UTF8'
+                )
+              ),
+              'hex'
+            ),
+          'actualSourceSha256',
+            pg_catalog.encode(
+              pg_catalog.sha256(
+                pg_catalog.convert_to(function_row.prosrc, 'UTF8')
+              ),
+              'hex'
+            )
+        )
+        ORDER BY expected.object_name
+      )::text,
+      '[]'
+    )
+    FROM expected_function AS expected
+    JOIN pg_catalog.pg_proc AS function_row
+      ON function_row.proname = expected.object_name
+     AND function_row.pronamespace = 'public'::regnamespace
+     AND (
+       (
+         expected.catalog_signature = ''
+         AND pg_catalog.pg_get_function_identity_arguments(function_row.oid) =
+           expected.identity_arguments
+       )
+       OR (
+         expected.catalog_signature <> ''
+         AND function_row.oid =
+           pg_catalog.to_regprocedure(expected.catalog_signature)
+       )
+     )
+     AND pg_catalog.pg_get_function_result(function_row.oid) =
+       expected.result_type
+     AND function_row.prokind = 'f'
+     AND function_row.prosecdef = expected.security_definer
+     AND function_row.proisstrict = expected.required_strict
+     AND function_row.provolatile::text = expected.volatility
+     AND NOT function_row.proleakproof
+     AND NOT function_row.proretset
+     AND function_row.pronargdefaults = 0
+     AND function_row.provariadic = 0
+     AND function_row.proparallel = 'u'
+     AND function_row.proconfig =
+       ARRAY[expected.search_path_setting]::text[]
+     AND function_row.proowner = (
+       SELECT database_row.datdba
+       FROM pg_catalog.pg_database AS database_row
+       WHERE database_row.datname = current_database()
+     )
+    JOIN pg_catalog.pg_language AS language_row
+      ON language_row.oid = function_row.prolang
+     AND language_row.lanname = expected.language_name
+    WHERE NOT (
+      (
+        expected.definition_sha256 <> ''
+        AND pg_catalog.encode(
+          pg_catalog.sha256(
+            pg_catalog.convert_to(
+              pg_catalog.pg_get_functiondef(function_row.oid),
+              'UTF8'
+            )
+          ),
+          'hex'
+        ) = expected.definition_sha256
+      )
+      OR (
+        pg_catalog.cardinality(expected.source_sha256_candidates) > 0
+        AND pg_catalog.encode(
+          pg_catalog.sha256(
+            pg_catalog.convert_to(function_row.prosrc, 'UTF8')
+          ),
+          'hex'
+        ) = ANY(expected.source_sha256_candidates)
+      )
+    )
+  ) AS unmatched_function_catalog,
   (
     SELECT COUNT(*)::text
     FROM expected_enum AS expected
@@ -4908,6 +5018,21 @@ function safeBoolean(value, code = "DATABASE_BOOLEAN_INVALID") {
   return value;
 }
 
+function parseJsonArray(value, code = "DATABASE_JSON_ARRAY_INVALID") {
+  if (typeof value !== "string") {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      contractError(code, "The database returned a non-array JSON payload.");
+    }
+    return parsed;
+  } catch {
+    contractError(code, "The database returned malformed JSON.");
+  }
+}
+
 function normalizeIsoTimestamp(value, code) {
   const parsed =
     value instanceof Date ? new Date(value.valueOf()) : new Date(value);
@@ -5066,6 +5191,9 @@ export function buildCatalogState(row) {
   const actualIndexCount = safeCount(row?.actual_index_count);
   const matchedFunctionCount = safeCount(row?.matched_function_count);
   const actualFunctionCount = safeCount(row?.actual_function_count);
+  const unmatchedFunctionCatalog = parseJsonArray(
+    row?.unmatched_function_catalog,
+  );
   const matchedEnumLabelCount = safeCount(row?.matched_enum_label_count);
   const totalEnumLabelCount = safeCount(row?.total_enum_label_count);
   const matchedTriggerCount = safeCount(row?.matched_trigger_count);
@@ -5124,6 +5252,7 @@ export function buildCatalogState(row) {
     expectedFunctionCount: EXPECTED_FUNCTION_MANIFEST.length,
     matchedFunctionCount,
     actualFunctionCount,
+    unmatchedFunctionCatalog,
     matchedEnumLabelCount,
     totalEnumLabelCount,
     expectedTriggerCount: EXPECTED_TRIGGER_MANIFEST.length,

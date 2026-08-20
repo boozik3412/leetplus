@@ -150,7 +150,7 @@ test("rejects a byte-drifted canonical migration before materialization", async 
   );
 });
 
-test("creates a sealed 186-migration disposable Prisma lane", async (t) => {
+test("creates a sealed 187-migration disposable Prisma lane", async (t) => {
   const root = await temporaryRoot(t);
   const laneRoot = path.join(
     root,
@@ -160,7 +160,7 @@ test("creates a sealed 186-migration disposable Prisma lane", async (t) => {
     laneRoot,
     sourcePrismaRoot: PRISMA_ROOT,
   });
-  assert.equal(receipt.migrationCount, 186);
+  assert.equal(receipt.migrationCount, 187);
   assert.match(receipt.treeDigest, /^[0-9a-f]{64}$/u);
   assert.equal(
     sha256(
@@ -187,6 +187,19 @@ test("creates a sealed 186-migration disposable Prisma lane", async (t) => {
       ),
     ),
     "cc95b88495113ac789a52956b2bdc9ba86915c64846a46c146e96532b32d8db5",
+  );
+  assert.equal(
+    sha256(
+      await readFile(
+        path.join(
+          laneRoot,
+          "migrations",
+          "20260820010000_guest_portal_telegram_update_ledger",
+          "migration.sql",
+        ),
+      ),
+    ),
+    "a13c5516341d9aa0cdbe88618da4371e4c42d3dc2ed5e12f522b25808da13d5d",
   );
   const replay = await materializeFounderPilotProductionHistoryLane({
     laneRoot,

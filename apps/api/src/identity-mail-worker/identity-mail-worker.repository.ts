@@ -15,8 +15,8 @@ import type {
 } from './identity-mail-worker.types';
 
 const CURRENT_MIGRATION =
-  '20260819010000_staff_attachment_parent_delete_guard' as const;
-const CURRENT_MIGRATION_COUNT = 186 as const;
+  '20260820010000_guest_portal_telegram_update_ledger' as const;
+const CURRENT_MIGRATION_COUNT = 187 as const;
 const PRETERMINAL_MIGRATION_MANIFEST_DIGESTS = new Set<string>([
   // Canonical clean install.
   '589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda',

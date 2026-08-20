@@ -22,13 +22,13 @@ const SOURCE_MIGRATION_MANIFEST_DIGEST =
 const SOURCE_ROLLED_BACK_MIGRATION_COUNT = 4;
 const SOURCE_ROLLED_BACK_MIGRATION_MANIFEST_DIGEST =
   "ae018d0beb9df8934dba01c0089b6219e774ac1fca78c5eaf415c36509400572";
-const FINAL_MIGRATION_COUNT = 186;
+const FINAL_MIGRATION_COUNT = 187;
 const FINAL_MIGRATION_HEAD =
-  "20260819010000_staff_attachment_parent_delete_guard";
+  "20260820010000_guest_portal_telegram_update_ledger";
 const FINAL_PRETERMINAL_MANIFEST_DIGEST =
   "094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b";
 const FINAL_WORKER_FUNCTION_DIGEST =
-  "645feb480c46c42d7d8ca2dae07ec1c82f88264ac5d0e30d26593a8e566f3f66";
+  "35fcd3935f02366fce3d43d4dcc2724334f156bcb22e8599713582a4f523ffce";
 const SOURCE_CURRENT179_SHA256 =
   "c394060fbf979c567403976c8e906dc67b3bd840aea9fa9550e1d939d04af519";
 const MATERIALIZED_CURRENT179_SHA256 =
@@ -699,8 +699,10 @@ export async function createFounderPilotProductionHistoryPgAdapter(
                 E'\\n'
                 ORDER BY migration."migration_name" COLLATE "C"
               ) FILTER (
-                WHERE migration."migration_name" <>
-                  '20260819010000_staff_attachment_parent_delete_guard'
+                WHERE migration."migration_name" NOT IN (
+                  '20260819010000_staff_attachment_parent_delete_guard',
+                  '20260820010000_guest_portal_telegram_update_ledger'
+                )
               ) || E'\\n',
               'UTF8'
             )

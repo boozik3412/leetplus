@@ -757,6 +757,7 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'TELEGRAM_BOT_CLUB_SELECTED'
     | 'TELEGRAM_BOT_HELP'
     | 'UNSUBSCRIBE'
+    | 'DUPLICATE_UPDATE'
     | 'UNKNOWN';
   profileId: string | null;
   profilesAffected?: number;
@@ -8190,6 +8191,38 @@ export class GuestPortalService {
     dto: unknown,
   ): Promise<GuestPortalTelegramWebhookResponse> {
     this.assertTelegramLinkSecret(secret);
+    const updateId = telegramWebhookUpdateId(dto);
+    const claim =
+      updateId === null
+        ? null
+        : await this.claimTelegramWebhookUpdate(updateId);
+
+    if (claim?.duplicate) {
+      return this.telegramWebhookDuplicateUpdateResponse(claim);
+    }
+
+    try {
+      const response = await this.processTelegramWebhook(secret, dto);
+
+      if (claim) {
+        await this.completeTelegramWebhookUpdate(claim.id, response);
+      }
+
+      return response;
+    } catch (error) {
+      if (claim) {
+        await this.failTelegramWebhookUpdate(claim.id, error);
+      }
+
+      throw error;
+    }
+  }
+
+  private async processTelegramWebhook(
+    secret: string | undefined,
+    dto: unknown,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    this.assertTelegramLinkSecret(secret);
     const update = telegramWebhookUpdate(dto);
     const telegramIdentityMasked = maskExternalIdentity(
       `chat:${update.telegramChatId}`,
@@ -8317,6 +8350,128 @@ export class GuestPortalService {
       telegramIdentityMasked,
       message:
         'Telegram webhook получен, но команда привязки или контакт телефона не найдены. Ожидается /start lp_CODE, /link CODE или Telegram contact-share.',
+    };
+  }
+
+  private async claimTelegramWebhookUpdate(updateId: bigint): Promise<
+    | {
+        duplicate: false;
+        id: string;
+      }
+    | {
+        duplicate: true;
+        updateId: bigint;
+        status: string;
+        action: string | null;
+        profileId: string | null;
+        chatIdMasked: string | null;
+      }
+  > {
+    try {
+      const row = await this.prisma.guestPortalTelegramUpdateLedger.create({
+        data: {
+          provider: 'TELEGRAM',
+          updateId,
+          status: 'PROCESSING',
+        },
+        select: { id: true },
+      });
+
+      return { duplicate: false, id: row.id };
+    } catch (error) {
+      if (
+        !(
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        )
+      ) {
+        throw error;
+      }
+
+      const row = await this.prisma.guestPortalTelegramUpdateLedger.update({
+        where: {
+          provider_updateId: {
+            provider: 'TELEGRAM',
+            updateId,
+          },
+        },
+        data: {
+          duplicateCount: { increment: 1 },
+          lastSeenAt: new Date(),
+        },
+        select: {
+          updateId: true,
+          status: true,
+          action: true,
+          profileId: true,
+          chatIdMasked: true,
+        },
+      });
+
+      return {
+        duplicate: true,
+        updateId: row.updateId,
+        status: row.status,
+        action: row.action,
+        profileId: row.profileId,
+        chatIdMasked: row.chatIdMasked,
+      };
+    }
+  }
+
+  private async completeTelegramWebhookUpdate(
+    ledgerId: string,
+    response: GuestPortalTelegramWebhookResponse,
+  ) {
+    await this.prisma.guestPortalTelegramUpdateLedger.update({
+      where: { id: ledgerId },
+      data: {
+        status: 'COMPLETED',
+        action: response.action,
+        profileId: response.profileId,
+        chatIdMasked: response.telegramIdentityMasked,
+        message: response.message.slice(0, 500),
+        completedAt: new Date(),
+      },
+    });
+  }
+
+  private async failTelegramWebhookUpdate(ledgerId: string, error: unknown) {
+    await this.prisma.guestPortalTelegramUpdateLedger.update({
+      where: { id: ledgerId },
+      data: {
+        status: 'FAILED',
+        message: safeDeliveryErrorMessage(error),
+        failedAt: new Date(),
+      },
+    });
+  }
+
+  private telegramWebhookDuplicateUpdateResponse(input: {
+    updateId: bigint;
+    status: string;
+    action: string | null;
+    profileId: string | null;
+    chatIdMasked: string | null;
+  }): GuestPortalTelegramWebhookResponse {
+    const updateIdSafe =
+      input.updateId <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number(input.updateId)
+        : input.updateId.toString();
+
+    return {
+      status: 'IGNORED',
+      action: 'DUPLICATE_UPDATE',
+      profileId: input.profileId,
+      telegramIdentityMasked: input.chatIdMasked,
+      message: `Telegram update ${updateIdSafe} already has ledger status ${input.status}; duplicate side effects were skipped.`,
+      replyDispatch: {
+        provider: 'TELEGRAM',
+        status: 'SKIPPED',
+        chatIdMasked: input.chatIdMasked,
+        message:
+          'Telegram update already reached the API ledger. Reply dispatch is skipped to avoid duplicate guest side effects.',
+      },
     };
   }
 
@@ -17059,6 +17214,35 @@ function telegramWebhookUpdate(value: unknown) {
     contactUserId,
     callbackData,
   };
+}
+
+function telegramWebhookUpdateId(value: unknown) {
+  const update = objectRecord(value);
+  const raw = update?.update_id;
+
+  if (raw === undefined || raw === null || raw === '') {
+    return null;
+  }
+
+  if (typeof raw === 'number') {
+    if (!Number.isSafeInteger(raw) || raw < 0 || !Number.isFinite(raw)) {
+      throw new BadRequestException('Telegram update_id is invalid.');
+    }
+
+    return BigInt(raw);
+  }
+
+  if (typeof raw === 'string') {
+    const normalized = raw.trim();
+
+    if (!/^\d{1,20}$/.test(normalized)) {
+      throw new BadRequestException('Telegram update_id is invalid.');
+    }
+
+    return BigInt(normalized);
+  }
+
+  throw new BadRequestException('Telegram update_id is invalid.');
 }
 
 function telegramWebhookLinkCode(text: string | null) {

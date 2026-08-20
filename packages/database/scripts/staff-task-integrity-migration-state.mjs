@@ -31,6 +31,7 @@ export const STAFF_TASK_ALLOWED_ADDITIVE_TAIL = Object.freeze([
   "20260818010000_founder_owner_invite_reissue_v1",
   "20260818020000_identity_mail_delivery_current_head_v1",
   "20260819010000_staff_attachment_parent_delete_guard",
+  "20260820010000_guest_portal_telegram_update_ledger",
 ]);
 
 export const CURRENT_EXPECTED_MIGRATION_COUNT =

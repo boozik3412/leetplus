@@ -85,6 +85,10 @@ function createPrismaMock() {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    guestPortalTelegramUpdateLedger: {
+      create: jest.fn(),
+      update: jest.fn(),
+    },
     guestGameReward: {
       count: jest.fn(),
       findFirst: jest.fn(),
@@ -355,6 +359,17 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameTelegramLinkChallenge.update.mockResolvedValue(null);
   prisma.guestGameTelegramLinkChallenge.updateMany.mockResolvedValue({
     count: 0,
+  });
+  prisma.guestPortalTelegramUpdateLedger.create.mockResolvedValue({
+    id: 'telegram-update-ledger-1',
+  });
+  prisma.guestPortalTelegramUpdateLedger.update.mockResolvedValue({
+    id: 'telegram-update-ledger-1',
+    updateId: BigInt(1001),
+    status: 'COMPLETED',
+    action: 'TELEGRAM_AUTH_START',
+    profileId: 'pending-profile-1',
+    chatIdMasked: 'ch...56',
   });
   prisma.guestGameReward.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameDelivery.findMany.mockResolvedValue([]);
@@ -8073,6 +8088,137 @@ describe('GuestPortalService', () => {
             resize_keyboard: true,
             one_time_keyboard: true,
           },
+        },
+      });
+    });
+
+    it('records a durable Telegram update ledger entry before processing side effects', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      const codeHash = createHmac('sha256', 'test-secret')
+        .update('telegram-link:ABCDEF1234')
+        .digest('hex');
+
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        id: 'telegram-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        profileId: 'pending-profile-1',
+        codeHash,
+        status: 'AUTH_PENDING',
+        expiresAt: new Date(Date.now() + 60_000),
+        profile: {
+          id: 'pending-profile-1',
+          status: 'PENDING_TELEGRAM_AUTH',
+        },
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        update_id: 1001,
+        message: {
+          text: `/start lp_ABCDEF1234`,
+          chat: { id: 123456 },
+          from: { id: 123456, username: 'player_one' },
+        },
+      });
+
+      expect(
+        prisma.guestPortalTelegramUpdateLedger.create,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            provider: 'TELEGRAM',
+            updateId: BigInt(1001),
+            status: 'PROCESSING',
+          },
+          select: { id: true },
+        }),
+      );
+      expect(prisma.guestGameProfile.update).toHaveBeenCalled();
+      expect(
+        prisma.guestPortalTelegramUpdateLedger.update,
+      ).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: { id: 'telegram-update-ledger-1' },
+          data: expect.objectContaining({
+            status: 'COMPLETED',
+            action: 'TELEGRAM_AUTH_START',
+            profileId: 'pending-profile-1',
+            chatIdMasked: 'ch...56',
+            completedAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'AWAITING_CONTACT',
+        action: 'TELEGRAM_AUTH_START',
+      });
+    });
+
+    it('skips duplicate Telegram update ids before auth and game side effects', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      const duplicateError = new Prisma.PrismaClientKnownRequestError(
+        'Telegram update already exists',
+        {
+          code: 'P2002',
+          clientVersion: 'test',
+        },
+      );
+
+      prisma.guestPortalTelegramUpdateLedger.create.mockRejectedValueOnce(
+        duplicateError,
+      );
+      prisma.guestPortalTelegramUpdateLedger.update.mockResolvedValueOnce({
+        updateId: BigInt(1001),
+        status: 'COMPLETED',
+        action: 'TELEGRAM_AUTH_START',
+        profileId: 'pending-profile-1',
+        chatIdMasked: 'ch...56',
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        update_id: 1001,
+        message: {
+          text: `/start lp_ABCDEF1234`,
+          chat: { id: 123456 },
+          from: { id: 123456, username: 'player_one' },
+        },
+      });
+
+      expect(
+        prisma.guestPortalTelegramUpdateLedger.update,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            provider_updateId: {
+              provider: 'TELEGRAM',
+              updateId: BigInt(1001),
+            },
+          },
+          data: expect.objectContaining({
+            duplicateCount: { increment: 1 },
+            lastSeenAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(
+        prisma.guestGameTelegramLinkChallenge.findFirst,
+      ).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        status: 'IGNORED',
+        action: 'DUPLICATE_UPDATE',
+        profileId: 'pending-profile-1',
+        telegramIdentityMasked: 'ch...56',
+        replyDispatch: {
+          provider: 'TELEGRAM',
+          status: 'SKIPPED',
+          chatIdMasked: 'ch...56',
         },
       });
     });

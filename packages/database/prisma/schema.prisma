@@ -3226,6 +3226,28 @@ model GuestGameTelegramLinkChallenge {
   @@index([expiresAt], map: "guest_game_telegram_link_expires_idx")
 }
 
+model GuestPortalTelegramUpdateLedger {
+  id             String    @id @default(uuid())
+  provider       String    @default("TELEGRAM")
+  updateId       BigInt
+  status         String    @default("PROCESSING")
+  action         String?
+  profileId      String?
+  chatIdMasked   String?
+  message        String?
+  firstSeenAt    DateTime  @default(now())
+  lastSeenAt     DateTime  @default(now())
+  completedAt    DateTime?
+  failedAt       DateTime?
+  duplicateCount Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([provider, updateId], map: "guest_portal_telegram_update_provider_update_uidx")
+  @@index([provider, status, firstSeenAt], map: "guest_portal_telegram_update_status_idx")
+  @@index([profileId], map: "guest_portal_telegram_update_profile_idx")
+}
+
 model GuestPortalOtpChallenge {
   id                    String    @id @default(uuid())
   tenantId              String

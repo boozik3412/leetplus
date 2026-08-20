@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.194                                        |
+| Версия           | 1.195                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -201,16 +201,18 @@ Successor Telegram poller stale/duplicate update guard: active
 Это poller-level guard, не durable DB dedupe; полный tenant-aware public
 guest/Telegram/outbound matrix ещё открыт.
 
-Successor API Telegram durable update ledger: implemented locally / CI pending
+Successor API Telegram durable update ledger: exact-SHA CI accepted
 API webhook теперь делает durable `GuestPortalTelegramUpdateLedger` claim по
 `(provider, updateId)` до auth/contact/callback/check-in side effects.
 Duplicate `update_id` возвращает safe `IGNORED/DUPLICATE_UPDATE` и
 `replyDispatch=SKIPPED`, поэтому API не повторяет игровые действия и Telegram
 reply. Локально зелёные: targeted Telegram/API suite `5/5`, `220/220`, API
 typecheck, targeted ESLint, Prisma validate, Prettier TS и `git diff --check`.
-Exact SHA CI/migration smoke ещё должен принять этот слой; stale PROCESSING
-reconciliation/alerts, production canary и полный tenant-aware matrix остаются
-открыты.
+Exact SHA `80e56b45…` принят CI `32364681000` как `4/4 SUCCESS`; founder mail
+gate `32364681122` также зелёный. Evidence:
+[Telegram API update ledger CI evidence 20.08.2026](./telegram-api-update-ledger-ci-evidence-2026-08-20.md).
+Stale PROCESSING reconciliation/alerts, production canary и полный
+tenant-aware matrix остаются открыты.
 
 Successor background execution identity metadata: центральный
 `TENANT_BACKGROUND_JOB_EXECUTION_METADATA` теперь требует explicit

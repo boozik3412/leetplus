@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.33                                                       |
+| Версия     | 1.34                                                       |
 | Дата       | 20.08.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -430,16 +430,19 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [ ] Guest registration/profile/XP и club selection не позволяют выбрать
       ресурс другого tenant.
 - [ ] Shared Telegram identity корректно маршрутизируется в B/B1.
-- [ ] Telegram update ID дедуплицируется durable.
+- [x] Telegram update ID дедуплицируется durable в API ingress.
       Partial evidence: poller mode now skips stale/duplicate `update_id`
       values before webhook handling when they are below the current offset;
-      API webhook now also has a local `GuestPortalTelegramUpdateLedger`
+      API webhook now also has an accepted `GuestPortalTelegramUpdateLedger`
       implementation that claims `(provider, updateId)` before side effects and
       returns `DUPLICATE_UPDATE` without reply dispatch on repeats. Exact SHA
-      CI/migration smoke, stale PROCESSING reconciliation and production canary
-      are still required before marking this complete.
+      `80e56b45…` принят CI `32364681000` как `4/4 SUCCESS`; stale PROCESSING
+      reconciliation and production canary are still required before marking
+      shared Telegram fully complete.
       See
-      [Telegram poller update dedupe CI evidence 20.08.2026](./telegram-poller-update-dedupe-ci-evidence-2026-08-20.md).
+      [Telegram poller update dedupe CI evidence 20.08.2026](./telegram-poller-update-dedupe-ci-evidence-2026-08-20.md)
+      and
+      [Telegram API update ledger CI evidence 20.08.2026](./telegram-api-update-ledger-ci-evidence-2026-08-20.md).
 - [ ] Reward posting идемпотентен; loss/duplicate reconciliation зелёный.
 - [ ] External reward write-back остаётся `OFF`.
 - [ ] Store-level `SHADOW → CANARY → LIVE` и kill switch проверены отдельно.
@@ -530,8 +533,8 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [ ] Shared Telegram routing и multi-profile identity имеют A/B negative tests.
 - [ ] Telegram API durable update ledger/reconciliation covers process restart,
       cross-worker races, stale PROCESSING rows, operator alerts and canary.
-      Local ledger claim is implemented; exact SHA CI/migration smoke and
-      reconciliation evidence are still pending.
+      Durable API ledger claim is exact-SHA CI accepted; reconciliation evidence
+      is still pending.
 - [ ] Queue backlog, retry, dead-letter/reconciliation и alert видны operator.
 
 ## H. Operations, support и rollback

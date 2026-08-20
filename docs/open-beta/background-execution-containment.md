@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.15                                                    |
+| Версия           | 1.16                                                    |
 | Дата             | 20.08.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -125,6 +125,13 @@ exact `TENANT_SYSTEM + tenantId` acceptance; quality monitoring требует e
 deterministic `SKIPPED` до wallet cleanup, policy lookup, quality snapshot или
 alert writes.
 
+`GUEST_ACTIVITY_LEDGER_SYNC` подключён к runtime identity foundation как
+tenant-wide background job. Recovery enqueue требует exact
+`TENANT_SYSTEM + tenantId` до `STALE_BINDING` mutation/enqueue, а queued job
+claim требует такой же runtime actor до `updateMany` lock/claim. Missing tenant
+identity превращается в deterministic no-op: recovery state не мутируется,
+queued job не claim-ится и `syncProfile` не вызывается.
+
 ### 3.2. Внешнее выполнение запрещено
 
 До отдельного durable fencing имеют `EXTERNAL_DENY`:
@@ -189,6 +196,8 @@ application graph.
 
 - activity recovery и queue claim выбирают только `INTERNAL` tenant и
   проверяют policy до claim/mutation;
+- activity recovery и queue claim дополнительно требуют accepted
+  `TENANT_SYSTEM` runtime identity до recovery mutation, enqueue или claim;
 - data retention сначала вычисляет исполнимые tenant и ограничивает ими все
   глобальные cleanup query;
 - ledger fallback, loot-box recovery, quality monitoring и reward
@@ -227,6 +236,9 @@ retention и quality collection не объявляются unattended entrypoin
 - Data retention и quality monitoring больше не выполняют unattended
   tenant-wide effects только на основании service-token/policy admission:
   accepted runtime tenant identity требуется до global cleanup/collection.
+- Activity ledger sync больше не выполняет recovery mutation/enqueue или queued
+  job claim только на основании service-token/policy admission: accepted
+  runtime tenant identity требуется до обоих unattended paths.
 - Текущий `INTERNAL` tenant сохраняет совместимость разрешённых registry
   paths, но legacy provider delivery effects намеренно отключены до
   coordinator.
@@ -312,6 +324,8 @@ Suite проверяет:
   retention run writes;
 - quality monitoring runtime identity adoption: missing tenant identity blocks
   `collectTenant` before snapshot/alert writes;
+- activity ledger runtime identity adoption: missing tenant identity blocks
+  recovery mutation/enqueue and queued job claim before `syncProfile`;
 - сохранение `CASHIER/MANUAL` cancellation.
 
 Successor identity metadata exact-SHA CI acceptance:
@@ -325,6 +339,9 @@ Report digest runtime identity exact-SHA CI acceptance:
 
 Retention and quality runtime identity exact-SHA CI acceptance:
 [background retention and quality runtime identity evidence 20.08.2026](./background-retention-quality-runtime-identity-ci-evidence-2026-08-20.md).
+
+Activity ledger runtime identity exact-SHA CI acceptance:
+[background activity ledger runtime identity evidence 20.08.2026](./background-activity-ledger-runtime-identity-ci-evidence-2026-08-20.md).
 
 Последний принятый baseline-результат до расширения migration-166 containment:
 

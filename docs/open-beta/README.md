@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.188                                        |
+| Версия           | 1.189                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -257,6 +257,14 @@ tenant в executable cleanup/recovery/policy list только после exact
 `SKIPPED` до wallet cleanup, policy lookup, quality snapshot или alert writes.
 Exact-SHA CI acceptance:
 [retention and quality runtime identity evidence 20.08.2026](./background-retention-quality-runtime-identity-ci-evidence-2026-08-20.md).
+
+Successor activity ledger runtime identity adoption:
+`GUEST_ACTIVITY_LEDGER_SYNC` подключён к runtime identity foundation как
+tenant-wide job. Recovery enqueue требует exact `TENANT_SYSTEM + tenantId` до
+`STALE_BINDING` mutation/enqueue, а queued job claim требует такой же runtime
+actor до `updateMany` lock/claim. Missing tenant identity превращается в
+deterministic no-op без `syncProfile`. Exact-SHA CI acceptance:
+[activity ledger runtime identity evidence 20.08.2026](./background-activity-ledger-runtime-identity-ci-evidence-2026-08-20.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

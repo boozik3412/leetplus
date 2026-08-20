@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 20.08.2026
-- Версия: 3.43
+- Версия: 3.44
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -141,6 +141,21 @@ TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
   `docs/open-beta/background-retention-quality-runtime-identity-ci-evidence-2026-08-20.md`.
   Recovery/activity, ledger fallback, loot-box recovery и staff recurring
   worker paths ещё не переведены; внешний доступ остаётся `NO-GO`.
+- Activity ledger sync background path подключён к runtime identity foundation:
+  `GUEST_ACTIVITY_LEDGER_SYNC` теперь требует exact `TENANT_SYSTEM + tenantId`
+  в recovery enqueue path до `STALE_BINDING` mutation/enqueue и в queued job
+  claim path до `updateMany` lock/claim. Missing tenant identity даёт
+  deterministic no-op: recovery state не мутируется, queued job не claim-ится,
+  `syncProfile` не вызывается. Локально зелёные: focused activity ledger spec
+  (`1/1 suite`, `51/51 tests`), `test:ci:background-execution`
+  (`16/16 suites`, `803/803 tests`), `test:ci:tenant-execution`
+  (`18/18 suites`, `1004/1004 tests`), `lint:ci:tenant-execution`, API
+  typecheck, Prettier check изменённых файлов и `git diff --check`.
+  Exact-SHA `6c485d6e63c8fcae2130fd33b51771073b1f9a2d` принят GitHub Actions
+  run `32335635308` как `4/4 SUCCESS`; evidence:
+  `docs/open-beta/background-activity-ledger-runtime-identity-ci-evidence-2026-08-20.md`.
+  Ledger fallback, loot-box recovery и staff recurring worker paths ещё не
+  переведены; внешний доступ остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day

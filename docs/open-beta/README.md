@@ -83,8 +83,12 @@ Dedicated database boundary:
 [founder restored-copy preflight](./founder-pilot-restored-copy-preflight.md).
 
 Принятый прогон настоящего production backup, production-history migration
-lane, data zero-diff и TLS activation-role rollback:
+lane и data zero-diff:
 [production restored-copy rehearsal 18.08.2026](./founder-production-restored-copy-rehearsal-2026-08-18.md).
+
+Свежая isolated репетиция actual production-history и runtime-role
+`plan → apply → check → rollback → reconcile`:
+[Controlled Beta-1 runtime-role rehearsal 20.08.2026](./controlled-beta-1-runtime-role-rehearsal-2026-08-20.md).
 
 Trusted TLS SMTP, protected mail enrollment и полный OWNER workflow на
 disposable клонах clean restored copy:

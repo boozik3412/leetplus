@@ -1,6 +1,6 @@
 # Controlled Beta-1: restored-copy rehearsal, diagnostic record
 
-Статус: `DIAGNOSTIC ONLY / NOT ACCEPTED / PRODUCTION NO-GO`.
+Статус: `FINAL RESTORED-COPY REHEARSAL ACCEPTED / PRODUCTION NO-GO`.
 
 Этот record фиксирует фактическую production-history диагностику от
 20.08.2026. Он не является разрешением на deploy, не раскрывает PII, secret
@@ -87,15 +87,54 @@ digest `a7dd1703…`. Final migration manifest уже совпал; требуе
 replay against a new accepted artifact. Existing 187-migration copy остаётся
 diagnostic evidence only и не является release acceptance.
 
-## Следующая clean acceptance
+## Final clean acceptance
 
-1. Принять controller final-fingerprint fix в clean SHA и full CI artifact.
-2. Удалить только failed isolated database/lane, сохранить PII-free evidence,
-   затем восстановить тот же verified backup в fresh target database.
-3. Повторить V2 preflight, `plan → digest-confirmed apply`, exact Prisma deploy
-   дважды и controller `check` against the new artifact.
-4. Принять только `187 applied / 4 historical rolled back / 0 unfinished`,
-   zero `RUNNING` digest rows, data zero-drift и controller `check`.
-5. Сохранить PII-free receipt и удалить isolated instance/database/lane по
-   retention policy. Production deploy, owner invite и external tester до этого
-   запрещены.
+Controller fixes приняты exact application SHA
+`d157764254507ead76231a913c1ffa3b5f445ef5`:
+
+- Fast CI [32383168039](https://github.com/boozik3412/leetplus/actions/runs/32383168039):
+  `2/2 SUCCESS`;
+- Full Release Admission
+  [32383465076](https://github.com/boozik3412/leetplus/actions/runs/32383465076):
+  `4/4 SUCCESS`;
+- downloaded raw artifact SHA-256:
+  `0c8d7202e6afd5b58556b4a74b45842ef7e98fff34358cb00132d1665bafabb9`.
+
+Fresh isolated restore of the same verified backup then passed the whole exact
+sequence:
+
+1. V2 preflight `READY_FOR_RESTORED_COPY_DATABASE_REHEARSAL`, evidence digest
+   `cdc7c5fcdf60436bf466034079283d6d92e9b7342c7ab636662255a1757780c0b`.
+2. Digest-bound plan `ef5d03d39c8974f4312de9986729016fa50e97b169bc83aa7baa965c46053e57`
+   found and reconciled exactly four allowed stale `WEEKLY` rows only on the
+   isolated copy.
+3. The first exact Prisma deploy applied 34 pending migrations; the second
+   returned `No pending migrations to apply`.
+4. Controller `check` returned `PRODUCTION_HISTORY_REHEARSAL_VERIFIED` with
+   `187 applied / 4 historical rolled back / 0 unfinished`, zero `RUNNING`
+   digest rows, materialized tree digest
+   `31c526a555f6a15d52f5e4d7b50697a2fee93c742a7ef76ab7dd31dab8e475ba2`,
+   preterminal manifest `094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b`
+   and CURRENT187 worker digest
+   `a7dd17037ceaccb294953dce145e0fcc589fb2646962db724d919c24ba87c53c`.
+
+The accepted 187-migration copy is retained only as receipt evidence until its
+declared deletion deadline. It contains no production service, worker, SMTP,
+Telegram or Langame process and cannot authorize a production deploy.
+Production database, runtime roles, current four-club network and external
+testers remain unchanged.
+
+## Follow-on runtime-role gate
+
+A separate fresh restore was subsequently used for the runtime-role lifecycle.
+The initial 153-migration preflight was preserved as baseline evidence, then
+the exact history lane advanced that isolated copy to 187 before the wrapper-
+dependent role controller was invoked. The accepted `plan → apply → check →
+rollback → reconcile` evidence, including its remaining production limits, is
+recorded separately in
+[the runtime-role rehearsal](./controlled-beta-1-runtime-role-rehearsal-2026-08-20.md).
+
+The next gate is now a SHA-bound production canary and runtime admission. It
+must still prove production HBA/TLS/SCRAM, dedicated pool behaviour, live API
+session restrictions and rollback before one OWNER invite for Tenant B/Store B1
+can be considered.

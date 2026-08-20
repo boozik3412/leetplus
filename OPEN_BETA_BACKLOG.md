@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 20.08.2026
-- Версия: 3.51
+- Версия: 3.52
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -66,6 +66,18 @@
   worker-function pin. Exact CURRENT187 `a7dd1703…` digest independently
   accepted by the legacy inventory must be the controller's final pin. Новый
   regression test, artifact и clean replay остаются обязательными.
+  `d1577642…` закрыл оба controller gaps: Fast CI `32383168039` (`2/2`) и Full
+  Release Admission `32383465076` (`4/4`) приняты; final raw artifact и fresh
+  isolated restore прошли `preflight → plan → apply → deploy → zero-diff deploy
+  → check` как `PRODUCTION_HISTORY_REHEARSAL_VERIFIED`. Gate restored-copy
+  history закрыт. Отдельная fresh-backup isolated lifecycle rehearsal затем
+  приняла exact `153 baseline → history 187 → role plan/apply/check/rollback/
+  reconcile`: initial role plan корректно запретил отсутствующую на source
+  wrapper boundary, а post-migration manifest дал strict role boundary без
+  ослабления controller. Evidence:
+  [`controlled-beta-1-runtime-role-rehearsal-2026-08-20.md`](./docs/open-beta/controlled-beta-1-runtime-role-rehearsal-2026-08-20.md).
+  Следующий blocking gate — SHA-bound production canary и production
+  runtime HBA/TLS/SCRAM/dedicated-pool admission; owner invite пока запрещён.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta
@@ -80,10 +92,10 @@
 
 | Шаг                                                             | Блокирует первый OWNER invite | Состояние                                                       |
 | --------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------- |
-| Fast CI на рабочем коммите                                      | Да                            | Реализуется этим change set                                     |
-| Full release admission для exact SHA                            | Да                            | Сохраняется как manual + nightly gate                           |
-| Production backup, rollback и canary                            | Да                            | Предстоит выполнить оператору после exact release SHA           |
-| Runtime roles, SMTP worker и activation                         | Да                            | Engineering/rehearsal приняты; production application предстоит |
+| Fast CI на рабочем коммите                                      | Да                            | `d1577642…`, `32383168039`: `2/2 SUCCESS`                      |
+| Full release admission для exact SHA                            | Да                            | `d1577642…`, `32383465076`: `4/4 SUCCESS`; manual + nightly далее |
+| Production backup, rollback и canary                            | Да                            | Backup/history/role rehearsal приняты; production canary предстоит |
+| Runtime roles, TLS route, SMTP worker и activation               | Да                            | Isolated lifecycle принята; production application предстоит    |
 | `Tenant B/Store B1`, persisted GO и OWNER invite                | Да                            | Предстоит после canary                                          |
 | Day-0 scope/module/kill-switch smoke                            | Да                            | Предстоит сразу после invite                                    |
 | Telegram public ingress/outbound enablement                     | Нет для первого B2B login     | Отдельный canary до включения Telegram гостям                   |

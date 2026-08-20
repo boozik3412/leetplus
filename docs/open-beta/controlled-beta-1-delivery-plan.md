@@ -2,7 +2,7 @@
 
 | Поле              | Значение                                       |
 | ----------------- | ---------------------------------------------- |
-| Версия            | 1.1                                            |
+| Версия            | 1.2                                            |
 | Дата              | 20.08.2026                                     |
 | Статус            | `NO-GO`, delivery plan active                  |
 | Цель              | Один приглашённый владелец `Tenant B/Store B1` |
@@ -70,8 +70,12 @@ Admission artifact `299c5a8b…`; он проверяет процедуру п�
 2. Запустить Full Release Admission для этого SHA и получить SHA-bound artifact.
 3. Выполнить backup verification, rollback drill и production canary на этом
    artifact по [SHA-bound production canary plan](./controlled-beta-1-production-canary-plan.md).
-4. Enroll production runtime roles, SMTP worker configuration и health/alert
-   checks ровно по reviewed operational runbook.
+   Isolated fresh-backup history и runtime-role lifecycle уже приняты, включая
+   exact role `plan → apply → check → rollback → reconcile`:
+   [runtime-role rehearsal](./controlled-beta-1-runtime-role-rehearsal-2026-08-20.md).
+4. Enroll production runtime roles, HBA/TLS/SCRAM dedicated-pool route, SMTP
+   worker configuration и health/alert checks ровно по reviewed operational
+   runbook.
 5. Создать `Tenant B/Store B1` через protected shell/GO/activation workflow и
    отправить OWNER invite.
 6. Пройти day-0: owner login, tenant/store scope, один restricted user,
@@ -96,5 +100,5 @@ fix-forward по runbook.
 
 `Fast CI` и `Full Release Admission` должны быть зелёными для одного SHA;
 production не должен иметь незавершённых миграций, degraded readiness или
-непроверенного backup/rollback. Только после этого можно выполнить canary и
-protected `FOUNDER_OPERATOR_BETA_GO`.
+непроверенного backup/rollback. Затем обязательны canary, production runtime
+role/TLS admission и только после них protected `FOUNDER_OPERATOR_BETA_GO`.

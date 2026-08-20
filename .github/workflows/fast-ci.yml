@@ -43,19 +43,27 @@ jobs:
           bash -n docs/deployment/production-artifact/stage-release-artifact.sh
           bash -n docs/deployment/production-artifact/stage-pnpm-store.sh
           bash -n .github/scripts/test-stage-release-artifact.sh
+          printf 'FAST_CI_FIXTURE_STAGE_RELEASE=START\n'
           bash .github/scripts/test-stage-release-artifact.sh
+          printf 'FAST_CI_FIXTURE_STAGE_RELEASE=PASS\n'
           bash -n docs/deployment/production-artifact/verify-release-readiness.sh
           bash -n .github/scripts/test-verify-release-readiness.sh
+          printf 'FAST_CI_FIXTURE_RELEASE_READINESS=START\n'
           bash .github/scripts/test-verify-release-readiness.sh
+          printf 'FAST_CI_FIXTURE_RELEASE_READINESS=PASS\n'
           bash -n docs/deployment/production-artifact/preflight-release-slot.sh
           bash -n docs/deployment/production-artifact/prepare-web-slot-cache.sh
           bash -n docs/deployment/production-artifact/seal-release-artifact.sh
           bash -n docs/deployment/production-artifact/promote-release-artifact.sh
           bash -n docs/deployment/production-artifact/blue-green-cutover.sh
           bash -n .github/scripts/test-production-artifact-blue-green.sh
+          printf 'FAST_CI_FIXTURE_BLUE_GREEN=START\n'
           bash .github/scripts/test-production-artifact-blue-green.sh
+          printf 'FAST_CI_FIXTURE_BLUE_GREEN=PASS\n'
           bash -n .github/scripts/test-production-artifact-systemd-templates.sh
+          printf 'FAST_CI_FIXTURE_SYSTEMD_TEMPLATES=START\n'
           bash .github/scripts/test-production-artifact-systemd-templates.sh
+          printf 'FAST_CI_FIXTURE_SYSTEMD_TEMPLATES=PASS\n'
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

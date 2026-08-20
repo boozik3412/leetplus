@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.190                                        |
+| Версия           | 1.191                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -275,6 +275,17 @@ fallback actor запускается как `STORES/[runtimeStoreId]`. Missing 
 identity возвращает deterministic `SKIPPED / BACKGROUND_STORE_ID_REQUIRED` до
 side effects. Exact-SHA CI acceptance:
 [ledger fallback runtime identity evidence 20.08.2026](./background-ledger-fallback-runtime-identity-ci-evidence-2026-08-20.md).
+
+Successor loot-box recovery runtime identity adoption:
+`GUEST_GAME_LOOT_BOX_RECOVERY` подключён к runtime identity foundation как
+store-bound job. Scheduler выбирает tenant-local active/background-enabled
+store, требует exact `TENANT_STORE_SYSTEM + storeId` до loot-box reads,
+activity fact reads, origin receipt reads/claims, dry-run, rule-decision записи
+и event processing, а recovery actor запускается как
+`STORES/[runtimeStoreId]`. Missing store identity возвращает deterministic
+`SKIPPED / BACKGROUND_STORE_ID_REQUIRED` до side effects. Exact-SHA CI
+acceptance:
+[loot-box recovery runtime identity evidence 20.08.2026](./background-loot-box-recovery-runtime-identity-ci-evidence-2026-08-20.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

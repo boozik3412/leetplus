@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.17                                                    |
+| Версия           | 1.18                                                    |
 | Дата             | 20.08.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -140,6 +140,14 @@ dry-run, rule-decision записи и `processEvent()`, а fallback actor за�
 со scope `STORES/[runtimeStoreId]`. Missing store identity даёт deterministic
 `SKIPPED` до side effects.
 
+`GUEST_GAME_LOOT_BOX_RECOVERY` подключён к runtime identity foundation как
+store-bound background job. Scheduler выбирает runtime store identity только из
+активных `backgroundExecutionEnabled` stores текущего tenant, требует exact
+`TENANT_STORE_SYSTEM + storeId` до loot-box reads, activity fact reads, origin
+receipt reads/claims, dry-run, rule-decision записи и event processing, а
+recovery actor запускается со scope `STORES/[runtimeStoreId]`. Missing store
+identity даёт deterministic `SKIPPED` до side effects.
+
 ### 3.2. Внешнее выполнение запрещено
 
 До отдельного durable fencing имеют `EXTERNAL_DENY`:
@@ -213,6 +221,9 @@ application graph.
 - ledger fallback дополнительно требует accepted `TENANT_STORE_SYSTEM` runtime
   identity и tenant-local active/background-enabled Store до fallback reads,
   claims, dry-run и `processEvent`;
+- loot-box recovery дополнительно требует accepted `TENANT_STORE_SYSTEM`
+  runtime identity и tenant-local active/background-enabled Store до recovery
+  reads, origin receipt claims, dry-run и event processing;
 - data retention и quality monitoring дополнительно требуют accepted
   `TENANT_SYSTEM` runtime identity до unattended cleanup/collection effects;
 - external queue rows могут оставаться сохранёнными, но не claim-ятся.
@@ -253,6 +264,9 @@ retention и quality collection не объявляются unattended entrypoin
 - Ledger fallback больше не выполняет unattended reads/claims/dry-run/event
   processing только на основании service-token/policy admission: accepted
   runtime store identity требуется до fallback work.
+- Loot-box recovery больше не выполняет unattended reads/claims/dry-run/event
+  processing только на основании service-token/policy admission: accepted
+  runtime store identity требуется до recovery work.
 - Текущий `INTERNAL` tenant сохраняет совместимость разрешённых registry
   paths, но legacy provider delivery effects намеренно отключены до
   coordinator.
@@ -343,6 +357,9 @@ Suite проверяет:
 - ledger fallback runtime identity adoption: missing store identity blocks
   fallback reads, origin receipt claim, dry-run, rule decisions and
   `processEvent`;
+- loot-box recovery runtime identity adoption: missing store identity blocks
+  loot-box reads, activity fact reads, origin receipt claims, dry-run, rule
+  decisions and event processing;
 - сохранение `CASHIER/MANUAL` cancellation.
 
 Successor identity metadata exact-SHA CI acceptance:
@@ -362,6 +379,9 @@ Activity ledger runtime identity exact-SHA CI acceptance:
 
 Ledger fallback runtime identity exact-SHA CI acceptance:
 [background ledger fallback runtime identity evidence 20.08.2026](./background-ledger-fallback-runtime-identity-ci-evidence-2026-08-20.md).
+
+Loot-box recovery runtime identity exact-SHA CI acceptance:
+[background loot-box recovery runtime identity evidence 20.08.2026](./background-loot-box-recovery-runtime-identity-ci-evidence-2026-08-20.md).
 
 Последний принятый baseline-результат до расширения migration-166 containment:
 

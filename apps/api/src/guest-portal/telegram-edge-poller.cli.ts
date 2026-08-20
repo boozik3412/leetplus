@@ -235,6 +235,13 @@ export async function runTelegramPollingTick(
     }
 
     const updateId = telegramUpdateId(update);
+    if (updateId !== null && nextOffset !== null && updateId < nextOffset) {
+      logger.warn(
+        `Telegram poller skipped stale update=${updateId} currentOffset=${nextOffset}`,
+      );
+      continue;
+    }
+
     const result = await handleUpdate(edgeConfig, update, {
       fetch: leetPlusFetchImpl,
       logger,

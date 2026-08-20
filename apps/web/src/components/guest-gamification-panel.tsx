@@ -209,6 +209,7 @@ type LootBoxPrizeForm = {
   rewardAmount: string;
   rewardLabel: string;
   chancePercent: string;
+  noBonus: boolean;
   visualMode: LootBoxPrizeVisualMode;
   iconKey: LootBoxPrizeIconKey;
   imageUrl: string;
@@ -1012,6 +1013,7 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     rewardAmount: "50",
     rewardLabel: "50 бонусов",
     chancePercent: "85",
+    noBonus: false,
     visualMode: "AUTO",
     iconKey: "coins",
     imageUrl: "",
@@ -1025,6 +1027,7 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     rewardAmount: "100",
     rewardLabel: "100 бонусов",
     chancePercent: "5",
+    noBonus: false,
     visualMode: "AUTO",
     iconKey: "coins",
     imageUrl: "",
@@ -1038,6 +1041,7 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     rewardAmount: "200",
     rewardLabel: "200 бонусов",
     chancePercent: "2",
+    noBonus: false,
     visualMode: "AUTO",
     iconKey: "coins",
     imageUrl: "",
@@ -1051,6 +1055,7 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
     rewardAmount: "1000",
     rewardLabel: "Промокод на 1000 рублей",
     chancePercent: "1",
+    noBonus: false,
     visualMode: "AUTO",
     iconKey: "ticket",
     imageUrl: "",
@@ -1113,6 +1118,7 @@ const defaultLootBoxForm: LootBoxForm = {
       rewardLabel: prize.rewardLabel,
       chancePercent: Number(prize.chancePercent),
       weight: Number(prize.chancePercent),
+      noBonus: prize.noBonus,
       visualMode: prize.visualMode,
       iconKey: prize.iconKey,
       imageUrl: prize.imageUrl || null,
@@ -10800,6 +10806,7 @@ function LootBoxPrizesEditor({
         rewardAmount: "50",
         rewardLabel: "Новый приз",
         chancePercent: "0",
+        noBonus: false,
         visualMode: "AUTO",
         iconKey: "coins",
         imageUrl: "",
@@ -10914,14 +10921,17 @@ function LootBoxPrizesEditor({
                   options={lootBoxRewardTypeOptions}
                   value={prize.rewardType}
                   preservedLabel="Сохраненный тип награды"
-                  onChange={(rewardType) =>
+                  onChange={(rewardType) => {
+                    const noBonus = rewardType === "MERCH" && prize.noBonus;
                     updatePrize(index, {
                       rewardType,
+                      noBonus,
+                      ...(noBonus ? { rewardAmount: "0" } : {}),
                       ...(prize.visualMode === "AUTO"
                         ? { iconKey: defaultLootBoxPrizeIconKey(rewardType) }
                         : {}),
-                    })
-                  }
+                    });
+                  }}
                 />
               </Field>
               <Field label="Сумма">
@@ -10930,6 +10940,7 @@ function LootBoxPrizesEditor({
                   type="number"
                   min="0"
                   value={prize.rewardAmount}
+                  disabled={prize.rewardType === "MERCH" && prize.noBonus}
                   onChange={(event) =>
                     updatePrize(index, { rewardAmount: event.target.value })
                   }
@@ -10966,6 +10977,29 @@ function LootBoxPrizesEditor({
                 Удалить
               </button>
             </div>
+
+            {prize.rewardType === "MERCH" ? (
+              <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-cyan-200 bg-cyan-50/70 p-3 text-sm text-zinc-800 dark:border-cyan-900 dark:bg-cyan-950/30 dark:text-zinc-100">
+                <input
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-600"
+                  type="checkbox"
+                  checked={prize.noBonus}
+                  onChange={(event) =>
+                    updatePrize(index, {
+                      noBonus: event.target.checked,
+                      ...(event.target.checked ? { rewardAmount: "0" } : {}),
+                    })
+                  }
+                />
+                <span>
+                  <strong className="block">Без бонусов</strong>
+                  <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    Игрок получит только физический приз. Бонусы на баланс не
+                    начисляются.
+                  </span>
+                </span>
+              </label>
+            ) : null}
 
             <div className="mt-3 grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-[112px_minmax(180px,0.8fr)_minmax(240px,1.2fr)] md:items-end">
               <div className="row-span-2 flex min-h-28 items-center justify-center rounded-lg border border-cyan-200 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.16),transparent_68%)] text-cyan-700 dark:border-cyan-900 dark:text-cyan-200">
@@ -16185,16 +16219,18 @@ function buildLootBoxProbabilityRules(form: LootBoxForm) {
       );
       const rewardLabel = prize.rewardLabel.trim();
       const chancePercent = Math.max(0, numeric(prize.chancePercent, 0));
+      const noBonus = rewardType === "MERCH" && prize.noBonus;
 
       return {
         rewardType,
-        rewardAmount: optionalNumber(prize.rewardAmount) ?? 0,
+        rewardAmount: noBonus ? 0 : (optionalNumber(prize.rewardAmount) ?? 0),
         rewardLabel:
           rewardLabel ||
           rewardTypeLabelFromValue(rewardType) ||
           "Награда лутбокса",
         chancePercent,
         weight: chancePercent,
+        noBonus,
         visualMode: prize.visualMode,
         iconKey: normalizeLootBoxPrizeIconKey(prize.iconKey, rewardType),
         imageUrl:
@@ -16217,6 +16253,7 @@ function buildLootBoxProbabilityRules(form: LootBoxForm) {
             optionalNumber(primaryLootBoxPrize(form).rewardAmount) ?? 0,
           chancePercent: 100,
           weight: 100,
+          noBonus: false,
           visualMode: "AUTO" as const,
           iconKey: defaultLootBoxPrizeIconKey(form.rewardType),
           imageUrl: null,
@@ -17578,6 +17615,7 @@ function lootBoxPrizesToForm(
         rewardAmount: fallback.rewardAmount || "0",
         rewardLabel: fallback.rewardLabel || "Награда лутбокса",
         chancePercent: "100",
+        noBonus: false,
         visualMode: "AUTO",
         iconKey: defaultLootBoxPrizeIconKey(fallback.rewardType),
         imageUrl: "",
@@ -17608,20 +17646,26 @@ function lootBoxPrizeFromRuleItem(
     return null;
   }
 
+  const rewardType = canonicalLootBoxRewardType(
+    String(
+      record.rewardType ?? record.type ?? fallback.rewardType ?? "PROMOCODE",
+    ),
+  );
+  const noBonus = rewardType === "MERCH" && record.noBonus === true;
+
   return {
     id: `rule-prize-${index}`,
-    rewardType: canonicalLootBoxRewardType(
-      String(
-        record.rewardType ?? record.type ?? fallback.rewardType ?? "PROMOCODE",
-      ),
-    ),
-    rewardAmount: numberFormValue(
-      record.rewardAmount ?? record.amount ?? fallback.rewardAmount ?? "0",
-    ),
+    rewardType,
+    rewardAmount: noBonus
+      ? "0"
+      : numberFormValue(
+          record.rewardAmount ?? record.amount ?? fallback.rewardAmount ?? "0",
+        ),
     rewardLabel,
     chancePercent: numberFormValue(
       record.chancePercent ?? record.weight ?? record.probability ?? "0",
     ),
+    noBonus,
     visualMode: lootBoxPrizeVisualMode(record.visualMode),
     iconKey: normalizeLootBoxPrizeIconKey(
       typeof record.iconKey === "string" ? record.iconKey : null,

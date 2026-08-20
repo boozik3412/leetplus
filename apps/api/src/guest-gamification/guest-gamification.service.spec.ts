@@ -6410,11 +6410,12 @@ describe('GuestGamificationService', () => {
                 backgroundColor: '#081014',
               },
               {
-                id: 'promo-1000',
-                rewardType: 'PROMOCODE',
-                rewardAmount: 1000,
-                rewardLabel: 'Промокод на 1000',
+                id: 'physical-prize',
+                rewardType: 'MERCH',
+                rewardAmount: 200,
+                rewardLabel: 'Фирменная футболка',
                 chancePercent: 20,
+                noBonus: true,
               },
             ],
             condition: 'Старт сессии',
@@ -6454,11 +6455,12 @@ describe('GuestGamificationService', () => {
                 chancePercent: 80,
               },
               {
-                rewardType: 'PROMOCODE',
-                rewardAmount: 1000,
-                rewardLabel: 'Промокод на 1000',
+                rewardType: 'MERCH',
+                rewardAmount: 0,
+                rewardLabel: 'Фирменная футболка',
                 weight: 20,
                 chancePercent: 20,
+                noBonus: true,
               },
             ],
           },
@@ -6494,11 +6496,12 @@ describe('GuestGamificationService', () => {
                   backgroundColor: '#081014',
                 }),
                 expect.objectContaining({
-                  rewardType: 'PROMOCODE',
-                  rewardAmount: 1000,
-                  rewardLabel: 'Промокод на 1000',
+                  rewardType: 'MERCH',
+                  rewardAmount: 0,
+                  rewardLabel: 'Фирменная футболка',
                   weight: 20,
                   chancePercent: 20,
+                  noBonus: true,
                 }),
               ],
             }),
@@ -9499,6 +9502,60 @@ describe('GuestGamificationService', () => {
       } finally {
         randomSpy.mockRestore();
       }
+    });
+
+    it('never assigns bonus amount to a physical loot box prize marked without bonuses', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          rewardType: 'MERCH',
+          rewardAmount: 200,
+          rewardLabel: 'Фирменная футболка',
+          probabilityRules: {
+            type: 'single',
+            prizes: [
+              {
+                rewardType: 'MERCH',
+                rewardAmount: 200,
+                rewardLabel: 'Фирменная футболка',
+                weight: 100,
+                noBonus: true,
+              },
+            ],
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.summary).toMatchObject({
+        checkedRules: 1,
+        eligibleRules: 1,
+        estimatedRewardAmount: 0,
+      });
+      expect(result.rules[0]).toMatchObject({
+        rewardType: 'MERCH',
+        rewardAmount: 0,
+        rewardLabel: 'Фирменная футболка',
+        selectedReward: {
+          rewardType: 'MERCH',
+          rewardAmount: 0,
+          rewardLabel: 'Фирменная футболка',
+          noBonus: true,
+          chancePercent: 100,
+        },
+      });
     });
 
     it('blocks packet-only session lootboxes for regular sessions in dry-run', async () => {

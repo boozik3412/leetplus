@@ -1101,6 +1101,7 @@ export type GuestGameVisualEditorLootBoxPrize = {
   rewardAmount: number | null;
   rewardLabel: string;
   chancePercent: number;
+  noBonus?: boolean;
   visualMode?: GuestGameLootBoxPrizeVisualMode;
   iconKey?: GuestGameLootBoxPrizeIconKey;
   imageUrl?: string | null;
@@ -2495,6 +2496,7 @@ export type GuestGameSelectedReward = {
   chancePercent: number;
   rewardRarity: GuestGameRewardRarity;
   rewardRarityLabel: string;
+  noBonus?: boolean;
   visualMode?: GuestGameLootBoxPrizeVisualMode;
   iconKey?: GuestGameLootBoxPrizeIconKey;
   imageUrl?: string | null;
@@ -30687,15 +30689,17 @@ function parseProcessSelectedReward(
   const visualMode = lootBoxPrizeVisualMode(value.visualMode);
   const imageUrl =
     visualMode === 'IMAGE' ? lootBoxPrizeImageUrl(value.imageUrl) : null;
+  const noBonus = lootBoxPhysicalPrizeHasNoBonus(rewardType, value.noBonus);
 
   return {
     rewardType,
-    rewardAmount: finiteJsonNumber(value.rewardAmount) ?? 0,
+    rewardAmount: noBonus ? 0 : (finiteJsonNumber(value.rewardAmount) ?? 0),
     rewardLabel,
     weight: finiteJsonNumber(value.weight) ?? 0,
     chancePercent: finiteJsonNumber(value.chancePercent) ?? 0,
     rewardRarity,
     rewardRarityLabel: nullableString(value.rewardRarityLabel) ?? rewardRarity,
+    noBonus,
     visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
     iconKey: lootBoxPrizeIconKey(value.iconKey, rewardType),
     imageUrl,
@@ -34204,14 +34208,16 @@ function lootBoxRewardFromPrize(
   const visualMode = lootBoxPrizeVisualMode(record.visualMode);
   const imageUrl =
     visualMode === 'IMAGE' ? lootBoxPrizeImageUrl(record.imageUrl) : null;
+  const noBonus = lootBoxPhysicalPrizeHasNoBonus(rewardType, record.noBonus);
 
   return {
     rewardType,
-    rewardAmount:
-      dryRunOptionalNumber(record.rewardAmount) ??
-      dryRunOptionalNumber(record.amount) ??
-      rule.rewardAmount ??
-      0,
+    rewardAmount: noBonus
+      ? 0
+      : (dryRunOptionalNumber(record.rewardAmount) ??
+        dryRunOptionalNumber(record.amount) ??
+        rule.rewardAmount ??
+        0),
     rewardLabel,
     weight: Math.max(
       0,
@@ -34220,6 +34226,7 @@ function lootBoxRewardFromPrize(
         dryRunOptionalNumber(record.probability) ??
         0,
     ),
+    noBonus,
     visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
     iconKey: lootBoxPrizeIconKey(record.iconKey, rewardType),
     imageUrl,
@@ -34283,6 +34290,10 @@ function lootBoxPrizeColor(value: unknown): string | null {
 function lootBoxPrizeImageUrl(value: unknown) {
   const url = dryRunString(value);
   return url?.startsWith('/api/guest-game/media/') ? url : null;
+}
+
+function lootBoxPhysicalPrizeHasNoBonus(rewardType: string, value: unknown) {
+  return rewardType.toUpperCase() === 'MERCH' && value === true;
 }
 
 function lootBoxRewardFromLegacyItem(
@@ -35755,6 +35766,7 @@ function buildVisualLootBoxData(
           rewardAmount: item.rewardAmount,
           rewardLabel: item.rewardLabel,
           chancePercent: 100,
+          noBonus: false,
           visualMode: 'AUTO' as const,
           iconKey: lootBoxPrizeIconKey(null, rewardType),
           imageUrl: null,
@@ -35809,10 +35821,19 @@ function buildVisualLootBoxData(
       totalChancePercent: Math.round(totalChancePercent * 100) / 100,
       prizes: probabilityPrizes.map((prize) => ({
         rewardType: canonicalLootBoxRewardType(prize.rewardType),
-        rewardAmount: prize.rewardAmount ?? 0,
+        rewardAmount: lootBoxPhysicalPrizeHasNoBonus(
+          prize.rewardType,
+          prize.noBonus,
+        )
+          ? 0
+          : (prize.rewardAmount ?? 0),
         rewardLabel: prize.rewardLabel,
         weight: prize.chancePercent,
         chancePercent: prize.chancePercent,
+        noBonus: lootBoxPhysicalPrizeHasNoBonus(
+          prize.rewardType,
+          prize.noBonus,
+        ),
         visualMode: prize.visualMode ?? 'AUTO',
         iconKey: prize.iconKey ?? lootBoxPrizeIconKey(null, prize.rewardType),
         imageUrl:
@@ -36598,18 +36619,25 @@ function visualLootBoxPrizes(
       const visualMode = lootBoxPrizeVisualMode(record.visualMode);
       const imageUrl =
         visualMode === 'IMAGE' ? lootBoxPrizeImageUrl(record.imageUrl) : null;
+      const noBonus = lootBoxPhysicalPrizeHasNoBonus(
+        rewardType,
+        record.noBonus,
+      );
 
       return {
         id: visualString(record.id, `prize-${index + 1}`),
         rewardType,
-        rewardAmount: visualNumberOrNull(
-          record.rewardAmount ?? record.amount ?? fallbackAmount,
-        ),
+        rewardAmount: noBonus
+          ? 0
+          : visualNumberOrNull(
+              record.rewardAmount ?? record.amount ?? fallbackAmount,
+            ),
         rewardLabel,
         chancePercent: visualChancePercent(
           record.chancePercent ?? record.weight ?? record.probability,
           source.length > 1 ? 0 : 100,
         ),
+        noBonus,
         visualMode: imageUrl || visualMode !== 'IMAGE' ? visualMode : 'AUTO',
         iconKey: lootBoxPrizeIconKey(record.iconKey, rewardType),
         imageUrl,
@@ -36637,6 +36665,7 @@ function visualLootBoxPrizes(
       rewardAmount: fallbackAmount,
       rewardLabel: fallbackLabel,
       chancePercent: 100,
+      noBonus: false,
       visualMode: 'AUTO',
       iconKey: lootBoxPrizeIconKey(null, fallbackType),
       imageUrl: null,

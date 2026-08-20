@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.18                                                    |
+| Версия           | 1.19                                                    |
 | Дата             | 20.08.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -170,9 +170,10 @@ identity даёт deterministic `SKIPPED` до side effects.
 | Guest data   | `GUEST_GAME_REWARD_MATERIALIZER`           |
 | Staff        | `STAFF_TASK_RECURRING_RULES`               |
 
-`STAFF_TASK_RECURRING_RULES` зарезервирован в registry, но scheduler и
-all-tenant scheduled route остаются намеренно незарегистрированными в
-application graph.
+`STAFF_TASK_RECURRING_RULES` зарезервирован в registry и переведён на
+store-scoped runtime identity для scheduled/all-tenant path. Для внешних
+stages job остаётся `EXTERNAL_DENY`; для внутреннего выполнения требуется
+accepted `TENANT_STORE_SYSTEM + storeId`.
 
 ## 4. Реализованные enforcement points
 
@@ -224,6 +225,9 @@ application graph.
 - loot-box recovery дополнительно требует accepted `TENANT_STORE_SYSTEM`
   runtime identity и tenant-local active/background-enabled Store до recovery
   reads, origin receipt claims, dry-run и event processing;
+- staff recurring rules дополнительно требуют accepted `TENANT_STORE_SYSTEM`
+  runtime identity и tenant-local active/background-enabled Store до scheduled
+  recurring-rule reads, run/task creation и transaction;
 - data retention и quality monitoring дополнительно требуют accepted
   `TENANT_SYSTEM` runtime identity до unattended cleanup/collection effects;
 - external queue rows могут оставаться сохранёнными, но не claim-ятся.
@@ -267,6 +271,9 @@ retention и quality collection не объявляются unattended entrypoin
 - Loot-box recovery больше не выполняет unattended reads/claims/dry-run/event
   processing только на основании service-token/policy admission: accepted
   runtime store identity требуется до recovery work.
+- Staff recurring rules больше не выполняют unattended tenant-wide sweep только
+  на основании service-token/policy admission: accepted runtime store identity
+  требуется до due-rule reads и task materialization.
 - Текущий `INTERNAL` tenant сохраняет совместимость разрешённых registry
   paths, но legacy provider delivery effects намеренно отключены до
   coordinator.
@@ -290,9 +297,9 @@ retention и quality collection не объявляются unattended entrypoin
 - registry-level identity metadata не создаёт сами runtime roles и не
   доказывает, что каждый legacy scheduler уже исполняется под отдельным
   tenant/store system actor;
-- runtime identity helper пока является foundation/contract: оставшиеся legacy
-  scheduler call-sites должны быть переведены на него отдельными bounded
-  patches с job-specific tests;
+- runtime identity helper остаётся foundation/contract для будущих job kinds;
+  текущий registry adoption список переведён, но это ещё не доказывает
+  durable leases/fencing/drain для полноценного shared worker plane;
 - activity jobs внешнего tenant могут накапливаться unclaimed;
 - не завершены shared Telegram tenant/store identity, durable update dedupe и
   per-store kill switch;
@@ -360,6 +367,8 @@ Suite проверяет:
 - loot-box recovery runtime identity adoption: missing store identity blocks
   loot-box reads, activity fact reads, origin receipt claims, dry-run, rule
   decisions and event processing;
+- staff recurring rules runtime identity adoption: missing store identity
+  blocks recurring-rule reads, run/task creation and transaction;
 - сохранение `CASHIER/MANUAL` cancellation.
 
 Successor identity metadata exact-SHA CI acceptance:
@@ -382,6 +391,9 @@ Ledger fallback runtime identity exact-SHA CI acceptance:
 
 Loot-box recovery runtime identity exact-SHA CI acceptance:
 [background loot-box recovery runtime identity evidence 20.08.2026](./background-loot-box-recovery-runtime-identity-ci-evidence-2026-08-20.md).
+
+Staff recurring rules runtime identity exact-SHA CI acceptance:
+[background staff recurring runtime identity evidence 20.08.2026](./background-staff-recurring-runtime-identity-ci-evidence-2026-08-20.md).
 
 Последний принятый baseline-результат до расширения migration-166 containment:
 

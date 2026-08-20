@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 20.08.2026
-- Версия: 3.46
+- Версия: 3.47
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -190,8 +190,25 @@ TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
   `3bde6641ce67407f513de13606d8b3428a893fc2` принят GitHub Actions run
   `32340721320` как `4/4 SUCCESS`; evidence:
   `docs/open-beta/background-loot-box-recovery-runtime-identity-ci-evidence-2026-08-20.md`.
-  Staff recurring worker path ещё не переведён; внешний доступ остаётся
-  `NO-GO`.
+  Staff recurring worker path на тот момент ещё не был переведён; внешний
+  доступ остаётся `NO-GO`.
+- Staff recurring rules background path подключён к runtime identity
+  foundation: `STAFF_TASK_RECURRING_RULES` теперь загружает только active
+  tenant и active/background-enabled stores, требует exact
+  `TENANT_STORE_SYSTEM + storeId` для каждого scheduled store и запускает due
+  recurring-rule work только с exact `storeId` predicate. Tenant без runtime
+  store identity не читает recurring rules, не создаёт run/task и не открывает
+  transaction; `PILOT/BETA/LIVE` остаются `EXTERNAL_DENY`. Локально зелёные:
+  focused staff recurring suite (`1/1 suite`, `26/26 tests`),
+  `test:ci:background-execution` (`16/16 suites`, `805/805 tests`),
+  `test:ci:tenant-execution` (`18/18 suites`, `1004/1004 tests`), targeted
+  staff ESLint, API typecheck, Prettier и `git diff --check`. Exact-SHA
+  `8fc5725b67170cd8d3263ebc6679d1f3c4de4af9` принят GitHub Actions run
+  `32343189662` как `4/4 SUCCESS`; evidence:
+  `docs/open-beta/background-staff-recurring-runtime-identity-ci-evidence-2026-08-20.md`.
+  Это закрывает текущий registry runtime-identity adoption список, но не
+  закрывает public guest/Telegram/outbound matrix, production admission,
+  Gate 2 и внешний доступ; release decision остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;
   `ACTIVATED→REPLAYED`, immutable activation command, `OWNER/NETWORK`, 30-day
@@ -2868,7 +2885,8 @@ Progressive activation contract:
    сотрудников целиком и коммуникации; users/roles ограничены Tenant D/D1;
 2. surface со статусом ниже `VERIFIED + ENFORCED` не может входить в первый
    доступ; новые возможности после старта включаются отдельными revisions;
-3. staff recurring scheduler и любой all-tenant route не запускаются;
+3. staff recurring scheduler и all-tenant route для внешнего tenant не
+   запускаются без accepted `TENANT_STORE_SYSTEM + storeId` runtime identity;
 4. reward/Langame/Telegram и иные outbound effects остаются `OFF` до
    отдельного store-level `OUTBOUND GO`, canary и reconciliation;
 5. salary остаётся planning-only, а discipline/motivation не выполняют
@@ -3217,8 +3235,9 @@ fresh effect boundary; bonus-ledger делает это до auto-queue, stale p
 scheduled/AUTO Langame, daily/business/guest-foundation, gamification
 snapshot/supplemental, delivery/bot pull, activity ledger, retention,
 fallback, loot-box recovery, quality monitoring и reward materializer.
-Staff recurring job зарезервирован в registry, но scheduler/all-tenant route
-по-прежнему не смонтированы.
+Staff recurring job зарезервирован в registry и переведён на store-scoped
+runtime identity для scheduled/all-tenant path; для external stages он остаётся
+`EXTERNAL_DENY`.
 
 Отдельный CI gate `test:ci:background-execution` фиксирует hard-coded полный
 набор registry keys, unknown-value deny, совместимость `INTERNAL`, deny

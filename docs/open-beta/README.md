@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.191                                        |
+| Версия           | 1.192                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -286,6 +286,16 @@ activity fact reads, origin receipt reads/claims, dry-run, rule-decision зап�
 `SKIPPED / BACKGROUND_STORE_ID_REQUIRED` до side effects. Exact-SHA CI
 acceptance:
 [loot-box recovery runtime identity evidence 20.08.2026](./background-loot-box-recovery-runtime-identity-ci-evidence-2026-08-20.md).
+
+Successor staff recurring rules runtime identity adoption:
+`STAFF_TASK_RECURRING_RULES` подключён к runtime identity foundation как
+store-bound scheduled job. Tenant entrypoint выбирает active
+background-enabled stores, требует exact `TENANT_STORE_SYSTEM + storeId` и
+ограничивает recurring-rule reads exact `storeId` predicate. External
+`PILOT/BETA/LIVE` stages остаются `EXTERNAL_DENY`; tenant без runtime store
+identity не создаёт run/task и не открывает transaction. Exact-SHA CI
+acceptance:
+[staff recurring runtime identity evidence 20.08.2026](./background-staff-recurring-runtime-identity-ci-evidence-2026-08-20.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

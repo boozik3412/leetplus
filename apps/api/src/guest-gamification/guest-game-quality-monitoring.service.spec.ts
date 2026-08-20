@@ -27,10 +27,12 @@ describe('GuestGameQualityMonitoringService', () => {
       prisma as unknown as PrismaService,
       { get: jest.fn() } as unknown as ConfigService,
     );
-    const collectTenant = jest.spyOn(service, 'collectTenant').mockResolvedValue({
-      tenantId: 'tenant-internal',
-      status: 'COMPLETE',
-    } as never);
+    const collectTenant = jest
+      .spyOn(service, 'collectTenant')
+      .mockResolvedValue({
+        tenantId: 'tenant-internal',
+        status: 'COMPLETE',
+      } as never);
 
     await expect(service.runAll()).resolves.toMatchObject({
       tenants: 1,
@@ -66,6 +68,36 @@ describe('GuestGameQualityMonitoringService', () => {
     });
     expect(String(result.results[0]?.reason)).toContain(
       'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+    );
+    expect(collectTenant).not.toHaveBeenCalled();
+  });
+
+  it('skips an internal tenant before collection when runtime tenant identity is missing', async () => {
+    const prisma = {
+      tenant: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: '',
+            customerStage: TenantCustomerStage.INTERNAL,
+          },
+        ]),
+      },
+    };
+    const service = new GuestGameQualityMonitoringService(
+      prisma as unknown as PrismaService,
+      { get: jest.fn() } as unknown as ConfigService,
+    );
+    const collectTenant = jest.spyOn(service, 'collectTenant');
+
+    const result = await service.runAll();
+
+    expect(result).toMatchObject({
+      tenants: 1,
+      failed: 0,
+      results: [{ tenantId: '', status: 'SKIPPED' }],
+    });
+    expect(String(result.results[0]?.reason)).toContain(
+      'BACKGROUND_TENANT_ID_REQUIRED',
     );
     expect(collectTenant).not.toHaveBeenCalled();
   });

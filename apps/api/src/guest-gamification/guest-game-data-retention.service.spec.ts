@@ -163,6 +163,38 @@ describe('GuestGameDataRetentionService', () => {
     expect(delegates.guestGameDataRetentionRun.create).not.toHaveBeenCalled();
   });
 
+  it('skips an internal tenant before global cleanup when runtime tenant identity is missing', async () => {
+    const { service, delegates } = createFixture();
+    delegates.tenant.findMany.mockResolvedValueOnce([
+      {
+        id: '',
+        customerStage: TenantCustomerStage.INTERNAL,
+      },
+    ]);
+
+    const result = await service.runAll({ now, liveRequested: true });
+
+    expect(result).toMatchObject({
+      walletCleanup: { deleted: 0 },
+      tenants: 1,
+      completed: 0,
+      skipped: 1,
+      results: [
+        expect.objectContaining({
+          tenantId: '',
+          status: 'SKIPPED',
+          reason: expect.stringContaining('BACKGROUND_TENANT_ID_REQUIRED'),
+        }),
+      ],
+    });
+    expect(delegates.guestGameRewardWalletItem.findMany).not.toHaveBeenCalled();
+    expect(delegates.guestGameReward.findMany).not.toHaveBeenCalled();
+    expect(
+      delegates.guestGameDataRetentionPolicy.findMany,
+    ).not.toHaveBeenCalled();
+    expect(delegates.guestGameDataRetentionRun.create).not.toHaveBeenCalled();
+  });
+
   it('keeps policy retention in dry-run while deleting expired wallet items', async () => {
     const { service, delegates } = createFixture();
     delegates.guestGameRewardWalletItem.findMany

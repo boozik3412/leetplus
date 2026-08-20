@@ -4,8 +4,10 @@ import { Prisma, TenantCustomerStage } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
   tenantBackgroundExecutionNote,
   tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundRuntimeIdentityDecision,
 } from '../tenancy/tenant-background-execution-policy';
 
 const DEFAULT_RAW_RETENTION_DAYS = 365;
@@ -37,17 +39,33 @@ export class GuestGameDataRetentionService {
     const tenants = await this.prisma.tenant.findMany({
       select: { id: true, customerStage: true },
     });
-    const executionByTenant = new Map(
-      tenants.map((tenant) => [
-        tenant.id,
-        evaluateTenantBackgroundExecutionPolicy({
+    const admissionByTenant = new Map(
+      tenants.map((tenant) => {
+        const executionDecision = evaluateTenantBackgroundExecutionPolicy({
           stage: tenantBackgroundStageForCustomerStage(tenant.customerStage),
           jobKind: 'GUEST_GAME_DATA_RETENTION',
-        }),
-      ]),
+        });
+        return [
+          tenant.id,
+          {
+            executionDecision,
+            runtimeIdentity: evaluateTenantBackgroundRuntimeIdentity({
+              decision: executionDecision,
+              actorKind: 'TENANT_SYSTEM',
+              tenantId: tenant.id,
+            }),
+          },
+        ] as const;
+      }),
     );
     const executableTenantIds = tenants
-      .filter((tenant) => executionByTenant.get(tenant.id)?.allowed === true)
+      .filter((tenant) => {
+        const admission = admissionByTenant.get(tenant.id);
+        return (
+          admission?.executionDecision.allowed === true &&
+          admission.runtimeIdentity.accepted === true
+        );
+      })
       .map((tenant) => tenant.id);
 
     await this.recoverStaleRewardWalletOpeningBatches(now, executableTenantIds);
@@ -70,7 +88,9 @@ export class GuestGameDataRetentionService {
     const results: Array<Record<string, unknown> & { status: string }> = [];
 
     for (const tenant of tenants) {
-      const executionDecision = executionByTenant.get(tenant.id);
+      const admission = admissionByTenant.get(tenant.id);
+      const executionDecision = admission?.executionDecision;
+      const runtimeIdentity = admission?.runtimeIdentity;
       if (!executionDecision?.allowed) {
         results.push({
           tenantId: tenant.id,
@@ -78,6 +98,16 @@ export class GuestGameDataRetentionService {
           reason: executionDecision
             ? tenantBackgroundExecutionNote(executionDecision)
             : 'Background execution policy decision is unavailable.',
+        });
+        continue;
+      }
+      if (!runtimeIdentity?.accepted) {
+        results.push({
+          tenantId: tenant.id,
+          status: 'SKIPPED',
+          reason: runtimeIdentity
+            ? tenantBackgroundRuntimeIdentityNote(runtimeIdentity)
+            : 'Background runtime identity decision is unavailable.',
         });
         continue;
       }
@@ -1139,6 +1169,12 @@ function positiveDays(value: number | undefined, fallback: number) {
   return Number.isInteger(value) && Number(value) > 0
     ? Number(value)
     : fallback;
+}
+
+function tenantBackgroundRuntimeIdentityNote(
+  decision: TenantBackgroundRuntimeIdentityDecision,
+) {
+  return `Background runtime identity denied: ${decision.reasonCode}.`;
 }
 
 function boundedInteger(

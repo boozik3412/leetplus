@@ -44,7 +44,7 @@ jobs:
           bash -n docs/deployment/production-artifact/stage-pnpm-store.sh
           bash -n .github/scripts/test-stage-release-artifact.sh
           printf 'FAST_CI_FIXTURE_STAGE_RELEASE=START\n'
-          bash .github/scripts/test-stage-release-artifact.sh
+          bash -x .github/scripts/test-stage-release-artifact.sh
           printf 'FAST_CI_FIXTURE_STAGE_RELEASE=PASS\n'
           bash -n docs/deployment/production-artifact/verify-release-readiness.sh
           bash -n .github/scripts/test-verify-release-readiness.sh

@@ -1,11 +1,19 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 20.08.2026
-- Версия: 3.50
+- Версия: 3.51
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
   только после Gate 1MT и Gate 2
+- Режим ускорения `CONTROLLED BETA-1` от 20.08.2026: первый внешний запуск
+  остаётся invite-only для одного `Tenant B/Store B1`, без публичной
+  регистрации, второго tenant или автоматического outbound. Полный historical
+  PostgreSQL/artifact admission остаётся обязательным перед deploy, но больше
+  не блокирует каждый рабочий коммит: быстрый CI выполняется на каждом push,
+  full release admission — вручную для release candidate и nightly на `main`.
+  Critical path, границы и порядок работ зафиксированы в
+  [`controlled-beta-1-delivery-plan.md`](./docs/open-beta/controlled-beta-1-delivery-plan.md).
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta
@@ -15,6 +23,23 @@
   shell, 30-дневной trial policy, rollback owner и пяти stop conditions. Это не
   отменяет обычные серверные JWT/encryption/SMTP secrets, tenant isolation,
   email-bound OWNER invite, CI, backup/restore или rollback
+
+## Critical path: `CONTROLLED BETA-1`
+
+| Шаг                                                             | Блокирует первый OWNER invite | Состояние                                                       |
+| --------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------- |
+| Fast CI на рабочем коммите                                      | Да                            | Реализуется этим change set                                     |
+| Full release admission для exact SHA                            | Да                            | Сохраняется как manual + nightly gate                           |
+| Production backup, rollback и canary                            | Да                            | Предстоит выполнить оператору после exact release SHA           |
+| Runtime roles, SMTP worker и activation                         | Да                            | Engineering/rehearsal приняты; production application предстоит |
+| `Tenant B/Store B1`, persisted GO и OWNER invite                | Да                            | Предстоит после canary                                          |
+| Day-0 scope/module/kill-switch smoke                            | Да                            | Предстоит сразу после invite                                    |
+| Telegram public ingress/outbound enablement                     | Нет для первого B2B login     | Отдельный canary до включения Telegram гостям                   |
+| Публичная регистрация, второй tenant, USB/KMS ceremony, billing | Нет                           | Post-beta                                                       |
+
+Все остальные historical пункты остаются release/security evidence, но не
+создают самостоятельную очередь работ перед первым контролируемым B2B-доступом.
+
 - Контрольная точка 19.08.2026: CI admission blocker после `de613c51…` закрыт.
   Exact SHA `849d62db840082e883e9c677dad8d9c50aef2f18` принят GitHub Actions
   run `32261064817` как `success`: OWNER invite fixture перепривязан к

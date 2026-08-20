@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.195                                        |
+| Версия           | 1.196                                        |
 | Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -54,6 +54,18 @@ JWT/encryption/SMTP secrets, tenant isolation, backup/restore и rollback
   `NETWORK | STORES` scope;
 - production-изменения выполняются только после exact candidate SHA, CI,
   backup/restore, canary и явного решения `GO`.
+
+## Режим доставки `CONTROLLED BETA-1`
+
+Первый внешний тест — это один приглашённый владелец `Tenant B/Store B1`, а не
+публичный запуск. Чтобы рабочие изменения не ждали historical PostgreSQL
+rehearsal на каждом push, введены три CI-контура: быстрый на каждый commit,
+full release admission вручную для exact candidate и nightly на `main`.
+Fast CI не является production approval и не публикует artifact; перед deploy
+обязательны полный admission, backup/rollback и production canary.
+
+Короткий исполнимый путь, границы отложенных работ и порядок включения Telegram
+зафиксированы в [плане Controlled Beta-1](./controlled-beta-1-delivery-plan.md).
 
 Актуальный successor и его строгая граница:
 [Founder-operator beta GO](./founder-operator-beta-go.md).

@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.34                                                       |
+| Версия     | 1.35                                                       |
 | Дата       | 20.08.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -112,6 +112,12 @@ checkpoint не являются production-like admission: persisted GO, produc
 deploy и доступ тестеру ещё не приняты.
 
 ## A. Gate 0: source и release
+
+- [ ] Fast CI зелёный для exact рабочего SHA: schema, focused acceptance,
+      API/web typecheck и production build.
+- [ ] Перед deploy вручную принят Full Release Admission для exact SHA:
+      полный PostgreSQL/artifact/rollback контур; nightly `main` не заменяет
+      этот запуск.
 
 - [ ] Есть один canonical clean candidate SHA.
 - [ ] Mandatory CI, typecheck, tests, schema validation и artifact build

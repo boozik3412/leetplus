@@ -1,11 +1,12 @@
-name: CI
+name: Release admission CI
 
 on:
-  pull_request:
+  workflow_dispatch:
   push:
     branches:
-      - codex/open-beta-hardening
       - main
+  schedule:
+    - cron: "17 2 * * *"
 
 permissions:
   contents: read

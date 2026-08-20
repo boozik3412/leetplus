@@ -1,0 +1,118 @@
+name: Fast CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - codex/open-beta-hardening
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI_RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  authority-root-trust:
+    name: Fast authority root trust
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out complete root history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact release checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Validate pinned authority root transition
+        run: >-
+          node
+          packages/database/scripts/staff-task-integrity-snapshot-authority-root-transition.cli.mjs
+          --check-parent
+          --confirm
+          verify-pinned-authority-root-transition
+
+      - name: Validate CURRENT198 bootstrap-root transition
+        run: >-
+          node
+          packages/database/scripts/langame-runtime-trust-bootstrap-registry-current198-transition.cli.mjs
+          --check-parent
+          --confirm
+          verify-langame-current198-bootstrap-root-transition
+
+  application:
+    name: Fast application checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact release checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema and generate client
+        run: |
+          pnpm --filter database db:validate
+          pnpm --filter database db:generate
+          pnpm --filter database typecheck
+
+      - name: Run focused API acceptance tests
+        run: pnpm --filter api test:ci:focused
+
+      - name: Type-check and build API
+        run: |
+          pnpm --filter api typecheck
+          pnpm --filter api build
+
+      - name: Run Web boundary tests
+        run: |
+          pnpm --filter web test:pilot-bff-boundary
+          pnpm --filter web test:users-roles-bff-boundary
+          pnpm --filter web test:gate-1mt-staff-attachments-browser-boundary
+          pnpm --filter web test:guest-session-transport
+
+      - name: Lint, type-check and build Web
+        run: |
+          pnpm --filter web lint
+          pnpm --filter web typecheck
+          pnpm --filter web build

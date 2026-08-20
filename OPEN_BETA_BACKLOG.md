@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
-- Дата актуализации: 19.08.2026
-- Версия: 3.40
+- Дата актуализации: 20.08.2026
+- Версия: 3.41
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -90,7 +90,22 @@ TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
   Exact-SHA `cdb1a619f1d3d646cfc62a3250b106b32b081b36` принят GitHub Actions
   run `32283610426` как `4/4 SUCCESS`; evidence:
   `docs/open-beta/background-bonus-ledger-runtime-identity-ci-evidence-2026-08-19.md`.
-  Delivery/reward/materializer, retention/recovery/activity и staff recurring
+- Третий background call-site подключён к runtime identity foundation:
+  `GUEST_GAME_REWARD_MATERIALIZER` теперь выбирает runtime store identity из
+  активных `backgroundExecutionEnabled` stores самого tenant, проверяет exact
+  `TENANT_STORE_SYSTEM + storeId` до materialization claim/effect и не
+  переиспользует один global store id при `allowAllTenants`. Missing store
+  identity даёт deterministic skip `BACKGROUND_STORE_ID_REQUIRED` до claims.
+  Manual `runTenantOnce()` намеренно не изменён этим unattended scheduler
+  slice. Локально зелёные: focused materializer specs (`2/2 suites`,
+  `34/34 tests`), `test:ci:background-execution` (`16/16 suites`,
+  `797/797 tests`), `test:ci:tenant-execution` (`18/18 suites`,
+  `1002/1002 tests`), `lint:ci:tenant-execution`, API typecheck, Prettier
+  check изменённых файлов и `git diff --check`. Exact-SHA
+  `419faa5819823fa9d71c2b8697b066e488a3910d` принят GitHub Actions run
+  `32328300134` как `4/4 SUCCESS`; evidence:
+  `docs/open-beta/background-reward-materializer-runtime-identity-ci-evidence-2026-08-20.md`.
+  Delivery dispatch/bot pull, retention/recovery/activity и staff recurring
   worker paths ещё не переведены; внешний доступ остаётся `NO-GO`.
 - На 18.08.2026 v2 atomic activation реализован и принят exact-SHA CI: current
   clean PostgreSQL 16 chain из `184` migrations развёрнут на disposable DB;

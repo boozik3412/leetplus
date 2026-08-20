@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.185                                        |
-| Дата             | 19.08.2026                                   |
+| Версия           | 1.186                                        |
+| Дата             | 20.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -228,6 +228,15 @@ batch dispatch и на последней Langame balance effect boundary. Live 
 claimed entry возвращает ledger в `PENDING` без Langame call. Exact-SHA CI
 acceptance:
 [bonus ledger runtime identity evidence 19.08.2026](./background-bonus-ledger-runtime-identity-ci-evidence-2026-08-19.md).
+
+Successor reward materializer runtime identity adoption:
+`GUEST_GAME_REWARD_MATERIALIZER` подключён к runtime identity foundation в
+unattended scheduler path. Scheduler выбирает store identity только из активных
+`backgroundExecutionEnabled` stores самого tenant, запускает materializer как
+`TENANT_STORE_SYSTEM + storeId` и не переиспользует один global store id для
+all-tenant sweep. Missing store identity даёт deterministic skip до
+claim/materialization effects. Exact-SHA CI acceptance:
+[reward materializer runtime identity evidence 20.08.2026](./background-reward-materializer-runtime-identity-ci-evidence-2026-08-20.md).
 
 Exact lifecycle dedicated activation role на restored copy:
 [founder activation-role deployment](./founder-pilot-activation-role-deployment.md).

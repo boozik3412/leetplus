@@ -2,8 +2,8 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.12                                                    |
-| Дата             | 29.07.2026                                              |
+| Версия           | 1.13                                                    |
+| Дата             | 20.08.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
 | Топология        | Shared API/workers/PostgreSQL, отдельный tenant на сеть |
@@ -100,6 +100,13 @@ claim и provider effects, а `GuestBonusLedgerService` повторяет пр�
 `DISPATCHING` на последней границе перед Langame balance write. Missing store
 identity блокирует batch до effects; потерянная store identity возвращает ledger
 entry в `PENDING` без provider call.
+
+`GUEST_GAME_REWARD_MATERIALIZER` подключён к runtime identity foundation в
+unattended scheduler path: scheduler выбирает runtime store identity только из
+активных `backgroundExecutionEnabled` stores текущего tenant, проверяет exact
+`TENANT_STORE_SYSTEM + storeId` до materialization effects и не
+переиспользует один global store id для all-tenant sweep. Missing store
+identity даёт deterministic skip `BACKGROUND_STORE_ID_REQUIRED` до claims.
 
 ### 3.2. Внешнее выполнение запрещено
 

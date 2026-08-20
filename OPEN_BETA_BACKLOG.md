@@ -36,6 +36,12 @@
   он не имеет DB/systemd/current-switch capability и проверяется Fast CI.
   Exact SHA `a9858694…` c canary/staging documentation и disposable
   corrupted-artifact test принят Fast CI `32373194554` как `2/2 SUCCESS`.
+  Read-only production unit audit подтвердил active legacy timer и запуск
+  API/Web из mutable checkout с env-файлом внутри checkout. Versioned
+  systemd templates подготовлены локально: exact artifact runtime,
+  `/etc/leetplus/runtime.env` и separate exact-SHA migration unit; их
+  installation, перенос env и отключение legacy timer — только после backup
+  rehearsal и explicit production approval.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta

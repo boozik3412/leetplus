@@ -96,8 +96,15 @@ capability на migration, systemd restart или `current` switch.
    environment-backup-артефакты из checkout в защищённое хранилище. Сначала
    составить PII-free inventory (count, timestamps, SHA-256); не выполнять
    массовое удаление.
-6. Отключить legacy deploy timer на время canary, чтобы `git pull` не мог
-   переписать runtime.
+
+Read-only unit audit дополнительно подтвердил active legacy deploy timer и
+запуск API/Web от `admin` из mutable checkout с environment file внутри
+checkout. Текущие команды запуска зафиксированы как input к rollout, но
+содержимое environment file не читалось. Подготовленные versioned
+[systemd templates](../deployment/production-artifact/systemd/) переносят
+runtime на `/srv/leetplus/current` и secrets в `/etc/leetplus/runtime.env`;
+они не установлены и не меняют production без отдельного approval. 6. Отключить legacy deploy timer на время canary, чтобы `git pull` не мог
+переписать runtime.
 
 ### B. Staging и switch
 

@@ -38,7 +38,29 @@ Legacy `git pull → build → restart` не является допустимы
 процедуры. Замена production timer/unit, перенос sensitive backup residue и
 runtime switch требуют отдельного разрешения владельца production.
 
+## Подготовленные systemd templates
+
+[`systemd/`](./systemd/) содержит versioned templates для API, Web и отдельного
+oneshot migration unit. Они фиксируют runtime на `/srv/leetplus/current`,
+используют non-secret release metadata из `/etc/leetplus/release.env` и требуют
+runtime secrets исключительно из `/etc/leetplus/runtime.env`, вне checkout и
+artifact. Шаблон migration unit получает exact `%i` SHA и не имеет `git`,
+download, install или build capability.
+
+Эти файлы ещё **не установлены** на server. Перед установкой оператор обязан
+сверить текущие units, создать защищённый runtime env из существующей
+конфигурации без вывода secrets, подготовить `/srv/leetplus/releases` и
+`/etc/leetplus/release-env`, выполнить restored-copy rehearsal, затем отдельным
+окном применить reviewed files, `daemon-reload` и проверку rollback. До этого
+legacy deploy timer остаётся production blocker и не должен отключаться
+автоматически.
+
 Минимальный acceptance test `/.github/scripts/test-stage-release-artifact.sh`
 собирает disposable artifact, принимает его и доказывает fail-closed отказ для
 повреждённого archive без созданного release directory. Он выполняется в Fast
 CI и не использует PostgreSQL, systemd или production secrets.
+
+`/.github/scripts/test-production-artifact-systemd-templates.sh` дополнительно
+проверяет, что systemd templates не возвращают legacy checkout, не используют
+secret env из repository и не дают migration unit mutable acquisition/build
+capability.

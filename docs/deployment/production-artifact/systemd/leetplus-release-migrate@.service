@@ -1,0 +1,16 @@
+[Unit]
+Description=LeetPlus exact release migration for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=admin
+Group=admin
+WorkingDirectory=/srv/leetplus/releases/%i
+EnvironmentFile=/etc/leetplus/runtime.env
+EnvironmentFile=/etc/leetplus/release-env/%i.env
+ExecStart=/usr/bin/pnpm --filter database db:deploy
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0027

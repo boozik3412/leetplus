@@ -43,6 +43,8 @@ jobs:
           bash -n docs/deployment/production-artifact/stage-release-artifact.sh
           bash -n .github/scripts/test-stage-release-artifact.sh
           bash .github/scripts/test-stage-release-artifact.sh
+          bash -n .github/scripts/test-production-artifact-systemd-templates.sh
+          bash .github/scripts/test-production-artifact-systemd-templates.sh
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

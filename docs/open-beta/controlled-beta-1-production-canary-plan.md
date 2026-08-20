@@ -1,6 +1,6 @@
 # Controlled Beta-1: production canary и SHA-bound deploy
 
-Статус: `PREPARED / NOT EXECUTED / PRODUCTION NO-GO`.
+Статус: `PREPARED / READ-ONLY PREFLIGHT UPDATED / NOT EXECUTED / PRODUCTION NO-GO`.
 
 Этот документ — обязательная операционная последовательность для первого
 внешнего `Tenant B/Store B1`. Он не разрешает выпуск по ветке, `git pull` или
@@ -9,12 +9,14 @@ release artifact, созданный Full Release Admission для того же
 
 ## Принятый artifact candidate
 
-Full Release Admission
-[`32371530743`](https://github.com/boozik3412/leetplus/actions/runs/32371530743)
-принял SHA `299c5a8b4948ce7483f03a370cb3a3f7d354dc5b` как `4/4 SUCCESS`.
-Artifact `leetplus-release-299c5a8b…` имеет ID `9407707351`, размер
-`28 563 832` bytes и GitHub digest
-`sha256:f91b0ef6130fdf8148af97efa406a93fb6ce5194b9a10a169543137fde28c774`.
+Fast CI [`32383168039`](https://github.com/boozik3412/leetplus/actions/runs/32383168039)
+и Full Release Admission
+[`32383465076`](https://github.com/boozik3412/leetplus/actions/runs/32383465076)
+приняли SHA `d157764254507ead76231a913c1ffa3b5f445ef5` как соответственно
+`2/2 SUCCESS` и `4/4 SUCCESS`. Artifact `leetplus-release-d1577642…` имеет
+GitHub artifact ID `9412379741`; проверенный downloaded raw archive имеет
+`28 563 679` bytes и SHA-256
+`0c8d7202e6afd5b58556b4a74b45842ef7e98fff34358cb00132d1665bafabb9`.
 
 Он был дополнительно скачан в isolated local system-temp directory и принят
 `stage-release-artifact.sh`: внешний checksum, gzip, internal `SHA256SUMS`,
@@ -38,6 +40,14 @@ fix и pre-warm exact lockfile store; fallback на live runtime directory ил�
 а базовые systemd services запущены. При этом production использует legacy
 процедуру, которая обновляет checkout из ветки перед build/restart. Такой
 процесс изменяем и не доказывает связь запущенного кода с CI artifact.
+
+Повторный read-only audit после fresh restored-copy rehearsal подтвердил:
+live runtime всё ещё указывает на legacy checkout, release symlink отсутствует,
+legacy deploy timer enabled, а checkout содержит `30` untracked entries. Их
+имена и содержимое намеренно не читаются и не публикуются. На root filesystem
+остается около `14 GB` свободного места, пока два protected isolated evidence
+copies хранятся до declared retention deadline; дополнительную restored-copy
+репетицию в canary window не создавать.
 
 В рабочем checkout также обнаружены неотслеживаемые backup-артефакты окружения.
 Их имена и содержимое намеренно не вносятся в репозиторий, логи и этот документ.
@@ -101,6 +111,8 @@ capability на migration, systemd restart или `current` switch.
    checksum, время и место хранения в закрытый release record.
 4. Прогнать restored-copy rehearsal этого же artifact, включая миграции,
    rollback и `/health/ready` с pinned migration name/count.
+   Fresh history и runtime-role lifecycle already accepted as isolated evidence:
+   [runtime-role rehearsal](./controlled-beta-1-runtime-role-rehearsal-2026-08-20.md).
 5. В отдельном обслуживаемом окне перенести неотслеживаемые
    environment-backup-артефакты из checkout в защищённое хранилище. Сначала
    составить PII-free inventory (count, timestamps, SHA-256); не выполнять
@@ -174,5 +186,11 @@ invite/session, остановить tenant-specific workers, вернуть `cu
 - проверенный immutable backup и restored-copy rehearsal;
 - отдельный release record с SHA, artifact digest, backup checksum,
   migration metadata, rollback target и результатами readiness.
+
+Read-only `verify-release-readiness.sh` принят Fast CI
+[`32389801010`](https://github.com/boozik3412/leetplus/actions/runs/32389801010)
+для SHA `e9dee8abb8e57fefe32feb75fbf567113c386d50`. Этот инструмент не
+является candidate artifact и не меняет production: он используется только
+после restart будущего exact release для проверки SHA/migration/Web contract.
 
 До выполнения этих пунктов текущий статус остаётся `NO-GO` для внешнего invite.

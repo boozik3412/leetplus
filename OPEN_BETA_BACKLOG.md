@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 20.08.2026
-- Версия: 3.52
+- Версия: 3.53
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -76,8 +76,13 @@
   wrapper boundary, а post-migration manifest дал strict role boundary без
   ослабления controller. Evidence:
   [`controlled-beta-1-runtime-role-rehearsal-2026-08-20.md`](./docs/open-beta/controlled-beta-1-runtime-role-rehearsal-2026-08-20.md).
-  Следующий blocking gate — SHA-bound production canary и production
-  runtime HBA/TLS/SCRAM/dedicated-pool admission; owner invite пока запрещён.
+  Canary preflight теперь использует raw artifact SHA `0c8d7202…` и versioned
+  read-only exact runtime readiness probe (Fast CI `32389801010`). Read-only
+  server audit оставил production services без изменений, но подтвердил legacy
+  checkout/timer, `30` untracked entries и ограниченный disk headroom при
+  retained isolated evidence. Следующий blocking gate — SHA-bound production
+  canary и production runtime HBA/TLS/SCRAM/dedicated-pool admission; owner
+  invite пока запрещён.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta

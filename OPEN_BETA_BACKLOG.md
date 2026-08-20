@@ -34,6 +34,8 @@
   выполняются. Для первоначальной isolated-проверки artifact добавлен
   [`stage-release-artifact.sh`](./docs/deployment/production-artifact/stage-release-artifact.sh):
   он не имеет DB/systemd/current-switch capability и проверяется Fast CI.
+  Exact SHA `a9858694…` c canary/staging documentation и disposable
+  corrupted-artifact test принят Fast CI `32373194554` как `2/2 SUCCESS`.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta

@@ -57,6 +57,13 @@ GitHub digest
 Это допустимый artifact candidate, но не production GO: backup/rehearsal,
 runtime enrollment и canary всё ещё обязательны.
 
+SHA-bound staging tooling и его isolated acceptance test добавлены на
+`a9858694…` и приняты Fast CI
+[`32373194554`](https://github.com/boozik3412/leetplus/actions/runs/32373194554)
+как `2/2 SUCCESS`. Этот documentation/operations SHA не заменяет Full Release
+Admission artifact `299c5a8b…`; он проверяет процедуру подготовки artifact к
+будущему controlled deployment.
+
 ## Critical path до первого invite
 
 1. Получить exact candidate SHA с зелёным Fast CI.

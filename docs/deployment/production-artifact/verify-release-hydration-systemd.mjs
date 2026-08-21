@@ -113,6 +113,7 @@ const STATIC_PROPERTIES = [
   "ReadOnlyPaths",
   "ReadWritePaths",
   "InaccessiblePaths",
+  "MemoryPressureWatch",
   "MemoryMax",
   "MemorySwapMax",
   "TasksMax",

@@ -1193,9 +1193,32 @@ if (!/^[0-9a-f]{64}$/u.test(process.env.LEETPLUS_CHILD_POLICY_SHA256 ?? "")) fai
 requiredEnvironment.set("LEETPLUS_CHILD_POLICY_SHA256", process.env.LEETPLUS_CHILD_POLICY_SHA256);
 const environmentNames = Object.keys(process.env).sort();
 const allowedEnvironmentNames = [...requiredEnvironment.keys(), "INVOCATION_ID"].sort();
-if (JSON.stringify(environmentNames) !== JSON.stringify(allowedEnvironmentNames) ||
-    [...requiredEnvironment].some(([name, value]) => process.env[name] !== value) ||
-    !/^[0-9a-f]{32}$/u.test(process.env.INVOCATION_ID ?? "")) fail(123);
+const unexpectedEnvironmentNames = environmentNames.filter(
+  (name) => !allowedEnvironmentNames.includes(name),
+);
+const missingEnvironmentNames = allowedEnvironmentNames.filter(
+  (name) => !environmentNames.includes(name),
+);
+const mismatchedEnvironmentNames = [...requiredEnvironment]
+  .filter(([name, value]) => process.env[name] !== value)
+  .map(([name]) => name);
+const invocationIdValid = /^[0-9a-f]{32}$/u.test(process.env.INVOCATION_ID ?? "");
+if (unexpectedEnvironmentNames.length !== 0 || missingEnvironmentNames.length !== 0 ||
+    mismatchedEnvironmentNames.length !== 0 || !invocationIdValid) {
+  if (contractMode === "fixture" && unitEvidenceDirectory !== "-") {
+    try {
+      fs.writeFileSync(
+        `${unitEvidenceDirectory}/child-environment-diagnostic.json`,
+        `${JSON.stringify({ invocationIdValid, mismatchedEnvironmentNames,
+          missingEnvironmentNames, unexpectedEnvironmentNames })}\n`,
+        { encoding: "utf8", flag: "wx", mode: 0o600 },
+      );
+    } catch {
+      // Keep the policy exit status authoritative when best-effort diagnostics cannot be persisted.
+    }
+  }
+  fail(123);
+}
 const commandLine = fs.readFileSync("/proc/self/cmdline");
 if (commandLine.length < 32 || commandLine.length > 262144 ||
     commandLine[commandLine.length - 1] !== 0) fail(124);

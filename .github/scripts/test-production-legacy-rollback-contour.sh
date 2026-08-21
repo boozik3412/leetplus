@@ -704,8 +704,12 @@ elif [[ "${1:-}" == -nG && "${2:-}" == leetplus-web-nminus1 ]]; then
 elif [[ "${1:-}" == -un ]]; then
   /usr/bin/id -un
 elif [[ "${1:-}" == -gn ]]; then
-  # MSYS has no stable group-name mapping; stat reports this exact sentinel.
-  printf 'UNKNOWN\n'
+  if [[ "$(uname -s)" == MINGW* ]]; then
+    # MSYS has no stable group-name mapping; stat reports this exact sentinel.
+    printf 'UNKNOWN\n'
+  else
+    /usr/bin/id -gn
+  fi
 else
   exec /usr/bin/id "$@"
 fi

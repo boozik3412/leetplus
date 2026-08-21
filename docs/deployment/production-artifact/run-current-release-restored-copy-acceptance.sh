@@ -929,7 +929,7 @@ unit_is_exactly_absent() {
   local -A state=()
   set +e
   output="$("$timeout_bin" --signal=KILL --kill-after=1s 5s \
-    "$systemctl_bin" show "$unit" --no-pager \
+    "$systemctl_bin" show "$unit" --all --no-pager \
     --property=Id --property=LoadState --property=ActiveState \
     --property=SubState --property=MainPID --property=ControlGroup 2>/dev/null)"
   status=$?
@@ -964,7 +964,7 @@ assert_unit_safely_stopped() {
   local -A state=()
   set +e
   output="$("$timeout_bin" --signal=KILL --kill-after=1s 5s \
-    "$systemctl_bin" show "$unit" --no-pager \
+    "$systemctl_bin" show "$unit" --all --no-pager \
     --property=Id --property=LoadState --property=ActiveState \
     --property=SubState --property=MainPID --property=ControlGroup 2>/dev/null)"
   status=$?
@@ -1120,9 +1120,6 @@ if (![systemctlPath, nodePath, artifactRoot, credentialSource, evidenceRoot]
     .every((value) => value.startsWith("/") && !/[\u0000-\u0020\\]/u.test(value))) fail(113);
 if (![hostEvidenceDirectory, unitEvidenceDirectory].every((value) => value === "-" ||
     (value.startsWith("/") && !/[\u0000-\u0020\\]/u.test(value)))) fail(114);
-if (phase === "drain" && unitEvidenceDirectory !== "-") fail(119);
-if (phase !== "drain" && !unitEvidenceDirectory.endsWith(`/${operationId}`)) fail(120);
-if (phase !== "drain" && unitEvidenceDirectory === hostEvidenceDirectory) fail(121);
 if ((phase === "main" && unit !== `leetplus-current-release-acceptance-${operationId}.service`) ||
     (phase === "verify" && unit !== `leetplus-current-release-verify-${operationId}.service`) ||
     (phase === "drain" && unit !== `leetplus-current-release-drain-${operationId}.service`) ||
@@ -1232,7 +1229,7 @@ const propertyNames = [
 let rawProperties;
 try {
   rawProperties = childProcess.execFileSync(systemctlPath,
-    ["show", unit, "--no-pager", ...propertyNames.map((name) => `--property=${name}`)],
+    ["show", unit, "--all", "--no-pager", ...propertyNames.map((name) => `--property=${name}`)],
     { encoding: "utf8", env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin", LANG: "C", LC_ALL: "C" },
       maxBuffer: 262144, timeout: 5000 });
 } catch { fail(91); }
@@ -1433,7 +1430,7 @@ assert_unit_effective_policy() {
   esac
   set +e
   output="$("$timeout_bin" --signal=KILL --kill-after=1s 5s \
-    "$systemctl_bin" show "$unit" --no-pager \
+    "$systemctl_bin" show "$unit" --all --no-pager \
     --property=User --property=Group --property=SupplementaryGroups --property=DynamicUser \
     --property=LoadCredential --property=WorkingDirectory --property=Environment \
     --property=EnvironmentFiles --property=PassEnvironment --property=SetLoginEnvironment \

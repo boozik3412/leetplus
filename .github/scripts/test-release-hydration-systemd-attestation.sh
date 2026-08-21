@@ -611,7 +611,7 @@ assert_snapshot_property_keys() {
 write_snapshot() {
   local output_path="$1"
   shift
-  local command=(systemctl show)
+  local command=(systemctl show --all)
   local property
   for property in "$@"; do
     command+=("--property=${property}")
@@ -1278,7 +1278,7 @@ write_recovery_snapshot() {
   local output_path="$1"
   local unit="$2"
   shift 2
-  local command=(systemctl show)
+  local command=(systemctl show --all)
   local property
   for property in "$@"; do
     command+=("--property=${property}")

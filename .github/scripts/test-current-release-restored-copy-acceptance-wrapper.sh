@@ -315,7 +315,7 @@ NODE
       drain) ;;
       *) die "privileged fixture phase is invalid: ${phase}" ;;
     esac
-    output="$("$privileged_systemctl" show "$unit" --no-pager \
+    output="$("$privileged_systemctl" show "$unit" --all --no-pager \
       --property=InaccessiblePaths --property=BindPaths --property=BindReadOnlyPaths \
       --property=ReadWritePaths --property=ReadOnlyPaths --property=User --property=Group \
       --property=SupplementaryGroups --property=DynamicUser --property=Id --property=ControlGroup \
@@ -775,7 +775,7 @@ NODE
     --fixture-host-current "$current_directory" --fixture-host-sibling "$sibling_receipt"
   wait_for_fixture_unit_success "$main_unit"
   assert_empty_fixture_unit_cgroup "$main_unit"
-  main_properties="$("$privileged_systemctl" show "$main_unit" --no-pager \
+  main_properties="$("$privileged_systemctl" show "$main_unit" --all --no-pager \
     --property=InaccessiblePaths --property=BindPaths --property=BindReadOnlyPaths \
     --property=ReadWritePaths --property=ReadOnlyPaths --property=User --property=Group \
     --property=SupplementaryGroups --property=DynamicUser --property=Id --property=ControlGroup \
@@ -910,7 +910,7 @@ NODE
     --fixture-host-current "$current_directory" --fixture-host-sibling "$sibling_receipt"
   wait_for_fixture_unit_success "$verify_unit"
   assert_empty_fixture_unit_cgroup "$verify_unit"
-  verify_properties="$("$privileged_systemctl" show "$verify_unit" --no-pager \
+  verify_properties="$("$privileged_systemctl" show "$verify_unit" --all --no-pager \
     --property=InaccessiblePaths --property=BindPaths --property=BindReadOnlyPaths \
     --property=ReadOnlyPaths --property=ReadWritePaths --property=User --property=Group \
     --property=SupplementaryGroups --property=DynamicUser --property=Id --property=ControlGroup \

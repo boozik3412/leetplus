@@ -126,6 +126,6 @@ verify_control_bundle
 env -i \
   PATH="$PATH" \
   LEETPLUS_ROLLBACK_CONTROL_AUTHORITY_MANIFEST_SHA256="$EXPECTED_CONTROL_MANIFEST_SHA256" \
-  /usr/bin/bash -p --noprofile --norc "$INSTALLER" --trusted-authority-install
+  /usr/bin/bash --noprofile --norc -p "$INSTALLER" --trusted-authority-install
 
 printf 'LEGACY_ROLLBACK_CONTROL_AUTHORITY_INSTALLED=true\n'

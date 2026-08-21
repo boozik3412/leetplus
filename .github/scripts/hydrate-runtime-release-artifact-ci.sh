@@ -503,7 +503,7 @@ done
     TZ=UTC \
     CI=true \
     GITHUB_ACTIONS=true \
-    /usr/bin/bash -p --noprofile --norc -c '
+    /usr/bin/bash --noprofile --norc -p -c '
       cd -- "$1"
       shift
       exec "$@"

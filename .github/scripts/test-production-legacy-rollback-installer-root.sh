@@ -338,7 +338,7 @@ chmod 0711 /etc/leetplus/rollback-releases
   || die 'installer did not repair exact planned directory mode'
 
 env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
-  /usr/sbin/runuser -u leetplus-api-nminus1 -- /usr/bin/bash -p --noprofile --norc -c '
+  /usr/sbin/runuser -u leetplus-api-nminus1 -- /usr/bin/bash --noprofile --norc -p -c '
     set -a
     source /etc/leetplus/rollback-runtime.env
     source /etc/leetplus/rollback-releases/7de04ff4ccc814494810730be3fa6bf661097b07.env

@@ -86,7 +86,7 @@ cleanup() {
     fi
   done
   if [[ "$created_adversarial_primary_user" == true ]]; then
-    userdel leetplus-build-primary-adversarial
+    userdel leetplus-build-primary-adv
   fi
   if [[ "$created_adversarial_gid_group" == true ]]; then
     groupdel leetplus-build-gid-adversarial
@@ -317,7 +317,7 @@ done
   || die 'fixture refuses to reuse the production hydration path namespace'
 [[ -z "$(getent passwd leetplus-build)" \
   && -z "$(getent passwd leetplus-build-uid-adversarial)" \
-    && -z "$(getent passwd leetplus-build-primary-adversarial)" \
+    && -z "$(getent passwd leetplus-build-primary-adv)" \
     && -z "$(getent group leetplus-build)" \
     && -z "$(getent group leetplus-build-adversarial)" \
     && -z "$(getent group leetplus-build-gid-adversarial)" \
@@ -409,12 +409,12 @@ created_adversarial_group=false
 assert_fixture_exact_build_identity \
   || die 'canonical build UID identity was not restored'
 useradd --system --no-create-home --home-dir "$TEST_ROOT/no-primary-alias-home" \
-  --shell /usr/sbin/nologin --gid leetplus-build leetplus-build-primary-adversarial
+  --shell /usr/sbin/nologin --gid leetplus-build leetplus-build-primary-adv
 created_adversarial_primary_user=true
 if assert_fixture_exact_build_identity; then
   die 'a second NSS identity with the build primary GID was accepted'
 fi
-userdel leetplus-build-primary-adversarial
+userdel leetplus-build-primary-adv
 created_adversarial_primary_user=false
 assert_fixture_exact_build_identity \
   || die 'canonical build primary-GID identity was not restored'

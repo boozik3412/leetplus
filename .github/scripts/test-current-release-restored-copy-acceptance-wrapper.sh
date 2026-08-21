@@ -81,13 +81,19 @@ if ((EUID != 0)); then
 fi
 
 run_privileged_evidence_isolation_fixture() {
-  local fixture_user='leetplus-evidence-fixture'
-  local fixture_group='leetplus-evidence-fixture'
-  local fixture_runtime_group='leetplus-evidence-runtime'
-  local duplicate_uid_user='leetplus-ev-dupuid' duplicate_uid_group='leetplus-ev-dupuid'
-  local duplicate_gid_group='leetplus-ev-dupgid' duplicate_runtime_gid_group='leetplus-ev-duprun'
-  local foreign_primary_user='leetplus-ev-primary'
-  local privileged_root='' fixture_gid fixture_uid fixture_runtime_gid node_executable
+  fixture_user='leetplus-evidence-fixture'
+  fixture_group='leetplus-evidence-fixture'
+  fixture_runtime_group='leetplus-evidence-runtime'
+  duplicate_uid_user='leetplus-ev-dupuid'
+  duplicate_uid_group='leetplus-ev-dupuid'
+  duplicate_gid_group='leetplus-ev-dupgid'
+  duplicate_runtime_gid_group='leetplus-ev-duprun'
+  foreign_primary_user='leetplus-ev-primary'
+  privileged_root=''
+  fixture_gid=''
+  fixture_uid=''
+  fixture_runtime_gid=''
+  node_executable=''
   local evidence_parent sibling_directory sibling_receipt current_directory current_receipt
   local unit_evidence_parent unit_current_directory unit_current_receipt
   local main_properties verify_properties main_exec_start verify_exec_start
@@ -100,11 +106,15 @@ run_privileged_evidence_isolation_fixture() {
   local drain_unit="leetplus-current-release-drain-evidence01.service"
   local replay_unit="leetplus-current-release-replay-evidence01fixture.service"
   local foreign_process_unit="leetplus-evidence-foreign-process-$$.service"
-  local created_group=false created_runtime_group=false created_user=false
-  local created_duplicate_uid_user=false created_duplicate_uid_group=false
-  local created_duplicate_gid_group=false created_duplicate_runtime_gid_group=false
-  local created_foreign_primary_user=false
-  local -a live_units=("$main_unit" "$verify_unit" "$drain_unit" "$replay_unit" "$foreign_process_unit")
+  created_group=false
+  created_runtime_group=false
+  created_user=false
+  created_duplicate_uid_user=false
+  created_duplicate_uid_group=false
+  created_duplicate_gid_group=false
+  created_duplicate_runtime_gid_group=false
+  created_foreign_primary_user=false
+  live_units=("$main_unit" "$verify_unit" "$drain_unit" "$replay_unit" "$foreign_process_unit")
   local privileged_unset_environment='CURRENT_RELEASE_RESTORED_DATABASE_URL CURRENT_RELEASE_EVIDENCE_HMAC_KEY CURRENT_RELEASE_LOGIN_EMAIL CURRENT_RELEASE_LOGIN_PASSWORD BASH_ENV ENV NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy ftp_proxy all_proxy no_proxy NODE_USE_ENV_PROXY CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_NODE_OPTIONS npm_config_node_options NPM_CONFIG_SCRIPT_SHELL npm_config_script_shell PNPM_HOME COREPACK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM'
 
   [[ "$#" == 0 ]] || die 'privileged evidence-isolation fixture accepts no extra arguments'
@@ -519,7 +529,9 @@ NODE
   fi
   "$privileged_userdel" "$duplicate_uid_user"
   created_duplicate_uid_user=false
-  "$privileged_groupdel" "$duplicate_uid_group"
+  if "$privileged_getent" group "$duplicate_uid_group" >/dev/null 2>&1; then
+    "$privileged_groupdel" "$duplicate_uid_group"
+  fi
   created_duplicate_uid_group=false
   fixture_nss_identity_is_exact || die 'privileged fixture UID cleanup was incomplete'
 

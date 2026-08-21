@@ -373,7 +373,7 @@ if [[ "$unprivileged_test_mode" == false || "${TEST_NSS_ATTESTATION:-false}" == 
     && -z "$api_primary_identities" && -z "$web_primary_identities" ]] \
     || die 'runtime secret-group reverse primary-GID sets are not exact'
   process_status_has_uid() {
-    local status_file="$1" expected_uid="$2" process_directory before_identity after_identity status_content
+    local status_file="$1" expected_uid="$2" process_directory before_identity after_identity status_content status_result
     process_directory="$(dirname -- "$status_file")"
     [[ -d "$process_directory" ]] || return 1
     before_identity="$(stat -Lc '%d:%i:%F' -- "$status_file" 2>/dev/null)" || {
@@ -399,8 +399,9 @@ if [[ "$unprivileged_test_mode" == false || "${TEST_NSS_ATTESTATION:-false}" == 
       END { if (seen != 1) exit 2; exit !match_uid }
     ' <<< "$status_content"; then
       return 0
+    else
+      status_result=$?
     fi
-    local status_result=$?
     [[ "$status_result" == 1 ]] && return 1
     return 2
   }

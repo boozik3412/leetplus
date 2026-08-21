@@ -609,6 +609,26 @@ recovery_common_arguments=(
 )
 
 command_log="$TEST_ROOT/commands.log"
+print_fixture_output() {
+  local output_path="$1"
+  if [[ -f "$output_path" ]]; then
+    awk '{ printf "%s%s", separator, $0; separator=" | " } END { print "" }' \
+      "$output_path" >&2
+  else
+    printf '<missing>\n' >&2
+  fi
+}
+
+assert_active_upstream_target() {
+  local label="$1" expected_target="$2" output_path="$3" actual_target
+  actual_target="$(realpath -e -- "$config_root/active-upstreams.conf" 2>/dev/null || true)"
+  [[ "$actual_target" == "$expected_target" ]] && return 0
+  printf 'blue/green fixture: %s active target differs; expected=%s actual=%s; Output=' \
+    "$label" "$expected_target" "${actual_target:-<unresolved>}" >&2
+  print_fixture_output "$output_path"
+  exit 1
+}
+
 mount_inventory_fixture="$TEST_ROOT/hostile-mount-inventory"
 printf '%s\n' "$state_root/nested-ephemeral-bind" > "$mount_inventory_fixture"
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
@@ -934,7 +954,8 @@ if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$con
   printf 'fixture-requested post-link interruption was unexpectedly accepted\n' >&2
   exit 1
 fi
-test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
+assert_active_upstream_target exit-guard "$config_root/upstreams/legacy-safe.conf" \
+  "$TEST_ROOT/exit-guard.out"
 test -n "$(find "$state_root" -maxdepth 1 -type f -name '*.recovered' -print -quit)"
 test -z "$(find "$state_root" -maxdepth 1 -type f -name '*.intent' -print -quit)"
 
@@ -948,7 +969,8 @@ if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$con
   printf 'post-link durability fault was unexpectedly accepted\n' >&2
   exit 1
 fi
-test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
+assert_active_upstream_target link-mv-fault "$config_root/upstreams/legacy-safe.conf" \
+  "$TEST_ROOT/link-mv-fault.out"
 test -z "$(find "$state_root" -maxdepth 1 -type f -name '*.intent' -print -quit)"
 
 # Intent archival failure is not success. The exact previous link remains
@@ -961,7 +983,8 @@ if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$con
   printf 'intent archival fault was unexpectedly accepted\n' >&2
   exit 1
 fi
-test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
+assert_active_upstream_target archive-fault "$config_root/upstreams/legacy-safe.conf" \
+  "$TEST_ROOT/archive-fault.out"
 test -n "$(find "$state_root" -maxdepth 1 -type f -name '*.intent' -print -quit)"
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
   /usr/bin/bash -p "$CUTOVER" recover-pending "${recovery_common_arguments[@]}" \

@@ -634,6 +634,13 @@ assert_active_upstream_target() {
   printf 'blue/green fixture: %s active target differs; expected=%s actual=%s; Output=' \
     "$label" "$expected_target" "${actual_target:-<unresolved>}" >&2
   print_fixture_output "$output_path"
+  printf 'blue/green fixture: %s Commands=' "$label" >&2
+  if [[ -f "$command_log" ]]; then
+    tail -n 24 -- "$command_log" \
+      | awk '{ printf "%s%s", separator, $0; separator=" | " } END { print "" }' >&2
+  else
+    printf '<missing>\n' >&2
+  fi
   exit 1
 }
 

@@ -890,8 +890,8 @@ set -e
   && "$(systemctl show --property=ExecMainStartTimestampMonotonic --value "$UNIT")" == '0' ]] \
   || die 'foreign build-UID rejection did not happen before hydration main started'
 preflight_execution="$(systemctl show --property=ExecStartPre --value "$UNIT")"
-[[ "$preflight_execution" == *'code=exited ; status=1'* ]] \
-  || die 'root build-UID preflight did not record an exact failure'
+[[ "$preflight_execution" == *'code=exited ; status=77'* ]] \
+  || die "root build-UID preflight did not record the exact foreign-process fence failure; ExecStartPre=${preflight_execution}"
 test -z "$(find -P '/srv/leetplus/release-builds' -mindepth 1 -print -quit)" \
   || die 'foreign build-UID rejection created staging bytes before it failed'
 systemctl reset-failed "$UNIT"

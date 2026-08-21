@@ -315,14 +315,14 @@ assert_exact_build_identity() {
 
 assert_build_uid_process_fence() {
   local fence_mode="$1"
-  local build_uid expected_cgroup current_shell_pid
+  local build_uid expected_cgroup current_shell_pid fence_status
 
   [[ "$fence_mode" == zero || "$fence_mode" == current ]] \
     || die 'build UID process fence mode is invalid'
   build_uid="$(id -u leetplus-build)"
   expected_cgroup="/system.slice/leetplus-release-hydrate@${release_sha}.service"
   current_shell_pid="$BASHPID"
-  if ! /usr/bin/node --input-type=module - \
+  if /usr/bin/node --input-type=module - \
     /proc "$build_uid" "$expected_cgroup" "$fence_mode" \
     "${stager_main_pid:-$current_shell_pid}" "$current_shell_pid" <<'NODE'
 import fs from 'node:fs';
@@ -459,7 +459,12 @@ for (const pid of allowed) {
 }
 NODE
   then
-    die 'foreign or ambiguous leetplus-build UID process/cgroup exists'
+    return 0
+  else
+    fence_status=$?
+    printf 'stage-release-artifact: build UID process fence rejected execution (status %s)\n' \
+      "$fence_status" >&2
+    exit "$fence_status"
   fi
 }
 

@@ -831,7 +831,10 @@ if [[ ! -f "$dropins_marker" ]]; then
   for unit in "${drain_units[@]}"; do
     dropin_directory="${systemd_root}/${unit}.d"
     [[ ! -L "$dropin_directory" ]] || die "legacy unit drop-in directory is symlinked: ${unit}"
-    install -d -m 0755 "$dropin_directory"
+    if [[ ! -e "$dropin_directory" ]]; then
+      mkdir -m 0755 -- "$dropin_directory" \
+        || die "failed to create legacy unit drop-in directory: ${unit}"
+    fi
     attest_start_fence_directory "$dropin_directory"
     dropin_path="${dropin_directory}/90-leetplus-nminus1-start-fence.conf"
     [[ ! -L "$dropin_path" ]] || die "legacy unit start-fence drop-in is symlinked: ${unit}"

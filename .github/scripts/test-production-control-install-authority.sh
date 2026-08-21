@@ -281,6 +281,13 @@ grep -F -x 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=46' "$TEST_ROOT/accepted.out
 run_installed_verifier "$accepted_root" > "$TEST_ROOT/accepted-verify.out"
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' \
   "$TEST_ROOT/accepted-verify.out" >/dev/null
+chmod 0777 -- "$accepted_root"
+if run_installed_verifier "$accepted_root" > "$TEST_ROOT/writable-fixture-root.out" 2>&1; then
+  die 'installed-generation verifier accepted a writable fixture root boundary'
+fi
+grep -F 'trusted ancestor is group/other writable' \
+  "$TEST_ROOT/writable-fixture-root.out" >/dev/null
+chmod 0700 -- "$accepted_root"
 run_installer "$accepted_root" > "$TEST_ROOT/reconciled.out"
 grep -F -x 'PRODUCTION_CONTROL_INSTALL_RECONCILED=true' \
   "$TEST_ROOT/reconciled.out" >/dev/null

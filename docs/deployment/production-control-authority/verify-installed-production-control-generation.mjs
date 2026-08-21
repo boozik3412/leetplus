@@ -78,6 +78,7 @@ const REQUIRED_DESTINATIONS = new Set([
 const compareUtf8 = (left, right) =>
   Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 let totalBytesRead = 0;
+let trustedAuthorityRoot = "/";
 
 function fail(message) {
   throw new Error(`verify-installed-production-control-generation: ${message}`);
@@ -205,13 +206,23 @@ function hostPath(rootPrefix, productionPath) {
 }
 
 function ancestorPaths(absolutePath) {
-  const parsed = path.parse(absolutePath);
-  const components = absolutePath
-    .slice(parsed.root.length)
+  const normalized = path.resolve(absolutePath);
+  if (normalized !== absolutePath) {
+    fail(`trusted authority path is not normalized: ${absolutePath}`);
+  }
+  const relative = path.relative(trustedAuthorityRoot, normalized);
+  if (
+    path.isAbsolute(relative) ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`)
+  ) {
+    fail(`trusted authority path escapes its root boundary: ${absolutePath}`);
+  }
+  const components = relative
     .split(path.sep)
     .filter(Boolean);
-  const ancestors = [parsed.root];
-  let current = parsed.root;
+  const ancestors = [trustedAuthorityRoot];
+  let current = trustedAuthorityRoot;
   for (const component of components) {
     current = path.join(current, component);
     ancestors.push(current);
@@ -643,6 +654,7 @@ const expectedGid = fixtureMode ? process.getgid() : 0;
 const rootPrefix = fixtureMode
   ? canonicalRoot(parsedArguments.fixtureRoot, "fixture root")
   : "/";
+trustedAuthorityRoot = rootPrefix;
 const generationRoot = hostPath(
   rootPrefix,
   `${GENERATION_BASE}/${parsedArguments.releaseSha}`,

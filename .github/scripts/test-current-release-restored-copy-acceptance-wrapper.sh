@@ -1142,7 +1142,7 @@ cleanup() {
   set +e
   if ((cleanup_status != 0)) && [[ -f "${fixture_root}/systemd-argv.log" ]]; then
     printf '%s\n' '--- CURRENT WRAPPER FIXTURE DIAGNOSTIC ---' >&2
-    grep -E '^(---TIMEOUT---|---TIMEOUT-STATUS=|---SYSTEMD-RUN---|---SYSTEMCTL---|show$|--unit=)' \
+    grep -E '^(---TIMEOUT---|---TIMEOUT-STATUS=|---SYSTEMD-RUN---|---SYSTEMCTL---|INACCESSIBLE_PATH_|show$|--unit=)' \
       "${fixture_root}/systemd-argv.log" | tail -n 160 >&2
     find -P "${fixture_root}/control" -maxdepth 1 -type f -name 'unit-policy-*' \
       -printf 'UNIT_POLICY=%f\n' >&2
@@ -1488,7 +1488,11 @@ done
   && "$child_contract_mode" == production \
   && "$child_payload_index" -gt "$command_index" ]] || exit 69
 [[ -f "$credential_file" ]] || exit 71
-[[ "$inaccessible_path" == "${fixture_root}/evidence" ]] || exit 78
+if [[ "$inaccessible_path" != "${fixture_root}/evidence" ]]; then
+  printf 'INACCESSIBLE_PATH_ACTUAL=%q\nINACCESSIBLE_PATH_EXPECTED=%q\n' \
+    "$inaccessible_path" "${fixture_root}/evidence" >> "$log_path"
+  exit 78
+fi
 policy_path="${control_root}/unit-policy-${unit%.service}"
 normalized_bind_path="${bind_path%:norbind}"
 normalized_bind_read_only_path="${bind_read_only_path%:norbind}"

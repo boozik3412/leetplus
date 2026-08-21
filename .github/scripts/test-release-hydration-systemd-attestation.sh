@@ -866,8 +866,8 @@ set -e
 created_exact_hydration_fixture=true
 install -d -o root -g root -m 0755 \
   '/srv/leetplus' \
-  '/srv/leetplus/pnpm-store' \
-  '/run/leetplus-release'
+  '/srv/leetplus/pnpm-store'
+install -d -o root -g leetplus-build -m 0750 '/run/leetplus-release'
 install -d -o root -g leetplus-build -m 0750 '/srv/leetplus/release-inbox'
 install -d -o leetplus-build -g leetplus-build -m 0750 '/srv/leetplus/release-builds'
 install -o root -g leetplus-build -m 0440 \

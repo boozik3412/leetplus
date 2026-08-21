@@ -1203,20 +1203,22 @@ const mismatchedEnvironmentNames = [...requiredEnvironment]
   .filter(([name, value]) => process.env[name] !== value)
   .map(([name]) => name);
 const invocationIdValid = /^[0-9a-f]{32}$/u.test(process.env.INVOCATION_ID ?? "");
+const writeFixturePolicyDiagnostic = (diagnostic) => {
+  if (contractMode !== "fixture" || unitEvidenceDirectory === "-") return;
+  try {
+    fs.writeFileSync(
+      `${unitEvidenceDirectory}/child-policy-diagnostic.json`,
+      `${JSON.stringify(diagnostic)}\n`,
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
+    );
+  } catch {
+    // Keep the policy exit status authoritative when best-effort diagnostics cannot be persisted.
+  }
+};
 if (unexpectedEnvironmentNames.length !== 0 || missingEnvironmentNames.length !== 0 ||
     mismatchedEnvironmentNames.length !== 0 || !invocationIdValid) {
-  if (contractMode === "fixture" && unitEvidenceDirectory !== "-") {
-    try {
-      fs.writeFileSync(
-        `${unitEvidenceDirectory}/child-environment-diagnostic.json`,
-        `${JSON.stringify({ invocationIdValid, mismatchedEnvironmentNames,
-          missingEnvironmentNames, unexpectedEnvironmentNames })}\n`,
-        { encoding: "utf8", flag: "wx", mode: 0o600 },
-      );
-    } catch {
-      // Keep the policy exit status authoritative when best-effort diagnostics cannot be persisted.
-    }
-  }
+  writeFixturePolicyDiagnostic({ stage: "environment", invocationIdValid,
+    mismatchedEnvironmentNames, missingEnvironmentNames, unexpectedEnvironmentNames });
   fail(123);
 }
 const commandLine = fs.readFileSync("/proc/self/cmdline");
@@ -1310,14 +1312,24 @@ const setProperties = new Set(["Environment", "UnsetEnvironment", "Supplementary
 const exactTokenSet = (value) => {
   if (value === "") return [];
   const tokens = value.split(" ");
-  if (tokens.some((token) => token === "") || new Set(tokens).size !== tokens.length) fail(96);
+  if (tokens.some((token) => token === "") || new Set(tokens).size !== tokens.length) return null;
   return tokens.sort((left, right) => Buffer.from(left).compare(Buffer.from(right)));
 };
 for (const [key, value] of expected) {
+  let matches;
   if (setProperties.has(key)) {
-    if (JSON.stringify(exactTokenSet(actual.get(key) ?? "")) !==
-        JSON.stringify(exactTokenSet(value))) fail(96);
-  } else if (actual.get(key) !== value) fail(96);
+    const actualTokens = exactTokenSet(actual.get(key) ?? "");
+    const expectedTokens = exactTokenSet(value);
+    matches = actualTokens !== null && expectedTokens !== null &&
+      JSON.stringify(actualTokens) === JSON.stringify(expectedTokens);
+  } else {
+    matches = actual.get(key) === value;
+  }
+  if (!matches) {
+    writeFixturePolicyDiagnostic({ stage: "effective-property", key,
+      actual: (actual.get(key) ?? "").slice(0, 2048), expected: value.slice(0, 2048) });
+    fail(96);
+  }
 }
 if (payloadMode === "cli") {
   if (payload.length < 2 || !payload[0].startsWith("/") || payload[0] !==

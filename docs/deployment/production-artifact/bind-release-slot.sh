@@ -1260,7 +1260,7 @@ if [[ "$mode" == 'bind' ]]; then
   requested_release_sha="$release_sha"
   requested_target="${release_root}/${release_sha}"
   requested_sha256sums_sha256="$validated_release_sha256sums_sha256"
-  requested_hydrated_sha256sums_sha256="$validated_release_hydrated_sha256s_sha256"
+  requested_hydrated_sha256sums_sha256="$validated_release_hydrated_sha256sums_sha256"
   requested_symlink_manifest_sha256="$validated_release_symlink_manifest_sha256"
   requested_provenance_sha256="$validated_release_provenance_sha256"
   requested_hydration_attestation_sha256="$validated_release_hydration_attestation_sha256"

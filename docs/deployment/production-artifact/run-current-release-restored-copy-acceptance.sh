@@ -1248,7 +1248,6 @@ const propertyNames = [
   "RestrictAddressFamilies", "RootDirectory", "RootImage", "InaccessiblePaths",
   "BindPaths", "BindReadOnlyPaths", "ReadOnlyPaths", "ReadWritePaths", "KillMode",
   "TimeoutStopUSec", "UMask", "StandardOutput", "StandardError", "RuntimeMaxUSec",
-  "ExecStart",
 ];
 let rawProperties;
 try {
@@ -1320,14 +1319,6 @@ for (const [key, value] of expected) {
         JSON.stringify(exactTokenSet(value))) fail(96);
   } else if (actual.get(key) !== value) fail(96);
 }
-const execStart = actual.get("ExecStart") ?? "";
-const execRecordPrefix = `${String.fromCharCode(123)} path=`;
-if (execStart.split(execRecordPrefix).length !== 2 ||
-    !execStart.startsWith(`${execRecordPrefix}${nodePath} ;`) ||
-    !execStart.includes("--leetplus-child-policy-v1") ||
-    !execStart.includes(phase) || !execStart.includes(unit) ||
-    !execStart.includes(`pid=${process.pid}`)) fail(97);
-
 if (payloadMode === "cli") {
   if (payload.length < 2 || !payload[0].startsWith("/") || payload[0] !==
       `${artifactRoot}/packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs`) fail(98);
@@ -1481,7 +1472,7 @@ assert_unit_effective_policy() {
     --property=InaccessiblePaths --property=BindPaths --property=BindReadOnlyPaths \
     --property=ReadOnlyPaths --property=ReadWritePaths --property=KillMode \
     --property=TimeoutStopUSec --property=UMask --property=StandardOutput \
-    --property=StandardError --property=RuntimeMaxUSec --property=ExecStart 2>/dev/null)"
+    --property=StandardError --property=RuntimeMaxUSec 2>/dev/null)"
   status=$?
   set -e
   [[ "$status" == 0 && "${#output}" -le 262144 && ! "$output" =~ $'\r' ]] \
@@ -1492,7 +1483,7 @@ assert_unit_effective_policy() {
     output+=$'\nEnvironmentFiles='
   fi
   while IFS='=' read -r key value; do
-    [[ "$key" =~ ^(User|Group|SupplementaryGroups|DynamicUser|LoadCredential|WorkingDirectory|Environment|EnvironmentFiles|PassEnvironment|SetLoginEnvironment|UnsetEnvironment|NoNewPrivileges|CapabilityBoundingSet|AmbientCapabilities|IPAddressDeny|IPAddressAllow|Delegate|MemoryPressureWatch|PrivateTmp|PrivateDevices|ProtectSystem|ProtectHome|ProtectProc|ProcSubset|ProtectKernelTunables|ProtectKernelModules|ProtectKernelLogs|ProtectControlGroups|ProtectClock|ProtectHostname|LockPersonality|RestrictRealtime|RestrictSUIDSGID|SystemCallArchitectures|RestrictAddressFamilies|RootDirectory|RootImage|InaccessiblePaths|BindPaths|BindReadOnlyPaths|ReadOnlyPaths|ReadWritePaths|KillMode|TimeoutStopUSec|UMask|StandardOutput|StandardError|RuntimeMaxUSec|ExecStart)$ \
+    [[ "$key" =~ ^(User|Group|SupplementaryGroups|DynamicUser|LoadCredential|WorkingDirectory|Environment|EnvironmentFiles|PassEnvironment|SetLoginEnvironment|UnsetEnvironment|NoNewPrivileges|CapabilityBoundingSet|AmbientCapabilities|IPAddressDeny|IPAddressAllow|Delegate|MemoryPressureWatch|PrivateTmp|PrivateDevices|ProtectSystem|ProtectHome|ProtectProc|ProcSubset|ProtectKernelTunables|ProtectKernelModules|ProtectKernelLogs|ProtectControlGroups|ProtectClock|ProtectHostname|LockPersonality|RestrictRealtime|RestrictSUIDSGID|SystemCallArchitectures|RestrictAddressFamilies|RootDirectory|RootImage|InaccessiblePaths|BindPaths|BindReadOnlyPaths|ReadOnlyPaths|ReadWritePaths|KillMode|TimeoutStopUSec|UMask|StandardOutput|StandardError|RuntimeMaxUSec)$ \
       && ! "$value" =~ [[:cntrl:]] && -z "${actual[$key]+present}" ]] \
       || die "systemd unit policy is malformed: ${unit}"
     actual[$key]="$value"
@@ -1548,7 +1539,7 @@ assert_unit_effective_policy() {
     [StandardError]=null
     [RuntimeMaxUSec]="$expected_runtime"
   )
-  [[ "$count" == 49 ]] || die "systemd unit policy property count is not exact: ${unit}"
+  [[ "$count" == 48 ]] || die "systemd unit policy property count is not exact: ${unit}"
   for key in "${!expected[@]}"; do
     [[ "${actual[$key]+present}" == present ]] \
       || die "systemd unit effective policy is missing ${key}: ${unit}"
@@ -1563,7 +1554,13 @@ assert_unit_effective_policy() {
         ;;
     esac
   done
-  exec_start="${actual[ExecStart]}"
+  set +e
+  exec_start="$("$systemctl_bin" show "$unit" --value --property=ExecStart 2>/dev/null)"
+  status=$?
+  set -e
+  [[ "$status" == 0 && -n "$exec_start" && "${#exec_start}" -le 262144 \
+    && ! "$exec_start" =~ $'\r' ]] \
+    || die "systemd unit ExecStart is unavailable or unbounded: ${unit}"
   exec_start_remainder="${exec_start#*'{ path='}"
   [[ "$exec_start_remainder" != "$exec_start" \
     && "${exec_start_remainder#*'{ path='}" == "$exec_start_remainder" \

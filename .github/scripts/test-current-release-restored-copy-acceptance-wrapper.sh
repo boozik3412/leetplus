@@ -1333,17 +1333,27 @@ if [[ "${1:-}" == show ]]; then
   unit="${2:-}"
   [[ "$unit" =~ ^leetplus-current-release-[a-z-]+[a-z0-9]+\.service$ ]] || exit 65
   policy_requested=false
+  exec_start_requested=false
   for argument in "$@"; do
     [[ "$argument" != --property=User ]] || policy_requested=true
+    [[ "$argument" != --property=ExecStart ]] || exec_start_requested=true
   done
   if [[ "$policy_requested" == true ]]; then
     policy_path="${control_root}/unit-policy-${unit%.service}"
     [[ -f "$policy_path" && ! -L "$policy_path" ]] || exit 66
     if [[ -f "${control_root}/test-unit-policy-drift" ]]; then
-      sed 's/^User=leetplus-rehearsal$/User=foreign-user/' "$policy_path"
+      sed 's/^User=leetplus-rehearsal$/User=foreign-user/' "$policy_path" \
+        | grep -v '^ExecStart='
     else
-      cat -- "$policy_path"
+      grep -v '^ExecStart=' "$policy_path"
     fi
+    exit 0
+  fi
+  if [[ "$exec_start_requested" == true ]]; then
+    policy_path="${control_root}/unit-policy-${unit%.service}"
+    [[ -f "$policy_path" && ! -L "$policy_path" ]] || exit 66
+    [[ "$(grep -c '^ExecStart=' "$policy_path")" == 1 ]] || exit 67
+    sed -n 's/^ExecStart=//p' "$policy_path"
     exit 0
   fi
   if [[ -f "${control_root}/test-force-active" ]]; then

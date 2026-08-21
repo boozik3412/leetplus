@@ -376,17 +376,17 @@ if [[ "$unprivileged_test_mode" == false || "${TEST_NSS_ATTESTATION:-false}" == 
     local status_file="$1" expected_uid="$2" process_directory before_identity after_identity status_content status_result
     process_directory="$(dirname -- "$status_file")"
     [[ -d "$process_directory" ]] || return 1
-    before_identity="$(stat -Lc '%d:%i:%F' -- "$status_file" 2>/dev/null)" || {
+    before_identity="$(stat -Lc '%d:%i:%f' -- "$status_file" 2>/dev/null)" || {
       [[ ! -d "$process_directory" ]] && return 1
       return 2
     }
-    [[ "$before_identity" == *':regular file' ]] || return 2
+    [[ "$before_identity" =~ :8[0-9a-f][0-9a-f][0-9a-f]$ ]] || return 2
     status_content="$(timeout --foreground --kill-after=1s 3s \
       dd if="$status_file" iflag=nofollow status=none 2>/dev/null)" || {
       [[ ! -d "$process_directory" ]] && return 1
       return 2
     }
-    after_identity="$(stat -Lc '%d:%i:%F' -- "$status_file" 2>/dev/null)" || {
+    after_identity="$(stat -Lc '%d:%i:%f' -- "$status_file" 2>/dev/null)" || {
       [[ ! -d "$process_directory" ]] && return 1
       return 2
     }

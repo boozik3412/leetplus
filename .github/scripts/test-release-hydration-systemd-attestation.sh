@@ -1485,6 +1485,20 @@ assert_fixture_output_contains() {
   die "fixture diagnostic differs: ${label}; Output=${bounded_output}"
 }
 
+run_promoter_required() {
+  local sha="$1" output_path="$2" label="$3" bounded_output
+  if run_promoter "$sha" "$output_path"; then
+    return 0
+  fi
+  if [[ -f "$output_path" && ! -L "$output_path" ]]; then
+    bounded_output="$(< "$output_path")"
+    bounded_output="${bounded_output:0:2048}"
+  else
+    bounded_output='[output absent or symlinked]'
+  fi
+  die "promoter failed unexpectedly: ${label}; Output=${bounded_output}"
+}
+
 normal_sha='1111111111111111111111111111111111111111'
 prepare_recovery_hydration "$normal_sha"
 chmod 0755 -- "$INSTALLED_GENERATION_VERIFIER"
@@ -1518,9 +1532,9 @@ assert_fixture_output_contains \
 flock -u 9
 exec 9>&-
 
-run_promoter "$normal_sha" "${TEST_ROOT}/promote-normal.out"
+run_promoter_required "$normal_sha" "${TEST_ROOT}/promote-normal.out" promote-normal
 assert_promoted_release "$normal_sha" "${TEST_ROOT}/promote-normal.out"
-run_promoter "$normal_sha" "${TEST_ROOT}/promote-normal-retry.out"
+run_promoter_required "$normal_sha" "${TEST_ROOT}/promote-normal-retry.out" promote-normal-retry
 grep -F -x 'PROMOTED_RELEASE_PUBLICATION_RECONCILED=true' \
   "${TEST_ROOT}/promote-normal-retry.out" >/dev/null \
   || die 'lost normal promotion response was not reconciled idempotently'
@@ -1594,7 +1608,7 @@ rm -rf -- "/srv/leetplus/release-promotions/${normal_sha}"
 post_stop_sha='2222222222222222222222222222222222222222'
 prepare_recovery_hydration "$post_stop_sha"
 publish_fixture_promotion_intent_and_stop "$post_stop_sha"
-run_promoter "$post_stop_sha" "${TEST_ROOT}/promote-post-stop.out"
+run_promoter_required "$post_stop_sha" "${TEST_ROOT}/promote-post-stop.out" promote-post-stop
 assert_promoted_release "$post_stop_sha" "${TEST_ROOT}/promote-post-stop.out"
 grep -F -x 'PROMOTED_RELEASE_PUBLICATION_RECONCILED=true' \
   "${TEST_ROOT}/promote-post-stop.out" >/dev/null \
@@ -1607,7 +1621,7 @@ mv -T -- "/srv/leetplus/release-builds/${post_move_sha}" \
   "/srv/leetplus/release-promotions/${post_move_sha}"
 sync -f '/srv/leetplus/release-builds'
 sync -f '/srv/leetplus/release-promotions'
-run_promoter "$post_move_sha" "${TEST_ROOT}/promote-post-move.out"
+run_promoter_required "$post_move_sha" "${TEST_ROOT}/promote-post-move.out" promote-post-move
 assert_promoted_release "$post_move_sha" "${TEST_ROOT}/promote-post-move.out"
 grep -F -x 'PROMOTED_RELEASE_PUBLICATION_RECONCILED=true' \
   "${TEST_ROOT}/promote-post-move.out" >/dev/null \
@@ -1625,7 +1639,7 @@ chmod 0700 -- "/srv/leetplus/release-promotions/${post_seal_sha}"
   --service-user leetplus-api-blue > "${TEST_ROOT}/precrash-seal.out"
 [[ ! -e "/var/lib/leetplus/deploy-receipts/release-hydration-attestation-${post_seal_sha}.receipt" ]] \
   || die 'precrash seal unexpectedly published the final hydration attestation'
-run_promoter "$post_seal_sha" "${TEST_ROOT}/promote-post-seal.out"
+run_promoter_required "$post_seal_sha" "${TEST_ROOT}/promote-post-seal.out" promote-post-seal
 assert_promoted_release "$post_seal_sha" "${TEST_ROOT}/promote-post-seal.out"
 grep -F -x 'PROMOTED_RELEASE_PUBLICATION_RECONCILED=true' \
   "${TEST_ROOT}/promote-post-seal.out" >/dev/null \

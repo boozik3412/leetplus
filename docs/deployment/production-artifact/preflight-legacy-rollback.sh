@@ -217,7 +217,7 @@ actual_symlinks="$(LC_ALL=C sort <<< "$actual_symlinks_unsorted")" \
 [[ "$expected_symlinks" == "$actual_symlinks" ]] || die 'rollback symlink topology does not match the exact artifact'
 
 if awk '
-  NF != 2 || $1 !~ /^[0-9a-f]{64}$/ || $2 !~ /^\*?\.\/[A-Za-z0-9_.@+\/-]+$/ || $2 ~ /(^|\/)\.\.?(\/|$)/ { exit 1 }
+  NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || $2 !~ /^\*?\.\/[A-Za-z0-9_.@+\/-]+$/ || $2 ~ /(^|\/)\.\.?(\/|$)/ { exit 1 }
 ' "$integrity_manifest"; then
   :
 else

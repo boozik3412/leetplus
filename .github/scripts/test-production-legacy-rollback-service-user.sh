@@ -222,9 +222,15 @@ unshare --mount --propagation private /usr/bin/bash -p -eu -c '
   "$INSTALLED_PREFLIGHT" "$LEGACY_SHA" > /tmp/leetplus-legacy-web-preflight.out
 grep -F -x 'LEGACY_ROLLBACK_PREFLIGHT_RUNTIME=web' /tmp/leetplus-legacy-web-preflight.out >/dev/null
 
-# Wrong group makes the direct service-user read fail closed. Restore it only
-# after the negative assertion so the cleanup and systemd parser can proceed.
+# Wrong group makes the direct service-user read fail closed. Prove that
+# precondition explicitly, then require the earliest content-integrity guard to
+# reject the unreadable overlay. Restore it only after the negative assertion
+# so the cleanup and systemd parser can proceed.
 chown root:root "${LEETPLUS_ETC}/rollback-safe.env"
+if runuser -u leetplus-api-nminus1 -- \
+  /usr/bin/test -r "${LEETPLUS_ETC}/rollback-safe.env"; then
+  die 'wrong-group final overlay remained readable by the service identity'
+fi
 if runuser -u leetplus-api-nminus1 -- env -i \
   "${common_environment[@]}" "${safe_environment_arguments[@]}" \
   'JWT_SECRET=fixture-only-strong-jwt-secret-00000000000000000000000000000000' \
@@ -233,7 +239,7 @@ if runuser -u leetplus-api-nminus1 -- env -i \
   >/tmp/leetplus-legacy-unreadable-preflight.out 2>&1; then
   die 'service-user preflight accepted an unreadable final overlay'
 fi
-grep -F 'final safety overlay must be root:leetplus-runtime mode 0440' \
+grep -F 'final safety overlay does not match the exact complete deny schema' \
   /tmp/leetplus-legacy-unreadable-preflight.out >/dev/null \
   || die 'unreadable-overlay negative failed for a different invariant'
 chown root:leetplus-runtime "${LEETPLUS_ETC}/rollback-safe.env"

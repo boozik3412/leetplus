@@ -152,6 +152,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   verification_libexec="${verification_root}/libexec"
   verification_environment="${verification_root}/environment"
   verification_cache="${verification_root}/cache"
+  verification_node="${verification_root}/node"
   mkdir -p "$verification_slot/apps/api/dist/config" \
     "$verification_slot/apps/web/node_modules/next/dist/bin" \
     "$verification_slot/apps/web/.next/cache" "$verification_libexec" \
@@ -161,6 +162,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   cp "$verification_environment/runtime.env" "$verification_environment/canary-safe.env"
   cp "$verification_environment/runtime.env" "$verification_environment/slots/blue.env"
   for executable in \
+    "$verification_node" \
     "$verification_libexec/preflight-release-slot.sh" \
     "$verification_slot/apps/api/dist/config/validate-production-environment.cli.js" \
     "$verification_slot/apps/api/dist/main.js" \
@@ -169,12 +171,14 @@ if command -v systemd-analyze >/dev/null 2>&1; then
     chmod 0755 "$executable"
   done
   sed -e 's/%i/blue/g' \
+    -e "s#/usr/bin/node#${verification_node}#g" \
     -e "s#/usr/local/libexec/leetplus#${verification_libexec}#g" \
     -e "s#/srv/leetplus/slots/blue#${verification_slot}#g" \
     -e "s#/etc/leetplus#${verification_environment}#g" \
     -e "s#^User=.*#User=$(id -un)#" -e "s#^Group=.*#Group=$(id -gn)#" \
     "$slot_api_unit" > "$verification_root/leetplus-api@blue.service"
   sed -e 's/%i/blue/g' \
+    -e "s#/usr/bin/node#${verification_node}#g" \
     -e "s#/usr/local/libexec/leetplus#${verification_libexec}#g" \
     -e "s#/srv/leetplus/slots/blue#${verification_slot}#g" \
     -e "s#/etc/leetplus#${verification_environment}#g" \

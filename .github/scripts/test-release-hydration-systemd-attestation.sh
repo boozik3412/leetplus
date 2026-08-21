@@ -643,9 +643,11 @@ policy_attestation="$({
     --stager-file "$INSTALLED_STAGER" \
     --phase policy
 })"
-[[ "$(grep -c '^HYDRATION_SYSTEMD_POLICY_VERSION=1$' <<< "$policy_attestation")" == '1' ]]
+[[ "$(grep -c '^HYDRATION_SYSTEMD_POLICY_VERSION=1$' <<< "$policy_attestation")" == '1' ]] \
+  || die 'policy attestation version output is not exact'
 policy_sha256="$(sed -n 's/^HYDRATION_SYSTEMD_POLICY_SHA256=//p' <<< "$policy_attestation")"
-[[ "$policy_sha256" =~ ^[0-9a-f]{64}$ ]]
+[[ "$policy_sha256" =~ ^[0-9a-f]{64}$ ]] \
+  || die 'policy attestation digest output is malformed'
 
 completed_snapshot="${TEST_ROOT}/completed.properties"
 cp -- "$policy_snapshot" "$completed_snapshot"
@@ -1365,7 +1367,8 @@ publish_fixture_promotion_intent_and_stop() {
     && "$policy_sha" =~ ^[0-9a-f]{64}$ ]] \
     || die "fixture completed attestation is malformed for ${sha}"
   control_group="$(systemctl show --property=ControlGroup --value "$unit")"
-  [[ "$control_group" == "/system.slice/${unit}" ]]
+  [[ "$control_group" == "/system.slice/${unit}" ]] \
+    || die "fixture completed control group differs for ${sha}; ControlGroup=${control_group}"
   cgroup_procs="/sys/fs/cgroup${control_group}/cgroup.procs"
   [[ -f "$cgroup_procs" && ! -L "$cgroup_procs" ]] \
     || die "fixture completed cgroup is absent for ${sha}"
@@ -1374,7 +1377,8 @@ publish_fixture_promotion_intent_and_stop() {
   fi
   source_receipt_sha="$(sha256sum -- "$receipt" | awk '{ print $1 }')"
   hydrated_manifest_sha="$(sha256sum -- "${source_directory}/HYDRATED_SHA256SUMS" | awk '{ print $1 }')"
-  [[ ! -e "$record" && ! -L "$record" ]]
+  [[ ! -e "$record" && ! -L "$record" ]] \
+    || die "fixture promotion intent already exists for ${sha}"
   {
     printf 'RECORD_VERSION=1\n'
     printf 'RELEASE_SHA=%s\n' "$sha"
@@ -1396,7 +1400,8 @@ publish_fixture_promotion_intent_and_stop() {
   sync -f "$record"
   sync -f '/var/lib/leetplus/deploy-receipts'
   timeout --foreground --kill-after=5s 20s systemctl stop "$unit"
-  [[ "$(systemctl show --property=ActiveState --value "$unit")" == 'inactive' ]]
+  [[ "$(systemctl show --property=ActiveState --value "$unit")" == 'inactive' ]] \
+    || die "fixture hydration unit did not stop for ${sha}"
 }
 
 assert_promoted_release() {
@@ -1412,8 +1417,10 @@ assert_promoted_release() {
     && "$(stat -c '%U:%G:%a:%h' -- "/var/lib/leetplus/deploy-receipts/release-hydration-attestation-${sha}.receipt")" == \
       'root:root:400:1' ]] \
     || die "promotion did not publish exact sealed state for ${sha}"
-  grep -F -x "PROMOTED_RELEASE_SHA=${sha}" "$output_path" >/dev/null
-  grep -F -x 'PROMOTED_RELEASE_RUNTIME_SWITCHED=false' "$output_path" >/dev/null
+  assert_fixture_output_contains "$output_path" "PROMOTED_RELEASE_SHA=${sha}" \
+    "promoted-release-sha-${sha}"
+  assert_fixture_output_contains "$output_path" \
+    'PROMOTED_RELEASE_RUNTIME_SWITCHED=false' "promoted-release-runtime-${sha}"
 }
 
 run_promoter() {
@@ -1463,7 +1470,19 @@ expect_final_reconciliation_rejected_unchanged() {
   snapshot_final_publication_state "$sha" "$after"
   cmp --silent -- "$before" "$after" \
     || die "failed final reconciliation mutated tree or receipt state: ${label}"
-  grep -F -- "$expected_message" "$output" >/dev/null
+  assert_fixture_output_contains "$output" "$expected_message" "$label"
+}
+
+assert_fixture_output_contains() {
+  local output_path="$1" expected_message="$2" label="$3" bounded_output
+  [[ -f "$output_path" && ! -L "$output_path" ]] \
+    || die "fixture diagnostic output is absent or symlinked: ${label}"
+  if grep -F -- "$expected_message" "$output_path" >/dev/null; then
+    return 0
+  fi
+  bounded_output="$(< "$output_path")"
+  bounded_output="${bounded_output:0:2048}"
+  die "fixture diagnostic differs: ${label}; Output=${bounded_output}"
 }
 
 normal_sha='1111111111111111111111111111111111111111'
@@ -1474,8 +1493,10 @@ chmod 0555 -- "$INSTALLED_GENERATION_VERIFIER"
 if run_promoter "$normal_sha" "${TEST_ROOT}/promoter-generation-verifier-drift.out"; then
   die 'promoter accepted an installed-generation verifier that differed from the receipt pin'
 fi
-grep -F 'installed generation verifier differs from its accepted receipt pin' \
-  "${TEST_ROOT}/promoter-generation-verifier-drift.out" >/dev/null
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promoter-generation-verifier-drift.out" \
+  'installed generation verifier differs from its accepted receipt pin' \
+  promoter-generation-verifier-drift
 [[ -d "/srv/leetplus/release-builds/${normal_sha}" \
   && ! -e "/var/lib/leetplus/deploy-receipts/release-promotion-intent-${normal_sha}.receipt" ]] \
   || die 'installed-generation verifier drift rejection mutated promotion state'
@@ -1487,8 +1508,10 @@ flock -n 9 || die 'fixture could not acquire the production-control install lock
 if run_promoter "$normal_sha" "${TEST_ROOT}/promoter-install-lock-held.out"; then
   die 'promoter ran while another production-control install operation held the lock'
 fi
-grep -F 'another production-control install or promotion operation holds the install lock' \
-  "${TEST_ROOT}/promoter-install-lock-held.out" >/dev/null
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promoter-install-lock-held.out" \
+  'another production-control install or promotion operation holds the install lock' \
+  promoter-install-lock-held
 [[ -d "/srv/leetplus/release-builds/${normal_sha}" \
   && ! -e "/var/lib/leetplus/deploy-receipts/release-promotion-intent-${normal_sha}.receipt" ]] \
   || die 'production-control install lock rejection mutated promotion state'
@@ -1538,8 +1561,10 @@ chown root:leetplus-runtime '/srv/leetplus/releases'
 if run_promoter "$normal_sha" "${TEST_ROOT}/promoter-final-root-group-negative.out"; then
   die 'promoter accepted a final releases root without exact root group authority'
 fi
-grep -F 'release root must be root:root and non-writable by group/other' \
-  "${TEST_ROOT}/promoter-final-root-group-negative.out" >/dev/null
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promoter-final-root-group-negative.out" \
+  'release root must be root:root and non-writable by group/other' \
+  promoter-final-root-group-negative
 if "$INSTALLED_SEALER" --release-sha "$normal_sha" \
   --release-root '/srv/leetplus/releases' \
   --service-user leetplus-api-blue > "${TEST_ROOT}/sealer-final-group-negative.out" 2>&1; then
@@ -1598,7 +1623,8 @@ chmod 0700 -- "/srv/leetplus/release-promotions/${post_seal_sha}"
 "$INSTALLED_SEALER" --release-sha "$post_seal_sha" \
   --release-root '/srv/leetplus/release-promotions' \
   --service-user leetplus-api-blue > "${TEST_ROOT}/precrash-seal.out"
-[[ ! -e "/var/lib/leetplus/deploy-receipts/release-hydration-attestation-${post_seal_sha}.receipt" ]]
+[[ ! -e "/var/lib/leetplus/deploy-receipts/release-hydration-attestation-${post_seal_sha}.receipt" ]] \
+  || die 'precrash seal unexpectedly published the final hydration attestation'
 run_promoter "$post_seal_sha" "${TEST_ROOT}/promote-post-seal.out"
 assert_promoted_release "$post_seal_sha" "${TEST_ROOT}/promote-post-seal.out"
 grep -F -x 'PROMOTED_RELEASE_PUBLICATION_RECONCILED=true' \
@@ -1614,13 +1640,17 @@ if "$STAGER_SOURCE" --release-sha "$mount_sha" --preflight-build-uid-fence \
   > "${TEST_ROOT}/stager-gid-alias.out" 2>&1; then
   die 'production stager accepted a second NSS group aliasing the build GID'
 fi
-grep -F 'another NSS group aliases the leetplus-build GID' \
-  "${TEST_ROOT}/stager-gid-alias.out" >/dev/null
+assert_fixture_output_contains \
+  "${TEST_ROOT}/stager-gid-alias.out" \
+  'another NSS group aliases the leetplus-build GID' \
+  stager-gid-alias
 if run_promoter "$mount_sha" "${TEST_ROOT}/promoter-gid-alias.out" 2>&1; then
   die 'production promoter accepted a second NSS group aliasing the build GID'
 fi
-grep -F 'another NSS group aliases the leetplus-build GID' \
-  "${TEST_ROOT}/promoter-gid-alias.out" >/dev/null
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promoter-gid-alias.out" \
+  'another NSS group aliases the leetplus-build GID' \
+  promoter-gid-alias
 [[ -d "/srv/leetplus/release-builds/${mount_sha}" \
   && ! -e "/var/lib/leetplus/deploy-receipts/release-promotion-intent-${mount_sha}.receipt" ]] \
   || die 'build-GID alias rejection mutated promotion state'
@@ -1633,8 +1663,10 @@ chown leetplus-build:leetplus-build \
 if run_promoter "$mount_sha" "${TEST_ROOT}/promoter-unlisted-file.out"; then
   die 'promoter accepted a regular file absent from HYDRATED_SHA256SUMS'
 fi
-grep -F 'hydrated artifact manifest path set is not canonical and exact' \
-  "${TEST_ROOT}/promoter-unlisted-file.out" >/dev/null
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promoter-unlisted-file.out" \
+  'hydrated artifact manifest path set is not canonical and exact' \
+  promoter-unlisted-file
 [[ -d "/srv/leetplus/release-builds/${mount_sha}" \
   && ! -e "/var/lib/leetplus/deploy-receipts/release-promotion-intent-${mount_sha}.receipt" ]] \
   || die 'unlisted-file rejection mutated promotion state'
@@ -1652,8 +1684,10 @@ for exact_mount_target in \
   if run_promoter "$mount_sha" "${TEST_ROOT}/promote-exact-mount-${exact_mount_label}.out"; then
     die "promoter accepted exact managed-root bind mount: ${exact_mount_target}"
   fi
-  grep -F 'managed promotion boundary contains an exact or candidate/receipt nested mountpoint' \
-    "${TEST_ROOT}/promote-exact-mount-${exact_mount_label}.out" >/dev/null
+  assert_fixture_output_contains \
+    "${TEST_ROOT}/promote-exact-mount-${exact_mount_label}.out" \
+    'managed promotion boundary contains an exact or candidate/receipt nested mountpoint' \
+    "promote-exact-mount-${exact_mount_label}"
   umount -- "$exact_mount_target"
   unset "active_mounts[$((${#active_mounts[@]} - 1))]"
 done
@@ -1668,8 +1702,10 @@ active_mounts+=("$candidate_mount")
 if run_promoter "$mount_sha" "${TEST_ROOT}/promote-candidate-mount.out" 2>&1; then
   die 'promoter accepted a nested candidate bind mount'
 fi
-grep -F 'managed promotion boundary contains an exact or candidate/receipt nested mountpoint' \
-  "${TEST_ROOT}/promote-candidate-mount.out" >/dev/null
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promote-candidate-mount.out" \
+  'managed promotion boundary contains an exact or candidate/receipt nested mountpoint' \
+  promote-candidate-mount
 [[ -d "/srv/leetplus/release-builds/${mount_sha}" \
   && ! -e "/var/lib/leetplus/deploy-receipts/release-promotion-intent-${mount_sha}.receipt" ]] \
   || die 'candidate mount rejection mutated promotion state'
@@ -1684,8 +1720,10 @@ active_mounts+=("$receipt_mount_target")
 if run_promoter "$mount_sha" "${TEST_ROOT}/promote-receipt-mount.out" 2>&1; then
   die 'promoter accepted a nested receipt bind mount'
 fi
-grep -F 'managed promotion boundary contains an exact or candidate/receipt nested mountpoint' \
-  "${TEST_ROOT}/promote-receipt-mount.out" >/dev/null
+assert_fixture_output_contains \
+  "${TEST_ROOT}/promote-receipt-mount.out" \
+  'managed promotion boundary contains an exact or candidate/receipt nested mountpoint' \
+  promote-receipt-mount
 [[ -d "/srv/leetplus/release-builds/${mount_sha}" \
   && ! -e "/var/lib/leetplus/deploy-receipts/release-promotion-intent-${mount_sha}.receipt" ]] \
   || die 'receipt mount rejection mutated promotion state'

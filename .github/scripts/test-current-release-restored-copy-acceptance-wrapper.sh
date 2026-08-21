@@ -1170,8 +1170,10 @@ grep -F -- '--leetplus-child-policy-v1' "$WRAPPER" >/dev/null \
   || die 'production wrapper does not gate runtime children before CLI/drain execution'
 grep -F 'const uidSet = readStatusIds("Uid");' "$WRAPPER" >/dev/null \
   || die 'production child gate does not attest real/effective/saved/fs identity'
-grep -F 'JSON.stringify(environmentNames) !== JSON.stringify(allowedEnvironmentNames)' \
+grep -F 'unexpectedEnvironmentNames.length !== 0 || missingEnvironmentNames.length !== 0 ||' \
   "$WRAPPER" >/dev/null \
+  && grep -F 'mismatchedEnvironmentNames.length !== 0 || !invocationIdValid) {' \
+    "$WRAPPER" >/dev/null \
   || die 'production child gate does not enforce an exact environment allowlist'
 grep -F 'sourceDigest !== process.env.LEETPLUS_CHILD_POLICY_SHA256' "$WRAPPER" >/dev/null \
   || die 'production child gate does not bind its actual eval source digest'

@@ -748,6 +748,8 @@ test("SQL role attestation covers ownership and effective PUBLIC privileges", ()
   ]) {
     assert.match(sql, pattern);
   }
+  assert.match(sql, /aclexplode\(attribute\.attacl\)/u);
+  assert.doesNotMatch(sql, /COALESCE\(attribute\.attacl/u);
   assert.doesNotMatch(sql, /namespace\.oid >= 16384/u);
   assert.doesNotMatch(sql, /WHERE acl\.grantor = routine\.proowner/u);
   assert.equal(accessScopeClassificationInternals.posixPermissionMask, 0o7777);

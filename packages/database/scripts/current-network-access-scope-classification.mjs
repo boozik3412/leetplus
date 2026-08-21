@@ -2563,9 +2563,7 @@ const IDENTITY_SQL = `
       ON relation.oid = attribute.attrelid
     INNER JOIN candidate_namespaces AS namespace
       ON namespace."oid" = relation.relnamespace
-    CROSS JOIN LATERAL pg_catalog.aclexplode(
-      COALESCE(attribute.attacl, '{}'::aclitem[])
-    ) AS acl
+    CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) AS acl
     INNER JOIN trusted_lock_owner AS owner ON owner.oid = acl.grantee
     WHERE attribute.attnum > 0 AND NOT attribute.attisdropped
   ), effective_lock_owner_column_grants(

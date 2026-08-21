@@ -1667,8 +1667,8 @@ prepare_recovery_hydration "$mount_sha"
 groupadd --system --non-unique --gid "$(id -g leetplus-build)" \
   leetplus-build-gid-adversarial
 created_adversarial_gid_group=true
-if /usr/bin/bash -p "$STAGER_SOURCE" \
-  --release-sha "$mount_sha" --preflight-build-uid-fence \
+install -o root -g root -m 0755 "$STAGER_SOURCE" "$INSTALLED_STAGER"
+if "$INSTALLED_STAGER" --release-sha "$mount_sha" --preflight-build-uid-fence \
   > "${TEST_ROOT}/stager-gid-alias.out" 2>&1; then
   die 'production stager accepted a second NSS group aliasing the build GID'
 fi
@@ -1676,6 +1676,7 @@ assert_fixture_output_contains \
   "${TEST_ROOT}/stager-gid-alias.out" \
   'another NSS group aliases the leetplus-build GID' \
   stager-gid-alias
+install -o root -g root -m 0755 "$fake_stager" "$INSTALLED_STAGER"
 if run_promoter "$mount_sha" "${TEST_ROOT}/promoter-gid-alias.out" 2>&1; then
   die 'production promoter accepted a second NSS group aliasing the build GID'
 fi

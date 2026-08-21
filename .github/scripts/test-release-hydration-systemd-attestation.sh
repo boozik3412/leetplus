@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -Eeuo pipefail
+set -euo pipefail
 IFS=$'\n\t'
 umask 0077
 
@@ -193,7 +193,6 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-trap 'status=$?; printf "test-release-hydration-systemd-attestation: unexpected failure at line=%s status=%s command=%q\n" "$LINENO" "$status" "$BASH_COMMAND" >&2; exit "$status"' ERR
 
 die() {
   printf 'test-release-hydration-systemd-attestation: %s\n' "$*" >&2
@@ -1283,6 +1282,8 @@ prepare_recovery_hydration() {
   local sha="$1"
   local unit="leetplus-release-hydrate@${sha}.service"
   local start_status active_state sub_state result exec_main_status preflight journal_tail
+  set -E
+  trap 'status=$?; printf "test-release-hydration-systemd-attestation: recovery failure at line=%s status=%s command=%q\n" "$LINENO" "$status" "$BASH_COMMAND" >&2; exit "$status"' ERR
   install -o root -g leetplus-build -m 0440 /dev/null \
     "/srv/leetplus/release-inbox/leetplus-release-${sha}.tar.gz"
   install -o root -g leetplus-build -m 0440 /dev/null \
@@ -1293,11 +1294,12 @@ prepare_recovery_hydration() {
     > "/srv/leetplus/release-inbox/leetplus-release-${sha}.tar.gz.sha256"
   live_units+=("$unit")
   systemctl reset-failed "$unit" >/dev/null 2>&1 || true
-  set +e
-  timeout --foreground --kill-after=5s 30s systemctl start "$unit" \
-    > "${TEST_ROOT}/recovery-hydration-${sha}.out" 2>&1
-  start_status=$?
-  set -e
+  if timeout --foreground --kill-after=5s 30s systemctl start "$unit" \
+    > "${TEST_ROOT}/recovery-hydration-${sha}.out" 2>&1; then
+    start_status=0
+  else
+    start_status=$?
+  fi
   active_state="$(systemctl show --property=ActiveState --value "$unit" 2>/dev/null || true)"
   sub_state="$(systemctl show --property=SubState --value "$unit" 2>/dev/null || true)"
   result="$(systemctl show --property=Result --value "$unit" 2>/dev/null || true)"
@@ -1310,6 +1312,8 @@ prepare_recovery_hydration() {
     die "fixture hydration did not complete for ${sha}; StartStatus=${start_status}; ActiveState=${active_state}; SubState=${sub_state}; Result=${result}; ExecMainStatus=${exec_main_status}; ExecStartPre=${preflight}; Journal=${journal_tail}"
   fi
   prepare_fixture_production_control_generation "$sha"
+  trap - ERR
+  set +E
 }
 
 write_recovery_snapshot() {

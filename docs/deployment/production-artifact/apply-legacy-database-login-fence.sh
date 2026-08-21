@@ -43,12 +43,21 @@ die() { printf 'apply-legacy-database-login-fence: %s\n' "$*" >&2; exit 1; }
 pg_service_file='/etc/leetplus/pg_service.conf'
 pg_service='leetplus-drain-fence'
 database_target='/etc/leetplus/legacy-drain-database-target.conf'
+test_database_server_address=''
+test_database_server_address_set=false
 test_mode=false
 while (($# > 0)); do
   case "$1" in
     --pg-service-file) pg_service_file="${2:-}"; shift 2 ;;
     --pg-service) pg_service="${2:-}"; shift 2 ;;
     --database-target) database_target="${2:-}"; shift 2 ;;
+    --test-database-server-address)
+      [[ "$test_database_server_address_set" == false ]] \
+        || die 'test database server address was specified more than once'
+      test_database_server_address_set=true
+      test_database_server_address="${2:-}"
+      shift 2
+      ;;
     --unprivileged-test-mode) test_mode=true; shift ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -57,8 +66,17 @@ if [[ "$test_mode" == true ]]; then
   ((EUID != 0)) || die 'unprivileged test mode is forbidden for root'
   PATH="$LEETPLUS_BOOTSTRAP_TEST_PATH"
   export PATH
+  expected_database_server_address='127.0.0.1'
+  if [[ "$test_database_server_address_set" == true ]]; then
+    expected_database_server_address="$test_database_server_address"
+  fi
+  [[ "$expected_database_server_address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] \
+    || die 'test database server address must be an exact IPv4 literal'
 else
   ((EUID == 0)) || die 'production database fence requires root'
+  [[ "$test_database_server_address_set" == false ]] \
+    || die 'production database server address cannot be overridden'
+  expected_database_server_address='127.0.0.1'
   [[ "$pg_service_file" == '/etc/leetplus/pg_service.conf' && "$pg_service" == 'leetplus-drain-fence' \
     && "$database_target" == '/etc/leetplus/legacy-drain-database-target.conf' ]] \
     || die 'production database-fence inputs cannot be overridden'
@@ -84,7 +102,7 @@ while IFS='=' read -r key value; do
   target[$key]="$value"
 done < "$database_target"
 [[ "${target[DATABASE_NAME]:-}" == leetplus \
-  && "${target[DATABASE_SERVER_ADDRESS]:-}" == 127.0.0.1 \
+  && "${target[DATABASE_SERVER_ADDRESS]:-}" == "$expected_database_server_address" \
   && "${target[DATABASE_SERVER_PORT]:-}" == 5432 \
   && "${target[DATABASE_SYSTEM_IDENTIFIER]:-}" =~ ^[1-9][0-9]{15,24}$ \
   && "${target[FENCE_SESSION_USER]:-}" == leetplus_role_fencer \
@@ -94,7 +112,7 @@ done < "$database_target"
   && ${#target[@]} == 9 ]] \
   || die 'database fence target identity is incomplete or noncanonical'
 
-result="$(timeout --foreground --kill-after=3s 30s env \
+result="$(timeout --kill-after=3s 30s env \
   PGCONNECT_TIMEOUT=5 \
   PGOPTIONS='-c statement_timeout=15000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=15000' \
   PGSERVICEFILE="$pg_service_file" PGSERVICE="$pg_service" \

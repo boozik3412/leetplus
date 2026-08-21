@@ -70,6 +70,8 @@ SQL
 
 system_identifier="$("${psql_admin[@]}" --tuples-only --no-align --command='SELECT system_identifier FROM pg_catalog.pg_control_system()')"
 [[ "$system_identifier" =~ ^[1-9][0-9]{15,24}$ ]]
+database_server_address="$("${psql_admin[@]}" --tuples-only --no-align --command='SELECT inet_server_addr()::text')"
+[[ "$database_server_address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]
 cat > "$TEST_ROOT/pg_service.conf" <<'PGSERVICE'
 [leetplus-drain-fence]
 host=127.0.0.1
@@ -81,7 +83,7 @@ sslmode=disable
 PGSERVICE
 cat > "$TEST_ROOT/database-target.conf" <<TARGET
 DATABASE_NAME=leetplus
-DATABASE_SERVER_ADDRESS=127.0.0.1
+DATABASE_SERVER_ADDRESS=${database_server_address}
 DATABASE_SERVER_PORT=5432
 DATABASE_SYSTEM_IDENTIFIER=${system_identifier}
 AUDIT_SESSION_USER=leetplus_drain_audit
@@ -96,6 +98,7 @@ run_fence() {
     --pg-service-file "$TEST_ROOT/pg_service.conf" \
     --pg-service leetplus-drain-fence \
     --database-target "$TEST_ROOT/database-target.conf" \
+    --test-database-server-address "$database_server_address" \
     --unprivileged-test-mode
 }
 legacy_login() {
@@ -126,15 +129,15 @@ expect_direct_fence_rejected() {
 # fail closed. Plain `IF NOT (predicate)` treats SQL NULL as neither true nor
 # false and used to reach ALTER ROLE; `IS NOT TRUE` must reject all five cases.
 expect_direct_fence_rejected null-database \
-  "NULL::text, '127.0.0.1', 5432, '${system_identifier}', 'leetplus_role_fencer'"
+  "NULL::text, '${database_server_address}', 5432, '${system_identifier}', 'leetplus_role_fencer'"
 expect_direct_fence_rejected null-address \
   "'leetplus', NULL::text, 5432, '${system_identifier}', 'leetplus_role_fencer'"
 expect_direct_fence_rejected null-port \
-  "'leetplus', '127.0.0.1', NULL::integer, '${system_identifier}', 'leetplus_role_fencer'"
+  "'leetplus', '${database_server_address}', NULL::integer, '${system_identifier}', 'leetplus_role_fencer'"
 expect_direct_fence_rejected null-system-identifier \
-  "'leetplus', '127.0.0.1', 5432, NULL::text, 'leetplus_role_fencer'"
+  "'leetplus', '${database_server_address}', 5432, NULL::text, 'leetplus_role_fencer'"
 expect_direct_fence_rejected null-session-user \
-  "'leetplus', '127.0.0.1', 5432, '${system_identifier}', NULL::text"
+  "'leetplus', '${database_server_address}', 5432, '${system_identifier}', NULL::text"
 
 # The GitHub PostgreSQL 16 service exposes TCP to the runner, but its real Unix
 # socket remains inside the service container. Prove that the connection really
@@ -165,7 +168,7 @@ socket_identity="$(
 if docker exec --env PGPASSWORD=fencer-fixture "$postgres_service_containers" \
   psql -h /var/run/postgresql -p 5432 -U leetplus_role_fencer -d leetplus \
     --no-psqlrc --set=ON_ERROR_STOP=1 \
-    --command="SELECT leetplus_ops.apply_nminus1_legacy_login_fence('leetplus', '127.0.0.1', 5432, '${system_identifier}', 'leetplus_role_fencer')" \
+    --command="SELECT leetplus_ops.apply_nminus1_legacy_login_fence('leetplus', '${database_server_address}', 5432, '${system_identifier}', 'leetplus_role_fencer')" \
     >"$TEST_ROOT/unix-socket.out" 2>&1; then
   printf 'Unix-socket database fence was unexpectedly accepted as the TCP target\n' >&2
   exit 1
@@ -181,7 +184,8 @@ sed "s/DATABASE_SYSTEM_IDENTIFIER=.*/DATABASE_SYSTEM_IDENTIFIER=9999999999999999
   "$TEST_ROOT/database-target.conf" > "$TEST_ROOT/wrong-target.conf"
 if env -u PGPASSWORD PATH="$PATH" /usr/bin/bash -p "$FENCE" \
   --pg-service-file "$TEST_ROOT/pg_service.conf" --pg-service leetplus-drain-fence \
-  --database-target "$TEST_ROOT/wrong-target.conf" --unprivileged-test-mode \
+  --database-target "$TEST_ROOT/wrong-target.conf" \
+  --test-database-server-address "$database_server_address" --unprivileged-test-mode \
   >"$TEST_ROOT/wrong-target.out" 2>&1; then
   printf 'wrong-target fence was unexpectedly accepted\n' >&2
   exit 1

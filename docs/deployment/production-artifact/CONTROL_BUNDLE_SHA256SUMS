@@ -1,5 +1,5 @@
 dc96e8573f54ef30ef4e88439188524d0d193897a77099975555bbf5659f7467  ./activate-legacy-rollback-contour.sh
-cd5359edbc0e836d880c2f20fa682a375b8e0c2779d0f1f8ff9a80458b17ac41  ./apply-legacy-database-login-fence.sh
+b6c135843eb8d5baacb2e357f27702e8606b7d85b948ef1fbd4ef4090c253cb9  ./apply-legacy-database-login-fence.sh
 81edbc91a908a6e1c9100266e162c1eca60292cdcfef4b43f5a28e061bc1db6f  ./apply-legacy-rollback-egress.sh
 ff13de67d18dd6a3a433d5b0aa6d469a08af615980027efd9707bb04850cb574  ./blue-green-cutover.sh
 66e6187f5d078e109a7df769d77946b74f7c5f48e6243ee48481f0cf11e25c3a  ./install-legacy-rollback-contour.sh

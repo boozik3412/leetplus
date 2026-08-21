@@ -255,12 +255,13 @@ run_privileged_evidence_isolation_fixture() {
   }
 
   wait_for_fixture_unit_success() {
-    local unit="$1" attempt active_state sub_state result status
+    local unit="$1" attempt active_state sub_state result status exec_code
     for attempt in {1..100}; do
       active_state="$("$privileged_systemctl" show "$unit" --value --property=ActiveState 2>/dev/null || true)"
       sub_state="$("$privileged_systemctl" show "$unit" --value --property=SubState 2>/dev/null || true)"
       result="$("$privileged_systemctl" show "$unit" --value --property=Result 2>/dev/null || true)"
       status="$("$privileged_systemctl" show "$unit" --value --property=ExecMainStatus 2>/dev/null || true)"
+      exec_code="$("$privileged_systemctl" show "$unit" --value --property=ExecMainCode 2>/dev/null || true)"
       if [[ "$active_state" == active && "$sub_state" == exited \
         && "$result" == success && "$status" == 0 ]]; then
         return 0
@@ -270,7 +271,7 @@ run_privileged_evidence_isolation_fixture() {
       fi
       "$privileged_sleep" 0.05
     done
-    die "privileged evidence-isolation unit did not finish successfully: ${unit}"
+    die "privileged evidence-isolation unit did not finish successfully: ${unit}; ActiveState=${active_state}; SubState=${sub_state}; Result=${result}; ExecMainCode=${exec_code}; ExecMainStatus=${status}"
   }
 
   assert_empty_fixture_unit_cgroup() {

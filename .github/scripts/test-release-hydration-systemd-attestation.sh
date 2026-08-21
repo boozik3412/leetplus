@@ -434,6 +434,28 @@ assert_fixture_exact_build_identity \
   || die 'canonical build GID group identity was not restored'
 assert_fixture_no_build_identity_processes \
   || die 'fresh build identity unexpectedly owns a process'
+
+# The installed stager deliberately replaces an inherited PATH with the exact
+# production PATH, so provision the reviewed CI Node bytes there before the
+# first production-mode staging exercise.
+authority_node="$(realpath -e -- "$(command -v node)")"
+[[ "$($authority_node -p 'process.versions.node.split(".")[0]')" == '22' ]] \
+  || die 'fixture authority Node is not major 22'
+if [[ ! -f /usr/bin/node || -L /usr/bin/node \
+  || "$(stat -c '%u:%g' -- /usr/bin/node 2>/dev/null || true)" != '0:0' \
+  || "$(/usr/bin/node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)" != '22' ]]; then
+  if [[ -e /usr/bin/node || -L /usr/bin/node ]]; then
+    mv -- /usr/bin/node "${TEST_ROOT}/system-node.original"
+    original_system_node_present=true
+  fi
+  replaced_system_node=true
+  install -o root -g root -m 0755 "$authority_node" /usr/bin/node
+fi
+[[ -f /usr/bin/node && ! -L /usr/bin/node \
+  && "$(stat -c '%u:%g' -- /usr/bin/node)" == '0:0' \
+  && "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == '22' ]] \
+  || die 'fixture could not provision exact root-owned /usr/bin/node major 22'
+
 if [[ ! -d /usr/local/libexec/leetplus ]]; then
   install -d -o root -g root -m 0755 /usr/local/libexec/leetplus
   created_libexec_directory=true
@@ -963,24 +985,6 @@ rm -f -- "$HOSTILE_UNIX_SOCKET"
 # Exercise the real promoter state machine with a deterministic test-only
 # hydration producer. The installed attestor remains the production verifier;
 # only its stager digest pin is rebuilt for these explicitly disposable bytes.
-authority_node="$(realpath -e -- "$(command -v node)")"
-[[ "$($authority_node -p 'process.versions.node.split(".")[0]')" == '22' ]] \
-  || die 'recovery fixture authority Node is not major 22'
-if [[ ! -f /usr/bin/node || -L /usr/bin/node \
-  || "$(stat -c '%u:%g' -- /usr/bin/node 2>/dev/null || true)" != '0:0' \
-  || "$(/usr/bin/node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)" != '22' ]]; then
-  if [[ -e /usr/bin/node || -L /usr/bin/node ]]; then
-    mv -- /usr/bin/node "${TEST_ROOT}/system-node.original"
-    original_system_node_present=true
-  fi
-  replaced_system_node=true
-  install -o root -g root -m 0755 "$authority_node" /usr/bin/node
-fi
-[[ -f /usr/bin/node && ! -L /usr/bin/node \
-  && "$(stat -c '%u:%g' -- /usr/bin/node)" == '0:0' \
-  && "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == '22' ]] \
-  || die 'recovery fixture could not provision exact root-owned /usr/bin/node major 22'
-
 groupadd --system leetplus-runtime
 created_runtime_group=true
 useradd --system --no-create-home --home-dir "${TEST_ROOT}/no-api-home" \

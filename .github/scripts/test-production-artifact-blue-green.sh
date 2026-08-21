@@ -470,7 +470,7 @@ cat > "$bin_root/nginx" <<'NGINX'
 set -euo pipefail
 printf 'nginx %s\n' "$*" >> "${TEST_COMMAND_LOG:?}"
 active_target="$(realpath -e -- "${TEST_ACTIVE_LINK:?}")"
-if [[ "${TEST_NGINX_FAIL:-false}" == true ]]; then
+if [[ "${TEST_NGINX_FAIL:-false}" == true && "$active_target" == */green.conf ]]; then
   exit 71
 fi
 NGINX
@@ -1105,7 +1105,13 @@ if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$con
   exit 1
 fi
 test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
-test -n "$(find "$state_root" -maxdepth 1 -type f -name "*-g*-${RELEASE_SHA}-green.recovered" -print -quit)"
+recovered_nginx_intent="$(find "$state_root" -maxdepth 1 -type f -name "*-g*-${RELEASE_SHA}-green.recovered" -print -quit)"
+[[ -n "$recovered_nginx_intent" ]] || {
+  printf 'blue/green fixture: post-link nginx rejection did not produce a recovered green intent; output=' >&2
+  tr '\n' '|' < "$TEST_ROOT/nginx-rejected.out" >&2
+  printf '\n' >&2
+  exit 1
+}
 
 # A root-owned but unreviewed upstream byte is rejected before an intent or
 # routing effect; runtime health cannot substitute for pinned nginx topology.

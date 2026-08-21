@@ -17,11 +17,19 @@ readonly CACHE_PREPARER="${DEPLOY_ROOT}/prepare-web-slot-cache.sh"
 readonly SAFE_OVERLAY="${DEPLOY_ROOT}/systemd/canary-safe.env.example"
 readonly TEST_ROOT="$(mktemp -d)"
 sink_server_pid=''
+replaced_system_node=false
+original_system_node_present=false
 
 cleanup() {
   if [[ -n "$sink_server_pid" ]]; then
     kill "$sink_server_pid" 2>/dev/null || true
     wait "$sink_server_pid" 2>/dev/null || true
+  fi
+  if [[ "$replaced_system_node" == true ]]; then
+    sudo -n rm -f -- /usr/bin/node
+    if [[ "$original_system_node_present" == true ]]; then
+      sudo -n mv -- "$TEST_ROOT/system-node.original" /usr/bin/node
+    fi
   fi
   rm -rf -- "$TEST_ROOT"
 }
@@ -31,6 +39,38 @@ if [[ "$(id -u)" == '0' ]]; then
   printf 'blue/green fixture requires an unprivileged CI account\n' >&2
   exit 1
 fi
+
+provision_system_node() {
+  local fixture_node_binary
+  fixture_node_binary="$(realpath -e -- "$(command -v node)")"
+  [[ -f "$fixture_node_binary" && ! -L "$fixture_node_binary" && -x "$fixture_node_binary" \
+    && "$($fixture_node_binary -p 'process.versions.node.split(".")[0]')" == '22' ]] || {
+    printf 'blue/green fixture requires an exact regular Node 22 binary\n' >&2
+    exit 1
+  }
+  # The sealer deliberately replaces inherited PATH with the reviewed
+  # production path. Provision setup-node there only for this disposable test.
+  if [[ ! -f /usr/bin/node || -L /usr/bin/node \
+    || "$(stat -c '%u:%g' -- /usr/bin/node 2>/dev/null || true)" != '0:0' \
+    || "$(/usr/bin/node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)" != '22' ]]; then
+    command -v sudo >/dev/null 2>&1 || {
+      printf 'blue/green fixture requires passwordless sudo to provision /usr/bin/node\n' >&2
+      exit 1
+    }
+    if [[ -e /usr/bin/node || -L /usr/bin/node ]]; then
+      sudo -n mv -- /usr/bin/node "$TEST_ROOT/system-node.original"
+      original_system_node_present=true
+    fi
+    replaced_system_node=true
+    sudo -n install -o root -g root -m 0755 "$fixture_node_binary" /usr/bin/node
+  fi
+  [[ -f /usr/bin/node && ! -L /usr/bin/node \
+    && "$(stat -c '%u:%g' -- /usr/bin/node)" == '0:0' \
+    && "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == '22' ]] || {
+    printf 'blue/green fixture could not provision exact root-owned /usr/bin/node major 22\n' >&2
+    exit 1
+  }
+}
 
 release_root="${TEST_ROOT}/releases"
 slot_root="${TEST_ROOT}/slots"
@@ -244,6 +284,7 @@ if EXPECTED_DATABASE_MIGRATION_COUNT=2 /usr/bin/bash -p "$PREFLIGHT" \
   printf 'mismatched slot migration provenance was unexpectedly accepted\n' >&2
   exit 1
 fi
+provision_system_node
 service_user="$(id -un)"
 /usr/bin/bash -p "$SEALER" \
   --release-sha "$RELEASE_SHA" \

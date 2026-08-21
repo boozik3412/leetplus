@@ -721,7 +721,7 @@ verify_previous_runtime() {
       --api-base-url "$previous_api_url" \
       --web-url "$previous_web_url" \
       --require-drain || return 1
-    return
+    return 0
   fi
 
   candidate_slot="$slot"
@@ -744,7 +744,7 @@ verify_previous_runtime() {
 verify_previous_runtime_bounded() {
   if [[ "$previous_runtime_kind" == 'LEGACY_SAFE' ]]; then
     verify_previous_runtime
-    return
+    return 0
   fi
   local deadline=$((SECONDS + 75))
   while ((SECONDS < deadline)); do

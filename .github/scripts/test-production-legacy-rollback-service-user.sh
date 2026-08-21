@@ -317,7 +317,13 @@ unshare --net /usr/bin/bash -p -eu -o pipefail -c '
   done
   runuser -u "$api_user" -- curl --disable --noproxy "*" --silent --fail \
     --connect-timeout 1 --max-time 1 http://127.0.0.1:4301/health >/dev/null
-  /usr/bin/bash -p "$egress" >/dev/null
+  if ! /usr/bin/bash -p "$egress" >/dev/null; then
+    printf "NFT_FIXTURE_ACTUAL_BEGIN\n" >&2
+    nft --version >&2 || true
+    nft -nn list table inet leetplus_nminus1 >&2 || true
+    printf "NFT_FIXTURE_ACTUAL_END\n" >&2
+    exit 1
+  fi
   runuser -u "$api_user" -- curl --disable --noproxy "*" --silent --fail \
     --connect-timeout 1 --max-time 1 http://127.0.0.1:4301/health >/dev/null
   if runuser -u "$web_user" -- curl --disable --noproxy "*" --silent --fail \

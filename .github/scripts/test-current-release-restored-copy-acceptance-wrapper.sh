@@ -260,7 +260,7 @@ run_privileged_evidence_isolation_fixture() {
   }
 
   wait_for_fixture_unit_success() {
-    local unit="$1" attempt active_state sub_state result status exec_code
+    local unit="$1" attempt active_state sub_state result status exec_code exec_start_tail
     for attempt in {1..100}; do
       active_state="$("$privileged_systemctl" show "$unit" --value --property=ActiveState 2>/dev/null || true)"
       sub_state="$("$privileged_systemctl" show "$unit" --value --property=SubState 2>/dev/null || true)"
@@ -276,7 +276,11 @@ run_privileged_evidence_isolation_fixture() {
       fi
       "$privileged_sleep" 0.05
     done
-    die "privileged evidence-isolation unit did not finish successfully: ${unit}; ActiveState=${active_state}; SubState=${sub_state}; Result=${result}; ExecMainCode=${exec_code}; ExecMainStatus=${status}"
+    exec_start_tail="$("$privileged_systemctl" show "$unit" --value \
+      --property=ExecStart 2>/dev/null || true)"
+    exec_start_tail="${exec_start_tail##*--leetplus-child-policy-v1}"
+    exec_start_tail="${exec_start_tail:0:2048}"
+    die "privileged evidence-isolation unit did not finish successfully: ${unit}; ActiveState=${active_state}; SubState=${sub_state}; Result=${result}; ExecMainCode=${exec_code}; ExecMainStatus=${status}; ChildArgTail=${exec_start_tail}"
   }
 
   assert_empty_fixture_unit_cgroup() {

@@ -657,7 +657,7 @@ cp -- "$policy_snapshot" "$completed_snapshot"
   printf 'Result=success\n'
   printf 'ExecMainStatus=0\n'
   printf 'InvocationID=%s\n' "$INVOCATION_ID"
-  printf 'ControlGroup=/system.slice/%s\n' "$UNIT"
+  printf 'ControlGroup=\n'
 } >> "$completed_snapshot"
 completed_attestation="$({
   node "$ATTESTOR" \
@@ -736,6 +736,19 @@ expect_rejected_property file-size-unbounded LimitFSIZE infinity
 expect_rejected_property writable-root ReadWritePaths \
   '/run/leetplus-release/hydration.lock /srv/leetplus/release-builds /'
 expect_rejected_property invocation-drift InvocationID cccccccccccccccccccccccccccccccc
+expect_rejected_property foreign-completed-cgroup ControlGroup \
+  '/system.slice/attacker.service'
+
+retained_cgroup_snapshot="${TEST_ROOT}/retained-cgroup.properties"
+mutate_property "$completed_snapshot" "$retained_cgroup_snapshot" ControlGroup \
+  "/system.slice/${UNIT}"
+node "$ATTESTOR" \
+  --release-sha "$RELEASE_SHA" \
+  --snapshot "$retained_cgroup_snapshot" \
+  --unit-file "$INSTALLED_UNIT" \
+  --stager-file "$INSTALLED_STAGER" \
+  --phase completed \
+  --expected-invocation-id "$INVOCATION_ID" >/dev/null
 
 missing_property_snapshot="${TEST_ROOT}/missing.properties"
 sed '/^IPAddressDeny=/d' "$completed_snapshot" > "$missing_property_snapshot"
@@ -1344,7 +1357,8 @@ publish_fixture_promotion_intent_and_stop() {
   local snapshot="${TEST_ROOT}/recovery-${sha}.properties"
   local receipt="${source_directory}/HYDRATION_SANDBOX_RECEIPT"
   local invocation_id completed_attestation fragment_sha stager_sha policy_sha
-  local source_receipt_sha hydrated_manifest_sha control_group cgroup_procs live_pid=''
+  local source_receipt_sha hydrated_manifest_sha control_group expected_control_group
+  local cgroup_procs live_pid=''
   local completed_properties=(
     "${STATIC_PROPERTIES[@]}"
     ActiveState SubState Result ExecMainStatus InvocationID ControlGroup
@@ -1367,13 +1381,16 @@ publish_fixture_promotion_intent_and_stop() {
     && "$policy_sha" =~ ^[0-9a-f]{64}$ ]] \
     || die "fixture completed attestation is malformed for ${sha}"
   control_group="$(systemctl show --property=ControlGroup --value "$unit")"
-  [[ "$control_group" == "/system.slice/${unit}" ]] \
+  expected_control_group="/system.slice/${unit}"
+  [[ -z "$control_group" || "$control_group" == "$expected_control_group" ]] \
     || die "fixture completed control group differs for ${sha}; ControlGroup=${control_group}"
-  cgroup_procs="/sys/fs/cgroup${control_group}/cgroup.procs"
-  [[ -f "$cgroup_procs" && ! -L "$cgroup_procs" ]] \
-    || die "fixture completed cgroup is absent for ${sha}"
-  if IFS= read -r live_pid < "$cgroup_procs"; then
-    die "fixture completed cgroup still contains process ${live_pid} for ${sha}"
+  cgroup_procs="/sys/fs/cgroup${expected_control_group}/cgroup.procs"
+  if [[ -e "$cgroup_procs" || -L "$cgroup_procs" ]]; then
+    [[ -f "$cgroup_procs" && ! -L "$cgroup_procs" ]] \
+      || die "fixture completed cgroup process list is unsafe for ${sha}"
+    if IFS= read -r live_pid < "$cgroup_procs"; then
+      die "fixture completed cgroup still contains process ${live_pid} for ${sha}"
+    fi
   fi
   source_receipt_sha="$(sha256sum -- "$receipt" | awk '{ print $1 }')"
   hydrated_manifest_sha="$(sha256sum -- "${source_directory}/HYDRATED_SHA256SUMS" | awk '{ print $1 }')"

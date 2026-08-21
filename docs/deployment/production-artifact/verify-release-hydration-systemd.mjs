@@ -457,11 +457,15 @@ if (phase === "completed") {
   assertExact(snapshot, "Result", "success");
   assertExact(snapshot, "ExecMainStatus", "0");
   assertExact(snapshot, "InvocationID", expectedInvocationId);
-  assertExact(
-    snapshot,
-    "ControlGroup",
-    `/system.slice/leetplus-release-hydrate@${releaseSha}.service`,
-  );
+  const completedControlGroup = snapshot.get("ControlGroup");
+  const expectedControlGroup =
+    `/system.slice/leetplus-release-hydrate@${releaseSha}.service`;
+  if (
+    completedControlGroup !== "" &&
+    completedControlGroup !== expectedControlGroup
+  ) {
+    fail("effective ControlGroup differs from the reviewed hydration policy");
+  }
 }
 
 process.stdout.write("HYDRATION_SYSTEMD_POLICY_VERSION=1\n");

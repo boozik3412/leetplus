@@ -710,10 +710,17 @@ trap cleanup_attestation_temp_files EXIT
 
 assert_empty_hydration_cgroup() {
   local control_group="$1"
+  local expected_control_group="/system.slice/leetplus-release-hydrate@${release_sha}.service"
   local live_pid=''
-  local procs_path="/sys/fs/cgroup${control_group}/cgroup.procs"
-  [[ "$control_group" == "/system.slice/leetplus-release-hydrate@${release_sha}.service" ]] \
+  local procs_path="/sys/fs/cgroup${expected_control_group}/cgroup.procs"
+  [[ -z "$control_group" || "$control_group" == "$expected_control_group" ]] \
     || die 'hydration unit cgroup identity is unexpected'
+  # systemd may prune a completed oneshot cgroup before ControlGroup is read.
+  # An absent canonical cgroup has no process list; the global UID fence below
+  # still rejects any surviving build-identity process in another cgroup.
+  if [[ ! -e "$procs_path" && ! -L "$procs_path" ]]; then
+    return 0
+  fi
   [[ -f "$procs_path" && ! -L "$procs_path" ]] \
     || die 'hydration unit cgroup process list is unavailable'
   # cgroup.procs is a virtual kernel file and normally reports st_size=0 even

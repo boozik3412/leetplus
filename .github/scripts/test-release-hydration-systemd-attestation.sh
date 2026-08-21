@@ -89,7 +89,9 @@ cleanup() {
     userdel leetplus-build-primary-adv
   fi
   if [[ "$created_adversarial_gid_group" == true ]]; then
-    groupdel leetplus-build-gid-adversarial
+    if getent group leetplus-build-gid-adversarial >/dev/null 2>&1; then
+      groupdel --force leetplus-build-gid-adversarial
+    fi
   fi
   if [[ "$created_adversarial_uid_user" == true ]]; then
     userdel leetplus-build-uid-adversarial
@@ -182,7 +184,9 @@ cleanup() {
     groupdel leetplus-build-adversarial
   fi
   if [[ "$created_group" == true ]]; then
-    groupdel leetplus-build
+    if getent group leetplus-build >/dev/null 2>&1; then
+      groupdel leetplus-build
+    fi
   fi
   if [[ "$TEST_ROOT" == /tmp/tmp.* && -d "$TEST_ROOT" && ! -L "$TEST_ROOT" ]]; then
     rm -rf -- "$TEST_ROOT"
@@ -424,7 +428,7 @@ created_adversarial_gid_group=true
 if assert_fixture_exact_build_identity; then
   die 'a second NSS group aliasing the build GID was accepted'
 fi
-groupdel leetplus-build-gid-adversarial
+groupdel --force leetplus-build-gid-adversarial
 created_adversarial_gid_group=false
 assert_fixture_exact_build_identity \
   || die 'canonical build GID group identity was not restored'
@@ -1546,7 +1550,7 @@ grep -F 'another NSS group aliases the leetplus-build GID' \
 [[ -d "/srv/leetplus/release-builds/${mount_sha}" \
   && ! -e "/var/lib/leetplus/deploy-receipts/release-promotion-intent-${mount_sha}.receipt" ]] \
   || die 'build-GID alias rejection mutated promotion state'
-groupdel leetplus-build-gid-adversarial
+groupdel --force leetplus-build-gid-adversarial
 created_adversarial_gid_group=false
 printf 'unlisted-after-hydration\n' \
   > "/srv/leetplus/release-builds/${mount_sha}/unlisted-after-hydration"

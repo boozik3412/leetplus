@@ -480,10 +480,14 @@ NODE
       "$privileged_userdel" "$duplicate_uid_user"
     fi
     if [[ "$created_duplicate_gid_group" == true ]]; then
-      "$privileged_groupdel" "$duplicate_gid_group"
+      if "$privileged_getent" group "$duplicate_gid_group" >/dev/null 2>&1; then
+        "$privileged_groupdel" --force "$duplicate_gid_group"
+      fi
     fi
     if [[ "$created_duplicate_runtime_gid_group" == true ]]; then
-      "$privileged_groupdel" "$duplicate_runtime_gid_group"
+      if "$privileged_getent" group "$duplicate_runtime_gid_group" >/dev/null 2>&1; then
+        "$privileged_groupdel" --force "$duplicate_runtime_gid_group"
+      fi
     fi
     if [[ "$created_duplicate_uid_group" == true ]]; then
       "$privileged_groupdel" "$duplicate_uid_group"
@@ -492,7 +496,10 @@ NODE
     if [[ "$created_runtime_group" == true ]]; then
       "$privileged_groupdel" "$fixture_runtime_group"
     fi
-    if [[ "$created_group" == true ]]; then "$privileged_groupdel" "$fixture_group"; fi
+    if [[ "$created_group" == true ]] \
+      && "$privileged_getent" group "$fixture_group" >/dev/null 2>&1; then
+      "$privileged_groupdel" "$fixture_group"
+    fi
     if [[ "$privileged_root" == /run/leetplus-current-evidence-isolation.* \
       && -d "$privileged_root" && ! -L "$privileged_root" ]]; then
       "$privileged_find" -P "$privileged_root" -xdev -depth -mindepth 1 -delete
@@ -540,7 +547,7 @@ NODE
   if fixture_nss_identity_is_exact; then
     die 'privileged fixture accepted a duplicate service GID alias'
   fi
-  "$privileged_groupdel" "$duplicate_gid_group"
+  "$privileged_groupdel" --force "$duplicate_gid_group"
   created_duplicate_gid_group=false
   fixture_nss_identity_is_exact || die 'privileged fixture GID cleanup was incomplete'
 
@@ -550,7 +557,7 @@ NODE
   if fixture_nss_identity_is_exact; then
     die 'privileged fixture accepted a duplicate runtime GID alias'
   fi
-  "$privileged_groupdel" "$duplicate_runtime_gid_group"
+  "$privileged_groupdel" --force "$duplicate_runtime_gid_group"
   created_duplicate_runtime_gid_group=false
   fixture_nss_identity_is_exact || die 'privileged fixture runtime-GID cleanup was incomplete'
 

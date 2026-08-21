@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
+
+trap 'status=$?; if [[ "$-" == *e* ]]; then printf "blue/green fixture: line=%s status=%s command=%q\n" "$LINENO" "$status" "$BASH_COMMAND" >&2; exit "$status"; fi' ERR
 
 readonly RELEASE_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 readonly LEGACY_SHA='7de04ff4ccc814494810730be3fa6bf661097b07'

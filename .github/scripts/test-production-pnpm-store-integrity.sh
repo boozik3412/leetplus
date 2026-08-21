@@ -61,6 +61,7 @@ create_store() {
   local label="$1"
   STORE_PATH="${TEST_ROOT}/${label}/store"
   install -d -o root -g root -m 0550 "$STORE_PATH/v3/files/aa"
+  find -P "$STORE_PATH" -xdev -type d -exec chmod 0550 -- {} +
   printf 'package-%s\n' "$label" > "$STORE_PATH/v3/files/aa/content"
   chown root:root -- "$STORE_PATH/v3/files/aa/content"
   chmod 0440 -- "$STORE_PATH/v3/files/aa/content"

@@ -531,7 +531,7 @@ if [[ "${TEST_FAIL_PUBLIC_WEB:-false}" == true \
   exit 72
 fi
 if [[ "${TEST_PROBE_DELAY_SECONDS:-0}" =~ ^[0-9]+$ \
-  && "${TEST_PROBE_DELAY_SECONDS:-0}" != 0 ]]; then
+  && "${TEST_PROBE_DELAY_SECONDS:-0}" != 0 && "$*" == *'https://'* ]]; then
   sleep "$TEST_PROBE_DELAY_SECONDS"
 fi
 exit 0
@@ -540,7 +540,9 @@ cat > "$TEST_ROOT/authenticated-smoke.mjs" <<'AUTHENTICATED_SMOKE'
 import { appendFileSync } from 'node:fs';
 const argumentsText = process.argv.slice(2).join(' ');
 appendFileSync(process.env.TEST_COMMAND_LOG, `authenticated-smoke ${argumentsText}\n`);
-if (/^[0-9]+$/.test(process.env.TEST_AUTH_DELAY_SECONDS ?? '') && process.env.TEST_AUTH_DELAY_SECONDS !== '0') {
+if (/^[0-9]+$/.test(process.env.TEST_AUTH_DELAY_SECONDS ?? '')
+  && process.env.TEST_AUTH_DELAY_SECONDS !== '0'
+  && argumentsText.includes('https://')) {
   await new Promise((resolve) => setTimeout(resolve, Number(process.env.TEST_AUTH_DELAY_SECONDS) * 1000));
 }
 if (process.env.TEST_AUTH_SMOKE_FAIL === 'true') process.exit(81);
@@ -1155,8 +1157,9 @@ if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$con
   printf 'watchdog accepted sequential probes beyond its one absolute deadline\n' >&2
   exit 1
 fi
-((SECONDS - watchdog_deadline_started < 9)) \
-  || { printf 'watchdog sequential probe chain exceeded its bounded deadline\n' >&2; exit 1; }
+watchdog_deadline_elapsed=$((SECONDS - watchdog_deadline_started))
+((watchdog_deadline_elapsed < 9)) \
+  || { printf 'watchdog sequential probe chain exceeded its bounded deadline: %ss\n' "$watchdog_deadline_elapsed" >&2; exit 1; }
 test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
 
 # A post-reload unit restart/effective-generation change is also a watchdog

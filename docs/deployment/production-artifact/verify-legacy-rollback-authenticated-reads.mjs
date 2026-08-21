@@ -331,7 +331,7 @@ WITH target_tenant AS MATERIALIZED (
 ), baseline AS (
   SELECT pg_catalog.jsonb_build_object(
     'databaseName', pg_catalog.current_database(),
-    'databaseAddress', pg_catalog.inet_server_addr()::text,
+    'databaseAddress', pg_catalog.host(pg_catalog.inet_server_addr()),
     'databasePort', pg_catalog.inet_server_port(),
     'databaseSystemIdentifier', (SELECT system_identifier::text FROM pg_catalog.pg_control_system()),
     'sessionUser', session_user::text,

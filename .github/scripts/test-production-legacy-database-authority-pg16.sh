@@ -17,10 +17,11 @@ readonly REPOSITORY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && p
 readonly DEPLOY_ROOT="${REPOSITORY_ROOT}/docs/deployment/production-artifact"
 readonly AUTHORITY_SQL="${DEPLOY_ROOT}/systemd/legacy-database-login-fence-authority.sql.example"
 readonly FENCE="${DEPLOY_ROOT}/apply-legacy-database-login-fence.sh"
+readonly DRAIN_VERIFIER="${DEPLOY_ROOT}/verify-legacy-runtime-drain.sh"
 readonly TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
 
-for command_name in docker psql pg_isready sha256sum; do
+for command_name in docker psql pg_isready sed sha256sum; do
   command -v "$command_name" >/dev/null 2>&1 || {
     printf 'missing PG16 fixture command: %s\n' "$command_name" >&2
     exit 1
@@ -68,10 +69,29 @@ CREATE TABLE public."StaffChatChannelMember" ("id" text PRIMARY KEY, "channelId"
 SQL
 "${psql_admin[@]}" --file "$AUTHORITY_SQL" >/dev/null
 
+pinned_function_source_md5="$(sed -nE \
+  "s/.*pg_catalog\\.md5\\(fn\\.prosrc\\) = '([0-9a-f]{32})'.*/\\1/p" \
+  "$DRAIN_VERIFIER")"
+[[ "$pinned_function_source_md5" =~ ^[0-9a-f]{32}$ ]] || {
+  printf 'drain verifier function-source MD5 pin is absent or ambiguous\n' >&2
+  exit 1
+}
+installed_function_source_md5="$("${psql_admin[@]}" --tuples-only --no-align \
+  --command="SELECT pg_catalog.md5(prosrc) FROM pg_catalog.pg_proc WHERE oid = 'leetplus_ops.apply_nminus1_legacy_login_fence(text,text,integer,text,text)'::regprocedure")"
+[[ "$installed_function_source_md5" == "$pinned_function_source_md5" ]] || {
+  printf 'installed database fence source does not match the drain verifier MD5 pin\n' >&2
+  exit 1
+}
+
 system_identifier="$("${psql_admin[@]}" --tuples-only --no-align --command='SELECT system_identifier FROM pg_catalog.pg_control_system()')"
 [[ "$system_identifier" =~ ^[1-9][0-9]{15,24}$ ]]
-database_server_address="$("${psql_admin[@]}" --tuples-only --no-align --command='SELECT inet_server_addr()::text')"
-[[ "$database_server_address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]
+database_server_address="$("${psql_admin[@]}" --tuples-only --no-align \
+  --command='SELECT pg_catalog.host(pg_catalog.inet_server_addr())')"
+[[ "$database_server_address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || {
+  printf 'PostgreSQL 16 TCP server address is not an exact IPv4 literal: %s\n' \
+    "$database_server_address" >&2
+  exit 1
+}
 cat > "$TEST_ROOT/pg_service.conf" <<'PGSERVICE'
 [leetplus-drain-fence]
 host=127.0.0.1

@@ -226,7 +226,7 @@ BEGIN
 
   IF (
     current_database() = expected_database
-    AND pg_catalog.inet_server_addr()::text = expected_address
+    AND pg_catalog.host(pg_catalog.inet_server_addr()) = expected_address
     AND pg_catalog.inet_server_port() = expected_port
     AND observed_system_identifier = expected_system_identifier
     AND session_user::text = expected_session_user
@@ -450,7 +450,7 @@ BEGIN
 
   RETURN pg_catalog.concat_ws('|',
     current_database(),
-    pg_catalog.inet_server_addr()::text,
+    pg_catalog.host(pg_catalog.inet_server_addr()),
     pg_catalog.inet_server_port()::text,
     observed_system_identifier,
     session_user::text,

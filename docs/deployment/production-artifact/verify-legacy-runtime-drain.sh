@@ -641,7 +641,7 @@ SELECT
           AND fn.prosecdef AND fn.provolatile = 'v' AND fn.proparallel = 'u'
           AND fn.prokind = 'f' AND language.lanname = 'plpgsql'
           AND fn.proconfig = ARRAY['search_path=pg_catalog']::text[]
-          AND pg_catalog.md5(fn.prosrc) = '6ad75226a4c0fe1dda37e0fe216aa073') = 1
+          AND pg_catalog.md5(fn.prosrc) = '51957bdd1436c5072787194eda27c431') = 1
       AND (SELECT count(*)
         FROM pg_catalog.pg_proc fn
         CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
@@ -678,7 +678,7 @@ SELECT
     )::int
   ),
   (SELECT current_database()),
-  (SELECT pg_catalog.inet_server_addr()::text),
+  (SELECT pg_catalog.host(pg_catalog.inet_server_addr())),
   (SELECT pg_catalog.inet_server_port()::text),
   (SELECT system_identifier::text FROM pg_catalog.pg_control_system()),
   (SELECT session_user::text)

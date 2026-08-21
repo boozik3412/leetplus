@@ -253,7 +253,7 @@ final_move_line="$(grep -n '^mv -- "$staging_directory" "$release_directory"$' "
   && $((final_move_line - hydration_fence_lines[3])) -le 3 ]] \
   || die 'stager build-UID process fences are not at the reviewed publication boundaries'
 foreign_fence_line="$(grep -n '^  assert_no_build_identity_processes$' "$PROMOTER_SOURCE" | tail -n 1 | cut -d: -f1)"
-source_move_line="$(grep -n '^mv -T -- "$source_directory" "$promotion_directory"$' "$PROMOTER_SOURCE" | cut -d: -f1)"
+source_move_line="$(grep -n '^  mv -T -- "$source_directory" "$promotion_directory"$' "$PROMOTER_SOURCE" | cut -d: -f1)"
 [[ "$foreign_fence_line" =~ ^[0-9]+$ && "$source_move_line" =~ ^[0-9]+$ \
   && "$foreign_fence_line" -lt "$source_move_line" \
   && $((source_move_line - foreign_fence_line)) -le 8 ]] \

@@ -1578,7 +1578,7 @@ if [[ "$verify" == false ]]; then
   [[ ! -f "${control_root}/test-drop-before-main" ]] || exit 75
   if [[ -f "${control_root}/test-sibling-tamper" ]]; then
     sibling_receipt="${fixture_root}/evidence/response01/receipt.json"
-    if printf 'forbidden-sibling-tamper\n' >> "$sibling_receipt" 2>/dev/null; then
+    if printf 'forbidden-sibling-tamper\n' 2>/dev/null >> "$sibling_receipt"; then
       exit 76
     fi
   fi
@@ -2608,7 +2608,9 @@ for (const args of invocations) {
       readOnly.filter((value) => value === artifactRoot).length !== 1 ||
       runtimeCredentials.length !== 1 || evidenceCredentials.length !== 0) process.exit(2);
   const commandBoundary = args.indexOf("--");
-  if (commandBoundary < 0 || args.slice(commandBoundary + 1).some((value) =>
+  const childPayloadBoundary = args.indexOf("--child-payload");
+  if (commandBoundary < 0 || childPayloadBoundary <= commandBoundary ||
+      args.slice(childPayloadBoundary + 1).some((value) =>
       value === evidenceRoot || value.startsWith(`${evidenceRoot}/`))) process.exit(8);
   const evidenceIndexes = args.flatMap((value, index) => value === "--evidence" ? [index] : []);
   const parseBinding = (value) => {

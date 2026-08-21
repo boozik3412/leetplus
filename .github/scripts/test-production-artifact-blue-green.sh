@@ -596,6 +596,17 @@ common_arguments=(
   --authenticated-smoke "$TEST_ROOT/authenticated-smoke.mjs"
   --unprivileged-test-mode
 )
+recovery_common_arguments=(
+  --config-root "$config_root"
+  --state-root "$state_root"
+  --systemd-root "$systemd_root"
+  --environment-root "$environment_root"
+  --libexec-root "$libexec_root"
+  --probe "$TEST_ROOT/probe"
+  --legacy-rollback-probe "$TEST_ROOT/probe"
+  --authenticated-smoke "$TEST_ROOT/authenticated-smoke.mjs"
+  --unprivileged-test-mode
+)
 
 command_log="$TEST_ROOT/commands.log"
 mount_inventory_fixture="$TEST_ROOT/hostile-mount-inventory"
@@ -824,19 +835,17 @@ fi
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
   LEETPLUS_TEST_ABORT_AFTER_ROLLBACK_ROUTE=true \
   /usr/bin/bash -p "$CUTOVER" rollback --receipt "$receipt" \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/rollback-lost-response.out" 2>&1; then
+    "${recovery_common_arguments[@]}" > "$TEST_ROOT/rollback-lost-response.out" 2>&1; then
   printf 'fixture-requested rollback lost response was unexpectedly accepted\n' >&2
   exit 1
 fi
+grep -F 'fixture-requested interruption after exact rollback route recovery' \
+  "$TEST_ROOT/rollback-lost-response.out" >/dev/null
 test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
 reloads_before_retry="$(grep -c 'systemctl reload nginx.service' "$command_log")"
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
   /usr/bin/bash -p "$CUTOVER" rollback --receipt "$receipt" \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/idempotent-rollback.out"
+    "${recovery_common_arguments[@]}" > "$TEST_ROOT/idempotent-rollback.out"
 reloads_after_retry="$(grep -c 'systemctl reload nginx.service' "$command_log")"
 test "$reloads_after_retry" -eq "$((reloads_before_retry + 1))"
 grep -F -x 'BLUE_GREEN_ROLLBACK_SERVING_CONFIRMED=true' "$TEST_ROOT/idempotent-rollback.out" >/dev/null
@@ -845,9 +854,7 @@ grep -F -x 'BLUE_GREEN_ROLLBACK_SERVING_CONFIRMED=true' "$TEST_ROOT/idempotent-r
 # replaying the old receipt is rejected even though its slot is active again.
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
   /usr/bin/bash -p "$CUTOVER" rollback --receipt "$receipt" \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/consumed-replay-rejected.out" 2>&1; then
+    "${recovery_common_arguments[@]}" > "$TEST_ROOT/consumed-replay-rejected.out" 2>&1; then
   printf 'consumed accepted receipt was unexpectedly reusable\n' >&2
   exit 1
 fi
@@ -868,9 +875,7 @@ lost_receipt="$(latest_receipt_by_generation)"
 test "$(basename -- "$lost_receipt")" = "20000101T000000000000000Z-g2-${RELEASE_SHA}-blue.receipt"
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
   /usr/bin/bash -p "$CUTOVER" rollback --receipt "$lost_receipt" \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/accepted-before-index-recovered.out"
+    "${recovery_common_arguments[@]}" > "$TEST_ROOT/accepted-before-index-recovered.out"
 grep -F -x "BLUE_GREEN_ACCEPTED_INDEX_RECONCILED=${lost_receipt}" "$TEST_ROOT/accepted-before-index-recovered.out" >/dev/null
 test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
 grep -F -x 'GENERATION=2' "$state_root/latest-accepted.index" >/dev/null
@@ -891,9 +896,7 @@ for index_failure_phase in before-latest-index-mv after-latest-index-mv; do
   index_failure_receipt="$(latest_receipt_by_generation)"
   PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
     /usr/bin/bash -p "$CUTOVER" rollback --receipt "$index_failure_receipt" \
-      --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-      --legacy-rollback-probe "$TEST_ROOT/probe" \
-      --unprivileged-test-mode > "$TEST_ROOT/${index_failure_phase}-recovered.out"
+      "${recovery_common_arguments[@]}" > "$TEST_ROOT/${index_failure_phase}-recovered.out"
   test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
 done
 
@@ -913,9 +916,7 @@ grep -E '^ACCEPTED_AT=[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$committed_intent" >/dev/nul
 committed_receipt="${committed_intent%.intent}.receipt"
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
   /usr/bin/bash -p "$CUTOVER" rollback --receipt "$committed_receipt" \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/accepted-intent-fsync-recovered.out"
+    "${recovery_common_arguments[@]}" > "$TEST_ROOT/accepted-intent-fsync-recovered.out"
 grep -F -x "BLUE_GREEN_ACCEPTED_INTENT_RECONCILED=${committed_receipt}" \
   "$TEST_ROOT/accepted-intent-fsync-recovered.out" >/dev/null
 grep -F -x "BLUE_GREEN_ACCEPTED_INDEX_RECONCILED=${committed_receipt}" \
@@ -963,10 +964,8 @@ fi
 test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
 test -n "$(find "$state_root" -maxdepth 1 -type f -name '*.intent' -print -quit)"
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
-  /usr/bin/bash -p "$CUTOVER" recover-pending \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/archive-fault-recovered.out"
+  /usr/bin/bash -p "$CUTOVER" recover-pending "${recovery_common_arguments[@]}" \
+    > "$TEST_ROOT/archive-fault-recovered.out"
 test -z "$(find "$state_root" -maxdepth 1 -type f -name '*.intent' -print -quit)"
 grep -F -x 'BLUE_GREEN_PENDING_RECOVERY=false' "$TEST_ROOT/archive-fault-recovered.out" >/dev/null
 grep -F 'BLUE_GREEN_RECOVERED_INTENT_RECONCILED=' "$TEST_ROOT/archive-fault-recovered.out" >/dev/null
@@ -987,10 +986,8 @@ for partial_phase in accepting recovering; do
   ln -s "$config_root/upstreams/blue.conf" "$config_root/active-upstreams.conf.next"
   mv -Tf "$config_root/active-upstreams.conf.next" "$config_root/active-upstreams.conf"
   PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
-    /usr/bin/bash -p "$CUTOVER" recover-pending \
-      --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-      --legacy-rollback-probe "$TEST_ROOT/probe" \
-      --unprivileged-test-mode > "$TEST_ROOT/partial-${partial_phase}-recovered.out"
+    /usr/bin/bash -p "$CUTOVER" recover-pending "${recovery_common_arguments[@]}" \
+      > "$TEST_ROOT/partial-${partial_phase}-recovered.out"
   grep -F -x "BLUE_GREEN_UNCOMMITTED_PHASE_RECORD_DISCARDED=${partial_intent}.${partial_phase}.new" \
     "$TEST_ROOT/partial-${partial_phase}-recovered.out" >/dev/null
   test ! -e "${partial_intent}.${partial_phase}.new"
@@ -1006,10 +1003,8 @@ intent="$(write_fixture_intent 20010101T000000000000001Z \
 ln -s "$config_root/upstreams/blue.conf" "$config_root/active-upstreams.conf.next"
 mv -Tf "$config_root/active-upstreams.conf.next" "$config_root/active-upstreams.conf"
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
-  /usr/bin/bash -p "$CUTOVER" recover-pending \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/intent-rollback.out"
+  /usr/bin/bash -p "$CUTOVER" recover-pending "${recovery_common_arguments[@]}" \
+    > "$TEST_ROOT/intent-rollback.out"
 test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
 recovered_intent="${intent%.intent}.recovered"
 test -f "$recovered_intent"
@@ -1022,9 +1017,7 @@ ln -s "$config_root/upstreams/blue.conf" "$config_root/active-upstreams.conf.nex
 mv -Tf "$config_root/active-upstreams.conf.next" "$config_root/active-upstreams.conf"
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" TEST_FAIL_ROLLBACK_SMOKE=true \
   /usr/bin/bash -p "$CUTOVER" rollback --receipt "$intent" \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/rollback-smoke-rejected.out" 2>&1; then
+    "${recovery_common_arguments[@]}" > "$TEST_ROOT/rollback-smoke-rejected.out" 2>&1; then
   printf 'rollback without public serving evidence was unexpectedly accepted\n' >&2
   exit 1
 fi
@@ -1038,10 +1031,8 @@ malformed_intent="$(write_fixture_intent 20010101T000000000000003Z \
   "$config_root/upstreams/legacy-safe.conf" "$config_root/upstreams/blue.conf")"
 printf 'EXTRA_KEY=forbidden\n' >> "$malformed_intent"
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
-  /usr/bin/bash -p "$CUTOVER" recover-pending \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/malformed-intent-rejected.out" 2>&1; then
+  /usr/bin/bash -p "$CUTOVER" recover-pending "${recovery_common_arguments[@]}" \
+    > "$TEST_ROOT/malformed-intent-rejected.out" 2>&1; then
   printf 'noncanonical intent journal schema was unexpectedly accepted\n' >&2
   exit 1
 fi
@@ -1059,9 +1050,7 @@ ln -s "$config_root/upstreams/blue.conf" "$config_root/active-upstreams.conf.nex
 mv -Tf "$config_root/active-upstreams.conf.next" "$config_root/active-upstreams.conf"
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
   /usr/bin/bash -p "$CUTOVER" rollback --receipt "$unsafe_intent" \
-    --config-root "$config_root" --state-root "$state_root" --probe "$TEST_ROOT/probe" \
-    --legacy-rollback-probe "$TEST_ROOT/probe" \
-    --unprivileged-test-mode > "$TEST_ROOT/unsafe-target-rejected.out" 2>&1; then
+    "${recovery_common_arguments[@]}" > "$TEST_ROOT/unsafe-target-rejected.out" 2>&1; then
   printf 'rollback accepted an upstream target outside the reviewed root\n' >&2
   exit 1
 fi

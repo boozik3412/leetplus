@@ -506,27 +506,35 @@ for unsafe_environment_key in \
   TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME NPM_CONFIG_USERCONFIG \
   npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS \
   GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM; do
-  [[ ! -v "$unsafe_environment_key" ]] || exit 79
+  if [[ -v "$unsafe_environment_key" ]]; then
+    printf 'fixture probe inherited unsafe environment: %s\n' "$unsafe_environment_key" >&2
+    exit 79
+  fi
 done
 printf 'probe %s\n' "$*" >> "${TEST_COMMAND_LOG:?}"
 if [[ "${TEST_FAIL_PREVIOUS:-false}" == true && "$*" == *'--require-drain'* ]]; then
+  printf 'fixture probe requested previous-runtime failure\n' >&2
   exit 75
 fi
 if [[ "${TEST_FAIL_PUBLIC:-false}" == true && "$*" == *'https://'* ]]; then
+  printf 'fixture probe requested public failure\n' >&2
   exit 72
 fi
 if [[ "${TEST_FAIL_PUBLIC_API:-false}" == true \
   && "$*" == *'--api-base-url https://'* ]]; then
+  printf 'fixture probe requested public API failure\n' >&2
   exit 72
 fi
 if [[ "${TEST_FAIL_PUBLIC_WEB:-false}" == true \
   && "$*" == *'--web-url https://'* ]]; then
+  printf 'fixture probe requested public Web failure\n' >&2
   exit 72
 fi
 if [[ "${TEST_PROBE_DELAY_SECONDS:-0}" =~ ^[0-9]+$ \
   && "${TEST_PROBE_DELAY_SECONDS:-0}" != 0 ]]; then
   sleep "$TEST_PROBE_DELAY_SECONDS"
 fi
+exit 0
 PROBE
 cat > "$TEST_ROOT/authenticated-smoke.mjs" <<'AUTHENTICATED_SMOKE'
 import { appendFileSync } from 'node:fs';

@@ -1007,6 +1007,8 @@ done
 family_probe_unit="leetplus-hydration-family-probe-${RANDOM}-${BASHPID}.service"
 live_units+=("$family_probe_unit")
 family_probe_program=$'import errno, socket, sys\npath = sys.argv[1]\nfor family, address in ((socket.AF_INET, ("127.0.0.1", 9)), (socket.AF_UNIX, path)):\n    try:\n        sock = socket.socket(family, socket.SOCK_STREAM)\n        sock.settimeout(1)\n        sock.connect(address)\n    except OSError as exc:\n        if exc.errno not in (errno.EAFNOSUPPORT, errno.EACCES, errno.EPERM):\n            sys.exit(85)\n    else:\n        sys.exit(86)\nsys.exit(0)'
+# An empty transient allow-list is the D-Bus equivalent of the fragment's
+# literal `none`; passing `none` as a list member is not an address family.
 timeout --foreground --kill-after=5s 20s systemd-run \
   --unit "$family_probe_unit" \
   --wait \
@@ -1020,7 +1022,7 @@ timeout --foreground --kill-after=5s 20s systemd-run \
   --property=PrivateTmp=yes \
   --property=ProtectSystem=strict \
   --property='ReadOnlyPaths=/run/leetplus-release' \
-  --property=RestrictAddressFamilies=none \
+  --property=RestrictAddressFamilies= \
   --property=IPAddressDeny=any \
   --property=RuntimeMaxSec=5s \
   /usr/bin/python3 -c "$family_probe_program" "$HOSTILE_UNIX_SOCKET"

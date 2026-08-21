@@ -644,7 +644,7 @@ auth_server_pid=''
 # operator DB target/smoke secret from an example.
 if [[ "$(uname -s)" != MINGW* ]]; then
 install_root="$TEST_ROOT/install"
-mkdir -p "$install_root" "$install_root/cutover"
+mkdir -p "$install_root" "$install_root/etc" "$install_root/cutover"
 if [[ "${OSTYPE:-}" == msys* ]]; then
   export TEST_INSTALL_MSYS_MODE_COMPAT=true
 fi

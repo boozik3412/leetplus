@@ -472,7 +472,7 @@ production_stage_archive_source="${TEST_ROOT}/leetplus-release-${RELEASE_SHA}.ta
 production_stage_checksum_source="${production_stage_archive_source}.sha256"
 production_stage_inbox="${production_stage_fixture_root}/inbox"
 production_stage_output="${production_stage_fixture_root}/output"
-install -d -o root -g root -m 0750 \
+install -d -o root -g leetplus-build -m 0750 \
   "$production_stage_fixture_root" "$production_stage_inbox"
 install -d -o leetplus-build -g leetplus-build -m 0750 "$production_stage_output"
 mkdir -p \

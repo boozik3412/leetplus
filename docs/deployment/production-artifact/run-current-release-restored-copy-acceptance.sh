@@ -1110,24 +1110,25 @@ const payloadMarker = process.argv.indexOf("--child-payload", markerIndex + 18);
 if (payloadMarker !== markerIndex + 18) fail(82);
 const payload = process.argv.slice(payloadMarker + 1);
 const hostEvidenceDirectory = phase === "drain" ? "-" : `${evidenceRoot}/${operationId}`;
-if (!/^(main|verify|replay|drain)$/u.test(phase) || !/^(production|fixture)$/u.test(contractMode) ||
-    !/^leetplus-current-release-[a-z-]+[a-z0-9]+\.service$/u.test(unit) ||
-    !/^[a-z0-9]{8,32}$/u.test(operationId) ||
-    !/^[a-z_][a-z0-9_-]{2,63}$/u.test(expectedUser) ||
-    !/^[a-z_][a-z0-9_-]{2,63}$/u.test(expectedGroup) ||
-    !/^[a-z_][a-z0-9_-]{2,63}$/u.test(artifactGroup) ||
-    ![systemctlPath, nodePath, artifactRoot, credentialSource, evidenceRoot]
-      .every((value) => value.startsWith("/") && !/[\u0000-\u0020\\]/u.test(value)) ||
-    ![hostEvidenceDirectory, unitEvidenceDirectory].every((value) => value === "-" ||
-      (value.startsWith("/") && !/[\u0000-\u0020\\]/u.test(value))) ||
+if (!/^(main|verify|replay|drain)$/u.test(phase) ||
+    !/^(production|fixture)$/u.test(contractMode)) fail(110);
+if (!/^leetplus-current-release-[a-z-]+[a-z0-9]+\.service$/u.test(unit) ||
+    !/^[a-z0-9]{8,32}$/u.test(operationId)) fail(111);
+if (![expectedUser, expectedGroup, artifactGroup]
+    .every((value) => /^[a-z_][a-z0-9_-]{2,63}$/u.test(value))) fail(112);
+if (![systemctlPath, nodePath, artifactRoot, credentialSource, evidenceRoot]
+    .every((value) => value.startsWith("/") && !/[\u0000-\u0020\\]/u.test(value))) fail(113);
+if (![hostEvidenceDirectory, unitEvidenceDirectory].every((value) => value === "-" ||
+    (value.startsWith("/") && !/[\u0000-\u0020\\]/u.test(value))) ||
     (phase === "drain" ? unitEvidenceDirectory !== "-" :
-      (!unitEvidenceDirectory.endsWith(`/${operationId}`) || unitEvidenceDirectory === hostEvidenceDirectory)) ||
-    (phase === "main" && unit !== `leetplus-current-release-acceptance-${operationId}.service`) ||
+      (!unitEvidenceDirectory.endsWith(`/${operationId}`) ||
+        unitEvidenceDirectory === hostEvidenceDirectory))) fail(114);
+if ((phase === "main" && unit !== `leetplus-current-release-acceptance-${operationId}.service`) ||
     (phase === "verify" && unit !== `leetplus-current-release-verify-${operationId}.service`) ||
     (phase === "drain" && unit !== `leetplus-current-release-drain-${operationId}.service`) ||
-    (phase === "replay" && !unit.startsWith(`leetplus-current-release-replay-${operationId}`)) ||
-    !/^(cli|drain)$/u.test(payloadMode) ||
-    (phase === "drain") !== (payloadMode === "drain")) fail(83);
+    (phase === "replay" && !unit.startsWith(`leetplus-current-release-replay-${operationId}`))) fail(115);
+if (!/^(cli|drain)$/u.test(payloadMode) ||
+    (phase === "drain") !== (payloadMode === "drain")) fail(116);
 if (contractMode === "production" && (
     expectedUser !== "leetplus-rehearsal" || expectedGroup !== "leetplus-rehearsal" ||
     artifactGroup !== "leetplus-runtime" || systemctlPath !== "/usr/bin/systemctl" ||
@@ -1136,7 +1137,7 @@ if (contractMode === "production" && (
       `/run/leetplus-current-release-evidence/${operationId}`) ||
     !/^\/srv\/leetplus\/releases\/[0-9a-f]{40}$/u.test(artifactRoot) ||
     !/^\/etc\/leetplus\/rehearsal-credentials\/[a-z0-9][a-z0-9._-]{2,63}\.json$/u
-      .test(credentialSource))) fail(83);
+      .test(credentialSource))) fail(117);
 const fixtureRoot = contractMode === "fixture"
   ? artifactRoot.match(/^(\/run\/leetplus-current-evidence-isolation\.[A-Za-z0-9]{8})\/artifact$/u)?.[1]
   : undefined;
@@ -1149,7 +1150,7 @@ if (contractMode === "fixture" && (!fixtureRoot ||
     credentialSource !== `${fixtureRoot}/credential.json` ||
     evidenceRoot !== `${fixtureRoot}/evidence` ||
     unitEvidenceDirectory !== (phase === "drain" ? "-" :
-      `${fixtureRoot}/unit-evidence/${operationId}`))) fail(83);
+      `${fixtureRoot}/unit-evidence/${operationId}`))) fail(118);
 const expectedUid = Number(expectedUidRaw);
 const expectedGid = Number(expectedGidRaw);
 const artifactGid = Number(artifactGidRaw);

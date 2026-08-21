@@ -143,11 +143,11 @@ if [[ "$unprivileged_test_mode" == false ]]; then
       "$source_root"|"$source_root"/*) die "control bundle contains an exact/nested mount: ${mount_target}" ;;
     esac
   done <<< "$mount_inventory"
+  [[ -z "$(find -P "$source_root" -xdev ! -type d ! -type f -print -quit)" ]] \
+    || die 'control bundle contains a symlink or special entry'
   [[ -z "$(find -P "$source_root" -xdev \
     \( ! -user root -o ! -group root -o -perm /022 \) -print -quit)" ]] \
     || die 'control bundle contains a non-root-owned or writable entry'
-  [[ -z "$(find -P "$source_root" -xdev ! -type d ! -type f -print -quit)" ]] \
-    || die 'control bundle contains a symlink or special entry'
   [[ -z "$(find -P "$source_root" -xdev -type f -links +1 -print -quit)" ]] \
     || die 'control bundle contains a hard-linked source file'
   if ! awk '

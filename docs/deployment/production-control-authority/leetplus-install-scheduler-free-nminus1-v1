@@ -25,7 +25,7 @@ readonly CONTROL_MANIFEST="${CONTROL_ROOT}/CONTROL_BUNDLE_SHA256SUMS"
 readonly TRUST_FILE='/etc/leetplus/rollback-control-manifest.sha256'
 readonly INSTALLER="${CONTROL_ROOT}/install-legacy-rollback-contour.sh"
 # This digest is updated only after the complete control manifest is frozen.
-readonly EXPECTED_CONTROL_MANIFEST_SHA256='f07962f5c12b3a784d757f020d0fe9217ddaba6766c9e4f29a01aa007893d9a6'
+readonly EXPECTED_CONTROL_MANIFEST_SHA256='c28867482253dd3175334422b9ceaac3125365a604f8ba0469cf72d43dde9394'
 
 die() {
   printf 'leetplus-legacy-control-authority: %s\n' "$*" >&2
@@ -92,11 +92,11 @@ verify_control_bundle() {
         ;;
     esac
   done <<< "$mount_inventory"
+  [[ -z "$(find -P "$CONTROL_ROOT" -xdev ! -type d ! -type f -print -quit)" ]] \
+    || die 'control bundle contains a symlink or special entry'
   [[ -z "$(find -P "$CONTROL_ROOT" -xdev \
     \( ! -user root -o ! -group root -o -perm /022 \) -print -quit)" ]] \
     || die 'control bundle contains a non-root-owned or writable entry'
-  [[ -z "$(find -P "$CONTROL_ROOT" -xdev ! -type d ! -type f -print -quit)" ]] \
-    || die 'control bundle contains a symlink or special entry'
   [[ -z "$(find -P "$CONTROL_ROOT" -xdev -type f -links +1 -print -quit)" ]] \
     || die 'control bundle contains a hard-linked source file'
   awk 'NF != 2 || $1 !~ /^[0-9a-f]{64}$/ || $2 !~ /^\.\/[A-Za-z0-9_.@+\/-]+$/ || substr($2, 3) ~ /(^|\/)\.\.?(\/|$)/ { exit 1 }' \

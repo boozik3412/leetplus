@@ -583,6 +583,17 @@ rm -f -- "${production_stage_fixture_root}/inbox-symlink"
 systemctl daemon-reload
 systemd-analyze verify "$INSTALLED_UNIT"
 
+normalize_empty_environment_files_property() {
+  local snapshot="$1" environment_files_count
+  environment_files_count="$(grep -c '^EnvironmentFiles=' "$snapshot" || true)"
+  [[ "$environment_files_count" =~ ^[0-9]+$ ]] \
+    || die 'systemd snapshot EnvironmentFiles count is malformed'
+  if [[ "$environment_files_count" == 0 ]]; then
+    # systemctl omits an empty EnvironmentFiles a(sb) property even with --all.
+    printf 'EnvironmentFiles=\n' >> "$snapshot"
+  fi
+}
+
 assert_snapshot_property_keys() {
   local snapshot="$1"
   shift
@@ -617,6 +628,7 @@ write_snapshot() {
     command+=("--property=${property}")
   done
   timeout --foreground --kill-after=5s 15s "${command[@]}" "$UNIT" > "$output_path"
+  normalize_empty_environment_files_property "$output_path"
   chmod 0600 "$output_path"
   assert_snapshot_property_keys "$output_path" "$@"
 }
@@ -1284,7 +1296,9 @@ write_recovery_snapshot() {
     command+=("--property=${property}")
   done
   timeout --foreground --kill-after=5s 15s "${command[@]}" "$unit" > "$output_path"
+  normalize_empty_environment_files_property "$output_path"
   chmod 0600 "$output_path"
+  assert_snapshot_property_keys "$output_path" "$@"
 }
 
 publish_fixture_promotion_intent_and_stop() {

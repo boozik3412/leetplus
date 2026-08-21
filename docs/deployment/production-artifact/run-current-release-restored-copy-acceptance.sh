@@ -1244,6 +1244,8 @@ for (const line of rawProperties.split("\n")) {
   if (!propertyNames.includes(key) || actual.has(key) || /[\u0000-\u001f\u007f]/u.test(value)) fail(94);
   actual.set(key, value);
 }
+// systemctl omits an empty EnvironmentFiles a(sb) property even with --all.
+if (!actual.has("EnvironmentFiles")) actual.set("EnvironmentFiles", "");
 if (actual.size !== propertyNames.length) fail(95);
 const expectedReadOnlyPaths = phase === "verify" || phase === "replay"
   ? `${artifactRoot} ${unitEvidenceDirectory}` : artifactRoot;
@@ -1452,6 +1454,11 @@ assert_unit_effective_policy() {
   set -e
   [[ "$status" == 0 && "${#output}" -le 262144 && ! "$output" =~ $'\r' ]] \
     || die "systemd unit policy is unavailable or unbounded: ${unit}"
+  if [[ "$output" != EnvironmentFiles=* \
+    && "$output" != *$'\nEnvironmentFiles='* ]]; then
+    # systemctl omits an empty EnvironmentFiles a(sb) property even with --all.
+    output+=$'\nEnvironmentFiles='
+  fi
   while IFS='=' read -r key value; do
     [[ "$key" =~ ^(User|Group|SupplementaryGroups|DynamicUser|LoadCredential|WorkingDirectory|Environment|EnvironmentFiles|PassEnvironment|SetLoginEnvironment|UnsetEnvironment|NoNewPrivileges|CapabilityBoundingSet|AmbientCapabilities|IPAddressDeny|IPAddressAllow|Delegate|PrivateTmp|PrivateDevices|ProtectSystem|ProtectHome|ProtectProc|ProcSubset|ProtectKernelTunables|ProtectKernelModules|ProtectKernelLogs|ProtectControlGroups|ProtectClock|ProtectHostname|LockPersonality|RestrictRealtime|RestrictSUIDSGID|SystemCallArchitectures|RestrictAddressFamilies|RootDirectory|RootImage|InaccessiblePaths|BindPaths|BindReadOnlyPaths|ReadOnlyPaths|ReadWritePaths|KillMode|TimeoutStopUSec|UMask|StandardOutput|StandardError|RuntimeMaxUSec|ExecStart)$ \
       && ! "$value" =~ [[:cntrl:]] && -z "${actual[$key]+present}" ]] \

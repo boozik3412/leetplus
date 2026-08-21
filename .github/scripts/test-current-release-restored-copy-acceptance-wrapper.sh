@@ -219,6 +219,11 @@ run_privileged_evidence_isolation_fixture() {
     local output="$1" expected_pair key value count=0
     shift
     local -A expected=() actual=()
+    if [[ "$output" != EnvironmentFiles=* \
+      && "$output" != *$'\nEnvironmentFiles='* ]]; then
+      # systemctl omits an empty EnvironmentFiles a(sb) property even with --all.
+      output+=$'\nEnvironmentFiles='
+    fi
     [[ "${#output}" -le 8192 && ! "$output" =~ $'\r' ]] \
       || die 'privileged evidence-isolation effective property output is unbounded'
     for expected_pair in "$@"; do

@@ -1589,6 +1589,7 @@ test "$(realpath -e -- "$toctou_root/config/active-upstreams.conf")" = "$toctou_
 shared_lock_root="${TEST_ROOT}/activation-shared-lock"
 reset_fixture "$shared_lock_root"
 exec 7> "$shared_lock_root/deployment-state/cutover.lock"
+chmod 0600 "$shared_lock_root/deployment-state/cutover.lock"
 flock -n 7
 if run_activation "$shared_lock_root" env > "$shared_lock_root/held-lock.out" 2>&1; then
   printf 'activation ignored an existing blue/green deployment lock\n' >&2

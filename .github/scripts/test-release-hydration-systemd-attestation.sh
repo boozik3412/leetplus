@@ -1711,6 +1711,9 @@ for exact_mount_target in \
   '/srv/leetplus/release-promotions' \
   '/srv/leetplus/releases' \
   '/var/lib/leetplus/deploy-receipts'; do
+  if [[ "$exact_mount_target" == '/var/lib/leetplus/deploy-receipts' ]]; then
+    cp -a -- "$PRODUCTION_CONTROL_RECEIPT_ROOT" "$exact_root_mount_source/"
+  fi
   mount --bind "$exact_root_mount_source" "$exact_mount_target"
   active_mounts+=("$exact_mount_target")
   exact_mount_label="$(basename -- "$exact_mount_target")"

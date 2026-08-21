@@ -348,7 +348,7 @@ export class UsersService {
             expiresAt: { gt: new Date() },
           },
           include: userInviteInclude,
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
         }),
         this.prisma.userRoleOverride.findMany({
           where: { tenantId },

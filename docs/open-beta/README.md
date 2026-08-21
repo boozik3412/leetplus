@@ -86,9 +86,14 @@ Dedicated database boundary:
 lane и data zero-diff:
 [production restored-copy rehearsal 18.08.2026](./founder-production-restored-copy-rehearsal-2026-08-18.md).
 
-Fail-closed production successor для exact `153/4/0 → 187/4/0` (реализован,
-но до нового restored-copy/N/N-1/blue-green evidence остаётся `NO-GO`):
+Fail-closed production successor для exact `153/4/0 → 187/4/0` (normal и
+actual crash/lost-response local evidence приняты; production остаётся
+`NO-GO` до operational/host gates):
 [production-history controller](./founder-pilot-production-history-production-controller.md).
+
+Exact f4 artifact provenance, restored-copy, actual crash/lost-response,
+business zero-diff и N−1 API/scheduler acceptance:
+[Controlled Beta-1 f4 rehearsal evidence 21.08.2026](./controlled-beta-1-f4-rehearsal-evidence-2026-08-21.md).
 
 Свежая isolated репетиция actual production-history и runtime-role
 `plan → apply → check → rollback → reconcile`:

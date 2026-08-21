@@ -1,6 +1,19 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash -p
 # Stage one checksummed, prewarmed pnpm CAS as an immutable read-only production
 # input. This script has no network, package execution, runtime or switch step.
+
+[[ "$-" == *p* ]] || {
+  printf 'stage-pnpm-store: execute the installed script directly with its privileged Bash shebang\n' >&2
+  exit 1
+}
+while IFS= read -r inherited_environment_name; do
+  unset "$inherited_environment_name" 2>/dev/null || true
+done < <(compgen -e)
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+LANG='C.UTF-8'
+LC_ALL='C.UTF-8'
+TZ='UTC'
+export PATH LANG LC_ALL TZ
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -30,8 +43,27 @@ PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 export PATH
 [[ "$node_major" =~ ^[0-9]+$ ]] || die 'Node major is invalid'
 [[ "$pnpm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'pnpm version is invalid'
-for command_name in awk basename chmod chown find grep gzip mktemp mv realpath rm sha256sum stat sync tar; do
+for command_name in awk basename chmod chown dirname find grep gzip mktemp mv realpath rm sha256sum stat sync tar; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is unavailable: $command_name"
+done
+[[ -x /usr/bin/node && ! -L /usr/bin/node \
+  && "$(stat -c '%u:%g' -- /usr/bin/node)" == '0:0' \
+  && "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == "$node_major" ]] \
+  || die 'exact root-owned /usr/bin/node does not match the requested store ABI'
+store_verifier='/usr/local/libexec/leetplus/verify-pnpm-store-integrity.mjs'
+[[ -f "$store_verifier" && ! -L "$store_verifier" \
+  && "$(realpath -e -- "$store_verifier")" == "$store_verifier" \
+  && "$(stat -c '%u:%g' -- "$store_verifier")" == '0:0' \
+  && -z "$(find -P "$store_verifier" -maxdepth 0 -perm /022 -print -quit)" ]] \
+  || die 'installed pnpm store verifier is absent or unsafe'
+verifier_ancestor="$(dirname -- "$store_verifier")"
+while :; do
+  [[ -d "$verifier_ancestor" && ! -L "$verifier_ancestor" \
+    && "$(stat -c '%u:%g' -- "$verifier_ancestor")" == '0:0' \
+    && -z "$(find -P "$verifier_ancestor" -maxdepth 0 -perm /022 -print -quit)" ]] \
+    || die "pnpm store verifier ancestor is not root-controlled: ${verifier_ancestor}"
+  [[ "$verifier_ancestor" == '/' ]] && break
+  verifier_ancestor="$(dirname -- "$verifier_ancestor")"
 done
 
 archive="$(realpath -e -- "$archive")"
@@ -51,6 +83,8 @@ gzip --test -- "$archive" || die 'store archive gzip verification failed'
 store_root='/srv/leetplus/pnpm-store'
 [[ ! -e "$store_root" && ! -L "$store_root" ]] || die 'production pnpm store already exists; replacement requires separate quarantine'
 [[ -d /srv/leetplus && ! -L /srv/leetplus ]] || die '/srv/leetplus is absent or unsafe'
+[[ "$(realpath -e -- /srv/leetplus)" == '/srv/leetplus' ]] \
+  || die '/srv/leetplus path traverses a symlink'
 [[ "$(stat -c '%u:%g' -- /srv/leetplus)" == '0:0' \
   && -z "$(find -P /srv/leetplus -maxdepth 0 -perm /022 -print -quit)" ]] \
   || die '/srv/leetplus must be root:root and non-writable by group/other'
@@ -73,18 +107,35 @@ tar -xzf "$archive" --no-same-owner --no-same-permissions -C "$staging" \
 [[ -z "$(find -P "$staging" -xdev -type f -links +1 -print -quit)" ]] || die 'extracted store contains a hardlink'
 
 lockfile_sha="$(sha256sum "$lockfile" | awk '{ print $1 }')"
-{
-  printf 'RECORD_VERSION=1\n'
-  printf 'LOCKFILE_SHA256=%s\n' "$lockfile_sha"
-  printf 'NODE_MAJOR=%s\n' "$node_major"
-  printf 'PNPM_VERSION=%s\n' "$pnpm_version"
-  printf 'BUNDLE_SHA256=%s\n' "$expected_digest"
-} > "$staging/LEETPLUS_STORE_RECEIPT"
 find -P "$staging" -xdev -type d -exec chmod 0550 -- {} +
 find -P "$staging" -xdev -type f -exec chmod 0440 -- {} +
 chown -hR root:leetplus-build -- "$staging"
+/usr/bin/node "$store_verifier" prepare \
+  --store-root "$staging" \
+  --lockfile-sha256 "$lockfile_sha" \
+  --node-major "$node_major" \
+  --pnpm-version "$pnpm_version" \
+  --bundle-sha256 "$expected_digest" \
+  || die 'cannot create the complete digest-bound pnpm store receipt'
+find -P "$staging" -xdev -type d -exec chmod 0550 -- {} +
+find -P "$staging" -xdev -type f -exec chmod 0440 -- {} +
+chown -hR root:leetplus-build -- "$staging"
+/usr/bin/node "$store_verifier" verify \
+  --store-root "$staging" \
+  --lockfile-sha256 "$lockfile_sha" \
+  --node-major "$node_major" \
+  --pnpm-version "$pnpm_version" \
+  --bundle-sha256 "$expected_digest" \
+  || die 'staged pnpm store failed complete integrity verification'
 mv -T -- "$staging" "$store_root"
 sync -d /srv/leetplus
+/usr/bin/node "$store_verifier" verify \
+  --store-root "$store_root" \
+  --lockfile-sha256 "$lockfile_sha" \
+  --node-major "$node_major" \
+  --pnpm-version "$pnpm_version" \
+  --bundle-sha256 "$expected_digest" \
+  || die 'published pnpm store failed complete integrity verification'
 
 printf 'PNPM_STORE_STAGED_LOCKFILE_SHA256=%s\n' "$lockfile_sha"
 printf 'PNPM_STORE_STAGED_BUNDLE_SHA256=%s\n' "$expected_digest"

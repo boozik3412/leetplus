@@ -1,6 +1,6 @@
 # Production history 153 → 187: fail-closed controller
 
-Статус: `REAL-PG FIXES IN WORKTREE / NEW SHA AND ARTIFACT REQUIRED / PRODUCTION EXECUTION NO-GO`.
+Статус: `F4 REAL-PG + NORMAL + ACTUAL CRASH/LOST-RESPONSE ACCEPTED / PRODUCTION EXECUTION NO-GO`.
 
 Этот документ описывает единственный допустимый repository-side путь для
 перехода production history с точного состояния `153 applied / 4 rolled back /
@@ -128,11 +128,25 @@ database/roles независимо. После прогона остаток р
 `23/23`, independent audit — `P0=0 / P1=0 / P2=0`. Production не подключался и
 не изменялся; Prisma deploy этим gate не выполнялся.
 
-Это не final acceptance: fixes должны получить новый clean SHA, Fast CI и Full
-Release Admission с обязательной real-PG integration suite. Затем только новый
-artifact этого SHA проходит полный restored-copy
-`inventory → plan → approve → apply → check`, lost-response/resume и N/N-1
-replay. `a34eae8e…` не переиспользуется.
+Artifact `a34eae8e…` не переиспользуется. Исправления вошли в следующий exact
+SHA `f4e8d79dadaa62734d045c7ae0b203f618d680b7`, который принят Fast CI
+`32420934305` и Full Release Admission `32421266035` вместе с real-PG gate.
+Raw artifact SHA-256:
+`9f77c15fd4b5bbdc42bc360c5dbdb9f34f66d40a00fcbbe159aaed7ff144d392`.
+
+Fresh LF extraction этого artifact прошла normal path
+`inventory → plan → approve → reconcile(4) → deploy(34) → zero-pending deploy
+→ check(187/4/0)`. Затем отдельная fresh clone прошла фактический controller
+kill после durable reconciliation, restart без повторного DML, real Prisma
+deploy с `PRISMA_DEPLOY_RESPONSE_AMBIGUOUS`, final-state reconciliation и ещё
+один process restart с `deploymentAttempt=0`. Все три phase journals имеют
+валидные SHA-256 chains; ownership mismatch `0/0/0`, other sessions `0`,
+business aggregate zero-diff. Полные digests и границы evidence:
+[`controlled-beta-1-f4-rehearsal-evidence-2026-08-21.md`](./controlled-beta-1-f4-rehearsal-evidence-2026-08-21.md).
+
+Таким образом local exact-artifact normal/crash/lost-response gate закрыт.
+Это всё ещё не production authorization: production имеет другие role OID,
+system identifier, stale digest, signing key/pin и network/session topology.
 
 ## Manifest
 
@@ -214,8 +228,10 @@ loopback port, без API/workers/outbound и с disposable role fixtures. То�
 8. Проверить `check`, readiness, N/N-1 compatibility и zero-diff business
    aggregates. На isolated copy удалить все fixtures после retention deadline.
 9. Перед production повторить backup/identity/role checks, убедиться, что
-   blue/green shadow runtime готов, schedulers/outbound выключены в shadow и
-   старый runtime остаётся hot rollback target.
+   blue/green shadow runtime готов, schedulers/outbound выключены в shadow, а
+   hot rollback даёт только отдельно проверенный scheduler-free N−1 contour на
+   `4300/4301/3300`. Scheduler-capable legacy `4000/3000` обязан быть
+   durably fenced, остановлен и исключён из routing.
 10. В production запускать plan → approve → apply → check только в одном
     контролируемом окне. При любом `BLOCKED_MANUAL` не повторять Prisma вручную;
     сначала классифицировать migration state и сохранить receipt.
@@ -225,19 +241,19 @@ CLI `--help` является каноническим перечнем пара
 
 ## Оставшиеся gates до production execution
 
-1. Новый clean SHA после real-PG fixes и полностью зелёный Full Release
-   Admission, включая обязательную production-history PostgreSQL 16 integration
-   suite; artifact `a34eae8e…` superseded.
-2. Fresh restored-copy replay именно нового exact artifact с реальным PostgreSQL
-   16, включая фактическое принятие canonical startup `role` option обоими
-   clients, catalog evidence владельца созданных CURRENT154..187 objects,
-   kill-after-reconciliation, lost deploy response и exact resume.
-3. Dedicated migration/application runtime roles/grants и независимая
-   attestation; текущая superuser application connection, если она обнаружена,
-   является hard blocker.
-4. N/N-1: старый production SHA должен пройти критические authenticated reads
-   и writes против migrated restored copy.
-5. Blue/green API/Web readiness и атомарный nginx upstream switch; первый
+1. Принять successor exact SHA, включающий operational rollback/drain/slot/smoke
+   helpers; f4 controller artifact и его local replay уже приняты.
+2. На production read-only получить fresh system identifier, exact role OID,
+   active session topology, HBA/TLS/SCRAM/pool evidence и strict four-row
+   digest. Создать новый production-only signing key/pin; local rehearsal key
+   повторно не используется.
+3. Перед effect создать fresh immutable production backup, globals и off-host
+   copy с совпавшими SHA-256 и independent restore check.
+4. N−1 API compatibility принята локально, но scheduler receipt требует
+   scheduler-free legacy runtime и доказанный pre-migration drain. Также нужен
+   authenticated current-release N=f4 smoke на migrated copy.
+5. Privileged Linux blue/green API/Web readiness и атомарный nginx upstream
+   switch; первый
    artifact cutover откатывается на legacy SHA/runtime, а schema rollback по
    умолчанию является fix-forward.
 

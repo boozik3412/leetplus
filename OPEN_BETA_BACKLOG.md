@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 21.08.2026
-- Версия: 3.57
+- Версия: 3.58
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -134,6 +134,37 @@
   test, новый artifact и полный exact-artifact replay. Production services,
   database, timer, текущая сеть, outbound и external invite этим evidence не
   изменялись.
+  Новый exact SHA `f4e8d79dadaa62734d045c7ae0b203f618d680b7`
+  принят Fast CI
+  [`32420934305`](https://github.com/boozik3412/leetplus/actions/runs/32420934305)
+  как `2/2 SUCCESS` и Full Release Admission
+  [`32421266035`](https://github.com/boozik3412/leetplus/actions/runs/32421266035)
+  как `4/4 SUCCESS`. Artifact `9426096697`, raw archive
+  `sha256:9f77c15fd4b5bbdc42bc360c5dbdb9f34f66d40a00fcbbe159aaed7ff144d392`
+  прошёл fresh exact-artifact `153/4/0 → reconcile(4) → 187/4/0`, повторный
+  zero-pending deploy и owner mismatch `0/0/0`. Отдельная fresh clone
+  фактически прошла kill после durable reconciliation, restart без повторного
+  DML, реальный deploy с ambiguous lost response и ещё один restart с
+  `deploymentAttempt=0`; три journal chain валидны. N−1 API выполнил `12`
+  authenticated probes с residue `0`, scheduler clone охватила шесть legacy
+  families и затем была удалена. Business aggregate exact source/migrated
+  copy совпал. Ранний Windows current-release diagnostic выполнил `31` probe
+  на отдельной disposable classified clone, cleanup residue `0`, но последующий
+  independent audit выявил неполное hydrated-tree/kernel/role/drain доказательство;
+  поэтому этот receipt помечен `SUPERSEDED_DIAGNOSTIC`, а production-like
+  current-release acceptance перенесён в обязательный privileged Linux gate.
+  Raw source
+  при этом намеренно остался неизменным и fail-closed обнаружил `5` active
+  legacy users текущей сети с `accessScope=NULL`. Поэтому binary acceptance не
+  является data admission: перед cutover обязателен отдельный reviewed
+  `classify manifest → plan → apply → zero-diff`, без автоматического
+  повышения platform user. Полное evidence зафиксировано в
+  [`controlled-beta-1-f4-rehearsal-evidence-2026-08-21.md`](./docs/open-beta/controlled-beta-1-f4-rehearsal-evidence-2026-08-21.md).
+  Локальные history/crash/N−1 gates для `f4e8d79d…` закрыты. Production canary
+  всё ещё `NO-GO`: требуются принятые successor-SHA operational helpers,
+  scheduler-free legacy rollback/drain, hardened current-release authenticated Linux smoke,
+  privileged Linux rehearsal, production role/TLS/pool attestation и новый
+  backup непосредственно перед effect.
 - Решением от 17.08.2026 offline CURRENT198–202 key ceremony и USB-хранение
   исключены из critical path первого дружественного beta tenant. CURRENT202 V2
   остаётся принятым deny-only engineering evidence и переносится в post-beta
@@ -148,10 +179,10 @@
 
 | Шаг                                                             | Блокирует первый OWNER invite | Состояние                                                       |
 | --------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------- |
-| Fast CI на рабочем коммите                                      | Да                            | `a34eae8e…`, `32413776104`: green, но SHA superseded; local real-PG fixes/gate green, требуется новый clean SHA |
-| Full release admission для exact SHA                            | Да                            | Real-PG gate реализован и локально `1/1`; `a34eae8e…` artifact `SUPERSEDED/NO-GO`, новый Full run ещё не принят |
-| Production backup, rollback и canary                            | Да                            | Backup и N−1 API/schema acceptance приняты; disposable controller reconcile green, exact-artifact replay и canary не выполнены |
-| Runtime roles, TLS route, SMTP worker и activation               | Да                            | Isolated lifecycle принята; production application предстоит    |
+| Fast CI на рабочем коммите                                      | Да                            | `f4e8d79d…`, `32420934305`: `2/2` принято; текущие operational additions требуют successor SHA и нового Fast CI |
+| Full release admission для exact SHA                            | Да                            | `f4e8d79d…`, `32421266035`: `4/4`, artifact `9426096697` принят; successor с rollback/drain/current-N helpers ещё не принят |
+| Production backup, rollback и canary                            | Да                            | Exact-artifact normal + crash/lost-response + N−1 + zero-diff приняты; ранний N=f4 runtime receipt superseded; 5-user scope classification, hardened N=f4 Linux runtime, scheduler-free rollback, privileged Linux rehearsal, fresh pre-window backup и production canary предстоят |
+| Runtime roles, TLS route, SMTP worker и activation               | Да                            | Restored-copy ownership `0/0/0` принято; production HBA/TLS/SCRAM/pool и activation application предстоят |
 | `Tenant B/Store B1`, persisted GO и OWNER invite                | Да                            | Предстоит после canary                                          |
 | Day-0 scope/module/kill-switch smoke                            | Да                            | Предстоит сразу после invite                                    |
 | Telegram public ingress/outbound enablement                     | Нет для первого B2B login     | Отдельный canary до включения Telegram гостям                   |

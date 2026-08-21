@@ -1,0 +1,26 @@
+# Every installed leetplus-* service/timer must be classified. DRAIN entries
+# are stopped and disabled after the scheduler-free pair is publicly serving.
+# SAFE entries may remain loaded. REQUIRED entries must exist; OPTIONAL ones
+# may be absent but, when present, are still drained.
+REQUIRED_DRAIN leetplus-api.service
+REQUIRED_DRAIN leetplus-web.service
+REQUIRED_DRAIN leetplus-deploy.timer
+OPTIONAL_DRAIN leetplus-deploy.service
+OPTIONAL_DRAIN leetplus-guest-game-bot-consumer.timer
+OPTIONAL_DRAIN leetplus-guest-game-bot-consumer.service
+SAFE leetplus-api-rollback@.service
+SAFE leetplus-web-rollback@.service
+SAFE leetplus-api-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service
+SAFE leetplus-web-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service
+SAFE leetplus-rollback-egress.service
+SAFE leetplus-api@.service
+SAFE leetplus-web@.service
+SAFE leetplus-api@blue.service
+SAFE leetplus-web@blue.service
+SAFE leetplus-api@green.service
+SAFE leetplus-web@green.service
+SAFE leetplus-release-hydrate@.service
+SAFE leetplus-release-hydrate@7de04ff4ccc814494810730be3fa6bf661097b07.service
+SAFE leetplus-blue-green-recovery.service
+SAFE leetplus-blue-green-recovery-watchdog.service
+SAFE leetplus-blue-green-recovery.timer

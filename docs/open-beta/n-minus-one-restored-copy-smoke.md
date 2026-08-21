@@ -1,6 +1,6 @@
 # N−1 compatibility smoke на migrated restored copy
 
-Статус: `HARNESS IMPLEMENTED / 13/13 LOCAL PASS / API + SCHEDULER RESTORED-COPY RUNS PENDING`.
+Статус: `HARNESS + API + SCHEDULER RESTORED-COPY ACCEPTED / PRODUCTION DRAIN AND WEB ROLLBACK PENDING`.
 
 Этот gate отвечает на узкий rollback-вопрос: сможет ли уже развёрнутый API с
 точным SHA `7de04ff4ccc814494810730be3fa6bf661097b07` продолжить критические
@@ -219,6 +219,31 @@ Prisma/schema/fatal runtime errors, final health `200` и reviewed exact
 before/after aggregate diff. Receipt всегда содержит
 `authorizesHotSchedulerRollback=false` и `requiresProductionDrain=true`.
 
+## Фактическое acceptance evidence — 21.08.2026
+
+На отдельной migrated PostgreSQL `16.15` copy со schema `187/4/0` exact legacy
+SHA `7de04ff4ccc814494810730be3fa6bf661097b07` прошёл canonical direct CLI:
+
+- `12` обязательных HTTP steps, включая login/auth-me и все критические
+  beta-модули;
+- reversible checklist create/delete;
+- fixture residue `0`, direct cleanup не потребовался;
+- evidence digest
+  `22a419cd813796f4470ef67ab53d85b2ff45bb6811541f7550367558771e24ba`.
+
+Два прежних 45-second Windows startup timeout receipts являются superseded
+diagnostics: отдельный extended diagnostic и canonical direct CLI доказали
+холодный startup и полный smoke. Они не являются schema/runtime failure.
+
+Отдельная fresh scheduler clone прошла все шесть scheduler families, final
+health `200`, zero Prisma/runtime errors и reviewed aggregate DB diff; evidence
+digest
+`c5ccebd372dff784473aed7ecafff3af3969329568e703507d94a09020d8a7fd`.
+Как и требует contract, этот PASS не разрешает hot scheduler rollback и
+требует production drain. API и scheduler clones после evidence удалены; exact
+catalog absence зафиксирован. Общая provenance и recovery evidence:
+[`controlled-beta-1-f4-rehearsal-evidence-2026-08-21.md`](./controlled-beta-1-f4-rehearsal-evidence-2026-08-21.md).
+
 Любой `FAIL` сохраняет запрет production schema migration. DB restore как
 обычный rollback после открытия записи не принимается: он потеряет изменения
 после backup. До доказанной N/N−1 совместимости rollback остаётся либо
@@ -258,12 +283,16 @@ session. Безопасная последовательность для single
 
 ## Что ещё не выполнено
 
-- Реальный запуск на migrated restored copy ещё не выполнялся.
-- Реальный scheduler-compatibility запуск на отдельном disposable migrated
-  clone ещё не выполнялся; до него scheduler contract остаётся `PENDING`.
+- Scheduler-free exact legacy rollback pair и production drain verifier должны
+  пройти successor-SHA CI и privileged Linux rehearsal, затем быть установлены
+  до production migration.
 - Web N−1 не запускается этим harness. Старый Next build требует отдельной
   artifact/build identity и network-isolated build acceptance; API является
   обязательной DB compatibility boundary. Web rollback проверяется отдельно
   blue/green Web readiness и точным BUILD_ID.
+- Current-release N=f4 binary/runtime отдельно прошёл `31` probe на disposable
+  classified clone; raw migrated source остаётся fail-closed из-за пяти active
+  `accessScope=NULL`. Требуется reviewed classification/data admission; N−1
+  evidence его не заменяет.
 - Harness не создаёт restored DB, не применяет migration, не запускает current
   release и не взаимодействует с production/remote PostgreSQL.

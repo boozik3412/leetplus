@@ -23,7 +23,21 @@ jobs:
   authority-root-trust:
     name: Fast authority root trust
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: leetplus
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d leetplus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
 
     steps:
       - name: Check out complete root history
@@ -36,6 +50,45 @@ jobs:
       - name: Verify exact release checkout
         shell: bash
         run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Verify exact operational Node runtime
+        shell: bash
+        run: |
+          test "$(node -p 'process.versions.node.split(".")[0]')" = '22'
+          node_path="$(realpath "$(command -v node)")"
+          case "$node_path" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected operational Node path: %s\n' "$node_path" >&2; exit 1 ;;
+          esac
+
+      - name: Verify production-control installed-generation authority
+        shell: bash
+        run: |
+          bash -n docs/deployment/production-control-authority/leetplus-install-production-control-v1
+          node --check docs/deployment/production-control-authority/verify-installed-production-control-generation.mjs
+          bash -n .github/scripts/test-production-control-install-authority.sh
+          authority_node="$(realpath -e -- "$(command -v node)")"
+          case "$authority_node" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected production-control authority Node path: %s\n' "$authority_node" >&2; exit 1 ;;
+          esac
+          printf 'FAST_CI_FIXTURE_PRODUCTION_CONTROL_INSTALL=START\n'
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LEETPLUS_FIXTURE_NODE="$authority_node" \
+            PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            /usr/bin/bash -p --noprofile --norc \
+            .github/scripts/test-production-control-install-authority.sh
+          printf 'FAST_CI_FIXTURE_PRODUCTION_CONTROL_INSTALL=PASS\n'
 
       - name: Validate SHA-bound artifact staging script syntax
         shell: bash
@@ -53,8 +106,47 @@ jobs:
           printf 'FAST_CI_FIXTURE_RELEASE_READINESS=PASS\n'
           bash -n docs/deployment/production-artifact/preflight-release-slot.sh
           bash -n docs/deployment/production-artifact/prepare-web-slot-cache.sh
+          bash -n .github/scripts/test-prepare-web-slot-cache.sh
+          bash .github/scripts/test-prepare-web-slot-cache.sh
           bash -n docs/deployment/production-artifact/seal-release-artifact.sh
           bash -n docs/deployment/production-artifact/promote-release-artifact.sh
+          node --check docs/deployment/production-artifact/verify-release-hydration-systemd.mjs
+          bash -n .github/scripts/test-release-hydration-systemd-attestation.sh
+          authority_node="$(realpath "$(command -v node)")"
+          case "$authority_node" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected authority Node path: %s\n' "$authority_node" >&2; exit 1 ;;
+          esac
+          authority_node_dir="$(dirname -- "$authority_node")"
+          printf 'FAST_CI_FIXTURE_HYDRATION_SYSTEMD_ATTESTATION=START\n'
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            HYDRATION_SYSTEMD_ATTESTATION_FIXTURE_CONFIRM=run-bounded-root-hydration-systemd-attestation-fixture \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH="${authority_node_dir}:/usr/sbin:/usr/bin:/sbin:/bin" \
+            /usr/bin/bash -p .github/scripts/test-release-hydration-systemd-attestation.sh
+          printf 'FAST_CI_FIXTURE_HYDRATION_SYSTEMD_ATTESTATION=PASS\n'
+          node --check docs/deployment/production-artifact/verify-pnpm-store-integrity.mjs
+          bash -n .github/scripts/test-production-pnpm-store-integrity.sh
+          printf 'FAST_CI_FIXTURE_PNPM_STORE_INTEGRITY=START\n'
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LEETPLUS_FIXTURE_NODE="$authority_node" \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/test-production-pnpm-store-integrity.sh
+          printf 'FAST_CI_FIXTURE_PNPM_STORE_INTEGRITY=PASS\n'
+          bash -n docs/deployment/production-artifact/bind-release-slot.sh
+          bash -n .github/scripts/test-production-artifact-slot-link.sh
+          printf 'FAST_CI_FIXTURE_SLOT_LINK=START\n'
+          bash .github/scripts/test-production-artifact-slot-link.sh
+          printf 'FAST_CI_FIXTURE_SLOT_LINK=PASS\n'
           bash -n docs/deployment/production-artifact/blue-green-cutover.sh
           bash -n .github/scripts/test-production-artifact-blue-green.sh
           printf 'FAST_CI_FIXTURE_BLUE_GREEN=START\n'
@@ -64,11 +156,90 @@ jobs:
           printf 'FAST_CI_FIXTURE_SYSTEMD_TEMPLATES=START\n'
           bash .github/scripts/test-production-artifact-systemd-templates.sh
           printf 'FAST_CI_FIXTURE_SYSTEMD_TEMPLATES=PASS\n'
+          bash -n docs/deployment/production-artifact/preflight-legacy-rollback.sh
+          bash -n docs/deployment/production-artifact/apply-legacy-rollback-egress.sh
+          bash -n docs/deployment/production-artifact/apply-legacy-database-login-fence.sh
+          bash -n docs/deployment/production-artifact/verify-legacy-runtime-drain.sh
+          bash -n docs/deployment/production-artifact/verify-legacy-rollback-readiness.sh
+          bash -n docs/deployment/production-artifact/activate-legacy-rollback-contour.sh
+          bash -n docs/deployment/production-artifact/install-legacy-rollback-contour.sh
+          bash -n docs/deployment/production-control-authority/leetplus-install-scheduler-free-nminus1-v1
+          bash -n .github/scripts/test-production-legacy-rollback-contour.sh
+          bash -n .github/scripts/test-production-legacy-rollback-service-user.sh
+          bash -n .github/scripts/test-production-legacy-rollback-control-bundle.sh
+          bash -n .github/scripts/test-production-legacy-database-authority-pg16.sh
+          node --check docs/deployment/production-artifact/legacy-rollback-auth-edge.mjs
+          node --check .github/scripts/test-legacy-rollback-auth-edge.mjs
+          node --check docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs
+          (cd docs/deployment/production-artifact && sha256sum --check --strict --quiet CONTROL_BUNDLE_SHA256SUMS)
+          printf 'FAST_CI_FIXTURE_LEGACY_ROLLBACK=START\n'
+          node .github/scripts/test-legacy-rollback-auth-edge.mjs
+          bash .github/scripts/test-production-legacy-rollback-contour.sh
+          CI=true GITHUB_ACTIONS=true bash .github/scripts/test-production-legacy-database-authority-pg16.sh
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH="${authority_node_dir}:/usr/sbin:/usr/bin:/sbin:/bin" \
+            /usr/bin/bash -p .github/scripts/test-production-legacy-rollback-service-user.sh
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/test-production-legacy-rollback-control-bundle.sh
+          printf 'FAST_CI_FIXTURE_LEGACY_ROLLBACK=PASS\n'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
+      - name: Verify production installer path in a disposable root
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_image='node:22.23.2-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a'
+          workspace_real="$(realpath -e -- "$GITHUB_WORKSPACE")"
+          test "$workspace_real" = "$GITHUB_WORKSPACE"
+          git diff --exit-code -- .
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          docker pull --platform linux/amd64 "$fixture_image"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$fixture_image")" = 'linux/amd64'
+          docker run --rm \
+            --platform linux/amd64 \
+            --network none \
+            --pids-limit 512 \
+            --memory 2g \
+            --mount "type=bind,src=${workspace_real},dst=/workspace,readonly" \
+            --workdir /workspace \
+            --entrypoint /usr/bin/bash \
+            "$fixture_image" -p -c '
+              set -euo pipefail
+              /usr/bin/install -o root -g root -m 0755 /usr/local/bin/node /usr/bin/node
+              /usr/bin/node -e "if (!/^22[.]/.test(process.versions.node)) process.exit(1)"
+              exec /usr/bin/env -i \
+                LEETPLUS_DISPOSABLE_ROOT_FIXTURE=CONFIRMED_DESTROYABLE_CI_ROOT \
+                LANG=C.UTF-8 \
+                LC_ALL=C.UTF-8 \
+                TZ=UTC \
+                PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+                /usr/bin/bash -p .github/scripts/test-production-legacy-rollback-installer-root.sh
+            '
+
+      - name: Verify exact runtime and production-control artifact identities
+        shell: bash
+        run: |
+          node --check .github/scripts/verify-runtime-release-artifact.mjs
+          bash -n .github/scripts/test-runtime-release-artifact-integrity.sh
+          bash .github/scripts/test-runtime-release-artifact-integrity.sh
+          bash -n .github/scripts/hydrate-runtime-release-artifact-ci.sh
+          /usr/bin/python3 -I -S -E -c \
+            "from pathlib import Path; [compile(Path(p).read_bytes(), p, 'exec') for p in ['.github/scripts/extract-runtime-release-artifact.py', '.github/scripts/test-runtime-release-archive-extraction.py']]"
+          /usr/bin/python3 -I -S -E .github/scripts/test-runtime-release-archive-extraction.py
+          node --check docs/deployment/production-control-authority/verify-production-control-artifact.mjs
+          bash -n .github/scripts/test-production-control-artifact-integrity.sh
+          bash .github/scripts/test-production-control-artifact-integrity.sh
+          bash -n .github/scripts/build-production-control-artifact-ci.sh
 
       - name: Validate pinned authority root transition
         run: >-
@@ -89,7 +260,7 @@ jobs:
   application:
     name: Fast application checks
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
 
     steps:
       - name: Check out repository
@@ -124,6 +295,46 @@ jobs:
           pnpm --filter database db:validate
           pnpm --filter database db:generate
           pnpm --filter database typecheck
+
+      - name: Validate controlled-beta data and runtime admission contracts
+        run: |
+          pnpm --filter database check:current-network-access-scope-classification
+          pnpm --filter database check:current-release-restored-copy-runtime-acceptance
+
+      - name: Validate current-release production-like Linux wrapper
+        shell: bash
+        run: |
+          bash -n docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh
+          bash -n .github/scripts/test-current-release-restored-copy-acceptance-wrapper.sh
+          bash .github/scripts/test-current-release-restored-copy-acceptance-wrapper.sh
+
+      - name: Validate current-release wrapper in a real privileged systemd namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_realpath="$(realpath -e -- "$(command -v node)")"
+          case "$node_realpath" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected wrapper fixture Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
+          esac
+          fixture_node='/usr/local/libexec/leetplus/current-wrapper-fixture-node22'
+          cleanup_fixture_node() {
+            sudo -n /usr/bin/rm -f -- "$fixture_node"
+          }
+          trap cleanup_fixture_node EXIT
+          sudo -n /usr/bin/install -d -o root -g root -m 0755 /usr/local/libexec/leetplus
+          sudo -n /usr/bin/install -o root -g root -m 0755 \
+            "$node_realpath" "$fixture_node"
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            CURRENT_WRAPPER_EVIDENCE_ISOLATION_FIXTURE_CONFIRM=run-root-current-wrapper-evidence-isolation-fixture \
+            LANG=C \
+            LC_ALL=C \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/test-current-release-restored-copy-acceptance-wrapper.sh \
+              --privileged-evidence-isolation-fixture
 
       - name: Run focused API acceptance tests
         run: pnpm --filter api test:ci:focused

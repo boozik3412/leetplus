@@ -1,0 +1,304 @@
+-- PostgreSQL 16 only. Run once as the cluster bootstrap superuser after the
+-- three roles exist with the exact attributes documented in the runbook.
+-- The LOGIN executor receives only USAGE+EXECUTE. The NOLOGIN owner receives
+-- only CREATEROLE plus non-inheriting/non-settable ADMIN authority over the
+-- one legacy role that this function may fence.
+
+ALTER ROLE leetplus LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1;
+ALTER ROLE leetplus RESET ALL;
+ALTER ROLE leetplus_legacy_rollback LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 20;
+ALTER ROLE leetplus_legacy_rollback RESET ALL;
+ALTER ROLE leetplus_fence_authority NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB CREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 0;
+ALTER ROLE leetplus_fence_authority RESET ALL;
+ALTER ROLE leetplus_role_fencer LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 1;
+ALTER ROLE leetplus_role_fencer RESET ALL;
+ALTER ROLE leetplus_drain_audit LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 2;
+ALTER ROLE leetplus_drain_audit RESET ALL;
+
+REVOKE CONNECT, TEMPORARY ON DATABASE leetplus FROM PUBLIC;
+GRANT CONNECT ON DATABASE leetplus TO leetplus, leetplus_legacy_rollback, leetplus_role_fencer, leetplus_drain_audit;
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO leetplus, leetplus_legacy_rollback, leetplus_drain_audit;
+
+GRANT leetplus TO leetplus_legacy_rollback WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT leetplus TO leetplus_fence_authority WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+GRANT pg_monitor TO leetplus_drain_audit WITH ADMIN FALSE, INHERIT TRUE, SET TRUE;
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM leetplus_drain_audit;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM leetplus_drain_audit;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM leetplus_drain_audit;
+GRANT SELECT ON TABLE
+  public."Tenant", public."Store", public."Product", public."User",
+  public."UserStoreAccess", public."UserAccessRole", public."UserInvite",
+  public."StaffChecklistTemplate", public."StaffKnowledgeArticle",
+  public."GuestGameLootBox", public."GuestGameMission", public."GuestGameSeason",
+  public."StaffChatChannel", public."StaffChatChannelMember"
+TO leetplus_drain_audit;
+
+CREATE SCHEMA leetplus_ops AUTHORIZATION leetplus_fence_authority;
+REVOKE ALL ON SCHEMA leetplus_ops FROM PUBLIC;
+GRANT USAGE ON SCHEMA leetplus_ops TO leetplus_role_fencer;
+GRANT EXECUTE ON FUNCTION pg_catalog.pg_control_system() TO leetplus_fence_authority;
+
+CREATE FUNCTION leetplus_ops.apply_nminus1_legacy_login_fence(
+  expected_database text,
+  expected_address text,
+  expected_port integer,
+  expected_system_identifier text,
+  expected_session_user text
+)
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+PARALLEL UNSAFE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $leetplus_fence_function$
+DECLARE
+  observed_system_identifier text;
+BEGIN
+  SELECT system_identifier::text
+  INTO STRICT observed_system_identifier
+  FROM pg_catalog.pg_control_system();
+
+  IF (
+    current_database() = expected_database
+    AND pg_catalog.inet_server_addr()::text = expected_address
+    AND pg_catalog.inet_server_port() = expected_port
+    AND observed_system_identifier = expected_system_identifier
+    AND session_user::text = expected_session_user
+    AND current_user::text = 'leetplus_fence_authority'
+    AND expected_session_user = 'leetplus_role_fencer'
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_roles
+      WHERE rolname = 'leetplus'
+        AND rolinherit AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole
+        AND NOT rolreplication AND NOT rolbypassrls
+        AND rolconnlimit = -1 AND rolvaliduntil IS NULL AND rolconfig IS NULL
+    ) = 1
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_auth_members membership
+      JOIN pg_catalog.pg_roles member_role ON member_role.oid = membership.member
+      WHERE member_role.rolname = 'leetplus'
+    ) = 0
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_roles
+      WHERE rolname = 'leetplus_legacy_rollback'
+        AND rolcanlogin AND NOT rolinherit AND NOT rolsuper
+        AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+        AND rolconnlimit = 20 AND rolvaliduntil IS NULL AND rolconfig IS NULL
+    ) = 1
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_auth_members membership
+      JOIN pg_catalog.pg_roles parent_role ON parent_role.oid = membership.roleid
+      JOIN pg_catalog.pg_roles member_role ON member_role.oid = membership.member
+      WHERE parent_role.rolname = 'leetplus'
+        AND member_role.rolname = 'leetplus_legacy_rollback'
+        AND NOT membership.admin_option
+        AND NOT membership.inherit_option
+        AND membership.set_option
+    ) = 1
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_roles
+      WHERE rolname = 'leetplus_fence_authority'
+        AND NOT rolcanlogin AND NOT rolinherit AND NOT rolsuper
+        AND NOT rolcreatedb AND rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+        AND rolconnlimit = 0 AND rolvaliduntil IS NULL AND rolconfig IS NULL
+    ) = 1
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_roles
+      WHERE rolname = 'leetplus_role_fencer'
+        AND rolcanlogin AND NOT rolinherit AND NOT rolsuper
+        AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+        AND rolconnlimit = 1 AND rolvaliduntil IS NULL AND rolconfig IS NULL
+    ) = 1
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_auth_members membership
+      JOIN pg_catalog.pg_roles parent_role ON parent_role.oid = membership.roleid
+      JOIN pg_catalog.pg_roles member_role ON member_role.oid = membership.member
+      WHERE parent_role.rolname = 'leetplus'
+        AND member_role.rolname = 'leetplus_fence_authority'
+        AND membership.admin_option
+        AND NOT membership.inherit_option
+        AND NOT membership.set_option
+    ) = 1
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_auth_members membership
+      JOIN pg_catalog.pg_roles parent_role ON parent_role.oid = membership.roleid
+      WHERE parent_role.rolname = 'leetplus'
+    ) = 2
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_auth_members membership
+      JOIN pg_catalog.pg_roles member_role ON member_role.oid = membership.member
+      WHERE member_role.rolname = 'leetplus_legacy_rollback'
+    ) = 1
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_auth_members membership
+      JOIN pg_catalog.pg_roles member_role ON member_role.oid = membership.member
+      WHERE member_role.rolname = 'leetplus_fence_authority'
+    ) = 1
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_auth_members membership
+      JOIN pg_catalog.pg_roles member_role ON member_role.oid = membership.member
+      WHERE member_role.rolname = 'leetplus_role_fencer'
+    ) = 0
+    AND (
+      SELECT count(*)
+      FROM pg_catalog.pg_auth_members membership
+      JOIN pg_catalog.pg_roles parent_role ON parent_role.oid = membership.roleid
+      WHERE parent_role.rolname IN ('leetplus_fence_authority', 'leetplus_role_fencer')
+    ) = 0
+    AND NOT pg_catalog.has_database_privilege('leetplus_role_fencer', current_database(), 'TEMPORARY')
+    AND NOT pg_catalog.has_database_privilege('leetplus_role_fencer', current_database(), 'CREATE')
+    AND pg_catalog.has_database_privilege('leetplus_role_fencer', current_database(), 'CONNECT')
+    AND NOT pg_catalog.has_database_privilege('leetplus_fence_authority', current_database(), 'CONNECT')
+    AND NOT pg_catalog.has_database_privilege('leetplus_fence_authority', current_database(), 'TEMPORARY')
+    AND NOT pg_catalog.has_database_privilege('leetplus_fence_authority', current_database(), 'CREATE')
+    AND NOT pg_catalog.has_schema_privilege('leetplus_role_fencer', 'public', 'USAGE')
+    AND NOT pg_catalog.has_schema_privilege('leetplus_role_fencer', 'public', 'CREATE')
+    AND pg_catalog.has_schema_privilege('leetplus_role_fencer', 'leetplus_ops', 'USAGE')
+    AND NOT pg_catalog.has_schema_privilege('leetplus_role_fencer', 'leetplus_ops', 'CREATE')
+    AND pg_catalog.has_schema_privilege('leetplus_fence_authority', 'leetplus_ops', 'USAGE')
+    AND pg_catalog.has_schema_privilege('leetplus_fence_authority', 'leetplus_ops', 'CREATE')
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_namespace namespace
+      WHERE namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'
+        AND namespace.nspname <> 'leetplus_ops'
+        AND (pg_catalog.has_schema_privilege('leetplus_role_fencer', namespace.oid, 'USAGE')
+          OR pg_catalog.has_schema_privilege('leetplus_role_fencer', namespace.oid, 'CREATE'))
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_namespace namespace
+      WHERE namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'
+        AND namespace.nspname <> 'leetplus_ops'
+        AND (pg_catalog.has_schema_privilege('leetplus_fence_authority', namespace.oid, 'USAGE')
+          OR pg_catalog.has_schema_privilege('leetplus_fence_authority', namespace.oid, 'CREATE'))
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_database database
+      JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = database.datdba
+      WHERE owner_role.rolname IN ('leetplus_fence_authority', 'leetplus_role_fencer')
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_namespace namespace
+      JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = namespace.nspowner
+      WHERE owner_role.rolname = 'leetplus_role_fencer'
+        OR (owner_role.rolname = 'leetplus_fence_authority' AND namespace.nspname <> 'leetplus_ops')
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_class relation
+      JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = relation.relowner
+      WHERE owner_role.rolname IN ('leetplus_fence_authority', 'leetplus_role_fencer')
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_type type
+      JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = type.typowner
+      WHERE owner_role.rolname IN ('leetplus_fence_authority', 'leetplus_role_fencer')
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_proc function
+      JOIN pg_catalog.pg_namespace namespace ON namespace.oid = function.pronamespace
+      JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = function.proowner
+      WHERE owner_role.rolname = 'leetplus_role_fencer'
+        OR (owner_role.rolname = 'leetplus_fence_authority'
+          AND NOT (namespace.nspname = 'leetplus_ops' AND function.proname = 'apply_nminus1_legacy_login_fence'
+            AND pg_catalog.pg_get_function_identity_arguments(function.oid) =
+              'expected_database text, expected_address text, expected_port integer, expected_system_identifier text, expected_session_user text'))
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_default_acl default_acl
+      JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = default_acl.defaclrole
+      WHERE owner_role.rolname IN ('leetplus_fence_authority', 'leetplus_role_fencer')
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_class relation
+      JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
+      CROSS JOIN (VALUES ('leetplus_fence_authority'), ('leetplus_role_fencer')) AS inspected_role(role_name)
+      WHERE namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'
+        AND relation.relkind IN ('r', 'v', 'm', 'f', 'p')
+        AND pg_catalog.has_table_privilege(inspected_role.role_name, relation.oid,
+          'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_class sequence_relation
+      JOIN pg_catalog.pg_namespace namespace ON namespace.oid = sequence_relation.relnamespace
+      CROSS JOIN (VALUES ('leetplus_fence_authority'), ('leetplus_role_fencer')) AS inspected_role(role_name)
+      WHERE namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'
+        AND sequence_relation.relkind = 'S'
+        AND (pg_catalog.has_sequence_privilege(inspected_role.role_name, sequence_relation.oid, 'USAGE')
+          OR pg_catalog.has_sequence_privilege(inspected_role.role_name, sequence_relation.oid, 'SELECT')
+          OR pg_catalog.has_sequence_privilege(inspected_role.role_name, sequence_relation.oid, 'UPDATE'))
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_type type
+      JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type.typnamespace
+      CROSS JOIN (VALUES ('leetplus_fence_authority'), ('leetplus_role_fencer')) AS inspected_role(role_name)
+      WHERE namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'
+        AND pg_catalog.has_schema_privilege(inspected_role.role_name, namespace.oid, 'USAGE')
+        AND pg_catalog.has_type_privilege(inspected_role.role_name, type.oid, 'USAGE')
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_proc function
+      JOIN pg_catalog.pg_namespace namespace ON namespace.oid = function.pronamespace
+      CROSS JOIN (VALUES ('leetplus_fence_authority'), ('leetplus_role_fencer')) AS inspected_role(role_name)
+      WHERE namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'
+        AND NOT (namespace.nspname = 'leetplus_ops' AND function.proname = 'apply_nminus1_legacy_login_fence'
+          AND pg_catalog.pg_get_function_identity_arguments(function.oid) =
+            'expected_database text, expected_address text, expected_port integer, expected_system_identifier text, expected_session_user text')
+        AND pg_catalog.has_schema_privilege(inspected_role.role_name, namespace.oid, 'USAGE')
+        AND pg_catalog.has_function_privilege(inspected_role.role_name, function.oid, 'EXECUTE')
+    ) = 0
+    AND (
+      SELECT count(*) FROM pg_catalog.pg_proc function
+      JOIN pg_catalog.pg_namespace namespace ON namespace.oid = function.pronamespace
+      WHERE function.prosecdef AND namespace.nspname NOT LIKE 'pg_%'
+        AND NOT (namespace.nspname = 'leetplus_ops' AND function.proname = 'apply_nminus1_legacy_login_fence'
+          AND pg_catalog.pg_get_function_identity_arguments(function.oid) =
+            'expected_database text, expected_address text, expected_port integer, expected_system_identifier text, expected_session_user text')
+        AND pg_catalog.has_function_privilege('leetplus_role_fencer', function.oid, 'EXECUTE')
+    ) = 0
+  ) IS NOT TRUE THEN
+    RAISE EXCEPTION 'database fence target or least-privilege authority mismatch';
+  END IF;
+
+  EXECUTE 'ALTER ROLE leetplus NOLOGIN';
+
+  IF (
+    SELECT count(*)
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'leetplus' AND NOT rolcanlogin
+      AND rolinherit AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole
+      AND NOT rolreplication AND NOT rolbypassrls
+      AND rolconnlimit = -1 AND rolvaliduntil IS NULL AND rolconfig IS NULL
+  ) <> 1 THEN
+    RAISE EXCEPTION 'database fence postcondition mismatch';
+  END IF;
+
+  RETURN pg_catalog.concat_ws('|',
+    current_database(),
+    pg_catalog.inet_server_addr()::text,
+    pg_catalog.inet_server_port()::text,
+    observed_system_identifier,
+    session_user::text,
+    'true'
+  );
+END
+$leetplus_fence_function$;
+
+ALTER FUNCTION leetplus_ops.apply_nminus1_legacy_login_fence(text, text, integer, text, text)
+  OWNER TO leetplus_fence_authority;
+REVOKE ALL ON FUNCTION leetplus_ops.apply_nminus1_legacy_login_fence(text, text, integer, text, text)
+  FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION leetplus_ops.apply_nminus1_legacy_login_fence(text, text, integer, text, text)
+  TO leetplus_role_fencer;

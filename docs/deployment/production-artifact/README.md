@@ -9,11 +9,18 @@ Release Admission для одного exact SHA, проверяет его це�
 ## Пример prepare-only проверки
 
 ```bash
-mkdir -p /srv/leetplus/rehearsal-releases
-bash stage-release-artifact.sh \
+install -d -o root -g leetplus-build -m 0750 /srv/leetplus/release-inbox
+install -d -o leetplus-build -g leetplus-build -m 0750 \
+  /srv/leetplus/rehearsal-releases
+install -o root -g leetplus-build -m 0440 \
+  /secure/inbox/leetplus-release-<sha>.tar.gz \
+  /secure/inbox/leetplus-release-<sha>.tar.gz.sha256 \
+  /srv/leetplus/release-inbox/
+sudo -u leetplus-build /usr/bin/env -i \
+  /usr/local/libexec/leetplus/stage-release-artifact.sh \
   --release-sha <exact-40-character-sha> \
-  --artifact /secure/inbox/leetplus-release-<sha>.tar.gz \
-  --artifact-sha256 /secure/inbox/leetplus-release-<sha>.tar.gz.sha256 \
+  --artifact /srv/leetplus/release-inbox/leetplus-release-<sha>.tar.gz \
+  --artifact-sha256 /srv/leetplus/release-inbox/leetplus-release-<sha>.tar.gz.sha256 \
   --output-root /srv/leetplus/rehearsal-releases
 ```
 
@@ -22,11 +29,33 @@ production hydration receipt и не может быть promoted. Production `-
 намеренно разрешён исключительно внутри versioned systemd unit и требует
 отдельного unprivileged system user
 `leetplus-build`, чистого от runtime secrets/production credentials и
-изолированного от внешней сети. Он запускает copy-only
-`pnpm install --prod --offline --frozen-lockfile --ignore-scripts`, затем Prisma
+изолированного от внешней сети и local Unix sockets. Он запускает exact copy-only
+`pnpm install --prod --offline --frozen-lockfile --ignore-scripts
+--package-import-method=copy --store-dir /srv/leetplus/pnpm-store`, затем Prisma
 generate, отвергает hardlinks и создаёт полный `HYDRATED_SHA256SUMS`. Root и
 runtime users не имеют права выполнять hydration. Ошибка сохраняет staging
 directory для расследования и никогда не перезаписывает существующий release.
+При построении manifest исключается только exact root
+`./HYDRATED_SHA256SUMS`; одноимённый regular file в любой вложенной директории
+остаётся связанным digest, а немедленная exact-tree проверка отвергает любой
+пропущенный или лишний путь.
+
+Любой production mode запускается только direct installed shebang
+`/usr/bin/bash -p`, полностью удаляет inherited exported environment до первого
+tool invocation и восстанавливает exact `PATH=/usr/sbin:/usr/bin:/sbin:/bin`,
+`C.UTF-8` и `UTC`. Prepare-only launcher выше также даёт пустой initial env;
+systemd unit делает эквивалентную loader/env boundary до `/usr/bin/flock` для
+hydration. Repository checkout или `bash stage-release-artifact.sh` не являются
+production authority.
+
+Artifact и checksum обязаны находиться в одной canonical директории, иметь
+exact `root:leetplus-build 0440`, один link и root-controlled ancestors без
+symlink, group/other write или unreviewed mount boundary. Единственное исключение
+— exact read-only leaf mount, созданный reviewed hydration unit через
+`ReadOnlyPaths=/srv/leetplus/release-inbox`. Stager создаёт в output root
+приватную копию через `cp --reflink=never`, проверяет её checksum и
+повторно связывает inode/bytes до и после archive extraction; дальнейшие
+операции не читают mutable inbox bytes.
 
 ## Переход к production
 
@@ -49,8 +78,10 @@ runtime switch требуют отдельного разрешения влад
 [`systemd/`](./systemd/) содержит versioned instance templates
 `leetplus-api@.service`/`leetplus-web@.service`, safety overlay и отдельный
 oneshot migration unit. Candidate работает через `/srv/leetplus/slots/blue|green`
-на портах `4100/3100` или `4200/3200`, не заменяя и не останавливая legacy
-`4000/3000`. API secrets читаются из `/etc/leetplus/runtime.env`, а Web получает
+на портах `4100/3100` или `4200/3200`. До первого cutover scheduler-capable
+legacy `4000/3000` обязательно останавливается и durably fenced, а HTTP rollback
+переносится в scheduler-free N−1 пару `4300/3300`. API secrets читаются из
+`/etc/leetplus/runtime.env`, а Web получает
 только `/etc/leetplus/web-runtime.env`; оба файла находятся вне checkout и
 artifact. API/Web каждого slot запускаются разными identities
 `leetplus-api-blue|green` и `leetplus-web-blue|green` с общей read-only artifact
@@ -77,34 +108,72 @@ production-history пути.
 legacy deploy timer остаётся production blocker и не должен отключаться
 автоматически.
 
-Repository scripts хранятся без executable Git mode; installation поэтому
-обязана задать его явно и не использовать файл из mutable checkout:
+Ручное `install`/`cp` этих файлов из checkout запрещено. Full Release Admission
+теперь строит отдельный `leetplus-production-control-<SHA>.tar.gz` и внешний
+SHA-256 из exact Git objects, повторно собирает и byte-for-byte сравнивает его в
+fresh handoff job. Само наличие загруженного payload не является admission:
+единственный положительный authority — отдельно загруженный final receipt,
+связанный с exact artifact IDs и transport/payload digests. До зелёного Full CI,
+скачивания exact receipt и независимой повторной проверки архив не считается
+installable. Root bootstrap authority принимает только canonical allowlist полного
+control manifest: stage/store/hydration/seal/promote/bind/preflight/cache,
+readiness/cutover/current units и вложенный scheduler-free N−1 bundle вместе с
+его independently pinned manifest. Архив с link/special/hardlink, дубликатом,
+лишним/пропущенным путём, несовпадающим outer/inner digest или mutable source
+не устанавливается. Runtime release artifact остаётся отдельным двухфайловым
+контрактом и не может подменить control artifact. Конкретная install-команда
+берётся только из SHA-bound CI evidence этого control artifact; локально
+собранная команда/копия не является deployable authority.
+
+Полный control payload устанавливается только отдельно просмотренным bootstrap
+`/usr/local/sbin/leetplus-install-production-control-v1` (`root:root 0500`).
+Bootstrap не распаковывается и не запускается из скачанного архива: оператор
+сначала устанавливает exact reviewed byte независимо, а затем помещает в
+`/srv/leetplus/production-control-inbox` с `root:root 0440` четыре файла одного
+SHA: control archive, его `.sha256`, final admission JSON и его `.sha256`.
+Admission receipt должен быть canonical receipt автоматического Full CI для
+`boozik3412/leetplus`, `ci.yml@refs/heads/main`, с `workflowSha == release SHA` и
+exact `productionControlArchiveSha256`. После независимой проверки команда имеет
+ровно один production input:
 
 ```bash
-install -d -o root -g root -m 0755 /usr/local/libexec/leetplus
-install -o root -g root -m 0755 \
-  stage-release-artifact.sh stage-pnpm-store.sh preflight-release-slot.sh \
-  prepare-web-slot-cache.sh verify-release-readiness.sh \
-  /usr/local/libexec/leetplus/
-install -o root -g root -m 0755 blue-green-cutover.sh \
-  /usr/local/sbin/leetplus-blue-green-cutover
-install -o root -g root -m 0755 seal-release-artifact.sh \
-  /usr/local/sbin/leetplus-seal-release-artifact
-install -o root -g root -m 0755 promote-release-artifact.sh \
-  /usr/local/sbin/leetplus-promote-release-artifact
-install -d -o root -g root -m 0700 /var/lib/leetplus/deploy-receipts
-install -o root -g root -m 0644 systemd/leetplus-blue-green-recovery.service \
-  systemd/leetplus-blue-green-recovery-watchdog.service \
-  systemd/leetplus-blue-green-recovery.timer \
-  systemd/leetplus-api@.service systemd/leetplus-web@.service \
-  systemd/leetplus-release-hydrate@.service /etc/systemd/system/
-install -d -o root -g root -m 0755 /etc/systemd/system/nginx.service.d
-install -o root -g root -m 0644 \
-  systemd/nginx.service.d/leetplus-blue-green-recovery.conf \
-  /etc/systemd/system/nginx.service.d/
-install -o root -g root -m 0644 systemd/tmpfiles.d/leetplus-release.conf \
-  /etc/tmpfiles.d/leetplus-release.conf
+sudo /usr/bin/env -i /usr/local/sbin/leetplus-install-production-control-v1 \
+  --release-sha <exact-40-character-SHA>
 ```
+
+Authority через `O_NOFOLLOW` создаёт приватный non-reflink byte snapshot,
+повторно связывает inode/size/ctime/digest входа, до extraction проверяет каждый
+raw ustar header и bounded regular-file envelope и запускает shipped outer
+verifier только из root-owned immutable extraction. Затем он публикует exact
+generation `/srv/leetplus/production-control-generations/<SHA>`, применяет только
+digest-pinned `production-control-install-map.tsv`, provision-ит полный exact
+scheduler-free inner bundle и выполняет `daemon-reload`. Отдельный inner launcher
+по-прежнему отвечает за установку rollback contour; outer installer не активирует
+его сервисы и не делает cutover.
+Installer удерживает exclusive inode
+`/run/leetplus-production-control/install.lock` от чтения admitted inputs до
+финальной проверки. Любой caller, включая promoter, обязан получить и удерживать
+тот же exclusive lock до installed-generation gate и завершения своих
+state/effect операций, иначе verification и замена control generation могли бы
+пересечься.
+
+До первого installed byte создаётся durable
+`production-control-generation-<SHA>.intent.json`. Повтор после interruption
+идемпотентно восстанавливает те же bytes; accepted
+`production-control-generation-<SHA>.receipt.json` (`root:root 0400`) появляется
+только после полного install-map и связывает archive/admission, outer/inner
+manifest, map, installer, stager, hydration attestor/unit, sealer и promoter
+digests. Наличие receipt само по себе недостаточно: production caller обязан
+запускать `/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs`
+с `--release-sha <SHA> --require-root-authority`; outstanding intent, drift любого
+installed byte, mount/link/hardlink, неверный mode/owner или receipt pin дают
+fail-closed отказ. Promoter до global hydration lock получает и удерживает
+installer lock, извлекает единственный verifier digest из root-only receipt,
+сверяет exact installed verifier byte и запускает его в `env -i`. Только exact
+14-line PASS record с тем же release/receipt и текущими manifest, map,
+installer, stager, hydration attestor/unit, sealer и promoter digests допускает
+обращение к promotion state; lock остаётся открыт до последнего publication
+effect.
 
 До установки units создаются shared group `leetplus-runtime`, отдельные system
 users без login/home `leetplus-api-blue`, `leetplus-api-green`,
@@ -116,17 +185,26 @@ users без login/home `leetplus-api-blue`, `leetplus-api-green`,
 0440`. Web identities никогда не входят в API-only secret group.
 
 Production hydration выполняется только versioned unit
-`leetplus-release-hydrate@.service` с `IPAddressDeny=any`, без runtime env:
+`leetplus-release-hydrate@.service` с `IPAddressDeny=any`, без runtime env.
+Unit явно удаляет manager/global `NODE_*`, loader, proxy и runtime-secret
+переменные, фиксирует безопасный `PATH` и закрывает capabilities/devices/kernel
+interfaces. Stager после проверки systemd identity очищает весь унаследованный
+environment и возвращает только фиксированные PATH/locale/timezone, sandbox
+marker и exact `INVOCATION_ID`. До pnpm/Prisma execution stager обязан получить
+kernel-level отказ `EACCES`/`EPERM`/`EAFNOSUPPORT` на bounded loopback
+AF_INET-connect probe; любой connect, timeout или обычный socket error является
+stop condition:
 
 ```bash
 groupadd --system leetplus-runtime
 groupadd --system leetplus-build
 groupadd --system leetplus-api-runtime
-useradd --system --no-create-home --shell /usr/sbin/nologin --gid leetplus-build leetplus-build
-useradd --system --no-create-home --shell /usr/sbin/nologin --gid leetplus-runtime --groups leetplus-api-runtime leetplus-api-blue
-useradd --system --no-create-home --shell /usr/sbin/nologin --gid leetplus-runtime --groups leetplus-api-runtime leetplus-api-green
-useradd --system --no-create-home --shell /usr/sbin/nologin --gid leetplus-runtime leetplus-web-blue
-useradd --system --no-create-home --shell /usr/sbin/nologin --gid leetplus-runtime leetplus-web-green
+groupadd --system leetplus-web-runtime
+useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --gid leetplus-build leetplus-build
+useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --gid leetplus-runtime --groups leetplus-api-runtime leetplus-api-blue
+useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --gid leetplus-runtime --groups leetplus-api-runtime leetplus-api-green
+useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --gid leetplus-runtime --groups leetplus-web-runtime leetplus-web-blue
+useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --gid leetplus-runtime --groups leetplus-web-runtime leetplus-web-green
 
 systemd-tmpfiles --create /etc/tmpfiles.d/leetplus-release.conf
 
@@ -145,32 +223,81 @@ sudo /usr/local/sbin/leetplus-promote-release-artifact \
 
 До hydration trusted store собирается **не на production** в таком же exact
 Node major/pnpm `10.33.2` окружении: `pnpm fetch --prod --frozen-lockfile
---store-dir <empty-store>`, затем содержимое `<empty-store>` архивируется и
+--ignore-scripts --package-import-method=copy --store-dir <empty-store>`, затем
+содержимое `<empty-store>` архивируется и
 архив получает отдельный SHA-256. На production оба файла и exact
 `pnpm-lock.yaml` импортируются только через root
 `stage-pnpm-store.sh --archive ... --archive-sha256 ... --lockfile ...
 --node-major 22 --pnpm-version 10.33.2`. Скрипт не выполняет package code,
-запрещает links/path traversal, пишет receipt с lockfile/bundle digests и
-публикует root-owned read-only `/srv/leetplus/pnpm-store`. Hydration unit видит
-его только read-only; mismatch Node/pnpm/lockfile или попытка fallback в сеть
-останавливает release.
+запрещает path traversal, symlink/special/hardlink, exact/nested mounts и
+переход на другое устройство. До публикации он строит canonical полный manifest
+каждого store file, пишет receipt с lockfile/bundle/manifest/verifier digests и
+file count, затем повторно проверяет весь root-owned read-only tree общим
+`verify-pnpm-store-integrity.mjs`. Hydration выполняет ту же проверку и связывает
+store manifest/receipt SHA-256 со своим sandbox receipt **до** первого `pnpm`.
+Unit видит store только read-only; любой topology/ownership/digest,
+Node/pnpm/lockfile mismatch или попытка fallback в сеть останавливает release.
 
 Команды создания identity выполняются только если exact user/group ещё нет;
-существующая запись с другим UID/GID/membership является stop condition, а не
-поводом запускать `useradd` повторно. Build, promotions и releases обязаны быть
-на одной filesystem. Hydration и promotion используют один root-provisioned
-stable lock inode; concurrent hydration/promote запрещены. Promoter связывает
+существующая запись с другим UID/GID/membership, duplicate UID, другой
+primary user или другая NSS group с тем же build GID является stop condition,
+а не поводом запускать `useradd` повторно. Build, promotions и releases обязаны быть на одной
+filesystem. Hydration и promotion используют один root-provisioned stable lock
+inode; concurrent hydration/promote запрещены. Global `release-builds` обязан
+быть exact empty до каждого hydration; stager проверяет его полный top-level
+inventory вокруг каждого artifact-controlled шага и повторно связывает identity
+и digest исходного `SHA256SUMS`, поэтому generator не может создать sibling или
+переписать source manifest и затем сам себя заверить. Непосредственно перед переносом
+builder-owned tree promoter выполняет bounded `/proc` inventory и требует ноль
+процессов с real/effective/saved/fs UID `leetplus-build`, включая процессы вне
+hydration cgroup. Promoter связывает
 receipt с exact successful systemd `InvocationID`, доказывает пустой cgroup,
-останавливает completed oneshot, затем забирает builder-owned tree в недоступный
-builder-у root boundary и повторно проверяет no-egress receipt/runtime manifest,
-seal и только затем атомарно публикует `releases/<SHA>`. Slot/nginx/DB при этом
-не изменяются. Ошибка после rename оставляет root-only quarantine в
-`release-promotions/<SHA>` и требует ручного incident review.
+до доверия receipt проверяет exact installed fragment SHA, отсутствие drop-ins,
+`systemd-analyze verify` и полный effective-property allowlist (identity,
+`ExecStart`, env scrub, filesystem/kernel/network sandbox). После остановки
+completed oneshot тот же policy digest проверяется повторно. До остановки unit
+promoter O_EXCL-публикует и syncfs-ит root-only promotion intent, связывающий
+exact invocation, source receipt, unit/stager/policy, hydrated manifest и все
+три допустимых state path. Сам promoter принимается
+только при прямом запуске через privileged Bash shebang и до обращения к
+systemctl/Node очищает окружение, фиксируя PATH/locale/timezone. Только затем
+builder-owned tree переходит в недоступный builder-у root boundary, повторно
+проверяются no-egress receipt, canonical exact-tree runtime manifest и seal.
+Неуказанный regular file является stop condition. Exact build/promotion/
+release roots не могут быть mountpoints; exact candidate paths и весь receipt
+subtree не могут содержать вложенные mounts. Root identities фиксируются до
+lock и повторно проверяются до/после intent, rename, seal, receipt и syncfs.
+До final release rename
+promoter O_EXCL-публикует и syncfs-ит root-only
+`/var/lib/leetplus/deploy-receipts/release-hydration-attestation-<SHA>.receipt`,
+который связывает source receipt, exact invocation, unit/stager/policy и hydrated
+manifest digests. Поэтому release никогда не становится bindable без durable
+authority. Повтор той же promotion после crash/lost response принимает только
+один exact state, связанный durable intent: stopped source, builder/root-owned
+promotion quarantine (включая crash до/после seal или receipt) либо final sealed
+release с receipt. Он повторно проверяет inactive unit policy, отсутствие build
+UID процессов, manifests и idempotent seal, затем завершает или подтверждает
+publication; несовместимый state остаётся root-only quarantine и fail-closed
+stop. Promotion root имеет exact `root:leetplus-runtime 0710`, а final releases
+root — `root:root` без group/other write; sealer проверяет эти разные authority
+границы явно. Slot/nginx/DB при этом не изменяются.
 
 Перед install каждый source file сверяется с exact candidate Git blob. Unit и
 nginx templates устанавливаются root-owned/group-other-nonwritable; slot env и
-runtime env имеют mode `0640`, а active link изначально указывает только на
-проверенный `legacy.conf`.
+runtime env имеют mode `0640`. До первой необратимой границы active link может
+указывать на проверенный `legacy.conf`, но этот scheduler-capable target не
+является допустимым blue/green rollback. Сначала обязательная процедура
+[`scheduler-free-n-minus-one-runbook.md`](./scheduler-free-n-minus-one-runbook.md)
+поднимает reviewed auth-edge на `4300`, exact `7de04ff4…` child на защищённом
+`4301` и Web на `3300`, атомарно маршрутизирует
+`legacy-safe.conf`, ставит systemd+DB start fences и доказывает полный drain
+старых `4000/3000` units/sessions.
+
+Nginx никогда не направляется на `4301`. Auth-edge оставляет публичными только
+exact `GET /health` и `POST /auth/login`; каждый другой запрос сначала проходит
+uncached bounded `/auth/me` introspection на legacy child. Root-owned preload
+принудительно исправляет wildcard `app.listen(PORT)` exact 7de на
+`127.0.0.1:4301`, а ordered nft fence разрешает этот порт только API UID.
 
 После hydration exact release обязательно проходит
 [`seal-release-artifact.sh`](./seal-release-artifact.sh): весь release становится
@@ -183,21 +310,27 @@ marker `/var/lib/leetplus/web-cache-releases/<slot>.sha` привязывает 
 к exact SHA. Web preflight отклоняет отсутствующий или чужой marker. Остальная
 release directory остаётся read-only.
 
-Atomic routing задаётся reviewed файлами из [`nginx/`](./nginx/). Сначала
-active link указывает на concrete `legacy.conf`, поэтому существующие процессы
-являются реальным N-1 rollback target. Затем
-[`blue-green-cutover.sh`](./blue-green-cutover.sh) создаёт root-only durable
+Atomic routing задаётся reviewed файлами из [`nginx/`](./nginx/). Входом в
+первый blue/green cutover является только уже активный scheduler-free
+`legacy-safe.conf` (`4300/3300`); `legacy.conf` и старые `4000/3000` процессы
+скрипт отклоняет. Затем [`blue-green-cutover.sh`](./blue-green-cutover.sh)
+создаёт root-only durable
 pre-effect intent, до effect проверяет full host nginx config с candidate include
 в private mount namespace, атомарно меняет nginx include, выполняет `nginx -t`, graceful
 reload и bounded public watchdog. При любой ошибке exact previous target
-восстанавливается и проверяется отдельным public legacy-compatible smoke; old
-processes скрипт никогда не останавливает. До switch candidate API/Web обязаны
+восстанавливается и проверяется отдельным authenticated read-only smoke.
+Blue/green не останавливает previous scheduler-free pair; scheduler-capable
+legacy units уже durably fenced/stopped предыдущей обязательной процедурой и
+никогда не возвращаются в route. До switch candidate API/Web обязаны
 быть одновременно `active` и `enabled`, а templates упорядочены до nginx. После
 accepted switch active slot остаётся boot-enabled до отдельного soak/retire
 gate. Если внешний smoke недоступен, link
 остаётся восстановленным, но rollback fail-closed сообщает отсутствие serving
 evidence. Успешный switch оставляет accepted receipt для отдельного
-`rollback --receipt`; durable `.intent` поддерживает crash recovery до receipt.
+`rollback --receipt`; право rollback связано только с последним принятым
+монотонным generation index, поэтому старый или уже использованный receipt
+fail-closed отклоняется. Durable `.intent` и атомарные phase records
+поддерживают crash/lost-response recovery до receipt/index.
 Handled signal/exit запускает exact rollback guard. Для `SIGKILL`/host loss
 pre-nginx recovery unit восстанавливает и syntax-check'ит N-1 link без
 рекурсивного nginx systemd job, а отдельный 10-секундный post-start watchdog
@@ -222,14 +355,42 @@ production startup. Относительный путь, filesystem root и пу
 отклоняются до запуска приложения.
 
 Минимальный acceptance test `/.github/scripts/test-stage-release-artifact.sh`
-собирает disposable artifact, принимает его и доказывает fail-closed отказ для
-повреждённого archive без созданного release directory. Он выполняется в Fast
-CI и не использует PostgreSQL, systemd или production secrets.
+использует explicit `--unprivileged-test-mode`. Такой результат создаётся только
+как `.untrusted-test-<sha>` и получает unmanifested `UNTRUSTED_TEST_STAGE`, то
+есть не может совпасть с production path или пройти bind manifest checks. Fixture
+доказывает fail-closed отказ для повреждённого archive и adversarial manifest.
+Privileged hydration-systemd fixture отдельно проверяет prepare-only production
+env scrub, private snapshot и отказ для writable/hardlinked input, writable
+ancestor и symlinked ancestor.
 
 `/.github/scripts/test-production-artifact-systemd-templates.sh` дополнительно
 проверяет, что systemd templates не возвращают legacy checkout, не используют
 secret env из repository и не дают migration unit mutable acquisition/build
 capability.
+
+`/.github/scripts/test-release-hydration-systemd-attestation.sh` на disposable
+GitHub runner устанавливает exact hydration template, запускает
+`systemd-analyze verify`, сверяет реальные effective properties, доказывает
+отказ для drop-in/property/unit/env drift и выполняет bounded kernel probes для
+`IPAddressDeny=any`, `RestrictAddressFamilies=none` и `UnsetEnvironment`.
+Он также проверяет exact nologin/no-home build identity без supplementary
+groups, duplicate UID/primary GID/group-GID alias, отклоняет независимый процесс
+под build UID, nonempty global build root и hostile generator, а также читает PID
+из реального nonempty zero-size `cgroup.procs`. Stage fixture отдельно фиксирует
+exact offline/copy/ignore-scripts argv и mutation-canary доказывает, что удаление
+`--ignore-scripts` исполняет dependency lifecycle marker и ломает gate.
+Тем же real-systemd fixture выполняются normal promotion и retry после lost
+response, recovery из post-stop/post-move/post-seal состояний, exact sealer root
+authority и dry-run owner/group/mode attestation, exact
+build/promotion/release/receipt-root mounts и fail-closed
+candidate/receipt nested bind-mount negatives. Перед positive promotion fixture
+также доказывает отсутствие state mutation при drift installed-generation
+verifier относительно receipt pin и при занятом production-control install
+lock.
+
+`/.github/scripts/test-production-pnpm-store-integrity.sh` под bounded sudo на
+disposable runner проверяет canonical store и adversarial owner/mode, symlink,
+hardlink, special file, unlisted/content/receipt drift и nested bind mount.
 
 `/.github/scripts/test-production-artifact-blue-green.sh` проверяет exact Web
 BUILD_ID, immutable/service-readable slot boundary, nginx switch, accepted
@@ -257,10 +418,11 @@ egress broker), exact-digest activation env и production-like rehearsal; зат
 Этот activation profile пока не реализован и является явным `NO-GO` для
 внешнего owner invite, но не блокирует localhost-only technical canary.
 
-Candidate не создаёт второй scheduler tick. До schema effect нужен отдельный
-выбор с evidence: либо N/N-1 доказывает совместимость legacy background paths с
-новой схемой и legacy API временно остаётся единственным scheduler owner, либо
-legacy schedulers reviewed-дренируются до migration и сохраняется объявленное
-окно без background execution. Legacy process всё равно остаётся hot для HTTP
-rollback. Последующий scheduler-handoff обязан доказать zero-overlap, ownership
-и rollback; cutover script намеренно его не выполняет.
+Candidate не создаёт второй scheduler tick. До любого schema effect обязательна
+процедура scheduler-free N−1: auth-edge/exact-child/Web rollback contour
+поднимается на `4300/4301/3300`,
+старые scheduler-capable `4000/3000` units и DB sessions reviewed-дренируются,
+durably fenced и проверяются на zero-overlap. Hot для HTTP rollback остаётся
+только `legacy-safe.conf` с парой `4300/3300`; старый scheduler-capable process
+не является допустимым rollback target. Cutover script handoff не выполняет и
+fail-closed отклоняет запуск без этого evidence.

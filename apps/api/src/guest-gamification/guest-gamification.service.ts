@@ -4337,6 +4337,7 @@ export class GuestGamificationService {
         { gamificationEnabled: 'desc' },
         { name: 'asc' },
         { createdAt: 'asc' },
+        { id: 'asc' },
       ],
     });
   }
@@ -8391,7 +8392,7 @@ export class GuestGamificationService {
     const rows = await this.prisma.guestGameProfile.findMany({
       where: { tenantId: user.tenantId },
       include: gameProfileInclude,
-      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
     });
 
@@ -11258,7 +11259,7 @@ export class GuestGamificationService {
     const rows = await this.prisma.guestGameReward.findMany({
       where: { tenantId: user.tenantId },
       include: rewardInclude,
-      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       ...(take ? { take } : {}),
     });
 
@@ -12698,7 +12699,7 @@ export class GuestGamificationService {
     const rows = await this.prisma.guestGameEvent.findMany({
       where: { tenantId: user.tenantId },
       include: eventInclude,
-      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       ...(take ? { take } : {}),
     });
 

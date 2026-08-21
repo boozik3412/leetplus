@@ -1,0 +1,60 @@
+[Unit]
+Description=LeetPlus scheduler-free N-1 API rollback artifact %i
+After=network-online.target postgresql.service leetplus-rollback-egress.service
+Requires=leetplus-rollback-egress.service
+Wants=network-online.target
+Before=nginx.service
+
+[Service]
+Type=simple
+User=leetplus-api-nminus1
+Group=leetplus-runtime
+WorkingDirectory=/srv/leetplus/rollback-releases/%i
+EnvironmentFile=/etc/leetplus/rollback-runtime.env
+EnvironmentFile=/etc/leetplus/rollback-releases/%i.env
+EnvironmentFile=/etc/leetplus/rollback-safe.env
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+UnsetEnvironment=BASH_ENV ENV HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM
+ExecStartPre=/usr/bin/bash -p /usr/local/libexec/leetplus/preflight-legacy-rollback.sh --release-sha %i --api-runtime
+ExecStart=/usr/bin/node /usr/local/libexec/leetplus/legacy-rollback-auth-edge.mjs --release-sha %i
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+TimeoutStopSec=30
+MemoryMax=768M
+TasksMax=128
+KillMode=control-group
+KillSignal=SIGTERM
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNetworkInterfaces=lo
+IPAddressDeny=any
+IPAddressAllow=localhost
+SocketBindDeny=any
+SocketBindAllow=ipv4:tcp:4300
+SocketBindAllow=ipv4:tcp:4301
+ReadOnlyPaths=/srv/leetplus/rollback-releases /etc/leetplus/rollback-safe.env /etc/leetplus/rollback-releases
+LogsDirectory=leetplus/api-nminus1
+LogsDirectoryMode=0750
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

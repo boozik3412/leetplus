@@ -7,9 +7,11 @@ Rollback owner: `founder-primary`.
 ## Runtime cutover rollback before pilot effects
 
 Первый artifact cutover больше не возвращает mutable `current` и не делает
-same-port restart. Legacy API/Web либо предыдущий slot остаются hot, а nginx
-active include переключается атомарно. Для rollback используется только
-root-only `.intent` или accepted `.receipt`, созданный
+same-port restart. Hot остаётся только scheduler-free N−1 pair
+`4300/4301/3300` за pinned auth-edge либо уже принятый предыдущий artifact slot;
+scheduler-capable legacy `4000/3000` durably fenced/stopped и никогда не является
+rollback target. Nginx active include переключается атомарно. Для rollback
+используется только root-only `.intent` или accepted `.receipt`, созданный
 `docs/deployment/production-artifact/blue-green-cutover.sh`:
 
 1. проверить exact record/digests и direct liveness + boot-enabled state
@@ -18,8 +20,9 @@ root-only `.intent` или accepted `.receipt`, созданный
    link разрешается именно в него;
 3. выполнить `nginx -t` и graceful reload даже если link уже был восстановлен
    предыдущей оборванной попыткой, не останавливая процессы;
-4. получить HTTP success от `https://api.leetplus.ru/health` и
-   `https://leetplus.ru/`;
+4. получить bounded public readiness и DB-bound authenticated read-only smoke
+   всех admission-critical tenant/module routes; health/Web identity сами по
+   себе не являются serving evidence;
 5. при отсутствии внешнего evidence оставить previous link/processes
    восстановленными, но не объявлять rollback принятым.
 

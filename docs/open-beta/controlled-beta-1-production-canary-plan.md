@@ -1,6 +1,6 @@
 # Controlled Beta-1: production canary и SHA-bound deploy
 
-Статус: `BLUE/GREEN SAFETY IMPLEMENTED IN REPOSITORY / NEW ARTIFACT AND REHEARSAL REQUIRED / NOT EXECUTED / PRODUCTION NO-GO`.
+Статус: `F4 ARTIFACT + RESTORED-COPY + CRASH/N-1 ACCEPTED / OPERATIONAL SUCCESSOR AND PRODUCTION CANARY PENDING / PRODUCTION NO-GO`.
 
 Этот документ — обязательная операционная последовательность для первого
 внешнего `Tenant B/Store B1`. Он не разрешает выпуск по ветке, `git pull` или
@@ -48,6 +48,25 @@ unit suite — `23/23`, независимый аудит — `P0=0 / P1=0 / P2=
 worktree evidence, а не release acceptance. Новым production candidate станет
 только последующий exact SHA после зелёного Fast/Full CI с этим gate и полного
 replay нового artifact на свежей restored copy.
+
+Последующий exact SHA `f4e8d79dadaa62734d045c7ae0b203f618d680b7`
+принят Fast CI `32420934305` (`2/2`) и Full Release Admission
+`32421266035` (`4/4`). Artifact ID `9426096697`, raw archive
+`28 597 317` bytes, SHA-256
+`9f77c15fd4b5bbdc42bc360c5dbdb9f34f66d40a00fcbbe159aaed7ff144d392`.
+Fresh extraction этого artifact прошла `153/4/0 → reconcile(4) → 187/4/0`,
+zero-pending second deploy, exact ownership и business zero-diff. Отдельная
+fresh clone фактически прошла crash после durable reconciliation, restart без
+повторного DML, real deploy с ambiguous child response и повторный restart с
+`deploymentAttempt=0`. N−1 API и scheduler compatibility также приняты;
+scheduler result требует production drain. Подробные immutable значения:
+[`controlled-beta-1-f4-rehearsal-evidence-2026-08-21.md`](./controlled-beta-1-f4-rehearsal-evidence-2026-08-21.md).
+
+Это закрывает artifact-bound local history/recovery/N−1 gate, но не даёт
+production GO. Scheduler-free legacy rollback pair, receipt-bound slot helper,
+authenticated current-release smoke и их successor-SHA CI admission ещё
+готовятся; privileged Linux rehearsal и production pre-window evidence также
+не выполнены.
 
 Artifact `d1577642…` был дополнительно скачан в isolated local system-temp
 directory и принят
@@ -130,10 +149,13 @@ GitHub Full Release Admission (exact SHA)
   -> root-owned seal + service-user read/execute probe
   -> restored-copy + old-SHA-on-new-schema N/N-1 acceptance
   -> verified backup + production-history controller
-  -> start blue|green API/Web on alternate loopback ports (old stays hot)
+  -> start scheduler-free N-1 auth-edge/exact API child/Web on dedicated 4300/4301/3300 users
+  -> authenticated read gate + atomic legacy-safe route
+  -> persistent systemd/DB fence + old 4000/3000 unit/session drain receipt
+  -> start blue|green API/Web on alternate loopback ports (safe N-1 stays hot)
   -> config validation + API SHA/migration + Web BUILD_ID assertions
   -> durable pre-effect intent + atomic nginx include switch + watchdog
-  -> accepted rollback receipt; old runtime remains hot through soak
+  -> accepted generation-bound rollback receipt; scheduler-free N-1 remains hot through soak
   -> controlled Tenant B activation (separate GO)
 ```
 
@@ -167,15 +189,19 @@ Repository-side implementation:
 1. Зафиксировать exact SHA и URL/ID Full Release Admission.
    Проверить, что run содержит успешный real-PostgreSQL production-history
    controller gate; зелёный historical run без этого шага недействителен.
-2. Скачать оба файла artifact (`.tar.gz` и `.tar.gz.sha256`) по защищённому
-   каналу и сверить SHA-256 вне production checkout.
+2. Скачать final admission receipt и ровно указанные в нём runtime/control
+   artifact IDs из того же успешного Full run. Независимо сверить transport
+   digests, внешние `.tar.gz.sha256`, payload SHA-256 и exact release SHA вне
+   production checkout. Payload без связанного final receipt не является
+   admitted даже при успешной загрузке в Actions.
 3. Выполнить immutable backup и отдельную restore verification. Записать
    checksum, время и место хранения в закрытый release record.
 4. Прогнать restored-copy rehearsal этого же artifact, включая миграции,
    rollback и `/health/ready` с pinned migration name/count. Отдельно запустить
-   старый production SHA против migrated restored copy и принять критические
-   authenticated reads/writes: это обязательное N/N-1 доказательство, потому
-   что старый runtime остаётся hot после schema change.
+   exact N−1 child против migrated restored copy и принять критические
+   authenticated reads: это обязательное N/N−1 доказательство для
+   scheduler-free `4300/4301/3300` rollback contour. Оно не разрешает держать
+   scheduler-capable legacy `4000/3000` hot после schema change.
    Fresh history и runtime-role lifecycle already accepted as isolated evidence:
    [runtime-role rehearsal](./controlled-beta-1-runtime-role-rehearsal-2026-08-20.md).
 5. В отдельном обслуживаемом окне перенести неотслеживаемые
@@ -193,22 +219,38 @@ runtime на `/srv/leetplus/slots/blue|green` и secrets в
 отдельного approval.
 
 6. Сохранить root-only exact copies текущих legacy API/Web/timer/nginx units,
-   checkout SHA и status. Настроить nginx active upstream link сначала на
-   concrete `legacy.conf`, выполнить `nginx -t`, graceful reload и доказать
-   zero-diff внешнего ответа.
-7. Отключить legacy deploy timer только непосредственно перед migration/window,
-   не останавливая legacy API/Web. Это предотвращает `git pull`, но сохраняет
-   рабочий N-1 runtime для мгновенного routing rollback.
+   checkout SHA и status. Не использовать `legacy.conf` и порты `4000/3000`
+   как rollback target после начала scheduler-free activation.
+7. Поднять exact SHA `7de04ff4ccc814494810730be3fa6bf661097b07`
+   отдельными system users: nginx-facing auth-edge `4300`, exact API child
+   `127.0.0.1:4301` и Web `3300`, с final deny overlay, UID-scoped loopback
+   egress fence и отдельной DB session identity. Legacy child `4301` никогда не
+   является nginx upstream; edge оставляет публичными только health/login и
+   выполняет `/auth/me` introspection для любого другого Bearer. До routing
+   пройти unauthenticated denial matrix и authenticated read-only smoke своей
+   сети. Затем versioned activator обязан
+   атомарно направить nginx на `legacy-safe.conf`, дождаться выхода старого nginx
+   worker generation и соединений к `4000/3000`, установить persistent systemd
+   start-fence и `NOLOGIN` для legacy DB role, остановить/disable весь closed
+   inventory старых units и получить bounded zero-session/transaction receipt.
+   Только scheduler-free `4300/3300` остаётся boot-enabled N-1.
 
 ### Release evidence (заполняется release owner перед effect)
 
 - exact candidate SHA / CI run с real-PG controller gate / artifact digest:
+  baseline `f4e8d79d…` / `32421266035` / raw
+  `9f77c15fd4b5bbdc42bc360c5dbdb9f34f66d40a00fcbbe159aaed7ff144d392`
+  принят для local replay; operational successor SHA перед production ещё
   `PENDING`; `a34eae8e…` явно `SUPERSEDED/NO-GO`;
 - production backup UTC / size / SHA-256: `PENDING`;
 - off-host copy size / SHA-256: `PENDING`;
 - globals/roles backup digest: `PENDING`;
-- production-history rehearsal receipt: `PENDING`;
-- N/N-1 compatibility receipt: `PENDING`;
+- production-history rehearsal receipt: exact f4 normal + actual
+  crash/lost-response/resume `ACCEPTED` на disposable PostgreSQL;
+- N/N-1 compatibility receipt: N−1 API + scheduler `ACCEPTED`; ранний N=f4
+  Windows runtime receipt — `SUPERSEDED_DIAGNOSTIC`, hardened full-tree/kernel
+  Linux acceptance `PENDING`; raw N=f4 data admission блокируют `5` unresolved scopes, а
+  scheduler-free production handoff остаётся `PENDING`;
 - legacy nginx/unit/config archive digest: `PENDING`.
 
 ### B. Staging и switch
@@ -239,7 +281,9 @@ runtime на `/srv/leetplus/slots/blue|green` и secrets в
    `leetplus-api@<slot>` и `leetplus-web@<slot>` на alternate loopback ports.
    Cutover принимает только одновременно active и boot-enabled units; Web
    зависит от paired API, оба упорядочены до nginx. `ExecStartPre` проверяет
-   immutable slot/service-user write boundary, API затем выполняет
+   immutable slot/service-user write boundary, exact NSS groups, safe PATH,
+   полный loader/Node/proxy/curl env scrub и live kernel no-egress через
+   ожидаемый `EACCES/EPERM` к собственному non-loopback адресу. API затем выполняет
    `config:validate:production`. Legacy units продолжают обслуживать traffic.
 9. Проверить loopback: API `/version`, API `/health/ready`, Web root,
    динамический no-store `/api/release-identity` и static asset smoke. Для этого использовать versioned read-only
@@ -248,18 +292,32 @@ runtime на `/srv/leetplus/slots/blue|green` и secrets в
 10. Запустить `blue-green-cutover.sh switch`. Он до effect сохраняет durable
     root-only intent, предварительно проверяет candidate в private mount
     namespace с real host nginx config, меняет только один nginx symlink, требует `nginx -t`,
-    graceful reload и bounded public watchdog. Ошибка автоматически возвращает
-    exact previous target; old processes не останавливаются. Candidate nginx
-    upstream первого cutover держит hot legacy как `backup`, но watchdog
-    принимает только динамическую exact candidate identity.
+    а также exact installed slot-unit digest, zero drop-ins, effective
+    identity/ExecStart/env/sandbox и MainPID+cgroup+loopback listener ownership,
+    pinned nginx/preflight/readiness bytes и bounded/sanitized readiness bodies.
+    Graceful reload и bounded public watchdog повторяют unit contract и требуют
+    неизменный InvocationID. Ошибка автоматически возвращает
+    exact previous scheduler-free target. Candidate nginx-конфиг содержит
+    ровно одну API/Web пару и не использует независимые `backup` upstream:
+    односторонний отказ не смешивает candidate и N-1, а до атомарного rollback
+    всей пары возвращает bounded serving error. Fenced scheduler-capable
+    `4000/3000` не запускается и не маршрутизируется.
     Handled exit запускает rollback guard; outstanding intent после SIGKILL
     восстанавливается pre-nginx unit и подтверждается отдельным post-start timer.
-11. Сохранить accepted receipt и оставить N-1 runtime hot на объявленный soak.
-    Candidate не создаёт второй scheduler tick. До migration должен быть уже
-    принят один из путей: legacy background compatibility на новой схеме или
-    reviewed drain legacy schedulers с объявленным окном без background work.
-    HTTP process остаётся hot и boot-enabled в обоих случаях. Остановка/disable N-1 и передача
-    scheduler ownership — отдельный zero-overlap post-acceptance gate.
+11. Сохранить schema-exact accepted receipt с монотонным `GENERATION` и
+    latest-generation index; UTC timestamp не используется как ordering
+    authority. Оставить
+    scheduler-free N-1 runtime hot на объявленный soak. Receipt даёт rollback
+    authority только пока он latest и не consumed. Lost response между rename
+    receipt и atomic index replacement допускает лишь fail-closed reconciliation
+    ровно одного schema-exact monotonic successor, совпадающего с live target;
+    clock regression не меняет порядок поколений.
+    `ACCEPTED_AT`/`RECOVERED_AT` создаются только whole-record temp + fsync +
+    atomic replace; append-in-place и torn authoritative journals запрещены.
+    Старые scheduler-capable units уже fenced/stopped, их DB login `NOLOGIN`, а
+    drain verifier повторно подтверждает отсутствие процессов, cgroups,
+    sessions, transactions и workers. Передача scheduler ownership новому
+    release остаётся отдельным zero-overlap post-acceptance gate.
 
 ### C. Минимальный canary
 
@@ -301,12 +359,13 @@ runtime на `/srv/leetplus/slots/blue|green` и secrets в
 
 До owner activation runtime rollback означает выполнить
 `blue-green-cutover.sh rollback --receipt <intent|receipt>`: он допускает только
-exact previous target/digest/runtime contract, сначала доказывает direct
-liveness и boot-enabled state N-1, затем выполняет `nginx -t`, graceful reload
-даже при уже восстановленном link и bounded public smoke старого runtime. Если
-внешняя проверка недоступна, link и процессы
-остаются восстановленными, но rollback не объявляется принятым. Старые процессы
-уже hot, поэтому restart не нужен. После owner activation дополнительно
+latest unconsumed generation с exact previous target/digest/runtime contract,
+сначала доказывает direct liveness и boot-enabled state scheduler-free N-1,
+затем выполняет `nginx -t`, graceful reload даже при уже восстановленном link и
+bounded public/authenticated smoke. Если внешняя проверка недоступна, safe link
+и N-1 процессы остаются восстановленными, но rollback не объявляется принятым.
+Scheduler-capable legacy `4000/3000` остаётся fenced/stopped; его restart или
+unmask в rollback запрещён. После owner activation дополнительно
 закрываются invite/session/tenant effects по pilot rollback plan.
 
 Schema rollback по умолчанию **не** означает restore старого backup: это
@@ -316,12 +375,16 @@ runtime работает на новой схеме, а DB incident идёт ч�
 
 ## Что требуется до выполнения на production
 
-- зелёные Fast CI и Full Release Admission для одного exact SHA;
+- зелёные Fast CI и Full Release Admission для operational successor exact SHA
+  (f4 baseline принят, новые rollback/drain/smoke helpers ещё не приняты);
 - explicit production-change approval на: архивирование sensitive artifacts,
   замену legacy deploy/timer и switch runtime на artifact release directory;
-- проверенный immutable backup и restored-copy rehearsal;
-- production-history controller и N/N-1 old-SHA compatibility acceptance;
-- legacy-background compatibility либо reviewed pre-migration scheduler drain;
+- свежий непосредственно перед окном immutable production backup; f4
+  restored-copy rehearsal уже принят;
+- production-history normal/crash controller и N−1 old-SHA приняты локально;
+  hardened N=f4 runtime требует privileged Linux systemd/cgroup запуска, а
+  reviewed five-user scope classification/data admission ещё требуется;
+- scheduler-free legacy target и reviewed pre-migration scheduler drain;
 - repository blue/green fixtures и новый exact-SHA Full Release Admission;
 - privileged Linux rehearsal: systemd parser, real full nginx parser,
   tmpfiles/cache bind, offline store/hydrate/promote/seal и reboot recovery;

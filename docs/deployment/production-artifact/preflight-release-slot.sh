@@ -1,10 +1,41 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash -p
 #
 # Fail-closed filesystem preflight for a SHA-bound blue/green release slot.
 #
 # The script is intended to run as the same unprivileged service account as
 # the API/Web systemd unit. It has no database, network, systemd or symlink
 # mutation capability.
+
+[[ $- == *p* ]] || { printf 'preflight-release-slot: privileged Bash mode is required\n' >&2; exit 1; }
+LEETPLUS_BOOTSTRAP_TEST_PATH="${PATH:-}"
+LEETPLUS_BOOTSTRAP_UNSAFE_ENV_KEYS=''
+for LEETPLUS_BOOTSTRAP_ENV_KEY in \
+  BASH_ENV ENV HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
+  http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH \
+  NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE \
+  LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES \
+  GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ \
+  CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR \
+  PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY \
+  TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME \
+  NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS \
+  GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM; do
+  [[ -v "$LEETPLUS_BOOTSTRAP_ENV_KEY" ]] \
+    && LEETPLUS_BOOTSTRAP_UNSAFE_ENV_KEYS+=" ${LEETPLUS_BOOTSTRAP_ENV_KEY}"
+done
+unset LEETPLUS_BOOTSTRAP_ENV_KEY
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+export PATH
+unset BASH_ENV ENV CDPATH \
+  HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy \
+  NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE \
+  NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH \
+  OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ \
+  CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR \
+  PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY \
+  TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME \
+  NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS \
+  GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -47,6 +78,7 @@ unprivileged_test_mode=false
 require_web_cache_bind=false
 web_runtime=false
 api_runtime=false
+inert_sink_port=1
 
 while (($# > 0)); do
   case "$1" in
@@ -96,6 +128,11 @@ while (($# > 0)); do
       api_runtime=true
       shift
       ;;
+    --test-inert-sink-port)
+      (($# >= 2)) || die '--test-inert-sink-port requires a value'
+      inert_sink_port="$2"
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -119,19 +156,69 @@ else
 fi
 [[ "${API_BIND_HOST:-}" == '127.0.0.1' ]] || die 'candidate API bind host must be exact loopback 127.0.0.1'
 
+# A local forwarding proxy or process-loader hook would bypass the intended
+# boundary. Capture presence before the mandatory bootstrap scrub, then fail.
+[[ -z "$LEETPLUS_BOOTSTRAP_UNSAFE_ENV_KEYS" ]] \
+  || die "candidate inherited forbidden injection environment:${LEETPLUS_BOOTSTRAP_UNSAFE_ENV_KEYS}"
+
 if [[ "$unprivileged_test_mode" == true ]]; then
   ((EUID != 0)) || die 'unprivileged test mode is forbidden for root'
+  [[ "$inert_sink_port" =~ ^[1-9][0-9]{0,4}$ && "$inert_sink_port" -le 65535 ]] \
+    || die 'test inert sink port is invalid'
+  PATH="$LEETPLUS_BOOTSTRAP_TEST_PATH"
+  export PATH
 else
+  [[ "$inert_sink_port" == 1 ]] || die 'production inert sink port cannot be overridden'
   [[ "$slot_root" == '/srv/leetplus/slots' ]] || die 'production slot root cannot be overridden'
   [[ "$release_root" == '/srv/leetplus/releases' ]] || die 'production release root cannot be overridden'
   [[ "$cache_marker_root" == '/var/lib/leetplus/web-cache-releases' ]] || die 'production cache marker root cannot be overridden'
-  PATH='/usr/sbin:/usr/bin:/sbin:/bin'
-  export PATH
 fi
+unset LEETPLUS_BOOTSTRAP_TEST_PATH
+unset LEETPLUS_BOOTSTRAP_UNSAFE_ENV_KEYS
 
 for command_name in find id node realpath sha256sum stat tr; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is unavailable: $command_name"
 done
+
+if [[ "$unprivileged_test_mode" == false ]]; then
+  # This process is an ExecStartPre of the candidate unit, so the connection
+  # attempt runs in that unit's live cgroup and effective IP firewall. Target
+  # the host's own non-loopback IPv4 on the closed discard port: a working
+  # boundary returns EACCES/EPERM before any external packet can be emitted;
+  # success, refusal, timeout or absence of a non-loopback address all fail.
+  node --input-type=module <<'NETWORK_DENY_SELF_TEST' \
+    || die 'candidate live kernel no-egress self-test failed'
+import { networkInterfaces } from "node:os";
+import { Socket } from "node:net";
+
+const target = Object.values(networkInterfaces())
+  .flat()
+  .filter(Boolean)
+  .filter((entry) => entry.family === "IPv4" && entry.internal === false)
+  .map((entry) => entry.address)
+  .sort()[0];
+
+if (!target) process.exit(61);
+const accepted = await new Promise((resolve) => {
+  const socket = new Socket();
+  let settled = false;
+  const finish = (value) => {
+    if (settled) return;
+    settled = true;
+    socket.destroy();
+    resolve(value);
+  };
+  socket.setTimeout(1500, () => finish(false));
+  socket.once("connect", () => finish(false));
+  socket.once("error", (error) => finish(
+    error?.code === "EACCES" || error?.code === "EPERM",
+  ));
+  socket.connect({ family: 4, host: target, port: 1 });
+});
+if (!accepted) process.exit(62);
+NETWORK_DENY_SELF_TEST
+  printf 'RELEASE_SLOT_LIVE_KERNEL_NO_EGRESS=true\n'
+fi
 
 [[ "${EXPECTED_DATABASE_MIGRATION:-}" =~ ^[0-9]{14}_[a-z0-9_]+$ ]] \
   || die 'expected database migration environment is invalid'
@@ -180,6 +267,17 @@ DEMO_SEED_ENABLED=false
 ACCESS_SCOPE_ENFORCEMENT_MODE=ENFORCED
 STAFF_ATTACHMENT_ACL_MODE=ENFORCED
 NEXT_TELEMETRY_DISABLED=1
+MAIL_HOST=127.0.0.1
+MAIL_PORT=1
+MAIL_SECURE=false
+MAIL_USER=disabled
+MAIL_PASS=disabled
+GUEST_GAME_BOT_CONSUMER_MAX_DELIVERY_ENDPOINT=http://127.0.0.1:1
+GUEST_GAME_MAX_DELIVERY_ENDPOINT=http://127.0.0.1:1
+GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT=http://127.0.0.1:1
+GUEST_PORTAL_OTP_SMS_ENDPOINT=http://127.0.0.1:1
+GUEST_PORTAL_OTP_SMS_RU_BASE_URL=http://127.0.0.1:1
+GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL=http://127.0.0.1:1
 GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=false
 GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false
 GUEST_GAME_RETENTION_SCHEDULER_ENABLED=false
@@ -243,6 +341,32 @@ LANGAME_INITIAL_SYNC_PREFLIGHT_CURRENT188_ENABLED=false
 LANGAME_INITIAL_SYNC_EXECUTION_CURRENT192_ENABLED=false
 # END CANARY_SAFE_REQUIRED_SETTINGS
 CANARY_SAFE_REQUIRED_SETTINGS
+
+# Every direct provider/SMTP fallback is pinned to loopback port 1. Prove from
+# the unit cgroup that this sink is actually unbound; otherwise a local relay
+# could turn an apparently inert endpoint into outbound delivery under another
+# process identity. Tests may point only this probe at a disposable listener.
+node --input-type=module - "$inert_sink_port" <<'INERT_LOOPBACK_SINK_TEST' \
+  || die 'pinned inert loopback sink is listening or cannot be proven closed'
+import { Socket } from "node:net";
+const port = Number(process.argv[2]);
+const refused = await new Promise((resolve) => {
+  const socket = new Socket();
+  let settled = false;
+  const finish = (value) => {
+    if (settled) return;
+    settled = true;
+    socket.destroy();
+    resolve(value);
+  };
+  socket.setTimeout(1000, () => finish(false));
+  socket.once("connect", () => finish(false));
+  socket.once("error", (error) => finish(error?.code === "ECONNREFUSED"));
+  socket.connect({ family: 4, host: "127.0.0.1", port });
+});
+if (!refused) process.exit(63);
+INERT_LOOPBACK_SINK_TEST
+printf 'RELEASE_SLOT_INERT_LOOPBACK_SINK_UNBOUND=true\n'
 
 [[ -d "$slot_root" && ! -L "$slot_root" ]] || die 'slot root must be a real directory'
 [[ -d "$release_root" && ! -L "$release_root" && "$release_root" != '/' ]] || die 'release root must be a real non-root directory'
@@ -338,9 +462,79 @@ while IFS= read -r -d '' link_path; do
 done < <(find -P "$release_directory" -xdev \
   -path "$runtime_cache_mount" -prune -o -type l -print0)
 
+node - "$release_directory" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+
+const [root] = process.argv.slice(2);
+const mutableCache = 'apps/web/.next/cache';
+const manifestPath = path.join(root, 'HYDRATED_SYMLINKS.json');
+const compareUtf8 = (left, right) =>
+  Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
+
+function fail(message) {
+  throw new Error(message);
+}
+
+function assertCanonicalPath(relativePath) {
+  const components = relativePath.split('/');
+  if (
+    components.length === 0 ||
+    components.some((component) =>
+      component.length === 0 ||
+      component === '.' ||
+      component === '..' ||
+      component !== component.normalize('NFC') ||
+      /[\\\u0000-\u001f\u007f]/u.test(component)
+    )
+  ) fail(`hydrated symlink path is not canonical: ${relativePath}`);
+}
+
+function collect(directory, relativeDirectory = '', links = []) {
+  const entries = fs.readdirSync(directory, { withFileTypes: true })
+    .sort((left, right) => compareUtf8(left.name, right.name));
+  for (const entry of entries) {
+    const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+    assertCanonicalPath(relativePath);
+    const absolutePath = path.join(root, ...relativePath.split('/'));
+    const stat = fs.lstatSync(absolutePath);
+    if (stat.isDirectory()) {
+      if (relativePath !== mutableCache) collect(absolutePath, relativePath, links);
+      continue;
+    }
+    if (!stat.isSymbolicLink()) continue;
+    const target = fs.readlinkSync(absolutePath, 'utf8');
+    if (
+      target.length === 0 ||
+      target !== target.normalize('NFC') ||
+      path.posix.isAbsolute(target) ||
+      path.posix.normalize(target) !== target ||
+      /[\\\u0000-\u001f\u007f]/u.test(target)
+    ) fail(`hydrated symlink target is not canonical: ${relativePath}`);
+    const resolved = fs.realpathSync.native(absolutePath);
+    if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+      fail(`hydrated symlink escapes the release: ${relativePath}`);
+    }
+    links.push({ path: relativePath, target });
+  }
+  return links;
+}
+
+const manifestStat = fs.lstatSync(manifestPath);
+if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.size > 8 * 1024 * 1024) {
+  fail('hydrated symlink manifest is absent or unsafe');
+}
+const text = fs.readFileSync(manifestPath, 'utf8');
+const links = collect(root)
+  .sort((left, right) => compareUtf8(left.path, right.path) || compareUtf8(left.target, right.target));
+const canonical = `${JSON.stringify({ links, version: 1 })}\n`;
+if (text !== canonical) fail('hydrated symlink manifest differs from the exact release topology');
+NODE
+
 required_files=(
   'release-provenance.json'
   'HYDRATED_SHA256SUMS'
+  'HYDRATED_SYMLINKS.json'
   'apps/api/dist/main.js'
   'apps/api/dist/config/validate-production-environment.cli.js'
   'apps/web/.next/BUILD_ID'

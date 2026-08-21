@@ -24,7 +24,21 @@ jobs:
   authority-root-trust:
     name: Authority root trust gate
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: leetplus
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d leetplus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
 
     steps:
       - name: Check out complete root history
@@ -46,6 +60,188 @@ jobs:
         with:
           node-version: 22
 
+      - name: Verify exact operational Node runtime
+        shell: bash
+        run: |
+          test "$(node -p 'process.versions.node.split(".")[0]')" = '22'
+          node_path="$(realpath "$(command -v node)")"
+          case "$node_path" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected operational Node path: %s\n' "$node_path" >&2; exit 1 ;;
+          esac
+
+      - name: Verify production-control installed-generation authority
+        shell: bash
+        run: |
+          bash -n docs/deployment/production-control-authority/leetplus-install-production-control-v1
+          node --check docs/deployment/production-control-authority/verify-installed-production-control-generation.mjs
+          bash -n .github/scripts/test-production-control-install-authority.sh
+          authority_node="$(realpath -e -- "$(command -v node)")"
+          case "$authority_node" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected production-control authority Node path: %s\n' "$authority_node" >&2; exit 1 ;;
+          esac
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LEETPLUS_FIXTURE_NODE="$authority_node" \
+            PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            /usr/bin/bash -p --noprofile --norc \
+            .github/scripts/test-production-control-install-authority.sh
+
+      - name: Verify installed and effective hydration systemd policy
+        shell: bash
+        run: |
+          bash -n docs/deployment/production-artifact/stage-release-artifact.sh
+          bash -n docs/deployment/production-artifact/promote-release-artifact.sh
+          node --check docs/deployment/production-artifact/verify-release-hydration-systemd.mjs
+          bash -n .github/scripts/test-release-hydration-systemd-attestation.sh
+          authority_node="$(realpath "$(command -v node)")"
+          case "$authority_node" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected authority Node path: %s\n' "$authority_node" >&2; exit 1 ;;
+          esac
+          authority_node_dir="$(dirname -- "$authority_node")"
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            HYDRATION_SYSTEMD_ATTESTATION_FIXTURE_CONFIRM=run-bounded-root-hydration-systemd-attestation-fixture \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH="${authority_node_dir}:/usr/sbin:/usr/bin:/sbin:/bin" \
+            /usr/bin/bash -p .github/scripts/test-release-hydration-systemd-attestation.sh
+
+      - name: Verify trusted pnpm store integrity boundary
+        shell: bash
+        run: |
+          node --check docs/deployment/production-artifact/verify-pnpm-store-integrity.mjs
+          bash -n .github/scripts/test-production-pnpm-store-integrity.sh
+          authority_node="$(realpath "$(command -v node)")"
+          case "$authority_node" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected authority Node path: %s\n' "$authority_node" >&2; exit 1 ;;
+          esac
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LEETPLUS_FIXTURE_NODE="$authority_node" \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/test-production-pnpm-store-integrity.sh
+
+      - name: Verify complete operational release authority
+        shell: bash
+        run: |
+          bash -n docs/deployment/production-artifact/stage-release-artifact.sh
+          bash -n .github/scripts/test-stage-release-artifact.sh
+          bash .github/scripts/test-stage-release-artifact.sh
+          bash -n docs/deployment/production-artifact/verify-release-readiness.sh
+          bash -n .github/scripts/test-verify-release-readiness.sh
+          bash .github/scripts/test-verify-release-readiness.sh
+          bash -n docs/deployment/production-artifact/preflight-release-slot.sh
+          bash -n docs/deployment/production-artifact/prepare-web-slot-cache.sh
+          bash -n .github/scripts/test-prepare-web-slot-cache.sh
+          bash .github/scripts/test-prepare-web-slot-cache.sh
+          bash -n docs/deployment/production-artifact/seal-release-artifact.sh
+          bash -n docs/deployment/production-artifact/bind-release-slot.sh
+          bash -n .github/scripts/test-production-artifact-slot-link.sh
+          bash .github/scripts/test-production-artifact-slot-link.sh
+          bash -n docs/deployment/production-artifact/blue-green-cutover.sh
+          bash -n .github/scripts/test-production-artifact-blue-green.sh
+          bash .github/scripts/test-production-artifact-blue-green.sh
+          bash -n .github/scripts/test-production-artifact-systemd-templates.sh
+          bash .github/scripts/test-production-artifact-systemd-templates.sh
+          bash -n docs/deployment/production-artifact/preflight-legacy-rollback.sh
+          bash -n docs/deployment/production-artifact/apply-legacy-rollback-egress.sh
+          bash -n docs/deployment/production-artifact/apply-legacy-database-login-fence.sh
+          bash -n docs/deployment/production-artifact/verify-legacy-runtime-drain.sh
+          bash -n docs/deployment/production-artifact/verify-legacy-rollback-readiness.sh
+          bash -n docs/deployment/production-artifact/activate-legacy-rollback-contour.sh
+          bash -n docs/deployment/production-artifact/install-legacy-rollback-contour.sh
+          bash -n docs/deployment/production-control-authority/leetplus-install-scheduler-free-nminus1-v1
+          bash -n .github/scripts/test-production-legacy-rollback-contour.sh
+          bash -n .github/scripts/test-production-legacy-rollback-service-user.sh
+          bash -n .github/scripts/test-production-legacy-rollback-control-bundle.sh
+          bash -n .github/scripts/test-production-legacy-database-authority-pg16.sh
+          node --check docs/deployment/production-artifact/legacy-rollback-auth-edge.mjs
+          node --check .github/scripts/test-legacy-rollback-auth-edge.mjs
+          node --check docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs
+          (cd docs/deployment/production-artifact && sha256sum --check --strict --quiet CONTROL_BUNDLE_SHA256SUMS)
+          node .github/scripts/test-legacy-rollback-auth-edge.mjs
+          bash .github/scripts/test-production-legacy-rollback-contour.sh
+          CI=true GITHUB_ACTIONS=true bash .github/scripts/test-production-legacy-database-authority-pg16.sh
+          authority_node="$(realpath "$(command -v node)")"
+          authority_node_dir="$(dirname -- "$authority_node")"
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH="${authority_node_dir}:/usr/sbin:/usr/bin:/sbin:/bin" \
+            /usr/bin/bash -p .github/scripts/test-production-legacy-rollback-service-user.sh
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/test-production-legacy-rollback-control-bundle.sh
+
+      - name: Verify production installer path in a disposable root
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_image='node:22.23.2-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a'
+          workspace_real="$(realpath -e -- "$GITHUB_WORKSPACE")"
+          test "$workspace_real" = "$GITHUB_WORKSPACE"
+          git diff --exit-code -- .
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          docker pull --platform linux/amd64 "$fixture_image"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$fixture_image")" = 'linux/amd64'
+          docker run --rm \
+            --platform linux/amd64 \
+            --network none \
+            --pids-limit 512 \
+            --memory 2g \
+            --mount "type=bind,src=${workspace_real},dst=/workspace,readonly" \
+            --workdir /workspace \
+            --entrypoint /usr/bin/bash \
+            "$fixture_image" -p -c '
+              set -euo pipefail
+              /usr/bin/install -o root -g root -m 0755 /usr/local/bin/node /usr/bin/node
+              /usr/bin/node -e "if (!/^22[.]/.test(process.versions.node)) process.exit(1)"
+              exec /usr/bin/env -i \
+                LEETPLUS_DISPOSABLE_ROOT_FIXTURE=CONFIRMED_DESTROYABLE_CI_ROOT \
+                LANG=C.UTF-8 \
+                LC_ALL=C.UTF-8 \
+                TZ=UTC \
+                PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+                /usr/bin/bash -p .github/scripts/test-production-legacy-rollback-installer-root.sh
+            '
+
+      - name: Verify exact runtime and production-control artifact identities
+        shell: bash
+        run: |
+          node --check .github/scripts/verify-runtime-release-artifact.mjs
+          bash -n .github/scripts/test-runtime-release-artifact-integrity.sh
+          bash .github/scripts/test-runtime-release-artifact-integrity.sh
+          bash -n .github/scripts/hydrate-runtime-release-artifact-ci.sh
+          /usr/bin/python3 -I -S -E -c \
+            "from pathlib import Path; [compile(Path(p).read_bytes(), p, 'exec') for p in ['.github/scripts/extract-runtime-release-artifact.py', '.github/scripts/test-runtime-release-archive-extraction.py']]"
+          /usr/bin/python3 -I -S -E .github/scripts/test-runtime-release-archive-extraction.py
+          node --check docs/deployment/production-control-authority/verify-production-control-artifact.mjs
+          bash -n .github/scripts/test-production-control-artifact-integrity.sh
+          bash .github/scripts/test-production-control-artifact-integrity.sh
+          bash -n .github/scripts/build-production-control-artifact-ci.sh
+
       - name: Validate pinned authority root transition
         run: >-
           node
@@ -65,7 +261,7 @@ jobs:
   application:
     name: Application checks
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -330,6 +526,47 @@ jobs:
       - name: Validate N-minus-one restored-copy smoke
         run: pnpm --filter database check:n-minus-one-restored-copy-smoke
 
+      - name: Validate current-release restored-copy runtime acceptance
+        run: pnpm --filter database check:current-release-restored-copy-runtime-acceptance
+
+      - name: Validate current-release production-like Linux wrapper
+        shell: bash
+        run: |
+          bash -n docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh
+          bash -n .github/scripts/test-current-release-restored-copy-acceptance-wrapper.sh
+          bash .github/scripts/test-current-release-restored-copy-acceptance-wrapper.sh
+
+      - name: Validate current-release wrapper in a real privileged systemd namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_realpath="$(realpath -e -- "$(command -v node)")"
+          case "$node_realpath" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected wrapper fixture Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
+          esac
+          fixture_node='/usr/local/libexec/leetplus/current-wrapper-fixture-node22'
+          cleanup_fixture_node() {
+            sudo -n /usr/bin/rm -f -- "$fixture_node"
+          }
+          trap cleanup_fixture_node EXIT
+          sudo -n /usr/bin/install -d -o root -g root -m 0755 /usr/local/libexec/leetplus
+          sudo -n /usr/bin/install -o root -g root -m 0755 \
+            "$node_realpath" "$fixture_node"
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            CURRENT_WRAPPER_EVIDENCE_ISOLATION_FIXTURE_CONFIRM=run-root-current-wrapper-evidence-isolation-fixture \
+            LANG=C \
+            LC_ALL=C \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/test-current-release-restored-copy-acceptance-wrapper.sh \
+              --privileged-evidence-isolation-fixture
+
+      - name: Validate current-network access-scope classification controller
+        run: pnpm --filter database check:current-network-access-scope-classification
+
       - name: Validate founder-pilot production-history rehearsal lane
         run: pnpm --filter database check:founder-pilot-production-history-rehearsal
 
@@ -571,8 +808,19 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
 
+          node_realpath="$(realpath -e -- "$(command -v node)")"
+          case "$node_realpath" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected release verifier Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
+          esac
+          node_directory="$(dirname -- "$node_realpath")"
+
           release_root="$RUNNER_TEMP/leetplus-release-$CI_RELEASE_SHA"
           archive="$RUNNER_TEMP/leetplus-release-$CI_RELEASE_SHA.tar.gz"
+          test ! -e "$release_root"
+          test ! -L "$release_root"
+          test ! -e "$archive"
+          test ! -L "$archive"
           mkdir -p \
             "$release_root/apps/api" \
             "$release_root/apps/web" \
@@ -584,6 +832,13 @@ jobs:
           cp -a apps/web/.next "$release_root/apps/web/"
           cp -a apps/web/next.config.ts apps/web/package.json "$release_root/apps/web/"
           cp -a apps/web/public "$release_root/apps/web/"
+          case "$release_root" in
+            "$RUNNER_TEMP"/leetplus-release-"$CI_RELEASE_SHA") ;;
+            *) printf 'unexpected generated release root\n' >&2; exit 1 ;;
+          esac
+          rm -rf -- \
+            "$release_root/apps/web/.next/cache" \
+            "$release_root/apps/web/.next/dev"
           cp -a packages/database/package.json "$release_root/packages/database/"
           cp -a packages/database/prisma/schema.prisma "$release_root/packages/database/prisma/"
           cp -a packages/database/prisma/migrations "$release_root/packages/database/prisma/"
@@ -606,6 +861,11 @@ jobs:
             packages/database/scripts/identity-mail-worker-enrollment.cli.mjs \
             packages/database/scripts/shared-beta-admission-provenance-catalog.mjs \
             packages/database/scripts/staff-task-integrity-migration-state.mjs \
+            packages/database/scripts/current-release-restored-copy-runtime-acceptance.mjs \
+            packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs \
+            docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh \
+            packages/database/scripts/current-network-access-scope-classification.mjs \
+            packages/database/scripts/current-network-access-scope-classification.cli.mjs \
             "$release_root/packages/database/scripts/"
           cp -a package.json pnpm-lock.yaml pnpm-workspace.yaml "$release_root/"
 
@@ -621,27 +881,46 @@ jobs:
             '  "founderPilotOperationalScriptCount": 12,' \
             '  "runtimeEnrollmentOperationalScriptsIncluded": true,' \
             '  "runtimeEnrollmentOperationalScriptCount": 6,' \
-            '  "operationalScriptCount": 18,' \
+            '  "currentReleaseRuntimeAcceptanceScriptsIncluded": true,' \
+            '  "currentReleaseRuntimeAcceptanceScriptCount": 3,' \
+            '  "currentNetworkAccessScopeClassificationScriptsIncluded": true,' \
+            '  "currentNetworkAccessScopeClassificationScriptCount": 2,' \
+            '  "operationalScriptCount": 23,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
+          find "$release_root" -depth -mindepth 1 -type d -empty -delete
+
           (
             cd "$release_root"
-            if find . \
-              -path './apps/web/.next/cache' -prune -o \
-              -path './apps/web/.next/dev' -prune -o \
-              -type l -print -quit \
-              | grep -q .; then
+            symlink_probe="$(mktemp "$RUNNER_TEMP/release-artifact-symlink-probe.XXXXXX")"
+            find . -type l -print0 -quit > "$symlink_probe"
+            if test -s "$symlink_probe"; then
               printf 'Release artifact refuses symbolic links\n' >&2
               exit 1
             fi
+            rm -f -- "$symlink_probe"
             find . \
-              -path './apps/web/.next/cache' -prune -o \
-              -path './apps/web/.next/dev' -prune -o \
-              -type f ! -name SHA256SUMS -print0 \
+              -type f ! -path './SHA256SUMS' -print0 \
               | LC_ALL=C sort -z \
-              | xargs -0 sha256sum > SHA256SUMS
+              | xargs -0 sha256sum --text > SHA256SUMS
           )
+
+          release_root_real="$(realpath -e -- "$release_root")"
+          test "$release_root_real" = "$release_root"
+          /usr/bin/env -i \
+            PATH="${node_directory}:/usr/bin:/bin" \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            "$node_realpath" .github/scripts/verify-runtime-release-artifact.mjs \
+              --release-root "$release_root_real" \
+              --expected-release-sha "$CI_RELEASE_SHA"
+
+          find "$release_root" -type d -exec chmod 0550 -- {} +
+          find "$release_root" -type f -exec chmod 0440 -- {} +
 
           tar \
             --sort=name \
@@ -649,6 +928,7 @@ jobs:
             --owner=0 \
             --group=0 \
             --numeric-owner \
+            --mode='u=rX,g=rX,o=' \
             --format=posix \
             --pax-option=delete=atime,delete=ctime \
             --exclude='./apps/web/.next/cache' \
@@ -665,7 +945,9 @@ jobs:
 
           verification_root="$RUNNER_TEMP/leetplus-release-verify-$CI_RELEASE_SHA"
           archive_listing="$RUNNER_TEMP/leetplus-release-$CI_RELEASE_SHA.contents"
-          mkdir -p "$verification_root"
+          test ! -e "$verification_root"
+          test ! -L "$verification_root"
+          mkdir -m 0700 "$verification_root"
           tar -tzf "$archive" > "$archive_listing"
           for required_path in \
             './apps/api/dist/main.js' \
@@ -683,6 +965,11 @@ jobs:
             './packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs' \
             './packages/database/scripts/runtime-function-enrollment.cli.mjs' \
             './packages/database/scripts/identity-mail-worker-enrollment.cli.mjs' \
+            './packages/database/scripts/current-release-restored-copy-runtime-acceptance.mjs' \
+            './packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs' \
+            './packages/database/scripts/run-current-release-restored-copy-acceptance.sh' \
+            './packages/database/scripts/current-network-access-scope-classification.mjs' \
+            './packages/database/scripts/current-network-access-scope-classification.cli.mjs' \
             './release-provenance.json' \
             './SHA256SUMS'; do
             grep -F -x "$required_path" "$archive_listing" > /dev/null
@@ -692,22 +979,45 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '18'
+          test "$script_file_count" = '23'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1
           fi
-          tar -xzf "$archive" -C "$verification_root"
+          timeout --signal=TERM --kill-after=10s 120s \
+            /usr/bin/env -i \
+              PATH=/usr/bin:/bin \
+              LANG=C.UTF-8 \
+              LC_ALL=C.UTF-8 \
+              TZ=UTC \
+              /usr/bin/python3 -I -S -E \
+                "$GITHUB_WORKSPACE/.github/scripts/extract-runtime-release-artifact.py" \
+                --archive "$archive" \
+                --destination "$verification_root"
           (
             cd "$verification_root"
-            sha256sum --check --quiet SHA256SUMS
+            verification_root_real="$(realpath -e -- .)"
+            /usr/bin/env -i \
+              PATH="${node_directory}:/usr/bin:/bin" \
+              LANG=C.UTF-8 \
+              LC_ALL=C.UTF-8 \
+              TZ=UTC \
+              CI=true \
+              GITHUB_ACTIONS=true \
+              "$node_realpath" "$GITHUB_WORKSPACE/.github/scripts/verify-runtime-release-artifact.mjs" \
+                --release-root "$verification_root_real" \
+                --expected-release-sha "$CI_RELEASE_SHA"
             test "$(node -p 'require("./release-provenance.json").releaseSha')" = "$CI_RELEASE_SHA"
             test "$(node -p 'require("./release-provenance.json").runtimePackageManifestsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '12'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptCount')" = '6'
-            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '18'
+            test "$(node -p 'require("./release-provenance.json").currentReleaseRuntimeAcceptanceScriptsIncluded')" = 'true'
+            test "$(node -p 'require("./release-provenance.json").currentReleaseRuntimeAcceptanceScriptCount')" = '3'
+            test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptsIncluded')" = 'true'
+            test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptCount')" = '2'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '23'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
             node --check packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs
@@ -717,37 +1027,27 @@ jobs:
             node --check packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs
             node --check packages/database/scripts/runtime-function-enrollment.cli.mjs
             node --check packages/database/scripts/identity-mail-worker-enrollment.cli.mjs
-            pnpm install --prod --offline --frozen-lockfile
-            pnpm --filter database db:generate
-            node packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs --help > /dev/null
-            node packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs --help > /dev/null
-            node packages/database/scripts/founder-pilot-production-history-production.cli.mjs --help > /dev/null
-            node packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs --help > /dev/null
-            node packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs --help > /dev/null
-            node packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs --help > /dev/null
-            node packages/database/scripts/runtime-function-enrollment.cli.mjs --help > /dev/null
-            node packages/database/scripts/identity-mail-worker-enrollment.cli.mjs --help > /dev/null
-            node -e "require.resolve('@nestjs/core', { paths: ['./apps/api'] })"
-            node -e "require.resolve('@prisma/client', { paths: ['./apps/api'] })"
-            test -s apps/web/.next/BUILD_ID
+            node --check packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs
+            bash -n packages/database/scripts/run-current-release-restored-copy-acceptance.sh
+            node --check packages/database/scripts/current-network-access-scope-classification.cli.mjs
           )
 
-      - name: Upload SHA-bound release artifact
+      - name: Upload non-deployable SHA-bound release candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: leetplus-release-${{ env.CI_RELEASE_SHA }}
+          name: leetplus-release-${{ env.CI_RELEASE_SHA }}-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/leetplus-release-${{ env.CI_RELEASE_SHA }}.tar.gz
             ${{ runner.temp }}/leetplus-release-${{ env.CI_RELEASE_SHA }}.tar.gz.sha256
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 1
 
   release-artifact-api:
     name: Release artifact API child process
     needs: application
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -789,10 +1089,109 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: Snapshot exact root-owned CI hydration controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper_source="$GITHUB_WORKSPACE/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
+          helper_sha256='46707b07ae3089a0a15a7c99f9b648c4d1ef3bc8af74d9a54d616a0b98b3bcd1'
+          authority_parent='/srv/leetplus-ci-runtime-authority'
+          authority_root="$authority_parent/$CI_RELEASE_SHA"
+          sudo -n /usr/bin/env -i \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/bin:/bin \
+            /usr/bin/python3 -I -S -E - \
+              "$helper_source" "$helper_sha256" "$CI_RELEASE_SHA" \
+              "$authority_parent" "$authority_root" <<'PY'
+          import hashlib
+          import os
+          import stat
+          import sys
+
+          source, expected, release_sha, parent, root = sys.argv[1:]
+          if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
+              raise SystemExit("CI hydration controller digest is not canonical")
+          if len(release_sha) != 40 or any(character not in "0123456789abcdef" for character in release_sha):
+              raise SystemExit("CI release SHA is not canonical")
+          if parent != "/srv/leetplus-ci-runtime-authority" or root != f"{parent}/{release_sha}":
+              raise SystemExit("CI hydration controller destination is outside its fixed authority")
+
+          srv = os.lstat("/srv")
+          if not stat.S_ISDIR(srv.st_mode) or srv.st_uid != 0 or srv.st_gid != 0 or srv.st_mode & 0o022:
+              raise SystemExit("/srv is not a root-controlled authority ancestor")
+          for path, mode in ((parent, 0o755), (root, 0o555)):
+              try:
+                  os.mkdir(path, mode)
+              except FileExistsError:
+                  raise SystemExit(f"CI hydration controller destination already exists: {path}")
+              os.chown(path, 0, 0)
+              os.chmod(path, mode)
+              observed = os.lstat(path)
+              if not stat.S_ISDIR(observed.st_mode) or observed.st_uid != 0 or observed.st_gid != 0:
+                  raise SystemExit(f"CI hydration controller directory is unsafe: {path}")
+              if stat.S_IMODE(observed.st_mode) != mode:
+                  raise SystemExit(f"CI hydration controller directory mode is unsafe: {path}")
+
+          destination = root + "/hydrate-runtime-release-artifact-ci.sh"
+          source_fd = os.open(source, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+          destination_fd = -1
+          try:
+              before = os.fstat(source_fd)
+              if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 1 <= before.st_size <= 4 * 1024 * 1024:
+                  raise SystemExit("CI hydration controller source is not an exact bounded regular file")
+              destination_fd = os.open(
+                  destination,
+                  os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+                  0o500,
+              )
+              digest = hashlib.sha256()
+              total = 0
+              while True:
+                  chunk = os.read(source_fd, min(1024 * 1024, before.st_size - total + 1))
+                  if not chunk:
+                      break
+                  total += len(chunk)
+                  if total > before.st_size:
+                      raise SystemExit("CI hydration controller source grew during snapshot")
+                  digest.update(chunk)
+                  view = memoryview(chunk)
+                  while view:
+                      written = os.write(destination_fd, view)
+                      if written <= 0:
+                          raise SystemExit("CI hydration controller snapshot made no write progress")
+                      view = view[written:]
+              if total != before.st_size or digest.hexdigest() != expected:
+                  raise SystemExit("CI hydration controller differs from the reviewed exact byte")
+              os.fchown(destination_fd, 0, 0)
+              os.fchmod(destination_fd, 0o500)
+              os.fsync(destination_fd)
+              after = os.fstat(source_fd)
+              path_after = os.stat(source, follow_symlinks=False)
+              identity = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+              if any(getattr(before, field) != getattr(after, field) for field in identity):
+                  raise SystemExit("CI hydration controller descriptor changed during snapshot")
+              if any(getattr(before, field) != getattr(path_after, field) for field in identity):
+                  raise SystemExit("CI hydration controller pathname changed during snapshot")
+              root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+              try:
+                  os.fsync(root_fd)
+              finally:
+                  os.close(root_fd)
+          finally:
+              if destination_fd >= 0:
+                  os.close(destination_fd)
+              os.close(source_fd)
+          PY
+          sudo -n /usr/bin/test \
+            "$(sudo -n /usr/bin/stat -c '%u:%g:%a:%h' -- "$authority_root/hydrate-runtime-release-artifact-ci.sh")" = \
+            '0:0:500:1'
+
       - name: Download exact SHA-bound release artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: leetplus-release-${{ env.CI_RELEASE_SHA }}
+          name: leetplus-release-${{ env.CI_RELEASE_SHA }}-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/leetplus-release-download
 
       - name: Verify and hydrate downloaded release artifact
@@ -801,21 +1200,61 @@ jobs:
           set -euo pipefail
           download_root="$RUNNER_TEMP/leetplus-release-download"
           archive="$download_root/leetplus-release-$CI_RELEASE_SHA.tar.gz"
-          release_root="$RUNNER_TEMP/leetplus-release-runtime-$CI_RELEASE_SHA"
-          test "$(find "$download_root" -maxdepth 1 -type f | wc -l | tr -d ' ')" = '2'
+          checksum="$archive.sha256"
+          test "$(realpath -e -- "$download_root")" = "$download_root"
+          download_inventory="$(mktemp "$RUNNER_TEMP/release-download-inventory.XXXXXX")"
+          find -P "$download_root" -mindepth 1 -maxdepth 1 -print0 > "$download_inventory"
+          download_entry_count=0
+          while IFS= read -r -d '' _; do
+            download_entry_count=$((download_entry_count + 1))
+          done < "$download_inventory"
+          rm -f -- "$download_inventory"
+          test "$download_entry_count" = '2'
+          for candidate_file in "$archive" "$checksum"; do
+            test -f "$candidate_file"
+            test ! -L "$candidate_file"
+            test "$(stat -c '%h' -- "$candidate_file")" = '1'
+            candidate_mode="$(stat -c '%a' -- "$candidate_file")"
+            test "$((8#$candidate_mode & 8#22))" = '0'
+          done
+          test "$(wc -l < "$checksum" | tr -d ' ')" = '1'
+          grep -E -x "[0-9a-f]{64}  leetplus-release-${CI_RELEASE_SHA}[.]tar[.]gz" "$checksum" > /dev/null
           (
             cd "$download_root"
-            sha256sum --check "$(basename "$archive").sha256"
+            sha256sum --check --strict "$(basename "$checksum")"
           )
           gzip --test "$archive"
-          mkdir -p "$release_root"
-          tar -xzf "$archive" -C "$release_root"
+
+          node_realpath="$(realpath -e -- "$(command -v node)")"
+          case "$node_realpath" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected hydration Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
+          esac
+          pnpm_realpath="$(realpath -e -- "$(command -v pnpm)")"
+          runner_tool_cache_real="$(realpath -e -- "$RUNNER_TOOL_CACHE")"
+          repository_root_real="$(realpath -e -- "$GITHUB_WORKSPACE")"
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          hydration_authority="/srv/leetplus-ci-runtime-authority/$CI_RELEASE_SHA/hydrate-runtime-release-artifact-ci.sh"
+          hydration_work_root="/srv/leetplus-ci-runtime-output/$CI_RELEASE_SHA"
+          sudo -n \
+              CI=true GITHUB_ACTIONS=true \
+              LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC PATH=/usr/bin:/bin \
+              /usr/bin/timeout --signal=TERM --kill-after=30s 720s \
+              /usr/bin/bash -p "$hydration_authority" \
+                --release-sha "$CI_RELEASE_SHA" \
+                --repository-root "$repository_root_real" \
+                --runner-tool-cache "$runner_tool_cache_real" \
+                --node-path "$node_realpath" \
+                --pnpm-path "$pnpm_realpath" \
+                --runner-uid "$runner_uid" \
+                --runner-gid "$runner_gid" \
+                --artifact "$archive" \
+                --artifact-sha256 "$checksum" \
+                --work-root "$hydration_work_root"
+          hydrated_release_root="$hydration_work_root/releases/.untrusted-test-$CI_RELEASE_SHA"
           (
-            cd "$release_root"
-            sha256sum --check --quiet SHA256SUMS
-            test "$(node -p 'require("./release-provenance.json").releaseSha')" = "$CI_RELEASE_SHA"
-            pnpm install --prod --frozen-lockfile
-            pnpm --filter database db:generate
+            cd "$hydrated_release_root"
             node -e "require.resolve('@nestjs/core', { paths: ['./apps/api'] })"
             node -e "require.resolve('@prisma/client', { paths: ['./apps/api'] })"
           )
@@ -824,7 +1263,7 @@ jobs:
         run: node .github/scripts/run-founder-release-artifact-api-fixture.mjs
         env:
           FOUNDER_RELEASE_ARTIFACT_API_CONFIRM: run-founder-release-artifact-api-child-process-fixture
-          FOUNDER_RELEASE_ARTIFACT_ROOT: ${{ runner.temp }}/leetplus-release-runtime-${{ env.CI_RELEASE_SHA }}
+          FOUNDER_RELEASE_ARTIFACT_ROOT: /srv/leetplus-ci-runtime-output/${{ env.CI_RELEASE_SHA }}/releases/.untrusted-test-${{ env.CI_RELEASE_SHA }}
           FOUNDER_RELEASE_ARTIFACT_MAINTENANCE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?schema=public
           FOUNDER_RELEASE_ARTIFACT_API_PORT: 4319
 
@@ -832,7 +1271,7 @@ jobs:
         run: node .github/scripts/run-release-artifact-web-pair-fixture.mjs
         env:
           RELEASE_ARTIFACT_WEB_PAIR_CONFIRM: run-release-artifact-web-pair-child-process-fixture
-          RELEASE_ARTIFACT_WEB_PAIR_ROOT: ${{ runner.temp }}/leetplus-release-runtime-${{ env.CI_RELEASE_SHA }}
+          RELEASE_ARTIFACT_WEB_PAIR_ROOT: /srv/leetplus-ci-runtime-output/${{ env.CI_RELEASE_SHA }}/releases/.untrusted-test-${{ env.CI_RELEASE_SHA }}
           RELEASE_ARTIFACT_WEB_PAIR_SHA: ${{ env.CI_RELEASE_SHA }}
           RELEASE_ARTIFACT_WEB_PAIR_API_PORT: 4320
           RELEASE_ARTIFACT_WEB_PAIR_WEB_PORT: 3320
@@ -932,6 +1371,41 @@ jobs:
           POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
           NODE_ENV: test
           FOUNDER_PILOT_PRODUCTION_HISTORY_PRODUCTION_PG_E2E_CONFIRM: run-founder-pilot-production-history-production-postgres-e2e
+          TZ: America/New_York
+
+      - name: Verify current-network access-scope controller with exact grants and concurrency
+        shell: bash
+        run: |
+          test -n "$POSTGRES_SERVICE_CONTAINER_ID"
+          [[ "$POSTGRES_SERVICE_CONTAINER_ID" =~ ^[0-9a-f]{64}$ ]]
+          postgres_pid="$(docker inspect --format '{{.State.Pid}}' "$POSTGRES_SERVICE_CONTAINER_ID")"
+          [[ "$postgres_pid" =~ ^[1-9][0-9]*$ ]]
+          sudo -n test -e "/proc/$postgres_pid/ns/net"
+          pnpm_bin="$(command -v pnpm)"
+          test -x "$pnpm_bin"
+          timeout --signal=TERM --kill-after=10s 120s \
+            sudo -n nsenter \
+              --target "$postgres_pid" \
+              --net \
+              --setuid "$(id -u)" \
+              --setgid "$(id -g)" \
+              -- \
+              env \
+                ACCESS_SCOPE_CLASSIFICATION_PG_E2E_ADMIN_DATABASE_URL="$ACCESS_SCOPE_CLASSIFICATION_PG_E2E_ADMIN_DATABASE_URL" \
+                ACCESS_SCOPE_CLASSIFICATION_PG_E2E_CONFIRM="$ACCESS_SCOPE_CLASSIFICATION_PG_E2E_CONFIRM" \
+                HOME="$HOME" \
+                NODE_ENV="$NODE_ENV" \
+                PATH="$PATH" \
+                PGOPTIONS="$PGOPTIONS" \
+                TZ="$TZ" \
+                "$pnpm_bin" \
+                --filter database \
+                check:current-network-access-scope-classification
+        env:
+          ACCESS_SCOPE_CLASSIFICATION_PG_E2E_ADMIN_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          ACCESS_SCOPE_CLASSIFICATION_PG_E2E_CONFIRM: RUN_CURRENT_NETWORK_ACCESS_SCOPE_CLASSIFICATION_PG_E2E
+          NODE_ENV: test
+          POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
           TZ: America/New_York
 
       - name: Rehearse tenant execution control-plane 162 to 163 upgrade and lock timeout
@@ -1386,3 +1860,411 @@ jobs:
         env:
           LANGAME_CURRENT194_PRISMA_INTEGRATION: run-langame-current194-actual-prisma-on-disposable-github-ci
         run: pnpm --filter database test:integration:langame-runtime-prisma-current194:pg
+
+  production-control-candidate:
+    name: Production-control candidate
+    needs:
+      - authority-root-trust
+      - release-artifact-api
+      - migration-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out exact control source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact control checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+
+      - name: Set up exact control Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Build independently verified production-control candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_realpath="$(realpath -e -- "$(command -v node)")"
+          runner_tool_cache_real="$(realpath -e -- "$RUNNER_TOOL_CACHE")"
+          repository_root="$(realpath -e -- "$GITHUB_WORKSPACE")"
+          case "$node_realpath" in
+            "$runner_tool_cache_real"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected production-control Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
+          esac
+          test "$("$node_realpath" -p 'process.versions.node.split(".")[0]')" = '22'
+          test "$repository_root" = "$GITHUB_WORKSPACE"
+          output_directory="$RUNNER_TEMP/leetplus-production-control-candidate-$CI_RELEASE_SHA"
+          test ! -e "$output_directory"
+          test ! -L "$output_directory"
+          /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            GITHUB_SHA="$CI_RELEASE_SHA" \
+            PRODUCTION_CONTROL_ARCHIVE_FIXTURE_CONFIRM=build-exact-git-production-control-artifact \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p "$repository_root/.github/scripts/build-production-control-artifact-ci.sh" \
+              --release-sha "$CI_RELEASE_SHA" \
+              --repository-root "$repository_root" \
+              --runner-tool-cache "$runner_tool_cache_real" \
+              --node-path "$node_realpath" \
+              --output-directory "$output_directory"
+
+      - name: Upload non-deployable production-control candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-production-control-${{ env.CI_RELEASE_SHA }}-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/leetplus-production-control-candidate-${{ env.CI_RELEASE_SHA }}/leetplus-production-control-${{ env.CI_RELEASE_SHA }}.tar.gz
+            ${{ runner.temp }}/leetplus-production-control-candidate-${{ env.CI_RELEASE_SHA }}/leetplus-production-control-${{ env.CI_RELEASE_SHA }}.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  release-handoff:
+    name: Admitted runtime and production-control handoff
+    needs:
+      - authority-root-trust
+      - release-artifact-api
+      - migration-smoke
+      - production-control-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out exact handoff verifier source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact handoff checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+
+      - name: Set up exact handoff Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Download exact runtime candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: leetplus-release-${{ env.CI_RELEASE_SHA }}-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-handoff-runtime-candidate
+
+      - name: Download exact production-control candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: leetplus-production-control-${{ env.CI_RELEASE_SHA }}-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-handoff-control-candidate
+
+      - name: Re-verify runtime candidate from a fresh checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          download_root="$RUNNER_TEMP/release-handoff-runtime-candidate"
+          archive="$download_root/leetplus-release-$CI_RELEASE_SHA.tar.gz"
+          checksum="$archive.sha256"
+          extraction_root="$RUNNER_TEMP/release-handoff-runtime-root-$CI_RELEASE_SHA"
+          test "$(realpath -e -- "$download_root")" = "$download_root"
+          download_inventory="$(mktemp "$RUNNER_TEMP/runtime-handoff-inventory.XXXXXX")"
+          find -P "$download_root" -mindepth 1 -maxdepth 1 -print0 > "$download_inventory"
+          download_entry_count=0
+          while IFS= read -r -d '' _; do
+            download_entry_count=$((download_entry_count + 1))
+          done < "$download_inventory"
+          rm -f -- "$download_inventory"
+          test "$download_entry_count" = '2'
+          for candidate_file in "$archive" "$checksum"; do
+            test -f "$candidate_file"
+            test ! -L "$candidate_file"
+            test "$(stat -c '%h' -- "$candidate_file")" = '1'
+            candidate_mode="$(stat -c '%a' -- "$candidate_file")"
+            test "$((8#$candidate_mode & 8#22))" = '0'
+          done
+          archive_size="$(stat -c '%s' -- "$archive")"
+          checksum_size="$(stat -c '%s' -- "$checksum")"
+          test "$archive_size" -gt 0
+          test "$archive_size" -le 2147483648
+          test "$checksum_size" -gt 0
+          test "$checksum_size" -le 256
+          test "$(wc -l < "$checksum" | tr -d ' ')" = '1'
+          grep -E -x "[0-9a-f]{64}  leetplus-release-${CI_RELEASE_SHA}[.]tar[.]gz" "$checksum" > /dev/null
+          (
+            cd "$download_root"
+            sha256sum --check --strict --quiet "$(basename "$checksum")"
+          )
+          timeout --signal=TERM --kill-after=10s 120s gzip --test "$archive"
+          test ! -e "$extraction_root"
+          test ! -L "$extraction_root"
+          mkdir -m 0700 "$extraction_root"
+          timeout --signal=TERM --kill-after=10s 120s \
+            /usr/bin/env -i \
+              PATH=/usr/bin:/bin \
+              LANG=C.UTF-8 \
+              LC_ALL=C.UTF-8 \
+              TZ=UTC \
+              /usr/bin/python3 -I -S -E \
+                "$GITHUB_WORKSPACE/.github/scripts/extract-runtime-release-artifact.py" \
+                --archive "$archive" \
+                --destination "$extraction_root"
+          node_realpath="$(realpath -e -- "$(command -v node)")"
+          runner_tool_cache_real="$(realpath -e -- "$RUNNER_TOOL_CACHE")"
+          case "$node_realpath" in
+            "$runner_tool_cache_real"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected handoff runtime Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
+          esac
+          node_directory="$(dirname -- "$node_realpath")"
+          extraction_root_real="$(realpath -e -- "$extraction_root")"
+          test "$extraction_root_real" = "$extraction_root"
+          /usr/bin/env -i \
+            PATH="${node_directory}:/usr/bin:/bin" \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            "$node_realpath" "$GITHUB_WORKSPACE/.github/scripts/verify-runtime-release-artifact.mjs" \
+              --release-root "$extraction_root_real" \
+              --expected-release-sha "$CI_RELEASE_SHA"
+
+      - name: Independently rebuild and compare production-control bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_root="$RUNNER_TEMP/release-handoff-control-candidate"
+          candidate_archive="$candidate_root/leetplus-production-control-$CI_RELEASE_SHA.tar.gz"
+          candidate_checksum="$candidate_archive.sha256"
+          test "$(realpath -e -- "$candidate_root")" = "$candidate_root"
+          candidate_inventory="$(mktemp "$RUNNER_TEMP/control-handoff-inventory.XXXXXX")"
+          find -P "$candidate_root" -mindepth 1 -maxdepth 1 -print0 > "$candidate_inventory"
+          candidate_entry_count=0
+          while IFS= read -r -d '' _; do
+            candidate_entry_count=$((candidate_entry_count + 1))
+          done < "$candidate_inventory"
+          rm -f -- "$candidate_inventory"
+          test "$candidate_entry_count" = '2'
+          for candidate_file in "$candidate_archive" "$candidate_checksum"; do
+            test -f "$candidate_file"
+            test ! -L "$candidate_file"
+            test "$(stat -c '%h' -- "$candidate_file")" = '1'
+            candidate_mode="$(stat -c '%a' -- "$candidate_file")"
+            test "$((8#$candidate_mode & 8#22))" = '0'
+          done
+          test "$(wc -l < "$candidate_checksum" | tr -d ' ')" = '1'
+          grep -E -x "[0-9a-f]{64}  leetplus-production-control-${CI_RELEASE_SHA}[.]tar[.]gz" \
+            "$candidate_checksum" > /dev/null
+          (
+            cd "$candidate_root"
+            sha256sum --check --strict --quiet "$(basename "$candidate_checksum")"
+          )
+          node_realpath="$(realpath -e -- "$(command -v node)")"
+          runner_tool_cache_real="$(realpath -e -- "$RUNNER_TOOL_CACHE")"
+          repository_root="$(realpath -e -- "$GITHUB_WORKSPACE")"
+          case "$node_realpath" in
+            "$runner_tool_cache_real"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected handoff control Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
+          esac
+          rebuilt_root="$RUNNER_TEMP/release-handoff-control-rebuilt-$CI_RELEASE_SHA"
+          test ! -e "$rebuilt_root"
+          test ! -L "$rebuilt_root"
+          /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            GITHUB_SHA="$CI_RELEASE_SHA" \
+            PRODUCTION_CONTROL_ARCHIVE_FIXTURE_CONFIRM=build-exact-git-production-control-artifact \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p "$repository_root/.github/scripts/build-production-control-artifact-ci.sh" \
+              --release-sha "$CI_RELEASE_SHA" \
+              --repository-root "$repository_root" \
+              --runner-tool-cache "$runner_tool_cache_real" \
+              --node-path "$node_realpath" \
+              --output-directory "$rebuilt_root"
+          rebuilt_archive="$rebuilt_root/leetplus-production-control-$CI_RELEASE_SHA.tar.gz"
+          rebuilt_checksum="$rebuilt_archive.sha256"
+          cmp --silent -- "$candidate_archive" "$rebuilt_archive"
+          cmp --silent -- "$candidate_checksum" "$rebuilt_checksum"
+
+      - name: Freeze admitted handoff payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          publication_root="$RUNNER_TEMP/release-handoff-publication-$CI_RELEASE_SHA"
+          test ! -e "$publication_root"
+          test ! -L "$publication_root"
+          install -d -m 0700 \
+            "$publication_root/runtime" \
+            "$publication_root/control" \
+            "$publication_root/admission"
+          install -m 0440 \
+            "$RUNNER_TEMP/release-handoff-runtime-candidate/leetplus-release-$CI_RELEASE_SHA.tar.gz" \
+            "$RUNNER_TEMP/release-handoff-runtime-candidate/leetplus-release-$CI_RELEASE_SHA.tar.gz.sha256" \
+            "$publication_root/runtime/"
+          install -m 0440 \
+            "$RUNNER_TEMP/release-handoff-control-candidate/leetplus-production-control-$CI_RELEASE_SHA.tar.gz" \
+            "$RUNNER_TEMP/release-handoff-control-candidate/leetplus-production-control-$CI_RELEASE_SHA.tar.gz.sha256" \
+            "$publication_root/control/"
+          runtime_digest="$(sha256sum "$publication_root/runtime/leetplus-release-$CI_RELEASE_SHA.tar.gz")"
+          runtime_digest="${runtime_digest%% *}"
+          control_digest="$(sha256sum "$publication_root/control/leetplus-production-control-$CI_RELEASE_SHA.tar.gz")"
+          control_digest="${control_digest%% *}"
+          printf '%s\n' "$runtime_digest" > "$publication_root/admission/runtime-archive.sha256"
+          printf '%s\n' "$control_digest" > "$publication_root/admission/control-archive.sha256"
+          chmod 0440 "$publication_root/admission/"*.sha256
+
+      - name: Upload verified runtime handoff payload
+        id: upload_runtime
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-release-${{ env.CI_RELEASE_SHA }}-handoff-payload-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-handoff-publication-${{ env.CI_RELEASE_SHA }}/runtime/leetplus-release-${{ env.CI_RELEASE_SHA }}.tar.gz
+            ${{ runner.temp }}/release-handoff-publication-${{ env.CI_RELEASE_SHA }}/runtime/leetplus-release-${{ env.CI_RELEASE_SHA }}.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload verified production-control handoff payload
+        id: upload_control
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-production-control-${{ env.CI_RELEASE_SHA }}-handoff-payload-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-handoff-publication-${{ env.CI_RELEASE_SHA }}/control/leetplus-production-control-${{ env.CI_RELEASE_SHA }}.tar.gz
+            ${{ runner.temp }}/release-handoff-publication-${{ env.CI_RELEASE_SHA }}/control/leetplus-production-control-${{ env.CI_RELEASE_SHA }}.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Bind admission receipt to uploaded transport artifacts
+        shell: bash
+        env:
+          RUNTIME_ARTIFACT_ID: ${{ steps.upload_runtime.outputs.artifact-id }}
+          RUNTIME_TRANSPORT_DIGEST: ${{ steps.upload_runtime.outputs.artifact-digest }}
+          CONTROL_ARTIFACT_ID: ${{ steps.upload_control.outputs.artifact-id }}
+          CONTROL_TRANSPORT_DIGEST: ${{ steps.upload_control.outputs.artifact-digest }}
+          RECEIPT_REPOSITORY: ${{ github.repository }}
+          RECEIPT_REPOSITORY_ID: ${{ github.repository_id }}
+          RECEIPT_WORKFLOW_REF: ${{ github.workflow_ref }}
+          RECEIPT_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/release-handoff-publication-$CI_RELEASE_SHA/admission/leetplus-release-admission-$CI_RELEASE_SHA.json"
+          test ! -e "$receipt"
+          test ! -L "$receipt"
+          runtime_payload_digest="$(< "$RUNNER_TEMP/release-handoff-publication-$CI_RELEASE_SHA/admission/runtime-archive.sha256")"
+          control_payload_digest="$(< "$RUNNER_TEMP/release-handoff-publication-$CI_RELEASE_SHA/admission/control-archive.sha256")"
+          [[ "$runtime_payload_digest" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$control_payload_digest" =~ ^[0-9a-f]{64}$ ]]
+          runtime_artifact_id="$RUNTIME_ARTIFACT_ID"
+          runtime_transport_digest="$RUNTIME_TRANSPORT_DIGEST"
+          control_artifact_id="$CONTROL_ARTIFACT_ID"
+          control_transport_digest="$CONTROL_TRANSPORT_DIGEST"
+          [[ "$runtime_artifact_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$control_artifact_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$runtime_transport_digest" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$control_transport_digest" =~ ^[0-9a-f]{64}$ ]]
+          repository="$RECEIPT_REPOSITORY"
+          repository_id="$RECEIPT_REPOSITORY_ID"
+          workflow_ref="$RECEIPT_WORKFLOW_REF"
+          workflow_sha="$RECEIPT_WORKFLOW_SHA"
+          [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$repository_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$workflow_ref" == "${repository}/.github/workflows/ci.yml@"* ]]
+          [[ "$workflow_sha" == "$CI_RELEASE_SHA" ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          node_realpath="$(realpath -e -- "$(command -v node)")"
+          runner_tool_cache_real="$(realpath -e -- "$RUNNER_TOOL_CACHE")"
+          case "$node_realpath" in
+            "$runner_tool_cache_real"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected admission-receipt Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
+          esac
+          node_directory="$(dirname -- "$node_realpath")"
+          /usr/bin/env -i \
+            PATH="${node_directory}:/usr/bin:/bin" \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            "$node_realpath" - "$receipt" \
+            "$CI_RELEASE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$repository" "$repository_id" "$workflow_ref" "$workflow_sha" \
+            "$runtime_payload_digest" "$control_payload_digest" \
+            "$runtime_artifact_id" "$runtime_transport_digest" \
+            "$control_artifact_id" "$control_transport_digest" <<'NODE'
+          const fs = require("node:fs");
+          const [
+            receiptPath,
+            releaseSha,
+            runId,
+            runAttempt,
+            repository,
+            repositoryId,
+            workflowRef,
+            workflowSha,
+            runtimePayloadDigest,
+            controlPayloadDigest,
+            runtimeId,
+            runtimeTransportDigest,
+            controlId,
+            controlTransportDigest,
+          ] = process.argv.slice(2);
+          const receipt = {
+            schemaVersion: 1,
+            admission: "PASS",
+            releaseSha,
+            runId,
+            runAttempt,
+            repository,
+            repositoryId,
+            workflowRef,
+            workflowSha,
+            runtimeArtifactName: `leetplus-release-${releaseSha}-handoff-payload-${runId}-${runAttempt}`,
+            runtimeArchiveSha256: runtimePayloadDigest,
+            productionControlArtifactName:
+              `leetplus-production-control-${releaseSha}-handoff-payload-${runId}-${runAttempt}`,
+            productionControlArchiveSha256: controlPayloadDigest,
+            runtimeArtifactId: runtimeId,
+            runtimeTransportDigest,
+            productionControlArtifactId: controlId,
+            productionControlTransportDigest: controlTransportDigest,
+          };
+          fs.writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, {
+            encoding: "utf8",
+            flag: "wx",
+            mode: 0o440,
+          });
+          NODE
+          chmod 0440 "$receipt"
+          (
+            cd "$(dirname -- "$receipt")"
+            sha256sum --text "$(basename -- "$receipt")" \
+              > "$(basename -- "$receipt").sha256"
+            chmod 0440 "$(basename -- "$receipt").sha256"
+            sha256sum --check --strict --quiet "$(basename -- "$receipt").sha256"
+          )
+
+      - name: Upload final admission receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-release-admission-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-handoff-publication-${{ env.CI_RELEASE_SHA }}/admission/leetplus-release-admission-${{ env.CI_RELEASE_SHA }}.json
+            ${{ runner.temp }}/release-handoff-publication-${{ env.CI_RELEASE_SHA }}/admission/leetplus-release-admission-${{ env.CI_RELEASE_SHA }}.json.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

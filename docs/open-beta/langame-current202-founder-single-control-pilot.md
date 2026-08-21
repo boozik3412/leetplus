@@ -174,7 +174,7 @@ SHA-256 текущих exact bytes:
 ```text
 keyCustodyPlanDigest   = b7bcb48f5cd009ffc375b8575c8f0024ae8c840231027c5f27386eeaa3a18843
 restoredCopyPlanDigest = cc8f19cd45ac46d2de3679bc9f99a7f3c4e20be5e3033d8d7e3b07f5d3423312
-rollbackPlanDigest     = 157597d98a13b67cb32414d828065c49adf78538b8efd21f68ccc8cd26690e59
+rollbackPlanDigest     = 33f7ceb6f4c6e761b0ac8501252c9613bf22501e1828355b32321dc850987b2c
 ```
 
 Перед церемонией founder повторно вычисляет hashes из clean accepted SHA. При

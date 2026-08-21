@@ -1,11 +1,9 @@
 upstream leetplus_api {
     server 127.0.0.1:4100 max_fails=2 fail_timeout=5s;
-    server 127.0.0.1:4000 backup;
     keepalive 32;
 }
 
 upstream leetplus_web {
     server 127.0.0.1:3100 max_fails=2 fail_timeout=5s;
-    server 127.0.0.1:3000 backup;
     keepalive 32;
 }

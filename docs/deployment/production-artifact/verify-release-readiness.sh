@@ -1,20 +1,50 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash -p
 #
 # Verify a running LeetPlus artifact release without mutating it.
 #
 # This probe has no database, systemd, filesystem-switch or secret capability.
 # It checks only already exposed API/Web HTTP contracts.
 
+[[ $- == *p* ]] || { printf 'verify-release-readiness: privileged Bash mode is required\n' >&2; exit 1; }
+LEETPLUS_BOOTSTRAP_TEST_PATH=''
+LEETPLUS_BOOTSTRAP_IS_TEST=false
+declare -a LEETPLUS_BOOTSTRAP_TEST_ENVIRONMENT=()
+for LEETPLUS_BOOTSTRAP_ARGUMENT in "$@"; do
+  if [[ "$LEETPLUS_BOOTSTRAP_ARGUMENT" == '--unprivileged-test-mode' && EUID -ne 0 ]]; then
+    LEETPLUS_BOOTSTRAP_IS_TEST=true
+    LEETPLUS_BOOTSTRAP_TEST_PATH="${PATH:-}"
+    break
+  fi
+done
+unset LEETPLUS_BOOTSTRAP_ARGUMENT
+if [[ "$LEETPLUS_BOOTSTRAP_IS_TEST" == true ]]; then
+  while IFS= read -r LEETPLUS_INHERITED_ENVIRONMENT_NAME; do
+    [[ "$LEETPLUS_INHERITED_ENVIRONMENT_NAME" == TEST_* || "$LEETPLUS_INHERITED_ENVIRONMENT_NAME" == LEETPLUS_TEST_* ]] \
+      && LEETPLUS_BOOTSTRAP_TEST_ENVIRONMENT+=("${LEETPLUS_INHERITED_ENVIRONMENT_NAME}=${!LEETPLUS_INHERITED_ENVIRONMENT_NAME}")
+  done < <(compgen -e)
+fi
+while IFS= read -r LEETPLUS_INHERITED_ENVIRONMENT_NAME; do
+  unset "$LEETPLUS_INHERITED_ENVIRONMENT_NAME" 2>/dev/null || true
+done < <(compgen -e)
+unset LEETPLUS_INHERITED_ENVIRONMENT_NAME
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+LANG='C.UTF-8'
+LC_ALL='C.UTF-8'
+TZ='UTC'
+export PATH LANG LC_ALL TZ
+if [[ "$LEETPLUS_BOOTSTRAP_IS_TEST" == true ]]; then
+  for LEETPLUS_BOOTSTRAP_TEST_ASSIGNMENT in "${LEETPLUS_BOOTSTRAP_TEST_ENVIRONMENT[@]}"; do export "$LEETPLUS_BOOTSTRAP_TEST_ASSIGNMENT"; done
+fi
+unset LEETPLUS_BOOTSTRAP_IS_TEST LEETPLUS_BOOTSTRAP_TEST_ENVIRONMENT LEETPLUS_BOOTSTRAP_TEST_ASSIGNMENT
+
 set -euo pipefail
 IFS=$'\n\t'
 
-if ((EUID == 0)); then
-  PATH='/usr/sbin:/usr/bin:/sbin:/bin'
-  export PATH
-fi
-
 readonly RELEASE_SHA_PATTERN='^[0-9a-f]{40}$'
 readonly MIGRATION_PATTERN='^[0-9]{14}_[a-z0-9_]+$'
+readonly SAFE_PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+readonly MAX_BODY_BYTES=1048576
+readonly MAX_HEADER_BYTES=65536
 
 usage() {
   cat <<'USAGE'
@@ -30,7 +60,8 @@ Usage:
 The API must expose /version and /health/ready. The probe accepts only an
 exact release SHA, expected completed migration name/count, an HTTP-success
 Web response and the exact Next.js BUILD_ID static manifest. It performs no
-write or restart operation.
+write or restart operation. Tests may add --unprivileged-test-mode; root may
+not use that mode.
 USAGE
 }
 
@@ -50,11 +81,21 @@ fetch_exact_2xx() {
   local headers="${4:-/dev/null}"
   local status
 
-  status="$(curl --silent --show-error --max-time 10 \
+  status="$(curl --disable --noproxy '*' --proto '=http,https' --proto-redir '=http,https' \
+    --silent --show-error --connect-timeout 3 --max-time 10 --max-redirs 0 \
+    --max-filesize "$MAX_BODY_BYTES" \
     --output "$output" --dump-header "$headers" --write-out '%{http_code}' "$url")" \
     || die "${label} request failed"
   [[ "$status" =~ ^2[0-9][0-9]$ ]] \
     || die "${label} returned non-2xx HTTP status: ${status:-missing}"
+  if [[ "$output" != /dev/null ]]; then
+    [[ -f "$output" && ! -L "$output" && "$(stat -c '%s' -- "$output")" -le "$MAX_BODY_BYTES" ]] \
+      || die "${label} response body exceeded the bounded parser input"
+  fi
+  if [[ "$headers" != /dev/null ]]; then
+    [[ -f "$headers" && ! -L "$headers" && "$(stat -c '%s' -- "$headers")" -le "$MAX_HEADER_BYTES" ]] \
+      || die "${label} response headers exceeded the bounded parser input"
+  fi
 }
 
 release_sha=''
@@ -63,6 +104,7 @@ expected_migration_count=''
 expected_web_build_id=''
 api_base_url=''
 web_url=''
+unprivileged_test_mode=false
 
 while (($# > 0)); do
   case "$1" in
@@ -96,6 +138,10 @@ while (($# > 0)); do
       web_url="$2"
       shift 2
       ;;
+    --unprivileged-test-mode)
+      unprivileged_test_mode=true
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -105,6 +151,37 @@ while (($# > 0)); do
       ;;
   esac
 done
+
+if [[ "$unprivileged_test_mode" == true ]]; then
+  ((EUID != 0)) || die 'unprivileged test mode is forbidden for root'
+  PATH="$LEETPLUS_BOOTSTRAP_TEST_PATH"
+  export PATH
+else
+  ((EUID == 0)) || die 'production readiness verification must run as root'
+fi
+unset LEETPLUS_BOOTSTRAP_TEST_PATH
+
+# The trusted caller starts this script through /usr/bin/bash -p under env -i. Scrub
+# again before curl/Node so no proxy, curl config, loader or Node injection can
+# influence either the serving evidence or the root JSON parser.
+for unsafe_environment_key in \
+  HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
+  http_proxy https_proxy all_proxy no_proxy \
+  NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG \
+  NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH \
+  LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES \
+  MALLOC_CHECK_ MALLOC_PERTURB_ BASH_ENV ENV \
+  CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR \
+  PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY \
+  TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME \
+  NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS \
+  GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM; do
+  unset "$unsafe_environment_key"
+done
+LC_ALL=C
+LANG=C
+TZ=UTC
+export LC_ALL LANG TZ
 
 [[ "$release_sha" =~ $RELEASE_SHA_PATTERN ]] || die 'release SHA must be 40 lowercase hexadecimal characters'
 [[ "$expected_migration" =~ $MIGRATION_PATTERN ]] || die 'expected migration name is invalid'
@@ -116,6 +193,7 @@ done
 require_command curl
 require_command mktemp
 require_command node
+require_command stat
 
 version_file="$(mktemp)"
 ready_file="$(mktemp)"

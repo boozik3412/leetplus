@@ -1,6 +1,6 @@
 [Unit]
 Description=LeetPlus fail-closed recovery of an outstanding blue/green intent
-After=local-fs.target network-online.target leetplus-api.service leetplus-web.service leetplus-api@blue.service leetplus-web@blue.service leetplus-api@green.service leetplus-web@green.service
+After=local-fs.target network-online.target leetplus-rollback-egress.service leetplus-api-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service leetplus-web-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service leetplus-api@blue.service leetplus-web@blue.service leetplus-api@green.service leetplus-web@green.service
 Wants=network-online.target
 Before=nginx.service
 
@@ -8,13 +8,15 @@ Before=nginx.service
 Type=oneshot
 User=root
 Group=root
-ExecStart=/usr/local/sbin/leetplus-blue-green-cutover recover-before-nginx
-TimeoutStartSec=180
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+UnsetEnvironment=BASH_ENV ENV HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM
+ExecStart=/usr/bin/bash -p /usr/local/sbin/leetplus-blue-green-cutover recover-before-nginx
+TimeoutStartSec=420
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadOnlyPaths=/usr/local/libexec/leetplus/verify-release-readiness.sh
+ReadOnlyPaths=/usr/local/libexec/leetplus/verify-release-readiness.sh /usr/local/libexec/leetplus/verify-legacy-rollback-readiness.sh /usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh /usr/local/libexec/leetplus/verify-legacy-rollback-authenticated-reads.mjs /usr/local/libexec/leetplus/apply-legacy-rollback-egress.sh /etc/leetplus/legacy-drain-units.conf /etc/leetplus/legacy-drain-database-target.conf /etc/leetplus/legacy-rollback-smoke.env /etc/leetplus/pg_service.conf /srv/leetplus/rollback-releases
 ReadWritePaths=/etc/nginx/leetplus /var/lib/leetplus/deploy-receipts
 UMask=0077
 

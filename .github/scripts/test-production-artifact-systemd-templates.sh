@@ -242,6 +242,8 @@ grep -F 'HYDRATION_SANDBOX_RECEIPT' "$release_promoter" > /dev/null
 grep -F 'assert_empty_hydration_cgroup' "$release_promoter" > /dev/null
 grep -F 'systemctl stop "$hydration_unit"' "$release_promoter" > /dev/null
 grep -F "another hydration or promotion operation holds the global lock" "$release_promoter" > /dev/null
+grep -F 'effective hydration snapshot EnvironmentFiles count is malformed' "$release_promoter" > /dev/null
+grep -F "printf 'EnvironmentFiles=\\n' >> \"\$output_path\"" "$release_promoter" > /dev/null
 grep -F -x 'f /run/leetplus-release/hydration.lock 0660 root leetplus-build -' "$hydration_tmpfiles" > /dev/null
 grep -F -x 'ExecStart=/usr/bin/bash -p /usr/local/sbin/leetplus-blue-green-cutover recover-before-nginx' "$recovery_unit" > /dev/null
 grep -F -x 'Before=nginx.service' "$recovery_unit" > /dev/null

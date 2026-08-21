@@ -620,12 +620,20 @@ write_systemd_snapshot() {
   local unit="$2"
   shift 2
   local command=(systemctl show)
-  local property
+  local property environment_files_count
   for property in "$@"; do
     command+=("--property=${property}")
   done
   timeout --foreground --kill-after=5s 15s "${command[@]}" "$unit" > "$output_path" \
     || die 'cannot acquire the exact effective hydration unit property snapshot'
+  environment_files_count="$(grep -c '^EnvironmentFiles=' "$output_path" || true)"
+  [[ "$environment_files_count" =~ ^[0-9]+$ && "$environment_files_count" -le 1 ]] \
+    || die 'effective hydration snapshot EnvironmentFiles count is malformed'
+  if [[ "$environment_files_count" == 0 ]]; then
+    # systemctl omits an empty EnvironmentFiles a(sb) property even when it is
+    # explicitly requested. Restore the canonical empty property for attestation.
+    printf 'EnvironmentFiles=\n' >> "$output_path"
+  fi
   chmod 0600 -- "$output_path"
 }
 

@@ -1043,13 +1043,13 @@ if [[ "${TEST_EGRESS_EXTRA_ACCEPT:-false}" == true ]]; then
   printf '    accept\n'
 fi
 cat <<'RULES'
-    meta skuid 12345 ct state established,related accept
-    meta skuid 12345 ip daddr 127.0.0.1 tcp dport 5432 ct state new accept
-    meta skuid 12345 ip daddr 127.0.0.1 tcp dport 4301 ct state new accept
-    ip daddr 127.0.0.1 tcp dport 4301 reject
+    meta skuid 12345 ct state 0x2,0x4 accept
+    meta skuid 12345 ip daddr 127.0.0.1 tcp dport 5432 ct state 0x8 accept
+    meta skuid 12345 ip daddr 127.0.0.1 tcp dport 4301 ct state 0x8 accept
+    ip daddr 127.0.0.1 tcp dport 4301 reject with icmp 3
     meta skuid 12345 reject
-    meta skuid 12346 ct state established,related accept
-    meta skuid 12346 ip daddr 127.0.0.1 tcp dport 4300 ct state new accept
+    meta skuid 12346 ct state 0x2,0x4 accept
+    meta skuid 12346 ip daddr 127.0.0.1 tcp dport 4300 ct state 0x8 accept
     meta skuid 12346 reject
   }
 }

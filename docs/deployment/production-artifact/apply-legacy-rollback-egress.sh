@@ -107,18 +107,19 @@ fi
 rules="$(timeout --foreground --kill-after=3s 15s nft -nn list table inet "$TABLE")" \
   || die 'N-1 egress table is absent'
 normalized_rules="$(sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]+/ /g; /^[[:space:]]*$/d' <<< "$rules")"
-# The numeric nft listing canonicalizes the named filter priority to zero.
+# The fully numeric nft listing canonicalizes the named filter priority,
+# conntrack states and the implicit IPv4 reject type.
 expected_rules="$(cat <<RULES
 table inet ${TABLE} {
 chain output {
 type filter hook output priority 0; policy accept;
-meta skuid ${api_uid} ct state established,related accept
-meta skuid ${api_uid} ip daddr 127.0.0.1 tcp dport 5432 ct state new accept
-meta skuid ${api_uid} ip daddr 127.0.0.1 tcp dport 4301 ct state new accept
-ip daddr 127.0.0.1 tcp dport 4301 reject
+meta skuid ${api_uid} ct state 0x2,0x4 accept
+meta skuid ${api_uid} ip daddr 127.0.0.1 tcp dport 5432 ct state 0x8 accept
+meta skuid ${api_uid} ip daddr 127.0.0.1 tcp dport 4301 ct state 0x8 accept
+ip daddr 127.0.0.1 tcp dport 4301 reject with icmp 3
 meta skuid ${api_uid} reject
-meta skuid ${web_uid} ct state established,related accept
-meta skuid ${web_uid} ip daddr 127.0.0.1 tcp dport 4300 ct state new accept
+meta skuid ${web_uid} ct state 0x2,0x4 accept
+meta skuid ${web_uid} ip daddr 127.0.0.1 tcp dport 4300 ct state 0x8 accept
 meta skuid ${web_uid} reject
 }
 }

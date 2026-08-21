@@ -1079,6 +1079,8 @@ rm -f -- "$TEST_ROOT/symlink-probe" "$TEST_ROOT/symlink-target"
 
 bin_root="${TEST_ROOT}/bin"
 mkdir -p "$bin_root"
+activation_drain_verifier="$bin_root/verify-legacy-runtime-drain.sh"
+cp "$drain_verifier" "$activation_drain_verifier"
 real_find="$(command -v find)"
 export TEST_REAL_FIND="$real_find"
 
@@ -1364,7 +1366,7 @@ run_activation() {
     --cgroup-root "$fixture_root/cgroup"
     --proc-root "$fixture_root/proc"
     --rollback-probe "$bin_root/rollback-probe"
-    --drain-verifier "$drain_verifier"
+    --drain-verifier "$activation_drain_verifier"
     --database-fence "$bin_root/database-fence"
     --public-api-url https://api.example.test
     --public-web-url https://web.example.test

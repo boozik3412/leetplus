@@ -348,11 +348,17 @@ chmod 0711 /etc/leetplus/rollback-releases
 
 env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
   /usr/sbin/runuser -u leetplus-api-nminus1 -- /usr/bin/bash --noprofile --norc -p -c '
-    set -a
-    source /etc/leetplus/rollback-runtime.env
-    source /etc/leetplus/rollback-releases/7de04ff4ccc814494810730be3fa6bf661097b07.env
-    source /etc/leetplus/rollback-safe.env
-    set +a
+    for environment_file in \
+      /etc/leetplus/rollback-runtime.env \
+      /etc/leetplus/rollback-releases/7de04ff4ccc814494810730be3fa6bf661097b07.env \
+      /etc/leetplus/rollback-safe.env; do
+      while IFS= read -r assignment || [[ -n "$assignment" ]]; do
+        [[ "$assignment" != *$'"'"'\r'"'"'* ]] || exit 70
+        [[ -n "$assignment" && "$assignment" != \#* ]] || continue
+        [[ "$assignment" =~ ^[A-Z][A-Z0-9_]*=.*$ ]] || exit 70
+        export "$assignment"
+      done < "$environment_file"
+    done
     exec /usr/bin/bash -p /usr/local/libexec/leetplus/preflight-legacy-rollback.sh \
       --release-sha 7de04ff4ccc814494810730be3fa6bf661097b07 --api-runtime
   ' > /run/fixture-api-preflight.out

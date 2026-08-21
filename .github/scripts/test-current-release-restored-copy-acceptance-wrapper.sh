@@ -101,6 +101,9 @@ run_privileged_evidence_isolation_fixture() {
   local fixture_cli child_policy_source_file child_policy_eval child_policy_systemd_eval
   local child_policy_sha256
   local foreign_control_group
+  # systemctl deliberately redacts credential sources; the command and child
+  # independently attest the source path and delivered credential bytes.
+  local -r effective_load_credential='[unprintable]'
   local operation_id='evidence01'
   local main_unit="leetplus-current-release-acceptance-evidence01.service"
   local verify_unit="leetplus-current-release-verify-evidence01.service"
@@ -371,7 +374,7 @@ NODE
       "Group=${fixture_group}" \
       "SupplementaryGroups=${fixture_runtime_group}" \
       'DynamicUser=no' \
-      "LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
+      "LoadCredential=${effective_load_credential}" \
       "WorkingDirectory=${fixture_working_directory}" \
       "Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
       'EnvironmentFiles=' \
@@ -837,7 +840,7 @@ NODE
     "Group=${fixture_group}" \
     "SupplementaryGroups=${fixture_runtime_group}" \
     'DynamicUser=no' \
-    "LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
+    "LoadCredential=${effective_load_credential}" \
     "WorkingDirectory=${fixture_working_directory}" \
     "Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
     'EnvironmentFiles=' \
@@ -975,7 +978,7 @@ NODE
     "Group=${fixture_group}" \
     "SupplementaryGroups=${fixture_runtime_group}" \
     'DynamicUser=no' \
-    "LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
+    "LoadCredential=${effective_load_credential}" \
     "WorkingDirectory=${fixture_working_directory}" \
     "Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
     'EnvironmentFiles=' \

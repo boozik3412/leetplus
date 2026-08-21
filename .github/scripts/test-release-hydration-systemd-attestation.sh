@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
 umask 0077
 
@@ -193,6 +193,7 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+trap 'status=$?; printf "test-release-hydration-systemd-attestation: unexpected failure at line=%s status=%s command=%q\n" "$LINENO" "$status" "$BASH_COMMAND" >&2; exit "$status"' ERR
 
 die() {
   printf 'test-release-hydration-systemd-attestation: %s\n' "$*" >&2

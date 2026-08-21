@@ -2,6 +2,7 @@
 
 set -euo pipefail
 IFS=$'\n\t'
+umask 0022
 
 readonly LEGACY_SHA='7de04ff4ccc814494810730be3fa6bf661097b07'
 readonly REPOSITORY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -1418,8 +1419,12 @@ if run_activation "$symlink_dropin_root" env > "$symlink_dropin_root/activation.
   printf 'activation accepted a symlinked start-fence drop-in directory\n' >&2
   exit 1
 fi
-grep -F 'legacy unit drop-in directory is symlinked: leetplus-api.service' \
-  "$symlink_dropin_root/activation.out" >/dev/null
+if ! grep -F 'legacy unit drop-in directory is symlinked: leetplus-api.service' \
+  "$symlink_dropin_root/activation.out" >/dev/null; then
+  printf 'symlinked start-fence rejection output:\n' >&2
+  sed -n '1,80p' "$symlink_dropin_root/activation.out" >&2
+  exit 1
+fi
 test -z "$(find "$symlink_dropin_root/outside-dropin" -mindepth 1 -print -quit)"
 
 writable_dropin_root="${TEST_ROOT}/activation-writable-dropin"
@@ -1430,8 +1435,12 @@ if run_activation "$writable_dropin_root" env > "$writable_dropin_root/activatio
   printf 'activation accepted a writable start-fence drop-in directory\n' >&2
   exit 1
 fi
-grep -F 'legacy start-fence drop-in directory authority is unsafe' \
-  "$writable_dropin_root/activation.out" >/dev/null
+if ! grep -F 'legacy start-fence drop-in directory authority is unsafe' \
+  "$writable_dropin_root/activation.out" >/dev/null; then
+  printf 'writable start-fence rejection output:\n' >&2
+  sed -n '1,80p' "$writable_dropin_root/activation.out" >&2
+  exit 1
+fi
 
 mounted_dropin_root="${TEST_ROOT}/activation-mounted-dropin"
 reset_fixture "$mounted_dropin_root"
@@ -1444,8 +1453,12 @@ if run_activation "$mounted_dropin_root" env \
   printf 'activation accepted a nested start-fence mount\n' >&2
   exit 1
 fi
-grep -F 'legacy start-fence directory contains an exact/nested mount' \
-  "$mounted_dropin_root/activation.out" >/dev/null
+if ! grep -F 'legacy start-fence directory contains an exact/nested mount' \
+  "$mounted_dropin_root/activation.out" >/dev/null; then
+  printf 'mounted start-fence rejection output:\n' >&2
+  sed -n '1,80p' "$mounted_dropin_root/activation.out" >&2
+  exit 1
+fi
 ! grep -F 'dropin_path}.new.$$' "$activator" >/dev/null
 
 success_root="${TEST_ROOT}/activation-success"

@@ -1260,7 +1260,8 @@ const expected = new Map([
   ["EnvironmentFiles", ""], ["PassEnvironment", ""], ["SetLoginEnvironment", "yes"],
   ["UnsetEnvironment", "CURRENT_RELEASE_RESTORED_DATABASE_URL CURRENT_RELEASE_EVIDENCE_HMAC_KEY CURRENT_RELEASE_LOGIN_EMAIL CURRENT_RELEASE_LOGIN_PASSWORD BASH_ENV ENV NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy ftp_proxy all_proxy no_proxy NODE_USE_ENV_PROXY CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_NODE_OPTIONS npm_config_node_options NPM_CONFIG_SCRIPT_SHELL npm_config_script_shell PNPM_HOME COREPACK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM"],
   ["NoNewPrivileges", "yes"], ["CapabilityBoundingSet", ""], ["AmbientCapabilities", ""],
-  ["IPAddressDeny", "any"], ["IPAddressAllow", "localhost"], ["Delegate", "no"],
+  ["IPAddressDeny", "0.0.0.0/0 ::/0"],
+  ["IPAddressAllow", "127.0.0.0/8 ::1/128"], ["Delegate", "no"],
   ["PrivateTmp", "yes"], ["PrivateDevices", "yes"], ["ProtectSystem", "strict"],
   ["ProtectHome", "yes"], ["ProtectProc", "invisible"], ["ProcSubset", "pid"],
   ["ProtectKernelTunables", "yes"], ["ProtectKernelModules", "yes"],
@@ -1281,7 +1282,7 @@ const expected = new Map([
   ["RuntimeMaxUSec", phase === "main" ? "14min" : "30s"],
 ]);
 const setProperties = new Set(["Environment", "UnsetEnvironment", "SupplementaryGroups",
-  "RestrictAddressFamilies", "ReadOnlyPaths"]);
+  "IPAddressDeny", "IPAddressAllow", "RestrictAddressFamilies", "ReadOnlyPaths"]);
 const exactTokenSet = (value) => {
   if (value === "") return [];
   const tokens = value.split(" ");
@@ -1372,6 +1373,11 @@ child_policy_sha256="$(printf '%s' "$child_policy_eval" \
   || die 'child policy source digest could not be computed'
 [[ "$child_policy_sha256" =~ ^[0-9a-f]{64}$ ]] \
   || die 'child policy source digest is malformed'
+# systemd expands $NAME and ${NAME} in ExecStart arguments. Doubling every
+# dollar preserves the exact reviewed JavaScript source delivered to Node.
+child_policy_systemd_eval="${child_policy_eval//\$/\$\$}"
+[[ "${child_policy_systemd_eval//\$\$/\$}" == "$child_policy_eval" ]] \
+  || die 'child policy systemd dollar escaping is not reversible'
 common_properties+=("--property=Environment=LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}")
 
 exact_space_token_set_equal() {
@@ -1481,8 +1487,8 @@ assert_unit_effective_policy() {
     [NoNewPrivileges]=yes
     [CapabilityBoundingSet]=''
     [AmbientCapabilities]=''
-    [IPAddressDeny]=any
-    [IPAddressAllow]=localhost
+    [IPAddressDeny]='0.0.0.0/0 ::/0'
+    [IPAddressAllow]='127.0.0.0/8 ::1/128'
     [Delegate]=no
     [PrivateTmp]=yes
     [PrivateDevices]=yes
@@ -1520,7 +1526,7 @@ assert_unit_effective_policy() {
     [[ "${actual[$key]+present}" == present ]] \
       || die "systemd unit effective policy is missing ${key}: ${unit}"
     case "$key" in
-      Environment|UnsetEnvironment|SupplementaryGroups|RestrictAddressFamilies|ReadOnlyPaths)
+      Environment|UnsetEnvironment|SupplementaryGroups|IPAddressDeny|IPAddressAllow|RestrictAddressFamilies|ReadOnlyPaths)
         exact_space_token_set_equal "${actual[$key]}" "${expected[$key]}" \
           || die "systemd unit effective policy differs for ${key}: ${unit}"
         ;;
@@ -1704,7 +1710,7 @@ run_database_drain() {
     "$systemd_run_bin" --no-ask-password --quiet --wait --service-type=exec \
     "--unit=${drain_unit}" "${common_properties[@]}" \
     "--property=RuntimeMaxSec=${VERIFY_RUNTIME_MAX}" \
-    -- "$node_bin" --input-type=module --eval "$child_policy_eval" -- \
+    -- "$node_bin" --input-type=module --eval "$child_policy_systemd_eval" -- \
     --leetplus-child-policy-v1 drain production "$drain_unit" "$systemctl_bin" "$node_bin" \
     "$service_uid" "$service_gid" "$artifact_read_gid" "$SERVICE_USER" "$SERVICE_GROUP" \
     "$ARTIFACT_READ_GROUP" "$artifact_root" "$credential_file" "$evidence_root" \
@@ -1733,7 +1739,7 @@ run_signed_verifier() {
     "--property=BindReadOnlyPaths=${evidence_directory}:${unit_evidence_directory}:norbind" \
     "--property=ReadOnlyPaths=${unit_evidence_directory}" \
     "--property=RuntimeMaxSec=${VERIFY_RUNTIME_MAX}" \
-    -- "$node_bin" --input-type=module --eval "$child_policy_eval" -- \
+    -- "$node_bin" --input-type=module --eval "$child_policy_systemd_eval" -- \
     --leetplus-child-policy-v1 verify production "$verify_unit" "$systemctl_bin" "$node_bin" \
     "$service_uid" "$service_gid" "$artifact_read_gid" "$SERVICE_USER" "$SERVICE_GROUP" \
     "$ARTIFACT_READ_GROUP" "$artifact_root" "$credential_file" "$evidence_root" \
@@ -1760,7 +1766,7 @@ run_completed_replay() {
     "--property=BindReadOnlyPaths=${evidence_directory}:${unit_evidence_directory}:norbind" \
     "--property=ReadOnlyPaths=${unit_evidence_directory}" \
     "--property=RuntimeMaxSec=${VERIFY_RUNTIME_MAX}" \
-    -- "$node_bin" --input-type=module --eval "$child_policy_eval" -- \
+    -- "$node_bin" --input-type=module --eval "$child_policy_systemd_eval" -- \
     --leetplus-child-policy-v1 replay production "$replay_unit" "$systemctl_bin" "$node_bin" \
     "$service_uid" "$service_gid" "$artifact_read_gid" "$SERVICE_USER" "$SERVICE_GROUP" \
     "$ARTIFACT_READ_GROUP" "$artifact_root" "$credential_file" "$evidence_root" \
@@ -1866,7 +1872,7 @@ else
     exit 99
   fi
   main_command=(
-    "$node_bin" --input-type=module --eval "$child_policy_eval" --
+    "$node_bin" --input-type=module --eval "$child_policy_systemd_eval" --
     --leetplus-child-policy-v1 main production "$main_unit" "$systemctl_bin" "$node_bin"
     "$service_uid" "$service_gid" "$artifact_read_gid" "$SERVICE_USER" "$SERVICE_GROUP"
     "$ARTIFACT_READ_GROUP" "$artifact_root" "$credential_file" "$evidence_root"

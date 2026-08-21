@@ -336,8 +336,6 @@ function validateStaticPolicy(
     RestrictRealtime: "yes",
     RestrictSUIDSGID: "yes",
     SystemCallArchitectures: "native",
-    IPAddressDeny: "any",
-    IPAddressAllow: "",
     InaccessiblePaths: "",
     MemoryMax: "4294967296",
     MemorySwapMax: "0",
@@ -353,6 +351,16 @@ function validateStaticPolicy(
     assertExact(properties, key, expected);
     normalized[key] = expected;
   }
+  // systemctl renders the `any` alias as its effective IPv4/IPv6 prefixes.
+  normalized.IPAddressDeny = assertExactSet(properties, "IPAddressDeny", [
+    "0.0.0.0/0",
+    "::/0",
+  ]);
+  normalized.IPAddressAllow = assertExactSet(
+    properties,
+    "IPAddressAllow",
+    [],
+  );
   normalized.Environment = assertExactSet(properties, "Environment", [
     "LEETPLUS_HYDRATION_SANDBOX=SYSTEMD_IP_DENY_ANY_V1",
     "PATH=/usr/sbin:/usr/bin:/sbin:/bin",

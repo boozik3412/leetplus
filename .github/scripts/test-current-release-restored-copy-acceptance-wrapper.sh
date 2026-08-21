@@ -98,7 +98,8 @@ run_privileged_evidence_isolation_fixture() {
   local unit_evidence_parent unit_current_directory unit_current_receipt
   local main_properties verify_properties main_exec_start verify_exec_start
   local fixture_artifact_root fixture_working_directory fixture_credential_file attempt
-  local fixture_cli child_policy_source_file child_policy_eval child_policy_sha256
+  local fixture_cli child_policy_source_file child_policy_eval child_policy_systemd_eval
+  local child_policy_sha256
   local foreign_control_group
   local operation_id='evidence01'
   local main_unit="leetplus-current-release-acceptance-evidence01.service"
@@ -247,7 +248,7 @@ run_privileged_evidence_isolation_fixture() {
       [[ "${actual[$key]+present}" == present ]] \
         || die "privileged evidence-isolation effective property is missing: ${key}"
       case "$key" in
-        Environment|UnsetEnvironment|SupplementaryGroups|RestrictAddressFamilies|ReadOnlyPaths)
+        Environment|UnsetEnvironment|SupplementaryGroups|IPAddressDeny|IPAddressAllow|RestrictAddressFamilies|ReadOnlyPaths)
           fixture_space_set_equal "${actual[$key]}" "${expected[$key]}" \
             || die "privileged evidence-isolation effective property differs: ${key}"
           ;;
@@ -365,8 +366,8 @@ NODE
       'NoNewPrivileges=yes' \
       'CapabilityBoundingSet=' \
       'AmbientCapabilities=' \
-      'IPAddressDeny=any' \
-      'IPAddressAllow=localhost' \
+      'IPAddressDeny=0.0.0.0/0 ::/0' \
+      'IPAddressAllow=127.0.0.0/8 ::1/128' \
       'Delegate=no' \
       'PrivateTmp=yes' \
       'PrivateDevices=yes' \
@@ -722,6 +723,9 @@ NODE
       'import crypto from "node:crypto"; const chunks=[]; for await (const chunk of process.stdin) chunks.push(chunk); process.stdout.write(crypto.createHash("sha256").update(Buffer.concat(chunks)).digest("hex"));')"
   [[ "$child_policy_sha256" =~ ^[0-9a-f]{64}$ ]] \
     || die 'exact embedded child-policy evaluator digest is malformed'
+  child_policy_systemd_eval="${child_policy_eval//\$/\$\$}"
+  [[ "${child_policy_systemd_eval//\$\$/\$}" == "$child_policy_eval" ]] \
+    || die 'exact embedded child-policy evaluator systemd escaping is not reversible'
   evidence_parent="${privileged_root}/evidence"
   sibling_directory="${evidence_parent}/sibling01"
   sibling_receipt="${sibling_directory}/receipt.json"
@@ -775,7 +779,7 @@ NODE
     "--property=BindPaths=${current_directory}:${unit_current_directory}:norbind" \
     "--property=ReadWritePaths=${unit_current_directory}" \
     "--property=Environment=LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
-    -- "$node_executable" --input-type=module --eval "$child_policy_eval" -- \
+    -- "$node_executable" --input-type=module --eval "$child_policy_systemd_eval" -- \
     --leetplus-child-policy-v1 main fixture "$main_unit" "$privileged_systemctl" "$node_executable" \
     "$fixture_uid" "$fixture_gid" "$fixture_runtime_gid" "$fixture_user" "$fixture_group" \
     "$fixture_runtime_group" "$fixture_artifact_root" "$fixture_credential_file" \
@@ -825,8 +829,8 @@ NODE
     'NoNewPrivileges=yes' \
     'CapabilityBoundingSet=' \
     'AmbientCapabilities=' \
-    'IPAddressDeny=any' \
-    'IPAddressAllow=localhost' \
+    'IPAddressDeny=0.0.0.0/0 ::/0' \
+    'IPAddressAllow=127.0.0.0/8 ::1/128' \
     'Delegate=no' \
     'PrivateTmp=yes' \
     'PrivateDevices=yes' \
@@ -910,7 +914,7 @@ NODE
     "--property=BindReadOnlyPaths=${current_directory}:${unit_current_directory}:norbind" \
     "--property=ReadOnlyPaths=${unit_current_directory}" \
     "--property=Environment=LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
-    -- "$node_executable" --input-type=module --eval "$child_policy_eval" -- \
+    -- "$node_executable" --input-type=module --eval "$child_policy_systemd_eval" -- \
     --leetplus-child-policy-v1 verify fixture "$verify_unit" "$privileged_systemctl" "$node_executable" \
     "$fixture_uid" "$fixture_gid" "$fixture_runtime_gid" "$fixture_user" "$fixture_group" \
     "$fixture_runtime_group" "$fixture_artifact_root" "$fixture_credential_file" \
@@ -960,8 +964,8 @@ NODE
     'NoNewPrivileges=yes' \
     'CapabilityBoundingSet=' \
     'AmbientCapabilities=' \
-    'IPAddressDeny=any' \
-    'IPAddressAllow=localhost' \
+    'IPAddressDeny=0.0.0.0/0 ::/0' \
+    'IPAddressAllow=127.0.0.0/8 ::1/128' \
     'Delegate=no' \
     'PrivateTmp=yes' \
     'PrivateDevices=yes' \
@@ -1033,7 +1037,7 @@ NODE
     --property=StandardOutput=null --property=StandardError=null \
     "--property=InaccessiblePaths=${evidence_parent}" \
     "--property=ReadOnlyPaths=${fixture_artifact_root}" \
-    -- "$node_executable" --input-type=module --eval "$child_policy_eval" -- \
+    -- "$node_executable" --input-type=module --eval "$child_policy_systemd_eval" -- \
     --leetplus-child-policy-v1 drain fixture "$drain_unit" "$privileged_systemctl" "$node_executable" \
     "$fixture_uid" "$fixture_gid" "$fixture_runtime_gid" "$fixture_user" "$fixture_group" \
     "$fixture_runtime_group" "$fixture_artifact_root" "$fixture_credential_file" \
@@ -1070,7 +1074,7 @@ NODE
     "--property=ReadOnlyPaths=${fixture_artifact_root}" \
     "--property=BindReadOnlyPaths=${current_directory}:${unit_current_directory}:norbind" \
     "--property=ReadOnlyPaths=${unit_current_directory}" \
-    -- "$node_executable" --input-type=module --eval "$child_policy_eval" -- \
+    -- "$node_executable" --input-type=module --eval "$child_policy_systemd_eval" -- \
     --leetplus-child-policy-v1 replay fixture "$replay_unit" "$privileged_systemctl" "$node_executable" \
     "$fixture_uid" "$fixture_gid" "$fixture_runtime_gid" "$fixture_user" "$fixture_group" \
     "$fixture_runtime_group" "$fixture_artifact_root" "$fixture_credential_file" \
@@ -1530,6 +1534,12 @@ policy_path="${control_root}/unit-policy-${unit%.service}"
 normalized_bind_path="${bind_path%:norbind}"
 normalized_bind_read_only_path="${bind_read_only_path%:norbind}"
 command_path="${arguments[$command_index]}"
+if [[ "$property_ip_address_deny" == any ]]; then
+  property_ip_address_deny='0.0.0.0/0 ::/0'
+fi
+if [[ "$property_ip_address_allow" == localhost ]]; then
+  property_ip_address_allow='127.0.0.0/8 ::1/128'
+fi
 {
   printf 'User=%s\n' "$property_user"
   printf 'Group=%s\n' "$property_group"

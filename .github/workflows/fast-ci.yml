@@ -86,7 +86,7 @@ jobs:
             LANG=C.UTF-8 \
             LC_ALL=C.UTF-8 \
             TZ=UTC \
-            /usr/bin/bash -p --noprofile --norc \
+            /usr/bin/bash --noprofile --norc -p \
             .github/scripts/test-production-control-install-authority.sh
           printf 'FAST_CI_FIXTURE_PRODUCTION_CONTROL_INSTALL=PASS\n'
 

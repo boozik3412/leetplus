@@ -1137,7 +1137,16 @@ fixture_root="$(mktemp -d /tmp/leetplus-current-wrapper.XXXXXXXX)"
 case "$fixture_root" in /tmp/leetplus-current-wrapper.*) ;; *) die 'unsafe fixture root' ;; esac
 background_pid=''
 cleanup() {
+  cleanup_status=$?
+  trap - EXIT
   set +e
+  if ((cleanup_status != 0)) && [[ -f "${fixture_root}/systemd-argv.log" ]]; then
+    printf '%s\n' '--- CURRENT WRAPPER FIXTURE DIAGNOSTIC ---' >&2
+    grep -E '^(---TIMEOUT---|---TIMEOUT-STATUS=|---SYSTEMD-RUN---|---SYSTEMCTL---|show$|--unit=)' \
+      "${fixture_root}/systemd-argv.log" | tail -n 160 >&2
+    find -P "${fixture_root}/control" -maxdepth 1 -type f -name 'unit-policy-*' \
+      -printf 'UNIT_POLICY=%f\n' >&2
+  fi
   if [[ "$background_pid" =~ ^[1-9][0-9]*$ ]]; then
     if [[ -d "${fixture_root}/control/fixture-flock-sentinel" ]]; then
       : > "${fixture_root}/control/fixture-flock-sentinel/release"
@@ -1149,6 +1158,7 @@ cleanup() {
     find -P "$fixture_root" -depth -mindepth 1 -delete
     rmdir "$fixture_root"
   fi
+  exit "$cleanup_status"
 }
 trap cleanup EXIT
 
@@ -1226,7 +1236,12 @@ set -euo pipefail
 bin_root="${BASH_SOURCE[0]%/*}"
 fixture_root="${bin_root%/*}"
 printf '%s\n' '---TIMEOUT---' "$@" >> "${fixture_root}/systemd-argv.log"
-exec "$(< "${bin_root}/real-timeout.path")" "$@"
+set +e
+"$(< "${bin_root}/real-timeout.path")" "$@"
+status=$?
+set -e
+printf '%s\n' "---TIMEOUT-STATUS=${status}---" >> "${fixture_root}/systemd-argv.log"
+exit "$status"
 TIMEOUT_WRAPPER
 cat > "$bin_root/flock" <<'FLOCK_STUB'
 #!/bin/bash
@@ -1401,7 +1416,9 @@ property_runtime_max=''
 read_only_paths=''
 for ((index = 0; index < ${#arguments[@]}; index += 1)); do
   argument="${arguments[$index]}"
-  [[ "$argument" != -- ]] || command_index=$((index + 1))
+  if [[ "$argument" == -- && "$command_index" -lt 0 ]]; then
+    command_index=$((index + 1))
+  fi
   case "$argument" in
     --unit=*) unit="${argument#--unit=}" ;;
     --leetplus-child-policy-v1)

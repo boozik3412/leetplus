@@ -80,7 +80,7 @@ install -d -o root -g root -m 0700 \
 install -d -o root -g leetplus-runtime -m 0750 /etc/leetplus/rollback-releases
 install -d -o root -g root -m 0755 /run/systemd/system
 
-while read -r expected_digest relative_path extra; do
+while IFS=' ' read -r expected_digest relative_path extra; do
   [[ "$expected_digest" =~ ^[0-9a-f]{64}$ && "$relative_path" == ./* && -z "${extra:-}" ]] \
     || die 'inner control manifest row is malformed'
   source_path="${DEPLOY_ROOT}/${relative_path#./}"

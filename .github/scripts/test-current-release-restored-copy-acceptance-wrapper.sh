@@ -116,7 +116,7 @@ run_privileged_evidence_isolation_fixture() {
   created_duplicate_runtime_gid_group=false
   created_foreign_primary_user=false
   live_units=("$main_unit" "$verify_unit" "$drain_unit" "$replay_unit" "$foreign_process_unit")
-  local privileged_unset_environment='CURRENT_RELEASE_RESTORED_DATABASE_URL CURRENT_RELEASE_EVIDENCE_HMAC_KEY CURRENT_RELEASE_LOGIN_EMAIL CURRENT_RELEASE_LOGIN_PASSWORD BASH_ENV ENV NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy ftp_proxy all_proxy no_proxy NODE_USE_ENV_PROXY CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_NODE_OPTIONS npm_config_node_options NPM_CONFIG_SCRIPT_SHELL npm_config_script_shell PNPM_HOME COREPACK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM'
+  local privileged_unset_environment='CURRENT_RELEASE_RESTORED_DATABASE_URL CURRENT_RELEASE_EVIDENCE_HMAC_KEY CURRENT_RELEASE_LOGIN_EMAIL CURRENT_RELEASE_LOGIN_PASSWORD BASH_ENV ENV SGX_AESM_ADDR NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy ftp_proxy all_proxy no_proxy NODE_USE_ENV_PROXY CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_NODE_OPTIONS npm_config_node_options NPM_CONFIG_SCRIPT_SHELL npm_config_script_shell PNPM_HOME COREPACK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM'
 
   [[ "$#" == 0 ]] || die 'privileged evidence-isolation fixture accepts no extra arguments'
   readonly privileged_awk='/usr/bin/mawk'
@@ -365,7 +365,7 @@ NODE
       'DynamicUser=no' \
       "LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
       "WorkingDirectory=${fixture_working_directory}" \
-      "Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
+      "Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
       'EnvironmentFiles=' \
       'PassEnvironment=' \
       'SetLoginEnvironment=yes' \
@@ -764,7 +764,7 @@ NODE
     "--property=SupplementaryGroups=${fixture_runtime_group}" \
     "--property=LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
     "--property=WorkingDirectory=${fixture_working_directory}" \
-    '--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC' \
+    '--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin' \
     --property=SetLoginEnvironment=yes \
     --property=NoNewPrivileges=yes --property=CapabilityBoundingSet= \
     --property=AmbientCapabilities= --property=IPAddressDeny=any \
@@ -831,7 +831,7 @@ NODE
     'DynamicUser=no' \
     "LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
     "WorkingDirectory=${fixture_working_directory}" \
-    "Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
+    "Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
     'EnvironmentFiles=' \
     'PassEnvironment=' \
     'SetLoginEnvironment=yes' \
@@ -902,7 +902,7 @@ NODE
     "--property=SupplementaryGroups=${fixture_runtime_group}" \
     "--property=LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
     "--property=WorkingDirectory=${fixture_working_directory}" \
-    '--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC' \
+    '--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin' \
     --property=SetLoginEnvironment=yes \
     --property=NoNewPrivileges=yes --property=CapabilityBoundingSet= \
     --property=AmbientCapabilities= --property=IPAddressDeny=any \
@@ -969,7 +969,7 @@ NODE
     'DynamicUser=no' \
     "LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
     "WorkingDirectory=${fixture_working_directory}" \
-    "Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
+    "Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
     'EnvironmentFiles=' \
     'PassEnvironment=' \
     'SetLoginEnvironment=yes' \
@@ -1032,7 +1032,7 @@ NODE
     "--property=SupplementaryGroups=${fixture_runtime_group}" \
     "--property=LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
     "--property=WorkingDirectory=${fixture_working_directory}" \
-    '--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC' \
+    '--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin' \
     "--property=Environment=LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
     --property=SetLoginEnvironment=yes --property=NoNewPrivileges=yes \
     --property=CapabilityBoundingSet= --property=AmbientCapabilities= \
@@ -1068,7 +1068,7 @@ NODE
     "--property=SupplementaryGroups=${fixture_runtime_group}" \
     "--property=LoadCredential=current-release-runtime.json:${fixture_credential_file}" \
     "--property=WorkingDirectory=${fixture_working_directory}" \
-    '--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC' \
+    '--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin' \
     "--property=Environment=LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
     --property=SetLoginEnvironment=yes --property=NoNewPrivileges=yes \
     --property=CapabilityBoundingSet= --property=AmbientCapabilities= \
@@ -1842,7 +1842,7 @@ unit_operation_directory="${unit_evidence_root}/response01"
   && ! -e "$unit_operation_directory" && ! -L "$unit_operation_directory" ]] \
   || die 'operation-scoped unit evidence target was not cleaned after completion'
 
-expected_unset_argument='--property=UnsetEnvironment=CURRENT_RELEASE_RESTORED_DATABASE_URL CURRENT_RELEASE_EVIDENCE_HMAC_KEY CURRENT_RELEASE_LOGIN_EMAIL CURRENT_RELEASE_LOGIN_PASSWORD BASH_ENV ENV NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy ftp_proxy all_proxy no_proxy NODE_USE_ENV_PROXY CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_NODE_OPTIONS npm_config_node_options NPM_CONFIG_SCRIPT_SHELL npm_config_script_shell PNPM_HOME COREPACK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM'
+expected_unset_argument='--property=UnsetEnvironment=CURRENT_RELEASE_RESTORED_DATABASE_URL CURRENT_RELEASE_EVIDENCE_HMAC_KEY CURRENT_RELEASE_LOGIN_EMAIL CURRENT_RELEASE_LOGIN_PASSWORD BASH_ENV ENV SGX_AESM_ADDR NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy ftp_proxy all_proxy no_proxy NODE_USE_ENV_PROXY CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_NODE_OPTIONS npm_config_node_options NPM_CONFIG_SCRIPT_SHELL npm_config_script_shell PNPM_HOME COREPACK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM'
 for exact_argument in \
   '--property=User=leetplus-rehearsal' \
   '--property=Group=leetplus-rehearsal' \
@@ -2644,7 +2644,7 @@ for (const args of invocations) {
   const requiredExactProperties = [
     "--property=User=leetplus-rehearsal", "--property=Group=leetplus-rehearsal",
     "--property=SupplementaryGroups=leetplus-runtime",
-    "--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC",
+    "--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin",
     "--property=SetLoginEnvironment=yes", "--property=NoNewPrivileges=yes",
     "--property=CapabilityBoundingSet=", "--property=AmbientCapabilities=",
     "--property=IPAddressDeny=any", "--property=IPAddressAllow=localhost",

@@ -150,7 +150,13 @@ if [[ "$unprivileged_test_mode" == false ]]; then
     || die 'control bundle contains a symlink or special entry'
   [[ -z "$(find -P "$source_root" -xdev -type f -links +1 -print -quit)" ]] \
     || die 'control bundle contains a hard-linked source file'
-  if ! awk 'NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || $2 !~ /^\.\/[A-Za-z0-9_.@+\/-]+$/ || $2 ~ /(^|\/)\.\.?(\/|$)/ { exit 1 }' \
+  if ! awk '
+    {
+      relative = $2
+      sub(/^\.\//, "", relative)
+    }
+    NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || $2 !~ /^\.\/[A-Za-z0-9_.@+\/-]+$/ || relative ~ /(^|\/)\.\.?(\/|$)/ { exit 1 }
+  ' \
     "$control_manifest"; then
     die 'control bundle manifest is malformed'
   fi

@@ -1076,6 +1076,7 @@ if [[ "$preflight" == true ]]; then
   ((EUID == 0))
   exit 0
 fi
+trap 'status=$?; printf "fixture-stage-release-artifact: line=%s status=%s\n" "$LINENO" "$status" >&2; exit "$status"' ERR
 [[ "$(id -un)" == 'leetplus-build' && "${INVOCATION_ID:-}" =~ ^[0-9a-f]{32}$ ]]
 release_directory="/srv/leetplus/release-builds/${release_sha}"
 [[ ! -e "$release_directory" && ! -L "$release_directory" ]]
@@ -1280,6 +1281,7 @@ systemd-analyze verify "$INSTALLED_UNIT"
 prepare_recovery_hydration() {
   local sha="$1"
   local unit="leetplus-release-hydrate@${sha}.service"
+  local start_status active_state sub_state result exec_main_status preflight journal_tail
   install -o root -g leetplus-build -m 0440 /dev/null \
     "/srv/leetplus/release-inbox/leetplus-release-${sha}.tar.gz"
   install -o root -g leetplus-build -m 0440 /dev/null \
@@ -1290,12 +1292,22 @@ prepare_recovery_hydration() {
     > "/srv/leetplus/release-inbox/leetplus-release-${sha}.tar.gz.sha256"
   live_units+=("$unit")
   systemctl reset-failed "$unit" >/dev/null 2>&1 || true
-  timeout --foreground --kill-after=5s 30s systemctl start "$unit"
-  [[ "$(systemctl show --property=ActiveState --value "$unit")" == 'active' \
-    && "$(systemctl show --property=SubState --value "$unit")" == 'exited' \
-    && "$(systemctl show --property=Result --value "$unit")" == 'success' \
-    && -d "/srv/leetplus/release-builds/${sha}" ]] \
-    || die "fixture hydration did not complete for ${sha}"
+  set +e
+  timeout --foreground --kill-after=5s 30s systemctl start "$unit" \
+    > "${TEST_ROOT}/recovery-hydration-${sha}.out" 2>&1
+  start_status=$?
+  set -e
+  active_state="$(systemctl show --property=ActiveState --value "$unit" 2>/dev/null || true)"
+  sub_state="$(systemctl show --property=SubState --value "$unit" 2>/dev/null || true)"
+  result="$(systemctl show --property=Result --value "$unit" 2>/dev/null || true)"
+  exec_main_status="$(systemctl show --property=ExecMainStatus --value "$unit" 2>/dev/null || true)"
+  preflight="$(systemctl show --property=ExecStartPre --value "$unit" 2>/dev/null || true)"
+  if [[ "$start_status" != 0 || "$active_state" != active || "$sub_state" != exited \
+    || "$result" != success || ! -d "/srv/leetplus/release-builds/${sha}" ]]; then
+    journal_tail="$(journalctl --no-pager --output=cat --unit "$unit" --lines 20 2>/dev/null || true)"
+    journal_tail="${journal_tail:0:2048}"
+    die "fixture hydration did not complete for ${sha}; StartStatus=${start_status}; ActiveState=${active_state}; SubState=${sub_state}; Result=${result}; ExecMainStatus=${exec_main_status}; ExecStartPre=${preflight}; Journal=${journal_tail}"
+  fi
   prepare_fixture_production_control_generation "$sha"
 }
 

@@ -412,7 +412,7 @@ NODE
       "RuntimeMaxUSec=${expected_runtime}" \
       'RemainAfterExit=yes' \
       "Id=${unit}" \
-      "ControlGroup=/system.slice/${unit}" \
+      'ControlGroup=' \
       'MainPID=0' \
       'ActiveState=active' \
       'SubState=exited' \
@@ -878,7 +878,7 @@ NODE
     'RuntimeMaxUSec=14min' \
     'RemainAfterExit=yes' \
     "Id=${main_unit}" \
-    "ControlGroup=/system.slice/${main_unit}" \
+    'ControlGroup=' \
     'MainPID=0' \
     'ActiveState=active' \
     'SubState=exited' \
@@ -1016,7 +1016,7 @@ NODE
     'RuntimeMaxUSec=30s' \
     'RemainAfterExit=yes' \
     "Id=${verify_unit}" \
-    "ControlGroup=/system.slice/${verify_unit}" \
+    'ControlGroup=' \
     'MainPID=0' \
     'ActiveState=active' \
     'SubState=exited' \

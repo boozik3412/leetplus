@@ -107,10 +107,11 @@ fi
 rules="$(timeout --foreground --kill-after=3s 15s nft -nn list table inet "$TABLE")" \
   || die 'N-1 egress table is absent'
 normalized_rules="$(sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]+/ /g; /^[[:space:]]*$/d' <<< "$rules")"
+# The numeric nft listing canonicalizes the named filter priority to zero.
 expected_rules="$(cat <<RULES
 table inet ${TABLE} {
 chain output {
-type filter hook output priority filter; policy accept;
+type filter hook output priority 0; policy accept;
 meta skuid ${api_uid} ct state established,related accept
 meta skuid ${api_uid} ip daddr 127.0.0.1 tcp dport 5432 ct state new accept
 meta skuid ${api_uid} ip daddr 127.0.0.1 tcp dport 4301 ct state new accept

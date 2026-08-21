@@ -1037,7 +1037,7 @@ set -euo pipefail
 cat <<'RULES'
 table inet leetplus_nminus1 {
   chain output {
-    type filter hook output priority filter; policy accept;
+    type filter hook output priority 0; policy accept;
 RULES
 if [[ "${TEST_EGRESS_EXTRA_ACCEPT:-false}" == true ]]; then
   printf '    accept\n'

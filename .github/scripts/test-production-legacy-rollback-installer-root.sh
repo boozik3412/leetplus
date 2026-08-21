@@ -285,10 +285,19 @@ touch /run/fixture-fail-second-reload
 if "$AUTHORITY_PATH" > /run/fixture-first-install.out 2>&1; then
   die 'installer ignored the simulated post-drop-in/pre-marker daemon-reload loss'
 fi
-[[ -f /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing \
-  && ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.fence \
-  && ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent \
-  && ! -e /usr/local/libexec/leetplus/preflight-legacy-rollback.sh ]] \
+if ! grep -F -x \
+  'install-legacy-rollback-contour: systemd daemon-reload failed or timed out during control installation' \
+  /run/fixture-first-install.out >/dev/null; then
+  sed -n '1,120p' /run/fixture-first-install.out >&2
+  die 'first install failed before the simulated pre-marker daemon-reload loss'
+fi
+[[ -f /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing ]] \
+  || die 'pre-marker failure did not leave the durable preparation record'
+[[ ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.fence ]] \
+  || die 'pre-marker failure published the boot-fence commit record too early'
+[[ ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent ]] \
+  || die 'pre-marker failure published the install intent too early'
+[[ ! -e /usr/local/libexec/leetplus/preflight-legacy-rollback.sh ]] \
   || die 'pre-marker failure crossed the first destination-mutation boundary'
 for unit in leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.service \
   leetplus-web-rollback@.service leetplus-web-rollback@${LEGACY_SHA}.service \

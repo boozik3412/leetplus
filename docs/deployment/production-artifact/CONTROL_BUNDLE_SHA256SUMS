@@ -23,4 +23,4 @@ b12c41795c0c798498dbfd20f338edfdc75f80decb9bf91d7c5d928a40e03808  ./systemd/lega
 65d7aae54bdded580a491713185229d81bec9f560249f5f4cb82e279900358f8  ./systemd/nginx.service.d/leetplus-blue-green-recovery.conf
 9d80d655921997d7134feeba5a44bef79ffcf96f36ab0a41fe271687e63f2b90  ./verify-legacy-rollback-authenticated-reads.mjs
 14797ba02c6a37c87b4659ab8026a2aa9711bfcbbe608f4d206d93c5353d7f55  ./verify-legacy-rollback-readiness.sh
-2f9b09ee4f31f4fc0184c1cce033074d8232720879c3d998cc1b29355669fb1c  ./verify-legacy-runtime-drain.sh
+cab6064fab2585948f1387b814ba10e1101943cab2157b31ff4fba12b613099b  ./verify-legacy-runtime-drain.sh

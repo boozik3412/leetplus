@@ -190,7 +190,7 @@ done
 declare -A unit_class=()
 declare -A discovered_units=()
 declare -a drain_units=()
-while read -r classification unit extra; do
+while IFS=$' \t' read -r classification unit extra; do
   [[ -z "${classification:-}" || "$classification" == \#* ]] && continue
   [[ -z "${extra:-}" ]] || die 'unit manifest line contains extra fields'
   [[ "$classification" == 'REQUIRED_DRAIN' || "$classification" == 'OPTIONAL_DRAIN' || "$classification" == 'SAFE' ]] \
@@ -231,7 +231,7 @@ unit_files_output="$(systemctl_bounded list-unit-files 'leetplus-*' --type=servi
   || die 'installed unit inventory failed or timed out'
 loaded_units_output="$(systemctl_bounded list-units 'leetplus-*' --all --type=service --type=timer --plain --no-legend --no-pager)" \
   || die 'loaded/transient unit inventory failed or timed out'
-while read -r discovered_unit _; do
+while IFS=$' \t' read -r discovered_unit _; do
   [[ -z "${discovered_unit:-}" ]] && continue
   [[ "$discovered_unit" =~ ^leetplus-[A-Za-z0-9@_.-]+\.(service|timer)$ ]] || continue
   discovered_units[$discovered_unit]=1

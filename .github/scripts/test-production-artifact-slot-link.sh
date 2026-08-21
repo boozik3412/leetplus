@@ -235,6 +235,23 @@ expect_blue_bind_rejected() {
   [[ ! -e "$TEST_ROOT/srv/leetplus/slots/blue" && ! -L "$TEST_ROOT/srv/leetplus/slots/blue" ]]
 }
 
+assert_fixture_status() {
+  local label="$1"
+  local expected="$2"
+  local actual="$3"
+  local output_path="$4"
+  [[ "$actual" == "$expected" ]] && return 0
+  printf 'slot-link fixture: %s status differs; expected=%s actual=%s; Output=' \
+    "$label" "$expected" "$actual" >&2
+  if [[ -f "$output_path" ]]; then
+    awk '{ printf "%s%s", separator, $0; separator=" | " } END { print "" }' \
+      "$output_path" >&2
+  else
+    printf '<missing>\n' >&2
+  fi
+  exit 1
+}
+
 attestation_a="$TEST_ROOT/var/lib/leetplus/deploy-receipts/release-hydration-attestation-${SHA_A}.receipt"
 rm -- "$attestation_a"
 expect_blue_bind_rejected missing-hydration-attestation
@@ -262,7 +279,8 @@ env NODE_OPTIONS='--require=/definitely-absent/leetplus-bind-injection.cjs' \
   --fixture-abort-after-intent-record-link "${common[@]}" > "$TEST_ROOT/attestation-intent-crash.out" 2>&1
 attestation_intent_status=$?
 set -e
-[[ "$attestation_intent_status" == '87' ]]
+assert_fixture_status attestation-intent 87 "$attestation_intent_status" \
+  "$TEST_ROOT/attestation-intent-crash.out"
 chmod 0600 -- "$attestation_a"
 sed -i 's/^HYDRATION_POLICY_SHA256=ffffffff/HYDRATION_POLICY_SHA256=aaaaaaaa/' "$attestation_a"
 chmod 0400 -- "$attestation_a"
@@ -279,7 +297,8 @@ set +e
   --fixture-abort-after-intent-record-link "${common[@]}" > "$TEST_ROOT/intent-publication-crash.out" 2>&1
 intent_publication_crash_status=$?
 set -e
-[[ "$intent_publication_crash_status" == '87' ]]
+assert_fixture_status intent-publication 87 "$intent_publication_crash_status" \
+  "$TEST_ROOT/intent-publication-crash.out"
 [[ ! -e "$TEST_ROOT/srv/leetplus/slots/blue" && ! -L "$TEST_ROOT/srv/leetplus/slots/blue" ]]
 intent_after_publication_crash="$(find -P "$TEST_ROOT/var/lib/leetplus/deploy-receipts/slot-links" \
   -maxdepth 1 -type f -name 'blue-*.bind.intent' -print -quit)"
@@ -296,7 +315,8 @@ set +e
   --fixture-abort-after-temporary-link "${common[@]}" > "$TEST_ROOT/temporary-link-crash.out" 2>&1
 temporary_link_crash_status=$?
 set -e
-[[ "$temporary_link_crash_status" == '89' ]]
+assert_fixture_status temporary-link 89 "$temporary_link_crash_status" \
+  "$TEST_ROOT/temporary-link-crash.out"
 [[ "$(realpath -e -- "$TEST_ROOT/srv/leetplus/slots/blue")" == "$TEST_ROOT/srv/leetplus/releases/$SHA_A" ]]
 [[ -n "$(find -P "$TEST_ROOT/srv/leetplus/slots" -maxdepth 1 -type l -name 'blue.next.*' -print -quit)" ]]
 bind_b_output="$(/usr/bin/bash -p "$SLOT_LINK_HELPER" reconcile --slot blue "${common[@]}")"
@@ -331,7 +351,8 @@ set +e
   "${common[@]}" > "$TEST_ROOT/receipt-publication-crash.out" 2>&1
 receipt_publication_crash_status=$?
 set -e
-[[ "$receipt_publication_crash_status" == '88' ]]
+assert_fixture_status receipt-publication 88 "$receipt_publication_crash_status" \
+  "$TEST_ROOT/receipt-publication-crash.out"
 safe_receipt_with_alias="$(find -P "$TEST_ROOT/var/lib/leetplus/deploy-receipts/slot-links" \
   -maxdepth 1 -type f -name 'blue-*.bind.receipt' -links 2 -print -quit)"
 [[ -n "$safe_receipt_with_alias" ]]
@@ -345,7 +366,8 @@ set +e
   --fixture-abort-after-effect "${common[@]}" > "$TEST_ROOT/bind-crash.out" 2>&1
 bind_crash_status=$?
 set -e
-[[ "$bind_crash_status" == '86' ]]
+assert_fixture_status bind-effect 86 "$bind_crash_status" \
+  "$TEST_ROOT/bind-crash.out"
 [[ "$(realpath -e -- "$TEST_ROOT/srv/leetplus/slots/blue")" == "$TEST_ROOT/srv/leetplus/releases/$SHA_A" ]]
 [[ "$(find -P "$TEST_ROOT/var/lib/leetplus/deploy-receipts/slot-links" -maxdepth 1 -type f -name 'blue-*.bind.intent' | wc -l)" == '1' ]]
 reconcile_bind_output="$(/usr/bin/bash -p "$SLOT_LINK_HELPER" reconcile --slot blue "${common[@]}")"
@@ -358,7 +380,8 @@ set +e
   --fixture-abort-after-effect "${common[@]}" > "$TEST_ROOT/rollback-crash.out" 2>&1
 rollback_crash_status=$?
 set -e
-[[ "$rollback_crash_status" == '86' ]]
+assert_fixture_status rollback-effect 86 "$rollback_crash_status" \
+  "$TEST_ROOT/rollback-crash.out"
 [[ "$(realpath -e -- "$TEST_ROOT/srv/leetplus/slots/blue")" == "$TEST_ROOT/srv/leetplus/releases/$SHA_B" ]]
 /usr/bin/bash -p "$SLOT_LINK_HELPER" reconcile --slot blue "${common[@]}" > "$TEST_ROOT/rollback-reconcile.out"
 [[ -z "$(find -P "$TEST_ROOT/var/lib/leetplus/deploy-receipts/slot-links" -maxdepth 1 -type f -name 'blue-*.intent' -print -quit)" ]]

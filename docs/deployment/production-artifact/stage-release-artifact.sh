@@ -442,12 +442,12 @@ try {
       !uidAfter || uidAfter.length !== 1 ||
       pidAfter[0].match(/[0-9]+/u)?.[0] !== name ||
       uidAfter[0] !== uidLines[0] ||
-      cgroupBefore !== cgroupAfter ||
-      cgroupBefore !== `0::${expectedCgroup}\n`
+      cgroupBefore !== cgroupAfter
     ) {
       process.exit(76);
     }
     if (!allowed.has(name) || observed.has(name)) process.exit(77);
+    if (cgroupBefore !== `0::${expectedCgroup}\n`) process.exit(76);
     observed.add(name);
   }
 } finally {

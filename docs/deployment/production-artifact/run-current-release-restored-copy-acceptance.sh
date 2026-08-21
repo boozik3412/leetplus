@@ -1237,9 +1237,12 @@ if (fs.realpathSync.native(process.cwd()) !==
 const cgroup = fs.readFileSync("/proc/self/cgroup", "utf8");
 if (cgroup !== `0::/system.slice/${unit}\n`) fail(90);
 
+// systemd redacts LoadCredential as [unprintable] from this unprivileged
+// process. The privileged parent attests its exact source after the unit
+// stops; this child separately opens and validates the delivered credential.
 const propertyNames = [
   "Id", "LoadState", "ActiveState", "SubState", "MainPID", "ControlGroup",
-  "User", "Group", "SupplementaryGroups", "DynamicUser", "LoadCredential", "WorkingDirectory",
+  "User", "Group", "SupplementaryGroups", "DynamicUser", "WorkingDirectory",
   "Environment", "EnvironmentFiles", "PassEnvironment", "SetLoginEnvironment",
   "UnsetEnvironment", "NoNewPrivileges",
   "CapabilityBoundingSet", "AmbientCapabilities", "IPAddressDeny", "IPAddressAllow",
@@ -1279,7 +1282,6 @@ const expected = new Map([
   ["MainPID", String(process.pid)], ["ControlGroup", `/system.slice/${unit}`],
   ["User", expectedUser], ["Group", expectedGroup],
   ["SupplementaryGroups", artifactGroup], ["DynamicUser", "no"],
-  ["LoadCredential", `current-release-runtime.json:${credentialSource}`],
   ["WorkingDirectory", `${artifactRoot}/packages/database`],
   ["Environment", `PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin LEETPLUS_CHILD_POLICY_SHA256=${process.env.LEETPLUS_CHILD_POLICY_SHA256}`],
   ["EnvironmentFiles", ""], ["PassEnvironment", ""], ["SetLoginEnvironment", "yes"],

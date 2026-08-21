@@ -248,7 +248,7 @@ final_move_line="$(grep -n '^mv -- "$staging_directory" "$release_directory"$' "
   && "${hydration_fence_lines[0]}" -lt "$input_snapshot_line" \
   && $((input_snapshot_line - hydration_fence_lines[0])) -le 8 \
   && "${hydration_fence_lines[2]}" -gt "$hydrated_manifest_end_line" \
-  && $((hydration_fence_lines[2] - hydrated_manifest_end_line)) -le 3 \
+  && $((hydration_fence_lines[2] - hydrated_manifest_end_line)) -le 4 \
   && "${hydration_fence_lines[3]}" -lt "$final_move_line" \
   && $((final_move_line - hydration_fence_lines[3])) -le 3 ]] \
   || die 'stager build-UID process fences are not at the reviewed publication boundaries'

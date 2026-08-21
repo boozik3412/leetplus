@@ -1235,7 +1235,11 @@ cat > "$bin_root/timeout" <<'TIMEOUT_WRAPPER'
 set -euo pipefail
 bin_root="${BASH_SOURCE[0]%/*}"
 fixture_root="${bin_root%/*}"
-printf '%s\n' '---TIMEOUT---' "$@" >> "${fixture_root}/systemd-argv.log"
+printf '%s\n' '---TIMEOUT---' >> "${fixture_root}/systemd-argv.log"
+for timeout_argument in "$@"; do
+  printf '%s\n' "$timeout_argument" >> "${fixture_root}/systemd-argv.log"
+  [[ "$timeout_argument" =~ ^[1-9][0-9]*s$ ]] && break
+done
 set +e
 "$(< "${bin_root}/real-timeout.path")" "$@"
 status=$?

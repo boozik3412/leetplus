@@ -713,6 +713,8 @@ NSS_ID
 cat > "$nss_bin/dd" <<'NSS_DD'
 #!/usr/bin/bash -p
 set -euo pipefail
+declare -a forwarded_arguments=()
+input_path=''
 for argument in "$@"; do
   if [[ "$argument" == "if=${TEST_PROC_ROOT:-}/9002/status" \
     && "${TEST_NSS_VANISH_PID:-false}" == true ]]; then
@@ -720,8 +722,18 @@ for argument in "$@"; do
     rmdir -- "${TEST_PROC_ROOT:?}/9002"
     exit 1
   fi
+  if [[ "$argument" == if=* ]]; then
+    input_path="${argument#if=}"
+  fi
+  if [[ "$argument" == iflag=nofollow && "$(uname -s)" == MINGW* ]]; then
+    continue
+  fi
+  forwarded_arguments+=("$argument")
 done
-exec /usr/bin/dd "$@"
+if [[ "$(uname -s)" == MINGW* ]]; then
+  [[ -n "$input_path" && -f "$input_path" && ! -L "$input_path" ]] || exit 66
+fi
+exec /usr/bin/dd "${forwarded_arguments[@]}"
 NSS_DD
 chmod 0700 "$nss_bin/getent" "$nss_bin/id" "$nss_bin/dd"
 install_arguments=(
@@ -767,7 +779,7 @@ rm -f -- "$install_root/cutover/scheduler-free-control-install.preparing"
 chmod 0755 "$installer_dropin_directory"
 rmdir "$installer_dropin_directory"
 
-mkdir -p "$installer_dropin_directory"
+install -d -m 0755 "$installer_dropin_directory"
 installer_mount_inventory="$install_root/persistent-fence-mounts"
 printf '%s\n' "$installer_dropin_directory/nested" > "$installer_mount_inventory"
 if PATH="$nss_bin:$PATH" TEST_NSS_ATTESTATION=true TEST_PROC_ROOT="$nss_proc" \
@@ -777,8 +789,12 @@ if PATH="$nss_bin:$PATH" TEST_NSS_ATTESTATION=true TEST_PROC_ROOT="$nss_proc" \
   printf 'installer accepted a nested persistent-fence mount\n' >&2
   exit 1
 fi
-grep -F 'persistent-fence directory contains an exact/nested mount' \
-  "$install_root/mounted-persistent-fence-directory.out" >/dev/null
+if ! grep -F 'persistent-fence directory contains an exact/nested mount' \
+  "$install_root/mounted-persistent-fence-directory.out" >/dev/null; then
+  printf 'mounted persistent-fence rejection output:\n' >&2
+  sed -n '1,80p' "$install_root/mounted-persistent-fence-directory.out" >&2
+  exit 1
+fi
 rm -rf -- "$install_root/cutover/test-runtime-masks"
 rm -f -- "$install_root/cutover/scheduler-free-control-install.preparing"
 rmdir "$installer_dropin_directory"

@@ -290,7 +290,12 @@ acquire_hardened_lock() {
   [[ "$(realpath -e -- "$fd_path")" == "$lock_path" \
     && "$(stat -Lc '%U:%G:%a:%h' -- "$fd_path")" == "$expected_identity" ]] \
     || die "${label} lock descriptor/path identity is unsafe before flock"
-  flock -n "$lock_fd" || die "another operation holds the ${label} lock"
+  if ! flock -n "$lock_fd"; then
+    if [[ "$label" == 'shared cutover' ]]; then
+      die 'another blue/green or scheduler-free activation holds the deployment lock'
+    fi
+    die "another operation holds the ${label} lock"
+  fi
   [[ -f "$lock_path" && ! -L "$lock_path" \
     && "$(realpath -e -- "$fd_path")" == "$lock_path" \
     && "$(stat -c '%U:%G:%a:%h' -- "$lock_path")" == "$expected_identity" \

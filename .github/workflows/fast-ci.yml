@@ -89,6 +89,10 @@ jobs:
             /usr/bin/bash --noprofile --norc -p \
             .github/scripts/test-production-control-install-authority.sh
           printf 'FAST_CI_FIXTURE_PRODUCTION_CONTROL_INSTALL=PASS\n'
+          printf 'FAST_CI_FIXTURE_LEGACY_PREFLIGHT=START\n'
+          node .github/scripts/test-legacy-rollback-auth-edge.mjs
+          bash .github/scripts/test-production-legacy-rollback-contour.sh
+          printf 'FAST_CI_FIXTURE_LEGACY_PREFLIGHT=PASS\n'
 
       - name: Validate SHA-bound artifact staging script syntax
         shell: bash
@@ -173,8 +177,6 @@ jobs:
           node --check docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs
           (cd docs/deployment/production-artifact && sha256sum --check --strict --quiet CONTROL_BUNDLE_SHA256SUMS)
           printf 'FAST_CI_FIXTURE_LEGACY_ROLLBACK=START\n'
-          node .github/scripts/test-legacy-rollback-auth-edge.mjs
-          bash .github/scripts/test-production-legacy-rollback-contour.sh
           CI=true GITHUB_ACTIONS=true bash .github/scripts/test-production-legacy-database-authority-pg16.sh
           sudo -n /usr/bin/env -i \
             CI=true \

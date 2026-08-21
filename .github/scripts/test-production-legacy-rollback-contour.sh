@@ -9,6 +9,13 @@ readonly DEPLOY_ROOT="${REPOSITORY_ROOT}/docs/deployment/production-artifact"
 readonly SYSTEMD_ROOT="${DEPLOY_ROOT}/systemd"
 readonly TEST_ROOT="$(mktemp -d)"
 
+report_failure() {
+  local status=$?
+  printf 'legacy rollback fixture: line=%s status=%s command=%q\n' \
+    "${BASH_LINENO[0]}" "$status" "$BASH_COMMAND" >&2
+  exit "$status"
+}
+
 cleanup() {
   if [[ -n "${auth_server_pid:-}" ]]; then
     kill "$auth_server_pid" 2>/dev/null || true
@@ -16,6 +23,7 @@ cleanup() {
   fi
   rm -rf -- "$TEST_ROOT"
 }
+trap report_failure ERR
 trap cleanup EXIT
 
 if [[ "$(id -u)" == 0 ]]; then

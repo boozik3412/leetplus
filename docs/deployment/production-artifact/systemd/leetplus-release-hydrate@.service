@@ -7,6 +7,7 @@ ConditionPathExists=/run/leetplus-release/hydration.lock
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+Slice=system.slice
 User=leetplus-build
 Group=leetplus-build
 Environment=LEETPLUS_HYDRATION_SANDBOX=SYSTEMD_IP_DENY_ANY_V1

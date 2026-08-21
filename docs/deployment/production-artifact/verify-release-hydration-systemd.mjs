@@ -8,7 +8,7 @@ const INVOCATION_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const EXPECTED_FRAGMENT_PATH =
   "/etc/systemd/system/leetplus-release-hydrate@.service";
 const EXPECTED_FRAGMENT_SHA256 =
-  "e482da60adc0a4cf342abe226d0d6da022db70b021f1081611958673eaf55510";
+  "38f20bc60488ed931dd0d50913a6cbbdd507ae2970bab4c992600bb8e87b33c8";
 const EXPECTED_STAGER_SHA256 =
   "ac9e6efa6a21f1949ed4543bcaf302087dc58302a596586971ee785836341e9d";
 const MAX_INPUT_BYTES = 64 * 1024;
@@ -77,6 +77,7 @@ const STATIC_PROPERTIES = [
   "DropInPaths",
   "Type",
   "RemainAfterExit",
+  "Slice",
   "User",
   "Group",
   "SupplementaryGroups",
@@ -311,6 +312,7 @@ function validateStaticPolicy(
     DropInPaths: "",
     Type: "oneshot",
     RemainAfterExit: "yes",
+    Slice: "system.slice",
     User: "leetplus-build",
     Group: "leetplus-build",
     SupplementaryGroups: "",

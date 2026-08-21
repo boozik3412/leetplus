@@ -230,6 +230,7 @@ grep -F 'cache_release_marker="${cache_marker_root}/${slot}.sha"' "$slot_preflig
 grep -F "Web slot must be stopped with no MainPID before cache preparation" "$cache_preparer" > /dev/null
 grep -F 'WEB_CACHE_OLD_DATA_DELETED=false' "$cache_preparer" > /dev/null
 grep -F -x 'User=leetplus-build' "$hydration_unit" > /dev/null
+grep -F -x 'Slice=system.slice' "$hydration_unit" > /dev/null
 grep -F -x 'IPAddressDeny=any' "$hydration_unit" > /dev/null
 grep -F -x 'RestrictAddressFamilies=none' "$hydration_unit" > /dev/null
 grep -F -x 'MemoryPressureWatch=skip' "$hydration_unit" > /dev/null

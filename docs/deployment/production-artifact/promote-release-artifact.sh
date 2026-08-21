@@ -25,7 +25,7 @@ umask 0077
 readonly RELEASE_SHA_PATTERN='^[0-9a-f]{40}$'
 readonly SLOT_PATTERN='^(blue|green)$'
 readonly HYDRATION_STATIC_PROPERTIES=(
-  Id LoadState UnitFileState FragmentPath DropInPaths Type RemainAfterExit
+  Id LoadState UnitFileState FragmentPath DropInPaths Type RemainAfterExit Slice
   User Group SupplementaryGroups DynamicUser ExecStartPre ExecStart Environment
   EnvironmentFiles PassEnvironment SetLoginEnvironment UnsetEnvironment
   NoNewPrivileges PrivateTmp PrivateDevices
@@ -34,7 +34,7 @@ readonly HYDRATION_STATIC_PROPERTIES=(
   ProtectHostname CapabilityBoundingSet AmbientCapabilities LockPersonality
   RestrictRealtime RestrictSUIDSGID SystemCallArchitectures
   RestrictAddressFamilies IPAddressDeny IPAddressAllow ReadOnlyPaths
-  ReadWritePaths InaccessiblePaths MemoryMax MemorySwapMax TasksMax
+  ReadWritePaths InaccessiblePaths MemoryPressureWatch MemoryMax MemorySwapMax TasksMax
   CPUQuotaPerSecUSec LimitFSIZE UMask KillMode RootDirectory RootImage
 )
 readonly HYDRATION_COMPLETED_PROPERTIES=(

@@ -27,7 +27,7 @@ readonly UNIT="leetplus-release-hydrate@${RELEASE_SHA}.service"
 readonly HOSTILE_UNIX_SOCKET='/run/leetplus-release/hydration-hostile.sock'
 readonly TEST_ROOT="$(mktemp -d)"
 readonly STATIC_PROPERTIES=(
-  Id LoadState UnitFileState FragmentPath DropInPaths Type RemainAfterExit
+  Id LoadState UnitFileState FragmentPath DropInPaths Type RemainAfterExit Slice
   User Group SupplementaryGroups DynamicUser ExecStartPre ExecStart Environment
   EnvironmentFiles PassEnvironment SetLoginEnvironment UnsetEnvironment
   NoNewPrivileges PrivateTmp PrivateDevices
@@ -704,6 +704,7 @@ expect_rejected_property() {
 expect_rejected_property dropin-paths DropInPaths \
   '/etc/systemd/system/leetplus-release-hydrate@.service.d/99-adversarial.conf'
 expect_rejected_property fragment-path FragmentPath '/run/systemd/transient/attacker.service'
+expect_rejected_property wrong-slice Slice 'leetplus-release-hydrate.slice'
 expect_rejected_property root-user User root
 expect_rejected_property root-group Group root
 expect_rejected_property altered-preflight ExecStartPre \

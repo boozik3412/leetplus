@@ -597,6 +597,7 @@ common_arguments=(
   --unprivileged-test-mode
 )
 
+command_log="$TEST_ROOT/commands.log"
 mount_inventory_fixture="$TEST_ROOT/hostile-mount-inventory"
 printf '%s\n' "$state_root/nested-ephemeral-bind" > "$mount_inventory_fixture"
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
@@ -693,7 +694,6 @@ write_fixture_intent() {
   printf '%s\n' "$intent_value"
 }
 
-command_log="$TEST_ROOT/commands.log"
 # A dead N-1 is rejected while the active link still points to legacy. The
 # candidate is never made externally routable when rollback itself is unsafe.
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" TEST_FAIL_PREVIOUS=true \

@@ -583,6 +583,31 @@ rm -f -- "${production_stage_fixture_root}/inbox-symlink"
 systemctl daemon-reload
 systemd-analyze verify "$INSTALLED_UNIT"
 
+assert_snapshot_property_keys() {
+  local snapshot="$1"
+  shift
+  local line key property
+  local -A expected=()
+  local -A seen=()
+  for property in "$@"; do expected["$property"]=1; done
+  while IFS= read -r line; do
+    [[ "$line" == *=* ]] || die 'systemd snapshot contains a malformed property line'
+    key="${line%%=*}"
+    [[ -n "$key" ]] || die 'systemd snapshot contains an empty property key'
+    [[ "${expected[$key]+present}" == present ]] \
+      || die "systemd snapshot contains an unexpected property key: ${key}"
+    [[ "${seen[$key]+present}" != present ]] \
+      || die "systemd snapshot contains a duplicate property key: ${key}"
+    seen["$key"]=1
+  done < "$snapshot"
+  for property in "$@"; do
+    [[ "${seen[$property]+present}" == present ]] \
+      || die "systemd snapshot is missing a requested property key: ${property}"
+  done
+  [[ "${#seen[@]}" == "$#" ]] \
+    || die 'systemd snapshot property-key count differs from the request'
+}
+
 write_snapshot() {
   local output_path="$1"
   shift
@@ -593,6 +618,7 @@ write_snapshot() {
   done
   timeout --foreground --kill-after=5s 15s "${command[@]}" "$UNIT" > "$output_path"
   chmod 0600 "$output_path"
+  assert_snapshot_property_keys "$output_path" "$@"
 }
 
 policy_snapshot="${TEST_ROOT}/policy.properties"

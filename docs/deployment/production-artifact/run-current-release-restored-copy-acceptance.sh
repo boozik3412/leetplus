@@ -1119,10 +1119,10 @@ if (![expectedUser, expectedGroup, artifactGroup]
 if (![systemctlPath, nodePath, artifactRoot, credentialSource, evidenceRoot]
     .every((value) => value.startsWith("/") && !/[\u0000-\u0020\\]/u.test(value))) fail(113);
 if (![hostEvidenceDirectory, unitEvidenceDirectory].every((value) => value === "-" ||
-    (value.startsWith("/") && !/[\u0000-\u0020\\]/u.test(value))) ||
-    (phase === "drain" ? unitEvidenceDirectory !== "-" :
-      (!unitEvidenceDirectory.endsWith(`/${operationId}`) ||
-        unitEvidenceDirectory === hostEvidenceDirectory))) fail(114);
+    (value.startsWith("/") && !/[\u0000-\u0020\\]/u.test(value)))) fail(114);
+if (phase === "drain" && unitEvidenceDirectory !== "-") fail(119);
+if (phase !== "drain" && !unitEvidenceDirectory.endsWith(`/${operationId}`)) fail(120);
+if (phase !== "drain" && unitEvidenceDirectory === hostEvidenceDirectory) fail(121);
 if ((phase === "main" && unit !== `leetplus-current-release-acceptance-${operationId}.service`) ||
     (phase === "verify" && unit !== `leetplus-current-release-verify-${operationId}.service`) ||
     (phase === "drain" && unit !== `leetplus-current-release-drain-${operationId}.service`) ||

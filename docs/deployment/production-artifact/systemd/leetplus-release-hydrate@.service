@@ -1,8 +1,8 @@
 [Unit]
 Description=LeetPlus isolated no-egress hydration for exact release %i
-ConditionPathIsRegular=/srv/leetplus/release-inbox/leetplus-release-%i.tar.gz
-ConditionPathIsRegular=/srv/leetplus/release-inbox/leetplus-release-%i.tar.gz.sha256
-ConditionPathIsRegular=/run/leetplus-release/hydration.lock
+ConditionFileNotEmpty=/srv/leetplus/release-inbox/leetplus-release-%i.tar.gz
+ConditionFileNotEmpty=/srv/leetplus/release-inbox/leetplus-release-%i.tar.gz.sha256
+ConditionPathExists=/run/leetplus-release/hydration.lock
 
 [Service]
 Type=oneshot

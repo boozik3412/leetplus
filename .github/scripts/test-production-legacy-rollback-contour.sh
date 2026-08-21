@@ -756,8 +756,12 @@ if PATH="$nss_bin:$PATH" TEST_NSS_ATTESTATION=true TEST_PROC_ROOT="$nss_proc" \
   printf 'installer accepted a writable persistent-fence directory\n' >&2
   exit 1
 fi
-grep -F 'persistent-fence directory authority is unsafe' \
-  "$install_root/writable-persistent-fence-directory.out" >/dev/null
+if ! grep -F 'persistent-fence directory authority is unsafe' \
+  "$install_root/writable-persistent-fence-directory.out" >/dev/null; then
+  printf 'writable persistent-fence rejection output:\n' >&2
+  sed -n '1,80p' "$install_root/writable-persistent-fence-directory.out" >&2
+  exit 1
+fi
 rm -rf -- "$install_root/cutover/test-runtime-masks"
 rm -f -- "$install_root/cutover/scheduler-free-control-install.preparing"
 chmod 0755 "$installer_dropin_directory"

@@ -43,9 +43,17 @@ fixture_service_gid="$(id -g "$fixture_service_user")"
 
 TEST_ROOT="$(mktemp -d /tmp/leetplus-slot-link-fixture.XXXXXXXX)"
 mounted_release_path=''
+replaced_system_node=false
+original_system_node_present=false
 cleanup() {
   if [[ -n "$mounted_release_path" ]] && mountpoint -q -- "$mounted_release_path"; then
     umount -- "$mounted_release_path"
+  fi
+  if [[ "$replaced_system_node" == true ]]; then
+    rm -f -- '/usr/bin/node'
+    if [[ "$original_system_node_present" == true ]]; then
+      mv -- "$TEST_ROOT/system-node.original" '/usr/bin/node'
+    fi
   fi
   case "$TEST_ROOT" in
     /tmp/leetplus-slot-link-fixture.*) rm -rf -- "$TEST_ROOT" ;;
@@ -55,6 +63,22 @@ cleanup() {
 trap cleanup EXIT
 
 chmod 0755 -- "$TEST_ROOT"
+if [[ ! -f /usr/bin/node || -L /usr/bin/node \
+  || "$(stat -c '%u:%g' -- /usr/bin/node 2>/dev/null || true)" != '0:0' \
+  || "$(/usr/bin/node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)" != '22' ]]; then
+  if [[ -e /usr/bin/node || -L /usr/bin/node ]]; then
+    mv -- /usr/bin/node "$TEST_ROOT/system-node.original"
+    original_system_node_present=true
+  fi
+  replaced_system_node=true
+  install -o root -g root -m 0755 "$fixture_node_binary" /usr/bin/node
+fi
+[[ -f /usr/bin/node && ! -L /usr/bin/node \
+  && "$(stat -c '%u:%g' -- /usr/bin/node)" == '0:0' \
+  && "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == '22' ]] || {
+  printf 'slot-link fixture: could not provision exact root-owned /usr/bin/node major 22\n' >&2
+  exit 1
+}
 install -d -m 0700 "$TEST_ROOT/cgroup-predicate"
 : > "$TEST_ROOT/cgroup-predicate/empty.cgroup.procs"
 [[ -z "$(find -P "$TEST_ROOT/cgroup-predicate" -type f -name '*.cgroup.procs' -exec awk 'NF { found=1; exit } END { exit(found ? 0 : 1) }' {} \; -print -quit)" ]]
@@ -129,8 +153,13 @@ if /usr/bin/bash -p "$SEALER" \
   printf 'sealer accepted a nested bind mount\n' >&2
   exit 1
 fi
-grep -F 'release contains an exact or nested mountpoint' \
-  "$TEST_ROOT/seal-nested-mount-rejected.out" >/dev/null
+if ! grep -F 'release contains an exact or nested mountpoint' \
+  "$TEST_ROOT/seal-nested-mount-rejected.out" >/dev/null; then
+  printf 'slot-link fixture: nested-mount rejection diagnostic differs; Output=' >&2
+  awk '{ printf "%s%s", separator, $0; separator=" | " } END { print "" }' \
+    "$TEST_ROOT/seal-nested-mount-rejected.out" >&2
+  exit 1
+fi
 [[ "$(stat -c '%u:%g' -- "$seal_mount_source/outside.txt")" == '0:0' ]]
 umount -- "$mounted_release_path"
 mounted_release_path=''

@@ -45,6 +45,7 @@ ReadOnlyPaths=/srv/leetplus/release-inbox
 ReadOnlyPaths=/srv/leetplus/pnpm-store
 ReadWritePaths=/run/leetplus-release/hydration.lock
 ReadWritePaths=/srv/leetplus/release-builds
+MemoryPressureWatch=skip
 MemoryMax=4294967296
 MemorySwapMax=0
 TasksMax=256

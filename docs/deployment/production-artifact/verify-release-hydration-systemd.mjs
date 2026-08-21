@@ -8,7 +8,7 @@ const INVOCATION_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const EXPECTED_FRAGMENT_PATH =
   "/etc/systemd/system/leetplus-release-hydrate@.service";
 const EXPECTED_FRAGMENT_SHA256 =
-  "d86bcd5df827472ab0314cdc3ae8d09cfa8a73948fe2757db7c10b2f3d74e4c3";
+  "e482da60adc0a4cf342abe226d0d6da022db70b021f1081611958673eaf55510";
 const EXPECTED_STAGER_SHA256 =
   "aa871e61a275636fdc5dd859e6f586ecf1a373741828a2c1d1f5a5e757b5aa98";
 const MAX_INPUT_BYTES = 64 * 1024;
@@ -337,6 +337,7 @@ function validateStaticPolicy(
     RestrictSUIDSGID: "yes",
     SystemCallArchitectures: "native",
     InaccessiblePaths: "",
+    MemoryPressureWatch: "skip",
     MemoryMax: "4294967296",
     MemorySwapMax: "0",
     TasksMax: "256",

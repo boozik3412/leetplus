@@ -1066,6 +1066,7 @@ common_properties=(
   '--property=IPAddressDeny=any'
   '--property=IPAddressAllow=localhost'
   '--property=Delegate=no'
+  '--property=MemoryPressureWatch=skip'
   '--property=PrivateTmp=yes'
   '--property=PrivateDevices=yes'
   '--property=ProtectSystem=strict'
@@ -1194,18 +1195,18 @@ const environmentNames = Object.keys(process.env).sort();
 const allowedEnvironmentNames = [...requiredEnvironment.keys(), "INVOCATION_ID"].sort();
 if (JSON.stringify(environmentNames) !== JSON.stringify(allowedEnvironmentNames) ||
     [...requiredEnvironment].some(([name, value]) => process.env[name] !== value) ||
-    !/^[0-9a-f]{32}$/u.test(process.env.INVOCATION_ID ?? "")) fail(88);
+    !/^[0-9a-f]{32}$/u.test(process.env.INVOCATION_ID ?? "")) fail(123);
 const commandLine = fs.readFileSync("/proc/self/cmdline");
 if (commandLine.length < 32 || commandLine.length > 262144 ||
-    commandLine[commandLine.length - 1] !== 0) fail(88);
+    commandLine[commandLine.length - 1] !== 0) fail(124);
 const commandArguments = commandLine.subarray(0, -1).toString("utf8").split("\0");
 if (commandArguments.length < 7 || commandArguments[0] !== nodePath ||
     commandArguments[1] !== "--input-type=module" || commandArguments[2] !== "--eval" ||
     commandArguments[4] !== "--" ||
-    JSON.stringify(commandArguments.slice(5)) !== JSON.stringify(process.argv.slice(1))) fail(88);
+    JSON.stringify(commandArguments.slice(5)) !== JSON.stringify(process.argv.slice(1))) fail(125);
 const sourceDigest = (await import("node:crypto")).createHash("sha256")
   .update(commandArguments[3], "utf8").digest("hex");
-if (sourceDigest !== process.env.LEETPLUS_CHILD_POLICY_SHA256) fail(88);
+if (sourceDigest !== process.env.LEETPLUS_CHILD_POLICY_SHA256) fail(126);
 if (fs.realpathSync.native(process.cwd()) !==
     fs.realpathSync.native(`${artifactRoot}/packages/database`)) fail(89);
 const cgroup = fs.readFileSync("/proc/self/cgroup", "utf8");
@@ -1217,7 +1218,7 @@ const propertyNames = [
   "Environment", "EnvironmentFiles", "PassEnvironment", "SetLoginEnvironment",
   "UnsetEnvironment", "NoNewPrivileges",
   "CapabilityBoundingSet", "AmbientCapabilities", "IPAddressDeny", "IPAddressAllow",
-  "Delegate", "PrivateTmp", "PrivateDevices", "ProtectSystem", "ProtectHome",
+  "Delegate", "MemoryPressureWatch", "PrivateTmp", "PrivateDevices", "ProtectSystem", "ProtectHome",
   "ProtectProc", "ProcSubset", "ProtectKernelTunables", "ProtectKernelModules",
   "ProtectKernelLogs", "ProtectControlGroups", "ProtectClock", "ProtectHostname",
   "LockPersonality", "RestrictRealtime", "RestrictSUIDSGID", "SystemCallArchitectures",
@@ -1262,6 +1263,7 @@ const expected = new Map([
   ["NoNewPrivileges", "yes"], ["CapabilityBoundingSet", ""], ["AmbientCapabilities", ""],
   ["IPAddressDeny", "0.0.0.0/0 ::/0"],
   ["IPAddressAllow", "127.0.0.0/8 ::1/128"], ["Delegate", "no"],
+  ["MemoryPressureWatch", "skip"],
   ["PrivateTmp", "yes"], ["PrivateDevices", "yes"], ["ProtectSystem", "strict"],
   ["ProtectHome", "yes"], ["ProtectProc", "invisible"], ["ProcSubset", "pid"],
   ["ProtectKernelTunables", "yes"], ["ProtectKernelModules", "yes"],
@@ -1445,6 +1447,7 @@ assert_unit_effective_policy() {
     --property=UnsetEnvironment --property=NoNewPrivileges \
     --property=CapabilityBoundingSet --property=AmbientCapabilities \
     --property=IPAddressDeny --property=IPAddressAllow --property=Delegate \
+    --property=MemoryPressureWatch \
     --property=PrivateTmp --property=PrivateDevices --property=ProtectSystem --property=ProtectHome \
     --property=ProtectProc --property=ProcSubset --property=ProtectKernelTunables \
     --property=ProtectKernelModules --property=ProtectKernelLogs \
@@ -1466,7 +1469,7 @@ assert_unit_effective_policy() {
     output+=$'\nEnvironmentFiles='
   fi
   while IFS='=' read -r key value; do
-    [[ "$key" =~ ^(User|Group|SupplementaryGroups|DynamicUser|LoadCredential|WorkingDirectory|Environment|EnvironmentFiles|PassEnvironment|SetLoginEnvironment|UnsetEnvironment|NoNewPrivileges|CapabilityBoundingSet|AmbientCapabilities|IPAddressDeny|IPAddressAllow|Delegate|PrivateTmp|PrivateDevices|ProtectSystem|ProtectHome|ProtectProc|ProcSubset|ProtectKernelTunables|ProtectKernelModules|ProtectKernelLogs|ProtectControlGroups|ProtectClock|ProtectHostname|LockPersonality|RestrictRealtime|RestrictSUIDSGID|SystemCallArchitectures|RestrictAddressFamilies|RootDirectory|RootImage|InaccessiblePaths|BindPaths|BindReadOnlyPaths|ReadOnlyPaths|ReadWritePaths|KillMode|TimeoutStopUSec|UMask|StandardOutput|StandardError|RuntimeMaxUSec|ExecStart)$ \
+    [[ "$key" =~ ^(User|Group|SupplementaryGroups|DynamicUser|LoadCredential|WorkingDirectory|Environment|EnvironmentFiles|PassEnvironment|SetLoginEnvironment|UnsetEnvironment|NoNewPrivileges|CapabilityBoundingSet|AmbientCapabilities|IPAddressDeny|IPAddressAllow|Delegate|MemoryPressureWatch|PrivateTmp|PrivateDevices|ProtectSystem|ProtectHome|ProtectProc|ProcSubset|ProtectKernelTunables|ProtectKernelModules|ProtectKernelLogs|ProtectControlGroups|ProtectClock|ProtectHostname|LockPersonality|RestrictRealtime|RestrictSUIDSGID|SystemCallArchitectures|RestrictAddressFamilies|RootDirectory|RootImage|InaccessiblePaths|BindPaths|BindReadOnlyPaths|ReadOnlyPaths|ReadWritePaths|KillMode|TimeoutStopUSec|UMask|StandardOutput|StandardError|RuntimeMaxUSec|ExecStart)$ \
       && ! "$value" =~ [[:cntrl:]] && -z "${actual[$key]+present}" ]] \
       || die "systemd unit policy is malformed: ${unit}"
     actual[$key]="$value"
@@ -1490,6 +1493,7 @@ assert_unit_effective_policy() {
     [IPAddressDeny]='0.0.0.0/0 ::/0'
     [IPAddressAllow]='127.0.0.0/8 ::1/128'
     [Delegate]=no
+    [MemoryPressureWatch]=skip
     [PrivateTmp]=yes
     [PrivateDevices]=yes
     [ProtectSystem]=strict
@@ -1521,7 +1525,7 @@ assert_unit_effective_policy() {
     [StandardError]=null
     [RuntimeMaxUSec]="$expected_runtime"
   )
-  [[ "$count" == 48 ]] || die "systemd unit policy property count is not exact: ${unit}"
+  [[ "$count" == 49 ]] || die "systemd unit policy property count is not exact: ${unit}"
   for key in "${!expected[@]}"; do
     [[ "${actual[$key]+present}" == present ]] \
       || die "systemd unit effective policy is missing ${key}: ${unit}"

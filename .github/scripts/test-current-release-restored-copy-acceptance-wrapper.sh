@@ -230,7 +230,7 @@ run_privileged_evidence_isolation_fixture() {
     for expected_pair in "$@"; do
       key="${expected_pair%%=*}"
       value="${expected_pair#*=}"
-      [[ "$key" =~ ^(InaccessiblePaths|BindPaths|BindReadOnlyPaths|ReadWritePaths|ReadOnlyPaths|User|Group|SupplementaryGroups|DynamicUser|Id|ControlGroup|MainPID|ActiveState|SubState|Result|ExecMainStatus|LoadCredential|WorkingDirectory|Environment|EnvironmentFiles|PassEnvironment|SetLoginEnvironment|UnsetEnvironment|NoNewPrivileges|CapabilityBoundingSet|AmbientCapabilities|IPAddressDeny|IPAddressAllow|Delegate|PrivateTmp|PrivateDevices|ProtectSystem|ProtectHome|ProtectProc|ProcSubset|ProtectKernelTunables|ProtectKernelModules|ProtectKernelLogs|ProtectControlGroups|ProtectClock|ProtectHostname|LockPersonality|RestrictRealtime|RestrictSUIDSGID|SystemCallArchitectures|RestrictAddressFamilies|RootDirectory|RootImage|KillMode|TimeoutStopUSec|UMask|StandardOutput|StandardError|RuntimeMaxUSec|RemainAfterExit)$ \
+      [[ "$key" =~ ^(InaccessiblePaths|BindPaths|BindReadOnlyPaths|ReadWritePaths|ReadOnlyPaths|User|Group|SupplementaryGroups|DynamicUser|Id|ControlGroup|MainPID|ActiveState|SubState|Result|ExecMainStatus|LoadCredential|WorkingDirectory|Environment|EnvironmentFiles|PassEnvironment|SetLoginEnvironment|UnsetEnvironment|NoNewPrivileges|CapabilityBoundingSet|AmbientCapabilities|IPAddressDeny|IPAddressAllow|Delegate|MemoryPressureWatch|PrivateTmp|PrivateDevices|ProtectSystem|ProtectHome|ProtectProc|ProcSubset|ProtectKernelTunables|ProtectKernelModules|ProtectKernelLogs|ProtectControlGroups|ProtectClock|ProtectHostname|LockPersonality|RestrictRealtime|RestrictSUIDSGID|SystemCallArchitectures|RestrictAddressFamilies|RootDirectory|RootImage|KillMode|TimeoutStopUSec|UMask|StandardOutput|StandardError|RuntimeMaxUSec|RemainAfterExit)$ \
         && -z "${expected[$key]+present}" ]] \
         || die 'privileged evidence-isolation expected property set is malformed'
       expected[$key]="$value"
@@ -336,6 +336,7 @@ NODE
       --property=UnsetEnvironment --property=NoNewPrivileges \
       --property=CapabilityBoundingSet --property=AmbientCapabilities \
       --property=IPAddressDeny --property=IPAddressAllow --property=Delegate \
+      --property=MemoryPressureWatch \
       --property=PrivateTmp --property=PrivateDevices --property=ProtectSystem --property=ProtectHome \
       --property=ProtectProc --property=ProcSubset --property=ProtectKernelTunables \
       --property=ProtectKernelModules --property=ProtectKernelLogs \
@@ -369,6 +370,7 @@ NODE
       'IPAddressDeny=0.0.0.0/0 ::/0' \
       'IPAddressAllow=127.0.0.0/8 ::1/128' \
       'Delegate=no' \
+      'MemoryPressureWatch=skip' \
       'PrivateTmp=yes' \
       'PrivateDevices=yes' \
       'ProtectSystem=strict' \
@@ -761,6 +763,7 @@ NODE
     --property=NoNewPrivileges=yes --property=CapabilityBoundingSet= \
     --property=AmbientCapabilities= --property=IPAddressDeny=any \
     --property=IPAddressAllow=localhost --property=Delegate=no \
+    --property=MemoryPressureWatch=skip \
     --property=ProtectSystem=strict --property=ProtectHome=yes --property=PrivateTmp=yes \
     --property=PrivateDevices=yes --property=ProtectProc=invisible --property=ProcSubset=pid \
     --property=ProtectKernelTunables=yes --property=ProtectKernelModules=yes \
@@ -799,6 +802,7 @@ NODE
     --property=UnsetEnvironment --property=NoNewPrivileges \
     --property=CapabilityBoundingSet --property=AmbientCapabilities \
     --property=IPAddressDeny --property=IPAddressAllow --property=Delegate \
+    --property=MemoryPressureWatch \
     --property=PrivateTmp --property=PrivateDevices --property=ProtectSystem --property=ProtectHome \
     --property=ProtectProc --property=ProcSubset --property=ProtectKernelTunables \
     --property=ProtectKernelModules --property=ProtectKernelLogs \
@@ -832,6 +836,7 @@ NODE
     'IPAddressDeny=0.0.0.0/0 ::/0' \
     'IPAddressAllow=127.0.0.0/8 ::1/128' \
     'Delegate=no' \
+    'MemoryPressureWatch=skip' \
     'PrivateTmp=yes' \
     'PrivateDevices=yes' \
     'ProtectSystem=strict' \
@@ -896,6 +901,7 @@ NODE
     --property=NoNewPrivileges=yes --property=CapabilityBoundingSet= \
     --property=AmbientCapabilities= --property=IPAddressDeny=any \
     --property=IPAddressAllow=localhost --property=Delegate=no \
+    --property=MemoryPressureWatch=skip \
     --property=ProtectSystem=strict --property=ProtectHome=yes --property=PrivateTmp=yes \
     --property=PrivateDevices=yes --property=ProtectProc=invisible --property=ProcSubset=pid \
     --property=ProtectKernelTunables=yes --property=ProtectKernelModules=yes \
@@ -934,6 +940,7 @@ NODE
     --property=UnsetEnvironment --property=NoNewPrivileges \
     --property=CapabilityBoundingSet --property=AmbientCapabilities \
     --property=IPAddressDeny --property=IPAddressAllow --property=Delegate \
+    --property=MemoryPressureWatch \
     --property=PrivateTmp --property=PrivateDevices --property=ProtectSystem --property=ProtectHome \
     --property=ProtectProc --property=ProcSubset --property=ProtectKernelTunables \
     --property=ProtectKernelModules --property=ProtectKernelLogs \
@@ -967,6 +974,7 @@ NODE
     'IPAddressDeny=0.0.0.0/0 ::/0' \
     'IPAddressAllow=127.0.0.0/8 ::1/128' \
     'Delegate=no' \
+    'MemoryPressureWatch=skip' \
     'PrivateTmp=yes' \
     'PrivateDevices=yes' \
     'ProtectSystem=strict' \
@@ -1023,6 +1031,7 @@ NODE
     --property=SetLoginEnvironment=yes --property=NoNewPrivileges=yes \
     --property=CapabilityBoundingSet= --property=AmbientCapabilities= \
     --property=IPAddressDeny=any --property=IPAddressAllow=localhost --property=Delegate=no \
+    --property=MemoryPressureWatch=skip \
     --property=ProtectSystem=strict --property=ProtectHome=yes --property=PrivateTmp=yes \
     --property=PrivateDevices=yes --property=ProtectProc=invisible --property=ProcSubset=pid \
     --property=ProtectKernelTunables=yes --property=ProtectKernelModules=yes \
@@ -1058,6 +1067,7 @@ NODE
     --property=SetLoginEnvironment=yes --property=NoNewPrivileges=yes \
     --property=CapabilityBoundingSet= --property=AmbientCapabilities= \
     --property=IPAddressDeny=any --property=IPAddressAllow=localhost --property=Delegate=no \
+    --property=MemoryPressureWatch=skip \
     --property=ProtectSystem=strict --property=ProtectHome=yes --property=PrivateTmp=yes \
     --property=PrivateDevices=yes --property=ProtectProc=invisible --property=ProcSubset=pid \
     --property=ProtectKernelTunables=yes --property=ProtectKernelModules=yes \
@@ -1427,6 +1437,7 @@ property_ambient_capabilities='__absent__'
 property_ip_address_deny=''
 property_ip_address_allow=''
 property_delegate=''
+property_memory_pressure_watch=''
 property_private_tmp=''
 property_private_devices=''
 property_protect_system=''
@@ -1481,6 +1492,7 @@ for ((index = 0; index < ${#arguments[@]}; index += 1)); do
     --property=IPAddressDeny=*) property_ip_address_deny="${argument#--property=*=}" ;;
     --property=IPAddressAllow=*) property_ip_address_allow="${argument#--property=*=}" ;;
     --property=Delegate=*) property_delegate="${argument#--property=*=}" ;;
+    --property=MemoryPressureWatch=*) property_memory_pressure_watch="${argument#--property=*=}" ;;
     --property=PrivateTmp=*) property_private_tmp="${argument#--property=*=}" ;;
     --property=PrivateDevices=*) property_private_devices="${argument#--property=*=}" ;;
     --property=ProtectSystem=*) property_protect_system="${argument#--property=*=}" ;;
@@ -1558,6 +1570,7 @@ fi
   printf 'IPAddressDeny=%s\n' "$property_ip_address_deny"
   printf 'IPAddressAllow=%s\n' "$property_ip_address_allow"
   printf 'Delegate=%s\n' "$property_delegate"
+  printf 'MemoryPressureWatch=%s\n' "$property_memory_pressure_watch"
   printf 'PrivateTmp=%s\n' "$property_private_tmp"
   printf 'PrivateDevices=%s\n' "$property_private_devices"
   printf 'ProtectSystem=%s\n' "$property_protect_system"
@@ -1832,6 +1845,7 @@ for exact_argument in \
   '--property=IPAddressDeny=any' \
   '--property=IPAddressAllow=localhost' \
   '--property=Delegate=no' \
+  '--property=MemoryPressureWatch=skip' \
   '--property=PrivateTmp=yes' \
   '--property=ProtectSystem=strict' \
   '--property=ProtectHome=yes' \
@@ -2626,7 +2640,8 @@ for (const args of invocations) {
     "--property=SetLoginEnvironment=yes", "--property=NoNewPrivileges=yes",
     "--property=CapabilityBoundingSet=", "--property=AmbientCapabilities=",
     "--property=IPAddressDeny=any", "--property=IPAddressAllow=localhost",
-    "--property=Delegate=no", "--property=PrivateTmp=yes", "--property=PrivateDevices=yes",
+    "--property=Delegate=no", "--property=MemoryPressureWatch=skip",
+    "--property=PrivateTmp=yes", "--property=PrivateDevices=yes",
     "--property=ProtectSystem=strict", "--property=ProtectHome=yes",
     "--property=ProtectProc=invisible", "--property=ProcSubset=pid",
     "--property=ProtectKernelTunables=yes", "--property=ProtectKernelModules=yes",

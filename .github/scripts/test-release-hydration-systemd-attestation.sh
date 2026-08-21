@@ -36,7 +36,7 @@ readonly STATIC_PROPERTIES=(
   ProtectHostname CapabilityBoundingSet AmbientCapabilities LockPersonality
   RestrictRealtime RestrictSUIDSGID SystemCallArchitectures
   RestrictAddressFamilies IPAddressDeny IPAddressAllow ReadOnlyPaths
-  ReadWritePaths InaccessiblePaths MemoryMax MemorySwapMax TasksMax
+  ReadWritePaths InaccessiblePaths MemoryPressureWatch MemoryMax MemorySwapMax TasksMax
   CPUQuotaPerSecUSec LimitFSIZE UMask KillMode RootDirectory RootImage
 )
 readonly MANAGER_ENVIRONMENT_KEYS=(
@@ -724,6 +724,7 @@ expect_rejected_property weak-protect-system ProtectSystem full
 expect_rejected_property home-visible ProtectHome no
 expect_rejected_property shared-tmp PrivateTmp no
 expect_rejected_property devices-visible PrivateDevices no
+expect_rejected_property pressure-watch-enabled MemoryPressureWatch auto
 expect_rejected_property memory-unbounded MemoryMax infinity
 expect_rejected_property swap-unbounded MemorySwapMax infinity
 expect_rejected_property tasks-unbounded TasksMax infinity
@@ -929,10 +930,12 @@ set -e
   && "$clean_hydration_status" != '137' ]] \
   || die 'incomplete clean hydration fixture did not fail promptly in ExecStart'
 clean_preflight_execution="$(systemctl show --property=ExecStartPre --value "$UNIT")"
+clean_main_started="$(systemctl show --property=ExecMainStartTimestampMonotonic --value "$UNIT")"
+clean_result="$(systemctl show --property=Result --value "$UNIT")"
+clean_exec_main_status="$(systemctl show --property=ExecMainStatus --value "$UNIT")"
 [[ "$clean_preflight_execution" == *'code=exited ; status=0'* \
-  && "$(systemctl show --property=ExecMainStartTimestampMonotonic --value "$UNIT")" \
-    =~ ^[1-9][0-9]*$ ]] \
-  || die 'root build-UID preflight did not pass after the foreign process stopped'
+  && "$clean_main_started" =~ ^[1-9][0-9]*$ ]] \
+  || die "root build-UID preflight did not pass after the foreign process stopped; Result=${clean_result}; ExecMainStatus=${clean_exec_main_status}; ExecMainStartTimestampMonotonic=${clean_main_started}; ExecStartPre=${clean_preflight_execution}"
 systemctl reset-failed "$UNIT"
 mapfile -d '' -t retained_clean_staging < <(
   find -P '/srv/leetplus/release-builds' -mindepth 1 -maxdepth 1 \

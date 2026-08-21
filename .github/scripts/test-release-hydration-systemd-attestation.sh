@@ -1284,6 +1284,10 @@ prepare_recovery_hydration() {
     "/srv/leetplus/release-inbox/leetplus-release-${sha}.tar.gz"
   install -o root -g leetplus-build -m 0440 /dev/null \
     "/srv/leetplus/release-inbox/leetplus-release-${sha}.tar.gz.sha256"
+  printf 'fixture archive for %s\n' "$sha" \
+    > "/srv/leetplus/release-inbox/leetplus-release-${sha}.tar.gz"
+  printf '%064d  leetplus-release-%s.tar.gz\n' 0 "$sha" \
+    > "/srv/leetplus/release-inbox/leetplus-release-${sha}.tar.gz.sha256"
   live_units+=("$unit")
   systemctl reset-failed "$unit" >/dev/null 2>&1 || true
   timeout --foreground --kill-after=5s 30s systemctl start "$unit"

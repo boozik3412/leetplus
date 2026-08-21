@@ -295,7 +295,15 @@ run_privileged_evidence_isolation_fixture() {
     "$privileged_node" --input-type=module - "/sys/fs/cgroup/system.slice/${unit}/cgroup.procs" <<'NODE'
 import fs from "node:fs";
 const file = process.argv[2];
-const descriptor = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+let descriptor;
+try {
+  descriptor = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+} catch (error) {
+  // Once a successful oneshot has no processes, systemd may prune its empty
+  // cgroup. Absence at this point is equivalent to an empty cgroup.
+  if (error?.code === "ENOENT") process.exit(0);
+  throw error;
+}
 try {
   const chunks = [];
   let total = 0;

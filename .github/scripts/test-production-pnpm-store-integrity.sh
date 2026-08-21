@@ -95,6 +95,8 @@ expect_rejected() {
 create_store valid
 verify_store > "$TEST_ROOT/valid.verify.out"
 grep -F -x 'PNPM_STORE_INTEGRITY=PASS' "$TEST_ROOT/valid.verify.out" >/dev/null
+grep -E -x 'PNPM_STORE_MANIFEST_SHA256=[0-9a-f]{64}' \
+  "$TEST_ROOT/valid.verify.out" >/dev/null
 
 create_store symlink
 ln -s -- 'v3/files/aa/content' "$STORE_PATH/adversarial-link"
@@ -151,7 +153,7 @@ mounted_path=''
 # that tests only the helper but is not wired into either side is insufficient.
 grep -F "/usr/local/libexec/leetplus/verify-pnpm-store-integrity.mjs" "$PRODUCER" >/dev/null
 grep -F "/usr/local/libexec/leetplus/verify-pnpm-store-integrity.mjs" "$CONSUMER" >/dev/null
-grep -F 'STORE_MANIFEST_SHA256' "$PRODUCER" >/dev/null
+grep -F -- '--bundle-sha256 "$expected_digest"' "$PRODUCER" >/dev/null
 grep -F 'PNPM_STORE_RECEIPT_SHA256' "$CONSUMER" >/dev/null
 
 printf 'PRODUCTION_PNPM_STORE_INTEGRITY_FIXTURE=PASS\n'

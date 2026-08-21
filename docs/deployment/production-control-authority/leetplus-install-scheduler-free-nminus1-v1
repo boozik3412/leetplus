@@ -99,7 +99,7 @@ verify_control_bundle() {
     || die 'control bundle contains a symlink or special entry'
   [[ -z "$(find -P "$CONTROL_ROOT" -xdev -type f -links +1 -print -quit)" ]] \
     || die 'control bundle contains a hard-linked source file'
-  awk 'NF != 2 || $1 !~ /^[0-9a-f]{64}$/ || $2 !~ /^\.\/[A-Za-z0-9_.@+\/-]+$/ || $2 ~ /(^|\/)\.\.?(\/|$)/ { exit 1 }' \
+  awk 'NF != 2 || $1 !~ /^[0-9a-f]{64}$/ || $2 !~ /^\.\/[A-Za-z0-9_.@+\/-]+$/ || substr($2, 3) ~ /(^|\/)\.\.?(\/|$)/ { exit 1 }' \
     "$CONTROL_MANIFEST" || die 'control manifest is malformed'
   (
     cd -- "$CONTROL_ROOT"

@@ -185,8 +185,11 @@ stable_process_status_has_uid() {
   if awk -v expected_uid="$expected_uid" '
     $1 == "Uid:" { seen += 1; match_uid=($2 == expected_uid || $3 == expected_uid || $4 == expected_uid || $5 == expected_uid) }
     END { if (seen != 1) exit 2; exit !match_uid }
-  ' <<< "$status_content"; then return 0; fi
-  status_result=$?
+  ' <<< "$status_content"; then
+    return 0
+  else
+    status_result=$?
+  fi
   [[ "$status_result" == 1 ]] && return 1
   return 2
 }

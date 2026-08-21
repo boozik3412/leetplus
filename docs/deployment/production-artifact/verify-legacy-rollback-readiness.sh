@@ -187,8 +187,9 @@ stable_process_status_has_uid() {
     END { if (seen != 1) exit 2; exit !match_uid }
   ' <<< "$status_content"; then
     return 0
+  else
+    status_result=$?
   fi
-  status_result=$?
   [[ "$status_result" == 1 ]] && return 1
   return 2
 }

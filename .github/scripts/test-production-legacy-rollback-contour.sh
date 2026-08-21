@@ -1325,6 +1325,9 @@ DATABASE_SERVER_PORT=5432
 DATABASE_SYSTEM_IDENTIFIER=1234567890123456789
 AUDIT_SESSION_USER=leetplus_drain_audit
 FENCE_SESSION_USER=leetplus_role_fencer
+FENCE_AUTHORITY_ROLE=leetplus_fence_authority
+FENCE_FUNCTION_SCHEMA=leetplus_ops
+FENCE_FUNCTION_NAME=apply_nminus1_legacy_login_fence
 TARGET
   printf '4242 (legacy api) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 999\n' > "$fixture_root/proc/4242/stat"
   printf '5001 (nginx worker) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 888\n' > "$fixture_root/proc/5001/stat"

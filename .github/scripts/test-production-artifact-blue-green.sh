@@ -344,6 +344,22 @@ case "${1:-}" in
     for argument in "$@"; do
       case "$argument" in --property=*) property="${argument#--property=}" ;; esac
     done
+    if [[ -z "$property" && "${TEST_UNIT_ATTESTATION:-false}" != true ]]; then
+      cache_state="${TEST_WEB_STATE:-inactive}"
+      case "$cache_state" in
+        active) cache_sub_state=running; cache_main_pid=123 ;;
+        inactive) cache_sub_state=dead; cache_main_pid=0 ;;
+        failed) cache_sub_state=failed; cache_main_pid=0 ;;
+        *) exit 75 ;;
+      esac
+      printf 'ActiveState=%s\n' "$cache_state"
+      printf 'SubState=%s\n' "$cache_sub_state"
+      printf 'MainPID=%s\n' "$cache_main_pid"
+      printf 'ControlGroup=/system.slice/%s\n' "$unit"
+      printf 'UnitFileState=enabled\n'
+      printf 'NeedDaemonReload=no\n'
+      exit 0
+    fi
     if [[ -z "$property" && "${TEST_UNIT_ATTESTATION:-false}" == true ]]; then
       for snapshot_property in \
         ActiveState SubState UnitFileState NeedDaemonReload User Group FragmentPath DropInPaths WorkingDirectory \
@@ -526,24 +542,36 @@ chmod 0700 "$bin_root/systemctl" "$bin_root/ss" "$bin_root/nginx" "$bin_root/cur
 
 cache_test_root="$TEST_ROOT/cache"
 cache_marker_test_root="$TEST_ROOT/cache-authority"
-mkdir -p "$cache_test_root" "$cache_marker_test_root"
+cache_cutover_state_root="$TEST_ROOT/cache-cutover-state"
+cache_cgroup_root="$TEST_ROOT/cache-cgroup"
+cache_slot_cgroup="$cache_cgroup_root/system.slice/leetplus-web@blue.service"
+mkdir -p "$cache_test_root" "$cache_marker_test_root" "$cache_slot_cgroup"
+: > "$cache_slot_cgroup/cgroup.procs"
+cache_common_arguments=(
+  --slot blue
+  --cache-root "$cache_test_root"
+  --marker-root "$cache_marker_test_root"
+  --cutover-state-root "$cache_cutover_state_root"
+  --cgroup-root "$cache_cgroup_root"
+  --service-user "$(id -un)"
+  --unprivileged-test-mode
+)
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$TEST_ROOT/cache-commands.log" TEST_WEB_STATE=active \
-  /usr/bin/bash -p "$CACHE_PREPARER" --slot blue --release-sha "$RELEASE_SHA" \
-    --cache-root "$cache_test_root" --marker-root "$cache_marker_test_root" --service-user "$(id -un)" --unprivileged-test-mode \
+  /usr/bin/bash -p "$CACHE_PREPARER" --release-sha "$RELEASE_SHA" "${cache_common_arguments[@]}" \
     > "$TEST_ROOT/cache-active-rejected.out" 2>&1; then
   printf 'cache reset while Web slot was active was unexpectedly accepted\n' >&2
   exit 1
 fi
+grep -F 'Web slot must be stopped with no MainPID before cache preparation (pre)' \
+  "$TEST_ROOT/cache-active-rejected.out" >/dev/null
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$TEST_ROOT/cache-commands.log" \
-  /usr/bin/bash -p "$CACHE_PREPARER" --slot blue --release-sha "$RELEASE_SHA" \
-    --cache-root "$cache_test_root" --marker-root "$cache_marker_test_root" --service-user "$(id -un)" --unprivileged-test-mode \
+  /usr/bin/bash -p "$CACHE_PREPARER" --release-sha "$RELEASE_SHA" "${cache_common_arguments[@]}" \
     > "$TEST_ROOT/cache-prepared.out"
 test "$(tr -d '\r\n' < "$cache_marker_test_root/blue.sha")" = "$RELEASE_SHA"
 printf 'stale\n' > "$cache_test_root/leetplus-web-blue/stale-entry"
 replacement_sha="$(printf 'b%.0s' {1..40})"
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$TEST_ROOT/cache-commands.log" \
-  /usr/bin/bash -p "$CACHE_PREPARER" --slot blue --release-sha "$replacement_sha" \
-    --cache-root "$cache_test_root" --marker-root "$cache_marker_test_root" --service-user "$(id -un)" --unprivileged-test-mode \
+  /usr/bin/bash -p "$CACHE_PREPARER" --release-sha "$replacement_sha" "${cache_common_arguments[@]}" \
     > "$TEST_ROOT/cache-replaced.out"
 test "$(tr -d '\r\n' < "$cache_marker_test_root/blue.sha")" = "$replacement_sha"
 test -n "$(find "$cache_test_root/leetplus-web-retired" -mindepth 1 -maxdepth 1 -type d -print -quit)"

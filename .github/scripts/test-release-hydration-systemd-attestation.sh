@@ -972,7 +972,10 @@ systemctl stop "$cgroup_probe_unit"
 
 ip_probe_unit="leetplus-hydration-ip-deny-probe-${RANDOM}-${BASHPID}.service"
 live_units+=("$ip_probe_unit")
-ip_probe_program=$'import errno, socket, sys\ns = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\ns.settimeout(1)\ntry:\n    s.connect(("127.0.0.1", 9))\nexcept PermissionError as exc:\n    sys.exit(0 if exc.errno in (errno.EACCES, errno.EPERM) else 82)\nexcept OSError:\n    sys.exit(83)\nsys.exit(84)'
+# cgroup IP packet filtering can surface a direct permission error or silently
+# drop the loopback packet until connect(2) times out. An unfiltered closed
+# loopback port instead fails immediately or connects if a service owns it.
+ip_probe_program=$'import errno, socket, sys\ns = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\ns.settimeout(1)\ntry:\n    s.connect(("127.0.0.1", 9))\nexcept PermissionError as exc:\n    sys.exit(0 if exc.errno in (errno.EACCES, errno.EPERM) else 82)\nexcept TimeoutError:\n    sys.exit(0)\nexcept OSError:\n    sys.exit(83)\nsys.exit(84)'
 timeout --foreground --kill-after=5s 20s systemd-run \
   --unit "$ip_probe_unit" \
   --wait \

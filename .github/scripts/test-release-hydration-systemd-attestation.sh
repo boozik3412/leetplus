@@ -1667,7 +1667,8 @@ prepare_recovery_hydration "$mount_sha"
 groupadd --system --non-unique --gid "$(id -g leetplus-build)" \
   leetplus-build-gid-adversarial
 created_adversarial_gid_group=true
-if "$STAGER_SOURCE" --release-sha "$mount_sha" --preflight-build-uid-fence \
+if /usr/bin/bash -p "$STAGER_SOURCE" \
+  --release-sha "$mount_sha" --preflight-build-uid-fence \
   > "${TEST_ROOT}/stager-gid-alias.out" 2>&1; then
   die 'production stager accepted a second NSS group aliasing the build GID'
 fi

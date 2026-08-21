@@ -396,7 +396,8 @@ restore_failure_marker="${state_root}/preboundary-restore-failed.marker"
 past_drain_boundary=false
 
 atomic_from_stdin() {
-  local destination="$1" temporary="${destination}.new.$$"
+  local destination="$1" temporary
+  temporary="${destination}.new.$$"
   [[ ! -L "$destination" ]] || die "refusing to replace symlinked state: ${destination}"
   cat > "$temporary"
   chmod 0600 "$temporary"

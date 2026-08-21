@@ -31,6 +31,8 @@ die() {
   exit 1
 }
 
+trap 'status=$?; printf "production legacy root fixture: unhandled failure at line %s (exit %s): %s\n" "$LINENO" "$status" "$BASH_COMMAND" >&2; exit "$status"' ERR
+
 ((EUID == 0)) || die 'must run as root inside a disposable Linux root'
 [[ "$LEETPLUS_FIXTURE_ACKNOWLEDGEMENT" == 'CONFIRMED_DESTROYABLE_CI_ROOT' ]] \
   || die 'explicit disposable-root acknowledgement is absent'
@@ -362,7 +364,10 @@ env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
     exec /usr/bin/bash -p /usr/local/libexec/leetplus/preflight-legacy-rollback.sh \
       --release-sha 7de04ff4ccc814494810730be3fa6bf661097b07 --api-runtime
   ' > /run/fixture-api-preflight.out
-grep -F -x 'LEGACY_ROLLBACK_PREFLIGHT_RUNTIME=api' /run/fixture-api-preflight.out >/dev/null
+grep -F -x 'LEGACY_ROLLBACK_PREFLIGHT_RUNTIME=api' /run/fixture-api-preflight.out >/dev/null || {
+  sed -n '1,120p' /run/fixture-api-preflight.out >&2
+  die 'installed API preflight did not publish its exact runtime receipt'
+}
 
 install -o root -g root -m 0755 "$DEPLOY_ROOT/prepare-web-slot-cache.sh" \
   /usr/local/libexec/leetplus/prepare-web-slot-cache.sh
@@ -376,7 +381,10 @@ for primary_group in leetplus-runtime leetplus-api-runtime leetplus-web-runtime;
     die "cache preparer accepted foreign primary-GID identity in ${primary_group}"
   fi
   grep -F 'runtime secret-group reverse primary-GID sets are not exact' \
-    "/run/${foreign_identity}.out" >/dev/null
+    "/run/${foreign_identity}.out" >/dev/null || {
+    sed -n '1,120p' "/run/${foreign_identity}.out" >&2
+    die "cache preparer foreign primary-GID negative failed for another invariant: ${primary_group}"
+  }
   userdel "$foreign_identity"
 done
 
@@ -392,7 +400,10 @@ if /usr/bin/bash -p /usr/local/libexec/leetplus/prepare-web-slot-cache.sh \
   die 'cache preparer accepted a foreign same-UID process'
 fi
 grep -F 'Web slot identity owns a process while cache preparation requires global UID quiescence' \
-  /run/fixture-cache-foreign-process.out >/dev/null
+  /run/fixture-cache-foreign-process.out >/dev/null || {
+  sed -n '1,120p' /run/fixture-cache-foreign-process.out >&2
+  die 'cache preparer foreign-process negative failed for another invariant'
+}
 pkill -TERM -u leetplus-web-blue 2>/dev/null || true
 kill "$foreign_web_pid" 2>/dev/null || true
 wait "$foreign_web_pid" 2>/dev/null || true
@@ -400,6 +411,9 @@ wait "$foreign_web_pid" 2>/dev/null || true
 /usr/bin/bash -p /usr/local/libexec/leetplus/prepare-web-slot-cache.sh \
   --slot blue --release-sha 1111111111111111111111111111111111111111 \
   > /run/fixture-cache-prepared.out
-grep -F -x 'WEB_CACHE_PREPARED_SLOT=blue' /run/fixture-cache-prepared.out >/dev/null
+grep -F -x 'WEB_CACHE_PREPARED_SLOT=blue' /run/fixture-cache-prepared.out >/dev/null || {
+  sed -n '1,120p' /run/fixture-cache-prepared.out >&2
+  die 'cache preparer did not publish its exact success receipt'
+}
 
 printf 'production legacy rollback installer root fixture: PASS\n'

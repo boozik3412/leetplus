@@ -485,7 +485,7 @@ SELECT
       AND (SELECT count(*)
         FROM pg_catalog.pg_class relation
         JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
-        CROSS JOIN LATERAL pg_catalog.aclexplode(pg_catalog.coalesce(relation.relacl, pg_catalog.acldefault('r', relation.relowner))) acl
+        CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(relation.relacl, pg_catalog.acldefault('r', relation.relowner))) acl
         JOIN pg_catalog.pg_roles grantee ON grantee.oid = acl.grantee
         WHERE grantee.rolname = :'audit_role'
           AND namespace.nspname = 'public'
@@ -497,7 +497,7 @@ SELECT
       AND (SELECT count(*)
         FROM pg_catalog.pg_class relation
         JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
-        CROSS JOIN LATERAL pg_catalog.aclexplode(pg_catalog.coalesce(relation.relacl, pg_catalog.acldefault('r', relation.relowner))) acl
+        CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(relation.relacl, pg_catalog.acldefault('r', relation.relowner))) acl
         JOIN pg_catalog.pg_roles grantee ON grantee.oid = acl.grantee
         WHERE grantee.rolname = :'audit_role' AND namespace.nspname NOT LIKE 'pg_%'
           AND namespace.nspname <> 'information_schema') = 14
@@ -644,7 +644,7 @@ SELECT
           AND pg_catalog.md5(fn.prosrc) = '6ad75226a4c0fe1dda37e0fe216aa073') = 1
       AND (SELECT count(*)
         FROM pg_catalog.pg_proc fn
-        CROSS JOIN LATERAL pg_catalog.aclexplode(pg_catalog.coalesce(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
+        CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
         JOIN pg_catalog.pg_roles grantee ON grantee.oid = acl.grantee
         JOIN pg_catalog.pg_roles grantor ON grantor.oid = acl.grantor
         WHERE fn.oid = 'leetplus_ops.apply_nminus1_legacy_login_fence(text,text,integer,text,text)'::regprocedure
@@ -653,11 +653,11 @@ SELECT
           AND grantee.rolname IN ('leetplus_fence_authority', 'leetplus_role_fencer')) = 2
       AND (SELECT count(*)
         FROM pg_catalog.pg_proc fn
-        CROSS JOIN LATERAL pg_catalog.aclexplode(pg_catalog.coalesce(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
+        CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
         WHERE fn.oid = 'leetplus_ops.apply_nminus1_legacy_login_fence(text,text,integer,text,text)'::regprocedure) = 2
       AND (SELECT count(*)
         FROM pg_catalog.pg_namespace namespace
-        CROSS JOIN LATERAL pg_catalog.aclexplode(pg_catalog.coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))) acl
+        CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))) acl
         LEFT JOIN pg_catalog.pg_roles grantee ON grantee.oid = acl.grantee
         JOIN pg_catalog.pg_roles grantor ON grantor.oid = acl.grantor
         WHERE namespace.nspname = 'leetplus_ops'
@@ -666,11 +666,11 @@ SELECT
             OR (grantee.rolname = 'leetplus_role_fencer' AND acl.privilege_type = 'USAGE'))) = 3
       AND (SELECT count(*)
         FROM pg_catalog.pg_namespace namespace
-        CROSS JOIN LATERAL pg_catalog.aclexplode(pg_catalog.coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))) acl
+        CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))) acl
         WHERE namespace.nspname = 'leetplus_ops') = 3
       AND (SELECT count(*)
         FROM pg_catalog.pg_proc fn
-        CROSS JOIN LATERAL pg_catalog.aclexplode(pg_catalog.coalesce(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
+        CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
         JOIN pg_catalog.pg_roles grantee ON grantee.oid = acl.grantee
         WHERE fn.oid = 'pg_catalog.pg_control_system()'::regprocedure
           AND grantee.rolname = 'leetplus_fence_authority'

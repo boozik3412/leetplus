@@ -192,6 +192,7 @@ control_manifest_sha="$(sha256sum "$control_manifest" | awk '{ print $1 }')"
 leetplus_root="${etc_root}/leetplus"
 runtime_environment="${leetplus_root}/rollback-runtime.env"
 web_runtime_environment="${leetplus_root}/rollback-web-runtime.env"
+safe_environment="${leetplus_root}/rollback-safe.env"
 pg_service_file="${leetplus_root}/pg_service.conf"
 database_target_file="${leetplus_root}/legacy-drain-database-target.conf"
 unit_manifest_file="${leetplus_root}/legacy-drain-units.conf"
@@ -533,7 +534,7 @@ add_install_file 0644 "${systemd_source}/leetplus-blue-green-recovery-watchdog.s
 add_install_file 0644 "${systemd_source}/leetplus-blue-green-recovery.timer" "${systemd_root}/leetplus-blue-green-recovery.timer"
 add_install_file 0644 "${systemd_source}/nginx.service.d/leetplus-blue-green-recovery.conf" \
   "${systemd_root}/nginx.service.d/leetplus-blue-green-recovery.conf"
-add_install_file 0440 "${systemd_source}/legacy-rollback-safe.env.example" "${leetplus_root}/rollback-safe.env" leetplus-runtime
+add_install_file 0440 "${systemd_source}/legacy-rollback-safe.env.example" "$safe_environment" leetplus-runtime
 add_install_file 0440 "${systemd_source}/legacy-rollback-7de04ff4.env.example" "${leetplus_root}/rollback-releases/${LEGACY_SHA}.env" leetplus-runtime
 if [[ "$unprivileged_test_mode" == true ]]; then
   add_install_file 0600 "${systemd_source}/legacy-drain-units.conf.example" "$unit_manifest_file"

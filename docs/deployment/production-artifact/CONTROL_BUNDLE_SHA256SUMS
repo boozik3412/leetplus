@@ -2,7 +2,7 @@ dc96e8573f54ef30ef4e88439188524d0d193897a77099975555bbf5659f7467  ./activate-leg
 cf95e1a3a704833a67b27cbc356abf16ab62c517b23ec708d19796818b332de3  ./apply-legacy-database-login-fence.sh
 4a25ff7561727f707ce37aa394ca5e0b0b28f52f5b63516dcdac5dfa6a60c130  ./apply-legacy-rollback-egress.sh
 5826a2d9d93f2523db8b3271dfe3c5b6f26b2956e95a95d6b35d164a73bb7929  ./blue-green-cutover.sh
-dd24d27f498d8dd8f73169dbd270d50dd2333918b9dc8032e08af80323b266df  ./install-legacy-rollback-contour.sh
+15c7e5c8b7eb56e5d248f095046000b4cd8561f39a4326e4e2da63c622ff9202  ./install-legacy-rollback-contour.sh
 e533a946eb7d4393b7f1f692da2f57f4d8bf86180658ff82d677084fc683b50a  ./legacy-rollback-auth-edge.mjs
 ea25c3cf121ff21f21c02b5bf017ac6b20e943918b6624210d593e800493127c  ./legacy-rollback-child-loopback.cjs
 3553e31012e1c00d695381c76ad4df184113c71c5a8b018bf5d934c2cea3fd8e  ./nginx/blue.conf.example

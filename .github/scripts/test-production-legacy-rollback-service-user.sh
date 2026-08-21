@@ -16,6 +16,9 @@ readonly INSTALLED_PREFLIGHT='/usr/local/libexec/leetplus/preflight-legacy-rollb
 readonly WEB_CACHE='/var/cache/leetplus-web-nminus1'
 readonly NESTED_MOUNT_SOURCE='/run/leetplus-legacy-nested-source'
 cleanup_armed=false
+node_fixture_root=''
+replaced_system_node=false
+original_system_node_present=false
 
 die() {
   printf 'legacy rollback service-user fixture: %s\n' "$*" >&2
@@ -23,8 +26,20 @@ die() {
 }
 
 cleanup() {
-  [[ "$cleanup_armed" == true ]] || return 0
   set +e
+  if [[ "$replaced_system_node" == true ]]; then
+    rm -f -- /usr/bin/node
+    if [[ "$original_system_node_present" == true ]]; then
+      mv -- "$node_fixture_root/system-node.original" /usr/bin/node
+    fi
+  fi
+  if [[ -n "$node_fixture_root" ]]; then
+    case "$node_fixture_root" in
+      /tmp/leetplus-legacy-service-user.*) rm -rf -- "$node_fixture_root" ;;
+      *) printf 'refusing unsafe Node fixture cleanup: %s\n' "$node_fixture_root" >&2 ;;
+    esac
+  fi
+  [[ "$cleanup_armed" == true ]] || return 0
   if [[ -f "${RELEASE_DIRECTORY}/.ci-legacy-rollback-fixture" \
     && "$(realpath -m -- "$RELEASE_DIRECTORY")" == "/srv/leetplus/rollback-releases/${LEGACY_SHA}" ]]; then
     find -P "$RELEASE_DIRECTORY" -depth -mindepth 1 -delete
@@ -73,6 +88,26 @@ done
 for exact_path in /srv/leetplus "$LEETPLUS_ETC" /usr/local/libexec/leetplus "$WEB_CACHE" "$NESTED_MOUNT_SOURCE"; do
   [[ ! -e "$exact_path" && ! -L "$exact_path" ]] || die "fixture path already exists: ${exact_path}"
 done
+
+node_fixture_root="$(mktemp -d /tmp/leetplus-legacy-service-user.XXXXXXXX)"
+fixture_node_binary="$(realpath -e -- "$(command -v node)")"
+[[ -f "$fixture_node_binary" && ! -L "$fixture_node_binary" && -x "$fixture_node_binary" \
+  && "$($fixture_node_binary -p 'process.versions.node.split(".")[0]')" == '22' ]] \
+  || die 'fixture authority Node is not an exact regular Node 22 binary'
+if [[ ! -f /usr/bin/node || -L /usr/bin/node \
+  || "$(stat -c '%u:%g' -- /usr/bin/node 2>/dev/null || true)" != '0:0' \
+  || "$(/usr/bin/node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)" != '22' ]]; then
+  if [[ -e /usr/bin/node || -L /usr/bin/node ]]; then
+    mv -- /usr/bin/node "$node_fixture_root/system-node.original"
+    original_system_node_present=true
+  fi
+  replaced_system_node=true
+  install -o root -g root -m 0755 "$fixture_node_binary" /usr/bin/node
+fi
+[[ -f /usr/bin/node && ! -L /usr/bin/node \
+  && "$(stat -c '%u:%g' -- /usr/bin/node)" == '0:0' \
+  && "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" == '22' ]] \
+  || die 'fixture could not provision exact root-owned /usr/bin/node major 22'
 
 cleanup_armed=true
 groupadd --system leetplus-runtime

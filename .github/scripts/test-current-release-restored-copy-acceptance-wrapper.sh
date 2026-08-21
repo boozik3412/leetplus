@@ -1428,53 +1428,53 @@ for ((index = 0; index < ${#arguments[@]}; index += 1)); do
       ;;
     --child-payload) child_payload_index=$((index + 1)) ;;
     --property=LoadCredential=current-release-runtime.json:*) credential_file="${argument#*:}" ;;
-    --property=User=*) property_user="${argument#*=}" ;;
-    --property=Group=*) property_group="${argument#*=}" ;;
-    --property=SupplementaryGroups=*) property_supplementary_groups="${argument#*=}" ;;
-    --property=SetLoginEnvironment=*) property_set_login_environment="${argument#*=}" ;;
-    --property=WorkingDirectory=*) property_working_directory="${argument#*=}" ;;
+    --property=User=*) property_user="${argument#--property=*=}" ;;
+    --property=Group=*) property_group="${argument#--property=*=}" ;;
+    --property=SupplementaryGroups=*) property_supplementary_groups="${argument#--property=*=}" ;;
+    --property=SetLoginEnvironment=*) property_set_login_environment="${argument#--property=*=}" ;;
+    --property=WorkingDirectory=*) property_working_directory="${argument#--property=*=}" ;;
     --property=Environment=*)
       if [[ -n "$property_environment" ]]; then property_environment+=' '; fi
-      property_environment+="${argument#*=}"
+      property_environment+="${argument#--property=*=}"
       ;;
-    --property=UnsetEnvironment=*) property_unset_environment="${argument#*=}" ;;
-    --property=NoNewPrivileges=*) property_no_new_privileges="${argument#*=}" ;;
-    --property=CapabilityBoundingSet=*) property_capability_bounding_set="${argument#*=}" ;;
-    --property=AmbientCapabilities=*) property_ambient_capabilities="${argument#*=}" ;;
-    --property=IPAddressDeny=*) property_ip_address_deny="${argument#*=}" ;;
-    --property=IPAddressAllow=*) property_ip_address_allow="${argument#*=}" ;;
-    --property=Delegate=*) property_delegate="${argument#*=}" ;;
-    --property=PrivateTmp=*) property_private_tmp="${argument#*=}" ;;
-    --property=PrivateDevices=*) property_private_devices="${argument#*=}" ;;
-    --property=ProtectSystem=*) property_protect_system="${argument#*=}" ;;
-    --property=ProtectHome=*) property_protect_home="${argument#*=}" ;;
-    --property=ProtectProc=*) property_protect_proc="${argument#*=}" ;;
-    --property=ProcSubset=*) property_proc_subset="${argument#*=}" ;;
-    --property=ProtectKernelTunables=*) property_protect_kernel_tunables="${argument#*=}" ;;
-    --property=ProtectKernelModules=*) property_protect_kernel_modules="${argument#*=}" ;;
-    --property=ProtectKernelLogs=*) property_protect_kernel_logs="${argument#*=}" ;;
-    --property=ProtectControlGroups=*) property_protect_control_groups="${argument#*=}" ;;
-    --property=ProtectClock=*) property_protect_clock="${argument#*=}" ;;
-    --property=ProtectHostname=*) property_protect_hostname="${argument#*=}" ;;
-    --property=LockPersonality=*) property_lock_personality="${argument#*=}" ;;
-    --property=RestrictRealtime=*) property_restrict_realtime="${argument#*=}" ;;
-    --property=RestrictSUIDSGID=*) property_restrict_suidsgid="${argument#*=}" ;;
-    --property=SystemCallArchitectures=*) property_system_call_architectures="${argument#*=}" ;;
-    --property=RestrictAddressFamilies=*) property_restrict_address_families="${argument#*=}" ;;
-    --property=InaccessiblePaths=*) inaccessible_path="${argument#*=}" ;;
-    --property=BindPaths=*) bind_path="${argument#*=}" ;;
-    --property=BindReadOnlyPaths=*) bind_read_only_path="${argument#*=}" ;;
+    --property=UnsetEnvironment=*) property_unset_environment="${argument#--property=*=}" ;;
+    --property=NoNewPrivileges=*) property_no_new_privileges="${argument#--property=*=}" ;;
+    --property=CapabilityBoundingSet=*) property_capability_bounding_set="${argument#--property=*=}" ;;
+    --property=AmbientCapabilities=*) property_ambient_capabilities="${argument#--property=*=}" ;;
+    --property=IPAddressDeny=*) property_ip_address_deny="${argument#--property=*=}" ;;
+    --property=IPAddressAllow=*) property_ip_address_allow="${argument#--property=*=}" ;;
+    --property=Delegate=*) property_delegate="${argument#--property=*=}" ;;
+    --property=PrivateTmp=*) property_private_tmp="${argument#--property=*=}" ;;
+    --property=PrivateDevices=*) property_private_devices="${argument#--property=*=}" ;;
+    --property=ProtectSystem=*) property_protect_system="${argument#--property=*=}" ;;
+    --property=ProtectHome=*) property_protect_home="${argument#--property=*=}" ;;
+    --property=ProtectProc=*) property_protect_proc="${argument#--property=*=}" ;;
+    --property=ProcSubset=*) property_proc_subset="${argument#--property=*=}" ;;
+    --property=ProtectKernelTunables=*) property_protect_kernel_tunables="${argument#--property=*=}" ;;
+    --property=ProtectKernelModules=*) property_protect_kernel_modules="${argument#--property=*=}" ;;
+    --property=ProtectKernelLogs=*) property_protect_kernel_logs="${argument#--property=*=}" ;;
+    --property=ProtectControlGroups=*) property_protect_control_groups="${argument#--property=*=}" ;;
+    --property=ProtectClock=*) property_protect_clock="${argument#--property=*=}" ;;
+    --property=ProtectHostname=*) property_protect_hostname="${argument#--property=*=}" ;;
+    --property=LockPersonality=*) property_lock_personality="${argument#--property=*=}" ;;
+    --property=RestrictRealtime=*) property_restrict_realtime="${argument#--property=*=}" ;;
+    --property=RestrictSUIDSGID=*) property_restrict_suidsgid="${argument#--property=*=}" ;;
+    --property=SystemCallArchitectures=*) property_system_call_architectures="${argument#--property=*=}" ;;
+    --property=RestrictAddressFamilies=*) property_restrict_address_families="${argument#--property=*=}" ;;
+    --property=InaccessiblePaths=*) inaccessible_path="${argument#--property=*=}" ;;
+    --property=BindPaths=*) bind_path="${argument#--property=*=}" ;;
+    --property=BindReadOnlyPaths=*) bind_read_only_path="${argument#--property=*=}" ;;
     --property=ReadOnlyPaths=*)
       if [[ -n "$read_only_paths" ]]; then read_only_paths+=' '; fi
-      read_only_paths+="${argument#*=}"
+      read_only_paths+="${argument#--property=*=}"
       ;;
-    --property=ReadWritePaths=*) read_write_path="${argument#*=}" ;;
-    --property=KillMode=*) property_kill_mode="${argument#*=}" ;;
-    --property=TimeoutStopSec=*) property_timeout_stop="${argument#*=}" ;;
-    --property=UMask=*) property_umask="${argument#*=}" ;;
-    --property=StandardOutput=*) property_standard_output="${argument#*=}" ;;
-    --property=StandardError=*) property_standard_error="${argument#*=}" ;;
-    --property=RuntimeMaxSec=*) property_runtime_max="${argument#*=}" ;;
+    --property=ReadWritePaths=*) read_write_path="${argument#--property=*=}" ;;
+    --property=KillMode=*) property_kill_mode="${argument#--property=*=}" ;;
+    --property=TimeoutStopSec=*) property_timeout_stop="${argument#--property=*=}" ;;
+    --property=UMask=*) property_umask="${argument#--property=*=}" ;;
+    --property=StandardOutput=*) property_standard_output="${argument#--property=*=}" ;;
+    --property=StandardError=*) property_standard_error="${argument#--property=*=}" ;;
+    --property=RuntimeMaxSec=*) property_runtime_max="${argument#--property=*=}" ;;
     --verify-evidence) verify=true ;;
     --drain-check) drain=true ;;
     --evidence) evidence="${arguments[$((index + 1))]:-}" ;;

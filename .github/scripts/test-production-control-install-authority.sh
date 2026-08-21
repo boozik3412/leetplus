@@ -14,6 +14,7 @@ readonly INNER_MANIFEST='docs/deployment/production-artifact/CONTROL_BUNDLE_SHA2
 readonly INSTALL_MAP='docs/deployment/production-control-authority/production-control-install-map.tsv'
 readonly INSTALLED_VERIFIER='/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs'
 readonly CLEAN_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+readonly VERIFIER_PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 readonly TEST_ROOT="$(mktemp -d)"
 readonly SOURCE_NODE="$(realpath -e -- "${LEETPLUS_FIXTURE_NODE:-$(command -v node)}")"
 
@@ -243,7 +244,7 @@ run_installer() {
 run_installed_verifier() {
   local root="$1"
   /usr/bin/env -i \
-    PATH="$CLEAN_PATH" \
+    PATH="$VERIFIER_PATH" \
     LANG='C.UTF-8' \
     LC_ALL='C.UTF-8' \
     TZ='UTC' \

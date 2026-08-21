@@ -224,7 +224,7 @@ done
 ((${#drain_units[@]} > 0)) || die 'unit manifest contains no drain targets'
 
 systemctl_bounded() {
-  timeout --foreground --kill-after=2s "${command_timeout_seconds}s" systemctl "$@"
+  timeout --kill-after=2s "${command_timeout_seconds}s" systemctl "$@"
 }
 
 unit_files_output="$(systemctl_bounded list-unit-files 'leetplus-*' --type=service --type=timer --no-legend --no-pager)" \
@@ -345,7 +345,7 @@ unit_not_drained() {
       }
       cgroup_path="${cgroup_root}${control_group}"
       if [[ -d "$cgroup_path" ]]; then
-        cgroup_pids="$(timeout --foreground --kill-after=2s "${command_timeout_seconds}s" \
+        cgroup_pids="$(timeout --kill-after=2s "${command_timeout_seconds}s" \
           find "$cgroup_path" -type f -name cgroup.procs \
             -exec awk 'NF { print; exit }' {} \; 2>/dev/null)" || {
           printf 'legacy unit cgroup inventory failed or returned partial output: %s\n' "$unit" >&2
@@ -370,7 +370,7 @@ database_not_drained() {
   local fence_authority_contract
   local observed_database observed_address observed_port observed_system_identifier observed_session_user
   counts="$(
-    timeout --foreground --kill-after=3s "${psql_timeout_seconds}s" env \
+    timeout --kill-after=3s "${psql_timeout_seconds}s" env \
       PGCONNECT_TIMEOUT=5 \
       PGOPTIONS='-c statement_timeout=10000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=10000' \
       PGSERVICEFILE="$pg_service_file" PGSERVICE="$pg_service" \

@@ -341,7 +341,7 @@ for canonical_drain in leetplus-api.service leetplus-web.service leetplus-deploy
 done
 
 systemctl_bounded() {
-  timeout --foreground --kill-after=2s 10s systemctl "$@"
+  timeout --kill-after=2s 10s systemctl "$@"
 }
 
 unit_files_output="$(systemctl_bounded list-unit-files 'leetplus-*' --type=service --type=timer --no-legend --no-pager)" \
@@ -382,7 +382,7 @@ esac
 [[ "$(systemctl_bounded show --property=NeedDaemonReload --value nginx.service)" == no ]] \
   || die 'nginx effective configuration is stale after contour installation'
 
-timeout --foreground --kill-after=5s 120s \
+timeout --kill-after=5s 120s \
   "$rollback_probe" --release-sha "$LEGACY_SHA" "${rollback_probe_arguments[@]}" \
   || die 'scheduler-free rollback pair is not ready before routing'
 
@@ -442,7 +442,7 @@ verify_intent() {
 
 if [[ -f "$receipt_path" && ! -L "$receipt_path" ]]; then
   [[ "$(realpath -e -- "$active_link")" == "$safe_target" ]] || die 'accepted scheduler-free route is no longer active'
-  timeout --foreground --kill-after=5s 330s \
+  timeout --kill-after=5s 330s \
     "$rollback_probe" --release-sha "$LEGACY_SHA" --require-drain "${rollback_probe_arguments[@]}" \
     || die 'accepted scheduler-free contour no longer verifies'
   # Receipt rename is the commit point. The immutable intent/phase evidence is
@@ -478,7 +478,7 @@ capture_unit_processes() {
       [[ "$control_group" == /* && "$control_group" != *'..'* ]] || die "unsafe cgroup path for ${unit}"
       cgroup_path="${cgroup_root}${control_group}"
       if [[ -d "$cgroup_path" ]]; then
-        cgroup_pid_inventory="$(timeout --foreground --kill-after=2s 10s \
+        cgroup_pid_inventory="$(timeout --kill-after=2s 10s \
           find "$cgroup_path" -type f -name cgroup.procs -exec awk 'NF { print }' {} \; 2>/dev/null)" \
           || die "cgroup PID inventory failed or returned partial output for ${unit}"
         while IFS= read -r pid; do
@@ -514,7 +514,7 @@ capture_nginx_workers() {
   master_pid="$(systemctl_bounded show --property=MainPID --value nginx.service)" \
     || die 'cannot inventory nginx master PID'
   [[ "$master_pid" =~ ^[1-9][0-9]*$ ]] || die 'nginx master PID is absent'
-  workers_output="$(timeout --foreground --kill-after=2s 10s pgrep -P "$master_pid" nginx)" \
+  workers_output="$(timeout --kill-after=2s 10s pgrep -P "$master_pid" nginx)" \
     || die 'cannot capture the pre-reload nginx worker generation'
   temporary="${nginx_worker_snapshot}.new.$$"
   : > "$temporary"
@@ -583,7 +583,7 @@ candidate_full_config_test() {
   cp -a -- "$config_root/." "$validation_root/"
   rm -f -- "$validation_root/active-upstreams.conf"
   ln -s -- "upstreams/$(basename -- "$safe_target")" "$validation_root/active-upstreams.conf"
-  if ! timeout --foreground --kill-after=5s 20s \
+  if ! timeout --kill-after=5s 20s \
     unshare --mount --propagation private /bin/sh -eu -c '
       mount --bind -- "$1" "$2"
       exec nginx -t
@@ -701,7 +701,7 @@ if ((public_successes < 3)); then
   die 'scheduler-free public watchdog failed after drain began; safe route retained and migration remains blocked'
 fi
 
-if ! timeout --foreground --kill-after=5s 120s \
+if ! timeout --kill-after=5s 120s \
   "$rollback_probe" --release-sha "$LEGACY_SHA" "${rollback_probe_arguments[@]}"; then
   if [[ "$past_drain_boundary" == false ]]; then
     restore_legacy_route \
@@ -725,7 +725,7 @@ past_drain_boundary=true
 
 legacy_connection_count() {
   local sockets
-  sockets="$(timeout --foreground --kill-after=2s 10s ss -Htan state established)" || return 2
+  sockets="$(timeout --kill-after=2s 10s ss -Htan state established)" || return 2
   awk '
     {
       for (field = 1; field <= NF; field += 1) {
@@ -902,7 +902,7 @@ fault_checkpoint dropins
 
 database_fence_running="${database_fence_marker}.running.$$"
 attest_operational_authority
-if ! timeout --foreground --kill-after=5s 45s \
+if ! timeout --kill-after=5s 45s \
   "$database_fence" "${database_fence_arguments[@]}" > "$database_fence_running"; then
   rm -f -- "$database_fence_running"
   die 'legacy database login fence failed; safe route retained and legacy units remain running'
@@ -949,7 +949,7 @@ done
 if [[ ! -f "$drain_output_path" ]]; then
   attest_operational_authority
   drain_running="${drain_output_path}.running.$$"
-  if ! timeout --foreground --kill-after=5s 330s \
+  if ! timeout --kill-after=5s 330s \
     "$drain_verifier" "${drain_verifier_arguments[@]}" > "$drain_running"; then
     rm -f -- "$drain_running"
     die 'legacy runtime did not drain; scheduler-free pair remains publicly routed and migration is blocked'
@@ -979,7 +979,7 @@ fault_checkpoint drain
 } | atomic_from_stdin "$receipt_path"
 fault_checkpoint receipt
 
-timeout --foreground --kill-after=5s 330s \
+timeout --kill-after=5s 330s \
   "$rollback_probe" --release-sha "$LEGACY_SHA" --require-drain "${rollback_probe_arguments[@]}" \
   || die 'post-receipt scheduler-free readiness re-verification failed'
 

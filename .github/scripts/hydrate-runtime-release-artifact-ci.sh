@@ -676,7 +676,12 @@ for runner_owned_input in "$repository_root" "$artifact" "$artifact_sha256" \
 done
 [[ "$(/usr/sbin/runuser -u "$build_user" -- /usr/bin/env -i \
   PATH="$tool_path" HOME="$home_root" \
-  "$pnpm_command" --version)" == '10.33.2' ]] \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+  /usr/bin/bash --noprofile --norc -p -c '
+    cd -- "$1"
+    shift
+    exec "$@"
+  ' ci-pnpm-version "$home_root" "$pnpm_command" --version)" == '10.33.2' ]] \
   || die 'exact pnpm runtime is not version 10.33.2'
 
 /usr/sbin/runuser -u "$build_user" -- /usr/bin/env -i \

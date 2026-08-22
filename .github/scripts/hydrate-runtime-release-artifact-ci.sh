@@ -491,6 +491,78 @@ find_has_match() {
   return 1
 }
 
+assert_exact_pnpm_project_registration() {
+  local registry_root="$1"
+  local registration_kind="$2"
+  local expected_root="$3"
+  local expected_sha="${4:-}"
+
+  /usr/bin/python3 - \
+    "$registry_root" "$registration_kind" "$expected_root" "$expected_sha" \
+    "$build_uid" "$build_gid" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+registry_root, registration_kind, expected_root, expected_sha, uid_text, gid_text = sys.argv[1:]
+expected_uid = int(uid_text)
+expected_gid = int(gid_text)
+
+registry_stat = os.lstat(registry_root)
+if not stat.S_ISDIR(registry_stat.st_mode):
+    raise SystemExit("pnpm project registry is not a real directory")
+if (
+    registry_stat.st_uid != expected_uid
+    or registry_stat.st_gid != expected_gid
+    or stat.S_IMODE(registry_stat.st_mode) != 0o700
+):
+    raise SystemExit("pnpm project registry metadata is not exact")
+
+with os.scandir(registry_root) as iterator:
+    entries = list(iterator)
+if len(entries) != 1:
+    raise SystemExit("pnpm project registry does not contain exactly one entry")
+
+entry = entries[0]
+entry_stat = entry.stat(follow_symlinks=False)
+if not stat.S_ISLNK(entry_stat.st_mode):
+    raise SystemExit("pnpm project registration is not a symlink")
+if entry_stat.st_uid != expected_uid or entry_stat.st_gid != expected_gid:
+    raise SystemExit("pnpm project registration ownership is not exact")
+
+raw_target = os.readlink(entry.path)
+if os.path.isabs(raw_target):
+    target = os.path.normpath(raw_target)
+else:
+    target = os.path.normpath(os.path.join(registry_root, raw_target))
+target = os.path.abspath(target)
+
+if registration_kind == "exact":
+    expected_target = os.path.abspath(os.path.normpath(expected_root))
+    if target != expected_target or os.path.realpath(entry.path) != expected_target:
+        raise SystemExit("pnpm project registration target is not exact")
+elif registration_kind == "untrusted-staging":
+    output_root = os.path.abspath(os.path.normpath(expected_root))
+    target_name = os.path.basename(target)
+    prefix = f".{expected_sha}.untrusted-test-staging."
+    suffix = target_name[len(prefix):] if target_name.startswith(prefix) else ""
+    if (
+        os.path.dirname(target) != output_root
+        or len(suffix) != 6
+        or not suffix.isascii()
+        or not suffix.isalnum()
+    ):
+        raise SystemExit("pnpm project registration escaped the disposable staging namespace")
+else:
+    raise SystemExit("unknown pnpm project registration assertion mode")
+
+expected_name = hashlib.sha256(target.encode("utf-8")).hexdigest()[:32]
+if entry.name != expected_name:
+    raise SystemExit("pnpm project registration name is not bound to its target")
+PY
+}
+
 store_authority_parent='/srv/leetplus-ci-runtime-hydration'
 store_authority_root="${store_authority_parent}/${release_sha}"
 output_authority_parent='/srv/leetplus-ci-runtime-output'
@@ -499,6 +571,8 @@ output_authority_parent='/srv/leetplus-ci-runtime-output'
 home_root="${work_root}/home"
 tool_root="${store_authority_root}/tools"
 store_root="${store_authority_root}/store"
+store_version_root="${store_root}/v10"
+project_registry_root="${store_version_root}/projects"
 input_root="${store_authority_root}/inputs"
 release_output_root="${work_root}/releases"
 [[ -d /srv && ! -L /srv && "$(/usr/bin/realpath -e -- /srv)" == '/srv' \
@@ -728,6 +802,15 @@ fi
     --release-root "$reference_root" \
     --expected-release-sha "$release_sha" \
   || die 'exact-lockfile fetch mutated the verified release source'
+[[ -d "$store_version_root" && ! -L "$store_version_root" \
+  && "$(/usr/bin/realpath -e -- "$store_version_root")" == "$store_version_root" ]] \
+  || die 'pinned pnpm did not create its exact v10 store layout'
+assert_exact_pnpm_project_registration \
+  "$project_registry_root" exact "$reference_root" \
+  || die 'pinned pnpm fetch created an unexpected project registration'
+/usr/bin/rm -rf -- "$project_registry_root"
+[[ ! -e "$project_registry_root" && ! -L "$project_registry_root" ]] \
+  || die 'temporary pnpm fetch project registration did not retire'
 /usr/bin/rm -rf -- "$reference_root"
 printf 'CI_PNPM_FETCH_SOURCE_INTEGRITY=PASS\n'
 
@@ -802,6 +885,19 @@ if find_has_match -P "$pnpm_runtime_root" -mindepth 0 ! -user root \
   die 'exact pnpm runtime tree metadata is not frozen'
 fi
 
+/usr/bin/install -d \
+  -o "$build_user" -g "$build_group" -m 0700 -- "$project_registry_root"
+[[ -d "$project_registry_root" && ! -L "$project_registry_root" \
+  && "$(/usr/bin/realpath -e -- "$project_registry_root")" == "$project_registry_root" \
+  && "$(/usr/bin/stat -c '%u:%g:%a' -- "$project_registry_root")" == \
+    "${build_uid}:${build_gid}:700" ]] \
+  || die 'isolated pnpm project registry metadata is not exact'
+if find_has_match -P "$project_registry_root" -mindepth 1; then
+  die 'isolated pnpm project registry did not start empty'
+fi
+/usr/sbin/runuser -u "$build_user" -- /usr/bin/test -w "$project_registry_root" \
+  || die 'ephemeral hydration identity cannot write its isolated pnpm project registry'
+
 for frozen_path in "$store_root" "$stager_snapshot" "${tool_root}/node" \
   "$pnpm_runtime_root" "$pnpm_entry_snapshot" "$pnpm_command" \
   "$pnpm_path" "$pnpm_package_root" \
@@ -834,6 +930,7 @@ run_hydration_and_verify() {
     --property=ProtectHome=read-only \
     --property="ReadOnlyPaths=${repository_root}" \
     --property="ReadOnlyPaths=${store_authority_root}" \
+    --property="ReadWritePaths=${project_registry_root}" \
     --property="ReadWritePaths=${work_root}" \
     --property=ProtectKernelTunables=yes \
     --property=ProtectKernelModules=yes \
@@ -871,6 +968,21 @@ run_hydration_and_verify() {
     || die 'production-parity disposable runtime hydration failed'
   assert_build_uid_quiescent
   /usr/bin/systemctl reset-failed "$hydration_unit_name" >/dev/null 2>&1 || true
+
+  assert_exact_pnpm_project_registration \
+    "$project_registry_root" untrusted-staging "$release_output_root" "$release_sha" \
+    || die 'offline hydration created an unexpected pnpm project registration'
+  /usr/bin/rm -rf -- "$project_registry_root"
+  [[ ! -e "$project_registry_root" && ! -L "$project_registry_root" ]] \
+    || die 'isolated pnpm project registry did not retire after hydration'
+  if find_has_match -P "$store_root" ! -type d ! -type f \
+    || find_has_match -P "$store_root" -type f -links +1 \
+    || find_has_match -P "$store_root" -mindepth 0 ! -user root \
+    || find_has_match -P "$store_root" -mindepth 0 ! -gid "$build_gid" \
+    || find_has_match -P "$store_root" -type d ! -perm 0550 \
+    || find_has_match -P "$store_root" -type f ! -perm 0440; then
+    die 'offline hydration changed frozen pnpm package-store topology or metadata'
+  fi
 
   store_manifest_after="$(/usr/bin/mktemp "${work_root}/.pnpm-store.after.XXXXXX")"
   (
@@ -927,7 +1039,8 @@ run_hydration_and_verify() {
   printf 'CI_RUNTIME_HYDRATION=PASS\n'
   printf 'CI_RUNTIME_BUILD_IDENTITY=EPHEMERAL_NOLOGIN_NO_SUDO\n'
   printf 'CI_RUNTIME_DEPENDENCY_INSTALL=OFFLINE_FROZEN_IGNORE_SCRIPTS_COPY\n'
-  printf 'CI_RUNTIME_PNPM_STORE_MUTATED=false\n'
+  printf 'CI_RUNTIME_PNPM_PACKAGE_STORE_MUTATED=false\n'
+  printf 'CI_RUNTIME_PNPM_PROJECT_REGISTRY=EPHEMERAL_ISOLATED_REMOVED\n'
   printf 'CI_HYDRATED_RELEASE_DIRECTORY=%s\n' "$hydrated_release"
 }
 

@@ -1207,7 +1207,8 @@ NODE
     assert_exact_hydration_output_inventory "$staging_directory"
     assert_trusted_source_manifest_unchanged
     pnpm install --prod --offline --frozen-lockfile --ignore-scripts \
-      --package-import-method=copy --store-dir "$pnpm_store_dir" || exit 1
+      --side-effects-cache-readonly --package-import-method=copy \
+      --store-dir "$pnpm_store_dir" || exit 1
     assert_trusted_source_manifest_unchanged
     assert_exact_hydration_output_inventory "$staging_directory"
     pnpm --filter database db:generate || exit 1

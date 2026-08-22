@@ -31,8 +31,9 @@ production hydration receipt и не может быть promoted. Production `-
 `leetplus-build`, чистого от runtime secrets/production credentials и
 изолированного от внешней сети и local Unix sockets. Он запускает exact copy-only
 `pnpm install --prod --offline --frozen-lockfile --ignore-scripts
---package-import-method=copy --store-dir /srv/leetplus/pnpm-store`, затем Prisma
-generate, отвергает hardlinks и создаёт полный `HYDRATED_SHA256SUMS`. Root и
+--side-effects-cache-readonly --package-import-method=copy --store-dir
+/srv/leetplus/pnpm-store`, затем Prisma generate, отвергает hardlinks и создаёт
+полный `HYDRATED_SHA256SUMS`. Root и
 runtime users не имеют права выполнять hydration. Ошибка сохраняет staging
 directory для расследования и никогда не перезаписывает существующий release.
 При построении manifest исключается только exact root
@@ -222,9 +223,15 @@ sudo /usr/local/sbin/leetplus-promote-release-artifact \
 ```
 
 До hydration trusted store собирается **не на production** в таком же exact
-Node major/pnpm `10.33.2` окружении: `pnpm fetch --prod --frozen-lockfile
---ignore-scripts --package-import-method=copy --store-dir <empty-store>`, затем
-содержимое `<empty-store>` архивируется и
+Node major/pnpm `10.33.2` окружении. Сначала `pnpm fetch --prod
+--frozen-lockfile --ignore-scripts --package-import-method=copy --store-dir
+<empty-store>` получает lockfile-bound package bytes без выполнения package
+code. Затем в disposable exact-source workspace выполняется `pnpm install
+--prod --offline --frozen-lockfile --side-effects-cache
+--package-import-method=copy --store-dir <empty-store>`: pnpm запускает только
+dependency hooks из reviewed `allowBuilds` и сохраняет их platform/Node-bound
+side-effects, включая оба Prisma engine, в тот же CAS. После удаления
+disposable `node_modules` содержимое `<empty-store>` архивируется и
 архив получает отдельный SHA-256. На production оба файла и exact
 `pnpm-lock.yaml` импортируются только через root
 `stage-pnpm-store.sh --archive ... --archive-sha256 ... --lockfile ...
@@ -377,8 +384,9 @@ GitHub runner устанавливает exact hydration template, запуск�
 groups, duplicate UID/primary GID/group-GID alias, отклоняет независимый процесс
 под build UID, nonempty global build root и hostile generator, а также читает PID
 из реального nonempty zero-size `cgroup.procs`. Stage fixture отдельно фиксирует
-exact offline/copy/ignore-scripts argv и mutation-canary доказывает, что удаление
-`--ignore-scripts` исполняет dependency lifecycle marker и ломает gate.
+exact offline/copy/ignore-scripts/side-effects-cache-readonly argv и
+mutation-canary доказывает, что удаление `--ignore-scripts` исполняет dependency
+lifecycle marker и ломает gate.
 Тем же real-systemd fixture выполняются normal promotion и retry после lost
 response, recovery из post-stop/post-move/post-seal состояний, exact sealer root
 authority и dry-run owner/group/mode attestation, exact

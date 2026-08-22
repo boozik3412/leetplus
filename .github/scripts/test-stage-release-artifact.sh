@@ -265,7 +265,7 @@ if [[ "$#" == '1' && "$1" == '--version' ]]; then
 fi
 printf '%s\n' "$*" >> "${PNPM_FIXTURE_LOG:-/dev/null}"
 if [[ "${1:-}" == 'install' ]]; then
-  [[ "$*" == 'install --prod --offline --frozen-lockfile --ignore-scripts --package-import-method=copy --store-dir /srv/leetplus/pnpm-store' ]]
+  [[ "$*" == 'install --prod --offline --frozen-lockfile --ignore-scripts --side-effects-cache-readonly --package-import-method=copy --store-dir /srv/leetplus/pnpm-store' ]]
   for module_root in \
     node_modules apps/api/node_modules apps/web/node_modules packages/database/node_modules; do
     [[ -d "$module_root" && ! -L "$module_root" && -w "$module_root" ]]
@@ -320,7 +320,7 @@ env -u DATABASE_URL -u JWT_SECRET -u GUEST_PORTAL_JWT_SECRET \
   --hydrate --unprivileged-test-mode > "${TEST_ROOT}/successful-hydration.out"
 successful_hydration_release="${successful_hydration_root}/.untrusted-test-${RELEASE_SHA}"
 grep -F -x \
-  'install --prod --offline --frozen-lockfile --ignore-scripts --package-import-method=copy --store-dir /srv/leetplus/pnpm-store' \
+  'install --prod --offline --frozen-lockfile --ignore-scripts --side-effects-cache-readonly --package-import-method=copy --store-dir /srv/leetplus/pnpm-store' \
   "$successful_pnpm_log" >/dev/null
 grep -F -x -- '--filter database db:generate' "$successful_pnpm_log" >/dev/null
 [[ "$(awk 'END { print NR }' "$successful_pnpm_log")" == '2' ]]
@@ -393,7 +393,7 @@ if [[ "$#" == '1' && "$1" == '--version' ]]; then
   exit 0
 fi
 if [[ "${1:-}" == 'install' ]]; then
-  [[ "$*" == 'install --prod --offline --frozen-lockfile --ignore-scripts --package-import-method=copy --store-dir /srv/leetplus/pnpm-store' ]]
+  [[ "$*" == 'install --prod --offline --frozen-lockfile --ignore-scripts --side-effects-cache-readonly --package-import-method=copy --store-dir /srv/leetplus/pnpm-store' ]]
   exit 0
 fi
 [[ "$*" == '--filter database db:generate' ]]

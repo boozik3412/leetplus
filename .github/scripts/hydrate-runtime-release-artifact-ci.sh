@@ -53,9 +53,11 @@ Usage:
 
 The command creates <work-root>/releases/.untrusted-test-<sha> and prints its
 absolute path as CI_HYDRATED_RELEASE_DIRECTORY. It fetches a fresh lockfile-
-bound store, freezes that store as root-owned read-only input, and delegates the
-offline copy-only, ignore-scripts install plus explicit Prisma generation to the
-reviewed production stager. It never creates a deployable production release.
+bound store, materializes only the reviewed production dependency side effects
+inside a disposable workspace, freezes that store as root-owned read-only input,
+and delegates the offline copy-only, ignore-scripts install plus explicit Prisma
+generation to the reviewed production stager. It never creates a deployable
+production release.
 USAGE
 }
 
@@ -620,7 +622,7 @@ source_node_sha256="$(snapshot_regular_file \
   "$node_path" "${tool_root}/node" 268435456 0550)"
 source_stager_sha256="$(snapshot_regular_file \
   "$stager" "$stager_snapshot" 4194304 0550 \
-  b9e3a45db18ad502305a00c9685bb41286a69d4968a3a0694b67860452e73a96)"
+  6e0b7128d31a0ad4439a728d6afe45d006bf2330ccc2f8a3cacffbef1677cc2d)"
 snapshot_regular_file \
   "$extractor" "$extractor_snapshot" 1048576 0440 \
   8b2e687f20a0c3c34bcd7c9108679c28f3a20305debe1aa17d248b4f7115cb6c \
@@ -751,6 +753,19 @@ for runner_owned_input in "$repository_root" "$artifact" "$artifact_sha256" \
     die "ephemeral CI hydration identity can write a runner-owned input: ${runner_owned_input}"
   fi
 done
+for runtime_manifest in \
+  package.json pnpm-workspace.yaml \
+  apps/api/package.json apps/web/package.json packages/database/package.json; do
+  [[ -f "${reference_root}/${runtime_manifest}" \
+    && ! -L "${reference_root}/${runtime_manifest}" \
+    && -f "${repository_root}/${runtime_manifest}" \
+    && ! -L "${repository_root}/${runtime_manifest}" ]] \
+    || die "runtime package manifest is absent or unsafe: ${runtime_manifest}"
+  /usr/bin/cmp --silent -- \
+    "${reference_root}/${runtime_manifest}" \
+    "${repository_root}/${runtime_manifest}" \
+    || die "runtime package manifest differs from the exact checkout: ${runtime_manifest}"
+done
 [[ "$(/usr/sbin/runuser -u "$build_user" -- /usr/bin/env -i \
   PATH="$tool_path" HOME="$home_root" \
   LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
@@ -811,8 +826,102 @@ assert_exact_pnpm_project_registration \
 /usr/bin/rm -rf -- "$project_registry_root"
 [[ ! -e "$project_registry_root" && ! -L "$project_registry_root" ]] \
   || die 'temporary pnpm fetch project registration did not retire'
+
+prewarm_parent_paths=(
+  "$reference_root"
+  "${reference_root}/apps/api"
+  "${reference_root}/apps/web"
+  "${reference_root}/packages/database"
+)
+prewarm_parent_modes=()
+for prewarm_parent in "${prewarm_parent_paths[@]}"; do
+  [[ -d "$prewarm_parent" && ! -L "$prewarm_parent" \
+    && "$(/usr/bin/realpath -e -- "$prewarm_parent")" == "$prewarm_parent" \
+    && "$(/usr/bin/stat -c '%u:%g' -- "$prewarm_parent")" == \
+      "${build_uid}:${build_gid}" ]] \
+    || die "dependency prewarm parent is absent or unsafe: ${prewarm_parent}"
+  prewarm_parent_mode="$(/usr/bin/stat -c '%a' -- "$prewarm_parent")"
+  [[ "$prewarm_parent_mode" =~ ^[0-7]{3,4}$ \
+    && "$((8#$prewarm_parent_mode & 8#22))" == '0' ]] \
+    || die "dependency prewarm parent has unsafe metadata: ${prewarm_parent}"
+  prewarm_parent_modes+=("$prewarm_parent_mode")
+  /usr/bin/chmod u+w -- "$prewarm_parent"
+done
+
+/usr/sbin/runuser -u "$build_user" -- /usr/bin/env -i \
+    PATH="$tool_path" \
+    HOME="$home_root" \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TZ=UTC \
+    CI=true \
+    GITHUB_ACTIONS=true \
+    /usr/bin/bash --noprofile --norc -p -c '
+      cd -- "$1"
+      shift
+      exec "$@"
+    ' ci-prewarm "$reference_root" "$pnpm_command" \
+      install --prod --offline --frozen-lockfile --side-effects-cache \
+        --package-import-method=copy --store-dir "$store_root" \
+  || die 'reviewed production dependency side-effect prewarm failed'
+assert_build_uid_quiescent
+
+prewarmed_prisma_engine_root="${reference_root}/node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines"
+prewarmed_prisma_schema_engine="${prewarmed_prisma_engine_root}/schema-engine-debian-openssl-3.0.x"
+prewarmed_prisma_query_engine="${prewarmed_prisma_engine_root}/libquery_engine-debian-openssl-3.0.x.so.node"
+for prewarmed_engine in \
+  "$prewarmed_prisma_schema_engine" "$prewarmed_prisma_query_engine"; do
+  [[ -f "$prewarmed_engine" && ! -L "$prewarmed_engine" \
+    && "$(/usr/bin/stat -c '%u:%g:%h' -- "$prewarmed_engine")" == \
+      "${build_uid}:${build_gid}:1" ]] \
+    || die "reviewed dependency prewarm did not materialize an exact Prisma engine: ${prewarmed_engine}"
+  prewarmed_engine_size="$(/usr/bin/stat -c '%s' -- "$prewarmed_engine")"
+  [[ "$prewarmed_engine_size" =~ ^[1-9][0-9]*$ \
+    && "$prewarmed_engine_size" -le 134217728 ]] \
+    || die "prewarmed Prisma engine size is outside its bound: ${prewarmed_engine}"
+done
+prewarmed_prisma_schema_sha256="$(/usr/bin/sha256sum -- "$prewarmed_prisma_schema_engine")"
+prewarmed_prisma_schema_sha256="${prewarmed_prisma_schema_sha256%% *}"
+prewarmed_prisma_query_sha256="$(/usr/bin/sha256sum -- "$prewarmed_prisma_query_engine")"
+prewarmed_prisma_query_sha256="${prewarmed_prisma_query_sha256%% *}"
+
+for prewarm_module_root in \
+  "${reference_root}/node_modules" \
+  "${reference_root}/apps/api/node_modules" \
+  "${reference_root}/apps/web/node_modules" \
+  "${reference_root}/packages/database/node_modules"; do
+  if [[ -e "$prewarm_module_root" || -L "$prewarm_module_root" ]]; then
+    [[ -d "$prewarm_module_root" && ! -L "$prewarm_module_root" ]] \
+      || die "dependency prewarm produced an unsafe module root: ${prewarm_module_root}"
+    /usr/bin/rm -rf -- "$prewarm_module_root"
+  fi
+done
+for prewarm_index in "${!prewarm_parent_paths[@]}"; do
+  /usr/bin/chmod "${prewarm_parent_modes[$prewarm_index]}" -- \
+    "${prewarm_parent_paths[$prewarm_index]}"
+done
+
+/usr/bin/cmp --silent -- \
+  "${reference_root}/SHA256SUMS" "$reference_manifest" \
+  || die 'dependency side-effect prewarm mutated the source manifest'
+/usr/bin/env -i \
+  PATH="${tool_root}:/usr/bin:/bin" \
+  LANG=C.UTF-8 \
+  LC_ALL=C.UTF-8 \
+  TZ=UTC \
+  "${tool_root}/node" "$runtime_verifier_snapshot" \
+    --release-root "$reference_root" \
+    --expected-release-sha "$release_sha" \
+  || die 'dependency side-effect prewarm mutated the verified release source'
+assert_exact_pnpm_project_registration \
+  "$project_registry_root" exact "$reference_root" \
+  || die 'dependency side-effect prewarm created an unexpected project registration'
+/usr/bin/rm -rf -- "$project_registry_root"
+[[ ! -e "$project_registry_root" && ! -L "$project_registry_root" ]] \
+  || die 'temporary dependency prewarm project registration did not retire'
 /usr/bin/rm -rf -- "$reference_root"
 printf 'CI_PNPM_FETCH_SOURCE_INTEGRITY=PASS\n'
+printf 'CI_PNPM_APPROVED_SIDE_EFFECTS=PREWARMED_EXACT\n'
 
 find_has_match -P "$store_root" -mindepth 1 \
   || die 'fresh CI pnpm store is empty'
@@ -1008,6 +1117,26 @@ run_hydration_and_verify() {
     && -s "${hydrated_release}/HYDRATED_SYMLINKS.json" \
     && -d "${hydrated_release}/node_modules" ]] \
     || die 'hydrated release is incomplete'
+  hydrated_prisma_engine_root="${hydrated_release}/node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines"
+  for hydrated_engine in \
+    "${hydrated_prisma_engine_root}/schema-engine-debian-openssl-3.0.x" \
+    "${hydrated_prisma_engine_root}/libquery_engine-debian-openssl-3.0.x.so.node"; do
+    [[ -f "$hydrated_engine" && ! -L "$hydrated_engine" \
+      && "$(/usr/bin/stat -c '%u:%g:%h' -- "$hydrated_engine")" == \
+        "${build_uid}:${build_gid}:1" ]] \
+      || die "offline hydration produced an unsafe Prisma engine: ${hydrated_engine}"
+  done
+  hydrated_prisma_schema_sha256="$(/usr/bin/sha256sum -- \
+    "${hydrated_prisma_engine_root}/schema-engine-debian-openssl-3.0.x")" \
+    || die 'offline hydration did not reuse the prewarmed Prisma schema engine'
+  hydrated_prisma_schema_sha256="${hydrated_prisma_schema_sha256%% *}"
+  hydrated_prisma_query_sha256="$(/usr/bin/sha256sum -- \
+    "${hydrated_prisma_engine_root}/libquery_engine-debian-openssl-3.0.x.so.node")" \
+    || die 'offline hydration did not reuse the prewarmed Prisma query engine'
+  hydrated_prisma_query_sha256="${hydrated_prisma_query_sha256%% *}"
+  [[ "$hydrated_prisma_schema_sha256" == "$prewarmed_prisma_schema_sha256" \
+    && "$hydrated_prisma_query_sha256" == "$prewarmed_prisma_query_sha256" ]] \
+    || die 'offline hydration Prisma engines differ from the frozen prewarm authority'
   hydrated_lockfile_sha256="$(/usr/bin/sha256sum -- "${hydrated_release}/pnpm-lock.yaml")"
   hydrated_lockfile_sha256="${hydrated_lockfile_sha256%% *}"
   [[ "$hydrated_lockfile_sha256" == "$source_lockfile_sha256" ]] \
@@ -1041,6 +1170,7 @@ run_hydration_and_verify() {
   printf 'CI_RUNTIME_HYDRATION=PASS\n'
   printf 'CI_RUNTIME_BUILD_IDENTITY=EPHEMERAL_NOLOGIN_NO_SUDO\n'
   printf 'CI_RUNTIME_DEPENDENCY_INSTALL=OFFLINE_FROZEN_IGNORE_SCRIPTS_COPY\n'
+  printf 'CI_RUNTIME_PRISMA_ENGINES=PREWARMED_FROZEN_REUSED\n'
   printf 'CI_RUNTIME_PNPM_PACKAGE_STORE_MUTATED=false\n'
   printf 'CI_RUNTIME_PNPM_PROJECT_REGISTRY=EPHEMERAL_ISOLATED_REMOVED\n'
   printf 'CI_HYDRATED_RELEASE_DIRECTORY=%s\n' "$hydrated_release"

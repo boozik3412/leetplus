@@ -31,13 +31,15 @@ def fail(message: str) -> None:
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--archive")
+    parser.add_argument("--archive-owner-uid")
     parser.add_argument("--destination")
     parser.add_argument("--help", action="store_true")
     arguments, unknown = parser.parse_known_args()
     if arguments.help:
         print(
             "Usage: extract-runtime-release-artifact.py "
-            "--archive <absolute-tar.gz> --destination <fresh-absolute-directory>"
+            "--archive <absolute-tar.gz> [--archive-owner-uid 0] "
+            "--destination <fresh-absolute-directory>"
         )
         raise SystemExit(0)
     if unknown:
@@ -71,14 +73,23 @@ def identity(record: os.stat_result) -> tuple[int, ...]:
     )
 
 
-def assert_archive(path_value: str) -> tuple[str, int, tuple[int, ...]]:
+def expected_archive_owner(owner_uid: str | None) -> int:
+    if owner_uid is None:
+        return os.geteuid()
+    if owner_uid != "0":
+        fail("--archive-owner-uid only accepts the exact root UID 0")
+    return 0
+
+
+def assert_archive(
+    path_value: str, expected_owner_uid: int
+) -> tuple[str, int, tuple[int, ...]]:
     archive = canonical_absolute(path_value, "archive")
     record = os.lstat(archive)
-    effective_uid = os.geteuid()
     if (
         not stat.S_ISREG(record.st_mode)
         or record.st_nlink != 1
-        or record.st_uid != effective_uid
+        or record.st_uid != expected_owner_uid
         or record.st_mode & 0o7022
         or record.st_size <= 0
         or record.st_size > MAX_ARCHIVE_BYTES
@@ -208,7 +219,10 @@ def run() -> None:
     arguments = parse_arguments()
     if os.geteuid() == 0:
         fail("extractor must run as the unprivileged CI identity")
-    archive_path, _, archive_identity = assert_archive(arguments.archive)
+    archive_owner_uid = expected_archive_owner(arguments.archive_owner_uid)
+    archive_path, _, archive_identity = assert_archive(
+        arguments.archive, archive_owner_uid
+    )
     destination, destination_device = assert_destination(arguments.destination)
     seen_paths: set[str] = set()
     member_count = 0

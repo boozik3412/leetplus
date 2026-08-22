@@ -23,6 +23,7 @@ REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXTRACTOR = REPOSITORY_ROOT / ".github/scripts/extract-runtime-release-artifact.py"
 PYTHON = pathlib.Path(sys.executable).resolve()
 TEST_ROOT = pathlib.Path(tempfile.mkdtemp(prefix="runtime-archive-extraction-"))
+ROOT_OWNED_ARCHIVES: list[pathlib.Path] = []
 
 
 def member(name: str, kind: bytes = tarfile.REGTYPE, data: bytes = b"payload\n") -> tuple:
@@ -50,21 +51,28 @@ def write_archive(label: str, members: list[tuple]) -> pathlib.Path:
     return archive_path
 
 
-def run_case(label: str, archive_path: pathlib.Path, expected: str, accepted: bool) -> None:
+def run_case(
+    label: str,
+    archive_path: pathlib.Path,
+    expected: str,
+    accepted: bool,
+    extra_arguments: list[str] | None = None,
+) -> None:
     destination = TEST_ROOT / f"extract-{label}"
     destination.mkdir(mode=0o700)
+    command = [
+        str(PYTHON),
+        "-I",
+        "-S",
+        "-E",
+        str(EXTRACTOR),
+        "--archive",
+        str(archive_path.resolve()),
+    ]
+    command.extend(extra_arguments or [])
+    command.extend(["--destination", str(destination.resolve())])
     result = subprocess.run(
-        [
-            str(PYTHON),
-            "-I",
-            "-S",
-            "-E",
-            str(EXTRACTOR),
-            "--archive",
-            str(archive_path.resolve()),
-            "--destination",
-            str(destination.resolve()),
-        ],
+        command,
         check=False,
         capture_output=True,
         text=True,
@@ -122,6 +130,53 @@ try:
     writable_archive.chmod(0o660)
     run_case("writable", writable_archive, "authority envelope", False)
 
+    invalid_owner_uid = write_archive("invalid-owner-uid", [member("./file")])
+    run_case(
+        "invalid-owner-uid",
+        invalid_owner_uid,
+        "only accepts the exact root UID 0",
+        False,
+        ["--archive-owner-uid", str(os.geteuid())],
+    )
+
+    sudo_path = pathlib.Path("/usr/bin/sudo")
+    if sudo_path.is_file():
+        root_owned_archive = write_archive("root-owned", [member("./file")])
+        ownership_result = subprocess.run(
+            [
+                str(sudo_path),
+                "-n",
+                "/usr/bin/chown",
+                f"0:{os.getegid()}",
+                str(root_owned_archive),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if ownership_result.returncode != 0:
+            raise AssertionError(
+                "could not create the root-owned archive fixture: "
+                f"{ownership_result.stdout}{ownership_result.stderr}"
+            )
+        ROOT_OWNED_ARCHIVES.append(root_owned_archive)
+        run_case(
+            "root-owned-default-rejected",
+            root_owned_archive,
+            "authority envelope",
+            False,
+        )
+        run_case(
+            "root-owned-explicitly-accepted",
+            root_owned_archive,
+            "RUNTIME_RELEASE_ARCHIVE_EXTRACTION=PASS",
+            True,
+            ["--archive-owner-uid", "0"],
+        )
+    elif os.environ.get("GITHUB_ACTIONS") == "true":
+        raise AssertionError("GitHub Actions runner lacks /usr/bin/sudo")
+
     preexisting_archive = write_archive("preexisting", [member("./file")])
     preexisting_destination = TEST_ROOT / "extract-preexisting"
     preexisting_destination.mkdir(mode=0o700)
@@ -149,6 +204,19 @@ try:
 
     print("runtime release archive extraction test: PASS")
 finally:
+    for root_owned_archive in ROOT_OWNED_ARCHIVES:
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/bin/chown",
+                f"{os.geteuid()}:{os.getegid()}",
+                str(root_owned_archive),
+            ],
+            check=False,
+            capture_output=True,
+            timeout=20,
+        )
     for path_value in TEST_ROOT.rglob("*"):
         try:
             path_value.chmod(0o700 if path_value.is_dir() else 0o600)

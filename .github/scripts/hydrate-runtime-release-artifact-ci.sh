@@ -485,7 +485,7 @@ source_stager_sha256="$(snapshot_regular_file \
   3392d681896fab07833019b3da5b53535282eabd145e1453f8f9c0fbae9ee874)"
 snapshot_regular_file \
   "$extractor" "$extractor_snapshot" 1048576 0440 \
-  9264d5d4b4328ab0bae8898a31dce1f864c18f95a5a0ffefa0198cd5dd11500a \
+  8b2e687f20a0c3c34bcd7c9108679c28f3a20305debe1aa17d248b4f7115cb6c \
   >/dev/null
 snapshot_regular_file \
   "$runtime_verifier" "$runtime_verifier_snapshot" 1048576 0440 \
@@ -516,6 +516,7 @@ reference_manifest="${store_authority_root}/ROOT_SOURCE_SHA256SUMS"
   TZ=UTC \
   /usr/bin/python3 -I -S -E "$extractor_snapshot" \
     --archive "$artifact_snapshot" \
+    --archive-owner-uid 0 \
     --destination "$reference_root" \
   || die 'root controller rejected the release archive during safe extraction'
 assert_build_uid_quiescent

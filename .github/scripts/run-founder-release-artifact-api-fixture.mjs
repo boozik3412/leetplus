@@ -4,10 +4,6 @@ import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
-import {
-  buildExpectedRuntimeReleaseProvenance,
-} from "./runtime-release-provenance-contract.mjs";
-
 const REQUIRED_CONFIRMATION =
   "run-founder-release-artifact-api-child-process-fixture";
 const ACTIVATION_ROLE = "leetplus_founder_beta_activation_runtime";
@@ -47,19 +43,16 @@ if (port < 1024 || port > 65_535) {
 const provenance = JSON.parse(
   readFileSync(join(releaseRoot, "release-provenance.json"), "utf8"),
 );
-const expectedProvenance = buildExpectedRuntimeReleaseProvenance({
-  databaseMigration: EXPECTED_MIGRATION,
-  databaseMigrationCount: EXPECTED_MIGRATION_COUNT,
-  releaseSha,
-});
+// The canonical artifact verifier already checks the exact provenance key set
+// and operational script inventory before upload. This runtime fixture only
+// rechecks the SHA and migration identity that it consumes.
 if (
   provenance === null ||
   Array.isArray(provenance) ||
   typeof provenance !== "object" ||
-  Object.keys(provenance).length !== Object.keys(expectedProvenance).length ||
-  Object.entries(expectedProvenance).some(
-    ([key, value]) => provenance[key] !== value,
-  )
+  provenance.releaseSha !== releaseSha ||
+  provenance.databaseMigration !== EXPECTED_MIGRATION ||
+  provenance.databaseMigrationCount !== EXPECTED_MIGRATION_COUNT
 ) {
   throw new Error("RELEASE_PROVENANCE_INVALID");
 }

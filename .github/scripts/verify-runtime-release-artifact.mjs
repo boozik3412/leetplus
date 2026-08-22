@@ -6,15 +6,37 @@ import path from "node:path";
 import process from "node:process";
 import { TextDecoder } from "node:util";
 
-import {
-  buildExpectedRuntimeReleaseProvenance,
-  EXPECTED_RUNTIME_RELEASE_OPERATIONAL_SCRIPTS as EXPECTED_OPERATIONAL_SCRIPTS,
-  EXPECTED_RUNTIME_RELEASE_PNPM_VERSION as EXPECTED_PNPM_VERSION,
-} from "./runtime-release-provenance-contract.mjs";
+const EXPECTED_OPERATIONAL_SCRIPTS = [
+  "packages/database/scripts/current-network-access-scope-classification.cli.mjs",
+  "packages/database/scripts/current-network-access-scope-classification.mjs",
+  "packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs",
+  "packages/database/scripts/current-release-restored-copy-runtime-acceptance.mjs",
+  "packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs",
+  "packages/database/scripts/founder-pilot-activation-role-deployment.mjs",
+  "packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs",
+  "packages/database/scripts/founder-pilot-activation-role-network-acceptance.mjs",
+  "packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs",
+  "packages/database/scripts/founder-pilot-mail-tenant-enrollment.mjs",
+  "packages/database/scripts/founder-pilot-production-history-production.cli.mjs",
+  "packages/database/scripts/founder-pilot-production-history-production.mjs",
+  "packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs",
+  "packages/database/scripts/founder-pilot-production-history-rehearsal.mjs",
+  "packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs",
+  "packages/database/scripts/founder-pilot-restored-copy-preflight.mjs",
+  "packages/database/scripts/identity-mail-worker-enrollment.cli.mjs",
+  "packages/database/scripts/identity-mail-worker-enrollment.mjs",
+  "packages/database/scripts/run-current-release-restored-copy-acceptance.sh",
+  "packages/database/scripts/runtime-function-enrollment.cli.mjs",
+  "packages/database/scripts/runtime-function-enrollment.mjs",
+  "packages/database/scripts/shared-beta-admission-provenance-catalog.mjs",
+  "packages/database/scripts/staff-task-integrity-migration-state.mjs",
+];
 
 const MANIFEST_NAME = "SHA256SUMS";
 const MANIFEST_PATH = `./${MANIFEST_NAME}`;
 const MAX_MANIFEST_BYTES = 64 * 1024 * 1024;
+const EXPECTED_NODE_VERSION = "22";
+const EXPECTED_PNPM_VERSION = "10.33.2";
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const MIGRATION_NAME_PATTERN = /^[0-9]{14}_[a-z0-9_]+$/u;
 const REQUIRED_CORE_FILES = [
@@ -316,11 +338,24 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
   if (provenance === null || Array.isArray(provenance) || typeof provenance !== "object") {
     fail("release-provenance.json must contain one JSON object");
   }
-  const expectedFields = buildExpectedRuntimeReleaseProvenance({
+  const expectedFields = {
+    currentNetworkAccessScopeClassificationScriptCount: 2,
+    currentNetworkAccessScopeClassificationScriptsIncluded: true,
+    currentReleaseRuntimeAcceptanceScriptCount: 3,
+    currentReleaseRuntimeAcceptanceScriptsIncluded: true,
     databaseMigration: migrationIdentity.databaseMigration,
     databaseMigrationCount: migrationIdentity.databaseMigrationCount,
+    founderPilotOperationalScriptCount: 12,
+    founderPilotOperationalScriptsIncluded: true,
+    nodeVersion: EXPECTED_NODE_VERSION,
+    operationalScriptCount: 23,
+    pnpmVersion: EXPECTED_PNPM_VERSION,
     releaseSha: expectedReleaseSha,
-  });
+    runtimeEnrollmentOperationalScriptCount: 6,
+    runtimeEnrollmentOperationalScriptsIncluded: true,
+    runtimePackageManifestsIncluded: true,
+    webPublicAssetsIncluded: true,
+  };
   const expectedKeys = Object.keys(expectedFields).sort(compareUtf8);
   const actualKeys = Object.keys(provenance).sort(compareUtf8);
   if (

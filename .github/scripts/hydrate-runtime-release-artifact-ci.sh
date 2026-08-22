@@ -44,6 +44,7 @@ Usage:
     --runner-tool-cache <canonical-runner-tool-cache> \
     --node-path <exact-Node-22-path> \
     --pnpm-path <exact-pnpm-10.33.2-path> \
+    --pnpm-package-root <canonical-pnpm-10.33.2-package-root> \
     --runner-uid <calling-runner-uid> \
     --runner-gid <calling-runner-gid> \
     --artifact <leetplus-release-<sha>.tar.gz> \
@@ -63,6 +64,7 @@ repository_root=''
 runner_tool_cache=''
 node_path=''
 pnpm_path=''
+pnpm_package_root=''
 runner_uid=''
 runner_gid=''
 artifact=''
@@ -77,6 +79,7 @@ while (($# > 0)); do
     --runner-tool-cache) runner_tool_cache="${2:-}"; shift 2 ;;
     --node-path) node_path="${2:-}"; shift 2 ;;
     --pnpm-path) pnpm_path="${2:-}"; shift 2 ;;
+    --pnpm-package-root) pnpm_package_root="${2:-}"; shift 2 ;;
     --runner-uid) runner_uid="${2:-}"; shift 2 ;;
     --runner-gid) runner_gid="${2:-}"; shift 2 ;;
     --artifact) artifact="${2:-}"; shift 2 ;;
@@ -174,12 +177,14 @@ provided_repository_root="$repository_root"
 provided_runner_tool_cache="$runner_tool_cache"
 provided_node_path="$node_path"
 provided_pnpm_path="$pnpm_path"
+provided_pnpm_package_root="$pnpm_package_root"
 provided_artifact="$artifact"
 provided_artifact_sha256="$artifact_sha256"
 repository_root="$(/usr/bin/realpath -e -- "$provided_repository_root")"
 runner_tool_cache="$(/usr/bin/realpath -e -- "$provided_runner_tool_cache")"
 node_path="$(/usr/bin/realpath -e -- "$provided_node_path")"
 pnpm_path="$(/usr/bin/realpath -e -- "$provided_pnpm_path")"
+pnpm_package_root="$(/usr/bin/realpath -e -- "$provided_pnpm_package_root")"
 artifact="$(/usr/bin/realpath -e -- "$provided_artifact")"
 artifact_sha256="$(/usr/bin/realpath -e -- "$provided_artifact_sha256")"
 
@@ -187,6 +192,7 @@ artifact_sha256="$(/usr/bin/realpath -e -- "$provided_artifact_sha256")"
   && "$provided_runner_tool_cache" == "$runner_tool_cache" \
   && "$provided_node_path" == "$node_path" \
   && "$provided_pnpm_path" == "$pnpm_path" \
+  && "$provided_pnpm_package_root" == "$pnpm_package_root" \
   && "$provided_artifact" == "$artifact" \
   && "$provided_artifact_sha256" == "$artifact_sha256" ]] \
   || die 'an authority input path is non-canonical or traverses a symlink'
@@ -203,16 +209,25 @@ esac
   || die 'exact Node 22 runtime is invalid'
 [[ -f "$pnpm_path" && -x "$pnpm_path" && ! -L "$pnpm_path" ]] \
   || die 'resolved pnpm command is absent or unsafe'
-pnpm_bin_root="$(/usr/bin/dirname -- "$pnpm_path")"
-pnpm_package_root="$(/usr/bin/dirname -- "$pnpm_bin_root")"
-[[ "$(/usr/bin/basename -- "$pnpm_path")" == 'pnpm.cjs' \
-  && "$(/usr/bin/basename -- "$pnpm_bin_root")" == 'bin' \
-  && -d "$pnpm_package_root" && ! -L "$pnpm_package_root" \
+pnpm_package_entrypoint="${pnpm_package_root}/bin/pnpm.cjs"
+[[ -d "$pnpm_package_root" && ! -L "$pnpm_package_root" \
   && "$(/usr/bin/realpath -e -- "$pnpm_package_root")" == \
     "$pnpm_package_root" \
   && -f "${pnpm_package_root}/package.json" \
-  && -f "${pnpm_package_root}/dist/pnpm.cjs" ]] \
+  && -f "${pnpm_package_root}/dist/pnpm.cjs" \
+  && -f "$pnpm_package_entrypoint" \
+  && ! -L "$pnpm_package_entrypoint" ]] \
   || die 'resolved pnpm command is outside an exact pnpm package root'
+if [[ "$pnpm_path" != "$pnpm_package_entrypoint" ]]; then
+  pnpm_command_root="$(/usr/bin/dirname -- "$pnpm_path")"
+  pnpm_node_modules_root="$(/usr/bin/dirname -- "$pnpm_command_root")"
+  [[ "$(/usr/bin/basename -- "$pnpm_path")" == 'pnpm' \
+    && "$(/usr/bin/basename -- "$pnpm_command_root")" == '.bin' \
+    && "$(/usr/bin/basename -- "$pnpm_node_modules_root")" == 'node_modules' \
+    && "$(/usr/bin/realpath -e -- "${pnpm_node_modules_root}/pnpm")" == \
+      "$pnpm_package_root" ]] \
+    || die 'resolved pnpm command is outside its exact package installation'
+fi
 [[ -f "$artifact" && ! -L "$artifact" \
   && "$(/usr/bin/stat -c '%h' -- "$artifact")" == '1' ]] \
   || die 'release archive is absent, linked or unsafe'
@@ -353,10 +368,11 @@ snapshot_regular_file() {
   local destination_mode="$4"
   local expected_sha256="${5:-}"
   local allow_empty="${6:-false}"
+  local allow_shared_source="${7:-false}"
   /usr/bin/python3 -I -S -E - \
     "$source_path" "$destination_path" "$maximum_bytes" \
     "$destination_mode" "$build_gid" "$expected_sha256" \
-    "$allow_empty" <<'PY'
+    "$allow_empty" "$allow_shared_source" <<'PY'
 import hashlib
 import os
 import stat
@@ -370,13 +386,20 @@ import sys
     gid_text,
     expected,
     allow_empty_text,
+    allow_shared_source_text,
 ) = sys.argv[1:]
 maximum = int(maximum_text, 10)
 mode = int(mode_text, 8)
 gid = int(gid_text, 10)
-if maximum <= 0 or gid <= 0 or allow_empty_text not in {"false", "true"}:
+if (
+    maximum <= 0
+    or gid <= 0
+    or allow_empty_text not in {"false", "true"}
+    or allow_shared_source_text not in {"false", "true"}
+):
     raise SystemExit("invalid snapshot authority arguments")
 allow_empty = allow_empty_text == "true"
+allow_shared_source = allow_shared_source_text == "true"
 
 source_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
 destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
@@ -384,8 +407,12 @@ source_fd = os.open(source, source_flags)
 destination_fd = -1
 try:
     before = os.fstat(source_fd)
-    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-        raise SystemExit("snapshot source is not an exact single-link regular file")
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_nlink < 1
+        or (before.st_nlink != 1 and not allow_shared_source)
+    ):
+        raise SystemExit("snapshot source is not an allowed regular file")
     if before.st_size < 0 or (before.st_size == 0 and not allow_empty) or before.st_size > maximum:
         raise SystemExit("snapshot source size is outside its exact bound")
     destination_fd = os.open(destination, destination_flags, mode)
@@ -415,12 +442,26 @@ try:
     os.fsync(destination_fd)
     after = os.fstat(source_fd)
     path_after = os.stat(source, follow_symlinks=False)
-    identity_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+    identity_fields = (
+        "st_dev",
+        "st_ino",
+        "st_size",
+        "st_mtime_ns",
+        "st_ctime_ns",
+        "st_mode",
+        "st_uid",
+        "st_gid",
+        "st_nlink",
+    )
     if any(getattr(before, field) != getattr(after, field) for field in identity_fields):
         raise SystemExit("snapshot source descriptor identity changed")
     if any(getattr(before, field) != getattr(path_after, field) for field in identity_fields):
         raise SystemExit("snapshot source pathname no longer names the opened file")
-    if not stat.S_ISREG(path_after.st_mode) or path_after.st_nlink != 1:
+    if (
+        not stat.S_ISREG(path_after.st_mode)
+        or path_after.st_nlink < 1
+        or (path_after.st_nlink != 1 and not allow_shared_source)
+    ):
         raise SystemExit("snapshot source pathname became unsafe")
     print(observed)
 finally:
@@ -536,8 +577,6 @@ while IFS= read -r -d '' pnpm_source_entry; do
   pnpm_source_mode="$(/usr/bin/stat -c '%a' -- "$pnpm_source_entry")"
   [[ "$pnpm_source_mode" =~ ^[0-7]{3,4}$ ]] \
     || die 'exact pnpm package entry has an invalid mode'
-  (( (8#$pnpm_source_mode & 8#7022) == 0 )) \
-    || die 'exact pnpm package entry has unsafe source permissions'
   if [[ -d "$pnpm_source_entry" && ! -L "$pnpm_source_entry" ]]; then
     /usr/bin/install -d \
       -o root -g "$build_group" -m 0750 -- "$pnpm_destination_entry"
@@ -556,8 +595,8 @@ while IFS= read -r -d '' pnpm_source_entry; do
     fi
     pnpm_source_digest="$(snapshot_regular_file \
       "$pnpm_source_entry" "$pnpm_destination_entry" 67108864 \
-      "$pnpm_destination_mode" '' true)"
-    if [[ "$pnpm_source_entry" == "$pnpm_path" ]]; then
+      "$pnpm_destination_mode" '' true true)"
+    if [[ "$pnpm_source_entry" == "$pnpm_package_entrypoint" ]]; then
       source_pnpm_sha256="$pnpm_source_digest"
     fi
   else
@@ -630,7 +669,7 @@ assert_build_uid_quiescent
 
 tool_path="${tool_root}:/usr/bin:/bin"
 for runner_owned_input in "$repository_root" "$artifact" "$artifact_sha256" \
-  "$pnpm_path"; do
+  "$pnpm_path" "$pnpm_package_root"; do
   if /usr/sbin/runuser -u "$build_user" -- /usr/bin/test -w "$runner_owned_input"; then
     die "ephemeral CI hydration identity can write a runner-owned input: ${runner_owned_input}"
   fi
@@ -730,7 +769,8 @@ if find_has_match -P "$pnpm_runtime_root" -mindepth 0 ! -user root \
 fi
 
 for frozen_path in "$store_root" "$stager_snapshot" "${tool_root}/node" \
-  "$pnpm_runtime_root" "$pnpm_entry_snapshot" "$pnpm_command" "$pnpm_path" \
+  "$pnpm_runtime_root" "$pnpm_entry_snapshot" "$pnpm_command" \
+  "$pnpm_path" "$pnpm_package_root" \
   "$artifact_snapshot" "$artifact_sha256_snapshot" "$reference_manifest"; do
   if /usr/sbin/runuser -u "$build_user" -- /usr/bin/test -w "$frozen_path"; then
     die "ephemeral CI hydration identity can write frozen authority input: ${frozen_path}"

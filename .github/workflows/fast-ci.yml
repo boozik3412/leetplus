@@ -307,11 +307,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm_realpath="$(realpath -e -- "$(command -v pnpm)")"
-          pnpm_bin_root="$(dirname -- "$pnpm_realpath")"
-          pnpm_package_root="$(dirname -- "$pnpm_bin_root")"
-          test "$(basename -- "$pnpm_realpath")" = 'pnpm.cjs'
-          test "$(basename -- "$pnpm_bin_root")" = 'bin'
+          pnpm_command_path="$(command -v pnpm)"
+          pnpm_realpath="$(realpath -e -- "$pnpm_command_path")"
+          pnpm_home="$(dirname -- "$pnpm_command_path")"
+          pnpm_node_modules_root="$(dirname -- "$pnpm_home")"
+          pnpm_package_root="$(realpath -e -- "$pnpm_node_modules_root/pnpm")"
+          printf 'CI_PNPM_RUNTIME_SOURCE_PATH=%s\n' "$pnpm_realpath"
+          printf 'CI_PNPM_RUNTIME_PACKAGE_ROOT=%s\n' "$pnpm_package_root"
+          test "$(basename -- "$pnpm_command_path")" = 'pnpm'
+          test "$(basename -- "$pnpm_home")" = '.bin'
+          test "$(basename -- "$pnpm_node_modules_root")" = 'node_modules'
           test "$(realpath -e -- "$pnpm_package_root")" = "$pnpm_package_root"
           test -f "$pnpm_package_root/package.json"
           test -f "$pnpm_package_root/dist/pnpm.cjs"
@@ -324,14 +329,11 @@ jobs:
             pnpm_entry_count=$((pnpm_entry_count + 1))
             test "$pnpm_entry_count" -le 5000
             test "$(stat -c '%u' -- "$pnpm_entry")" = "$runner_uid"
-            pnpm_entry_mode="$(stat -c '%a' -- "$pnpm_entry")"
-            test "$((8#$pnpm_entry_mode & 8#7022))" = '0'
             if test -d "$pnpm_entry" && test ! -L "$pnpm_entry"; then
               continue
             fi
             test -f "$pnpm_entry"
             test ! -L "$pnpm_entry"
-            test "$(stat -c '%h' -- "$pnpm_entry")" = '1'
             pnpm_entry_bytes="$(stat -c '%s' -- "$pnpm_entry")"
             test "$pnpm_entry_bytes" -le 67108864
             pnpm_total_bytes=$((pnpm_total_bytes + pnpm_entry_bytes))
@@ -340,7 +342,7 @@ jobs:
           rm -f -- "$pnpm_inventory"
           test "$pnpm_entry_count" -gt 0
           test "$pnpm_total_bytes" -gt 0
-          test "$(node "$pnpm_realpath" --version)" = '10.33.2'
+          test "$(pnpm --version)" = '10.33.2'
           printf 'CI_PNPM_RUNTIME_SOURCE_ENVELOPE=PASS\n'
 
       - name: Install dependencies

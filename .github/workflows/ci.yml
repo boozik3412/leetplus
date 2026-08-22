@@ -1094,7 +1094,7 @@ jobs:
         run: |
           set -euo pipefail
           helper_source="$GITHUB_WORKSPACE/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
-          helper_sha256='497751d103a41013d91dfbd1041e7b57f9b1e8168fc8b0a646920c4992bff63e'
+          helper_sha256='14e592e2a1beafaf30373541fc0087533015e13500452d7c94f9e090adcebd2f'
           authority_parent='/srv/leetplus-ci-runtime-authority'
           authority_root="$authority_parent/$CI_RELEASE_SHA"
           sudo -n /usr/bin/env -i \
@@ -1230,7 +1230,11 @@ jobs:
             "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
             *) printf 'unexpected hydration Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
           esac
-          pnpm_realpath="$(realpath -e -- "$(command -v pnpm)")"
+          pnpm_command_path="$(command -v pnpm)"
+          pnpm_realpath="$(realpath -e -- "$pnpm_command_path")"
+          pnpm_home="$(dirname -- "$pnpm_command_path")"
+          pnpm_node_modules_root="$(dirname -- "$pnpm_home")"
+          pnpm_package_root="$(realpath -e -- "$pnpm_node_modules_root/pnpm")"
           runner_tool_cache_real="$(realpath -e -- "$RUNNER_TOOL_CACHE")"
           repository_root_real="$(realpath -e -- "$GITHUB_WORKSPACE")"
           runner_uid="$(id -u)"
@@ -1247,6 +1251,7 @@ jobs:
                 --runner-tool-cache "$runner_tool_cache_real" \
                 --node-path "$node_realpath" \
                 --pnpm-path "$pnpm_realpath" \
+                --pnpm-package-root "$pnpm_package_root" \
                 --runner-uid "$runner_uid" \
                 --runner-gid "$runner_gid" \
                 --artifact "$archive" \

@@ -1904,18 +1904,28 @@ jobs:
             *) printf 'unexpected production-control Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
           esac
           test "$("$node_realpath" -p 'process.versions.node.split(".")[0]')" = '22'
-          # A hosted toolcache executable may be multiply linked. Preserve the
-          # builder's single-link boundary by admitting an identical root-owned copy.
-          control_node_root="$runner_tool_cache_real/node/22.leetplus-control-$CI_RELEASE_SHA"
+          # Normalize hosted-toolcache links and writable ancestors into a
+          # byte-identical, root-owned source beneath the trusted /var/lib boundary.
+          control_tool_cache_root="/var/lib/leetplus-production-control-node-$CI_RELEASE_SHA"
+          control_node_root="$control_tool_cache_root/node/22.leetplus-control-$CI_RELEASE_SHA"
           control_node_path="$control_node_root/x64/bin/node"
-          test ! -e "$control_node_root"
-          test ! -L "$control_node_root"
-          sudo -n /usr/bin/install -d -o root -g root -m 0555 -- \
+          test ! -e "$control_tool_cache_root"
+          test ! -L "$control_tool_cache_root"
+          sudo -n /usr/bin/install -d -o root -g root -m 0755 -- \
             "$control_node_root/x64/bin"
           sudo -n /usr/bin/install -o root -g root -m 0555 -- \
             "$node_realpath" "$control_node_path"
+          sudo -n /usr/bin/chmod 0555 -- \
+            "$control_tool_cache_root" \
+            "$control_tool_cache_root/node" \
+            "$control_node_root" \
+            "$control_node_root/x64" \
+            "$control_node_root/x64/bin"
+          control_tool_cache_real="$(realpath -e -- "$control_tool_cache_root")"
           control_node_realpath="$(realpath -e -- "$control_node_path")"
+          test "$control_tool_cache_real" = "$control_tool_cache_root"
           test "$control_node_realpath" = "$control_node_path"
+          test "$(stat -c '%u:%g:%a' -- "$control_tool_cache_real")" = '0:0:555'
           test "$(stat -c '%u:%g:%a:%h' -- "$control_node_realpath")" = '0:0:555:1'
           cmp --silent -- "$node_realpath" "$control_node_realpath"
           test "$("$control_node_realpath" -p 'process.versions.node.split(".")[0]')" = '22'
@@ -1935,7 +1945,7 @@ jobs:
             /usr/bin/bash -p "$repository_root/.github/scripts/build-production-control-artifact-ci.sh" \
               --release-sha "$CI_RELEASE_SHA" \
               --repository-root "$repository_root" \
-              --runner-tool-cache "$runner_tool_cache_real" \
+              --runner-tool-cache "$control_tool_cache_real" \
               --node-path "$control_node_realpath" \
               --output-directory "$output_directory"
 
@@ -2096,17 +2106,27 @@ jobs:
             "$runner_tool_cache_real"/node/22.*/x64/bin/node) ;;
             *) printf 'unexpected handoff control Node path: %s\n' "$node_realpath" >&2; exit 1 ;;
           esac
-          # Recreate the same private single-link source for independent rebuild.
-          control_node_root="$runner_tool_cache_real/node/22.leetplus-control-$CI_RELEASE_SHA"
+          # Recreate the same root-owned trust path for independent rebuild.
+          control_tool_cache_root="/var/lib/leetplus-production-control-node-$CI_RELEASE_SHA"
+          control_node_root="$control_tool_cache_root/node/22.leetplus-control-$CI_RELEASE_SHA"
           control_node_path="$control_node_root/x64/bin/node"
-          test ! -e "$control_node_root"
-          test ! -L "$control_node_root"
-          sudo -n /usr/bin/install -d -o root -g root -m 0555 -- \
+          test ! -e "$control_tool_cache_root"
+          test ! -L "$control_tool_cache_root"
+          sudo -n /usr/bin/install -d -o root -g root -m 0755 -- \
             "$control_node_root/x64/bin"
           sudo -n /usr/bin/install -o root -g root -m 0555 -- \
             "$node_realpath" "$control_node_path"
+          sudo -n /usr/bin/chmod 0555 -- \
+            "$control_tool_cache_root" \
+            "$control_tool_cache_root/node" \
+            "$control_node_root" \
+            "$control_node_root/x64" \
+            "$control_node_root/x64/bin"
+          control_tool_cache_real="$(realpath -e -- "$control_tool_cache_root")"
           control_node_realpath="$(realpath -e -- "$control_node_path")"
+          test "$control_tool_cache_real" = "$control_tool_cache_root"
           test "$control_node_realpath" = "$control_node_path"
+          test "$(stat -c '%u:%g:%a' -- "$control_tool_cache_real")" = '0:0:555'
           test "$(stat -c '%u:%g:%a:%h' -- "$control_node_realpath")" = '0:0:555:1'
           cmp --silent -- "$node_realpath" "$control_node_realpath"
           test "$("$control_node_realpath" -p 'process.versions.node.split(".")[0]')" = '22'
@@ -2125,7 +2145,7 @@ jobs:
             /usr/bin/bash -p "$repository_root/.github/scripts/build-production-control-artifact-ci.sh" \
               --release-sha "$CI_RELEASE_SHA" \
               --repository-root "$repository_root" \
-              --runner-tool-cache "$runner_tool_cache_real" \
+              --runner-tool-cache "$control_tool_cache_real" \
               --node-path "$control_node_realpath" \
               --output-directory "$rebuilt_root"
           rebuilt_archive="$rebuilt_root/leetplus-production-control-$CI_RELEASE_SHA.tar.gz"

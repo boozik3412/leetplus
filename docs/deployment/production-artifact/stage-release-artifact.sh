@@ -736,6 +736,9 @@ assert_exact_hydration_output_inventory() {
 trusted_source_manifest_path=''
 trusted_source_manifest_identity=''
 trusted_source_manifest_sha256=''
+hydration_parent_modes_prepared=false
+declare -a hydration_module_parents=()
+declare -a hydration_parent_modes=()
 capture_trusted_source_manifest() {
   trusted_source_manifest_path="${staging_directory}/SHA256SUMS"
   [[ -f "$trusted_source_manifest_path" && ! -L "$trusted_source_manifest_path" \
@@ -755,6 +758,75 @@ assert_trusted_source_manifest_unchanged() {
     && "$(sha256sum -- "$trusted_source_manifest_path" | awk '{ print $1 }')" == \
       "$trusted_source_manifest_sha256" ]] \
     || die 'artifact-controlled hydration mutated trusted source SHA256SUMS identity or digest'
+}
+
+prepare_hydration_module_roots() {
+  local parent parent_mode module_root
+  local current_gid
+  local enforce_exact_module_mode=true
+
+  [[ "$hydrate" == true && "$hydration_parent_modes_prepared" == false ]] \
+    || die 'hydration module-root preparation state is invalid'
+  case "${OSTYPE:-}" in
+    msys*|cygwin*) enforce_exact_module_mode=false ;;
+  esac
+  current_gid="$(id -g)"
+  hydration_module_parents=(
+    "$staging_directory"
+    "${staging_directory}/apps/api"
+    "${staging_directory}/apps/web"
+    "${staging_directory}/packages/database"
+  )
+  hydration_parent_modes=()
+
+  for parent in "${hydration_module_parents[@]}"; do
+    [[ -d "$parent" && ! -L "$parent" \
+      && "$(realpath -e -- "$parent")" == "$parent" \
+      && "$(stat -c '%u:%g' -- "$parent")" == "${EUID}:${current_gid}" ]] \
+      || die "hydration module parent is not exact build-owned input: ${parent}"
+    parent_mode="$(stat -c '%a' -- "$parent")"
+    [[ "$parent_mode" =~ ^[0-7]{3,4}$ \
+      && "$((8#$parent_mode & 8#22))" == '0' ]] \
+      || die "hydration module parent is writable outside its owner: ${parent}"
+    hydration_parent_modes+=("$parent_mode")
+
+    chmod u+w -- "$parent"
+    module_root="${parent}/node_modules"
+    [[ ! -e "$module_root" && ! -L "$module_root" ]] \
+      || die "hydration module root already exists: ${module_root}"
+    mkdir -- "$module_root"
+    chmod 0700 -- "$module_root" \
+      || [[ "$enforce_exact_module_mode" == false ]] \
+      || die "hydration module root mode cannot be restricted: ${module_root}"
+    [[ -d "$module_root" && ! -L "$module_root" \
+      && "$(realpath -e -- "$module_root")" == "$module_root" \
+      && "$(stat -c '%u:%g' -- "$module_root")" == \
+        "${EUID}:${current_gid}" \
+      && ( "$enforce_exact_module_mode" == false \
+        || "$(stat -c '%a' -- "$module_root")" == '700' ) ]] \
+      || die "hydration module root metadata is not exact: ${module_root}"
+  done
+
+  hydration_parent_modes_prepared=true
+}
+
+restore_hydration_module_parent_modes() {
+  local index parent parent_mode
+
+  [[ "$hydration_parent_modes_prepared" == true \
+    && "${#hydration_module_parents[@]}" == '4' \
+    && "${#hydration_parent_modes[@]}" == '4' ]] \
+    || die 'hydration module-parent restoration state is invalid'
+  for index in "${!hydration_module_parents[@]}"; do
+    parent="${hydration_module_parents[$index]}"
+    parent_mode="${hydration_parent_modes[$index]}"
+    [[ -d "$parent" && ! -L "$parent" ]] \
+      || die "hydration module parent disappeared before mode restoration: ${parent}"
+    chmod "$parent_mode" -- "$parent"
+    [[ "$(stat -c '%a' -- "$parent")" == "$parent_mode" ]] \
+      || die "hydration module parent mode was not restored: ${parent}"
+  done
+  hydration_parent_modes_prepared=false
 }
 
 if [[ "$unprivileged_test_mode" == false ]]; then
@@ -1129,6 +1201,7 @@ NODE
     store_manifest_sha256="$(awk -F= '$1 == "PNPM_STORE_MANIFEST_SHA256" { print $2 }' <<< "$store_integrity_attestation")"
     store_receipt_sha256="$(sha256sum -- "$store_receipt" | awk '{ print $1 }')"
   fi
+  prepare_hydration_module_roots
   if ! (
     cd -- "$staging_directory"
     assert_exact_hydration_output_inventory "$staging_directory"
@@ -1360,6 +1433,7 @@ NODE
       assert_build_uid_process_fence current
     fi
   ); then
+    restore_hydration_module_parent_modes
     die "locked offline hydration failed; retained $staging_directory for inspection"
   fi
 fi
@@ -1374,6 +1448,7 @@ else
 fi
 
 if [[ "$hydrate" == true ]]; then
+  restore_hydration_module_parent_modes
   assert_trusted_source_manifest_unchanged
   assert_exact_hydration_output_inventory "$staging_directory"
   if [[ "$unprivileged_test_mode" == false ]]; then

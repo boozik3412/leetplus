@@ -253,6 +253,10 @@ fi
 printf '%s\n' "$*" >> "${PNPM_FIXTURE_LOG:-/dev/null}"
 if [[ "${1:-}" == 'install' ]]; then
   [[ "$*" == 'install --prod --offline --frozen-lockfile --ignore-scripts --package-import-method=copy --store-dir /srv/leetplus/pnpm-store' ]]
+  for module_root in \
+    node_modules apps/api/node_modules apps/web/node_modules packages/database/node_modules; do
+    [[ -d "$module_root" && ! -L "$module_root" && -w "$module_root" ]]
+  done
   [[ " $* " == *' --ignore-scripts '* ]] \
     || printf 'executed\n' > "${LIFECYCLE_MARKER:?}"
   exit 0
@@ -264,6 +268,18 @@ chmod 0700 "${successful_pnpm_root}/pnpm"
 successful_hydration_root="${TEST_ROOT}/successful-hydration-staged"
 successful_pnpm_log="${TEST_ROOT}/successful-pnpm.log"
 lifecycle_marker="${TEST_ROOT}/dependency-lifecycle-executed"
+readonly_fixture_root="${TEST_ROOT}/readonly-hydration-fixture"
+readonly_inbox="${TEST_ROOT}/readonly-hydration-inbox"
+readonly_archive="${readonly_inbox}/leetplus-release-${RELEASE_SHA}.tar.gz"
+cp -a -- "$fixture_root" "$readonly_fixture_root"
+for readonly_parent in \
+  "$readonly_fixture_root" \
+  "$readonly_fixture_root/apps/api" \
+  "$readonly_fixture_root/apps/web" \
+  "$readonly_fixture_root/packages/database"; do
+  chmod 0550 -- "$readonly_parent"
+done
+pack_artifact "$readonly_fixture_root" "$readonly_inbox" "$readonly_archive"
 mkdir -p "$successful_hydration_root"
 env -u DATABASE_URL -u JWT_SECRET -u GUEST_PORTAL_JWT_SECRET \
   -u APP_ENCRYPTION_KEY -u INTEGRATION_ENCRYPTION_KEY -u SYNC_SERVICE_TOKEN -u LANGAME_API_KEY \
@@ -285,8 +301,8 @@ env -u DATABASE_URL -u JWT_SECRET -u GUEST_PORTAL_JWT_SECRET \
   LIFECYCLE_MARKER="$lifecycle_marker" \
   PATH="${successful_pnpm_root}:${PATH}" bash "$STAGER" \
   --release-sha "$RELEASE_SHA" \
-  --artifact "$archive" \
-  --artifact-sha256 "${archive}.sha256" \
+  --artifact "$readonly_archive" \
+  --artifact-sha256 "${readonly_archive}.sha256" \
   --output-root "$successful_hydration_root" \
   --hydrate --unprivileged-test-mode > "${TEST_ROOT}/successful-hydration.out"
 successful_hydration_release="${successful_hydration_root}/.untrusted-test-${RELEASE_SHA}"
@@ -296,6 +312,19 @@ grep -F -x \
 grep -F -x -- '--filter database db:generate' "$successful_pnpm_log" >/dev/null
 [[ "$(awk 'END { print NR }' "$successful_pnpm_log")" == '2' ]]
 test ! -e "$lifecycle_marker"
+case "${OSTYPE:-}" in
+  msys*|cygwin*) ;;
+  *)
+    for restored_parent in \
+      "$successful_hydration_release" \
+      "$successful_hydration_release/apps/api" \
+      "$successful_hydration_release/apps/web" \
+      "$successful_hydration_release/packages/database"; do
+      restored_mode="$(stat -c '%a' -- "$restored_parent")"
+      [[ "$((8#$restored_mode & 8#200))" == '0' ]]
+    done
+    ;;
+esac
 grep -E \
   '^[0-9a-f]{64}  \./nested-receipts/HYDRATED_SHA256SUMS$' \
   "$successful_hydration_release/HYDRATED_SHA256SUMS" >/dev/null

@@ -620,7 +620,7 @@ source_node_sha256="$(snapshot_regular_file \
   "$node_path" "${tool_root}/node" 268435456 0550)"
 source_stager_sha256="$(snapshot_regular_file \
   "$stager" "$stager_snapshot" 4194304 0550 \
-  3392d681896fab07833019b3da5b53535282eabd145e1453f8f9c0fbae9ee874)"
+  b9e3a45db18ad502305a00c9685bb41286a69d4968a3a0694b67860452e73a96)"
 snapshot_regular_file \
   "$extractor" "$extractor_snapshot" 1048576 0440 \
   8b2e687f20a0c3c34bcd7c9108679c28f3a20305debe1aa17d248b4f7115cb6c \

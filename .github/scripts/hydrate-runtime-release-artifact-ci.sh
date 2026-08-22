@@ -146,8 +146,8 @@ for command_path in \
   /usr/bin/awk /usr/bin/bash /usr/bin/basename /usr/bin/chmod /usr/bin/chown \
   /usr/bin/cmp /usr/bin/dirname /usr/bin/env /usr/bin/find \
   /usr/bin/getent /usr/bin/id \
-  /usr/bin/install /usr/bin/ln /usr/bin/mkdir /usr/bin/mktemp /usr/bin/python3 \
-  /usr/bin/pgrep /usr/bin/pkill /usr/bin/readlink /usr/bin/realpath /usr/bin/rm \
+  /usr/bin/install /usr/bin/mkdir /usr/bin/mktemp /usr/bin/python3 \
+  /usr/bin/pgrep /usr/bin/pkill /usr/bin/realpath /usr/bin/rm \
   /usr/bin/sha256sum /usr/bin/sort /usr/bin/stat /usr/bin/sudo \
   /usr/bin/systemctl /usr/bin/systemd-run /usr/bin/test /usr/bin/true \
   /usr/bin/uname /usr/bin/xargs \
@@ -203,6 +203,16 @@ esac
   || die 'exact Node 22 runtime is invalid'
 [[ -f "$pnpm_path" && -x "$pnpm_path" && ! -L "$pnpm_path" ]] \
   || die 'resolved pnpm command is absent or unsafe'
+pnpm_bin_root="$(/usr/bin/dirname -- "$pnpm_path")"
+pnpm_package_root="$(/usr/bin/dirname -- "$pnpm_bin_root")"
+[[ "$(/usr/bin/basename -- "$pnpm_path")" == 'pnpm.cjs' \
+  && "$(/usr/bin/basename -- "$pnpm_bin_root")" == 'bin' \
+  && -d "$pnpm_package_root" && ! -L "$pnpm_package_root" \
+  && "$(/usr/bin/realpath -e -- "$pnpm_package_root")" == \
+    "$pnpm_package_root" \
+  && -f "${pnpm_package_root}/package.json" \
+  && -f "${pnpm_package_root}/dist/pnpm.cjs" ]] \
+  || die 'resolved pnpm command is outside an exact pnpm package root'
 [[ -f "$artifact" && ! -L "$artifact" \
   && "$(/usr/bin/stat -c '%h' -- "$artifact")" == '1' ]] \
   || die 'release archive is absent, linked or unsafe'
@@ -334,6 +344,7 @@ assert_build_cannot_replace_path() {
   done
 }
 assert_build_cannot_replace_path "$pnpm_path"
+assert_build_cannot_replace_path "$pnpm_package_root"
 
 snapshot_regular_file() {
   local source_path="$1"
@@ -341,20 +352,31 @@ snapshot_regular_file() {
   local maximum_bytes="$3"
   local destination_mode="$4"
   local expected_sha256="${5:-}"
+  local allow_empty="${6:-false}"
   /usr/bin/python3 -I -S -E - \
     "$source_path" "$destination_path" "$maximum_bytes" \
-    "$destination_mode" "$build_gid" "$expected_sha256" <<'PY'
+    "$destination_mode" "$build_gid" "$expected_sha256" \
+    "$allow_empty" <<'PY'
 import hashlib
 import os
 import stat
 import sys
 
-source, destination, maximum_text, mode_text, gid_text, expected = sys.argv[1:]
+(
+    source,
+    destination,
+    maximum_text,
+    mode_text,
+    gid_text,
+    expected,
+    allow_empty_text,
+) = sys.argv[1:]
 maximum = int(maximum_text, 10)
 mode = int(mode_text, 8)
 gid = int(gid_text, 10)
-if maximum <= 0 or gid <= 0:
+if maximum <= 0 or gid <= 0 or allow_empty_text not in {"false", "true"}:
     raise SystemExit("invalid snapshot authority arguments")
+allow_empty = allow_empty_text == "true"
 
 source_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
 destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
@@ -364,7 +386,7 @@ try:
     before = os.fstat(source_fd)
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise SystemExit("snapshot source is not an exact single-link regular file")
-    if before.st_size <= 0 or before.st_size > maximum:
+    if before.st_size < 0 or (before.st_size == 0 and not allow_empty) or before.st_size > maximum:
         raise SystemExit("snapshot source size is outside its exact bound")
     destination_fd = os.open(destination, destination_flags, mode)
     digest = hashlib.sha256()
@@ -475,7 +497,8 @@ artifact_sha256_snapshot="${artifact_snapshot}.sha256"
 stager_snapshot="${tool_root}/stage-release-artifact.sh"
 extractor_snapshot="${tool_root}/extract-runtime-release-artifact.py"
 runtime_verifier_snapshot="${tool_root}/verify-runtime-release-artifact.mjs"
-pnpm_entry_snapshot="${input_root}/PINNED_PNPM_ENTRYPOINT"
+pnpm_runtime_root="${tool_root}/pnpm-runtime"
+pnpm_entry_snapshot="${pnpm_runtime_root}/bin/pnpm.cjs"
 pnpm_command="${tool_root}/pnpm"
 pinned_lockfile="${store_authority_root}/PINNED_PNPM_LOCKFILE"
 source_node_sha256="$(snapshot_regular_file \
@@ -491,15 +514,74 @@ snapshot_regular_file \
   "$runtime_verifier" "$runtime_verifier_snapshot" 1048576 0440 \
   74da72b8b91bafd79058a621af637cc33e9803f3bc635427cbd45cc962f4ad23 \
   >/dev/null
-source_pnpm_sha256="$(snapshot_regular_file \
-  "$pnpm_path" "$pnpm_entry_snapshot" 16777216 0440)"
+/usr/bin/install -d -o root -g "$build_group" -m 0750 -- "$pnpm_runtime_root"
+pnpm_source_inventory="${store_authority_root}/.pnpm-source-inventory"
+/usr/bin/find -P "$pnpm_package_root" -mindepth 1 -print0 \
+  > "$pnpm_source_inventory" \
+  || die 'exact pnpm package inventory failed'
+pnpm_tree_entry_count=0
+pnpm_tree_total_bytes=0
+source_pnpm_sha256=''
+while IFS= read -r -d '' pnpm_source_entry; do
+  pnpm_relative_entry="${pnpm_source_entry#"${pnpm_package_root}/"}"
+  [[ -n "$pnpm_relative_entry" \
+    && "$pnpm_relative_entry" != "$pnpm_source_entry" ]] \
+    || die 'exact pnpm package inventory escaped its source root'
+  pnpm_destination_entry="${pnpm_runtime_root}/${pnpm_relative_entry}"
+  pnpm_tree_entry_count=$((pnpm_tree_entry_count + 1))
+  ((pnpm_tree_entry_count <= 5000)) \
+    || die 'exact pnpm package inventory exceeds its entry bound'
+  [[ "$(/usr/bin/stat -c '%u' -- "$pnpm_source_entry")" == "$runner_uid" ]] \
+    || die 'exact pnpm package entry has an unexpected owner'
+  pnpm_source_mode="$(/usr/bin/stat -c '%a' -- "$pnpm_source_entry")"
+  [[ "$pnpm_source_mode" =~ ^[0-7]{3,4}$ ]] \
+    || die 'exact pnpm package entry has an invalid mode'
+  (( (8#$pnpm_source_mode & 8#7022) == 0 )) \
+    || die 'exact pnpm package entry has unsafe source permissions'
+  if [[ -d "$pnpm_source_entry" && ! -L "$pnpm_source_entry" ]]; then
+    /usr/bin/install -d \
+      -o root -g "$build_group" -m 0750 -- "$pnpm_destination_entry"
+  elif [[ -f "$pnpm_source_entry" && ! -L "$pnpm_source_entry" ]]; then
+    pnpm_source_size="$(/usr/bin/stat -c '%s' -- "$pnpm_source_entry")"
+    [[ "$pnpm_source_size" =~ ^[0-9]+$ ]] \
+      || die 'exact pnpm package file has an invalid size'
+    pnpm_tree_total_bytes=$((pnpm_tree_total_bytes + pnpm_source_size))
+    ((pnpm_source_size <= 67108864 && pnpm_tree_total_bytes <= 268435456)) \
+      || die 'exact pnpm package tree exceeds its byte bound'
+    /usr/bin/install -d -o root -g "$build_group" -m 0750 -- \
+      "$(/usr/bin/dirname -- "$pnpm_destination_entry")"
+    pnpm_destination_mode=0440
+    if (( (8#$pnpm_source_mode & 8#111) != 0 )); then
+      pnpm_destination_mode=0550
+    fi
+    pnpm_source_digest="$(snapshot_regular_file \
+      "$pnpm_source_entry" "$pnpm_destination_entry" 67108864 \
+      "$pnpm_destination_mode" '' true)"
+    if [[ "$pnpm_source_entry" == "$pnpm_path" ]]; then
+      source_pnpm_sha256="$pnpm_source_digest"
+    fi
+  else
+    die 'exact pnpm package tree contains a link or special entry'
+  fi
+done < "$pnpm_source_inventory"
+/usr/bin/rm -f -- "$pnpm_source_inventory"
+[[ "$pnpm_tree_entry_count" -gt 0 \
+  && "$pnpm_tree_total_bytes" -gt 0 \
+  && "$source_pnpm_sha256" =~ ^[0-9a-f]{64}$ \
+  && -f "$pnpm_entry_snapshot" \
+  && -f "${pnpm_runtime_root}/dist/pnpm.cjs" \
+  && -f "${pnpm_runtime_root}/package.json" ]] \
+  || die 'exact pnpm package snapshot is incomplete'
+printf '#!/usr/bin/bash -p\nexec "%s" "%s" "$@"\n' \
+  "${tool_root}/node" "$pnpm_entry_snapshot" > "$pnpm_command"
+/usr/bin/chown "0:${build_gid}" -- "$pnpm_command"
+/usr/bin/chmod 0550 -- "$pnpm_command"
 source_lockfile_sha256="$(snapshot_regular_file \
   "${repository_root}/pnpm-lock.yaml" "$pinned_lockfile" 33554432 0440)"
 source_artifact_sha256="$(snapshot_regular_file \
   "$artifact" "$artifact_snapshot" 1073741824 0440)"
 source_checksum_sha256="$(snapshot_regular_file \
   "$artifact_sha256" "$artifact_sha256_snapshot" 4096 0440)"
-/usr/bin/ln -s -- "$pnpm_path" "$pnpm_command"
 
 /usr/bin/bash -n "$stager_snapshot" \
   || die 'reviewed release stager snapshot has invalid Bash syntax'
@@ -594,9 +676,13 @@ store_manifest_before="${store_authority_root}/STORE_SHA256SUMS"
 ) > "$store_manifest_before"
 /usr/bin/find -P "$store_root" -type d -exec /usr/bin/chmod 0550 -- {} +
 /usr/bin/find -P "$store_root" -type f -exec /usr/bin/chmod 0440 -- {} +
+/usr/bin/find -P "$pnpm_runtime_root" -type d \
+  -exec /usr/bin/chmod 0550 -- {} +
 /usr/bin/chmod 0440 -- "$store_manifest_before"
 /usr/bin/chmod 0440 -- "$pinned_lockfile"
-/usr/bin/chmod 0550 -- "$tool_root" "${tool_root}/node" "$stager_snapshot"
+/usr/bin/chmod 0550 -- \
+  "$tool_root" "${tool_root}/node" "$stager_snapshot" \
+  "$pnpm_entry_snapshot" "$pnpm_command"
 /usr/bin/chmod 0550 -- "$store_authority_root"
 /usr/bin/chown -hR "0:${build_gid}" -- "$store_authority_root"
 copied_node_sha256="$(/usr/bin/sha256sum -- "${tool_root}/node")"
@@ -616,12 +702,12 @@ copied_checksum_sha256="${copied_checksum_sha256%% *}"
   && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$store_manifest_before")" == "0:${build_gid}:440:1" \
   && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "${tool_root}/node")" == "0:${build_gid}:550:1" \
   && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$stager_snapshot")" == "0:${build_gid}:550:1" \
-  && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$pnpm_entry_snapshot")" == "0:${build_gid}:440:1" \
+  && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$pnpm_entry_snapshot")" == "0:${build_gid}:550:1" \
+  && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$pnpm_command")" == "0:${build_gid}:550:1" \
   && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$pinned_lockfile")" == "0:${build_gid}:440:1" \
   && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$artifact_snapshot")" == "0:${build_gid}:440:1" \
   && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$artifact_sha256_snapshot")" == "0:${build_gid}:440:1" \
   && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$reference_manifest")" == "0:${build_gid}:440:1" \
-  && "$(/usr/bin/readlink -- "$pnpm_command")" == "$pnpm_path" \
   && "$copied_node_sha256" == "$source_node_sha256" \
   && "$copied_stager_sha256" == "$source_stager_sha256" \
   && "$copied_pnpm_sha256" == "$source_pnpm_sha256" \
@@ -635,9 +721,16 @@ if find_has_match -P "$store_root" -mindepth 0 ! -user root \
   || find_has_match -P "$store_root" -type f ! -perm 0440; then
   die 'fresh CI pnpm store tree metadata is not exact'
 fi
+if find_has_match -P "$pnpm_runtime_root" -mindepth 0 ! -user root \
+  || find_has_match -P "$pnpm_runtime_root" -mindepth 0 ! -gid "$build_gid" \
+  || find_has_match -P "$pnpm_runtime_root" -type d ! -perm 0550 \
+  || find_has_match -P "$pnpm_runtime_root" -type f \
+    ! -perm 0440 ! -perm 0550; then
+  die 'exact pnpm runtime tree metadata is not frozen'
+fi
 
 for frozen_path in "$store_root" "$stager_snapshot" "${tool_root}/node" \
-  "$pnpm_entry_snapshot" "$pnpm_path" \
+  "$pnpm_runtime_root" "$pnpm_entry_snapshot" "$pnpm_command" "$pnpm_path" \
   "$artifact_snapshot" "$artifact_sha256_snapshot" "$reference_manifest"; do
   if /usr/sbin/runuser -u "$build_user" -- /usr/bin/test -w "$frozen_path"; then
     die "ephemeral CI hydration identity can write frozen authority input: ${frozen_path}"

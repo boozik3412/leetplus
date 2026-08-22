@@ -303,6 +303,46 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: Validate exact pnpm runtime source envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm_realpath="$(realpath -e -- "$(command -v pnpm)")"
+          pnpm_bin_root="$(dirname -- "$pnpm_realpath")"
+          pnpm_package_root="$(dirname -- "$pnpm_bin_root")"
+          test "$(basename -- "$pnpm_realpath")" = 'pnpm.cjs'
+          test "$(basename -- "$pnpm_bin_root")" = 'bin'
+          test "$(realpath -e -- "$pnpm_package_root")" = "$pnpm_package_root"
+          test -f "$pnpm_package_root/package.json"
+          test -f "$pnpm_package_root/dist/pnpm.cjs"
+          pnpm_inventory="$(mktemp "$RUNNER_TEMP/pnpm-runtime-source.XXXXXX")"
+          find -P "$pnpm_package_root" -mindepth 1 -print0 > "$pnpm_inventory"
+          runner_uid="$(id -u)"
+          pnpm_entry_count=0
+          pnpm_total_bytes=0
+          while IFS= read -r -d '' pnpm_entry; do
+            pnpm_entry_count=$((pnpm_entry_count + 1))
+            test "$pnpm_entry_count" -le 5000
+            test "$(stat -c '%u' -- "$pnpm_entry")" = "$runner_uid"
+            pnpm_entry_mode="$(stat -c '%a' -- "$pnpm_entry")"
+            test "$((8#$pnpm_entry_mode & 8#7022))" = '0'
+            if test -d "$pnpm_entry" && test ! -L "$pnpm_entry"; then
+              continue
+            fi
+            test -f "$pnpm_entry"
+            test ! -L "$pnpm_entry"
+            test "$(stat -c '%h' -- "$pnpm_entry")" = '1'
+            pnpm_entry_bytes="$(stat -c '%s' -- "$pnpm_entry")"
+            test "$pnpm_entry_bytes" -le 67108864
+            pnpm_total_bytes=$((pnpm_total_bytes + pnpm_entry_bytes))
+            test "$pnpm_total_bytes" -le 268435456
+          done < "$pnpm_inventory"
+          rm -f -- "$pnpm_inventory"
+          test "$pnpm_entry_count" -gt 0
+          test "$pnpm_total_bytes" -gt 0
+          test "$(node "$pnpm_realpath" --version)" = '10.33.2'
+          printf 'CI_PNPM_RUNTIME_SOURCE_ENVELOPE=PASS\n'
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 

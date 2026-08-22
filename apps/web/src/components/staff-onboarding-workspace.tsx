@@ -144,7 +144,7 @@ function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function defaultDraft(): DraftPlan {
+function defaultDraft(defaultStoreId = ""): DraftPlan {
   return {
     id: null,
     title: "",
@@ -152,7 +152,7 @@ function defaultDraft(): DraftPlan {
     roleScope: "ADMINISTRATOR",
     status: "DRAFT",
     durationDays: "7",
-    storeId: "",
+    storeId: defaultStoreId,
     steps: [],
   };
 }
@@ -200,8 +200,10 @@ export function StaffOnboardingWorkspace({
   report: StaffOnboardingReport;
 }) {
   const router = useRouter();
+  const defaultStoreId =
+    report.accessScope === "STORES" ? (report.stores[0]?.id ?? "") : "";
   const [draft, setDraft] = useState<DraftPlan>(() =>
-    report.rows[0] ? fromPlan(report.rows[0]) : defaultDraft(),
+    report.rows[0] ? fromPlan(report.rows[0]) : defaultDraft(defaultStoreId),
   );
   const [isPending, setIsPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -211,6 +213,9 @@ export function StaffOnboardingWorkspace({
     () => report.rows.find((row) => row.id === draft.id) ?? null,
     [draft.id, report.rows],
   );
+  const canEditSelected = draft.id
+    ? selectedPlan?.canManage === true
+    : report.canManageOnboarding;
 
   function updateDraft(patch: Partial<DraftPlan>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -219,7 +224,7 @@ export function StaffOnboardingWorkspace({
   }
 
   function loadSeed(seed: Omit<DraftPlan, "id" | "storeId">) {
-    setDraft({ ...seed, id: null, storeId: "" });
+    setDraft({ ...seed, id: null, storeId: defaultStoreId });
     setMessage("Шаблон онбординга загружен. Настройте шаги и сохраните.");
     setError(null);
   }
@@ -292,7 +297,9 @@ export function StaffOnboardingWorkspace({
 
     try {
       const response = await fetch(
-        draft.id ? `/api/staff/onboarding/${draft.id}` : "/api/staff/onboarding",
+        draft.id
+          ? `/api/staff/onboarding/${draft.id}`
+          : "/api/staff/onboarding",
         {
           method: draft.id ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
@@ -327,13 +334,11 @@ export function StaffOnboardingWorkspace({
               <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
                 Быстрый старт
               </p>
-              <h2 className="mt-1 text-lg font-semibold">
-                Шаблоны адаптации
-              </h2>
+              <h2 className="mt-1 text-lg font-semibold">Шаблоны адаптации</h2>
             </div>
             <button
               type="button"
-              onClick={() => setDraft(defaultDraft())}
+              onClick={() => setDraft(defaultDraft(defaultStoreId))}
               className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
               Новый маршрут
@@ -422,7 +427,7 @@ export function StaffOnboardingWorkspace({
         </section>
 
         <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          {report.canManageOnboarding ? (
+          {canEditSelected ? (
             <form onSubmit={save}>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -488,7 +493,8 @@ export function StaffOnboardingWorkspace({
                     value={draft.roleScope}
                     onChange={(event) =>
                       updateDraft({
-                        roleScope: event.target.value as StaffOnboardingRoleScope,
+                        roleScope: event.target
+                          .value as StaffOnboardingRoleScope,
                       })
                     }
                     className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
@@ -512,7 +518,9 @@ export function StaffOnboardingWorkspace({
                     }
                     className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
                   >
-                    <option value="">Вся сеть</option>
+                    {report.accessScope === "NETWORK" ? (
+                      <option value="">Вся сеть</option>
+                    ) : null}
                     {report.stores.map((store) => (
                       <option key={store.id} value={store.id}>
                         {store.name}
@@ -602,8 +610,9 @@ export function StaffOnboardingWorkspace({
                     {
                       label: "Контур",
                       value: draft.storeId
-                        ? report.stores.find((store) => store.id === draft.storeId)
-                            ?.name ?? "Клуб"
+                        ? (report.stores.find(
+                            (store) => store.id === draft.storeId,
+                          )?.name ?? "Клуб")
                         : "Вся сеть",
                     },
                     { label: "Статус", value: statusLabels[draft.status] },
@@ -710,7 +719,9 @@ function OnboardingStepEditor({
         </label>
 
         <label className="space-y-1">
-          <span className="text-xs font-bold uppercase text-zinc-500">День</span>
+          <span className="text-xs font-bold uppercase text-zinc-500">
+            День
+          </span>
           <input
             inputMode="numeric"
             value={step.day ?? ""}
@@ -964,7 +975,11 @@ function stepReferenceTitle(
   }
 
   if (step.type === "TASK_TEMPLATE") {
-    return optionTitle(report.taskTemplates, step.taskTemplateId, "Шаблон задачи");
+    return optionTitle(
+      report.taskTemplates,
+      step.taskTemplateId,
+      "Шаблон задачи",
+    );
   }
 
   if (step.type === "CHECKLIST_TEMPLATE") {
@@ -989,5 +1004,7 @@ function optionTitle(
 ) {
   const option = options.find((item) => item.id === id);
 
-  return option ? `${option.title} · ${option.store?.name ?? "Вся сеть"}` : fallback;
+  return option
+    ? `${option.title} · ${option.store?.name ?? "Вся сеть"}`
+    : fallback;
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { ProductsTable } from "@/components/products-table";
 import { requireCurrentUser } from "@/lib/auth";
@@ -32,14 +33,19 @@ export default async function ProductsTablePage({
 }: ProductsTablePageProps) {
   const params = await searchParams;
   const query = resolveCatalogQuery(params);
-  const [user, catalog, categories, suppliers, stores] = await Promise.all([
-    requireCurrentUser(),
-    getProductCatalog(query),
-    getCategories(),
-    getSuppliers(),
+  const user = await requireCurrentUser();
+  const canEditProducts =
+    user.accessScope === "NETWORK" && can(user, "edit_products");
+  const unfilteredCatalogPromise = query.storeIds?.length
+    ? null
+    : getProductCatalog(query);
+  const [categories, suppliers, stores] = await Promise.all([
+    canEditProducts ? getCategories() : Promise.resolve([]),
+    canEditProducts ? getSuppliers() : Promise.resolve([]),
     getStores(),
   ]);
-  const canEditProducts = can(user, "edit_products");
+  assertRequestedStores(query, stores);
+  const catalog = await (unfilteredCatalogPromise ?? getProductCatalog(query));
 
   return (
     <main className="min-h-screen bg-[var(--background)] text-zinc-950">
@@ -132,4 +138,19 @@ function allParams(value: string | string[] | undefined) {
   }
 
   return Array.isArray(value) ? value : [value];
+}
+
+function assertRequestedStores(
+  query: ProductCatalogQuery,
+  stores: Awaited<ReturnType<typeof getStores>>,
+) {
+  if (!query.storeIds?.length) {
+    return;
+  }
+
+  const allowedStoreIds = new Set(stores.map((store) => store.id));
+
+  if (query.storeIds.some((storeId) => !allowedStoreIds.has(storeId))) {
+    notFound();
+  }
 }

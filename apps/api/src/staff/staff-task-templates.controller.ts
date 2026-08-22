@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { FreshStoreScopeGuard } from '../tenancy/fresh-store-scope.guard';
 import {
   StaffTaskTemplatesService,
   type StaffTaskTemplateDto,
@@ -31,7 +32,7 @@ import {
   UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshStoreScopeGuard)
 export class StaffTaskTemplatesController {
   constructor(
     private readonly staffTaskTemplatesService: StaffTaskTemplatesService,

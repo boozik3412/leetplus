@@ -12,10 +12,21 @@ export class AppController {
 
   @Get('health')
   getHealth() {
-    return {
-      ok: true,
-      service: 'leetplus-api',
-      checkedAt: new Date().toISOString(),
-    };
+    return this.appService.getLiveness();
+  }
+
+  @Get('health/live')
+  getLiveness() {
+    return this.appService.getLiveness();
+  }
+
+  @Get('health/ready')
+  getReadiness() {
+    return this.appService.getReadiness();
+  }
+
+  @Get('version')
+  getVersion() {
+    return this.appService.getVersion();
   }
 }

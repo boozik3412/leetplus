@@ -6,7 +6,6 @@ import {
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
 import {
   buildStaffExportFile,
   formatStaffDateTime,
@@ -15,20 +14,17 @@ import {
   type StaffExportCell,
   type StaffExportFile,
 } from './staff-export';
+import {
+  StaffTrainingAccessPolicyService,
+  type StaffTrainingAccess,
+  type StaffTrainingRoleScope,
+} from './staff-training-access-policy.service';
 
 const progressStatuses = [
   'NOT_STARTED',
   'IN_PROGRESS',
   'COMPLETED',
   'WAIVED',
-] as const;
-const roleScopes = [
-  'ALL_STAFF',
-  'ADMINISTRATOR',
-  'SENIOR_ADMINISTRATOR',
-  'CLUB_MANAGER',
-  'MANAGER',
-  'STANDARDS_MANAGER',
 ] as const;
 const staffRoles = [
   UserRole.OWNER,
@@ -42,7 +38,7 @@ const staffRoles = [
 ] as const;
 
 export type StaffTrainingProgressStatus = (typeof progressStatuses)[number];
-export type StaffTrainingProfileRoleScope = (typeof roleScopes)[number];
+export type StaffTrainingProfileRoleScope = StaffTrainingRoleScope;
 
 export type StaffTrainingProfilesQuery = {
   userId?: string;
@@ -72,6 +68,7 @@ export type StaffTrainingProgressDto = {
 };
 
 export type StaffTrainingProfileReport = {
+  accessScope: 'NETWORK' | 'STORES';
   filters: {
     userId: string | null;
     role: UserRole | 'all';
@@ -223,22 +220,18 @@ type StaffAssessmentResultRow = Prisma.StaffAssessmentResultGetPayload<{
 export class StaffTrainingProfilesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
+    private readonly accessPolicy: StaffTrainingAccessPolicyService,
   ) {}
 
   async getProfiles(
     user: AuthenticatedUser,
     query: StaffTrainingProfilesQuery = {},
   ): Promise<StaffTrainingProfileReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const canManageTraining = this.canManageTraining(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId, canManageTraining } = access;
     const filters = this.resolveFilters(query, canManageTraining);
-    const usersWhere = this.buildUsersWhere(
-      tenantId,
-      user,
-      filters,
-      canManageTraining,
-    );
+    this.accessPolicy.assertRequestedStore(access, filters.storeId);
+    const usersWhere = this.buildUsersWhere(access, filters);
 
     const [users, courses, assessments, stores] = await Promise.all([
       this.prisma.user.findMany({
@@ -250,23 +243,14 @@ export class StaffTrainingProfilesService {
       this.prisma.staffTrainingCourse.findMany({
         where: {
           tenantId,
-          status: 'ACTIVE',
-          roleScope: {
-            in: this.visibleRoleScopes(user.role, canManageTraining),
-          },
+          AND: [this.accessPolicy.activeProfileCourseWhere(access)],
         },
         include: courseInclude,
         orderBy: [{ required: 'desc' }, { roleScope: 'asc' }, { title: 'asc' }],
         take: 400,
       }),
       this.prisma.staffAssessment.findMany({
-        where: {
-          tenantId,
-          status: 'ACTIVE',
-          roleScope: {
-            in: this.visibleRoleScopes(user.role, canManageTraining),
-          },
-        },
+        where: this.accessPolicy.visibleAssessmentsWhere(access),
         include: assessmentInclude,
         orderBy: [
           { assessmentKind: 'asc' },
@@ -276,7 +260,7 @@ export class StaffTrainingProfilesService {
         take: 400,
       }),
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: this.accessPolicy.visibleStoresWhere(access),
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
@@ -328,16 +312,18 @@ export class StaffTrainingProfilesService {
           assessments,
           progressByUserCourse,
           resultsByUserAssessment,
+          access,
         ),
       )
       .filter((row) => this.matchesStatus(row, filters.status));
 
     return {
+      accessScope: access.mode,
       filters,
       summary: this.buildSummary(rows),
       canManageTraining,
       rows,
-      users: users.map((row) => this.toUser(row)),
+      users: users.map((row) => this.toUser(row, access)),
       stores,
     };
   }
@@ -378,8 +364,8 @@ export class StaffTrainingProfilesService {
   }
 
   async updateProgress(user: AuthenticatedUser, dto: StaffTrainingProgressDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const canManageTraining = this.canManageTraining(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId, canManageTraining } = access;
     const userId = this.normalizeOptionalString(dto.userId) ?? user.id;
     const courseId = this.normalizeRequiredString(
       dto.courseId,
@@ -392,11 +378,18 @@ export class StaffTrainingProfilesService {
 
     const [targetUser, course, current] = await Promise.all([
       this.prisma.user.findFirst({
-        where: { id: userId, tenantId },
+        where: {
+          id: userId,
+          AND: [this.accessPolicy.visibleUsersWhere(access)],
+        },
         include: userInclude,
       }),
       this.prisma.staffTrainingCourse.findFirst({
-        where: { id: courseId, tenantId, status: 'ACTIVE' },
+        where: {
+          id: courseId,
+          tenantId,
+          AND: [this.accessPolicy.activeProfileCourseWhere(access)],
+        },
         include: courseInclude,
       }),
       this.prisma.staffTrainingProgress.findFirst({
@@ -411,6 +404,10 @@ export class StaffTrainingProfilesService {
 
     if (!course) {
       throw new NotFoundException('Active training course not found');
+    }
+
+    if (!this.accessPolicy.canManageUser(access, targetUser)) {
+      throw new NotFoundException('User not found');
     }
 
     if (!this.courseMatchesUser(course, targetUser)) {
@@ -505,18 +502,15 @@ export class StaffTrainingProfilesService {
   }
 
   private buildUsersWhere(
-    tenantId: string,
-    user: AuthenticatedUser,
+    access: StaffTrainingAccess,
     filters: StaffTrainingProfileReport['filters'],
-    canManageTraining: boolean,
   ): Prisma.UserWhereInput {
     const where: Prisma.UserWhereInput = {
-      tenantId,
+      AND: [this.accessPolicy.visibleUsersWhere(access)],
       role: { in: [...staffRoles] },
     };
 
-    if (!canManageTraining) {
-      where.id = user.id;
+    if (!access.canManageTraining) {
       return where;
     }
 
@@ -529,10 +523,14 @@ export class StaffTrainingProfilesService {
     }
 
     if (filters.storeId) {
-      where.OR = [
-        { storeAccesses: { some: { storeId: filters.storeId } } },
-        { storeAccesses: { none: {} } },
-      ];
+      if (access.mode === 'NETWORK') {
+        where.OR = [
+          { storeAccesses: { some: { storeId: filters.storeId } } },
+          { storeAccesses: { none: {} } },
+        ];
+      } else {
+        where.storeAccesses = { some: { storeId: filters.storeId } };
+      }
     }
 
     if (filters.search) {
@@ -556,8 +554,9 @@ export class StaffTrainingProfilesService {
     assessments: StaffAssessmentRow[],
     progressByUserCourse: Map<string, StaffTrainingProgressRow>,
     resultsByUserAssessment: Map<string, StaffAssessmentResultRow>,
+    access: StaffTrainingAccess,
   ): StaffTrainingProfileRow {
-    const profileUser = this.toUser(user);
+    const profileUser = this.toUser(user, access);
     const assignedCourses = courses
       .filter((course) => this.courseMatchesUser(course, user))
       .map((course) =>
@@ -996,51 +995,6 @@ export class StaffTrainingProfilesService {
     return user.storeAccesses.some((access) => access.storeId === storeId);
   }
 
-  private visibleRoleScopes(role: UserRole, canManageTraining: boolean) {
-    if (canManageTraining) {
-      return [...roleScopes];
-    }
-
-    const scopes: StaffTrainingProfileRoleScope[] = ['ALL_STAFF'];
-
-    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
-      scopes.push('ADMINISTRATOR');
-    }
-
-    if (role === UserRole.SENIOR_ADMINISTRATOR) {
-      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR');
-    }
-
-    if (role === UserRole.CLUB_MANAGER) {
-      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'CLUB_MANAGER');
-    }
-
-    if (
-      role === UserRole.MANAGER ||
-      role === UserRole.OWNER ||
-      role === UserRole.ADMIN
-    ) {
-      scopes.push(
-        'ADMINISTRATOR',
-        'SENIOR_ADMINISTRATOR',
-        'CLUB_MANAGER',
-        'MANAGER',
-        'STANDARDS_MANAGER',
-      );
-    }
-
-    if (role === UserRole.STANDARDS_MANAGER) {
-      scopes.push(
-        'ADMINISTRATOR',
-        'SENIOR_ADMINISTRATOR',
-        'CLUB_MANAGER',
-        'STANDARDS_MANAGER',
-      );
-    }
-
-    return Array.from(new Set(scopes));
-  }
-
   private normalizeProgressPercent(
     value: number | string | undefined,
     status: StaffTrainingProgressStatus,
@@ -1091,14 +1045,19 @@ export class StaffTrainingProfilesService {
     return value !== null && new Date(value).getTime() < Date.now();
   }
 
-  private toUser(user: StaffTrainingUserRow): StaffTrainingProfileUser {
+  private toUser(
+    user: StaffTrainingUserRow,
+    access: StaffTrainingAccess,
+  ): StaffTrainingProfileUser {
     return {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
       role: user.role,
       isActive: user.isActive,
-      stores: user.storeAccesses.map((access) => access.store),
+      stores: this.accessPolicy
+        .projectStoreAccesses(access, user.storeAccesses)
+        .map((item) => item.store),
     };
   }
 
@@ -1170,18 +1129,5 @@ export class StaffTrainingProfilesService {
 
   private joinKey(first: string, second: string) {
     return `${first}:${second}`;
-  }
-
-  private canManageTraining(user: AuthenticatedUser) {
-    switch (user.role) {
-      case UserRole.OWNER:
-      case UserRole.ADMIN:
-      case UserRole.MANAGER:
-      case UserRole.CLUB_MANAGER:
-      case UserRole.STANDARDS_MANAGER:
-        return true;
-      default:
-        return false;
-    }
   }
 }

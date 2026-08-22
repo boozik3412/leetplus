@@ -7,6 +7,7 @@ import {
 import { Prisma, ProductAssortmentRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import type {
   AssignProductsCategoryDto,
@@ -41,10 +42,14 @@ export class ProductsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
-  async findAll(user?: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+  async findAll(user: AuthenticatedUser) {
+    const { tenantId, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(user);
+    const storeFilter = this.storeFilter(effectiveStoreIds);
+    const productVisibility = this.productVisibility(effectiveStoreIds);
     const operationalActivePeriod = this.resolveOperationalActivePeriod();
 
     const latestSalesPeriod = this.resolveLatestSalesPeriod();
@@ -54,6 +59,7 @@ export class ProductsService {
           where: {
             tenantId,
             isActive: true,
+            ...productVisibility,
           },
           include: {
             category: true,
@@ -66,6 +72,7 @@ export class ProductsService {
         this.prisma.inventorySnapshot.findMany({
           where: {
             tenantId,
+            ...storeFilter,
             snapshotDate: {
               lte: operationalActivePeriod.toDate,
             },
@@ -88,6 +95,7 @@ export class ProductsService {
         this.prisma.salesFact.findMany({
           where: {
             tenantId,
+            ...storeFilter,
             isCanceled: false,
             saleDate: {
               gte: operationalActivePeriod.fromDate,
@@ -102,6 +110,7 @@ export class ProductsService {
         this.prisma.salesFact.findMany({
           where: {
             tenantId,
+            ...storeFilter,
             isCanceled: false,
             saleDate: {
               gte: latestSalesPeriod.fromDate,
@@ -202,8 +211,11 @@ export class ProductsService {
     });
   }
 
-  async getSummary(user?: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+  async getSummary(user: AuthenticatedUser) {
+    const { tenantId, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(user);
+    const storeFilter = this.storeFilter(effectiveStoreIds);
+    const productVisibility = this.productVisibility(effectiveStoreIds);
     const operationalActivePeriod = this.resolveOperationalActivePeriod();
 
     const [
@@ -214,17 +226,28 @@ export class ProductsService {
       recentSalesFacts,
     ] = await Promise.all([
       this.prisma.product.count({
-        where: { tenantId, isActive: true },
+        where: { tenantId, isActive: true, ...productVisibility },
       }),
       this.prisma.product.count({
-        where: { tenantId, isActive: true, categoryId: { not: null } },
+        where: {
+          tenantId,
+          isActive: true,
+          categoryId: { not: null },
+          ...productVisibility,
+        },
       }),
       this.prisma.product.count({
-        where: { tenantId, isActive: true, supplierId: { not: null } },
+        where: {
+          tenantId,
+          isActive: true,
+          supplierId: { not: null },
+          ...productVisibility,
+        },
       }),
       this.prisma.inventorySnapshot.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           snapshotDate: { lte: operationalActivePeriod.toDate },
           product: { isActive: true },
         },
@@ -242,6 +265,7 @@ export class ProductsService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           isCanceled: false,
           saleDate: {
             gte: operationalActivePeriod.fromDate,
@@ -272,28 +296,25 @@ export class ProductsService {
     };
   }
 
-  async getCatalog(query: ProductCatalogQuery, user?: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+  async getCatalog(query: ProductCatalogQuery, user: AuthenticatedUser) {
     const request = this.resolveCatalogQuery(query);
+    const { tenantId, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(
+        user,
+        request.storeIds,
+      );
+    const storeFilter = this.storeFilter(effectiveStoreIds);
+    const productVisibility = this.productVisibility(effectiveStoreIds);
     const operationalActivePeriod = this.resolveOperationalActivePeriod();
     const latestSalesPeriod = this.resolveLatestSalesPeriod();
     const where: Prisma.ProductWhereInput = {
       tenantId,
       isActive: true,
+      ...productVisibility,
       ...(request.name
         ? { name: { contains: request.name, mode: 'insensitive' } }
         : {}),
       ...(request.categoryStatus === 'unassigned' ? { categoryId: null } : {}),
-      ...(request.storeIds.length > 0
-        ? {
-            inventorySnapshots: {
-              some: {
-                storeId: { in: request.storeIds },
-                snapshotDate: { lte: operationalActivePeriod.toDate },
-              },
-            },
-          }
-        : {}),
     };
 
     const [products, total] = await Promise.all([
@@ -326,6 +347,7 @@ export class ProductsService {
         this.prisma.inventorySnapshot.findMany({
           where: {
             tenantId,
+            ...storeFilter,
             productId: { in: productIds },
             snapshotDate: { lte: operationalActivePeriod.toDate },
           },
@@ -345,6 +367,7 @@ export class ProductsService {
         this.prisma.salesFact.findMany({
           where: {
             tenantId,
+            ...storeFilter,
             productId: { in: productIds },
             isCanceled: false,
             saleDate: {
@@ -358,6 +381,7 @@ export class ProductsService {
         this.prisma.salesFact.findMany({
           where: {
             tenantId,
+            ...storeFilter,
             productId: { in: productIds },
             isCanceled: false,
             saleDate: {
@@ -498,19 +522,17 @@ export class ProductsService {
     )
       ? (query.sort as ProductCatalogSort)
       : 'name';
+    const hasStoreFilter = query.storeId !== undefined;
     const storeValues = Array.isArray(query.storeId)
       ? query.storeId
-      : query.storeId
+      : query.storeId !== undefined
         ? [query.storeId]
         : [];
-    const storeIds = [
-      ...new Set(
-        storeValues
+    const storeIds = hasStoreFilter
+      ? storeValues
           .flatMap((value) => value.split(','))
           .map((value) => value.trim())
-          .filter(Boolean),
-      ),
-    ];
+      : undefined;
 
     return {
       page,
@@ -525,7 +547,7 @@ export class ProductsService {
       page: number;
       pageSize: number;
       name: string;
-      storeIds: string[];
+      storeIds: string[] | undefined;
       categoryStatus: 'all' | 'unassigned';
       sort: ProductCatalogSort;
       direction: ProductCatalogDirection;
@@ -564,13 +586,15 @@ export class ProductsService {
     return [{ [sort]: direction }, { name: 'asc' }, tieBreaker];
   }
 
-  async findById(id: string, user?: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+  async findById(id: string, user: AuthenticatedUser) {
+    const { tenantId, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(user);
 
     return this.prisma.product.findFirst({
       where: {
         id,
         tenantId,
+        ...this.productVisibility(effectiveStoreIds),
       },
       include: {
         category: true,
@@ -579,7 +603,33 @@ export class ProductsService {
     });
   }
 
+  private storeFilter(storeIds: readonly string[] | null): {
+    storeId?: { in: string[] };
+  } {
+    return storeIds ? { storeId: { in: [...storeIds] } } : {};
+  }
+
+  private productVisibility(
+    storeIds: readonly string[] | null,
+  ): Prisma.ProductWhereInput {
+    if (!storeIds) {
+      return {};
+    }
+
+    const inScope = { in: [...storeIds] };
+
+    return {
+      OR: [
+        { inventorySnapshots: { some: { storeId: inScope } } },
+        { salesFacts: { some: { storeId: inScope } } },
+        { stockMovements: { some: { storeId: inScope } } },
+        { langameClubConfigurations: { some: { storeId: inScope } } },
+      ],
+    };
+  }
+
   async create(dto: CreateProductDto, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const data = await this.normalizeCreateData(dto, tenantId);
 
@@ -598,6 +648,7 @@ export class ProductsService {
   }
 
   async update(id: string, dto: UpdateProductDto, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
     const data = await this.normalizeUpdateData(dto, tenantId);
@@ -618,6 +669,7 @@ export class ProductsService {
   }
 
   async archive(id: string, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
 
@@ -635,6 +687,7 @@ export class ProductsService {
     dto: AssignProductsCategoryDto,
     user: AuthenticatedUser,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const productIds = this.normalizeProductIds(dto.productIds);
 

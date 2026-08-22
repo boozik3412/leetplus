@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { FactCsvImportService } from './fact-csv-import.service';
 
@@ -29,6 +30,10 @@ type PrismaMock = {
 
 type TenantContextMock = {
   resolve: jest.Mock;
+};
+
+type FreshStoreScopeMock = {
+  assertNetwork: jest.Mock;
 };
 
 type UpsertCall = {
@@ -133,12 +138,19 @@ function lastImportJobCreateData(prisma: PrismaMock) {
 describe('FactCsvImportService', () => {
   let prisma: PrismaMock;
   let tenantContext: TenantContextMock;
+  let freshStoreScope: FreshStoreScopeMock;
   let service: FactCsvImportService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     tenantContext = {
       resolve: jest.fn().mockResolvedValue({
+        tenantId: 'tenant-1',
+        tenantSlug: 'club-a',
+      }),
+    };
+    freshStoreScope = {
+      assertNetwork: jest.fn().mockResolvedValue({
         tenantId: 'tenant-1',
         tenantSlug: 'club-a',
       }),
@@ -181,6 +193,7 @@ describe('FactCsvImportService', () => {
     service = new FactCsvImportService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
+      freshStoreScope as unknown as FreshStoreScopeService,
     );
   });
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffAssessmentsWorkspace } from "@/components/staff-assessments-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffAssessmentsReport,
   type StaffAssessmentKind,
@@ -50,7 +50,9 @@ function isStatus(
   );
 }
 
-function isKind(value: string | undefined): value is StaffAssessmentKind | "all" {
+function isKind(
+  value: string | undefined,
+): value is StaffAssessmentKind | "all" {
   return value === "all" || value === "TEST" || value === "ATTESTATION";
 }
 
@@ -68,7 +70,9 @@ function isRoleScope(
   );
 }
 
-function resolveFilters(params: Awaited<SearchParams>): StaffAssessmentsFilters {
+function resolveFilters(
+  params: Awaited<SearchParams>,
+): StaffAssessmentsFilters {
   const status = searchParam(params.status);
   const roleScope = searchParam(params.roleScope);
   const assessmentKind = searchParam(params.assessmentKind);
@@ -92,7 +96,7 @@ export default async function StaffAssessmentsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffAssessmentsReport(filters);

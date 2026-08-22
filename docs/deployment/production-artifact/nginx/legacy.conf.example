@@ -1,0 +1,10 @@
+# Concrete N-1 rollback target. The existing legacy API/Web services remain hot.
+upstream leetplus_api {
+    server 127.0.0.1:4000 max_fails=2 fail_timeout=5s;
+    keepalive 32;
+}
+
+upstream leetplus_web {
+    server 127.0.0.1:3000 max_fails=2 fail_timeout=5s;
+    keepalive 32;
+}

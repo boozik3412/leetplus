@@ -1,0 +1,361 @@
+# LeetPlus open beta — текущее состояние на 07.08.2026
+
+> Обновление 14.08.2026: CURRENT200 принят exact SHA `ccf38764…` / CI
+> `31767536910`. Поверх него реализован deny-only CURRENT201: два разных
+> участника и два разных Ed25519 public key подписывают role-bound payload,
+> переносимый public receipt повторно проверяется, а любое изменение CURRENT198
+> теперь требует exact canonical evidence-файл в том же commit. Missing,
+> drifted, expired или forged evidence останавливает CI; focused matrix
+> `16/16`. Exact implementation SHA `e3cf6ff4…` принят CI `31776034567` как
+> `3/3 SUCCESS`, artifact digest `sha256:2e3d1201…86d2`. Private keys,
+> production, Tenant A/A1..A4, тестер и owner route не изменялись. Внешний
+> доступ остаётся `NO-GO` до фактической offline ceremony, production-origin
+> registration и restored-copy role/grant rehearsal.
+
+> Обновление 10.08.2026: Gate 0 закрыт exact synchronized SHA и зелёным
+> SHA-bound CI artifact. Актуальное evidence вынесено в
+> `gate-0-ci-artifact-2026-08-10.md`; остальные launch gates сохраняют `NO-GO`.
+>
+> Дополнение 10.08.2026: CURRENT187-F добавил stable signed policy binding
+> foundation. Planner `16/16`, acquisition/binding `15/15`, DDL-fence authority
+> `11/11`; exact SHA `b64abfe5…` принят CI `31391874407` как `3/3 SUCCESS`.
+> Это не semantic allowlist и не production authority. Evidence:
+> `identity-mail-current187-f-ci-evidence-2026-08-10.md`.
+>
+> CURRENT187-G добавил secret-free semantic risk facts
+> для privileged roles, memberships, settings, ownership, current/default ACL,
+> `PUBLIC`/grantable grants и effective privileges. Facts digest включён в
+> signed-bound `clusterCatalogDigest`; exact-SHA CI `31397844858` на
+> `3804792e…` — `3/3 SUCCESS`. На момент приёмки G allowlist/GO отсутствовали. Evidence:
+> `identity-mail-current187-g-ci-evidence-2026-08-10.md`.
+>
+> CURRENT187-H добавил independently signed semantic allowlist и
+> fail-closed evaluator. Четвёртый purpose связывает exact cluster/universe,
+> review evidence, document и risk-facts digests; F теперь требует matched H
+> receipt. Authority `13/13`, acquisition/risk/allowlist/policy `24/24`, DDL
+> fence `11/11`, полный disposable rehearsal `163/163`. Exact SHA `e91b641f…`
+> принят CI `31403020215` как `3/3 SUCCESS`, artifact digest
+> `sha256:94eb8908…c61b7`. H остаётся deny-only; deploy/test-access GO не
+> выдаётся. Evidence: `identity-mail-current187-h-ci-evidence-2026-08-10.md`.
+>
+> CURRENT187-I foundation добавил explicit authority verification provenance,
+> canonical one-time consumption и scoped revocation bundles. Policy F теперь
+> требует branded persisted I receipt и отклоняет raw/cloned H. Focused
+> `31/31`, release acceptance `133/133`, official sequential materializer
+> `24/24`, journal `24/24`, runner `14/14`, runtime `27/27`. Foundation SHA
+> `340e6f05…` принят CI `31411596083` — `3/3 SUCCESS`, artifact
+> `sha256:95afdce0…31ee3`. Noncanonical PostgreSQL candidate `daf5a98f…` теперь
+> реализует append-only/FORCE-RLS/execute-only RPC ledger с exact canonical-JSON
+> reconstruction; static `7/7`, два независимых hostile PG16.13 run — `1/1 PASS`,
+> включая duplicate-key/reordered JSON attacks, postflight `0/0/0`.
+> Exact candidate SHA `8e2a25ec…` принят CI `31416609580` как `3/3 SUCCESS`,
+> artifact digest `sha256:9c46d1d6…a2fe0f`. Canonical promotion и production
+> runtime admission ещё не готовы; статус
+> внешнего доступа не изменился: `NO-GO`.
+>
+> CURRENT187-J локально добавил synthetic deny-only foundation фактического
+> network/runtime admission: разные branded receipts для четырёх service-path
+> probes и host/control-plane evidence, exact endpoint/TLS/HBA/pooler/
+> service-account digests, запрет trust/wildcard/user collapse и обязательные
+> positive/negative probes. Standalone `10/10`, общий CURRENT187 gate `42/42`;
+> exact SHA `04ffff27…` принят CI `31420665364` как `3/3 SUCCESS`, artifact
+> digest `sha256:0cb6ac6e…bd337`. J не выполняет реальные
+> TCP/TLS/HBA/PgBouncer probes, не имеет production root/signer и сохраняет все
+> access/effect flags false. Evidence:
+> `identity-mail-current187-j-network-runtime-attestation-foundation.md`.
+>
+> CURRENT187-J1 принят как exact-SHA CI capability-bearing коллектор
+> фактической PostgreSQL backend-сессии через Prisma. Exact DB/role name+OID,
+> `application_name`, backend/network coordinates, read-only state, negotiated
+> TLS facts, role attributes/privileges/memberships/settings и positive SELECT
+> probe проверяются fail closed; receipt secret-free и deny-only. Standalone
+> `11/11`, общий CURRENT187 gate `53/53`; exact SHA `a9513c69…` принят CI
+> `31577001152` как `3/3 SUCCESS`, фактический loopback PostgreSQL smoke —
+> `SUCCESS`, artifact `sha256:8e0c26f5…d334`. J1 намеренно не
+> утверждает endpoint identity, matched HBA rule, PgBouncer identity или
+> negative probe. Production и внешний доступ не менялись. Evidence:
+> `identity-mail-current187-j1-ci-evidence-2026-08-12.md`.
+>
+> CURRENT187-J2 принят exact-SHA CI как actual endpoint/TLS-peer collector:
+> exact DNS address set, selected IP/family/port, PostgreSQL SSLRequest byte,
+> TLS `1.2..1.3`, verify-full hostname/CA, leaf DER/SPKI SHA-256 и validity.
+> Unit `10/10`, aggregate CURRENT187 `63/63`, protocol/TLS integration `1/1`.
+> Exact SHA `d386dfa2…`, CI `31584476362` — `3/3 SUCCESS`, artifact
+> `sha256:722f77c2…f495`. J2 выставляет observed, но не attested. Evidence:
+> `identity-mail-current187-j2-ci-evidence-2026-08-12.md`.
+>
+> CURRENT187-J3/J4 приняты exact-SHA CI как actual read-only control-plane
+> collectors. J3 читает `pg_hba_file_rules` и reload clock, но честно сохраняет
+> effective-loaded HBA flags false; J4 через simple query protocol читает
+> PgBouncer `SHOW CONFIG/DATABASES/USERS/POOLS/SERVERS`, проверяет transaction
+> pool mode, backend mapping и отсутствие `force_user`. Collector SHA
+> `ceed7239…` имел J3 `8/8`, J4 `7/7`, aggregate CURRENT187 `78/78`; CI
+> `31586755130` — `3/3 SUCCESS`, actual HBA step `SUCCESS`, artifact
+> `sha256:faf8c3e2…aa283`. Evidence:
+> `identity-mail-current187-j3-j4-control-plane-collectors.md`.
+>
+> Actual disposable PgBouncer J4 fixture принят exact SHA
+> `b9296430ffb5876e3db79c37215de414dbf05799`: CI `31591848857` —
+> `3/3 SUCCESS`, actual install/control-plane steps `SUCCESS`, application
+> through-pooler + admin denial `2/2`, aggregate CURRENT187 `79/79`, artifact
+> `sha256:01f3aba16faf57a24308bbffd0a839aff65aa9691b21969a1e284c004922d776`.
+> Это synthetic loopback topology без production TLS/root/signer; внешний
+> статус остаётся `NO-GO`. Evidence:
+> `identity-mail-current187-j4-pgbouncer-ci-evidence-2026-08-12.md`.
+>
+> CURRENT187-J5 локально реализовал independently signed connection-probe
+> matrix contract: четыре service purpose, positive allow и восемь exact
+> negative outcomes на каждый, Ed25519 origin + пяти-минутная freshness,
+> service identity/evidence separation и frozen-empty production root. J5
+> `10/10`, aggregate CURRENT187 `89/89`, typecheck green. Exact-SHA CI
+> `31594459396` завершил `3/3 SUCCESS`, artifact ID `9140727030`.
+> Capability-bearing runner foundation теперь реализован: 4 positive bindings,
+> 20 network attempts и 12 control-policy evaluations; runner `10/10`, общий J5
+> `20/20`, aggregate CURRENT187 `99/99`. Actual disposable wire/TLS integration
+> `1/1` доказал 20 network attempts. Exact SHA `e4789e29…`, CI `31597872402`
+> завершил `3/3 SUCCESS`, actual negative probe step `SUCCESS`, artifact
+> `sha256:1fb76259…fdd85f`. Branded J1–J4 production-like execution,
+> production signer/root и persisted consumption ещё отсутствуют;
+> статус `NO-GO`. Evidence:
+> `identity-mail-current187-j5-r1-ci-evidence-2026-08-12.md`.
+> J5-R2 локально добавил отдельный file-backed protected signer boundary:
+> canonical external Ed25519 pair, public pin, key path/link/drift fences и
+> exact branded R1→J5 binding. Signer `6/6`, combined J5 `26/26`, aggregate
+> CURRENT187 `105/105`. Production root, key ceremony/ACL/HSM, persistence и
+> deploy binding не выполнены; статус остаётся `NO-GO`.
+>
+> J5-R3 локально добавил transferable deny-only consumption/revocation
+> contract: exact envelope+branded receipt, one-time operation/nonce и
+> `ENVELOPE/MATRIX/ROOT` scopes. R3 `6/6`, combined J5 `32/32`, aggregate
+> CURRENT187 `111/111`. Это ещё не PostgreSQL persistence: tables/FORCE-RLS/RPC,
+> hostile races/lost-response, production root и F/deploy binding отсутствуют;
+> статус остаётся `NO-GO`.
+>
+> Noncanonical J5-R3 PostgreSQL candidate теперь реализует append-only/FORCE
+> RLS/execute-only RPC и total lock order. Static candidate `7/7`, combined J5
+> `39/39`, aggregate CURRENT187 `118/118`. Exact SHA `1f7ef47c…` принят CI
+> `31606012609` как `3/3 SUCCESS`; actual hostile PG test `1/1 PASS`, postflight
+> `databases/roles/sessions = 0/0/0`, artifact `sha256:0fc0908b…8972`.
+> Candidate остаётся noncanonical; production root, production-like topology и
+> F/deploy binding отсутствуют. Статус остаётся `NO-GO`.
+>
+> J5-R4 локально добавляет отдельный exact structural successor receipt рядом с
+> immutable deployment authority: envelope, matrix, persisted receipt, public
+> root и verifier receipt связаны через общий release/cluster/universe, frozen
+> deploy contract не меняется. J5 `42/42`, aggregate CURRENT187 `121/121`,
+> authority `13/13`; receipt остаётся synthetic deny-only с
+> `deploymentGoConsumable=false` и
+> `productionBindingSatisfied=false`. Exact SHA `5fca5a9d…` принят CI
+> `31609394804` `3/3 SUCCESS`, artifact `sha256:396d7e78…dce1`.
+> CURRENT187-F остаётся immutable; R5 ниже композирует F + R4 отдельным
+> successor. Production root/topology отсутствуют, статус `NO-GO`.
+>
+> J5-R5 локально добавляет отдельный pure successor policy, который принимает
+> только exact branded F + R4 с одинаковым authority payload digest. Другой
+> signed authority, branded denied F/R4, clone, Proxy и arity fail closed.
+> Acquisition `21/21`, aggregate CURRENT187 `124/124`, refreeze `17/17`,
+> assembler `21/21`;
+> production/access/effect flags остаются false, статус `NO-GO`.
+
+## Итоговый вердикт
+
+- Fail-closed runner/janitor, signed journal, materializer recovery и SQL
+  semantic fingerprint приняты. Release lane перезаморожен поверх canonical
+  head № 180; exact SHA `183270…` прошёл GitHub CI `3/3 SUCCESS`, включая
+  PostgreSQL CURRENT183–187, worker/TLS SMTP и tenant/store security gates.
+  Production-like restored-copy rehearsal остаётся отдельным следующим gate.
+- Внешний invite-only тест пока имеет решение `NO-GO`.
+- Production, текущий `Tenant A` с четырьмя `Store A1..A4` и будущий тестер не
+  изменялись. Учётная запись для `gr1mmphone1@gmail.com` не создавалась, пароль
+  `123456` не устанавливался и invite не отправлялся.
+- Локальная приёмка release/runtime foundation не является production deploy
+  authority и не разрешает ручное создание пользователя.
+
+## Зафиксированная целевая модель
+
+- Четыре текущих клуба — одна сеть: один `Tenant A`, четыре `Store A1..A4`.
+- Первый внешний клуб должен быть отдельным `Tenant B/Store B1` в общем data
+  plane, а не новой базой на каждого пользователя.
+- OWNER получает mailbox-bound invite, сам задаёт пароль и затем управляет
+  пользователями, ролями, клубами и Langame mapping только своей сети.
+- Один общий web/API/worker/PostgreSQL/Telegram контур обслуживает несколько
+  tenant. Различаются persisted tenant/store scope, entitlements, настройки и
+  integration credentials.
+- В первую когорту целиком входят геймификация, ассортимент/товары, сотрудники,
+  коммуникации, пользователи/роли и необходимые integrations. Outbound effects
+  включаются отдельно через `OFF → SHADOW → CANARY → LIVE`.
+
+## Состояние текущей инженерной задачи
+
+| Контур                            | Статус                                                   | Подтверждение                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Planning state machine            | `ACCEPTED LOCALLY`                                       | `33/33`                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| SQL semantic fingerprint          | `ACCEPTED LOCALLY`                                       | `26/26`; schema/data/sequences, ACL, cluster role attributes, password-verifier hashes и memberships                                                                                                                                                                                                                                                                                                                                                                   |
+| Persistent coordinator            | `ACCEPTED LOCALLY`                                       | `6/6`; внешний pinned Ed25519 trust root                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Materializer/recovery             | `ACCEPTED LOCALLY`                                       | `24/24`; bounded descriptor reads, exact tree/inode provenance, signed restart locator                                                                                                                                                                                                                                                                                                                                                                                 |
+| Signed journal                    | `ACCEPTED LOCALLY`                                       | `24/24`; public-only verification, signed lifecycle, lost unlink/rmdir recovery                                                                                                                                                                                                                                                                                                                                                                                        |
+| Runtime adapter                   | `ACCEPTED LOCALLY`                                       | `27/27`; pinned Node/Prisma/schema, isolated env, session lock, prior-run marker admission                                                                                                                                                                                                                                                                                                                                                                             |
+| Runner/janitor                    | `ACCEPTED LOCALLY`                                       | `14/14`; intent-before-effect, lost-response reconciliation, fail-closed crash cleanup                                                                                                                                                                                                                                                                                                                                                                                 |
+| CURRENT187-F policy binding       | `ENGINEERING ACCEPTED / DENY-ONLY`                       | stable role/current-ACL/default-ACL/catalog fingerprints; planner `16/16`, acquisition/binding `15/15`; exact-SHA CI `3/3`                                                                                                                                                                                                                                                                                                                                             |
+| CURRENT187-G semantic risk facts  | `ENGINEERING ACCEPTED / DENY-ONLY`                       | secret-free counts/category digests по 12 surfaces; focused `7/7`; exact-SHA CI `3/3`; allowlist вынесен в H                                                                                                                                                                                                                                                                                                                                                           |
+| CURRENT187-H semantic allowlist   | `ENGINEERING ACCEPTED / DENY-ONLY`                       | independent signed exact allowlist + deny-only evaluator; focused `13/13`, `24/24`, `11/11`; exact-SHA CI `3/3`                                                                                                                                                                                                                                                                                                                                                        |
+| CURRENT187-I persisted approval   | `EXACT-HEAD CI ACCEPTED / NONCANONICAL`                  | persisted brand required; candidate `daf5a98f…`; static `7/7`, PG16.13 `2 × 1/1`, CI `31416609580` `3/3 SUCCESS`, zero residue; all access/effect flags false                                                                                                                                                                                                                                                                                                          |
+| CURRENT187-J network/runtime      | `EXACT-HEAD CI ACCEPTED / SYNTHETIC-ONLY`                | four exact service paths + separate host-control brand; endpoint/TLS/HBA/pooler/service-account digests; `10/10`, aggregate CURRENT187 `42/42`, CI `31420665364` `3/3 SUCCESS`; all access/effect flags false                                                                                                                                                                                                                                                          |
+| CURRENT187-J1 PostgreSQL session  | `EXACT-HEAD CI ACCEPTED / DENY-ONLY`                     | actual Prisma backend session collector; exact DB/role OID, application, read-only, network/backend, TLS and role-policy observations; `11/11`, aggregate CURRENT187 `53/53`, CI `31577001152` `3/3 SUCCESS`, actual PG J1 `SUCCESS`; endpoint/HBA/PgBouncer/negative-probe flags remain false                                                                                                                                                                         |
+| CURRENT187-J2 endpoint/TLS peer   | `EXACT-SHA CI ACCEPTED / DENY-ONLY`                      | actual DNS/TCP/PostgreSQL SSLRequest/TLS collector; verify-full hostname/CA + leaf DER/SPKI; `10/10`, aggregate `63/63`, integration `1/1`; SHA `d386dfa2…`, CI `31584476362` `3/3 SUCCESS`, artifact `sha256:722f77c2…f495`                                                                                                                                                                                                                                           |
+| CURRENT187-J3 HBA/reload          | `EXACT-SHA CI ACCEPTED / DENY-ONLY`                      | actual read-only `pg_hba_file_rules` + reload clock; trust/plaintext/wildcard/regex/group/map fail closed; `8/8`; exact SHA `ceed7239…`, CI `31586755130`, actual HBA step `SUCCESS`; current file observed, effective loaded HBA/rule not attested                                                                                                                                                                                                                    |
+| CURRENT187-J4 PgBouncer           | `EXACT-SHA CI ACCEPTED / ACTUAL FIXTURE / DENY-ONLY`     | simple-query stats-only `SHOW` collector; exact active/paused/suspended state, global/database/user/runtime transaction mode, backend/TLS mapping, `force_user`/stale mapping checks; unit `8/8`, aggregate `79/79`; SHA `b9296430…`, CI `31591848857` `3/3`, actual integration `2/2`, artifact `sha256:01f3aba1…d776`; signer/production topology pending                                                                                                            |
+| CURRENT187-J5 signed probes       | `EXACT-SHA CI ACCEPTED / SYNTHETIC CONTRACT / DENY-ONLY` | independent Ed25519 verifier; 4 service purposes × (positive + 8 negative scenarios), 5-minute freshness, identity/evidence separation, frozen-empty production root; `10/10`, aggregate `89/89`, exact-SHA CI `31594459396` — `3/3 SUCCESS`, artifact `9140727030`; actual topology execution/signer/persistence/F binding pending                                                                                                                                    |
+| CURRENT187-J5-R1 probe runner     | `EXACT-SHA CI ACCEPTED / ACTUAL WIRE+TLS FIXTURE`        | branded J1–J4 chain; 4 positive bindings + 20 classified negative PostgreSQL attempts + 12 non-mutating control-policy evaluations; exact dimension binding; secret-free process-local receipt; runner `10/10`, combined J5 `20/20`, actual disposable wire/TLS `1/1`, aggregate CURRENT187 `99/99`; SHA `e4789e29…`, CI `31597872402` `3/3 SUCCESS`, artifact `sha256:1fb76259…fdd85f`; branded production-like run pending                                           |
+| CURRENT187-J5-R2 protected signer | `ENGINEERING ACCEPTED LOCALLY / ROOT FROZEN-EMPTY`       | exact branded R1→J5 Ed25519 signer; external canonical PKCS8/SPKI, public pin, repo/temp/link/drift fences; no DB/network/process/env/deploy/tenant/provider capability; `6/6`, combined J5 `26/26`, aggregate CURRENT187 `105/105`; production key/root/ACL-HSM/persistence/F binding pending                                                                                                                                                                         |
+| CURRENT187-J5-R3 ledger           | `EXACT-SHA CI ACCEPTED / NONCANONICAL PG CANDIDATE`      | exact transferable contract plus append-only/FORCE-RLS/owner-only candidate, exact-OID roles, execute-only consume/revoke RPC, total lock order and post-lock freshness; contract `6/6`, static `7/7`, combined J5 `39/39`, aggregate CURRENT187 `118/118`; SHA `1f7ef47c…`, CI `31606012609` `3/3 SUCCESS`, actual PG `1/1`, zero DB/role/session residue; independent review, canonical promotion, production root/topology and F binding pending                    |
+| CURRENT187-J5-R4 deploy binding   | `EXACT-SHA CI ACCEPTED / SYNTHETIC DENY-ONLY`            | separate branded successor receipt combines immutable deployment authority with exact J5 envelope/matrix/persisted receipt/root/verifier digest through shared release/cluster/universe; clone/scope drift fail closed; frozen contract unchanged; J5 `42/42`, aggregate `121/121`, authority `13/13`; SHA `5fca5a9d…`, CI `31609394804` `3/3 SUCCESS`, artifact `sha256:396d7e78…dce1`; R5 consumes this brand locally, production root/topology remain pending       |
+| CURRENT187-J5-R5 policy successor | `EXACT-SHA CI ACCEPTED / SYNTHETIC DENY-ONLY`            | pure successor requires exact branded F + R4, both matched deny-only, with exact same signed authority payload digest; different branded authority and branded denied F/R4 preserve deny; clone, Proxy and arity fail closed; frozen F/R4/deploy unchanged; acquisition `21/21`, aggregate `124/124`, refreeze `17/17`, assembler `21/21`; SHA `603e09bf…`, CI `31612439527` `3/3 SUCCESS`, artifact `sha256:d1fe9df4…8a11`; production topology pending               |
+| CURRENT187-J5-R6 origin fence     | `EXACT-SHA CI ACCEPTED / STRICT PRODUCTION BRAND`        | actual public J1/J2/J3/J4 collectors and production-mode test dependency seams use disjoint brands; production runner consumes only strict actual-origin brands. Four dependency-backed J1/J2 receipts plus J3/J4 chain fail before network I/O with zero counters; integration `2/2`; SHA `24b2f7ea…`, CI `31614205518` `3/3 SUCCESS`, artifact `sha256:766d1173…9449`; J4 mTLS input and actual topology pending                                                     |
+| CURRENT187-J5-R7 J4 client mTLS   | `EXACT-SHA CI ACCEPTED / NO PROD EFFECT`                 | production J4 requires exact bounded client certificate + PKCS#8 key with separate SHA-256 binding and passes them only to TLS; receipt exposes only an aggregate domain-separated digest and no PEM/raw hashes; synthetic mode requires four nulls. J4 `9/9`, aggregate CURRENT187 `125/125`, actual wire/TLS `2/2`, typecheck green; SHA `5f2b529a…`, CI `31617615666` `3/3 SUCCESS`, artifact `sha256:77b3e24a…60b0a`; co-located public-collector topology pending |
+| CURRENT187-J5-R8 actual J4 mTLS   | `EXACT-SHA CI ACCEPTED / NO PROD EFFECT`                 | disposable CA signs separate server/client certificates; PostgreSQL TLS and PgBouncer client/server verify-full precede public actual J4 collection. Integration `3/3` without skip proves strict production-origin brand, application admin deny, missing-client-cert deny and zero secret projection; SHA `8917cd4b…`, CI `31624262449` `3/3 SUCCESS`, artifact `sha256:101e956b…04cca`; later DB gates green, co-located J1–J4 topology pending                     |
+| CURRENT187-J5-R9 co-located runner | `EXACT-SHA CI ACCEPTED / NO PROD EFFECT`                | one disposable verify-full PostgreSQL/PgBouncer topology gathers strict public J1/J2 for four purposes plus strict J3/J4, then runs the production `4 positive + 20 network negative + 12 control negative` matrix. Target `4/4`, zero fail/skip; exact gateway `/32` and temporary HBA/roles/hosts clean up before downstream gates. SHA `677a37c2…`, CI `31635286090` `3/3 SUCCESS`, artifact `sha256:c0ade8bd…a7595`; production root/runtime and restored-copy rehearsal pending |
+| Единый gate                       | `PASS`                                                   | `163/163`, `0` failures                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Независимая latest-byte проверка  | `PASS`                                                   | `P0=0`, `P1=0` для этого rehearsal-контура                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+Закрыты важные failure modes:
+
+- crash recovery не удаляет filesystem evidence до подписанного
+  `SOURCE_ZERO_DIFF_VERIFIED` и свежего совпадения source fingerprint;
+- переименованная база текущего или предыдущего rehearsal run обнаруживается
+  по exact ownership marker, даже если имя больше не соответствует derived
+  шаблону;
+- cluster-global `CREATE/ALTER ROLE` и `GRANT` не скрываются удалением target DB;
+- lost response для DDL, deploy и advisory unlock проходит bounded
+  reconciliation, а неоднозначность сохраняет evidence и блокирует продолжение;
+- production recovery использует только public verifier, private coordinator
+  key не требуется для read-only inspection.
+
+## Предыдущее локальное PostgreSQL evidence
+
+Это evidence было получено до синхронизации с новой upstream-миграцией и больше
+не закрывает текущий release gate. Среда: PostgreSQL `16.13`, loopback
+`127.0.0.1:55432`, исторический source `leetplus_current180_ci`, head
+`20260731120000_identity_mail_delivery_release_head`, `179` finished и `0`
+unfinished/rolled-back migrations.
+
+| Attempt | Run token                          | Source fingerprint                                                 | Runner receipt                                                     | Результат                |
+| ------: | ---------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------------ |
+|       1 | `05c5990b42918ec8e9d7fb26ad44089c` | `03e04ef19ad731c5eb4f66977a4572db4da655278b84dce00d7565075bb7357b` | `49f22f51e8bb72d716e50381dbbd52b08005c2525d7ea7ce2efe08cca2573d07` | `ZERO_DIFF_ZERO_RESIDUE` |
+|       2 | `c5a0bc6fc2f2ede68d4326c7fd2b6be2` | `03e04ef19ad731c5eb4f66977a4572db4da655278b84dce00d7565075bb7357b` | `fd142b051b7eea56ff2683259adff14fb77c858d4d03ae964c95e85655119aee` | `ZERO_DIFF_ZERO_RESIDUE` |
+
+Оба receipt подтверждают `targetAbsentVerified=true`,
+`artifactRootAbsent=true`, `journalRootAbsent=true`. Отдельный postflight
+подтвердил `0` target/marker databases и неизменный source `179/0`.
+После postflight локальный rehearsal PostgreSQL штатно остановлен через
+`pg_ctl -m fast`; endpoint больше не принимает соединения, data directory
+сохранён для воспроизводимости.
+
+Операционные оговорки:
+
+- восемь pre-coordinator roots от 06.08 сохранены в default OS temp как legacy
+  evidence; автоматическая очистка без утраченной in-memory provenance
+  намеренно запрещена;
+- в выделенном task temp остаётся один обычный, не-reparse и пустой каталог
+  Prisma `jiti`; системный guard запретил его нерекурсивное удаление. Он не
+  является signed artifact/journal residue.
+
+## Состояние открытого теста в целом
+
+Исполнимая часть специального backlog содержит `101` задачу P0:
+
+| Статус P0       | Количество |
+| --------------- | ---------: |
+| `Готово`        |          8 |
+| `В работе`      |         33 |
+| `Запланировано` |         60 |
+
+Дополнительно остаются `5` запланированных P1. Это не процент готовности
+продукта: широкая функциональность уже существует, но задача считается launch-
+ready только после canonical merge, production-like evidence, tenant/store
+изоляции на всех путях и операционной приёмки.
+
+### Release gates
+
+| Gate                                     | Состояние     | Почему не закрыт                                                                                                                                                                                                                                                            |
+| ---------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gate 0 — canonical source                | `PASS`        | Exact SHA `183270f6d7b26196844210fc428639945a081cd5`; latest `origin/main` влит `05a23cd9`, behind `0`; GitHub CI `31385942115` — `3/3 SUCCESS`; artifact `leetplus-release-183270…`, digest `sha256:1e28b8…a4966`. Подробное evidence: `gate-0-ci-artifact-2026-08-10.md`. |
+| Gate 1 — safe platform                   | `NO-GO`       | Не завершены все P0 security/tenant/IAM; anonymous operational boundary, startup/secrets, PII/export и full two-tenant enforcement ещё не приняты как production release                                                                                                    |
+| Gate 1MT — shared multi-tenant admission | `NO-GO`       | Из `294` HTTP handlers `54` ещё blocked; BFF CURRENT188–190 остаются dormant/unregistered; store-scope и background/browser matrix неполные                                                                                                                                 |
+| Gate 2A — cutover текущей сети           | `NOT STARTED` | Нет production-like restore/apply/rollback evidence, change window и `CUTOVER GO`                                                                                                                                                                                           |
+| Gate 2 — первый внешний invite           | `NOT STARTED` | `Tenant A/A1..A4` не переведён in place и не прошёл 7 суток stable internal alpha                                                                                                                                                                                           |
+| Gate 3 — открытый заявочный тест         | `NOT STARTED` | Нужны две friendly-сети, 14 дней, отсутствие P0/P1 и принятые SLO/incident/offboarding evidence                                                                                                                                                                             |
+
+### Что уже существует, но ещё не разрешено к production wiring
+
+- shell provisioning, initial OWNER coordination, employee invites, Langame
+  onboarding и guest persisted sessions реализованы как engineering candidates;
+- CURRENT180–190 migration lane, CURRENT187 admission/DDL-fence evidence и
+  CURRENT188–190 HTTP/BFF candidates остаются noncanonical/dormant;
+- provider lost-response handling принят локально, но production runtime
+  roles/grants/attestation и restored-snapshot rehearsal ещё обязательны;
+- web build получает стабильный build ID из exact release SHA; CI собрал
+  API/Web/Prisma bundle, нормализовал tar metadata, добавил per-file
+  `SHA256SUMS` и опубликовал принятый SHA-bound artifact;
+- основные assortment, gamification, staff и communications boundaries имеют
+  значительное локальное покрытие, но полный API/BFF/files/export/jobs/SSE/
+  Telegram/browser Gate 1MT не завершён.
+
+## Критический путь до первого внешнего клуба
+
+1. Принять CURRENT187-I candidate независимой latest-byte проверкой; exact-head
+   CI с hostile PostgreSQL fixture уже принят. Затем заменить synthetic
+   CURRENT187-J на independently signed actual TCP/TLS/HBA/pooler collectors,
+   закрыть infrastructure admission/provider recovery и exact production runtime
+   roles/grants/attestation и выполнить reviewed canonical promotion
+   CURRENT180–190.
+2. Закрыть Gate 1MT по полному согласованному модульному scope: оставшиеся HTTP
+   и BFF paths, files/exports/jobs/SSE/Telegram, users/roles и outbound fences.
+3. На восстановленной production-like копии выполнить signed backup/restore,
+   apply/repeat/rollback/emergency/zero-diff rehearsal и принять отдельные
+   production root/deploy GO.
+4. Выполнить controlled canary и in-place cutover `Tenant A/A1..A4`, закрыть
+   anonymous operational demo boundary и сверить все четыре клуба.
+5. Выдержать минимум семь стабильных суток internal alpha без launch P0/P1 и
+   stop condition.
+6. Принять отдельный persisted `SHARED BETA GO`; только после него штатный
+   workflow создаёт `Tenant B/Store B1` и отправляет mailbox-bound OWNER invite.
+
+## Прямой ответ по доступу
+
+Тестовый доступ внешнему владельцу сейчас выдавать нельзя. Технически корректная
+точка выдачи — после Gate 1MT, Gate 2 и persisted `SHARED BETA GO`. До этого
+ручное создание `User`, временный общий tenant, пароль `123456` или подключение
+внешнего Langame API к текущему tenant нарушат целевую изоляцию и не считаются
+допустимым beta workflow.
+
+Открытый заявочный тест наступает позже первого invite: только после двух
+friendly-сетей, 14-дневного окна и выполнения Gate 3.
+
+## Следующее действие разработки
+
+Gate 0 закрыт exact SHA и воспроизводимым CI artifact. CURRENT187-F/G приняты
+exact-SHA CI. CURRENT187-H реализовал независимо подписанный allowlist,
+fail-closed facts evaluator и обязательную связь с F; все launch flags false,
+полный disposable gate `163/163`, exact-SHA CI `31403020215` — `3/3 SUCCESS`.
+CURRENT187-J foundation теперь фиксирует четыре service purpose, две branded
+evidence boundary и пять production deployment digest; J `10/10`, aggregate
+CURRENT187 `42/42`, exact-head CI `31420665364` — `3/3 SUCCESS`. CURRENT187-J1
+actual PostgreSQL backend-session collector принят exact-head CI `31577001152`:
+`3/3 SUCCESS`, J1 `SUCCESS`, artifact `sha256:8e0c26f5…d334`. CURRENT187-J2
+actual endpoint/TLS-peer collector принят exact-SHA CI `31584476362`:
+`3/3 SUCCESS`, artifact `sha256:722f77c2…f495`. J3 HBA/reload и J4 PgBouncer
+control-plane collectors приняты exact SHA `ceed7239…`, CI `31586755130`:
+`3/3 SUCCESS`, actual HBA step `SUCCESS`, artifact `sha256:faf8c3e2…aa283`.
+Actual PgBouncer fixture принят SHA `b9296430…`, CI `31591848857`:
+`3/3 SUCCESS`, artifact `sha256:01f3aba1…d776`.
+J5 independently signed connection-probe contract принят exact-SHA CI:
+`31594459396`, `3/3 SUCCESS`, artifact ID `9140727030`. Capability-bearing
+runner foundation и actual disposable wire/TLS fixture приняты exact-SHA CI
+`31597872402` на `e4789e29…`: runner `10/10`, combined J5 `20/20`, integration
+`1/1`, aggregate CURRENT187 `99/99`, artifact `sha256:1fb76259…fdd85f`.
+Ближайший этап — branded J1–J4 production-like execution и protected production
+signer key ceremony/ACL-HSM + reviewed root enrollment; file-backed signer
+foundation уже реализован J5-R2. Затем завершить independent
+latest-byte review CURRENT187-I и reviewed canonical promotion/restored-copy
+rehearsal.

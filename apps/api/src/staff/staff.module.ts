@@ -7,8 +7,10 @@ import { StaffAiAssistantController } from './staff-ai-assistant.controller';
 import { StaffAiAssistantService } from './staff-ai-assistant.service';
 import { StaffAssessmentsController } from './staff-assessments.controller';
 import { StaffAssessmentsService } from './staff-assessments.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 import { StaffAttachmentsController } from './staff-attachments.controller';
 import { StaffAttachmentsService } from './staff-attachments.service';
+import { StaffChecklistAccessPolicyService } from './staff-checklist-access-policy.service';
 import { StaffChecklistTemplatesController } from './staff-checklist-templates.controller';
 import { StaffChecklistTemplatesService } from './staff-checklist-templates.service';
 import { StaffChecklistsController } from './staff-checklists.controller';
@@ -22,6 +24,7 @@ import { StaffDirectoryController } from './staff-directory.controller';
 import { StaffDirectoryService } from './staff-directory.service';
 import { StaffKnowledgeBaseController } from './staff-knowledge-base.controller';
 import { StaffKnowledgeBaseService } from './staff-knowledge-base.service';
+import { StaffKnowledgeAccessPolicyService } from './staff-knowledge-access-policy.service';
 import { StaffNotificationsController } from './staff-notifications.controller';
 import { StaffNotificationsService } from './staff-notifications.service';
 import { StaffOnboardingPlansController } from './staff-onboarding-plans.controller';
@@ -34,17 +37,18 @@ import { StaffSalaryController } from './staff-salary.controller';
 import { StaffSalaryService } from './staff-salary.service';
 import { StaffShiftRegulationsController } from './staff-shift-regulations.controller';
 import { StaffShiftRegulationsService } from './staff-shift-regulations.service';
+import { StaffShiftRegulationAccessPolicyService } from './staff-shift-regulation-access-policy.service';
 import { StaffShiftReportsController } from './staff-shift-reports.controller';
 import { StaffShiftReportsService } from './staff-shift-reports.service';
 import { StaffShiftWorkspaceController } from './staff-shift-workspace.controller';
+import { StaffTaskCatalogAccessPolicyService } from './staff-task-catalog-access-policy.service';
 import { StaffTaskRecurringRulesController } from './staff-task-recurring-rules.controller';
-import { StaffTaskRecurringRulesScheduledController } from './staff-task-recurring-rules-scheduled.controller';
-import { StaffTaskRecurringRulesSchedulerService } from './staff-task-recurring-rules-scheduler.service';
 import { StaffTaskRecurringRulesService } from './staff-task-recurring-rules.service';
 import { StaffTaskTemplatesController } from './staff-task-templates.controller';
 import { StaffTaskTemplatesService } from './staff-task-templates.service';
 import { StaffTeamChatController } from './staff-team-chat.controller';
 import { StaffTeamChatService } from './staff-team-chat.service';
+import { StaffTrainingAccessPolicyService } from './staff-training-access-policy.service';
 import { StaffTrainingCoursesController } from './staff-training-courses.controller';
 import { StaffTrainingCoursesService } from './staff-training-courses.service';
 import { StaffTrainingProfilesController } from './staff-training-profiles.controller';
@@ -60,7 +64,6 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffDirectoryController,
     StaffTaskTemplatesController,
     StaffTaskRecurringRulesController,
-    StaffTaskRecurringRulesScheduledController,
     StaffKnowledgeBaseController,
     StaffTrainingCoursesController,
     StaffTrainingProfilesController,
@@ -84,19 +87,24 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTasksService,
     StaffAiAssistantService,
     StaffDirectoryService,
+    StaffTaskCatalogAccessPolicyService,
     StaffTaskTemplatesService,
     StaffTaskRecurringRulesService,
-    StaffTaskRecurringRulesSchedulerService,
+    StaffKnowledgeAccessPolicyService,
     StaffKnowledgeBaseService,
+    StaffTrainingAccessPolicyService,
     StaffTrainingCoursesService,
     StaffTrainingProfilesService,
     StaffReadinessReportService,
     StaffOperationsDashboardService,
     StaffOnboardingPlansService,
     StaffAssessmentsService,
+    StaffAttachmentBindingsService,
     StaffAttachmentsService,
     StaffShiftRegulationsService,
+    StaffShiftRegulationAccessPolicyService,
     StaffShiftReportsService,
+    StaffChecklistAccessPolicyService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,
     StaffTeamChatService,

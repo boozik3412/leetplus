@@ -2,7 +2,12 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getApiUrl, readApiError } from "@/lib/api";
+import {
+  projectGuestPortalGetRequest,
+  projectGuestPortalPostBody,
+} from "@/lib/guest-portal-bff";
 import { GUEST_AUTH_COOKIE_NAME } from "@/lib/guest-portal";
+import { sanitizeGuestSessionResponse } from "@/lib/guest-session-transport";
 
 type RouteContext = {
   params: Promise<{ path: string[] }>;
@@ -10,14 +15,28 @@ type RouteContext = {
 
 export const runtime = "nodejs";
 
+const MINI_APP_EDGE_BODY_FIELDS = new Set([
+  "initData",
+  "clubId",
+  "tenantSlug",
+  "storeId",
+]);
+
 function guestPortalPath(path: string[]) {
   return `/guest-portal/${path.map(encodeURIComponent).join("/")}`;
 }
 
 export async function GET(request: Request, { params }: RouteContext) {
   const { path } = await params;
-  const url = new URL(request.url);
+  const projectedRequest = projectGuestPortalGetRequest(path, request.url);
   const headers: Record<string, string> = {};
+
+  if (!projectedRequest.ok) {
+    return NextResponse.json(
+      { message: projectedRequest.message },
+      { status: projectedRequest.status },
+    );
+  }
 
   if (path.length >= 1 && path[0] === "session") {
     const cookieStore = await cookies();
@@ -34,7 +53,7 @@ export async function GET(request: Request, { params }: RouteContext) {
   }
 
   const response = await fetch(
-    `${getApiUrl()}${guestPortalPath(path)}${url.search}`,
+    `${getApiUrl()}${guestPortalPath(path)}${projectedRequest.query}`,
     {
       headers,
       cache: "no-store",
@@ -79,8 +98,18 @@ export async function POST(request: Request, { params }: RouteContext) {
     );
   }
 
-  const requestBody = miniAppEdgePayload?.ok ? miniAppEdgePayload.body : body;
-  const headers: Record<string, string> = body
+  const projectedBody = miniAppEdgePayload?.ok
+    ? { ok: true as const, body: miniAppEdgePayload.body }
+    : projectGuestPortalPostBody(path, body);
+
+  if (!projectedBody.ok) {
+    return NextResponse.json(
+      { message: projectedBody.message },
+      { status: projectedBody.status },
+    );
+  }
+
+  const headers: Record<string, string> = projectedBody.body
     ? { "Content-Type": "application/json" }
     : {};
 
@@ -106,7 +135,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   const response = await fetch(`${getApiUrl()}${guestPortalPath(path)}`, {
     method: "POST",
     headers,
-    body: requestBody,
+    body: projectedBody.body,
   });
 
   if (!response.ok) {
@@ -116,8 +145,8 @@ export async function POST(request: Request, { params }: RouteContext) {
     );
   }
 
-  const data = await response.json();
-  const nextResponse = NextResponse.json(data);
+  const data = (await response.json()) as unknown;
+  const nextResponse = NextResponse.json(sanitizeGuestSessionResponse(data));
 
   if (
     ((path.length === 4 &&
@@ -131,18 +160,27 @@ export async function POST(request: Request, { params }: RouteContext) {
       (path.length === 2 &&
         path[0] === "session" &&
         path[1] === "select-club")) &&
-    typeof data?.token === "string"
+    isRecord(data) &&
+    typeof data.token === "string"
   ) {
     nextResponse.cookies.set(GUEST_AUTH_COOKIE_NAME, data.token, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
-      maxAge: 60 * 60 * 24 * 7,
+      maxAge: 60 * 60,
+      priority: "high",
     });
   }
 
+  nextResponse.headers.set("Cache-Control", "private, no-store, max-age=0");
+  nextResponse.headers.set("Pragma", "no-cache");
+
   return nextResponse;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function maybeBuildMiniAppEdgePayload(path: string[], body: string) {
@@ -182,6 +220,16 @@ function maybeBuildMiniAppEdgePayload(path: string[], body: string) {
   }
 
   const payload = parseJsonObject(body);
+  for (const key of Object.keys(payload)) {
+    if (!MINI_APP_EDGE_BODY_FIELDS.has(key)) {
+      return {
+        ok: false as const,
+        status: 400,
+        message: "Telegram Mini App body contains unsupported fields.",
+      };
+    }
+  }
+
   const initData = typeof payload.initData === "string" ? payload.initData : "";
   const validation = validateTelegramMiniAppInitData(initData, botToken);
 

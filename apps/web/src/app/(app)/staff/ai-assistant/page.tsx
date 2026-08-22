@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffAiAssistantReport,
   type StaffAiActionDraft,
@@ -44,7 +44,9 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function resolveFilters(params: Awaited<SearchParams>): StaffAiAssistantFilters {
+function resolveFilters(
+  params: Awaited<SearchParams>,
+): StaffAiAssistantFilters {
   return {
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
@@ -85,7 +87,7 @@ export default async function StaffAiAssistantPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffAiAssistantReport(filters);
@@ -261,7 +263,9 @@ function ManagerSummaryPanel({
   summary,
 }: {
   generatedAt: string;
-  summary: Awaited<ReturnType<typeof getStaffAiAssistantReport>>["managerSummary"];
+  summary: Awaited<
+    ReturnType<typeof getStaffAiAssistantReport>
+  >["managerSummary"];
 }) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
@@ -315,7 +319,13 @@ function DataPolicyPanel({ notes }: { notes: string[] }) {
   );
 }
 
-function InsightGroup({ title, rows }: { title: string; rows: StaffAiInsight[] }) {
+function InsightGroup({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: StaffAiInsight[];
+}) {
   return (
     <div>
       <h3 className="text-sm font-semibold">{title}</h3>
@@ -330,9 +340,7 @@ function InsightGroup({ title, rows }: { title: string; rows: StaffAiInsight[] }
               <p className="text-sm font-semibold">{row.title}</p>
               <RiskPill level={row.tone} />
             </div>
-            <p className="mt-2 text-xs leading-5 text-zinc-500">
-              {row.detail}
-            </p>
+            <p className="mt-2 text-xs leading-5 text-zinc-500">{row.detail}</p>
           </MaybeLink>
         ))}
       </div>
@@ -399,7 +407,10 @@ function ChecklistDraftsPanel({ drafts }: { drafts: StaffAiChecklistDraft[] }) {
               </div>
               <div className="mt-3 space-y-2">
                 {draft.checklistItems.slice(0, 4).map((item) => (
-                  <p key={`${draft.id}:${item.sectionTitle}:${item.title}`} className="text-xs leading-5 text-zinc-500">
+                  <p
+                    key={`${draft.id}:${item.sectionTitle}:${item.title}`}
+                    className="text-xs leading-5 text-zinc-500"
+                  >
                     <span className="font-semibold text-zinc-700 dark:text-zinc-300">
                       {item.sectionTitle}:
                     </span>{" "}
@@ -471,7 +482,10 @@ function InstructionDraftsPanel({
                   </p>
                   <div className="mt-2 space-y-1">
                     {draft.controlPoints.slice(0, 3).map((point) => (
-                      <p key={`${draft.id}:control:${point}`} className="text-xs leading-5 text-zinc-500">
+                      <p
+                        key={`${draft.id}:control:${point}`}
+                        className="text-xs leading-5 text-zinc-500"
+                      >
                         {point}
                       </p>
                     ))}
@@ -507,13 +521,13 @@ function WeakSpotsPanel({ rows }: { rows: StaffAiWeakSpotRecommendation[] }) {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">{row.title}</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    {row.scopeLabel}
-                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">{row.scopeLabel}</p>
                 </div>
                 <RiskPill level={row.priority} />
               </div>
-              <p className="mt-3 text-xs leading-5 text-zinc-500">{row.detail}</p>
+              <p className="mt-3 text-xs leading-5 text-zinc-500">
+                {row.detail}
+              </p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <span className="rounded-full bg-zinc-100 px-2 py-1 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
                   {recommendationLabels[row.recommendedAction]}

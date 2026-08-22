@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "contract": "IDENTITY_MAIL_CLUSTER_APPLICATION_ADMISSION_CURRENT187_V1",
+  "sourceVerifierContract": "CURRENT187_CLUSTER_APPLICATION_ADMISSION_V1",
+  "candidate": "20260805010000_identity_mail_cluster_application_admission_current187",
+  "ordinal": 187,
+  "predecessor": {
+    "count": 187,
+    "head": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
+    "headChecksum": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
+    "manifestDigest": "d5143b06ab4e21ec99d5a6c600aa257effffd7ba4cdbbb156650ebdd378ffd16"
+  },
+  "predecessorEvidence": {
+    "externallyVerifiedEvidenceRequired": true,
+    "resolved": false
+  },
+  "migrationSqlSha256": "24de1c767af0b0bd9d386c9c2df11455743bd0ee041edfd2ca17cdba7e01c2e7",
+  "proposalOnly": true,
+  "authorization": false,
+  "effects": false,
+  "assemblyAuthorized": false,
+  "canActivateApplicationRoute": false,
+  "canCallExternalProviders": false,
+  "canDeploy": false,
+  "canMutateCanonicalMigrations": false,
+  "canMutateProduction": false,
+  "canProvisionRolesOrGrants": false,
+  "canResolveMigration": false,
+  "canWriteDatabase": false,
+  "productionApplyAuthorized": false,
+  "status": "NOT_DEPLOYABLE"
+}

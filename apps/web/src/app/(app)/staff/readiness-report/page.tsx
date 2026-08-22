@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import { getRoleLabel } from "@/lib/roles";
 import {
   getStaffReadinessReport,
@@ -45,7 +45,9 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function isRole(value: string | undefined): value is StaffTrainingProfileRole | "all" {
+function isRole(
+  value: string | undefined,
+): value is StaffTrainingProfileRole | "all" {
   return roleOptions.includes(value as StaffTrainingProfileRole | "all");
 }
 
@@ -91,7 +93,7 @@ export default async function StaffReadinessReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffReadinessReport(filters);
@@ -100,7 +102,10 @@ export default async function StaffReadinessReportPage({
     { label: "Готовы", value: report.summary.ready, tone: "ready" },
     { label: "Внимание", value: report.summary.attention, tone: "attention" },
     { label: "Нет допуска", value: report.summary.blocked, tone: "blocked" },
-    { label: "Средняя готовность", value: `${report.summary.averageReadinessPercent}%` },
+    {
+      label: "Средняя готовность",
+      value: `${report.summary.averageReadinessPercent}%`,
+    },
     { label: "Истекли аттестации", value: report.summary.expiredAttestations },
   ];
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import {
   getStaffOperationsDashboard,
@@ -75,9 +75,7 @@ function defaultStaffControlPeriod() {
   const now = new Date();
   const todayParts = yektDateParts(now);
   const firstDay = `${todayParts.year}-${todayParts.month}-01`;
-  const yesterdayNoon = new Date(
-    `${yektDateParam(now)}T12:00:00+05:00`,
-  );
+  const yesterdayNoon = new Date(`${yektDateParam(now)}T12:00:00+05:00`);
   yesterdayNoon.setDate(yesterdayNoon.getDate() - 1);
   const lastFullDay = yektDateParam(yesterdayNoon);
 
@@ -143,7 +141,10 @@ function formatDate(value: string | null | undefined) {
   }).format(parsed);
 }
 
-function formatDateRange(dateFrom: string | null | undefined, dateTo: string | null | undefined) {
+function formatDateRange(
+  dateFrom: string | null | undefined,
+  dateTo: string | null | undefined,
+) {
   return `${formatDate(dateFrom)} - ${formatDate(dateTo)}`;
 }
 
@@ -173,7 +174,7 @@ export default async function StaffOperationsDashboardPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const [dashboard, staffSnapshot] = await Promise.all([
@@ -266,7 +267,6 @@ export default async function StaffOperationsDashboardPage({
   );
 }
 
-
 function StaffOperationsFilterForm({
   dashboard,
 }: {
@@ -274,80 +274,80 @@ function StaffOperationsFilterForm({
 }) {
   return (
     <form>
-          <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-            <label className="block text-sm">
-              <span className="text-xs font-semibold uppercase text-zinc-500">
-                С даты
-              </span>
-              <input
-                type="date"
-                name="dateFrom"
-                defaultValue={dashboard.filters.dateFrom}
-                className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs font-semibold uppercase text-zinc-500">
-                По дату
-              </span>
-              <input
-                type="date"
-                name="dateTo"
-                defaultValue={dashboard.filters.dateTo}
-                className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs font-semibold uppercase text-zinc-500">
-                Клуб
-              </span>
-              <select
-                name="storeId"
-                defaultValue={dashboard.filters.storeId ?? ""}
-                className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              >
-                <option value="">Вся сеть</option>
-                {dashboard.stores.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {store.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs font-semibold uppercase text-zinc-500">
-                Сотрудник
-              </span>
-              <select
-                name="userId"
-                defaultValue={dashboard.filters.userId ?? ""}
-                className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              >
-                <option value="">Все сотрудники</option>
-                {dashboard.users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.fullName ?? user.email}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm lg:col-span-2">
-              <span className="text-xs font-semibold uppercase text-zinc-500">
-                Поиск
-              </span>
-              <div className="mt-1 flex gap-2">
-                <input
-                  name="search"
-                  defaultValue={dashboard.filters.search ?? ""}
-                  placeholder="Задача, чеклист или сотрудник"
-                  className="h-10 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                />
-                <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
-                  Показать
-                </button>
-              </div>
-            </label>
+      <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <label className="block text-sm">
+          <span className="text-xs font-semibold uppercase text-zinc-500">
+            С даты
+          </span>
+          <input
+            type="date"
+            name="dateFrom"
+            defaultValue={dashboard.filters.dateFrom}
+            className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold uppercase text-zinc-500">
+            По дату
+          </span>
+          <input
+            type="date"
+            name="dateTo"
+            defaultValue={dashboard.filters.dateTo}
+            className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold uppercase text-zinc-500">
+            Клуб
+          </span>
+          <select
+            name="storeId"
+            defaultValue={dashboard.filters.storeId ?? ""}
+            className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            <option value="">Вся сеть</option>
+            {dashboard.stores.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold uppercase text-zinc-500">
+            Сотрудник
+          </span>
+          <select
+            name="userId"
+            defaultValue={dashboard.filters.userId ?? ""}
+            className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            <option value="">Все сотрудники</option>
+            {dashboard.users.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.fullName ?? user.email}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm lg:col-span-2">
+          <span className="text-xs font-semibold uppercase text-zinc-500">
+            Поиск
+          </span>
+          <div className="mt-1 flex gap-2">
+            <input
+              name="search"
+              defaultValue={dashboard.filters.search ?? ""}
+              placeholder="Задача, чеклист или сотрудник"
+              className="h-10 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
+              Показать
+            </button>
           </div>
+        </label>
+      </div>
     </form>
   );
 }
@@ -404,9 +404,13 @@ function StaffControlPanel({
           <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
             Staff-control
           </p>
-          <h2 className="mt-1 text-lg font-semibold">Смены, касса и операционные сигналы</h2>
+          <h2 className="mt-1 text-lg font-semibold">
+            Смены, касса и операционные сигналы
+          </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Дашборд связывает дисциплину персонала с фактическими сменами: привязка сотрудников, касса, возвраты, инкассация, средний чек и чеклисты смены.
+            Дашборд связывает дисциплину персонала с фактическими сменами:
+            привязка сотрудников, касса, возвраты, инкассация, средний чек и
+            чеклисты смены.
           </p>
         </div>
         <span className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">
@@ -425,59 +429,64 @@ function StaffControlPanel({
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        {metricCards.map((card) => (
-          <div
-            key={card.label}
-            className={[
-              "rounded-lg border p-3",
-              riskClass(card.tone),
-            ].join(" ")}
-          >
-            <p className="text-xs font-bold uppercase opacity-80">{card.label}</p>
-            <p className="mt-2 text-xl font-semibold">{card.value}</p>
-            <p className="mt-1 text-xs opacity-80">{card.caption}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {anomalies.length > 0 ? (
-          anomalies.map((anomaly) => (
-            <article
-              key={anomaly.id}
-              className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+          {metricCards.map((card) => (
+            <div
+              key={card.label}
+              className={["rounded-lg border p-3", riskClass(card.tone)].join(
+                " ",
+              )}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">{anomaly.title}</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    {anomaly.store?.name ?? "вся сеть"}
-                    {anomaly.operatorLabel ? ` · ${anomaly.operatorLabel}` : ""}
-                  </p>
+              <p className="text-xs font-bold uppercase opacity-80">
+                {card.label}
+              </p>
+              <p className="mt-2 text-xl font-semibold">{card.value}</p>
+              <p className="mt-1 text-xs opacity-80">{card.caption}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {anomalies.length > 0 ? (
+            anomalies.map((anomaly) => (
+              <article
+                key={anomaly.id}
+                className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">{anomaly.title}</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {anomaly.store?.name ?? "вся сеть"}
+                      {anomaly.operatorLabel
+                        ? ` · ${anomaly.operatorLabel}`
+                        : ""}
+                    </p>
+                  </div>
+                  <RiskPill level={anomaly.severity} />
                 </div>
-                <RiskPill level={anomaly.severity} />
-              </div>
-              <p className="mt-3 text-xs leading-5 text-zinc-500">
-                {formatNumber(anomaly.count)} сигналов
-                {anomaly.amount !== null ? ` · ${formatRubles(anomaly.amount)}` : ""}
-              </p>
-              <p className="mt-2 text-xs leading-5 text-zinc-500">
-                {anomaly.detail}
-              </p>
-              <DrilldownActions
-                actions={resolveDrilldownActions(
-                  anomaly.actions,
-                  anomaly.href,
-                )}
-              />
-            </article>
-          ))
-        ) : (
-          <div className="md:col-span-2 xl:col-span-3">
-            <EmptyState text="Сменных кассовых аномалий по выбранному периоду нет." />
-          </div>
-        )}
-      </div>
+                <p className="mt-3 text-xs leading-5 text-zinc-500">
+                  {formatNumber(anomaly.count)} сигналов
+                  {anomaly.amount !== null
+                    ? ` · ${formatRubles(anomaly.amount)}`
+                    : ""}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-zinc-500">
+                  {anomaly.detail}
+                </p>
+                <DrilldownActions
+                  actions={resolveDrilldownActions(
+                    anomaly.actions,
+                    anomaly.href,
+                  )}
+                />
+              </article>
+            ))
+          ) : (
+            <div className="md:col-span-2 xl:col-span-3">
+              <EmptyState text="Сменных кассовых аномалий по выбранному периоду нет." />
+            </div>
+          )}
+        </div>
       </div>
     </details>
   );
@@ -516,7 +525,11 @@ function RatingPanel({
   );
 }
 
-function EmployeeRatingPanel({ rows }: { rows: StaffOperationsEmployeeRating[] }) {
+function EmployeeRatingPanel({
+  rows,
+}: {
+  rows: StaffOperationsEmployeeRating[];
+}) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-wrap items-start justify-between gap-3">

@@ -78,13 +78,30 @@ type DraftRule = {
   labelsText: string;
 };
 
-function defaultDraft(): DraftRule {
+type RuleMutationPayload = {
+  title: string;
+  description: string | null;
+  templateId: string | null;
+  storeId: string | null;
+  assignedToUserId: string | null;
+  cadence: StaffTaskRuleCadence;
+  status: StaffTaskRuleStatus;
+  taskType: StaffTaskType;
+  priority: StaffTaskPriority;
+  timeOfDay: string | null;
+  dayOfWeek: string | null;
+  dayOfMonth: string | null;
+  dueOffsetMinutes: string | null;
+  labels: string[] | null;
+};
+
+function defaultDraft(storeId = ""): DraftRule {
   return {
     id: null,
     title: "",
     description: "",
     templateId: "",
-    storeId: "",
+    storeId,
     assignedToUserId: "",
     cadence: "DAILY",
     status: "ACTIVE",
@@ -114,6 +131,62 @@ function labelsFromText(value: string) {
     .map((label) => label.trim())
     .filter(Boolean)
     .slice(0, 20);
+}
+
+function mutationPayloadFromDraft(draft: DraftRule): RuleMutationPayload {
+  const labels = labelsFromText(draft.labelsText);
+
+  return {
+    title: draft.title.trim(),
+    description: draft.description.trim() || null,
+    templateId: draft.templateId || null,
+    storeId: draft.storeId || null,
+    assignedToUserId: draft.assignedToUserId || null,
+    cadence: draft.cadence,
+    status: draft.status,
+    taskType: draft.taskType,
+    priority: draft.priority,
+    timeOfDay: draft.timeOfDay || null,
+    dayOfWeek: draft.cadence === "WEEKLY" ? draft.dayOfWeek || null : null,
+    dayOfMonth:
+      draft.cadence === "MONTHLY" ? draft.dayOfMonth || null : null,
+    dueOffsetMinutes: draft.dueOffsetMinutes.trim() || null,
+    labels: labels.length > 0 ? labels : null,
+  };
+}
+
+function mutationValuesEqual(
+  left: RuleMutationPayload[keyof RuleMutationPayload],
+  right: RuleMutationPayload[keyof RuleMutationPayload],
+) {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  return left === right;
+}
+
+function buildRuleMutationPayload(
+  draft: DraftRule,
+  sourceDraft: DraftRule | null,
+) {
+  const payload = mutationPayloadFromDraft(draft);
+
+  if (!sourceDraft) {
+    return payload;
+  }
+
+  const sourcePayload = mutationPayloadFromDraft(sourceDraft);
+
+  return Object.fromEntries(
+    (
+      Object.keys(payload) as Array<keyof RuleMutationPayload>
+    ).flatMap((field) =>
+      mutationValuesEqual(payload[field], sourcePayload[field])
+        ? []
+        : [[field, payload[field]]],
+    ),
+  );
 }
 
 function fromRule(row: StaffTaskRule): DraftRule {
@@ -176,8 +249,17 @@ export function StaffTaskRulesWorkspace({
   report: StaffTaskRuleReport;
 }) {
   const router = useRouter();
+  const firstActiveStoreId =
+    report.stores.find((store) => store.isActive)?.id ?? "";
+  const activeStores = report.stores.filter((store) => store.isActive);
+  const activeTemplates = report.templates.filter(
+    (template) => template.status === "ACTIVE",
+  );
   const [draft, setDraft] = useState<DraftRule>(() =>
-    report.rows[0] ? fromRule(report.rows[0]) : defaultDraft(),
+    report.rows[0] ? fromRule(report.rows[0]) : defaultDraft(firstActiveStoreId),
+  );
+  const [sourceDraft, setSourceDraft] = useState<DraftRule | null>(() =>
+    report.rows[0] ? fromRule(report.rows[0]) : null,
   );
   const [launchStoreId, setLaunchStoreId] = useState("");
   const [launchAssignedToUserId, setLaunchAssignedToUserId] = useState("");
@@ -193,6 +275,18 @@ export function StaffTaskRulesWorkspace({
     () => report.rows.find((row) => row.id === draft.id) ?? null,
     [draft.id, report.rows],
   );
+  const editorStores =
+    selectedRule?.store &&
+    !activeStores.some((store) => store.id === selectedRule.store?.id)
+      ? [selectedRule.store, ...activeStores]
+      : activeStores;
+  const editorTemplates =
+    selectedRule?.template &&
+    !activeTemplates.some(
+      (template) => template.id === selectedRule.template?.id,
+    )
+      ? [selectedRule.template, ...activeTemplates]
+      : activeTemplates;
 
   function updateDraft(patch: Partial<DraftRule>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -202,7 +296,8 @@ export function StaffTaskRulesWorkspace({
   }
 
   function startNew() {
-    setDraft(defaultDraft());
+    setDraft(defaultDraft(firstActiveStoreId));
+    setSourceDraft(null);
     setLaunchStoreId("");
     setLaunchAssignedToUserId("");
     setLaunchDueAt("");
@@ -212,7 +307,9 @@ export function StaffTaskRulesWorkspace({
   }
 
   function selectRule(rule: StaffTaskRule) {
-    setDraft(fromRule(rule));
+    const selectedDraft = fromRule(rule);
+    setDraft(selectedDraft);
+    setSourceDraft(selectedDraft);
     setLaunchStoreId("");
     setLaunchAssignedToUserId("");
     setLaunchDueAt("");
@@ -222,14 +319,15 @@ export function StaffTaskRulesWorkspace({
   }
 
   function applyTemplate(templateId: string) {
-    const template = report.templates.find((item) => item.id === templateId);
+    const template = activeTemplates.find((item) => item.id === templateId);
 
     updateDraft({
       templateId,
       title: template && !draft.title.trim() ? template.title : draft.title,
       taskType: template?.type ?? draft.taskType,
       priority: template?.priority ?? draft.priority,
-      storeId: template?.storeId ?? draft.storeId,
+      storeId:
+        template?.storeId ?? (draft.storeId || firstActiveStoreId),
     });
   }
 
@@ -246,23 +344,19 @@ export function StaffTaskRulesWorkspace({
     setMessage(null);
     setLastTaskHref(null);
 
-    const labels = labelsFromText(draft.labelsText);
-    const payload = {
-      title: draft.title.trim(),
-      description: draft.description.trim() || null,
-      templateId: draft.templateId || null,
-      storeId: draft.storeId || null,
-      assignedToUserId: draft.assignedToUserId || null,
-      cadence: draft.cadence,
-      status: draft.status,
-      taskType: draft.taskType,
-      priority: draft.priority,
-      timeOfDay: draft.timeOfDay || null,
-      dayOfWeek: draft.cadence === "WEEKLY" ? draft.dayOfWeek || null : null,
-      dayOfMonth: draft.cadence === "MONTHLY" ? draft.dayOfMonth || null : null,
-      dueOffsetMinutes: draft.dueOffsetMinutes.trim() || null,
-      labels: labels.length > 0 ? labels : null,
-    };
+    if (draft.id && sourceDraft?.id !== draft.id) {
+      setError("Исходное состояние правила устарело. Выберите правило заново.");
+      setIsSaving(false);
+      return;
+    }
+
+    const payload = buildRuleMutationPayload(draft, sourceDraft);
+
+    if (draft.id && Object.keys(payload).length === 0) {
+      setMessage("Нет изменений для сохранения.");
+      setIsSaving(false);
+      return;
+    }
 
     try {
       const response = await fetch(
@@ -282,7 +376,9 @@ export function StaffTaskRulesWorkspace({
       }
 
       const saved = (await response.json()) as StaffTaskRule;
-      setDraft(fromRule(saved));
+      const savedDraft = fromRule(saved);
+      setDraft(savedDraft);
+      setSourceDraft(savedDraft);
       setMessage("Правило сохранено.");
       router.refresh();
     } catch (saveError) {
@@ -312,9 +408,11 @@ export function StaffTaskRulesWorkspace({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          storeId: launchStoreId || null,
-          assignedToUserId: launchAssignedToUserId || null,
-          dueAt: launchDueAt || null,
+          ...(launchStoreId ? { storeId: launchStoreId } : {}),
+          ...(launchAssignedToUserId
+            ? { assignedToUserId: launchAssignedToUserId }
+            : {}),
+          ...(launchDueAt ? { dueAt: launchDueAt } : {}),
         }),
       });
 
@@ -572,9 +670,14 @@ export function StaffTaskRulesWorkspace({
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               >
                 <option value="">Без шаблона</option>
-                {report.templates.map((template) => (
-                  <option key={template.id} value={template.id}>
+                {editorTemplates.map((template) => (
+                  <option
+                    key={template.id}
+                    value={template.id}
+                    disabled={template.status !== "ACTIVE"}
+                  >
                     {template.title}
+                    {template.status !== "ACTIVE" ? " (архив)" : ""}
                   </option>
                 ))}
               </select>
@@ -682,9 +785,14 @@ export function StaffTaskRulesWorkspace({
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               >
                 <option value="">Вся сеть</option>
-                {report.stores.map((store) => (
-                  <option key={store.id} value={store.id}>
+                {editorStores.map((store) => (
+                  <option
+                    key={store.id}
+                    value={store.id}
+                    disabled={!store.isActive}
+                  >
                     {store.name}
+                    {!store.isActive ? " (неактивен)" : ""}
                   </option>
                 ))}
               </select>
@@ -821,7 +929,7 @@ export function StaffTaskRulesWorkspace({
           </div>
         </form>
 
-        {draft.id ? (
+        {draft.id && selectedRule?.status !== "ARCHIVED" ? (
           <div className="mt-5 border-t border-zinc-200 pt-4 dark:border-zinc-800">
             <p className="text-xs font-bold uppercase text-zinc-500">
               Ручной запуск
@@ -832,12 +940,13 @@ export function StaffTaskRulesWorkspace({
                   Клуб
                 </span>
                 <select
-                  value={launchStoreId}
+                  value={selectedRule?.store?.id ?? launchStoreId}
                   onChange={(event) => setLaunchStoreId(event.target.value)}
+                  disabled={Boolean(selectedRule?.store)}
                   className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                 >
                   <option value="">Из правила</option>
-                  {report.stores.map((store) => (
+                  {activeStores.map((store) => (
                     <option key={store.id} value={store.id}>
                       {store.name}
                     </option>

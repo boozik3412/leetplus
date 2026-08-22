@@ -1,19 +1,34 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   IntegrationSyncMode,
   IntegrationProvider,
   IntegrationSyncStatus,
   IntegrationSyncTrigger,
   Prisma,
+  TenantCustomerStage,
+  TenantModule,
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { LANGAME_DISCREPANCY_LOG_ROOT_KEY } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
+import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 import type {
   LangameGood,
   LangameClubProductConfiguration,
@@ -30,6 +45,8 @@ import type {
 const DEFAULT_PAGE_LIMIT = 200;
 const MAX_LANGAME_PERIOD_DAYS = 365;
 const MAX_LANGAME_OPERATION_LOG_PERIOD_DAYS = 31;
+export const EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE =
+  'EXTERNAL_LEGACY_LANGAME_SYNC_REQUIRES_CURRENT188';
 
 type DiscrepancyLogEntry = {
   entity: 'Product' | 'InventorySnapshot' | 'SalesFact';
@@ -56,6 +73,11 @@ type ResolvedSyncPeriod = {
   to: string;
 };
 
+const LANGAME_SYNC_MODULES = [
+  TenantModule.INTEGRATIONS,
+  TenantModule.ASSORTMENT,
+] as const;
+
 @Injectable()
 export class LangameSyncService {
   constructor(
@@ -63,12 +85,16 @@ export class LangameSyncService {
     private readonly tenantContextService: TenantContextService,
     private readonly langameClient: LangameClient,
     private readonly langameSettingsService: LangameSettingsService,
+    private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
+    private readonly configService: ConfigService,
   ) {}
 
   async syncTenant(
     user: AuthenticatedUser,
     query: LangameSyncQuery,
   ): Promise<LangameSyncResult> {
+    // resolve is synchronous today, but compatible tenant-context adapters may be async.
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     const { tenantId } = await this.tenantContextService.resolve(user);
     return this.syncTenantById(tenantId, query);
   }
@@ -98,28 +124,99 @@ export class LangameSyncService {
     });
 
     const results: LangameSyncResult[] = [];
+    const skips: LangameScheduledSyncResult['skips'] = [];
 
     for (const tenant of tenants) {
+      const admission = await this.tenantExecutionAdmissionService.evaluate(
+        tenant.id,
+        LANGAME_SYNC_MODULES.map((module) => ({
+          module,
+          action: 'OUTBOUND' as const,
+        })),
+      );
+      if (!admission.allowed) {
+        skips.push({
+          status: 'SKIPPED',
+          tenantId: tenant.id,
+          reasonCode: admission.reasonCode,
+          failedRequirement: admission.failedRequirement,
+        });
+        continue;
+      }
+
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+        jobKind: 'LANGAME_SCHEDULED_SYNC',
+      });
+      if (!backgroundExecution.allowed) {
+        skips.push({
+          status: 'SKIPPED',
+          tenantId: tenant.id,
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          failedRequirement: null,
+        });
+        continue;
+      }
+
       results.push(
-        await this.syncTenantById(tenant.id, {
-          ...query,
-          mode,
-          trigger: 'AUTO',
-        }),
+        await this.syncTenantById(
+          tenant.id,
+          {
+            ...query,
+            mode,
+            trigger: 'AUTO',
+          },
+          'LANGAME_SCHEDULED_SYNC',
+        ),
       );
     }
 
     return {
       mode,
       tenants: tenants.length,
+      processedTenants: results.length,
+      skippedTenants: skips.length,
       results,
+      skips,
     };
   }
 
   async syncTenantById(
     tenantId: string,
     query: LangameSyncQuery,
+    backgroundJobKind:
+      | 'LANGAME_SCHEDULED_SYNC'
+      | 'LANGAME_DAILY_SYNC' = 'LANGAME_SCHEDULED_SYNC',
   ): Promise<LangameSyncResult> {
+    const executionAction =
+      query.trigger === 'AUTO' ? ('OUTBOUND' as const) : ('WRITE' as const);
+    const admission = await this.tenantExecutionAdmissionService.assertAllowed(
+      tenantId,
+      LANGAME_SYNC_MODULES.map((module) => ({
+        module,
+        action: executionAction,
+      })),
+    );
+    if (executionAction === 'OUTBOUND') {
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+        jobKind: backgroundJobKind,
+      });
+      if (!backgroundExecution.allowed) {
+        throw new ServiceUnavailableException({
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          message: tenantBackgroundExecutionNote(backgroundExecution),
+        });
+      }
+    }
+    if (admission.customerStage !== TenantCustomerStage.INTERNAL) {
+      throw new ServiceUnavailableException({
+        reasonCode: EXTERNAL_LEGACY_LANGAME_SYNC_DENIAL_REASON_CODE,
+        message:
+          'External tenant Langame sync requires the staged, store-bound onboarding workflow',
+      });
+    }
+
     const requestedPeriod = this.resolvePeriod(query);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
@@ -1482,10 +1579,13 @@ export class LangameSyncService {
     syncJobId: string;
     discrepancies: DiscrepancyLogEntry[];
   }) {
-    const directory = join(process.cwd(), 'logs', 'langame-sync', tenantId);
+    const root = this.discrepancyLogRoot();
+    const directory = resolve(root, tenantId);
+    this.assertPathInside(root, directory, 'tenant directory');
     await mkdir(directory, { recursive: true });
-    const fileName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${domain}-${syncJobId}.json`;
-    const filePath = join(directory, fileName);
+    const fileName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${this.safeLogComponent(domain)}-${this.safeLogComponent(syncJobId)}.json`;
+    const filePath = resolve(directory, fileName);
+    this.assertPathInside(directory, filePath, 'log file');
 
     await writeFile(
       filePath,
@@ -1504,6 +1604,40 @@ export class LangameSyncService {
     );
 
     return filePath;
+  }
+
+  private discrepancyLogRoot() {
+    const configured = this.configService
+      .get<string>(LANGAME_DISCREPANCY_LOG_ROOT_KEY)
+      ?.trim();
+    if (configured && !isAbsolute(configured)) {
+      throw new Error(
+        `${LANGAME_DISCREPANCY_LOG_ROOT_KEY} must be an absolute path`,
+      );
+    }
+
+    return configured
+      ? resolve(configured)
+      : resolve(process.cwd(), 'logs', 'langame-sync');
+  }
+
+  private assertPathInside(root: string, candidate: string, label: string) {
+    const relativePath = relative(root, candidate);
+    if (
+      !relativePath ||
+      relativePath === '..' ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath)
+    ) {
+      throw new Error(`Unsafe Langame discrepancy ${label}`);
+    }
+  }
+
+  private safeLogComponent(value: string) {
+    const normalized = value.replace(/[^a-z0-9._-]/giu, '_');
+    return normalized && normalized !== '.' && normalized !== '..'
+      ? normalized
+      : 'unknown';
   }
 
   private knownAddress(domain: string, clubId: number) {

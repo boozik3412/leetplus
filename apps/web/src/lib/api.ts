@@ -5,6 +5,8 @@ import {
 } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { cookies } from "next/headers";
+import "server-only";
+import { resolveApiUrl } from "./api-url";
 
 export const AUTH_COOKIE_NAME = "leetplus_access_token";
 const DEFAULT_API_TIMEOUT_MS = 15_000;
@@ -30,13 +32,7 @@ export type ApiJsonResult<T> = {
 };
 
 export function getApiUrl() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-
-  if (!apiUrl) {
-    throw new Error("NEXT_PUBLIC_API_URL is not defined");
-  }
-
-  return apiUrl;
+  return resolveApiUrl(process.env);
 }
 
 export async function getAccessToken() {

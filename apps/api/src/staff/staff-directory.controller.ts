@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { FreshStoreScopeGuard } from '../tenancy/fresh-store-scope.guard';
 import {
   StaffDirectoryService,
   type StaffActiveShiftCandidatesReport,
@@ -21,6 +22,7 @@ import {
   type StaffDirectoryQuery,
   type StaffDirectoryReport,
   type StaffMemberDto,
+  type StaffMemberResponse,
 } from './staff-directory.service';
 
 @Controller('staff/directory')
@@ -33,7 +35,7 @@ import {
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshStoreScopeGuard)
 export class StaffDirectoryController {
   constructor(private readonly staffDirectoryService: StaffDirectoryService) {}
 
@@ -51,6 +53,14 @@ export class StaffDirectoryController {
     @Query() query: StaffActiveShiftQuery,
   ): Promise<StaffActiveShiftCandidatesReport> {
     return this.staffDirectoryService.getActiveShiftCandidates(user, query);
+  }
+
+  @Get(':id')
+  getMember(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<StaffMemberResponse> {
+    return this.staffDirectoryService.getMember(user, id);
   }
 
   @Post()

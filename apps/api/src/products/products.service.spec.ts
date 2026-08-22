@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 type ProductsPrismaMock = {
   product: {
@@ -29,6 +30,12 @@ type ProductsPrismaMock = {
 
 type TenantContextMock = {
   resolve: jest.Mock;
+};
+
+type FreshStoreScopeMock = {
+  resolve: jest.Mock;
+  assertNetwork: jest.Mock;
+  resolveRequestedStoreIds: jest.Mock;
 };
 
 type ProductInventoryQuery = {
@@ -63,11 +70,7 @@ type ProductCatalogFindManyQuery = {
     tenantId: string;
     isActive: boolean;
     name: { contains: string; mode: string };
-    inventorySnapshots: {
-      some: {
-        storeId: { in: string[] };
-      };
-    };
+    OR: Array<Record<string, unknown>>;
     categoryId?: null;
   };
 };
@@ -100,6 +103,7 @@ function createPrismaMock(): ProductsPrismaMock {
 describe('ProductsService', () => {
   let prisma: ProductsPrismaMock;
   let tenantContext: TenantContextMock;
+  let freshStoreScope: FreshStoreScopeMock;
   let service: ProductsService;
   const user: AuthenticatedUser = {
     id: 'user-1',
@@ -108,6 +112,9 @@ describe('ProductsService', () => {
     role: UserRole.OWNER,
     tenantId: 'tenant-demo',
     tenantSlug: 'demo',
+    isPlatformAdmin: false,
+    accessScope: 'NETWORK',
+    allowedStoreIds: [],
   };
 
   beforeEach(() => {
@@ -118,9 +125,39 @@ describe('ProductsService', () => {
         tenantSlug: 'demo',
       }),
     };
+    freshStoreScope = {
+      resolve: jest.fn().mockResolvedValue({
+        userId: 'user-1',
+        tenantId: 'tenant-demo',
+        tenantSlug: 'demo',
+        mode: 'NETWORK',
+        allowedStoreIds: [],
+      }),
+      assertNetwork: jest.fn().mockResolvedValue({
+        userId: 'user-1',
+        tenantId: 'tenant-demo',
+        tenantSlug: 'demo',
+        mode: 'NETWORK',
+        allowedStoreIds: [],
+      }),
+      resolveRequestedStoreIds: jest
+        .fn()
+        .mockImplementation(
+          (_user: AuthenticatedUser, requested?: readonly string[]) =>
+            Promise.resolve({
+              userId: 'user-1',
+              tenantId: 'tenant-demo',
+              tenantSlug: 'demo',
+              mode: 'NETWORK',
+              allowedStoreIds: [],
+              effectiveStoreIds: requested ?? null,
+            }),
+        ),
+    };
     service = new ProductsService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
+      freshStoreScope as unknown as FreshStoreScopeService,
     );
   });
 
@@ -129,9 +166,9 @@ describe('ProductsService', () => {
     prisma.inventorySnapshot.findMany.mockResolvedValue([]);
     prisma.salesFact.findMany.mockResolvedValue([]);
 
-    await service.findAll();
+    await service.findAll(user);
 
-    expect(tenantContext.resolve).toHaveBeenCalledWith(undefined);
+    expect(freshStoreScope.resolveRequestedStoreIds).toHaveBeenCalledWith(user);
     expect(prisma.product.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -199,7 +236,7 @@ describe('ProductsService', () => {
       },
     ]);
 
-    const products = await service.findAll();
+    const products = await service.findAll(user);
 
     expect(products).toEqual(
       expect.arrayContaining([
@@ -217,6 +254,31 @@ describe('ProductsService', () => {
         }),
       ]),
     );
+  });
+
+  it('applies the fresh store allow-list to every store-bound product fact', async () => {
+    freshStoreScope.resolveRequestedStoreIds.mockResolvedValueOnce({
+      userId: 'user-1',
+      tenantId: 'tenant-demo',
+      tenantSlug: 'demo',
+      mode: 'STORES',
+      allowedStoreIds: ['store-1'],
+      effectiveStoreIds: ['store-1'],
+    });
+    prisma.product.findMany.mockResolvedValue([]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([]);
+    prisma.salesFact.findMany.mockResolvedValue([]);
+
+    await service.findAll(user);
+
+    expect(prisma.inventorySnapshot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ storeId: { in: ['store-1'] } }),
+      }),
+    );
+    for (const [query] of prisma.salesFact.findMany.mock.calls) {
+      expect(query.where.storeId).toEqual({ in: ['store-1'] });
+    }
   });
 
   it('builds the product summary from latest stock per club and product', async () => {
@@ -299,11 +361,18 @@ describe('ProductsService', () => {
       tenantId: 'tenant-demo',
       isActive: true,
       name: { contains: 'батон', mode: 'insensitive' },
-      inventorySnapshots: {
-        some: {
-          storeId: { in: ['store-1', 'store-2'] },
+      OR: expect.arrayContaining([
+        {
+          inventorySnapshots: {
+            some: { storeId: { in: ['store-1', 'store-2'] } },
+          },
         },
-      },
+        {
+          salesFacts: {
+            some: { storeId: { in: ['store-1', 'store-2'] } },
+          },
+        },
+      ]),
     });
     expect(catalog).toEqual(
       expect.objectContaining({
@@ -325,7 +394,7 @@ describe('ProductsService', () => {
   it('filters product details by id and resolved tenant', async () => {
     prisma.product.findFirst.mockResolvedValue(null);
 
-    await service.findById('product-1');
+    await service.findById('product-1', user);
 
     expect(prisma.product.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

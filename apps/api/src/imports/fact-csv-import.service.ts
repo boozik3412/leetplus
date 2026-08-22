@@ -3,6 +3,7 @@ import { Prisma, StockMovementType } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
 type CsvRecord = Record<string, string | undefined>;
@@ -70,12 +71,14 @@ export class FactCsvImportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
   async previewInventory(
     csv: string,
     user: AuthenticatedUser,
   ): Promise<FactImportPreview<InventoryImportRow>> {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const records = this.parseCsv(csv);
     const lookup = await this.loadLookup(tenantId);
@@ -122,6 +125,7 @@ export class FactCsvImportService {
     csv: string,
     user: AuthenticatedUser,
   ): Promise<FactImportPreview<SalesImportRow>> {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const records = this.parseCsv(csv);
     const lookup = await this.loadLookup(tenantId);
@@ -168,6 +172,7 @@ export class FactCsvImportService {
     csv: string,
     user: AuthenticatedUser,
   ): Promise<FactImportPreview<StockMovementImportRow>> {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const records = this.parseCsv(csv);
     const lookup = await this.loadLookup(tenantId);
@@ -216,6 +221,7 @@ export class FactCsvImportService {
     user: AuthenticatedUser,
     sourceFileName?: string,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const preview = await this.previewInventory(csv, user);
 
@@ -287,6 +293,7 @@ export class FactCsvImportService {
     user: AuthenticatedUser,
     sourceFileName?: string,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const preview = await this.previewSales(csv, user);
 
@@ -395,6 +402,7 @@ export class FactCsvImportService {
     user: AuthenticatedUser,
     sourceFileName?: string,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const preview = await this.previewStockMovements(csv, user);
 

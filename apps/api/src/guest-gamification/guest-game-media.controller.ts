@@ -16,6 +16,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   GUEST_GAME_MEDIA_MAX_BYTES,
   GuestGameMediaService,
@@ -30,7 +31,7 @@ import {
   UserRole.MARKETER,
   UserRole.CLUB_MANAGER,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
 export class GuestGameMediaController {
   constructor(private readonly mediaService: GuestGameMediaService) {}
 

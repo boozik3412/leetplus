@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { UsersService } from './users.service';
 
 describe('UsersService role override permissions', () => {
@@ -16,10 +17,14 @@ describe('UsersService role override permissions', () => {
     isActive: true,
     isPlatformAdmin: false,
     permissions: [],
+    accessScope: 'NETWORK',
+    allowedStoreIds: [],
   } satisfies AuthenticatedUser;
 
   function createService() {
     const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([{ pg_advisory_xact_lock: null }]),
+      $transaction: jest.fn(),
       userRoleOverride: {
         upsert: jest
           .fn()
@@ -36,20 +41,59 @@ describe('UsersService role override permissions', () => {
       },
       userAccessRole: {
         create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue({ id: 'custom-role-1' }),
+        update: jest.fn().mockResolvedValue({
+          id: 'custom-role-1',
+          tenantId,
+          name: 'Стандарты клуба',
+          description: null,
+          permissions: ['view_staff_tasks', 'view_staff_standards'],
+          createdAt: updatedAt,
+          updatedAt,
+        }),
       },
     };
-    const tenantContextService = {
-      resolve: jest.fn().mockResolvedValue({ tenantId }),
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: typeof prisma) => Promise<unknown>) => callback(prisma),
+    );
+    const freshStoreScopeService = {
+      assertNetwork: jest
+        .fn()
+        .mockImplementation((subject: AuthenticatedUser) => {
+          if (subject.accessScope !== 'NETWORK') {
+            return Promise.reject(
+              new ForbiddenException('Network access is required'),
+            );
+          }
+          return Promise.resolve({
+            tenantId: subject.tenantId,
+            tenantSlug: subject.tenantSlug,
+            mode: subject.accessScope,
+            allowedStoreIds: [...subject.allowedStoreIds],
+            userId: subject.id,
+          });
+        }),
+      resolve: jest.fn().mockImplementation((subject: AuthenticatedUser) =>
+        Promise.resolve({
+          tenantId: subject.tenantId,
+          tenantSlug: subject.tenantSlug,
+          mode: subject.accessScope,
+          allowedStoreIds: [...subject.allowedStoreIds],
+          userId: subject.id,
+        }),
+      ),
     };
 
     const service = new UsersService(
       prisma as never,
       {} as never,
-      tenantContextService as never,
+      {} as never,
+      new AccessScopeService(),
+      freshStoreScopeService as never,
       {} as never,
     );
 
-    return { prisma, service, tenantContextService };
+    return { freshStoreScopeService, prisma, service };
   }
 
   it('allows standards manager to save tenant-scoped overrides for assignable roles', async () => {
@@ -87,6 +131,17 @@ describe('UsersService role override permissions', () => {
         updatedAt: true,
       },
     });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const [lockQuery] = prisma.$queryRaw.mock.calls[0] as unknown as [
+      {
+        strings?: readonly string[];
+        values?: readonly unknown[];
+      },
+    ];
+    expect(lockQuery.strings?.join(' ')).toContain('pg_advisory_xact_lock');
+    expect(lockQuery.values).toEqual([
+      `user-role-authority:system:${tenantId}:${UserRole.CLUB_ADMINISTRATOR}`,
+    ]);
   });
 
   it('allows standards manager to save trainee role overrides', async () => {
@@ -150,6 +205,36 @@ describe('UsersService role override permissions', () => {
     });
   });
 
+  it('serializes custom role updates on the same authority key used by readers', async () => {
+    const { prisma, service } = createService();
+
+    await expect(
+      service.updateAccessRole(actor, 'custom-role-1', {
+        name: 'Стандарты клуба',
+        permissions: ['view_staff_tasks', 'view_staff_standards'],
+      }),
+    ).resolves.toMatchObject({
+      id: 'custom-role-1',
+      permissions: ['view_staff_tasks', 'view_staff_standards'],
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const [lockQuery] = prisma.$queryRaw.mock.calls[0] as unknown as [
+      { values?: readonly unknown[] },
+    ];
+    expect(lockQuery.values).toEqual([
+      `user-role-authority:custom:${tenantId}:custom-role-1`,
+    ]);
+    expect(prisma.userAccessRole.update).toHaveBeenCalledWith({
+      where: { id: 'custom-role-1', tenantId },
+      data: {
+        name: 'Стандарты клуба',
+        description: null,
+        permissions: ['view_staff_tasks', 'view_staff_standards'],
+      },
+    });
+  });
+
   it('does not allow standards manager to override roles outside the standards scope', async () => {
     const { prisma, service } = createService();
 
@@ -181,6 +266,23 @@ describe('UsersService role override permissions', () => {
     await expect(
       service.updateSystemRole(actor, UserRole.CLUB_ADMINISTRATOR, {
         permissions: ['view_staff_tasks', 'view_marketing'],
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(prisma.userRoleOverride.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not allow a store-scoped manager to mutate tenant-global roles', async () => {
+    const { prisma, service } = createService();
+    const storeActor = {
+      ...actor,
+      accessScope: 'STORES',
+      allowedStoreIds: ['store-1'],
+    } satisfies AuthenticatedUser;
+
+    await expect(
+      service.updateSystemRole(storeActor, UserRole.CLUB_ADMINISTRATOR, {
+        permissions: ['view_staff_tasks'],
       }),
     ).rejects.toThrow(ForbiddenException);
 

@@ -52,6 +52,7 @@ export type StaffOnboardingPlan = {
   tasksCount: number;
   createdAt: string;
   updatedAt: string;
+  canManage: boolean;
   store: StaffTaskStore | null;
   createdByUser: {
     id: string;
@@ -81,6 +82,7 @@ export type StaffOnboardingReport = {
     coursesCount: number;
     tasksCount: number;
   };
+  accessScope: "NETWORK" | "STORES";
   canManageOnboarding: boolean;
   rows: StaffOnboardingPlan[];
   stores: StaffTaskStore[];
@@ -93,10 +95,13 @@ export type StaffOnboardingReport = {
 export async function getStaffOnboardingReport(
   filters: StaffOnboardingFilters = {},
 ): Promise<StaffOnboardingReport> {
-  const response = await fetch(`${getApiUrl()}/staff/onboarding${query(filters)}`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${getApiUrl()}/staff/onboarding${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch staff onboarding plans");

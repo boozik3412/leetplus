@@ -2,6 +2,40 @@
 
 LeetPlus - SaaS-платформа для операционного управления компьютерными клубами и сетями клубов. Приложение собирает данные из Langame, приводит клубы к единой сетевой картине и помогает управлять ассортиментом, продажами, остатками, гостями/CRM, геймификацией, маркетингом, персоналом, сменными регламентами, чек-листами и внутренними коммуникациями.
 
+Переход от operational demo к invite-only открытому тесту ведётся по
+[специальному backlog](./OPEN_BETA_BACKLOG.md). Канонический контракт
+`NETWORK | STORES`, phased migration, rollout/rollback, матрица модулей и
+тестовая стратегия находятся в
+[AccessScope documentation package](./docs/security/access-scope/README.md).
+Четыре текущих клуба считаются одной сетью и сохраняются четырьмя `Store`
+одного существующего `Tenant`.
+
+Production-backup restored-copy rehearsal от 18.08.2026 принят: clean
+migration/repeat, 134-table row-count zero-diff и activation-role
+TLS/HBA/SCRAM rollback прошли на изолированной копии. Точный evidence и
+оставшийся путь до первого внешнего tenant зафиксированы в
+[отчёте restored-copy rehearsal](./docs/open-beta/founder-production-restored-copy-rehearsal-2026-08-18.md).
+
+Текущий StaffTask hardening checkpoint —
+[snapshot evidence boundary и SYNTHETIC reconciliation proposal dry-run](./docs/security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
+на runtime candidate SHA `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`.
+Он прошёл 23 сценария disposable PostgreSQL 16.13: все восемь proposal-кодов
+дают восемь occurrences и семь cases; две last-task причины coalesce в один
+case, а admission role имеет table-level `SELECT` к восьми relations и только
+пять разрешённых колонок `User`.
+Отдельный test-evidence commit
+`2341b99937e54cc50d1763a0a794d975816c72ce` локально добавляет public-only
+pre-signed pinned-path fixture и подтверждает admission suite `19/19`. Fixture
+не содержит private key, key generation или signing API; production root
+registry не изменяется. Remote CI и независимый review этого commit ещё
+pending.
+Production-like verifier, DB marker и exact Git-blob binding реализованы
+fail-closed, но trusted-root registry намеренно пуст: production-like запуск,
+apply, deployment и внешний beta всё ещё не разрешены.
+Изолированный experimental Node.js 22 module mock используется только для
+test child process и остаётся `P2` test-infrastructure risk, а не production
+authority.
+
 ## Текущий статус
 
 На 27.06.2026 проект находится в production-стадии ранней операционной платформы: рабочий контур развернут на VDS, подключен к реальным источникам Langame и развивается быстрыми итерациями от пользовательских сценариев. LeetPlus уже покрывает дашборд сети, ассортимент, гостей/CRM, маркетинг, игровой модуль, выдачу доступа сотрудникам и большой блок `Персонал` с задачами, регламентами, чек-листами, обучением, дисциплиной и коммуникациями.
@@ -73,6 +107,8 @@ Payload: `phone`, `type`, `sum`, `comment`, где `type` может быть `b
 
 Боевой dispatcher включается env-флагом `LANGAME_BONUS_ACCRUAL_ENABLED=true`; путь по умолчанию: `LANGAME_BONUS_ACCRUAL_PATH=/master_api/guests/balance/phone`.
 
+Каждый Langame balance write принудительно ограничен таймаутом не более 30 секунд; отключить его значением `0` или увеличить выше этого предела нельзя. Перед вызовом provider bonus ledger заново проверяет ownership текущей claim-generation вместе с `Tenant.executionRevision`, tenant permit, normalized phone target, deliverability reward/staff-профиля и активные tenant source/credential. Неоднозначный timeout не запускает автоматический write retry: запись переходит в `RECONCILIATION_REQUIRED`, а решение `NOT_APPLIED` разрешается только после fail-closed quarantine `LANGAME_BONUS_RECONCILIATION_QUARANTINE_MINUTES` (по умолчанию `30`). Это не является доказательством at-most-once без подтверждённой idempotency/status-семантики Langame, поэтому для нового tenant outbound остаётся выключенным до отдельного canary gate.
+
 Для автономной работы без админского запуска добавлен API-side scheduler `GuestBonusLedgerSchedulerService`: в production он стартует при наличии `SYNC_SERVICE_TOKEN`, если `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED` не выключен явно. Scheduler вызывает существующий `POST /guests/gamification/scheduled/bonus-ledger/dispatch`-контур внутри backend, пропускает пересекающиеся тики и логирует только агрегаты tenant/queued/confirmed/failed/blocked без raw phone, токенов и Langame payload. Настройки: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_QUEUE_APPROVED_REWARDS`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_ID`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES`. Реальная запись в Langame все равно требует `LANGAME_BONUS_ACCRUAL_ENABLED=true`; если write-флаг не включен, ledger остается в safe dry-run/disabled режиме.
 
 Для внешнего Telegram/MAX bot-consumer добавлены сервисные endpoints под тем же `SYNC_SERVICE_TOKEN`: `POST /guests/gamification/scheduled/deliveries/bot/pull` принимает `tenantId` или `tenantSlug`, `channels` и `limit`, возвращает только готовые `READY_FOR_BOT` доставки из `GuestGameDelivery` с безопасным текстом сообщения, масками и подтвержденным bot identity для отправки; `POST /guests/gamification/scheduled/deliveries/bot/ack` принимает `deliveryId`, `status=SENT|FAILED|BLOCKED`, короткие provider-поля и переводит delivery в итоговый статус с записью `GuestGameDeliveryEvent`. Повторный terminal ack с тем же статусом идемпотентно возвращает текущую delivery без нового события, а смена terminal-статуса требует явного retry из Guest Game Hub. Эти endpoints не делают live-запросы в Langame, не пишут в Langame, не отдают raw phone и не сохраняют raw Telegram update.
@@ -137,7 +173,7 @@ Deployment-порядок для fallback-входа закреплен в `docs
 
 `game-summary` также отдает guest-safe блок `journey`: регистрация, связь с Langame, активность/чекин, квест, награда и начисление бонуса. `/play/game` показывает этот маршрут как `Путь к бонусу` с процентом готовности, следующим шагом и ссылками к нужному блоку экрана или в гостевой кабинет к `#langame-match`, чтобы игрок и QA видели полный путь от `/play` до подтвержденного бонуса без live-запросов, raw phone и участия админа.
 
-Для рефералок `GET /guest-portal/session/game-summary` отдает блок `referral`: opaque HMAC-код, ссылку `/play?clubId=...&ref=...`, share-text, подсказку канала и safe `stats` по принятым/eligible регистрациям. `/play/game` показывает карточку `Рефералка` с копированием ссылки, native share/fallback, Telegram share-url и текущим статусом приглашений, а `/play` при входе по `ref` показывает безопасный баннер приглашения. Код строится от отдельного `GuestGameProfile` и клуба, статистика считается из `GuestGameEvent` `GAME_REFERRAL_ACCEPTED` по `inviterProfileId`; raw phone, secret, сырой profile id и общий массив `Guest` не раскрываются и не используются для публичного статуса. Eligible-регистрация по ссылке попадает в Guest Game Hub как `GUEST_GAME_REFERRAL`, а для production можно задать `GUEST_GAME_REFERRAL_SECRET`, иначе используется `JWT_SECRET`/`APP_ENCRYPTION_KEY`.
+Для рефералок `GET /guest-portal/session/game-summary` отдает блок `referral`: opaque HMAC-код, ссылку `/play?clubId=...&ref=...`, share-text, подсказку канала и safe `stats` по принятым/eligible регистрациям. `/play/game` показывает карточку `Рефералка` с копированием ссылки, native share/fallback, Telegram share-url и текущим статусом приглашений, а `/play` при входе по `ref` показывает безопасный баннер приглашения. Код строится от отдельного `GuestGameProfile` и клуба, статистика считается из `GuestGameEvent` `GAME_REFERRAL_ACCEPTED` по `inviterProfileId`; raw phone, secret, сырой profile id и общий массив `Guest` не раскрываются и не используются для публичного статуса. Eligible-регистрация по ссылке попадает в Guest Game Hub как `GUEST_GAME_REFERRAL`. В production обязателен отдельный `GUEST_GAME_REFERRAL_SECRET`; fallback на JWT/encryption key допускается только в local/test.
 
 Внутренний Guest Game Hub на `/guests/gamification` показывает пилотный чек-лист готовности клуба к первому бонусу: 1337 выбирается приоритетно, далее проверяются `/play`, OTP, игровой профиль, связка с Langame, активные правила, наличие сохраненных `guests/logs` raw-типов, тестовое событие, очередь наград, bonus ledger и обязательная сверка баланса после первого production-начисления. Пункт `Факты guests/logs` показывает количество сохраненных логов, типов, источников и следующее действие для `/sync`; пустой каталог остается data-риском для будущих правил и anti-fraud, но не блокирует dry-run, пока активные правила не используют `guestLogTypes`/`blockedGuestLogTypes` или XP `guestLog`. Если последняя успешная foundation-синхронизация уже запускалась с `includeGuestLogs=true`, но Langame вернул `0` логов, runbook показывает `проверено: 0` / `0 после sync` и ведет на диагностику, а не предлагает слепо повторять тот же sync. Если активное правило зависит от `guests/logs`, этот пункт становится prerequisite-блокером runbook и ведет оператора на `/sync?includeGuestLogs=1` до разбора endpoint или временного снятия зависимости правила; обычный `/sync` остается легким, а deeplink сразу включает расширенную проверку событий. Каждый пункт checklist дополнительно может отдавать безопасные `actionHref/actionLabel`, поэтому UI показывает кликабельный следующий шаг к `/stores`, `/play`, гостевому кабинету, `/sync?includeGuestLogs=1`, правилам или CSV-export каталога без нового API-запроса. Поверх чек-листа есть runbook-стадия `Стоп / Dry-run / Canary / Live write / Сверка / Готово`: она показывает, можно ли сейчас запускать dry-run, canary, live-write или только сверку, и дает следующий безопасный шаг без live-запросов в Langame и без раскрытия ПДн. Runbook также возвращает action-list для оператора: открыть dry-run/process-event, поставить approved bonus-награду в ledger, выполнить ledger dry-run, запустить защищенный canary live dispatch и перейти к сверке баланса; web UI вызывает только существующие guarded handlers и не добавляет отдельный путь записи в Langame. Canary dispatch дополнительно защищен backend-флагом `canary=true`: сервер обрабатывает максимум одну уже подготовленную ledger-запись и не ставит новые approved rewards в очередь внутри live dispatch. Перед live-write runbook выполняет scoped preflight по клубу 1337: считает claimable ledger-записи (`PENDING`, retry-ready `FAILED`, stale `PROCESSING`), показывает безопасный preview первых claim-кандидатов и разблокирует canary только если готова ровно одна запись. Из preview оператор с правом на награды может отменить показанную pending/failed/stale-processing запись через существующий cancel API: backend не дает отменить свежий `PROCESSING` lock и сохраняет каскадную отмену linked reward/delivery. Действия runbook передают `storeId` выбранного пилотного клуба, поэтому постановка в ledger, dry-run preview, status counts и live claim ограничены клубом 1337, а общий batch dispatch в карточке bonus ledger остается без такого scope. Финальный gate `firstBonusReconciliation` отдельно ищет первую подтвержденную положительную `bonus_balance` операцию по клубу 1337, игнорирует денежные `balance` записи и переводит пилот в `Сверка` или `Готово` только после сверки `balanceAfter` с последующим `GuestBonusBalanceSnapshot`.
 
@@ -242,7 +278,13 @@ Deployment-порядок для fallback-входа закреплен в `docs
 - Tenant-scoped данные.
 - Роли пользователей внутри tenant: владелец, системный администратор, управляющий сетью, управляющий клубом, менеджер по стандартам, маркетолог, закупщик, старший администратор и администратор клуба.
 - `/users` позволяет выдавать учетные записи сотрудникам, менять роль, активность, пароль и рабочий scope по всей сети или выбранным клубам по матрице: владелец и системный администратор управляют всеми ролями; управляющий сетью - управляющим клубом, администраторами, маркетологом, закупщиками, старшими администраторами и менеджером по стандартам; менеджер по стандартам - управляющим клубом, старшими администраторами и администраторами клуба.
-- `/users` поддерживает два сценария выдачи доступа: ручное создание учетной записи и ссылку-приглашение. Активное приглашение можно открыть из списка, скопировать ссылку повторно, отредактировать имя/email/роль/клубы или отменить. Новые ссылки строятся как подписанные воспроизводимые invite-токены, старые hash-ссылки остаются совместимыми.
+- `/users` поддерживает два сценария выдачи доступа: ручное создание учетной
+  записи и email-bound ссылку-приглашение. Invite URL возвращается только в
+  ответе создания или обновления, а в БД хранится только SHA-256 случайного
+  opaque token; общий список URL не раскрывает. Обновление приглашения
+  ротирует token и инвалидирует прежнюю ссылку, отмена делает её
+  недействительной. Legacy signed-ID и приглашения без email необходимо
+  отозвать и перевыпустить.
 - Для коммуникаций есть отдельный доступ `view_communications`: он открывает обзор коммуникаций, командный чат и внутренние уведомления без общего доступа к блоку `Персонал`; CRM-задачи контакта остаются за доступом к гостям/CRM.
 - Для `isPlatformAdmin` есть отдельный раздел `/administration` в блоке `Администрирование`: tenant-сети, источники Langame, диагностика, lifecycle-действия tenant, support-действия Langame-источников, support-заметки и audit trail по всем tenant с фильтрами, CSV-экспортом и раскрытием `before/after/metadata`; старый `/admin` оставлен как редирект.
 - Неактивные tenant-статусы `SUSPENDED` и `ARCHIVED` блокируют вход и защищенный API для обычных пользователей tenant, но platform admin сохраняет доступ для восстановления или проверки.
@@ -262,6 +304,7 @@ Deployment-порядок для fallback-входа закреплен в `docs
 - Добавлен конструктор шаблонов чеклистов `/staff/checklist-templates`: каталог reusable-шаблонов, создание с нуля, из опубликованного регламента или из готовых паков для кассы, PC-зоны, передачи ТМЦ и обучения; секции, обязательные пункты, требования к доказательствам, баллы, клуб/роль scope и запуск чеклистов из активного шаблона.
 - В конструкторах `/staff/shift-regulations`, `/staff/checklist-templates`, `/staff/task-templates`, `/staff/training-courses`, `/staff/onboarding` и `/staff/knowledge-base` добавлен sandbox-предпросмотр employee-facing сценария: менеджер может пройти материал с тестовыми ответами и доказательствами, проверить обязательные шаги, ссылки и внешний вид без входа под администратором и без создания реальных фактов.
 - Добавлен отчет выполнения чеклистов `/staff/checklists/report`: период, статус, тип смены, клуб, сотрудник и поиск, сводка и разрезы по клубам, сменам, сотрудникам и чеклистам.
+- Шаблоны, выполнения и отчёты чек-листов используют fresh `NETWORK | STORES` policy: клубный менеджер управляет только ресурсами разрешённых клубов, читает совместимый активный сетевой шаблон только для чтения, а чужие фильтры и UUID fail-closed отклоняются до totals/export/file access.
 - Добавлен дашборд операционной дисциплины `/staff/operations-dashboard`: задачи и чеклисты в срок/просрочено/провалено/возвращено/эскалировано/на проверке, рейтинг клубов, рейтинг сотрудников, готовность к сменам, повторяющиеся проблемы чеклистов, смены/касса из `/guests/staff-control` и текущие риски с переходом к задачам, чеклистам и staff-control отчетам.
 - Добавлена система предупреждений и штрафов `/staff/discipline` по шаблону администратора: категории `Чистота`, `Взаимодействие`, `Соблюдение регламента`, два предупреждения перед штрафами, нарастающие ставки, журнал записей и включение/отключение по сети или клубу.
 - Добавлен отдельный рейтинг администраторов `/staff/administrator-ratings`: соблюдение регламентов, чеклисты, аттестация, предупреждения и штрафы собираются в один score с детализацией по критериям.
@@ -352,7 +395,12 @@ Deployment-порядок для fallback-входа закреплен в `docs
 - Ежедневный email-дайджест по сети: деньги, маржа, OOS, списания, SKU без продаж и ключевые действия.
 - Еженедельный коммерческий отчет: сравнение с предыдущей неделей и XLSX-отчет во вложении.
 - В `/reports` добавлен блок отправки ежедневного дайджеста и недельного отчета на email.
-- Для будущего расписания есть защищенный endpoint `POST /reports/digests/scheduled` с `x-sync-service-token`.
+- Для диагностики будущего расписания endpoint
+  `POST /reports/digests/scheduled` требует `x-sync-service-token`, явный
+  `REPORT_DIGEST_SCHEDULED_HTTP_ENABLED=true` и допускает только
+  `dryRun=true`. Live HTTP-отправка fail-closed до маршрутизации через
+  persisted `ReportDigestScheduleRun` coordinator; штатный internal scheduler
+  использует этот coordinator.
 - В API добавлен встроенный scheduler ежедневной/еженедельной доставки с журналом запусков и защитой от повторной отправки по tenant/type/date.
 - `/reports` не загружает полный sales-detail в первый экран: тяжелая таблица открывается отдельно, чтобы хаб отчетов и блок дайджестов не зависели от многомегабайтного preview.
 - Позже добавить Telegram/MAX-уведомления для критических событий после подготовки канала и юридических правил.
@@ -464,6 +512,8 @@ APP_ENCRYPTION_KEY="change_me_32_plus_chars_in_production"
 WEB_URL="http://localhost:3000"
 API_URL="http://localhost:4000"
 NEXT_PUBLIC_API_URL="http://localhost:4000"
+ACCESS_SCOPE_ENFORCEMENT_MODE="ENFORCED"
+STAFF_ATTACHMENT_ACL_MODE="ENFORCED"
 ```
 
 Дополнительно для почты и сервисной синхронизации:
@@ -475,7 +525,10 @@ MAIL_SECURE="false"
 MAIL_USER=""
 MAIL_PASS=""
 MAIL_FROM="LeetPlus <no-reply@leetplus.ru>"
-SYNC_SERVICE_TOKEN="change_me_for_cron"
+IDENTITY_MAIL_ENCRYPTION_KEY=""
+IDENTITY_MAIL_ENCRYPTION_KEY_VERSION="v1"
+IDENTITY_MAIL_AAD_ENVIRONMENT="development"
+SYNC_SERVICE_TOKEN="<unique-strong-scheduler-secret>"
 REPORT_DIGEST_SCHEDULER_ENABLED="false"
 REPORT_DIGEST_SCHEDULER_TIMEZONE_OFFSET_MINUTES="300"
 REPORT_DIGEST_DAILY_TIME="09:00"
@@ -490,7 +543,57 @@ REPORT_DIGEST_SCHEDULER_INTERVAL_MS="60000"
 работать только при поднятом локальном Mailpit/SMTP-сервисе.
 Если `REPORT_DIGEST_SCHEDULER_ENABLED` не задан явно, scheduler включается только при `NODE_ENV=production` и настроенном `SYNC_SERVICE_TOKEN`.
 
-`APP_ENCRYPTION_KEY` нужно задать до первого сохранения реальных ключей интеграции. Если заменить его без процедуры ротации, сохраненные API-ключи нельзя будет расшифровать.
+В production API запускается только при наличии независимых секретов
+`JWT_SECRET`, `GUEST_PORTAL_JWT_SECRET`, `GUEST_GAME_REFERRAL_SECRET`,
+`APP_ENCRYPTION_KEY`, `INTEGRATION_ENCRYPTION_KEY`,
+`IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY`, `IDENTITY_MAIL_ENCRYPTION_KEY` и
+`SYNC_SERVICE_TOKEN`. Обычные строковые секреты должны содержать не менее
+32 символов, не быть placeholder и не совпадать друг с другом.
+
+`IDENTITY_MAIL_ENCRYPTION_KEY` имеет более строгий контракт: это ровно
+32 CSPRNG-байта, закодированные canonical unpadded base64url строкой из
+43 символов. Ключ создаётся вне репозитория и не может переиспользовать JWT,
+APP, integration, fingerprint или иной production secret. Дополнительно
+обязательны exact `IDENTITY_MAIL_ENCRYPTION_KEY_VERSION=v1` и стабильный
+`IDENTITY_MAIL_AAD_ENVIRONMENT`, соответствующий шаблону
+`[a-z0-9][a-z0-9._-]{0,63}`. Environment является несекретным persisted AAD
+binding для изоляции local/staging/production и restore-контуров; его нельзя
+неявно выводить из `NODE_ENV`.
+
+Сгенерировать допустимый ключ можно локально, не сохраняя результат в shell
+history или репозитории:
+
+```powershell
+node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
+Также production требует явный `ACCESS_SCOPE_ENFORCEMENT_MODE`:
+`SHADOW` только пишет диагностику неклассифицированных аккаунтов и всё равно
+отказывает им в доступе; `ENFORCED` является штатным режимом после
+классификации.
+
+Для download staff-вложений production также требует явный
+`STAFF_ATTACHMENT_ACL_MODE`:
+
+- `LEGACY` сохраняет tenant-only read без parent ACL и предназначен только для
+  краткого внутреннего перехода;
+- `SHADOW` вычисляет strict parent decision и пишет privacy-safe mismatch, но
+  возвращает legacy result и не переводит expired pending в quarantine;
+- `ENFORCED` делает parent ACL авторитетным и включает TTL quarantine.
+
+Если переменная отсутствует локально или в test, используется `ENFORCED`. CI
+production startup contract проверяет явный `SHADOW`. Внешний beta запрещён в
+`LEGACY/SHADOW`; `ENFORCED` включается только после завершения parent adoption,
+inventory/backfill и canary.
+
+До первого релиза с разделёнными ключами нужно проверить, каким фактическим
+ключом зашифрованы существующие PII и credentials интеграций. Если раньше
+использовался fallback на `JWT_SECRET`, сначала необходимы legacy keyring,
+dual-read и контролируемая миграция ciphertext/HMAC. Простая замена ключа
+сделает старые данные нечитаемыми. Смена signing-secret также инвалидирует
+текущие гостевые сессии и referral-ссылки, если не реализован переход с dual
+verification. Актуальные user invites используют случайные opaque tokens с
+hash-only хранением и от общего signing-secret не зависят.
 
 Установка зависимостей:
 
@@ -569,6 +672,14 @@ systemctl restart leetplus-web.service
 
 Запуск защищен через `flock`, чтобы два деплоя не выполнялись параллельно.
 
+Этот legacy auto-deploy не является допустимым release-механизмом для открытой
+beta. Перед внешним тестом production должен получать только проверенный
+immutable artifact. Для каждого release обязательны полный `RELEASE_SHA`,
+UTC `BUILD_TIME`, точное имя `EXPECTED_DATABASE_MIGRATION` и количество
+`EXPECTED_DATABASE_MIGRATION_COUNT`. API публикует эти данные через `/version`
+и `/health/live`, а `/health/ready` дополнительно проверяет БД и ожидаемую
+revision/count миграций.
+
 Быстрая проверка production:
 
 ```powershell
@@ -605,21 +716,86 @@ pnpm --filter database exec prisma migrate status
 Demo seed:
 
 ```powershell
+$env:DEMO_SEED_ENABLED = "true"
+$env:DEMO_SEED_TARGET_ENVIRONMENT = "development"
 pnpm --filter database db:seed
+Remove-Item Env:DEMO_SEED_ENABLED
+Remove-Item Env:DEMO_SEED_TARGET_ENVIRONMENT
 ```
 
-Seed создает demo tenant, справочники, товары, клубы, продажи, остатки, списания и возвраты.
+Seed предназначен только для локальной или явно подтвержденной удаленной development-БД. При
+`NODE_ENV=production`, другом production environment marker или production-маркере в адресе БД
+он всегда завершается до изменений. По умолчанию seed создает tenant `local-demo`, справочники,
+товары, клубы, продажи, остатки, списания и возвраты.
+Даже для loopback-БД требуется положительная аттестация
+`DEMO_SEED_TARGET_ENVIRONMENT=development`; operational slugs `demo` и `public-demo`
+зарезервированы и этим seed не обслуживаются.
 
-Тестовый пользователь:
+OWNER email и пароль генерируются случайно при каждом запуске и выводятся один раз в локальную
+консоль. Seed никогда не выдает этому пользователю `isPlatformAdmin`. Для воспроизводимого
+локального входа можно задать `DEMO_SEED_OWNER_EMAIL` и пароль длиной не менее 16 символов через
+`DEMO_SEED_OWNER_PASSWORD`; такие значения нельзя хранить в репозитории или использовать в
+production.
 
-```text
-Логин: 123@123.ru
-Пароль: 12345678
-Роль: OWNER
-Tenant: demo
-```
+Повторный запуск, который очистит существующий tenant, дополнительно требует
+`DEMO_SEED_RESET_EXISTING=true`, fingerprint именно этой БД в
+`DEMO_SEED_DATABASE_FINGERPRINT` и точный ID tenant в `DEMO_SEED_CONFIRM_TENANT_ID`. Отказ
+seed выводит необходимые несекретные значения. Для удаленной development-БД также требуется
+`DEMO_SEED_ALLOW_REMOTE_DATABASE=true`; не переносите подтверждения между окружениями.
 
 ## Проверки
+
+GitHub Actions запускает frozen install, Prisma validate/generate, read-only lint
+границы security/health/config, focused и полный API test, API/web typecheck и build,
+web lint, а также разворачивает все миграции с нуля в отдельном PostgreSQL 16.
+
+```powershell
+pnpm --filter api lint:ci:boundary
+pnpm --filter api test:ci:focused
+pnpm --filter api test:ci
+pnpm --filter api typecheck
+pnpm --filter web typecheck
+pnpm --filter database check:staff-task-integrity-snapshot-admission
+pnpm --filter database check:staff-task-integrity-reconciliation-proposal-dry-run
+pnpm --filter database check:tenant-execution-revision-fence
+```
+
+Populated upgrade migration `163 → 164` репетируется только на одноразовом
+local/CI PostgreSQL 16. Smoke принимает только loopback test/ci database и
+test superuser, создаёт две случайные БД из `template0`, никогда не мигрирует
+source database и удаляет только созданные им БД:
+
+```powershell
+$env:DATABASE_URL = "<disposable local/CI PostgreSQL 16 URL>"
+$env:TENANT_EXECUTION_REVISION_FENCE_UPGRADE_SMOKE_CONFIRM = "run-tenant-execution-revision-fence-upgrade-smoke"
+pnpm --filter database db:smoke:tenant-execution-revision-fence-upgrade
+```
+
+Без реального PostgreSQL 16 локальные `--self-test` и offline contract не
+заменяют CI database evidence. Запуск на общем или production-кластере
+запрещён.
+
+Полный StaffTask admission/proposal PostgreSQL rehearsal запускается только на
+выделенном одноразовом local/CI PostgreSQL 16, поскольку smoke создаёт и
+удаляет временные database, role и fixtures. На время запуска он также
+сериализованно отзывает `PUBLIC CONNECT` у других БД этого одноразового
+кластера и восстанавливает исходный ACL в `finally`; запускать его на общем
+или production-кластере нельзя:
+
+```powershell
+$env:DATABASE_URL = "<disposable local/CI PostgreSQL 16 URL>"
+$env:RELEASE_SHA = "<exact clean 40-character lowercase Git SHA>"
+$env:STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_SMOKE_CONFIRM = "run-staff-task-integrity-snapshot-admission-smoke"
+pnpm --filter database db:smoke:staff-task-integrity-snapshot-admission
+```
+
+Временное ограничение baseline: полный API lint пока не является merge gate из-за
+исторического backlog ошибок. `pnpm --filter api lint` содержит `--fix` и предназначен
+только для осознанного локального форматирования; в CI его запускать нельзя.
+`pnpm --filter api lint:check` проверяет весь API без изменения файлов, но до погашения
+legacy debt обязательным остаётся расширяемый `lint:ci:boundary`. В нём временно отключена
+только проверка Prettier, чтобы line-ending различия Windows/Linux не скрывали смысловые
+ошибки ESLint.
 
 Для обычного изменения кода перед push:
 
@@ -745,7 +921,9 @@ curl -X POST "https://api.example.ru/integrations/langame/scheduled/sync" `
 - Не поднимать вторую PostgreSQL в Docker локально без явной необходимости.
 - Не менять `APP_ENCRYPTION_KEY` без процедуры ротации.
 - Не раскрывать на frontend, в логах или audit raw phone, Telegram `chat_id`, bot token, Langame API key, raw Telegram update и полный Langame payload; использовать маски, агрегаты и безопасные metadata.
-- В `/users` не ломать совместимость старых invite-ссылок по `tokenHash`: новые подписанные invite-токены должны жить рядом с legacy resolution.
+- В `/users` не восстанавливать legacy signed-ID invite resolution: старые
+  ссылки и приглашения без email отзываются и перевыпускаются как email-bound
+  opaque tokens; raw token не хранится и не возвращается общим списком.
 - В операционном контроле персонала текущие открытые смены Langame нельзя смешивать с историческими или дневными чек-листами; открытая смена без активированного чек-листа должна отображаться явно как проблема смены.
 - Не делать автоматическое объединение товаров во время Langame sync.
 - Не удалять исторические факты продаж при переименовании или исчезновении товара из внешней номенклатуры.

@@ -303,7 +303,7 @@ function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function defaultDraft(): DraftArticle {
+function defaultDraft(storeId = ""): DraftArticle {
   return {
     id: null,
     kind: "ARTICLE",
@@ -317,7 +317,7 @@ function defaultDraft(): DraftArticle {
     templateKey: "",
     requiresReading: false,
     revisionSlaDays: "",
-    storeId: "",
+    storeId,
     tagsText: "",
     materials: [],
     relatedLinks: [],
@@ -347,9 +347,9 @@ function fromArticle(row: StaffKnowledgeArticle): DraftArticle {
   };
 }
 
-function informationMessageDraft(): DraftArticle {
+function informationMessageDraft(storeId = ""): DraftArticle {
   return {
-    ...defaultDraft(),
+    ...defaultDraft(storeId),
     kind: "INFORMATION",
     status: "PUBLISHED",
     folder: "Информация",
@@ -360,10 +360,12 @@ function informationMessageDraft(): DraftArticle {
 }
 
 function hasRichTextContent(value: string) {
-  return value
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&(nbsp|#160);/gi, " ")
-    .trim().length > 0;
+  return (
+    value
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&(nbsp|#160);/gi, " ")
+      .trim().length > 0
+  );
 }
 
 function draftSnapshot(draft: DraftArticle) {
@@ -398,9 +400,7 @@ function defaultRevisionSlaDays(
   return Math.min(Math.max(Math.round(roleDays + materialExtraDays), 1), 14);
 }
 
-function formatSettingsActor(
-  user: StaffKnowledgeSettingsEvent["actorUser"],
-) {
+function formatSettingsActor(user: StaffKnowledgeSettingsEvent["actorUser"]) {
   return user?.fullName ?? user?.email ?? "Система";
 }
 
@@ -436,7 +436,9 @@ function slaPolicyHistorySummary(event: StaffKnowledgeSettingsEvent) {
     materialChanges > 0 ? `материалов изменено: ${materialChanges}` : null,
   ].filter(Boolean);
 
-  return details.length > 0 ? details.join(", ") : "Без изменения числовых правил";
+  return details.length > 0
+    ? details.join(", ")
+    : "Без изменения числовых правил";
 }
 
 function materialTypeFromAttachment(
@@ -488,8 +490,7 @@ function revisionSlaBadge(article: StaffKnowledgeArticle) {
   if (hoursLeft < 0) {
     return {
       label: `SLA просрочен: ${formatDateTime(article.revisionDueAt)}`,
-      className:
-        "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-200",
+      className: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-200",
     };
   }
 
@@ -523,7 +524,6 @@ function RevisionSlaPill({ article }: { article: StaffKnowledgeArticle }) {
     </span>
   );
 }
-
 
 function materialHostFromUrl(value: string | null | undefined) {
   if (!value) {
@@ -567,7 +567,9 @@ function readingMaterialsFrom(
   return materials
     .filter(
       (material) =>
-        material.title.trim() || material.content?.trim() || material.url?.trim(),
+        material.title.trim() ||
+        material.content?.trim() ||
+        material.url?.trim(),
     )
     .map((material, index) => ({
       id: material.id || `knowledge-material-${index}`,
@@ -656,8 +658,8 @@ function draftReadingData(
       {
         label: "Клуб",
         value: draft.storeId
-          ? report.stores.find((store) => store.id === draft.storeId)?.name ??
-            "Клуб"
+          ? (report.stores.find((store) => store.id === draft.storeId)?.name ??
+            "Клуб")
           : "Вся сеть",
       },
       { label: "Статус", value: statusLabels[draft.status] },
@@ -684,14 +686,14 @@ export function StaffKnowledgeBaseWorkspace({
   report: StaffKnowledgeBaseReport;
 }) {
   const router = useRouter();
+  const defaultStoreId =
+    report.accessScope === "STORES" ? (report.stores[0]?.id ?? "") : "";
   const [reviewQueueTab, setReviewQueueTab] =
     useState<(typeof reviewQueueTabs)[number]["key"]>("REVIEW");
   const initialDraft = report.rows[0]
     ? fromArticle(report.rows[0])
-    : defaultDraft();
-  const [draft, setDraft] = useState<DraftArticle>(() =>
-    initialDraft,
-  );
+    : defaultDraft(defaultStoreId);
+  const [draft, setDraft] = useState<DraftArticle>(() => initialDraft);
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState(() =>
     draftSnapshot(initialDraft),
   );
@@ -713,10 +715,14 @@ export function StaffKnowledgeBaseWorkspace({
     () => report.rows.find((row) => row.id === draft.id) ?? null,
     [draft.id, report.rows],
   );
+  const canManageDraft = draft.id
+    ? selectedArticle?.canManage === true
+    : report.canManageKnowledge;
   const canSaveArticle =
-    report.canEditKnowledge ||
-    report.canReviewKnowledge ||
-    report.canPublishKnowledge;
+    canManageDraft &&
+    (report.canEditKnowledge ||
+      report.canReviewKnowledge ||
+      report.canPublishKnowledge);
   const isInformationMessage = draft.kind === "INFORMATION";
   function canSaveStatus(status: StaffKnowledgeArticleStatus) {
     if (status === "PUBLISHED" || status === "ARCHIVED") {
@@ -730,9 +736,11 @@ export function StaffKnowledgeBaseWorkspace({
     return canSaveArticle;
   }
 
-  const canSaveCurrentStatus = isInformationMessage
-    ? report.canPublishKnowledge
-    : canSaveStatus(draft.status);
+  const canSaveCurrentStatus =
+    canManageDraft &&
+    (isInformationMessage
+      ? report.canPublishKnowledge
+      : canSaveStatus(draft.status));
   const effectiveRevisionSlaDays = draft.revisionSlaDays.trim()
     ? Number(draft.revisionSlaDays)
     : defaultRevisionSlaDays(
@@ -746,9 +754,11 @@ export function StaffKnowledgeBaseWorkspace({
   );
   const statusOptions = useMemo(
     () =>
-      (Object.entries(statusLabels) as Array<
-        [StaffKnowledgeArticleStatus, string]
-      >).filter(([value]) => {
+      (
+        Object.entries(statusLabels) as Array<
+          [StaffKnowledgeArticleStatus, string]
+        >
+      ).filter(([value]) => {
         if (value === draft.status) {
           return true;
         }
@@ -776,16 +786,11 @@ export function StaffKnowledgeBaseWorkspace({
   );
   const currentDraftSnapshot = useMemo(() => draftSnapshot(draft), [draft]);
   const hasUnsavedChanges =
-    report.canManageKnowledge &&
-    !isPending &&
-    currentDraftSnapshot !== savedDraftSnapshot;
+    canManageDraft && !isPending && currentDraftSnapshot !== savedDraftSnapshot;
 
   useEffect(() => {
     function handleReadingWindowMessage(event: MessageEvent) {
-      if (
-        event.origin !== window.location.origin &&
-        event.origin !== "null"
-      ) {
+      if (event.origin !== window.location.origin && event.origin !== "null") {
         return;
       }
 
@@ -808,17 +813,17 @@ export function StaffKnowledgeBaseWorkspace({
             : null;
         const patch = {
           title: typeof data.title === "string" ? data.title : undefined,
-          summary:
-            typeof data.summary === "string" ? data.summary : undefined,
-          content:
-            typeof data.content === "string" ? data.content : undefined,
+          summary: typeof data.summary === "string" ? data.summary : undefined,
+          content: typeof data.content === "string" ? data.content : undefined,
         };
 
         if (articleId && articleId !== draft.id) {
           const article = report.rows.find((row) => row.id === articleId);
 
-          if (!article) {
-            setError("Статья для редактирования не найдена в текущем каталоге.");
+          if (!article || !article.canManage) {
+            setError(
+              "Статья для редактирования не найдена в текущем каталоге.",
+            );
             setIsBuilderOpen(true);
             window.focus();
             return;
@@ -856,7 +861,7 @@ export function StaffKnowledgeBaseWorkspace({
       if (typeof data.articleId === "string" && data.articleId) {
         const article = report.rows.find((row) => row.id === data.articleId);
 
-        if (!article) {
+        if (!article || !article.canManage) {
           setError("Статья для редактирования не найдена в текущем каталоге.");
           setIsBuilderOpen(true);
           window.focus();
@@ -881,19 +886,21 @@ export function StaffKnowledgeBaseWorkspace({
   }, [canSaveArticle, draft.id, report.rows]);
 
   function loadArticle(row: StaffKnowledgeArticle | null) {
-    const nextDraft = row ? fromArticle(row) : defaultDraft();
+    const nextDraft = row ? fromArticle(row) : defaultDraft(defaultStoreId);
     setDraft(nextDraft);
     setSavedDraftSnapshot(draftSnapshot(nextDraft));
     setMessage(null);
     setError(null);
 
-    if (report.canManageKnowledge) {
+    if (!row || row.canManage) {
       setIsBuilderOpen(true);
+    } else {
+      setIsBuilderOpen(false);
     }
   }
 
   function startInformationMessage() {
-    const nextDraft = informationMessageDraft();
+    const nextDraft = informationMessageDraft(defaultStoreId);
     setDraft(nextDraft);
     setSavedDraftSnapshot(draftSnapshot(nextDraft));
     setMessage(null);
@@ -906,7 +913,7 @@ export function StaffKnowledgeBaseWorkspace({
     setMessage(null);
     setError(null);
 
-    if (report.canManageKnowledge) {
+    if (canManageDraft) {
       setIsBuilderOpen(true);
     }
   }
@@ -918,7 +925,7 @@ export function StaffKnowledgeBaseWorkspace({
       ...seed,
       id: null,
       kind: "ARTICLE",
-      storeId: "",
+      storeId: defaultStoreId,
       revisionSlaDays: "",
     });
     setMessage("Черновик загружен. Проверьте текст и сохраните статью.");
@@ -986,7 +993,9 @@ export function StaffKnowledgeBaseWorkspace({
   function removeMaterial(materialId: string) {
     setDraft((current) => ({
       ...current,
-      materials: current.materials.filter((material) => material.id !== materialId),
+      materials: current.materials.filter(
+        (material) => material.id !== materialId,
+      ),
     }));
   }
 
@@ -1025,10 +1034,11 @@ export function StaffKnowledgeBaseWorkspace({
     }));
   }
 
-
   function addUploadedImageMaterial(attachment: StaffAttachmentUploadResult) {
     setDraft((current) => {
-      if (current.materials.some((material) => material.url === attachment.url)) {
+      if (
+        current.materials.some((material) => material.url === attachment.url)
+      ) {
         return current;
       }
 
@@ -1302,1200 +1312,1235 @@ export function StaffKnowledgeBaseWorkspace({
     <>
       {unsavedDraftPrompt}
       <div className="space-y-6">
-      {report.canManageKnowledge ? (
-        <details className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <summary className="cursor-pointer list-none">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                  Политика SLA
-                </p>
-                <h2 className="mt-1 text-lg font-semibold">
-                  Возврат материалов на доработку
-                </h2>
-              </div>
-              <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                базово {revisionSlaPolicy.defaultDays} дн.
-              </span>
-            </div>
-          </summary>
-
-          <div className="mt-4 space-y-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <label className="space-y-1">
-                <span className="text-xs font-bold uppercase text-zinc-500">
-                  Базовый срок
+        {report.accessScope === "NETWORK" && report.canManageKnowledge ? (
+          <details className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+            <summary className="cursor-pointer list-none">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                    Политика SLA
+                  </p>
+                  <h2 className="mt-1 text-lg font-semibold">
+                    Возврат материалов на доработку
+                  </h2>
+                </div>
+                <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  базово {revisionSlaPolicy.defaultDays} дн.
                 </span>
-                <input
-                  type="number"
-                  min={1}
-                  max={14}
-                  value={revisionSlaPolicy.defaultDays}
-                  onChange={(event) =>
-                    updateRevisionSlaPolicy({
-                      defaultDays: Number(event.target.value),
-                    })
-                  }
-                  className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                />
-              </label>
+              </div>
+            </summary>
 
-              {revisionSlaRoleOrder.map((roleScope) => (
-                <label key={roleScope} className="space-y-1">
+            <div className="mt-4 space-y-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <label className="space-y-1">
                   <span className="text-xs font-bold uppercase text-zinc-500">
-                    {roleScopeLabels[roleScope]}
+                    Базовый срок
                   </span>
                   <input
                     type="number"
                     min={1}
                     max={14}
-                    value={revisionSlaPolicy.roleDays[roleScope]}
+                    value={revisionSlaPolicy.defaultDays}
                     onChange={(event) =>
-                      updateRevisionSlaRole(roleScope, event.target.value)
+                      updateRevisionSlaPolicy({
+                        defaultDays: Number(event.target.value),
+                      })
                     }
                     className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                   />
                 </label>
-              ))}
-            </div>
 
-            <div>
-              <p className="text-xs font-bold uppercase text-zinc-500">
-                Дополнительные дни за обязательные материалы
-              </p>
-              <div className="mt-2 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-                {revisionSlaMaterialTypeOrder.map((materialType) => (
-                  <label key={materialType} className="space-y-1">
-                    <span className="text-xs font-semibold text-zinc-500">
-                      {materialTypeLabels[materialType]}
+                {revisionSlaRoleOrder.map((roleScope) => (
+                  <label key={roleScope} className="space-y-1">
+                    <span className="text-xs font-bold uppercase text-zinc-500">
+                      {roleScopeLabels[roleScope]}
                     </span>
                     <input
                       type="number"
-                      min={0}
-                      max={7}
-                      value={revisionSlaPolicy.materialTypeExtraDays[materialType]}
+                      min={1}
+                      max={14}
+                      value={revisionSlaPolicy.roleDays[roleScope]}
                       onChange={(event) =>
-                        updateRevisionSlaMaterialExtra(
-                          materialType,
-                          event.target.value,
-                        )
+                        updateRevisionSlaRole(roleScope, event.target.value)
                       }
                       className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                     />
                   </label>
                 ))}
               </div>
-            </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs leading-5 text-zinc-500">
-                Статьи без ручного SLA используют срок по роли и самый большой
-                бонус среди обязательных материалов. Уже возвращенные статьи
-                без ручного срока пересчитываются при сохранении политики.
-              </p>
-              <button
-                type="button"
-                onClick={() => void saveRevisionSlaPolicy()}
-                disabled={settingsPending}
-                className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {settingsPending ? "Сохраняем..." : "Сохранить SLA"}
-              </button>
-            </div>
-
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-xs font-bold uppercase text-zinc-500">
-                    История SLA
-                  </p>
-                  <p className="text-xs text-zinc-500">
-                    Последние изменения правил согласования базы знаний.
-                  </p>
-                </div>
-                {report.settings.updatedAt ? (
-                  <span className="text-xs text-zinc-500">
-                    Обновлено {formatDateTime(report.settings.updatedAt)}
-                  </span>
-                ) : null}
-              </div>
-
-              {settingsHistory.length > 0 ? (
-                <div className="mt-3 grid gap-2">
-                  {settingsHistory.map((event) => (
-                    <div
-                      key={event.id}
-                      className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
-                    >
-                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-sm font-semibold">
-                          {slaPolicyHistorySummary(event)}
-                        </p>
-                        <span className="text-xs text-zinc-500">
-                          {formatDateTime(event.createdAt)}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        Изменил: {formatSettingsActor(event.actorUser)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700">
-                  История появится после первого сохранения политики SLA.
-                </p>
-              )}
-            </div>
-          </div>
-        </details>
-      ) : null}
-
-      {report.canEditKnowledge || report.canPublishKnowledge ? (
-        <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                Быстрый старт
-              </p>
-              <h2 className="mt-1 text-lg font-semibold">
-                Заготовки для базы знаний
-              </h2>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => guardAction(() => loadArticle(null))}
-                className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 shadow-sm transition hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-              >
-                Новая статья
-              </button>
-              {report.canPublishKnowledge ? (
-                <button
-                  type="button"
-                  onClick={() => guardAction(startInformationMessage)}
-                  className="h-10 rounded-md border border-emerald-300 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 transition hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100 dark:hover:bg-emerald-500/15"
-                >
-                  Новое информационное сообщение
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            {seedArticles.map((seed) => (
-              <button
-                key={seed.title}
-                type="button"
-                onClick={() => guardAction(() => loadSeed(seed))}
-                className="rounded-lg border border-zinc-200 p-3 text-left transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-zinc-800 dark:hover:bg-emerald-500/10"
-              >
-                <span className="text-sm font-semibold">{seed.title}</span>
-                <span className="mt-2 block text-xs leading-5 text-zinc-500">
-                  {seed.summary}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-5 rounded-lg border border-dashed border-zinc-300 p-3 dark:border-zinc-800">
-            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-bold uppercase text-zinc-500">
-                  Подсказки из чек-листов
+                  Дополнительные дни за обязательные материалы
                 </p>
-                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                  Повторяющиеся провалы превращаются в черновики стандартов без
-                  ручного поиска по выполненным чек-листам.
-                </p>
+                <div className="mt-2 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                  {revisionSlaMaterialTypeOrder.map((materialType) => (
+                    <label key={materialType} className="space-y-1">
+                      <span className="text-xs font-semibold text-zinc-500">
+                        {materialTypeLabels[materialType]}
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={7}
+                        value={
+                          revisionSlaPolicy.materialTypeExtraDays[materialType]
+                        }
+                        onChange={(event) =>
+                          updateRevisionSlaMaterialExtra(
+                            materialType,
+                            event.target.value,
+                          )
+                        }
+                        className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
-              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                {report.articleSuggestions.length}
-              </span>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs leading-5 text-zinc-500">
+                  Статьи без ручного SLA используют срок по роли и самый большой
+                  бонус среди обязательных материалов. Уже возвращенные статьи
+                  без ручного срока пересчитываются при сохранении политики.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void saveRevisionSlaPolicy()}
+                  disabled={settingsPending}
+                  className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {settingsPending ? "Сохраняем..." : "Сохранить SLA"}
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-bold uppercase text-zinc-500">
+                      История SLA
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      Последние изменения правил согласования базы знаний.
+                    </p>
+                  </div>
+                  {report.settings.updatedAt ? (
+                    <span className="text-xs text-zinc-500">
+                      Обновлено {formatDateTime(report.settings.updatedAt)}
+                    </span>
+                  ) : null}
+                </div>
+
+                {settingsHistory.length > 0 ? (
+                  <div className="mt-3 grid gap-2">
+                    {settingsHistory.map((event) => (
+                      <div
+                        key={event.id}
+                        className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+                      >
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-sm font-semibold">
+                            {slaPolicyHistorySummary(event)}
+                          </p>
+                          <span className="text-xs text-zinc-500">
+                            {formatDateTime(event.createdAt)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Изменил: {formatSettingsActor(event.actorUser)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700">
+                    История появится после первого сохранения политики SLA.
+                  </p>
+                )}
+              </div>
+            </div>
+          </details>
+        ) : null}
+
+        {report.canEditKnowledge || report.canPublishKnowledge ? (
+          <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                  Быстрый старт
+                </p>
+                <h2 className="mt-1 text-lg font-semibold">
+                  Заготовки для базы знаний
+                </h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => guardAction(() => loadArticle(null))}
+                  className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 shadow-sm transition hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                >
+                  Новая статья
+                </button>
+                {report.canPublishKnowledge ? (
+                  <button
+                    type="button"
+                    onClick={() => guardAction(startInformationMessage)}
+                    className="h-10 rounded-md border border-emerald-300 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 transition hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100 dark:hover:bg-emerald-500/15"
+                  >
+                    Новое информационное сообщение
+                  </button>
+                ) : null}
+              </div>
             </div>
 
-            {report.articleSuggestions.length === 0 ? (
-              <p className="mt-3 rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
-                Повторяющихся провалов за последние 90 дней пока нет, либо по
-                ним уже заведены похожие материалы.
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {seedArticles.map((seed) => (
+                <button
+                  key={seed.title}
+                  type="button"
+                  onClick={() => guardAction(() => loadSeed(seed))}
+                  className="rounded-lg border border-zinc-200 p-3 text-left transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-zinc-800 dark:hover:bg-emerald-500/10"
+                >
+                  <span className="text-sm font-semibold">{seed.title}</span>
+                  <span className="mt-2 block text-xs leading-5 text-zinc-500">
+                    {seed.summary}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-5 rounded-lg border border-dashed border-zinc-300 p-3 dark:border-zinc-800">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase text-zinc-500">
+                    Подсказки из чек-листов
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                    Повторяющиеся провалы превращаются в черновики стандартов
+                    без ручного поиска по выполненным чек-листам.
+                  </p>
+                </div>
+                <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  {report.articleSuggestions.length}
+                </span>
+              </div>
+
+              {report.articleSuggestions.length === 0 ? (
+                <p className="mt-3 rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
+                  Повторяющихся провалов за последние 90 дней пока нет, либо по
+                  ним уже заведены похожие материалы.
+                </p>
+              ) : (
+                <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                  {report.articleSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion.id}
+                      type="button"
+                      onClick={() =>
+                        guardAction(() => loadSuggestion(suggestion))
+                      }
+                      className="rounded-lg border border-zinc-200 p-3 text-left transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-zinc-800 dark:hover:bg-emerald-500/10"
+                    >
+                      <span className="text-sm font-semibold">
+                        {suggestion.title}
+                      </span>
+                      <span className="mt-2 block text-xs leading-5 text-zinc-500">
+                        {suggestion.detail}
+                      </span>
+                      <span className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+                          {suggestion.occurrences} повторов
+                        </span>
+                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                          {suggestion.store?.name ?? "Вся сеть"}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        ) : null}
+
+        {report.canReviewKnowledge || report.canPublishKnowledge ? (
+          <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                  Очередь согласования
+                </p>
+                <h2 className="mt-1 text-lg font-semibold">
+                  Проверка и публикация материалов
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-zinc-500">
+                  Проверяющий возвращает материал с комментарием или передает
+                  дальше, публикатор выпускает версию и запускает контроль
+                  прочтения.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href="/staff/tasks?view=approval"
+                  className="inline-flex h-9 items-center rounded-md border border-amber-300 bg-amber-50 px-3 text-xs font-semibold text-amber-800 transition hover:border-amber-400 hover:bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
+                >
+                  Задачи на доработку
+                </a>
+                {reviewQueueTabs.map((tab) => {
+                  const count = report.rows.filter(
+                    (row) => row.status === tab.key,
+                  ).length;
+
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setReviewQueueTab(tab.key)}
+                      className={[
+                        "h-9 rounded-md border px-3 text-xs font-semibold transition",
+                        reviewQueueTab === tab.key
+                          ? "border-emerald-500 bg-emerald-500 text-zinc-950"
+                          : "border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900",
+                      ].join(" ")}
+                    >
+                      {tab.label} · {count}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {reviewQueueRows.length === 0 ? (
+              <p className="mt-4 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
+                {
+                  reviewQueueTabs.find((tab) => tab.key === reviewQueueTab)
+                    ?.empty
+                }
               </p>
             ) : (
-              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                {report.articleSuggestions.map((suggestion) => (
+              <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                {reviewQueueRows.map((row) => (
                   <button
-                    key={suggestion.id}
+                    key={row.id}
                     type="button"
-                    onClick={() => guardAction(() => loadSuggestion(suggestion))}
+                    onClick={() => guardAction(() => loadArticle(row))}
                     className="rounded-lg border border-zinc-200 p-3 text-left transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-zinc-800 dark:hover:bg-emerald-500/10"
                   >
-                    <span className="text-sm font-semibold">
-                      {suggestion.title}
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold">{row.title}</span>
+                      <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                        {statusLabels[row.status]}
+                      </span>
+                      <RevisionSlaPill article={row} />
                     </span>
                     <span className="mt-2 block text-xs leading-5 text-zinc-500">
-                      {suggestion.detail}
+                      {row.folder} · {row.category} ·{" "}
+                      {row.store?.name ?? "Вся сеть"}
                     </span>
-                    <span className="mt-2 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
-                        {suggestion.occurrences} повторов
+                    {row.approvalNote ? (
+                      <span className="mt-2 block text-xs leading-5 text-zinc-500">
+                        {row.approvalNote}
                       </span>
-                      <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                        {suggestion.store?.name ?? "Вся сеть"}
-                      </span>
+                    ) : null}
+                    <span className="mt-2 block text-[11px] font-semibold uppercase text-zinc-400">
+                      Обновлено {formatDateTime(row.updatedAt)}
                     </span>
                   </button>
                 ))}
               </div>
             )}
-          </div>
-        </section>
-      ) : null}
-
-      {report.canReviewKnowledge || report.canPublishKnowledge ? (
-        <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                Очередь согласования
-              </p>
-              <h2 className="mt-1 text-lg font-semibold">
-                Проверка и публикация материалов
-              </h2>
-              <p className="mt-1 text-sm leading-6 text-zinc-500">
-                Проверяющий возвращает материал с комментарием или передает
-                дальше, публикатор выпускает версию и запускает контроль
-                прочтения.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <a
-                href="/staff/tasks?view=approval"
-                className="inline-flex h-9 items-center rounded-md border border-amber-300 bg-amber-50 px-3 text-xs font-semibold text-amber-800 transition hover:border-amber-400 hover:bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
-              >
-                Задачи на доработку
-              </a>
-              {reviewQueueTabs.map((tab) => {
-                const count = report.rows.filter(
-                  (row) => row.status === tab.key,
-                ).length;
-
-                return (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    onClick={() => setReviewQueueTab(tab.key)}
-                    className={[
-                      "h-9 rounded-md border px-3 text-xs font-semibold transition",
-                      reviewQueueTab === tab.key
-                        ? "border-emerald-500 bg-emerald-500 text-zinc-950"
-                        : "border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900",
-                    ].join(" ")}
-                  >
-                    {tab.label} · {count}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {reviewQueueRows.length === 0 ? (
-            <p className="mt-4 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
-              {
-                reviewQueueTabs.find((tab) => tab.key === reviewQueueTab)
-                  ?.empty
-              }
-            </p>
-          ) : (
-            <div className="mt-4 grid gap-3 lg:grid-cols-3">
-              {reviewQueueRows.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  onClick={() => guardAction(() => loadArticle(row))}
-                  className="rounded-lg border border-zinc-200 p-3 text-left transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-zinc-800 dark:hover:bg-emerald-500/10"
-                >
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold">{row.title}</span>
-                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                      {statusLabels[row.status]}
-                    </span>
-                    <RevisionSlaPill article={row} />
-                  </span>
-                  <span className="mt-2 block text-xs leading-5 text-zinc-500">
-                    {row.folder} · {row.category} ·{" "}
-                    {row.store?.name ?? "Вся сеть"}
-                  </span>
-                  {row.approvalNote ? (
-                    <span className="mt-2 block text-xs leading-5 text-zinc-500">
-                      {row.approvalNote}
-                    </span>
-                  ) : null}
-                  <span className="mt-2 block text-[11px] font-semibold uppercase text-zinc-400">
-                    Обновлено {formatDateTime(row.updatedAt)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      <div className="space-y-6">
-        {report.canManageKnowledge ? (
-          <details
-            open={isBuilderOpen}
-            onToggle={(event) =>
-              setIsBuilderOpen(event.currentTarget.open)
-            }
-            className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
-          >
-            <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                    Конструктор
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold">
-                    {draft.id
-                      ? isInformationMessage
-                        ? "Редактирование информационного сообщения"
-                        : "Редактирование статьи"
-                      : isInformationMessage
-                        ? "Новое информационное сообщение"
-                        : "Новая статья"}
-                  </h2>
-                </div>
-                <span className="rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
-                  {isBuilderOpen ? "Свернуть" : "Развернуть"}
-                </span>
-              </div>
-            </summary>
-            <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
-              <form onSubmit={save}>
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                    Конструктор
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold">
-                    {draft.id
-                      ? isInformationMessage
-                        ? "Редактирование информационного сообщения"
-                        : "Редактирование статьи"
-                      : isInformationMessage
-                        ? "Новое информационное сообщение"
-                        : "Новая статья"}
-                  </h2>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {[
-                      {
-                        label: "Черновики",
-                        enabled: report.canEditKnowledge,
-                      },
-                      {
-                        label: "Согласование",
-                        enabled: report.canReviewKnowledge,
-                      },
-                      {
-                        label: "Публикация",
-                        enabled: report.canPublishKnowledge,
-                      },
-                    ].map((item) => (
-                      <span
-                        key={item.label}
-                        className={[
-                          "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                          item.enabled
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"
-                            : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
-                        ].join(" ")}
-                      >
-                        {item.label}
-                      </span>
-                    ))}
-                    {selectedArticle ? (
-                      <RevisionSlaPill article={selectedArticle} />
-                    ) : null}
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={openDraftPreview}
-                    className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                  >
-                    Предпросмотр
-                  </button>
-                  <button
-                  type="submit"
-                  disabled={isPending || !canSaveCurrentStatus}
-                  className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isPending
-                    ? "Сохраняем..."
-                    : canSaveCurrentStatus
-                      ? "Сохранить"
-                      : "Нет прав"}
-                </button>
-
-                </div>
-                {selectedArticle?.status === "RETURNED" ? (
-                  <a
-                    href="/staff/tasks?view=approval"
-                    className="inline-flex h-10 items-center rounded-md border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-800 transition hover:border-amber-400 hover:bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
-                  >
-                    Открыть задачу на доработку
-                  </a>
-                ) : null}
-              </div>
-
-              <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr]">
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    Название
-                  </span>
-                  <input
-                    value={draft.title}
-                    onChange={(event) =>
-                      updateDraft({ title: event.target.value })
-                    }
-                    placeholder="Например: работа с конфликтным гостем"
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                </label>
-
-                {isInformationMessage ? (
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold uppercase text-zinc-500">
-                      Публикация
-                    </span>
-                    <div className="flex h-11 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-100">
-                      Будет опубликовано в «Информация и объявления»
-                    </div>
-                  </div>
-                ) : (
-                  <label className="space-y-1">
-                    <span className="text-xs font-bold uppercase text-zinc-500">
-                      Статус
-                    </span>
-                    <select
-                      value={draft.status}
-                      onChange={(event) =>
-                        updateDraft({
-                          status: event.target.value as StaffKnowledgeArticleStatus,
-                        })
-                      }
-                      className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                    >
-                      {statusOptions.map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </div>
-
-              <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
-                {isInformationMessage ? (
-                  <>
-                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                      Информационное сообщение:
-                    </span>{" "}
-                    сразу публикуется в ветке «Информация и объявления» и
-                    требует от выбранных сотрудников подтверждения после
-                    полного прочтения. Каждое сохранение новой версии снова
-                    запросит ознакомление.
-                  </>
-                ) : (
-                  <>
-                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                      Workflow:
-                    </span>{" "}
-                    черновики редактируют роли с правом базы знаний, согласование
-                    ведут проверяющие, публикация и архив требуют отдельного
-                    права публикатора. Публикация создает новую версию, а
-                    обязательные статьи попадают в контроль прочтения.
-                  </>
-                )}
-              </div>
-
-              <div className="mt-3 grid gap-3 lg:grid-cols-4">
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    Папка
-                  </span>
-                  <input
-                    value={draft.folder}
-                    onChange={(event) =>
-                      updateDraft({ folder: event.target.value })
-                    }
-                    placeholder="Сервис, смены, касса"
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                </label>
-
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    Категория
-                  </span>
-                  <input
-                    value={draft.category}
-                    onChange={(event) =>
-                      updateDraft({ category: event.target.value })
-                    }
-                    placeholder="Смена, сервис, касса"
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                </label>
-
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    Видимость
-                  </span>
-                  <select
-                    value={draft.roleScope}
-                    onChange={(event) =>
-                      updateDraft({
-                        roleScope: event.target.value as StaffKnowledgeRoleScope,
-                      })
-                    }
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  >
-                    {Object.entries(roleScopeLabels).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    SLA возврата, дней
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={14}
-                    value={draft.revisionSlaDays}
-                    onChange={(event) =>
-                      updateDraft({ revisionSlaDays: event.target.value })
-                    }
-                    placeholder={`${defaultRevisionSlaDays(
-                      draft.roleScope,
-                      draft.materials,
-                      revisionSlaPolicy,
-                    )}`}
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                  <span className="block text-xs leading-5 text-zinc-500">
-                    Пусто = авто по роли и типам материалов:{" "}
-                    {effectiveRevisionSlaDays} дн.
-                  </span>
-                </label>
-
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    Клуб
-                  </span>
-                  <select
-                    value={draft.storeId}
-                    onChange={(event) =>
-                      updateDraft({ storeId: event.target.value })
-                    }
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  >
-                    <option value="">Вся сеть</option>
-                    {report.stores.map((store) => (
-                      <option key={store.id} value={store.id}>
-                        {store.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
-                {isInformationMessage ? (
-                  <div className="flex min-h-11 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-100">
-                    Ознакомление сотрудников обязательно
-                  </div>
-                ) : (
-                  <label className="inline-flex min-h-11 items-center gap-3 rounded-md border border-zinc-300 px-3 text-sm font-semibold dark:border-zinc-700">
-                    <input
-                      type="checkbox"
-                      checked={draft.requiresReading}
-                      onChange={(event) =>
-                        updateDraft({ requiresReading: event.target.checked })
-                      }
-                    />
-                    Обязательное прочтение сотрудниками
-                  </label>
-                )}
-
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    Заметка согласования
-                  </span>
-                  <input
-                    value={draft.approvalNote}
-                    onChange={(event) =>
-                      updateDraft({ approvalNote: event.target.value })
-                    }
-                    placeholder="Что изменено или почему материал готов"
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                </label>
-              </div>
-
-              <label className="mt-3 block space-y-1">
-                <span className="text-xs font-bold uppercase text-zinc-500">
-                  Кратко
-                </span>
-                <input
-                  value={draft.summary}
-                  onChange={(event) =>
-                    updateDraft({ summary: event.target.value })
-                  }
-                  placeholder="О чем статья и когда ее читать"
-                  className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                />
-              </label>
-
-              <div className="mt-3">
-                <span className="mb-1 block text-xs font-bold uppercase text-zinc-500">
-                  Основной текст
-                </span>
-                <StaffKnowledgeRichTextEditor
-                  value={draft.content}
-                  onChange={(content) => updateDraft({ content })}
-                  onImageUploaded={addUploadedImageMaterial}
-                />
-              </div>
-
-              <label className="mt-3 block space-y-1">
-                <span className="text-xs font-bold uppercase text-zinc-500">
-                  Теги
-                </span>
-                <input
-                  value={draft.tagsText}
-                  onChange={(event) =>
-                    updateDraft({ tagsText: event.target.value })
-                  }
-                  placeholder="смена, сервис, касса"
-                  className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                />
-              </label>
-
-              <div className="mt-5 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                      Учебные материалы
-                    </p>
-                    <p className="mt-1 text-sm text-zinc-500">
-                      Текстовые блоки, видео, изображения, файлы и внешние
-                      ссылки к этой статье.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={addMaterial}
-                    className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                  >
-                    Добавить материал
-                  </button>
-                </div>
-
-                {draft.materials.length === 0 ? (
-                  <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
-                    Материалов пока нет. Статья может состоять только из текста.
-                  </p>
-                ) : (
-                  <div className="mt-3 space-y-3">
-                    {draft.materials.map((material, index) => (
-                      <div
-                        key={material.id}
-                        className="rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/50"
-                      >
-                        <div className="grid gap-3 lg:grid-cols-[1fr_10rem_1fr_auto]">
-                          <div className="space-y-1">
-                            <span className="text-xs font-bold uppercase text-zinc-500">
-                              Материал {index + 1}
-                            </span>
-                            <input
-                              value={material.title}
-                              onChange={(event) =>
-                                updateMaterial(material.id, {
-                                  title: event.target.value,
-                                })
-                              }
-                              placeholder="Название"
-                              className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <span className="text-xs font-bold uppercase text-zinc-500">
-                              Тип
-                            </span>
-                            <select
-                              value={material.type}
-                              onChange={(event) =>
-                                updateMaterial(material.id, {
-                                  type: event.target
-                                    .value as StaffKnowledgeMaterialType,
-                                })
-                              }
-                              className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                            >
-                              {Object.entries(materialTypeLabels).map(
-                                ([value, label]) => (
-                                  <option key={value} value={value}>
-                                    {label}
-                                  </option>
-                                ),
-                              )}
-                            </select>
-                          </div>
-
-                          <div className="space-y-1">
-                            <span className="text-xs font-bold uppercase text-zinc-500">
-                              Ссылка
-                            </span>
-                            <input
-                              value={material.url ?? ""}
-                              onChange={(event) => {
-                                const nextUrl = event.target.value;
-
-                                updateMaterial(material.id, {
-                                  type:
-                                    material.type === "TEXT" &&
-                                    nextUrl.trim() &&
-                                    !material.content?.trim()
-                                      ? "EXTERNAL_LINK"
-                                      : material.type,
-                                  url: nextUrl,
-                                });
-                              }}
-                              placeholder="https://..."
-                              className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                            />
-                            <StaffAttachmentUpload
-                              label="Загрузить материал"
-                              buttonLabel="Загрузить файл"
-                              onUploaded={(attachment) =>
-                                updateMaterial(material.id, {
-                                  title: material.title || attachment.fileName,
-                                  type: materialTypeFromAttachment(attachment),
-                                  url: attachment.url,
-                                })
-                              }
-                            />
-                          </div>
-
-                          <div className="flex items-end gap-2">
-                            <label className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-300 px-3 text-xs font-semibold dark:border-zinc-700">
-                              <input
-                                type="checkbox"
-                                checked={material.required}
-                                onChange={(event) =>
-                                  updateMaterial(material.id, {
-                                    required: event.target.checked,
-                                  })
-                                }
-                              />
-                              Обяз.
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => removeMaterial(material.id)}
-                              className="h-10 rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                            >
-                              Убрать
-                            </button>
-                          </div>
-                        </div>
-
-                        <label className="mt-3 block space-y-1">
-                          <span className="text-xs font-bold uppercase text-zinc-500">
-                            Текст материала
-                          </span>
-                          <textarea
-                            value={material.content ?? ""}
-                            onChange={(event) =>
-                              updateMaterial(material.id, {
-                                content: event.target.value,
-                              })
-                            }
-                            rows={3}
-                            placeholder="Заполните для текстового материала или добавьте пояснение к ссылке."
-                            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                          />
-                        </label>
-
-                        <label className="mt-3 block space-y-1">
-                          <span className="text-xs font-bold uppercase text-zinc-500">
-                            Примечание
-                          </span>
-                          <input
-                            value={material.note ?? ""}
-                            onChange={(event) =>
-                              updateMaterial(material.id, {
-                                note: event.target.value,
-                              })
-                            }
-                            placeholder="Что сотрудник должен вынести из материала"
-                            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                          />
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-5 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                      Связанные стандарты
-                    </p>
-                    <p className="mt-1 text-sm text-zinc-500">
-                      Ссылки на регламенты, чек-листы, обучение, адаптацию,
-                      задачи или разборы нарушений.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={addRelatedLink}
-                    className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                  >
-                    Добавить связь
-                  </button>
-                </div>
-
-                {draft.relatedLinks.length === 0 ? (
-                  <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
-                    Связей пока нет. Их можно добавить позднее, когда статья
-                    станет частью регламента, чек-листа или курса.
-                  </p>
-                ) : (
-                  <div className="mt-3 space-y-3">
-                    {draft.relatedLinks.map((link) => (
-                      <div
-                        key={link.id}
-                        className="grid gap-3 rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/50 lg:grid-cols-[11rem_1fr_1fr_auto]"
-                      >
-                        <label className="space-y-1">
-                          <span className="text-xs font-bold uppercase text-zinc-500">
-                            Тип
-                          </span>
-                          <select
-                            value={link.type}
-                            onChange={(event) =>
-                              updateRelatedLink(link.id, {
-                                type: event.target
-                                  .value as StaffKnowledgeRelatedLinkType,
-                              })
-                            }
-                            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                          >
-                            {Object.entries(relatedLinkTypeLabels).map(
-                              ([value, label]) => (
-                                <option key={value} value={value}>
-                                  {label}
-                                </option>
-                              ),
-                            )}
-                          </select>
-                        </label>
-
-                        <label className="space-y-1">
-                          <span className="text-xs font-bold uppercase text-zinc-500">
-                            Название
-                          </span>
-                          <input
-                            value={link.title}
-                            onChange={(event) =>
-                              updateRelatedLink(link.id, {
-                                title: event.target.value,
-                              })
-                            }
-                            placeholder="Например: чек-лист кассы"
-                            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                          />
-                        </label>
-
-                        <label className="space-y-1">
-                          <span className="text-xs font-bold uppercase text-zinc-500">
-                            Ссылка
-                          </span>
-                          <input
-                            value={link.url ?? ""}
-                            onChange={(event) =>
-                              updateRelatedLink(link.id, {
-                                url: event.target.value,
-                              })
-                            }
-                            placeholder="/staff/checklist-templates"
-                            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                          />
-                        </label>
-
-                        <button
-                          type="button"
-                          onClick={() => removeRelatedLink(link.id)}
-                          className="self-end rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                        >
-                          Убрать
-                        </button>
-
-                        <label className="space-y-1 lg:col-span-4">
-                          <span className="text-xs font-bold uppercase text-zinc-500">
-                            Примечание
-                          </span>
-                          <input
-                            value={link.note ?? ""}
-                            onChange={(event) =>
-                              updateRelatedLink(link.id, {
-                                note: event.target.value,
-                              })
-                            }
-                            placeholder="Зачем эта связь нужна сотруднику"
-                            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                          />
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <details className="mt-5 rounded-lg border border-zinc-200 dark:border-zinc-800">
-                <summary className="cursor-pointer list-none p-3 [&::-webkit-details-marker]:hidden">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                        Тест
-                      </p>
-                      <h3 className="mt-1 text-base font-semibold">Тест прохождения (опция)</h3>
-                    </div>
-                    <span className="rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
-                      Открыть
-                    </span>
-                  </div>
-                </summary>
-                <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
-                  <StaffMaterialPreview
-                  title={draft.title}
-                  description={draft.summary}
-                  body={draft.content}
-                  metrics={[
-                    { label: "Папка", value: draft.folder || "Общие" },
-                    { label: "Категория", value: draft.category || "Без категории" },
-                    { label: "Видимость", value: roleScopeLabels[draft.roleScope] },
-                    {
-                      label: "Контур",
-                      value: draft.storeId
-                        ? report.stores.find((store) => store.id === draft.storeId)
-                            ?.name ?? "Клуб"
-                        : "Вся сеть",
-                    },
-                    { label: "Статус", value: statusLabels[draft.status] },
-                    {
-                      label: "Прочтение",
-                      value: draft.requiresReading
-                        ? "Обязательное"
-                        : "Необязательное",
-                    },
-                    {
-                      label: "SLA возврата",
-                      value: `${effectiveRevisionSlaDays} дн.`,
-                    },
-                  ]}
-                  tags={tagsFromText(draft.tagsText)}
-                  steps={[
-                    {
-                      id: "knowledge-read",
-                      title: "Прочитать материал",
-                      typeLabel: "Статья",
-                      content:
-                        draft.summary ||
-                        "Сотрудник видит основной текст и материалы статьи.",
-                      required: true,
-                    },
-                    ...draft.materials
-                      .filter(
-                        (material) =>
-                          material.title.trim() ||
-                          material.content?.trim() ||
-                          material.url?.trim(),
-                      )
-                      .map((material, index) => ({
-                        id: material.id || `knowledge-material-${index}`,
-                        title: knowledgeMaterialTitleFallback(material, index),
-                        typeLabel: materialTypeLabels[material.type],
-                        content: material.note || material.content,
-                        url: material.url,
-                        required: material.required,
-                      })),
-                    ...draft.relatedLinks
-                      .filter((link) => link.title.trim() || link.url?.trim())
-                      .map((link, index) => ({
-                        id: link.id || `knowledge-link-${index}`,
-                        title: link.title || `Связь ${index + 1}`,
-                        typeLabel: relatedLinkTypeLabels[link.type],
-                        content: link.note,
-                        url: link.url,
-                        required: false,
-                      })),
-                  ]}
-                  attachments={draft.materials
-                    .filter(
-                      (material) =>
-                        material.title.trim() ||
-                        material.content?.trim() ||
-                        material.url?.trim(),
-                    )
-                    .map((material, index) => ({
-                      id: material.id || `knowledge-attachment-${index}`,
-                      title: material.title || `Материал ${index + 1}`,
-                      typeLabel: materialTypeLabels[material.type],
-                      url: material.url,
-                      content: material.content,
-                      note: material.note,
-                      required: material.required,
-                    }))}
-                  emptyLabel="В статье пока нет тестовых действий для сотрудника."
-                />
-                </div>
-              </details>
-
-              {selectedArticle ? (
-                <VersionHistory article={selectedArticle} />
-              ) : null}
-              </form>
-            </div>
-          </details>
-        ) : null}
-
-        <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                Каталог
-              </p>
-              <h2 className="mt-1 text-lg font-semibold">Статьи и материалы</h2>
-            </div>
-            <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-              {report.rows.length}
-            </span>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {report.rows.length === 0 ? (
-              <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
-                Материалов пока нет. Руководитель или менеджер по стандартам
-                может создать первую статью в конструкторе выше.
-              </p>
-            ) : (
-              report.rows.map((row) => (
-                <article
-                  key={row.id}
-                  className={[
-                    "rounded-lg border p-3 transition",
-                    draft.id === row.id
-                      ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
-                      : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900",
-                  ].join(" ")}
-                >
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-base font-semibold">{row.title}</h3>
-                        {row.kind === "INFORMATION" ? (
-                          <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-700 dark:bg-sky-500/15 dark:text-sky-200">
-                            Информационное сообщение
-                          </span>
-                        ) : null}
-                        {report.canManageKnowledge ? (
-                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                            {statusLabels[row.status]}
-                          </span>
-                        ) : null}
-                        <RevisionSlaPill article={row} />
-                      </div>
-                      {row.summary ? (
-                        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-                          {row.summary}
-                        </p>
-                      ) : null}
-                      <p className="mt-2 text-xs text-zinc-500">
-                        {row.folder} · {row.category} ·{" "}
-                        {roleScopeLabels[row.roleScope]} ·{" "}
-                        {row.store?.name ?? "Вся сеть"} · материалов:{" "}
-                        {row.materialsCount}
-                        {row.requiresReading
-                          ? " · обязательное прочтение"
-                          : ""}
-                      </p>
-                      {row.requiresReading ? (
-                        <p className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                          Прочитали {row.readingSummary.readCount}/
-                          {row.readingSummary.requiredCount}
-                          {row.readingSummary.requiredByMe &&
-                          !row.readingSummary.readByMe
-                            ? " · требуется от вас"
-                            : ""}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="flex shrink-0 flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => guardAction(() => loadArticle(row))}
-                        className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                      >
-                        {report.canManageKnowledge ? "Редактировать" : "Показать здесь"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openArticleForReading(row)}
-                        className="h-9 rounded-md bg-zinc-950 px-3 text-xs font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
-                      >
-                        Открыть для чтения
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              ))
-            )}
-          </div>
-        </section>
-
-        {!report.canManageKnowledge && selectedArticle ? (
-          <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-            <ArticlePreview
-              article={selectedArticle}
-              onMarkRead={markRead}
-              isReadPending={readPendingId === selectedArticle.id}
-            />
           </section>
         ) : null}
 
-        {message ? (
-          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200">
-            {message}
-          </p>
-        ) : null}
-        {error ? (
-          <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-            {error}
-          </p>
-        ) : null}
-      </div>
+        <div className="space-y-6">
+          {report.canManageKnowledge && canManageDraft ? (
+            <details
+              open={isBuilderOpen}
+              onToggle={(event) => setIsBuilderOpen(event.currentTarget.open)}
+              className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                      Конструктор
+                    </p>
+                    <h2 className="mt-1 text-lg font-semibold">
+                      {draft.id
+                        ? isInformationMessage
+                          ? "Редактирование информационного сообщения"
+                          : "Редактирование статьи"
+                        : isInformationMessage
+                          ? "Новое информационное сообщение"
+                          : "Новая статья"}
+                    </h2>
+                  </div>
+                  <span className="rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+                    {isBuilderOpen ? "Свернуть" : "Развернуть"}
+                  </span>
+                </div>
+              </summary>
+              <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+                <form onSubmit={save}>
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                        Конструктор
+                      </p>
+                      <h2 className="mt-1 text-lg font-semibold">
+                        {draft.id
+                          ? isInformationMessage
+                            ? "Редактирование информационного сообщения"
+                            : "Редактирование статьи"
+                          : isInformationMessage
+                            ? "Новое информационное сообщение"
+                            : "Новая статья"}
+                      </h2>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {[
+                          {
+                            label: "Черновики",
+                            enabled: report.canEditKnowledge,
+                          },
+                          {
+                            label: "Согласование",
+                            enabled: report.canReviewKnowledge,
+                          },
+                          {
+                            label: "Публикация",
+                            enabled: report.canPublishKnowledge,
+                          },
+                        ].map((item) => (
+                          <span
+                            key={item.label}
+                            className={[
+                              "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                              item.enabled
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"
+                                : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+                            ].join(" ")}
+                          >
+                            {item.label}
+                          </span>
+                        ))}
+                        {selectedArticle ? (
+                          <RevisionSlaPill article={selectedArticle} />
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={openDraftPreview}
+                        className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                      >
+                        Предпросмотр
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isPending || !canSaveCurrentStatus}
+                        className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isPending
+                          ? "Сохраняем..."
+                          : canSaveCurrentStatus
+                            ? "Сохранить"
+                            : "Нет прав"}
+                      </button>
+                    </div>
+                    {selectedArticle?.status === "RETURNED" ? (
+                      <a
+                        href="/staff/tasks?view=approval"
+                        className="inline-flex h-10 items-center rounded-md border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-800 transition hover:border-amber-400 hover:bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
+                      >
+                        Открыть задачу на доработку
+                      </a>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        Название
+                      </span>
+                      <input
+                        value={draft.title}
+                        onChange={(event) =>
+                          updateDraft({ title: event.target.value })
+                        }
+                        placeholder="Например: работа с конфликтным гостем"
+                        className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </label>
+
+                    {isInformationMessage ? (
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold uppercase text-zinc-500">
+                          Публикация
+                        </span>
+                        <div className="flex h-11 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-100">
+                          Будет опубликовано в «Информация и объявления»
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="space-y-1">
+                        <span className="text-xs font-bold uppercase text-zinc-500">
+                          Статус
+                        </span>
+                        <select
+                          value={draft.status}
+                          onChange={(event) =>
+                            updateDraft({
+                              status: event.target
+                                .value as StaffKnowledgeArticleStatus,
+                            })
+                          }
+                          className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                        >
+                          {statusOptions.map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
+                    {isInformationMessage ? (
+                      <>
+                        <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                          Информационное сообщение:
+                        </span>{" "}
+                        сразу публикуется в ветке «Информация и объявления» и
+                        требует от выбранных сотрудников подтверждения после
+                        полного прочтения. Каждое сохранение новой версии снова
+                        запросит ознакомление.
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                          Workflow:
+                        </span>{" "}
+                        черновики редактируют роли с правом базы знаний,
+                        согласование ведут проверяющие, публикация и архив
+                        требуют отдельного права публикатора. Публикация создает
+                        новую версию, а обязательные статьи попадают в контроль
+                        прочтения.
+                      </>
+                    )}
+                  </div>
+
+                  <div className="mt-3 grid gap-3 lg:grid-cols-4">
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        Папка
+                      </span>
+                      <input
+                        value={draft.folder}
+                        onChange={(event) =>
+                          updateDraft({ folder: event.target.value })
+                        }
+                        placeholder="Сервис, смены, касса"
+                        className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        Категория
+                      </span>
+                      <input
+                        value={draft.category}
+                        onChange={(event) =>
+                          updateDraft({ category: event.target.value })
+                        }
+                        placeholder="Смена, сервис, касса"
+                        className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        Видимость
+                      </span>
+                      <select
+                        value={draft.roleScope}
+                        onChange={(event) =>
+                          updateDraft({
+                            roleScope: event.target
+                              .value as StaffKnowledgeRoleScope,
+                          })
+                        }
+                        className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      >
+                        {Object.entries(roleScopeLabels).map(
+                          ([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        SLA возврата, дней
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={14}
+                        value={draft.revisionSlaDays}
+                        onChange={(event) =>
+                          updateDraft({ revisionSlaDays: event.target.value })
+                        }
+                        placeholder={`${defaultRevisionSlaDays(
+                          draft.roleScope,
+                          draft.materials,
+                          revisionSlaPolicy,
+                        )}`}
+                        className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                      <span className="block text-xs leading-5 text-zinc-500">
+                        Пусто = авто по роли и типам материалов:{" "}
+                        {effectiveRevisionSlaDays} дн.
+                      </span>
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        Клуб
+                      </span>
+                      <select
+                        value={draft.storeId}
+                        onChange={(event) =>
+                          updateDraft({ storeId: event.target.value })
+                        }
+                        className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      >
+                        {report.accessScope === "NETWORK" ? (
+                          <option value="">Вся сеть</option>
+                        ) : null}
+                        {report.stores.map((store) => (
+                          <option key={store.id} value={store.id}>
+                            {store.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
+                    {isInformationMessage ? (
+                      <div className="flex min-h-11 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-100">
+                        Ознакомление сотрудников обязательно
+                      </div>
+                    ) : (
+                      <label className="inline-flex min-h-11 items-center gap-3 rounded-md border border-zinc-300 px-3 text-sm font-semibold dark:border-zinc-700">
+                        <input
+                          type="checkbox"
+                          checked={draft.requiresReading}
+                          onChange={(event) =>
+                            updateDraft({
+                              requiresReading: event.target.checked,
+                            })
+                          }
+                        />
+                        Обязательное прочтение сотрудниками
+                      </label>
+                    )}
+
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        Заметка согласования
+                      </span>
+                      <input
+                        value={draft.approvalNote}
+                        onChange={(event) =>
+                          updateDraft({ approvalNote: event.target.value })
+                        }
+                        placeholder="Что изменено или почему материал готов"
+                        className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="mt-3 block space-y-1">
+                    <span className="text-xs font-bold uppercase text-zinc-500">
+                      Кратко
+                    </span>
+                    <input
+                      value={draft.summary}
+                      onChange={(event) =>
+                        updateDraft({ summary: event.target.value })
+                      }
+                      placeholder="О чем статья и когда ее читать"
+                      className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </label>
+
+                  <div className="mt-3">
+                    <span className="mb-1 block text-xs font-bold uppercase text-zinc-500">
+                      Основной текст
+                    </span>
+                    <StaffKnowledgeRichTextEditor
+                      value={draft.content}
+                      onChange={(content) => updateDraft({ content })}
+                      onImageUploaded={addUploadedImageMaterial}
+                    />
+                  </div>
+
+                  <label className="mt-3 block space-y-1">
+                    <span className="text-xs font-bold uppercase text-zinc-500">
+                      Теги
+                    </span>
+                    <input
+                      value={draft.tagsText}
+                      onChange={(event) =>
+                        updateDraft({ tagsText: event.target.value })
+                      }
+                      placeholder="смена, сервис, касса"
+                      className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </label>
+
+                  <div className="mt-5 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                          Учебные материалы
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-500">
+                          Текстовые блоки, видео, изображения, файлы и внешние
+                          ссылки к этой статье.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addMaterial}
+                        className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                      >
+                        Добавить материал
+                      </button>
+                    </div>
+
+                    {draft.materials.length === 0 ? (
+                      <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
+                        Материалов пока нет. Статья может состоять только из
+                        текста.
+                      </p>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        {draft.materials.map((material, index) => (
+                          <div
+                            key={material.id}
+                            className="rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/50"
+                          >
+                            <div className="grid gap-3 lg:grid-cols-[1fr_10rem_1fr_auto]">
+                              <div className="space-y-1">
+                                <span className="text-xs font-bold uppercase text-zinc-500">
+                                  Материал {index + 1}
+                                </span>
+                                <input
+                                  value={material.title}
+                                  onChange={(event) =>
+                                    updateMaterial(material.id, {
+                                      title: event.target.value,
+                                    })
+                                  }
+                                  placeholder="Название"
+                                  className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                                />
+                              </div>
+
+                              <div className="space-y-1">
+                                <span className="text-xs font-bold uppercase text-zinc-500">
+                                  Тип
+                                </span>
+                                <select
+                                  value={material.type}
+                                  onChange={(event) =>
+                                    updateMaterial(material.id, {
+                                      type: event.target
+                                        .value as StaffKnowledgeMaterialType,
+                                    })
+                                  }
+                                  className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                                >
+                                  {Object.entries(materialTypeLabels).map(
+                                    ([value, label]) => (
+                                      <option key={value} value={value}>
+                                        {label}
+                                      </option>
+                                    ),
+                                  )}
+                                </select>
+                              </div>
+
+                              <div className="space-y-1">
+                                <span className="text-xs font-bold uppercase text-zinc-500">
+                                  Ссылка
+                                </span>
+                                <input
+                                  value={material.url ?? ""}
+                                  onChange={(event) => {
+                                    const nextUrl = event.target.value;
+
+                                    updateMaterial(material.id, {
+                                      type:
+                                        material.type === "TEXT" &&
+                                        nextUrl.trim() &&
+                                        !material.content?.trim()
+                                          ? "EXTERNAL_LINK"
+                                          : material.type,
+                                      url: nextUrl,
+                                    });
+                                  }}
+                                  placeholder="https://..."
+                                  className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                                />
+                                <StaffAttachmentUpload
+                                  label="Загрузить материал"
+                                  buttonLabel="Загрузить файл"
+                                  onUploaded={(attachment) =>
+                                    updateMaterial(material.id, {
+                                      title:
+                                        material.title || attachment.fileName,
+                                      type: materialTypeFromAttachment(
+                                        attachment,
+                                      ),
+                                      url: attachment.url,
+                                    })
+                                  }
+                                />
+                              </div>
+
+                              <div className="flex items-end gap-2">
+                                <label className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-300 px-3 text-xs font-semibold dark:border-zinc-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={material.required}
+                                    onChange={(event) =>
+                                      updateMaterial(material.id, {
+                                        required: event.target.checked,
+                                      })
+                                    }
+                                  />
+                                  Обяз.
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => removeMaterial(material.id)}
+                                  className="h-10 rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                                >
+                                  Убрать
+                                </button>
+                              </div>
+                            </div>
+
+                            <label className="mt-3 block space-y-1">
+                              <span className="text-xs font-bold uppercase text-zinc-500">
+                                Текст материала
+                              </span>
+                              <textarea
+                                value={material.content ?? ""}
+                                onChange={(event) =>
+                                  updateMaterial(material.id, {
+                                    content: event.target.value,
+                                  })
+                                }
+                                rows={3}
+                                placeholder="Заполните для текстового материала или добавьте пояснение к ссылке."
+                                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                              />
+                            </label>
+
+                            <label className="mt-3 block space-y-1">
+                              <span className="text-xs font-bold uppercase text-zinc-500">
+                                Примечание
+                              </span>
+                              <input
+                                value={material.note ?? ""}
+                                onChange={(event) =>
+                                  updateMaterial(material.id, {
+                                    note: event.target.value,
+                                  })
+                                }
+                                placeholder="Что сотрудник должен вынести из материала"
+                                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                              />
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-5 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                          Связанные стандарты
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-500">
+                          Ссылки на регламенты, чек-листы, обучение, адаптацию,
+                          задачи или разборы нарушений.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addRelatedLink}
+                        className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                      >
+                        Добавить связь
+                      </button>
+                    </div>
+
+                    {draft.relatedLinks.length === 0 ? (
+                      <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
+                        Связей пока нет. Их можно добавить позднее, когда статья
+                        станет частью регламента, чек-листа или курса.
+                      </p>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        {draft.relatedLinks.map((link) => (
+                          <div
+                            key={link.id}
+                            className="grid gap-3 rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/50 lg:grid-cols-[11rem_1fr_1fr_auto]"
+                          >
+                            <label className="space-y-1">
+                              <span className="text-xs font-bold uppercase text-zinc-500">
+                                Тип
+                              </span>
+                              <select
+                                value={link.type}
+                                onChange={(event) =>
+                                  updateRelatedLink(link.id, {
+                                    type: event.target
+                                      .value as StaffKnowledgeRelatedLinkType,
+                                  })
+                                }
+                                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                              >
+                                {Object.entries(relatedLinkTypeLabels).map(
+                                  ([value, label]) => (
+                                    <option key={value} value={value}>
+                                      {label}
+                                    </option>
+                                  ),
+                                )}
+                              </select>
+                            </label>
+
+                            <label className="space-y-1">
+                              <span className="text-xs font-bold uppercase text-zinc-500">
+                                Название
+                              </span>
+                              <input
+                                value={link.title}
+                                onChange={(event) =>
+                                  updateRelatedLink(link.id, {
+                                    title: event.target.value,
+                                  })
+                                }
+                                placeholder="Например: чек-лист кассы"
+                                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                              />
+                            </label>
+
+                            <label className="space-y-1">
+                              <span className="text-xs font-bold uppercase text-zinc-500">
+                                Ссылка
+                              </span>
+                              <input
+                                value={link.url ?? ""}
+                                onChange={(event) =>
+                                  updateRelatedLink(link.id, {
+                                    url: event.target.value,
+                                  })
+                                }
+                                placeholder="/staff/checklist-templates"
+                                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                              />
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={() => removeRelatedLink(link.id)}
+                              className="self-end rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                            >
+                              Убрать
+                            </button>
+
+                            <label className="space-y-1 lg:col-span-4">
+                              <span className="text-xs font-bold uppercase text-zinc-500">
+                                Примечание
+                              </span>
+                              <input
+                                value={link.note ?? ""}
+                                onChange={(event) =>
+                                  updateRelatedLink(link.id, {
+                                    note: event.target.value,
+                                  })
+                                }
+                                placeholder="Зачем эта связь нужна сотруднику"
+                                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                              />
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <details className="mt-5 rounded-lg border border-zinc-200 dark:border-zinc-800">
+                    <summary className="cursor-pointer list-none p-3 [&::-webkit-details-marker]:hidden">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                            Тест
+                          </p>
+                          <h3 className="mt-1 text-base font-semibold">
+                            Тест прохождения (опция)
+                          </h3>
+                        </div>
+                        <span className="rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+                          Открыть
+                        </span>
+                      </div>
+                    </summary>
+                    <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+                      <StaffMaterialPreview
+                        title={draft.title}
+                        description={draft.summary}
+                        body={draft.content}
+                        metrics={[
+                          { label: "Папка", value: draft.folder || "Общие" },
+                          {
+                            label: "Категория",
+                            value: draft.category || "Без категории",
+                          },
+                          {
+                            label: "Видимость",
+                            value: roleScopeLabels[draft.roleScope],
+                          },
+                          {
+                            label: "Контур",
+                            value: draft.storeId
+                              ? (report.stores.find(
+                                  (store) => store.id === draft.storeId,
+                                )?.name ?? "Клуб")
+                              : "Вся сеть",
+                          },
+                          {
+                            label: "Статус",
+                            value: statusLabels[draft.status],
+                          },
+                          {
+                            label: "Прочтение",
+                            value: draft.requiresReading
+                              ? "Обязательное"
+                              : "Необязательное",
+                          },
+                          {
+                            label: "SLA возврата",
+                            value: `${effectiveRevisionSlaDays} дн.`,
+                          },
+                        ]}
+                        tags={tagsFromText(draft.tagsText)}
+                        steps={[
+                          {
+                            id: "knowledge-read",
+                            title: "Прочитать материал",
+                            typeLabel: "Статья",
+                            content:
+                              draft.summary ||
+                              "Сотрудник видит основной текст и материалы статьи.",
+                            required: true,
+                          },
+                          ...draft.materials
+                            .filter(
+                              (material) =>
+                                material.title.trim() ||
+                                material.content?.trim() ||
+                                material.url?.trim(),
+                            )
+                            .map((material, index) => ({
+                              id: material.id || `knowledge-material-${index}`,
+                              title: knowledgeMaterialTitleFallback(
+                                material,
+                                index,
+                              ),
+                              typeLabel: materialTypeLabels[material.type],
+                              content: material.note || material.content,
+                              url: material.url,
+                              required: material.required,
+                            })),
+                          ...draft.relatedLinks
+                            .filter(
+                              (link) => link.title.trim() || link.url?.trim(),
+                            )
+                            .map((link, index) => ({
+                              id: link.id || `knowledge-link-${index}`,
+                              title: link.title || `Связь ${index + 1}`,
+                              typeLabel: relatedLinkTypeLabels[link.type],
+                              content: link.note,
+                              url: link.url,
+                              required: false,
+                            })),
+                        ]}
+                        attachments={draft.materials
+                          .filter(
+                            (material) =>
+                              material.title.trim() ||
+                              material.content?.trim() ||
+                              material.url?.trim(),
+                          )
+                          .map((material, index) => ({
+                            id: material.id || `knowledge-attachment-${index}`,
+                            title: material.title || `Материал ${index + 1}`,
+                            typeLabel: materialTypeLabels[material.type],
+                            url: material.url,
+                            content: material.content,
+                            note: material.note,
+                            required: material.required,
+                          }))}
+                        emptyLabel="В статье пока нет тестовых действий для сотрудника."
+                      />
+                    </div>
+                  </details>
+
+                  {selectedArticle ? (
+                    <VersionHistory article={selectedArticle} />
+                  ) : null}
+                </form>
+              </div>
+            </details>
+          ) : null}
+
+          <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                  Каталог
+                </p>
+                <h2 className="mt-1 text-lg font-semibold">
+                  Статьи и материалы
+                </h2>
+              </div>
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                {report.rows.length}
+              </span>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {report.rows.length === 0 ? (
+                <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
+                  Материалов пока нет. Руководитель или менеджер по стандартам
+                  может создать первую статью в конструкторе выше.
+                </p>
+              ) : (
+                report.rows.map((row) => (
+                  <article
+                    key={row.id}
+                    className={[
+                      "rounded-lg border p-3 transition",
+                      draft.id === row.id
+                        ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+                        : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900",
+                    ].join(" ")}
+                  >
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-base font-semibold">
+                            {row.title}
+                          </h3>
+                          {row.kind === "INFORMATION" ? (
+                            <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-700 dark:bg-sky-500/15 dark:text-sky-200">
+                              Информационное сообщение
+                            </span>
+                          ) : null}
+                          {row.canManage ? (
+                            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                              {statusLabels[row.status]}
+                            </span>
+                          ) : null}
+                          <RevisionSlaPill article={row} />
+                        </div>
+                        {row.summary ? (
+                          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+                            {row.summary}
+                          </p>
+                        ) : null}
+                        <p className="mt-2 text-xs text-zinc-500">
+                          {row.folder} · {row.category} ·{" "}
+                          {roleScopeLabels[row.roleScope]} ·{" "}
+                          {row.store?.name ?? "Вся сеть"} · материалов:{" "}
+                          {row.materialsCount}
+                          {row.requiresReading
+                            ? " · обязательное прочтение"
+                            : ""}
+                        </p>
+                        {row.requiresReading ? (
+                          <p className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                            Прочитали {row.readingSummary.readCount}/
+                            {row.readingSummary.requiredCount}
+                            {row.readingSummary.requiredByMe &&
+                            !row.readingSummary.readByMe
+                              ? " · требуется от вас"
+                              : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => guardAction(() => loadArticle(row))}
+                          className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                        >
+                          {row.canManage ? "Редактировать" : "Показать здесь"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openArticleForReading(row)}
+                          className="h-9 rounded-md bg-zinc-950 px-3 text-xs font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+                        >
+                          Открыть для чтения
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+
+          {selectedArticle && !selectedArticle.canManage ? (
+            <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <ArticlePreview
+                article={selectedArticle}
+                onMarkRead={markRead}
+                isReadPending={readPendingId === selectedArticle.id}
+              />
+            </section>
+          ) : null}
+
+          {message ? (
+            <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200">
+              {message}
+            </p>
+          ) : null}
+          {error ? (
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+              {error}
+            </p>
+          ) : null}
+        </div>
       </div>
     </>
   );
@@ -2518,8 +2563,8 @@ function ArticlePreview({
       <h2 className="mt-1 text-2xl font-semibold">{article.title}</h2>
       <p className="mt-2 text-sm text-zinc-500">
         {article.folder} · {article.category} ·{" "}
-        {roleScopeLabels[article.roleScope]} ·{" "}
-        опубликовано: {formatDateTime(article.publishedAt)} · SLA возврата:{" "}
+        {roleScopeLabels[article.roleScope]} · опубликовано:{" "}
+        {formatDateTime(article.publishedAt)} · SLA возврата:{" "}
         {article.revisionSlaDaysEffective} дн.
         {article.requiresReading ? " · обязательное прочтение" : ""}
       </p>
@@ -2743,7 +2788,7 @@ function VersionHistory({ article }: { article: StaffKnowledgeArticle }) {
                 </div>
                 <p className="mt-1 text-xs text-zinc-500">
                   {event.actor
-                    ? event.actor.fullName ?? event.actor.email
+                    ? (event.actor.fullName ?? event.actor.email)
                     : "Системное событие"}
                   {event.detail ? ` · ${event.detail}` : ""}
                 </p>
@@ -2778,7 +2823,8 @@ function VersionHistory({ article }: { article: StaffKnowledgeArticle }) {
               {version.createdByUser ? (
                 <p className="mt-1 text-xs text-zinc-500">
                   Автор версии:{" "}
-                  {version.createdByUser.fullName ?? version.createdByUser.email}
+                  {version.createdByUser.fullName ??
+                    version.createdByUser.email}
                 </p>
               ) : null}
             </div>

@@ -4,11 +4,19 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
 import { formatStaffDateTime } from './staff-export';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
+import {
+  extractStaffAttachmentIds,
+  isExactStaffAttachmentUrl,
+} from './staff-attachment-references';
+import {
+  StaffShiftRegulationAccessPolicyService,
+  type StaffShiftRegulationAccess,
+} from './staff-shift-regulation-access-policy.service';
 import {
   StaffTeamChatService,
   type StaffChatSystemNotificationDto,
@@ -109,6 +117,8 @@ export type StaffShiftRegulationAttachment = {
 };
 
 export type StaffShiftRegulationReport = {
+  accessScope: 'NETWORK' | 'STORES';
+  canManageStandards: boolean;
   filters: {
     status: StaffShiftRegulationStatus | 'all';
     shiftKind: StaffShiftKind | 'all';
@@ -129,11 +139,6 @@ export type StaffShiftRegulationReport = {
   rows: StaffShiftRegulationResponse[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
   assessments: StaffShiftRegulationAssessmentOption[];
-};
-
-type StaffShiftCatalogScope = {
-  roleScopes: StaffShiftRoleScope[];
-  storeIds: string[] | null;
 };
 
 export type StaffShiftRegulationAssessmentOption = {
@@ -189,6 +194,7 @@ export type StaffShiftRegulationVersionResponse = {
 };
 
 export type StaffShiftRegulationResponse = {
+  canManage: boolean;
   id: string;
   title: string;
   description: string | null;
@@ -269,21 +275,25 @@ type AcknowledgementRow = Prisma.StaffShiftRegulationAcknowledgementGetPayload<{
 export class StaffShiftRegulationsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
+    private readonly accessPolicy: StaffShiftRegulationAccessPolicyService,
     private readonly staffTeamChatService: StaffTeamChatService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getRegulations(
     user: AuthenticatedUser,
     query: StaffShiftRegulationsQuery = {},
   ): Promise<StaffShiftRegulationReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const catalogScope = await this.resolveCatalogScope(tenantId, user);
-    const filters = this.resolveFilters(query, catalogScope);
-    const where = this.applyCatalogScope(
-      this.buildWhere(tenantId, filters),
-      catalogScope,
-    );
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
+    const filters = this.resolveFilters(query, access);
+    this.accessPolicy.assertRequestedStore(access, filters.storeId);
+    const where: Prisma.StaffShiftRegulationWhereInput = {
+      AND: [
+        this.buildWhere(tenantId, filters),
+        this.accessPolicy.readableRegulationWhere(access),
+      ],
+    };
 
     const [rows, stores, activeUsers, assessments] = await Promise.all([
       this.prisma.staffShiftRegulation.findMany({
@@ -293,17 +303,17 @@ export class StaffShiftRegulationsService {
         take: 200,
       }),
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: this.accessPolicy.visibleStoresWhere(access),
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
       this.prisma.user.findMany({
-        where: { tenantId, isActive: true },
+        where: this.accessPolicy.visibleUsersWhere(access),
         include: acknowledgementUserInclude,
         orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
       }),
       this.prisma.staffAssessment.findMany({
-        where: { tenantId, status: 'ACTIVE' },
+        where: this.accessPolicy.visibleAssessmentsWhere(access),
         select: {
           id: true,
           title: true,
@@ -315,10 +325,12 @@ export class StaffShiftRegulationsService {
       }),
     ]);
     const responseRows = rows.map((row) =>
-      this.toRegulationResponse(row, user.id, activeUsers),
+      this.toRegulationResponse(row, user.id, activeUsers, access),
     );
 
     return {
+      accessScope: access.mode,
+      canManageStandards: access.canManageStandards,
       filters,
       summary: this.buildSummary(responseRows),
       rows: responseRows,
@@ -331,8 +343,13 @@ export class StaffShiftRegulationsService {
     user: AuthenticatedUser,
     dto: StaffShiftRegulationDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const data = await this.normalizeRegulationData(tenantId, dto, {
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
+    this.accessPolicy.assertWritableStore(
+      access,
+      this.normalizeOptionalString(dto.storeId),
+    );
+    const data = await this.normalizeRegulationData(access, dto, {
       requireTitle: true,
     });
     const status = data.status ?? 'DRAFT';
@@ -350,6 +367,17 @@ export class StaffShiftRegulationsService {
         include: regulationInclude,
       });
 
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.SHIFT_REGULATION,
+          resourceId: created.id,
+          attachmentIds: extractStaffAttachmentIds([data.attachments]),
+        },
+      );
+
       if (status === 'PUBLISHED') {
         await this.createVersionSnapshot(tx, created, user.id);
       }
@@ -360,7 +388,7 @@ export class StaffShiftRegulationsService {
       });
     });
 
-    const activeUsers = await this.getAcknowledgementUsers(tenantId);
+    const activeUsers = await this.getAcknowledgementUsers(access);
 
     if (regulation.status === 'PUBLISHED') {
       await this.staffTeamChatService.createSystemNotification(
@@ -369,7 +397,7 @@ export class StaffShiftRegulationsService {
       );
     }
 
-    return this.toRegulationResponse(regulation, user.id, activeUsers);
+    return this.toRegulationResponse(regulation, user.id, activeUsers, access);
   }
 
   async updateRegulation(
@@ -377,17 +405,35 @@ export class StaffShiftRegulationsService {
     id: string,
     dto: StaffShiftRegulationDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
     const current = await this.prisma.staffShiftRegulation.findFirst({
       where: { id, tenantId },
-      select: { id: true, status: true, version: true, publishedAt: true },
+      select: {
+        id: true,
+        storeId: true,
+        status: true,
+        version: true,
+        publishedAt: true,
+        attachments: true,
+      },
     });
 
     if (!current) {
       throw new NotFoundException('Shift regulation not found');
     }
 
-    const data = await this.normalizeRegulationData(tenantId, dto, {
+    if (!this.accessPolicy.canManageRegulation(access, current)) {
+      throw new NotFoundException('Shift regulation not found');
+    }
+
+    this.accessPolicy.assertWritableStore(
+      access,
+      dto.storeId === undefined
+        ? current.storeId
+        : this.normalizeOptionalString(dto.storeId),
+    );
+    const data = await this.normalizeRegulationData(access, dto, {
       requireTitle: false,
     });
     const status = data.status ?? current.status;
@@ -412,6 +458,21 @@ export class StaffShiftRegulationsService {
         include: regulationInclude,
       });
 
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.SHIFT_REGULATION,
+          resourceId: updated.id,
+          attachmentIds: extractStaffAttachmentIds([
+            data.attachments === undefined
+              ? current.attachments
+              : data.attachments,
+          ]),
+        },
+      );
+
       if (shouldPublish) {
         await this.createVersionSnapshot(tx, updated, user.id);
       }
@@ -422,7 +483,7 @@ export class StaffShiftRegulationsService {
       });
     });
 
-    const activeUsers = await this.getAcknowledgementUsers(tenantId);
+    const activeUsers = await this.getAcknowledgementUsers(access);
 
     if (this.shouldNotifyRegulationUpdate(regulation, data)) {
       await this.staffTeamChatService.createSystemNotification(
@@ -431,15 +492,17 @@ export class StaffShiftRegulationsService {
       );
     }
 
-    return this.toRegulationResponse(regulation, user.id, activeUsers);
+    return this.toRegulationResponse(regulation, user.id, activeUsers, access);
   }
 
   async deleteRegulation(user: AuthenticatedUser, id: string) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
     const regulation = await this.prisma.staffShiftRegulation.findFirst({
       where: { id, tenantId },
       select: {
         id: true,
+        storeId: true,
         title: true,
         createdByUserId: true,
         _count: { select: { checklistRuns: true, checklistTemplates: true } },
@@ -450,6 +513,10 @@ export class StaffShiftRegulationsService {
       throw new NotFoundException('Shift regulation not found');
     }
 
+    if (!this.accessPolicy.canManageRegulation(access, regulation)) {
+      throw new NotFoundException('Shift regulation not found');
+    }
+
     if (!this.canDeleteRegulation(user, regulation.createdByUserId)) {
       throw new ForbiddenException(
         'Удалить регламент может автор, управляющий клубом, управляющий сети или владелец',
@@ -457,6 +524,29 @@ export class StaffShiftRegulationsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT regulation."id"
+        FROM "StaffShiftRegulation" AS regulation
+        WHERE regulation."id" = ${regulation.id}
+          AND regulation."tenantId" = ${tenantId}
+        FOR UPDATE
+      `);
+
+      if (locked.length !== 1) {
+        throw new NotFoundException('Shift regulation not found');
+      }
+
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.SHIFT_REGULATION,
+          resourceId: regulation.id,
+          attachmentIds: [],
+        },
+      );
+
       await tx.staffChecklistRun.updateMany({
         where: { tenantId, regulationId: regulation.id },
         data: { regulationId: null },
@@ -584,10 +674,15 @@ export class StaffShiftRegulationsService {
     id: string,
     dto: StaffShiftRegulationAcknowledgementDto = {},
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
     const [regulation, actor] = await Promise.all([
       this.prisma.staffShiftRegulation.findFirst({
-        where: { id, tenantId },
+        where: {
+          id,
+          tenantId,
+          AND: [this.accessPolicy.readableRegulationWhere(access)],
+        },
         include: regulationInclude,
       }),
       this.prisma.user.findFirst({
@@ -648,10 +743,10 @@ export class StaffShiftRegulationsService {
 
   private resolveFilters(
     query: StaffShiftRegulationsQuery,
-    catalogScope: StaffShiftCatalogScope | null = null,
+    access: StaffShiftRegulationAccess,
   ): StaffShiftRegulationReport['filters'] {
     return {
-      status: catalogScope
+      status: !access.canManageStandards
         ? 'PUBLISHED'
         : this.resolveOne(
             query.status,
@@ -696,62 +791,6 @@ export class StaffShiftRegulationsService {
     return where;
   }
 
-  private applyCatalogScope(
-    where: Prisma.StaffShiftRegulationWhereInput,
-    scope: StaffShiftCatalogScope | null,
-  ): Prisma.StaffShiftRegulationWhereInput {
-    if (!scope) {
-      return where;
-    }
-
-    const scoped: Prisma.StaffShiftRegulationWhereInput = {
-      roleScope: { in: scope.roleScopes },
-    };
-
-    if (scope.storeIds) {
-      scoped.OR = [{ storeId: null }, { storeId: { in: scope.storeIds } }];
-    }
-
-    return { AND: [where, scoped] };
-  }
-
-  private async resolveCatalogScope(
-    tenantId: string,
-    user: AuthenticatedUser,
-  ): Promise<StaffShiftCatalogScope | null> {
-    if (!this.isShiftCatalogUser(user)) {
-      return null;
-    }
-
-    const actor = await this.prisma.user.findFirst({
-      where: { id: user.id, tenantId, isActive: true },
-      select: { storeAccesses: { select: { storeId: true } } },
-    });
-
-    return {
-      roleScopes: this.roleScopesForUser(user.role),
-      storeIds: actor?.storeAccesses.length
-        ? actor.storeAccesses.map((access) => access.storeId)
-        : null,
-    };
-  }
-
-  private isShiftCatalogUser(user: AuthenticatedUser) {
-    return (
-      user.role === UserRole.SENIOR_ADMINISTRATOR ||
-      user.role === UserRole.CLUB_ADMINISTRATOR ||
-      user.role === UserRole.TRAINEE
-    );
-  }
-
-  private roleScopesForUser(role: UserRole): StaffShiftRoleScope[] {
-    if (role === UserRole.SENIOR_ADMINISTRATOR) {
-      return ['ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'ALL_STAFF'];
-    }
-
-    return ['ADMINISTRATOR', 'ALL_STAFF'];
-  }
-
   private buildSummary(rows: StaffShiftRegulationResponse[]) {
     return rows.reduce(
       (summary, row) => {
@@ -791,10 +830,11 @@ export class StaffShiftRegulationsService {
   }
 
   private async normalizeRegulationData(
-    tenantId: string,
+    access: StaffShiftRegulationAccess,
     dto: StaffShiftRegulationDto,
     options: { requireTitle: boolean },
   ) {
+    const { tenantId } = access;
     const data: Prisma.StaffShiftRegulationUncheckedCreateInput = {
       tenantId,
       title: '',
@@ -873,7 +913,7 @@ export class StaffShiftRegulationsService {
       }
 
       data.assessmentId = assessmentId
-        ? await this.resolveAssessmentId(tenantId, assessmentId)
+        ? await this.resolveAssessmentId(access, assessmentId)
         : null;
     }
 
@@ -884,6 +924,7 @@ export class StaffShiftRegulationsService {
     row: StaffShiftRegulationRow,
     currentUserId: string,
     activeUsers: AcknowledgementUserRow[],
+    access: StaffShiftRegulationAccess,
   ): StaffShiftRegulationResponse {
     const sections = this.normalizeSections(row.sections);
     const attachments = this.normalizeAttachments(row.attachments);
@@ -891,8 +932,13 @@ export class StaffShiftRegulationsService {
     const targetUsers = activeUsers.filter((candidate) =>
       this.userMatchesRegulationTarget(candidate, row),
     );
+    const visibleUserIds = new Set(
+      activeUsers.map((candidate) => candidate.id),
+    );
     const currentVersionAcknowledgements = row.acknowledgements.filter(
-      (acknowledgement) => acknowledgement.version === row.version,
+      (acknowledgement) =>
+        acknowledgement.version === row.version &&
+        visibleUserIds.has(acknowledgement.userId),
     );
     const acknowledgedUserIds = new Set(
       currentVersionAcknowledgements.map(
@@ -910,6 +956,7 @@ export class StaffShiftRegulationsService {
       targetUsers.some((candidate) => candidate.id === currentUserId);
 
     return {
+      canManage: this.accessPolicy.canManageRegulation(access, row),
       id: row.id,
       title: row.title,
       description: row.description,
@@ -949,7 +996,9 @@ export class StaffShiftRegulationsService {
       acknowledgements: currentVersionAcknowledgements.map((acknowledgement) =>
         this.toAcknowledgementResponse(acknowledgement),
       ),
-      versions: row.versions.map((version) => this.toVersionResponse(version)),
+      versions: row.versions
+        .filter((version) => this.accessPolicy.canReadVersion(access, version))
+        .map((version) => this.toVersionResponse(version)),
     };
   }
 
@@ -1030,9 +1079,9 @@ export class StaffShiftRegulationsService {
     };
   }
 
-  private getAcknowledgementUsers(tenantId: string) {
+  private getAcknowledgementUsers(access: StaffShiftRegulationAccess) {
     return this.prisma.user.findMany({
-      where: { tenantId, isActive: true },
+      where: this.accessPolicy.visibleUsersWhere(access),
       include: acknowledgementUserInclude,
       orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
     });
@@ -1125,7 +1174,7 @@ export class StaffShiftRegulationsService {
 
       if (!this.isAllowedAttachmentUrl(url)) {
         throw new BadRequestException(
-          'Attachment URL must start with http:// or https://',
+          'Attachment URL must be a native attachment path or start with http:// or https://',
         );
       }
 
@@ -1148,7 +1197,7 @@ export class StaffShiftRegulationsService {
   }
 
   private isAllowedAttachmentUrl(value: string) {
-    return /^https?:\/\//i.test(value);
+    return isExactStaffAttachmentUrl(value) || /^https?:\/\//i.test(value);
   }
 
   private normalizeSections(value: unknown): StaffShiftRegulationSection[] {
@@ -1336,7 +1385,7 @@ export class StaffShiftRegulationsService {
   }
 
   private async resolveAssessmentId(
-    tenantId: string,
+    access: StaffShiftRegulationAccess,
     value: string | null | undefined,
   ) {
     const id = this.normalizeOptionalString(value);
@@ -1346,7 +1395,10 @@ export class StaffShiftRegulationsService {
     }
 
     const assessment = await this.prisma.staffAssessment.findFirst({
-      where: { id, tenantId, status: 'ACTIVE' },
+      where: {
+        id,
+        AND: [this.accessPolicy.visibleAssessmentsWhere(access)],
+      },
       select: { id: true },
     });
 

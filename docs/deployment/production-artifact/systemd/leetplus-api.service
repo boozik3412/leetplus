@@ -1,0 +1,22 @@
+[Unit]
+# DEPRECATED FOR FIRST ARTIFACT CUTOVER: use leetplus-api@blue|green.service.
+Description=LeetPlus API (SHA-bound artifact release)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/srv/leetplus/current
+EnvironmentFile=/etc/leetplus/runtime.env
+EnvironmentFile=/etc/leetplus/release.env
+ExecStart=/usr/bin/pnpm --filter api start:prod
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

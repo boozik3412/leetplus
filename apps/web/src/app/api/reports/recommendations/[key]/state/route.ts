@@ -9,5 +9,6 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
     request,
     `/reports/recommendations/${encodeURIComponent(key)}/state`,
     "PATCH",
+    { privateNoStore: true },
   );
 }

@@ -52,8 +52,10 @@ describe('guest game reward materializer policy', () => {
       GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
       GUEST_GAME_REWARD_MATERIALIZER_TENANT_ID: 'tenant-1',
       GUEST_GAME_REWARD_MATERIALIZER_TENANT_SLUG: 'demo',
+      GUEST_GAME_REWARD_MATERIALIZER_STORE_ID: 'store-1',
     });
 
+    expect(resolved.storeId).toBe('store-1');
     expect(
       guestGameRewardMaterializerAllowsTenant(resolved, {
         tenantId: 'tenant-1',

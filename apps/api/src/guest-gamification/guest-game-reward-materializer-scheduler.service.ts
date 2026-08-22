@@ -10,6 +10,13 @@ import { TenantLifecycleStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundRuntimeIdentityDecision,
+} from '../tenancy/tenant-background-execution-policy';
+import {
   type GuestGameEffectMaterializeResult,
   GuestGamificationService,
 } from './guest-gamification.service';
@@ -466,8 +473,9 @@ export class GuestGameRewardMaterializerSchedulerService
           id: true,
           slug: true,
           status: true,
+          customerStage: true,
           users: {
-            where: { isActive: true },
+            where: { isActive: true, accessScope: 'NETWORK' },
             select: {
               id: true,
               email: true,
@@ -479,12 +487,39 @@ export class GuestGameRewardMaterializerSchedulerService
             orderBy: { createdAt: 'asc' },
             take: 1,
           },
+          stores: {
+            where: {
+              isActive: true,
+              backgroundExecutionEnabled: true,
+              ...(policy.allowAllTenants || !policy.storeId
+                ? {}
+                : { id: policy.storeId }),
+            },
+            select: { id: true },
+            orderBy: { createdAt: 'asc' },
+            take: 1,
+          },
         },
         orderBy: { slug: 'asc' },
       });
       const results: GuestGameRewardMaterializerTenantResult[] = [];
 
       for (const tenant of tenants) {
+        const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+          stage: tenantBackgroundStageForCustomerStage(tenant.customerStage),
+          jobKind: 'GUEST_GAME_REWARD_MATERIALIZER',
+        });
+        if (!executionDecision.allowed) {
+          results.push(
+            emptyTenantResult(
+              tenant.id,
+              tenant.slug,
+              'SKIPPED',
+              tenantBackgroundExecutionNote(executionDecision),
+            ),
+          );
+          continue;
+        }
         if (tenant.status !== TenantLifecycleStatus.ACTIVE) {
           results.push(
             emptyTenantResult(
@@ -509,11 +544,32 @@ export class GuestGameRewardMaterializerSchedulerService
           continue;
         }
 
+        const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+          decision: executionDecision,
+          actorKind: 'TENANT_STORE_SYSTEM',
+          tenantId: tenant.id,
+          storeId: tenant.stores[0]?.id,
+        });
+        if (!runtimeIdentity.accepted || !runtimeIdentity.storeId) {
+          results.push(
+            emptyTenantResult(
+              tenant.id,
+              tenant.slug,
+              'SKIPPED',
+              tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
+            ),
+          );
+          continue;
+        }
+        const runtimeStoreId = runtimeIdentity.storeId;
+
         const user = {
           ...actor,
           tenantId: tenant.id,
           tenantSlug: tenant.slug,
           tenantStatus: tenant.status,
+          accessScope: 'STORES' as const,
+          allowedStoreIds: [runtimeStoreId],
         };
         const dto = {
           limit: this.batchSize(),
@@ -865,4 +921,10 @@ function materializerNotReadyReason(
   if (!policy.enabled) return 'background materializer is disabled';
   if (!policy.scopeConfigured) return 'tenant scope is not configured';
   return 'background materializer policy is not ready';
+}
+
+function tenantBackgroundRuntimeIdentityNote(
+  decision: TenantBackgroundRuntimeIdentityDecision,
+) {
+  return `Background runtime identity denied: ${decision.reasonCode}.`;
 }

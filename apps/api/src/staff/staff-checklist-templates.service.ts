@@ -7,7 +7,10 @@ import {
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  StaffChecklistAccessPolicyService,
+  type StaffChecklistAccess,
+} from './staff-checklist-access-policy.service';
 
 const templateStatuses = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
 const shiftKinds = [
@@ -114,6 +117,8 @@ export type StaffChecklistTemplateReport = {
     timedItemsCount: number;
     scoreTotal: number;
   };
+  accessScope: 'NETWORK' | 'STORES';
+  canManageTemplates: boolean;
   rows: StaffChecklistTemplateResponse[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
   publishedRegulations: StaffChecklistTemplateRegulationOption[];
@@ -150,6 +155,7 @@ export type StaffChecklistTemplateResponse = {
   scoreTotal: number;
   createdAt: string;
   updatedAt: string;
+  canManage: boolean;
   store: { id: string; name: string; isActive: boolean } | null;
   sourceRegulation: {
     id: string;
@@ -191,33 +197,31 @@ type SectionSummary = {
   scoreTotal: number;
 };
 
-type StaffChecklistTemplateCatalogScope = {
-  roleScopes: StaffChecklistTemplateRoleScope[];
-  storeIds: string[] | null;
-};
-
 @Injectable()
 export class StaffChecklistTemplatesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
+    private readonly accessPolicy: StaffChecklistAccessPolicyService,
   ) {}
 
   async getTemplates(
     user: AuthenticatedUser,
     query: StaffChecklistTemplatesQuery = {},
   ): Promise<StaffChecklistTemplateReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const catalogScope = await this.resolveCatalogScope(tenantId, user);
-    const filters = this.resolveFilters(query, catalogScope);
-    const where = this.applyCatalogScope(
-      this.buildWhere(tenantId, filters),
-      catalogScope,
-    );
-    const regulationWhere = this.applyRegulationCatalogScope(
-      { tenantId, status: 'PUBLISHED' },
-      catalogScope,
-    );
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
+    const filters = this.resolveFilters(query, access.canManageStandards);
+    this.accessPolicy.assertRequestedStore(access, filters.storeId);
+    const where = {
+      AND: [
+        this.buildWhere(tenantId, filters),
+        this.accessPolicy.readableTemplateWhere(access),
+      ],
+    } satisfies Prisma.StaffChecklistTemplateWhereInput;
+    const regulationWhere = {
+      tenantId,
+      AND: [this.accessPolicy.readableRegulationWhere(access)],
+    } satisfies Prisma.StaffShiftRegulationWhereInput;
 
     const [rows, stores, regulations] = await Promise.all([
       this.prisma.staffChecklistTemplate.findMany({
@@ -227,7 +231,7 @@ export class StaffChecklistTemplatesService {
         take: 200,
       }),
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: this.accessPolicy.visibleStoresWhere(access),
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
@@ -246,10 +250,14 @@ export class StaffChecklistTemplatesService {
         take: 200,
       }),
     ]);
-    const responseRows = rows.map((row) => this.toTemplateResponse(row));
+    const responseRows = rows.map((row) =>
+      this.toTemplateResponse(row, access),
+    );
 
     return {
       filters,
+      accessScope: access.mode,
+      canManageTemplates: access.canManageStandards,
       summary: this.buildSummary(responseRows),
       rows: responseRows,
       stores,
@@ -263,9 +271,10 @@ export class StaffChecklistTemplatesService {
     user: AuthenticatedUser,
     dto: StaffChecklistTemplateDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
     const sourceRegulation = await this.resolveSourceRegulation(
-      tenantId,
+      access,
       dto.sourceRegulationId,
     );
     const sections = this.normalizeSections(
@@ -273,9 +282,11 @@ export class StaffChecklistTemplatesService {
     );
     const summary = this.summarizeSections(sections);
     const storeId = await this.resolveStoreId(
-      tenantId,
+      access,
       dto.storeId === undefined ? sourceRegulation?.storeId : dto.storeId,
     );
+    this.accessPolicy.assertWritableStore(access, storeId);
+    this.assertSourceStoreCompatible(sourceRegulation, storeId);
 
     const template = await this.prisma.staffChecklistTemplate.create({
       data: {
@@ -304,7 +315,7 @@ export class StaffChecklistTemplatesService {
       include: templateInclude,
     });
 
-    return this.toTemplateResponse(template);
+    return this.toTemplateResponse(template, access);
   }
 
   async updateTemplate(
@@ -312,20 +323,25 @@ export class StaffChecklistTemplatesService {
     id: string,
     dto: StaffChecklistTemplateDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
     const current = await this.prisma.staffChecklistTemplate.findFirst({
-      where: { id, tenantId },
-      select: { id: true },
+      where: {
+        id,
+        tenantId,
+        AND: [this.accessPolicy.readableTemplateWhere(access)],
+      },
+      select: { id: true, storeId: true },
     });
 
-    if (!current) {
+    if (!current || !this.accessPolicy.canManageTemplate(access, current)) {
       throw new NotFoundException('Checklist template not found');
     }
 
     const sourceRegulation =
       dto.sourceRegulationId === undefined
         ? null
-        : await this.resolveSourceRegulation(tenantId, dto.sourceRegulationId);
+        : await this.resolveSourceRegulation(access, dto.sourceRegulationId);
     const data: Prisma.StaffChecklistTemplateUncheckedUpdateInput = {};
     let shouldIncrementVersion = false;
 
@@ -364,10 +380,13 @@ export class StaffChecklistTemplatesService {
     }
 
     if (dto.storeId !== undefined || sourceRegulation) {
-      data.storeId = await this.resolveStoreId(
-        tenantId,
+      const storeId = await this.resolveStoreId(
+        access,
         dto.storeId === undefined ? sourceRegulation?.storeId : dto.storeId,
       );
+      this.accessPolicy.assertWritableStore(access, storeId);
+      this.assertSourceStoreCompatible(sourceRegulation, storeId);
+      data.storeId = storeId;
     }
 
     if (dto.sourceRegulationId !== undefined) {
@@ -396,22 +415,28 @@ export class StaffChecklistTemplatesService {
       include: templateInclude,
     });
 
-    return this.toTemplateResponse(template);
+    return this.toTemplateResponse(template, access);
   }
 
   async deleteTemplate(user: AuthenticatedUser, id: string) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.accessPolicy.resolve(user);
+    const { tenantId } = access;
     const template = await this.prisma.staffChecklistTemplate.findFirst({
-      where: { id, tenantId },
+      where: {
+        id,
+        tenantId,
+        AND: [this.accessPolicy.readableTemplateWhere(access)],
+      },
       select: {
         id: true,
+        storeId: true,
         title: true,
         createdByUserId: true,
         _count: { select: { checklistRuns: true } },
       },
     });
 
-    if (!template) {
+    if (!template || !this.accessPolicy.canManageTemplate(access, template)) {
       throw new NotFoundException('Checklist template not found');
     }
 
@@ -440,16 +465,16 @@ export class StaffChecklistTemplatesService {
 
   private resolveFilters(
     query: StaffChecklistTemplatesQuery,
-    catalogScope: StaffChecklistTemplateCatalogScope | null = null,
+    canManageStandards: boolean,
   ): StaffChecklistTemplateReport['filters'] {
     return {
-      status: catalogScope
-        ? 'ACTIVE'
-        : this.resolveOne(
+      status: canManageStandards
+        ? this.resolveOne(
             query.status,
             ['all', ...templateStatuses] as const,
             'all',
-          ),
+          )
+        : 'ACTIVE',
       shiftKind: this.resolveOne(
         query.shiftKind,
         ['all', ...shiftKinds] as const,
@@ -491,81 +516,6 @@ export class StaffChecklistTemplatesService {
     }
 
     return where;
-  }
-
-  private applyCatalogScope(
-    where: Prisma.StaffChecklistTemplateWhereInput,
-    scope: StaffChecklistTemplateCatalogScope | null,
-  ): Prisma.StaffChecklistTemplateWhereInput {
-    if (!scope) {
-      return where;
-    }
-
-    const scoped: Prisma.StaffChecklistTemplateWhereInput = {
-      roleScope: { in: scope.roleScopes },
-    };
-
-    if (scope.storeIds) {
-      scoped.OR = [{ storeId: null }, { storeId: { in: scope.storeIds } }];
-    }
-
-    return { AND: [where, scoped] };
-  }
-
-  private applyRegulationCatalogScope(
-    where: Prisma.StaffShiftRegulationWhereInput,
-    scope: StaffChecklistTemplateCatalogScope | null,
-  ): Prisma.StaffShiftRegulationWhereInput {
-    if (!scope) {
-      return where;
-    }
-
-    const scoped: Prisma.StaffShiftRegulationWhereInput = {
-      roleScope: { in: scope.roleScopes },
-    };
-
-    if (scope.storeIds) {
-      scoped.OR = [{ storeId: null }, { storeId: { in: scope.storeIds } }];
-    }
-
-    return { AND: [where, scoped] };
-  }
-
-  private async resolveCatalogScope(
-    tenantId: string,
-    user: AuthenticatedUser,
-  ): Promise<StaffChecklistTemplateCatalogScope | null> {
-    if (!this.isShiftCatalogUser(user)) {
-      return null;
-    }
-
-    const actor = await this.prisma.user.findFirst({
-      where: { id: user.id, tenantId, isActive: true },
-      select: { storeAccesses: { select: { storeId: true } } },
-    });
-
-    return {
-      roleScopes: this.roleScopesForUser(user.role),
-      storeIds: actor?.storeAccesses.length
-        ? actor.storeAccesses.map((access) => access.storeId)
-        : null,
-    };
-  }
-
-  private isShiftCatalogUser(user: AuthenticatedUser) {
-    return (
-      user.role === UserRole.SENIOR_ADMINISTRATOR ||
-      user.role === UserRole.CLUB_ADMINISTRATOR ||
-      user.role === UserRole.TRAINEE
-    );
-  }
-
-  private roleScopesForUser(role: UserRole): StaffChecklistTemplateRoleScope[] {
-    if (role === UserRole.SENIOR_ADMINISTRATOR) {
-      return ['ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'ALL_STAFF'];
-    }
-
-    return ['ADMINISTRATOR', 'ALL_STAFF'];
   }
 
   private canDeleteTemplate(
@@ -649,6 +599,7 @@ export class StaffChecklistTemplatesService {
 
   private toTemplateResponse(
     row: StaffChecklistTemplateRow,
+    access: StaffChecklistAccess,
   ): StaffChecklistTemplateResponse {
     const sections = this.normalizeSections(row.sections);
     const summary = this.summarizeSections(sections);
@@ -670,6 +621,7 @@ export class StaffChecklistTemplatesService {
       scoreTotal: summary.scoreTotal,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      canManage: this.accessPolicy.canManageTemplate(access, row),
       store: row.store,
       sourceRegulation: row.sourceRegulation,
       createdByUser: row.createdByUser,
@@ -677,7 +629,7 @@ export class StaffChecklistTemplatesService {
   }
 
   private async resolveSourceRegulation(
-    tenantId: string,
+    access: StaffChecklistAccess,
     value: string | null | undefined,
   ): Promise<SourceRegulation | null> {
     const id = this.normalizeOptionalString(value);
@@ -687,7 +639,11 @@ export class StaffChecklistTemplatesService {
     }
 
     const regulation = await this.prisma.staffShiftRegulation.findFirst({
-      where: { id, tenantId, status: 'PUBLISHED' },
+      where: {
+        id,
+        tenantId: access.tenantId,
+        AND: [this.accessPolicy.readableRegulationWhere(access)],
+      },
       select: {
         id: true,
         title: true,
@@ -704,6 +660,17 @@ export class StaffChecklistTemplatesService {
     }
 
     return regulation;
+  }
+
+  private assertSourceStoreCompatible(
+    source: SourceRegulation | null,
+    storeId: string | null,
+  ) {
+    if (source?.storeId && source.storeId !== storeId) {
+      throw new BadRequestException(
+        'Checklist template store must match source regulation',
+      );
+    }
   }
 
   private normalizeSections(value: unknown): StaffChecklistTemplateSection[] {
@@ -961,7 +928,7 @@ export class StaffChecklistTemplatesService {
   }
 
   private async resolveStoreId(
-    tenantId: string,
+    access: StaffChecklistAccess,
     value: string | null | undefined,
   ) {
     const id = this.normalizeOptionalString(value);
@@ -971,7 +938,7 @@ export class StaffChecklistTemplatesService {
     }
 
     const store = await this.prisma.store.findFirst({
-      where: { id, tenantId },
+      where: { id, AND: [this.accessPolicy.visibleStoresWhere(access)] },
       select: { id: true },
     });
 

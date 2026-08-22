@@ -13,9 +13,9 @@ describe('ProductCategoryCatalogService', () => {
         ]),
       },
       category: {
-        findMany: jest.fn().mockResolvedValue([
-          { id: 'category-drinks', name: 'Напитки' },
-        ]),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'category-drinks', name: 'Напитки' }]),
       },
       langameClubProductConfiguration: {
         findMany: jest.fn().mockResolvedValue([
@@ -40,6 +40,9 @@ describe('ProductCategoryCatalogService', () => {
       prisma as never,
       tenantContextService as never,
       { syncTenant: jest.fn() } as never,
+      {
+        assertNetwork: jest.fn().mockResolvedValue({ tenantId: 'tenant-1' }),
+      } as never,
     );
 
     const preview = await service.previewLangameMappings(
@@ -79,7 +82,9 @@ describe('ProductCategoryCatalogService', () => {
         ],
       }),
     ]);
-    expect(prisma.langameClubProductConfiguration.findMany).toHaveBeenCalledWith(
+    expect(
+      prisma.langameClubProductConfiguration.findMany,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           tenantId: 'tenant-1',
@@ -95,6 +100,7 @@ describe('ProductCategoryCatalogService', () => {
       {} as never,
       {} as never,
       { syncTenant: jest.fn() } as never,
+      {} as never,
     );
     const tx = {
       langameClubProductConfiguration: {
@@ -129,16 +135,18 @@ describe('ProductCategoryCatalogService', () => {
       categorySourceMappingEvent: { create: jest.fn() },
     };
 
-    const updated = await (service as unknown as {
-      assignUncategorizedProducts: (
-        transaction: unknown,
-        tenantId: string,
-        mappings: unknown[],
-        categoryIdsByCreateName: Map<string, string>,
-        mappingIdsByKey: Map<string, string>,
-        userId: string,
-      ) => Promise<number>;
-    }).assignUncategorizedProducts(
+    const updated = await (
+      service as unknown as {
+        assignUncategorizedProducts: (
+          transaction: unknown,
+          tenantId: string,
+          mappings: unknown[],
+          categoryIdsByCreateName: Map<string, string>,
+          mappingIdsByKey: Map<string, string>,
+          userId: string,
+        ) => Promise<number>;
+      }
+    ).assignUncategorizedProducts(
       tx,
       'tenant-1',
       [
@@ -183,7 +191,10 @@ describe('ProductCategoryCatalogService', () => {
           productId: 'product-safe',
           mappingId: 'mapping-drinks',
           previousValue: { categoryId: null },
-          nextValue: { categoryId: 'category-drinks', assignedBy: 'bulk-import' },
+          nextValue: {
+            categoryId: 'category-drinks',
+            assignedBy: 'bulk-import',
+          },
         }),
       }),
     );

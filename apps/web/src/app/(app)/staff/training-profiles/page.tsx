@@ -36,7 +36,9 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function isRole(value: string | undefined): value is StaffTrainingProfileRole | "all" {
+function isRole(
+  value: string | undefined,
+): value is StaffTrainingProfileRole | "all" {
   return roleOptions.includes(value as StaffTrainingProfileRole | "all");
 }
 
@@ -71,7 +73,10 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
-function exportHref(format: "csv" | "xlsx", filters: StaffTrainingProfilesFilters) {
+function exportHref(
+  format: "csv" | "xlsx",
+  filters: StaffTrainingProfilesFilters,
+) {
   const params = new URLSearchParams();
 
   Object.entries({ ...filters, format }).forEach(([key, value]) => {
@@ -94,7 +99,10 @@ export default async function StaffTrainingProfilesPage({
   const report = await getStaffTrainingProfilesReport(filters);
   const summaryCards = [
     { label: "Сотрудники", value: report.summary.employees },
-    { label: "Средний прогресс", value: `${report.summary.averageProgressPercent}%` },
+    {
+      label: "Средний прогресс",
+      value: `${report.summary.averageProgressPercent}%`,
+    },
     { label: "Просрочки", value: report.summary.overdueCourses },
     { label: "Аттестации", value: report.summary.pendingAssessments },
     { label: "Сертификаты", value: report.summary.validCertificates },
@@ -144,12 +152,14 @@ export default async function StaffTrainingProfilesPage({
             >
               Курсы
             </Link>
-            <Link
-              href="/staff/assessments"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              Аттестации
-            </Link>
+            {report.accessScope === "NETWORK" ? (
+              <Link
+                href="/staff/assessments"
+                className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              >
+                Аттестации
+              </Link>
+            ) : null}
           </div>
         </header>
 
@@ -219,7 +229,11 @@ export default async function StaffTrainingProfilesPage({
                   defaultValue={report.filters.storeId ?? ""}
                   className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                 >
-                  <option value="">Вся сеть</option>
+                  <option value="">
+                    {report.accessScope === "NETWORK"
+                      ? "Вся сеть"
+                      : "Все доступные"}
+                  </option>
                   {report.stores.map((store) => (
                     <option key={store.id} value={store.id}>
                       {store.name}

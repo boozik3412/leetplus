@@ -1,0 +1,61 @@
+[Unit]
+Description=LeetPlus isolated no-egress hydration for exact release %i
+ConditionFileNotEmpty=/srv/leetplus/release-inbox/leetplus-release-%i.tar.gz
+ConditionFileNotEmpty=/srv/leetplus/release-inbox/leetplus-release-%i.tar.gz.sha256
+ConditionPathExists=/run/leetplus-release/hydration.lock
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Slice=system.slice
+User=leetplus-build
+Group=leetplus-build
+Environment=LEETPLUS_HYDRATION_SANDBOX=SYSTEMD_IP_DENY_ANY_V1
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+Environment=LANG=C.UTF-8
+Environment=LC_ALL=C.UTF-8
+Environment=TZ=UTC
+PassEnvironment=
+SetLoginEnvironment=no
+UnsetEnvironment=DATABASE_URL JWT_SECRET GUEST_PORTAL_JWT_SECRET APP_ENCRYPTION_KEY INTEGRATION_ENCRYPTION_KEY SYNC_SERVICE_TOKEN LANGAME_API_KEY BASH_ENV ENV SHELL HOME USER LOGNAME TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_USE_ENV_PROXY NODE_V8_COVERAGE NODE_COMPILE_CACHE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NPM_CONFIG_USERCONFIG npm_config_userconfig NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_NODE_OPTIONS npm_config_node_options NPM_CONFIG_SCRIPT_SHELL npm_config_script_shell PNPM_HOME COREPACK_HOME SSL_CERT_FILE SSL_CERT_DIR GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+ExecStartPre=+/usr/local/libexec/leetplus/stage-release-artifact.sh --release-sha %i --preflight-build-uid-fence
+ExecStart=/usr/bin/flock --exclusive --no-fork /run/leetplus-release/hydration.lock /usr/local/libexec/leetplus/stage-release-artifact.sh --release-sha %i --artifact /srv/leetplus/release-inbox/leetplus-release-%i.tar.gz --artifact-sha256 /srv/leetplus/release-inbox/leetplus-release-%i.tar.gz.sha256 --output-root /srv/leetplus/release-builds --pnpm-store-dir /srv/leetplus/pnpm-store --hydrate
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=none
+IPAddressDeny=any
+IPAddressAllow=
+ReadOnlyPaths=/srv/leetplus/release-inbox
+ReadOnlyPaths=/srv/leetplus/pnpm-store
+ReadWritePaths=/run/leetplus-release/hydration.lock
+ReadWritePaths=/srv/leetplus/release-builds
+MemoryPressureWatch=skip
+MemoryMax=4294967296
+MemorySwapMax=0
+TasksMax=256
+CPUQuota=200%
+LimitFSIZE=2147483648
+UMask=0077
+TimeoutStartSec=900
+TimeoutStopSec=30
+KillMode=control-group
+
+# Deliberately no [Install]: invoke one exact SHA with `systemctl start` and
+# preserve its journal/INVOCATION_ID as release evidence.

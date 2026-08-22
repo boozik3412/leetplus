@@ -21,6 +21,41 @@ enum UserRole {
   TRAINEE
 }
 
+enum UserAccessScope {
+  NETWORK
+  STORES
+}
+
+enum StaffAttachmentState {
+  PENDING
+  BOUND
+  UNRESOLVED
+  QUARANTINED
+}
+
+enum StaffAttachmentBindingState {
+  BOUND
+  UNRESOLVED
+  QUARANTINED
+}
+
+enum StaffAttachmentResourceKind {
+  CHAT_MESSAGE
+  STAFF_TASK
+  CHECKLIST_RUN
+  KNOWLEDGE_ARTICLE
+  SHIFT_REGULATION
+  TRAINING_COURSE
+  ONBOARDING_PLAN
+}
+
+enum StaffAttachmentBindingSource {
+  NATIVE
+  CHAT_RELATION_BACKFILL
+  LEGACY_REFERENCE_BACKFILL
+  MANUAL_RECONCILIATION
+}
+
 enum StockMovementType {
   WRITEOFF
   RETURN
@@ -131,20 +166,84 @@ enum TenantLifecycleStatus {
   ARCHIVED
 }
 
+enum TenantCustomerStage {
+  INTERNAL
+  PILOT
+  BETA
+  LIVE
+}
+
+enum TenantOnboardingStatus {
+  PROVISIONING
+  OWNER_INVITED
+  ONBOARDING
+  READY
+  ACTIVE
+  OFFBOARDING
+}
+
+enum TenantModule {
+  GAMIFICATION
+  ASSORTMENT
+  STAFF
+  COMMUNICATIONS
+  USERS_ROLES
+  INTEGRATIONS
+}
+
+enum IdentityEmailClaimType {
+  INVITE
+  USER
+  EMAIL_CHANGE
+}
+
+enum IdentityMailTemplate {
+  INITIAL_OWNER_INVITE
+}
+
+enum IdentityMailOutboxStatus {
+  HOLD
+  PENDING
+  CLAIMED
+  RETRY
+  SENT
+  DEAD
+  CANCELED
+  RECONCILIATION_REQUIRED
+}
+
+enum SharedBetaReleaseGateCode {
+  MODULE_POLICY_ENFORCED
+  EMAIL_INVITE_WORKFLOW_VERIFIED
+  POSTGRESQL_RELEASE_REHEARSAL_VERIFIED
+}
+
 model Tenant {
-  id              String                @id @default(uuid())
-  name            String
-  slug            String                @unique
-  domain          String?
-  gameLogoUrl     String?
-  status          TenantLifecycleStatus @default(ACTIVE)
-  statusChangedAt DateTime?
-  statusReason    String?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  id                         String                 @id @default(uuid())
+  name                       String
+  slug                       String                 @unique
+  domain                     String?
+  gameLogoUrl                String?
+  status                     TenantLifecycleStatus  @default(SUSPENDED)
+  customerStage              TenantCustomerStage    @default(INTERNAL)
+  onboardingStatus           TenantOnboardingStatus @default(PROVISIONING)
+  cohortKey                  String?
+  supportOwnerUserId         String?
+  trialStartsAt              DateTime?              @db.Timestamptz(3)
+  trialEndsAt                DateTime?              @db.Timestamptz(3)
+  /// Monotonic CAS/version for the complete module entitlement profile.
+  entitlementProfileRevision Int                    @default(0)
+  /// Monotonic fence for lifecycle/onboarding/trial/profile execution permits.
+  executionRevision          Int                    @default(0)
+  statusChangedAt            DateTime?
+  statusReason               String?
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
 
   users                                User[]
+  supportOwner                         User?                                 @relation("TenantSupportOwner", fields: [supportOwnerUserId], references: [id], onDelete: SetNull)
   stores                               Store[]
+  moduleEntitlements                   TenantModuleEntitlement[]
   suppliers                            Supplier[]
   products                             Product[]
   canonicalProducts                    CanonicalProduct[]
@@ -195,6 +294,7 @@ model Tenant {
   guestGameRewardWalletItems           GuestGameRewardWalletItem[]
   guestGameDeliveries                  GuestGameDelivery[]
   guestGameDeliveryEvents              GuestGameDeliveryEvent[]
+  guestGameDeliveryAttempts            GuestGameDeliveryAttempt[]
   guestGameEvents                      GuestGameEvent[]
   guestGameAuditEvents                 GuestGameAuditEvent[]
   guestGameRuleDecisions               GuestGameRuleDecision[]
@@ -238,6 +338,7 @@ model Tenant {
   staffTaskObservers                   StaffTaskObserver[]
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
+  staffTaskCatalogAuditEvents          StaffTaskCatalogAuditEvent[]
   staffKnowledgeSettings               StaffKnowledgeSettings?
   staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
@@ -254,6 +355,7 @@ model Tenant {
   staffChecklistTemplates              StaffChecklistTemplate[]
   staffChecklistRuns                   StaffChecklistRun[]
   staffAttachments                     StaffAttachment[]
+  staffAttachmentBindings              StaffAttachmentBinding[]
   staffDisciplinePolicies              StaffDisciplinePolicy[]
   staffDisciplineRules                 StaffDisciplineRule[]
   staffDisciplineRecords               StaffDisciplineRecord[]
@@ -272,116 +374,162 @@ model Tenant {
   userAccessRoles                      UserAccessRole[]
   userRoleOverrides                    UserRoleOverride[]
   userInvites                          UserInvite[]
+  identityEmailClaims                  IdentityEmailClaim[]
+  identityOwnerInviteIssueCommands     IdentityOwnerInviteIssueCommand[]
+  identityMailOutboxEntries            IdentityMailOutbox[]
+  identityMailDeliveryTenantEnrollment IdentityMailDeliveryTenantEnrollment?
+  identityMailDeliveryEvents           IdentityMailDeliveryEvent[]
+  admissionDecisions                   TenantAdmissionDecision[]
+  founderOperatorBetaGos               FounderOperatorBetaGo[]
+  founderOperatorBetaActivation        FounderOperatorBetaActivationCommand?
+  sharedBetaActivationCommand          SharedBetaTenantActivationCommand?
   platformAdminAuditEvents             PlatformAdminAuditEvent[]
+
+  @@index([status, onboardingStatus, customerStage])
+  @@index([supportOwnerUserId])
+}
+
+model TenantModuleEntitlement {
+  id              String       @id @default(uuid())
+  tenantId        String
+  module          TenantModule
+  readEnabled     Boolean      @default(false)
+  writeEnabled    Boolean      @default(false)
+  outboundEnabled Boolean      @default(false)
+  validFrom       DateTime?    @db.Timestamptz(3)
+  validUntil      DateTime?    @db.Timestamptz(3)
+  /// Must match Tenant.entitlementProfileRevision; profile updates replace the full set atomically.
+  profileRevision Int
+  reason          String
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, module])
+  @@index([tenantId, validUntil])
 }
 
 model User {
-  id              String    @id @default(uuid())
-  tenantId        String
-  email           String    @unique
-  passwordHash    String
-  fullName        String?
-  role            UserRole  @default(OWNER)
-  customRoleId    String?
-  isActive        Boolean   @default(true)
-  isPlatformAdmin Boolean   @default(false)
-  emailVerifiedAt DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                    String           @id @default(uuid())
+  tenantId              String
+  email                 String           @unique
+  passwordHash          String
+  fullName              String?
+  role                  UserRole
+  accessScope           UserAccessScope?
+  customRoleId          String?
+  isActive              Boolean          @default(true)
+  isPlatformAdmin       Boolean          @default(false)
+  emailVerifiedAt       DateTime?
+  identityClaimRevision Int?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
-  tenant                               Tenant                                @relation(fields: [tenantId], references: [id])
-  customRole                           UserAccessRole?                       @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  tenant                               Tenant                                 @relation(fields: [tenantId], references: [id])
+  customRole                           UserAccessRole?                        @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
   emailVerificationTokens              EmailVerificationToken[]
   importJobs                           ImportJob[]
   guestCrmEvents                       GuestCrmEvent[]
   guestCrmLeads                        GuestCrmLead[]
-  guestCrmTasks                        GuestCrmTask[]                        @relation("GuestCrmTaskCreatedBy")
-  assignedGuestCrmTasks                GuestCrmTask[]                        @relation("GuestCrmTaskAssignedTo")
+  guestCrmTasks                        GuestCrmTask[]                         @relation("GuestCrmTaskCreatedBy")
+  assignedGuestCrmTasks                GuestCrmTask[]                         @relation("GuestCrmTaskAssignedTo")
   guestCrmContactEvents                GuestCrmContactEvent[]
-  createdMarketingCampaigns            MarketingCampaign[]                   @relation("MarketingCampaignCreatedBy")
-  ownedMarketingCampaigns              MarketingCampaign[]                   @relation("MarketingCampaignOwner")
-  createdMarketingPromoBundles         MarketingPromoBundle[]                @relation("MarketingPromoBundleCreatedBy")
-  createdMarketingPromoBundleLaunches  MarketingPromoBundleLaunch[]          @relation("MarketingPromoBundleLaunchCreatedBy")
-  createdMarketingPromoBundleUsages    MarketingPromoBundleUsage[]           @relation("MarketingPromoBundleUsageCreatedBy")
-  createdMarketingMissions             MarketingMission[]                    @relation("MarketingMissionCreatedBy")
-  createdMarketingMissionRewards       MarketingMissionReward[]              @relation("MarketingMissionRewardCreatedBy")
-  approvedMarketingMissionRewards      MarketingMissionReward[]              @relation("MarketingMissionRewardApprovedBy")
-  createdGuestGameProfiles             GuestGameProfile[]                    @relation("GuestGameProfileCreatedBy")
-  createdGuestGameLootBoxes            GuestGameLootBox[]                    @relation("GuestGameLootBoxCreatedBy")
-  createdGuestGameMissions             GuestGameMission[]                    @relation("GuestGameMissionCreatedBy")
-  createdGuestGameSeasons              GuestGameSeason[]                     @relation("GuestGameSeasonCreatedBy")
-  createdGuestGameRewards              GuestGameReward[]                     @relation("GuestGameRewardCreatedBy")
-  approvedGuestGameRewards             GuestGameReward[]                     @relation("GuestGameRewardApprovedBy")
-  createdGuestBonusLedgerEntries       GuestBonusLedgerEntry[]               @relation("GuestBonusLedgerCreatedBy")
-  processedGuestBonusLedgerEntries     GuestBonusLedgerEntry[]               @relation("GuestBonusLedgerProcessedBy")
-  createdGuestGameDeliveries           GuestGameDelivery[]                   @relation("GuestGameDeliveryCreatedBy")
-  guestGameDeliveryEvents              GuestGameDeliveryEvent[]              @relation("GuestGameDeliveryEventActor")
-  createdGuestGameEvents               GuestGameEvent[]                      @relation("GuestGameEventCreatedBy")
-  createdGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingCreatedBy")
-  updatedGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingUpdatedBy")
-  createdGuestGamePromoCards           GuestGamePromoCard[]                  @relation("GuestGamePromoCardCreatedBy")
-  createdGuestGameVisualDrafts         GuestGameVisualDraft[]                @relation("GuestGameVisualDraftCreatedBy")
-  updatedGuestGameVisualDrafts         GuestGameVisualDraft[]                @relation("GuestGameVisualDraftUpdatedBy")
-  confirmedCategorySourceMappings      CategorySourceMapping[]               @relation("CategorySourceMappingConfirmedBy")
-  categorySourceMappingEvents          CategorySourceMappingEvent[]          @relation("CategorySourceMappingEventActor")
-  publishedGuestGameVisualDrafts       GuestGameVisualDraft[]                @relation("GuestGameVisualDraftPublishedBy")
+  createdMarketingCampaigns            MarketingCampaign[]                    @relation("MarketingCampaignCreatedBy")
+  ownedMarketingCampaigns              MarketingCampaign[]                    @relation("MarketingCampaignOwner")
+  createdMarketingPromoBundles         MarketingPromoBundle[]                 @relation("MarketingPromoBundleCreatedBy")
+  createdMarketingPromoBundleLaunches  MarketingPromoBundleLaunch[]           @relation("MarketingPromoBundleLaunchCreatedBy")
+  createdMarketingPromoBundleUsages    MarketingPromoBundleUsage[]            @relation("MarketingPromoBundleUsageCreatedBy")
+  createdMarketingMissions             MarketingMission[]                     @relation("MarketingMissionCreatedBy")
+  createdMarketingMissionRewards       MarketingMissionReward[]               @relation("MarketingMissionRewardCreatedBy")
+  approvedMarketingMissionRewards      MarketingMissionReward[]               @relation("MarketingMissionRewardApprovedBy")
+  createdGuestGameProfiles             GuestGameProfile[]                     @relation("GuestGameProfileCreatedBy")
+  createdGuestGameLootBoxes            GuestGameLootBox[]                     @relation("GuestGameLootBoxCreatedBy")
+  createdGuestGameMissions             GuestGameMission[]                     @relation("GuestGameMissionCreatedBy")
+  createdGuestGameSeasons              GuestGameSeason[]                      @relation("GuestGameSeasonCreatedBy")
+  createdGuestGameRewards              GuestGameReward[]                      @relation("GuestGameRewardCreatedBy")
+  approvedGuestGameRewards             GuestGameReward[]                      @relation("GuestGameRewardApprovedBy")
+  createdGuestBonusLedgerEntries       GuestBonusLedgerEntry[]                @relation("GuestBonusLedgerCreatedBy")
+  processedGuestBonusLedgerEntries     GuestBonusLedgerEntry[]                @relation("GuestBonusLedgerProcessedBy")
+  createdGuestGameDeliveries           GuestGameDelivery[]                    @relation("GuestGameDeliveryCreatedBy")
+  guestGameDeliveryEvents              GuestGameDeliveryEvent[]               @relation("GuestGameDeliveryEventActor")
+  createdGuestGameEvents               GuestGameEvent[]                       @relation("GuestGameEventCreatedBy")
+  createdGuestGameLogTypeMappings      GuestGameLogTypeMapping[]              @relation("GuestGameLogTypeMappingCreatedBy")
+  updatedGuestGameLogTypeMappings      GuestGameLogTypeMapping[]              @relation("GuestGameLogTypeMappingUpdatedBy")
+  createdGuestGamePromoCards           GuestGamePromoCard[]                   @relation("GuestGamePromoCardCreatedBy")
+  createdGuestGameVisualDrafts         GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftCreatedBy")
+  updatedGuestGameVisualDrafts         GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftUpdatedBy")
+  confirmedCategorySourceMappings      CategorySourceMapping[]                @relation("CategorySourceMappingConfirmedBy")
+  categorySourceMappingEvents          CategorySourceMappingEvent[]           @relation("CategorySourceMappingEventActor")
+  publishedGuestGameVisualDrafts       GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftPublishedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   guestStaffIdentityMappingEvents      GuestStaffIdentityMappingEvent[]
-  staffMember                          StaffMember?                          @relation("StaffMemberUser")
-  createdStaffMembers                  StaffMember[]                         @relation("StaffMemberCreatedBy")
-  createdStaffTasks                    StaffTask[]                           @relation("StaffTaskCreatedBy")
-  createdStaffTaskTemplates            StaffTaskTemplate[]                   @relation("StaffTaskTemplateCreatedBy")
-  createdStaffTaskRecurringRules       StaffTaskRecurringRule[]              @relation("StaffTaskRecurringRuleCreatedBy")
-  assignedStaffTaskRecurringRules      StaffTaskRecurringRule[]              @relation("StaffTaskRecurringRuleAssignedTo")
-  assignedStaffTasks                   StaffTask[]                           @relation("StaffTaskAssignedTo")
-  observedStaffTasks                   StaffTaskObserver[]                   @relation("StaffTaskObserverUser")
-  staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
-  staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
-  updatedStaffKnowledgeSettings        StaffKnowledgeSettings[]              @relation("StaffKnowledgeSettingsUpdatedBy")
-  staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]         @relation("StaffKnowledgeSettingsEventActor")
-  createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
-  approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleApprovedBy")
-  createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]        @relation("StaffKnowledgeArticleVersionCreatedBy")
-  staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]    @relation("StaffKnowledgeArticleReadReceiptUser")
-  createdStaffTrainingCourses          StaffTrainingCourse[]                 @relation("StaffTrainingCourseCreatedBy")
-  staffTrainingProgresses              StaffTrainingProgress[]               @relation("StaffTrainingProgressUser")
-  updatedStaffTrainingProgresses       StaffTrainingProgress[]               @relation("StaffTrainingProgressUpdatedBy")
-  createdStaffOnboardingPlans          StaffOnboardingPlan[]                 @relation("StaffOnboardingPlanCreatedBy")
-  createdStaffAssessments              StaffAssessment[]                     @relation("StaffAssessmentCreatedBy")
-  staffAssessmentResults               StaffAssessmentResult[]               @relation("StaffAssessmentUser")
-  reviewedStaffAssessmentResults       StaffAssessmentResult[]               @relation("StaffAssessmentReviewedBy")
-  createdStaffShiftRegulations         StaffShiftRegulation[]                @relation("StaffShiftRegulationCreatedBy")
-  createdStaffShiftRegulationVersions  StaffShiftRegulationVersion[]         @relation("StaffShiftRegulationVersionCreatedBy")
+  staffMember                          StaffMember?                           @relation("StaffMemberUser")
+  createdStaffMembers                  StaffMember[]                          @relation("StaffMemberCreatedBy")
+  createdStaffTasks                    StaffTask[]                            @relation("StaffTaskCreatedBy")
+  createdStaffTaskTemplates            StaffTaskTemplate[]                    @relation("StaffTaskTemplateCreatedBy")
+  createdStaffTaskRecurringRules       StaffTaskRecurringRule[]               @relation("StaffTaskRecurringRuleCreatedBy")
+  assignedStaffTaskRecurringRules      StaffTaskRecurringRule[]               @relation("StaffTaskRecurringRuleAssignedTo")
+  assignedStaffTasks                   StaffTask[]                            @relation("StaffTaskAssignedTo")
+  observedStaffTasks                   StaffTaskObserver[]                    @relation("StaffTaskObserverUser")
+  staffTaskComments                    StaffTaskComment[]                     @relation("StaffTaskCommentAuthor")
+  staffTaskAuditEvents                 StaffTaskAuditEvent[]                  @relation("StaffTaskAuditActor")
+  staffTaskCatalogAuditEvents          StaffTaskCatalogAuditEvent[]           @relation("StaffTaskCatalogAuditActor")
+  updatedStaffKnowledgeSettings        StaffKnowledgeSettings[]               @relation("StaffKnowledgeSettingsUpdatedBy")
+  staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]          @relation("StaffKnowledgeSettingsEventActor")
+  createdStaffKnowledgeArticles        StaffKnowledgeArticle[]                @relation("StaffKnowledgeArticleCreatedBy")
+  approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]                @relation("StaffKnowledgeArticleApprovedBy")
+  createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]         @relation("StaffKnowledgeArticleVersionCreatedBy")
+  staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]     @relation("StaffKnowledgeArticleReadReceiptUser")
+  createdStaffTrainingCourses          StaffTrainingCourse[]                  @relation("StaffTrainingCourseCreatedBy")
+  staffTrainingProgresses              StaffTrainingProgress[]                @relation("StaffTrainingProgressUser")
+  updatedStaffTrainingProgresses       StaffTrainingProgress[]                @relation("StaffTrainingProgressUpdatedBy")
+  createdStaffOnboardingPlans          StaffOnboardingPlan[]                  @relation("StaffOnboardingPlanCreatedBy")
+  createdStaffAssessments              StaffAssessment[]                      @relation("StaffAssessmentCreatedBy")
+  staffAssessmentResults               StaffAssessmentResult[]                @relation("StaffAssessmentUser")
+  reviewedStaffAssessmentResults       StaffAssessmentResult[]                @relation("StaffAssessmentReviewedBy")
+  createdStaffShiftRegulations         StaffShiftRegulation[]                 @relation("StaffShiftRegulationCreatedBy")
+  createdStaffShiftRegulationVersions  StaffShiftRegulationVersion[]          @relation("StaffShiftRegulationVersionCreatedBy")
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
-  createdStaffChecklistTemplates       StaffChecklistTemplate[]              @relation("StaffChecklistTemplateCreatedBy")
-  createdStaffChecklistRuns            StaffChecklistRun[]                   @relation("StaffChecklistRunCreatedBy")
-  assignedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunAssignedTo")
-  reviewedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunReviewedBy")
-  updatedStaffDisciplinePolicies       StaffDisciplinePolicy[]               @relation("StaffDisciplinePolicyUpdatedBy")
-  createdStaffDisciplineRules          StaffDisciplineRule[]                 @relation("StaffDisciplineRuleCreatedBy")
-  staffDisciplineRecords               StaffDisciplineRecord[]               @relation("StaffDisciplineRecordUser")
-  createdStaffDisciplineRecords        StaffDisciplineRecord[]               @relation("StaffDisciplineRecordCreatedBy")
-  createdStaffSalarySchemes            StaffSalaryScheme[]                   @relation("StaffSalarySchemeCreatedBy")
+  createdStaffChecklistTemplates       StaffChecklistTemplate[]               @relation("StaffChecklistTemplateCreatedBy")
+  createdStaffChecklistRuns            StaffChecklistRun[]                    @relation("StaffChecklistRunCreatedBy")
+  assignedStaffChecklistRuns           StaffChecklistRun[]                    @relation("StaffChecklistRunAssignedTo")
+  reviewedStaffChecklistRuns           StaffChecklistRun[]                    @relation("StaffChecklistRunReviewedBy")
+  updatedStaffDisciplinePolicies       StaffDisciplinePolicy[]                @relation("StaffDisciplinePolicyUpdatedBy")
+  createdStaffDisciplineRules          StaffDisciplineRule[]                  @relation("StaffDisciplineRuleCreatedBy")
+  staffDisciplineRecords               StaffDisciplineRecord[]                @relation("StaffDisciplineRecordUser")
+  createdStaffDisciplineRecords        StaffDisciplineRecord[]                @relation("StaffDisciplineRecordCreatedBy")
+  createdStaffSalarySchemes            StaffSalaryScheme[]                    @relation("StaffSalarySchemeCreatedBy")
   guestSavedFilters                    GuestSavedFilter[]
   guestAudiences                       GuestAudience[]
   storeAccesses                        UserStoreAccess[]
-  createdUserInvites                   UserInvite[]                          @relation("UserInviteCreatedBy")
-  acceptedUserInvites                  UserInvite[]                          @relation("UserInviteAcceptedBy")
-  createdStaffChatChannels             StaffChatChannel[]                    @relation("StaffChatChannelCreatedBy")
-  staffChatChannelMemberships          StaffChatChannelMember[]              @relation("StaffChatChannelMemberUser")
-  addedStaffChatChannelMembers         StaffChatChannelMember[]              @relation("StaffChatChannelMemberAddedBy")
-  authoredStaffChatMessages            StaffChatMessage[]                    @relation("StaffChatMessageAuthor")
-  staffChatMessageEdits                StaffChatMessageEdit[]                @relation("StaffChatMessageEditActor")
-  staffChatMentions                    StaffChatMention[]                    @relation("StaffChatMentionUser")
+  createdUserInvites                   UserInvite[]                           @relation("UserInviteCreatedBy")
+  acceptedUserInvites                  UserInvite[]                           @relation("UserInviteAcceptedBy")
+  revokedUserInvites                   UserInvite[]                           @relation("UserInviteRevokedBy")
+  createdStaffChatChannels             StaffChatChannel[]                     @relation("StaffChatChannelCreatedBy")
+  staffChatChannelMemberships          StaffChatChannelMember[]               @relation("StaffChatChannelMemberUser")
+  addedStaffChatChannelMembers         StaffChatChannelMember[]               @relation("StaffChatChannelMemberAddedBy")
+  authoredStaffChatMessages            StaffChatMessage[]                     @relation("StaffChatMessageAuthor")
+  staffChatMessageEdits                StaffChatMessageEdit[]                 @relation("StaffChatMessageEditActor")
+  staffChatMentions                    StaffChatMention[]                     @relation("StaffChatMentionUser")
   staffChatReadReceipts                StaffChatReadReceipt[]
-  uploadedStaffAttachments             StaffAttachment[]                     @relation("StaffAttachmentUploadedBy")
-  acknowledgedStaffNotifications       StaffNotification[]                   @relation("StaffNotificationAcknowledgedBy")
-  resolvedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationResolvedBy")
-  targetedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationTargetUser")
-  platformAdminAuditEvents             PlatformAdminAuditEvent[]             @relation("PlatformAdminAuditActor")
+  uploadedStaffAttachments             StaffAttachment[]                      @relation("StaffAttachmentUploadedBy")
+  createdStaffAttachmentBindings       StaffAttachmentBinding[]               @relation("StaffAttachmentBindingCreatedBy")
+  acknowledgedStaffNotifications       StaffNotification[]                    @relation("StaffNotificationAcknowledgedBy")
+  resolvedStaffNotifications           StaffNotification[]                    @relation("StaffNotificationResolvedBy")
+  targetedStaffNotifications           StaffNotification[]                    @relation("StaffNotificationTargetUser")
+  approvedTenantAdmissionDecisions     TenantAdmissionDecision[]              @relation("TenantAdmissionDecisionApprovedBy")
+  approvedFounderOperatorBetaGos       FounderOperatorBetaGo[]                @relation("FounderOperatorBetaGoApprovedBy")
+  rollbackFounderOperatorBetaGos       FounderOperatorBetaGo[]                @relation("FounderOperatorBetaGoRollbackOwner")
+  founderOperatorBetaActivations       FounderOperatorBetaActivationCommand[] @relation("FounderOperatorBetaActivationActor")
+  sharedBetaTenantActivations          SharedBetaTenantActivationCommand[]    @relation("SharedBetaTenantActivationActor")
+  platformAdminAuditEvents             PlatformAdminAuditEvent[]              @relation("PlatformAdminAuditActor")
+  supportedTenants                     Tenant[]                               @relation("TenantSupportOwner")
 
+  @@unique([tenantId, id], map: "user_tenant_id_uidx")
   @@index([tenantId])
   @@index([tenantId, role])
+  @@index([tenantId, accessScope])
   @@index([tenantId, isActive])
   @@index([customRoleId])
 }
@@ -390,6 +538,9 @@ model PlatformAdminAuditEvent {
   id          String   @id @default(uuid())
   tenantId    String?
   actorUserId String?
+  /// Tenant-scoped idempotency is represented below; the migration also adds
+  /// a partial unique (action, requestId) index for global tenantId=NULL events.
+  requestId   String?
   action      String
   targetType  String
   targetId    String?
@@ -402,6 +553,7 @@ model PlatformAdminAuditEvent {
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   actor  User?   @relation("PlatformAdminAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, action, requestId], map: "platform_admin_audit_tenant_action_request_uidx")
   @@index([tenantId, createdAt])
   @@index([actorUserId, createdAt])
   @@index([action])
@@ -440,32 +592,660 @@ model UserRoleOverride {
 }
 
 model UserInvite {
-  id               String    @id @default(uuid())
-  tenantId         String
-  email            String?
-  fullName         String?
-  role             UserRole
-  customRoleId     String?
-  storeIds         String[]  @default([])
-  tokenHash        String    @unique
-  expiresAt        DateTime
-  acceptedAt       DateTime?
-  acceptedByUserId String?
-  createdByUserId  String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                    String           @id @default(uuid())
+  tenantId              String
+  email                 String?
+  fullName              String?
+  role                  UserRole
+  accessScope           UserAccessScope?
+  customRoleId          String?
+  storeIds              String[]         @default([])
+  tokenHash             String           @unique
+  expiresAt             DateTime
+  acceptedAt            DateTime?
+  acceptedByUserId      String?
+  createdByUserId       String?
+  revokedAt             DateTime?
+  revokedByUserId       String?
+  identityClaimRevision Int?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
-  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customRole UserAccessRole? @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
-  createdBy  User?           @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  acceptedBy User?           @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  tenant                        Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customRole                    UserAccessRole?                       @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  createdBy                     User?                                 @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  acceptedBy                    User?                                 @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  revokedBy                     User?                                 @relation("UserInviteRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  initialOwnerIssueCommand      IdentityOwnerInviteIssueCommand?      @relation("IdentityOwnerInviteIssueCommandInvite")
+  identityMailOutbox            IdentityMailOutbox?                   @relation("IdentityMailOutboxInvite")
+  identityMailDeliveryEvents    IdentityMailDeliveryEvent[]           @relation("IdentityMailDeliveryEventInvite")
+  founderOperatorBetaActivation FounderOperatorBetaActivationCommand? @relation("FounderOperatorBetaActivationInvite")
+  sharedBetaActivation          SharedBetaTenantActivationCommand?    @relation("SharedBetaTenantActivationInvite")
 
+  @@unique([tenantId, id], map: "UserInvite_tenantId_id_key")
   @@index([tenantId, createdAt])
+  @@index([tenantId, accessScope])
   @@index([tenantId, acceptedAt])
   @@index([expiresAt])
   @@index([customRoleId])
   @@index([createdByUserId])
   @@index([acceptedByUserId])
+  @@index([revokedByUserId])
+}
+
+/// Global, canonical reservation for an email participating in an identity
+/// workflow. The database owns canonical form and monotonic revision checks;
+/// subjectId is deliberately polymorphic until Identity and TenantMembership
+/// become separate first-class models.
+model IdentityEmailClaim {
+  emailCanonical  String                 @id @db.VarChar(320)
+  claimType       IdentityEmailClaimType
+  tenantId        String
+  subjectId       String
+  workflowLocator String
+  revision        Int                    @default(1)
+  createdAt       DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime               @default(now()) @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([tenantId, subjectId], map: "identity_email_claim_tenant_subject_idx")
+  @@index([tenantId, claimType], map: "identity_email_claim_tenant_type_idx")
+}
+
+/// Immutable database authority record for one dormant initial-owner invite
+/// issue command. Runtime roles receive no direct table access and migration
+/// 171 does not grant execution of the corresponding issue RPC.
+model IdentityOwnerInviteIssueCommand {
+  id                       String               @id
+  tenantId                 String
+  action                   String               @default("ISSUE_INITIAL_OWNER_INVITE") @db.VarChar(64)
+  requestId                String
+  issueRequestDigest       String               @db.VarChar(64)
+  aadEnvironment           String               @db.VarChar(64)
+  workflowLocator          String
+  reservationSubjectId     String
+  reservationClaimRevision Int
+  inviteId                 String
+  outboxId                 String
+  messageKey               String
+  tokenHash                String               @db.VarChar(64)
+  tokenDigestVersion       String               @default("sha256-v1") @db.VarChar(16)
+  template                 IdentityMailTemplate @default(INITIAL_OWNER_INVITE)
+  envelopeVersion          Int                  @default(1)
+  keyVersion               String               @default("v1") @db.VarChar(16)
+  expiresAt                DateTime             @db.Timestamptz(3)
+  claimRevision            Int
+  createdAt                DateTime             @default(now()) @db.Timestamptz(3)
+
+  tenant                        Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  invite                        UserInvite                            @relation("IdentityOwnerInviteIssueCommandInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityOwnerInviteIssueCommand_invite_fkey")
+  outbox                        IdentityMailOutbox?                   @relation("IdentityOwnerInviteIssueCommandOutbox")
+  founderOperatorBetaActivation FounderOperatorBetaActivationCommand? @relation("FounderOperatorBetaActivationIssue")
+  sharedBetaActivation          SharedBetaTenantActivationCommand?    @relation("SharedBetaTenantActivationIssue")
+
+  @@unique([tenantId, id], map: "identity_owner_invite_issue_command_tenant_id_key")
+  @@unique([tenantId, action, requestId], map: "identity_owner_invite_issue_command_request_uidx")
+  @@unique([tenantId, inviteId], map: "identity_owner_invite_issue_command_invite_uidx")
+  @@unique([tenantId, outboxId], map: "identity_owner_invite_issue_command_outbox_uidx")
+  @@unique([messageKey], map: "identity_owner_invite_issue_command_message_key")
+  @@unique([tenantId, workflowLocator], map: "identity_owner_invite_issue_command_locator_uidx")
+}
+
+/// Encrypted initial-owner invite payload. CURRENT_176 permits only the exact
+/// leased delivery state machine through sealed RPCs. Application and worker
+/// roles receive no direct relation access.
+model IdentityMailOutbox {
+  id                       String                   @id
+  tenantId                 String
+  issueCommandId           String
+  inviteId                 String
+  workflowLocator          String
+  aadEnvironment           String                   @db.VarChar(64)
+  template                 IdentityMailTemplate     @default(INITIAL_OWNER_INVITE)
+  status                   IdentityMailOutboxStatus @default(HOLD)
+  messageKey               String
+  issueRequestDigest       String                   @db.VarChar(64)
+  tokenHash                String                   @db.VarChar(64)
+  tokenDigestVersion       String                   @default("sha256-v1") @db.VarChar(16)
+  secretCiphertext         Bytes?
+  envelopeVersion          Int                      @default(1)
+  keyVersion               String                   @default("v1") @db.VarChar(16)
+  expiresAt                DateTime                 @db.Timestamptz(3)
+  releasedAt               DateTime?                @db.Timestamptz(3)
+  attempts                 Int                      @default(0)
+  leaseVersion             Int                      @default(0)
+  transitionRevision       BigInt                   @default(0)
+  availableAt              DateTime?                @db.Timestamptz(3)
+  leaseOwnerDigest         String?                  @db.Char(64)
+  leaseTokenDigest         String?                  @db.Char(64)
+  claimedAt                DateTime?                @db.Timestamptz(3)
+  leaseExpiresAt           DateTime?                @db.Timestamptz(3)
+  providerAttemptKey       String?                  @db.VarChar(96)
+  providerAttemptedAt      DateTime?                @db.Timestamptz(3)
+  providerAcknowledgeUntil DateTime?                @db.Timestamptz(3)
+  providerAuthorityDigest  String?                  @db.Char(64)
+  messageIdDigest          String?                  @db.Char(64)
+  providerOutcomeClass     String?                  @db.VarChar(32)
+  providerObservedAt       DateTime?                @db.Timestamptz(3)
+  providerReceiptDigest    String?                  @db.Char(64)
+  terminalAckDigest        String?                  @db.Char(64)
+  ciphertextClearedAt      DateTime?                @db.Timestamptz(3)
+  sentAt                   DateTime?                @db.Timestamptz(3)
+  terminalAt               DateTime?                @db.Timestamptz(3)
+  stateReasonCode          String?                  @db.VarChar(64)
+  createdAt                DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime                 @default(now()) @updatedAt @db.Timestamptz(3)
+
+  tenant                        Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  issueCommand                  IdentityOwnerInviteIssueCommand       @relation("IdentityOwnerInviteIssueCommandOutbox", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_issueCommand_fkey")
+  invite                        UserInvite                            @relation("IdentityMailOutboxInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailOutbox_invite_fkey")
+  founderOperatorBetaActivation FounderOperatorBetaActivationCommand? @relation("FounderOperatorBetaActivationOutbox")
+  sharedBetaActivation          SharedBetaTenantActivationCommand?    @relation("SharedBetaTenantActivationOutbox")
+  deliveryEvents                IdentityMailDeliveryEvent[]
+
+  @@unique([tenantId, id], map: "identity_mail_outbox_tenant_id_key")
+  @@unique([tenantId, issueCommandId], map: "identity_mail_outbox_issue_command_uidx")
+  @@unique([tenantId, inviteId], map: "identity_mail_outbox_invite_uidx")
+  @@unique([tenantId, workflowLocator], map: "identity_mail_outbox_locator_uidx")
+  @@unique([messageKey], map: "identity_mail_outbox_message_key")
+  @@unique([providerAttemptKey], map: "identity_mail_outbox_provider_attempt_key_uidx")
+  @@index([tenantId, status, createdAt], map: "identity_mail_outbox_tenant_status_created_idx")
+  @@index([status, availableAt, createdAt, id], map: "identity_mail_outbox_ready_idx")
+  @@index([leaseExpiresAt, id], map: "identity_mail_outbox_unmarked_lease_idx")
+  @@index([providerAcknowledgeUntil, id], map: "identity_mail_outbox_marked_ack_idx")
+  @@index([terminalAt, id], map: "identity_mail_outbox_reconciliation_idx")
+}
+
+/// Empty-by-default canary enrollment bound to the exact worker
+/// session_user name and OID.
+model IdentityMailDeliveryTenantEnrollment {
+  tenantId                String    @id
+  workerRoleName          String    @db.VarChar(63)
+  workerRoleOid           BigInt
+  policyRevision          Int       @default(1)
+  enabled                 Boolean   @default(false)
+  maxAttempts             Int
+  leaseSeconds            Int
+  acknowledgeSeconds      Int
+  baseRetrySeconds        Int
+  maxRetrySeconds         Int
+  providerAuthorityDigest String    @db.Char(64)
+  enabledAt               DateTime? @db.Timestamptz(3)
+  disabledAt              DateTime? @db.Timestamptz(3)
+  createdAt               DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workerRoleName, workerRoleOid, enabled], map: "identity_mail_delivery_enrollment_worker_idx")
+}
+
+/// Append-only PII-free transition evidence. Raw email, token, ciphertext,
+/// Message-ID and provider payloads are deliberately absent.
+model IdentityMailDeliveryEvent {
+  id                      String                    @id
+  tenantId                String
+  outboxId                String
+  inviteId                String
+  transitionRevision      BigInt
+  leaseVersion            Int
+  attemptNumber           Int
+  eventType               String                    @db.VarChar(64)
+  fromStatus              IdentityMailOutboxStatus?
+  toStatus                IdentityMailOutboxStatus
+  leaseOwnerDigest        String?                   @db.Char(64)
+  providerAttemptKey      String?                   @db.VarChar(96)
+  providerAuthorityDigest String?                   @db.Char(64)
+  messageIdDigest         String?                   @db.Char(64)
+  providerOutcomeClass    String?                   @db.VarChar(32)
+  providerReceiptDigest   String?                   @db.Char(64)
+  terminalAckDigest       String?                   @db.Char(64)
+  actorDigest             String?                   @db.Char(64)
+  stateReasonCode         String?                   @db.VarChar(64)
+  eventAt                 DateTime                  @db.Timestamptz(3)
+  createdTransactionId    String                    @db.VarChar(32)
+  eventDigest             String                    @unique(map: "identity_mail_delivery_event_digest_key") @db.Char(64)
+
+  tenant Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  outbox IdentityMailOutbox @relation(fields: [tenantId, outboxId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailDeliveryEvent_outbox_fkey")
+  invite UserInvite         @relation("IdentityMailDeliveryEventInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "IdentityMailDeliveryEvent_invite_fkey")
+
+  @@unique([tenantId, outboxId, transitionRevision], map: "identity_mail_delivery_event_transition_uidx")
+  @@index([tenantId, inviteId, eventAt], map: "identity_mail_delivery_event_invite_idx")
+  @@index([outboxId, eventAt], map: "identity_mail_delivery_event_outbox_idx")
+}
+
+/// Sealed, externally verified Ed25519 provenance for one release gate.
+/// The signed payload is immutable; only an explicit CAS revocation may
+/// advance stateRevision. No application role receives direct table access.
+model ReleaseGateAttestation {
+  id                     String                    @id
+  gateCode               SharedBetaReleaseGateCode
+  contractVersion        String                    @default("RELEASE_GATE_ATTESTATION_V1") @db.VarChar(40)
+  releaseSha             String                    @db.Char(40)
+  environment            String                    @db.VarChar(64)
+  artifactDigest         String                    @db.Char(64)
+  schemaHead             String                    @db.VarChar(128)
+  migrationCount         Int
+  policyManifestDigest   String                    @db.Char(64)
+  payload                Json
+  payloadDigest          String                    @db.Char(64)
+  signatureAlgorithm     String                    @default("Ed25519") @db.VarChar(16)
+  signingKeyId           String                    @db.VarChar(64)
+  provenanceKeyVersion   String                    @db.VarChar(64)
+  publicKeyFingerprint   String                    @db.Char(64)
+  signature              Bytes
+  passedAt               DateTime                  @db.Timestamptz(3)
+  validUntil             DateTime                  @db.Timestamptz(3)
+  stateRevision          Int                       @default(1)
+  revokedAt              DateTime?                 @db.Timestamptz(3)
+  revocationReasonDigest String?                   @db.Char(64)
+  createdAt              DateTime                  @default(now()) @db.Timestamptz(3)
+
+  decisionGates TenantAdmissionDecisionGate[]
+
+  @@unique([id, gateCode], map: "release_gate_attestation_id_code_key")
+  @@unique([payloadDigest], map: "release_gate_attestation_payload_digest_key")
+  @@index([releaseSha, environment, gateCode, validUntil], map: "release_gate_attestation_release_env_code_valid_idx")
+}
+
+/// Persisted SHARED BETA GO bound to one exact tenant revision and the exact
+/// three release gates. Migration 174 permits a one-way consume only from the
+/// sealed same-transaction activation coordinator; revoke remains independent.
+model TenantAdmissionDecision {
+  id                                 String    @id
+  tenantId                           String
+  decision                           String    @default("GO") @db.VarChar(8)
+  requestId                          String
+  requestDigest                      String    @db.Char(64)
+  workflowLocator                    String
+  reservationSubjectId               String
+  expectedClaimRevision              Int
+  shellEvidenceDigest                String    @db.Char(64)
+  releaseSha                         String    @db.Char(40)
+  environment                        String    @db.VarChar(64)
+  artifactDigest                     String    @db.Char(64)
+  schemaHead                         String    @db.VarChar(128)
+  migrationCount                     Int
+  policyManifestDigest               String    @db.Char(64)
+  databaseIdentityDigest             String    @db.Char(64)
+  expectedEntitlementProfileRevision Int
+  expectedExecutionRevision          Int
+  profileDigest                      String    @db.Char(64)
+  gateSetVersion                     String    @default("SHARED_BETA_GATE_SET_V1") @db.VarChar(32)
+  gateSetDigest                      String    @db.Char(64)
+  approvedByUserId                   String
+  approvalReferenceDigest            String    @db.Char(64)
+  payload                            Json
+  payloadDigest                      String    @db.Char(64)
+  signatureAlgorithm                 String    @default("Ed25519") @db.VarChar(16)
+  signingKeyId                       String    @db.VarChar(64)
+  publicKeyFingerprint               String    @db.Char(64)
+  signature                          Bytes
+  approvedAt                         DateTime  @db.Timestamptz(3)
+  validUntil                         DateTime  @db.Timestamptz(3)
+  stateRevision                      Int       @default(1)
+  revokedAt                          DateTime? @db.Timestamptz(3)
+  revocationReasonDigest             String?   @db.Char(64)
+  consumedAt                         DateTime? @db.Timestamptz(3)
+  createdAt                          DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant            Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy        User                               @relation("TenantAdmissionDecisionApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  gates             TenantAdmissionDecisionGate[]
+  activationCommand SharedBetaTenantActivationCommand?
+
+  @@unique([id, tenantId], map: "tenant_admission_decision_id_tenant_key")
+  @@unique([tenantId, requestId], map: "tenant_admission_decision_request_key")
+  @@unique([payloadDigest], map: "tenant_admission_decision_payload_digest_key")
+  @@index([tenantId, validUntil], map: "tenant_admission_decision_tenant_valid_idx")
+  @@index([approvedByUserId, approvedAt], map: "tenant_admission_decision_approver_idx")
+}
+
+/// Immutable exact-code binding between one GO decision and one attestation.
+model TenantAdmissionDecisionGate {
+  decisionId               String
+  gateCode                 SharedBetaReleaseGateCode
+  attestationId            String
+  boundAttestationRevision Int
+  boundPayloadDigest       String                    @db.Char(64)
+  createdAt                DateTime                  @default(now()) @db.Timestamptz(3)
+
+  decision    TenantAdmissionDecision @relation(fields: [decisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attestation ReleaseGateAttestation  @relation(fields: [attestationId, gateCode], references: [id, gateCode], onDelete: Restrict, onUpdate: Restrict, map: "tenant_admission_decision_gate_attestation_fkey")
+
+  @@id([decisionId, gateCode])
+  @@unique([decisionId, attestationId], map: "tenant_admission_decision_gate_attestation_key")
+  @@index([attestationId], map: "tenant_admission_decision_gate_attestation_idx")
+}
+
+/// Single-founder beta-only admission authority. It deliberately does not
+/// depend on an offline customer/platform key. The exact tenant shell, release
+/// SHA, trial policy and stop conditions are persisted before owner activation.
+/// A later hardening release may replace this authority with hardware-backed
+/// signing without changing tenant, role or mailbox isolation.
+model FounderOperatorBetaGo {
+  id                                 String    @id
+  tenantId                           String
+  requestId                          String
+  requestDigest                      String    @db.Char(64)
+  contractVersion                    String    @default("FOUNDER_OPERATOR_BETA_GO_V1") @db.VarChar(48)
+  decision                           String    @default("GO") @db.VarChar(8)
+  releaseSha                         String    @db.Char(40)
+  environment                        String    @db.VarChar(64)
+  workflowLocator                    String    @unique(map: "founder_operator_beta_go_locator_uidx")
+  reservationSubjectId               String
+  expectedClaimRevision              Int
+  shellEvidenceDigest                String    @db.Char(64)
+  expectedEntitlementProfileRevision Int
+  expectedExecutionRevision          Int
+  trialPolicyVersion                 String    @default("FOUNDER_OPERATOR_BETA_TRIAL_V1") @db.VarChar(64)
+  trialDurationSeconds               Int
+  approvedByUserId                   String
+  rollbackOwnerUserId                String
+  singleFounderRiskAccepted          Boolean   @default(true)
+  stopConditions                     Json
+  stopConditionsDigest               String    @db.Char(64)
+  payload                            Json
+  payloadDigest                      String    @unique(map: "founder_operator_beta_go_payload_digest_uidx") @db.Char(64)
+  approvedAt                         DateTime  @db.Timestamptz(3)
+  validUntil                         DateTime  @db.Timestamptz(3)
+  stateRevision                      Int       @default(1)
+  revokedAt                          DateTime? @db.Timestamptz(3)
+  revocationReasonDigest             String?   @db.Char(64)
+  consumedAt                         DateTime? @db.Timestamptz(3)
+  createdAt                          DateTime  @default(now()) @db.Timestamptz(3)
+
+  tenant        Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy    User                                  @relation("FounderOperatorBetaGoApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  rollbackOwner User                                  @relation("FounderOperatorBetaGoRollbackOwner", fields: [rollbackOwnerUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  activation    FounderOperatorBetaActivationCommand?
+
+  @@unique([tenantId, requestId], map: "founder_operator_beta_go_request_uidx")
+  @@unique([id, tenantId], map: "founder_operator_beta_go_id_tenant_uidx")
+  @@index([tenantId, stateRevision, validUntil], map: "founder_operator_beta_go_tenant_state_idx")
+  @@index([releaseSha, environment, validUntil], map: "founder_operator_beta_go_release_valid_idx")
+  @@index([approvedByUserId, approvedAt], map: "founder_operator_beta_go_approver_idx")
+  @@index([rollbackOwnerUserId, approvedAt], map: "founder_operator_beta_go_rollback_idx")
+}
+
+/// Immutable PII-free receipt for the single-founder beta activation path.
+/// The database creates this row, consumes the matching GO, activates the
+/// tenant and releases exactly one initial-owner outbox in one SERIALIZABLE
+/// transaction. Application roles never receive direct table writes.
+model FounderOperatorBetaActivationCommand {
+  id                         String   @id
+  tenantId                   String   @unique(map: "founder_operator_beta_activation_tenant_uidx")
+  action                     String   @default("ACTIVATE_AND_RELEASE_OWNER_INVITE") @db.VarChar(64)
+  requestId                  String
+  requestDigest              String   @db.Char(64)
+  goId                       String   @unique(map: "founder_operator_beta_activation_go_uidx")
+  releaseSha                 String   @db.Char(40)
+  environment                String   @db.VarChar(64)
+  shellEvidenceDigest        String   @db.Char(64)
+  actualShellDigest          String   @db.Char(64)
+  reservationSubjectId       String
+  reservationClaimRevision   Int
+  issueRequestId             String
+  issueRequestDigest         String   @db.Char(64)
+  issueCommandId             String   @unique(map: "founder_operator_beta_activation_issue_uidx")
+  inviteId                   String   @unique(map: "founder_operator_beta_activation_invite_uidx")
+  outboxId                   String   @unique(map: "founder_operator_beta_activation_outbox_uidx")
+  messageKey                 String
+  tokenHash                  String   @db.Char(64)
+  secretCiphertextDigest     String   @db.Char(64)
+  workflowLocator            String   @unique(map: "founder_operator_beta_activation_locator_uidx")
+  activatedByUserId          String
+  entitlementProfileRevision Int
+  executionRevisionBefore    Int
+  executionRevisionAfter     Int
+  trialPolicyVersion         String   @db.VarChar(64)
+  trialDurationSeconds       Int
+  trialStartsAt              DateTime @db.Timestamptz(3)
+  trialEndsAt                DateTime @db.Timestamptz(3)
+  receipt                    Json
+  createdTransactionId       String
+  activatedAt                DateTime @db.Timestamptz(3)
+
+  tenant      Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_tenant_fkey")
+  go          FounderOperatorBetaGo           @relation(fields: [goId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_go_fkey")
+  issue       IdentityOwnerInviteIssueCommand @relation("FounderOperatorBetaActivationIssue", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_issue_fkey")
+  invite      UserInvite                      @relation("FounderOperatorBetaActivationInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_invite_fkey")
+  outbox      IdentityMailOutbox              @relation("FounderOperatorBetaActivationOutbox", fields: [tenantId, outboxId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_outbox_fkey")
+  activatedBy User                            @relation("FounderOperatorBetaActivationActor", fields: [activatedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "FounderOperatorBetaActivationCommand_actor_fkey")
+
+  @@unique([tenantId, action, requestId], map: "founder_operator_beta_activation_request_uidx")
+  @@unique([goId, tenantId], map: "founder_operator_beta_activation_go_tenant_uidx")
+  @@unique([tenantId, issueCommandId], map: "founder_operator_beta_activation_tenant_issue_uidx")
+  @@unique([tenantId, inviteId], map: "founder_operator_beta_activation_tenant_invite_uidx")
+  @@unique([tenantId, outboxId], map: "founder_operator_beta_activation_tenant_outbox_uidx")
+}
+
+/// Immutable, PII-free authority for replacing a revoked or naturally expired
+/// initial OWNER invite. Each command creates a new invite, issue command,
+/// encrypted outbox and token; an existing secret is never resent.
+model FounderOwnerInviteReissueCommand {
+  id                     String   @id
+  tenantId               String
+  action                 String   @default("FOUNDER_OWNER_INVITE_REISSUE") @db.VarChar(64)
+  requestId              String
+  requestDigest          String   @db.Char(64)
+  sequence               Int
+  predecessorInviteId    String   @unique(map: "founder_owner_invite_reissue_predecessor_uidx")
+  predecessorOutboxId    String
+  reservationSubjectId   String   @unique(map: "founder_owner_invite_reissue_reservation_uidx")
+  workflowLocator        String   @unique(map: "founder_owner_invite_reissue_locator_uidx")
+  issueRequestId         String
+  issueRequestDigest     String   @db.Char(64)
+  issueCommandId         String   @unique(map: "founder_owner_invite_reissue_issue_uidx")
+  inviteId               String   @unique(map: "founder_owner_invite_reissue_invite_uidx")
+  outboxId               String   @unique(map: "founder_owner_invite_reissue_outbox_uidx")
+  messageKey             String   @unique(map: "founder_owner_invite_reissue_message_key_uidx")
+  tokenHash              String   @db.Char(64)
+  secretCiphertextDigest String   @db.Char(64)
+  expiresAt              DateTime @db.Timestamptz(3)
+  reissuedByUserId       String
+  reasonDigest           String   @db.Char(64)
+  supportTicketDigest    String?  @db.Char(64)
+  receipt                Json
+  createdTransactionId   String
+  reissuedAt             DateTime @db.Timestamptz(3)
+
+  @@unique([tenantId, action, requestId], map: "founder_owner_invite_reissue_request_uidx")
+  @@unique([tenantId, sequence], map: "founder_owner_invite_reissue_sequence_uidx")
+  @@unique([tenantId, inviteId], map: "founder_owner_invite_reissue_tenant_invite_uidx")
+  @@unique([tenantId, outboxId], map: "founder_owner_invite_reissue_tenant_outbox_uidx")
+  @@index([tenantId, sequence], map: "founder_owner_invite_reissue_tenant_sequence_idx")
+}
+
+/// Sealed CI-build provenance for one exact artifact, migration manifest,
+/// policy manifest and explicitly signed trial duration. Application roles
+/// receive no direct access.
+model SharedBetaBuildProvenance {
+  id                      String    @id
+  authorityDomain         String    @default("SHARED_BETA_BUILD") @db.VarChar(32)
+  contractVersion         String    @default("SHARED_BETA_BUILD_PROVENANCE_V1") @db.VarChar(64)
+  releaseSha              String    @db.Char(40)
+  buildTime               String
+  builtAt                 DateTime  @db.Timestamptz(3)
+  artifactContentDigest   String    @db.Char(64)
+  releaseManifestDigest   String    @db.Char(64)
+  schemaHead              String    @db.VarChar(128)
+  migrationCount          Int
+  migrationManifestDigest String    @db.Char(64)
+  policyManifestDigest    String    @db.Char(64)
+  trialPolicyVersion      String    @db.VarChar(64)
+  trialDurationSeconds    Int
+  buildReferenceDigest    String    @db.Char(64)
+  payload                 Json
+  payloadDigest           String    @unique(map: "shared_beta_build_payload_digest_uidx") @db.Char(64)
+  signatureAlgorithm      String    @default("Ed25519") @db.VarChar(16)
+  signingKeyId            String    @db.VarChar(64)
+  publicKeyFingerprint    String    @db.Char(64)
+  signatureBase64url      String
+  validUntil              DateTime  @db.Timestamptz(3)
+  stateRevision           Int       @default(1)
+  revokedAt               DateTime? @db.Timestamptz(3)
+  revocationReasonDigest  String?   @db.Char(64)
+  createdAt               DateTime  @default(now()) @db.Timestamptz(3)
+
+  challenges         SharedBetaRuntimeReleaseChallenge[]
+  markers            SharedBetaRuntimeReleaseMarker[]
+  activationCommands SharedBetaTenantActivationCommand[]
+
+  @@index([releaseSha, validUntil], map: "shared_beta_build_release_valid_idx")
+}
+
+/// UNLOGGED singleton anchoring release provenance to one concrete PostgreSQL
+/// instance and boot epoch. It is populated only by the owner-only challenge
+/// boundary and intentionally absent from physical backups and standbys.
+model SharedBetaRuntimeInstanceAnchor {
+  id          String   @id @default("SHARED_BETA_RUNTIME_INSTANCE") @db.VarChar(64)
+  anchorNonce String   @db.Char(64)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+}
+
+/// One-shot database-generated challenge that binds deployment provenance to
+/// the actual database identity, migration state and dedicated activation role.
+model SharedBetaRuntimeReleaseChallenge {
+  id                      String    @id
+  buildProvenanceId       String
+  environment             String    @db.VarChar(64)
+  activationRoleName      String    @db.VarChar(63)
+  activationRoleOid       BigInt
+  installerRoleName       String    @db.VarChar(63)
+  installerRoleOid        BigInt
+  creationNonce           String    @db.Char(64)
+  databaseIdentityDigest  String    @db.Char(64)
+  schemaHead              String    @db.VarChar(128)
+  migrationCount          Int
+  migrationManifestDigest String    @db.Char(64)
+  expectedStateRevision   Int
+  candidateGeneration     BigInt
+  predecessorMarkerId     String?
+  predecessorMarkerDigest String    @db.Char(64)
+  challengeDigest         String    @unique(map: "shared_beta_runtime_challenge_digest_uidx") @db.Char(64)
+  actualContextDigest     String    @db.Char(64)
+  stateRevision           Int       @default(1)
+  consumedAt              DateTime? @db.Timestamptz(3)
+  createdAt               DateTime  @default(now()) @db.Timestamptz(3)
+  validUntil              DateTime  @db.Timestamptz(3)
+
+  build  SharedBetaBuildProvenance       @relation(fields: [buildProvenanceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseChallenge_build_fkey")
+  marker SharedBetaRuntimeReleaseMarker? @relation("SharedBetaRuntimeReleaseChallengeMarker")
+
+  @@index([stateRevision, validUntil], map: "shared_beta_runtime_challenge_expiry_idx")
+}
+
+/// Sealed ops-deployment marker for one exact verified build and one consumed
+/// database challenge. Only the current unrevoked marker can authorize an
+/// activation coordinator.
+model SharedBetaRuntimeReleaseMarker {
+  id                       String    @id
+  buildProvenanceId        String
+  challengeId              String    @unique(map: "shared_beta_runtime_marker_challenge_uidx")
+  authorityDomain          String    @default("SHARED_BETA_DEPLOYMENT") @db.VarChar(32)
+  contractVersion          String    @default("SHARED_BETA_DEPLOYMENT_PROVENANCE_V1") @db.VarChar(64)
+  generation               BigInt    @unique(map: "shared_beta_runtime_marker_generation_uidx")
+  environment              String    @db.VarChar(64)
+  buildPayloadDigest       String    @db.Char(64)
+  deploymentInstanceDigest String    @db.Char(64)
+  databaseIdentityDigest   String    @db.Char(64)
+  databaseChallengeDigest  String    @db.Char(64)
+  actualContextDigest      String    @db.Char(64)
+  schemaHead               String    @db.VarChar(128)
+  migrationCount           Int
+  migrationManifestDigest  String    @db.Char(64)
+  activationDatabaseRole   String    @db.VarChar(63)
+  coordinatorRoleName      String    @db.VarChar(63)
+  coordinatorRoleOid       BigInt
+  predecessorMarkerId      String?
+  predecessorMarkerDigest  String    @db.Char(64)
+  payload                  Json
+  payloadDigest            String    @unique(map: "shared_beta_runtime_marker_payload_digest_uidx") @db.Char(64)
+  signatureAlgorithm       String    @default("Ed25519") @db.VarChar(16)
+  signingKeyId             String    @db.VarChar(64)
+  publicKeyFingerprint     String    @db.Char(64)
+  signatureBase64url       String
+  deployedAt               DateTime  @db.Timestamptz(3)
+  validUntil               DateTime  @db.Timestamptz(3)
+  stateRevision            Int       @default(1)
+  revokedAt                DateTime? @db.Timestamptz(3)
+  revocationReasonDigest   String?   @db.Char(64)
+  createdAt                DateTime  @default(now()) @db.Timestamptz(3)
+
+  build              SharedBetaBuildProvenance           @relation(fields: [buildProvenanceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseMarker_build_fkey")
+  challenge          SharedBetaRuntimeReleaseChallenge   @relation("SharedBetaRuntimeReleaseChallengeMarker", fields: [challengeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseMarker_challenge_fkey")
+  predecessor        SharedBetaRuntimeReleaseMarker?     @relation("SharedBetaRuntimeReleaseChain", fields: [predecessorMarkerId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseMarker_predecessor_fkey")
+  successors         SharedBetaRuntimeReleaseMarker[]    @relation("SharedBetaRuntimeReleaseChain")
+  currentForStates   SharedBetaRuntimeReleaseState[]
+  activationCommands SharedBetaTenantActivationCommand[]
+}
+
+/// Singleton CAS pointer to the only current runtime-release marker.
+model SharedBetaRuntimeReleaseState {
+  id              String   @id @db.VarChar(64)
+  currentMarkerId String?
+  generation      BigInt   @default(0)
+  stateRevision   Int      @default(0)
+  updatedAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  currentMarker SharedBetaRuntimeReleaseMarker? @relation(fields: [currentMarkerId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaRuntimeReleaseState_marker_fkey")
+}
+
+/// Immutable PII-free receipt binding one atomic tenant activation, admission
+/// consumption, dormant OWNER issue and exact HOLD-to-PENDING transition.
+model SharedBetaTenantActivationCommand {
+  id                         String   @id
+  tenantId                   String   @unique(map: "shared_beta_activation_tenant_uidx")
+  action                     String   @default("ACTIVATE_AND_RELEASE_OWNER_INVITE") @db.VarChar(64)
+  requestId                  String
+  requestDigest              String   @db.Char(64)
+  decisionId                 String   @unique(map: "shared_beta_activation_decision_uidx")
+  markerId                   String
+  markerPayloadDigest        String   @db.Char(64)
+  markerGeneration           BigInt
+  buildProvenanceId          String
+  actualContextDigest        String   @db.Char(64)
+  actualShellDigest          String   @db.Char(64)
+  reservationSubjectId       String
+  reservationClaimRevision   Int
+  issueRequestId             String
+  issueRequestDigest         String   @db.Char(64)
+  issueCommandId             String   @unique(map: "shared_beta_activation_issue_uidx")
+  inviteId                   String   @unique(map: "shared_beta_activation_invite_uidx")
+  outboxId                   String   @unique(map: "shared_beta_activation_outbox_uidx")
+  messageKey                 String
+  tokenHash                  String   @db.Char(64)
+  secretCiphertextDigest     String   @db.Char(64)
+  workflowLocator            String   @unique(map: "shared_beta_activation_locator_uidx")
+  activatedByUserId          String
+  entitlementProfileRevision Int
+  executionRevisionBefore    Int
+  executionRevisionAfter     Int
+  trialPolicyVersion         String   @db.VarChar(64)
+  trialDurationSeconds       Int
+  trialStartsAt              DateTime @db.Timestamptz(3)
+  trialEndsAt                DateTime @db.Timestamptz(3)
+  receipt                    Json
+  createdTransactionId       String
+  activatedAt                DateTime @db.Timestamptz(3)
+
+  tenant      Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_tenant_fkey")
+  decision    TenantAdmissionDecision         @relation(fields: [decisionId, tenantId], references: [id, tenantId], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_decision_fkey")
+  marker      SharedBetaRuntimeReleaseMarker  @relation(fields: [markerId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_marker_fkey")
+  build       SharedBetaBuildProvenance       @relation(fields: [buildProvenanceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_build_fkey")
+  issue       IdentityOwnerInviteIssueCommand @relation("SharedBetaTenantActivationIssue", fields: [tenantId, issueCommandId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_issue_fkey")
+  invite      UserInvite                      @relation("SharedBetaTenantActivationInvite", fields: [tenantId, inviteId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_invite_fkey")
+  outbox      IdentityMailOutbox              @relation("SharedBetaTenantActivationOutbox", fields: [tenantId, outboxId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_outbox_fkey")
+  activatedBy User                            @relation("SharedBetaTenantActivationActor", fields: [activatedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "SharedBetaTenantActivationCommand_actor_fkey")
+
+  @@unique([tenantId, action, requestId], map: "shared_beta_activation_request_uidx")
+  @@unique([decisionId, tenantId], map: "shared_beta_activation_decision_tenant_uidx")
+  @@unique([tenantId, issueCommandId], map: "shared_beta_activation_tenant_issue_uidx")
+  @@unique([tenantId, inviteId], map: "shared_beta_activation_tenant_invite_uidx")
+  @@unique([tenantId, outboxId], map: "shared_beta_activation_tenant_outbox_uidx")
 }
 
 model UserStoreAccess {
@@ -517,29 +1297,31 @@ model EmailVerificationToken {
 }
 
 model Store {
-  id                    String               @id @default(uuid())
-  tenantId              String
-  name                  String
-  publicSlug            String?
-  address               String?
-  city                  String?
-  cityFiasId            String?
-  cityKladrId           String?
-  latitude              Decimal?             @db.Decimal(9, 6)
-  longitude             Decimal?             @db.Decimal(9, 6)
-  yandexMapsUrl         String?
-  gameLogoUrl           String?
-  gamificationEnabled   Boolean              @default(false)
-  timeZone              String?
-  isActive              Boolean              @default(true)
-  externalProvider      IntegrationProvider?
-  externalDomain        String?
-  externalClubId        String?
-  integrationSourceId   String?
-  computerCount         Int?
-  computerCountSyncedAt DateTime?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
+  id                         String               @id @default(uuid())
+  tenantId                   String
+  name                       String
+  publicSlug                 String?
+  address                    String?
+  city                       String?
+  cityFiasId                 String?
+  cityKladrId                String?
+  latitude                   Decimal?             @db.Decimal(9, 6)
+  longitude                  Decimal?             @db.Decimal(9, 6)
+  yandexMapsUrl              String?
+  gameLogoUrl                String?
+  gamificationEnabled        Boolean              @default(false)
+  backgroundExecutionEnabled Boolean              @default(false)
+  executionRevision          Int                  @default(0)
+  timeZone                   String?
+  isActive                   Boolean              @default(true)
+  externalProvider           IntegrationProvider?
+  externalDomain             String?
+  externalClubId             String?
+  integrationSourceId        String?
+  computerCount              Int?
+  computerCountSyncedAt      DateTime?
+  createdAt                  DateTime             @default(now())
+  updatedAt                  DateTime             @updatedAt
 
   tenant                          Tenant                            @relation(fields: [tenantId], references: [id])
   integrationSource               IntegrationSource?                @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
@@ -561,6 +1343,8 @@ model Store {
   guestGameRewards                GuestGameReward[]
   guestGameRewardWalletItems      GuestGameRewardWalletItem[]
   guestGameDeliveries             GuestGameDelivery[]
+  guestGameDeliveryEvents         GuestGameDeliveryEvent[]
+  guestGameDeliveryAttempts       GuestGameDeliveryAttempt[]
   guestGameAuditEvents            GuestGameAuditEvent[]
   guestGameRuleDecisions          GuestGameRuleDecision[]
   guestGameEntitlements           GuestGameEntitlement[]
@@ -589,6 +1373,7 @@ model Store {
   userAccesses                    UserStoreAccess[]
   langameProductConfigurations    LangameClubProductConfiguration[]
 
+  @@unique([tenantId, id], map: "store_tenant_id_uidx")
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@unique([tenantId, publicSlug], map: "store_tenant_public_slug_uidx")
   @@index([tenantId])
@@ -596,11 +1381,11 @@ model Store {
 }
 
 model Category {
-  id             String                  @id @default(uuid())
-  tenantId       String
-  name           String
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   tenant         Tenant                  @relation(fields: [tenantId], references: [id])
   products       Product[]
@@ -635,18 +1420,18 @@ model CategorySourceMapping {
 }
 
 model CategorySourceMappingEvent {
-  id               String   @id @default(uuid())
-  tenantId         String
-  mappingId        String?
-  productId        String?
-  action           String
-  source           IntegrationProvider
-  externalDomain   String
-  externalGroupId  String
-  previousValue    Json?
-  nextValue        Json?
-  createdByUserId  String?
-  createdAt        DateTime @default(now())
+  id              String              @id @default(uuid())
+  tenantId        String
+  mappingId       String?
+  productId       String?
+  action          String
+  source          IntegrationProvider
+  externalDomain  String
+  externalGroupId String
+  previousValue   Json?
+  nextValue       Json?
+  createdByUserId String?
+  createdAt       DateTime            @default(now())
 
   tenant        Tenant                 @relation(fields: [tenantId], references: [id])
   mapping       CategorySourceMapping? @relation(fields: [mappingId], references: [id], onDelete: SetNull)
@@ -700,15 +1485,15 @@ model Product {
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
 
-  tenant                    Tenant                            @relation(fields: [tenantId], references: [id])
-  category                  Category?                         @relation(fields: [categoryId], references: [id])
-  supplier                  Supplier?                         @relation(fields: [supplierId], references: [id])
-  canonicalProduct          CanonicalProduct?                 @relation(fields: [canonicalProductId], references: [id], onDelete: SetNull)
-  salesFacts                SalesFact[]
-  inventorySnapshots        InventorySnapshot[]
-  stockMovements            StockMovement[]
-  oosExclusions             ProductOosExclusion[]
-  langameClubConfigurations LangameClubProductConfiguration[]
+  tenant                      Tenant                            @relation(fields: [tenantId], references: [id])
+  category                    Category?                         @relation(fields: [categoryId], references: [id])
+  supplier                    Supplier?                         @relation(fields: [supplierId], references: [id])
+  canonicalProduct            CanonicalProduct?                 @relation(fields: [canonicalProductId], references: [id], onDelete: SetNull)
+  salesFacts                  SalesFact[]
+  inventorySnapshots          InventorySnapshot[]
+  stockMovements              StockMovement[]
+  oosExclusions               ProductOosExclusion[]
+  langameClubConfigurations   LangameClubProductConfiguration[]
   categorySourceMappingEvents CategorySourceMappingEvent[]
 
   @@unique([tenantId, article])
@@ -826,22 +1611,24 @@ model RecommendationState {
 }
 
 model ReportDigestScheduleRun {
-  id               String    @id @default(uuid())
-  tenantId         String
-  type             String
-  scheduledForDate String
-  status           String    @default("RUNNING")
-  startedAt        DateTime  @default(now())
-  completedAt      DateTime?
-  sentCount        Int       @default(0)
-  errorMessage     String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                String    @id @default(uuid())
+  tenantId          String
+  type              String
+  scheduledForDate  String
+  status            String    @default("RUNNING")
+  startedAt         DateTime  @default(now())
+  completedAt       DateTime?
+  sentCount         Int       @default(0)
+  executionRevision Int?
+  errorMessage      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, type, scheduledForDate], map: "report_digest_schedule_tenant_type_date_uidx")
   @@index([tenantId, status, startedAt], map: "report_digest_schedule_status_started_idx")
+  @@index([tenantId, executionRevision, status], map: "report_digest_schedule_execution_revision_idx")
 }
 
 model SalesFact {
@@ -1302,6 +2089,7 @@ model Guest {
   guestPortalOtpChallenges   GuestPortalOtpChallenge[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
+  @@unique([tenantId, id], map: "guest_tenant_id_uidx")
   @@index([tenantId])
   @@index([tenantId, externalGuestTypeId])
   @@index([tenantId, lastActivityAt])
@@ -1634,37 +2422,37 @@ model MarketingMissionReward {
 }
 
 model GuestGameProfile {
-  id                 String                          @id @default(uuid())
-  tenantId           String
-  guestId            String?
-  leadId             String?
-  createdByUserId    String?
-  displayName        String?
-  contactMasked      String?
-  phoneHash          String?
-  phoneEncrypted     String?
-  telegramIdentity   String?
-  maxIdentity        String?
-  phoneConsentStatus GuestCommunicationConsentStatus @default(UNKNOWN)
-  phoneConsentSource String?
-  phoneConsentAt     DateTime?
-  unsubscribedAt     DateTime?
-  xp                 Int                             @default(0)
-  level              Int                             @default(1)
-  status             String                          @default("ACTIVE")
-  isStaffTest        Boolean                         @default(false)
-  staffTestReason    String?
-  staffTestMatchedAt DateTime?
-  lastActivityAt     DateTime?
-  gameActivatedAt    DateTime?
-  preActivationXpExcluded Int                        @default(0)
-  createdAt          DateTime                        @default(now())
-  updatedAt          DateTime                        @updatedAt
+  id                      String                          @id @default(uuid())
+  tenantId                String
+  guestId                 String?
+  leadId                  String?
+  createdByUserId         String?
+  displayName             String?
+  contactMasked           String?
+  phoneHash               String?
+  phoneEncrypted          String?
+  telegramIdentity        String?
+  maxIdentity             String?
+  phoneConsentStatus      GuestCommunicationConsentStatus @default(UNKNOWN)
+  phoneConsentSource      String?
+  phoneConsentAt          DateTime?
+  unsubscribedAt          DateTime?
+  xp                      Int                             @default(0)
+  level                   Int                             @default(1)
+  status                  String                          @default("ACTIVE")
+  isStaffTest             Boolean                         @default(false)
+  staffTestReason         String?
+  staffTestMatchedAt      DateTime?
+  lastActivityAt          DateTime?
+  gameActivatedAt         DateTime?
+  preActivationXpExcluded Int                             @default(0)
+  createdAt               DateTime                        @default(now())
+  updatedAt               DateTime                        @updatedAt
 
-  tenant                   Tenant                           @relation(fields: [tenantId], references: [id])
-  guest                    Guest?                           @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  lead                     GuestCrmLead?                    @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  createdByUser            User?                            @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant                   Tenant                            @relation(fields: [tenantId], references: [id])
+  guest                    Guest?                            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lead                     GuestCrmLead?                     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdByUser            User?                             @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   rewards                  GuestGameReward[]
   completionNotifications  GuestGameCompletionNotification[]
   rewardWalletItems        GuestGameRewardWalletItem[]
@@ -1687,6 +2475,7 @@ model GuestGameProfile {
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
   @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")
+  @@unique([tenantId, id], map: "guest_game_profile_tenant_id_uidx")
   @@index([tenantId, status, updatedAt], map: "guest_game_profile_status_idx")
   @@index([tenantId, isStaffTest], map: "guest_game_profile_staff_test_idx")
   @@index([tenantId, phoneHash], map: "guest_game_profile_phone_idx")
@@ -1695,22 +2484,22 @@ model GuestGameProfile {
 }
 
 model GuestGameProfileIdentityLink {
-  id                  String              @id @default(uuid())
-  tenantId            String
-  profileId           String
-  guestId             String
-  externalProvider    IntegrationProvider
-  externalDomain      String
-  externalGuestId     String
-  status              String              @default("ACTIVE")
-  matchSource         String
-  confidence          String              @default("EXACT")
-  consecutiveMatches  Int                 @default(1)
-  verifiedAt          DateTime
-  lastSeenAt          DateTime
-  supersededAt        DateTime?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  id                 String              @id @default(uuid())
+  tenantId           String
+  profileId          String
+  guestId            String
+  externalProvider   IntegrationProvider
+  externalDomain     String
+  externalGuestId    String
+  status             String              @default("ACTIVE")
+  matchSource        String
+  confidence         String              @default("EXACT")
+  consecutiveMatches Int                 @default(1)
+  verifiedAt         DateTime
+  lastSeenAt         DateTime
+  supersededAt       DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   tenant  Tenant           @relation(fields: [tenantId], references: [id])
   profile GuestGameProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
@@ -1892,63 +2681,65 @@ model GuestGameVisualDraft {
 }
 
 model GuestGameReward {
-  id                String               @id @default(uuid())
-  tenantId          String
-  profileId         String?
-  guestId           String?
-  lootBoxId         String?
-  missionId         String?
-  seasonId          String?
-  storeId           String?
-  createdByUserId   String?
-  approvedByUserId  String?
-  status            String               @default("PENDING")
-  source            String               @default("MANUAL")
-  externalProvider  IntegrationProvider?
-  externalDomain    String?
-  externalId        String?
-  originKey         String?
-  idempotencyKey    String?
-  guestExternalId   String?
-  rewardType        String
-  rewardAmount      Decimal              @default(0) @db.Decimal(12, 2)
-  rewardLabel       String
-  rewardRarity      String?
-  rewardRarityLabel String?
-  rewardDropChance  Decimal?             @db.Decimal(8, 4)
-  rewardCode        String?
-  claimRequired     Boolean              @default(true)
+  id                  String               @id @default(uuid())
+  tenantId            String
+  profileId           String?
+  guestId             String?
+  lootBoxId           String?
+  missionId           String?
+  seasonId            String?
+  storeId             String?
+  createdByUserId     String?
+  approvedByUserId    String?
+  status              String               @default("PENDING")
+  source              String               @default("MANUAL")
+  externalProvider    IntegrationProvider?
+  externalDomain      String?
+  externalId          String?
+  originKey           String?
+  idempotencyKey      String?
+  guestExternalId     String?
+  rewardType          String
+  rewardAmount        Decimal              @default(0) @db.Decimal(12, 2)
+  rewardLabel         String
+  rewardRarity        String?
+  rewardRarityLabel   String?
+  rewardDropChance    Decimal?             @db.Decimal(8, 4)
+  rewardCode          String?
+  claimRequired       Boolean              @default(true)
   deliveryRequestedAt DateTime?
-  claimExpiresAt    DateTime?
-  qualifiedAt       DateTime             @default(now())
-  expiresAt         DateTime?
-  paidAt            DateTime?
-  note              String?
-  evidence          Json?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  claimExpiresAt      DateTime?
+  qualifiedAt         DateTime             @default(now())
+  expiresAt           DateTime?
+  paidAt              DateTime?
+  note                String?
+  evidence            Json?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
-  tenant             Tenant                   @relation(fields: [tenantId], references: [id])
-  profile            GuestGameProfile?        @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  guest              Guest?                   @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  lootBox            GuestGameLootBox?        @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
-  mission            GuestGameMission?        @relation(fields: [missionId], references: [id], onDelete: SetNull)
-  season             GuestGameSeason?         @relation(fields: [seasonId], references: [id], onDelete: SetNull)
-  store              Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser      User?                    @relation("GuestGameRewardCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  approvedByUser     User?                    @relation("GuestGameRewardApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  deliveries         GuestGameDelivery[]
-  deliveryEvents     GuestGameDeliveryEvent[]
-  bonusLedgerEntries GuestBonusLedgerEntry[]
-  entitlements       GuestGameEntitlement[] @relation("GuestGameEntitlementOutcomeReward")
-  sourceEntitlements GuestGameEntitlement[] @relation("GuestGameEntitlementSourceReward")
-  rewardIntents      GuestGameRewardIntent[]
-  rewardEffects      GuestGameRewardEffect[]
+  tenant                  Tenant                            @relation(fields: [tenantId], references: [id])
+  profile                 GuestGameProfile?                 @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest                   Guest?                            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lootBox                 GuestGameLootBox?                 @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
+  mission                 GuestGameMission?                 @relation(fields: [missionId], references: [id], onDelete: SetNull)
+  season                  GuestGameSeason?                  @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  store                   Store?                            @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser           User?                             @relation("GuestGameRewardCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUser          User?                             @relation("GuestGameRewardApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  deliveries              GuestGameDelivery[]
+  deliveryEvents          GuestGameDeliveryEvent[]
+  deliveryAttempts        GuestGameDeliveryAttempt[]
+  bonusLedgerEntries      GuestBonusLedgerEntry[]
+  entitlements            GuestGameEntitlement[]            @relation("GuestGameEntitlementOutcomeReward")
+  sourceEntitlements      GuestGameEntitlement[]            @relation("GuestGameEntitlementSourceReward")
+  rewardIntents           GuestGameRewardIntent[]
+  rewardEffects           GuestGameRewardEffect[]
   completionNotifications GuestGameCompletionNotification[]
-  walletItems        GuestGameRewardWalletItem[]
+  walletItems             GuestGameRewardWalletItem[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_reward_external_uidx")
   @@unique([tenantId, idempotencyKey], map: "guest_game_reward_idempotency_uidx")
+  @@unique([tenantId, id], map: "guest_game_reward_tenant_id_uidx")
   @@index([tenantId, originKey], map: "guest_game_reward_origin_idx")
   @@index([tenantId, status, qualifiedAt], map: "guest_game_reward_status_idx")
   @@index([tenantId, claimRequired, deliveryRequestedAt, claimExpiresAt, status], map: "guest_game_reward_claim_queue_idx")
@@ -1981,7 +2772,7 @@ model GuestGameCompletionNotification {
 }
 
 model GuestGameRewardWalletItem {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   tenantId      String
   profileId     String
   storeId       String?
@@ -1993,13 +2784,13 @@ model GuestGameRewardWalletItem {
   sourceId      String?
   title         String
   rewardLabel   String
-  status        String   @default("PENDING")
-  claimXpDelta  Int      @default(0)
-  availableAt   DateTime @default(now())
+  status        String    @default("PENDING")
+  claimXpDelta  Int       @default(0)
+  availableAt   DateTime  @default(now())
   expiresAt     DateTime
   claimedAt     DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   tenant      Tenant                @relation(fields: [tenantId], references: [id])
   profile     GuestGameProfile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
@@ -2022,39 +2813,76 @@ model GuestGameRewardWalletItem {
 }
 
 model GuestGameDelivery {
-  id                    String    @id @default(uuid())
-  tenantId              String
-  rewardId              String
-  profileId             String?
-  guestId               String?
-  storeId               String?
-  createdByUserId       String?
-  channel               String    @default("MANUAL")
-  status                String    @default("READY")
-  readinessStatus       String
-  recipientMasked       String?
-  channelIdentityMasked String?
-  messageTitle          String
-  messageBody           String
-  blockers              Json?
-  metadata              Json?
-  preparedAt            DateTime  @default(now())
-  sentAt                DateTime?
-  failedAt              DateTime?
-  canceledAt            DateTime?
-  note                  String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                          String    @id @default(uuid())
+  tenantId                    String
+  rewardId                    String
+  profileId                   String?
+  guestId                     String?
+  storeId                     String?
+  createdByUserId             String?
+  channel                     String    @default("MANUAL")
+  status                      String    @default("READY")
+  readinessStatus             String
+  recipientMasked             String?
+  channelIdentityMasked       String?
+  messageTitle                String
+  messageBody                 String
+  blockers                    Json?
+  metadata                    Json?
+  preparedAt                  DateTime  @default(now())
+  sentAt                      DateTime?
+  failedAt                    DateTime?
+  canceledAt                  DateTime?
+  note                        String?
+  attempts                    Int       @default(0)
+  attemptBudget               Int       @default(5)
+  claimGeneration             Int       @default(0)
+  transitionRevision          BigInt    @default(0)
+  claimJobKind                String?
+  integrityState              String    @default("VERIFIED")
+  integrityReasonCode         String?
+  stateReasonCode             String?
+  executionRevision           Int?
+  storeExecutionRevision      Int?
+  leaseOwner                  String?
+  claimKeyVersion             Int?
+  claimOwnerDigest            String?
+  claimTokenDigest            String?
+  claimedAt                   DateTime? @db.Timestamptz(3)
+  leaseExpiresAt              DateTime? @db.Timestamptz(3)
+  acknowledgeUntil            DateTime? @db.Timestamptz(3)
+  effectInputDigest           String?
+  providerConfigDigest        String?
+  providerAuthorityRevision   Int?
+  workloadIdentityDigest      String?
+  sendGrantDigest             String?
+  sendGrantExpiresAt          DateTime? @db.Timestamptz(3)
+  providerAttemptKey          String?
+  providerAttemptedAt         DateTime? @db.Timestamptz(3)
+  providerOutcomeClass        String?
+  providerOutcomeCode         String?
+  providerObservedAt          DateTime? @db.Timestamptz(3)
+  providerReceiptDigest       String?
+  providerReceiptRefEncrypted Bytes?
+  providerReceiptKeyVersion   Int?
+  terminalAckDigest           String?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
 
-  tenant        Tenant                   @relation(fields: [tenantId], references: [id])
-  reward        GuestGameReward          @relation(fields: [rewardId], references: [id], onDelete: Cascade)
-  profile       GuestGameProfile?        @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  guest         Guest?                   @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  store         Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?                    @relation("GuestGameDeliveryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  events        GuestGameDeliveryEvent[]
+  // Migration 166 intentionally retains an additional DB-native
+  // GuestGameDelivery_storeId_fkey to Store(id). Prisma models the composite
+  // relation below; the direct FK preserves the legacy referential contract.
+  tenant           Tenant                     @relation(fields: [tenantId], references: [id])
+  reward           GuestGameReward            @relation(fields: [tenantId, rewardId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDelivery_tenantId_rewardId_fkey")
+  profile          GuestGameProfile?          @relation(fields: [tenantId, profileId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDelivery_tenantId_profileId_fkey")
+  guest            Guest?                     @relation(fields: [tenantId, guestId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDelivery_tenantId_guestId_fkey")
+  store            Store?                     @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDelivery_tenantId_storeId_fkey")
+  createdByUser    User?                      @relation("GuestGameDeliveryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  events           GuestGameDeliveryEvent[]
+  deliveryAttempts GuestGameDeliveryAttempt[]
 
   @@unique([tenantId, rewardId, channel], map: "guest_game_delivery_reward_channel_uidx")
+  @@unique([tenantId, id], map: "guest_game_delivery_tenant_id_uidx")
   @@index([tenantId, status, preparedAt], map: "guest_game_delivery_status_idx")
   @@index([tenantId, readinessStatus], map: "guest_game_delivery_readiness_idx")
   @@index([rewardId], map: "guest_game_delivery_reward_idx")
@@ -2064,29 +2892,117 @@ model GuestGameDelivery {
   @@index([createdByUserId], map: "guest_game_delivery_created_by_idx")
 }
 
+// Migration 166 enforces append-only Event evidence with a DB trigger:
+// UPDATE always fails and ordinary DELETE is denied.
 model GuestGameDeliveryEvent {
-  id          String   @id @default(uuid())
-  tenantId    String
-  deliveryId  String
-  rewardId    String
-  actorUserId String?
-  eventType   String
-  fromStatus  String?
-  toStatus    String?
-  channel     String?
-  note        String?
-  payload     Json?
-  createdAt   DateTime @default(now())
+  id                          String    @id @default(uuid())
+  tenantId                    String
+  deliveryId                  String
+  rewardId                    String
+  storeId                     String?
+  attemptId                   String?
+  actorUserId                 String?
+  eventType                   String
+  transitionKey               String?
+  transitionRevision          BigInt?
+  fromStatus                  String?
+  toStatus                    String?
+  channel                     String?
+  claimGeneration             Int?
+  attemptNumber               Int?
+  claimJobKind                String?
+  executionRevision           Int?
+  storeExecutionRevision      Int?
+  claimKeyVersion             Int?
+  claimOwnerDigest            String?
+  claimTokenDigest            String?
+  claimedAt                   DateTime? @db.Timestamptz(3)
+  leaseExpiresAt              DateTime? @db.Timestamptz(3)
+  acknowledgeUntil            DateTime? @db.Timestamptz(3)
+  effectInputDigest           String?
+  providerConfigDigest        String?
+  providerAuthorityRevision   Int?
+  workloadIdentityDigest      String?
+  providerAttemptKey          String?
+  providerAttemptedAt         DateTime? @db.Timestamptz(3)
+  sendGrantDigest             String?
+  sendGrantExpiresAt          DateTime? @db.Timestamptz(3)
+  providerOutcomeClass        String?
+  providerOutcomeCode         String?
+  providerObservedAt          DateTime? @db.Timestamptz(3)
+  providerReceiptDigest       String?
+  providerReceiptRefEncrypted Bytes?
+  providerReceiptKeyVersion   Int?
+  terminalAckDigest           String?
+  integrityState              String?
+  integrityReasonCode         String?
+  stateReasonCode             String?
+  adapterVersion              String?
+  httpStatusClass             Int?
+  provenanceDigest            String?
+  note                        String?
+  payload                     Json?
+  createdAt                   DateTime  @default(now())
 
-  tenant    Tenant            @relation(fields: [tenantId], references: [id])
-  delivery  GuestGameDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
-  reward    GuestGameReward   @relation(fields: [rewardId], references: [id], onDelete: Cascade)
-  actorUser User?             @relation("GuestGameDeliveryEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  tenant    Tenant                    @relation(fields: [tenantId], references: [id])
+  delivery  GuestGameDelivery         @relation(fields: [tenantId, deliveryId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryEvent_tenantId_deliveryId_fkey")
+  reward    GuestGameReward           @relation(fields: [tenantId, rewardId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryEvent_tenantId_rewardId_fkey")
+  store     Store?                    @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryEvent_tenantId_storeId_fkey")
+  attempt   GuestGameDeliveryAttempt? @relation(fields: [tenantId, attemptId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryEvent_tenantId_attemptId_fkey")
+  actorUser User?                     @relation("GuestGameDeliveryEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, transitionKey], map: "guest_game_delivery_event_transition_uidx")
   @@index([tenantId, eventType, createdAt], map: "guest_game_delivery_event_type_idx")
   @@index([deliveryId], map: "guest_game_delivery_event_delivery_idx")
   @@index([rewardId], map: "guest_game_delivery_event_reward_idx")
+  @@index([tenantId, storeId], map: "guest_game_delivery_event_store_idx")
+  @@index([tenantId, attemptId], map: "guest_game_delivery_event_attempt_idx")
   @@index([actorUserId], map: "guest_game_delivery_event_actor_idx")
+}
+
+// Migration 166 validates Attempt inserts against their Delivery and enforces
+// append-only evidence with a DB trigger.
+model GuestGameDeliveryAttempt {
+  id                        String   @id @default(uuid())
+  tenantId                  String
+  deliveryId                String
+  rewardId                  String
+  storeId                   String
+  channel                   String
+  claimGeneration           Int
+  attemptNumber             Int
+  claimJobKind              String
+  executionRevision         Int
+  storeExecutionRevision    Int
+  claimKeyVersion           Int
+  claimOwnerDigest          String
+  claimTokenDigest          String
+  claimedAt                 DateTime @db.Timestamptz(3)
+  leaseExpiresAt            DateTime @db.Timestamptz(3)
+  acknowledgeUntil          DateTime @db.Timestamptz(3)
+  effectInputDigest         String
+  providerConfigDigest      String
+  providerAuthorityRevision Int
+  workloadIdentityDigest    String
+  providerAttemptKey        String
+  providerAttemptedAt       DateTime @db.Timestamptz(3)
+  sendGrantDigest           String
+  sendGrantExpiresAt        DateTime @db.Timestamptz(3)
+  createdAt                 DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant   Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryAttempt_tenantId_fkey")
+  delivery GuestGameDelivery        @relation(fields: [tenantId, deliveryId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryAttempt_tenantId_deliveryId_fkey")
+  reward   GuestGameReward          @relation(fields: [tenantId, rewardId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryAttempt_tenantId_rewardId_fkey")
+  store    Store                    @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryAttempt_tenantId_storeId_fkey")
+  events   GuestGameDeliveryEvent[]
+
+  @@unique([tenantId, id], map: "guest_game_delivery_attempt_tenant_id_uidx")
+  @@unique([tenantId, deliveryId, claimGeneration], map: "guest_game_delivery_attempt_generation_uidx")
+  @@unique([tenantId, providerAttemptKey], map: "guest_game_delivery_attempt_provider_key_uidx")
+  @@index([tenantId, storeId, providerAttemptedAt, id], map: "guest_game_delivery_attempt_store_idx")
+  @@index([deliveryId], map: "guest_game_delivery_attempt_delivery_idx")
+  @@index([rewardId], map: "guest_game_delivery_attempt_reward_idx")
+  @@index([storeId], map: "guest_game_delivery_attempt_store_fk_idx")
 }
 
 model GuestGameEvent {
@@ -2110,13 +3026,13 @@ model GuestGameEvent {
   note             String?
   createdAt        DateTime             @default(now())
 
-  tenant        Tenant                  @relation(fields: [tenantId], references: [id])
-  profile       GuestGameProfile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  guest         Guest?                  @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  lootBox       GuestGameLootBox?       @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
-  mission       GuestGameMission?       @relation(fields: [missionId], references: [id], onDelete: SetNull)
-  season        GuestGameSeason?        @relation(fields: [seasonId], references: [id], onDelete: SetNull)
-  createdByUser User?                   @relation("GuestGameEventCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant                      @relation(fields: [tenantId], references: [id])
+  profile       GuestGameProfile?           @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest         Guest?                      @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lootBox       GuestGameLootBox?           @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
+  mission       GuestGameMission?           @relation(fields: [missionId], references: [id], onDelete: SetNull)
+  season        GuestGameSeason?            @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  createdByUser User?                       @relation("GuestGameEventCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   ruleDecisions GuestGameRuleDecision[]
   entitlements  GuestGameEntitlement[]
   xpPosting     GuestGameXpPosting?
@@ -2238,14 +3154,14 @@ model GuestGameEntitlement {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  tenant  Tenant            @relation(fields: [tenantId], references: [id])
-  profile GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  guest   Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  store   Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  event   GuestGameEvent?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  reward       GuestGameReward?  @relation("GuestGameEntitlementOutcomeReward", fields: [rewardId], references: [id], onDelete: SetNull)
-  sourceReward GuestGameReward?  @relation("GuestGameEntitlementSourceReward", fields: [sourceRewardId], references: [id], onDelete: Restrict)
-  walletItems GuestGameRewardWalletItem[]
+  tenant       Tenant                      @relation(fields: [tenantId], references: [id])
+  profile      GuestGameProfile?           @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest        Guest?                      @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store        Store?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  event        GuestGameEvent?             @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  reward       GuestGameReward?            @relation("GuestGameEntitlementOutcomeReward", fields: [rewardId], references: [id], onDelete: SetNull)
+  sourceReward GuestGameReward?            @relation("GuestGameEntitlementSourceReward", fields: [sourceRewardId], references: [id], onDelete: Restrict)
+  walletItems  GuestGameRewardWalletItem[]
 
   @@unique([tenantId, idempotencyKey], map: "guest_game_entitlement_idempotency_uidx")
   @@index([tenantId, originKey], map: "guest_game_entitlement_origin_idx")
@@ -2308,6 +3224,28 @@ model GuestGameTelegramLinkChallenge {
   @@index([profileId], map: "guest_game_telegram_link_profile_idx")
   @@index([guestId], map: "guest_game_telegram_link_guest_idx")
   @@index([expiresAt], map: "guest_game_telegram_link_expires_idx")
+}
+
+model GuestPortalTelegramUpdateLedger {
+  id             String    @id @default(uuid())
+  provider       String    @default("TELEGRAM")
+  updateId       BigInt
+  status         String    @default("PROCESSING")
+  action         String?
+  profileId      String?
+  chatIdMasked   String?
+  message        String?
+  firstSeenAt    DateTime  @default(now())
+  lastSeenAt     DateTime  @default(now())
+  completedAt    DateTime?
+  failedAt       DateTime?
+  duplicateCount Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([provider, updateId], map: "guest_portal_telegram_update_provider_update_uidx")
+  @@index([provider, status, firstSeenAt], map: "guest_portal_telegram_update_status_idx")
+  @@index([profileId], map: "guest_portal_telegram_update_profile_idx")
 }
 
 model GuestPortalOtpChallenge {
@@ -2458,8 +3396,11 @@ model GuestBonusLedgerEntry {
   langameRequest    Json?
   langameResponse   Json?
   attempts          Int                  @default(0)
+  /// Monotonic worker-claim token; unlike attempts it is never reset.
+  claimGeneration   Int                  @default(0)
   nextAttemptAt     DateTime?
   lockedAt          DateTime?
+  executionRevision Int?
   processedAt       DateTime?
   confirmedAt       DateTime?
   failedAt          DateTime?
@@ -2488,6 +3429,7 @@ model GuestBonusLedgerEntry {
   @@index([storeId], map: "guest_bonus_ledger_store_idx")
   @@index([createdByUserId], map: "guest_bonus_ledger_created_by_idx")
   @@index([processedByUserId], map: "guest_bonus_ledger_processed_by_idx")
+  @@index([tenantId, executionRevision, status], map: "guest_bonus_ledger_execution_revision_idx")
 }
 
 model GuestSession {
@@ -3245,19 +4187,24 @@ model StaffTask {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
+  // DB-native same-tenant FKs for the template, rule, and User references live
+  // in 20260727131000_staff_task_integrity_expand. Prisma 6.19 cannot model
+  // their partial SET NULL actions; do not db push or accept generated DROP
+  // CONSTRAINT statements without the integrity runbook review.
   tenant                    Tenant                      @relation(fields: [tenantId], references: [id])
-  store                     Store?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  store                     Store?                      @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "StaffTask_tenantId_storeId_fkey")
   shift                     GuestWorkingShift?          @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  sourceTemplate            StaffTaskTemplate?          @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
-  sourceRecurringRule       StaffTaskRecurringRule?     @relation("StaffTaskRecurringRuleTasks", fields: [sourceRecurringRuleId], references: [id], onDelete: SetNull)
-  createdByUser             User?                       @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  assignedToUser            User?                       @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  sourceTemplate            StaffTaskTemplate?          @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  sourceRecurringRule       StaffTaskRecurringRule?     @relation("StaffTaskRecurringRuleTasks", fields: [sourceRecurringRuleId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  createdByUser             User?                       @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  assignedToUser            User?                       @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
   lastRecurringRuleRuns     StaffTaskRecurringRule[]    @relation("StaffTaskRecurringRuleLastTask")
   recurringRuleScheduleRuns StaffTaskRecurringRuleRun[]
   observers                 StaffTaskObserver[]
   comments                  StaffTaskComment[]
   auditEvents               StaffTaskAuditEvent[]
 
+  @@unique([tenantId, id], map: "staff_task_tenant_id_uidx")
   @@index([tenantId, status, dueAt], map: "staff_task_status_due_idx")
   @@index([tenantId, createdAt], map: "staff_task_created_idx")
   @@index([storeId], map: "staff_task_store_idx")
@@ -3300,12 +4247,15 @@ model StaffTaskTemplate {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  // The createdByUser same-tenant FK and temporary simple Store RESTRICT FK
+  // are DB-native contracts from 20260727131000_staff_task_integrity_expand.
   tenant         Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  store          Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser  User?                    @relation("StaffTaskTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  store          Store?                   @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "StaffTaskTemplate_tenantId_storeId_fkey")
+  createdByUser  User?                    @relation("StaffTaskTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
   tasks          StaffTask[]
   recurringRules StaffTaskRecurringRule[]
 
+  @@unique([tenantId, id], map: "staff_task_template_tenant_id_uidx")
   @@index([tenantId, status, type], map: "staff_task_template_status_type_idx")
   @@index([tenantId, createdAt], map: "staff_task_template_created_idx")
   @@index([storeId], map: "staff_task_template_store_idx")
@@ -3338,15 +4288,19 @@ model StaffTaskRecurringRule {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  // DB-native same-tenant FKs for template, actor, assignee, and last task,
+  // plus the temporary simple Store RESTRICT FK, live in the integrity EXPAND
+  // migration. Prisma 6.19 cannot express their partial SET NULL actions.
   tenant          Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  template        StaffTaskTemplate?          @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  store           Store?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser   User?                       @relation("StaffTaskRecurringRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  assignedToUser  User?                       @relation("StaffTaskRecurringRuleAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  lastCreatedTask StaffTask?                  @relation("StaffTaskRecurringRuleLastTask", fields: [lastCreatedTaskId], references: [id], onDelete: SetNull)
+  template        StaffTaskTemplate?          @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  store           Store?                      @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "StaffTaskRecurringRule_tenantId_storeId_fkey")
+  createdByUser   User?                       @relation("StaffTaskRecurringRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  assignedToUser  User?                       @relation("StaffTaskRecurringRuleAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  lastCreatedTask StaffTask?                  @relation("StaffTaskRecurringRuleLastTask", fields: [lastCreatedTaskId], references: [id], onDelete: SetNull, onUpdate: Restrict)
   generatedTasks  StaffTask[]                 @relation("StaffTaskRecurringRuleTasks")
   scheduleRuns    StaffTaskRecurringRuleRun[]
 
+  @@unique([tenantId, id], map: "staff_task_rule_tenant_id_uidx")
   @@index([tenantId, status, cadence], map: "staff_task_rule_status_cadence_idx")
   @@index([tenantId, nextRunAt], map: "staff_task_rule_next_run_idx")
   @@index([templateId], map: "staff_task_rule_template_idx")
@@ -3370,9 +4324,11 @@ model StaffTaskRecurringRuleRun {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  // DB-native same-tenant FKs for rule and createdTask live in the integrity
+  // EXPAND migration; Prisma 6.19 cannot express partial SET NULL here.
   tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  rule        StaffTaskRecurringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  createdTask StaffTask?             @relation(fields: [createdTaskId], references: [id], onDelete: SetNull)
+  rule        StaffTaskRecurringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  createdTask StaffTask?             @relation(fields: [createdTaskId], references: [id], onDelete: SetNull, onUpdate: Restrict)
 
   @@unique([ruleId, scheduledFor], map: "staff_task_rule_run_unique")
   @@index([tenantId, status, scheduledFor], map: "staff_task_rule_run_status_idx")
@@ -3419,22 +4375,81 @@ model StaffTaskAuditEvent {
   @@index([actorUserId], map: "staff_task_audit_actor_idx")
 }
 
-model StaffAttachment {
+model StaffTaskCatalogAuditEvent {
   id               String   @id @default(uuid())
+  tenantId         String
+  actorUserId      String?
+  entityKind       String
+  entityId         String
+  action           String
+  effectiveStoreId String?
+  changedFields    String[]
+  beforeState      Json?
+  afterState       Json?
+  releaseSha       String?
+  reasonCode       String?
+  createdAt        DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actorUser User?  @relation("StaffTaskCatalogAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt], map: "staff_task_catalog_audit_tenant_created_idx")
+  @@index([entityKind, entityId, createdAt], map: "staff_task_catalog_audit_entity_created_idx")
+  @@index([actorUserId, createdAt], map: "staff_task_catalog_audit_actor_created_idx")
+}
+
+model StaffAttachment {
+  id               String               @id @default(uuid())
   tenantId         String
   uploadedByUserId String?
   fileName         String
   contentType      String
   byteSize         Int
   data             Bytes
-  createdAt        DateTime @default(now())
+  state            StaffAttachmentState @default(UNRESOLVED)
+  pendingExpiresAt DateTime?
+  stateReasonCode  String?              @default("LEGACY_UNCLASSIFIED")
+  stateChangedAt   DateTime             @default(now())
+  createdAt        DateTime             @default(now())
 
   tenant         Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   uploadedByUser User?                        @relation("StaffAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   chatMessages   StaffChatMessageAttachment[]
+  bindings       StaffAttachmentBinding[]
 
   @@index([tenantId, createdAt], map: "staff_attachment_tenant_created_idx")
   @@index([uploadedByUserId], map: "staff_attachment_uploaded_by_idx")
+  @@index([tenantId, state, createdAt, id], map: "staff_attachment_tenant_state_created_idx")
+}
+
+model StaffAttachmentBinding {
+  id                    String                       @id @default(uuid())
+  tenantId              String
+  attachmentId          String?
+  candidateAttachmentId String
+  resourceKind          StaffAttachmentResourceKind
+  resourceId            String
+  resourceStoreId       String?
+  state                 StaffAttachmentBindingState  @default(UNRESOLVED)
+  source                StaffAttachmentBindingSource
+  sourceKey             String
+  createdByUserId       String?
+  reasonCode            String?
+  resolvedAt            DateTime?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attachment    StaffAttachment? @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
+  createdByUser User?            @relation("StaffAttachmentBindingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, resourceKind, resourceId, sourceKey], map: "staff_attachment_binding_source_unique")
+  @@index([tenantId, attachmentId, state], map: "staff_attachment_binding_attachment_state_idx")
+  @@index([tenantId, resourceKind, resourceId, state], map: "staff_attachment_binding_resource_state_idx")
+  @@index([tenantId, candidateAttachmentId, state], map: "staff_attachment_binding_candidate_state_idx")
+  @@index([tenantId, state, createdAt], map: "staff_attachment_binding_tenant_state_created_idx")
+  @@index([attachmentId], map: "staff_attachment_binding_attachment_fk_idx")
+  @@index([createdByUserId], map: "staff_attachment_binding_created_by_idx")
 }
 
 model StaffKnowledgeSettings {
@@ -4069,37 +5084,37 @@ model StaffChatChannelMember {
 }
 
 model StaffChatMessage {
-  id           String   @id @default(uuid())
-  tenantId     String
-  channelId    String
-  authorUserId String?
-  storeId      String?
+  id                 String   @id @default(uuid())
+  tenantId           String
+  channelId          String
+  authorUserId       String?
+  storeId            String?
   knowledgeArticleId String?
-  body         String
-  kind         String   @default("MESSAGE")
-  priority     String   @default("NORMAL")
-  isPinned     Boolean  @default(false)
-  dedupeKey    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  body               String
+  kind               String   @default("MESSAGE")
+  priority           String   @default("NORMAL")
+  isPinned           Boolean  @default(false)
+  dedupeKey          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  tenant       Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  channel      StaffChatChannel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  authorUser   User?                        @relation("StaffChatMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
-  store        Store?                       @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  knowledgeArticle StaffKnowledgeArticle?   @relation("StaffChatMessageKnowledgeArticle", fields: [knowledgeArticleId], references: [id], onDelete: SetNull)
-  attachments  StaffChatMessageAttachment[]
-  editHistory  StaffChatMessageEdit[]
-  mentions     StaffChatMention[]
-  readReceipts StaffChatReadReceipt[]
+  tenant           Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel          StaffChatChannel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  authorUser       User?                        @relation("StaffChatMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  store            Store?                       @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  knowledgeArticle StaffKnowledgeArticle?       @relation("StaffChatMessageKnowledgeArticle", fields: [knowledgeArticleId], references: [id], onDelete: SetNull)
+  attachments      StaffChatMessageAttachment[]
+  editHistory      StaffChatMessageEdit[]
+  mentions         StaffChatMention[]
+  readReceipts     StaffChatReadReceipt[]
 
+  @@unique([tenantId, dedupeKey], map: "staff_chat_message_tenant_dedupe_unique")
   @@index([tenantId, createdAt], map: "staff_chat_message_tenant_created_idx")
   @@index([tenantId, isPinned, createdAt], map: "staff_chat_message_pinned_idx")
   @@index([channelId, createdAt], map: "staff_chat_message_channel_created_idx")
   @@index([authorUserId], map: "staff_chat_message_author_idx")
   @@index([storeId], map: "staff_chat_message_store_idx")
   @@index([knowledgeArticleId], map: "staff_chat_message_knowledge_article_idx")
-  @@unique([tenantId, dedupeKey], map: "staff_chat_message_tenant_dedupe_unique")
 }
 
 model StaffChatMessageEdit {

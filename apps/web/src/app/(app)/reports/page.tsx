@@ -190,30 +190,29 @@ export default async function ReportsPage({
     storeId: filters.storeId,
     ...lastFullDaysRange(21),
   };
-  const [
-    assortmentReport,
-    operationalReport,
-    skuPerformanceReport,
-    replenishmentReport,
-    suppliersPerformanceReport,
-    noSalesReport7,
-    noSalesReport14,
-    noSalesReport21,
-    newProductsReport,
-    lflReport,
-    stores,
-    assortmentSnapshot,
-  ] = await Promise.all([
+  // Report endpoints fan out to several PostgreSQL queries each. Keep useful
+  // parallelism without letting one SSR render exhaust the shared pool.
+  const [assortmentReport, operationalReport] = await Promise.all([
     getAssortmentReport(),
     getOperationalReport(filters),
+  ]);
+  const [skuPerformanceReport, replenishmentReport] = await Promise.all([
     getSkuPerformanceReport(filters),
     getReplenishmentReport(filters),
+  ]);
+  const [suppliersPerformanceReport, noSalesReport7] = await Promise.all([
     getSuppliersPerformanceReport(filters),
     getOperationalReport(noSalesFilters),
+  ]);
+  const [noSalesReport14, noSalesReport21] = await Promise.all([
     getOperationalReport(noSalesFilters14),
     getOperationalReport(noSalesFilters21),
+  ]);
+  const [newProductsReport, lflReport] = await Promise.all([
     getNewProductsReport({ storeId: filters.storeId }),
     getLflReport(lflPeriod),
+  ]);
+  const [stores, assortmentSnapshot] = await Promise.all([
     getStores(),
     safeGetBusinessSnapshot("ASSORTMENT_ARRIVALS"),
   ]);
@@ -648,7 +647,9 @@ function AssortmentRiskPanel({
               <tr key={`${row.riskType}:${row.storeName}:${row.name}:${index}`}>
                 <td className="px-5 py-4 text-zinc-700">{row.riskTypeLabel}</td>
                 <td className="px-5 py-4 text-zinc-700">{row.storeName}</td>
-                <td className="px-5 py-4 font-medium text-zinc-950">{row.name}</td>
+                <td className="px-5 py-4 font-medium text-zinc-950">
+                  {row.name}
+                </td>
                 <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                   {formatMoney(row.profitAtRiskForPeriod)}
                 </td>
@@ -702,7 +703,11 @@ function ReportRoutePanel({
       </div>
       <div className="grid gap-px bg-zinc-200 sm:grid-cols-3">
         {metrics.map((metric) => (
-          <Metric key={metric.label} label={metric.label} value={metric.value} />
+          <Metric
+            key={metric.label}
+            label={metric.label}
+            value={metric.value}
+          />
         ))}
       </div>
     </section>

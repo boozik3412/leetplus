@@ -5,6 +5,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshStoreScopeGuard } from '../tenancy/fresh-store-scope.guard';
 import {
   StaffShiftReportsService,
   type StaffShiftReportDraftQuery,
@@ -22,7 +23,7 @@ import {
   UserRole.CLUB_ADMINISTRATOR,
   UserRole.TRAINEE,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshStoreScopeGuard)
 export class StaffShiftReportsController {
   constructor(
     private readonly staffShiftReportsService: StaffShiftReportsService,

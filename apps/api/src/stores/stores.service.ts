@@ -1,12 +1,15 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { TenantCustomerStage } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import type { CreateStoreDto, UpdateStoreDto } from './stores.dto';
 import {
   cityFromStoreAddress,
@@ -78,19 +81,39 @@ export class StoresService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly configService: ConfigService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
-  async findAll(user?: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+  async findAll(user: AuthenticatedUser) {
+    const { tenantId, effectiveStoreIds } =
+      await this.freshStoreScopeService.resolveRequestedStoreIds(user);
 
     return this.prisma.store.findMany({
-      where: { tenantId },
+      where: {
+        tenantId,
+        ...(effectiveStoreIds ? { id: { in: [...effectiveStoreIds] } } : {}),
+      },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     });
   }
 
   async create(dto: CreateStoreDto, user: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { customerStage: true },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    if (tenant.customerStage !== TenantCustomerStage.INTERNAL) {
+      throw new ConflictException(
+        'External tenant store creation requires the dedicated provisioning and quota workflow',
+      );
+    }
+
     const name = this.normalizeName(dto.name);
     const address = this.normalizeOptionalString(dto.address);
     const location = this.normalizeLocation(
@@ -129,6 +152,7 @@ export class StoresService {
           dto.gamificationEnabled,
           false,
         ),
+        backgroundExecutionEnabled: false,
       },
     });
   }
@@ -564,6 +588,7 @@ export class StoresService {
   }
 
   async update(id: string, dto: UpdateStoreDto, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
     const nextAddress =
@@ -574,10 +599,17 @@ export class StoresService {
       dto.yandexMapsUrl === undefined
         ? undefined
         : this.normalizeOptionalString(dto.yandexMapsUrl);
-    const yandexGeocode =
-      yandexMapsUrl && yandexMapsUrl !== current.yandexMapsUrl
-        ? await this.geocodeYandexMapsLink(yandexMapsUrl)
-        : null;
+    const yandexLinkChanged =
+      Boolean(yandexMapsUrl) && yandexMapsUrl !== current.yandexMapsUrl;
+    const yandexGeocode = yandexLinkChanged
+      ? this.tryParseYandexMapsGeocode(yandexMapsUrl as string)
+      : null;
+
+    if (yandexLinkChanged && !yandexGeocode) {
+      throw new BadRequestException(
+        'Сначала получите координаты через отдельный предпросмотр ссылки Яндекс Карт',
+      );
+    }
     const shouldNormalizeLocation =
       dto.city !== undefined ||
       dto.timeZone !== undefined ||
@@ -665,12 +697,16 @@ export class StoresService {
   }
 
   async archive(id: string, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
 
     return this.prisma.store.update({
       where: { id: current.id },
-      data: { isActive: false },
+      data: {
+        isActive: false,
+        backgroundExecutionEnabled: false,
+      },
     });
   }
 

@@ -1,7 +1,10 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
-import { resolveUserCapabilities } from './capabilities';
+import {
+  resolveUserCapabilities,
+  SHARED_BETA_INITIAL_OWNER_CAPABILITIES,
+} from './capabilities';
 import { RolesGuard } from './roles.guard';
 
 type RequestWithUser = {
@@ -27,12 +30,14 @@ function createContext(request: RequestWithUser): ExecutionContext {
 
 describe('RolesGuard', () => {
   let reflector: {
+    get: jest.Mock;
     getAllAndOverride: jest.Mock;
   };
   let guard: RolesGuard;
 
   beforeEach(() => {
     reflector = {
+      get: jest.fn(),
       getAllAndOverride: jest.fn(),
     };
     guard = new RolesGuard(reflector as unknown as Reflector);
@@ -57,6 +62,144 @@ describe('RolesGuard', () => {
 
     expect(() =>
       guard.canActivate(createContext({ user: { role: UserRole.BUYER } })),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('does not let a custom role fall back to its base role on an unmapped route', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.MARKETER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/unmapped-module',
+          user: {
+            role: UserRole.MARKETER,
+            customRoleId: 'custom-role-1',
+            permissions: ['view_dashboard'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('does not let a standard buyer role bypass guest capabilities', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+      UserRole.BUYER,
+      UserRole.MARKETER,
+      UserRole.CLUB_MANAGER,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests',
+          user: {
+            role: UserRole.BUYER,
+            permissions: resolveUserCapabilities({ role: UserRole.BUYER }),
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('requires the dashboard capability from every authenticated role', () => {
+    reflector.getAllAndOverride.mockReturnValue(Object.values(UserRole));
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/dashboard/summary',
+          user: {
+            role: UserRole.TRAINEE,
+            permissions: resolveUserCapabilities({ role: UserRole.TRAINEE }),
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/dashboard/summary',
+          user: {
+            role: UserRole.BUYER,
+            permissions: resolveUserCapabilities({ role: UserRole.BUYER }),
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps trainee access outside the assortment boundary', () => {
+    reflector.getAllAndOverride.mockReturnValue(Object.values(UserRole));
+    const permissions = resolveUserCapabilities({ role: UserRole.TRAINEE });
+
+    expect(permissions).not.toContain('view_assortment_products');
+    expect(permissions).not.toContain('view_assortment_stores');
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/products',
+          user: { role: UserRole.TRAINEE, permissions },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/stores',
+          user: { role: UserRole.TRAINEE, permissions },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('does not let a standard marketer role bypass guest export capability', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+      UserRole.BUYER,
+      UserRole.MARKETER,
+      UserRole.CLUB_MANAGER,
+    ]);
+    const permissions = resolveUserCapabilities({ role: UserRole.MARKETER });
+
+    expect(permissions).toContain('view_guests');
+    expect(permissions).not.toContain('export_guests');
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests',
+          user: {
+            role: UserRole.MARKETER,
+            permissions,
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests/export',
+          user: {
+            role: UserRole.MARKETER,
+            permissions,
+          },
+        }),
+      ),
     ).toThrow(ForbiddenException);
   });
 
@@ -107,6 +250,231 @@ describe('RolesGuard', () => {
             role: UserRole.STANDARDS_MANAGER,
             hasRoleOverride: true,
             permissions: ['view_dashboard'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it.each([
+    ['GET', '/integrations/langame/settings'],
+    ['PUT', '/integrations/langame/settings'],
+    ['POST', '/integrations/langame/settings/preview'],
+    ['POST', '/integrations/langame/onboarding/preview'],
+    ['POST', '/integrations/langame/onboarding/activate'],
+    ['POST', '/integrations/langame/onboarding/status'],
+    ['POST', '/integrations/langame/onboarding/reconcile'],
+    ['POST', '/integrations/langame/onboarding/initial-sync/preflight'],
+    ['GET', '/integrations/langame/routes-diagnostics'],
+    ['GET', '/integrations/langame/service-diagnostics'],
+    ['POST', '/integrations/langame/endpoint-profile-diagnostics'],
+    ['POST', '/integrations/langame/endpoint-snapshot'],
+    ['POST', '/integrations/langame/guests/search-diagnostics'],
+  ])(
+    'allows an owner role override with manage_integrations to access %s %s',
+    (method, path) => {
+      reflector.getAllAndOverride.mockReturnValue([
+        UserRole.OWNER,
+        UserRole.ADMIN,
+      ]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method,
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions: ['manage_integrations'],
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    '/integrations/langame/guests/foundation/sync',
+    '/integrations/langame/guests/foundation/sync/start',
+  ])(
+    'allows the exact shared-beta initial OWNER capability ceiling to POST %s',
+    (path) => {
+      reflector.getAllAndOverride.mockReturnValue([
+        UserRole.OWNER,
+        UserRole.ADMIN,
+      ]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'POST',
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions: [...SHARED_BETA_INITIAL_OWNER_CAPABILITIES],
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    ['GET', '/integrations/langame/business-snapshots/status'],
+    ['GET', '/integrations/langame/sync-jobs/job-1/discrepancy-log'],
+    ['GET', '/integrations/langame/guests/foundation/sync/status'],
+  ])(
+    'allows an owner role override with run_sync to access %s %s',
+    (method, path) => {
+      reflector.getAllAndOverride.mockReturnValue([
+        UserRole.OWNER,
+        UserRole.ADMIN,
+      ]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method,
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions: ['run_sync'],
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    [
+      '/integrations/langame/sync',
+      ['run_sync', 'import_data'],
+    ],
+    [
+      '/integrations/langame/guests/foundation/sync',
+      ['run_sync', 'import_guest_foundation'],
+    ],
+    [
+      '/integrations/langame/guests/foundation/sync/start',
+      ['run_sync', 'import_guest_foundation'],
+    ],
+    [
+      '/integrations/langame/business-snapshots/run',
+      ['run_sync', 'manage_assortment_reports'],
+    ],
+  ])(
+    'requires all cross-module capabilities for POST %s',
+    (path, permissions) => {
+      reflector.getAllAndOverride.mockReturnValue([
+        UserRole.OWNER,
+        UserRole.ADMIN,
+      ]);
+
+      expect(() =>
+        guard.canActivate(
+          createContext({
+            method: 'POST',
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions: ['run_sync'],
+            },
+          }),
+        ),
+      ).toThrow(ForbiddenException);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'POST',
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions,
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it('keeps Langame integration management and sync capabilities separate', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/integrations/langame/endpoint-snapshot',
+          user: {
+            role: UserRole.OWNER,
+            hasRoleOverride: true,
+            permissions: ['run_sync'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/integrations/langame/business-snapshots/run',
+          user: {
+            role: UserRole.OWNER,
+            hasRoleOverride: true,
+            permissions: ['manage_integrations'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('keeps unknown Langame routes fail-closed for an owner role override', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/integrations/langame/unclassified-effect',
+          user: {
+            role: UserRole.OWNER,
+            hasRoleOverride: true,
+            permissions: ['manage_integrations', 'run_sync'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('keeps unknown Langame routes fail-closed for a standard system role', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/integrations/langame/sync-jobs/job-1/unclassified-effect',
+          user: {
+            role: UserRole.OWNER,
+            hasRoleOverride: false,
+            permissions: ['manage_integrations', 'run_sync'],
           },
         }),
       ),
@@ -239,6 +607,79 @@ describe('RolesGuard', () => {
         }),
       ),
     ).toBe(true);
+  });
+
+  it.each([
+    'view_communications',
+    'view_staff_shift_workspace',
+    'view_staff_tasks',
+    'view_staff_standards',
+    'view_staff_training',
+    'view_staff_knowledge',
+    'approve_guest_game_rewards',
+  ])(
+    'allows %s through the staff attachment guard boundary',
+    (permission) => {
+      reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'GET',
+            path: '/staff/attachments/attachment-1',
+            user: {
+              role: UserRole.MARKETER,
+              permissions: [permission],
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it('does not turn task-only attachment admission into team-chat route access', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+    const user = {
+      role: UserRole.MARKETER,
+      permissions: ['view_staff_tasks'],
+    };
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/attachments/attachment-1',
+          user,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/team-chat',
+          user,
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('rejects unrelated capabilities at the staff attachment boundary', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/attachments/attachment-1',
+          user: {
+            role: UserRole.OWNER,
+            permissions: ['view_dashboard'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
   });
 
   it('allows reward approvers to read the gamification approval chat only', () => {
@@ -567,14 +1008,87 @@ describe('RolesGuard', () => {
     ).toBe(true);
   });
 
-  it('keeps CRM contact tasks behind guest access', () => {
+  it.each([
+    '/guests/crm/tasks',
+    '/guests/crm/tasks/report',
+    '/guests/crm/tasks/export',
+    '/guests/crm/users',
+    '/guests/crm/contact-events',
+  ])('maps bounded CRM contact-task read %s to communications only', (path) => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path,
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_communications'],
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path,
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_guests'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it.each([
+    ['POST', '/guests/crm/tasks'],
+    ['POST', '/guests/crm/contact-events'],
+    ['PATCH', '/guests/crm/tasks/task-1'],
+  ])(
+    'maps bounded CRM contact-task write %s %s to communications management only',
+    (method, path) => {
+      reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method,
+            path,
+            user: {
+              role: UserRole.CLUB_ADMINISTRATOR,
+              permissions: ['manage_communications'],
+            },
+          }),
+        ),
+      ).toBe(true);
+
+      expect(() =>
+        guard.canActivate(
+          createContext({
+            method,
+            path,
+            user: {
+              role: UserRole.CLUB_ADMINISTRATOR,
+              permissions: ['manage_guest_crm'],
+            },
+          }),
+        ),
+      ).toThrow(ForbiddenException);
+    },
+  );
+
+  it('keeps broad guest CRM outside the communications capability', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 
     expect(() =>
       guard.canActivate(
         createContext({
           method: 'GET',
-          path: '/guests/crm/tasks',
+          path: '/guests/crm/leads',
           user: {
             role: UserRole.CLUB_ADMINISTRATOR,
             permissions: ['view_communications'],
@@ -612,6 +1126,55 @@ describe('RolesGuard', () => {
         }),
       ),
     ).toThrow(ForbiddenException);
+  });
+
+  it('keeps bonus-ledger writes behind both the endpoint role and ledger capability', () => {
+    const endpointRoles = [
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+    ];
+    reflector.getAllAndOverride.mockReturnValue(endpointRoles);
+    reflector.get.mockReturnValue(endpointRoles);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/guests/gamification/bonus-ledger/dispatch',
+          user: {
+            role: UserRole.MARKETER,
+            permissions: resolveUserCapabilities({ role: UserRole.MARKETER }),
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/guests/gamification/bonus-ledger/dispatch',
+          user: {
+            role: UserRole.MANAGER,
+            permissions: ['manage_guest_game_rules'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/guests/gamification/bonus-ledger/dispatch',
+          user: {
+            role: UserRole.MANAGER,
+            permissions: ['operate_guest_game_ledger'],
+          },
+        }),
+      ),
+    ).toBe(true);
   });
 
   it('lets senior and club administrators approve rewards without viewing or managing game rules', () => {

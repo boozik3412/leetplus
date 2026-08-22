@@ -1,10 +1,16 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   GuestCommunicationConsentStatus,
   GuestCrmStatus,
   IntegrationProvider,
   Prisma,
+  TenantModule,
 } from '@prisma/client';
 import {
   createCipheriv,
@@ -13,8 +19,16 @@ import {
   randomBytes,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { resolveSecuritySecret } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
+import type { TenantExecutionAction } from '../tenancy/tenant-execution-policy.service';
 import {
   GuestIdentityResolverService,
   type GuestIdentitySnapshotCandidate,
@@ -27,6 +41,7 @@ import {
   type LangameTariffTypeGroupIndex,
 } from './langame-session-tariff';
 import { LangameSettingsService } from './langame-settings.service';
+import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 import type {
   LangameCashTransaction,
   LangameGuest,
@@ -51,6 +66,12 @@ const STALE_RUNNING_SYNC_MS = 2 * 60 * 60 * 1000;
 const STALE_RUNNING_SYNC_MESSAGE =
   'Синхронизация остановлена: не было завершения больше 2 часов. Запустите повторно.';
 const FRESH_GUEST_SYNC_MS = 24 * 60 * 60 * 1000;
+const GUEST_FOUNDATION_MODULES = [
+  TenantModule.INTEGRATIONS,
+  TenantModule.ASSORTMENT,
+  TenantModule.GAMIFICATION,
+  TenantModule.STAFF,
+] as const;
 
 export type GuestDataFoundationSyncQuery = {
   dateFrom?: string;
@@ -66,6 +87,13 @@ export type GuestDataFoundationSyncResult = {
   sources: number;
   failedSources: number;
   sourceResults: GuestDataFoundationSourceResult[];
+};
+
+export type GuestDataFoundationConfiguredTenantSkip = {
+  status: 'SKIPPED';
+  tenantId: string;
+  reasonCode: typeof BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE;
+  note: string;
 };
 
 export type GuestDataFoundationStartResult = {
@@ -299,12 +327,14 @@ export class GuestDataFoundationService {
     private readonly langameSettingsService: LangameSettingsService,
     private readonly configService: ConfigService,
     private readonly guestIdentityResolver: GuestIdentityResolverService,
+    private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
   ) {}
 
   async syncTenant(
     user: AuthenticatedUser,
     query: GuestDataFoundationSyncQuery,
   ): Promise<GuestDataFoundationSyncResult> {
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     const { tenantId } = await this.tenantContextService.resolve(user);
     return this.syncTenantById(tenantId, query);
   }
@@ -312,6 +342,8 @@ export class GuestDataFoundationService {
   async syncConfiguredTenants(query: GuestDataFoundationSyncQuery): Promise<{
     tenants: number;
     results: GuestDataFoundationSyncResult[];
+    skipped: number;
+    skips: GuestDataFoundationConfiguredTenantSkip[];
   }> {
     const tenants = await this.prisma.tenant.findMany({
       where: {
@@ -329,25 +361,59 @@ export class GuestDataFoundationService {
           },
         },
       },
-      select: { id: true },
+      select: { id: true, customerStage: true },
       orderBy: { slug: 'asc' },
     });
     const results: GuestDataFoundationSyncResult[] = [];
+    const skips: GuestDataFoundationConfiguredTenantSkip[] = [];
 
     for (const tenant of tenants) {
-      results.push(await this.syncTenantById(tenant.id, query));
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(tenant.customerStage),
+        jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
+      });
+      if (!backgroundExecution.allowed) {
+        skips.push({
+          status: 'SKIPPED',
+          tenantId: tenant.id,
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          note: tenantBackgroundExecutionNote(backgroundExecution),
+        });
+        continue;
+      }
+      results.push(await this.syncTenantById(tenant.id, query, 'OUTBOUND'));
     }
 
     return {
       tenants: tenants.length,
       results,
+      skipped: skips.length,
+      skips,
     };
   }
 
   async syncTenantById(
     tenantId: string,
     query: GuestDataFoundationSyncQuery,
+    executionAction: TenantExecutionAction = 'WRITE',
   ): Promise<GuestDataFoundationSyncResult> {
+    const admission = await this.assertExecutionAllowed(
+      tenantId,
+      executionAction,
+    );
+    if (executionAction === 'OUTBOUND') {
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+        jobKind: 'LANGAME_GUEST_DATA_FOUNDATION',
+      });
+      if (!backgroundExecution.allowed) {
+        throw new ServiceUnavailableException({
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          message: tenantBackgroundExecutionNote(backgroundExecution),
+        });
+      }
+    }
+
     await this.failStaleRunningRuns(tenantId);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
@@ -442,7 +508,9 @@ export class GuestDataFoundationService {
     user: AuthenticatedUser,
     query: GuestDataFoundationSyncQuery,
   ): Promise<GuestDataFoundationStartResult> {
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     const { tenantId } = await this.tenantContextService.resolve(user);
+    await this.assertExecutionAllowed(tenantId, 'WRITE');
     await this.failStaleRunningRuns(tenantId);
     const { sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
@@ -494,6 +562,7 @@ export class GuestDataFoundationService {
   async getTenantSyncStatus(
     user: AuthenticatedUser,
   ): Promise<GuestDataFoundationStatusResult> {
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     const { tenantId } = await this.tenantContextService.resolve(user);
     await this.failStaleRunningRuns(tenantId);
     const nextPeriod = await this.resolvePeriod(tenantId, {});
@@ -592,6 +661,10 @@ export class GuestDataFoundationService {
   }
 
   async syncComputerCountsForTenant(tenantId: string) {
+    await this.tenantExecutionAdmissionService.assertAllowed(tenantId, [
+      { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
+      { module: TenantModule.ASSORTMENT, action: 'WRITE' },
+    ]);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
     const syncedAt = new Date();
@@ -621,6 +694,16 @@ export class GuestDataFoundationService {
     }
 
     return updatedStores;
+  }
+
+  private assertExecutionAllowed(
+    tenantId: string,
+    action: TenantExecutionAction,
+  ) {
+    return this.tenantExecutionAdmissionService.assertAllowed(
+      tenantId,
+      GUEST_FOUNDATION_MODULES.map((module) => ({ module, action })),
+    );
   }
 
   private profileRunStatusSelect() {
@@ -2855,15 +2938,9 @@ export class GuestDataFoundationService {
   }
 
   private piiSecret() {
-    const secret =
-      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
-      this.configService.get<string>('JWT_SECRET')?.trim();
-
-    if (!secret) {
-      throw new BadRequestException('APP_ENCRYPTION_KEY is not configured');
-    }
-
-    return secret;
+    return resolveSecuritySecret(this.configService, 'APP_ENCRYPTION_KEY', [
+      'JWT_SECRET',
+    ]);
   }
 
   private piiEncryptionKey() {

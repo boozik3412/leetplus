@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import type {
   CreateCategoryDto,
   MergeCategoriesDto,
@@ -19,10 +20,11 @@ export class CategoriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
-  async findAll(user?: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+  async findAll(user: AuthenticatedUser) {
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
 
     return this.prisma.category.findMany({
       where: { tenantId },
@@ -38,6 +40,7 @@ export class CategoriesService {
   }
 
   async create(dto: CreateCategoryDto, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const name = this.normalizeName(dto.name);
 
@@ -55,6 +58,7 @@ export class CategoriesService {
   }
 
   async update(id: string, dto: UpdateCategoryDto, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
     const name = dto.name ? this.normalizeName(dto.name) : current.name;
@@ -71,6 +75,7 @@ export class CategoriesService {
   }
 
   async remove(id: string, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
     const [productsCount, mappingsCount] = await Promise.all([
@@ -108,6 +113,7 @@ export class CategoriesService {
   }
 
   async merge(dto: MergeCategoriesDto, user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const categoryIds = this.normalizeMergeCategoryIds(dto.categoryIds);
     const targetCategoryId = this.requiredId(
@@ -130,13 +136,17 @@ export class CategoriesService {
       throw new NotFoundException('One or more categories are unavailable');
     }
 
-    const target = categories.find((category) => category.id === targetCategoryId);
+    const target = categories.find(
+      (category) => category.id === targetCategoryId,
+    );
 
     if (!target) {
       throw new NotFoundException('Target category not found');
     }
 
-    const sourceCategoryIds = categoryIds.filter((id) => id !== targetCategoryId);
+    const sourceCategoryIds = categoryIds.filter(
+      (id) => id !== targetCategoryId,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const mappings = await tx.categorySourceMapping.findMany({
@@ -223,7 +233,9 @@ export class CategoriesService {
       throw new BadRequestException('Categories to merge are required');
     }
 
-    const categoryIds = [...new Set(value.map((id) => this.requiredId(id, 'Category')))];
+    const categoryIds = [
+      ...new Set(value.map((id) => this.requiredId(id, 'Category'))),
+    ];
 
     if (categoryIds.length < 2) {
       throw new BadRequestException('Select at least two categories to merge');

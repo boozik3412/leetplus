@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { FreshStoreScopeGuard } from '../tenancy/fresh-store-scope.guard';
 import {
   StaffKnowledgeBaseService,
   type StaffKnowledgeArticleDto,
@@ -34,7 +35,7 @@ import {
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshStoreScopeGuard)
 export class StaffKnowledgeBaseController {
   constructor(
     private readonly staffKnowledgeBaseService: StaffKnowledgeBaseService,

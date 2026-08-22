@@ -40,6 +40,7 @@ function createPrismaMock() {
     guest: {
       findFirst: jest.fn(),
       findMany: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestAudienceMember: {
       findMany: jest.fn(),
@@ -47,8 +48,10 @@ function createPrismaMock() {
     guestCrmLead: {
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestCrmEvent: {
+      createMany: jest.fn(),
       findMany: jest.fn(),
     },
     guestGroup: {
@@ -81,6 +84,10 @@ function createPrismaMock() {
       create: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
+    },
+    guestPortalTelegramUpdateLedger: {
+      create: jest.fn(),
+      update: jest.fn(),
     },
     guestGameReward: {
       count: jest.fn(),
@@ -115,7 +122,11 @@ function createPrismaMock() {
       findFirst: jest.fn(),
     },
     guestGameDelivery: {
+      findMany: jest.fn(),
       updateMany: jest.fn(),
+    },
+    guestGameDeliveryEvent: {
+      createMany: jest.fn(),
     },
     guestBonusLedgerEntry: {
       findFirst: jest.fn(),
@@ -282,9 +293,12 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.tenant.findFirst.mockResolvedValue(null);
   prisma.guest.findFirst.mockResolvedValue(null);
   prisma.guest.findMany.mockResolvedValue([]);
+  prisma.guest.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestAudienceMember.findMany.mockResolvedValue([]);
   prisma.guestCrmLead.findFirst.mockResolvedValue(null);
   prisma.guestCrmLead.update.mockResolvedValue({});
+  prisma.guestCrmLead.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestCrmEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guestCrmEvent.findMany.mockResolvedValue([]);
   prisma.guestGroup.findMany.mockResolvedValue([]);
   prisma.integrationCredential.findMany.mockResolvedValue([
@@ -346,8 +360,21 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameTelegramLinkChallenge.updateMany.mockResolvedValue({
     count: 0,
   });
+  prisma.guestPortalTelegramUpdateLedger.create.mockResolvedValue({
+    id: 'telegram-update-ledger-1',
+  });
+  prisma.guestPortalTelegramUpdateLedger.update.mockResolvedValue({
+    id: 'telegram-update-ledger-1',
+    updateId: BigInt(1001),
+    status: 'COMPLETED',
+    action: 'TELEGRAM_AUTH_START',
+    profileId: 'pending-profile-1',
+    chatIdMasked: 'ch...56',
+  });
   prisma.guestGameReward.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameDelivery.findMany.mockResolvedValue([]);
   prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameDeliveryEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guestBonusLedgerEntry.findMany.mockResolvedValue([]);
   prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestBalanceSnapshot.findFirst.mockResolvedValue(null);
@@ -5656,7 +5683,7 @@ describe('GuestPortalService', () => {
 
     it('preserves BLOCKED when a newly backfilled entitlement has ambiguous legacy rewards', async () => {
       const { prisma, service } = createService();
-      const qualifiedAt = new Date('2026-07-17T14:24:00.000Z');
+      const qualifiedAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const entitlement = {
         id: 'entitlement-backfill-ambiguous',
         tenantId: 'tenant-1',
@@ -5688,7 +5715,7 @@ describe('GuestPortalService', () => {
       const lootBox = {
         id: 'loot-weekday',
         name: 'Weekday case',
-        updatedAt: new Date('2026-07-17T13:00:00.000Z'),
+        updatedAt: new Date(qualifiedAt.getTime() - 60 * 60 * 1000),
         audienceId: null,
         usageKind: 'REWARD',
         triggerKind: 'SESSION_START',
@@ -5711,13 +5738,13 @@ describe('GuestPortalService', () => {
       prisma.guestGameReward.findMany.mockResolvedValue([
         {
           id: 'reward-ambiguous-1',
-          qualifiedAt: new Date('2026-07-17T15:05:59.000Z'),
-          createdAt: new Date('2026-07-17T15:05:59.000Z'),
+          qualifiedAt: new Date(qualifiedAt.getTime() + 41 * 60 * 1000),
+          createdAt: new Date(qualifiedAt.getTime() + 41 * 60 * 1000),
         },
         {
           id: 'reward-ambiguous-2',
-          qualifiedAt: new Date('2026-07-17T15:06:00.000Z'),
-          createdAt: new Date('2026-07-17T15:06:00.000Z'),
+          qualifiedAt: new Date(qualifiedAt.getTime() + 42 * 60 * 1000),
+          createdAt: new Date(qualifiedAt.getTime() + 42 * 60 * 1000),
         },
       ]);
 
@@ -5729,7 +5756,7 @@ describe('GuestPortalService', () => {
         profileId: 'profile-1',
         storeId: 'store-1',
         storeTimeZone: 'Asia/Yekaterinburg',
-        gameActivatedAt: new Date('2026-07-01T00:00:00.000Z'),
+        gameActivatedAt: new Date(qualifiedAt.getTime() - 24 * 60 * 60 * 1000),
         lootBox,
         unlockEvents: [
           {
@@ -7085,6 +7112,44 @@ describe('GuestPortalService', () => {
   });
 
   describe('selectGameClub', () => {
+    it('rejects conflicting club selectors before store lookup or profile mutation', async () => {
+      const { jwtService, prisma, service } = createService();
+      const tokenPayload = {
+        sub: 'guest-portal:profile-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash-1',
+      };
+
+      jest
+        .spyOn(service as any, 'verifyGuestToken')
+        .mockResolvedValue(tokenPayload);
+      jest.spyOn(service as any, 'getTenantStore');
+
+      await expect(
+        service.selectGameClub('Bearer guest-token', {
+          clubId: 'leet:club-2',
+          tenantSlug: 'other-tenant',
+          storeId: 'club-2',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.selectGameClub('Bearer guest-token', {
+          clubId: 'leet:club-2',
+          tenantSlug: 'leet',
+          storeId: 'club-3',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(service['getTenantStore']).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
     it('issues a scoped guest token for the selected game club without creating a common guest', async () => {
       const { jwtService, prisma, service } = createService({
         GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
@@ -8027,6 +8092,137 @@ describe('GuestPortalService', () => {
       });
     });
 
+    it('records a durable Telegram update ledger entry before processing side effects', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      const codeHash = createHmac('sha256', 'test-secret')
+        .update('telegram-link:ABCDEF1234')
+        .digest('hex');
+
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        id: 'telegram-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        profileId: 'pending-profile-1',
+        codeHash,
+        status: 'AUTH_PENDING',
+        expiresAt: new Date(Date.now() + 60_000),
+        profile: {
+          id: 'pending-profile-1',
+          status: 'PENDING_TELEGRAM_AUTH',
+        },
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        update_id: 1001,
+        message: {
+          text: `/start lp_ABCDEF1234`,
+          chat: { id: 123456 },
+          from: { id: 123456, username: 'player_one' },
+        },
+      });
+
+      expect(
+        prisma.guestPortalTelegramUpdateLedger.create,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            provider: 'TELEGRAM',
+            updateId: BigInt(1001),
+            status: 'PROCESSING',
+          },
+          select: { id: true },
+        }),
+      );
+      expect(prisma.guestGameProfile.update).toHaveBeenCalled();
+      expect(
+        prisma.guestPortalTelegramUpdateLedger.update,
+      ).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: { id: 'telegram-update-ledger-1' },
+          data: expect.objectContaining({
+            status: 'COMPLETED',
+            action: 'TELEGRAM_AUTH_START',
+            profileId: 'pending-profile-1',
+            chatIdMasked: 'ch...56',
+            completedAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'AWAITING_CONTACT',
+        action: 'TELEGRAM_AUTH_START',
+      });
+    });
+
+    it('skips duplicate Telegram update ids before auth and game side effects', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      const duplicateError = new Prisma.PrismaClientKnownRequestError(
+        'Telegram update already exists',
+        {
+          code: 'P2002',
+          clientVersion: 'test',
+        },
+      );
+
+      prisma.guestPortalTelegramUpdateLedger.create.mockRejectedValueOnce(
+        duplicateError,
+      );
+      prisma.guestPortalTelegramUpdateLedger.update.mockResolvedValueOnce({
+        updateId: BigInt(1001),
+        status: 'COMPLETED',
+        action: 'TELEGRAM_AUTH_START',
+        profileId: 'pending-profile-1',
+        chatIdMasked: 'ch...56',
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        update_id: 1001,
+        message: {
+          text: `/start lp_ABCDEF1234`,
+          chat: { id: 123456 },
+          from: { id: 123456, username: 'player_one' },
+        },
+      });
+
+      expect(
+        prisma.guestPortalTelegramUpdateLedger.update,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            provider_updateId: {
+              provider: 'TELEGRAM',
+              updateId: BigInt(1001),
+            },
+          },
+          data: expect.objectContaining({
+            duplicateCount: { increment: 1 },
+            lastSeenAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(
+        prisma.guestGameTelegramLinkChallenge.findFirst,
+      ).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        status: 'IGNORED',
+        action: 'DUPLICATE_UPDATE',
+        profileId: 'pending-profile-1',
+        telegramIdentityMasked: 'ch...56',
+        replyDispatch: {
+          provider: 'TELEGRAM',
+          status: 'SKIPPED',
+          chatIdMasked: 'ch...56',
+        },
+      });
+    });
+
     it('sends Telegram auth reply when webhook sender is enabled', async () => {
       const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
         new Response(
@@ -8041,6 +8237,7 @@ describe('GuestPortalService', () => {
         APP_ENCRYPTION_KEY: 'test-secret',
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
         GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED: 'true',
+        GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS: '1234',
         GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
       });
       const codeHash = createHmac('sha256', 'test-secret')
@@ -8082,6 +8279,7 @@ describe('GuestPortalService', () => {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: expect.any(String),
+            signal: expect.any(AbortSignal),
           }),
         );
 
@@ -8448,6 +8646,119 @@ describe('GuestPortalService', () => {
         },
       });
       expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
+    });
+
+    it('updates unsubscribe consent but protocol-blocks legacy Telegram delivery mutations', async () => {
+      const legacyFlagKeys = [
+        'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED',
+        'GUEST_GAME_DELIVERY_TELEGRAM_ENABLED',
+        'GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN',
+      ] as const;
+      const previousLegacyFlags = new Map(
+        legacyFlagKeys.map((key) => [key, process.env[key]]),
+      );
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED = 'true';
+      process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN = 'telegram-token';
+
+      try {
+        const { prisma, service } = createService({
+          GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        });
+        prisma.guestGameProfile.findMany.mockResolvedValue([
+          {
+            id: 'profile-1',
+            tenantId: 'tenant-1',
+            guestId: 'guest-1',
+            leadId: 'lead-1',
+          },
+        ]);
+        prisma.guestGameDelivery.findMany.mockResolvedValue([
+          {
+            id: 'delivery-1',
+            tenantId: 'tenant-1',
+            rewardId: 'reward-1',
+            status: 'READY',
+          },
+        ]);
+
+        const result = await service.handleTelegramWebhook('telegram-secret', {
+          message: {
+            text: '/stop',
+            chat: { id: 123456 },
+            from: { id: 123456 },
+          },
+        });
+
+        expect(prisma.guest.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: { in: ['guest-1'] } },
+            data: expect.objectContaining({
+              phoneConsentStatus: 'UNSUBSCRIBED',
+              phoneConsentSource: 'telegram_bot',
+              unsubscribedAt: expect.any(Date),
+              crmStatus: 'DO_NOT_CONTACT',
+            }),
+          }),
+        );
+        expect(prisma.guestCrmEvent.createMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: [
+              expect.objectContaining({
+                tenantId: 'tenant-1',
+                guestId: 'guest-1',
+                status: 'DO_NOT_CONTACT',
+              }),
+            ],
+          }),
+        );
+        expect(prisma.guestCrmLead.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: { in: ['lead-1'] } },
+            data: expect.objectContaining({
+              phoneConsentStatus: 'UNSUBSCRIBED',
+              crmStatus: 'DO_NOT_CONTACT',
+            }),
+          }),
+        );
+        expect(prisma.guestGameDelivery.findMany).toHaveBeenCalledWith({
+          where: {
+            profileId: { in: ['profile-1'] },
+            channel: 'TELEGRAM',
+            status: 'READY',
+            readinessStatus: 'READY_FOR_BOT',
+          },
+          select: {
+            id: true,
+            tenantId: true,
+            rewardId: true,
+            status: true,
+          },
+        });
+        expect(prisma.guestGameDelivery.updateMany).not.toHaveBeenCalled();
+        expect(prisma.guestGameDeliveryEvent.createMany).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          status: 'UNSUBSCRIBED',
+          action: 'UNSUBSCRIBE',
+          profileId: 'profile-1',
+          profilesAffected: 1,
+          deliveriesBlocked: 0,
+          deliveriesProtocolBlocked: 1,
+          message: expect.stringContaining(
+            'provider delivery rows and events were preserved',
+          ),
+        });
+        expect(JSON.stringify(result)).not.toContain('telegram-token');
+      } finally {
+        for (const key of legacyFlagKeys) {
+          const previousValue = previousLegacyFlags.get(key);
+          if (previousValue === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = previousValue;
+          }
+        }
+      }
     });
 
     it('answers Telegram /status callback with the bot menu', async () => {
@@ -9521,6 +9832,30 @@ describe('GuestPortalService', () => {
         }),
         expect.any(Object),
       );
+    });
+
+    it('rejects conflicting Telegram Mini App club selectors before profile lookup', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_TG_EDGE_SHARED_SECRET: 'edge-secret',
+      });
+
+      const result = await service.exchangeTelegramMiniAppSession({
+        edgeSecret: 'edge-secret',
+        telegramUserId: '123456',
+        authDate: Math.floor(Date.now() / 1000),
+        clubId: 'leet:club-1337',
+        tenantSlug: 'other-tenant',
+        storeId: 'club-1337',
+      });
+
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        profileId: null,
+        telegramIdentityMasked: 'ch...56',
+        message: expect.stringContaining('параметры tenant/store конфликтуют'),
+      });
+      expect(prisma.guestGameProfile.findMany).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
     });
 
     it('rejects Telegram Mini App initData with an invalid hash before profile lookup', async () => {

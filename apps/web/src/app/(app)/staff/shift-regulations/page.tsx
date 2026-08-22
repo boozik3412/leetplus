@@ -66,7 +66,9 @@ function isStatus(
   );
 }
 
-function isShiftKind(value: string | undefined): value is StaffShiftKind | "all" {
+function isShiftKind(
+  value: string | undefined,
+): value is StaffShiftKind | "all" {
   return (
     value === "all" ||
     value === "OPENING" ||
@@ -81,7 +83,9 @@ function isShiftKind(value: string | undefined): value is StaffShiftKind | "all"
   );
 }
 
-function resolveFilters(params: Awaited<SearchParams>): StaffShiftRegulationFilters {
+function resolveFilters(
+  params: Awaited<SearchParams>,
+): StaffShiftRegulationFilters {
   const status = searchParam(params.status);
   const shiftKind = searchParam(params.shiftKind);
 
@@ -161,6 +165,7 @@ export default async function StaffShiftRegulationsPage({
   const user = await requireCurrentUser();
   const params = await searchParams;
   const requestedFilters = resolveFilters(params);
+  const canLoadNetworkCompanions = user.accessScope === "NETWORK";
   const canManageRegulations =
     can(user, "manage_staff_standards") && !isCatalogOnlyRole(user.role);
   const filters: StaffShiftRegulationFilters = canManageRegulations
@@ -176,15 +181,17 @@ export default async function StaffShiftRegulationsPage({
     recentTaskReport,
   ] = await Promise.all([
     getStaffShiftRegulationReport(filters),
-    getStaffChecklistTemplateReport({
-      status: canManageRegulations
-        ? checklistStatusFromRegulationStatus(filters.status ?? "all")
-        : "ACTIVE",
-      shiftKind: requestedFilters.shiftKind,
-      storeId: requestedFilters.storeId,
-      search: requestedFilters.search,
-    }),
-    canManageRegulations
+    canLoadNetworkCompanions
+      ? getStaffChecklistTemplateReport({
+          status: canManageRegulations
+            ? checklistStatusFromRegulationStatus(filters.status ?? "all")
+            : "ACTIVE",
+          shiftKind: requestedFilters.shiftKind,
+          storeId: requestedFilters.storeId,
+          search: requestedFilters.search,
+        })
+      : Promise.resolve(null),
+    canManageRegulations && canLoadNetworkCompanions
       ? getStaffChecklistExecutionReport({
           status: "all",
           shiftKind: "all",
@@ -192,7 +199,7 @@ export default async function StaffShiftRegulationsPage({
           dateTo: operationalDate,
         })
       : Promise.resolve(null),
-    canManageRegulations
+    canManageRegulations && canLoadNetworkCompanions
       ? getStaffChecklistExecutionReport({
           status: "all",
           shiftKind: "all",
@@ -200,7 +207,7 @@ export default async function StaffShiftRegulationsPage({
           dateTo: operationalDate,
         })
       : Promise.resolve(null),
-    canManageRegulations
+    canManageRegulations && canLoadNetworkCompanions
       ? getStaffTaskReport({
           status: "all",
           dueFrom: operationalDate,
@@ -209,7 +216,7 @@ export default async function StaffShiftRegulationsPage({
           pageSize: "500",
         })
       : Promise.resolve(null),
-    canManageRegulations
+    canManageRegulations && canLoadNetworkCompanions
       ? getStaffTaskReport({
           status: "all",
           dueFrom: operationalDateOffset(operationalDate, -14),
@@ -247,7 +254,7 @@ export default async function StaffShiftRegulationsPage({
             </p>
           </div>
           <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-[34rem] lg:justify-end">
-            {canManageRegulations ? (
+            {canManageRegulations && canLoadNetworkCompanions ? (
               <Link
                 href="/staff/checklist-templates?new=1"
                 className={headerActionPrimary}
@@ -255,26 +262,22 @@ export default async function StaffShiftRegulationsPage({
                 Новый чек-лист
               </Link>
             ) : null}
-            {canManageRegulations ? (
-              <Link
-                href="/staff/checklists"
-                className={headerActionSecondary}
-              >
+            {canManageRegulations && canLoadNetworkCompanions ? (
+              <Link href="/staff/checklists" className={headerActionSecondary}>
                 Открыть чек-листы
               </Link>
             ) : null}
-            <Link
-              href={canManageRegulations ? "/staff/tasks" : "/staff/checklists"}
-              className={headerActionSecondary}
-            >
-              {canManageRegulations ? "Задачи персонала" : "Открыть чек-листы"}
+            <Link href="/staff/tasks" className={headerActionSecondary}>
+              Задачи персонала
             </Link>
-            <Link
-              href="/staff/checklists/report"
-              className={headerActionSecondary.replace(" gap-2", "")}
-            >
-              Отчет по чек-листам
-            </Link>
+            {canLoadNetworkCompanions ? (
+              <Link
+                href="/staff/checklists/report"
+                className={headerActionSecondary.replace(" gap-2", "")}
+              >
+                Отчет по чек-листам
+              </Link>
+            ) : null}
           </div>
         </header>
 
@@ -343,7 +346,11 @@ export default async function StaffShiftRegulationsPage({
                 defaultValue={report.filters.storeId ?? ""}
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               >
-                <option value="">Вся сеть</option>
+                <option value="">
+                  {user.accessScope === "NETWORK"
+                    ? "Вся сеть"
+                    : "Все доступные"}
+                </option>
                 {report.stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}
@@ -374,18 +381,32 @@ export default async function StaffShiftRegulationsPage({
 
         <section className="mt-6">
           {canManageRegulations ? (
-            <StaffShiftRegulationBuilder
-              rows={report.rows}
-              checklistTemplates={checklistTemplates.rows}
-              stores={report.stores}
-              assessments={report.assessments}
-              currentUserId={user.id}
-              currentUserRole={user.role}
-            />
+            <div className="space-y-6">
+              <StaffShiftRegulationBuilder
+                rows={report.rows.filter((row) => row.canManage)}
+                checklistTemplates={checklistTemplates?.rows ?? []}
+                stores={report.stores}
+                assessments={report.assessments}
+                currentUserId={user.id}
+                currentUserRole={user.role}
+                defaultStoreId={
+                  report.accessScope === "STORES"
+                    ? (report.stores[0]?.id ?? "")
+                    : ""
+                }
+                allowNetworkStore={report.accessScope === "NETWORK"}
+                canOpenChecklistTemplates={canLoadNetworkCompanions}
+              />
+              {report.rows.some((row) => !row.canManage) ? (
+                <StaffShiftRegulationCatalog
+                  rows={report.rows.filter((row) => !row.canManage)}
+                />
+              ) : null}
+            </div>
           ) : (
             <StaffShiftRegulationCatalog
               rows={report.rows}
-              checklistTemplates={checklistTemplates.rows}
+              checklistTemplates={checklistTemplates?.rows ?? []}
             />
           )}
         </section>

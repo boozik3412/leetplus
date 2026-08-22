@@ -263,6 +263,111 @@ describe('LangameClient', () => {
     });
   });
 
+  it('bounds diagnostic timeout and performs exactly one request', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      responseWithBody({
+        status: true,
+        data: [],
+      }),
+    );
+    const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+    global.fetch = fetchMock as typeof fetch;
+
+    await client.getDiagnosticEndpoint(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      '/clubs/list',
+      {},
+      { timeoutMs: 60_000 },
+    );
+
+    const calls = fetchMock.mock.calls as Array<[string | URL, RequestInit?]>;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(calls[0][1]?.signal).toBeDefined();
+    expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(10_000);
+  });
+
+  it('rejects a diagnostic response once its streamed body exceeds the requested bound', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: true,
+          data: [{ id: 1, name: 'oversized' }],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      client.getDiagnosticEndpoint(
+        'https://443.langame.ru/public_api',
+        'test-key',
+        '/products/list',
+        {},
+        { timeoutMs: 5_000, maxResponseBytes: 16 },
+      ),
+    ).rejects.toThrow('Langame response exceeded limit');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps a caller-supplied diagnostic response bound at four MiB', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      new Response('{}', {
+        headers: { 'content-length': String(4 * 1024 * 1024 + 1) },
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      client.getDiagnosticEndpoint(
+        'https://443.langame.ru/public_api',
+        'test-key',
+        '/products/list',
+        {},
+        { timeoutMs: 5_000, maxResponseBytes: Number.MAX_SAFE_INTEGER },
+      ),
+    ).rejects.toThrow('Langame response exceeded limit');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the diagnostic timeout active while reading the response body', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetchMock = jest.fn(
+        (_url: string | URL | Request, init?: RequestInit) => {
+          const signal = init?.signal;
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              signal?.addEventListener(
+                'abort',
+                () => controller.error(new Error('body aborted')),
+                { once: true },
+              );
+            },
+          });
+          return Promise.resolve(new Response(body));
+        },
+      );
+      global.fetch = fetchMock as typeof fetch;
+
+      const pending = expect(
+        client.getDiagnosticEndpoint(
+          'https://443.langame.ru/public_api',
+          'test-key',
+          '/products/list',
+          {},
+          { timeoutMs: 50, maxResponseBytes: 1024 },
+        ),
+      ).rejects.toThrow('body aborted');
+      await jest.advanceTimersByTimeAsync(50);
+      await pending;
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('posts master balance updates by phone with X-Request-Token and no public API key header', async () => {
     const fetchMock = jest.fn().mockResolvedValueOnce(
       responseWithBody({
@@ -296,6 +401,7 @@ describe('LangameClient', () => {
       'https://46.langamepro.ru/master_api/guests/balance/phone',
     );
     expect(init?.method).toBe('POST');
+    expect(init?.signal).toBeDefined();
     expect(init?.headers).toMatchObject({
       'Content-Type': 'application/json',
       'X-Request-Token': 'request-token',
@@ -311,6 +417,48 @@ describe('LangameClient', () => {
         comment: 'LeetPlus test',
       }),
     );
+  });
+
+  it('never lets a Langame balance write disable or exceed the mandatory timeout', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(responseWithBody({ status: true }));
+    const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+    global.fetch = fetchMock as typeof fetch;
+
+    await client.adjustGuestBalanceByPhone(
+      'https://46.langamepro.ru/public_api',
+      'request-token',
+      {
+        phone: '79999999999',
+        type: 'bonus_balance',
+        sum: 10,
+        comment: 'LeetPlus test',
+      },
+      '/guests/balance/phone',
+      { timeoutMs: 0 },
+    );
+    await client.adjustGuestBalanceByPhone(
+      'https://46.langamepro.ru/public_api',
+      'request-token',
+      {
+        phone: '79999999999',
+        type: 'bonus_balance',
+        sum: 10,
+        comment: 'LeetPlus test',
+      },
+      '/guests/balance/phone',
+      { timeoutMs: 60_000 },
+    );
+
+    for (const [, init] of fetchMock.mock.calls as Array<
+      [string | URL, RequestInit?]
+    >) {
+      expect(init?.signal).toBeDefined();
+    }
+    expect(setTimeoutSpy.mock.calls.map(([, delay]) => delay)).toEqual([
+      30_000, 30_000,
+    ]);
   });
 
   it('loads active product groups from the domain master API', async () => {

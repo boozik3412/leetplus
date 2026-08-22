@@ -2,6 +2,7 @@ import {
   loadTelegramEdgeConfig,
   startTelegramEdgeServer,
 } from './telegram-edge-adapter';
+import { assertStandaloneProcessAllowed } from '../config/design-partner-runtime-policy';
 import {
   createTelegramBotApiFetch,
   loadTelegramBotApiProxyUrl,
@@ -9,6 +10,13 @@ import {
 } from './telegram-bot-api-fetch';
 
 async function main() {
+  assertStandaloneProcessAllowed(
+    process.env,
+    'GUEST_GAME_TG_EDGE_ADAPTER_ENABLED',
+    { GUEST_GAME_TG_EDGE_DRY_RUN: 'true' },
+    'GUEST_GAME_TG_EDGE_LEETPLUS_API_URL',
+  );
+
   const config = loadTelegramEdgeConfig(process.env);
   const telegramProxyUrl = loadTelegramBotApiProxyUrl(process.env);
   const server = await startTelegramEdgeServer(config, {

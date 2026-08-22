@@ -1,13 +1,19 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   IntegrationProvider,
   Prisma,
+  TenantCustomerStage,
   type IntegrationCredential,
 } from '@prisma/client';
 import { readFile } from 'node:fs/promises';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
 import { SecretEncryptionService } from './secret-encryption.service';
@@ -41,6 +47,11 @@ const CREDENTIAL_NAME = 'Langame API key';
 const ENDPOINT_PROFILE_FRESH_MS = 24 * 60 * 60 * 1000;
 const PORTAL_BALANCE_PAGE_LIMIT = 200;
 const PORTAL_BALANCE_MAX_PAGES = 50;
+const ONBOARDING_DIAGNOSTIC_PATH = '/clubs/list';
+const ONBOARDING_DIAGNOSTIC_TIMEOUT_MS = 5_000;
+const ONBOARDING_DIAGNOSTIC_MAX_ATTEMPTS = 1;
+const ONBOARDING_MAX_DOMAINS = 20;
+const LANGAME_DOMAIN_SUFFIXES = ['.langame.ru', '.langamepro.ru'] as const;
 
 const SERVICE_DIAGNOSTIC_ENDPOINTS: LangameServiceEndpointDefinition[] = [
   {
@@ -271,6 +282,11 @@ export type LangameSettingsDto = {
   domains?: string[];
 };
 
+export type LangameSettingsPreviewDto = Pick<
+  LangameSettingsDto,
+  'apiKey' | 'domains'
+>;
+
 type EndpointSnapshotSourceDraft = Omit<
   LangameEndpointSnapshotSource,
   'snapshotRunId'
@@ -291,13 +307,14 @@ export class LangameSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly accessScopeService: AccessScopeService,
     private readonly secretEncryptionService: SecretEncryptionService,
     private readonly configService: ConfigService,
     private readonly langameClient: LangameClient,
   ) {}
 
   async getSettings(user: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const [
       tenant,
       credential,
@@ -405,7 +422,13 @@ export class LangameSettingsService {
   }
 
   async saveSettings(user: AuthenticatedUser, dto: LangameSettingsDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    this.accessScopeService.assertNetwork(user);
+    if (user.tenantCustomerStage !== TenantCustomerStage.INTERNAL) {
+      throw new ForbiddenException(
+        'External tenants must use staged Langame onboarding',
+      );
+    }
+    const { tenantId } = this.tenantContextService.resolve(user);
     const domains = this.normalizeDomains(dto.domains ?? []);
     const apiKey = dto.apiKey?.trim();
     const tenantName = dto.tenantName?.trim();
@@ -498,6 +521,85 @@ export class LangameSettingsService {
     return this.getSettings(user);
   }
 
+  async previewSettings(
+    user: AuthenticatedUser,
+    dto: LangameSettingsPreviewDto,
+  ) {
+    this.accessScopeService.assertNetwork(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const domains = this.normalizeDomains(dto.domains ?? []);
+
+    if (domains.length === 0) {
+      throw new BadRequestException('At least one Langame domain is required');
+    }
+    if (domains.length > ONBOARDING_MAX_DOMAINS) {
+      throw new BadRequestException(
+        `No more than ${ONBOARDING_MAX_DOMAINS} Langame domains can be diagnosed at once`,
+      );
+    }
+
+    const submittedApiKey = dto.apiKey?.trim();
+    const existingCredential = submittedApiKey
+      ? null
+      : await this.findCredential(tenantId);
+    const apiKey =
+      submittedApiKey ||
+      (existingCredential
+        ? this.resolveCredentialApiKey(existingCredential)
+        : null);
+
+    if (!apiKey) {
+      throw new BadRequestException('Langame API key is required');
+    }
+
+    const diagnostics = await Promise.all(
+      domains.map(async (domain) => {
+        try {
+          const payload = await this.langameClient.getDiagnosticEndpoint(
+            `https://${domain}/public_api`,
+            apiKey,
+            ONBOARDING_DIAGNOSTIC_PATH,
+            {},
+            { timeoutMs: ONBOARDING_DIAGNOSTIC_TIMEOUT_MS },
+          );
+
+          return {
+            domain,
+            status: 'SUCCESS' as const,
+            clubCount: this.extractDiagnosticRows(payload).length,
+            reasonCode: null,
+          };
+        } catch {
+          return {
+            domain,
+            status: 'FAILED' as const,
+            clubCount: 0,
+            reasonCode: 'LANGAME_DIAGNOSTIC_FAILED' as const,
+          };
+        }
+      }),
+    );
+    const ready = diagnostics.every(({ status }) => status === 'SUCCESS');
+
+    return {
+      status: ready ? ('READY' as const) : ('REJECTED' as const),
+      hasApiKey: true,
+      activation: {
+        required: true,
+        performed: false,
+      },
+      sync: {
+        performed: false,
+      },
+      limits: {
+        timeoutMs: ONBOARDING_DIAGNOSTIC_TIMEOUT_MS,
+        maxAttempts: ONBOARDING_DIAGNOSTIC_MAX_ATTEMPTS,
+        maxDomains: ONBOARDING_MAX_DOMAINS,
+      },
+      diagnostics,
+    };
+  }
+
   async resolveTenantAccess(tenantId: string) {
     const credential = await this.findCredential(tenantId);
 
@@ -528,7 +630,7 @@ export class LangameSettingsService {
   }
 
   async getDiscrepancyLog(user: AuthenticatedUser, syncJobId: string) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const syncJob = await this.prisma.integrationSyncJob.findFirst({
       where: {
         id: syncJobId,
@@ -552,7 +654,7 @@ export class LangameSettingsService {
   async getRoutesDiagnostics(
     user: AuthenticatedUser,
   ): Promise<LangameRoutesDiagnosticsResult> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
     const checkedAt = new Date().toISOString();
     const diagnostics = await Promise.all(
@@ -603,7 +705,7 @@ export class LangameSettingsService {
   async getServiceDiagnostics(
     user: AuthenticatedUser,
   ): Promise<LangameServiceDiagnosticsResult> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     return this.getServiceDiagnosticsForTenant(tenantId);
   }
 
@@ -673,7 +775,7 @@ export class LangameSettingsService {
     user: AuthenticatedUser,
     dto: LangameEndpointProfileQuery,
   ): Promise<LangameEndpointProfileDiagnosticsResult> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
     const endpoint =
       PROFILE_DIAGNOSTIC_ENDPOINTS.find(
@@ -769,7 +871,7 @@ export class LangameSettingsService {
     user: AuthenticatedUser,
     dto: LangameEndpointProfileQuery,
   ): Promise<LangameEndpointSnapshotResult> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
     const endpoint =
       PROFILE_DIAGNOSTIC_ENDPOINTS.find(
@@ -894,7 +996,7 @@ export class LangameSettingsService {
     user: AuthenticatedUser,
     dto: LangameGuestSearchQuery,
   ): Promise<LangameGuestSearchDiagnosticsResult> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
     const query = dto.query?.trim();
 
@@ -2424,6 +2526,20 @@ export class LangameSettingsService {
     if (invalidDomain) {
       throw new BadRequestException(
         `Invalid Langame domain: ${invalidDomain}. Use domains like 1337.langame.ru without protocol or path.`,
+      );
+    }
+
+    const unsupportedDomain = normalized.find(
+      (domain) =>
+        !LANGAME_DOMAIN_SUFFIXES.some(
+          (suffix) =>
+            domain === suffix.slice(1) || domain.endsWith(suffix),
+        ),
+    );
+
+    if (unsupportedDomain) {
+      throw new BadRequestException(
+        `Unsupported Langame domain: ${unsupportedDomain}`,
       );
     }
 

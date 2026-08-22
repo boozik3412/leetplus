@@ -7,7 +7,12 @@ export type RegisterDto = {
   fullName?: string;
 };
 
+export type PreviewUserInviteDto = {
+  token?: string;
+};
+
 export type AcceptUserInviteDto = {
+  token?: string;
   email?: string;
   password?: string;
   confirmPassword?: string;

@@ -5,6 +5,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import { StaffDirectoryService } from './staff-directory.service';
 
 @Controller('staff/shift-workspace')
@@ -18,7 +19,7 @@ import { StaffDirectoryService } from './staff-directory.service';
   UserRole.CLUB_ADMINISTRATOR,
   UserRole.TRAINEE,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
 export class StaffShiftWorkspaceController {
   constructor(private readonly staffDirectoryService: StaffDirectoryService) {}
 

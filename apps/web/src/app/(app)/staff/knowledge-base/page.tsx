@@ -67,7 +67,9 @@ function isRoleScope(
   );
 }
 
-function resolveFilters(params: Awaited<SearchParams>): StaffKnowledgeBaseFilters {
+function resolveFilters(
+  params: Awaited<SearchParams>,
+): StaffKnowledgeBaseFilters {
   const status = searchParam(params.status);
   const roleScope = searchParam(params.roleScope);
   const requiredReading = searchParam(params.requiredReading);

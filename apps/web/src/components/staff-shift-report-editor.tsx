@@ -54,13 +54,19 @@ export function StaffShiftReportEditor({
   const [activeDraft, setActiveDraft] = useState(draft);
   const [body, setBody] = useState(draft.body);
   const [attachments, setAttachments] = useState(draft.attachments);
+  const [pendingAttachmentIds, setPendingAttachmentIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [isRefreshingDraft, setIsRefreshingDraft] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<StaffShiftReportSendResult | null>(null);
   const attachmentIds = useMemo(
-    () => attachments.map((attachment) => attachment.id),
-    [attachments],
+    () =>
+      attachments
+        .filter((attachment) => pendingAttachmentIds.has(attachment.id))
+        .map((attachment) => attachment.id),
+    [attachments, pendingAttachmentIds],
   );
 
   async function refreshDraft(shiftId: string | null) {
@@ -87,6 +93,7 @@ export function StaffShiftReportEditor({
     setActiveDraft(nextDraft);
     setBody(nextDraft.body);
     setAttachments(nextDraft.attachments);
+    setPendingAttachmentIds(new Set());
   }
 
   function appendAttachment(attachment: StaffAttachmentUploadResult) {
@@ -96,12 +103,22 @@ export function StaffShiftReportEditor({
       ...current.filter((item) => item.id !== nextAttachment.id),
       nextAttachment,
     ]);
+    setPendingAttachmentIds((current) => {
+      const next = new Set(current);
+      next.add(nextAttachment.id);
+      return next;
+    });
   }
 
   function removeAttachment(id: string) {
     setAttachments((current) =>
       current.filter((attachment) => attachment.id !== id),
     );
+    setPendingAttachmentIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
   }
 
   async function sendReport() {

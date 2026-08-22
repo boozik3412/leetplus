@@ -509,6 +509,15 @@ source_checksum_sha256="$(snapshot_regular_file \
 
 reference_root="${store_authority_root}/reference"
 reference_manifest="${store_authority_root}/ROOT_SOURCE_SHA256SUMS"
+[[ ! -e "$reference_root" && ! -L "$reference_root" ]] \
+  || die 'reference extraction root unexpectedly exists'
+/usr/bin/install -d \
+  -o "$build_user" -g "$build_group" -m 0700 -- "$reference_root"
+[[ -d "$reference_root" && ! -L "$reference_root" \
+  && "$(/usr/bin/realpath -e -- "$reference_root")" == "$reference_root" \
+  && "$(/usr/bin/stat -c '%u:%g:%a' -- "$reference_root")" == \
+    "${build_uid}:${build_gid}:700" ]] \
+  || die 'reference extraction root is not exact private build authority'
 /usr/sbin/runuser -u "$build_user" -- /usr/bin/env -i \
   PATH=/usr/bin:/bin \
   LANG=C.UTF-8 \

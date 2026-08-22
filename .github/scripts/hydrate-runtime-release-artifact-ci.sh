@@ -913,6 +913,8 @@ run_hydration_and_verify() {
   [[ "$(/usr/bin/systemctl show --property=LoadState --value "$hydration_unit_name")" == \
     'not-found' ]] \
     || die 'ephemeral CI hydration unit name is already loaded'
+  # For transient D-Bus units, the unit-file literal `none` is represented by
+  # an empty address-family array; `none` as an array member is invalid.
   /usr/bin/systemd-run --quiet --wait --pipe --service-type=exec \
     --unit="$hydration_unit_name" \
     --property="User=${build_user}" \
@@ -924,7 +926,7 @@ run_hydration_and_verify() {
     --property=PrivateDevices=yes \
     --property=PrivateTmp=yes \
     --property=PrivateNetwork=yes \
-    --property=RestrictAddressFamilies=none \
+    --property=RestrictAddressFamilies= \
     --property=IPAddressDeny=any \
     --property=ProtectSystem=strict \
     --property=ProtectHome=read-only \

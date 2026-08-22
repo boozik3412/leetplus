@@ -235,6 +235,20 @@ jobs:
           bash -n .github/scripts/test-runtime-release-artifact-integrity.sh
           bash .github/scripts/test-runtime-release-artifact-integrity.sh
           bash -n .github/scripts/hydrate-runtime-release-artifact-ci.sh
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          sudo -n \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/hydrate-runtime-release-artifact-ci.sh \
+              --validate-fixed-tools-only \
+              --release-sha "$CI_RELEASE_SHA" \
+              --runner-uid "$runner_uid" \
+              --runner-gid "$runner_gid"
           /usr/bin/python3 -I -S -E -c \
             "from pathlib import Path; [compile(Path(p).read_bytes(), p, 'exec') for p in ['.github/scripts/extract-runtime-release-artifact.py', '.github/scripts/test-runtime-release-archive-extraction.py']]"
           /usr/bin/python3 -I -S -E .github/scripts/test-runtime-release-archive-extraction.py

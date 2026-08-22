@@ -1094,7 +1094,7 @@ jobs:
         run: |
           set -euo pipefail
           helper_source="$GITHUB_WORKSPACE/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
-          helper_sha256='868b63a55dc82811c136e6269099b240bc2fd6076e75f1aa49088c3253f66993'
+          helper_sha256='13c168a764534723b309c4134ef0a6f36767ab2d2fe633ca509b206961fbce79'
           authority_parent='/srv/leetplus-ci-runtime-authority'
           authority_root="$authority_parent/$CI_RELEASE_SHA"
           sudo -n /usr/bin/env -i \

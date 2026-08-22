@@ -35,6 +35,10 @@ usage() {
   cat <<'USAGE'
 Usage:
   hydrate-runtime-release-artifact-ci.sh \
+    --validate-fixed-tools-only --release-sha <40-lowercase-hex> \
+    --runner-uid <calling-runner-uid> --runner-gid <calling-runner-gid>
+
+  hydrate-runtime-release-artifact-ci.sh \
     --release-sha <40-lowercase-hex> \
     --repository-root <exact-checkout-root> \
     --runner-tool-cache <canonical-runner-tool-cache> \
@@ -64,6 +68,7 @@ runner_gid=''
 artifact=''
 artifact_sha256=''
 work_root=''
+validate_fixed_tools_only=false
 
 while (($# > 0)); do
   case "$1" in
@@ -77,6 +82,7 @@ while (($# > 0)); do
     --artifact) artifact="${2:-}"; shift 2 ;;
     --artifact-sha256) artifact_sha256="${2:-}"; shift 2 ;;
     --work-root) work_root="${2:-}"; shift 2 ;;
+    --validate-fixed-tools-only) validate_fixed_tools_only=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -93,6 +99,49 @@ done
   && "$invoking_sudo_gid" == "$runner_gid" ]] \
   || die 'sudo caller identity does not match the declared GitHub runner identity'
 
+for bootstrap_tool in /usr/bin/realpath /usr/bin/stat; do
+  [[ -f "$bootstrap_tool" && -x "$bootstrap_tool" && ! -L "$bootstrap_tool" ]] \
+    || die "fixed-tool verifier is absent or unsafe: ${bootstrap_tool}"
+done
+
+assert_root_controlled_tool_directory() {
+  local directory="$1"
+  local mode
+  [[ -d "$directory" && ! -L "$directory" \
+    && "$(/usr/bin/stat -c '%u:%g' -- "$directory")" == '0:0' ]] \
+    || die "fixed-tool authority directory is unsafe: ${directory}"
+  mode="$(/usr/bin/stat -c '%a' -- "$directory")"
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] \
+    || die "fixed-tool authority directory mode is invalid: ${directory}"
+  (( (8#$mode & 8#22) == 0 )) \
+    || die "fixed-tool authority directory is writable outside root: ${directory}"
+}
+
+for authority_directory in /usr /usr/bin /usr/sbin /etc /etc/alternatives; do
+  assert_root_controlled_tool_directory "$authority_directory"
+done
+
+assert_fixed_tool() {
+  local command_path="$1"
+  local resolved_path mode
+  [[ -x "$command_path" ]] \
+    || die "required fixed tool is absent: ${command_path}"
+  resolved_path="$(/usr/bin/realpath -e -- "$command_path")" \
+    || die "required fixed tool cannot be resolved: ${command_path}"
+  case "$resolved_path" in
+    /usr/bin/*|/usr/sbin/*) ;;
+    *) die "required fixed tool resolves outside the system authority: ${command_path}" ;;
+  esac
+  [[ -f "$resolved_path" && -x "$resolved_path" && ! -L "$resolved_path" \
+    && "$(/usr/bin/stat -c '%u:%g' -- "$resolved_path")" == '0:0' ]] \
+    || die "required fixed tool target is unsafe: ${command_path}"
+  mode="$(/usr/bin/stat -c '%a' -- "$resolved_path")"
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] \
+    || die "required fixed tool mode is invalid: ${command_path}"
+  (( (8#$mode & 8#22) == 0 )) \
+    || die "required fixed tool is writable outside root: ${command_path}"
+}
+
 for command_path in \
   /usr/bin/awk /usr/bin/bash /usr/bin/basename /usr/bin/chmod /usr/bin/chown \
   /usr/bin/cmp /usr/bin/dirname /usr/bin/env /usr/bin/find \
@@ -104,9 +153,13 @@ for command_path in \
   /usr/bin/uname /usr/bin/xargs \
   /usr/sbin/groupadd /usr/sbin/groupdel /usr/sbin/runuser \
   /usr/sbin/useradd /usr/sbin/userdel; do
-  [[ -x "$command_path" && ! -L "$command_path" ]] \
-    || die "required fixed tool is absent or unsafe: ${command_path}"
+  assert_fixed_tool "$command_path"
 done
+
+if [[ "$validate_fixed_tools_only" == true ]]; then
+  printf 'CI_RUNTIME_FIXED_TOOLS=PASS\n'
+  exit 0
+fi
 
 runner_passwd_rows="$(/usr/bin/getent passwd | /usr/bin/awk -F: -v uid="$runner_uid" '$3 == uid { print }')"
 runner_group_rows="$(/usr/bin/getent group | /usr/bin/awk -F: -v gid="$runner_gid" '$3 == gid { print }')"
@@ -429,7 +482,7 @@ source_node_sha256="$(snapshot_regular_file \
   "$node_path" "${tool_root}/node" 268435456 0550)"
 source_stager_sha256="$(snapshot_regular_file \
   "$stager" "$stager_snapshot" 4194304 0550 \
-  aa871e61a275636fdc5dd859e6f586ecf1a373741828a2c1d1f5a5e757b5aa98)"
+  3392d681896fab07833019b3da5b53535282eabd145e1453f8f9c0fbae9ee874)"
 snapshot_regular_file \
   "$extractor" "$extractor_snapshot" 1048576 0440 \
   9264d5d4b4328ab0bae8898a31dce1f864c18f95a5a0ffefa0198cd5dd11500a \

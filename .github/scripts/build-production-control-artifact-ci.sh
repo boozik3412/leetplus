@@ -1243,8 +1243,7 @@ root_tar_digest="${root_tar_digest%% *}"
     --same-owner \
     --same-permissions \
     --numeric-owner \
-    --keep-old-files \
-    --no-overwrite-dir
+    --keep-old-files
 
 root_verification="$(node_command "${root_extraction}/${VERIFIER_PATH}" \
     --artifact-root "$root_extraction" \

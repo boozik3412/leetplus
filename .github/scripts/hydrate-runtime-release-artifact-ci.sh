@@ -661,11 +661,14 @@ assert_build_uid_quiescent
   || die 'root controller rejected the exact runtime artifact identity'
 /usr/bin/install -o root -g "$build_group" -m 0440 -- \
   "${reference_root}/SHA256SUMS" "$reference_manifest"
-/usr/bin/rm -rf -- "$reference_root"
 [[ -f "$reference_manifest" && ! -L "$reference_manifest" \
   && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$reference_manifest")" == \
     "0:${build_gid}:440:1" ]] \
   || die 'root-controlled source manifest snapshot is unsafe'
+reference_lockfile_sha256="$(/usr/bin/sha256sum -- "${reference_root}/pnpm-lock.yaml")"
+reference_lockfile_sha256="${reference_lockfile_sha256%% *}"
+[[ "$reference_lockfile_sha256" == "$source_lockfile_sha256" ]] \
+  || die 'verified release lockfile differs from the exact checkout'
 
 tool_path="${tool_root}:/usr/bin:/bin"
 for runner_owned_input in "$repository_root" "$artifact" "$artifact_sha256" \
@@ -696,11 +699,37 @@ done
       cd -- "$1"
       shift
       exec "$@"
-    ' ci-fetch "$repository_root" "$pnpm_command" \
+    ' ci-fetch "$reference_root" "$pnpm_command" \
       fetch --prod --frozen-lockfile --ignore-scripts \
         --package-import-method=copy --store-dir "$store_root" \
   || die 'fresh exact-lockfile production dependency fetch failed'
 assert_build_uid_quiescent
+[[ -d "$reference_root" && ! -L "$reference_root" \
+  && "$(/usr/bin/realpath -e -- "$reference_root")" == "$reference_root" \
+  && "$(/usr/bin/stat -c '%u:%g:%a' -- "$reference_root")" == \
+    "${build_uid}:${build_gid}:700" ]] \
+  || die 'exact-lockfile fetch source root became unsafe'
+if [[ -e "${reference_root}/node_modules" \
+  || -L "${reference_root}/node_modules" ]]; then
+  [[ -d "${reference_root}/node_modules" \
+    && ! -L "${reference_root}/node_modules" ]] \
+    || die 'exact-lockfile fetch created an unsafe virtual store root'
+  /usr/bin/rm -rf -- "${reference_root}/node_modules"
+fi
+/usr/bin/cmp --silent -- \
+  "${reference_root}/SHA256SUMS" "$reference_manifest" \
+  || die 'exact-lockfile fetch mutated the source manifest'
+/usr/bin/env -i \
+  PATH="${tool_root}:/usr/bin:/bin" \
+  LANG=C.UTF-8 \
+  LC_ALL=C.UTF-8 \
+  TZ=UTC \
+  "${tool_root}/node" "$runtime_verifier_snapshot" \
+    --release-root "$reference_root" \
+    --expected-release-sha "$release_sha" \
+  || die 'exact-lockfile fetch mutated the verified release source'
+/usr/bin/rm -rf -- "$reference_root"
+printf 'CI_PNPM_FETCH_SOURCE_INTEGRITY=PASS\n'
 
 find_has_match -P "$store_root" -mindepth 1 \
   || die 'fresh CI pnpm store is empty'
@@ -822,7 +851,7 @@ run_hydration_and_verify() {
     --property=LimitNOFILE=4096 \
     --property=RuntimeMaxSec=700 \
     --property=UMask=0077 \
-    --property="WorkingDirectory=${repository_root}" \
+    --property="WorkingDirectory=${home_root}" \
     /usr/bin/env -i \
       PATH="$tool_path" \
       HOME="$home_root" \

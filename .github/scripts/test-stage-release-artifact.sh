@@ -9,7 +9,20 @@ readonly STAGER="${REPOSITORY_ROOT}/docs/deployment/production-artifact/stage-re
 readonly TEST_ROOT="$(mktemp -d)"
 
 cleanup() {
-  rm -rf -- "$TEST_ROOT"
+  local test_status=$?
+
+  # Successful fixtures deliberately restore their release directories to
+  # read-only modes. Make only this mktemp-owned tree removable before the
+  # EXIT trap deletes it, while preserving any earlier test failure.
+  chmod -R u+w -- "$TEST_ROOT" 2>/dev/null || true
+  if ! rm -rf -- "$TEST_ROOT"; then
+    printf 'stage-release-artifact test: failed to remove test root: %s\n' "$TEST_ROOT" >&2
+    if (( test_status == 0 )); then
+      test_status=1
+    fi
+  fi
+
+  return "$test_status"
 }
 trap cleanup EXIT
 

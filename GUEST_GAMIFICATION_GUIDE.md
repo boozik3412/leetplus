@@ -1,6 +1,6 @@
 # Геймификация гостей LeetPlus
 
-Дата: 13.08.2026
+Дата: 23.08.2026
 Статус: рабочий guide для поддержки и развития Guest Game Hub.
 
 > Актуальный production-контур описан в `docs/deployment/guest-gamification-live-rewards.md`. Старые заметки ниже сохранены как исторический контекст только там, где не противоречат этому документу.
@@ -21,6 +21,7 @@
 - Diagnostics: `/gamification/log` (legacy `/gamification-log` redirects here)
 - UI component: `apps/web/src/components/guest-gamification-panel.tsx`
 - API: `/guests/gamification/*`
+- Statistics API: `GET /guests/gamification/statistics`
 - Backend: `apps/api/src/guest-gamification/*`
 - Data models: `GuestGameProfile`, `GuestGameLootBox`, `GuestGameMission`, `GuestGameSeason`, `GuestGameReward`, `GuestGameEvent`, `GuestGameRewardWalletItem`, `GuestGameEntitlement`
 
@@ -32,6 +33,18 @@
 - Battle Pass: сезон, период, XP-правила, уровни, free/premium rewards, premium mode, бюджет и ручное согласование.
 - Кошелёк наград: отдельные item для обычной награды, отложенного XP и права открыть лутбокс; пользовательские состояния `PENDING/PROCESSING/FAILED/OPENING`, 30-дневный срок и точная связка с профилем, источником и клубом.
 - Игровые события: идемпотентная фиксация квалификации; event XP обычных mission/Battle Pass/check-in/event-сценариев применяется только после claim соответствующего wallet item.
+- Статистика: отдельный агрегатный API и вкладка в менеджерском интерфейсе. Она не строится по компактному `workspace`, поэтому длинная история профилей/событий/наград не обрезается UI-лимитами.
+
+## 3.0.1. Метрики статистики
+
+- `Регистрации` — новые `GuestGameProfile.createdAt` без `isStaffTest`. Это регистрация в игровом модуле, а не создание любой записи Guest в Langame.
+- `Активные пользователи` — уникальные профили с `gameActivatedAt` и доверенным игровым событием после этой границы. События источника `MANUAL` не считаются продуктовой активностью.
+- `Выданные награды` — уникальные `GuestGameReward` с финальным статусом `PAID` по `paidAt`. Состояния квалификации, wallet и bonus ledger не суммируются поверх reward.
+- `Выданные бонусы` — только подтвержденные `GuestBonusLedgerEntry` с `entryType=EARN`, `source=GAMIFICATION`, `status=CONFIRMED` по `confirmedAt`. `PENDING`, `FAILED`, `CANCELED` и `RECONCILIATION_REQUIRED` не входят в сумму.
+- Funnel награды использует три разные границы: `qualifiedAt`, `GuestGameRewardWalletItem.claimedAt`, `paidAt`. Completion ACK не является claim и не увеличивает второй шаг.
+- Фильтр клуба для регистрации использует доступную клубную атрибуцию игрового факта. События без store dimension остаются в сетевом срезе; UI прямо сообщает об этом ограничении.
+- Timezone берется из выбранного клуба, затем из primary active store, иначе используется `UTC`. Метаданные ответа всегда сообщают фактическую timezone и freshness.
+- Контракт уже содержит `store`, `rewardType`, `sourceKind` и период. Следующий retention/CRM слой должен соединять эти измерения по стабильным `profileId/guestId`, но не объявлять корреляцию причинным эффектом без attribution window и контрольной группы.
 
 ## 3.1. Текущий live-контур наград
 

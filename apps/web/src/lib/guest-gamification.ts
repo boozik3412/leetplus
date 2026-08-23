@@ -1618,6 +1618,72 @@ export type GuestGamificationWorkspace = {
   guestLogCatalog: GuestGameGuestLogCatalog;
 };
 
+export type GuestGamificationStatisticsComparison = {
+  current: number;
+  previous: number;
+  delta: number;
+  trendPercent: number | null;
+};
+
+export type GuestGamificationStatistics = {
+  meta: {
+    generatedAt: string;
+    latestDataAt: string | null;
+    timeZone: string;
+    timeZoneSource: "SELECTED_STORE" | "PRIMARY_STORE" | "UTC_FALLBACK";
+    granularity: "DAY" | "WEEK" | "MONTH";
+    period: { from: string; to: string };
+    previousPeriod: { from: string; to: string };
+    filters: {
+      stores: Array<{ id: string; name: string }>;
+      rewardTypes: string[];
+      sourceKinds: Array<
+        "LOOT_BOX" | "MISSION" | "CHECK_IN" | "BATTLE_PASS" | "OTHER"
+      >;
+    };
+    scopeNote: string | null;
+  };
+  summary: {
+    registrations: GuestGamificationStatisticsComparison;
+    activeUsers: GuestGamificationStatisticsComparison;
+    deliveredRewards: GuestGamificationStatisticsComparison;
+    confirmedBonuses: GuestGamificationStatisticsComparison & {
+      operations: number;
+      previousOperations: number;
+    };
+    otherDeliveredRewards: number;
+  };
+  series: Array<{
+    bucketStart: string;
+    registrations: number;
+    activeUsers: number;
+    deliveredRewards: number;
+    confirmedBonusAmount: number;
+    confirmedBonusOperations: number;
+  }>;
+  rewardTypes: Array<{
+    type: string;
+    label: string;
+    count: number;
+    amount: number;
+  }>;
+  sources: Array<{
+    sourceKind: "LOOT_BOX" | "MISSION" | "CHECK_IN" | "BATTLE_PASS" | "OTHER";
+    label: string;
+    count: number;
+  }>;
+  lifecycle: {
+    qualified: number;
+    claimed: number;
+    delivered: number;
+  };
+  definitions: Array<{
+    key: string;
+    label: string;
+    description: string;
+  }>;
+};
+
 export async function getGuestGamificationWorkspace(
   options: { compact?: boolean } = {},
 ): Promise<GuestGamificationWorkspace> {

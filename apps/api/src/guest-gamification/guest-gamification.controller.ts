@@ -37,6 +37,11 @@ import {
   type GuestActivityLedgerDiagnostics,
 } from './guest-activity-ledger.service';
 import { GuestGamificationLogService } from './guest-gamification-log.service';
+import {
+  GuestGamificationStatisticsService,
+  type GuestGamificationStatistics,
+  type GuestGamificationStatisticsQuery,
+} from './guest-gamification-statistics.service';
 import { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
 import {
   GuestGameLedgerFallbackSchedulerService,
@@ -136,6 +141,7 @@ import {
 export class GuestGamificationController {
   constructor(
     private readonly gamificationService: GuestGamificationService,
+    private readonly statisticsService: GuestGamificationStatisticsService,
     private readonly activityLedgerService: GuestActivityLedgerService,
     private readonly gamificationLogService: GuestGamificationLogService,
     private readonly qualityMonitoringService: GuestGameQualityMonitoringService,
@@ -144,6 +150,14 @@ export class GuestGamificationController {
     private readonly ledgerFallbackScheduler: GuestGameLedgerFallbackSchedulerService,
     private readonly ruleReplayService: GuestGameRuleReplayService,
   ) {}
+
+  @Get('statistics')
+  getStatistics(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: GuestGamificationStatisticsQuery,
+  ): Promise<GuestGamificationStatistics> {
+    return this.statisticsService.getStatistics(user, query);
+  }
 
   @Get('workspace')
   getWorkspace(

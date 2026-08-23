@@ -25,6 +25,7 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 const gamificationTabs = new Set<TabId>([
   "overview",
+  "statistics",
   "profiles",
   "lootBoxes",
   "missions",

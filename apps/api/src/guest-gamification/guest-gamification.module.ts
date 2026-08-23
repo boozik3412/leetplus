@@ -25,6 +25,7 @@ import {
 } from './guest-game-media.controller';
 import { GuestGameMediaService } from './guest-game-media.service';
 import { GuestGamificationScheduledController } from './guest-gamification-scheduled.controller';
+import { GuestGamificationStatisticsService } from './guest-gamification-statistics.service';
 import { GuestGamificationController } from './guest-gamification.controller';
 import { GuestGamificationService } from './guest-gamification.service';
 
@@ -38,6 +39,7 @@ import { GuestGamificationService } from './guest-gamification.service';
   ],
   providers: [
     GuestGamificationService,
+    GuestGamificationStatisticsService,
     GuestGamificationPipelineSchedulerService,
     GuestGamificationSupplementalPipelineSchedulerService,
     GuestGamificationLogService,

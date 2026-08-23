@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Current gamification state (13.08.2026)
+## Current gamification state (23.08.2026)
 
 - The canonical manager route is `/gamification`, diagnostics live at `/gamification/log`, missions are created and edited only in `/gamification/missions/wizard`, and the guest flow is `/game/auth -> /game/clubs -> /game` with reward history at `/game/rewards`.
 - Mission v2 and Battle Pass share the same condition family: `APP_OPEN`, `PLAY_TIME`, `PRODUCT_PURCHASE`, `BALANCE_TOPUP`, and `CHECK_IN`. Loot boxes accept `ANY`, `HOURLY`, or `PACKAGE_OR_SUBSCRIPTION`.
@@ -25,6 +25,8 @@
 - Loot-box prize rows support a standard preset or custom image plus frame, text and background colours. The editor roulette preview and live game roulette consume the same visual payload, preload images and retain a snapshot on the opened reward so later template edits do not rewrite history.
 - `REWARD_TEMPLATE` stays out of the standalone storefront, `BOTH` remains storefront-plus-gift, and Battle Pass/mission reward selectors accept only `REWARD_TEMPLATE` or `BOTH`. The API validates this invariant even if an old or custom client bypasses the UI.
 - The reward-history page is a compact guest-facing timeline with club/source/rarity/search filters. Internal game-journal details and reward claim codes are hidden from ordinary guests. Claiming the same wallet item from a quest modal or reward history is one idempotent operation; the next summary removes the already-settled action from every surface.
+- `/gamification` now has a dedicated `Статистика` tab backed by `GET /guests/gamification/statistics`. The endpoint aggregates the complete tenant scope independently of the bounded workspace lists and supports day/week/month/custom periods plus club, reward-type and activity-source filters. It exposes registrations, unique active profiles, final `PAID` rewards, confirmed gamification bonus-ledger operations, reward composition, sources and the `qualified → claimed → delivered` lifecycle. Staff-test profiles, manual activity events and non-confirmed ledger attempts are excluded; reward, wallet and ledger rows are never added as three copies of one prize.
+- The statistics response already carries stable store/source/reward dimensions, explicit metric definitions, comparison periods, source timezone and data freshness. This is the forward-compatible base for a later retention/CRM view. Return-rate or marketing-causality claims must not be added until guest cohorts, attribution windows and an appropriate comparison/control methodology are approved.
 - Guest club branding uses the network logo beside the club name and in club selection. The standalone header logo was removed, and the remaining logo is decorative; only the club name changes the selected club.
 
 ### Mission wizard v2 and supplemental ledger layer (20.07.2026)
@@ -46,7 +48,7 @@
 - The ordinary LIVE snapshot window remains the primary path. Historical anti-join recovery for guest-bound sessions and purchases is independently gated by `GUEST_GAME_PIPELINE_BACKFILL_MODE=OFF|SHADOW|LIVE` and defaults to `OFF`, where it executes no anti-join SQL. Every enabled mode requires an exact tenant and an explicitly false kill switch; `LIVE` also requires a timezone-qualified cutoff plus an exact profile unless tenant-wide rollout is explicitly allowed. `SHADOW` records diagnostic decisions only and cannot create event, XP, reward or entitlement. `PLAY_HOUR` is emitted only after a session has stopped, so an intermediate duration cannot seal a stale event before the final 60-minute boundary. The Ledger recovery lane remains secondary and acts only after the primary grace window.
 - Standalone cases, mission-target cases and Battle Pass lootbox rewards share entitlement limits and opening semantics. `STANDALONE` is directly earnable, `REWARD_TEMPLATE` is only granted by a mission or Battle Pass target, and `BOTH` supports both paths. Qualification never selects a random prize; the guest's manual open action does that exactly once.
 
-Last updated: 2026-08-13
+Last updated: 2026-08-23
 
 ## Current Workflow
 

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import {
   useEffect,
   useMemo,
@@ -74,6 +75,18 @@ import type {
 import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
 
+const GuestGamificationStatisticsTab = dynamic(
+  () =>
+    import("@/components/guest-gamification-statistics-tab").then(
+      (module) => module.GuestGamificationStatisticsTab,
+    ),
+  {
+    loading: () => (
+      <div className="mt-6 h-96 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-900" />
+    ),
+  },
+);
+
 type Props = {
   initialWorkspace: GuestGamificationWorkspace;
   audiences: GuestAudience[];
@@ -97,6 +110,7 @@ type Props = {
 
 export type TabId =
   | "overview"
+  | "statistics"
   | "profiles"
   | "lootBoxes"
   | "missions"
@@ -498,6 +512,7 @@ type DryRunForm = {
 
 const tabs: Array<{ id: TabId; label: string }> = [
   { id: "overview", label: "Обзор" },
+  { id: "statistics", label: "Статистика" },
   { id: "profiles", label: "Профили" },
   { id: "lootBoxes", label: "Лутбоксы" },
   { id: "missions", label: "Задания" },
@@ -3080,6 +3095,10 @@ export function GuestGamificationPanel({
               onCancelBonusLedgerEntry={cancelBonusLedgerEntry}
               bonusLedgerResult={bonusLedgerResult}
             />
+          ) : null}
+
+          {activeTab === "statistics" ? (
+            <GuestGamificationStatisticsTab stores={stores} />
           ) : null}
 
           {activeTab === "profiles" ? (

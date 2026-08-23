@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -42,7 +43,7 @@ export class GuestGameMediaService {
       );
     }
 
-    const tenant = await this.tenantContextService.resolve(user);
+    const tenant = this.tenantContextService.resolve(user);
     const asset = await this.prisma.guestGameMediaAsset.create({
       data: {
         tenantId: tenant.tenantId,
@@ -86,6 +87,59 @@ export class GuestGameMediaService {
       fileName: asset.fileName,
       contentType: asset.contentType,
       buffer: Buffer.from(asset.data),
+    };
+  }
+
+  /**
+   * Exact tenant-bound read port for the dormant CURRENT190 guest-session
+   * application boundary. The legacy public ID-only controller intentionally
+   * continues to use getAsset until the protected route is promoted.
+   */
+  async readForTenant(tenantId: string, assetId: string) {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        assetId: string;
+        tenantId: string;
+        contentType: string;
+        byteSize: number;
+        data: Uint8Array;
+      }>
+    >(Prisma.sql`
+      SELECT
+        asset."id" AS "assetId",
+        asset."tenantId",
+        asset."contentType",
+        asset."byteSize",
+        asset."data"
+      FROM public."GuestGameMediaAsset" AS asset
+      WHERE asset."tenantId" = ${tenantId}
+        AND asset."id" = ${assetId}
+        AND asset."contentType" IN ('image/jpeg', 'image/png', 'image/webp')
+        AND asset."byteSize" BETWEEN 1 AND ${GUEST_GAME_MEDIA_MAX_BYTES}
+        AND pg_catalog.octet_length(asset."data") = asset."byteSize"
+        AND pg_catalog.octet_length(asset."data") <=
+          ${GUEST_GAME_MEDIA_MAX_BYTES}
+      LIMIT 1
+    `);
+    const asset = rows[0];
+
+    if (!asset || rows.length !== 1) {
+      throw new NotFoundException('Image not found');
+    }
+
+    const buffer = Buffer.from(asset.data);
+    if (
+      asset.byteSize !== buffer.length ||
+      detectImageContentType(buffer) !== asset.contentType
+    ) {
+      throw new NotFoundException('Image not found');
+    }
+
+    return {
+      assetId: asset.assetId,
+      tenantId: asset.tenantId,
+      contentType: asset.contentType,
+      buffer,
     };
   }
 }

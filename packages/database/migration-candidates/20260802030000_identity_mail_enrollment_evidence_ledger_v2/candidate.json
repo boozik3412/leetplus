@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "contract": "IDENTITY_MAIL_ENROLLMENT_EVIDENCE_LEDGER_V2_CANDIDATE_V1",
+  "candidate": "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
+  "ordinal": 185,
+  "predecessor": {
+    "count": 185,
+    "head": "20260804170000_identity_mail_worker_v2_lost_response_replay",
+    "manifestDigest": "d5f9f9ad5d7be5706897533eb71f92aa0bd9d8f3feca62462898fc3a0757ac7a",
+    "headChecksum": "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424"
+  },
+  "migrationSqlSha256": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6",
+  "authorization": false,
+  "canMutate": false,
+  "canSend": false,
+  "status": "NOT_DEPLOYABLE"
+}

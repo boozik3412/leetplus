@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { IntegrationProvider, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -10,7 +14,9 @@ import type {
   LangameWorkingShift,
 } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 import {
   STAFF_CHAT_REPORTING_CHANNEL_DESCRIPTION,
   STAFF_CHAT_REPORTING_CHANNEL_NAME,
@@ -156,19 +162,28 @@ export class StaffShiftReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly accessScopeService: AccessScopeService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameClient: LangameClient,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getDraft(
     user: AuthenticatedUser,
     query: StaffShiftReportDraftQuery = {},
   ): Promise<StaffShiftReportDraft> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+    const allowedStoreIds =
+      accessScope.mode === 'STORES' ? accessScope.allowedStoreIds : null;
     const now = new Date();
     const requestedShiftId = this.normalizeOptionalString(query.shiftId);
     const member = await this.prisma.staffMember.findFirst({
-      where: { tenantId, userId: user.id },
+      where: {
+        tenantId,
+        userId: user.id,
+        ...(allowedStoreIds ? { storeId: { in: [...allowedStoreIds] } } : {}),
+      },
       include: {
         store: {
           select: {
@@ -185,7 +200,12 @@ export class StaffShiftReportsService {
     const storeId = member?.storeId ?? null;
     const timeZone = member?.store?.timeZone ?? 'Asia/Yekaterinburg';
     const requestedShift = requestedShiftId
-      ? await this.findShiftById(tenantId, requestedShiftId, storeId)
+      ? await this.findShiftById(
+          tenantId,
+          requestedShiftId,
+          storeId,
+          allowedStoreIds,
+        )
       : null;
     const syncWarnings = await this.syncReportDataFromLangame(
       tenantId,
@@ -199,6 +219,7 @@ export class StaffShiftReportsService {
       member?.externalUserId ?? null,
       requestedShiftId,
       now,
+      allowedStoreIds,
     );
 
     if (activeShift) {
@@ -209,7 +230,12 @@ export class StaffShiftReportsService {
           now,
         )),
       );
-      activeShift = await this.findShiftById(tenantId, activeShift.id, storeId);
+      activeShift = await this.findShiftById(
+        tenantId,
+        activeShift.id,
+        storeId,
+        allowedStoreIds,
+      );
     }
 
     const reportStoreId = activeShift?.storeId ?? storeId;
@@ -299,24 +325,45 @@ export class StaffShiftReportsService {
     user: AuthenticatedUser,
     dto: StaffShiftReportSendDto,
   ): Promise<StaffShiftReportSendResult> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+    const allowedStoreIds =
+      accessScope.mode === 'STORES' ? accessScope.allowedStoreIds : null;
     const rawBody = this.normalizeRequiredString(
       dto.body,
       'Report body',
       STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
     );
-    const attachmentIds = await this.resolveAttachmentIds(
+    const attachmentIds = this.resolveAttachmentIds(dto.attachmentIds);
+    const explicitStoreId = await this.resolveStoreId(
+      user,
       tenantId,
-      user.id,
-      dto.attachmentIds,
+      dto.storeId,
     );
-    const requestedStoreId = await this.resolveStoreId(tenantId, dto.storeId);
+    const requestedStoreId =
+      explicitStoreId ??
+      (allowedStoreIds?.length === 1 ? allowedStoreIds[0] : null);
     const shift = await this.resolveReportShiftForSend(
       tenantId,
       dto.shiftId,
       requestedStoreId,
+      allowedStoreIds,
     );
     const storeId = shift?.storeId ?? requestedStoreId;
+
+    if (
+      allowedStoreIds &&
+      (!storeId || !allowedStoreIds.includes(storeId))
+    ) {
+      throw new BadRequestException(
+        'Store is required for store-scoped shift reports',
+      );
+    }
+
+    if (storeId) {
+      this.accessScopeService.assertStoreAllowed(user, storeId);
+    }
+
     const body = this.prepareReportBodyForSend(rawBody, shift);
     const channel = await this.ensureReportingChannel(tenantId);
 
@@ -336,14 +383,15 @@ export class StaffShiftReportsService {
       });
 
       if (attachmentIds.length > 0) {
-        await tx.staffChatMessageAttachment.createMany({
-          data: attachmentIds.map((attachmentId) => ({
+        await this.staffAttachmentBindingsService.bindPendingChatAttachments(
+          tx,
+          {
             tenantId,
+            actorUserId: user.id,
             messageId: created.id,
-            attachmentId,
-          })),
-          skipDuplicates: true,
-        });
+            attachmentIds,
+          },
+        );
       }
 
       return created;
@@ -360,6 +408,7 @@ export class StaffShiftReportsService {
     tenantId: string,
     shiftId: string | null | undefined,
     storeId: string | null,
+    allowedStoreIds: readonly string[] | null,
   ) {
     const normalizedShiftId = this.normalizeOptionalString(shiftId);
 
@@ -371,10 +420,11 @@ export class StaffShiftReportsService {
       tenantId,
       normalizedShiftId,
       storeId,
+      allowedStoreIds,
     );
 
     if (!shift) {
-      throw new BadRequestException('Shift not found');
+      throw new NotFoundException('Shift not found');
     }
 
     return shift;
@@ -411,24 +461,13 @@ export class StaffShiftReportsService {
     tenantId: string,
     shiftId: string,
     storeId: string | null,
+    allowedStoreIds: readonly string[] | null = null,
   ) {
-    const scopedShift = await this.prisma.guestWorkingShift.findFirst({
-      where: {
-        id: shiftId,
-        tenantId,
-        ...(storeId ? { storeId } : {}),
-      },
-      include: { store: { select: { id: true, name: true, timeZone: true } } },
-    });
-
-    if (scopedShift || !storeId) {
-      return scopedShift;
-    }
-
     return this.prisma.guestWorkingShift.findFirst({
       where: {
         id: shiftId,
         tenantId,
+        ...this.shiftStoreWhere(storeId, allowedStoreIds),
       },
       include: { store: { select: { id: true, name: true, timeZone: true } } },
     });
@@ -440,9 +479,15 @@ export class StaffShiftReportsService {
     externalUserId: string | null,
     requestedShiftId: string | null,
     now: Date,
+    allowedStoreIds: readonly string[] | null,
   ) {
     if (requestedShiftId) {
-      return this.findShiftById(tenantId, requestedShiftId, storeId);
+      return this.findShiftById(
+        tenantId,
+        requestedShiftId,
+        storeId,
+        allowedStoreIds,
+      );
     }
 
     if (!externalUserId) {
@@ -453,7 +498,7 @@ export class StaffShiftReportsService {
       where: {
         tenantId,
         externalUserId,
-        ...(storeId ? { storeId } : {}),
+        ...this.shiftStoreWhere(storeId, allowedStoreIds),
         stoppedAt: null,
       },
       include: { store: { select: { id: true, name: true, timeZone: true } } },
@@ -472,7 +517,7 @@ export class StaffShiftReportsService {
       where: {
         tenantId,
         externalUserId,
-        ...(storeId ? { storeId } : {}),
+        ...this.shiftStoreWhere(storeId, allowedStoreIds),
         stoppedAt: { not: null },
         OR: [
           { startedAt: { gte: recentSince } },
@@ -1514,31 +1559,20 @@ export class StaffShiftReportsService {
     });
   }
 
-  private async resolveAttachmentIds(
-    tenantId: string,
-    userId: string,
-    values: string[] | null | undefined,
-  ) {
+  private resolveAttachmentIds(values: string[] | null | undefined) {
     const requestedIds = this.uniqueStrings(values);
 
-    if (requestedIds.length === 0) {
-      return [];
+    if (requestedIds.length > 20) {
+      throw new BadRequestException(
+        'No more than 20 attachments are allowed',
+      );
     }
 
-    const rows = await this.prisma.staffAttachment.findMany({
-      where: {
-        tenantId,
-        uploadedByUserId: userId,
-        id: { in: requestedIds },
-      },
-      select: { id: true },
-    });
-    const availableIds = new Set(rows.map((row) => row.id));
-
-    return requestedIds.filter((id) => availableIds.has(id));
+    return requestedIds;
   }
 
   private async resolveStoreId(
+    user: AuthenticatedUser,
     tenantId: string,
     value: string | null | undefined,
   ) {
@@ -1548,12 +1582,29 @@ export class StaffShiftReportsService {
       return null;
     }
 
+    this.accessScopeService.assertStoreAllowed(user, id);
+
     const store = await this.prisma.store.findFirst({
       where: { id, tenantId },
       select: { id: true },
     });
 
-    return store?.id ?? null;
+    if (!store) {
+      throw new BadRequestException('Store not found');
+    }
+
+    return store.id;
+  }
+
+  private shiftStoreWhere(
+    storeId: string | null,
+    allowedStoreIds: readonly string[] | null,
+  ): Prisma.GuestWorkingShiftWhereInput {
+    if (storeId) {
+      return { storeId };
+    }
+
+    return allowedStoreIds ? { storeId: { in: [...allowedStoreIds] } } : {};
   }
 
   private uniqueStrings(values: string[] | null | undefined) {

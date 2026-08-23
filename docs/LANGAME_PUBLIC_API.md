@@ -13,7 +13,7 @@
 - `/public_api/routes` требует `api_key` в query string и также поддерживается нашим клиентом с header `X-API-KEY`.
 - Прямой вызов `https://46.langamepro.ru/public_api/routes` без ключа возвращает `400 Validation failed`, поле `api_key` обязательно.
 - В LeetPlus production безопасная проверка маршрутов идет через `/integrations/langame/routes-diagnostics`; endpoint доступен только OWNER/ADMIN и не раскрывает ключ.
-- Для QA-проверок production использовать тестовую учетную запись LeetPlus `123@123.ru`. Пароль не хранить в репозитории, токены и Langame API key не выводить в логи.
+- Для QA-проверок production использовать отдельную именную учетную запись с минимальными capabilities и явным store scope. Local demo seed не создает production QA-аккаунты или Platform Admin; пароли, токены и Langame API key не хранить в репозитории и не выводить в логи.
 
 ## Маршруты Из Документации
 

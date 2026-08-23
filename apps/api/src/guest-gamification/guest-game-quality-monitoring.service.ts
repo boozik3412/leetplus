@@ -3,6 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundRuntimeIdentityDecision,
+} from '../tenancy/tenant-background-execution-policy';
 import { guestGameTriggerMatches } from './guest-game-progress';
 
 const DEFAULT_SYNC_LAG_SECONDS = 10 * 60;
@@ -111,9 +118,36 @@ export class GuestGameQualityMonitoringService {
   }
 
   async runAll(now = new Date()) {
-    const tenants = await this.prisma.tenant.findMany({ select: { id: true } });
+    const tenants = await this.prisma.tenant.findMany({
+      select: { id: true, customerStage: true },
+    });
     const results: Array<Record<string, unknown> & { status: string }> = [];
     for (const tenant of tenants) {
+      const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(tenant.customerStage),
+        jobKind: 'GUEST_GAME_QUALITY_MONITORING',
+      });
+      if (!executionDecision.allowed) {
+        results.push({
+          tenantId: tenant.id,
+          status: 'SKIPPED',
+          reason: tenantBackgroundExecutionNote(executionDecision),
+        });
+        continue;
+      }
+      const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+        decision: executionDecision,
+        actorKind: 'TENANT_SYSTEM',
+        tenantId: tenant.id,
+      });
+      if (!runtimeIdentity.accepted) {
+        results.push({
+          tenantId: tenant.id,
+          status: 'SKIPPED',
+          reason: tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
+        });
+        continue;
+      }
       try {
         results.push(await this.collectTenant(tenant.id, now));
       } catch (error) {
@@ -696,6 +730,12 @@ function positiveNumber(value: string | undefined, fallback: number) {
 function boundedRate(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : fallback;
+}
+
+function tenantBackgroundRuntimeIdentityNote(
+  decision: TenantBackgroundRuntimeIdentityDecision,
+) {
+  return `Background runtime identity denied: ${decision.reasonCode}.`;
 }
 
 function mapPlain<T>(value: T): T {

@@ -37,6 +37,36 @@ describe('telegram edge adapter', () => {
     });
   });
 
+  it('fails closed without an explicit LeetPlus API URL', () => {
+    expect(() =>
+      loadTelegramEdgeConfig({
+        GUEST_GAME_TG_EDGE_WEBHOOK_SECRET: 'telegram-secret',
+        GUEST_GAME_TG_EDGE_BOT_TOKEN: 'bot-token',
+      }),
+    ).toThrow('GUEST_GAME_TG_EDGE_LEETPLUS_API_URL is required.');
+  });
+
+  it('rejects non-http edge outbound base URLs', () => {
+    expect(() =>
+      loadTelegramEdgeConfig({
+        GUEST_GAME_TG_EDGE_LEETPLUS_API_URL: 'ftp://api.leetplus.test',
+        GUEST_GAME_TG_EDGE_WEBHOOK_SECRET: 'telegram-secret',
+        GUEST_GAME_TG_EDGE_BOT_TOKEN: 'bot-token',
+      }),
+    ).toThrow('GUEST_GAME_TG_EDGE_LEETPLUS_API_URL must use http or https');
+
+    expect(() =>
+      loadTelegramEdgeConfig({
+        GUEST_GAME_TG_EDGE_LEETPLUS_API_URL: 'https://api.leetplus.test',
+        GUEST_GAME_TG_EDGE_WEBHOOK_SECRET: 'telegram-secret',
+        GUEST_GAME_TG_EDGE_BOT_TOKEN: 'bot-token',
+        GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL: 'file://telegram',
+      }),
+    ).toThrow(
+      'GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL must use http or https',
+    );
+  });
+
   it('forwards Telegram webhook to LeetPlus and sends safe reply through proxy base URL', async () => {
     const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest
       .fn<TelegramEdgeFetch>()
@@ -307,6 +337,58 @@ describe('telegram edge adapter', () => {
       replySent: false,
       dryRun: true,
       chatIdMasked: 'ch...54',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects unsafe reply markup before any Telegram outbound call', async () => {
+    const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest
+      .fn<TelegramEdgeFetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: 'CONFIRMED',
+            action: 'TELEGRAM_BOT_MENU',
+            reply: {
+              provider: 'TELEGRAM',
+              method: 'sendMessage',
+              text: 'Меню',
+              replyMarkup: {
+                inline_keyboard: [
+                  [
+                    {
+                      text: 'Опасная кнопка',
+                      url: 'javascript:alert(1)',
+                      leak: 'unexpected',
+                    },
+                  ],
+                ],
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+    const result = await handleTelegramEdgeWebhook(
+      baseConfig,
+      {
+        update_id: 4,
+        message: {
+          chat: { id: 123456 },
+          text: '/menu',
+        },
+      },
+      { fetch: fetchMock, logger: silentLogger },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      replySent: false,
+      dryRun: false,
+      chatIdMasked: 'ch...56',
+      outboundRejected: true,
+      note: 'Unsafe Telegram reply payload.',
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

@@ -5,6 +5,7 @@ export type GuestGameRewardMaterializerPolicy = {
   killSwitchEnabled: boolean;
   tenantId: string | null;
   tenantSlug: string | null;
+  storeId: string | null;
   allowAllTenants: boolean;
   scopeConfigured: boolean;
   ready: boolean;
@@ -34,6 +35,10 @@ export function resolveGuestGameRewardMaterializerPolicy(
     config,
     'GUEST_GAME_REWARD_MATERIALIZER_TENANT_SLUG',
   );
+  const storeId = optionalString(
+    config,
+    'GUEST_GAME_REWARD_MATERIALIZER_STORE_ID',
+  );
   const allowAllTenants = optionalBoolean(
     config,
     'GUEST_GAME_REWARD_MATERIALIZER_ALLOW_ALL_TENANTS',
@@ -45,6 +50,7 @@ export function resolveGuestGameRewardMaterializerPolicy(
     killSwitchEnabled,
     tenantId,
     tenantSlug,
+    storeId,
     allowAllTenants,
     scopeConfigured,
     ready: enabled && !killSwitchEnabled && scopeConfigured,

@@ -48,7 +48,9 @@ function isStatus(
   );
 }
 
-function isShiftKind(value: string | undefined): value is StaffChecklistShiftKind | "all" {
+function isShiftKind(
+  value: string | undefined,
+): value is StaffChecklistShiftKind | "all" {
   return (
     value === "all" ||
     value === "OPENING" ||
@@ -209,7 +211,11 @@ export default async function StaffChecklistTemplatesPage({
                 defaultValue={report.filters.storeId ?? ""}
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
               >
-                <option value="">Вся сеть</option>
+                <option value="">
+                  {report.accessScope === "NETWORK"
+                    ? "Вся сеть"
+                    : "Все доступные"}
+                </option>
                 {report.stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}

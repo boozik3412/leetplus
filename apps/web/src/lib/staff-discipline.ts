@@ -65,8 +65,10 @@ export type StaffDisciplineReport = {
     canManage: boolean;
     canExport: boolean;
   };
-  filters: Required<Pick<StaffDisciplineFilters, "dateFrom" | "dateTo">> & {
+  filters: {
     period: "all" | "range";
+    dateFrom: string | null;
+    dateTo: string | null;
     storeId: string | null;
     userId: string | null;
     status: "ACTIVE" | "CANCELED" | "RESET" | "all";

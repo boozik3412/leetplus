@@ -1,0 +1,22 @@
+[Unit]
+# DEPRECATED FOR FIRST ARTIFACT CUTOVER: use leetplus-web@blue|green.service.
+Description=LeetPlus Web (SHA-bound artifact release)
+After=network-online.target leetplus-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/srv/leetplus/current/apps/web
+EnvironmentFile=/etc/leetplus/runtime.env
+EnvironmentFile=/etc/leetplus/release.env
+ExecStart=/srv/leetplus/current/apps/web/node_modules/.bin/next start --hostname 127.0.0.1 --port 3000
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

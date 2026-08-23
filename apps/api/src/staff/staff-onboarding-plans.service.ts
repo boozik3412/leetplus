@@ -3,10 +3,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
+import {
+  extractStaffAttachmentIds,
+  isExactStaffAttachmentUrl,
+} from './staff-attachment-references';
+import {
+  StaffTrainingAccessPolicyService,
+  type StaffTrainingAccess,
+} from './staff-training-access-policy.service';
 
 const planStatuses = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
 const roleScopes = [
@@ -77,6 +85,7 @@ export type StaffOnboardingPlanReport = {
     coursesCount: number;
     tasksCount: number;
   };
+  accessScope: 'NETWORK' | 'STORES';
   canManageOnboarding: boolean;
   rows: StaffOnboardingPlanResponse[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
@@ -99,6 +108,7 @@ export type StaffOnboardingPlanResponse = {
   tasksCount: number;
   createdAt: string;
   updatedAt: string;
+  canManage: boolean;
   store: { id: string; name: string; isActive: boolean } | null;
   createdByUser: { id: string; email: string; fullName: string | null } | null;
 };
@@ -124,17 +134,23 @@ type StaffOnboardingPlanRow = Prisma.StaffOnboardingPlanGetPayload<{
 export class StaffOnboardingPlansService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
+    private readonly staffTrainingAccessPolicyService: StaffTrainingAccessPolicyService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getPlans(
     user: AuthenticatedUser,
     query: StaffOnboardingPlansQuery = {},
   ): Promise<StaffOnboardingPlanReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const canManageOnboarding = this.canManageOnboarding(user);
+    const access = await this.staffTrainingAccessPolicyService.resolve(user);
+    const { tenantId } = access;
+    const canManageOnboarding = access.canManageTraining;
     const filters = this.resolveFilters(query, canManageOnboarding);
-    const where = this.buildWhere(tenantId, user, filters, canManageOnboarding);
+    this.staffTrainingAccessPolicyService.assertRequestedStore(
+      access,
+      filters.storeId,
+    );
+    const where = this.buildWhere(access, filters);
 
     const [
       rows,
@@ -155,14 +171,16 @@ export class StaffOnboardingPlansService {
         take: 200,
       }),
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: this.staffTrainingAccessPolicyService.visibleStoresWhere(access),
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
       this.prisma.staffTrainingCourse.findMany({
         where: {
           tenantId,
-          status: canManageOnboarding ? { in: ['ACTIVE', 'DRAFT'] } : 'ACTIVE',
+          AND: [
+            this.staffTrainingAccessPolicyService.readableCourseWhere(access),
+          ],
         },
         select: {
           id: true,
@@ -175,10 +193,10 @@ export class StaffOnboardingPlansService {
         take: 300,
       }),
       this.prisma.staffTaskTemplate.findMany({
-        where: {
-          tenantId,
-          status: canManageOnboarding ? { in: ['ACTIVE', 'DRAFT'] } : 'ACTIVE',
-        },
+        where:
+          this.staffTrainingAccessPolicyService.visibleTaskTemplatesWhere(
+            access,
+          ),
         select: {
           id: true,
           title: true,
@@ -189,10 +207,10 @@ export class StaffOnboardingPlansService {
         take: 300,
       }),
       this.prisma.staffChecklistTemplate.findMany({
-        where: {
-          tenantId,
-          status: canManageOnboarding ? { in: ['ACTIVE', 'DRAFT'] } : 'ACTIVE',
-        },
+        where:
+          this.staffTrainingAccessPolicyService.visibleChecklistTemplatesWhere(
+            access,
+          ),
         select: {
           id: true,
           title: true,
@@ -204,12 +222,8 @@ export class StaffOnboardingPlansService {
         take: 300,
       }),
       this.prisma.staffShiftRegulation.findMany({
-        where: {
-          tenantId,
-          status: canManageOnboarding
-            ? { in: ['PUBLISHED', 'DRAFT'] }
-            : 'PUBLISHED',
-        },
+        where:
+          this.staffTrainingAccessPolicyService.visibleRegulationsWhere(access),
         select: {
           id: true,
           title: true,
@@ -221,10 +235,11 @@ export class StaffOnboardingPlansService {
         take: 300,
       }),
     ]);
-    const responseRows = rows.map((row) => this.toPlanResponse(row));
+    const responseRows = rows.map((row) => this.toPlanResponse(row, access));
 
     return {
       filters,
+      accessScope: access.mode,
       summary: this.buildSummary(responseRows),
       canManageOnboarding,
       rows: responseRows,
@@ -261,25 +276,41 @@ export class StaffOnboardingPlansService {
   }
 
   async createPlan(user: AuthenticatedUser, dto: StaffOnboardingPlanDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.staffTrainingAccessPolicyService.resolve(user);
+    const { tenantId } = access;
 
-    if (!this.canManageOnboarding(user)) {
+    if (!access.canManageTraining) {
       throw new BadRequestException('Onboarding plan editing is not allowed');
     }
 
-    const normalized = await this.normalizePlanData(tenantId, dto, {
+    const normalized = await this.normalizePlanData(access, dto, {
       requireTitle: true,
     });
-    const created = await this.prisma.staffOnboardingPlan.create({
-      data: {
-        ...(normalized.data as Prisma.StaffOnboardingPlanUncheckedCreateInput),
-        tenantId,
-        createdByUserId: user.id,
-      },
-      include: planInclude,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const plan = await tx.staffOnboardingPlan.create({
+        data: {
+          ...(normalized.data as Prisma.StaffOnboardingPlanUncheckedCreateInput),
+          tenantId,
+          createdByUserId: user.id,
+        },
+        include: planInclude,
+      });
+
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.ONBOARDING_PLAN,
+          resourceId: plan.id,
+          attachmentIds: extractStaffAttachmentIds([normalized.data.steps]),
+        },
+      );
+
+      return plan;
     });
 
-    return this.toPlanResponse(created);
+    return this.toPlanResponse(created, access);
   }
 
   async updatePlan(
@@ -287,31 +318,65 @@ export class StaffOnboardingPlansService {
     id: string,
     dto: StaffOnboardingPlanDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.staffTrainingAccessPolicyService.resolve(user);
+    const { tenantId } = access;
 
-    if (!this.canManageOnboarding(user)) {
+    if (!access.canManageTraining) {
       throw new BadRequestException('Onboarding plan editing is not allowed');
     }
 
     const current = await this.prisma.staffOnboardingPlan.findFirst({
-      where: { id, tenantId },
-      select: { id: true },
+      where: {
+        id,
+        tenantId,
+        AND: [
+          this.staffTrainingAccessPolicyService.readableOnboardingPlanWhere(
+            access,
+          ),
+        ],
+      },
+      select: { id: true, storeId: true, steps: true },
     });
 
-    if (!current) {
+    if (
+      !current ||
+      !this.staffTrainingAccessPolicyService.canManageOnboardingPlan(
+        access,
+        current,
+      )
+    ) {
       throw new NotFoundException('Onboarding plan not found');
     }
 
-    const normalized = await this.normalizePlanData(tenantId, dto, {
+    const normalized = await this.normalizePlanData(access, dto, {
       requireTitle: false,
     });
-    const updated = await this.prisma.staffOnboardingPlan.update({
-      where: { id: current.id },
-      data: normalized.data,
-      include: planInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const plan = await tx.staffOnboardingPlan.update({
+        where: { id: current.id },
+        data: normalized.data,
+        include: planInclude,
+      });
+
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.ONBOARDING_PLAN,
+          resourceId: plan.id,
+          attachmentIds: extractStaffAttachmentIds([
+            normalized.data.steps === undefined
+              ? current.steps
+              : normalized.data.steps,
+          ]),
+        },
+      );
+
+      return plan;
     });
 
-    return this.toPlanResponse(updated);
+    return this.toPlanResponse(updated, access);
   }
 
   private resolveFilters(
@@ -337,12 +402,17 @@ export class StaffOnboardingPlansService {
   }
 
   private buildWhere(
-    tenantId: string,
-    user: AuthenticatedUser,
+    access: StaffTrainingAccess,
     filters: StaffOnboardingPlanReport['filters'],
-    canManageOnboarding: boolean,
   ): Prisma.StaffOnboardingPlanWhereInput {
-    const where: Prisma.StaffOnboardingPlanWhereInput = { tenantId };
+    const where: Prisma.StaffOnboardingPlanWhereInput = {
+      tenantId: access.tenantId,
+      AND: [
+        this.staffTrainingAccessPolicyService.readableOnboardingPlanWhere(
+          access,
+        ),
+      ],
+    };
 
     if (filters.status !== 'all') {
       where.status = filters.status;
@@ -350,11 +420,6 @@ export class StaffOnboardingPlansService {
 
     if (filters.roleScope !== 'all') {
       where.roleScope = filters.roleScope;
-    }
-
-    if (!canManageOnboarding) {
-      where.status = 'ACTIVE';
-      where.roleScope = { in: this.visibleRoleScopes(user.role) };
     }
 
     if (filters.storeId) {
@@ -402,7 +467,7 @@ export class StaffOnboardingPlansService {
   }
 
   private async normalizePlanData(
-    tenantId: string,
+    access: StaffTrainingAccess,
     dto: StaffOnboardingPlanDto,
     options: { requireTitle: boolean },
   ): Promise<{ data: Prisma.StaffOnboardingPlanUncheckedUpdateInput }> {
@@ -441,12 +506,17 @@ export class StaffOnboardingPlansService {
       );
     }
 
-    if (dto.storeId !== undefined) {
-      data.storeId = await this.resolveStoreId(tenantId, dto.storeId);
+    if (dto.storeId !== undefined || options.requireTitle) {
+      const storeId = await this.resolveStoreId(access, dto.storeId);
+      this.staffTrainingAccessPolicyService.assertWritableOnboardingStore(
+        access,
+        storeId,
+      );
+      data.storeId = storeId;
     }
 
     if (dto.steps !== undefined || options.requireTitle) {
-      const steps = await this.normalizeSteps(tenantId, dto.steps);
+      const steps = await this.normalizeSteps(access, dto.steps);
       data.steps = steps;
       data.stepsCount = steps.length;
       data.coursesCount = steps.filter((step) => step.type === 'COURSE').length;
@@ -462,7 +532,7 @@ export class StaffOnboardingPlansService {
   }
 
   private async normalizeSteps(
-    tenantId: string,
+    access: StaffTrainingAccess,
     value: unknown,
   ): Promise<StaffOnboardingStep[]> {
     const rawSteps = Array.isArray(value) ? value.slice(0, 50) : [];
@@ -476,19 +546,46 @@ export class StaffOnboardingPlansService {
     const [courses, taskTemplates, checklistTemplates, regulations] =
       await Promise.all([
         this.prisma.staffTrainingCourse.findMany({
-          where: { tenantId, id: { in: courseIds } },
+          where: {
+            tenantId: access.tenantId,
+            id: { in: courseIds },
+            AND: [
+              this.staffTrainingAccessPolicyService.readableCourseWhere(access),
+            ],
+          },
           select: { id: true },
         }),
         this.prisma.staffTaskTemplate.findMany({
-          where: { tenantId, id: { in: taskTemplateIds } },
+          where: {
+            id: { in: taskTemplateIds },
+            AND: [
+              this.staffTrainingAccessPolicyService.visibleTaskTemplatesWhere(
+                access,
+              ),
+            ],
+          },
           select: { id: true },
         }),
         this.prisma.staffChecklistTemplate.findMany({
-          where: { tenantId, id: { in: checklistTemplateIds } },
+          where: {
+            id: { in: checklistTemplateIds },
+            AND: [
+              this.staffTrainingAccessPolicyService.visibleChecklistTemplatesWhere(
+                access,
+              ),
+            ],
+          },
           select: { id: true },
         }),
         this.prisma.staffShiftRegulation.findMany({
-          where: { tenantId, id: { in: regulationIds } },
+          where: {
+            id: { in: regulationIds },
+            AND: [
+              this.staffTrainingAccessPolicyService.visibleRegulationsWhere(
+                access,
+              ),
+            ],
+          },
           select: { id: true },
         }),
       ]);
@@ -566,7 +663,7 @@ export class StaffOnboardingPlansService {
 
       if (type === 'LINK' && url && !this.isAllowedUrl(url)) {
         throw new BadRequestException(
-          'Onboarding step URL must start with http:// or https://',
+          'Onboarding step URL must be a native attachment path or start with http:// or https://',
         );
       }
 
@@ -589,7 +686,10 @@ export class StaffOnboardingPlansService {
     return steps;
   }
 
-  private toPlanResponse(row: StaffOnboardingPlanRow) {
+  private toPlanResponse(
+    row: StaffOnboardingPlanRow,
+    access: StaffTrainingAccess,
+  ) {
     const steps = this.normalizeStepsFromStorage(row.steps);
 
     return {
@@ -610,6 +710,10 @@ export class StaffOnboardingPlansService {
       ).length,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      canManage: this.staffTrainingAccessPolicyService.canManageOnboardingPlan(
+        access,
+        { storeId: row.store?.id ?? null },
+      ),
       store: row.store,
       createdByUser: row.createdByUser,
     };
@@ -654,60 +758,6 @@ export class StaffOnboardingPlansService {
           .filter((id): id is string => Boolean(id)),
       ),
     );
-  }
-
-  private canManageOnboarding(user: AuthenticatedUser) {
-    switch (user.role) {
-      case UserRole.OWNER:
-      case UserRole.ADMIN:
-      case UserRole.MANAGER:
-      case UserRole.CLUB_MANAGER:
-      case UserRole.STANDARDS_MANAGER:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private visibleRoleScopes(role: UserRole): StaffOnboardingRoleScope[] {
-    const scopes: StaffOnboardingRoleScope[] = ['ALL_STAFF'];
-
-    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
-      scopes.push('ADMINISTRATOR');
-    }
-
-    if (role === UserRole.SENIOR_ADMINISTRATOR) {
-      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR');
-    }
-
-    if (role === UserRole.CLUB_MANAGER) {
-      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'CLUB_MANAGER');
-    }
-
-    if (
-      role === UserRole.MANAGER ||
-      role === UserRole.OWNER ||
-      role === UserRole.ADMIN
-    ) {
-      scopes.push(
-        'ADMINISTRATOR',
-        'SENIOR_ADMINISTRATOR',
-        'CLUB_MANAGER',
-        'MANAGER',
-        'STANDARDS_MANAGER',
-      );
-    }
-
-    if (role === UserRole.STANDARDS_MANAGER) {
-      scopes.push(
-        'ADMINISTRATOR',
-        'SENIOR_ADMINISTRATOR',
-        'CLUB_MANAGER',
-        'STANDARDS_MANAGER',
-      );
-    }
-
-    return Array.from(new Set(scopes));
   }
 
   private resolveOne<T extends readonly string[]>(
@@ -806,7 +856,7 @@ export class StaffOnboardingPlansService {
   }
 
   private isAllowedUrl(value: string) {
-    return /^https?:\/\//i.test(value);
+    return isExactStaffAttachmentUrl(value) || /^https?:\/\//i.test(value);
   }
 
   private asRecord(value: unknown): Record<string, unknown> {
@@ -818,7 +868,7 @@ export class StaffOnboardingPlansService {
   }
 
   private async resolveStoreId(
-    tenantId: string,
+    access: StaffTrainingAccess,
     value: string | null | undefined,
   ) {
     const id = this.normalizeOptionalString(value);
@@ -828,7 +878,12 @@ export class StaffOnboardingPlansService {
     }
 
     const store = await this.prisma.store.findFirst({
-      where: { id, tenantId },
+      where: {
+        AND: [
+          { id },
+          this.staffTrainingAccessPolicyService.visibleStoresWhere(access),
+        ],
+      },
       select: { id: true },
     });
 

@@ -1,0 +1,18 @@
+{
+  "contract": "LANGAME_INITIAL_SYNC_EXECUTION_CURRENT192_V1",
+  "migrationName": "20260813020000_langame_initial_sync_execution_current192",
+  "predecessor": "20260813010000_langame_initial_sync_approval_current191",
+  "predecessorSqlSha256": "2125aa6db050f5d402871e7327dd86720ba11cb5498271b52d9baf88fcf25629",
+  "requiredContracts": [
+    "LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1",
+    "LANGAME_INITIAL_SYNC_PLAN_CURRENT191_V1",
+    "LANGAME_INITIAL_SYNC_APPROVAL_CURRENT191_V1"
+  ],
+  "migrationSqlSha256": "cc40b3fadd5f0e8f3e131838a52d68d972f45c0ee4755784be3c86a3127361f3",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "canCallProvider": false,
+  "runtimeGrants": false,
+  "canonical": false
+}

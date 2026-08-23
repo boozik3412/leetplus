@@ -5,9 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { hasCapability } from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  AccessScopeService,
+  type ResolvedAccessScope,
+} from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import {
   buildStaffExportFile,
@@ -18,6 +23,7 @@ import {
   type StaffExportCell,
   type StaffExportFile,
 } from './staff-export';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 import {
   StaffTeamChatService,
   type StaffChatSystemNotificationDto,
@@ -62,6 +68,12 @@ const taskSortKeys = [
   'priority',
 ] as const;
 const taskAssignmentModes = ['SINGLE', 'ANY_OF', 'INDIVIDUAL'] as const;
+const taskAssignmentLabelKeys = [
+  'assignmentMode',
+  'candidateUserIds',
+  'originalAssignedToUserIds',
+  'bulkTaskGroupId',
+] as const;
 const taskReviewerRoles = [
   UserRole.OWNER,
   UserRole.ADMIN,
@@ -136,8 +148,26 @@ export type StaffTaskCommentDto = {
   evidenceType?: string | null;
   evidenceLabel?: string | null;
   evidenceUrl?: string | null;
+  attachmentIds?: unknown;
   status?: StaffTaskStatus;
 };
+
+export type StaffTaskCatalogSource =
+  | {
+      kind: 'TEMPLATE';
+      templateId: string;
+      templateTitle: string;
+    }
+  | {
+      kind: 'RECURRING_RULE';
+      ruleId: string;
+      ruleTitle: string;
+      cadence: string;
+      templateId: string | null;
+      automatic: boolean;
+      scheduledFor?: string;
+      ruleRunId?: string;
+    };
 
 export type StaffTaskReport = {
   filters: {
@@ -209,10 +239,21 @@ export type StaffTaskGroup = {
 
 type StaffTaskStatusContext = {
   id: string;
+  storeId: string | null;
   status: string;
   assignedToUserId: string | null;
   labels: Prisma.JsonValue | null;
 };
+
+type StaffTaskMutationContext = StaffTaskStatusContext & {
+  shiftId: string | null;
+  observers: Array<{ userId: string }>;
+};
+
+type StaffTaskReferenceClient = Pick<
+  PrismaService,
+  'guestWorkingShift' | 'store' | 'user'
+>;
 
 export type StaffTaskResponse = {
   id: string;
@@ -327,20 +368,41 @@ export class StaffTasksService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly staffTeamChatService: StaffTeamChatService,
+    private readonly accessScopeService: AccessScopeService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getTasks(
     user: AuthenticatedUser,
     query: StaffTasksQuery = {},
   ): Promise<StaffTaskReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
     const filters = this.resolveFilters(query);
-    const baseWhere = this.buildWhere(tenantId, filters, false, user.id);
-    const quickViewWhere = this.buildQuickViewWhere(tenantId, filters, user.id);
+    this.assertTaskStoreFilterAllowed(user, filters.storeId);
+    const baseWhere = this.buildWhere(
+      tenantId,
+      filters,
+      false,
+      user,
+      accessScope,
+    );
+    const quickViewWhere = this.buildQuickViewWhere(
+      tenantId,
+      filters,
+      user,
+      accessScope,
+    );
 
     const [rows, summaryRows, quickRows, groupRows, users, stores] =
       await Promise.all([
-        this.fetchOrderedTaskRows(tenantId, filters, user.id, filters.pageSize),
+        this.fetchOrderedTaskRows(
+          tenantId,
+          filters,
+          user,
+          accessScope,
+          filters.pageSize,
+        ),
         this.prisma.staffTask.findMany({
           where: baseWhere,
           select: { status: true, dueAt: true },
@@ -384,7 +446,7 @@ export class StaffTasksService {
           take: 5000,
         }),
         this.prisma.user.findMany({
-          where: { tenantId, isActive: true },
+          where: this.buildTaskUserSelectorWhere(tenantId, accessScope),
           select: {
             id: true,
             email: true,
@@ -404,7 +466,7 @@ export class StaffTasksService {
           orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
         }),
         this.prisma.store.findMany({
-          where: { tenantId },
+          where: this.buildTaskStoreSelectorWhere(tenantId, accessScope),
           select: { id: true, name: true, isActive: true },
           orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
         }),
@@ -422,7 +484,10 @@ export class StaffTasksService {
           { id: string; name: string; isActive: boolean }
         >();
 
-        if (reportUser.staffMember?.store) {
+        if (
+          reportUser.staffMember?.store &&
+          this.isTaskStoreVisible(reportUser.staffMember.store.id, accessScope)
+        ) {
           storesById.set(
             reportUser.staffMember.store.id,
             reportUser.staffMember.store,
@@ -430,7 +495,9 @@ export class StaffTasksService {
         }
 
         reportUser.storeAccesses.forEach((access) => {
-          storesById.set(access.store.id, access.store);
+          if (this.isTaskStoreVisible(access.store.id, accessScope)) {
+            storesById.set(access.store.id, access.store);
+          }
         });
 
         return {
@@ -451,13 +518,16 @@ export class StaffTasksService {
     user: AuthenticatedUser,
     query: StaffTasksExportQuery = {},
   ): Promise<StaffExportFile> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
     const filters = this.resolveFilters(query);
+    this.assertTaskStoreFilterAllowed(user, filters.storeId);
     const format = resolveStaffExportFormat(query.format);
     const rows = await this.fetchOrderedTaskRows(
       tenantId,
       filters,
-      user.id,
+      user,
+      accessScope,
       10000,
     );
 
@@ -491,26 +561,42 @@ export class StaffTasksService {
   }
 
   async createTask(user: AuthenticatedUser, dto: StaffTaskDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
     const data = await this.normalizeTaskData(tenantId, dto, {
       requireTitle: true,
     });
+    const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
+    this.assertTaskCreationStatus(status);
+    const taskStoreId = typeof data.storeId === 'string' ? data.storeId : null;
     const observerUserIds =
-      (await this.resolveObserverUserIds(tenantId, dto.observerUserIds)) ?? [];
+      (await this.resolveObserverUserIds(
+        tenantId,
+        dto.observerUserIds,
+        accessScope,
+        taskStoreId,
+      )) ?? [];
     const fallbackAssignedToUserId =
       typeof data.assignedToUserId === 'string' ? data.assignedToUserId : null;
     const assignedToUserIds = await this.resolveAssignedUserIds(
       tenantId,
       dto.assignedToUserIds,
       fallbackAssignedToUserId,
+      accessScope,
+      taskStoreId,
     );
     const assignmentMode = this.resolveAssignmentMode(
       dto.assignmentMode,
       assignedToUserIds.length,
     );
-    const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
-    const taskStoreId = typeof data.storeId === 'string' ? data.storeId : null;
 
+    this.assertTaskCreateStoreAllowed(accessScope, taskStoreId);
+    await this.assertTaskShiftMatchesStore(
+      tenantId,
+      typeof data.shiftId === 'string' ? data.shiftId : null,
+      taskStoreId,
+      accessScope,
+    );
     await this.assertTaskCreationPolicy(
       tenantId,
       user,
@@ -520,6 +606,37 @@ export class StaffTasksService {
     );
 
     const tasks = await this.prisma.$transaction(async (tx) => {
+      await this.resolveAssignedUserIds(
+        tenantId,
+        assignedToUserIds,
+        null,
+        accessScope,
+        taskStoreId,
+        tx,
+      );
+      await this.resolveObserverUserIds(
+        tenantId,
+        observerUserIds,
+        accessScope,
+        taskStoreId,
+        tx,
+      );
+      await this.assertTaskShiftMatchesStore(
+        tenantId,
+        typeof data.shiftId === 'string' ? data.shiftId : null,
+        taskStoreId,
+        accessScope,
+        tx,
+      );
+      await this.assertTaskCreationPolicy(
+        tenantId,
+        user,
+        assignedToUserIds,
+        observerUserIds,
+        taskStoreId,
+        tx,
+      );
+
       const createdTasks: StaffTaskRow[] = [];
       const groupId =
         assignmentMode === 'INDIVIDUAL' && assignedToUserIds.length > 1
@@ -612,12 +729,168 @@ export class StaffTasksService {
     };
   }
 
+  async createCatalogTaskInTransaction(
+    tx: Prisma.TransactionClient,
+    user: AuthenticatedUser,
+    dto: StaffTaskDto,
+    source: StaffTaskCatalogSource,
+  ): Promise<StaffTaskResponse> {
+    if (
+      dto.assignedToUserIds !== undefined ||
+      dto.assignmentMode !== undefined
+    ) {
+      throw new BadRequestException(
+        'Catalog task materialization supports a single assignment only',
+      );
+    }
+
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+    const data = await this.normalizeTaskData(
+      tenantId,
+      dto,
+      { requireTitle: true },
+      tx,
+    );
+    const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
+    this.assertTaskCreationStatus(status);
+    const taskStoreId = typeof data.storeId === 'string' ? data.storeId : null;
+    const observerUserIds =
+      (await this.resolveObserverUserIds(
+        tenantId,
+        dto.observerUserIds,
+        accessScope,
+        taskStoreId,
+        tx,
+      )) ?? [];
+    const assignedToUserIds = await this.resolveAssignedUserIds(
+      tenantId,
+      undefined,
+      typeof data.assignedToUserId === 'string' ? data.assignedToUserId : null,
+      accessScope,
+      taskStoreId,
+      tx,
+    );
+
+    this.assertTaskCreateStoreAllowed(accessScope, taskStoreId);
+    await this.assertTaskShiftMatchesStore(
+      tenantId,
+      typeof data.shiftId === 'string' ? data.shiftId : null,
+      taskStoreId,
+      accessScope,
+      tx,
+    );
+    await this.assertTaskCreationPolicy(
+      tenantId,
+      user,
+      assignedToUserIds,
+      observerUserIds,
+      taskStoreId,
+      tx,
+    );
+
+    const assignedToUserId = assignedToUserIds[0] ?? null;
+    const labels = this.buildAssignmentLabels(data.labels, {
+      assignmentMode: 'SINGLE',
+      candidateUserIds: assignedToUserId ? [assignedToUserId] : [],
+      bulkTaskGroupId: null,
+      originalAssignedToUserIds: assignedToUserIds,
+    });
+    const sourceFields =
+      source.kind === 'TEMPLATE'
+        ? {
+            sourceTemplateId: source.templateId,
+            sourceRecurringRuleId: null,
+          }
+        : {
+            sourceTemplateId: source.templateId,
+            sourceRecurringRuleId: source.ruleId,
+          };
+    const sourceMetadata =
+      source.kind === 'TEMPLATE'
+        ? {
+            templateId: source.templateId,
+            templateTitle: source.templateTitle,
+          }
+        : {
+            ruleId: source.ruleId,
+            ruleTitle: source.ruleTitle,
+            cadence: source.cadence,
+            templateId: source.templateId,
+            automatic: source.automatic,
+            ...(source.scheduledFor
+              ? { scheduledFor: source.scheduledFor }
+              : {}),
+            ...(source.ruleRunId ? { ruleRunId: source.ruleRunId } : {}),
+          };
+    const auditAction =
+      source.kind === 'TEMPLATE'
+        ? 'CREATED_FROM_TEMPLATE'
+        : 'CREATED_FROM_RECURRING_RULE';
+    const auditMessage =
+      source.kind === 'TEMPLATE'
+        ? 'Task created from template'
+        : source.automatic
+          ? 'Task created automatically from recurring rule'
+          : 'Task created from recurring rule';
+    const created = await tx.staffTask.create({
+      data: {
+        ...(data as Prisma.StaffTaskUncheckedCreateInput),
+        ...sourceFields,
+        tenantId,
+        status,
+        assignedToUserId,
+        labels,
+        createdByUserId: user.id,
+        completedAt: null,
+      },
+      select: { id: true },
+    });
+
+    await tx.staffTaskAuditEvent.create({
+      data: {
+        tenantId,
+        taskId: created.id,
+        actorUserId: user.id,
+        action: auditAction,
+        message: auditMessage,
+        metadata: {
+          ...sourceMetadata,
+          status,
+          priority: data.priority ?? 'NORMAL',
+          type: data.type ?? 'ONE_TIME',
+          observerUserIds,
+          assignedToUserIds,
+          assignmentMode: 'SINGLE',
+        },
+      },
+    });
+    await this.syncTaskObservers(tx, tenantId, created.id, observerUserIds);
+
+    const task = await this.fetchTaskOrThrow(tx, tenantId, created.id);
+    await this.staffTeamChatService.createSystemNotification(
+      tenantId,
+      this.buildTaskCreatedNotification(task),
+      tx,
+    );
+
+    return this.toTaskResponse(task);
+  }
+
   async updateTask(user: AuthenticatedUser, id: string, dto: StaffTaskDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
     const current = await this.prisma.staffTask.findFirst({
-      where: { id, tenantId },
+      where: {
+        AND: [
+          { id, tenantId },
+          this.buildTaskUpdateVisibilityWhere(user, accessScope),
+        ],
+      },
       select: {
         id: true,
+        storeId: true,
+        shiftId: true,
         status: true,
         assignedToUserId: true,
         labels: true,
@@ -631,13 +904,47 @@ export class StaffTasksService {
     const data = await this.normalizeTaskData(tenantId, dto, {
       requireTitle: false,
     });
-    const observerUserIds = await this.resolveObserverUserIds(
+    this.assertTaskUpdateStoreAllowed(accessScope, dto, data);
+    const nextStoreId =
+      dto.storeId === undefined
+        ? current.storeId
+        : typeof data.storeId === 'string'
+          ? data.storeId
+          : null;
+    const nextShiftId =
+      dto.shiftId === undefined
+        ? current.shiftId
+        : typeof data.shiftId === 'string'
+          ? data.shiftId
+          : null;
+    if (dto.assignedToUserId !== undefined) {
+      const assignedToUserIds = await this.resolveAssignedUserIds(
+        tenantId,
+        undefined,
+        typeof data.assignedToUserId === 'string'
+          ? data.assignedToUserId
+          : null,
+        accessScope,
+        nextStoreId,
+      );
+      data.assignedToUserId = assignedToUserIds[0] ?? null;
+    }
+    let observerUserIds = await this.resolveObserverUserIds(
       tenantId,
       dto.observerUserIds,
+      accessScope,
+      nextStoreId,
     );
+    if (dto.storeId !== undefined || dto.shiftId !== undefined) {
+      await this.assertTaskShiftMatchesStore(
+        tenantId,
+        nextShiftId,
+        nextStoreId,
+        accessScope,
+      );
+    }
     const normalizedStatus = data.status as StaffTaskStatus | undefined;
     const currentStatus = current.status as StaffTaskStatus;
-    const nextStatus = normalizedStatus ?? currentStatus;
     const dataFields = Object.keys(data);
 
     if (normalizedStatus && normalizedStatus !== currentStatus) {
@@ -645,15 +952,137 @@ export class StaffTasksService {
     }
 
     const task = await this.prisma.$transaction(async (tx) => {
+      const lockedCurrent = await this.lockVisibleTaskForMutation(
+        tx,
+        tenantId,
+        current.id,
+        user,
+        accessScope,
+        'UPDATE',
+      );
+      const lockedNextStoreId =
+        dto.storeId === undefined
+          ? lockedCurrent.storeId
+          : typeof data.storeId === 'string'
+            ? data.storeId
+            : null;
+      const lockedNextShiftId =
+        dto.shiftId === undefined
+          ? lockedCurrent.shiftId
+          : typeof data.shiftId === 'string'
+            ? data.shiftId
+            : null;
+
+      if (dto.labels !== undefined) {
+        data.labels = this.mergeTaskLabelsForUpdate(
+          lockedCurrent.labels,
+          dto.labels,
+        );
+      }
+
+      if (dto.assignedToUserId !== undefined) {
+        const assignedToUserIds = await this.resolveAssignedUserIds(
+          tenantId,
+          undefined,
+          typeof data.assignedToUserId === 'string'
+            ? data.assignedToUserId
+            : null,
+          accessScope,
+          lockedNextStoreId,
+          tx,
+        );
+        data.assignedToUserId = assignedToUserIds[0] ?? null;
+      }
+      if (dto.observerUserIds !== undefined) {
+        observerUserIds = await this.resolveObserverUserIds(
+          tenantId,
+          dto.observerUserIds,
+          accessScope,
+          lockedNextStoreId,
+          tx,
+        );
+      }
+      this.assertTaskAssignmentMetadataMutationAllowed(
+        lockedCurrent,
+        dto,
+        observerUserIds,
+      );
+      if (dto.storeId !== undefined || dto.shiftId !== undefined) {
+        await this.assertTaskShiftMatchesStore(
+          tenantId,
+          lockedNextShiftId,
+          lockedNextStoreId,
+          accessScope,
+          tx,
+        );
+      }
+      if (
+        dto.storeId !== undefined ||
+        dto.assignedToUserId !== undefined ||
+        dto.observerUserIds !== undefined
+      ) {
+        const finalAssignedToUserIds = Array.from(
+          new Set(
+            [
+              typeof data.assignedToUserId === 'string'
+                ? data.assignedToUserId
+                : dto.assignedToUserId === undefined
+                  ? lockedCurrent.assignedToUserId
+                  : null,
+              ...this.taskCandidateUserIds(lockedCurrent),
+              ...this.taskOriginalAssignedToUserIds(lockedCurrent),
+            ].filter((userId): userId is string => Boolean(userId)),
+          ),
+        );
+        const finalObserverUserIds =
+          observerUserIds ??
+          lockedCurrent.observers.map((observer) => observer.userId);
+
+        await this.resolveAssignedUserIds(
+          tenantId,
+          finalAssignedToUserIds,
+          null,
+          accessScope,
+          lockedNextStoreId,
+          tx,
+        );
+        await this.resolveObserverUserIds(
+          tenantId,
+          finalObserverUserIds,
+          accessScope,
+          lockedNextStoreId,
+          tx,
+        );
+        await this.assertTaskCreationPolicy(
+          tenantId,
+          user,
+          finalAssignedToUserIds,
+          finalObserverUserIds,
+          lockedNextStoreId,
+          tx,
+        );
+      }
+
+      const lockedCurrentStatus = lockedCurrent.status as StaffTaskStatus;
+      const lockedNextStatus = normalizedStatus ?? lockedCurrentStatus;
+
+      if (normalizedStatus && normalizedStatus !== lockedCurrentStatus) {
+        this.assertStatusTransitionAllowed(
+          user,
+          lockedCurrent,
+          normalizedStatus,
+        );
+      }
+
       if (dataFields.length > 0) {
         await tx.staffTask.update({
-          where: { id: current.id },
+          where: { id: lockedCurrent.id },
           data: {
             ...data,
             completedAt:
               data.status === undefined
                 ? undefined
-                : nextStatus === 'DONE'
+                : lockedNextStatus === 'DONE'
                   ? new Date()
                   : null,
           },
@@ -662,13 +1091,18 @@ export class StaffTasksService {
       }
 
       if (observerUserIds !== undefined) {
-        await this.syncTaskObservers(tx, tenantId, current.id, observerUserIds);
+        await this.syncTaskObservers(
+          tx,
+          tenantId,
+          lockedCurrent.id,
+          observerUserIds,
+        );
       }
 
       await tx.staffTaskAuditEvent.create({
         data: {
           tenantId,
-          taskId: current.id,
+          taskId: lockedCurrent.id,
           actorUserId: user.id,
           action: normalizedStatus
             ? 'STATUS_CHANGED'
@@ -676,14 +1110,14 @@ export class StaffTasksService {
               ? 'OBSERVERS_UPDATED'
               : 'UPDATED',
           message: normalizedStatus
-            ? `Status changed from ${currentStatus} to ${nextStatus}`
+            ? `Status changed from ${lockedCurrentStatus} to ${lockedNextStatus}`
             : observerUserIds !== undefined && dataFields.length === 0
               ? 'Task observers updated'
               : 'Task updated',
           metadata: normalizedStatus
             ? {
-                fromStatus: currentStatus,
-                toStatus: nextStatus,
+                fromStatus: lockedCurrentStatus,
+                toStatus: lockedNextStatus,
                 ...(observerUserIds !== undefined ? { observerUserIds } : {}),
               }
             : {
@@ -693,14 +1127,14 @@ export class StaffTasksService {
         },
       });
 
-      const task = await this.fetchTaskOrThrow(tx, tenantId, current.id);
+      const task = await this.fetchTaskOrThrow(tx, tenantId, lockedCurrent.id);
 
       if (normalizedStatus) {
         await this.staffTeamChatService.createSystemNotification(
           tenantId,
           this.buildTaskStatusNotification(
             task,
-            currentStatus,
+            lockedCurrentStatus,
             normalizedStatus,
           ),
           tx,
@@ -718,11 +1152,18 @@ export class StaffTasksService {
     id: string,
     dto: StaffTaskCommentDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
     const current = await this.prisma.staffTask.findFirst({
-      where: { id, tenantId },
+      where: {
+        AND: [
+          { id, tenantId },
+          this.buildTaskVisibilityWhere(user, accessScope),
+        ],
+      },
       select: {
         id: true,
+        storeId: true,
         status: true,
         assignedToUserId: true,
         labels: true,
@@ -734,20 +1175,24 @@ export class StaffTasksService {
     }
 
     const body = this.normalizeOptionalString(dto.body);
-    const evidenceUrl = this.normalizeEvidenceUrl(dto.evidenceUrl);
+    const attachmentIds = this.normalizeEvidenceAttachmentIds(
+      dto.attachmentIds,
+    );
+    const evidenceUrl =
+      attachmentIds.length === 1
+        ? `/staff/attachments/${attachmentIds[0]}`
+        : this.normalizeEvidenceUrl(dto.evidenceUrl);
     const evidenceType = this.normalizeOptionalString(dto.evidenceType);
     const evidenceLabel = this.normalizeOptionalString(dto.evidenceLabel);
 
-    const nextStatus =
+    const requestedStatus =
       dto.status === undefined
         ? undefined
-        : this.resolveOne(
-            dto.status,
-            taskStatuses,
-            current.status as StaffTaskStatus,
-          );
+        : this.resolveOne(dto.status, taskStatuses, 'OPEN');
     const statusChange =
-      nextStatus && nextStatus !== current.status ? nextStatus : undefined;
+      requestedStatus && requestedStatus !== current.status
+        ? requestedStatus
+        : undefined;
 
     if (!body && !evidenceUrl && !statusChange) {
       throw new BadRequestException('Comment or evidence link is required');
@@ -758,11 +1203,36 @@ export class StaffTasksService {
     }
 
     const task = await this.prisma.$transaction(async (tx) => {
+      const lockedCurrent = await this.lockVisibleTaskForMutation(
+        tx,
+        tenantId,
+        current.id,
+        user,
+        accessScope,
+        'COMMENT',
+      );
+      const lockedStatusChange =
+        requestedStatus && requestedStatus !== lockedCurrent.status
+          ? requestedStatus
+          : undefined;
+
+      if (!body && !evidenceUrl && !lockedStatusChange) {
+        throw new BadRequestException('Comment or evidence link is required');
+      }
+
+      if (lockedStatusChange) {
+        this.assertStatusTransitionAllowed(
+          user,
+          lockedCurrent,
+          lockedStatusChange,
+        );
+      }
+
       if (body || evidenceUrl) {
         await tx.staffTaskComment.create({
           data: {
             tenantId,
-            taskId: current.id,
+            taskId: lockedCurrent.id,
             authorUserId: user.id,
             body,
             evidenceType,
@@ -771,10 +1241,23 @@ export class StaffTasksService {
           },
         });
 
+        if (attachmentIds.length > 0) {
+          await this.staffAttachmentBindingsService.bindPendingResourceAttachments(
+            tx,
+            {
+              tenantId,
+              actorUserId: user.id,
+              resourceKind: StaffAttachmentResourceKind.STAFF_TASK,
+              resourceId: lockedCurrent.id,
+              attachmentIds,
+            },
+          );
+        }
+
         await tx.staffTaskAuditEvent.create({
           data: {
             tenantId,
-            taskId: current.id,
+            taskId: lockedCurrent.id,
             actorUserId: user.id,
             action: evidenceUrl ? 'EVIDENCE_ADDED' : 'COMMENT_ADDED',
             message: evidenceUrl ? 'Evidence added' : 'Comment added',
@@ -787,12 +1270,12 @@ export class StaffTasksService {
         });
       }
 
-      if (statusChange) {
+      if (lockedStatusChange) {
         await tx.staffTask.update({
-          where: { id: current.id },
+          where: { id: lockedCurrent.id },
           data: {
-            status: statusChange,
-            completedAt: statusChange === 'DONE' ? new Date() : null,
+            status: lockedStatusChange,
+            completedAt: lockedStatusChange === 'DONE' ? new Date() : null,
           },
           select: { id: true },
         });
@@ -800,24 +1283,27 @@ export class StaffTasksService {
         await tx.staffTaskAuditEvent.create({
           data: {
             tenantId,
-            taskId: current.id,
+            taskId: lockedCurrent.id,
             actorUserId: user.id,
             action: 'STATUS_CHANGED',
-            message: `Status changed from ${current.status} to ${statusChange}`,
-            metadata: { fromStatus: current.status, toStatus: statusChange },
+            message: `Status changed from ${lockedCurrent.status} to ${lockedStatusChange}`,
+            metadata: {
+              fromStatus: lockedCurrent.status,
+              toStatus: lockedStatusChange,
+            },
           },
         });
       }
 
-      const task = await this.fetchTaskOrThrow(tx, tenantId, current.id);
+      const task = await this.fetchTaskOrThrow(tx, tenantId, lockedCurrent.id);
 
-      if (statusChange) {
+      if (lockedStatusChange) {
         await this.staffTeamChatService.createSystemNotification(
           tenantId,
           this.buildTaskStatusNotification(
             task,
-            current.status as StaffTaskStatus,
-            statusChange,
+            lockedCurrent.status as StaffTaskStatus,
+            lockedStatusChange,
           ),
           tx,
         );
@@ -827,6 +1313,328 @@ export class StaffTasksService {
     });
 
     return this.toTaskResponse(task);
+  }
+
+  private async lockVisibleTaskForMutation(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    taskId: string,
+    user: AuthenticatedUser,
+    accessScope: ResolvedAccessScope,
+    operation: 'UPDATE' | 'COMMENT',
+  ): Promise<StaffTaskMutationContext> {
+    const visibility =
+      operation === 'UPDATE'
+        ? this.buildTaskUpdateVisibilityWhere(user, accessScope)
+        : this.buildTaskVisibilityWhere(user, accessScope);
+    const where: Prisma.StaffTaskWhereInput = {
+      AND: [{ id: taskId, tenantId }, visibility],
+    };
+    const select = {
+      id: true,
+      storeId: true,
+      shiftId: true,
+      status: true,
+      assignedToUserId: true,
+      labels: true,
+      observers: { select: { userId: true } },
+    } satisfies Prisma.StaffTaskSelect;
+    const visibleBeforeLock = await tx.staffTask.findFirst({
+      where,
+      select,
+    });
+
+    if (!visibleBeforeLock) {
+      throw new NotFoundException('Staff task not found');
+    }
+
+    const lockedRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT task."id"
+      FROM "StaffTask" AS task
+      WHERE task."id" = ${taskId}
+        AND task."tenantId" = ${tenantId}
+      FOR UPDATE
+    `);
+
+    if (lockedRows.length !== 1) {
+      throw new NotFoundException('Staff task not found');
+    }
+
+    const current = await tx.staffTask.findFirst({
+      where,
+      select,
+    });
+
+    if (!current) {
+      throw new NotFoundException('Staff task not found');
+    }
+
+    return current;
+  }
+
+  async canReadAnyAttachmentTask(
+    user: AuthenticatedUser,
+    taskIds: readonly string[],
+    prismaClient: Pick<PrismaService, 'staffTask'> = this.prisma,
+  ): Promise<boolean> {
+    if (!hasCapability(user, 'view_staff_tasks')) {
+      return false;
+    }
+
+    const normalizedTaskIds = Array.from(
+      new Set(
+        taskIds
+          .map((taskId) => taskId.trim())
+          .filter((taskId) => taskId.length > 0),
+      ),
+    );
+
+    if (normalizedTaskIds.length === 0) {
+      return false;
+    }
+
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+    const task = await prismaClient.staffTask.findFirst({
+      where: {
+        AND: [
+          { id: { in: normalizedTaskIds }, tenantId },
+          this.buildTaskVisibilityWhere(user, accessScope),
+        ],
+      },
+      select: { id: true },
+    });
+
+    return Boolean(task);
+  }
+
+  private buildTaskVisibilityWhere(
+    user: AuthenticatedUser,
+    accessScope: ResolvedAccessScope,
+  ): Prisma.StaffTaskWhereInput {
+    if (accessScope.mode === 'NETWORK') {
+      return {};
+    }
+
+    return {
+      OR: [
+        {
+          AND: [
+            { storeId: { in: [...accessScope.allowedStoreIds] } },
+            {
+              OR: [
+                { shiftId: null },
+                {
+                  shift: {
+                    is: {
+                      storeId: { in: [...accessScope.allowedStoreIds] },
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          AND: [
+            { storeId: null },
+            { shiftId: null },
+            {
+              OR: [
+                { assignedToUserId: user.id },
+                { observers: { some: { userId: user.id } } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  private buildTaskUpdateVisibilityWhere(
+    user: AuthenticatedUser,
+    accessScope: ResolvedAccessScope,
+  ): Prisma.StaffTaskWhereInput {
+    if (accessScope.mode === 'NETWORK') {
+      return {};
+    }
+
+    return {
+      AND: [
+        this.buildTaskVisibilityWhere(user, accessScope),
+        { storeId: { in: [...accessScope.allowedStoreIds] } },
+      ],
+    };
+  }
+
+  private assertTaskStoreFilterAllowed(
+    user: AuthenticatedUser,
+    storeId: string | null,
+  ) {
+    if (storeId) {
+      this.accessScopeService.assertStoreAllowed(user, storeId);
+    }
+  }
+
+  private assertTaskCreateStoreAllowed(
+    accessScope: ResolvedAccessScope,
+    storeId: string | null,
+  ) {
+    if (
+      accessScope.mode === 'STORES' &&
+      (!storeId || !accessScope.allowedStoreIds.includes(storeId))
+    ) {
+      throw new ForbiddenException(
+        'A store-scoped task must belong to an allowed store',
+      );
+    }
+  }
+
+  private assertTaskUpdateStoreAllowed(
+    accessScope: ResolvedAccessScope,
+    dto: StaffTaskDto,
+    data: Prisma.StaffTaskUncheckedUpdateInput,
+  ) {
+    if (accessScope.mode !== 'STORES' || dto.storeId === undefined) {
+      return;
+    }
+
+    const storeId = typeof data.storeId === 'string' ? data.storeId : null;
+
+    if (!storeId || !accessScope.allowedStoreIds.includes(storeId)) {
+      throw new ForbiddenException(
+        'A store-scoped task must belong to an allowed store',
+      );
+    }
+  }
+
+  private async assertTaskShiftMatchesStore(
+    tenantId: string,
+    shiftId: string | null,
+    taskStoreId: string | null,
+    accessScope: ResolvedAccessScope,
+    prismaClient: StaffTaskReferenceClient = this.prisma,
+  ) {
+    if (!shiftId) {
+      return;
+    }
+
+    const shift = await prismaClient.guestWorkingShift.findFirst({
+      where: { id: shiftId, tenantId },
+      select: { id: true, storeId: true },
+    });
+
+    if (!shift) {
+      throw new BadRequestException('Shift not found');
+    }
+
+    if (
+      accessScope.mode === 'STORES' &&
+      (!shift.storeId || !accessScope.allowedStoreIds.includes(shift.storeId))
+    ) {
+      throw new ForbiddenException('Shift is outside your access scope');
+    }
+
+    if (!taskStoreId || shift.storeId !== taskStoreId) {
+      throw new BadRequestException(
+        'Task store must match the selected shift store',
+      );
+    }
+  }
+
+  private buildTaskUserSelectorWhere(
+    tenantId: string,
+    accessScope: ResolvedAccessScope,
+    requiredStoreId: string | null | undefined = undefined,
+  ): Prisma.UserWhereInput {
+    if (accessScope.mode === 'NETWORK') {
+      const where: Prisma.UserWhereInput = {
+        tenantId,
+        isActive: true,
+        isPlatformAdmin: false,
+      };
+
+      if (requiredStoreId === null) {
+        return {
+          ...where,
+          accessScope: 'NETWORK',
+          storeAccesses: { none: {} },
+        };
+      }
+
+      if (requiredStoreId) {
+        return {
+          ...where,
+          OR: [
+            {
+              accessScope: 'NETWORK',
+              storeAccesses: { none: {} },
+            },
+            {
+              accessScope: 'STORES',
+              storeAccesses: {
+                some: { storeId: requiredStoreId },
+                none: { store: { tenantId: { not: tenantId } } },
+              },
+            },
+          ],
+        };
+      }
+
+      return {
+        ...where,
+        OR: [
+          {
+            accessScope: 'NETWORK',
+            storeAccesses: { none: {} },
+          },
+          {
+            accessScope: 'STORES',
+            storeAccesses: {
+              some: { store: { tenantId } },
+              none: { store: { tenantId: { not: tenantId } } },
+            },
+          },
+        ],
+      };
+    }
+
+    const storeIds = [...accessScope.allowedStoreIds];
+
+    return {
+      tenantId,
+      isActive: true,
+      isPlatformAdmin: false,
+      accessScope: 'STORES',
+      storeAccesses: {
+        some: {
+          storeId: requiredStoreId ? requiredStoreId : { in: storeIds },
+        },
+        none: { storeId: { notIn: storeIds } },
+      },
+    };
+  }
+
+  private buildTaskStoreSelectorWhere(
+    tenantId: string,
+    accessScope: ResolvedAccessScope,
+  ): Prisma.StoreWhereInput {
+    return accessScope.mode === 'NETWORK'
+      ? { tenantId }
+      : {
+          tenantId,
+          id: { in: [...accessScope.allowedStoreIds] },
+        };
+  }
+
+  private isTaskStoreVisible(
+    storeId: string,
+    accessScope: ResolvedAccessScope,
+  ) {
+    return (
+      accessScope.mode === 'NETWORK' ||
+      accessScope.allowedStoreIds.includes(storeId)
+    );
   }
 
   private resolveFilters(query: StaffTasksQuery): StaffTaskReport['filters'] {
@@ -872,11 +1680,16 @@ export class StaffTasksService {
     tenantId: string,
     filters: StaffTaskReport['filters'],
     includeStatus: boolean,
-    currentUserId: string,
+    user: AuthenticatedUser,
+    accessScope: ResolvedAccessScope,
   ): Prisma.StaffTaskWhereInput {
     const where: Prisma.StaffTaskWhereInput = { tenantId };
     const and: Prisma.StaffTaskWhereInput[] = [];
     const now = new Date();
+
+    if (accessScope.mode === 'STORES') {
+      and.push(this.buildTaskVisibilityWhere(user, accessScope));
+    }
 
     if (includeStatus && filters.status !== 'all') {
       if (filters.status === 'OVERDUE') {
@@ -934,7 +1747,7 @@ export class StaffTasksService {
     } else if (includeStatus && filters.view === 'my') {
       and.push({
         OR: [
-          { assignedToUserId: currentUserId },
+          { assignedToUserId: user.id },
           {
             AND: [
               {
@@ -944,7 +1757,7 @@ export class StaffTasksService {
                 },
               },
               {
-                observers: { some: { userId: currentUserId } },
+                observers: { some: { userId: user.id } },
               },
             ],
           },
@@ -955,7 +1768,7 @@ export class StaffTasksService {
     if (filters.observerUserId) {
       where.observers = { some: { userId: filters.observerUserId } };
     } else if (includeStatus && filters.view === 'watched') {
-      where.observers = { some: { userId: currentUserId } };
+      where.observers = { some: { userId: user.id } };
     }
 
     if (filters.search) {
@@ -1053,7 +1866,8 @@ export class StaffTasksService {
   private buildQuickViewWhere(
     tenantId: string,
     filters: StaffTaskReport['filters'],
-    currentUserId: string,
+    user: AuthenticatedUser,
+    accessScope: ResolvedAccessScope,
   ) {
     return this.buildWhere(
       tenantId,
@@ -1068,7 +1882,8 @@ export class StaffTasksService {
           filters.view === 'watched' ? null : filters.observerUserId,
       },
       false,
-      currentUserId,
+      user,
+      accessScope,
     );
   }
 
@@ -1099,10 +1914,11 @@ export class StaffTasksService {
   private async fetchOrderedTaskRows(
     tenantId: string,
     filters: StaffTaskReport['filters'],
-    currentUserId: string,
+    user: AuthenticatedUser,
+    accessScope: ResolvedAccessScope,
     take: number,
   ): Promise<StaffTaskRow[]> {
-    const where = this.buildWhere(tenantId, filters, true, currentUserId);
+    const where = this.buildWhere(tenantId, filters, true, user, accessScope);
     const orderBy = this.buildOrderBy(filters);
 
     if (filters.status !== 'all') {
@@ -1502,15 +2318,17 @@ export class StaffTasksService {
 
   private canReviewTask(user: AuthenticatedUser) {
     return (
-      user.isPlatformAdmin ||
-      (taskReviewerRoles as readonly UserRole[]).includes(user.role)
+      hasCapability(user, 'manage_staff_tasks') &&
+      (user.isPlatformAdmin ||
+        (taskReviewerRoles as readonly UserRole[]).includes(user.role))
     );
   }
 
   private canManageTaskStatus(user: AuthenticatedUser) {
     return (
-      user.isPlatformAdmin ||
-      (taskStatusManagerRoles as readonly UserRole[]).includes(user.role)
+      hasCapability(user, 'manage_staff_tasks') &&
+      (user.isPlatformAdmin ||
+        (taskStatusManagerRoles as readonly UserRole[]).includes(user.role))
     );
   }
 
@@ -1560,6 +2378,9 @@ export class StaffTasksService {
     tenantId: string,
     value: unknown,
     fallbackUserId: string | null,
+    accessScope: ResolvedAccessScope,
+    taskStoreId: string | null,
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ) {
     const rawValues = Array.isArray(value)
       ? value
@@ -1580,8 +2401,11 @@ export class StaffTasksService {
       return [];
     }
 
-    const users = await this.prisma.user.findMany({
-      where: { tenantId, id: { in: ids }, isActive: true },
+    const users = await prismaClient.user.findMany({
+      where: {
+        ...this.buildTaskUserSelectorWhere(tenantId, accessScope, taskStoreId),
+        id: { in: ids },
+      },
       select: { id: true },
     });
     const foundIds = new Set(users.map((assignedUser) => assignedUser.id));
@@ -1603,17 +2427,22 @@ export class StaffTasksService {
       originalAssignedToUserIds: string[];
     },
   ) {
-    const labels =
-      value && typeof value === 'object' && !Array.isArray(value)
-        ? { ...(value as Record<string, unknown>) }
-        : {};
+    const labelObject = this.taskLabelObject(value);
+    const labels = { ...(labelObject ?? {}) };
+    taskAssignmentLabelKeys.forEach((key) => delete labels[key]);
 
     if (
       assignment.assignmentMode === 'SINGLE' &&
       assignment.candidateUserIds.length <= 1 &&
       !assignment.bulkTaskGroupId
     ) {
-      return labels as Prisma.InputJsonValue;
+      return labelObject ? (labels as Prisma.InputJsonValue) : value;
+    }
+
+    if (!labelObject && value !== null && value !== undefined) {
+      throw new BadRequestException(
+        'Task labels must be an object for grouped assignment',
+      );
     }
 
     return {
@@ -1628,15 +2457,105 @@ export class StaffTasksService {
   }
 
   private taskLabelRecord(task: { labels: Prisma.JsonValue | null }) {
-    if (
-      task.labels &&
-      typeof task.labels === 'object' &&
-      !Array.isArray(task.labels)
-    ) {
-      return task.labels as Record<string, unknown>;
+    return this.taskLabelObject(task.labels);
+  }
+
+  private taskLabelObject(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  }
+
+  private assertTaskCreationStatus(status: StaffTaskStatus) {
+    if (status !== 'OPEN') {
+      throw new BadRequestException(
+        'New staff tasks must start in OPEN status',
+      );
+    }
+  }
+
+  private assertNoServerOwnedTaskLabelKeys(value: unknown) {
+    const labels = this.taskLabelObject(value);
+    const forbiddenKey = labels
+      ? taskAssignmentLabelKeys.find((key) =>
+          Object.prototype.hasOwnProperty.call(labels, key),
+        )
+      : undefined;
+
+    if (forbiddenKey) {
+      throw new BadRequestException(
+        `Task label "${forbiddenKey}" is managed by the server`,
+      );
+    }
+  }
+
+  private mergeTaskLabelsForUpdate(
+    currentValue: Prisma.JsonValue | null,
+    nextValue: unknown,
+  ) {
+    const currentLabels = this.taskLabelObject(currentValue);
+    const serverLabels: Record<string, unknown> = {};
+
+    if (currentLabels) {
+      taskAssignmentLabelKeys.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(currentLabels, key)) {
+          serverLabels[key] = currentLabels[key];
+        }
+      });
     }
 
-    return null;
+    if (Object.keys(serverLabels).length === 0) {
+      return this.normalizeJson(nextValue);
+    }
+
+    if (nextValue === null || nextValue === undefined || nextValue === '') {
+      return serverLabels as Prisma.InputJsonValue;
+    }
+
+    const nextLabels = this.taskLabelObject(nextValue);
+
+    if (!nextLabels) {
+      throw new BadRequestException(
+        'Task labels must be an object while assignment metadata is present',
+      );
+    }
+
+    return {
+      ...nextLabels,
+      ...serverLabels,
+    } as Prisma.InputJsonValue;
+  }
+
+  private assertTaskAssignmentMetadataMutationAllowed(
+    current: { labels: Prisma.JsonValue | null },
+    dto: StaffTaskDto,
+    observerUserIds: string[] | undefined,
+  ) {
+    const labels = this.taskLabelRecord(current);
+    const hasServerAssignmentMetadata = taskAssignmentLabelKeys.some((key) =>
+      Object.prototype.hasOwnProperty.call(labels ?? {}, key),
+    );
+
+    if (dto.assignedToUserId !== undefined && hasServerAssignmentMetadata) {
+      throw new BadRequestException(
+        'Grouped task assignment must be changed through a dedicated workflow',
+      );
+    }
+
+    if (observerUserIds === undefined || labels?.assignmentMode !== 'ANY_OF') {
+      return;
+    }
+
+    const observerIds = new Set(observerUserIds);
+    const removedCandidateId = this.taskCandidateUserIds(current).find(
+      (candidateUserId) => !observerIds.has(candidateUserId),
+    );
+
+    if (removedCandidateId) {
+      throw new BadRequestException(
+        'ANY_OF task candidates must remain task observers',
+      );
+    }
   }
 
   private taskCandidateUserIds(task: { labels: Prisma.JsonValue | null }) {
@@ -1647,6 +2566,20 @@ export class StaffTasksService {
       ? candidateUserIds.filter(
           (candidateUserId): candidateUserId is string =>
             typeof candidateUserId === 'string' && candidateUserId.length > 0,
+        )
+      : [];
+  }
+
+  private taskOriginalAssignedToUserIds(task: {
+    labels: Prisma.JsonValue | null;
+  }) {
+    const labels = this.taskLabelRecord(task);
+    const originalAssignedToUserIds = labels?.originalAssignedToUserIds;
+
+    return Array.isArray(originalAssignedToUserIds)
+      ? originalAssignedToUserIds.filter(
+          (userId): userId is string =>
+            typeof userId === 'string' && userId.length > 0,
         )
       : [];
   }
@@ -1674,6 +2607,7 @@ export class StaffTasksService {
     assignedToUserIds: string[],
     observerUserIds: string[],
     taskStoreId: string | null,
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ) {
     const staffOnly = this.mustCreateTaskForStaffOnly(user);
     const needsConfirmation = this.mustRequestTaskConfirmation(user);
@@ -1688,7 +2622,7 @@ export class StaffTasksService {
       );
     }
 
-    const assignedUsers = await this.prisma.user.findMany({
+    const assignedUsers = await prismaClient.user.findMany({
       where: { id: { in: assignedToUserIds }, tenantId, isActive: true },
       select: {
         id: true,
@@ -1721,6 +2655,7 @@ export class StaffTasksService {
         user.id,
         assignedUsers,
         taskStoreId,
+        prismaClient,
       );
     }
 
@@ -1738,7 +2673,7 @@ export class StaffTasksService {
       );
     }
 
-    const confirmationUsers = await this.prisma.user.findMany({
+    const confirmationUsers = await prismaClient.user.findMany({
       where: { id: { in: observerUserIds }, tenantId, isActive: true },
       select: { id: true, role: true },
     });
@@ -1765,8 +2700,9 @@ export class StaffTasksService {
       storeAccesses: Array<{ storeId: string }>;
     }>,
     taskStoreId: string | null,
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ) {
-    const seniorUser = await this.prisma.user.findFirst({
+    const seniorUser = await prismaClient.user.findFirst({
       where: { id: userId, tenantId, isActive: true },
       select: { storeAccesses: { select: { storeId: true } } },
     });
@@ -1803,6 +2739,7 @@ export class StaffTasksService {
     tenantId: string,
     dto: StaffTaskDto,
     options: { requireTitle: boolean },
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ): Promise<Prisma.StaffTaskUncheckedUpdateInput> {
     const data: Prisma.StaffTaskUncheckedUpdateInput = {};
 
@@ -1834,21 +2771,29 @@ export class StaffTasksService {
     }
 
     if (dto.storeId !== undefined) {
-      data.storeId = await this.resolveStoreId(tenantId, dto.storeId);
+      data.storeId = await this.resolveStoreId(
+        tenantId,
+        dto.storeId,
+        prismaClient,
+      );
     }
 
     if (dto.shiftId !== undefined) {
-      data.shiftId = await this.resolveShiftId(tenantId, dto.shiftId);
+      data.shiftId = await this.resolveShiftId(
+        tenantId,
+        dto.shiftId,
+        prismaClient,
+      );
     }
 
     if (dto.assignedToUserId !== undefined) {
-      data.assignedToUserId = await this.resolveUserId(
-        tenantId,
+      data.assignedToUserId = this.normalizeOptionalString(
         dto.assignedToUserId,
       );
     }
 
     if (dto.labels !== undefined) {
+      this.assertNoServerOwnedTaskLabelKeys(dto.labels);
       data.labels = this.normalizeJson(dto.labels);
     }
 
@@ -1862,6 +2807,9 @@ export class StaffTasksService {
   private async resolveObserverUserIds(
     tenantId: string,
     value: unknown,
+    accessScope: ResolvedAccessScope,
+    taskStoreId: string | null,
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ): Promise<string[] | undefined> {
     if (value === undefined) {
       return undefined;
@@ -1884,8 +2832,11 @@ export class StaffTasksService {
       return [];
     }
 
-    const users = await this.prisma.user.findMany({
-      where: { tenantId, id: { in: ids }, isActive: true },
+    const users = await prismaClient.user.findMany({
+      where: {
+        ...this.buildTaskUserSelectorWhere(tenantId, accessScope, taskStoreId),
+        id: { in: ids },
+      },
       select: { id: true },
     });
     const foundIds = new Set(users.map((observer) => observer.id));
@@ -2255,6 +3206,12 @@ export class StaffTasksService {
       return null;
     }
 
+    if (this.isInternalAttachmentPath(normalized)) {
+      throw new BadRequestException(
+        'Attachment IDs are required for internal evidence links',
+      );
+    }
+
     let url: URL;
 
     try {
@@ -2267,7 +3224,49 @@ export class StaffTasksService {
       throw new BadRequestException('Evidence link must use http or https');
     }
 
+    if (this.isInternalAttachmentPath(url.pathname)) {
+      throw new BadRequestException(
+        'Attachment IDs are required for internal evidence links',
+      );
+    }
+
     return url.toString();
+  }
+
+  private normalizeEvidenceAttachmentIds(value: unknown) {
+    if (value === null || value === undefined) {
+      return [];
+    }
+
+    if (!Array.isArray(value)) {
+      throw new BadRequestException('Attachment IDs must be an array');
+    }
+
+    const attachmentIds = Array.from(
+      new Set(
+        value.map((attachmentId) => {
+          if (typeof attachmentId !== 'string' || !attachmentId.trim()) {
+            throw new BadRequestException('Attachment ID is required');
+          }
+
+          return attachmentId.trim();
+        }),
+      ),
+    );
+
+    if (attachmentIds.length > 1) {
+      throw new BadRequestException(
+        'Only one evidence attachment is supported',
+      );
+    }
+
+    return attachmentIds;
+  }
+
+  private isInternalAttachmentPath(value: string) {
+    return /^\/?(?:api\/)?staff\/attachments\/[^/?#]+(?:[?#].*)?$/i.test(
+      value.trim(),
+    );
   }
 
   private normalizeJson(value: unknown) {
@@ -2281,6 +3280,7 @@ export class StaffTasksService {
   private async resolveStoreId(
     tenantId: string,
     value: string | null | undefined,
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ) {
     const id = this.normalizeOptionalString(value);
 
@@ -2288,7 +3288,7 @@ export class StaffTasksService {
       return null;
     }
 
-    const store = await this.prisma.store.findFirst({
+    const store = await prismaClient.store.findFirst({
       where: { id, tenantId },
       select: { id: true },
     });
@@ -2303,6 +3303,7 @@ export class StaffTasksService {
   private async resolveShiftId(
     tenantId: string,
     value: string | null | undefined,
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ) {
     const id = this.normalizeOptionalString(value);
 
@@ -2310,7 +3311,7 @@ export class StaffTasksService {
       return null;
     }
 
-    const shift = await this.prisma.guestWorkingShift.findFirst({
+    const shift = await prismaClient.guestWorkingShift.findFirst({
       where: { id, tenantId },
       select: { id: true },
     });
@@ -2320,27 +3321,5 @@ export class StaffTasksService {
     }
 
     return shift.id;
-  }
-
-  private async resolveUserId(
-    tenantId: string,
-    value: string | null | undefined,
-  ) {
-    const id = this.normalizeOptionalString(value);
-
-    if (!id) {
-      return null;
-    }
-
-    const user = await this.prisma.user.findFirst({
-      where: { id, tenantId },
-      select: { id: true },
-    });
-
-    if (!user) {
-      throw new BadRequestException('Assigned user not found');
-    }
-
-    return user.id;
   }
 }

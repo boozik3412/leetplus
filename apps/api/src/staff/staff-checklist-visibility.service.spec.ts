@@ -1,5 +1,6 @@
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { StaffChecklistAccessPolicyService } from './staff-checklist-access-policy.service';
 import { StaffChecklistsService } from './staff-checklists.service';
 import { StaffChecklistTemplatesService } from './staff-checklist-templates.service';
 
@@ -36,6 +37,9 @@ describe('Staff checklist catalog visibility', () => {
       tenantSlug: 'demo',
       isActive: true,
       isPlatformAdmin: false,
+      accessScope: 'STORES',
+      allowedStoreIds: [storeId],
+      permissions: ['view_staff_standards'],
     };
   }
 
@@ -77,9 +81,18 @@ describe('Staff checklist catalog visibility', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
     };
+    const accessPolicy = new StaffChecklistAccessPolicyService({
+      resolve: jest.fn().mockResolvedValue({
+        userId: 'user-1',
+        tenantId,
+        tenantSlug: 'demo',
+        mode: 'STORES',
+        allowedStoreIds: [storeId],
+      }),
+    } as never);
     const service = new StaffChecklistTemplatesService(
       prisma as never,
-      { resolve: jest.fn().mockResolvedValue({ tenantId }) } as never,
+      accessPolicy,
     );
 
     const report = await service.getTemplates(
@@ -97,8 +110,18 @@ describe('Staff checklist catalog visibility', () => {
           AND: [
             { tenantId, status: 'ACTIVE' },
             {
-              roleScope: { in: ['ADMINISTRATOR', 'ALL_STAFF'] },
-              OR: [{ storeId: null }, { storeId: { in: [storeId] } }],
+              OR: [
+                {
+                  storeId: { in: [storeId] },
+                  status: 'ACTIVE',
+                  roleScope: { in: ['ADMINISTRATOR', 'ALL_STAFF'] },
+                },
+                {
+                  storeId: null,
+                  status: 'ACTIVE',
+                  roleScope: { in: ['ADMINISTRATOR', 'ALL_STAFF'] },
+                },
+              ],
             },
           ],
         },
@@ -154,9 +177,19 @@ describe('Staff checklist catalog visibility', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
     };
+    const accessPolicy = new StaffChecklistAccessPolicyService({
+      resolve: jest.fn().mockResolvedValue({
+        userId: 'user-1',
+        tenantId,
+        tenantSlug: 'demo',
+        mode: 'STORES',
+        allowedStoreIds: [storeId],
+      }),
+    } as never);
     const service = new StaffChecklistsService(
       prisma as never,
-      { resolve: jest.fn().mockResolvedValue({ tenantId }) } as never,
+      accessPolicy,
+      {} as never,
     );
 
     const report = await service.getChecklists(
@@ -168,11 +201,21 @@ describe('Staff checklist catalog visibility', () => {
     expect(prisma.staffChecklistTemplate.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
+          tenantId,
           AND: [
-            { tenantId, status: 'ACTIVE' },
             {
-              roleScope: { in: ['ADMINISTRATOR', 'ALL_STAFF'] },
-              OR: [{ storeId: null }, { storeId: { in: [storeId] } }],
+              OR: [
+                {
+                  storeId: { in: [storeId] },
+                  status: 'ACTIVE',
+                  roleScope: { in: ['ADMINISTRATOR', 'ALL_STAFF'] },
+                },
+                {
+                  storeId: null,
+                  status: 'ACTIVE',
+                  roleScope: { in: ['ADMINISTRATOR', 'ALL_STAFF'] },
+                },
+              ],
             },
           ],
         },
@@ -183,7 +226,7 @@ describe('Staff checklist catalog visibility', () => {
 
 describe('Staff checklist time-of-day planning', () => {
   function createService() {
-    return new StaffChecklistsService({} as never, {} as never);
+    return new StaffChecklistsService({} as never, {} as never, {} as never);
   }
 
   function resolveTimeOfDayPlannedAt(

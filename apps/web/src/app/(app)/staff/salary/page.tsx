@@ -1,6 +1,6 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffSalaryWorkspaceView } from "@/components/staff-salary-workspace";
-import { requireCurrentUser } from "@/lib/auth";
+import { requireNetworkScopedUser } from "@/lib/auth";
 import {
   getStaffSalaryWorkspace,
   type StaffSalaryFilters,
@@ -27,7 +27,9 @@ function resolveFilters(params: Awaited<SearchParams>): StaffSalaryFilters {
     schemeId: searchParam(params.schemeId),
     search: searchParam(params.search)?.trim(),
     calculate: searchParam(params.calculate),
-    periodMode: searchParam(params.periodMode) as StaffSalaryFilters["periodMode"],
+    periodMode: searchParam(
+      params.periodMode,
+    ) as StaffSalaryFilters["periodMode"],
     month: searchParam(params.month),
     roleScope: searchParam(params.roleScope) as StaffSalaryFilters["roleScope"],
   };
@@ -38,7 +40,7 @@ export default async function StaffSalaryPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  await requireNetworkScopedUser();
   const params = await searchParams;
   const workspace = await getStaffSalaryWorkspace(resolveFilters(params));
 
@@ -67,7 +69,6 @@ export default async function StaffSalaryPage({
             </p>
           </div>
         </header>
-
 
         <StaffSalaryWorkspaceView workspace={workspace} />
       </div>

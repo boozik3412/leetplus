@@ -1013,7 +1013,9 @@ function UserPanel({
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-zinc-500">Сейчас открыт demo tenant.</p>
+      <p className="text-xs text-zinc-500">
+        Для доступа к рабочей сети войдите в аккаунт.
+      </p>
       <Link
         href="/login"
         className="block rounded-xl bg-zinc-900 px-3 py-2 text-center text-sm font-medium text-white transition hover:bg-zinc-800"

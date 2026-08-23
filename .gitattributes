@@ -1,0 +1,13 @@
+packages/database/scripts/staff-task-integrity-snapshot-authority-roots.json text eol=lf
+packages/database/scripts/tenant-delivery-claim-base-165-manifest.json text eol=lf
+packages/database/scripts/shared-beta-admission-provenance-catalog.mjs text eol=lf
+packages/database/prisma/migrations/**/migration.sql text eol=lf
+packages/database/migration-candidates/**/migration.sql text eol=lf
+packages/database/migration-candidates/**/candidate.json text eol=lf
+packages/database/migration-candidates/**/README.md text eol=lf
+packages/database/release-proposals/**/*.json text eol=lf
+packages/database/release-proposals/**/*.sql text eol=lf
+packages/database/release-proposals/**/*.md text eol=lf
+packages/database/release-rehearsals/**/*.json text eol=lf
+packages/database/scripts/current180-current190-disposable-postgresql-rehearsal-*.mjs text eol=lf
+*.sh text eol=lf

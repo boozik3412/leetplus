@@ -3,6 +3,7 @@ import { ProductParsingSuggestionStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 type ProductForParsing = {
   id: string;
@@ -225,10 +226,11 @@ export class ProductParsingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
   async getOverview(user: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
     const [latestRun, pendingSuggestions, canonicalProductsCount] =
       await Promise.all([
         this.prisma.productParsingRun.findFirst({
@@ -256,6 +258,7 @@ export class ProductParsingService {
   }
 
   async analyze(user: AuthenticatedUser) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const [products, stores] = await Promise.all([
       this.prisma.product.findMany({
@@ -373,6 +376,7 @@ export class ProductParsingService {
     suggestionId: string,
     dto: { selectedName?: string; productIds?: string[] },
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const suggestion = await this.prisma.productParsingSuggestion.findFirst({
       where: {
@@ -454,6 +458,7 @@ export class ProductParsingService {
   }
 
   async rejectSuggestion(user: AuthenticatedUser, suggestionId: string) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const suggestion = await this.prisma.productParsingSuggestion.findFirst({
       where: {
@@ -485,7 +490,7 @@ export class ProductParsingService {
   }
 
   async getManualOverview(user: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
     const [groups, products, stores] = await Promise.all([
       this.prisma.canonicalProduct.findMany({
         where: { tenantId },
@@ -562,6 +567,7 @@ export class ProductParsingService {
     user: AuthenticatedUser,
     dto: ManualProductParsingGroupDto,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const name = dto.name?.trim();
     const productIds = this.uniqueProductIds(dto.productIds ?? []);
@@ -604,6 +610,7 @@ export class ProductParsingService {
     canonicalProductId: string,
     dto: ManualProductParsingGroupDto,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const canonicalProduct = await this.prisma.canonicalProduct.findFirst({
       where: { id: canonicalProductId, tenantId },

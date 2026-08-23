@@ -4,6 +4,7 @@ import { parse } from 'csv-parse/sync';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 type CsvRecord = Record<string, string | undefined>;
 
@@ -48,12 +49,14 @@ export class ProductCsvImportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
   async preview(
     csv: string,
     user: AuthenticatedUser,
   ): Promise<ProductImportPreview> {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const records = this.parseCsv(csv);
     const lookup = await this.loadRelationLookup(tenantId);
@@ -98,7 +101,7 @@ export class ProductCsvImportService {
   }
 
   async findRecent(user: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
 
     return this.prisma.importJob.findMany({
       where: { tenantId },
@@ -116,6 +119,7 @@ export class ProductCsvImportService {
   }
 
   async import(csv: string, user: AuthenticatedUser, sourceFileName?: string) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const preview = await this.preview(csv, user);
 

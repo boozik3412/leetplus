@@ -14,6 +14,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshNetworkScopeGuard } from '../tenancy/fresh-network-scope.guard';
 import {
   StaffSalaryService,
   type StaffSalaryPeriodAdjustmentDto,
@@ -29,7 +30,7 @@ import {
   UserRole.MANAGER,
   UserRole.STANDARDS_MANAGER,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshNetworkScopeGuard)
 export class StaffSalaryController {
   constructor(private readonly staffSalaryService: StaffSalaryService) {}
 

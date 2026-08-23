@@ -6,8 +6,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { ReportDigestType } from './reports.dto';
-import { ReportsDigestService } from './reports-digest.service';
+import {
+  REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+  ReportsDigestService,
+} from './reports-digest.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  evaluateTenantBackgroundRuntimeIdentity,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
 
 type DigestSchedule = {
   type: ReportDigestType;
@@ -30,6 +39,7 @@ export class ReportsDigestSchedulerService
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly reportsDigestService: ReportsDigestService,
+    private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
   ) {}
 
   onModuleInit() {
@@ -114,23 +124,97 @@ export class ReportsDigestSchedulerService
     }
 
     try {
+      const permitAcquisition =
+        await this.tenantExecutionAdmissionService.acquirePermit(
+          tenant.id,
+          REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+        );
+      await this.prisma.reportDigestScheduleRun.update({
+        where: { id: run.id },
+        data: {
+          executionRevision: permitAcquisition.decision.executionRevision,
+        },
+      });
+      if (permitAcquisition.decision.allowed) {
+        const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+          stage: tenantBackgroundStageForCustomerStage(
+            permitAcquisition.decision.customerStage,
+          ),
+          jobKind: 'REPORT_DIGEST_SMTP',
+        });
+        if (!backgroundExecution.allowed) {
+          await this.prisma.reportDigestScheduleRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'SKIPPED',
+              sentCount: 0,
+              completedAt: new Date(),
+              errorMessage: backgroundExecution.reasonCode,
+            },
+          });
+          this.logger.warn(
+            `Skipped ${type} report digest for ${tenant.slug}: ${backgroundExecution.reasonCode}`,
+          );
+          return;
+        }
+
+        const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+          decision: backgroundExecution,
+          actorKind: 'TENANT_SYSTEM',
+          tenantId: tenant.id,
+        });
+        if (!runtimeIdentity.accepted) {
+          await this.prisma.reportDigestScheduleRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'SKIPPED',
+              sentCount: 0,
+              completedAt: new Date(),
+              errorMessage: runtimeIdentity.reasonCode,
+            },
+          });
+          this.logger.warn(
+            `Skipped ${type} report digest for ${tenant.slug}: ${runtimeIdentity.reasonCode}`,
+          );
+          return;
+        }
+      }
       const result = await this.reportsDigestService.sendScheduledDigests(
         { type },
-        { tenantId: tenant.id },
+        { tenantId: tenant.id, permitAcquisition },
       );
       const sentCount = result.dryRun ? 0 : result.sent;
+      const skippedCount = result.skipped;
+      const scheduleStatus =
+        !result.dryRun && sentCount === 0 && skippedCount > 0
+          ? 'SKIPPED'
+          : 'SENT';
+      const skipReason =
+        scheduleStatus === 'SKIPPED'
+          ? result.skippedResults
+              .map((item) => item.reasonCode)
+              .sort()
+              .join(',')
+          : null;
 
       await this.prisma.reportDigestScheduleRun.update({
         where: { id: run.id },
         data: {
-          status: 'SENT',
+          status: scheduleStatus,
           sentCount,
           completedAt: new Date(),
+          errorMessage: skipReason,
         },
       });
-      this.logger.log(
-        `Sent ${type} report digest for ${tenant.slug}: ${sentCount} recipient(s)`,
-      );
+      if (scheduleStatus === 'SKIPPED') {
+        this.logger.warn(
+          `Skipped ${type} report digest for ${tenant.slug}: ${skipReason}`,
+        );
+      } else {
+        this.logger.log(
+          `Sent ${type} report digest for ${tenant.slug}: ${sentCount} recipient(s), ${skippedCount} skipped`,
+        );
+      }
     } catch (error) {
       await this.prisma.reportDigestScheduleRun.update({
         where: { id: run.id },

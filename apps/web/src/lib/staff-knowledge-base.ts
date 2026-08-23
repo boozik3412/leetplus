@@ -125,6 +125,7 @@ export type StaffKnowledgeReadReceipt = {
 
 export type StaffKnowledgeArticle = {
   id: string;
+  canManage: boolean;
   kind: StaffKnowledgeArticleKind;
   title: string;
   summary: string | null;
@@ -225,6 +226,7 @@ export type StaffKnowledgeBaseFilters = {
 };
 
 export type StaffKnowledgeBaseReport = {
+  accessScope: "NETWORK" | "STORES";
   filters: Required<Pick<StaffKnowledgeBaseFilters, "status" | "roleScope">> & {
     category: string | null;
     folder: string | null;

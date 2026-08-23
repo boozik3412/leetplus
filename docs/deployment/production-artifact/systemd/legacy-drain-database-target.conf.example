@@ -1,0 +1,11 @@
+# Copy to /etc/leetplus/legacy-drain-database-target.conf as root:root 0600
+# only after a fresh production read-only inventory. Placeholder values fail.
+DATABASE_NAME=leetplus
+DATABASE_SERVER_ADDRESS=127.0.0.1
+DATABASE_SERVER_PORT=5432
+DATABASE_SYSTEM_IDENTIFIER=<exact-production-pg_control_system-identifier>
+AUDIT_SESSION_USER=leetplus_drain_audit
+FENCE_SESSION_USER=leetplus_role_fencer
+FENCE_AUTHORITY_ROLE=leetplus_fence_authority
+FENCE_FUNCTION_SCHEMA=leetplus_ops
+FENCE_FUNCTION_NAME=apply_nminus1_legacy_login_fence

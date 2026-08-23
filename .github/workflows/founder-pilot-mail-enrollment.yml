@@ -1,0 +1,102 @@
+name: Founder pilot mail enrollment PostgreSQL gate
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/founder-pilot-mail-enrollment.yml"
+      - "apps/api/test/founder-operator-beta-activation-v2.pg.integration-spec.ts"
+      - "packages/database/prisma/**"
+      - "packages/database/scripts/founder-pilot-mail-tenant-enrollment*.mjs"
+      - "packages/database/scripts/identity-mail-worker-enrollment*.mjs"
+      - "packages/database/scripts/staff-task-integrity-migration-state.mjs"
+      - "packages/database/package.json"
+      - "pnpm-lock.yaml"
+  push:
+    branches:
+      - codex/open-beta-hardening
+      - main
+    paths:
+      - ".github/workflows/founder-pilot-mail-enrollment.yml"
+      - "apps/api/test/founder-operator-beta-activation-v2.pg.integration-spec.ts"
+      - "packages/database/prisma/**"
+      - "packages/database/scripts/founder-pilot-mail-tenant-enrollment*.mjs"
+      - "packages/database/scripts/identity-mail-worker-enrollment*.mjs"
+      - "packages/database/scripts/staff-task-integrity-migration-state.mjs"
+      - "packages/database/package.json"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: founder-pilot-mail-enrollment-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI_RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci?schema=public
+
+jobs:
+  founder-pilot-mail-enrollment-postgres:
+    name: Founder pilot mail enrollment PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FOUNDER_OPERATOR_BETA_ACTIVATION_V2_PG_CONFIRM: run-founder-operator-beta-activation-v2-postgres-fixture
+      PGOPTIONS: -c lock_timeout=5000 -c statement_timeout=120000
+
+    services:
+      postgres:
+        image: postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: leetplus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact release checkout
+        shell: bash
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          printf 'CI_RELEASE_SHA=%s\n' "$CI_RELEASE_SHA"
+          test "$actual_sha" = "$CI_RELEASE_SHA"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter database db:generate
+
+      - name: Validate tenant enrollment controller
+        run: pnpm --filter database check:founder-pilot-mail-tenant-enrollment
+
+      - name: Verify full founder owner lifecycle through tenant enrollment
+        run: pnpm --filter api test:integration:founder-operator-beta-activation-v2:pg

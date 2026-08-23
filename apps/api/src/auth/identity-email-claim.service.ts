@@ -1,0 +1,862 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { IdentityEmailClaimType, Prisma } from '@prisma/client';
+import { createHmac } from 'node:crypto';
+import { isCanonicalIdentityEmail } from '../utilities/canonical-identity-email';
+
+const IDENTITY_EMAIL_FINGERPRINT_KEY = 'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY';
+const IDENTITY_EMAIL_FINGERPRINT_KEY_VERSION =
+  'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION';
+const SUPPORTED_FINGERPRINT_KEY_VERSION = 'v1';
+const FINGERPRINT_DOMAIN = 'leetplus:identity-email-fingerprint:v1\0';
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const MINIMUM_HMAC_KEY_BYTES = 32;
+const MAXIMUM_HMAC_KEY_BYTES = 4096;
+const IDENTITY_MAIL_TENANT_LOCK_DOMAIN = 'leetplus:identity-mail-tenant:v1:';
+const IDENTITY_MAIL_TENANT_LOCK_SEED = 180;
+const IDENTITY_CLAIM_STATEMENT_TIMEOUT = '25s';
+const IDENTITY_CLAIM_LOCK_TIMEOUT = '5s';
+const identityEmailClaimTransactionBrand = Symbol(
+  'identityEmailClaimTransaction',
+);
+
+// The tenant-lock statement may wait behind a committed tenant mutation. Read
+// Committed makes the following RPC/relation statement start with a fresh
+// snapshot; Serializable would keep the pre-wait snapshot for the transaction.
+export const IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+  maxWait: 5_000,
+  timeout: 30_000,
+} as const;
+
+export type IdentityEmailClaimTransaction = {
+  readonly client: Pick<Prisma.TransactionClient, '$queryRaw'>;
+  readonly tenantId: string;
+  readonly [identityEmailClaimTransactionBrand]: true;
+};
+
+export type IdentityEmailClaimTransactionHost = {
+  $transaction<T>(
+    operation: (tx: Prisma.TransactionClient) => Promise<T>,
+    options: typeof IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS,
+  ): Promise<T>;
+};
+
+export type IdentityEmailFingerprint = {
+  fingerprint: string;
+  keyVersion: typeof SUPPORTED_FINGERPRINT_KEY_VERSION;
+};
+
+export type ReserveIdentityInviteInput = {
+  email: string;
+  tenantId: string;
+  subjectId: string;
+};
+
+export type AssertIdentityInviteInput = {
+  email: string;
+  tenantId: string;
+  subjectId: string;
+  expectedRevision: number;
+};
+
+export type AssertIdentityInviteLocatorInput = {
+  workflowLocator: string;
+  tenantId: string;
+  subjectId: string;
+  expectedRevision: number;
+};
+
+export type TransitionIdentityInviteInput = {
+  email: string;
+  tenantId: string;
+  expectedSubjectId: string;
+  expectedRevision: number;
+  nextClaimType:
+    | typeof IdentityEmailClaimType.INVITE
+    | typeof IdentityEmailClaimType.USER;
+  nextSubjectId: string;
+};
+
+export type ReleaseIdentityInviteInput = {
+  email: string;
+  tenantId: string;
+  expectedSubjectId: string;
+  expectedRevision: number;
+};
+
+export type ReserveIdentityInviteReceipt = IdentityEmailFingerprint & {
+  schemaVersion: 2;
+  operation: 'RESERVE_INVITE';
+  decision: 'CREATED' | 'ALREADY_RESERVED';
+  claimType: typeof IdentityEmailClaimType.INVITE;
+  tenantId: string;
+  subjectId: string;
+  revision: number;
+};
+
+export type AssertIdentityInviteReceipt = {
+  schemaVersion: 1;
+  operation: 'ASSERT_INVITE';
+  decision: 'MATCHED';
+  claimType: typeof IdentityEmailClaimType.INVITE;
+  tenantId: string;
+  subjectId: string;
+  revision: number;
+};
+
+export type AssertIdentityInviteLocatorReceipt = {
+  schemaVersion: 1;
+  operation: 'ASSERT_INVITE_LOCATOR';
+  decision: 'MATCHED';
+  claimType: typeof IdentityEmailClaimType.INVITE;
+  tenantId: string;
+  subjectId: string;
+  workflowLocator: string;
+  revision: number;
+};
+
+export type TransitionIdentityInviteReceipt = {
+  schemaVersion: 2;
+  operation: 'TRANSITION_INVITE';
+  decision: 'TRANSITIONED' | 'ALREADY_TRANSITIONED';
+  claimType:
+    | typeof IdentityEmailClaimType.INVITE
+    | typeof IdentityEmailClaimType.USER;
+  tenantId: string;
+  subjectId: string;
+  revision: number;
+};
+
+export type ReleaseIdentityInviteReceipt = {
+  schemaVersion: 2;
+  operation: 'RELEASE_INVITE';
+  decision: 'RELEASED';
+  tenantId: string;
+  subjectId: string;
+  releasedRevision: number;
+};
+
+type JsonRpcRow = {
+  receipt: Prisma.JsonValue;
+};
+
+type IdentityClaimTransactionSettingsRow = {
+  isolationLevel: string;
+  readOnly: string;
+  statementTimeout: string;
+  lockTimeout: string;
+};
+
+type IdentityClaimTenantLockRow = {
+  tenantId: string;
+  backendPid: number;
+};
+
+@Injectable()
+export class IdentityEmailClaimService {
+  constructor(private readonly configService: ConfigService) {}
+
+  async runTenantTransaction<T>(
+    host: IdentityEmailClaimTransactionHost,
+    tenantIdValue: string,
+    operation: (
+      tx: Prisma.TransactionClient,
+      identityTx: IdentityEmailClaimTransaction,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const tenantId = this.uuid(tenantIdValue);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await host.$transaction(async (tx) => {
+          const identityTx = await this.lockTenantTransaction(tx, tenantId);
+          return operation(tx, identityTx);
+        }, IDENTITY_EMAIL_CLAIM_TRANSACTION_OPTIONS);
+      } catch (error) {
+        if (!this.retryableTransactionError(error)) {
+          throw error;
+        }
+        if (attempt === 1) {
+          throw this.boundaryError(error);
+        }
+      }
+    }
+    throw this.transactionProtocolUnavailable();
+  }
+
+  async lockTenantTransaction(
+    tx: Prisma.TransactionClient,
+    tenantIdValue: string,
+  ): Promise<IdentityEmailClaimTransaction> {
+    const candidate = tx as unknown as Record<string, unknown>;
+    if (
+      typeof candidate.$connect === 'function' ||
+      typeof candidate.$disconnect === 'function'
+    ) {
+      throw this.transactionProtocolUnavailable();
+    }
+    const tenantId = this.uuid(tenantIdValue);
+    try {
+      const settings = await tx.$queryRaw<
+        IdentityClaimTransactionSettingsRow[]
+      >(
+        Prisma.sql`
+          SELECT
+            pg_catalog.current_setting('transaction_isolation') AS "isolationLevel",
+            pg_catalog.current_setting('transaction_read_only') AS "readOnly",
+            pg_catalog.set_config(
+              'statement_timeout',
+              ${IDENTITY_CLAIM_STATEMENT_TIMEOUT},
+              true
+            ) AS "statementTimeout",
+            pg_catalog.set_config(
+              'lock_timeout',
+              ${IDENTITY_CLAIM_LOCK_TIMEOUT},
+              true
+            ) AS "lockTimeout"
+        `,
+      );
+      if (
+        settings.length !== 1 ||
+        settings[0]?.isolationLevel !== 'read committed' ||
+        settings[0]?.readOnly !== 'off' ||
+        settings[0]?.statementTimeout !== IDENTITY_CLAIM_STATEMENT_TIMEOUT ||
+        settings[0]?.lockTimeout !== IDENTITY_CLAIM_LOCK_TIMEOUT
+      ) {
+        throw this.transactionProtocolUnavailable();
+      }
+
+      // Keep advisory acquisition in its own statement. Merging the protected
+      // operation here would make it use a snapshot created before lock wait.
+      const locks = await tx.$queryRaw<IdentityClaimTenantLockRow[]>(Prisma.sql`
+        WITH tenant_lock AS MATERIALIZED (
+          SELECT pg_catalog.pg_advisory_xact_lock(
+            pg_catalog.hashtextextended(
+              ${IDENTITY_MAIL_TENANT_LOCK_DOMAIN} || ${tenantId}::TEXT,
+              ${IDENTITY_MAIL_TENANT_LOCK_SEED}
+            )
+          ) AS acquired
+        )
+        SELECT
+          ${tenantId}::TEXT AS "tenantId",
+          pg_catalog.pg_backend_pid()::INTEGER AS "backendPid"
+        FROM tenant_lock
+      `);
+      if (
+        locks.length !== 1 ||
+        locks[0]?.tenantId !== tenantId ||
+        !Number.isInteger(locks[0]?.backendPid)
+      ) {
+        throw this.transactionProtocolUnavailable();
+      }
+      return Object.freeze({
+        client: tx,
+        tenantId,
+        [identityEmailClaimTransactionBrand]: true as const,
+      });
+    } catch (error) {
+      throw this.boundaryError(error);
+    }
+  }
+
+  fingerprint(email: string): IdentityEmailFingerprint {
+    const canonicalEmail = this.canonicalEmail(email);
+    const { key, keyVersion } = this.fingerprintKey();
+    return {
+      fingerprint: createHmac('sha256', key)
+        .update(FINGERPRINT_DOMAIN)
+        .update(canonicalEmail)
+        .digest('hex'),
+      keyVersion,
+    };
+  }
+
+  async reserveInvite(
+    tx: IdentityEmailClaimTransaction,
+    input: ReserveIdentityInviteInput,
+  ): Promise<ReserveIdentityInviteReceipt> {
+    const canonicalEmail = this.canonicalEmail(input.email);
+    const tenantId = this.uuid(input.tenantId);
+    const subjectId = this.uuid(input.subjectId);
+    const client = this.tenantBoundClient(tx, tenantId);
+    const fingerprint = this.fingerprint(canonicalEmail);
+
+    try {
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+        SELECT public."identity_email_claim_reserve_invite_v2"(
+          ${canonicalEmail}::TEXT,
+          ${tenantId}::TEXT,
+          ${subjectId}::TEXT
+        ) AS receipt
+      `);
+      const receipt = this.reserveReceipt(rows);
+      if (
+        receipt.tenantId !== tenantId ||
+        receipt.subjectId !== subjectId ||
+        receipt.revision !== 1
+      ) {
+        throw this.invalidReceipt();
+      }
+      return {
+        ...receipt,
+        ...fingerprint,
+      };
+    } catch (error) {
+      throw this.boundaryError(error);
+    }
+  }
+
+  async assertInvite(
+    tx: IdentityEmailClaimTransaction,
+    input: AssertIdentityInviteInput,
+  ): Promise<AssertIdentityInviteReceipt> {
+    const canonicalEmail = this.canonicalEmail(input.email);
+    const tenantId = this.uuid(input.tenantId);
+    const subjectId = this.uuid(input.subjectId);
+    const expectedRevision = this.revision(input.expectedRevision);
+    const client = this.tenantBoundClient(tx, tenantId);
+
+    try {
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+        SELECT public."identity_email_claim_assert_invite_v1"(
+          ${canonicalEmail}::TEXT,
+          ${tenantId}::TEXT,
+          ${subjectId}::TEXT,
+          ${expectedRevision}::INTEGER
+        ) AS receipt
+      `);
+      const receipt = this.assertReceipt(rows);
+      if (
+        receipt.tenantId !== tenantId ||
+        receipt.subjectId !== subjectId ||
+        receipt.revision !== expectedRevision
+      ) {
+        throw this.invalidReceipt();
+      }
+      return receipt;
+    } catch (error) {
+      throw this.boundaryError(error);
+    }
+  }
+
+  async assertInviteLocator(
+    tx: IdentityEmailClaimTransaction,
+    input: AssertIdentityInviteLocatorInput,
+  ): Promise<AssertIdentityInviteLocatorReceipt> {
+    const workflowLocator = this.uuid(input.workflowLocator);
+    const tenantId = this.uuid(input.tenantId);
+    const subjectId = this.uuid(input.subjectId);
+    const expectedRevision = this.revision(input.expectedRevision);
+    const client = this.tenantBoundClient(tx, tenantId);
+
+    try {
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+        SELECT public."identity_email_claim_assert_invite_locator_v1"(
+          ${workflowLocator}::TEXT,
+          ${tenantId}::TEXT,
+          ${subjectId}::TEXT,
+          ${expectedRevision}::INTEGER
+        ) AS receipt
+      `);
+      const receipt = this.assertLocatorReceipt(rows);
+      if (
+        receipt.workflowLocator !== workflowLocator ||
+        receipt.tenantId !== tenantId ||
+        receipt.subjectId !== subjectId ||
+        receipt.revision !== expectedRevision
+      ) {
+        throw this.invalidReceipt();
+      }
+      return receipt;
+    } catch (error) {
+      throw this.boundaryError(error);
+    }
+  }
+
+  async transitionInvite(
+    tx: IdentityEmailClaimTransaction,
+    input: TransitionIdentityInviteInput,
+  ): Promise<TransitionIdentityInviteReceipt> {
+    const canonicalEmail = this.canonicalEmail(input.email);
+    const tenantId = this.uuid(input.tenantId);
+    const expectedSubjectId = this.uuid(input.expectedSubjectId);
+    const expectedRevision = this.revision(input.expectedRevision);
+    const nextSubjectId = this.uuid(input.nextSubjectId);
+    const client = this.tenantBoundClient(tx, tenantId);
+    if (expectedSubjectId === nextSubjectId) {
+      throw this.invalidCommand();
+    }
+    if (
+      input.nextClaimType !== IdentityEmailClaimType.INVITE &&
+      input.nextClaimType !== IdentityEmailClaimType.USER
+    ) {
+      throw this.invalidCommand();
+    }
+
+    try {
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+        SELECT public."identity_email_claim_transition_v2"(
+          ${canonicalEmail}::TEXT,
+          ${tenantId}::TEXT,
+          ${IdentityEmailClaimType.INVITE}::TEXT,
+          ${expectedSubjectId}::TEXT,
+          ${expectedRevision}::INTEGER,
+          ${input.nextClaimType}::TEXT,
+          ${nextSubjectId}::TEXT
+        ) AS receipt
+      `);
+      const receipt = this.transitionReceipt(rows);
+      if (
+        receipt.tenantId !== tenantId ||
+        receipt.subjectId !== nextSubjectId ||
+        receipt.claimType !== input.nextClaimType ||
+        receipt.revision !== expectedRevision + 1
+      ) {
+        throw this.invalidReceipt();
+      }
+      return receipt;
+    } catch (error) {
+      throw this.boundaryError(error);
+    }
+  }
+
+  async releaseInvite(
+    tx: IdentityEmailClaimTransaction,
+    input: ReleaseIdentityInviteInput,
+  ): Promise<ReleaseIdentityInviteReceipt> {
+    const canonicalEmail = this.canonicalEmail(input.email);
+    const tenantId = this.uuid(input.tenantId);
+    const expectedSubjectId = this.uuid(input.expectedSubjectId);
+    const expectedRevision = this.revision(input.expectedRevision);
+    const client = this.tenantBoundClient(tx, tenantId);
+
+    try {
+      const rows = await client.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+        SELECT public."identity_email_claim_release_v2"(
+          ${canonicalEmail}::TEXT,
+          ${tenantId}::TEXT,
+          ${IdentityEmailClaimType.INVITE}::TEXT,
+          ${expectedSubjectId}::TEXT,
+          ${expectedRevision}::INTEGER
+        ) AS receipt
+      `);
+      const receipt = this.releaseReceipt(rows);
+      if (
+        receipt.tenantId !== tenantId ||
+        receipt.subjectId !== expectedSubjectId ||
+        receipt.releasedRevision !== expectedRevision
+      ) {
+        throw this.invalidReceipt();
+      }
+      return receipt;
+    } catch (error) {
+      throw this.boundaryError(error);
+    }
+  }
+
+  private reserveReceipt(
+    rows: JsonRpcRow[],
+  ): Omit<ReserveIdentityInviteReceipt, keyof IdentityEmailFingerprint> {
+    const receipt = this.receiptRecord(rows, [
+      'schemaVersion',
+      'operation',
+      'decision',
+      'claimType',
+      'tenantId',
+      'subjectId',
+      'revision',
+    ]);
+    if (
+      receipt.schemaVersion !== 2 ||
+      receipt.operation !== 'RESERVE_INVITE' ||
+      (receipt.decision !== 'CREATED' &&
+        receipt.decision !== 'ALREADY_RESERVED') ||
+      receipt.claimType !== IdentityEmailClaimType.INVITE
+    ) {
+      throw this.invalidReceipt();
+    }
+    return {
+      schemaVersion: 2,
+      operation: 'RESERVE_INVITE',
+      decision: receipt.decision,
+      claimType: IdentityEmailClaimType.INVITE,
+      tenantId: this.receiptUuid(receipt.tenantId),
+      subjectId: this.receiptUuid(receipt.subjectId),
+      revision: this.receiptRevision(receipt.revision),
+    };
+  }
+
+  private assertReceipt(rows: JsonRpcRow[]): AssertIdentityInviteReceipt {
+    const receipt = this.receiptRecord(rows, [
+      'schemaVersion',
+      'operation',
+      'decision',
+      'claimType',
+      'tenantId',
+      'subjectId',
+      'revision',
+    ]);
+    if (
+      receipt.schemaVersion !== 1 ||
+      receipt.operation !== 'ASSERT_INVITE' ||
+      receipt.decision !== 'MATCHED' ||
+      receipt.claimType !== IdentityEmailClaimType.INVITE
+    ) {
+      throw this.invalidReceipt();
+    }
+    return {
+      schemaVersion: 1,
+      operation: 'ASSERT_INVITE',
+      decision: 'MATCHED',
+      claimType: IdentityEmailClaimType.INVITE,
+      tenantId: this.receiptUuid(receipt.tenantId),
+      subjectId: this.receiptUuid(receipt.subjectId),
+      revision: this.receiptRevision(receipt.revision),
+    };
+  }
+
+  private assertLocatorReceipt(
+    rows: JsonRpcRow[],
+  ): AssertIdentityInviteLocatorReceipt {
+    const receipt = this.receiptRecord(rows, [
+      'schemaVersion',
+      'operation',
+      'decision',
+      'claimType',
+      'tenantId',
+      'subjectId',
+      'workflowLocator',
+      'revision',
+    ]);
+    if (
+      receipt.schemaVersion !== 1 ||
+      receipt.operation !== 'ASSERT_INVITE_LOCATOR' ||
+      receipt.decision !== 'MATCHED' ||
+      receipt.claimType !== IdentityEmailClaimType.INVITE
+    ) {
+      throw this.invalidReceipt();
+    }
+    return {
+      schemaVersion: 1,
+      operation: 'ASSERT_INVITE_LOCATOR',
+      decision: 'MATCHED',
+      claimType: IdentityEmailClaimType.INVITE,
+      tenantId: this.receiptUuid(receipt.tenantId),
+      subjectId: this.receiptUuid(receipt.subjectId),
+      workflowLocator: this.receiptUuid(receipt.workflowLocator),
+      revision: this.receiptRevision(receipt.revision),
+    };
+  }
+
+  private transitionReceipt(
+    rows: JsonRpcRow[],
+  ): TransitionIdentityInviteReceipt {
+    const receipt = this.receiptRecord(rows, [
+      'schemaVersion',
+      'operation',
+      'decision',
+      'claimType',
+      'tenantId',
+      'subjectId',
+      'revision',
+    ]);
+    if (
+      receipt.schemaVersion !== 2 ||
+      receipt.operation !== 'TRANSITION_INVITE' ||
+      (receipt.decision !== 'TRANSITIONED' &&
+        receipt.decision !== 'ALREADY_TRANSITIONED') ||
+      (receipt.claimType !== IdentityEmailClaimType.INVITE &&
+        receipt.claimType !== IdentityEmailClaimType.USER)
+    ) {
+      throw this.invalidReceipt();
+    }
+    return {
+      schemaVersion: 2,
+      operation: 'TRANSITION_INVITE',
+      decision: receipt.decision,
+      claimType: receipt.claimType,
+      tenantId: this.receiptUuid(receipt.tenantId),
+      subjectId: this.receiptUuid(receipt.subjectId),
+      revision: this.receiptRevision(receipt.revision),
+    };
+  }
+
+  private releaseReceipt(rows: JsonRpcRow[]): ReleaseIdentityInviteReceipt {
+    const receipt = this.receiptRecord(rows, [
+      'schemaVersion',
+      'operation',
+      'decision',
+      'tenantId',
+      'subjectId',
+      'releasedRevision',
+    ]);
+    if (
+      receipt.schemaVersion !== 2 ||
+      receipt.operation !== 'RELEASE_INVITE' ||
+      receipt.decision !== 'RELEASED'
+    ) {
+      throw this.invalidReceipt();
+    }
+    return {
+      schemaVersion: 2,
+      operation: 'RELEASE_INVITE',
+      decision: receipt.decision,
+      tenantId: this.receiptUuid(receipt.tenantId),
+      subjectId: this.receiptUuid(receipt.subjectId),
+      releasedRevision: this.receiptRevision(receipt.releasedRevision),
+    };
+  }
+
+  private receiptRecord(
+    rows: JsonRpcRow[],
+    exactKeys: readonly string[],
+  ): Record<string, unknown> {
+    if (
+      !Array.isArray(rows) ||
+      rows.length !== 1 ||
+      !this.record(rows[0]?.receipt)
+    ) {
+      throw this.invalidReceipt();
+    }
+    const receipt = rows[0].receipt;
+    const actualKeys = Object.keys(receipt).sort();
+    const expectedKeys = [...exactKeys].sort();
+    if (
+      actualKeys.length !== expectedKeys.length ||
+      actualKeys.some((key, index) => key !== expectedKeys[index])
+    ) {
+      throw this.invalidReceipt();
+    }
+    return receipt;
+  }
+
+  private canonicalEmail(value: unknown): string {
+    if (typeof value !== 'string' || !/^[ -~]+$/u.test(value)) {
+      throw this.invalidEmail();
+    }
+    const canonical = value.trim().toLowerCase();
+    if (
+      canonical.length < 3 ||
+      canonical.length > 320 ||
+      !/^[!-~]+$/u.test(canonical) ||
+      !isCanonicalIdentityEmail(canonical)
+    ) {
+      throw this.invalidEmail();
+    }
+    return canonical;
+  }
+
+  private uuid(value: unknown): string {
+    if (typeof value !== 'string' || !UUID_PATTERN.test(value.toLowerCase())) {
+      throw this.invalidCommand();
+    }
+    return value.toLowerCase();
+  }
+
+  private revision(value: unknown): number {
+    if (
+      typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < 1
+    ) {
+      throw this.invalidCommand();
+    }
+    return value;
+  }
+
+  private tenantBoundClient(
+    tx: IdentityEmailClaimTransaction,
+    tenantId: string,
+  ): Pick<Prisma.TransactionClient, '$queryRaw'> {
+    if (
+      tx[identityEmailClaimTransactionBrand] !== true ||
+      tx.tenantId !== tenantId ||
+      !tx.client ||
+      typeof tx.client.$queryRaw !== 'function'
+    ) {
+      throw this.transactionProtocolUnavailable();
+    }
+    return tx.client;
+  }
+
+  private receiptUuid(value: unknown): string {
+    if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+      throw this.invalidReceipt();
+    }
+    return value;
+  }
+
+  private receiptRevision(value: unknown): number {
+    if (
+      typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < 1
+    ) {
+      throw this.invalidReceipt();
+    }
+    return value;
+  }
+
+  private fingerprintKey(): {
+    key: string;
+    keyVersion: typeof SUPPORTED_FINGERPRINT_KEY_VERSION;
+  } {
+    const key = this.configService
+      .get<string>(IDENTITY_EMAIL_FINGERPRINT_KEY)
+      ?.trim();
+    const keyVersion = this.configService
+      .get<string>(IDENTITY_EMAIL_FINGERPRINT_KEY_VERSION)
+      ?.trim();
+    const keyBytes = key ? Buffer.byteLength(key, 'utf8') : 0;
+    if (
+      keyVersion !== SUPPORTED_FINGERPRINT_KEY_VERSION ||
+      !key ||
+      keyBytes < MINIMUM_HMAC_KEY_BYTES ||
+      keyBytes > MAXIMUM_HMAC_KEY_BYTES
+    ) {
+      throw new ServiceUnavailableException({
+        message: 'Identity email fingerprinting is unavailable',
+        reasonCode: 'IDENTITY_EMAIL_FINGERPRINT_KEY_UNAVAILABLE',
+      });
+    }
+    return { key, keyVersion };
+  }
+
+  private boundaryError(error: unknown): Error {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof ConflictException ||
+      error instanceof ServiceUnavailableException
+    ) {
+      return error;
+    }
+    const errorCode = this.errorCode(error);
+    const sqlState = this.sqlState(error);
+    if (
+      errorCode === 'P2034' ||
+      sqlState === '40001' ||
+      sqlState === '40P01' ||
+      sqlState === '55P03' ||
+      sqlState === '57014'
+    ) {
+      return new ConflictException({
+        message: 'Identity claim command must be retried',
+        reasonCode: 'IDENTITY_CLAIM_RETRY_REQUIRED',
+      });
+    }
+    if (sqlState === '22023') {
+      return this.invalidEmail();
+    }
+    if (sqlState === '23505') {
+      return new ConflictException({
+        message: 'Identity email is unavailable',
+        reasonCode: 'IDENTITY_EMAIL_UNAVAILABLE',
+      });
+    }
+    if (sqlState === '23503') {
+      return new ConflictException({
+        message: 'Identity claim precondition failed',
+        reasonCode: 'IDENTITY_CLAIM_PRECONDITION_FAILED',
+      });
+    }
+    if (sqlState === '23514') {
+      return new ConflictException({
+        message: 'Identity claim state changed',
+        reasonCode: 'IDENTITY_CLAIM_STATE_MISMATCH',
+      });
+    }
+    if (sqlState === '42501') {
+      return new ServiceUnavailableException({
+        message: 'Identity claim boundary is not enrolled',
+        reasonCode: 'IDENTITY_CLAIM_BOUNDARY_NOT_ENROLLED',
+      });
+    }
+    return new ServiceUnavailableException({
+      message: 'Identity claim boundary is unavailable',
+      reasonCode: 'IDENTITY_CLAIM_BOUNDARY_UNAVAILABLE',
+    });
+  }
+
+  private retryableTransactionError(error: unknown): boolean {
+    if (error instanceof ConflictException) {
+      const response = error.getResponse();
+      return (
+        this.record(response) &&
+        response.reasonCode === 'IDENTITY_CLAIM_RETRY_REQUIRED'
+      );
+    }
+    const errorCode = this.errorCode(error);
+    const sqlState = this.sqlState(error);
+    return (
+      errorCode === 'P2034' ||
+      sqlState === '40001' ||
+      sqlState === '40P01' ||
+      sqlState === '55P03' ||
+      sqlState === '57014'
+    );
+  }
+
+  private transactionProtocolUnavailable(): ServiceUnavailableException {
+    return new ServiceUnavailableException({
+      message:
+        'Identity claim command requires a tenant-locked read-committed transaction',
+      reasonCode: 'IDENTITY_CLAIM_TRANSACTION_REQUIRED',
+    });
+  }
+
+  private sqlState(error: unknown): string | null {
+    if (!this.record(error)) {
+      return null;
+    }
+    const code = this.errorCode(error);
+    if (
+      code === 'P2010' &&
+      this.record(error.meta) &&
+      typeof error.meta.code === 'string' &&
+      /^[0-9A-Z]{5}$/u.test(error.meta.code)
+    ) {
+      return error.meta.code;
+    }
+    if (code && /^[0-9A-Z]{5}$/u.test(code)) {
+      return code;
+    }
+    return null;
+  }
+
+  private errorCode(error: unknown): string | null {
+    return this.record(error) && typeof error.code === 'string'
+      ? error.code
+      : null;
+  }
+
+  private invalidEmail(): BadRequestException {
+    return new BadRequestException({
+      message: 'Identity email is invalid',
+      reasonCode: 'IDENTITY_EMAIL_INVALID',
+    });
+  }
+
+  private invalidCommand(): BadRequestException {
+    return new BadRequestException({
+      message: 'Identity claim command is invalid',
+      reasonCode: 'IDENTITY_CLAIM_COMMAND_INVALID',
+    });
+  }
+
+  private invalidReceipt(): ServiceUnavailableException {
+    return new ServiceUnavailableException({
+      message: 'Identity claim boundary returned an invalid receipt',
+      reasonCode: 'IDENTITY_CLAIM_RECEIPT_INVALID',
+    });
+  }
+
+  private record(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+}

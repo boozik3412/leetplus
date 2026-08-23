@@ -10,5 +10,6 @@ export async function GET(
     request,
     `/staff/attachments/${encodeURIComponent(id)}`,
     "staff-attachment",
+    { forwardQuery: false },
   );
 }

@@ -1,0 +1,442 @@
+{
+  "schemaVersion": 1,
+  "contract": "CURRENT180_CURRENT190_RELEASE_REFREEZE_MANIFEST_V1",
+  "status": "NOT_DEPLOYABLE",
+  "proposalRoot": "packages/database/release-proposals/current180-current190",
+  "logicalOrder": [180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190],
+  "materializationPlanner": {
+    "contract": "CURRENT180_CURRENT190_RELEASE_MATERIALIZATION_PLAN_V1",
+    "planDigest": "37dab050287389027af6691d13b0cc25536e9670f740a8c0cb71ff11d09ba1b7",
+    "sourceArtifactSetDigest": "7b2d29eb70674dd62450c322f33b2a689f64dd110a4c85e123b8bc517887919a"
+  },
+  "authorization": {
+    "canActivateRoutes": false,
+    "canAssemble": false,
+    "canCallExternalProviders": false,
+    "canDeploy": false,
+    "canMutateCanonicalMigrations": false,
+    "canMutateProduction": false,
+    "canProvisionRoles": false,
+    "canResolveMigration": false,
+    "canWrite": false,
+    "productionApplyAuthorized": false
+  },
+  "effects": {
+    "anchorArtifactCreated": false,
+    "databaseConnectionOpened": false,
+    "externalProviderCallAttempted": false,
+    "filesystemWriteAttempted": false,
+    "migrationArtifactCreated": false,
+    "migrationCommandExecuted": false,
+    "productionStateRead": false,
+    "roleOrGrantMutationAttempted": false,
+    "routeActivationAttempted": false
+  },
+  "predecessorPolicy": {
+    "allResolved": false,
+    "candidateMetadataMayResolve": false,
+    "externalEvidenceRequired": true
+  },
+  "schemaLane": [
+    {
+      "ordinal": 180,
+      "contract": "IDENTITY_MAIL_TENANT_ENROLLMENT_FOUNDATION_CANDIDATE_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260801010000_identity_mail_tenant_enrollment_control_plane",
+      "targetDirectory": "20260804130000_identity_mail_tenant_enrollment_control_plane",
+      "sourceFiles": [
+        {
+          "name": "README.md",
+          "sha256": "900d5df596ec413ee08bbe6037bc9d2ebfd23a3419599157ff3a15dd41e3c232"
+        },
+        {
+          "name": "candidate.json",
+          "sha256": "e51580b7c8d74be9324cdebd12e2bd7eb43e25d4a579b1720a15c672e1277cd2"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683"
+        }
+      ],
+      "sourceDirectorySha256": "aeebb58998a1e869aec0359586afd783ead805c181db579df44b0299838917fc",
+      "migrationSqlSha256": "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683",
+      "predecessor": {
+        "count": 180,
+        "head": "20260804120000_guest_game_max_pending_rewards",
+        "headChecksum": "40587bc93c34875edf6064f9848e42ce0194b321165ac494750987533cef21ef",
+        "manifestDigest": "8a763027a16c45532bf1cff84fdaacf27f2c4e834cae15cffd7a15feae63f6dc"
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 181,
+      "contract": "IDENTITY_MAIL_TENANT_LOCK_DRAIN_WORKER_V2_CANDIDATE_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260801020000_identity_mail_tenant_lock_drain_worker_v2",
+      "targetDirectory": "20260804140000_identity_mail_tenant_lock_drain_worker_v2",
+      "sourceFiles": [
+        {
+          "name": "candidate.json",
+          "sha256": "2479d586ce84d5f6b138a0daec1bd7867ddc9095c879528bc146bd0e21be5da6"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac"
+        }
+      ],
+      "sourceDirectorySha256": "5c41e75df755b304d939b3be2dc4583fa2c24d6287e8c2cb08fdb16128125d51",
+      "migrationSqlSha256": "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac",
+      "predecessor": {
+        "count": 181,
+        "head": "20260804130000_identity_mail_tenant_enrollment_control_plane",
+        "headChecksum": "e84ba3c4e9e61d1d759b82a33fc22c853471fb0ef908546e755699d0d264f683",
+        "manifestDigest": "ce2cfdf0b499aefee7171c7229ee8d9e1ec5e37b31e0e247ccd30145ac14ff46"
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 182,
+      "contract": "IDENTITY_MAIL_TENANT_FIRST_CLAIM_PROTOCOL_CANDIDATE_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260801030000_identity_mail_tenant_first_claim_protocol",
+      "targetDirectory": "20260804150000_identity_mail_tenant_first_claim_protocol",
+      "sourceFiles": [
+        {
+          "name": "candidate.json",
+          "sha256": "edb7de7208d689f744fe6be4a06aad628e28afa671976dca2a72a11c97aa62b2"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf"
+        }
+      ],
+      "sourceDirectorySha256": "6c544750938533a43582f77e45a2295fb4f0cf621797d3cf623361980b69c038",
+      "migrationSqlSha256": "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf",
+      "predecessor": {
+        "count": 182,
+        "head": "20260804140000_identity_mail_tenant_lock_drain_worker_v2",
+        "headChecksum": "c923d26d77fbb268fccc03d6eff0539a75c2644059d7f7ffc2493491c88f69ac",
+        "manifestDigest": "0d7fa6466d609504696eb96e53e27c33e10881c4d2edf38b69d88ef1ab689107"
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 183,
+      "contract": "IDENTITY_MAIL_WORKER_V2_FRESHNESS_PROTOCOL_CANDIDATE_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260802010000_identity_mail_worker_v2_freshness_protocol",
+      "targetDirectory": "20260804160000_identity_mail_worker_v2_freshness_protocol",
+      "sourceFiles": [
+        {
+          "name": "README.md",
+          "sha256": "aa0054cc8e5c5f58a12b22ece5bf220a6ef42386525d3d5c682f44f9b2f115d0"
+        },
+        {
+          "name": "candidate.json",
+          "sha256": "54bbb95ef0449cc5526a47f0fb5d2f9be53c0ca0148fbdb26e19e5735bd7d3d2"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0"
+        }
+      ],
+      "sourceDirectorySha256": "bd6268ce5de4112577d0e3ff9f9d18fd9569205b4f8812e842468afa503a062c",
+      "migrationSqlSha256": "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0",
+      "predecessor": {
+        "count": 183,
+        "head": "20260804150000_identity_mail_tenant_first_claim_protocol",
+        "headChecksum": "5eb1ab8f2535c212b334e599071aefbae19039cc519177f62cbe0de7373e6fdf",
+        "manifestDigest": "f4359a47b40fdf2df1839db4fd33c577674d4f887b56aab9e7903373e103c52a"
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 184,
+      "contract": "IDENTITY_MAIL_WORKER_V2_LOST_RESPONSE_REPLAY_CANDIDATE_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260802020000_identity_mail_worker_v2_lost_response_replay",
+      "targetDirectory": "20260804170000_identity_mail_worker_v2_lost_response_replay",
+      "sourceFiles": [
+        {
+          "name": "README.md",
+          "sha256": "f56f18dba5e6cfb230889791f50b3c56f29b628658c65230eb9efcbd09e7c308"
+        },
+        {
+          "name": "candidate.json",
+          "sha256": "c164beda8687a140bd16b9783677c29320d1461f5eacbff229932ef20618af04"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424"
+        }
+      ],
+      "sourceDirectorySha256": "0de209e2b8524447241426097a27afba8fe36b06e1ed1c4d6c671e98469fd5f3",
+      "migrationSqlSha256": "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424",
+      "predecessor": {
+        "count": 184,
+        "head": "20260804160000_identity_mail_worker_v2_freshness_protocol",
+        "headChecksum": "a3b92838cac386480384abb770aa06a9f2cb27b4326d5c6f9344f9019b26f2f0",
+        "manifestDigest": "fbefd932e2e34cc3358b2eee8028daf729b044b690af6df01aac2b888b15f642"
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 185,
+      "contract": "IDENTITY_MAIL_ENROLLMENT_EVIDENCE_LEDGER_V2_CANDIDATE_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260802030000_identity_mail_enrollment_evidence_ledger_v2",
+      "targetDirectory": "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
+      "sourceFiles": [
+        {
+          "name": "README.md",
+          "sha256": "017cdd6c9297ddddb1c45a5291f020090d52c0014b1332fc1220989e3f297f55"
+        },
+        {
+          "name": "candidate.json",
+          "sha256": "2ba4d7a855572ca8b63df7ae3eb4a98b8ef703ab2c4b672b4061736a300ef418"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6"
+        }
+      ],
+      "sourceDirectorySha256": "c57e46db1730c4fd4136c183a1d6379df19797c0c3c2d14b080d87fb50fd33b5",
+      "migrationSqlSha256": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6",
+      "predecessor": {
+        "count": 185,
+        "head": "20260804170000_identity_mail_worker_v2_lost_response_replay",
+        "headChecksum": "d889537c9c0e6c8d6862062fd5cd1a45f5f26409993cb3cbba64446dfe71c424",
+        "manifestDigest": "d5f9f9ad5d7be5706897533eb71f92aa0bd9d8f3feca62462898fc3a0757ac7a"
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 186,
+      "contract": "IDENTITY_MAIL_DUTY_ROLE_RUNTIME_BOUNDARY_V2_CANDIDATE_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260803010000_identity_mail_duty_role_runtime_boundary_v2",
+      "targetDirectory": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
+      "sourceFiles": [
+        {
+          "name": "README.md",
+          "sha256": "c6469dfa74893570669fb5ebeaec0697bf72fb6182d3ed80c4ea605bf8a112a7"
+        },
+        {
+          "name": "candidate.json",
+          "sha256": "f69b4bab382aca5bdb80bf545bab233d32855455358056e9a5a1b284c5036579"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd"
+        }
+      ],
+      "sourceDirectorySha256": "d25ad9e1da125419203337b5f8c570637e3de8200de99a132b787c877bef0ffb",
+      "migrationSqlSha256": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
+      "predecessor": {
+        "count": 186,
+        "head": "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
+        "headChecksum": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6",
+        "manifestDigest": "a7a90ef8c5de5c8a54bdccd54309837ddda2c2e161d6650b335d83f7af04034d"
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 187,
+      "contract": "IDENTITY_MAIL_CLUSTER_APPLICATION_ADMISSION_CURRENT187_V1",
+      "sourceVerifierContract": "CURRENT187_CLUSTER_APPLICATION_ADMISSION_V1",
+      "sourceKind": "RELEASE_PROPOSAL",
+      "sourceDirectory": "packages/database/release-proposals/current180-current190/20260805010000_identity_mail_cluster_application_admission_current187",
+      "targetDirectory": "20260805010000_identity_mail_cluster_application_admission_current187",
+      "sourceFiles": [
+        {
+          "name": "candidate.json",
+          "sha256": "3ce79a5e589406907ad43d612dca905ba65ebe9d6e73a36cabf96c0a2e1f345a"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "24de1c767af0b0bd9d386c9c2df11455743bd0ee041edfd2ca17cdba7e01c2e7"
+        }
+      ],
+      "sourceDirectorySha256": "248334f8039cb2768cd168d13e6b685009c56975dfcb976f3773e5bf9eb25aea",
+      "migrationSqlSha256": "24de1c767af0b0bd9d386c9c2df11455743bd0ee041edfd2ca17cdba7e01c2e7",
+      "predecessor": {
+        "count": 187,
+        "head": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
+        "headChecksum": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
+        "manifestDigest": "d5143b06ab4e21ec99d5a6c600aa257effffd7ba4cdbbb156650ebdd378ffd16"
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 188,
+      "contract": "LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260805020000_langame_onboarding_staged_receipt_current188",
+      "targetDirectory": "20260805020000_langame_onboarding_staged_receipt_current188",
+      "sourceFiles": [
+        {
+          "name": "README.md",
+          "sha256": "f5b5c56d22f2c91439a3964819583d771c272c36f607a9ed319f9e06956c0de2"
+        },
+        {
+          "name": "candidate.json",
+          "sha256": "69b15914f01ab37036c0ee47eee5fd320116ee77445e68e02126799e7ee35b8c"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "e76ed2c1b7e913bbfa9a9779cd0c860b120534c83eba504a0510469ff26f0c60"
+        }
+      ],
+      "sourceDirectorySha256": "c0b497c7e7ca7c206e3fbd053e60c718164222829e7428e2df4772f5cd468cf7",
+      "migrationSqlSha256": "e76ed2c1b7e913bbfa9a9779cd0c860b120534c83eba504a0510469ff26f0c60",
+      "predecessor": {
+        "requiredContract": "IDENTITY_MAIL_CLUSTER_APPLICATION_ADMISSION_CURRENT187_V1",
+        "resolved": false
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 189,
+      "contract": "IDENTITY_EMPLOYEE_INVITE_CURRENT189_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260805030000_identity_employee_invite_mail_boundary_current189",
+      "targetDirectory": "20260805030000_identity_employee_invite_mail_boundary_current189",
+      "sourceFiles": [
+        {
+          "name": "candidate.json",
+          "sha256": "8ee959eac505be345560769018f52a97dac7ebc0b28efe14344a951c76177f52"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "4bbf4d49847b82731aa2e235796b4b1a898914768c1f4f4e2cb7a8b084e5c751"
+        }
+      ],
+      "sourceDirectorySha256": "ca75242592f6f699cb41e7b216be5b487384c41bf16afa5a54e59b6e70540e95",
+      "migrationSqlSha256": "4bbf4d49847b82731aa2e235796b4b1a898914768c1f4f4e2cb7a8b084e5c751",
+      "predecessor": {
+        "requiredContract": "LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1",
+        "resolved": false
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    },
+    {
+      "ordinal": 190,
+      "contract": "GUEST_PORTAL_SESSION_CURRENT190_V1",
+      "sourceKind": "MIGRATION_CANDIDATE",
+      "sourceDirectory": "packages/database/migration-candidates/20260805040000_guest_portal_session_current190",
+      "targetDirectory": "20260805040000_guest_portal_session_current190",
+      "sourceFiles": [
+        {
+          "name": "README.md",
+          "sha256": "b4fb7faa9ceee685c2601f2e12aa48e678f8eee1c1117bc8c014fb8667f740bf"
+        },
+        {
+          "name": "candidate.json",
+          "sha256": "2b97644eb0c94feaff2cd3dfbb227f18d390b2825587fe2be93a6524fe418784"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "d23c0e8fbdfddd0eb9ec7a73d877e7bbcde8c170683247a66f43530cca3867d5"
+        }
+      ],
+      "sourceDirectorySha256": "3a89d8d8b1e80181cff07d52ccd23db4496e194a616a495155be5cba93c50584",
+      "migrationSqlSha256": "d23c0e8fbdfddd0eb9ec7a73d877e7bbcde8c170683247a66f43530cca3867d5",
+      "predecessor": {
+        "requiredContract": "IDENTITY_EMPLOYEE_INVITE_CURRENT189_V1",
+        "resolved": false
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    }
+  ],
+  "auxiliaryEvidenceLane": [
+    {
+      "ordinal": 187,
+      "contract": "CURRENT187_DDL_FENCE_LEDGER_SYNTHETIC_CI_V1",
+      "sourceKind": "AUXILIARY_SYNTHETIC_EVIDENCE",
+      "sourceDirectory": "packages/database/migration-candidates/20260805050000_identity_mail_ddl_fence_ledger_current187",
+      "databaseBoundary": "SEPARATE_LP_C187E_LOOPBACK_CI_ONLY",
+      "mustNeverEnterSchemaLane": true,
+      "sourceFiles": [
+        {
+          "name": "README.md",
+          "sha256": "76364998a26572fb092c39a58db3e890eb84a41bff981d5d7d4abfb43a9a7fd0"
+        },
+        {
+          "name": "candidate.json",
+          "sha256": "6ad04e9fefc95ed5612d69986b27f5a1ad75c4caaeb66159a8847739d27f5c76"
+        },
+        {
+          "name": "migration.sql",
+          "sha256": "dd5f4db5aecef2c537251bc5262063c1012a1383aec0d0137e7d8b9536f8bb63"
+        }
+      ],
+      "sourceDirectorySha256": "c50f16bf906f66edf2bde8a5969fcb3c63d8c422f7f624f1a118099aa3d84562",
+      "migrationSqlSha256": "dd5f4db5aecef2c537251bc5262063c1012a1383aec0d0137e7d8b9536f8bb63",
+      "predecessor": {
+        "requiredContract": "CURRENT187_INDEPENDENT_TECHNICAL_DDL_FENCE_ATTESTATION_V1",
+        "resolved": false
+      },
+      "predecessorEvidence": {
+        "externalEvidenceRequired": true,
+        "resolved": false
+      },
+      "authorization": false,
+      "effects": false
+    }
+  ]
+}

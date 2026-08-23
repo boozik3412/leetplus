@@ -14,6 +14,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameSyncService } from '../integrations/langame-sync.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 import type {
   ApplyCategorySourceMappingsDto,
   CategorySourceMappingDto,
@@ -52,10 +53,11 @@ export class ProductCategoryCatalogService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly langameSyncService: LangameSyncService,
+    private readonly freshStoreScopeService: FreshStoreScopeService,
   ) {}
 
-  async getLangameOverview(user?: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+  async getLangameOverview(user: AuthenticatedUser) {
+    const { tenantId } = await this.freshStoreScopeService.assertNetwork(user);
     const [groups, configurations, categories, mappings] = await Promise.all([
       this.prisma.langameProductGroup.findMany({
         where: { tenantId },
@@ -96,7 +98,10 @@ export class ProductCategoryCatalogService {
     ]);
 
     const groupsByKey = new Map(
-      groups.map((group) => [this.externalKey(group.externalDomain, group.externalGroupId), group]),
+      groups.map((group) => [
+        this.externalKey(group.externalDomain, group.externalGroupId),
+        group,
+      ]),
     );
     const mappingsByKey = new Map(
       mappings.map((mapping) => [
@@ -104,7 +109,8 @@ export class ProductCategoryCatalogService {
         mapping,
       ]),
     );
-    const categoriesByNormalizedName = this.indexCategoriesByNormalizedName(categories);
+    const categoriesByNormalizedName =
+      this.indexCategoriesByNormalizedName(categories);
     const statsByKey = new Map<
       string,
       {
@@ -136,16 +142,14 @@ export class ProductCategoryCatalogService {
         continue;
       }
 
-      const stats =
-        statsByKey.get(key) ??
-        {
-          productKeys: new Set<string>(),
-          linkedProductIds: new Set<string>(),
-          uncategorizedProductIds: new Set<string>(),
-          storeIds: new Set<string>(),
-          unmatchedProductCount: 0,
-          conflictProductIds: new Set<string>(),
-        };
+      const stats = statsByKey.get(key) ?? {
+        productKeys: new Set<string>(),
+        linkedProductIds: new Set<string>(),
+        uncategorizedProductIds: new Set<string>(),
+        storeIds: new Set<string>(),
+        unmatchedProductCount: 0,
+        conflictProductIds: new Set<string>(),
+      };
       const productKey =
         configuration.productId ??
         `${configuration.externalDomain}:${configuration.externalProductId}`;
@@ -206,8 +210,9 @@ export class ProductCategoryCatalogService {
       warnings,
       summary: {
         groups: groups.length,
-        activeGroups: groups.filter((group) => group.isActive && !group.isDeleted)
-          .length,
+        activeGroups: groups.filter(
+          (group) => group.isActive && !group.isDeleted,
+        ).length,
         configurationsWithoutGroup,
         configurationsWithUnavailableGroup,
         unlinkedProducts: [...statsByKey.values()].reduce(
@@ -221,7 +226,10 @@ export class ProductCategoryCatalogService {
         ).size,
       },
       groups: groups.map((group) => {
-        const key = this.externalKey(group.externalDomain, group.externalGroupId);
+        const key = this.externalKey(
+          group.externalDomain,
+          group.externalGroupId,
+        );
         const stats = statsByKey.get(key);
         const mapping = mappingsByKey.get(key);
         const suggestedCategories =
@@ -251,9 +259,7 @@ export class ProductCategoryCatalogService {
               }
             : null,
           suggestedCategory:
-            suggestedCategories.length === 1
-              ? suggestedCategories[0]
-              : null,
+            suggestedCategories.length === 1 ? suggestedCategories[0] : null,
         };
       }),
     };
@@ -263,9 +269,12 @@ export class ProductCategoryCatalogService {
     dto: PreviewCategorySourceMappingsDto,
     user: AuthenticatedUser,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const mappings = await this.prepareMappings(dto.mappings, tenantId);
-    const mappedTargets = mappings.filter((mapping) => mapping.action === 'MAP');
+    const mappedTargets = mappings.filter(
+      (mapping) => mapping.action === 'MAP',
+    );
 
     if (mappedTargets.length === 0) {
       return {
@@ -280,22 +289,23 @@ export class ProductCategoryCatalogService {
         this.toPreviewTarget(mapping),
       ]),
     );
-    const configurations = await this.prisma.langameClubProductConfiguration.findMany({
-      where: { tenantId, isActive: true, productId: { not: null } },
-      select: {
-        externalDomain: true,
-        externalGroupId: true,
-        store: { select: { id: true, name: true } },
-        product: {
-          select: {
-            id: true,
-            name: true,
-            categoryId: true,
-            category: { select: { id: true, name: true } },
+    const configurations =
+      await this.prisma.langameClubProductConfiguration.findMany({
+        where: { tenantId, isActive: true, productId: { not: null } },
+        select: {
+          externalDomain: true,
+          externalGroupId: true,
+          store: { select: { id: true, name: true } },
+          product: {
+            select: {
+              id: true,
+              name: true,
+              categoryId: true,
+              category: { select: { id: true, name: true } },
+            },
           },
         },
-      },
-    });
+      });
     const candidatesByProduct = new Map<
       string,
       {
@@ -341,7 +351,12 @@ export class ProductCategoryCatalogService {
       candidatesByProduct.set(configuration.product.id, entry);
     }
 
-    const summary = { matched: 0, uncategorized: 0, conflicts: 0, ambiguous: 0 };
+    const summary = {
+      matched: 0,
+      uncategorized: 0,
+      conflicts: 0,
+      ambiguous: 0,
+    };
     const items = [...candidatesByProduct.values()]
       .map((entry) => {
         const candidates = [...entry.candidates.values()];
@@ -381,7 +396,10 @@ export class ProductCategoryCatalogService {
       .filter((item): item is NonNullable<typeof item> => Boolean(item))
       .sort((left, right) => {
         const order = { AMBIGUOUS: 0, CONFLICT: 1, UNASSIGNED: 2 };
-        return order[left.status] - order[right.status] || left.productName.localeCompare(right.productName);
+        return (
+          order[left.status] - order[right.status] ||
+          left.productName.localeCompare(right.productName)
+        );
       });
 
     return { summary, items };
@@ -391,6 +409,7 @@ export class ProductCategoryCatalogService {
     dto: ApplyCategorySourceMappingsDto,
     user: AuthenticatedUser,
   ) {
+    await this.freshStoreScopeService.assertNetwork(user);
     const { tenantId } = await this.tenantContextService.resolve(user);
     const mappings = await this.prepareMappings(dto.mappings, tenantId);
     const resolutions = this.normalizeResolutions(dto.resolutions ?? []);
@@ -433,7 +452,10 @@ export class ProductCategoryCatalogService {
       let mappingsChanged = 0;
 
       for (const mapping of mappings) {
-        const key = this.externalKey(mapping.externalDomain, mapping.externalGroupId);
+        const key = this.externalKey(
+          mapping.externalDomain,
+          mapping.externalGroupId,
+        );
         const existing = existingByKey.get(key);
 
         if (mapping.action === 'UNMAP') {
@@ -513,7 +535,9 @@ export class ProductCategoryCatalogService {
             source: IntegrationProvider.LANGAME,
             externalDomain: mapping.externalDomain,
             externalGroupId: mapping.externalGroupId,
-            previousValue: existing ? this.mappingSnapshot(existing) : Prisma.JsonNull,
+            previousValue: existing
+              ? this.mappingSnapshot(existing)
+              : Prisma.JsonNull,
             nextValue: this.mappingSnapshot(saved),
             createdByUserId: user.id,
           },
@@ -574,10 +598,15 @@ export class ProductCategoryCatalogService {
     const seen = new Set<string>();
 
     for (const mapping of mappings) {
-      const key = this.externalKey(mapping.externalDomain, mapping.externalGroupId);
+      const key = this.externalKey(
+        mapping.externalDomain,
+        mapping.externalGroupId,
+      );
 
       if (seen.has(key)) {
-        throw new BadRequestException('Each Langame group can be selected once');
+        throw new BadRequestException(
+          'Each Langame group can be selected once',
+        );
       }
 
       seen.add(key);
@@ -612,16 +641,25 @@ export class ProductCategoryCatalogService {
     );
 
     for (const mapping of mappings) {
-      if (!knownGroupKeys.has(this.externalKey(mapping.externalDomain, mapping.externalGroupId))) {
-        throw new BadRequestException('Langame group is unavailable or belongs to another tenant');
+      if (
+        !knownGroupKeys.has(
+          this.externalKey(mapping.externalDomain, mapping.externalGroupId),
+        )
+      ) {
+        throw new BadRequestException(
+          'Langame group is unavailable or belongs to another tenant',
+        );
       }
 
       if (mapping.categoryId && !categoriesById.has(mapping.categoryId)) {
-        throw new BadRequestException('LeetPlus category is unavailable or belongs to another tenant');
+        throw new BadRequestException(
+          'LeetPlus category is unavailable or belongs to another tenant',
+        );
       }
 
       if (mapping.categoryId) {
-        mapping.categoryName = categoriesById.get(mapping.categoryId)?.name ?? null;
+        mapping.categoryName =
+          categoriesById.get(mapping.categoryId)?.name ?? null;
       }
     }
 
@@ -629,8 +667,14 @@ export class ProductCategoryCatalogService {
   }
 
   private normalizeMapping(entry: CategorySourceMappingDto): MappingTarget {
-    const externalDomain = this.requiredText(entry.externalDomain, 'Langame domain');
-    const externalGroupId = this.requiredText(entry.externalGroupId, 'Langame group');
+    const externalDomain = this.requiredText(
+      entry.externalDomain,
+      'Langame domain',
+    );
+    const externalGroupId = this.requiredText(
+      entry.externalGroupId,
+      'Langame group',
+    );
     const action = entry.action ?? 'MAP';
 
     if (action !== 'MAP' && action !== 'UNMAP') {
@@ -652,7 +696,10 @@ export class ProductCategoryCatalogService {
 
     const categoryId = entry.categoryId?.trim() || null;
     const createCategoryName = entry.createCategoryName
-      ? this.requiredText(entry.createCategoryName, 'New LeetPlus category name')
+      ? this.requiredText(
+          entry.createCategoryName,
+          'New LeetPlus category name',
+        )
       : null;
 
     if (Boolean(categoryId) === Boolean(createCategoryName)) {
@@ -706,10 +753,12 @@ export class ProductCategoryCatalogService {
         where: { tenantId, name },
         select: { id: true },
       });
-      const category = existing ?? (await tx.category.create({
-        data: { tenantId, name },
-        select: { id: true },
-      }));
+      const category =
+        existing ??
+        (await tx.category.create({
+          data: { tenantId, name },
+          select: { id: true },
+        }));
 
       if (!existing) {
         createdCount += 1;
@@ -724,7 +773,9 @@ export class ProductCategoryCatalogService {
   private async applyProductResolutions(
     tx: Prisma.TransactionClient,
     tenantId: string,
-    resolutions: ReturnType<ProductCategoryCatalogService['normalizeResolutions']>,
+    resolutions: ReturnType<
+      ProductCategoryCatalogService['normalizeResolutions']
+    >,
     mappingKeys: string[],
     mappingIdsByKey: Map<string, string>,
     userId: string,
@@ -751,7 +802,9 @@ export class ProductCategoryCatalogService {
         select: { id: true },
       }),
     ]);
-    const productsById = new Map(products.map((product) => [product.id, product]));
+    const productsById = new Map(
+      products.map((product) => [product.id, product]),
+    );
     const categoryIds = new Set(categories.map((category) => category.id));
     let updated = 0;
 
@@ -763,11 +816,15 @@ export class ProductCategoryCatalogService {
       const product = productsById.get(resolution.productId);
 
       if (!allowedSourceKeys.has(sourceKey)) {
-        throw new BadRequestException('Product resolution is not part of this preview');
+        throw new BadRequestException(
+          'Product resolution is not part of this preview',
+        );
       }
 
       if (!product || !categoryIds.has(resolution.categoryId)) {
-        throw new BadRequestException('Product or LeetPlus category is unavailable');
+        throw new BadRequestException(
+          'Product or LeetPlus category is unavailable',
+        );
       }
 
       if (product.categoryId === resolution.categoryId) {
@@ -913,16 +970,20 @@ export class ProductCategoryCatalogService {
       await tx.categorySourceMappingEvent.create({
         data: {
           tenantId,
-          mappingId: mappingIdsByKey.get(
-            this.externalKey(target.externalDomain, target.externalGroupId),
-          ) ?? null,
+          mappingId:
+            mappingIdsByKey.get(
+              this.externalKey(target.externalDomain, target.externalGroupId),
+            ) ?? null,
           productId: candidate.productId,
           action: 'PRODUCT_CATEGORY_ASSIGNED',
           source: IntegrationProvider.LANGAME,
           externalDomain: target.externalDomain,
           externalGroupId: target.externalGroupId,
           previousValue: { categoryId: null },
-          nextValue: { categoryId: target.categoryId, assignedBy: 'bulk-import' },
+          nextValue: {
+            categoryId: target.categoryId,
+            assignedBy: 'bulk-import',
+          },
           createdByUserId: userId,
         },
       });
@@ -959,8 +1020,14 @@ export class ProductCategoryCatalogService {
       return {
         productId,
         categoryId: this.requiredText(entry.categoryId, 'LeetPlus category'),
-        externalDomain: this.requiredText(entry.externalDomain, 'Langame domain'),
-        externalGroupId: this.requiredText(entry.externalGroupId, 'Langame group'),
+        externalDomain: this.requiredText(
+          entry.externalDomain,
+          'Langame domain',
+        ),
+        externalGroupId: this.requiredText(
+          entry.externalGroupId,
+          'Langame group',
+        ),
       };
     });
   }
@@ -1026,7 +1093,11 @@ export class ProductCategoryCatalogService {
   }
 
   private canEditProducts(user: AuthenticatedUser) {
-    if (!user.customRoleId && !user.hasRoleOverride && user.role !== UserRole.TRAINEE) {
+    if (
+      !user.customRoleId &&
+      !user.hasRoleOverride &&
+      user.role !== UserRole.TRAINEE
+    ) {
       return (
         user.role === UserRole.OWNER ||
         user.role === UserRole.ADMIN ||
@@ -1039,7 +1110,9 @@ export class ProductCategoryCatalogService {
 
   private normalizeConfidence(value: number) {
     if (!Number.isInteger(value) || value < 0 || value > 100) {
-      throw new BadRequestException('Confidence must be an integer from 0 to 100');
+      throw new BadRequestException(
+        'Confidence must be an integer from 0 to 100',
+      );
     }
 
     return value;

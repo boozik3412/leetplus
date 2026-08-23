@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "contract": "LANGAME_INITIAL_SYNC_APPROVAL_CURRENT191_V1",
+  "candidate": "20260813010000_langame_initial_sync_approval_current191",
+  "ordinal": 191,
+  "predecessor": {
+    "requiredContract": "GUEST_PORTAL_SESSION_CURRENT190_V1",
+    "resolved": false
+  },
+  "dependencies": [
+    "LANGAME_ONBOARDING_STAGED_RECEIPT_CURRENT188_V1",
+    "LANGAME_INITIAL_SYNC_PREFLIGHT_CURRENT188_V1",
+    "LANGAME_INITIAL_SYNC_PLAN_CURRENT191_V1"
+  ],
+  "migrationSqlSha256": "2125aa6db050f5d402871e7327dd86720ba11cb5498271b52d9baf88fcf25629",
+  "authorization": false,
+  "canMutateProduction": false,
+  "canActivateApplicationRoute": false,
+  "canStartSync": false,
+  "canWriteBusinessTables": false,
+  "canWriteProvider": false,
+  "applicationRoleAllowlistBound": false,
+  "productionApplyAuthorized": false,
+  "status": "NOT_DEPLOYABLE"
+}

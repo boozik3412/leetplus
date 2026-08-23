@@ -3,12 +3,20 @@ import {
   loadTelegramBotApiProxyUrl,
   maskTelegramBotApiProxyUrl,
 } from '../guest-portal/telegram-bot-api-fetch';
+import { assertStandaloneProcessAllowed } from '../config/design-partner-runtime-policy';
 import {
   loadBotConsumerConfig,
   runBotConsumerOnce,
 } from './guest-game-delivery-bot-consumer';
 
 async function main() {
+  assertStandaloneProcessAllowed(
+    process.env,
+    'GUEST_GAME_BOT_CONSUMER_ENABLED',
+    { GUEST_GAME_BOT_CONSUMER_DRY_RUN: 'true' },
+    'GUEST_GAME_BOT_CONSUMER_API_URL',
+  );
+
   const config = loadBotConsumerConfig(process.env);
   const telegramProxyUrl = loadTelegramBotApiProxyUrl(process.env);
   const telegramFetch = createTelegramBotApiFetch(process.env);

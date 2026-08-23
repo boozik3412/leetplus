@@ -649,6 +649,7 @@ export default async function GamificationPage({
           access={{
             canManageRules: can(user, "manage_guest_game_rules"),
             canApproveRewards: can(user, "approve_guest_game_rewards"),
+            canOperateLedger: can(user, "operate_guest_game_ledger"),
             canViewGuestPii: can(user, "view_guest_game_pii"),
             isPlatformAdmin: user.isPlatformAdmin,
             canRunRewardMaterializer,

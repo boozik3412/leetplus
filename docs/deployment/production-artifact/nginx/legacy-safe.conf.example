@@ -1,0 +1,11 @@
+# First-cutover N-1 target. This pair runs exact 7de04ff4 with the final
+# scheduler/outbound deny overlay and a dedicated database session identity.
+upstream leetplus_api {
+    server 127.0.0.1:4300 max_fails=2 fail_timeout=5s;
+    keepalive 32;
+}
+
+upstream leetplus_web {
+    server 127.0.0.1:3300 max_fails=2 fail_timeout=5s;
+    keepalive 32;
+}

@@ -38,10 +38,15 @@ type LangameMasterResponse<T> = {
 type LangameQueryParams = Record<string, string>;
 type LangameRequestOptions = {
   timeoutMs?: number;
+  maxResponseBytes?: number;
 };
 type LangameBalanceType = 'balance' | 'bonus_balance';
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+const maximumLangameWriteTimeoutMs = 30_000;
+const maximumLangameDiagnosticTimeoutMs = 10_000;
+const defaultLangameDiagnosticResponseBytes = 1024 * 1024;
+const maximumLangameDiagnosticResponseBytes = 4 * 1024 * 1024;
 
 @Injectable()
 export class LangameClient {
@@ -409,6 +414,7 @@ export class LangameClient {
     apiKey: string,
     path: string,
     params: LangameQueryParams = {},
+    options: LangameRequestOptions = {},
   ) {
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
     const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${normalizedPath}`);
@@ -417,36 +423,53 @@ export class LangameClient {
       url.searchParams.set(key, value);
     });
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-API-KEY': apiKey,
-      },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.boundedDiagnosticTimeoutMs(options.timeoutMs),
+    );
 
-    if (!response.ok) {
-      const errorDetails = await this.readErrorDetails(response);
-      throw new BadRequestException(
-        [
-          `Langame ${normalizedPath} failed: ${response.status} ${response.statusText}`,
-          errorDetails,
-        ]
-          .filter(Boolean)
-          .join(' - '),
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'X-API-KEY': apiKey,
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorDetails = await this.readErrorDetails(
+          response,
+          this.boundedDiagnosticResponseBytes(options.maxResponseBytes),
+        );
+        throw new BadRequestException(
+          [
+            `Langame ${normalizedPath} failed: ${response.status} ${response.statusText}`,
+            errorDetails,
+          ]
+            .filter(Boolean)
+            .join(' - '),
+        );
+      }
+
+      const result = await this.readJsonOrText(
+        response,
+        this.boundedDiagnosticResponseBytes(options.maxResponseBytes),
       );
+
+      if (this.isPlainObject(result) && result.status === false) {
+        throw new BadRequestException(
+          this.hasStringField(result, 'message')
+            ? `Langame ${normalizedPath} returned an error: ${result.message}`
+            : `Langame ${normalizedPath} returned an error`,
+        );
+      }
+
+      return result;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const result = await this.readJsonOrText(response);
-
-    if (this.isPlainObject(result) && result.status === false) {
-      throw new BadRequestException(
-        this.hasStringField(result, 'message')
-          ? `Langame ${normalizedPath} returned an error: ${result.message}`
-          : `Langame ${normalizedPath} returned an error`,
-      );
-    }
-
-    return result;
   }
 
   async searchGuests(
@@ -549,19 +572,24 @@ export class LangameClient {
       comment: string;
     },
     path = '/guests/balance/phone',
+    options: LangameRequestOptions = {},
   ) {
     const normalizedPath = this.masterApiPath(path);
     const displayPath = `/master_api${normalizedPath}`;
     const url = new URL(`${this.masterApiBaseUrl(baseUrl)}${normalizedPath}`);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Request-Token': requestToken,
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Token': requestToken,
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
+      this.boundedWriteTimeoutMs(options.timeoutMs),
+    );
 
     if (!response.ok) {
       const errorDetails = await this.readErrorDetails(response);
@@ -742,6 +770,51 @@ export class LangameClient {
     }
   }
 
+  private boundedWriteTimeoutMs(requestedTimeoutMs?: number) {
+    if (
+      typeof requestedTimeoutMs !== 'number' ||
+      !Number.isFinite(requestedTimeoutMs) ||
+      requestedTimeoutMs <= 0
+    ) {
+      return maximumLangameWriteTimeoutMs;
+    }
+
+    return Math.min(
+      Math.max(1, Math.floor(requestedTimeoutMs)),
+      maximumLangameWriteTimeoutMs,
+    );
+  }
+
+  private boundedDiagnosticTimeoutMs(requestedTimeoutMs?: number) {
+    if (
+      typeof requestedTimeoutMs !== 'number' ||
+      !Number.isFinite(requestedTimeoutMs) ||
+      requestedTimeoutMs <= 0
+    ) {
+      return maximumLangameDiagnosticTimeoutMs;
+    }
+
+    return Math.min(
+      Math.max(1, Math.floor(requestedTimeoutMs)),
+      maximumLangameDiagnosticTimeoutMs,
+    );
+  }
+
+  private boundedDiagnosticResponseBytes(requestedBytes?: number) {
+    if (
+      typeof requestedBytes !== 'number' ||
+      !Number.isFinite(requestedBytes) ||
+      requestedBytes <= 0
+    ) {
+      return defaultLangameDiagnosticResponseBytes;
+    }
+
+    return Math.min(
+      Math.max(1, Math.floor(requestedBytes)),
+      maximumLangameDiagnosticResponseBytes,
+    );
+  }
+
   private shouldRetryWithEuropeanDates(
     error: unknown,
     params: LangameQueryParams,
@@ -779,9 +852,14 @@ export class LangameClient {
     return `${day}.${month}.${year}`;
   }
 
-  private async readErrorDetails(response: Response) {
+  private async readErrorDetails(response: Response, maxBytes?: number) {
     try {
-      const body = (await response.text()).trim();
+      const body = (
+        await this.readBoundedText(
+          response,
+          maxBytes ?? defaultLangameDiagnosticResponseBytes,
+        )
+      ).trim();
 
       if (!body) {
         return '';
@@ -793,8 +871,11 @@ export class LangameClient {
     }
   }
 
-  private async readJsonOrText(response: Response) {
-    const body = await response.text();
+  private async readJsonOrText(response: Response, maxBytes?: number) {
+    const body = await this.readBoundedText(
+      response,
+      maxBytes ?? defaultLangameDiagnosticResponseBytes,
+    );
 
     if (!body.trim()) {
       return null;
@@ -805,6 +886,52 @@ export class LangameClient {
     } catch {
       return this.compactErrorDetails(body);
     }
+  }
+
+  private async readBoundedText(response: Response, maxBytes: number) {
+    const declaredLength = response.headers?.get?.('content-length');
+    if (declaredLength !== null && declaredLength !== undefined) {
+      const parsedLength = Number(declaredLength);
+      if (
+        !/^(0|[1-9][0-9]*)$/.test(declaredLength) ||
+        !Number.isSafeInteger(parsedLength) ||
+        parsedLength < 0 ||
+        parsedLength > maxBytes
+      ) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new BadRequestException('Langame response exceeded limit');
+      }
+    }
+
+    const reader = response.body?.getReader?.();
+    if (!reader) {
+      const body = await response.text();
+      if (new TextEncoder().encode(body).byteLength > maxBytes) {
+        throw new BadRequestException('Langame response exceeded limit');
+      }
+      return body;
+    }
+
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      totalBytes += result.value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new BadRequestException('Langame response exceeded limit');
+      }
+      chunks.push(result.value);
+    }
+
+    const body = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(body);
   }
 
   private compactErrorDetails(body: string) {

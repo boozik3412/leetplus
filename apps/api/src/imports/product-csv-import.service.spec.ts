@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { ProductCsvImportService } from './product-csv-import.service';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 type PrismaMock = {
   category: {
@@ -82,12 +83,19 @@ function lastImportJobCreateData(prisma: PrismaMock) {
 describe('ProductCsvImportService', () => {
   let prisma: PrismaMock;
   let tenantContext: TenantContextMock;
+  let freshStoreScope: { assertNetwork: jest.Mock };
   let service: ProductCsvImportService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     tenantContext = {
       resolve: jest.fn().mockResolvedValue({
+        tenantId: 'tenant-1',
+        tenantSlug: 'club-a',
+      }),
+    };
+    freshStoreScope = {
+      assertNetwork: jest.fn().mockResolvedValue({
         tenantId: 'tenant-1',
         tenantSlug: 'club-a',
       }),
@@ -105,6 +113,7 @@ describe('ProductCsvImportService', () => {
     service = new ProductCsvImportService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
+      freshStoreScope as unknown as FreshStoreScopeService,
     );
   });
 

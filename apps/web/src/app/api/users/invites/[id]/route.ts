@@ -1,5 +1,10 @@
 import { proxyJsonRequest } from "@/lib/proxy";
 
+const USERS_BFF_OPTIONS = {
+  forwardQuery: false,
+  privateNoStore: true,
+} as const;
+
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
@@ -11,6 +16,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     request,
     `/users/invites/${encodeURIComponent(id)}`,
     "PATCH",
+    USERS_BFF_OPTIONS,
   );
 }
 
@@ -21,5 +27,6 @@ export async function DELETE(request: Request, context: RouteContext) {
     request,
     `/users/invites/${encodeURIComponent(id)}`,
     "DELETE",
+    USERS_BFF_OPTIONS,
   );
 }

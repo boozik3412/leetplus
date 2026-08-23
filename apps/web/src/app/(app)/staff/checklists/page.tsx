@@ -47,7 +47,9 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function isStatus(value: string | undefined): value is StaffChecklistFilterStatus {
+function isStatus(
+  value: string | undefined,
+): value is StaffChecklistFilterStatus {
   return (
     value === "all" ||
     value === "OPEN" ||
@@ -111,7 +113,8 @@ export default async function StaffChecklistsPage({
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffChecklistReport(filters);
-  const canManageChecklists = !isChecklistUseOnlyRole(user.role);
+  const canManageChecklists =
+    report.canManageChecklistRuns && !isChecklistUseOnlyRole(user.role);
   const breadcrumbItems = [
     { href: "/dashboard", label: "Дашборд" },
     { href: "/staff/tasks", label: "Задачи персонала" },
@@ -132,10 +135,7 @@ export default async function StaffChecklistsPage({
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
-        <ReportBreadcrumbs
-          current="Чеклисты смены"
-          items={breadcrumbItems}
-        />
+        <ReportBreadcrumbs current="Чеклисты смены" items={breadcrumbItems} />
 
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -236,7 +236,11 @@ export default async function StaffChecklistsPage({
                 defaultValue={report.filters.storeId ?? ""}
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
               >
-                <option value="">Все клубы</option>
+                <option value="">
+                  {report.accessScope === "NETWORK"
+                    ? "Все клубы"
+                    : "Все доступные"}
+                </option>
                 {report.stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}

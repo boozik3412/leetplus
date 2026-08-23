@@ -110,6 +110,7 @@ export type StaffTrainingProfilesFilters = {
 };
 
 export type StaffTrainingProfilesReport = {
+  accessScope: "NETWORK" | "STORES";
   filters: Required<Pick<StaffTrainingProfilesFilters, "role" | "status">> & {
     userId: string | null;
     storeId: string | null;

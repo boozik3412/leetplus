@@ -8,7 +8,11 @@ export type StaffChecklistStatus =
   | "RETURNED"
   | "ESCALATED"
   | "CANCELED";
-export type StaffChecklistFilterStatus = StaffChecklistStatus | "OVERDUE" | "OTHER" | "all";
+export type StaffChecklistFilterStatus =
+  | StaffChecklistStatus
+  | "OVERDUE"
+  | "OTHER"
+  | "all";
 export type StaffChecklistShiftKind =
   | "OPENING"
   | "CLOSING"
@@ -224,8 +228,18 @@ export type StaffChecklistRun = {
   maxTimingDeviationMinutes: number;
   createdAt: string;
   updatedAt: string;
-  regulation: { id: string; title: string; status: string; version: number } | null;
-  template: { id: string; title: string; status: string; version: number } | null;
+  regulation: {
+    id: string;
+    title: string;
+    status: string;
+    version: number;
+  } | null;
+  template: {
+    id: string;
+    title: string;
+    status: string;
+    version: number;
+  } | null;
   store: StaffChecklistStore | null;
   shift: {
     id: string;
@@ -289,6 +303,8 @@ export type StaffChecklistReport = {
     timingViolations: number;
     timingCompliancePercent: number;
   };
+  accessScope: "NETWORK" | "STORES";
+  canManageChecklistRuns: boolean;
   rows: StaffChecklistRun[];
   publishedRegulations: StaffChecklistRegulationOption[];
   checklistTemplates: StaffChecklistTemplateOption[];
@@ -366,6 +382,7 @@ export type StaffChecklistExecutionReport = {
     scoreRange: StaffChecklistExecutionScoreFilter;
     sourceType: StaffChecklistExecutionSourceFilter;
   };
+  accessScope: "NETWORK" | "STORES";
   summary: StaffChecklistExecutionMetrics;
   byClub: StaffChecklistExecutionGroup[];
   byShift: StaffChecklistExecutionGroup[];
@@ -380,10 +397,13 @@ export type StaffChecklistExecutionReport = {
 export async function getStaffChecklistReport(
   filters: StaffChecklistFilters = {},
 ): Promise<StaffChecklistReport> {
-  const response = await fetch(`${getApiUrl()}/staff/checklists${query(filters)}`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${getApiUrl()}/staff/checklists${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch staff checklists");
@@ -395,10 +415,13 @@ export async function getStaffChecklistReport(
 export async function getStaffChecklistExecutionReport(
   filters: StaffChecklistExecutionReportFilters = {},
 ): Promise<StaffChecklistExecutionReport> {
-  const response = await fetch(`${getApiUrl()}/staff/checklists/report${query(filters)}`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${getApiUrl()}/staff/checklists/report${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch staff checklist execution report");

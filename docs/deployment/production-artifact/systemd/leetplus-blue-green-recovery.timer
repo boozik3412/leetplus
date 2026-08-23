@@ -1,0 +1,11 @@
+[Unit]
+Description=LeetPlus watchdog for an abandoned blue/green intent
+
+[Timer]
+OnBootSec=15s
+OnUnitInactiveSec=10s
+AccuracySec=1s
+Unit=leetplus-blue-green-recovery-watchdog.service
+
+[Install]
+WantedBy=timers.target

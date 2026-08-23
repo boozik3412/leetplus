@@ -3,17 +3,19 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule, type JwtModuleOptions } from '@nestjs/jwt';
 import { MailModule } from '../mail/mail.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { TenancyModule } from '../tenancy/tenancy.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
+import { IdentityEmailClaimService } from './identity-email-claim.service';
+import { InitialOwnerInviteDeliveryGateService } from './initial-owner-invite-delivery-gate.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard';
 import { PasswordService } from './password.service';
 import { PlatformAdminGuard } from './platform-admin.guard';
 import { RolesGuard } from './roles.guard';
 import { StrictRolesGuard } from './strict-roles.guard';
+import { resolveSecuritySecret } from '../config/environment-validation';
 
-const DEV_JWT_SECRET = 'leetplus-dev-jwt-secret-change-before-production';
 type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
 
 @Module({
@@ -21,11 +23,12 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
     ConfigModule,
     MailModule,
     PrismaModule,
+    TenancyModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET') ?? DEV_JWT_SECRET,
+        secret: resolveSecuritySecret(configService, 'JWT_SECRET'),
         signOptions: {
           expiresIn: (configService.get<string>('JWT_EXPIRES_IN') ??
             '24h') as JwtExpiresIn,
@@ -37,18 +40,19 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
   providers: [
     AuthService,
     EmailVerificationService,
+    IdentityEmailClaimService,
+    InitialOwnerInviteDeliveryGateService,
     PasswordService,
     PlatformAdminGuard,
     JwtAuthGuard,
-    OptionalJwtAuthGuard,
     RolesGuard,
     StrictRolesGuard,
   ],
   exports: [
     AuthService,
+    IdentityEmailClaimService,
     JwtModule,
     JwtAuthGuard,
-    OptionalJwtAuthGuard,
     PlatformAdminGuard,
     PasswordService,
     RolesGuard,

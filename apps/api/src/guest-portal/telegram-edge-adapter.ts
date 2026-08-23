@@ -1,4 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
+import {
+  buildTelegramSendMessageBody,
+  isTelegramSendMessageProjectionError,
+  type TelegramSendMessageBody,
+} from './telegram-send-message-payload';
 
 export type TelegramEdgeEnv = Record<string, string | undefined>;
 export type TelegramEdgeFetch = typeof fetch;
@@ -85,11 +90,12 @@ const defaultMaxBodyBytes = 128 * 1024;
 export function loadTelegramEdgeConfig(
   env: TelegramEdgeEnv = process.env,
 ): TelegramEdgeConfig {
-  const leetPlusApiUrl = normalizeBaseUrl(
+  const leetPlusApiUrl = normalizeHttpBaseUrl(
     env.GUEST_GAME_TG_EDGE_LEETPLUS_API_URL ??
       env.GUEST_GAME_BOT_CONSUMER_API_URL ??
       env.API_URL ??
-      'https://api.leetplus.ru',
+      '',
+    'GUEST_GAME_TG_EDGE_LEETPLUS_API_URL',
   );
   const webhookSecret =
     trimmed(env.GUEST_GAME_TG_EDGE_WEBHOOK_SECRET) ??
@@ -112,10 +118,11 @@ export function loadTelegramEdgeConfig(
       '/guest-portal/telegram/webhook',
     webhookSecret,
     botToken,
-    telegramApiBaseUrl: normalizeBaseUrl(
+    telegramApiBaseUrl: normalizeHttpBaseUrl(
       env.GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL ??
         env.TELEGRAM_API_BASE_URL ??
         'https://api.telegram.org',
+      'GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL',
     ),
     dryRun: parseBoolean(env.GUEST_GAME_TG_EDGE_DRY_RUN, true),
     requestTimeoutMs: parseBoundedInt(
@@ -271,6 +278,26 @@ export async function handleTelegramEdgeWebhook(
     };
   }
 
+  const replyBody = safelyBuildTelegramReplyBody(
+    logger,
+    chatId,
+    replyText,
+    reply.replyMarkup,
+  );
+
+  if (!replyBody) {
+    return {
+      ok: true,
+      upstreamStatus: leetPlusResponse.status ?? null,
+      upstreamAction: leetPlusResponse.action ?? null,
+      replySent: false,
+      dryRun: false,
+      chatIdMasked,
+      outboundRejected: true,
+      note: 'Unsafe Telegram reply payload.',
+    };
+  }
+
   const callbackAnswered = await answerTelegramCallbackQueryIfNeeded(
     config,
     telegramFetchImpl,
@@ -280,9 +307,7 @@ export async function handleTelegramEdgeWebhook(
   const telegramResult = await sendTelegramReply(
     config,
     telegramFetchImpl,
-    chatId,
-    replyText,
-    reply.replyMarkup,
+    replyBody,
   );
 
   logger.log(
@@ -398,22 +423,10 @@ async function routeTelegramEdgeRequest(
 async function sendTelegramReply(
   config: TelegramEdgeConfig,
   fetchImpl: TelegramEdgeFetch,
-  chatId: string,
-  text: string,
-  replyMarkup: unknown,
+  body: TelegramSendMessageBody,
 ): Promise<{ messageId: string | null }> {
   if (!config.botToken) {
     throw new Error('Telegram bot token is not configured.');
-  }
-
-  const body: JsonBody = {
-    chat_id: chatId,
-    text,
-    disable_web_page_preview: true,
-  };
-
-  if (replyMarkup && typeof replyMarkup === 'object') {
-    body.reply_markup = replyMarkup;
   }
 
   const response = await postJson<TelegramSendMessageResponse>(
@@ -439,6 +452,28 @@ async function sendTelegramReply(
         ? String(rawMessageId)
         : null,
   };
+}
+
+function safelyBuildTelegramReplyBody(
+  logger: TelegramEdgeLogger,
+  chatId: string,
+  text: string,
+  replyMarkup: unknown,
+) {
+  try {
+    return buildTelegramSendMessageBody({ chatId, text, replyMarkup });
+  } catch (error) {
+    if (isTelegramSendMessageProjectionError(error)) {
+      logger.warn(
+        `Telegram edge rejected unsafe reply payload: ${safeErrorMessage(
+          error,
+        )}`,
+      );
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 async function answerTelegramCallbackQueryIfNeeded(
@@ -600,6 +635,28 @@ function normalizeBaseUrl(value: string) {
   const normalized = value.trim();
 
   return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+}
+
+function normalizeHttpBaseUrl(value: string, settingName: string) {
+  const normalized = normalizeBaseUrl(value);
+
+  if (!normalized) {
+    return '';
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(normalized);
+  } catch {
+    throw new Error(`${settingName} must be a valid http(s) URL.`);
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`${settingName} must use http or https protocol.`);
+  }
+
+  return normalized;
 }
 
 function parseBoundedInt(

@@ -1,13 +1,22 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { hasCapability } from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
+import {
+  StaffKnowledgeAccessPolicyService,
+  type StaffKnowledgeAccess,
+} from './staff-knowledge-access-policy.service';
+import {
+  extractStaffAttachmentIds,
+  isExactStaffAttachmentUrl,
+} from './staff-attachment-references';
 
 const articleStatuses = [
   'DRAFT',
@@ -138,6 +147,7 @@ export type StaffKnowledgeRelatedLink = {
 };
 
 export type StaffKnowledgeBaseReport = {
+  accessScope: 'NETWORK' | 'STORES';
   filters: {
     status: StaffKnowledgeArticleStatus | 'all';
     roleScope: StaffKnowledgeRoleScope | 'all';
@@ -204,6 +214,7 @@ export type StaffKnowledgeArticleSuggestion = {
 
 export type StaffKnowledgeArticleResponse = {
   id: string;
+  canManage: boolean;
   kind: StaffKnowledgeArticleKind;
   title: string;
   summary: string | null;
@@ -431,32 +442,32 @@ export type StaffKnowledgeSettingsEventResponse = {
 export class StaffKnowledgeBaseService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
+    private readonly staffKnowledgeAccessPolicyService: StaffKnowledgeAccessPolicyService,
   ) {}
 
   async getArticles(
     user: AuthenticatedUser,
     query: StaffKnowledgeBaseQuery = {},
   ): Promise<StaffKnowledgeBaseReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const canEditKnowledge = this.canEditKnowledge(user);
-    const canReviewKnowledge = this.canReviewKnowledge(user);
-    const canPublishKnowledge = this.canPublishKnowledge(user);
-    const canManageKnowledge =
-      canEditKnowledge || canReviewKnowledge || canPublishKnowledge;
-    const filters = this.resolveFilters(query, canManageKnowledge);
-    const visibleStoreIds = canManageKnowledge
-      ? null
-      : await this.getCurrentUserStoreAccessIds(tenantId, user.id);
-    const where = this.buildWhere(
+    const access = await this.staffKnowledgeAccessPolicyService.resolve(user);
+    const {
       tenantId,
-      user,
-      filters,
+      canEditKnowledge,
+      canReviewKnowledge,
+      canPublishKnowledge,
       canManageKnowledge,
-      visibleStoreIds,
+    } = access;
+    const filters = this.resolveFilters(query, canManageKnowledge);
+    this.staffKnowledgeAccessPolicyService.assertRequestedStore(
+      access,
+      filters.storeId,
     );
-    const visibleArticleStoreScope =
-      this.buildVisibleArticleStoreScope(visibleStoreIds);
+    const readableArticleWhere =
+      this.staffKnowledgeAccessPolicyService.readableArticleWhere(access);
+    const where = this.buildWhere(tenantId, filters, readableArticleWhere);
+    const visibleUsersWhere =
+      this.staffKnowledgeAccessPolicyService.visibleUsersWhere(access);
 
     const [rows, stores, activeUsers, folders, categories, settings] =
       await Promise.all([
@@ -474,15 +485,15 @@ export class StaffKnowledgeBaseService {
         this.prisma.store.findMany({
           where: {
             tenantId,
-            ...(visibleStoreIds && visibleStoreIds.length > 0
-              ? { id: { in: visibleStoreIds } }
+            ...(access.mode === 'STORES'
+              ? { id: { in: [...access.allowedStoreIds] } }
               : {}),
           },
           select: { id: true, name: true, isActive: true },
           orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
         }),
         this.prisma.user.findMany({
-          where: { tenantId, isActive: true },
+          where: visibleUsersWhere,
           select: {
             id: true,
             email: true,
@@ -495,15 +506,7 @@ export class StaffKnowledgeBaseService {
         this.prisma.staffKnowledgeArticle.findMany({
           where: {
             tenantId,
-            ...(canManageKnowledge
-              ? {}
-              : {
-                  status: 'PUBLISHED',
-                  roleScope: { in: this.visibleRoleScopes(user.role) },
-                }),
-            ...(visibleArticleStoreScope
-              ? { AND: [visibleArticleStoreScope] }
-              : {}),
+            AND: [readableArticleWhere],
           },
           select: { folder: true },
           distinct: ['folder'],
@@ -512,15 +515,7 @@ export class StaffKnowledgeBaseService {
         this.prisma.staffKnowledgeArticle.findMany({
           where: {
             tenantId,
-            ...(canManageKnowledge
-              ? {}
-              : {
-                  status: 'PUBLISHED',
-                  roleScope: { in: this.visibleRoleScopes(user.role) },
-                }),
-            ...(visibleArticleStoreScope
-              ? { AND: [visibleArticleStoreScope] }
-              : {}),
+            AND: [readableArticleWhere],
           },
           select: { category: true },
           distinct: ['category'],
@@ -528,22 +523,28 @@ export class StaffKnowledgeBaseService {
         }),
         this.getKnowledgeSettingsRow(tenantId),
       ]);
-    const settingsResponse = this.toKnowledgeSettingsResponse(settings);
+    const settingsResponse = this.toKnowledgeSettingsResponse(
+      settings,
+      access.mode === 'NETWORK',
+    );
     const responseRows = rows.map((row) =>
       this.toArticleResponse(
         row,
         user.id,
         activeUsers,
         settingsResponse.revisionSlaPolicy,
-        canManageKnowledge,
+        this.staffKnowledgeAccessPolicyService.canManageArticle(access, row),
+        access.mode === 'STORES',
       ),
     );
-    const articleSuggestions = canEditKnowledge
-      ? await this.buildArticleSuggestions(tenantId, filters.storeId)
-      : [];
+    const articleSuggestions =
+      canEditKnowledge && access.mode === 'NETWORK'
+        ? await this.buildArticleSuggestions(tenantId, filters.storeId)
+        : [];
 
     return {
       filters,
+      accessScope: access.mode,
       summary: this.buildSummary(responseRows),
       canManageKnowledge,
       canEditKnowledge,
@@ -559,19 +560,30 @@ export class StaffKnowledgeBaseService {
   }
 
   async getSettings(user: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.staffKnowledgeAccessPolicyService.resolve(user);
+    const { tenantId } = access;
     const settings = await this.getKnowledgeSettingsRow(tenantId);
 
-    return this.toKnowledgeSettingsResponse(settings);
+    return this.toKnowledgeSettingsResponse(
+      settings,
+      access.mode === 'NETWORK',
+    );
   }
 
   async updateSettings(
     user: AuthenticatedUser,
     dto: StaffKnowledgeSettingsDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.staffKnowledgeAccessPolicyService.resolve(user);
+    const { tenantId } = access;
 
-    if (!this.canManageKnowledge(user)) {
+    if (access.mode !== 'NETWORK') {
+      throw new ForbiddenException(
+        'Network access is required for knowledge base settings',
+      );
+    }
+
+    if (!access.canManageKnowledge) {
       throw new BadRequestException('Knowledge base settings are not allowed');
     }
 
@@ -668,19 +680,26 @@ export class StaffKnowledgeBaseService {
       });
     });
 
-    return this.toKnowledgeSettingsResponse(settings);
+    return this.toKnowledgeSettingsResponse(settings, true);
   }
 
   async createArticle(user: AuthenticatedUser, dto: StaffKnowledgeArticleDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.staffKnowledgeAccessPolicyService.resolve(user);
+    const { tenantId } = access;
 
-    if (!this.canManageKnowledge(user)) {
+    if (!access.canManageKnowledge) {
       throw new BadRequestException('Knowledge base editing is not allowed');
     }
 
     const data = await this.normalizeArticleData(tenantId, dto, {
       requireTitle: true,
     });
+    const requestedStoreId =
+      typeof data.storeId === 'string' ? data.storeId : null;
+    this.staffKnowledgeAccessPolicyService.assertWritableStore(
+      access,
+      requestedStoreId,
+    );
     const kind =
       (data.kind as StaffKnowledgeArticleKind | undefined) ?? 'ARTICLE';
     const isInformationMessage = kind === 'INFORMATION';
@@ -732,6 +751,21 @@ export class StaffKnowledgeBaseService {
         },
       });
 
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+          resourceId: article.id,
+          attachmentIds: extractStaffAttachmentIds([
+            data.content,
+            data.materials,
+            data.relatedLinks,
+          ]),
+        },
+      );
+
       if (status === 'PUBLISHED') {
         await this.createArticleVersion(tx, article, user.id);
       }
@@ -746,14 +780,15 @@ export class StaffKnowledgeBaseService {
       });
     });
 
-    const activeUsers = await this.getActiveKnowledgeUsers(tenantId);
+    const activeUsers = await this.getActiveKnowledgeUsers(access);
 
     return this.toArticleResponse(
       created,
       user.id,
       activeUsers,
       revisionSlaPolicy,
-      true,
+      this.staffKnowledgeAccessPolicyService.canManageArticle(access, created),
+      access.mode === 'STORES',
     );
   }
 
@@ -762,9 +797,10 @@ export class StaffKnowledgeBaseService {
     id: string,
     dto: StaffKnowledgeArticleDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.staffKnowledgeAccessPolicyService.resolve(user);
+    const { tenantId } = access;
 
-    if (!this.canManageKnowledge(user)) {
+    if (!access.canManageKnowledge) {
       throw new BadRequestException('Knowledge base editing is not allowed');
     }
 
@@ -772,6 +808,7 @@ export class StaffKnowledgeBaseService {
       where: { id, tenantId },
       select: {
         id: true,
+        storeId: true,
         kind: true,
         status: true,
         publishedAt: true,
@@ -779,6 +816,7 @@ export class StaffKnowledgeBaseService {
         roleScope: true,
         content: true,
         materials: true,
+        relatedLinks: true,
         revisionSlaDays: true,
       },
     });
@@ -787,9 +825,25 @@ export class StaffKnowledgeBaseService {
       throw new NotFoundException('Knowledge article not found');
     }
 
+    if (
+      !this.staffKnowledgeAccessPolicyService.canManageArticle(access, current)
+    ) {
+      throw new NotFoundException('Knowledge article not found');
+    }
+
     const data = await this.normalizeArticleData(tenantId, dto, {
       requireTitle: false,
     });
+    const nextStoreId =
+      data.storeId === undefined
+        ? current.storeId
+        : typeof data.storeId === 'string'
+          ? data.storeId
+          : null;
+    this.staffKnowledgeAccessPolicyService.assertWritableStore(
+      access,
+      nextStoreId,
+    );
     if (data.kind === 'INFORMATION' && current.kind !== 'INFORMATION') {
       throw new BadRequestException(
         'Information messages must be created as a separate item',
@@ -871,6 +925,23 @@ export class StaffKnowledgeBaseService {
         },
       });
 
+      await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
+        tx,
+        {
+          tenantId,
+          actorUserId: user.id,
+          resourceKind: StaffAttachmentResourceKind.KNOWLEDGE_ARTICLE,
+          resourceId: article.id,
+          attachmentIds: extractStaffAttachmentIds([
+            data.content === undefined ? current.content : data.content,
+            data.materials === undefined ? current.materials : data.materials,
+            data.relatedLinks === undefined
+              ? current.relatedLinks
+              : data.relatedLinks,
+          ]),
+        },
+      );
+
       if (shouldCreateVersion) {
         await this.createArticleVersion(tx, article, user.id);
       }
@@ -902,14 +973,15 @@ export class StaffKnowledgeBaseService {
       });
     });
 
-    const activeUsers = await this.getActiveKnowledgeUsers(tenantId);
+    const activeUsers = await this.getActiveKnowledgeUsers(access);
 
     return this.toArticleResponse(
       updated,
       user.id,
       activeUsers,
       revisionSlaPolicy,
-      true,
+      this.staffKnowledgeAccessPolicyService.canManageArticle(access, updated),
+      access.mode === 'STORES',
     );
   }
 
@@ -918,9 +990,16 @@ export class StaffKnowledgeBaseService {
     id: string,
     dto: StaffKnowledgeReadReceiptDto = {},
   ): Promise<StaffKnowledgeReadReceiptResponse> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const access = await this.staffKnowledgeAccessPolicyService.resolve(user);
+    const { tenantId } = access;
     const article = await this.prisma.staffKnowledgeArticle.findFirst({
-      where: { id, tenantId },
+      where: {
+        id,
+        tenantId,
+        AND: [
+          this.staffKnowledgeAccessPolicyService.readableArticleWhere(access),
+        ],
+      },
       select: {
         id: true,
         tenantId: true,
@@ -1020,13 +1099,13 @@ export class StaffKnowledgeBaseService {
 
   private buildWhere(
     tenantId: string,
-    user: AuthenticatedUser,
     filters: StaffKnowledgeBaseReport['filters'],
-    canManageKnowledge: boolean,
-    visibleStoreIds: string[] | null,
+    readableArticleWhere: Prisma.StaffKnowledgeArticleWhereInput,
   ): Prisma.StaffKnowledgeArticleWhereInput {
     const where: Prisma.StaffKnowledgeArticleWhereInput = { tenantId };
-    const and: Prisma.StaffKnowledgeArticleWhereInput[] = [];
+    const and: Prisma.StaffKnowledgeArticleWhereInput[] = [
+      readableArticleWhere,
+    ];
 
     if (filters.status !== 'all') {
       where.status = filters.status;
@@ -1038,16 +1117,6 @@ export class StaffKnowledgeBaseService {
 
     if (filters.folder) {
       where.folder = filters.folder;
-    }
-
-    if (!canManageKnowledge) {
-      where.status = 'PUBLISHED';
-      where.roleScope = { in: this.visibleRoleScopes(user.role) };
-
-      const storeScope = this.buildVisibleArticleStoreScope(visibleStoreIds);
-      if (storeScope) {
-        and.push(storeScope);
-      }
     }
 
     if (filters.category) {
@@ -1075,9 +1144,7 @@ export class StaffKnowledgeBaseService {
       ];
     }
 
-    if (and.length > 0) {
-      where.AND = and;
-    }
+    where.AND = and;
 
     return where;
   }
@@ -1768,7 +1835,7 @@ export class StaffKnowledgeBaseService {
 
       if (url && !this.isAllowedUrl(url)) {
         throw new BadRequestException(
-          'Material URL must start with http:// or https://',
+          'Material URL must be a native attachment path or start with http:// or https://',
         );
       }
 
@@ -1883,7 +1950,8 @@ export class StaffKnowledgeBaseService {
     currentUserId: string,
     activeUsers: StaffKnowledgeReadUser[],
     revisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy,
-    includeAudienceDetails: boolean,
+    canManage: boolean,
+    restrictAudienceDetails: boolean,
   ): StaffKnowledgeArticleResponse {
     const materials = this.normalizeMaterials(row.materials);
     const relatedLinks = this.normalizeRelatedLinks(row.relatedLinks);
@@ -1901,14 +1969,20 @@ export class StaffKnowledgeBaseService {
             this.userMatchesKnowledgeTarget(candidate, row),
           )
         : [];
-    const visibleTargetUsers = includeAudienceDetails
+    const visibleTargetUsers = canManage
       ? targetUsers
       : targetUsers.filter((candidate) => candidate.id === currentUserId);
     const currentVersionReceipts = row.readReceipts.filter(
       (receipt) => receipt.version === row.version,
     );
-    const visibleReceipts = includeAudienceDetails
-      ? currentVersionReceipts
+    const visibleUserIds = new Set(
+      activeUsers.map((candidate) => candidate.id),
+    );
+    const visibleReceipts = canManage
+      ? currentVersionReceipts.filter(
+          (receipt) =>
+            !restrictAudienceDetails || visibleUserIds.has(receipt.userId),
+        )
       : currentVersionReceipts.filter(
           (receipt) => receipt.userId === currentUserId,
         );
@@ -1927,6 +2001,7 @@ export class StaffKnowledgeBaseService {
 
     return {
       id: row.id,
+      canManage,
       kind: row.kind as StaffKnowledgeArticleKind,
       title: row.title,
       summary: row.summary,
@@ -2111,15 +2186,16 @@ export class StaffKnowledgeBaseService {
 
   private toKnowledgeSettingsResponse(
     row: StaffKnowledgeSettingsRow | null,
+    includeAuditDetails = true,
   ): StaffKnowledgeSettingsResponse {
     return {
       revisionSlaPolicy: this.normalizeRevisionSlaPolicy(
         row?.revisionSlaPolicy,
       ),
       updatedAt: row?.updatedAt.toISOString() ?? null,
-      updatedByUser: row?.updatedByUser ?? null,
+      updatedByUser: includeAuditDetails ? (row?.updatedByUser ?? null) : null,
       history:
-        row?.historyEvents.map((event) => ({
+        (includeAuditDetails ? row?.historyEvents : [])?.map((event) => ({
           id: event.id,
           eventType: event.eventType,
           previousRevisionSlaPolicy: event.previousRevisionSlaPolicy
@@ -2421,9 +2497,9 @@ export class StaffKnowledgeBaseService {
     }).format(date);
   }
 
-  private getActiveKnowledgeUsers(tenantId: string) {
+  private getActiveKnowledgeUsers(access: StaffKnowledgeAccess) {
     return this.prisma.user.findMany({
-      where: { tenantId, isActive: true },
+      where: this.staffKnowledgeAccessPolicyService.visibleUsersWhere(access),
       select: {
         id: true,
         email: true,
@@ -2433,25 +2509,6 @@ export class StaffKnowledgeBaseService {
       },
       orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
     });
-  }
-
-  private async getCurrentUserStoreAccessIds(tenantId: string, userId: string) {
-    const row = await this.prisma.user.findFirst({
-      where: { id: userId, tenantId },
-      select: { storeAccesses: { select: { storeId: true } } },
-    });
-
-    return row?.storeAccesses.map((access) => access.storeId) ?? [];
-  }
-
-  private buildVisibleArticleStoreScope(visibleStoreIds: string[] | null) {
-    if (!visibleStoreIds || visibleStoreIds.length === 0) {
-      return null;
-    }
-
-    return {
-      OR: [{ storeId: null }, { storeId: { in: visibleStoreIds } }],
-    } satisfies Prisma.StaffKnowledgeArticleWhereInput;
   }
 
   private assertKnowledgeWriteAllowed(
@@ -2493,14 +2550,6 @@ export class StaffKnowledgeBaseService {
     if (!this.canEditKnowledge(user) && !this.canReviewKnowledge(user)) {
       throw new BadRequestException('Knowledge base editing is not allowed');
     }
-  }
-
-  private canManageKnowledge(user: AuthenticatedUser) {
-    return (
-      this.canEditKnowledge(user) ||
-      this.canReviewKnowledge(user) ||
-      this.canPublishKnowledge(user)
-    );
   }
 
   private canEditKnowledge(user: AuthenticatedUser) {
@@ -2620,47 +2669,6 @@ export class StaffKnowledgeBaseService {
     ).includes(role);
   }
 
-  private visibleRoleScopes(role: UserRole): StaffKnowledgeRoleScope[] {
-    const scopes: StaffKnowledgeRoleScope[] = ['ALL_STAFF'];
-
-    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
-      scopes.push('ADMINISTRATOR');
-    }
-
-    if (role === UserRole.SENIOR_ADMINISTRATOR) {
-      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR');
-    }
-
-    if (role === UserRole.CLUB_MANAGER) {
-      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'CLUB_MANAGER');
-    }
-
-    if (
-      role === UserRole.MANAGER ||
-      role === UserRole.OWNER ||
-      role === UserRole.ADMIN
-    ) {
-      scopes.push(
-        'ADMINISTRATOR',
-        'SENIOR_ADMINISTRATOR',
-        'CLUB_MANAGER',
-        'MANAGER',
-        'STANDARDS_MANAGER',
-      );
-    }
-
-    if (role === UserRole.STANDARDS_MANAGER) {
-      scopes.push(
-        'ADMINISTRATOR',
-        'SENIOR_ADMINISTRATOR',
-        'CLUB_MANAGER',
-        'STANDARDS_MANAGER',
-      );
-    }
-
-    return Array.from(new Set(scopes));
-  }
-
   private resolveOne<T extends readonly string[]>(
     value: string | null | undefined,
     allowed: T,
@@ -2718,7 +2726,7 @@ export class StaffKnowledgeBaseService {
   }
 
   private isAllowedUrl(value: string) {
-    return /^https?:\/\//i.test(value);
+    return isExactStaffAttachmentUrl(value) || /^https?:\/\//i.test(value);
   }
 
   private isAllowedInternalOrExternalUrl(value: string) {

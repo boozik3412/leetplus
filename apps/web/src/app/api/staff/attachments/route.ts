@@ -44,10 +44,7 @@ export async function POST(request: Request) {
   }
 
   const data = (await response.json()) as { id: string };
-  const url = new URL(
-    `/api/staff/attachments/${encodeURIComponent(data.id)}`,
-    request.url,
-  ).toString();
+  const url = `/api/staff/attachments/${encodeURIComponent(data.id)}`;
 
   return NextResponse.json({ ...data, url });
 }

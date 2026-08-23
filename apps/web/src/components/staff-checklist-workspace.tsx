@@ -35,7 +35,10 @@ const answerStatusLabels: Record<StaffChecklistAnswerStatus, string> = {
   NOT_APPLICABLE: "Не применимо",
 };
 
-const shiftKindLabels: Record<StaffChecklistRegulationOption["shiftKind"], string> = {
+const shiftKindLabels: Record<
+  StaffChecklistRegulationOption["shiftKind"],
+  string
+> = {
   OPENING: "Открытие",
   CLOSING: "Закрытие",
   CASH: "Касса",
@@ -261,7 +264,8 @@ function formatTimingLabel(timing: StaffChecklistAnswer["timing"]) {
   const planned = formatTimeOnly(timing.plannedAt);
   const windowStart = formatTimeOnly(timing.windowStartAt);
   const windowEnd = formatTimeOnly(timing.windowEndAt);
-  const window = windowStart && windowEnd ? `${windowStart}-${windowEnd}` : null;
+  const window =
+    windowStart && windowEnd ? `${windowStart}-${windowEnd}` : null;
 
   if (timing.status === "ON_TIME") {
     return planned ? `вовремя к ${planned}` : "вовремя";
@@ -385,7 +389,10 @@ export function StaffChecklistWorkspace({
   const selectedSource = sourceOptions.find(
     (source) => source.key === selectedSourceKey,
   );
-  const [storeId, setStoreId] = useState("");
+  const defaultStoreId =
+    sourceOptions[0]?.store?.id ??
+    (report.accessScope === "STORES" ? (report.stores[0]?.id ?? "") : "");
+  const [storeId, setStoreId] = useState(defaultStoreId);
   const [assignedToUserId, setAssignedToUserId] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -413,7 +420,14 @@ export function StaffChecklistWorkspace({
     }
 
     if (!selectedSource) {
-      setMessage("Сначала опубликуйте регламент или активируйте шаблон чеклиста.");
+      setMessage(
+        "Сначала опубликуйте регламент или активируйте шаблон чеклиста.",
+      );
+      return;
+    }
+
+    if (report.accessScope === "STORES" && !storeId) {
+      setMessage("Выберите доступный клуб для нового чек-листа.");
       return;
     }
 
@@ -426,7 +440,8 @@ export function StaffChecklistWorkspace({
       body: JSON.stringify({
         regulationId:
           selectedSource.kind === "REGULATION" ? selectedSource.id : null,
-        templateId: selectedSource.kind === "TEMPLATE" ? selectedSource.id : null,
+        templateId:
+          selectedSource.kind === "TEMPLATE" ? selectedSource.id : null,
         storeId: storeId || null,
         assignedToUserId: canAssignRuns ? assignedToUserId || null : null,
         scheduledAt: scheduledAt || null,
@@ -456,7 +471,9 @@ export function StaffChecklistWorkspace({
                 <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
                   Запуск
                 </p>
-                <h2 className="mt-1 text-lg font-semibold">Новый чеклист смены</h2>
+                <h2 className="mt-1 text-lg font-semibold">
+                  Новый чеклист смены
+                </h2>
               </div>
               <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
                 {formatNumber(sourceOptions.length)} основ
@@ -477,12 +494,19 @@ export function StaffChecklistWorkspace({
                     );
 
                     setSelectedSourceKey(value);
-                    setStoreId(next?.store?.id ?? "");
+                    setStoreId(
+                      next?.store?.id ??
+                        (report.accessScope === "STORES"
+                          ? (report.stores[0]?.id ?? "")
+                          : ""),
+                    );
                   }}
                   className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                 >
                   {sourceOptions.length === 0 ? (
-                    <option value="">Нет регламентов или активных шаблонов</option>
+                    <option value="">
+                      Нет регламентов или активных шаблонов
+                    </option>
                   ) : null}
                   {sourceOptions.map((source) => (
                     <option key={source.key} value={source.key}>
@@ -522,7 +546,9 @@ export function StaffChecklistWorkspace({
                   disabled={Boolean(selectedSource?.store)}
                   className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950"
                 >
-                  <option value="">Вся сеть / не указан</option>
+                  {report.accessScope === "NETWORK" ? (
+                    <option value="">Вся сеть / не указан</option>
+                  ) : null}
                   {report.stores.map((store) => (
                     <option key={store.id} value={store.id}>
                       {store.name}
@@ -538,7 +564,9 @@ export function StaffChecklistWorkspace({
                   </span>
                   <select
                     value={assignedToUserId}
-                    onChange={(event) => setAssignedToUserId(event.target.value)}
+                    onChange={(event) =>
+                      setAssignedToUserId(event.target.value)
+                    }
                     className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                   >
                     <option value="">Не назначен</option>
@@ -566,7 +594,11 @@ export function StaffChecklistWorkspace({
               <button
                 type="button"
                 onClick={createRun}
-                disabled={isPending || sourceOptions.length === 0}
+                disabled={
+                  isPending ||
+                  sourceOptions.length === 0 ||
+                  (report.accessScope === "STORES" && !storeId)
+                }
                 className="w-full rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Создать чеклист
@@ -583,7 +615,9 @@ export function StaffChecklistWorkspace({
             <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
               Выполнение
             </p>
-            <h2 className="mt-1 text-lg font-semibold">Мои текущие чек-листы</h2>
+            <h2 className="mt-1 text-lg font-semibold">
+              Мои текущие чек-листы
+            </h2>
             <p className="mt-2 text-sm leading-6 text-zinc-500">
               Здесь отображаются только чек-листы, назначенные вам или вашей
               смене. Создание и редактирование регламентов недоступно для этой
@@ -647,15 +681,22 @@ export function StaffChecklistWorkspace({
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <p className="text-sm font-semibold">{run.title}</p>
+                              <p className="text-sm font-semibold">
+                                {run.title}
+                              </p>
                               <p className="mt-1 text-xs text-zinc-500">
                                 {run.assignedToUser?.fullName ??
                                   run.assignedToUser?.email ??
-                                  "Не назначен"} · {run.store?.name ?? "Вся сеть"} ·{" "}
-                                {formatDateTime(run.startedAt ?? run.scheduledAt)}
+                                  "Не назначен"}{" "}
+                                · {run.store?.name ?? "Вся сеть"} ·{" "}
+                                {formatDateTime(
+                                  run.startedAt ?? run.scheduledAt,
+                                )}
                               </p>
                             </div>
-                            <span className={statusClass(run.status, run.isOverdue)}>
+                            <span
+                              className={statusClass(run.status, run.isOverdue)}
+                            >
                               {run.isOverdue
                                 ? "Просрочен"
                                 : statusLabels[run.status]}
@@ -722,8 +763,9 @@ function ChecklistRunEditor({
 }) {
   const router = useRouter();
   const [answers, setAnswers] = useState<StaffChecklistAnswer[]>(run.answers);
-  const [persistedAnswers, setPersistedAnswers] =
-    useState<StaffChecklistAnswer[]>(run.answers);
+  const [persistedAnswers, setPersistedAnswers] = useState<
+    StaffChecklistAnswer[]
+  >(run.answers);
   const [reviewComment, setReviewComment] = useState(run.reviewComment ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
@@ -1045,7 +1087,7 @@ function ChecklistRunEditor({
 
   async function cancelRun() {
     const confirmed = window.confirm(
-      "Отменить некорректный чек-лист? Он останется в отчете со статусом \"Отменен\".",
+      'Отменить некорректный чек-лист? Он останется в отчете со статусом "Отменен".',
     );
 
     if (!confirmed) {
@@ -1055,7 +1097,7 @@ function ChecklistRunEditor({
     await updateRun(
       "CANCELED",
       answers,
-      "Чеклист отменен. Он останется в отчете со статусом \"Отменен\".",
+      'Чеклист отменен. Он останется в отчете со статусом "Отменен".',
     );
   }
 
@@ -1115,625 +1157,646 @@ function ChecklistRunEditor({
   return (
     <>
       <div>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-            Выполнение
-          </p>
-          <h2 className="mt-1 text-2xl font-semibold">{run.title}</h2>
-          <p className="mt-2 text-sm text-zinc-500">
-            {run.regulation?.title ?? run.template?.title ?? "Чеклист"} · v
-            {run.regulation ? run.regulationVersion : run.templateVersion} ·{" "}
-            {shiftKindLabels[run.shiftKind]}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={statusClass(run.status, run.isOverdue)}>
-            {run.isOverdue ? "Просрочен" : statusLabels[run.status]}
-          </span>
-          <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-            {formatNumber(run.scoreEarned)}/{formatNumber(run.scoreTotal)} баллов
-          </span>
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-5">
-        <Metric
-          label="Обязательные"
-          value={`${formatNumber(run.requiredItemsDone)}/${formatNumber(run.requiredItemsTotal)}`}
-        />
-        <Metric
-          label="Доказательства"
-          value={`${formatNumber(run.evidenceDone)}/${formatNumber(run.evidenceTotal)}`}
-        />
-        <Metric
-          label="Проблемы"
-          value={formatNumber(run.failedItems)}
-          tone={run.failedItems > 0 ? "bad" : "good"}
-        />
-        <Metric
-          label="В срок"
-          value={
-            run.timedItemsTotal > 0
-              ? `${formatNumber(run.timedItemsOnTime)}/${formatNumber(run.timedItemsTotal)}`
-              : "нет"
-          }
-          tone={run.timingViolations > 0 ? "bad" : "good"}
-        />
-        <Metric
-          label="Блокеры сдачи"
-          value={formatNumber(localBlockingIssues.length)}
-          tone={localBlockingIssues.length > 0 ? "bad" : "good"}
-        />
-      </div>
-
-      {message ? (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-          {message}
-        </div>
-      ) : null}
-
-      {localBlockingIssues.length > 0 ? (
-        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/40">
-          <p className="font-semibold">Что мешает отправить на проверку</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {localBlockingIssues.slice(0, 8).map((issue) => (
-              <span
-                key={issue}
-                className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-200"
-              >
-                {issue}
-              </span>
-            ))}
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+              Выполнение
+            </p>
+            <h2 className="mt-1 text-2xl font-semibold">{run.title}</h2>
+            <p className="mt-2 text-sm text-zinc-500">
+              {run.regulation?.title ?? run.template?.title ?? "Чеклист"} · v
+              {run.regulation ? run.regulationVersion : run.templateVersion} ·{" "}
+              {shiftKindLabels[run.shiftKind]}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={statusClass(run.status, run.isOverdue)}>
+              {run.isOverdue ? "Просрочен" : statusLabels[run.status]}
+            </span>
+            <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+              {formatNumber(run.scoreEarned)}/{formatNumber(run.scoreTotal)}{" "}
+              баллов
+            </span>
           </div>
         </div>
-      ) : null}
 
-      <div className="mt-5 space-y-4">
-        {run.sections.map((section) => (
-          <div
-            key={section.id}
-            className="rounded-lg border border-zinc-200 dark:border-zinc-800"
-          >
-            <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-              <p className="text-sm font-semibold">{section.title}</p>
-              {section.description ? (
-                <p className="mt-1 text-sm text-zinc-500">
-                  {section.description}
-                </p>
-              ) : null}
+        <div className="mt-4 grid gap-3 md:grid-cols-5">
+          <Metric
+            label="Обязательные"
+            value={`${formatNumber(run.requiredItemsDone)}/${formatNumber(run.requiredItemsTotal)}`}
+          />
+          <Metric
+            label="Доказательства"
+            value={`${formatNumber(run.evidenceDone)}/${formatNumber(run.evidenceTotal)}`}
+          />
+          <Metric
+            label="Проблемы"
+            value={formatNumber(run.failedItems)}
+            tone={run.failedItems > 0 ? "bad" : "good"}
+          />
+          <Metric
+            label="В срок"
+            value={
+              run.timedItemsTotal > 0
+                ? `${formatNumber(run.timedItemsOnTime)}/${formatNumber(run.timedItemsTotal)}`
+                : "нет"
+            }
+            tone={run.timingViolations > 0 ? "bad" : "good"}
+          />
+          <Metric
+            label="Блокеры сдачи"
+            value={formatNumber(localBlockingIssues.length)}
+            tone={localBlockingIssues.length > 0 ? "bad" : "good"}
+          />
+        </div>
+
+        {message ? (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+            {message}
+          </div>
+        ) : null}
+
+        {localBlockingIssues.length > 0 ? (
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/40">
+            <p className="font-semibold">Что мешает отправить на проверку</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {localBlockingIssues.slice(0, 8).map((issue) => (
+                <span
+                  key={issue}
+                  className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-200"
+                >
+                  {issue}
+                </span>
+              ))}
             </div>
-            <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {section.items.map((item) => {
-                const answer = answersByKey.get(`${section.id}::${item.id}`);
-                const completedAt = formatCompletionDateTime(
-                  answer?.completedAt ?? null,
-                );
-                const isSubmitted = Boolean(answer?.completedAt);
-                const canResubmitSubmittedItem =
-                  run.status === "RETURNED" || run.status === "ESCALATED";
-                const evidenceAttachments = getEvidenceAttachments(answer);
-                const hasEvidence = answerHasEvidence(answer);
-                const reviewThreads = answer?.reviewThreads ?? [];
-                const openReviewThreads = reviewThreads.filter(
-                  (thread) => thread.status === "OPEN",
-                );
-                const reviewMessagesCount = reviewThreads.reduce(
-                  (sum, thread) => sum + thread.messages.length,
-                  0,
-                );
+          </div>
+        ) : null}
 
-                return (
-                  <div
-                    key={item.id}
-                    id={`item-${item.id}`}
-                    className="scroll-mt-24 px-3 py-3 sm:px-4"
-                  >
-                    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950/70">
-                      <div className="grid gap-3 xl:grid-cols-[minmax(18rem,1fr)_minmax(28rem,34rem)] xl:items-start">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="min-w-0 text-sm font-semibold leading-5 sm:text-base">
-                              {item.title}
-                            </p>
-                            {item.required ? <Pill>обязательный</Pill> : null}
-                            {item.evidenceRequired ? (
-                              <Pill>доказательство</Pill>
+        <div className="mt-5 space-y-4">
+          {run.sections.map((section) => (
+            <div
+              key={section.id}
+              className="rounded-lg border border-zinc-200 dark:border-zinc-800"
+            >
+              <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+                <p className="text-sm font-semibold">{section.title}</p>
+                {section.description ? (
+                  <p className="mt-1 text-sm text-zinc-500">
+                    {section.description}
+                  </p>
+                ) : null}
+              </div>
+              <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                {section.items.map((item) => {
+                  const answer = answersByKey.get(`${section.id}::${item.id}`);
+                  const completedAt = formatCompletionDateTime(
+                    answer?.completedAt ?? null,
+                  );
+                  const isSubmitted = Boolean(answer?.completedAt);
+                  const canResubmitSubmittedItem =
+                    run.status === "RETURNED" || run.status === "ESCALATED";
+                  const evidenceAttachments = getEvidenceAttachments(answer);
+                  const hasEvidence = answerHasEvidence(answer);
+                  const reviewThreads = answer?.reviewThreads ?? [];
+                  const openReviewThreads = reviewThreads.filter(
+                    (thread) => thread.status === "OPEN",
+                  );
+                  const reviewMessagesCount = reviewThreads.reduce(
+                    (sum, thread) => sum + thread.messages.length,
+                    0,
+                  );
+
+                  return (
+                    <div
+                      key={item.id}
+                      id={`item-${item.id}`}
+                      className="scroll-mt-24 px-3 py-3 sm:px-4"
+                    >
+                      <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950/70">
+                        <div className="grid gap-3 xl:grid-cols-[minmax(18rem,1fr)_minmax(28rem,34rem)] xl:items-start">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="min-w-0 text-sm font-semibold leading-5 sm:text-base">
+                                {item.title}
+                              </p>
+                              {item.required ? <Pill>обязательный</Pill> : null}
+                              {item.evidenceRequired ? (
+                                <Pill>доказательство</Pill>
+                              ) : null}
+                              {item.score > 0 ? (
+                                <Pill>{item.score} балл.</Pill>
+                              ) : null}
+                            </div>
+                            {item.instruction ? (
+                              <p className="mt-1 text-sm leading-5 text-zinc-500">
+                                {item.instruction}
+                              </p>
                             ) : null}
-                            {item.score > 0 ? <Pill>{item.score} балл.</Pill> : null}
-                          </div>
-                          {item.instruction ? (
-                            <p className="mt-1 text-sm leading-5 text-zinc-500">
-                              {item.instruction}
-                            </p>
-                          ) : null}
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                            <span>
-                              {answer?.status
-                                ? answerStatusLabels[answer.status]
-                                : "ждет результата"}
-                            </span>
-                            {completedAt ? (
-                              <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
-                                отправлено {completedAt}
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                              <span>
+                                {answer?.status
+                                  ? answerStatusLabels[answer.status]
+                                  : "ждет результата"}
                               </span>
-                            ) : null}
-                            {answer?.timing ? (
-                              <span className={timingStatusClass(answer.timing.status)}>
-                                {formatTimingLabel(answer.timing)}
-                              </span>
-                            ) : null}
+                              {completedAt ? (
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+                                  отправлено {completedAt}
+                                </span>
+                              ) : null}
+                              {answer?.timing ? (
+                                <span
+                                  className={timingStatusClass(
+                                    answer.timing.status,
+                                  )}
+                                >
+                                  {formatTimingLabel(answer.timing)}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
-                        <div className="grid min-w-0 gap-2">
-                          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(10rem,12rem)_minmax(12rem,1fr)] lg:grid-cols-[minmax(10rem,12rem)_minmax(14rem,1fr)_8rem]">
-                            <select
-                              value={answer?.status ?? ""}
-                              onChange={(event) =>
-                                patchAnswer(section.id, item.id, {
-                                  status:
-                                    event.target.value === ""
-                                      ? null
-                                      : (event.target
-                                          .value as StaffChecklistAnswerStatus),
-                                })
-                              }
-                              className="h-10 w-full min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                            >
-                              <option value="">Результат</option>
-                              {Object.entries(answerStatusLabels).map(
-                                ([value, label]) => (
-                                  <option key={value} value={value}>
-                                    {label}
-                                  </option>
-                                ),
-                              )}
-                            </select>
-                            <input
-                              value={answer?.value ?? ""}
-                              onChange={(event) =>
-                                patchAnswer(section.id, item.id, {
-                                  value: event.target.value,
-                                })
-                              }
-                              placeholder="Короткий результат или отметка"
-                              className="h-10 w-full min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                submitAnswer(
-                                  section.id,
-                                  item.id,
-                                  item.evidenceRequired,
-                                )
-                              }
-                              disabled={
-                                isPending ||
-                                (isSubmitted && !canResubmitSubmittedItem)
-                              }
-                              className="h-10 w-full min-w-32 whitespace-nowrap rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 disabled:opacity-100 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
-                              title={
-                                isSubmitted && !canResubmitSubmittedItem
-                                  ? "Пункт уже отправлен"
-                                  : item.evidenceRequired && !hasEvidence
-                                    ? "Перед отправкой понадобится доказательство"
-                                    : "Зафиксировать выполнение пункта"
-                              }
-                            >
-                              {isSubmitted && !canResubmitSubmittedItem
-                                ? "Отправлено"
-                                : isSubmitted
-                                  ? "Отправить снова"
-                                  : "Отправить"}
-                            </button>
-                          </div>
-                          <details className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/40">
-                            <summary className="cursor-pointer text-xs font-semibold uppercase text-zinc-500">
-                              Доказательство и комментарий
-                            </summary>
-                            <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
-                              <input
-                                value={answer?.evidenceUrl ?? ""}
+                          <div className="grid min-w-0 gap-2">
+                            <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(10rem,12rem)_minmax(12rem,1fr)] lg:grid-cols-[minmax(10rem,12rem)_minmax(14rem,1fr)_8rem]">
+                              <select
+                                value={answer?.status ?? ""}
                                 onChange={(event) =>
                                   patchAnswer(section.id, item.id, {
-                                    evidenceUrl: event.target.value,
+                                    status:
+                                      event.target.value === ""
+                                        ? null
+                                        : (event.target
+                                            .value as StaffChecklistAnswerStatus),
                                   })
                                 }
-                                placeholder="Ссылка на фото/файл, если он уже загружен отдельно"
-                                className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                                className="h-10 w-full min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                              >
+                                <option value="">Результат</option>
+                                {Object.entries(answerStatusLabels).map(
+                                  ([value, label]) => (
+                                    <option key={value} value={value}>
+                                      {label}
+                                    </option>
+                                  ),
+                                )}
+                              </select>
+                              <input
+                                value={answer?.value ?? ""}
+                                onChange={(event) =>
+                                  patchAnswer(section.id, item.id, {
+                                    value: event.target.value,
+                                  })
+                                }
+                                placeholder="Короткий результат или отметка"
+                                className="h-10 w-full min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                               />
-                              <StaffAttachmentUpload
-                                label="Добавить фото или файлы"
-                                buttonLabel="Добавить фото"
-                                className="min-w-0"
-                                multiple
-                                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
-                                compressImages
-                                onUploaded={(attachment) =>
-                                  appendEvidenceAttachment(
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  submitAnswer(
                                     section.id,
                                     item.id,
-                                    attachment,
+                                    item.evidenceRequired,
                                   )
                                 }
-                              />
+                                disabled={
+                                  isPending ||
+                                  (isSubmitted && !canResubmitSubmittedItem)
+                                }
+                                className="h-10 w-full min-w-32 whitespace-nowrap rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 disabled:opacity-100 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
+                                title={
+                                  isSubmitted && !canResubmitSubmittedItem
+                                    ? "Пункт уже отправлен"
+                                    : item.evidenceRequired && !hasEvidence
+                                      ? "Перед отправкой понадобится доказательство"
+                                      : "Зафиксировать выполнение пункта"
+                                }
+                              >
+                                {isSubmitted && !canResubmitSubmittedItem
+                                  ? "Отправлено"
+                                  : isSubmitted
+                                    ? "Отправить снова"
+                                    : "Отправить"}
+                              </button>
                             </div>
-                            {evidenceAttachments.length > 0 ? (
-                              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                                {evidenceAttachments.map((attachment, index) => (
-                                  <div
-                                    key={`${attachment.id}-${index}`}
-                                    className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
-                                  >
-                                    <a
-                                      href={getAttachmentHref(attachment)}
-                                      onClick={(event) => {
-                                        if (!isPreviewableImage(attachment)) {
-                                          return;
-                                        }
-
-                                        event.preventDefault();
-                                        setPreviewAttachment(attachment);
-                                      }}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="min-w-0 truncate font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
-                                    >
-                                      {attachment.fileName}
-                                      {attachment.byteSize > 0
-                                        ? ` · ${formatAttachmentSize(
-                                            attachment.byteSize,
-                                          )}`
-                                        : ""}
-                                    </a>
-                                    {!isSubmitted ? (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          removeEvidenceAttachment(
-                                            section.id,
-                                            item.id,
-                                            attachment.id,
-                                          )
-                                        }
-                                        className="shrink-0 rounded-md px-2 py-1 font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-900"
-                                      >
-                                        Убрать
-                                      </button>
-                                    ) : null}
-                                  </div>
-                                ))}
+                            <details className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/40">
+                              <summary className="cursor-pointer text-xs font-semibold uppercase text-zinc-500">
+                                Доказательство и комментарий
+                              </summary>
+                              <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
+                                <input
+                                  value={answer?.evidenceUrl ?? ""}
+                                  onChange={(event) =>
+                                    patchAnswer(section.id, item.id, {
+                                      evidenceUrl: event.target.value,
+                                    })
+                                  }
+                                  placeholder="Ссылка на фото/файл, если он уже загружен отдельно"
+                                  className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                                />
+                                <StaffAttachmentUpload
+                                  label="Добавить фото или файлы"
+                                  buttonLabel="Добавить фото"
+                                  className="min-w-0"
+                                  multiple
+                                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                                  compressImages
+                                  onUploaded={(attachment) =>
+                                    appendEvidenceAttachment(
+                                      section.id,
+                                      item.id,
+                                      attachment,
+                                    )
+                                  }
+                                />
                               </div>
-                            ) : null}
-                            <textarea
-                              value={answer?.note ?? ""}
-                              onChange={(event) =>
-                                patchAnswer(section.id, item.id, {
-                                  note: event.target.value,
-                                })
-                              }
-                              placeholder="Комментарий по пункту"
-                              rows={2}
-                              className="mt-2 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                            />
-                          </details>
-                          {canReviewRun || reviewThreads.length > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setDiscussionTarget({
-                                  sectionId: section.id,
-                                  itemId: item.id,
-                                })
-                              }
-                              className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs font-semibold text-amber-900 transition hover:border-amber-300 hover:bg-amber-100 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
-                            >
-                              <span className="flex min-w-0 items-center gap-2">
-                                <span aria-hidden="true">▸</span>
-                                <span className="truncate">
-                                  Необходимо уточнение
+                              {evidenceAttachments.length > 0 ? (
+                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                  {evidenceAttachments.map(
+                                    (attachment, index) => (
+                                      <div
+                                        key={`${attachment.id}-${index}`}
+                                        className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
+                                      >
+                                        <a
+                                          href={getAttachmentHref(attachment)}
+                                          onClick={(event) => {
+                                            if (
+                                              !isPreviewableImage(attachment)
+                                            ) {
+                                              return;
+                                            }
+
+                                            event.preventDefault();
+                                            setPreviewAttachment(attachment);
+                                          }}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="min-w-0 truncate font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
+                                        >
+                                          {attachment.fileName}
+                                          {attachment.byteSize > 0
+                                            ? ` · ${formatAttachmentSize(
+                                                attachment.byteSize,
+                                              )}`
+                                            : ""}
+                                        </a>
+                                        {!isSubmitted ? (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              removeEvidenceAttachment(
+                                                section.id,
+                                                item.id,
+                                                attachment.id,
+                                              )
+                                            }
+                                            className="shrink-0 rounded-md px-2 py-1 font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-900"
+                                          >
+                                            Убрать
+                                          </button>
+                                        ) : null}
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
+                              ) : null}
+                              <textarea
+                                value={answer?.note ?? ""}
+                                onChange={(event) =>
+                                  patchAnswer(section.id, item.id, {
+                                    note: event.target.value,
+                                  })
+                                }
+                                placeholder="Комментарий по пункту"
+                                rows={2}
+                                className="mt-2 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                              />
+                            </details>
+                            {canReviewRun || reviewThreads.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDiscussionTarget({
+                                    sectionId: section.id,
+                                    itemId: item.id,
+                                  })
+                                }
+                                className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs font-semibold text-amber-900 transition hover:border-amber-300 hover:bg-amber-100 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
+                              >
+                                <span className="flex min-w-0 items-center gap-2">
+                                  <span aria-hidden="true">▸</span>
+                                  <span className="truncate">
+                                    Необходимо уточнение
+                                  </span>
                                 </span>
-                              </span>
-                              <span className="flex shrink-0 items-center gap-2">
-                                {openReviewThreads.length > 0 ? (
-                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-400/20 dark:text-amber-100">
-                                    открыто {openReviewThreads.length}
-                                  </span>
-                                ) : null}
-                                {reviewMessagesCount > 0 ? (
-                                  <span className="rounded-full bg-white px-2 py-0.5 text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300">
-                                    {reviewMessagesCount} коммент.
-                                  </span>
-                                ) : null}
-                              </span>
-                            </button>
-                          ) : null}
+                                <span className="flex shrink-0 items-center gap-2">
+                                  {openReviewThreads.length > 0 ? (
+                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-400/20 dark:text-amber-100">
+                                      открыто {openReviewThreads.length}
+                                    </span>
+                                  ) : null}
+                                  {reviewMessagesCount > 0 ? (
+                                    <span className="rounded-full bg-white px-2 py-0.5 text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300">
+                                      {reviewMessagesCount} коммент.
+                                    </span>
+                                  ) : null}
+                                </span>
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-5 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
-        <label className="block text-sm">
-          <span className="text-xs font-semibold uppercase text-zinc-500">
-            {canReviewRun ? "Комментарий проверки" : "Комментарий к выполнению"}
-          </span>
-          <textarea
-            value={reviewComment}
-            onChange={(event) => setReviewComment(event.target.value)}
-            rows={2}
-            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-            placeholder={
-              canReviewRun
-                ? "Почему приняли, вернули или эскалировали чеклист"
-                : "Что сделано, что важно проверить или где есть проблема"
-            }
-          />
-        </label>
-        {escalationNeedsComment ? (
-          <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
-            Для эскалации без проблемных пунктов укажите причину в комментарии проверки.
-          </p>
-        ) : null}
-        <div className="mt-3 flex flex-wrap gap-2">
-          <ActionButton disabled={isPending} onClick={() => updateRun("IN_PROGRESS")}>
-            Сохранить
-          </ActionButton>
-          <button
-            type="button"
-            onClick={() => updateRun("ON_REVIEW")}
-            disabled={isPending || localBlockingIssues.length > 0}
-            className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Отправить на проверку
-          </button>
-          {canCancelRun ? (
-            <button
-              type="button"
-              onClick={cancelRun}
-              disabled={isPending}
-              title="Отменить некорректный чек-лист"
-              className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-red-500/40 dark:hover:bg-red-500/10 dark:hover:text-red-100"
-            >
-              Отменить
-            </button>
-          ) : null}
-          {canReviewRun ? (
-            <>
-              <button
-                type="button"
-                onClick={() => updateRun("ACCEPTED")}
-                disabled={isPending || run.status !== "ON_REVIEW"}
-                className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100"
-              >
-                Принять
-              </button>
-              <button
-                type="button"
-                onClick={() => updateRun("RETURNED")}
-                disabled={isPending || run.status !== "ON_REVIEW"}
-                className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
-              >
-                Вернуть
-              </button>
-              <button
-                type="button"
-                onClick={() => updateRun("ESCALATED")}
-                disabled={
-                  isPending ||
-                  run.status !== "ON_REVIEW" ||
-                  escalationNeedsComment
-                }
-                title={
-                  escalationNeedsComment
-                    ? "Укажите причину эскалации в комментарии проверки"
-                    : undefined
-                }
-                className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100"
-              >
-                Эскалировать
-              </button>
-            </>
-          ) : null}
+          ))}
         </div>
-      </div>
-    </div>
-    {discussionContext ? (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Необходимо уточнение"
-        onClick={closeDiscussion}
-      >
-        <div
-          className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="flex items-start justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase text-amber-700 dark:text-amber-300">
-                Необходимо уточнение
-              </p>
-              <h3 className="mt-1 text-base font-semibold">
-                {discussionContext.item.title}
-              </h3>
-              <p className="mt-1 text-xs text-zinc-500">
-                {discussionContext.section.title}
-              </p>
-            </div>
+
+        <div className="mt-5 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <label className="block text-sm">
+            <span className="text-xs font-semibold uppercase text-zinc-500">
+              {canReviewRun
+                ? "Комментарий проверки"
+                : "Комментарий к выполнению"}
+            </span>
+            <textarea
+              value={reviewComment}
+              onChange={(event) => setReviewComment(event.target.value)}
+              rows={2}
+              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+              placeholder={
+                canReviewRun
+                  ? "Почему приняли, вернули или эскалировали чеклист"
+                  : "Что сделано, что важно проверить или где есть проблема"
+              }
+            />
+          </label>
+          {escalationNeedsComment ? (
+            <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+              Для эскалации без проблемных пунктов укажите причину в комментарии
+              проверки.
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <ActionButton
+              disabled={isPending}
+              onClick={() => updateRun("IN_PROGRESS")}
+            >
+              Сохранить
+            </ActionButton>
             <button
               type="button"
-              onClick={closeDiscussion}
-              className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              onClick={() => updateRun("ON_REVIEW")}
+              disabled={isPending || localBlockingIssues.length > 0}
+              className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Свернуть
+              Отправить на проверку
             </button>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-            {discussionContext.threads.length > 0 ? (
-              <div className="space-y-3">
-                {discussionContext.threads.map((thread) => (
-                  <ReviewThreadCard
-                    key={thread.id}
-                    thread={thread}
-                    onPreviewAttachment={setPreviewAttachment}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-800">
-                Комментариев по пункту пока нет. Проверяющий может открыть
-                уточнение, а администратор ответит здесь же.
-              </div>
-            )}
-          </div>
-
-          <div className="border-t border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-            <div className="grid gap-2">
-              <textarea
-                value={discussionBody}
-                onChange={(event) => setDiscussionBody(event.target.value)}
-                rows={3}
-                placeholder={
-                  canReviewRun
-                    ? "Что нужно уточнить или исправить по этому пункту"
-                    : "Ответ на комментарий проверяющего"
-                }
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-              />
-              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                <input
-                  value={discussionAttachmentUrl}
-                  onChange={(event) =>
-                    setDiscussionAttachmentUrl(event.target.value)
-                  }
-                  placeholder="Ссылка на фото/файл, если он уже загружен отдельно"
-                  className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                />
-                <StaffAttachmentUpload
-                  label="Фото или файл к уточнению"
-                  buttonLabel="Добавить фото"
-                  multiple
-                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
-                  compressImages
-                  onUploaded={appendDiscussionAttachment}
-                />
-              </div>
-              {discussionAttachments.length > 0 ? (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {discussionAttachments.map((attachment) => (
-                    <div
-                      key={attachment.id}
-                      className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
-                    >
-                      <span className="min-w-0 truncate font-semibold">
-                        {attachment.fileName}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeDiscussionAttachment(attachment.id)}
-                        className="shrink-0 rounded-md px-2 py-1 font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-900"
-                      >
-                        Убрать
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <div className="flex flex-wrap justify-between gap-2">
-                {canReviewRun && discussionContext.openThread ? (
-                  <div className="flex min-w-0 flex-1 flex-wrap gap-2">
-                    <input
-                      value={resolveComment}
-                      onChange={(event) => setResolveComment(event.target.value)}
-                      placeholder="Комментарий при зачете, если нужен"
-                      className="h-10 min-w-56 flex-1 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                    />
-                    <button
-                      type="button"
-                      onClick={resolveDiscussionThread}
-                      disabled={isDiscussionPending}
-                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100"
-                    >
-                      Зачесть пункт
-                    </button>
-                  </div>
-                ) : null}
+            {canCancelRun ? (
+              <button
+                type="button"
+                onClick={cancelRun}
+                disabled={isPending}
+                title="Отменить некорректный чек-лист"
+                className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-red-500/40 dark:hover:bg-red-500/10 dark:hover:text-red-100"
+              >
+                Отменить
+              </button>
+            ) : null}
+            {canReviewRun ? (
+              <>
                 <button
                   type="button"
-                  onClick={submitDiscussionMessage}
-                  disabled={isDiscussionPending}
-                  className="ml-auto rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={() => updateRun("ACCEPTED")}
+                  disabled={isPending || run.status !== "ON_REVIEW"}
+                  className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100"
                 >
-                  Отправить
+                  Принять
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateRun("RETURNED")}
+                  disabled={isPending || run.status !== "ON_REVIEW"}
+                  className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
+                >
+                  Вернуть
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateRun("ESCALATED")}
+                  disabled={
+                    isPending ||
+                    run.status !== "ON_REVIEW" ||
+                    escalationNeedsComment
+                  }
+                  title={
+                    escalationNeedsComment
+                      ? "Укажите причину эскалации в комментарии проверки"
+                      : undefined
+                  }
+                  className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100"
+                >
+                  Эскалировать
+                </button>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </div>
+      {discussionContext ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Необходимо уточнение"
+          onClick={closeDiscussion}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase text-amber-700 dark:text-amber-300">
+                  Необходимо уточнение
+                </p>
+                <h3 className="mt-1 text-base font-semibold">
+                  {discussionContext.item.title}
+                </h3>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {discussionContext.section.title}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeDiscussion}
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              >
+                Свернуть
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              {discussionContext.threads.length > 0 ? (
+                <div className="space-y-3">
+                  {discussionContext.threads.map((thread) => (
+                    <ReviewThreadCard
+                      key={thread.id}
+                      thread={thread}
+                      onPreviewAttachment={setPreviewAttachment}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-800">
+                  Комментариев по пункту пока нет. Проверяющий может открыть
+                  уточнение, а администратор ответит здесь же.
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <div className="grid gap-2">
+                <textarea
+                  value={discussionBody}
+                  onChange={(event) => setDiscussionBody(event.target.value)}
+                  rows={3}
+                  placeholder={
+                    canReviewRun
+                      ? "Что нужно уточнить или исправить по этому пункту"
+                      : "Ответ на комментарий проверяющего"
+                  }
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                />
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <input
+                    value={discussionAttachmentUrl}
+                    onChange={(event) =>
+                      setDiscussionAttachmentUrl(event.target.value)
+                    }
+                    placeholder="Ссылка на фото/файл, если он уже загружен отдельно"
+                    className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                  />
+                  <StaffAttachmentUpload
+                    label="Фото или файл к уточнению"
+                    buttonLabel="Добавить фото"
+                    multiple
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                    compressImages
+                    onUploaded={appendDiscussionAttachment}
+                  />
+                </div>
+                {discussionAttachments.length > 0 ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {discussionAttachments.map((attachment) => (
+                      <div
+                        key={attachment.id}
+                        className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
+                      >
+                        <span className="min-w-0 truncate font-semibold">
+                          {attachment.fileName}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeDiscussionAttachment(attachment.id)
+                          }
+                          className="shrink-0 rounded-md px-2 py-1 font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-900"
+                        >
+                          Убрать
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap justify-between gap-2">
+                  {canReviewRun && discussionContext.openThread ? (
+                    <div className="flex min-w-0 flex-1 flex-wrap gap-2">
+                      <input
+                        value={resolveComment}
+                        onChange={(event) =>
+                          setResolveComment(event.target.value)
+                        }
+                        placeholder="Комментарий при зачете, если нужен"
+                        className="h-10 min-w-56 flex-1 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                      />
+                      <button
+                        type="button"
+                        onClick={resolveDiscussionThread}
+                        disabled={isDiscussionPending}
+                        className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100"
+                      >
+                        Зачесть пункт
+                      </button>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={submitDiscussionMessage}
+                    disabled={isDiscussionPending}
+                    className="ml-auto rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Отправить
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {previewAttachment && previewAttachmentHref ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Просмотр фото"
+          onClick={() => setPreviewAttachment(null)}
+        >
+          <div
+            className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-zinc-100">
+                  {previewAttachment.fileName}
+                </p>
+                {previewAttachment.byteSize > 0 ? (
+                  <p className="text-xs text-zinc-400">
+                    {formatAttachmentSize(previewAttachment.byteSize)}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <a
+                  href={previewAttachmentHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-900"
+                >
+                  Открыть оригинал
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setPreviewAttachment(null)}
+                  className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-900"
+                >
+                  Закрыть
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-    ) : null}
-    {previewAttachment && previewAttachmentHref ? (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Просмотр фото"
-        onClick={() => setPreviewAttachment(null)}
-      >
-        <div
-          className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-zinc-100">
-                {previewAttachment.fileName}
-              </p>
-              {previewAttachment.byteSize > 0 ? (
-                <p className="text-xs text-zinc-400">
-                  {formatAttachmentSize(previewAttachment.byteSize)}
-                </p>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <a
-                href={previewAttachmentHref}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-900"
-              >
-                Открыть оригинал
-              </a>
-              <button
-                type="button"
-                onClick={() => setPreviewAttachment(null)}
-                className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-900"
-              >
-                Закрыть
-              </button>
+            <div className="flex max-h-[78vh] items-center justify-center overflow-auto bg-black p-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewAttachmentHref}
+                alt={previewAttachment.fileName}
+                className="max-h-[74vh] max-w-full rounded-lg object-contain"
+              />
             </div>
           </div>
-          <div className="flex max-h-[78vh] items-center justify-center overflow-auto bg-black p-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={previewAttachmentHref}
-              alt={previewAttachment.fileName}
-              className="max-h-[74vh] max-w-full rounded-lg object-contain"
-            />
-          </div>
         </div>
-      </div>
-    ) : null}
+      ) : null}
     </>
   );
 }

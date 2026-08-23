@@ -1,6 +1,12 @@
-import { UserRole } from '@prisma/client';
+import {
+  TenantCustomerStage,
+  TenantLifecycleStatus,
+  TenantOnboardingStatus,
+  UserRole,
+} from '@prisma/client';
 import { Request } from 'express';
 import type { AccessCapability } from './capabilities';
+import type { AccessScopeMode } from '../tenancy/access-scope.service';
 
 export type AuthenticatedUser = {
   id: string;
@@ -15,7 +21,14 @@ export type AuthenticatedUser = {
   isPlatformAdmin: boolean;
   tenantId: string;
   tenantSlug: string;
-  tenantStatus?: string;
+  tenantStatus?: TenantLifecycleStatus;
+  tenantCustomerStage?: TenantCustomerStage;
+  tenantOnboardingStatus?: TenantOnboardingStatus;
+  tenantTrialStartsAt?: Date | null;
+  tenantTrialEndsAt?: Date | null;
+  tenantEntitlementProfileRevision?: number;
+  accessScope: AccessScopeMode;
+  allowedStoreIds: readonly string[];
 };
 
 export type AuthTokenPayload = {

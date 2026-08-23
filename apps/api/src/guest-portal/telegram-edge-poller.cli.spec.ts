@@ -131,6 +131,45 @@ describe('telegram edge poller', () => {
     );
   });
 
+  it('skips stale and duplicate update ids before webhook handling', async () => {
+    const fetchMock = jsonFetchMock([
+      { update_id: 6, message: { text: 'stale-before-offset' } },
+      { update_id: 7, message: { text: 'first-new' } },
+      { update_id: 7, message: { text: 'duplicate-in-batch' } },
+      { update_id: 8, message: { text: 'second-new' } },
+    ]);
+    const handleUpdate = jest.fn().mockResolvedValue({
+      dryRun: false,
+      replySent: false,
+      upstreamAction: 'NOOP',
+      upstreamStatus: 'OK',
+    });
+
+    const result = await runTelegramPollingTick(edgeConfig, pollingConfig, 7, {
+      fetch: fetchMock,
+      handleUpdate,
+      logger: silentLogger,
+    });
+
+    expect(result).toEqual({ handled: 2, offset: 9, received: 4 });
+    expect(handleUpdate).toHaveBeenCalledTimes(2);
+    expect(handleUpdate).toHaveBeenNthCalledWith(
+      1,
+      edgeConfig,
+      { update_id: 7, message: { text: 'first-new' } },
+      expect.any(Object),
+    );
+    expect(handleUpdate).toHaveBeenNthCalledWith(
+      2,
+      edgeConfig,
+      { update_id: 8, message: { text: 'second-new' } },
+      expect.any(Object),
+    );
+    expect(JSON.parse(await readFile(pollingConfig.statePath, 'utf8'))).toEqual(
+      expect.objectContaining({ offset: 9 }),
+    );
+  });
+
   it('reads and writes polling offset state', async () => {
     expect(await readPollingOffset(pollingConfig.statePath)).toBeNull();
 

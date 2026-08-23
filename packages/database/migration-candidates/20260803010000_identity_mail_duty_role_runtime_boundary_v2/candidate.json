@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "contract": "IDENTITY_MAIL_DUTY_ROLE_RUNTIME_BOUNDARY_V2_CANDIDATE_V1",
+  "candidate": "20260804190000_identity_mail_duty_role_runtime_boundary_v2",
+  "ordinal": 186,
+  "predecessor": {
+    "count": 186,
+    "head": "20260804180000_identity_mail_enrollment_evidence_ledger_v2",
+    "manifestDigest": "a7a90ef8c5de5c8a54bdccd54309837ddda2c2e161d6650b335d83f7af04034d",
+    "headChecksum": "2c8752ec4f92addabd21ace9be8071aea1e62be45887abb2c4944de2f96657e6"
+  },
+  "migrationSqlSha256": "7a1a0453b883d6bbf8640eff8c39b007376286b0f21d31f766771fead65a93dd",
+  "authorization": false,
+  "authorityScope": "CURRENT_DATABASE_ONLY",
+  "canMutate": false,
+  "canSend": false,
+  "crossDatabaseAuthorityControlled": false,
+  "futureCreatorDefaultPrivilegesControlled": false,
+  "applicationRoleAllowlistBound": false,
+  "productionApplyAuthorized": false,
+  "status": "NOT_DEPLOYABLE"
+}

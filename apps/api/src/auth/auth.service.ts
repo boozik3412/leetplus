@@ -1,20 +1,37 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { createHash } from 'node:crypto';
-import { TenantLifecycleStatus, UserRole } from '@prisma/client';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  IdentityEmailClaimType,
+  Prisma,
+  TenantCustomerStage,
+  TenantLifecycleStatus,
+  TenantOnboardingStatus,
+  UserAccessScope,
+  UserRole,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveSignedUserInviteToken } from '../users/user-invite-token';
+import { AccessScopeService } from '../tenancy/access-scope.service';
+import {
+  type PersistedTenantModuleEntitlement,
+  type PersistedTenantExecutionSubject,
+  TenantExecutionPolicyService,
+} from '../tenancy/tenant-execution-policy.service';
 import { AcceptUserInviteDto, LoginDto, RegisterDto } from './auth.dto';
 import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
 import { EmailVerificationService } from './email-verification.service';
+import { IdentityEmailClaimService } from './identity-email-claim.service';
+import { InitialOwnerInviteDeliveryGateService } from './initial-owner-invite-delivery-gate.service';
 import { PasswordService } from './password.service';
 
 type AuthResponse = {
@@ -23,6 +40,16 @@ type AuthResponse = {
 };
 
 const AUTH_TOKEN_EXPIRES_IN = '24h';
+const OPAQUE_INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+const tenantModuleEntitlementExecutionSelect = {
+  module: true,
+  readEnabled: true,
+  writeEnabled: true,
+  outboundEnabled: true,
+  validFrom: true,
+  validUntil: true,
+  profileRevision: true,
+} satisfies Prisma.TenantModuleEntitlementSelect;
 
 type UserWithTenant = {
   id: string;
@@ -34,9 +61,23 @@ type UserWithTenant = {
   isPlatformAdmin: boolean;
   passwordHash: string;
   tenantId: string;
+  accessScope: unknown;
+  storeAccesses: Array<{
+    storeId: string;
+    store: {
+      tenantId: string;
+    };
+  }>;
   tenant: {
     slug: string;
     status: TenantLifecycleStatus;
+    customerStage: TenantCustomerStage;
+    onboardingStatus: TenantOnboardingStatus;
+    trialStartsAt: Date | null;
+    trialEndsAt: Date | null;
+    entitlementProfileRevision: number;
+    executionRevision: number;
+    moduleEntitlements: PersistedTenantModuleEntitlement[];
   };
   customRole?: {
     id: string;
@@ -71,6 +112,20 @@ type UserInvitePreview = {
   expiresAt: string;
 };
 
+type InviteAdmissionCandidate = {
+  role: UserRole;
+  accessScope: UserAccessScope | null;
+  customRoleId: string | null;
+  storeIds: readonly string[];
+  tenant: PersistedTenantExecutionSubject;
+};
+
+type InitialOwnerInviteDeliveryCandidate = InviteAdmissionCandidate & {
+  id: string;
+  tenantId: string;
+  tokenHash: string;
+};
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -79,93 +134,33 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly emailVerificationService: EmailVerificationService,
     private readonly configService: ConfigService,
+    private readonly accessScopeService: AccessScopeService,
+    private readonly tenantExecutionPolicy: TenantExecutionPolicyService,
+    private readonly identityEmailClaim: IdentityEmailClaimService,
+    private readonly initialOwnerInviteDeliveryGate: InitialOwnerInviteDeliveryGateService,
   ) {}
 
-  async register(dto: RegisterDto): Promise<AuthResponse> {
-    const email = this.normalizeEmail(dto.email);
-    const tenantSlug = this.normalizeTenantSlug(dto.tenantSlug);
-    const organizationName = dto.organizationName?.trim();
-    const fullName = dto.fullName?.trim() || null;
-
-    this.assertEmail(email);
-    this.assertPassword(dto.password);
-    this.assertPasswordConfirmation(dto.password, dto.confirmPassword);
-    this.assertTenantSlug(tenantSlug);
-
-    if (!organizationName) {
-      throw new BadRequestException('Укажите название организации');
-    }
-
-    const [existingUser, existingTenant] = await Promise.all([
-      this.prisma.user.findUnique({ where: { email } }),
-      this.prisma.tenant.findUnique({ where: { slug: tenantSlug } }),
-    ]);
-
-    if (existingUser) {
-      throw new ConflictException('Пользователь с таким email уже существует');
-    }
-
-    if (existingTenant) {
-      throw new ConflictException('Такой адрес организации уже занят');
-    }
-
-    const passwordHash = await this.passwordService.hash(dto.password);
-
-    const tenant = await this.prisma.tenant.create({
-      data: {
-        name: organizationName,
-        slug: tenantSlug,
-        domain: `${tenantSlug}.leetplus.ru`,
-        users: {
-          create: {
-            email,
-            fullName,
-            passwordHash,
-            role: UserRole.OWNER,
-          },
-        },
-      },
-      include: {
-        users: true,
-      },
-    });
-
-    const owner = tenant.users[0];
-
-    if (!owner) {
-      throw new BadRequestException('Не удалось создать владельца организации');
-    }
-
-    await this.emailVerificationService.sendVerificationEmail(
-      owner.id,
-      owner.email,
+  register(dto: RegisterDto): never {
+    void dto;
+    throw new ForbiddenException(
+      'Самостоятельная регистрация отключена. Используйте приглашение владельца сети.',
     );
-
-    return this.createAuthResponse({
-      id: owner.id,
-      email: owner.email,
-      fullName: owner.fullName,
-      role: owner.role,
-      customRoleId: null,
-      customRole: null,
-      isActive: owner.isActive,
-      isPlatformAdmin: owner.isPlatformAdmin,
-      passwordHash: owner.passwordHash,
-      tenantId: owner.tenantId,
-      tenant: {
-        slug: tenant.slug,
-        status: tenant.status,
-      },
-    });
   }
 
-  async getInvite(token: string): Promise<UserInvitePreview> {
+  async getInvite(token: unknown): Promise<UserInvitePreview> {
     const invite = await this.resolveActiveInvite(token);
-    this.assertTenantActive(invite.tenant.status);
-    const stores = await this.resolveInviteStores(
+    this.assertInviteAdmitted(invite);
+    await this.assertInitialOwnerInviteDeliverySent(invite);
+    const storeIds = await this.resolveInviteStoreIds(
       invite.tenantId,
       invite.storeIds,
     );
+    const accessScope = this.accessScopeService.fromPersisted({
+      tenantId: invite.tenantId,
+      accessScope: invite.accessScope,
+      storeAccesses: storeIds.map((storeId) => ({ storeId })),
+    });
+    const stores = await this.resolveInviteStores(invite.tenantId, storeIds);
 
     return {
       email: invite.email,
@@ -183,18 +178,22 @@ export class AuthService {
         name: invite.tenant.name,
         slug: invite.tenant.slug,
       },
-      scope: stores.length > 0 ? 'STORES' : 'NETWORK',
+      scope: accessScope.mode,
       stores,
       expiresAt: invite.expiresAt.toISOString(),
     };
   }
 
   async acceptInvite(
-    token: string,
+    token: unknown,
     dto: AcceptUserInviteDto,
   ): Promise<AuthResponse> {
     const invite = await this.resolveActiveInvite(token);
-    this.assertTenantActive(invite.tenant.status);
+    this.assertInviteAdmitted(invite);
+    await this.assertInitialOwnerInviteDeliverySent(invite);
+    const identityClaimRevision = this.requireInviteIdentityClaimRevision(
+      invite.identityClaimRevision,
+    );
     const email = this.resolveInviteEmail(invite.email, dto.email);
     const fullName = this.resolveInviteFullName(invite.fullName, dto.fullName);
     const password = dto.password;
@@ -205,60 +204,237 @@ export class AuthService {
       this.prisma.user.findUnique({ where: { email } }),
       this.resolveInviteStoreIds(invite.tenantId, invite.storeIds),
     ]);
+    const inviteAccessScope = this.accessScopeService.fromPersisted({
+      tenantId: invite.tenantId,
+      accessScope: invite.accessScope,
+      storeAccesses: storeIds.map((storeId) => ({ storeId })),
+    });
 
     if (existingUser) {
       throw new ConflictException('Пользователь с таким email уже существует');
     }
 
     const passwordHash = await this.passwordService.hash(password);
-    const created = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          tenantId: invite.tenantId,
+    const created = await this.identityEmailClaim.runTenantTransaction(
+      this.prisma,
+      invite.tenantId,
+      async (tx, identityTransaction) => {
+        await this.identityEmailClaim.assertInvite(identityTransaction, {
           email,
-          fullName,
-          passwordHash,
-          role: invite.role,
-          customRoleId: invite.customRoleId,
-          isActive: true,
-          emailVerifiedAt: new Date(),
-        },
-      });
-
-      if (storeIds.length > 0) {
-        await tx.userStoreAccess.createMany({
-          data: storeIds.map((storeId) => ({ userId: user.id, storeId })),
-          skipDuplicates: true,
+          tenantId: invite.tenantId,
+          subjectId: invite.id,
+          expectedRevision: identityClaimRevision,
         });
-      }
 
-      await tx.userInvite.update({
-        where: { id: invite.id },
-        data: {
-          acceptedAt: new Date(),
-          acceptedByUserId: user.id,
-        },
-      });
-
-      return tx.user.findUniqueOrThrow({
-        where: { id: user.id },
-        include: {
+        const acceptedAt = new Date();
+        const lockedTenants = await tx.$queryRaw<
+          Array<PersistedTenantExecutionSubject>
+        >(Prisma.sql`
+        SELECT
+          "id",
+          "status",
+          "customerStage",
+          "onboardingStatus",
+          "trialStartsAt",
+          "trialEndsAt",
+          "entitlementProfileRevision",
+          "executionRevision"
+        FROM "Tenant"
+        WHERE "id" = ${invite.tenantId}
+        FOR UPDATE
+      `);
+        const lockedTenant = lockedTenants[0];
+        if (!lockedTenant) {
+          throw new ConflictException('Tenant changed while accepting invite');
+        }
+        const lockedEntitlements = await tx.tenantModuleEntitlement.findMany({
+          where: { tenantId: invite.tenantId },
+          select: tenantModuleEntitlementExecutionSelect,
+        });
+        const lockedInvite = {
+          ...invite,
           tenant: {
+            ...lockedTenant,
+            moduleEntitlements: lockedEntitlements,
+          },
+        };
+        this.assertInviteAdmitted(lockedInvite, acceptedAt);
+        await this.assertInitialOwnerInviteDeliverySent(lockedInvite, tx);
+
+        if (invite.role === UserRole.OWNER) {
+          const ownerCount = await tx.user.count({
+            where: {
+              tenantId: invite.tenantId,
+              role: UserRole.OWNER,
+            },
+          });
+          if (ownerCount !== 0) {
+            throw new ConflictException(
+              'Initial owner already exists; use the owner-transfer workflow',
+            );
+          }
+        }
+
+        const userId = randomUUID();
+        await tx.user.create({
+          data: {
+            id: userId,
+            tenantId: invite.tenantId,
+            email,
+            fullName,
+            passwordHash,
+            role: invite.role,
+            customRoleId: invite.customRoleId,
+            accessScope: inviteAccessScope.mode,
+            isActive: true,
+            emailVerifiedAt: new Date(),
+            identityClaimRevision: null,
+          },
+        });
+
+        if (storeIds.length > 0) {
+          await tx.userStoreAccess.createMany({
+            data: storeIds.map((storeId) => ({ userId, storeId })),
+            skipDuplicates: true,
+          });
+        }
+
+        const accepted = await tx.userInvite.updateMany({
+          where: {
+            id: invite.id,
+            acceptedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: acceptedAt },
+            updatedAt: invite.updatedAt,
+          },
+          data: {
+            acceptedAt,
+            acceptedByUserId: userId,
+          },
+        });
+
+        if (accepted.count !== 1) {
+          throw new ConflictException('Invite changed or was already accepted');
+        }
+
+        if (invite.role === UserRole.OWNER) {
+          const transitioned = await tx.tenant.updateMany({
+            where: {
+              id: invite.tenantId,
+              status: TenantLifecycleStatus.ACTIVE,
+              onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+              entitlementProfileRevision:
+                lockedTenant.entitlementProfileRevision,
+              executionRevision: lockedTenant.executionRevision,
+            },
+            data: {
+              onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+            },
+          });
+
+          if (transitioned.count !== 1) {
+            throw new ConflictException(
+              'Tenant onboarding changed while accepting invite',
+            );
+          }
+
+          const transitionedTenant = await tx.tenant.findUniqueOrThrow({
+            where: { id: invite.tenantId },
             select: {
-              slug: true,
-              status: true,
+              onboardingStatus: true,
+              executionRevision: true,
+            },
+          });
+          if (
+            transitionedTenant.onboardingStatus !==
+              TenantOnboardingStatus.ONBOARDING ||
+            transitionedTenant.executionRevision !==
+              lockedTenant.executionRevision + 1
+          ) {
+            throw new ConflictException(
+              'Tenant execution revision changed while accepting invite',
+            );
+          }
+
+          await tx.platformAdminAuditEvent.create({
+            data: {
+              tenantId: invite.tenantId,
+              actorUserId: userId,
+              action: 'TENANT_OWNER_INVITE_ACCEPTED',
+              targetType: 'TENANT_ONBOARDING',
+              targetId: invite.tenantId,
+              reason: 'Initial owner accepted the email-bound invite',
+              before: {
+                onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+                executionRevision: lockedTenant.executionRevision,
+              },
+              after: {
+                onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+                executionRevision: transitionedTenant.executionRevision,
+              },
+              metadata: {
+                inviteId: invite.id,
+                ownerUserId: userId,
+                executionRevisionBefore: lockedTenant.executionRevision,
+                executionRevisionAfter: transitionedTenant.executionRevision,
+              },
+            },
+          });
+        }
+
+        const identityTransition =
+          await this.identityEmailClaim.transitionInvite(identityTransaction, {
+            email,
+            tenantId: invite.tenantId,
+            expectedSubjectId: invite.id,
+            expectedRevision: identityClaimRevision,
+            nextClaimType: IdentityEmailClaimType.USER,
+            nextSubjectId: userId,
+          });
+        await tx.user.update({
+          where: { id: userId },
+          data: { identityClaimRevision: identityTransition.revision },
+        });
+
+        return tx.user.findUniqueOrThrow({
+          where: { id: userId },
+          include: {
+            tenant: {
+              select: {
+                slug: true,
+                status: true,
+                customerStage: true,
+                onboardingStatus: true,
+                trialStartsAt: true,
+                trialEndsAt: true,
+                entitlementProfileRevision: true,
+                executionRevision: true,
+                moduleEntitlements: {
+                  select: tenantModuleEntitlementExecutionSelect,
+                },
+              },
+            },
+            customRole: {
+              select: {
+                id: true,
+                name: true,
+                permissions: true,
+              },
+            },
+            storeAccesses: {
+              select: {
+                storeId: true,
+                store: {
+                  select: {
+                    tenantId: true,
+                  },
+                },
+              },
             },
           },
-          customRole: {
-            select: {
-              id: true,
-              name: true,
-              permissions: true,
-            },
-          },
-        },
-      });
-    });
+        });
+      },
+    );
 
     return this.createAuthResponse(created);
   }
@@ -275,6 +451,15 @@ export class AuthService {
           select: {
             slug: true,
             status: true,
+            customerStage: true,
+            onboardingStatus: true,
+            trialStartsAt: true,
+            trialEndsAt: true,
+            entitlementProfileRevision: true,
+            executionRevision: true,
+            moduleEntitlements: {
+              select: tenantModuleEntitlementExecutionSelect,
+            },
           },
         },
         customRole: {
@@ -282,6 +467,16 @@ export class AuthService {
             id: true,
             name: true,
             permissions: true,
+          },
+        },
+        storeAccesses: {
+          select: {
+            storeId: true,
+            store: {
+              select: {
+                tenantId: true,
+              },
+            },
           },
         },
       },
@@ -315,6 +510,15 @@ export class AuthService {
           select: {
             slug: true,
             status: true,
+            customerStage: true,
+            onboardingStatus: true,
+            trialStartsAt: true,
+            trialEndsAt: true,
+            entitlementProfileRevision: true,
+            executionRevision: true,
+            moduleEntitlements: {
+              select: tenantModuleEntitlementExecutionSelect,
+            },
           },
         },
         customRole: {
@@ -322,6 +526,16 @@ export class AuthService {
             id: true,
             name: true,
             permissions: true,
+          },
+        },
+        storeAccesses: {
+          select: {
+            storeId: true,
+            store: {
+              select: {
+                tenantId: true,
+              },
+            },
           },
         },
       },
@@ -350,27 +564,49 @@ export class AuthService {
     return this.emailVerificationService.resendByEmail(normalizedEmail);
   }
 
-  private async resolveActiveInvite(token: string) {
-    const normalizedToken = typeof token === 'string' ? token.trim() : '';
+  private requireInviteIdentityClaimRevision(value: unknown): number {
+    if (
+      typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < 1
+    ) {
+      throw new ServiceUnavailableException({
+        message: 'Invite identity provenance is unavailable',
+        reasonCode: 'IDENTITY_INVITE_PROVENANCE_REQUIRED',
+      });
+    }
+    return value;
+  }
 
-    if (!normalizedToken) {
-      throw new BadRequestException('Токен приглашения обязателен');
+  private async resolveActiveInvite(token: unknown) {
+    if (typeof token !== 'string' || !OPAQUE_INVITE_TOKEN_PATTERN.test(token)) {
+      throw new BadRequestException({
+        message: 'Некорректное приглашение',
+        reasonCode: 'INVITE_TOKEN_INVALID',
+      });
     }
 
-    const signedInviteId = resolveSignedUserInviteToken(
-      normalizedToken,
-      this.configService,
-    );
     const invite = await this.prisma.userInvite.findUnique({
-      where: signedInviteId
-        ? { id: signedInviteId }
-        : { tokenHash: this.hashInviteToken(normalizedToken) },
+      where: {
+        tokenHash: this.hashInviteToken(token),
+        revokedAt: null,
+      },
       include: {
         tenant: {
           select: {
             name: true,
             slug: true,
+            id: true,
             status: true,
+            customerStage: true,
+            onboardingStatus: true,
+            trialStartsAt: true,
+            trialEndsAt: true,
+            entitlementProfileRevision: true,
+            executionRevision: true,
+            moduleEntitlements: {
+              select: tenantModuleEntitlementExecutionSelect,
+            },
           },
         },
         customRole: {
@@ -388,6 +624,12 @@ export class AuthService {
       throw new NotFoundException('Ссылка-приглашение не найдена');
     }
 
+    if (!invite.email) {
+      throw new BadRequestException(
+        'Приглашение не привязано к email и должно быть перевыпущено',
+      );
+    }
+
     if (invite.acceptedAt) {
       throw new BadRequestException('Ссылка-приглашение уже использована');
     }
@@ -403,22 +645,78 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
+  private assertInviteAdmitted(
+    invite: InviteAdmissionCandidate,
+    now = new Date(),
+  ): void {
+    this.tenantExecutionPolicy.assertInviteAllowed(invite.tenant, now);
+
+    const ownerBootstrap =
+      invite.tenant.onboardingStatus === TenantOnboardingStatus.OWNER_INVITED;
+    if (ownerBootstrap) {
+      if (
+        invite.role !== UserRole.OWNER ||
+        invite.accessScope !== UserAccessScope.NETWORK ||
+        invite.customRoleId !== null ||
+        invite.storeIds.length !== 0
+      ) {
+        throw new UnauthorizedException(
+          'Initial owner invite must grant only the NETWORK OWNER bootstrap role',
+        );
+      }
+      return;
+    }
+
+    if (invite.role === UserRole.OWNER) {
+      throw new UnauthorizedException(
+        'Additional owner invites require the owner-transfer workflow',
+      );
+    }
+  }
+
+  private async assertInitialOwnerInviteDeliverySent(
+    invite: InitialOwnerInviteDeliveryCandidate,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (
+      invite.role !== UserRole.OWNER ||
+      invite.tenant.onboardingStatus !== TenantOnboardingStatus.OWNER_INVITED
+    ) {
+      return;
+    }
+
+    const input = {
+      tenantId: invite.tenantId,
+      inviteId: invite.id,
+      tokenHash: invite.tokenHash,
+    };
+    if (tx) {
+      await this.initialOwnerInviteDeliveryGate.assertSentInTransaction(
+        tx,
+        input,
+      );
+      return;
+    }
+    await this.initialOwnerInviteDeliveryGate.assertSent(input);
+  }
+
   private resolveInviteEmail(
     invitedEmail: string | null,
     submittedEmail: unknown,
   ): string {
-    const email = this.normalizeEmail(invitedEmail ?? submittedEmail);
+    if (!invitedEmail) {
+      throw new BadRequestException(
+        'Приглашение не привязано к email и должно быть перевыпущено',
+      );
+    }
+
+    const email = this.normalizeEmail(invitedEmail);
     this.assertEmail(email);
 
-    if (invitedEmail) {
-      const normalizedSubmittedEmail = this.normalizeEmail(submittedEmail);
+    const normalizedSubmittedEmail = this.normalizeEmail(submittedEmail);
 
-      if (
-        normalizedSubmittedEmail &&
-        normalizedSubmittedEmail !== invitedEmail
-      ) {
-        throw new BadRequestException('Приглашение выдано на другой email');
-      }
+    if (normalizedSubmittedEmail && normalizedSubmittedEmail !== invitedEmail) {
+      throw new BadRequestException('Приглашение выдано на другой email');
     }
 
     return email;
@@ -495,6 +793,8 @@ export class AuthService {
   }
 
   private toAuthenticatedUser(user: UserWithTenant): AuthenticatedUser {
+    const accessScope = this.accessScopeService.fromPersisted(user);
+
     return {
       id: user.id,
       email: user.email,
@@ -509,6 +809,8 @@ export class AuthService {
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,
       tenantStatus: user.tenant.status,
+      accessScope: accessScope.mode,
+      allowedStoreIds: [...accessScope.storeIds],
     };
   }
 
@@ -540,18 +842,22 @@ export class AuthService {
     };
   }
 
-  private assertTenantActive(status: TenantLifecycleStatus): void {
-    if (status !== TenantLifecycleStatus.ACTIVE) {
-      throw new UnauthorizedException('Организация не активна');
-    }
-  }
-
   private assertTenantActiveForUser(user: UserWithTenant): void {
     if (user.isPlatformAdmin) {
       return;
     }
 
-    this.assertTenantActive(user.tenant.status);
+    this.tenantExecutionPolicy.assertSessionAllowed({
+      id: user.tenantId,
+      status: user.tenant.status,
+      customerStage: user.tenant.customerStage,
+      onboardingStatus: user.tenant.onboardingStatus,
+      trialStartsAt: user.tenant.trialStartsAt,
+      trialEndsAt: user.tenant.trialEndsAt,
+      entitlementProfileRevision: user.tenant.entitlementProfileRevision,
+      executionRevision: user.tenant.executionRevision,
+      moduleEntitlements: user.tenant.moduleEntitlements,
+    });
   }
 
   private normalizeEmail(email: unknown): string {
@@ -560,14 +866,6 @@ export class AuthService {
     }
 
     return email.trim().toLowerCase();
-  }
-
-  private normalizeTenantSlug(tenantSlug: unknown): string {
-    if (typeof tenantSlug !== 'string') {
-      return '';
-    }
-
-    return tenantSlug.trim().toLowerCase();
   }
 
   private assertEmail(email: string): void {
@@ -590,14 +888,6 @@ export class AuthService {
   ) {
     if (typeof confirmPassword !== 'string' || password !== confirmPassword) {
       throw new BadRequestException('Пароли не совпадают');
-    }
-  }
-
-  private assertTenantSlug(tenantSlug: string): void {
-    if (!/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(tenantSlug)) {
-      throw new BadRequestException(
-        'Адрес организации должен содержать 3-32 символа: строчные латинские буквы, цифры или дефисы',
-      );
     }
   }
 }

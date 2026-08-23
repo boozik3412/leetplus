@@ -1,0 +1,131 @@
+#!/usr/bin/bash -p
+# Separately reviewed bootstrap authority for the scheduler-free exact N-1
+# control bundle. Install this byte at the fixed root-owned path only from the
+# trusted release artifact; never execute the bundle's installer directly.
+
+[[ $- == *p* ]] || { printf 'leetplus scheduler-free authority: privileged Bash mode is required\n' >&2; exit 1; }
+while IFS= read -r LEETPLUS_INHERITED_ENVIRONMENT_NAME; do
+  unset "$LEETPLUS_INHERITED_ENVIRONMENT_NAME" 2>/dev/null || true
+done < <(compgen -e)
+unset LEETPLUS_INHERITED_ENVIRONMENT_NAME
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+LANG='C.UTF-8'
+LC_ALL='C.UTF-8'
+TZ='UTC'
+export PATH LANG LC_ALL TZ
+
+set -euo pipefail
+IFS=$'\n\t'
+umask 0077
+
+readonly AUTHORITY_PATH='/usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1'
+readonly CONTROL_BUNDLE_ID='scheduler-free-nminus1-v1'
+readonly CONTROL_ROOT="/srv/leetplus/control-bundles/${CONTROL_BUNDLE_ID}"
+readonly CONTROL_MANIFEST="${CONTROL_ROOT}/CONTROL_BUNDLE_SHA256SUMS"
+readonly TRUST_FILE='/etc/leetplus/rollback-control-manifest.sha256'
+readonly INSTALLER="${CONTROL_ROOT}/install-legacy-rollback-contour.sh"
+# This digest is updated only after the complete control manifest is frozen.
+readonly EXPECTED_CONTROL_MANIFEST_SHA256='9c7c41c85de7ee17fa2d06f8325454dc8cc18f89d7c03e128fab2cf95c345497'
+
+die() {
+  printf 'leetplus-legacy-control-authority: %s\n' "$*" >&2
+  exit 1
+}
+
+verify_only=false
+while (($# > 0)); do
+  case "$1" in
+    --verify-only) verify_only=true; shift ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
+((EUID == 0)) || die 'authority must run as root'
+unset BASH_ENV ENV CDPATH GLOBIGNORE
+
+for command_name in awk dirname find findmnt realpath sha256sum sort stat tr; do
+  command -v "$command_name" >/dev/null 2>&1 \
+    || die "required command is unavailable: ${command_name}"
+done
+
+authority_source="$(realpath -e -- "${BASH_SOURCE[0]}")"
+[[ "$authority_source" == "$AUTHORITY_PATH" \
+  && -f "$AUTHORITY_PATH" && ! -L "$AUTHORITY_PATH" \
+  && "$(stat -c '%U:%G:%a:%h' -- "$AUTHORITY_PATH")" == 'root:root:500:1' ]] \
+  || die 'authority executable is not the exact root:root 0500 installed byte'
+for authority_ancestor in /usr /usr/local /usr/local/sbin; do
+  [[ -d "$authority_ancestor" && ! -L "$authority_ancestor" \
+    && "$(realpath -e -- "$authority_ancestor")" == "$authority_ancestor" \
+    && "$(stat -c '%U:%G' -- "$authority_ancestor")" == 'root:root' \
+    && -z "$(find -P "$authority_ancestor" -maxdepth 0 -perm /022 -print -quit)" ]] \
+    || die "authority ancestor is not root-controlled: ${authority_ancestor}"
+done
+
+verify_control_bundle() {
+  local trusted_ancestor mount_inventory manifest_paths actual_paths trust_digest manifest_digest
+  for trusted_ancestor in /srv /srv/leetplus /srv/leetplus/control-bundles "$CONTROL_ROOT"; do
+    [[ -d "$trusted_ancestor" && ! -L "$trusted_ancestor" \
+      && "$(realpath -e -- "$trusted_ancestor")" == "$trusted_ancestor" \
+      && "$(stat -c '%U:%G' -- "$trusted_ancestor")" == 'root:root' \
+      && -z "$(find -P "$trusted_ancestor" -maxdepth 0 -perm /022 -print -quit)" ]] \
+      || die "control-bundle ancestor is not root-owned immutable: ${trusted_ancestor}"
+  done
+  [[ -f "$CONTROL_MANIFEST" && ! -L "$CONTROL_MANIFEST" \
+    && "$(stat -c '%U:%G:%a:%h' -- "$CONTROL_MANIFEST")" == 'root:root:400:1' ]] \
+    || die 'control manifest is absent, linked or not root:root mode 0400'
+  [[ -f "$TRUST_FILE" && ! -L "$TRUST_FILE" \
+    && "$(stat -c '%U:%G:%a:%h' -- "$TRUST_FILE")" == 'root:root:400:1' ]] \
+    || die 'independent control-manifest trust file is absent or unsafe'
+  trust_digest="$(tr -d '\r\n' < "$TRUST_FILE")"
+  manifest_digest="$(sha256sum "$CONTROL_MANIFEST" | awk '{ print $1 }')"
+  [[ "$EXPECTED_CONTROL_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
+    && "$trust_digest" == "$EXPECTED_CONTROL_MANIFEST_SHA256" \
+    && "$manifest_digest" == "$EXPECTED_CONTROL_MANIFEST_SHA256" ]] \
+    || die 'control manifest is not the authority-pinned reviewed digest'
+
+  mount_inventory="$(findmnt --raw --noheadings --output TARGET)" \
+    || die 'control-bundle mount inventory failed or returned partial output'
+  while IFS= read -r mount_target; do
+    case "$mount_target" in
+      "$CONTROL_ROOT"|"$CONTROL_ROOT"/*)
+        die "control bundle contains an exact/nested mount: ${mount_target}"
+        ;;
+    esac
+  done <<< "$mount_inventory"
+  [[ -z "$(find -P "$CONTROL_ROOT" -xdev ! -type d ! -type f -print -quit)" ]] \
+    || die 'control bundle contains a symlink or special entry'
+  [[ -z "$(find -P "$CONTROL_ROOT" -xdev \
+    \( ! -user root -o ! -group root -o -perm /022 \) -print -quit)" ]] \
+    || die 'control bundle contains a non-root-owned or writable entry'
+  [[ -z "$(find -P "$CONTROL_ROOT" -xdev -type f -links +1 -print -quit)" ]] \
+    || die 'control bundle contains a hard-linked source file'
+  awk 'NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || $2 !~ /^\.\/[A-Za-z0-9_.@+\/-]+$/ || substr($2, 3) ~ /(^|\/)\.\.?(\/|$)/ { exit 1 }' \
+    "$CONTROL_MANIFEST" || die 'control manifest is malformed'
+  (
+    cd -- "$CONTROL_ROOT"
+    sha256sum --check --strict --quiet CONTROL_BUNDLE_SHA256SUMS
+  ) || die 'control bundle source drifted from its reviewed manifest'
+  manifest_paths="$(awk '{ print $2 }' "$CONTROL_MANIFEST" | LC_ALL=C sort)"
+  actual_paths="$(cd -- "$CONTROL_ROOT" \
+    && find . -xdev -type f ! -path './CONTROL_BUNDLE_SHA256SUMS' -print | LC_ALL=C sort)"
+  [[ "$manifest_paths" == "$actual_paths" ]] \
+    || die 'control manifest does not cover the exact file set'
+}
+
+verify_control_bundle
+if [[ "$verify_only" == true ]]; then
+  printf 'LEGACY_ROLLBACK_CONTROL_AUTHORITY_ACCEPTED=true\n'
+  printf 'LEGACY_ROLLBACK_CONTROL_BUNDLE_ID=%s\n' "$CONTROL_BUNDLE_ID"
+  exit 0
+fi
+
+# Re-attest immediately before executing the first byte from the bundle. All
+# accepted ancestors and entries are root-owned and non-writable, so a non-root
+# actor cannot change the already-reviewed source between this check and exec.
+verify_control_bundle
+env -i \
+  PATH="$PATH" \
+  LEETPLUS_ROLLBACK_CONTROL_AUTHORITY_MANIFEST_SHA256="$EXPECTED_CONTROL_MANIFEST_SHA256" \
+  /usr/bin/bash --noprofile --norc -p "$INSTALLER" --trusted-authority-install
+
+printf 'LEGACY_ROLLBACK_CONTROL_AUTHORITY_INSTALLED=true\n'

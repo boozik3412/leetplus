@@ -29,8 +29,13 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import {
+  isProductionConfig,
+  resolveSecuritySecret,
+} from '../config/environment-validation';
 import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
 import { GuestBonusLedgerSchedulerService } from '../guest-gamification/guest-bonus-ledger-scheduler.service';
+import { evaluateLegacyGuestGameDeliveryProtocolGate } from '../guest-gamification/guest-game-delivery-protocol-gate';
 import {
   GuestGamificationService,
   guestGameRewardUsesBonusLedger,
@@ -49,6 +54,7 @@ import { acquireGuestGameLootBoxRuleLock } from '../guest-gamification/guest-gam
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
+import { buildTelegramSendMessageBody } from './telegram-send-message-payload';
 import {
   evaluateGuestGameProgress,
   guestGameProgressPeriodicity,
@@ -80,6 +86,9 @@ const GUEST_TOKEN_EXPIRES_IN = '7d';
 const GUEST_PORTAL_PURPOSE = 'guest_portal';
 const TELEGRAM_LINK_TTL_MINUTES = 15;
 const TELEGRAM_MINI_APP_INIT_DATA_TTL_SECONDS = 60 * 60 * 24;
+const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS = 15_000;
+const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MIN_MS = 1000;
+const TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MAX_MS = 120_000;
 const TELEGRAM_AUTH_PROFILE_STATUS = 'PENDING_TELEGRAM_AUTH';
 const TELEGRAM_AUTH_MERGED_PROFILE_STATUS = 'MERGED_TELEGRAM_AUTH';
 const TELEGRAM_AUTH_PENDING_STATUS = 'AUTH_PENDING';
@@ -748,10 +757,12 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'TELEGRAM_BOT_CLUB_SELECTED'
     | 'TELEGRAM_BOT_HELP'
     | 'UNSUBSCRIBE'
+    | 'DUPLICATE_UPDATE'
     | 'UNKNOWN';
   profileId: string | null;
   profilesAffected?: number;
   deliveriesBlocked?: number;
+  deliveriesProtocolBlocked?: number;
   telegramIdentityMasked: string | null;
   message: string;
   reply?: {
@@ -3315,7 +3326,10 @@ export class GuestPortalService {
     void iat;
     void nbf;
 
+    const guestJwtSecret = this.guestPortalJwtSecret();
+
     return this.jwtService.signAsync(signablePayload, {
+      ...(guestJwtSecret ? { secret: guestJwtSecret } : {}),
       expiresIn: (this.configService.get<string>(
         'GUEST_PORTAL_JWT_EXPIRES_IN',
       ) ?? GUEST_TOKEN_EXPIRES_IN) as JwtExpiresIn,
@@ -4038,6 +4052,8 @@ export class GuestPortalService {
             tenantId: payload.tenantId,
             tenantSlug: portal.tenant.slug,
             tenantStatus: TenantLifecycleStatus.ACTIVE,
+            accessScope: 'STORES',
+            allowedStoreIds: [payload.storeId],
           },
           portal.profile.id,
         );
@@ -4331,6 +4347,8 @@ export class GuestPortalService {
       tenantId: payload.tenantId,
       tenantSlug: tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [payload.storeId],
     };
     try {
       await this.guestGamificationService.materializeRewardEffects(actor, {
@@ -5917,7 +5935,7 @@ export class GuestPortalService {
     let cursor: { expiresAt: Date; id: string } | null = null;
 
     for (let batch = 0; batch < maxBatches; batch += 1) {
-      const rows = await this.prisma.guestGameRewardWalletItem.findMany({
+      const rows = (await this.prisma.guestGameRewardWalletItem.findMany({
         where: {
           tenantId,
           profileId,
@@ -6013,7 +6031,14 @@ export class GuestPortalService {
         },
         orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
         take: batchSize,
-      });
+      })) as Array<{
+        id: string;
+        status: string;
+        rewardId: string | null;
+        entitlementId: string | null;
+        eventId: string | null;
+        expiresAt: Date;
+      }>;
       if (rows.length === 0) {
         break;
       }
@@ -6386,6 +6411,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
     const eventExternalId = buildGuestPortalGameExternalId(
       GAME_APP_OPEN_SOURCE_KIND,
@@ -6545,6 +6572,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
 
     const result = await this.guestGamificationService.processLiveSessionStart(
@@ -6993,6 +7022,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
     const prequalifiedLootBoxOpen = {
       tenantId: context.tenant.id,
@@ -7442,7 +7473,19 @@ export class GuestPortalService {
 
     const telegramIdentity = `chat:${validation.userId}`;
     const telegramIdentityMasked = maskExternalIdentity(telegramIdentity);
-    const selectedClub = normalizeMiniAppClubSelection(dto);
+    const selectedClubParts = parseMiniAppClubSelection(dto);
+
+    if (hasMiniAppClubSelectionConflict(selectedClubParts)) {
+      return {
+        status: 'FAILED',
+        profileId: null,
+        telegramIdentityMasked,
+        message:
+          'Выбор клуба отклонен: параметры tenant/store конфликтуют. Откройте Mini App заново или выберите клуб из списка.',
+      };
+    }
+
+    const selectedClub = normalizeParsedMiniAppClubSelection(selectedClubParts);
     const candidates = await this.findTelegramMiniAppClubs(telegramIdentity);
 
     if (candidates.length === 0) {
@@ -7638,6 +7681,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
     let checkIn: Awaited<ReturnType<GuestGamificationService['checkIn']>>;
 
@@ -8146,6 +8191,38 @@ export class GuestPortalService {
     dto: unknown,
   ): Promise<GuestPortalTelegramWebhookResponse> {
     this.assertTelegramLinkSecret(secret);
+    const updateId = telegramWebhookUpdateId(dto);
+    const claim =
+      updateId === null
+        ? null
+        : await this.claimTelegramWebhookUpdate(updateId);
+
+    if (claim?.duplicate) {
+      return this.telegramWebhookDuplicateUpdateResponse(claim);
+    }
+
+    try {
+      const response = await this.processTelegramWebhook(secret, dto);
+
+      if (claim) {
+        await this.completeTelegramWebhookUpdate(claim.id, response);
+      }
+
+      return response;
+    } catch (error) {
+      if (claim) {
+        await this.failTelegramWebhookUpdate(claim.id, error);
+      }
+
+      throw error;
+    }
+  }
+
+  private async processTelegramWebhook(
+    secret: string | undefined,
+    dto: unknown,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    this.assertTelegramLinkSecret(secret);
     const update = telegramWebhookUpdate(dto);
     const telegramIdentityMasked = maskExternalIdentity(
       `chat:${update.telegramChatId}`,
@@ -8273,6 +8350,128 @@ export class GuestPortalService {
       telegramIdentityMasked,
       message:
         'Telegram webhook получен, но команда привязки или контакт телефона не найдены. Ожидается /start lp_CODE, /link CODE или Telegram contact-share.',
+    };
+  }
+
+  private async claimTelegramWebhookUpdate(updateId: bigint): Promise<
+    | {
+        duplicate: false;
+        id: string;
+      }
+    | {
+        duplicate: true;
+        updateId: bigint;
+        status: string;
+        action: string | null;
+        profileId: string | null;
+        chatIdMasked: string | null;
+      }
+  > {
+    try {
+      const row = await this.prisma.guestPortalTelegramUpdateLedger.create({
+        data: {
+          provider: 'TELEGRAM',
+          updateId,
+          status: 'PROCESSING',
+        },
+        select: { id: true },
+      });
+
+      return { duplicate: false, id: row.id };
+    } catch (error) {
+      if (
+        !(
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        )
+      ) {
+        throw error;
+      }
+
+      const row = await this.prisma.guestPortalTelegramUpdateLedger.update({
+        where: {
+          provider_updateId: {
+            provider: 'TELEGRAM',
+            updateId,
+          },
+        },
+        data: {
+          duplicateCount: { increment: 1 },
+          lastSeenAt: new Date(),
+        },
+        select: {
+          updateId: true,
+          status: true,
+          action: true,
+          profileId: true,
+          chatIdMasked: true,
+        },
+      });
+
+      return {
+        duplicate: true,
+        updateId: row.updateId,
+        status: row.status,
+        action: row.action,
+        profileId: row.profileId,
+        chatIdMasked: row.chatIdMasked,
+      };
+    }
+  }
+
+  private async completeTelegramWebhookUpdate(
+    ledgerId: string,
+    response: GuestPortalTelegramWebhookResponse,
+  ) {
+    await this.prisma.guestPortalTelegramUpdateLedger.update({
+      where: { id: ledgerId },
+      data: {
+        status: 'COMPLETED',
+        action: response.action,
+        profileId: response.profileId,
+        chatIdMasked: response.telegramIdentityMasked,
+        message: response.message.slice(0, 500),
+        completedAt: new Date(),
+      },
+    });
+  }
+
+  private async failTelegramWebhookUpdate(ledgerId: string, error: unknown) {
+    await this.prisma.guestPortalTelegramUpdateLedger.update({
+      where: { id: ledgerId },
+      data: {
+        status: 'FAILED',
+        message: safeDeliveryErrorMessage(error),
+        failedAt: new Date(),
+      },
+    });
+  }
+
+  private telegramWebhookDuplicateUpdateResponse(input: {
+    updateId: bigint;
+    status: string;
+    action: string | null;
+    profileId: string | null;
+    chatIdMasked: string | null;
+  }): GuestPortalTelegramWebhookResponse {
+    const updateIdSafe =
+      input.updateId <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number(input.updateId)
+        : input.updateId.toString();
+
+    return {
+      status: 'IGNORED',
+      action: 'DUPLICATE_UPDATE',
+      profileId: input.profileId,
+      telegramIdentityMasked: input.chatIdMasked,
+      message: `Telegram update ${updateIdSafe} already has ledger status ${input.status}; duplicate side effects were skipped.`,
+      replyDispatch: {
+        provider: 'TELEGRAM',
+        status: 'SKIPPED',
+        chatIdMasked: input.chatIdMasked,
+        message:
+          'Telegram update already reached the API ledger. Reply dispatch is skipped to avoid duplicate guest side effects.',
+      },
     };
   }
 
@@ -9137,6 +9336,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
 
     try {
@@ -9556,12 +9757,21 @@ export class GuestPortalService {
       };
     }
 
+    const timeoutMs = configBoundedInteger(
+      this.configService,
+      'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS',
+      TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MS,
+      TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MIN_MS,
+      TELEGRAM_WEBHOOK_REPLY_TIMEOUT_MAX_MS,
+    );
+
     try {
       await sendTelegramWebhookReply({
         token,
         chatId: telegramChatId,
         text: response.reply.text,
         replyMarkup: response.reply.replyMarkup,
+        timeoutMs,
       });
 
       const responseWithoutReply = { ...response };
@@ -9629,6 +9839,9 @@ export class GuestPortalService {
     const preferenceNote = `${COMMUNICATION_PREFERENCE_EVENT_PREFIX}UNSUBSCRIBE: Telegram bot stop command.`;
     const deliveryNote =
       'Guest unsubscribed from Telegram bot through webhook stop command.';
+    const deliveryProtocolGate = evaluateLegacyGuestGameDeliveryProtocolGate(
+      'LEGACY_PROVIDER_UNSUBSCRIBE',
+    );
 
     const result = await this.prisma.$transaction(async (tx) => {
       if (guestIds.length > 0) {
@@ -9684,7 +9897,7 @@ export class GuestPortalService {
         },
       });
 
-      if (pendingDeliveries.length > 0) {
+      if (pendingDeliveries.length > 0 && deliveryProtocolGate.allowed) {
         await tx.guestGameDelivery.updateMany({
           where: {
             id: { in: pendingDeliveries.map((delivery) => delivery.id) },
@@ -9717,7 +9930,14 @@ export class GuestPortalService {
         });
       }
 
-      return { deliveriesBlocked: pendingDeliveries.length };
+      return {
+        deliveriesBlocked: deliveryProtocolGate.allowed
+          ? pendingDeliveries.length
+          : 0,
+        deliveriesProtocolBlocked: deliveryProtocolGate.allowed
+          ? 0
+          : pendingDeliveries.length,
+      };
     });
 
     return {
@@ -9726,9 +9946,11 @@ export class GuestPortalService {
       profileId: profiles.length === 1 ? profiles[0].id : null,
       profilesAffected: profiles.length,
       deliveriesBlocked: result.deliveriesBlocked,
+      deliveriesProtocolBlocked: result.deliveriesProtocolBlocked,
       telegramIdentityMasked,
-      message:
-        'Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED and pending Telegram deliveries are blocked.',
+      message: result.deliveriesProtocolBlocked
+        ? `Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED. ${deliveryProtocolGate.note}`
+        : 'Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED and pending Telegram deliveries are blocked.',
     };
   }
 
@@ -13364,8 +13586,12 @@ export class GuestPortalService {
     }
 
     try {
+      const guestJwtSecret = this.guestPortalJwtSecret();
       const payload =
-        await this.jwtService.verifyAsync<GuestPortalTokenPayload>(token);
+        await this.jwtService.verifyAsync<GuestPortalTokenPayload>(
+          token,
+          guestJwtSecret ? { secret: guestJwtSecret } : undefined,
+        );
 
       if (payload.purpose !== GUEST_PORTAL_PURPOSE) {
         throw new UnauthorizedException('Invalid guest token');
@@ -13511,7 +13737,7 @@ export class GuestPortalService {
   }
 
   private encryptPhone(phone: GuestPortalPhoneIdentity) {
-    return this.secretEncryptionService.encrypt(phone.normalized);
+    return this.secretEncryptionService.encrypt(phone.normalized, 'pii');
   }
 
   private phoneIdentityFromEncrypted(
@@ -13522,7 +13748,9 @@ export class GuestPortalService {
     }
 
     try {
-      return this.phoneIdentity(this.secretEncryptionService.decrypt(value));
+      return this.phoneIdentity(
+        this.secretEncryptionService.decrypt(value, 'pii'),
+      );
     } catch {
       return null;
     }
@@ -14711,24 +14939,29 @@ export class GuestPortalService {
   }
 
   private piiSecret() {
-    const secret =
-      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
-      this.configService.get<string>('JWT_SECRET')?.trim();
-
-    if (!secret) {
-      throw new BadRequestException('APP_ENCRYPTION_KEY is not configured');
-    }
-
-    return secret;
+    return resolveSecuritySecret(this.configService, 'APP_ENCRYPTION_KEY', [
+      'JWT_SECRET',
+    ]);
   }
 
   private referralSecret() {
-    return (
-      this.configService.get<string>('GUEST_GAME_REFERRAL_SECRET')?.trim() ||
-      this.configService.get<string>('JWT_SECRET')?.trim() ||
-      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
-      'guest-game-referral-local-secret'
+    return resolveSecuritySecret(
+      this.configService,
+      'GUEST_GAME_REFERRAL_SECRET',
+      ['JWT_SECRET', 'APP_ENCRYPTION_KEY'],
     );
+  }
+
+  private guestPortalJwtSecret() {
+    const secret = this.configService
+      .get<string>('GUEST_PORTAL_JWT_SECRET')
+      ?.trim();
+
+    if (!secret && isProductionConfig(this.configService)) {
+      throw new Error('GUEST_PORTAL_JWT_SECRET is required in production');
+    }
+
+    return secret || null;
   }
 
   private publicWebUrl() {
@@ -15639,6 +15872,59 @@ function stringOrNull(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function parseMiniAppClubSelection(dto: {
+  clubId?: unknown;
+  tenantSlug?: unknown;
+  storeId?: unknown;
+}) {
+  const clubId = stringOrNull(dto.clubId);
+  const [clubTenantSlug, clubStoreId] = clubId?.includes(':')
+    ? clubId.split(':', 2)
+    : [null, null];
+
+  return {
+    clubId,
+    clubTenantSlug,
+    clubStoreId,
+    explicitTenantSlug: stringOrNull(dto.tenantSlug),
+    explicitStoreId: stringOrNull(dto.storeId),
+  };
+}
+
+function hasMiniAppClubSelectionConflict(
+  selection: ReturnType<typeof parseMiniAppClubSelection>,
+) {
+  return (
+    (selection.clubTenantSlug &&
+      selection.explicitTenantSlug &&
+      selection.explicitTenantSlug !== selection.clubTenantSlug) ||
+    (selection.clubStoreId &&
+      selection.explicitStoreId &&
+      selection.explicitStoreId !== selection.clubStoreId)
+  );
+}
+
+function normalizeParsedMiniAppClubSelection(
+  selection: ReturnType<typeof parseMiniAppClubSelection>,
+): TelegramMiniAppClubSelection | null {
+  if (hasMiniAppClubSelectionConflict(selection)) {
+    return null;
+  }
+
+  const tenantSlug = selection.explicitTenantSlug ?? selection.clubTenantSlug;
+  const storeId = selection.explicitStoreId ?? selection.clubStoreId;
+
+  if (!selection.clubId && !tenantSlug && !storeId) {
+    return null;
+  }
+
+  return {
+    clubId: selection.clubId,
+    tenantSlug,
+    storeId,
+  };
+}
+
 function telegramUserIdString(value: unknown) {
   const raw =
     typeof value === 'number' && Number.isFinite(value)
@@ -15653,22 +15939,7 @@ function normalizeMiniAppClubSelection(dto: {
   tenantSlug?: unknown;
   storeId?: unknown;
 }): TelegramMiniAppClubSelection | null {
-  const clubId = stringOrNull(dto.clubId);
-  const [clubTenantSlug, clubStoreId] = clubId?.includes(':')
-    ? clubId.split(':', 2)
-    : [null, null];
-  const tenantSlug = stringOrNull(dto.tenantSlug) ?? clubTenantSlug;
-  const storeId = stringOrNull(dto.storeId) ?? clubStoreId;
-
-  if (!clubId && !tenantSlug && !storeId) {
-    return null;
-  }
-
-  return {
-    clubId,
-    tenantSlug,
-    storeId,
-  };
+  return normalizeParsedMiniAppClubSelection(parseMiniAppClubSelection(dto));
 }
 
 function guestPortalAppOpenSurface(value: unknown): GuestPortalAppOpenSurface {
@@ -15935,19 +16206,27 @@ function gameSummaryMissionSort(
 }
 
 function gameMissionPageOffset(value: unknown) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const parsed = gameMissionPageInteger(value);
 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 function gameMissionPageLimit(value: unknown) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const parsed = gameMissionPageInteger(value);
 
   if (!Number.isFinite(parsed) || parsed < 1) {
     return GAME_MISSION_PAGE_DEFAULT_LIMIT;
   }
 
   return Math.min(parsed, GAME_MISSION_PAGE_MAX_LIMIT);
+}
+
+function gameMissionPageInteger(value: unknown) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.trunc(value) : Number.NaN;
+  }
+
+  return typeof value === 'string' ? Number.parseInt(value, 10) : Number.NaN;
 }
 
 function missionHistorySort(
@@ -16571,6 +16850,26 @@ function configPositiveInteger(
   return Math.max(0, Math.floor(parsed));
 }
 
+function configBoundedInteger(
+  configService: ConfigService,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+) {
+  const raw = configService.get<string>(key)?.trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
+}
+
 function otpMessage(code: string, context: TenantStoreContext) {
   return [
     `Код LeetPlus: ${code}`,
@@ -16739,6 +17038,7 @@ async function sendTelegramWebhookReply({
   chatId,
   text,
   replyMarkup,
+  timeoutMs,
 }: {
   token: string;
   chatId: string;
@@ -16746,40 +17046,40 @@ async function sendTelegramWebhookReply({
   replyMarkup?: NonNullable<
     GuestPortalTelegramWebhookResponse['reply']
   >['replyMarkup'];
+  timeoutMs: number;
 }) {
-  const body: Record<string, unknown> = {
-    chat_id: chatId,
-    text,
-    disable_web_page_preview: true,
-  };
+  const body = buildTelegramSendMessageBody({ chatId, text, replyMarkup });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (replyMarkup) {
-    body.reply_markup = replyMarkup;
-  }
-
-  const response = await fetch(
-    `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-  );
-  const payload = await safeJson(response);
-  const ok =
-    payload && typeof payload === 'object' && 'ok' in payload
-      ? Boolean((payload as { ok?: unknown }).ok)
-      : response.ok;
-
-  if (!response.ok || !ok) {
-    throw new Error(
-      `Telegram webhook reply failed: ${
-        providerErrorText(payload) || response.status
-      }`,
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      },
     );
-  }
+    const payload = await safeJson(response);
+    const ok =
+      payload && typeof payload === 'object' && 'ok' in payload
+        ? Boolean((payload as { ok?: unknown }).ok)
+        : response.ok;
 
-  return payload;
+    if (!response.ok || !ok) {
+      throw new Error(
+        `Telegram webhook reply failed: ${
+          providerErrorText(payload) || response.status
+        }`,
+      );
+    }
+
+    return payload;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function safeJson(response: Response) {
@@ -16914,6 +17214,35 @@ function telegramWebhookUpdate(value: unknown) {
     contactUserId,
     callbackData,
   };
+}
+
+function telegramWebhookUpdateId(value: unknown) {
+  const update = objectRecord(value);
+  const raw = update?.update_id;
+
+  if (raw === undefined || raw === null || raw === '') {
+    return null;
+  }
+
+  if (typeof raw === 'number') {
+    if (!Number.isSafeInteger(raw) || raw < 0 || !Number.isFinite(raw)) {
+      throw new BadRequestException('Telegram update_id is invalid.');
+    }
+
+    return BigInt(raw);
+  }
+
+  if (typeof raw === 'string') {
+    const normalized = raw.trim();
+
+    if (!/^\d{1,20}$/.test(normalized)) {
+      throw new BadRequestException('Telegram update_id is invalid.');
+    }
+
+    return BigInt(normalized);
+  }
+
+  throw new BadRequestException('Telegram update_id is invalid.');
 }
 
 function telegramWebhookLinkCode(text: string | null) {

@@ -1,8 +1,12 @@
 import type { ConfigService } from '@nestjs/config';
-import { IntegrationProvider, UserRole } from '@prisma/client';
+import {
+  IntegrationProvider,
+  TenantCustomerStage,
+  UserRole,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
 import { SecretEncryptionService } from './secret-encryption.service';
@@ -82,8 +86,18 @@ const user: AuthenticatedUser = {
   email: 'owner@example.com',
   fullName: null,
   role: UserRole.OWNER,
+  isPlatformAdmin: false,
   tenantId: 'tenant-1',
   tenantSlug: 'demo',
+  tenantCustomerStage: TenantCustomerStage.INTERNAL,
+  accessScope: 'NETWORK',
+  allowedStoreIds: [],
+};
+
+const storeScopedUser: AuthenticatedUser = {
+  ...user,
+  accessScope: 'STORES',
+  allowedStoreIds: ['store-1'],
 };
 
 function createPrismaMock(): PrismaMock {
@@ -128,7 +142,7 @@ describe('LangameSettingsService', () => {
   beforeEach(() => {
     prisma = createPrismaMock();
     tenantContext = {
-      resolve: jest.fn().mockResolvedValue({
+      resolve: jest.fn().mockReturnValue({
         tenantId: 'tenant-1',
         tenantSlug: 'demo',
       }),
@@ -191,11 +205,169 @@ describe('LangameSettingsService', () => {
     );
     service = new LangameSettingsService(
       prisma as unknown as PrismaService,
-      tenantContext as unknown as TenantContextService,
+      tenantContext,
+      new AccessScopeService(),
       encryption as unknown as SecretEncryptionService,
       configService as unknown as ConfigService,
       langameClient as unknown as LangameClient,
     );
+  });
+
+  it('denies tenant-wide Langame settings changes and preview to STORES scope', async () => {
+    await expect(
+      service.saveSettings(storeScopedUser, {
+        apiKey: 'must-not-be-read',
+        domains: ['443.langame.ru'],
+      }),
+    ).rejects.toThrow('Network access is required');
+    await expect(
+      service.previewSettings(storeScopedUser, {
+        apiKey: 'must-not-be-read',
+        domains: ['443.langame.ru'],
+      }),
+    ).rejects.toThrow('Network access is required');
+
+    expect(tenantContext.resolve).not.toHaveBeenCalled();
+    expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
+    expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.updateMany).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
+  });
+
+  it('denies the legacy direct activation path to an external pilot tenant', async () => {
+    await expect(
+      service.saveSettings(
+        {
+          ...user,
+          tenantCustomerStage: TenantCustomerStage.PILOT,
+        },
+        {
+          apiKey: 'must-not-be-persisted',
+          domains: ['443.langame.ru'],
+        },
+      ),
+    ).rejects.toThrow('External tenants must use staged Langame onboarding');
+
+    expect(tenantContext.resolve).not.toHaveBeenCalled();
+    expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the legacy caller has no authoritative customer stage', async () => {
+    const unclassifiedUser: AuthenticatedUser = {
+      ...user,
+      tenantCustomerStage: undefined,
+    };
+
+    await expect(
+      service.saveSettings(unclassifiedUser, {
+        apiKey: 'must-not-be-persisted',
+        domains: ['443.langame.ru'],
+      }),
+    ).rejects.toThrow('External tenants must use staged Langame onboarding');
+
+    expect(tenantContext.resolve).not.toHaveBeenCalled();
+    expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
+  });
+
+  it('allows NETWORK scope to preview credentials without leaking or activating them', async () => {
+    langameClient.getDiagnosticEndpoint.mockResolvedValue({
+      status: true,
+      data: [
+        {
+          id: 42,
+          api_key: 'must-not-leak-from-upstream',
+        },
+      ],
+    });
+
+    const result = await service.previewSettings(user, {
+      apiKey: 'submitted-secret-key',
+      domains: ['https://443.langame.ru/public_api'],
+    });
+
+    expect(result).toEqual({
+      status: 'READY',
+      hasApiKey: true,
+      activation: { required: true, performed: false },
+      sync: { performed: false },
+      limits: {
+        timeoutMs: 5_000,
+        maxAttempts: 1,
+        maxDomains: 20,
+      },
+      diagnostics: [
+        {
+          domain: '443.langame.ru',
+          status: 'SUCCESS',
+          clubCount: 1,
+          reasonCode: null,
+        },
+      ],
+    });
+    expect(langameClient.getDiagnosticEndpoint).toHaveBeenCalledTimes(1);
+    expect(langameClient.getDiagnosticEndpoint).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'submitted-secret-key',
+      '/clubs/list',
+      {},
+      { timeoutMs: 5_000 },
+    );
+    expect(JSON.stringify(result)).not.toContain('submitted-secret-key');
+    expect(JSON.stringify(result)).not.toContain(
+      'must-not-leak-from-upstream',
+    );
+    expect(encryption.encrypt).not.toHaveBeenCalled();
+    expect(prisma.tenant.update).not.toHaveBeenCalled();
+    expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.updateMany).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
+  });
+
+  it('fails a bad staged diagnostic closed without mutation or activation', async () => {
+    langameClient.getDiagnosticEndpoint.mockRejectedValue(
+      new Error('upstream echoed submitted-secret-key'),
+    );
+
+    const result = await service.previewSettings(user, {
+      apiKey: 'submitted-secret-key',
+      domains: ['443.langame.ru'],
+    });
+
+    expect(result).toMatchObject({
+      status: 'REJECTED',
+      activation: { required: true, performed: false },
+      sync: { performed: false },
+      diagnostics: [
+        {
+          domain: '443.langame.ru',
+          status: 'FAILED',
+          clubCount: 0,
+          reasonCode: 'LANGAME_DIAGNOSTIC_FAILED',
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain('submitted-secret-key');
+    expect(langameClient.getDiagnosticEndpoint).toHaveBeenCalledTimes(1);
+    expect(encryption.encrypt).not.toHaveBeenCalled();
+    expect(prisma.tenant.update).not.toHaveBeenCalled();
+    expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.updateMany).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-Langame diagnostic hosts before any outbound request', async () => {
+    await expect(
+      service.previewSettings(user, {
+        apiKey: 'submitted-secret-key',
+        domains: ['internal.example.com'],
+      }),
+    ).rejects.toThrow('Unsupported Langame domain');
+
+    expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
+    expect(prisma.integrationCredential.upsert).not.toHaveBeenCalled();
+    expect(prisma.integrationSource.upsert).not.toHaveBeenCalled();
   });
 
   it('saves encrypted API key and active domains for tenant', async () => {

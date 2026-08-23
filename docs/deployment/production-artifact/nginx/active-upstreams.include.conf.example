@@ -1,0 +1,2 @@
+# Install at nginx `http` scope. Do not include both slot files directly.
+include /etc/nginx/leetplus/active-upstreams.conf;

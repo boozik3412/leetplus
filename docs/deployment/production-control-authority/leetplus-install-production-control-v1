@@ -1,0 +1,1021 @@
+#!/usr/bin/bash -p
+# Separately reviewed bootstrap for one final-admission-receipt-bound production
+# control archive. This authority is installed independently as root:root 0500;
+# it never executes a byte from the archive until a private snapshot has been
+# digest-checked against the separately downloaded final admission receipt.
+
+[[ $- == *p* ]] || { printf 'leetplus production-control installer: privileged Bash mode is required\n' >&2; exit 1; }
+readonly LEETPLUS_FIXTURE_CONFIRMATION_SNAPSHOT="${LEETPLUS_PRODUCTION_CONTROL_FIXTURE_CONFIRMATION-}"
+readonly LEETPLUS_FIXTURE_NODE_SNAPSHOT="${LEETPLUS_FIXTURE_NODE-}"
+readonly LEETPLUS_CI_SNAPSHOT="${CI-}"
+readonly LEETPLUS_GITHUB_ACTIONS_SNAPSHOT="${GITHUB_ACTIONS-}"
+while IFS= read -r LEETPLUS_INHERITED_ENVIRONMENT_NAME; do
+  unset "$LEETPLUS_INHERITED_ENVIRONMENT_NAME" 2>/dev/null || true
+done < <(compgen -e)
+unset LEETPLUS_INHERITED_ENVIRONMENT_NAME
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+LANG='C.UTF-8'
+LC_ALL='C.UTF-8'
+TZ='UTC'
+export PATH LANG LC_ALL TZ
+
+set -euo pipefail
+IFS=$'\n\t'
+umask 0077
+
+die() {
+  printf 'leetplus production-control installer: %s\n' "$*" >&2
+  exit 1
+}
+
+release_sha=''
+fixture_root=''
+fixture_abort_after=''
+unprivileged_test_mode=false
+while (($# > 0)); do
+  case "$1" in
+    --release-sha)
+      (($# >= 2)) || die '--release-sha requires a value'
+      release_sha="$2"
+      shift 2
+      ;;
+    --unprivileged-test-mode)
+      unprivileged_test_mode=true
+      shift
+      ;;
+    --fixture-root)
+      (($# >= 2)) || die '--fixture-root requires a value'
+      fixture_root="$2"
+      shift 2
+      ;;
+    --fixture-abort-after)
+      (($# >= 2)) || die '--fixture-abort-after requires a value'
+      fixture_abort_after="$2"
+      shift 2
+      ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
+[[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] \
+  || die '--release-sha must be 40 lowercase hexadecimal characters'
+if [[ "$unprivileged_test_mode" == true ]]; then
+  [[ -n "$fixture_root" \
+    && "$LEETPLUS_FIXTURE_CONFIRMATION_SNAPSHOT" == 'install-production-control-v1' \
+    && ( "$LEETPLUS_CI_SNAPSHOT" == true || "$LEETPLUS_GITHUB_ACTIONS_SNAPSHOT" == true ) \
+    && -n "$LEETPLUS_FIXTURE_NODE_SNAPSHOT" ]] \
+    || die 'unprivileged test mode requires the exact CI fixture boundary'
+  [[ -z "$fixture_abort_after" || "$fixture_abort_after" =~ ^[1-9][0-9]*$ ]] \
+    || die '--fixture-abort-after must be a positive integer'
+else
+  [[ -z "$fixture_root" && -z "$fixture_abort_after" ]] \
+    || die 'fixture arguments are forbidden in production mode'
+  ((EUID == 0)) || die 'production installation requires root'
+fi
+
+for fixed_tool in /usr/bin/env /usr/bin/id /usr/bin/realpath /usr/bin/stat; do
+  fixed_tool_permissions="$(/usr/bin/stat -c '%A' -- "$fixed_tool")"
+  [[ -x "$fixed_tool" && ! -L "$fixed_tool" \
+    && "$(/usr/bin/stat -c '%U:%G:%h' -- "$fixed_tool")" == 'root:root:1' \
+    && "${fixed_tool_permissions:5:1}" != w \
+    && "${fixed_tool_permissions:8:1}" != w ]] \
+    || die "fixed bootstrap tool is absent, linked or writable: ${fixed_tool}"
+done
+unset fixed_tool fixed_tool_permissions
+
+authority_source="$(/usr/bin/realpath -e -- "${BASH_SOURCE[0]}")"
+expected_authority='/usr/local/sbin/leetplus-install-production-control-v1'
+expected_authority_identity='0:0:500:1'
+if [[ "$unprivileged_test_mode" == true ]]; then
+  fixture_root="$(/usr/bin/realpath -e -- "$fixture_root")"
+  expected_authority="${fixture_root}/usr/local/sbin/leetplus-install-production-control-v1"
+  expected_authority_identity="${EUID}:$(/usr/bin/id -g):500:1"
+fi
+[[ "$authority_source" == "$expected_authority" \
+  && -f "$expected_authority" && ! -L "$expected_authority" \
+  && "$(/usr/bin/stat -c '%u:%g:%a:%h' -- "$expected_authority")" \
+    == "$expected_authority_identity" ]] \
+  || die 'authority must execute only as the exact separately installed mode 0500 byte'
+unset authority_source expected_authority expected_authority_identity
+
+python_source='/usr/bin/python3'
+[[ -x "$python_source" ]] || die '/usr/bin/python3 is required'
+python_path="$(/usr/bin/realpath -e -- "$python_source")"
+[[ "$python_path" == /usr/bin/python3.* || "$python_path" == /usr/bin/python3 ]] \
+  || die 'Python resolves outside the reviewed /usr/bin boundary'
+[[ -f "$python_path" && ! -L "$python_path" \
+  && "$(/usr/bin/stat -c '%U:%G:%h' -- "$python_path")" == 'root:root:1' ]] \
+  || die 'resolved Python executable is not immutable root authority'
+python_permissions="$(/usr/bin/stat -c '%A' -- "$python_path")"
+[[ "${python_permissions:5:1}" != w && "${python_permissions:8:1}" != w ]] \
+  || die 'resolved Python executable is group/other writable'
+unset python_permissions
+
+python_arguments=(
+  --release-sha "$release_sha"
+)
+if [[ "$unprivileged_test_mode" == true ]]; then
+  fixture_node="$(/usr/bin/realpath -e -- "$LEETPLUS_FIXTURE_NODE_SNAPSHOT")"
+  python_arguments+=(
+    --fixture-root "$fixture_root"
+    --fixture-node "$fixture_node"
+  )
+  [[ -z "$fixture_abort_after" ]] \
+    || python_arguments+=(--fixture-abort-after "$fixture_abort_after")
+fi
+
+/usr/bin/env -i \
+  PATH="$PATH" \
+  LANG="$LANG" \
+  LC_ALL="$LC_ALL" \
+  TZ="$TZ" \
+  "$python_path" -I -S -E - "${python_arguments[@]}" <<'PYTHON_AUTHORITY'
+import argparse
+import fcntl
+import gzip
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+
+RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+SAFE_SOURCE_RE = re.compile(r"^[A-Za-z0-9_.@+/-]+$")
+EXPECTED_REPOSITORY = "boozik3412/leetplus"
+EXPECTED_INSTALL_MAP_SHA256 = "0e1424555628f95dd706412b46dc07aedb46d7880d08e0158bbb61f46b1fa801"
+GENERATION_BASE = "/srv/leetplus/production-control-generations"
+INBOX_BASE = "/srv/leetplus/production-control-inbox"
+RECEIPT_BASE = "/var/lib/leetplus/deploy-receipts/production-control"
+CONTROL_BUNDLE_ROOT = "/srv/leetplus/control-bundles/scheduler-free-nminus1-v1"
+AUTHORITY_PATH = "/usr/local/sbin/leetplus-install-production-control-v1"
+INSTALLER_SOURCE = "docs/deployment/production-control-authority/leetplus-install-production-control-v1"
+INSTALL_MAP_SOURCE = "docs/deployment/production-control-authority/production-control-install-map.tsv"
+ALLOWLIST_SOURCE = "docs/deployment/production-control-authority/production-control-payload.allowlist"
+ARTIFACT_VERIFIER_SOURCE = "docs/deployment/production-control-authority/verify-production-control-artifact.mjs"
+INSTALLED_VERIFIER_SOURCE = "docs/deployment/production-control-authority/verify-installed-production-control-generation.mjs"
+INNER_MANIFEST_SOURCE = "docs/deployment/production-artifact/CONTROL_BUNDLE_SHA256SUMS"
+MAX_COMPRESSED_BYTES = 96 * 1024 * 1024
+MAX_TAR_BYTES = 192 * 1024 * 1024
+MAX_MEMBER_BYTES = 32 * 1024 * 1024
+MAX_TOTAL_MEMBER_BYTES = 160 * 1024 * 1024
+MAX_MEMBERS = 256
+
+
+def die(message):
+    raise SystemExit(f"leetplus production-control installer: {message}")
+
+
+def sha256_bytes(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def read_all_fd(fd, maximum, label):
+    chunks = []
+    total = 0
+    while True:
+        chunk = os.read(fd, min(1024 * 1024, maximum + 1 - total))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > maximum:
+            die(f"{label} exceeds its bounded byte envelope")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def fsync_directory(directory):
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def host_path(root_prefix, production_path):
+    if not production_path.startswith("/"):
+        die("internal production path is not absolute")
+    if root_prefix == "/":
+        return production_path
+    return os.path.join(root_prefix, *production_path[1:].split("/"))
+
+
+def path_components(absolute_path):
+    absolute_path = os.path.abspath(absolute_path)
+    if absolute_path == "/":
+        return ["/"]
+    result = ["/"]
+    current = ""
+    for component in absolute_path[1:].split("/"):
+        current += "/" + component
+        result.append(current)
+    return result
+
+
+def assert_safe_source(value, label):
+    if (
+        not SAFE_SOURCE_RE.fullmatch(value)
+        or value != os.path.normpath(value)
+        or value.startswith("/")
+        or any(part in ("", ".", "..") for part in value.split("/"))
+    ):
+        die(f"{label} is not a canonical safe path: {value!r}")
+
+
+def expected_identity(fixture_mode):
+    return (os.getuid(), os.getgid()) if fixture_mode else (0, 0)
+
+
+def assert_ancestors(absolute_path, root_prefix, uid, gid, include_leaf=False):
+    candidates = path_components(absolute_path)
+    if not include_leaf:
+        candidates = candidates[:-1]
+    if root_prefix != "/":
+        try:
+            first = candidates.index(root_prefix)
+        except ValueError:
+            die(f"path is outside fixture authority: {absolute_path}")
+        candidates = candidates[first:]
+    for candidate in candidates:
+        details = os.lstat(candidate)
+        if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode):
+            die(f"trusted ancestor is not a real directory: {candidate}")
+        if details.st_uid != uid or details.st_gid != gid or details.st_mode & 0o022:
+            die(f"trusted ancestor is not immutable expected authority: {candidate}")
+
+
+def ensure_directory(absolute_path, root_prefix, uid, gid, mode):
+    if not absolute_path.startswith("/"):
+        die("directory target is not absolute")
+    components = path_components(absolute_path)
+    start = 1
+    if root_prefix != "/":
+        try:
+            start = components.index(root_prefix) + 1
+        except ValueError:
+            die(f"directory is outside fixture root: {absolute_path}")
+    for candidate in components[start:]:
+        try:
+            details = os.lstat(candidate)
+        except FileNotFoundError:
+            os.mkdir(candidate, mode)
+            os.chown(candidate, uid, gid)
+            fsync_directory(os.path.dirname(candidate))
+            details = os.lstat(candidate)
+        if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode):
+            die(f"directory authority path is not a real directory: {candidate}")
+        if details.st_uid != uid or details.st_gid != gid or details.st_mode & 0o022:
+            die(f"directory authority path is writable or foreign-owned: {candidate}")
+
+
+def read_mount_targets():
+    try:
+        with open("/proc/self/mountinfo", "r", encoding="utf-8", newline="") as handle:
+            text = handle.read(4 * 1024 * 1024 + 1)
+    except OSError as error:
+        die(f"cannot read mount inventory: {error}")
+    if len(text) > 4 * 1024 * 1024 or not text.endswith("\n"):
+        die("mount inventory is oversized or incomplete")
+    result = []
+    escapes = {"040": " ", "011": "\t", "012": "\n", "134": "\\"}
+    for line in text[:-1].split("\n"):
+        fields = line.split(" ")
+        if len(fields) < 7 or "-" not in fields:
+            die("mount inventory is malformed")
+        value = re.sub(r"\\(040|011|012|134)", lambda match: escapes[match.group(1)], fields[4])
+        result.append(value)
+    return result
+
+
+def reject_mounts_at_or_below(absolute_path, mount_targets, label):
+    for target in mount_targets:
+        if target == absolute_path or target.startswith(absolute_path + "/"):
+            die(f"{label} contains an exact or nested mount: {target}")
+
+
+def reject_exact_mount(absolute_path, mount_targets, label):
+    if absolute_path in mount_targets:
+        die(f"{label} is an exact mount: {absolute_path}")
+
+
+def assert_regular_authority(pathname, root_prefix, uid, gid, mode, label, maximum):
+    assert_ancestors(pathname, root_prefix, uid, gid)
+    details = os.lstat(pathname)
+    if (
+        not stat.S_ISREG(details.st_mode)
+        or stat.S_ISLNK(details.st_mode)
+        or details.st_nlink != 1
+        or details.st_uid != uid
+        or details.st_gid != gid
+        or stat.S_IMODE(details.st_mode) != mode
+        or details.st_size <= 0
+        or details.st_size > maximum
+    ):
+        die(f"{label} is not exact regular authority mode {mode:04o}")
+    return details
+
+
+def stable_read(pathname, maximum, label):
+    before = os.lstat(pathname)
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(pathname, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino, opened.st_size, opened.st_ctime_ns)
+            != (before.st_dev, before.st_ino, before.st_size, before.st_ctime_ns)
+        ):
+            die(f"{label} changed identity before read")
+        value = read_all_fd(descriptor, maximum, label)
+        after = os.fstat(descriptor)
+        if (
+            (after.st_dev, after.st_ino, after.st_size, after.st_ctime_ns)
+            != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_ctime_ns)
+            or len(value) != opened.st_size
+        ):
+            die(f"{label} changed during read")
+        return value, opened
+    finally:
+        os.close(descriptor)
+
+
+def atomic_write(pathname, value, root_prefix, uid, gid, mode):
+    parent = os.path.dirname(pathname)
+    ensure_directory(parent, root_prefix, uid, gid, 0o700)
+    temporary = os.path.join(parent, f".{os.path.basename(pathname)}.new")
+    try:
+        existing = os.lstat(temporary)
+    except FileNotFoundError:
+        existing = None
+    if existing is not None:
+        if (
+            not stat.S_ISREG(existing.st_mode)
+            or existing.st_nlink != 1
+            or existing.st_uid != uid
+            or existing.st_gid != gid
+        ):
+            die(f"stale publication temporary is unsafe: {temporary}")
+        os.unlink(temporary)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(temporary, flags, 0o600)
+    try:
+        offset = 0
+        while offset < len(value):
+            written = os.write(descriptor, value[offset:])
+            if written <= 0:
+                die(f"short write while publishing {pathname}")
+            offset += written
+        os.fchmod(descriptor, mode)
+        os.fchown(descriptor, uid, gid)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.replace(temporary, pathname)
+    fsync_directory(parent)
+
+
+def parse_checksum(value, expected_name, label):
+    try:
+        text = value.decode("ascii")
+    except UnicodeDecodeError:
+        die(f"{label} is not ASCII")
+    match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_.-]+)\n", text)
+    if not match or match.group(2) != expected_name:
+        die(f"{label} is not one exact canonical checksum record")
+    return match.group(1)
+
+
+def parse_final_admission(value, release_sha, archive_digest):
+    try:
+        text = value.decode("utf-8", errors="strict")
+        parsed = json.loads(text)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        die("final admission receipt is not canonical UTF-8 JSON")
+    keys = [
+        "schemaVersion", "admission", "releaseSha", "runId", "runAttempt",
+        "repository", "repositoryId", "workflowRef", "workflowSha",
+        "runtimeArtifactName", "runtimeArchiveSha256",
+        "productionControlArtifactName", "productionControlArchiveSha256",
+        "runtimeArtifactId", "runtimeTransportDigest",
+        "productionControlArtifactId", "productionControlTransportDigest",
+    ]
+    if not isinstance(parsed, dict) or list(parsed.keys()) != keys:
+        die("final admission receipt key set or ordering is not exact")
+    canonical = json.dumps(parsed, indent=2, ensure_ascii=False, separators=(",", ": ")) + "\n"
+    if text != canonical:
+        die("final admission receipt is not canonical JSON")
+    if (
+        parsed["schemaVersion"] != 1
+        or parsed["admission"] != "PASS"
+        or parsed["releaseSha"] != release_sha
+        or parsed["repository"] != EXPECTED_REPOSITORY
+        or parsed["workflowSha"] != release_sha
+        or parsed["productionControlArchiveSha256"] != archive_digest
+        or not re.fullmatch(r"[1-9][0-9]*", parsed["runId"])
+        or not re.fullmatch(r"[1-9][0-9]*", parsed["runAttempt"])
+        or not re.fullmatch(r"[1-9][0-9]*", parsed["repositoryId"])
+        or not re.fullmatch(r"[1-9][0-9]*", parsed["runtimeArtifactId"])
+        or not re.fullmatch(r"[1-9][0-9]*", parsed["productionControlArtifactId"])
+        or not SHA256_RE.fullmatch(parsed["runtimeArchiveSha256"])
+        or not SHA256_RE.fullmatch(parsed["runtimeTransportDigest"])
+        or not SHA256_RE.fullmatch(parsed["productionControlTransportDigest"])
+        or parsed["workflowRef"]
+        != f"{EXPECTED_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
+        or parsed["runtimeArtifactName"]
+        != f"leetplus-release-{release_sha}-handoff-payload-{parsed['runId']}-{parsed['runAttempt']}"
+        or parsed["productionControlArtifactName"]
+        != f"leetplus-production-control-{release_sha}-handoff-payload-{parsed['runId']}-{parsed['runAttempt']}"
+    ):
+        die("final admission receipt does not bind the exact admitted release/control archive")
+    return parsed
+
+
+def parse_octal(field, label):
+    if field and field[0] & 0x80:
+        die(f"tar {label} uses forbidden base-256 encoding")
+    stripped = field.rstrip(b"\0 ").lstrip(b" ")
+    if not stripped:
+        return 0
+    if not re.fullmatch(rb"[0-7]+", stripped):
+        die(f"tar {label} is not canonical octal")
+    return int(stripped, 8)
+
+
+def tar_string(field, label):
+    value, separator, remainder = field.partition(b"\0")
+    if separator and any(remainder):
+        die(f"tar {label} has nonzero bytes after NUL")
+    try:
+        return value.decode("ascii")
+    except UnicodeDecodeError:
+        die(f"tar {label} is not ASCII")
+
+
+def extract_canonical_tar(tar_bytes, output_root, uid, gid):
+    if len(tar_bytes) < 2048 or len(tar_bytes) % 512:
+        die("tar byte envelope is not block-aligned canonical ustar")
+    offset = 0
+    prior_path = None
+    member_count = 0
+    member_bytes = 0
+    while offset + 512 <= len(tar_bytes):
+        header = tar_bytes[offset:offset + 512]
+        if header == b"\0" * 512:
+            trailer = tar_bytes[offset:]
+            if len(trailer) < 1024 or any(trailer):
+                die("tar trailer is not exact all-zero termination")
+            break
+        stored_checksum = parse_octal(header[148:156], "checksum")
+        calculated_checksum = sum(header[:148]) + 8 * 32 + sum(header[156:])
+        if stored_checksum != calculated_checksum:
+            die("tar header checksum mismatch")
+        if header[257:263] != b"ustar\0" or header[263:265] != b"00":
+            die("tar member is not canonical ustar")
+        type_flag = header[156:157]
+        if type_flag not in (b"\0", b"0") or any(header[157:257]):
+            die("tar member is not one link-free regular file")
+        name = tar_string(header[0:100], "name")
+        prefix = tar_string(header[345:500], "prefix")
+        member = f"{prefix}/{name}" if prefix else name
+        assert_safe_source(member, "tar member")
+        if prior_path is not None and member.encode("utf-8") <= prior_path.encode("utf-8"):
+            die("tar members are duplicate or not canonically sorted")
+        prior_path = member
+        member_count += 1
+        if member_count > MAX_MEMBERS:
+            die("tar member count exceeds the bounded envelope")
+        mode = parse_octal(header[100:108], "mode")
+        owner = parse_octal(header[108:116], "uid")
+        group = parse_octal(header[116:124], "gid")
+        size = parse_octal(header[124:136], "size")
+        modified = parse_octal(header[136:148], "mtime")
+        if mode != 0o440 or owner != 0 or group != 0 or modified != 0:
+            die(f"tar member metadata is not root:root 0440 epoch: {member}")
+        if size <= 0 or size > MAX_MEMBER_BYTES:
+            die(f"tar member exceeds the bounded size: {member}")
+        member_bytes += size
+        if member_bytes > MAX_TOTAL_MEMBER_BYTES:
+            die("tar aggregate payload exceeds the bounded size")
+        payload_start = offset + 512
+        payload_end = payload_start + size
+        padded_end = payload_start + ((size + 511) // 512) * 512
+        if padded_end > len(tar_bytes):
+            die(f"tar member is truncated: {member}")
+        if any(tar_bytes[payload_end:padded_end]):
+            die(f"tar member padding is nonzero: {member}")
+        target = os.path.join(output_root, *member.split("/"))
+        parent = os.path.dirname(target)
+        relative_parent = os.path.relpath(parent, output_root)
+        if relative_parent != ".":
+            current = output_root
+            for component in relative_parent.split(os.sep):
+                current = os.path.join(current, component)
+                try:
+                    details = os.lstat(current)
+                except FileNotFoundError:
+                    os.mkdir(current, 0o700)
+                    os.chown(current, uid, gid)
+                    details = os.lstat(current)
+                if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode):
+                    die(f"tar parent is not a real directory: {member}")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(target, flags, 0o400)
+        try:
+            value = tar_bytes[payload_start:payload_end]
+            written = 0
+            while written < len(value):
+                count = os.write(descriptor, value[written:])
+                if count <= 0:
+                    die(f"short tar extraction write: {member}")
+                written += count
+            os.fchmod(descriptor, 0o400)
+            os.fchown(descriptor, uid, gid)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        offset = padded_end
+    else:
+        die("tar has no canonical trailer")
+    if member_count == 0:
+        die("tar contains no payload members")
+    for directory, subdirectories, _ in os.walk(output_root, topdown=False, followlinks=False):
+        for child in subdirectories:
+            child_path = os.path.join(directory, child)
+            details = os.lstat(child_path)
+            if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode):
+                die("extracted tree contains a linked directory")
+            os.chmod(child_path, 0o500)
+            os.chown(child_path, uid, gid)
+            fsync_directory(child_path)
+    os.chmod(output_root, 0o500)
+    os.chown(output_root, uid, gid)
+    fsync_directory(output_root)
+    return member_count
+
+
+def parse_manifest(value, label):
+    try:
+        text = value.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        die(f"{label} is not UTF-8")
+    if not text.endswith("\n") or text.endswith("\n\n"):
+        die(f"{label} must end with exactly one LF")
+    result = {}
+    prior = None
+    for line in text[:-1].split("\n"):
+        match = re.fullmatch(r"([0-9a-f]{64})  \.\/([A-Za-z0-9_.@+/-]+)", line)
+        if not match:
+            die(f"{label} contains a malformed line")
+        digest, source = match.groups()
+        assert_safe_source(source, label)
+        if source in result or (prior is not None and source.encode() <= prior.encode()):
+            die(f"{label} is duplicate or not sorted")
+        result[source] = digest
+        prior = source
+    return result
+
+
+def parse_allowlist(value):
+    try:
+        text = value.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        die("payload allowlist is not UTF-8")
+    if not text.endswith("\n") or text.endswith("\n\n"):
+        die("payload allowlist must end with exactly one LF")
+    result = text[:-1].split("\n")
+    prior = None
+    for source in result:
+        assert_safe_source(source, "payload allowlist")
+        if prior is not None and source.encode() <= prior.encode():
+            die("payload allowlist is duplicate or not sorted")
+        prior = source
+    return result
+
+
+def parse_install_map(value, manifest):
+    if sha256_bytes(value) != EXPECTED_INSTALL_MAP_SHA256:
+        die("install map differs from the separately reviewed authority pin")
+    try:
+        text = value.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        die("install map is not UTF-8")
+    if not text.endswith("\n") or text.endswith("\n\n"):
+        die("install map must end with exactly one LF")
+    result = []
+    destinations = set()
+    prior = None
+    for line in text[:-1].split("\n"):
+        fields = line.split("\t")
+        if len(fields) != 3:
+            die("install map line is not exact TSV")
+        source, destination, mode_text = fields
+        assert_safe_source(source, "install map source")
+        if (
+            not re.fullmatch(r"/[A-Za-z0-9_.@+/-]+", destination)
+            or any(part in ("", ".", "..") for part in destination[1:].split("/"))
+        ):
+            die(f"install map destination is unsafe: {destination!r}")
+        if mode_text not in ("0400", "0444", "0500", "0555"):
+            die(f"install map mode is forbidden: {mode_text}")
+        if source not in manifest or destination in destinations:
+            die("install map source is unbound or destination is duplicate")
+        if prior is not None and line.encode() <= prior.encode():
+            die("install map is duplicate or not canonically sorted")
+        prior = line
+        destinations.add(destination)
+        result.append((source, destination, int(mode_text, 8)))
+    return result
+
+
+def verify_artifact(node_path, generation_root, release_sha, fixture_mode):
+    verifier = os.path.join(generation_root, *ARTIFACT_VERIFIER_SOURCE.split("/"))
+    arguments = [
+        node_path, verifier, "--artifact-root", generation_root,
+        "--expected-release-sha", release_sha,
+    ]
+    if not fixture_mode:
+        arguments.append("--require-root-authority")
+    completed = subprocess.run(
+        arguments,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=30,
+        check=False,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+    )
+    expected_authority = b"NOT_REQUESTED" if fixture_mode else b"REQUIRED"
+    if (
+        completed.returncode != 0
+        or b"PRODUCTION_CONTROL_ARTIFACT_INTEGRITY=PASS\n" not in completed.stdout
+        or f"PRODUCTION_CONTROL_RELEASE_SHA={release_sha}\n".encode() not in completed.stdout
+        or b"PRODUCTION_CONTROL_ROOT_AUTHORITY=" + expected_authority + b"\n" not in completed.stdout
+        or completed.stderr
+    ):
+        die("shipped artifact verifier rejected the private generation")
+
+
+def verify_installed(node_path, verifier_path, release_sha, fixture_root):
+    arguments = [node_path, verifier_path, "--release-sha", release_sha]
+    environment = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"}
+    if fixture_root:
+        arguments.extend(["--fixture-root", fixture_root])
+        environment["LEETPLUS_PRODUCTION_CONTROL_FIXTURE_CONFIRMATION"] = "verify-installed-production-control-generation"
+    else:
+        arguments.append("--require-root-authority")
+    completed = subprocess.run(
+        arguments,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=45,
+        check=False,
+        env=environment,
+    )
+    if (
+        completed.returncode != 0
+        or b"PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS\n" not in completed.stdout
+        or f"PRODUCTION_CONTROL_RELEASE_SHA={release_sha}\n".encode() not in completed.stdout
+        or completed.stderr
+    ):
+        sys.stderr.buffer.write(completed.stderr[:8192])
+        die("installed-generation verifier rejected the published generation")
+    return completed.stdout.decode("utf-8", errors="strict")
+
+
+arguments = argparse.ArgumentParser(add_help=False)
+arguments.add_argument("--release-sha", required=True)
+arguments.add_argument("--fixture-root")
+arguments.add_argument("--fixture-node")
+arguments.add_argument("--fixture-abort-after", type=int)
+options = arguments.parse_args()
+if not RELEASE_RE.fullmatch(options.release_sha):
+    die("release SHA is malformed")
+fixture_mode = options.fixture_root is not None
+if fixture_mode != (options.fixture_node is not None):
+    die("fixture root and fixture Node must be supplied together")
+if options.fixture_abort_after is not None and (not fixture_mode or options.fixture_abort_after <= 0):
+    die("fixture fault requires a positive fixture install count")
+if not fixture_mode and os.geteuid() != 0:
+    die("production installation requires root")
+root_prefix = os.path.realpath(options.fixture_root) if fixture_mode else "/"
+if fixture_mode and (root_prefix != os.path.abspath(options.fixture_root) or os.path.islink(root_prefix)):
+    die("fixture root is not canonical")
+uid, gid = expected_identity(fixture_mode)
+if fixture_mode:
+    root_details = os.lstat(root_prefix)
+    if (
+        not stat.S_ISDIR(root_details.st_mode)
+        or root_details.st_uid != uid
+        or root_details.st_gid != gid
+        or stat.S_IMODE(root_details.st_mode) != 0o700
+    ):
+        die("fixture root must be exact current-user mode 0700 authority")
+
+node_path = os.path.realpath(options.fixture_node) if fixture_mode else "/usr/bin/node"
+if not os.path.isfile(node_path) or os.path.islink(node_path) or not os.access(node_path, os.X_OK):
+    die("Node executable is not one canonical regular executable")
+node_details = os.lstat(node_path)
+if not fixture_mode and (node_path != "/usr/bin/node" or node_details.st_uid != 0 or node_details.st_gid != 0 or node_details.st_mode & 0o022):
+    die("production Node executable is not exact immutable /usr/bin/node")
+node_major = subprocess.run(
+    [node_path, "-p", "process.versions.node.split('.')[0]"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    timeout=5, check=False,
+    env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+)
+if node_major.returncode != 0 or node_major.stdout != b"22\n" or node_major.stderr:
+    die("exact Node.js major 22 is required")
+
+inbox = host_path(root_prefix, INBOX_BASE)
+generation_base = host_path(root_prefix, GENERATION_BASE)
+receipt_base = host_path(root_prefix, RECEIPT_BASE)
+run_root = host_path(root_prefix, "/run/leetplus-production-control")
+ensure_directory(host_path(root_prefix, "/srv/leetplus"), root_prefix, uid, gid, 0o755)
+ensure_directory(host_path(root_prefix, "/var/lib/leetplus"), root_prefix, uid, gid, 0o755)
+for directory, mode in ((inbox, 0o700), (generation_base, 0o700), (receipt_base, 0o700), (run_root, 0o700)):
+    ensure_directory(directory, root_prefix, uid, gid, mode)
+    assert_ancestors(directory, root_prefix, uid, gid, include_leaf=True)
+    directory_details = os.lstat(directory)
+    if stat.S_IMODE(directory_details.st_mode) != mode:
+        die(f"managed production-control directory mode drift: {directory}")
+
+mount_targets = read_mount_targets()
+for directory, label in ((inbox, "production-control inbox"), (generation_base, "generation root"), (receipt_base, "receipt root")):
+    reject_mounts_at_or_below(directory, mount_targets, label)
+
+lock_path = os.path.join(run_root, "install.lock")
+lock_flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+if hasattr(os, "O_NOFOLLOW"):
+    lock_flags |= os.O_NOFOLLOW
+lock_fd = os.open(lock_path, lock_flags, 0o600)
+os.fchmod(lock_fd, 0o600)
+os.fchown(lock_fd, uid, gid)
+lock_details = os.fstat(lock_fd)
+if (
+    not stat.S_ISREG(lock_details.st_mode)
+    or lock_details.st_nlink != 1
+    or lock_details.st_uid != uid
+    or lock_details.st_gid != gid
+    or stat.S_IMODE(lock_details.st_mode) != 0o600
+):
+    die("installer lock is not one exact private regular inode")
+fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+archive_name = f"leetplus-production-control-{options.release_sha}.tar.gz"
+admission_name = f"leetplus-release-admission-{options.release_sha}.json"
+archive_path = os.path.join(inbox, archive_name)
+archive_checksum_path = archive_path + ".sha256"
+admission_path = os.path.join(inbox, admission_name)
+admission_checksum_path = admission_path + ".sha256"
+for pathname, mode, label, maximum in (
+    (archive_path, 0o440, "production-control archive", MAX_COMPRESSED_BYTES),
+    (archive_checksum_path, 0o440, "archive checksum", 4096),
+    (admission_path, 0o440, "final admission receipt", 64 * 1024),
+    (admission_checksum_path, 0o440, "final admission receipt checksum", 4096),
+):
+    assert_regular_authority(pathname, root_prefix, uid, gid, mode, label, maximum)
+    reject_exact_mount(pathname, mount_targets, label)
+
+archive_checksum_bytes, _ = stable_read(archive_checksum_path, 4096, "archive checksum")
+archive_expected_digest = parse_checksum(archive_checksum_bytes, archive_name, "archive checksum")
+admission_checksum_bytes, _ = stable_read(admission_checksum_path, 4096, "admission receipt checksum")
+admission_expected_digest = parse_checksum(admission_checksum_bytes, admission_name, "admission receipt checksum")
+admission_bytes, admission_identity = stable_read(admission_path, 64 * 1024, "final admission receipt")
+if sha256_bytes(admission_bytes) != admission_expected_digest:
+    die("final admission receipt digest differs from its checksum")
+archive_bytes, archive_identity = stable_read(archive_path, MAX_COMPRESSED_BYTES, "production-control archive")
+archive_digest = sha256_bytes(archive_bytes)
+if archive_digest != archive_expected_digest:
+    die("production-control archive digest differs from its checksum")
+parse_final_admission(admission_bytes, options.release_sha, archive_digest)
+
+generation_root = os.path.join(generation_base, options.release_sha)
+stage_root = os.path.join(generation_base, f".{options.release_sha}.staging")
+generation_temporary = os.path.join(stage_root, "generation")
+if os.path.lexists(stage_root):
+    reject_mounts_at_or_below(stage_root, mount_targets, "stale generation staging")
+    details = os.lstat(stage_root)
+    if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode) or details.st_uid != uid or details.st_gid != gid:
+        die("stale generation staging is not safe to reconcile")
+    for directory, subdirectories, files in os.walk(stage_root, topdown=False, followlinks=False):
+        for name in files:
+            child = os.path.join(directory, name)
+            child_details = os.lstat(child)
+            if not stat.S_ISREG(child_details.st_mode) or child_details.st_nlink != 1 or child_details.st_uid != uid or child_details.st_gid != gid:
+                die("stale generation staging contains a linked/special/foreign file")
+        for name in subdirectories:
+            child = os.path.join(directory, name)
+            child_details = os.lstat(child)
+            if not stat.S_ISDIR(child_details.st_mode) or stat.S_ISLNK(child_details.st_mode) or child_details.st_uid != uid or child_details.st_gid != gid:
+                die("stale generation staging contains a linked/foreign directory")
+    shutil.rmtree(stage_root)
+    fsync_directory(generation_base)
+
+os.mkdir(stage_root, 0o700)
+os.chown(stage_root, uid, gid)
+os.mkdir(generation_temporary, 0o700)
+os.chown(generation_temporary, uid, gid)
+snapshot_path = os.path.join(stage_root, "archive.tar.gz")
+atomic_write(snapshot_path, archive_bytes, root_prefix, uid, gid, 0o400)
+source_after = os.lstat(archive_path)
+if (
+    (source_after.st_dev, source_after.st_ino, source_after.st_size, source_after.st_ctime_ns)
+    != (archive_identity.st_dev, archive_identity.st_ino, archive_identity.st_size, archive_identity.st_ctime_ns)
+    or sha256_bytes(stable_read(archive_path, MAX_COMPRESSED_BYTES, "archive post-snapshot identity")[0]) != archive_digest
+):
+    die("archive source changed around the private snapshot")
+admission_after = os.lstat(admission_path)
+if (
+    (admission_after.st_dev, admission_after.st_ino, admission_after.st_size, admission_after.st_ctime_ns)
+    != (admission_identity.st_dev, admission_identity.st_ino, admission_identity.st_size, admission_identity.st_ctime_ns)
+    or sha256_bytes(stable_read(admission_path, 64 * 1024, "admission post-snapshot identity")[0]) != admission_expected_digest
+):
+    die("final admission source changed around the archive snapshot")
+try:
+    with open(snapshot_path, "rb") as snapshot_handle:
+        with gzip.GzipFile(fileobj=snapshot_handle, mode="rb") as compressed:
+            tar_chunks = []
+            tar_size = 0
+            while True:
+                chunk = compressed.read(min(1024 * 1024, MAX_TAR_BYTES + 1 - tar_size))
+                if not chunk:
+                    break
+                tar_size += len(chunk)
+                if tar_size > MAX_TAR_BYTES:
+                    die("decompressed tar exceeds the bounded envelope")
+                tar_chunks.append(chunk)
+            tar_bytes = b"".join(tar_chunks)
+except (OSError, EOFError) as error:
+    die(f"archive gzip stream is invalid: {error}")
+extract_canonical_tar(tar_bytes, generation_temporary, uid, gid)
+verify_artifact(node_path, generation_temporary, options.release_sha, fixture_mode)
+candidate_manifest_bytes = stable_read(
+    os.path.join(generation_temporary, "SHA256SUMS"),
+    MAX_MEMBER_BYTES,
+    "candidate generation SHA256SUMS",
+)[0]
+if not os.path.lexists(generation_root):
+    os.rename(generation_temporary, generation_root)
+    fsync_directory(generation_base)
+else:
+    details = os.lstat(generation_root)
+    if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode) or details.st_uid != uid or details.st_gid != gid or stat.S_IMODE(details.st_mode) != 0o500:
+        die("existing generation is not exact immutable authority")
+    verify_artifact(node_path, generation_root, options.release_sha, fixture_mode)
+    existing_manifest_bytes = stable_read(
+        os.path.join(generation_root, "SHA256SUMS"),
+        MAX_MEMBER_BYTES,
+        "existing generation SHA256SUMS",
+    )[0]
+    if existing_manifest_bytes != candidate_manifest_bytes:
+        die("existing release-SHA generation differs from the admitted archive snapshot")
+shutil.rmtree(stage_root)
+fsync_directory(generation_base)
+
+root_manifest_bytes = stable_read(os.path.join(generation_root, "SHA256SUMS"), MAX_MEMBER_BYTES, "generation SHA256SUMS")[0]
+manifest = parse_manifest(root_manifest_bytes, "generation SHA256SUMS")
+allowlist_bytes = stable_read(os.path.join(generation_root, *ALLOWLIST_SOURCE.split("/")), MAX_MEMBER_BYTES, "generation allowlist")[0]
+allowlist = parse_allowlist(allowlist_bytes)
+install_map_bytes = stable_read(os.path.join(generation_root, *INSTALL_MAP_SOURCE.split("/")), MAX_MEMBER_BYTES, "generation install map")[0]
+install_entries = parse_install_map(install_map_bytes, manifest)
+inner_manifest_bytes = stable_read(os.path.join(generation_root, *INNER_MANIFEST_SOURCE.split("/")), MAX_MEMBER_BYTES, "generation inner manifest")[0]
+authority_source_bytes = stable_read(os.path.join(generation_root, *INSTALLER_SOURCE.split("/")), MAX_MEMBER_BYTES, "generation installer authority")[0]
+authority_path = host_path(root_prefix, AUTHORITY_PATH)
+assert_regular_authority(authority_path, root_prefix, uid, gid, 0o500, "installed production-control authority", MAX_MEMBER_BYTES)
+authority_installed_bytes = stable_read(authority_path, MAX_MEMBER_BYTES, "installed production-control authority")[0]
+if authority_source_bytes != authority_installed_bytes or sha256_bytes(authority_installed_bytes) != manifest.get(INSTALLER_SOURCE):
+    die("separately installed authority differs from the admitted generation byte")
+
+def manifest_pin(source, label):
+    value = manifest.get(source)
+    if not value or not SHA256_RE.fullmatch(value):
+        die(f"generation manifest omits {label}")
+    return value
+
+receipt_path = os.path.join(receipt_base, f"production-control-generation-{options.release_sha}.receipt.json")
+intent_path = os.path.join(receipt_base, f"production-control-generation-{options.release_sha}.intent.json")
+expected_receipt = {
+    "schemaVersion": 1,
+    "recordKind": "leetplus-production-control-installed-generation",
+    "state": "ACCEPTED",
+    "releaseSha": options.release_sha,
+    "repository": EXPECTED_REPOSITORY,
+    "archiveSha256": archive_digest,
+    "admissionReceiptSha256": admission_expected_digest,
+    "generationRoot": f"{GENERATION_BASE}/{options.release_sha}",
+    "artifactRootManifestSha256": sha256_bytes(root_manifest_bytes),
+    "payloadAllowlistSha256": sha256_bytes(allowlist_bytes),
+    "controlBundleManifestSha256": sha256_bytes(inner_manifest_bytes),
+    "installMapSha256": sha256_bytes(install_map_bytes),
+    "installerAuthoritySha256": manifest_pin(INSTALLER_SOURCE, "installer authority"),
+    "artifactVerifierSha256": manifest_pin(ARTIFACT_VERIFIER_SOURCE, "artifact verifier"),
+    "installedGenerationVerifierSha256": manifest_pin(INSTALLED_VERIFIER_SOURCE, "installed-generation verifier"),
+    "hydrationStagerSha256": manifest_pin("docs/deployment/production-artifact/stage-release-artifact.sh", "hydration stager"),
+    "hydrationAttestorSha256": manifest_pin("docs/deployment/production-artifact/verify-release-hydration-systemd.mjs", "hydration attestor"),
+    "hydrationUnitSha256": manifest_pin("docs/deployment/production-artifact/systemd/leetplus-release-hydrate@.service", "hydration unit"),
+    "sealerSha256": manifest_pin("docs/deployment/production-artifact/seal-release-artifact.sh", "release sealer"),
+    "promoterSha256": manifest_pin("docs/deployment/production-artifact/promote-release-artifact.sh", "release promoter"),
+    "payloadFileCount": len(allowlist),
+    "installedFileCount": len(install_entries),
+}
+receipt_bytes = (json.dumps(expected_receipt, indent=2, ensure_ascii=False, separators=(",", ": ")) + "\n").encode("utf-8")
+
+if os.path.lexists(receipt_path) and not os.path.lexists(intent_path):
+    current = stable_read(receipt_path, 64 * 1024, "existing installed-generation receipt")[0]
+    if current != receipt_bytes:
+        die("existing accepted generation receipt conflicts with admitted input")
+    verifier_path = host_path(root_prefix, "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs")
+    output = verify_installed(node_path, verifier_path, options.release_sha, root_prefix if fixture_mode else None)
+    print("PRODUCTION_CONTROL_INSTALL_RECONCILED=true")
+    print(output, end="")
+    raise SystemExit(0)
+
+intent_record = {
+    "schemaVersion": 1,
+    "recordKind": "leetplus-production-control-install-intent",
+    "state": "INTENT",
+    "releaseSha": options.release_sha,
+    "archiveSha256": archive_digest,
+    "admissionReceiptSha256": admission_expected_digest,
+    "generationRoot": f"{GENERATION_BASE}/{options.release_sha}",
+    "installMapSha256": sha256_bytes(install_map_bytes),
+}
+intent_bytes = (json.dumps(intent_record, indent=2, ensure_ascii=False, separators=(",", ": ")) + "\n").encode("utf-8")
+if os.path.lexists(intent_path):
+    current_intent = stable_read(intent_path, 64 * 1024, "existing install intent")[0]
+    if current_intent != intent_bytes:
+        die("outstanding install intent conflicts with the admitted generation")
+else:
+    atomic_write(intent_path, intent_bytes, root_prefix, uid, gid, 0o400)
+
+if os.path.lexists(receipt_path):
+    current = stable_read(receipt_path, 64 * 1024, "existing receipt during reconciliation")[0]
+    if current != receipt_bytes:
+        die("existing receipt conflicts with the outstanding install intent")
+
+installed_count = 0
+for source, destination, mode in install_entries:
+    source_path = os.path.join(generation_root, *source.split("/"))
+    source_bytes = stable_read(source_path, MAX_MEMBER_BYTES, f"install source {source}")[0]
+    if sha256_bytes(source_bytes) != manifest[source]:
+        die(f"install source drifted from generation manifest: {source}")
+    destination_path = host_path(root_prefix, destination)
+    destination_parent = os.path.dirname(destination_path)
+    if destination.startswith(CONTROL_BUNDLE_ROOT + "/"):
+        ensure_directory(host_path(root_prefix, "/srv/leetplus"), root_prefix, uid, gid, 0o755)
+        ensure_directory(destination_parent, root_prefix, uid, gid, 0o500)
+    else:
+        ensure_directory(destination_parent, root_prefix, uid, gid, 0o755)
+    reject_exact_mount(destination_path, mount_targets, f"install destination {destination}")
+    atomic_write(destination_path, source_bytes, root_prefix, uid, gid, mode)
+    installed_bytes = stable_read(destination_path, MAX_MEMBER_BYTES, f"installed destination {destination}")[0]
+    details = os.lstat(destination_path)
+    if (
+        sha256_bytes(installed_bytes) != manifest[source]
+        or details.st_uid != uid
+        or details.st_gid != gid
+        or details.st_nlink != 1
+        or stat.S_IMODE(details.st_mode) != mode
+    ):
+        die(f"installed destination failed post-publication attestation: {destination}")
+    installed_count += 1
+    if options.fixture_abort_after == installed_count:
+        die("fixture-requested interruption during install-map publication")
+
+inner_digest = sha256_bytes(inner_manifest_bytes)
+trust_path = host_path(root_prefix, "/etc/leetplus/rollback-control-manifest.sha256")
+ensure_directory(os.path.dirname(trust_path), root_prefix, uid, gid, 0o755)
+atomic_write(trust_path, f"{inner_digest}\n".encode("ascii"), root_prefix, uid, gid, 0o400)
+
+if not fixture_mode:
+    daemon_reload = subprocess.run(
+        ["/usr/bin/systemctl", "daemon-reload"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        timeout=30, check=False,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC"},
+    )
+    if daemon_reload.returncode != 0 or daemon_reload.stdout or daemon_reload.stderr:
+        die("systemd daemon-reload failed or produced unexpected output")
+
+atomic_write(receipt_path, receipt_bytes, root_prefix, uid, gid, 0o400)
+os.unlink(intent_path)
+fsync_directory(receipt_base)
+verifier_path = host_path(root_prefix, "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs")
+output = verify_installed(node_path, verifier_path, options.release_sha, root_prefix if fixture_mode else None)
+print("PRODUCTION_CONTROL_INSTALL=PASS")
+print(f"PRODUCTION_CONTROL_ARCHIVE_SHA256={archive_digest}")
+print(f"PRODUCTION_CONTROL_ADMISSION_RECEIPT_SHA256={admission_expected_digest}")
+print(output, end="")
+PYTHON_AUTHORITY

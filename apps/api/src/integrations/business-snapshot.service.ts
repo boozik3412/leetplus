@@ -1,7 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import { Prisma, type BusinessSnapshotRun } from '@prisma/client';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma, TenantModule, type BusinessSnapshotRun } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
+import type { TenantExecutionAction } from '../tenancy/tenant-execution-policy.service';
+import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 
 export type BusinessSnapshotType =
   | 'REVENUE'
@@ -80,6 +88,12 @@ type SnapshotBuildResult = {
 
 const businessSnapshotFreshMs = 24 * 60 * 60 * 1000;
 const businessSnapshotStaleAfterHours = 24;
+const BUSINESS_SNAPSHOT_MODULES = [
+  TenantModule.INTEGRATIONS,
+  TenantModule.ASSORTMENT,
+  TenantModule.GAMIFICATION,
+  TenantModule.STAFF,
+] as const;
 const businessSnapshotDefinitions: SnapshotDefinition[] = [
   {
     type: 'REVENUE',
@@ -115,7 +129,10 @@ const businessSnapshotDefinitions: SnapshotDefinition[] = [
 
 @Injectable()
 export class BusinessSnapshotService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
+  ) {}
 
   async getStatus(
     user: AuthenticatedUser,
@@ -126,6 +143,7 @@ export class BusinessSnapshotService {
   async getStatusForTenant(
     tenantId: string,
   ): Promise<BusinessSnapshotStatusResult> {
+    await this.assertExecutionAllowed(tenantId, 'READ');
     const latestRuns = await this.prisma.businessSnapshotRun.findMany({
       where: { tenantId },
       orderBy: { startedAt: 'desc' },
@@ -154,7 +172,25 @@ export class BusinessSnapshotService {
   async runSnapshotsForTenant(
     tenantId: string,
     query: BusinessSnapshotRunQuery,
+    executionAction: TenantExecutionAction = 'WRITE',
   ): Promise<BusinessSnapshotRunResult> {
+    const admission = await this.assertExecutionAllowed(
+      tenantId,
+      executionAction,
+    );
+    if (executionAction === 'OUTBOUND') {
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+        jobKind: 'LANGAME_BUSINESS_SNAPSHOT',
+      });
+      if (!backgroundExecution.allowed) {
+        throw new ServiceUnavailableException({
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          message: tenantBackgroundExecutionNote(backgroundExecution),
+        });
+      }
+    }
+
     const startedAt = new Date();
     const period = this.resolvePeriod(query);
     const types = this.resolveTypes(query.type);
@@ -171,6 +207,16 @@ export class BusinessSnapshotService {
       runs,
       status: await this.getStatusForTenant(tenantId),
     };
+  }
+
+  private assertExecutionAllowed(
+    tenantId: string,
+    action: TenantExecutionAction,
+  ) {
+    return this.tenantExecutionAdmissionService.assertAllowed(
+      tenantId,
+      BUSINESS_SNAPSHOT_MODULES.map((module) => ({ module, action })),
+    );
   }
 
   private async createSnapshotRun(

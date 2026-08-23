@@ -1,11 +1,15 @@
-import { UserRole } from '@prisma/client';
+import { TenantCustomerStage, UserRole } from '@prisma/client';
 import { StoresService } from './stores.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ConfigService } from '@nestjs/config';
+import { FreshStoreScopeService } from '../tenancy/fresh-store-scope.service';
 
 type StoresPrismaMock = {
+  tenant: {
+    findUnique: jest.Mock;
+  };
   store: {
     findMany: jest.Mock;
     findFirst: jest.Mock;
@@ -20,6 +24,11 @@ type TenantContextMock = {
 
 function createPrismaMock(): StoresPrismaMock {
   return {
+    tenant: {
+      findUnique: jest.fn().mockResolvedValue({
+        customerStage: TenantCustomerStage.INTERNAL,
+      }),
+    },
     store: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
@@ -33,6 +42,10 @@ describe('StoresService', () => {
   let prisma: StoresPrismaMock;
   let tenantContext: TenantContextMock;
   let config: { get: jest.Mock };
+  let freshStoreScope: {
+    resolveRequestedStoreIds: jest.Mock;
+    assertNetwork: jest.Mock;
+  };
   let service: StoresService;
   const user: AuthenticatedUser = {
     id: 'user-1',
@@ -41,6 +54,9 @@ describe('StoresService', () => {
     role: UserRole.OWNER,
     tenantId: 'tenant-demo',
     tenantSlug: 'demo',
+    isPlatformAdmin: false,
+    accessScope: 'NETWORK',
+    allowedStoreIds: [],
   };
 
   beforeEach(() => {
@@ -52,10 +68,26 @@ describe('StoresService', () => {
       }),
     };
     config = { get: jest.fn() };
+    freshStoreScope = {
+      resolveRequestedStoreIds: jest.fn().mockResolvedValue({
+        tenantId: 'tenant-demo',
+        tenantSlug: 'demo',
+        mode: 'NETWORK',
+        allowedStoreIds: [],
+        effectiveStoreIds: null,
+      }),
+      assertNetwork: jest.fn().mockResolvedValue({
+        tenantId: 'tenant-demo',
+        tenantSlug: 'demo',
+        mode: 'NETWORK',
+        allowedStoreIds: [],
+      }),
+    };
     service = new StoresService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
       config as unknown as ConfigService,
+      freshStoreScope as unknown as FreshStoreScopeService,
     );
   });
 
@@ -68,9 +100,27 @@ describe('StoresService', () => {
 
     await service.findAll(user);
 
-    expect(tenantContext.resolve).toHaveBeenCalledWith(user);
+    expect(freshStoreScope.resolveRequestedStoreIds).toHaveBeenCalledWith(user);
     expect(prisma.store.findMany).toHaveBeenCalledWith({
       where: { tenantId: 'tenant-demo' },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    });
+  });
+
+  it('returns only stores from the fresh club-owner allow-list', async () => {
+    freshStoreScope.resolveRequestedStoreIds.mockResolvedValueOnce({
+      tenantId: 'tenant-demo',
+      tenantSlug: 'demo',
+      mode: 'STORES',
+      allowedStoreIds: ['store-2'],
+      effectiveStoreIds: ['store-2'],
+    });
+    prisma.store.findMany.mockResolvedValue([]);
+
+    await service.findAll(user);
+
+    expect(prisma.store.findMany).toHaveBeenCalledWith({
+      where: { tenantId: 'tenant-demo', id: { in: ['store-2'] } },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     });
   });
@@ -87,6 +137,11 @@ describe('StoresService', () => {
       user,
     );
 
+    expect(freshStoreScope.assertNetwork).toHaveBeenCalledWith(user);
+    expect(prisma.tenant.findUnique).toHaveBeenCalledWith({
+      where: { id: 'tenant-demo' },
+      select: { customerStage: true },
+    });
     expect(prisma.store.create).toHaveBeenCalledWith({
       data: {
         tenantId: 'tenant-demo',
@@ -101,8 +156,31 @@ describe('StoresService', () => {
         yandexMapsUrl: null,
         timeZone: 'Asia/Yekaterinburg',
         gamificationEnabled: false,
+        backgroundExecutionEnabled: false,
       },
     });
+  });
+
+  it('blocks external pilot store creation before any outbound lookup or write', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch');
+    prisma.tenant.findUnique.mockResolvedValueOnce({
+      customerStage: TenantCustomerStage.PILOT,
+    });
+
+    await expect(
+      service.create(
+        {
+          name: 'Second club',
+          yandexMapsUrl: 'https://yandex.ru/maps/-/CDuDemo',
+        },
+        user,
+      ),
+    ).rejects.toThrow(
+      'External tenant store creation requires the dedicated provisioning and quota workflow',
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(prisma.store.create).not.toHaveBeenCalled();
   });
 
   it('updates explicit gamification flag inside tenant', async () => {
@@ -117,6 +195,7 @@ describe('StoresService', () => {
 
     await service.update('store-1', { gamificationEnabled: true }, user);
 
+    expect(freshStoreScope.assertNetwork).toHaveBeenCalledWith(user);
     expect(prisma.store.update).toHaveBeenCalledWith({
       where: { id: 'store-1' },
       data: { gamificationEnabled: true },
@@ -225,6 +304,27 @@ describe('StoresService', () => {
         yandexMapsUrl: 'https://yandex.ru/maps/?pt=60.597465,56.838011,pm2rdm',
       },
     });
+  });
+
+  it('does not resolve a shortened Yandex link from the store mutation path', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch');
+    prisma.store.findFirst.mockResolvedValue({
+      id: 'store-1',
+      name: 'Club A',
+      yandexMapsUrl: null,
+    });
+
+    await expect(
+      service.update(
+        'store-1',
+        { yandexMapsUrl: 'https://yandex.ru/maps/-/CDuDemo' },
+        user,
+      ),
+    ).rejects.toThrow(
+      'Сначала получите координаты через отдельный предпросмотр ссылки Яндекс Карт',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(prisma.store.update).not.toHaveBeenCalled();
   });
 
   it('rejects unsupported map links', async () => {
@@ -447,12 +547,16 @@ describe('StoresService', () => {
 
     await service.archive('store-1', user);
 
+    expect(freshStoreScope.assertNetwork).toHaveBeenCalledWith(user);
     expect(prisma.store.findFirst).toHaveBeenCalledWith({
       where: { id: 'store-1', tenantId: 'tenant-demo' },
     });
     expect(prisma.store.update).toHaveBeenCalledWith({
       where: { id: 'store-1' },
-      data: { isActive: false },
+      data: {
+        isActive: false,
+        backgroundExecutionEnabled: false,
+      },
     });
   });
 });

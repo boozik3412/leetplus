@@ -168,6 +168,19 @@ indefinitely.
 
 Use a short lock timeout so deployment fails instead of waiting indefinitely. A timeout is a stop condition: inspect `_prisma_migrations` and real objects before retrying or using `prisma migrate resolve`.
 
+The all-pending `db:deploy` command below is valid for this merged candidate
+only when the target already contains the immutable case contract migration
+`20260731110000_guest_game_case_reward_contract` (the current `origin/main`
+upgrade path), or for a clean database with no old API process. If the target
+is at `CURRENT_176` or otherwise still has the case expand/contract migrations
+pending while an old API can write, stop: do not deploy the merged migration
+directory in one wave. Use separately reviewed artifacts to apply the expand
+migration first, replace and drain every old API process, capture the
+application-wave evidence, and only then apply the contract and terminal
+`CURRENT_179` migrations. The local three-history rehearsal proves this
+separated path synthetically; it is not evidence of a production binary
+restart or drain.
+
 ```bash
 PGOPTIONS='-c lock_timeout=5000' pnpm --filter database db:deploy
 pnpm --filter database exec prisma migrate status

@@ -10,12 +10,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { from, interval, map, startWith, switchMap } from 'rxjs';
+import { of } from 'rxjs';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { FreshStoreScopeGuard } from '../tenancy/fresh-store-scope.guard';
 import {
   StaffTeamChatService,
   type StaffChatChannelDto,
@@ -37,7 +38,7 @@ const TEAM_CHAT_EVENTS_INTERVAL_MS = 5_000;
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
 )
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, FreshStoreScopeGuard)
 export class StaffTeamChatController {
   constructor(private readonly staffTeamChatService: StaffTeamChatService) {}
 
@@ -50,21 +51,20 @@ export class StaffTeamChatController {
   }
 
   @Sse('events')
-  events(
+  async events(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: StaffTeamChatQuery,
   ) {
-    return interval(TEAM_CHAT_EVENTS_INTERVAL_MS).pipe(
-      startWith(0),
-      switchMap(() =>
-        from(this.staffTeamChatService.getLiveState(user, query)),
-      ),
-      map((data) => ({
-        type: 'team-chat-state',
-        retry: TEAM_CHAT_EVENTS_INTERVAL_MS,
-        data,
-      })),
-    );
+    // One event per connection makes every browser retry pass through
+    // JwtAuthGuard again, so scope revocation applies on the next poll. Await
+    // the fresh authority decision before Nest commits the 200 SSE headers.
+    const data = await this.staffTeamChatService.getLiveState(user, query);
+
+    return of({
+      type: 'team-chat-state',
+      retry: TEAM_CHAT_EVENTS_INTERVAL_MS,
+      data,
+    });
   }
 
   @Post('channels')

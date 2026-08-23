@@ -306,6 +306,9 @@ jobs:
       - name: Validate attachment inventory command
         run: pnpm --filter database check:attachment-inventory
 
+      - name: Validate Gate 1MT operational fail-closed preflight
+        run: pnpm --filter database check:gate-1mt-operational-preflight
+
       - name: Validate staff task integrity inventory command
         run: pnpm --filter database check:staff-task-integrity-inventory
 

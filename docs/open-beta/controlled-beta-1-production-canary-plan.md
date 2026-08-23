@@ -2,6 +2,13 @@
 
 Статус: `F4 ARTIFACT + RESTORED-COPY + CRASH/N-1 ACCEPTED / OPERATIONAL SUCCESSOR AND PRODUCTION CANARY PENDING / PRODUCTION NO-GO`.
 
+Актуальный машиночитаемый вход перед canary —
+[`Gate 1MT operational preflight`](./gate-1mt-operational-preflight.md).
+Исторические SHA/run/artifact ниже остаются audit trail и не допускаются как
+текущий evidence: каждый новый canary manifest обязан ссылаться на exact
+release SHA, свежие CI/browser/inventory/metrics/rollback receipts и exact
+target fingerprints. Provider traffic в `CONTROLLED_CANARY` запрещён.
+
 Этот документ — обязательная операционная последовательность для первого
 внешнего `Tenant B/Store B1`. Он не разрешает выпуск по ветке, `git pull` или
 из произвольной рабочей директории. Единственный разрешённый вход — exact

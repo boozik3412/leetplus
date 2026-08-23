@@ -8,6 +8,13 @@
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
+Gate 1MT production-risk evidence теперь сводится read-only fail-closed
+admission contract: [Gate 1MT operational preflight](gate-1mt-operational-preflight.md).
+Он связывает exact release SHA, production attachment inventory, browser
+archive/delete/orphan/cross-tenant checks, CI, observability, rollback и
+отдельно одобренные provider canary. До передачи exact target/test-recipient
+scope внешний send и production GO остаются `BLOCKED_MANUAL`.
+
 Этот каталог — навигационная точка для перевода текущей сети из demo-режима в
 полноценную работу и последующего invite-only теста с внешними сетями. Он не
 разрешает deployment, миграцию production-данных или выдачу доступа сам по

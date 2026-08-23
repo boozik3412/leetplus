@@ -279,8 +279,10 @@ Read-only scanner уже реализован как
 `packages/database/scripts/staff-attachment-backfill-dry-run.mjs`. Он использует
 одно read-only PostgreSQL connection и одну `REPEATABLE READ` snapshot
 transaction для всех bounded keyset pages. Production требует explicit target
-и точную attestation; raw UUID, URL, имена файлов, PII и credentials не
-выводятся.
+и точную attestation, exact release SHA и независимо проверенный
+credential-free database target fingerprint; raw UUID, URL, имена файлов, PII
+и credentials не выводятся. Aggregate report затем проходит digest-bound
+[`Gate 1MT operational preflight`](../../../open-beta/gate-1mt-operational-preflight.md).
 
 Распознаются только:
 

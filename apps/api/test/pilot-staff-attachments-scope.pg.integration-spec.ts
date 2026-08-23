@@ -1389,11 +1389,12 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
           select: { state: true, stateReasonCode: true },
         }),
       ).resolves.toEqual({ state: 'BOUND', stateReasonCode: null });
-      await expect(
-        services.attachments.getAttachment(user, expected.attachmentId),
-      ).resolves.toEqual(
-        expect.objectContaining({ id: expected.attachmentId }),
+      const downloaded = await services.attachments.getAttachment(
+        user,
+        expected.attachmentId,
       );
+      expect(downloaded.contentType).toBe('text/plain');
+      expect(Buffer.isBuffer(downloaded.buffer)).toBe(true);
     }
 
     await services.trainingCourses.updateCourse(user, course.id, {

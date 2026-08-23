@@ -355,6 +355,7 @@ const definitions: readonly ControllerDefinition[] = [
       [
         'GET',
         [
+          'statistics',
           'workspace',
           'facts',
           'activity-ledger/diagnostics',

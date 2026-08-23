@@ -120,10 +120,16 @@ export async function requireTenantWorkspaceUser() {
  * helper prevents a STORES subject from reaching a server component that
  * would otherwise turn the expected 403 into a generic RSC failure.
  */
-export async function requireNetworkScopedUser() {
+export async function requireNetworkScopedUser(options: {
+  storesFallback?: string;
+} = {}) {
   const user = await requireCurrentUser();
 
   if (user.accessScope !== "NETWORK") {
+    if (options.storesFallback) {
+      redirect(options.storesFallback);
+    }
+
     notFound();
   }
 

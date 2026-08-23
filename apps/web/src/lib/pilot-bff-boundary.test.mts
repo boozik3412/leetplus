@@ -584,7 +584,7 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
 
   assert.match(
     authSource,
-    /export async function requireNetworkScopedUser\(\)[\s\S]*await requireCurrentUser\(\)[\s\S]*user\.accessScope !== ["']NETWORK["'][\s\S]*notFound\(\)/,
+    /export async function requireNetworkScopedUser\(options:\s*\{[\s\S]*storesFallback\?:\s*string;[\s\S]*\}\s*=\s*\{\}\)\s*\{[\s\S]*await requireCurrentUser\(\)[\s\S]*user\.accessScope !== ["']NETWORK["'][\s\S]*notFound\(\)/,
   );
   assert.match(
     permissionsSource,
@@ -599,10 +599,18 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
     );
     assert.match(
       source,
-      /await requireNetworkScopedUser\(\)/,
+      /await requireNetworkScopedUser\(/,
       `${networkOnlyPages[index]} must apply the scope gate before data access`,
     );
   }
+
+  const shiftWorkspaceSource = pageSources[networkOnlyPages.indexOf(
+    "shift-workspace/page.tsx",
+  )];
+  assert.match(
+    shiftWorkspaceSource,
+    /requireNetworkScopedUser\(\{[\s\S]*storesFallback:\s*staffTasksWorkspaceHref[\s\S]*\}\)/,
+  );
 });
 
 test("keeps store-aware checklist workspaces behind authenticated API authority", async () => {

@@ -5,6 +5,7 @@ import {
   getDefaultLandingPath,
   platformAdministrationHref,
   staffShiftWorkspaceHref,
+  staffTasksWorkspaceHref,
 } from "./landing.ts";
 
 type LandingUser = Parameters<typeof getDefaultLandingPath>[0];
@@ -13,6 +14,7 @@ function user(overrides: Partial<NonNullable<LandingUser>> = {}) {
   return {
     role: "OWNER" as const,
     isPlatformAdmin: false,
+    accessScope: "NETWORK" as const,
     ...overrides,
   } satisfies NonNullable<LandingUser>;
 }
@@ -47,6 +49,29 @@ test("keeps tenant shift roles in the shift workspace", () => {
   assert.equal(
     getDefaultLandingPath(user({ role: "CLUB_ADMINISTRATOR" })),
     staffShiftWorkspaceHref,
+  );
+});
+
+test("routes store-scoped shift roles to their scoped task workspace", () => {
+  for (const role of [
+    "SENIOR_ADMINISTRATOR",
+    "CLUB_ADMINISTRATOR",
+    "TRAINEE",
+  ] as const) {
+    assert.equal(
+      getDefaultLandingPath(user({ role, accessScope: "STORES" })),
+      staffTasksWorkspaceHref,
+    );
+  }
+});
+
+test("replaces a stale shift-workspace return path for STORES users", () => {
+  assert.equal(
+    getAuthenticatedDestination(
+      user({ role: "TRAINEE", accessScope: "STORES" }),
+      "/staff/shift-workspace?checklistRunId=old",
+    ),
+    staffTasksWorkspaceHref,
   );
 });
 

@@ -14,6 +14,7 @@ import {
   getDefaultLandingPath,
   isShiftWorkspaceRole,
   platformAdministrationHref,
+  staffTasksWorkspaceHref,
 } from "@/lib/landing";
 import { canAccessPath } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/roles";
@@ -719,15 +720,19 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const homeLabel =
     homeHref === platformAdministrationHref
       ? "Администрирование"
-      : homeHref === "/dashboard"
-        ? "Главная"
-        : "Моя смена";
+      : homeHref === staffTasksWorkspaceHref
+        ? "Мои задачи"
+        : homeHref === "/dashboard"
+          ? "Главная"
+          : "Моя смена";
   const homeTitle =
     homeHref === platformAdministrationHref
       ? "Главная: администрирование платформы"
-      : homeHref === "/dashboard"
-        ? "Главная: сводный дашборд сети"
-        : "Моя смена: задачи, регламенты и текущая выручка";
+      : homeHref === staffTasksWorkspaceHref
+        ? "Моя смена: задачи и текущие приоритеты"
+        : homeHref === "/dashboard"
+          ? "Главная: сводный дашборд сети"
+          : "Моя смена: задачи, регламенты и текущая выручка";
   const isHomeActive = isNavigationItemActive(pathname, homeHref);
   const isDashboardArea = isDashboardPath(pathname);
   const currentProductArea = resolveCurrentProductArea(pathname);

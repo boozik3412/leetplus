@@ -1,6 +1,7 @@
 import type { AuthUser } from "./auth";
 
 export const staffShiftWorkspaceHref = "/staff/shift-workspace";
+export const staffTasksWorkspaceHref = "/staff/tasks?view=my&status=all";
 export const platformAdministrationHref = "/administration";
 
 export function isShiftWorkspaceRole(
@@ -20,26 +21,44 @@ export function isCommunicationChatOnlyRole(
 }
 
 export function getDefaultLandingPath(
-  user: Pick<AuthUser, "role" | "isPlatformAdmin"> | null,
+  user: Pick<AuthUser, "role" | "isPlatformAdmin" | "accessScope"> | null,
 ) {
   if (user?.isPlatformAdmin) {
     return platformAdministrationHref;
   }
 
   if (isShiftWorkspaceRole(user?.role)) {
-    return staffShiftWorkspaceHref;
+    return user?.accessScope === "STORES"
+      ? staffTasksWorkspaceHref
+      : staffShiftWorkspaceHref;
   }
 
   return "/dashboard";
 }
 
 export function getAuthenticatedDestination(
-  user: Pick<AuthUser, "role" | "isPlatformAdmin">,
+  user: Pick<AuthUser, "role" | "isPlatformAdmin" | "accessScope">,
   returnTo?: string | null,
 ) {
   if (user.isPlatformAdmin) {
     return platformAdministrationHref;
   }
 
+  if (
+    user.accessScope === "STORES" &&
+    returnTo &&
+    isShiftWorkspacePath(returnTo)
+  ) {
+    return staffTasksWorkspaceHref;
+  }
+
   return returnTo ?? getDefaultLandingPath(user);
+}
+
+function isShiftWorkspacePath(href: string) {
+  const path = href.split("?")[0]?.split("#")[0] ?? href;
+  return (
+    path === staffShiftWorkspaceHref ||
+    path.startsWith(`${staffShiftWorkspaceHref}/`)
+  );
 }

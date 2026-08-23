@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
 import { requireNetworkScopedUser } from "@/lib/auth";
+import { staffTasksWorkspaceHref } from "@/lib/landing";
 import {
   getStaffOperators,
   type StaffOperatorReport,
@@ -608,7 +609,9 @@ export default async function StaffShiftWorkspacePage({
 }: {
   searchParams: SearchParams;
 }) {
-  const user = await requireNetworkScopedUser();
+  const user = await requireNetworkScopedUser({
+    storesFallback: staffTasksWorkspaceHref,
+  });
   const params = await searchParams;
   const selectedChecklistId = searchParam(params.checklistRunId);
   const isChecklistPickerOpen = searchParam(params.checklistPicker) === "1";

@@ -1,6 +1,9 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 import { notFound, redirect } from "next/navigation";
-import { getDefaultLandingPath } from "./landing";
+import {
+  getAuthenticatedDestination,
+  platformAdministrationHref,
+} from "./landing";
 import { cache } from "react";
 
 export type AuthUser = {
@@ -64,7 +67,9 @@ export async function redirectIfAuthenticated(returnTo?: string | null) {
   const user = await getCurrentUserForRequest();
 
   if (user) {
-    redirect(sanitizeReturnTo(returnTo) ?? getDefaultLandingPath(user));
+    redirect(
+      getAuthenticatedDestination(user, sanitizeReturnTo(returnTo)),
+    );
   }
 }
 
@@ -95,15 +100,36 @@ export async function requireCurrentUser() {
 }
 
 /**
+ * Keeps platform operators out of tenant-scoped pages. The API remains the
+ * authoritative boundary; this redirect prevents expected tenant-scope
+ * rejections from becoming generic server-component failures.
+ */
+export async function requireTenantWorkspaceUser() {
+  const user = await requireCurrentUser();
+
+  if (user.isPlatformAdmin) {
+    redirect(platformAdministrationHref);
+  }
+
+  return user;
+}
+
+/**
  * UI companion for API workspaces protected by FreshNetworkScopeGuard.
  * The API guard remains the authoritative, database-fresh boundary; this
  * helper prevents a STORES subject from reaching a server component that
  * would otherwise turn the expected 403 into a generic RSC failure.
  */
-export async function requireNetworkScopedUser() {
+export async function requireNetworkScopedUser(options: {
+  storesFallback?: string;
+} = {}) {
   const user = await requireCurrentUser();
 
   if (user.accessScope !== "NETWORK") {
+    if (options.storesFallback) {
+      redirect(options.storesFallback);
+    }
+
     notFound();
   }
 

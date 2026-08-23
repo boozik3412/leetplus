@@ -52,6 +52,11 @@ type TelegramUpdate = {
 type LeetPlusWebhookResponse = {
   status?: unknown;
   action?: unknown;
+  replyAdmission?: {
+    status?: unknown;
+    scopeKind?: unknown;
+    scopeCount?: unknown;
+  };
   replyDispatch?: {
     status?: unknown;
   };
@@ -184,11 +189,33 @@ export async function handleTelegramEdgeWebhook(
   );
   const reply = leetPlusResponse.reply;
   const replyText = typeof reply?.text === 'string' ? reply.text : null;
-  const shouldSend =
+  const hasReplyProjection =
     reply?.provider === 'TELEGRAM' &&
     reply.method === 'sendMessage' &&
     replyText !== null;
+  const replyAdmitted = validReplyAdmission(leetPlusResponse.replyAdmission);
+  const shouldSend = hasReplyProjection && replyAdmitted;
   const alreadySentByApi = leetPlusResponse.replyDispatch?.status === 'SENT';
+
+  if (!replyAdmitted && (hasReplyProjection || callbackQueryId)) {
+    logger.warn(
+      `Telegram edge blocked outbound without API admission action=${stringValue(
+        leetPlusResponse.action,
+      )} status=${stringValue(leetPlusResponse.status)} chat=${chatIdMasked}`,
+    );
+
+    return {
+      ok: true,
+      upstreamStatus: leetPlusResponse.status ?? null,
+      upstreamAction: leetPlusResponse.action ?? null,
+      replySent: false,
+      dryRun: config.dryRun,
+      chatIdMasked,
+      callbackAnswered: false,
+      outboundRejected: true,
+      note: 'Missing or invalid LeetPlus Telegram outbound admission.',
+    };
+  }
 
   if (!shouldSend) {
     const callbackAnswered = config.dryRun
@@ -474,6 +501,23 @@ function safelyBuildTelegramReplyBody(
 
     throw error;
   }
+}
+
+function validReplyAdmission(value: LeetPlusWebhookResponse['replyAdmission']) {
+  if (
+    value?.status !== 'ADMITTED' ||
+    typeof value.scopeCount !== 'number' ||
+    !Number.isSafeInteger(value.scopeCount)
+  ) {
+    return false;
+  }
+
+  return (
+    (value.scopeKind === 'PLATFORM_SAFE' && value.scopeCount === 0) ||
+    (value.scopeKind === 'TENANT_STORES' &&
+      value.scopeCount > 0 &&
+      value.scopeCount <= 1000)
+  );
 }
 
 async function answerTelegramCallbackQueryIfNeeded(

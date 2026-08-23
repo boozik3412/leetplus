@@ -112,6 +112,32 @@ test("keeps all staff attachment parent lifecycle kinds covered by PostgreSQL ma
   assert.match(deleteGuardBlock, /resolves\.toBe\(parents\.length\)/);
 });
 
+test("keeps archive retention and controlled quarantine in the PostgreSQL release gate", async () => {
+  const source = await readFile(API_STAFF_ATTACHMENT_PG_SPEC, "utf8");
+  const lifecycleBlock = source.slice(
+    source.indexOf(
+      "it('atomically binds native writer references for all five staff parent kinds'",
+    ),
+    source.indexOf(
+      "it('rejects raw parent deletes that would orphan bound attachment authority'",
+    ),
+  );
+
+  assert.match(lifecycleBlock, /shiftRegulations\.updateRegulation[\s\S]*status: 'ARCHIVED'/);
+  assert.match(lifecycleBlock, /knowledgeBase\.updateArticle[\s\S]*status: 'ARCHIVED'/);
+  assert.match(lifecycleBlock, /trainingCourses\.updateCourse[\s\S]*status: 'ARCHIVED'/);
+  assert.match(lifecycleBlock, /onboardingPlans\.updatePlan[\s\S]*status: 'ARCHIVED'/);
+  assert.match(lifecycleBlock, /checklists\.updateChecklist[\s\S]*status: 'ACCEPTED'/);
+  assert.match(
+    lifecycleBlock,
+    /state: 'QUARANTINED'[\s\S]*stateReasonCode: 'NATIVE_REFERENCE_REMOVED'/,
+  );
+  assert.match(
+    lifecycleBlock,
+    /services\.attachments\.getAttachment[\s\S]*rejects\.toBeInstanceOf\(NotFoundException\)/,
+  );
+});
+
 test("keeps accepted STORES browser evidence linked until live archive/orphan matrix is added", async () => {
   const [readme, ...evidenceFiles] = await Promise.all([
     readFile(path.join(REPO_ROOT, "docs/open-beta/README.md"), "utf8"),

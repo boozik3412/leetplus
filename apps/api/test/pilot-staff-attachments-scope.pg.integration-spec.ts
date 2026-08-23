@@ -1366,6 +1366,36 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       ]);
     }
 
+    await services.shiftRegulations.updateRegulation(user, regulation.id, {
+      status: 'ARCHIVED',
+    });
+    await services.knowledgeBase.updateArticle(user, article.id, {
+      status: 'ARCHIVED',
+    });
+    await services.trainingCourses.updateCourse(user, course.id, {
+      status: 'ARCHIVED',
+    });
+    await services.onboardingPlans.updatePlan(user, plan.id, {
+      status: 'ARCHIVED',
+    });
+    await services.checklists.updateChecklist(user, fixture.checklistRunA1Id, {
+      status: 'ACCEPTED',
+    });
+
+    for (const expected of parentRows) {
+      await expect(
+        prisma.staffAttachment.findUniqueOrThrow({
+          where: { id: expected.attachmentId },
+          select: { state: true, stateReasonCode: true },
+        }),
+      ).resolves.toEqual({ state: 'BOUND', stateReasonCode: null });
+      await expect(
+        services.attachments.getAttachment(user, expected.attachmentId),
+      ).resolves.toEqual(
+        expect.objectContaining({ id: expected.attachmentId }),
+      );
+    }
+
     await services.trainingCourses.updateCourse(user, course.id, {
       steps: [
         {
@@ -1440,6 +1470,35 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
       state: 'QUARANTINED',
       stateReasonCode: 'NATIVE_REFERENCE_REMOVED',
     });
+
+    await services.knowledgeBase.updateArticle(user, article.id, {
+      content: null,
+    });
+    await services.onboardingPlans.updatePlan(user, plan.id, { steps: [] });
+    await services.checklists.updateChecklist(user, fixture.checklistRunA1Id, {
+      answers: [
+        {
+          sectionId: 'section-a',
+          itemId: 'item-a',
+          evidenceAttachments: [],
+        },
+      ],
+    });
+
+    for (const expected of parentRows) {
+      await expect(
+        prisma.staffAttachment.findUniqueOrThrow({
+          where: { id: expected.attachmentId },
+          select: { state: true, stateReasonCode: true },
+        }),
+      ).resolves.toEqual({
+        state: 'QUARANTINED',
+        stateReasonCode: 'NATIVE_REFERENCE_REMOVED',
+      });
+      await expect(
+        services.attachments.getAttachment(user, expected.attachmentId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    }
 
     const foreignAttachment = await services.attachments.createAttachment(
       buildUser(fixture, 'B_NETWORK'),

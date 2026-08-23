@@ -64,6 +64,7 @@ function createPrismaMock() {
       findMany: jest.fn(),
     },
     store: {
+      findFirst: jest.fn(),
       findMany: jest.fn(),
     },
     guestPortalOtpChallenge: {
@@ -278,6 +279,16 @@ function createService(configValues: Record<string, string | undefined> = {}) {
       }),
     ),
   };
+  const tenantExecutionAdmission = {
+    assertAllowed: jest.fn().mockResolvedValue({ allowed: true }),
+    evaluate: jest.fn().mockImplementation((tenantId: string) =>
+      Promise.resolve({
+        allowed: true,
+        tenantId,
+        reasonCode: 'ALLOWED',
+      }),
+    ),
+  };
   const service = new GuestPortalService(
     prisma,
     configService,
@@ -288,6 +299,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     guestBonusLedgerSchedulerService as any,
     secretEncryptionService as any,
     guestIdentityResolver as any,
+    tenantExecutionAdmission as any,
   );
 
   prisma.tenant.findFirst.mockResolvedValue(null);
@@ -336,6 +348,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     },
   ]);
   prisma.store.findMany.mockResolvedValue([]);
+  prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
   prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue(null);
   prisma.guestPortalOtpChallenge.count.mockResolvedValue(0);
   prisma.guestPortalOtpChallenge.create.mockResolvedValue({});
@@ -490,6 +503,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     prisma,
     secretEncryptionService,
     service,
+    tenantExecutionAdmission,
   };
 }
 
@@ -1561,6 +1575,376 @@ describe('case reward public contract', () => {
 });
 
 describe('GuestPortalService', () => {
+  describe('tenant execution admission', () => {
+    it('blocks public outbound bootstrap before any challenge mutation', async () => {
+      const { prisma, service, tenantExecutionAdmission } = createService();
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        gameLogoUrl: null,
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
+      tenantExecutionAdmission.assertAllowed.mockRejectedValueOnce(
+        new Error('ENTITLEMENT_OUTBOUND_DISABLED'),
+      );
+
+      await expect(
+        service.startOtp('leet', 'club-1337', {
+          phone: '+7 999 999-99-99',
+          gameConsentAccepted: true,
+        }),
+      ).rejects.toThrow('ENTITLEMENT_OUTBOUND_DISABLED');
+
+      expect(tenantExecutionAdmission.assertAllowed).toHaveBeenCalledWith(
+        'tenant-1',
+        [
+          { module: 'GAMIFICATION', action: 'OUTBOUND' },
+          { module: 'COMMUNICATIONS', action: 'OUTBOUND' },
+        ],
+      );
+      expect(prisma.guestPortalOtpChallenge.updateMany).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.create).not.toHaveBeenCalled();
+    });
+
+    it('blocks Telegram auth ingress before mutating a challenge when outbound is denied', async () => {
+      const { prisma, service, tenantExecutionAdmission } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      const codeHash = createHmac('sha256', 'test-secret')
+        .update('telegram-link:ABCDEF1234')
+        .digest('hex');
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        id: 'telegram-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        profileId: 'pending-profile-1',
+        codeHash,
+        status: 'AUTH_PENDING',
+        expiresAt: new Date(Date.now() + 60_000),
+        profile: {
+          id: 'pending-profile-1',
+          status: 'PENDING_TELEGRAM_AUTH',
+        },
+      });
+      tenantExecutionAdmission.assertAllowed.mockRejectedValueOnce(
+        new Error('ENTITLEMENT_OUTBOUND_DISABLED'),
+      );
+
+      await expect(
+        service.handleTelegramWebhook('telegram-secret', {
+          message: {
+            text: '/start lp_ABCDEF1234',
+            chat: { id: 123456 },
+            from: { id: 123456 },
+          },
+        }),
+      ).rejects.toThrow('ENTITLEMENT_OUTBOUND_DISABLED');
+
+      expect(tenantExecutionAdmission.assertAllowed).toHaveBeenCalledWith(
+        'tenant-1',
+        [
+          { module: 'GAMIFICATION', action: 'WRITE' },
+          { module: 'GAMIFICATION', action: 'OUTBOUND' },
+          { module: 'COMMUNICATIONS', action: 'OUTBOUND' },
+        ],
+      );
+      expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+      expect(
+        prisma.guestGameTelegramLinkChallenge.update,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('removes denied tenants from the public club directory', async () => {
+      const { prisma, service, tenantExecutionAdmission } = createService();
+      const store = (
+        tenantId: string,
+        tenantSlug: string,
+        storeId: string,
+      ) => ({
+        id: storeId,
+        publicSlug: `${storeId}-public`,
+        name: storeId,
+        city: 'Екатеринбург',
+        address: 'Lenina, 1',
+        gameLogoUrl: null,
+        latitude: null,
+        longitude: null,
+        externalProvider: null,
+        externalDomain: null,
+        integrationSourceId: null,
+        gamificationEnabled: true,
+        tenant: {
+          id: tenantId,
+          name: tenantSlug,
+          slug: tenantSlug,
+          gameLogoUrl: null,
+        },
+      });
+
+      prisma.store.findMany.mockResolvedValue([
+        store('tenant-admitted', 'admitted', 'store-admitted'),
+        store('tenant-denied', 'denied', 'store-denied'),
+      ]);
+      tenantExecutionAdmission.evaluate.mockImplementation((tenantId: string) =>
+        Promise.resolve({
+          allowed: tenantId === 'tenant-admitted',
+          tenantId,
+          reasonCode:
+            tenantId === 'tenant-admitted' ? 'ALLOWED' : 'TRIAL_EXPIRED',
+        }),
+      );
+
+      const directory = await service.getGamificationClubDirectory();
+
+      expect(directory.clubs.map((club) => club.id)).toEqual([
+        'admitted:store-admitted-public',
+      ]);
+      expect(tenantExecutionAdmission.evaluate).toHaveBeenCalledWith(
+        'tenant-admitted',
+        [{ module: 'GAMIFICATION', action: 'READ' }],
+      );
+      expect(tenantExecutionAdmission.evaluate).toHaveBeenCalledWith(
+        'tenant-denied',
+        [{ module: 'GAMIFICATION', action: 'READ' }],
+      );
+    });
+
+    it('does not issue a Mini App session for a denied tenant profile', async () => {
+      const { jwtService, prisma, service, tenantExecutionAdmission } =
+        createService({ GUEST_GAME_TG_EDGE_SHARED_SECRET: 'edge-secret' });
+
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        {
+          id: 'profile-denied',
+          guestId: null,
+          phoneHash: 'phone-hash',
+          contactMasked: '***2233',
+          unsubscribedAt: null,
+          tenant: {
+            id: 'tenant-denied',
+            slug: 'denied',
+            name: 'Denied tenant',
+          },
+          telegramLinkChallenges: [
+            {
+              id: 'challenge-denied',
+              store: {
+                id: 'store-denied',
+                publicSlug: 'club-denied',
+                name: 'Denied club',
+                city: 'Екатеринбург',
+                address: 'Lenina, 1',
+              },
+            },
+          ],
+        },
+      ]);
+      tenantExecutionAdmission.evaluate.mockResolvedValue({
+        allowed: false,
+        tenantId: 'tenant-denied',
+        reasonCode: 'TRIAL_EXPIRED',
+      });
+
+      const result = await service.exchangeTelegramMiniAppSession({
+        edgeSecret: 'edge-secret',
+        telegramUserId: '123456',
+        authDate: Math.floor(Date.now() / 1000),
+      });
+
+      expect(result).toMatchObject({
+        status: 'AUTH_REQUIRED',
+        profileId: null,
+      });
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('marks only explicit platform-safe Telegram replies as admitted', async () => {
+      const { service, tenantExecutionAdmission } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        message: {
+          text: '/help',
+          chat: { id: 123456 },
+          from: { id: 123456 },
+        },
+      });
+
+      expect(result.replyAdmission).toEqual({
+        status: 'ADMITTED',
+        scopeKind: 'PLATFORM_SAFE',
+        scopeCount: 0,
+      });
+      expect(result.replyDispatch).toMatchObject({ status: 'DISABLED' });
+      expect(tenantExecutionAdmission.assertAllowed).not.toHaveBeenCalled();
+    });
+
+    it('binds an in-progress Telegram auth reminder to its exact tenant/store', async () => {
+      const { prisma, service, tenantExecutionAdmission } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'pending-profile-1',
+        tenantId: 'tenant-1',
+        guestId: null,
+        phoneHash: 'phone-hash',
+        phoneEncrypted: null,
+        contactMasked: '***2233',
+        phoneConsentStatus: 'PENDING',
+        phoneConsentAt: null,
+        xp: 0,
+        level: 1,
+        status: 'PENDING_TELEGRAM_AUTH',
+        unsubscribedAt: null,
+      });
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        message: {
+          text: '/status',
+          chat: { id: 123456 },
+          from: { id: 123456 },
+        },
+      });
+
+      expect(result.replyAdmission).toEqual({
+        status: 'ADMITTED',
+        scopeKind: 'TENANT_STORES',
+        scopeCount: 1,
+      });
+      expect(result.replyDispatch).toMatchObject({ status: 'DISABLED' });
+      expect(tenantExecutionAdmission.assertAllowed).toHaveBeenCalledWith(
+        'tenant-1',
+        [
+          { module: 'GAMIFICATION', action: 'OUTBOUND' },
+          { module: 'COMMUNICATIONS', action: 'OUTBOUND' },
+        ],
+      );
+    });
+
+    it('skips Telegram dispatch without a platform-safe marker or tenant/store scope', async () => {
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('must not send'));
+      const { service } = createService({
+        GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED: 'true',
+        GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
+      });
+
+      try {
+        const result = await (service as any).dispatchTelegramWebhookReply(
+          {
+            status: 'IGNORED',
+            action: 'TELEGRAM_BOT_HELP',
+            profileId: null,
+            telegramIdentityMasked: 'ch...56',
+            message: 'Generic shared reply.',
+            reply: {
+              provider: 'TELEGRAM',
+              method: 'sendMessage',
+              chatIdMasked: 'ch...56',
+              text: 'Generic shared reply.',
+            },
+          },
+          '123456',
+        );
+
+        expect(result.replyDispatch).toMatchObject({
+          status: 'SKIPPED',
+          message: expect.stringContaining('exact tenant/store scope'),
+        });
+        expect(result.reply).toBeUndefined();
+        expect(result.replyAdmission).toBeUndefined();
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        fetchMock.mockRestore();
+      }
+    });
+
+    it('rechecks outbound admission immediately before Telegram fetch', async () => {
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('must not send'));
+      const { prisma, service, tenantExecutionAdmission } = createService({
+        GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED: 'true',
+        GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
+      });
+      const response = {
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_MENU',
+        profileId: 'profile-1',
+        telegramIdentityMasked: 'ch...56',
+        message: 'Scoped reply.',
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          chatIdMasked: 'ch...56',
+          text: 'Scoped reply.',
+        },
+      };
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        gameLogoUrl: null,
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
+      tenantExecutionAdmission.assertAllowed.mockRejectedValueOnce(
+        new Error('ENTITLEMENT_OUTBOUND_DISABLED'),
+      );
+
+      try {
+        const scopedResponse = (service as any).withTelegramOutboundScope(
+          response,
+          { tenantId: 'tenant-1', storeId: 'store-1' },
+        );
+        const result = await (service as any).dispatchTelegramWebhookReply(
+          scopedResponse,
+          '123456',
+        );
+
+        expect(tenantExecutionAdmission.assertAllowed).toHaveBeenCalledWith(
+          'tenant-1',
+          [
+            { module: 'GAMIFICATION', action: 'OUTBOUND' },
+            { module: 'COMMUNICATIONS', action: 'OUTBOUND' },
+          ],
+        );
+        expect(result.replyDispatch).toMatchObject({
+          status: 'SKIPPED',
+          message: expect.stringContaining('outbound admission'),
+        });
+        expect(result.reply).toBeUndefined();
+        expect(result.replyAdmission).toBeUndefined();
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        fetchMock.mockRestore();
+      }
+    });
+  });
+
   it('keeps Battle Pass rewards visible after switching to another season club', async () => {
     const { prisma, service } = createService();
     const gameActivatedAt = new Date('2026-06-01T00:00:00.000Z');
@@ -8257,6 +8641,20 @@ describe('GuestPortalService', () => {
           status: 'PENDING_TELEGRAM_AUTH',
         },
       });
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        gameLogoUrl: null,
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
 
       try {
         const result = await service.handleTelegramWebhook('telegram-secret', {
@@ -8271,6 +8669,11 @@ describe('GuestPortalService', () => {
           provider: 'TELEGRAM',
           status: 'SENT',
           chatIdMasked: 'ch...56',
+        });
+        expect(result.replyAdmission).toEqual({
+          status: 'ADMITTED',
+          scopeKind: 'TENANT_STORES',
+          scopeCount: 1,
         });
         expect(result.reply).toBeUndefined();
         expect(fetchMock).toHaveBeenCalledWith(

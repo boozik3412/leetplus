@@ -10,7 +10,11 @@ import {
   type ReactNode,
 } from "react";
 import type { AuthUser } from "@/lib/auth";
-import { getDefaultLandingPath, isShiftWorkspaceRole } from "@/lib/landing";
+import {
+  getDefaultLandingPath,
+  isShiftWorkspaceRole,
+  platformAdministrationHref,
+} from "@/lib/landing";
 import { canAccessPath } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/roles";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -712,11 +716,18 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     .filter((group) => group.items.length > 0);
   const showHomeLink = Boolean(user);
   const homeHref = user ? getDefaultLandingPath(user) : "/dashboard";
-  const homeLabel = homeHref === "/dashboard" ? "Главная" : "Моя смена";
+  const homeLabel =
+    homeHref === platformAdministrationHref
+      ? "Администрирование"
+      : homeHref === "/dashboard"
+        ? "Главная"
+        : "Моя смена";
   const homeTitle =
-    homeHref === "/dashboard"
-      ? "Главная: сводный дашборд сети"
-      : "Моя смена: задачи, регламенты и текущая выручка";
+    homeHref === platformAdministrationHref
+      ? "Главная: администрирование платформы"
+      : homeHref === "/dashboard"
+        ? "Главная: сводный дашборд сети"
+        : "Моя смена: задачи, регламенты и текущая выручка";
   const isHomeActive = isNavigationItemActive(pathname, homeHref);
   const isDashboardArea = isDashboardPath(pathname);
   const currentProductArea = resolveCurrentProductArea(pathname);

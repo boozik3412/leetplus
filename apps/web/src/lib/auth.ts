@@ -1,6 +1,9 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 import { notFound, redirect } from "next/navigation";
-import { getDefaultLandingPath } from "./landing";
+import {
+  getAuthenticatedDestination,
+  platformAdministrationHref,
+} from "./landing";
 import { cache } from "react";
 
 export type AuthUser = {
@@ -64,7 +67,9 @@ export async function redirectIfAuthenticated(returnTo?: string | null) {
   const user = await getCurrentUserForRequest();
 
   if (user) {
-    redirect(sanitizeReturnTo(returnTo) ?? getDefaultLandingPath(user));
+    redirect(
+      getAuthenticatedDestination(user, sanitizeReturnTo(returnTo)),
+    );
   }
 }
 
@@ -89,6 +94,21 @@ export async function requireCurrentUser() {
 
   if (!user) {
     redirect("/login");
+  }
+
+  return user;
+}
+
+/**
+ * Keeps platform operators out of tenant-scoped pages. The API remains the
+ * authoritative boundary; this redirect prevents expected tenant-scope
+ * rejections from becoming generic server-component failures.
+ */
+export async function requireTenantWorkspaceUser() {
+  const user = await requireCurrentUser();
+
+  if (user.isPlatformAdmin) {
+    redirect(platformAdministrationHref);
   }
 
   return user;

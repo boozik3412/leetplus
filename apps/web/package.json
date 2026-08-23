@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test:landing": "node --test --experimental-strip-types src/lib/landing.test.mts",
     "test:invite-secret-transport": "node --test --experimental-strip-types src/lib/invite-secret.test.mts src/lib/invite-transport-core.test.mts",
     "test:pilot-bff-boundary": "node --test --experimental-strip-types src/lib/pilot-bff-boundary.test.mts",
     "test:users-roles-bff-boundary": "node --test --experimental-strip-types src/lib/users-roles-bff-boundary.test.mts",

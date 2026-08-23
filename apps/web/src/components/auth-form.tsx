@@ -4,7 +4,10 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type { AuthUser } from "@/lib/auth";
-import { getDefaultLandingPath } from "@/lib/landing";
+import {
+  getAuthenticatedDestination,
+  getDefaultLandingPath,
+} from "@/lib/landing";
 import { getRoleLabel, type UserRole } from "@/lib/roles";
 
 type AuthMode = "login" | "register";
@@ -303,6 +306,9 @@ export function AuthForm({
 
       const data = (await response.json()) as { user?: AuthUser };
       const landingPath = data.user ? getDefaultLandingPath(data.user) : "/dashboard";
+      const authenticatedDestination = data.user
+        ? getAuthenticatedDestination(data.user, returnTo)
+        : returnTo ?? landingPath;
 
       if (isInviteRegister) {
         onInviteAccepted?.();
@@ -324,7 +330,7 @@ export function AuthForm({
           ? landingPath
           : isRegister
           ? `/verify-email?email=${encodeURIComponent(form.email)}`
-          : returnTo ?? landingPath,
+          : authenticatedDestination,
       );
     } catch {
       setError("Backend недоступен. Проверьте, что API запущен.");

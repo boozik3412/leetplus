@@ -607,6 +607,12 @@ jobs:
       - name: Lint tenant execution admission boundary
         run: pnpm --filter api lint:ci:tenant-execution
 
+      - name: Lint tenant Telegram outbound admission boundary
+        run: pnpm --filter api lint:ci:tenant-telegram-admission
+
+      - name: Lint Gate 1MT controlled outbound digest boundary
+        run: pnpm --filter api lint:ci:gate-1mt-controlled-outbound
+
       - name: Lint isolated design-partner runtime boundary
         run: pnpm --filter api lint:ci:design-partner
 
@@ -723,6 +729,12 @@ jobs:
 
       - name: Run tenant execution admission tests
         run: pnpm --filter api test:ci:tenant-execution
+
+      - name: Run tenant Telegram outbound admission tests
+        run: pnpm --filter api test:ci:tenant-telegram-admission
+
+      - name: Run Gate 1MT controlled outbound digest tests
+        run: pnpm --filter api test:ci:gate-1mt-controlled-outbound
 
       - name: Run background execution containment tests
         run: pnpm --filter api test:ci:background-execution

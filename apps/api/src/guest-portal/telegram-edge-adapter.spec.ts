@@ -75,6 +75,11 @@ describe('telegram edge adapter', () => {
           JSON.stringify({
             status: 'AWAITING_CONTACT',
             action: 'TELEGRAM_AUTH_START',
+            replyAdmission: {
+              status: 'ADMITTED',
+              scopeKind: 'TENANT_STORES',
+              scopeCount: 1,
+            },
             reply: {
               provider: 'TELEGRAM',
               method: 'sendMessage',
@@ -156,6 +161,11 @@ describe('telegram edge adapter', () => {
           JSON.stringify({
             status: 'CONFIRMED',
             action: 'TELEGRAM_BOT_MENU',
+            replyAdmission: {
+              status: 'ADMITTED',
+              scopeKind: 'TENANT_STORES',
+              scopeCount: 1,
+            },
             reply: {
               provider: 'TELEGRAM',
               method: 'sendMessage',
@@ -238,6 +248,11 @@ describe('telegram edge adapter', () => {
           JSON.stringify({
             status: 'CONFIRMED',
             action: 'TELEGRAM_BOT_MENU',
+            replyAdmission: {
+              status: 'ADMITTED',
+              scopeKind: 'TENANT_STORES',
+              scopeCount: 1,
+            },
             replyDispatch: {
               provider: 'TELEGRAM',
               status: 'SENT',
@@ -296,6 +311,48 @@ describe('telegram edge adapter', () => {
     );
   });
 
+  it('fails closed when the API reply has no outbound admission receipt', async () => {
+    const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest
+      .fn<TelegramEdgeFetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: 'CONFIRMED',
+            action: 'TELEGRAM_BOT_MENU',
+            reply: {
+              provider: 'TELEGRAM',
+              method: 'sendMessage',
+              text: 'Unadmitted reply',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+    const result = await handleTelegramEdgeWebhook(
+      baseConfig,
+      {
+        update_id: 31,
+        callback_query: {
+          id: 'callback-unadmitted',
+          from: { id: 123456 },
+          message: { chat: { id: 123456 }, text: 'Menu' },
+          data: 'bot:menu',
+        },
+      },
+      { fetch: fetchMock, logger: silentLogger },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      replySent: false,
+      callbackAnswered: false,
+      outboundRejected: true,
+      note: 'Missing or invalid LeetPlus Telegram outbound admission.',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('does not call Telegram in dry-run mode', async () => {
     const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest
       .fn<TelegramEdgeFetch>()
@@ -304,6 +361,11 @@ describe('telegram edge adapter', () => {
           JSON.stringify({
             status: 'CONFIRMED',
             action: 'TELEGRAM_AUTH_CONTACT',
+            replyAdmission: {
+              status: 'ADMITTED',
+              scopeKind: 'TENANT_STORES',
+              scopeCount: 1,
+            },
             reply: {
               provider: 'TELEGRAM',
               method: 'sendMessage',
@@ -349,6 +411,11 @@ describe('telegram edge adapter', () => {
           JSON.stringify({
             status: 'CONFIRMED',
             action: 'TELEGRAM_BOT_MENU',
+            replyAdmission: {
+              status: 'ADMITTED',
+              scopeKind: 'TENANT_STORES',
+              scopeCount: 1,
+            },
             reply: {
               provider: 'TELEGRAM',
               method: 'sendMessage',

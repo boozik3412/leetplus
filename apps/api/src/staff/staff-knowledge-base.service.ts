@@ -1602,10 +1602,11 @@ export class StaffKnowledgeBaseService {
     }
 
     if (dto.content !== undefined) {
-      data.content = this.normalizeOptionalString(dto.content)?.slice(
-        0,
-        KNOWLEDGE_ARTICLE_CONTENT_LIMIT,
-      );
+      data.content =
+        this.normalizeOptionalString(dto.content)?.slice(
+          0,
+          KNOWLEDGE_ARTICLE_CONTENT_LIMIT,
+        ) ?? null;
     }
 
     if (dto.folder !== undefined || options.requireTitle) {

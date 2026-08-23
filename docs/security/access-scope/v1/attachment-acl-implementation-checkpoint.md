@@ -363,11 +363,19 @@ pnpm --filter database db:inventory:attachment-acl -- --pretty
 STAFF_ATTACHMENT_BACKFILL_TARGET=production
 STAFF_ATTACHMENT_BACKFILL_PRODUCTION_ATTESTATION=
   I_ATTEST_THIS_IS_A_READ_ONLY_PRODUCTION_ATTACHMENT_INVENTORY
+STAFF_ATTACHMENT_BACKFILL_RELEASE_SHA=<exact-40-lowercase-hex>
+STAFF_ATTACHMENT_BACKFILL_EXPECTED_DATABASE_FINGERPRINT=<reviewed-sha256>
 ```
 
 Значение attestation передаётся одной строкой. `DATABASE_URL` обязателен, но
-никогда не сохраняется в evidence. Scanner не является apply-backfill:
+никогда не сохраняется в evidence. Fingerprint без DB access и credentials
+выводится отдельной командой `--print-database-fingerprint`; production scan
+до первого query проверяет его совпадение и привязывает report к exact release
+SHA. Scanner не является apply-backfill:
 положительный отчёт сам по себе не меняет lifecycle и bindings.
+
+Aggregate report принимается в operational admission только через
+[`gate-1mt-operational-preflight.md`](../../../open-beta/gate-1mt-operational-preflight.md).
 
 ## 7. Последовательность миграций и безопасный запуск
 

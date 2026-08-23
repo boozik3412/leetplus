@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 
 const SCRIPT_NAME = 'staff-attachment-backfill-dry-run';
@@ -14,6 +15,8 @@ const MAX_NODES_PER_VALUE = 20_000;
 const MAX_REFERENCES_PER_ROW = 1_000;
 const PRODUCTION_ATTESTATION =
   'I_ATTEST_THIS_IS_A_READ_ONLY_PRODUCTION_ATTACHMENT_INVENTORY';
+const RELEASE_SHA_RE = /^[0-9a-f]{40}$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
 const TARGET_ENVIRONMENTS = new Set(['development', 'staging', 'production']);
 const UUID_SOURCE =
   '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
@@ -46,6 +49,9 @@ Options:
   --self-test                Run parser/source safety checks without env or DB.
   --pretty                   Pretty-print the aggregate JSON report.
   --batch-size <1..1000>     Keyset page size (default: 250).
+  --print-database-fingerprint
+                             Print only the credential-free target fingerprint
+                             for DATABASE_URL, then exit without DB access.
 
 Required environment:
   DATABASE_URL
@@ -58,6 +64,13 @@ Production attestation:
   When STAFF_ATTACHMENT_BACKFILL_TARGET=production or NODE_ENV=production,
   STAFF_ATTACHMENT_BACKFILL_PRODUCTION_ATTESTATION must equal:
   ${PRODUCTION_ATTESTATION}
+
+  Production also requires STAFF_ATTACHMENT_BACKFILL_RELEASE_SHA to be the
+  exact lowercase release commit and
+  STAFF_ATTACHMENT_BACKFILL_EXPECTED_DATABASE_FINGERPRINT to match the
+  credential-free DATABASE_URL target fingerprint. Generate the fingerprint
+  from the reviewed production URL with --print-database-fingerprint before
+  opening the read-only inventory window.
 
 Optional environment:
   STAFF_ATTACHMENT_ALLOWED_HTTPS_ORIGINS
@@ -116,6 +129,7 @@ function parseBoundedInteger(
 
 function parseArguments(argv) {
   let batchSize;
+  let printDatabaseFingerprint = false;
   let pretty = false;
   let selfTest = false;
 
@@ -125,6 +139,7 @@ function parseArguments(argv) {
     if (argument === '--help') {
       return {
         help: true,
+        printDatabaseFingerprint: false,
         selfTest: false,
         pretty: false,
         batchSize: DEFAULT_BATCH_SIZE,
@@ -138,6 +153,11 @@ function parseArguments(argv) {
 
     if (argument === '--pretty') {
       pretty = true;
+      continue;
+    }
+
+    if (argument === '--print-database-fingerprint') {
+      printDatabaseFingerprint = true;
       continue;
     }
 
@@ -165,7 +185,20 @@ function parseArguments(argv) {
     );
   }
 
-  return { help: false, selfTest, pretty, batchSize };
+  if (printDatabaseFingerprint && (selfTest || pretty || batchSize)) {
+    failContract(
+      'CLI_FINGERPRINT_ARGUMENT_CONFLICT',
+      '--print-database-fingerprint cannot be combined with scan options.',
+    );
+  }
+
+  return {
+    help: false,
+    printDatabaseFingerprint,
+    selfTest,
+    pretty,
+    batchSize,
+  };
 }
 
 function parseTargetEnvironment() {
@@ -256,8 +289,7 @@ function parseAllowedOrigins() {
   return origins;
 }
 
-function buildReadOnlyDatabaseUrl(statementTimeoutMs) {
-  const raw = process.env.DATABASE_URL;
+function parsePostgresDatabaseUrl(raw) {
   if (!raw) {
     failContract('DATABASE_URL_REQUIRED', 'DATABASE_URL is required.');
   }
@@ -278,6 +310,83 @@ function buildReadOnlyDatabaseUrl(statementTimeoutMs) {
       'DATABASE_URL must use the postgres or postgresql protocol.',
     );
   }
+
+  if (!parsed.hostname || !parsed.pathname || parsed.pathname === '/') {
+    failContract(
+      'DATABASE_URL_TARGET_INVALID',
+      'DATABASE_URL must identify an explicit PostgreSQL host and database.',
+    );
+  }
+
+  return parsed;
+}
+
+function databaseTargetFingerprint(raw) {
+  const parsed = parsePostgresDatabaseUrl(raw);
+  const canonicalTarget = {
+    databasePath: parsed.pathname,
+    hostname: parsed.hostname.toLowerCase(),
+    port: parsed.port || '5432',
+    protocol: 'postgresql:',
+    schema: parsed.searchParams.get('schema') || 'public',
+  };
+
+  return createHash('sha256')
+    .update('STAFF_ATTACHMENT_DATABASE_TARGET_V1\0', 'utf8')
+    .update(JSON.stringify(canonicalTarget), 'utf8')
+    .digest('hex');
+}
+
+function parseOperationalBinding({ productionRequested, targetFingerprint }) {
+  const releaseSha = String(
+    process.env.STAFF_ATTACHMENT_BACKFILL_RELEASE_SHA ?? '',
+  ).trim();
+  const expectedTargetFingerprint = String(
+    process.env.STAFF_ATTACHMENT_BACKFILL_EXPECTED_DATABASE_FINGERPRINT ?? '',
+  ).trim();
+
+  if (productionRequested && !RELEASE_SHA_RE.test(releaseSha)) {
+    failContract(
+      'PRODUCTION_RELEASE_SHA_REQUIRED',
+      'Production inventory requires the exact lowercase release commit.',
+    );
+  }
+  if (releaseSha && !RELEASE_SHA_RE.test(releaseSha)) {
+    failContract(
+      'RELEASE_SHA_INVALID',
+      'The release commit must be 40 lowercase hexadecimal characters.',
+    );
+  }
+  if (productionRequested && !SHA256_RE.test(expectedTargetFingerprint)) {
+    failContract(
+      'PRODUCTION_DATABASE_FINGERPRINT_REQUIRED',
+      'Production inventory requires the reviewed database target fingerprint.',
+    );
+  }
+  if (expectedTargetFingerprint && !SHA256_RE.test(expectedTargetFingerprint)) {
+    failContract(
+      'DATABASE_FINGERPRINT_INVALID',
+      'The expected database target fingerprint must be lowercase SHA-256.',
+    );
+  }
+  if (
+    expectedTargetFingerprint &&
+    expectedTargetFingerprint !== targetFingerprint
+  ) {
+    failContract(
+      'DATABASE_TARGET_FINGERPRINT_MISMATCH',
+      'DATABASE_URL does not match the reviewed database target fingerprint.',
+    );
+  }
+
+  return {
+    databaseTargetFingerprint: targetFingerprint,
+    releaseSha: releaseSha || null,
+  };
+}
+
+function buildReadOnlyDatabaseUrl(statementTimeoutMs) {
+  const parsed = parsePostgresDatabaseUrl(process.env.DATABASE_URL);
 
   const existingOptions = parsed.searchParams.get('options')?.trim();
   const enforcedOptions = [
@@ -827,6 +936,26 @@ function runSelfTests() {
   const attachmentId = '123e4567-e89b-12d3-a456-426614174000';
   const sources = createSourcesReport();
   const requiredSecondarySources = ['chat_message_body', 'staff_task_fields'];
+  const fingerprintA = databaseTargetFingerprint(
+    'postgresql://operator:first-secret@db.example.test:5432/leetplus?schema=public',
+  );
+  const fingerprintB = databaseTargetFingerprint(
+    'postgresql://operator:second-secret@db.example.test:5432/leetplus?schema=public',
+  );
+  const fingerprintOtherSchema = databaseTargetFingerprint(
+    'postgresql://operator:first-secret@db.example.test:5432/leetplus?schema=other',
+  );
+
+  if (
+    !SHA256_RE.test(fingerprintA) ||
+    fingerprintA !== fingerprintB ||
+    fingerprintA === fingerprintOtherSchema
+  ) {
+    failContract(
+      'SELF_TEST_DATABASE_FINGERPRINT_FAILED',
+      'Database target fingerprints must exclude credentials and bind schema.',
+    );
+  }
 
   if (
     requiredSecondarySources.some(
@@ -914,6 +1043,8 @@ async function runInventory({
   prisma,
   batchSize,
   allowedOrigins,
+  databaseTargetFingerprint,
+  releaseSha,
   target,
   productionAttested,
   statementTimeoutMs,
@@ -931,6 +1062,8 @@ async function runInventory({
     safety: {
       target,
       productionAttested,
+      releaseSha,
+      databaseTargetFingerprint,
       databaseSessionReadOnly: false,
       singleConnection: true,
       snapshotIsolation: 'REPEATABLE READ',
@@ -1567,6 +1700,19 @@ try {
     process.stdout.write(`${HELP}\n`);
   } else if (argumentsResult.selfTest) {
     runSelfTests();
+  } else if (argumentsResult.printDatabaseFingerprint) {
+    process.stdout.write(
+      `${JSON.stringify({
+        schemaVersion: REPORT_SCHEMA_VERSION,
+        script: SCRIPT_NAME,
+        status: 'completed',
+        mode: 'DATABASE_TARGET_FINGERPRINT',
+        databaseTargetFingerprint: databaseTargetFingerprint(
+          process.env.DATABASE_URL,
+        ),
+        credentialsEmitted: false,
+      })}\n`,
+    );
   } else {
     const target = parseTargetEnvironment();
     const allowedOrigins = parseAllowedOrigins();
@@ -1601,6 +1747,13 @@ try {
         fallback: DEFAULT_TRANSACTION_TIMEOUT_MS,
       },
     );
+    const targetFingerprint = databaseTargetFingerprint(
+      process.env.DATABASE_URL,
+    );
+    const operationalBinding = parseOperationalBinding({
+      productionRequested: target.productionAttested,
+      targetFingerprint,
+    });
     const readOnlyUrl = buildReadOnlyDatabaseUrl(statementTimeoutMs);
 
     prisma = new PrismaClient({
@@ -1611,6 +1764,8 @@ try {
       prisma,
       batchSize,
       allowedOrigins,
+      databaseTargetFingerprint: operationalBinding.databaseTargetFingerprint,
+      releaseSha: operationalBinding.releaseSha,
       target: target.target,
       productionAttested: target.productionAttested,
       statementTimeoutMs,

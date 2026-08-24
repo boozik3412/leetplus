@@ -196,6 +196,11 @@ const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
   { group: "Геймификация", href: "/gamification", label: "Управление" },
   {
     group: "Геймификация",
+    href: "/gamification?tab=statistics",
+    label: "Статистика",
+  },
+  {
+    group: "Геймификация",
     href: "/gamification/log",
     label: "Игровой журнал",
   },

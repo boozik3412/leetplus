@@ -1684,6 +1684,19 @@ export function GuestGamificationPanel({
     if (["missions", "seasons"].includes(tab)) {
       void ensureMissionProducts();
     }
+
+    const url = new URL(window.location.href);
+    if (tab === "overview") {
+      url.searchParams.delete("tab");
+    } else {
+      url.searchParams.set("tab", tab);
+    }
+    window.history.replaceState(
+      null,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+
     setActiveTab(tab);
   }
 

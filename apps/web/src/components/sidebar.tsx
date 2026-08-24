@@ -24,6 +24,11 @@ import { startNavigationFeedback } from "@/components/navigation-feedback";
 type NavItem = {
   href: string;
   label: string;
+  activeQuery?: {
+    name: string;
+    value: string;
+    exclude?: boolean;
+  };
   onNavigate?: () => void;
 };
 
@@ -65,7 +70,16 @@ const navGroups: NavGroup[] = [
     title: "Геймификация",
     icon: "gamification",
     items: [
-      { href: "/gamification", label: "Управление" },
+      {
+        href: "/gamification",
+        label: "Управление",
+        activeQuery: { name: "tab", value: "statistics", exclude: true },
+      },
+      {
+        href: "/gamification?tab=statistics",
+        label: "Статистика",
+        activeQuery: { name: "tab", value: "statistics" },
+      },
       { href: "/gamification/log", label: "Игровой журнал" },
     ],
   },
@@ -197,9 +211,15 @@ function resolveNavItemForUser(user: AuthUser | null, item: NavItem): NavItem {
   return item;
 }
 
-function NavLink({ href, label, onNavigate }: NavItem) {
+function NavLink({ href, label, activeQuery, onNavigate }: NavItem) {
   const pathname = usePathname();
-  const isActive = isNavigationItemActive(pathname, href);
+  const searchParams = useSearchParams();
+  const isActive = isNavigationItemActive(
+    pathname,
+    href,
+    searchParams,
+    activeQuery,
+  );
 
   return (
     <Link
@@ -627,7 +647,12 @@ function isDashboardPath(pathname: string) {
   );
 }
 
-function isNavigationItemActive(pathname: string, href: string) {
+function isNavigationItemActive(
+  pathname: string,
+  href: string,
+  searchParams?: Pick<URLSearchParams, "get">,
+  activeQuery?: NavItem["activeQuery"],
+) {
   if (href.includes("#")) {
     return false;
   }
@@ -643,7 +668,18 @@ function isNavigationItemActive(pathname: string, href: string) {
     return currentPathname === hrefPath;
   }
 
-  return currentPathname === hrefPath;
+  if (currentPathname !== hrefPath) {
+    return false;
+  }
+
+  if (!activeQuery) {
+    return true;
+  }
+
+  const matchesQuery =
+    searchParams?.get(activeQuery.name) === activeQuery.value;
+
+  return activeQuery.exclude ? !matchesQuery : matchesQuery;
 }
 
 function resolveCurrentProductArea(pathname: string): ProductArea {

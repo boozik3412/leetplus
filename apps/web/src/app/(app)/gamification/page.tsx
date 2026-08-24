@@ -29,7 +29,9 @@ const gamificationTabs = new Set<TabId>([
   "profiles",
   "lootBoxes",
   "missions",
+  "checkIn",
   "seasons",
+  "promoCards",
   "rewards",
   "testRun",
 ]);

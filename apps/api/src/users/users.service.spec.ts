@@ -105,7 +105,13 @@ describe('UsersService role override permissions', () => {
       }),
     ).resolves.toMatchObject({
       role: UserRole.CLUB_ADMINISTRATOR,
-      permissions: ['view_staff_tasks', 'view_staff_standards'],
+      permissions: [
+        'view_communications',
+        'view_staff',
+        'view_staff_tasks',
+        'view_staff_standards',
+        'view_staff_knowledge',
+      ],
       isOverridden: true,
       updatedAt: updatedAt.toISOString(),
     });
@@ -160,6 +166,7 @@ describe('UsersService role override permissions', () => {
     ).resolves.toMatchObject({
       role: UserRole.TRAINEE,
       permissions: [
+        'view_communications',
         'view_staff_shift_workspace',
         'view_staff_tasks',
         'view_staff_standards',

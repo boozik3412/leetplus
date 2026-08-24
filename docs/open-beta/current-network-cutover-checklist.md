@@ -7,7 +7,7 @@
 | Дата            | 02.08.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
-| External access | Запрещён до Gate 1MT/2 и `SHARED BETA GO`        |
+| External access | Запрещён до Gate 1MT/2 и `SHARED BETA GO`          |
 
 Реальные ID, email, домены интеграций, токены и database URLs в этот файл не
 вносятся. Для них используется защищённая операционная запись; здесь
@@ -564,15 +564,18 @@ admission.
       proof, production-like evidence или apply authorization.
 - [ ] Communications — chat, mentions, receipts, notifications, contact tasks.
 - [ ] Users/roles — delegation, revoke и scope работают сразу.
-- [ ] Attachments `ENFORCED`; inventory/backfill/reconciliation zero-diff.
+- [x] Attachments inventory/base+residual reconciliation zero-diff;
+      restored-copy archive/delete/orphan/cross-tenant matrix `5/5`.
+- [ ] Attachments production application deployed на admitted exact SHA;
+      live tenant/store canary и отдельный `SHADOW → ENFORCED` approval приняты.
 - [ ] Marketing/full CRM/billing/public registration deny проверен.
 
 ## G. Operations
 
 - [ ] Accepted artifact, migration apply и production runtime environment
       обновляются одной release-операцией:
-      `EXPECTED_DATABASE_MIGRATION=20260731120000_identity_mail_delivery_release_head`
-      и `EXPECTED_DATABASE_MIGRATION_COUNT=179`; старые значения не допускаются
+      `EXPECTED_DATABASE_MIGRATION=20260820010000_guest_portal_telegram_update_ledger`
+      и `EXPECTED_DATABASE_MIGRATION_COUNT=187`; старые значения не допускаются
       после apply.
 - [ ] `/health/live`, `/health/ready`, `/version` проверены внешним probe.
 - [ ] Migration identity/count подтверждены именно через `/health/ready`;
@@ -764,8 +767,8 @@ marker/freshness/blob mismatch.
   delivery-row/lifecycle freeze закрывает один из исходных четырёх P1.
   Rejected `6a69cd8...` / run #26 / PG job `90553255161` сохраняется как
   `FAILED`; `a644b81...` / CI `30447011917` (`run #27`) — `REJECTED`, `2/3
-  PASS`. Previous accepted exact-head `d525b736...` / CI `30447467729` (`run
-  #28`) — `3/3 PASS`; он закрыл final-row reason/Event integrity и worker
+PASS`. Previous accepted exact-head `d525b736...` / CI `30447467729` (`run
+#28`) — `3/3 PASS`; он закрыл final-row reason/Event integrity и worker
   boundary-only durable event write. Last accepted exact-head
   `be8c94c4...` / CI `30449026506` (`run #29`) — `3/3 PASS`; private
   SECURITY INVOKER lock boundary и двухсессионный rehearsal закрыли

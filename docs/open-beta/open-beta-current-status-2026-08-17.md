@@ -3,9 +3,9 @@
 | Поле                 | Состояние                                                                             |
 | -------------------- | ------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                          |
-| Production runtime   | healthy; access baseline deployed; внешний tenant не создавался                       |
+| Production runtime   | healthy; API SHA `e26a924b…`; attachment ACL `SHADOW`; внешний tenant не создавался   |
 | Prisma schema        | `CURRENT_187`: 187 applied, head `20260820010000_guest_portal_telegram_update_ledger` |
-| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA          |
+| Release authority    | admitted immutable candidate/controller artifact `7efcaeff…`; app deployment pending  |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                      |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`              |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены           |
@@ -25,14 +25,13 @@ data-quality отклонения зафиксированы в
 [production access baseline](./production-access-baseline-2026-08-24.md).
 
 Предыдущий mutable `main → git pull → build → restart` создал release-gate
-bypass: runtime мог попасть в production до завершения CI. Поэтому текущий
-healthy runtime сам по себе не считается admitted evidence. Exact SHA
-`d2ea7121…` уже имеет успешные Fast CI `32716122369`, Full Release Admission
-`32716122390` и immutable handoff; legacy deploy timer теперь masked.
-Production всё ещё работает из legacy checkout SHA `59239eeb…`, поэтому
-immutable slot cutover и отдельный GO остаются launch blockers. Canonical-deploy
-successor из текущего change обязан получить новую same-SHA admission до замены
-этого baseline.
+bypass: runtime мог попасть в production до завершения CI. Legacy deploy timer
+теперь masked. Admitted immutable artifact exact SHA `7efcaeff…` независимо
+прошёл integrity verification и использован только как controller runtime для
+attachment reconciliation. Production application при этом не
+деплоился/перезапускался и API `/version` до и после ceremony сообщал
+`e26a924b…`. Поэтому immutable application deployment `7efcaeff…` и отдельный
+GO остаются launch blockers.
 
 В PostgreSQL fixture custom-role raw permissions были ошибочно выданы за
 effective permissions после введения обязательного минимума роли. Runtime
@@ -48,10 +47,14 @@ canonical LF Prisma artifact. PostgreSQL 16.15 clean deploy дошёл до `187
 повторился как no-op, а attachment reconciliation завершил plan/apply/replay/
 check/rollback с zero residue. Подробности:
 [canonical deploy/reconciliation evidence](./gate-1mt-canonical-deploy-reconciliation-pg16-evidence-2026-08-24.md).
-Эти prerequisites впоследствии закрыты для base subset: fresh backup,
-restored-copy, exact role/grant attestation и owner approval завершились
-production apply `4 416/4 416`, check/replay `zeroDiff`, drift/downtime `0`.
-Оставшийся residual subset требует отдельного нового admission/approval.
+Эти prerequisites впоследствии закрыты для base и residual subsets. Base apply
+дал `4 416/4 416`; residual ceremony exact `7efcaeff…` выполнила `1 050`
+actions, создала `795` bindings для `309` attachments, quarantined `741`
+no-parent blobs и сохранила `10` non-expired `PENDING`. Оба apply/check/replay
+дали `zeroDiff`, production drift/downtime `0`; post-apply `UNRESOLVED=0` и
+core attachment/binding invariants `0`. Restored-copy production-build
+archive/delete/orphan/cross-tenant browser matrix затем прошла `5/5` с accepted
+console `0/0`.
 
 Restored-copy gate 18.08.2026: настоящий production backup восстановлен в
 изолированный PostgreSQL; clean migration/repeat/data-zero-diff и полный
@@ -455,24 +458,23 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    journey, OWNER attachment lifecycle, knowledge, shift-regulations,
    training, onboarding и checklists STORES adoption приняты. Production
    parent-delete trigger inventory `7/7` также принят на read-only snapshot.
-   Aggregate inventory выявил `5 446 UNRESOLVED`, из которых production base
-   apply уже закрыл `4 416` unique-parent rows с drift/downtime `0`. Остались
-   `1 030 UNRESOLVED`, `20 PENDING` и `243` URL-review signals. Residual
-   controller прошёл fresh restored-copy lifecycle: `309` blobs получили
-   предложение `795` existing-parent bindings, `721` no-parent blobs —
-   reversible quarantine, `20` non-expired PENDING остались review-only.
-   CURRENT179 manifest blocker закрыт canonical LF deploy. До browser matrix
-   нужны новый same-SHA admission, fresh production residual plan/approval,
-   apply/check/replay и pending TTL disposition. Также не закрыты outbound
-   digest, remaining STAFF slices, jobs/Telegram/public guest binding и Gate 2
-   текущей сети.
+   Aggregate inventory выявил `5 446 UNRESOLVED`; base и residual production
+   ceremonies полностью закрыли их без физического удаления blob/source.
+   Final state: `4 764 BOUND`, `10 PENDING`, `0 UNRESOLVED`, `741 QUARANTINED`,
+   `5 250` BOUND bindings, core invariants `0`. Restored-copy production-build
+   archive/delete/orphan/cross-tenant matrix exact `7efcaeff…` прошла `5/5`.
+   До live attachment enforcement остаются application deployment
+   `e26a924b… → 7efcaeff…`, exact production tenant/store canary,
+   observability/rollback evidence и отдельный `SHADOW → ENFORCED` approval.
+   Также не закрыты outbound digest, remaining STAFF slices,
+   jobs/Telegram/public guest binding и Gate 2 текущей сети.
 5. External-beta activation, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
 ## Полный путь до первого внешнего тестера
 
 ```text
-new exact SHA + Fast CI + Full Release Admission [IN PROGRESS]
+new exact SHA + Fast CI + Full Release Admission [DONE candidate 7efcaeff]
   → immutable runtime/control handoff + legacy auto-deploy removal
   → [DONE] live backup + isolated target + read-only preflight
   → [DONE restored copy] production-history migrate + repeat + zero-diff
@@ -512,9 +514,12 @@ new exact SHA + Fast CI + Full Release Admission [IN PROGRESS]
   → [DONE production] reviewed unique-parent apply: 4 416 bindings, zero drift/downtime
   → [DONE engineering/restored-copy PG] residual controller: 309→795 bindings,
     721 no-parent quarantine proposals, 20 active PENDING retained, exact rollback
-  → admitted residual artifact + fresh production plan + exact owner approval
-  → residual production apply/check/replay + pending TTL disposition
-  → Gate 1MT attachment archive/orphan browser matrix + remaining STAFF slices
+  → [DONE] admitted residual artifact + fresh production plan + exact owner approval
+  → [DONE production] residual apply/check/replay: 1 050 actions, zeroDiff
+  → [DONE restored-copy browser] attachment archive/delete/orphan/cross-tenant 5/5
+  → immutable application deploy e26a924b → 7efcaeff
+  → exact live attachment tenant/store canary + observability/rollback
+  → separate STAFF_ATTACHMENT_ACL_MODE SHADOW → ENFORCED approval
   → Gate 1MT jobs/Telegram/public-guest/outbound
   → Gate 2 current Tenant A/A1..A4
   → production deploy in PREPARE

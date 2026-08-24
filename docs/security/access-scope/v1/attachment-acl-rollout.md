@@ -1,13 +1,13 @@
 # ACL вложений: модель, миграция и ввод в эксплуатацию
 
-| Поле | Значение |
-|---|---|
-| Статус | `PRODUCTION SHADOW` / reconciliation controller implemented / external beta `NO-GO` |
-| Версия | 0.8.0 |
-| Дата | 24.08.2026 |
-| Владелец | LeetPlus engineering |
-| Backlog | `BETA-MOD-STAFF-009`, `BETA-MOD-COMMS-002`, `BETA-SEC-006` |
-| Release decision | `NO-GO` до выполнения activation gates |
+| Поле             | Значение                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| Статус           | `PRODUCTION SHADOW` / base+residual reconciliation PASS / restored-copy browser PASS / external beta `NO-GO` |
+| Версия           | 0.9.0                                                                                                        |
+| Дата             | 24.08.2026                                                                                                   |
+| Владелец         | LeetPlus engineering                                                                                         |
+| Backlog          | `BETA-MOD-STAFF-009`, `BETA-MOD-COMMS-002`, `BETA-SEC-006`                                                   |
+| Release decision | `NO-GO` до выполнения activation gates                                                                       |
 
 Этот документ является рабочим контрактом для устранения IDOR в
 `GET /staff/attachments/:id`. Он описывает не только схему данных, но и весь
@@ -18,12 +18,16 @@
 следующие шаги зафиксированы в
 [implementation checkpoint](./attachment-acl-implementation-checkpoint.md).
 EXPAND, dual-write, parent adoption и parent-delete guards уже находятся в
-production; runtime остаётся в `STAFF_ATTACHMENT_ACL_MODE=SHADOW`.
-`ENFORCED` нельзя включать до reviewed reconciliation, повторного zero-diff
-inventory и выполнения activation gates: legacy blobs имеют состояние
-`UNRESOLVED` и в strict режиме будут корректно закрыты через `404`. `LEGACY` и
-`SHADOW` предназначены только для внутреннего перехода; внешний beta в этих
-режимах запрещён.
+production; runtime остаётся в `STAFF_ATTACHMENT_ACL_MODE=SHADOW`. Base и
+residual reconciliation завершены: post-apply inventory содержит `4 764
+BOUND`, `10` non-expired `PENDING`, `0 UNRESOLVED`, `741 QUARANTINED`, а core
+binding invariants равны `0`. Exact `7efcaeff…` прошёл production-build
+restored-copy archive/delete/orphan/cross-tenant matrix `5/5`.
+
+`ENFORCED` нельзя включать до immutable application deployment, exact live
+tenant/store browser canary, fresh observability evidence и rollback drill.
+`LEGACY` и `SHADOW` предназначены только для внутреннего перехода; внешний beta
+в этих режимах запрещён.
 
 Зафиксированная launch topology: четыре текущих клуба являются четырьмя
 `Store` одного `Tenant`. После прохождения gates первый beta tenant получает
@@ -59,15 +63,15 @@ download по `attachment.id + tenantId` допускает same-tenant IDOR: п
 
 ## 2. Поддерживаемые parent resources
 
-| Resource kind | Канонический parent | Текущий источник ссылки | Авторитетная политика | Статус checkpoint |
-|---|---|---|---|---|
-| `CHAT_MESSAGE` | `StaffChatMessage` | `StaffChatMessageAttachment` | channel scope, message audience, membership, live `AccessScope`, communications/reward capability | Реализованы native bind и strict parent reader |
-| `STAFF_TASK` | `StaffTask` | comment `evidenceUrl` + `attachmentIds` | persisted participant scope, transaction-client task/shift recheck, `view_staff_tasks`; manager status — `manage_staff_tasks` | Реализован candidate: scoped reads/mutations, parent row-lock recheck, transactional bind, strict parent reader и real PG race/rollback; reference-row serialization/DB invariant, revoke и browser pending |
-| `CHECKLIST_RUN` | `StaffChecklistRun` | `answers`, review JSON | run store или явное personal assignment, `view_staff_standards` | Schema + secondary inventory; producer/reader pending |
-| `KNOWLEDGE_ARTICLE` | `StaffKnowledgeArticle` | current/version `materials`, внутренние ссылки content | store, status, roleScope, knowledge capability | Schema + secondary inventory; producer/reader pending |
-| `SHIFT_REGULATION` | `StaffShiftRegulation` | current/version `attachments` | store, status, roleScope, standards capability | Schema + secondary inventory; producer/reader pending |
-| `TRAINING_COURSE` | `StaffTrainingCourse` | `steps[].url` | store, status, roleScope, training capability | Schema + secondary inventory; producer/reader pending |
-| `ONBOARDING_PLAN` | `StaffOnboardingPlan` | `steps[].url` | store, status, roleScope, training capability | Schema + secondary inventory; producer/reader pending |
+| Resource kind       | Канонический parent     | Текущий источник ссылки                                | Авторитетная политика                                                                                                         | Статус checkpoint                                                                                                                                                                                           |
+| ------------------- | ----------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CHAT_MESSAGE`      | `StaffChatMessage`      | `StaffChatMessageAttachment`                           | channel scope, message audience, membership, live `AccessScope`, communications/reward capability                             | Реализованы native bind и strict parent reader                                                                                                                                                              |
+| `STAFF_TASK`        | `StaffTask`             | comment `evidenceUrl` + `attachmentIds`                | persisted participant scope, transaction-client task/shift recheck, `view_staff_tasks`; manager status — `manage_staff_tasks` | Реализован candidate: scoped reads/mutations, parent row-lock recheck, transactional bind, strict parent reader и real PG race/rollback; reference-row serialization/DB invariant, revoke и browser pending |
+| `CHECKLIST_RUN`     | `StaffChecklistRun`     | `answers`, review JSON                                 | run store или явное personal assignment, `view_staff_standards`                                                               | Schema + secondary inventory; producer/reader pending                                                                                                                                                       |
+| `KNOWLEDGE_ARTICLE` | `StaffKnowledgeArticle` | current/version `materials`, внутренние ссылки content | store, status, roleScope, knowledge capability                                                                                | Schema + secondary inventory; producer/reader pending                                                                                                                                                       |
+| `SHIFT_REGULATION`  | `StaffShiftRegulation`  | current/version `attachments`                          | store, status, roleScope, standards capability                                                                                | Schema + secondary inventory; producer/reader pending                                                                                                                                                       |
+| `TRAINING_COURSE`   | `StaffTrainingCourse`   | `steps[].url`                                          | store, status, roleScope, training capability                                                                                 | Schema + secondary inventory; producer/reader pending                                                                                                                                                       |
+| `ONBOARDING_PLAN`   | `StaffOnboardingPlan`   | `steps[].url`                                          | store, status, roleScope, training capability                                                                                 | Schema + secondary inventory; producer/reader pending                                                                                                                                                       |
 
 Shift report не создаёт отдельный вид binding: отправленный отчёт становится
 store-bound chat message и использует `CHAT_MESSAGE`.
@@ -176,11 +180,11 @@ Server формирует canonical `/staff/attachments/<id>`, создаёт co
 Process-wide `STAFF_ATTACHMENT_ACL_MODE` управляет только download decision и
 TTL quarantine; schema и dual-write продолжают работать во всех режимах.
 
-| Mode | Поведение |
-|---|---|
-| `LEGACY` | Сохраняет tenant-only read без strict evaluation. Только краткий внутренний переход |
-| `SHADOW` | Вычисляет strict decision, безопасно логирует strict deny/error, но возвращает legacy result и не quarantine expired pending |
-| `ENFORCED` | Делает strict parent ACL авторитетным и переводит expired pending в `QUARANTINED/PENDING_EXPIRED` |
+| Mode       | Поведение                                                                                                                    |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `LEGACY`   | Сохраняет tenant-only read без strict evaluation. Только краткий внутренний переход                                          |
+| `SHADOW`   | Вычисляет strict decision, безопасно логирует strict deny/error, но возвращает legacy result и не quarantine expired pending |
+| `ENFORCED` | Делает strict parent ACL авторитетным и переводит expired pending в `QUARANTINED/PENDING_EXPIRED`                            |
 
 Production требует явный mode; local/test default — `ENFORCED`, CI production
 startup contract — `SHADOW`. Mismatch event не содержит attachment/user/tenant
@@ -317,15 +321,16 @@ checklist answers и task-from-chat description считаются вторич�
 audit-копиями. Они попадают в отчёт scanner, но никогда не создают ACL binding
 и не расширяют доступ.
 
-На checkpoint 24.08.2026 read-only production inventory выполнен: `5 446`
-`UNRESOLVED`, `4 416` unique-primary candidates, `309` multiple-parent и `741`
-без распознанного reference. Reconciliation controller реализован и прошёл
-unit + disposable PostgreSQL apply/zero-diff/rollback. Base production apply
-затем закрыл `4 416` unique-parent rows (`4 416` bindings, drift/downtime `0`).
-Residual owner-decision contract прошёл fresh restored-copy lifecycle:
-`309 → 795` normalized-parent bindings, `721` reversible no-parent quarantine,
-`20` non-expired PENDING без изменения. Residual production apply не разрешён
-до нового same-SHA admission, fresh plan и отдельного exact approval.
+На checkpoint 24.08.2026 read-only production inventory выявил `5 446`
+`UNRESOLVED`. Base production apply закрыл `4 416` unique-parent rows. Затем
+owner-approved residual ceremony admitted release `7efcaeff…` выполнила
+`1 050` actions: `309` attachments получили `795` normalized-parent bindings,
+`741` no-parent blobs переведены в reversible quarantine, `10` non-expired
+`PENDING` оставлены без изменения. Final state: `4 764 BOUND`, `10 PENDING`,
+`0 UNRESOLVED`, `741 QUARANTINED`, core invariants `0`; оба apply/check/replay
+дали `zeroDiff`, drift/downtime `0`. Restored-copy production-build browser
+matrix archive/delete/orphan/cross-tenant прошла `5/5`. Live canary и
+process-wide `SHADOW → ENFORCED` не выполнялись.
 
 ## 8. Phased rollout
 
@@ -510,13 +515,24 @@ revoke/delete, остальные parent kinds, inventory/backfill и canary.
 До выполнения всех десяти условий `BETA-MOD-STAFF-009` остаётся `В работе`, а
 выдача внешних доступов — `NO-GO`.
 
-В особенности нельзя объединять schema EXPAND и `ENFORCED` application в один
-auto-deploy: legacy blobs имеют `UNRESOLVED`, а runtime reader пока поддерживает
-только adopted `CHAT_MESSAGE` и candidate `STAFF_TASK`; остальные parent kinds
-ещё pending. Внешний beta запрещён как в `LEGACY`, так и в `SHADOW`.
+На 24.08.2026 условия 1–8 и exact release binding инженерного restored-copy
+journey закрыты для candidate `7efcaeff…`; условие 9 и live часть условия 10
+остаются открыты. Synthetic/restored-copy fingerprints нельзя подставлять в
+production operational preflight.
+
+Schema EXPAND и `ENFORCED` application по-прежнему нельзя объединять в один
+auto-deploy. Все семь parent kinds adopted, но application production runtime
+ещё `e26a924b…`/`SHADOW`; live canary должен выполняться только после отдельного
+immutable deployment и target binding. Внешний beta запрещён как в `LEGACY`,
+так и в `SHADOW`.
 
 ## 12. Changelog
 
+- `0.9.0`, 24.08.2026 — base и residual production reconciliation завершены
+  с `zeroDiff`; `0 UNRESOLVED`, core attachment/binding invariants `0`.
+  Production-build restored-copy archive/delete/orphan/cross-tenant matrix
+  exact `7efcaeff…` прошла `5/5`. Production mode остался `SHADOW`; live
+  canary, rollback drill и отдельное `SHADOW → ENFORCED` решение не выполнены.
 - `0.8.0`, 24.08.2026 — зафиксированы production `SHADOW` и aggregate
   inventory; добавлен digest-bound controller с detached approval,
   serializable apply, durable audit, zero-diff replay и exact rollback.

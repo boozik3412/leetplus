@@ -149,6 +149,14 @@ Browser evidence:
 }
 ```
 
+Restored-copy browser evidence может закрыть engineering prerequisite, но не
+подменяет live contract: его synthetic tenant/store fingerprints не должны
+совпадать с production manifest. Для `CONTROLLED_CANARY` нужен новый browser
+artifact после immutable application deployment, привязанный к заранее
+одобренным exact production tenant/store fingerprints. Принятая restored-copy
+матрица `7efcaeff…` описана в
+[отчёте 24.08.2026](./gate-1mt-attachment-archive-delete-orphan-browser-evidence-2026-08-24.md).
+
 CI admission evidence требует разные `fastRun.runId` и `releaseRun.runId`; у
 обоих `conclusion` должен быть `SUCCESS`, а `releaseSha` — exact manifest SHA.
 

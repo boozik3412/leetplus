@@ -1,7 +1,7 @@
 # Gate 1MT: production attachment inventory — 24.08.2026
 
 Статус:
-`BASE PRODUCTION RECONCILIATION PASS / RESIDUAL CONTROLLER REHEARSED / RESIDUAL APPROVAL REQUIRED / EXTERNAL BETA NO-GO`.
+`BASE + RESIDUAL PRODUCTION RECONCILIATION PASS / RESTORED-COPY BROWSER PASS / LIVE CANARY REQUIRED / EXTERNAL BETA NO-GO`.
 
 ## Решение
 
@@ -10,8 +10,10 @@ Production-схема и DB-level parent-delete guard соответствуют
 переведены в `BOUND` и получили ровно `4 416` bindings. Apply/check/replay и
 независимый integrity postflight прошли без drift и downtime.
 
-До process-wide `ENFORCED` остаётся отдельный owner-approved residual subset,
-active `PENDING` lifecycle и полная archive/delete/orphan browser-матрица,
+Owner-approved residual subset и полная restored-copy production-build
+archive/delete/orphan/cross-tenant browser-матрица завершены. До process-wide
+`ENFORCED` остаются immutable application deployment, exact live tenant/store
+canary, fresh observability/rollback evidence и отдельное mode-switch approval,
 поэтому внешний доступ остаётся `NO-GO`.
 
 Production работал и продолжает работать в `STAFF_ATTACHMENT_ACL_MODE=SHADOW`.
@@ -33,15 +35,15 @@ replay:            PASS / RECONCILED / zeroDiff=true
 
 Postflight:
 
-| Метрика                         | Значение |
-| ------------------------------- | -------: |
-| `BOUND` attachments             |  `4 416` |
-| `BOUND` bindings                |  `4 416` |
-| Distinct bound attachments      |  `4 416` |
-| `UNRESOLVED`                    |  `1 030` |
-| `PENDING`                       |     `20` |
-| attachment/binding/scope drift  |      `0` |
-| health-monitor failures         |      `0` |
+| Метрика                        | Значение |
+| ------------------------------ | -------: |
+| `BOUND` attachments            |  `4 416` |
+| `BOUND` bindings               |  `4 416` |
+| Distinct bound attachments     |  `4 416` |
+| `UNRESOLVED`                   |  `1 030` |
+| `PENDING`                      |     `20` |
+| attachment/binding/scope drift |      `0` |
+| health-monitor failures        |      `0` |
 | temporary production role left |      `0` |
 
 Platform-admin login, tenant context, dashboard и `/staff/shift-workspace`
@@ -56,22 +58,68 @@ Platform-admin login, tenant context, dashboard и `/staff/shift-workspace`
 
 Свежая restored-copy rehearsal post-base состояния дала:
 
-| Решение                                          | Значение |
-| ------------------------------------------------ | -------: |
-| Bind all normalized parents                     |      309 |
-| Bindings к этим существующим parents            |      795 |
-| Quarantine legacy no-parent, blob retained       |      721 |
-| Non-expired `PENDING`, без изменения             |       20 |
-| Residual action count                            |    `1 030` |
-| Remaining review after apply                     |       20 |
+| Решение                                    | Значение |
+| ------------------------------------------ | -------: |
+| Bind all normalized parents                |      309 |
+| Bindings к этим существующим parents       |      795 |
+| Quarantine legacy no-parent, blob retained |      721 |
+| Non-expired `PENDING`, без изменения       |       20 |
+| Residual action count                      |  `1 030` |
+| Remaining review after apply               |       20 |
 
 Lifecycle `plan → apply → replay → check → rollback → replay → check` прошёл
 `PASS`; после apply копия имела `4 725 BOUND`, `5 211 bindings`, `721
-QUARANTINED`, `20 PENDING` и drift `0`. Production residual apply не
-выполнялся и потребует нового admitted exact SHA, свежего production plan и
-отдельного approval его digest/counts.
+QUARANTINED`, `20 PENDING` и drift `0`. Этот rehearsal был prerequisite для
+отдельной live ceremony ниже.
 
-## Release binding
+## Production update после residual apply
+
+Residual ceremony использовала admitted controller artifact
+`7efcaeff5de06ee8657a13c98c205bba1adc5f9c` и exact owner approval:
+
+```text
+plan digest:          eb4a21a0ed5b4bb2123a2c32a88e104554af4b57fbb655fc4d48f0049fc8bcaf
+source graph digest:  15dbe2056c94900c89beea36953df18f337c755f87045cb74bb6d7f8d06d8185
+action set digest:    defaaeed54ad2c42b854f991843850f7e780ba91166dc37cdd4c6397501203c6
+actions:              1 050
+bindings:               795
+quarantine:             741
+review/PENDING:           10
+apply:                 PASS / APPLIED / zeroDiff=true
+check:                 PASS / CHECKED / zeroDiff=true
+replay:                PASS / RECONCILED / zeroDiff=true
+```
+
+Live drift policy разрешила только новые valid `BOUND` с существующими
+bindings либо non-expired `PENDING` вне approved action set. Immediate live
+plan подтвердил exact source graph/action set: missing/changed/unapproved
+actions `0`, signal review `0`.
+
+Final production postflight:
+
+| Метрика                                 | Значение |
+| --------------------------------------- | -------: |
+| Total attachments                       |  `5 515` |
+| `BOUND`                                 |  `4 764` |
+| `PENDING`                               |     `10` |
+| `UNRESOLVED`                            |      `0` |
+| `QUARANTINED`                           |    `741` |
+| Total/BOUND bindings                    |  `5 250` |
+| Distinct bound attachments              |  `4 764` |
+| Residual actions after apply            |      `0` |
+| Core attachment/binding invariants      |      `0` |
+| Expired pending                         |      `0` |
+| Unfinished migrations / invalid indexes |  `0 / 0` |
+
+Физического удаления blob/source не было. Temporary writer role, tunnel и
+runtime junction удалены. Application runtime остался `e26a924b…`, mode —
+`SHADOW`; deploy/restart не выполнялся.
+
+Exact `7efcaeff…` затем прошёл полную restored-copy production-build browser
+matrix `5/5`; см.
+[archive/delete/orphan evidence](./gate-1mt-attachment-archive-delete-orphan-browser-evidence-2026-08-24.md).
+
+## Base release binding
 
 | Evidence                    | Значение                                                                                         |
 | --------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -150,10 +198,12 @@ origin allowlist, с `https://leetplus.ru` и с двумя canonical public ori
 `https://leetplus.ru,https://api.leetplus.ru`. Последние `243` сигнала не
 стали valid references и поэтому не могут автоматически расширять authority.
 
-`4 416` unique-parent candidates являются только кандидатами плана. Aggregate
-inventory не разрешает создавать bindings. `309` multiple-parent, `741`
-unreferenced, `243` URL-review и lifecycle `20 PENDING` требуют отдельной
-row-level церемонии и owner-approved решения.
+На момент snapshot `4 416` unique-parent rows, `309` multiple-parent, `741`
+unreferenced и lifecycle `20 PENDING` требовали отдельной row-level ceremony;
+aggregate inventory сам по себе bindings не разрешал. Последующие base и
+residual owner-approved ceremonies завершены с final `0 UNRESOLVED`, `741`
+reversible quarantine и `10` non-expired `PENDING`. `243` historical URL-review
+signals не использовались как authority и post-apply signal review равен `0`.
 
 ## Protected evidence
 
@@ -171,26 +221,18 @@ Evidence directory имеет mode `0700`, JSON и checksum files — `0600`, ow
 
 ## Следующий gate
 
-1. Reconciliation controller реализован и локально проверен последовательностью
-   `read-only plan → immutable review → detached approval → explicit apply → zero-diff replay → exact rollback/check`.
-   Production apply не выполнялся;
-   см. [runbook](../security/access-scope/v1/staff-attachment-reconciliation-runbook.md).
-2. Clean-deploy manifest-digest blocker закрыт без изменения migration SQL:
-   причиной были CRLF-байты старого Windows checkout. Canonical LF artifact
-   применил `187/187`, подтвердил CURRENT179 digest `7f986797…` и no-op replay.
-   Теперь выполнить fresh-backup restored-copy rehearsal фактической production
-   history на новом admitted exact artifact.
-3. Выпустить residual controller через Fast CI и Full Release Admission на
-   одном exact SHA и построить свежий read-only production plan.
-4. Получить отдельное owner approval exact residual digest и четырёх counts:
-   actions, bindings, quarantine, remaining review. До этого production write
-   запрещён.
-5. После apply/check/replay оставить non-expired `PENDING` до TTL, повторить
-   inventory и зафиксировать их последующий bind либо `PENDING_EXPIRED`.
-6. Классифицировать `243` absolute-origin signals как external либо исправить
-   exact internal origin; они никогда не создают ACL binding автоматически.
-7. Только затем выполнить production-build archive/delete/orphan browser
-   matrix и tenant/store canary перед process-wide `ENFORCED`.
+1. Base/residual production apply, check, zero-diff replay и restored-copy
+   archive/delete/orphan/cross-tenant browser matrix завершены.
+2. Оставить `10` non-expired `PENDING` штатному bind/TTL lifecycle и проверить
+   отсутствие `PENDING_EXPIRED` drift перед live canary.
+3. Развернуть admitted application candidate `7efcaeff…` immutable release
+   operation вместо текущего runtime `e26a924b…`; reconciliation artifact сам
+   по себе deployment не выполнял.
+4. Зафиксировать exact production tenant/store fingerprints и выполнить
+   controlled live browser canary с fresh observability и rollback evidence.
+5. Отдельным approval решить `STAFF_ATTACHMENT_ACL_MODE=SHADOW → ENFORCED`.
+6. Только после этого продолжить остальные Gate 1MT jobs/Telegram/public-guest/
+   outbound и Gate 2; tester invite всё ещё запрещён.
 
 Ни этот inventory, ни будущий backfill сами по себе не разрешают создание
 внешнего tenant, отправку SMTP или выдачу tester invite.

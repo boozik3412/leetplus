@@ -178,12 +178,12 @@ parent save создал exact B1 native binding, PostgreSQL blob и browser dow
 
 ## Что ещё не закрыто
 
-Reader coverage не равна полной file workflow readiness. До внешнего beta
-остаются:
+Reader coverage на момент этого evidence не равнялась полной file workflow
+readiness. Successor evidence закрыли STORES policies knowledge, regulations,
+training, onboarding и checklists, а exact `7efcaeff…` — restored-copy
+archive/delete/orphan/cross-tenant matrix `5/5`; см.
+[отчёт 24.08.2026](./gate-1mt-attachment-archive-delete-orphan-browser-evidence-2026-08-24.md).
 
-1. корректные STORES visibility policies самих checklist/knowledge/regulation/
-   training/onboarding workspaces, после чего network-only file deny можно
-   безопасно сузить;
-2. archive/delete/orphan-retention browser matrix для остальных parent kinds;
-3. tenant-aware jobs, Telegram/public guest binding, controlled outbound,
-   Gate 2 и production `PREPARE`.
+До внешнего beta остаются live production attachment canary и отдельный
+`SHADOW → ENFORCED`, tenant-aware jobs, Telegram/public guest binding,
+controlled outbound, Gate 2 и production `PREPARE`.

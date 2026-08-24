@@ -1,12 +1,12 @@
 # Staff attachment reconciliation controller
 
-| Поле     | Значение                                                                  |
-| -------- | ------------------------------------------------------------------------- |
-| Статус   | `BASE PRODUCTION APPLY PASS / RESIDUAL LOCAL PG PASS / RESIDUAL PRODUCTION APPLY NOT AUTHORIZED` |
-| Версия   | 1.0.0                                                                     |
-| Дата     | 24.08.2026                                                                |
-| Владелец | LeetPlus engineering                                                      |
-| Gate     | `BETA-MOD-STAFF-009`, `BETA-SEC-006`, Gate 1MT                            |
+| Поле     | Значение                                                                                 |
+| -------- | ---------------------------------------------------------------------------------------- |
+| Статус   | `BASE + RESIDUAL PRODUCTION APPLY PASS / RESTORED-COPY BROWSER PASS / PRODUCTION SHADOW` |
+| Версия   | 1.1.0                                                                                    |
+| Дата     | 24.08.2026                                                                               |
+| Владелец | LeetPlus engineering                                                                     |
+| Gate     | `BETA-MOD-STAFF-009`, `BETA-SEC-006`, Gate 1MT                                           |
 
 ## Решение
 
@@ -24,9 +24,17 @@ lost-response replay вернули `zeroDiff=true`; три независимы
 проверки дали drift `0`, а Web/API оставались `200` во всех `91` health rounds.
 Режим `STAFF_ATTACHMENT_ACL_MODE` остался `SHADOW`.
 
-Оставшийся residual subset не применялся к production. Наличие residual
-контроллера само по себе не разрешает запись и не переводит режим в
-`ENFORCED`.
+Residual production subset применён отдельной ceremony на admitted controller
+release `7efcaeff5de06ee8657a13c98c205bba1adc5f9c`: `1 050` approved actions,
+`309` attachments получили `795` bindings, `741` no-parent attachments
+переведены в reversible quarantine, `10` non-expired `PENDING` оставлены без
+изменения. Apply, check и replay вернули `zeroDiff=true`; post-apply residual
+actions, `BOUND` без binding и non-`BOUND` с BOUND binding равны `0`. Blob bytes
+и source references не удалялись. Application runtime и
+`STAFF_ATTACHMENT_ACL_MODE=SHADOW` не менялись.
+
+Следующий production write, rollback, deployment либо `SHADOW → ENFORCED` не
+разрешается прошедшей ceremony автоматически и требует собственного gate.
 
 Реализация:
 
@@ -303,7 +311,7 @@ lifecycle прошёл. Это fail-closed поведение обязатель
 Production plan разрешён как read-only операция только после зелёных Fast CI и
 Full Release Admission на одном exact SHA и независимой проверки immutable
 artifact handoff для этого SHA.
-Production apply остаётся запрещён до одновременного выполнения условий:
+Для любого повторного production apply/rollback остаются обязательны условия:
 
 1. свежий проверенный backup и измеренное rollback window;
 2. restored-copy rehearsal на фактической production history;
@@ -312,8 +320,8 @@ Production apply остаётся запрещён до одновременно
 5. отдельное явное разрешение на один exact plan digest;
 6. отсутствие активных deploy/migration/background maintenance операций;
 7. `STAFF_ATTACHMENT_ACL_MODE=SHADOW` сохраняется на время backfill;
-8. после apply выполнены check, повторный zero-diff inventory и browser
-   archive/delete/orphan matrix.
+8. после apply выполнены check, повторный zero-diff inventory и restored-copy
+   browser archive/delete/orphan matrix; live canary остаётся отдельным gate.
 
 Немедленная остановка при database/schema/source graph drift, extra binding,
 lock/statement timeout, deferred-trigger failure, audit drift, partial response
@@ -333,8 +341,15 @@ lock/statement timeout, deferred-trigger failure, audit drift, partial response
 - base production apply/check/replay: `4 416/4 416 PASS`, drift `0`, downtime
   `0`, temporary role removed;
 - residual PostgreSQL restored-copy lifecycle: `1 030 actions / 795 bindings /
-  721 quarantine / 20 review`, apply/replay/check/rollback/replay/check `PASS`;
-- residual production application/data/config не изменялись.
+721 quarantine / 20 review`, apply/replay/check/rollback/replay/check `PASS`;
+- residual production ceremony на live-drift-approved action set:
+  `1 050 actions / 795 bindings / 741 quarantine / 10 active PENDING`,
+  apply/replay/check `PASS`, `zeroDiff=true`, post-apply residual actions `0`;
+- production postflight: `4 764 BOUND`, `10 PENDING`, `0 UNRESOLVED`, `741
+QUARANTINED`, core invariant violations `0`, runtime/config unchanged;
+- production-build restored-copy archive/delete/orphan/cross-tenant browser
+  matrix на exact `7efcaeff…`: `5/5 PASS`, accepted console `0/0`; см.
+  [browser evidence](../../../open-beta/gate-1mt-attachment-archive-delete-orphan-browser-evidence-2026-08-24.md).
 
 Clean-schema blocker закрыт без изменения уже применённых migration SQL.
 Причиной были `150` CRLF-файлов в старом Windows working tree; Git/LF manifest

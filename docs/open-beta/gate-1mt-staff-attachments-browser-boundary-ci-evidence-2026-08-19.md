@@ -79,12 +79,12 @@ browser evidence, теперь должна падать до release artifact.
 
 ## Что остаётся
 
-Полный production-build browser journey
-`archive/delete/orphan-retention` для staff attachments остаётся открытым до
-отдельного restored-copy/headed-browser evidence. Локальная машина на момент
-этого guard не имела доступного PostgreSQL runtime (`psql`, Docker/service и
-listening loopback database отсутствовали), поэтому этот файл не утверждает,
-что live browser matrix выполнена.
+На момент этого CI guard полный production-build browser journey
+`archive/delete/orphan-retention` оставался открытым: локальная машина не имела
+доступного PostgreSQL runtime. Successor exact `7efcaeff…` закрыл отдельную
+restored-copy/headed-browser matrix `5/5`; см.
+[evidence 24.08.2026](./gate-1mt-attachment-archive-delete-orphan-browser-evidence-2026-08-24.md).
+Live production canary этим successor не подменяется.
 
 До внешнего beta доступа также остаются tenant-aware jobs,
 Telegram/public guest binding, controlled outbound, Gate 2 текущей сети и

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.200                                        |
+| Версия           | 1.201                                        |
 | Дата             | 24.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -18,14 +18,16 @@ scope внешний send и production GO остаются `BLOCKED_MANUAL`.
 Digest-bound attachment reconciliation controller, его protected artifacts,
 detached approval, zero-diff replay и exact rollback описаны в
 [операционном runbook](../security/access-scope/v1/staff-attachment-reconciliation-runbook.md).
-Controller прошёл local PostgreSQL rehearsal. Уже завершённый production base
-subset создал `4 416` unique-parent bindings; zero-diff check/replay прошли с
-downtime `0`. Новый residual owner-decision contract
-прошёл fresh restored-copy PostgreSQL lifecycle (`309 → 795 bindings`, `721`
-no-parent quarantine proposals, `20` active PENDING retained), но его
-production apply остаётся отдельным `BLOCKED_MANUAL` gate. Scanner/controller/
-CLI входят в exact immutable release-artifact allowlist; произвольный mutable
-checkout не является допустимым источником production-команды.
+Controller прошёл local PostgreSQL rehearsal. Production base subset создал
+`4 416` unique-parent bindings; residual ceremony exact `7efcaeff…` затем
+выполнила `1 050` actions, создала `795` bindings для `309` attachments,
+quarantined `741` no-parent blobs и сохранила `10` non-expired `PENDING`.
+Apply/check/replay дали `zeroDiff`, post-apply `UNRESOLVED=0` и core invariants
+`0`, downtime `0`. Production-build restored-copy
+archive/delete/orphan/cross-tenant matrix прошла `5/5`; live production canary
+и `SHADOW → ENFORCED` остаются `BLOCKED_MANUAL`. Scanner/controller/CLI входят
+в exact immutable release-artifact allowlist; произвольный mutable checkout не
+является допустимым источником production-команды.
 
 Этот каталог — навигационная точка для перевода текущей сети из demo-режима в
 полноценную работу и последующего invite-only теста с внешними сетями. Он не
@@ -174,8 +176,9 @@ canonical `CURRENT_186` identity-mail readiness bump:
 
 Successor staff attachment file BFF hardening: download route теперь
 selector-free (`forwardQuery: false`), upload locator остаётся canonical
-same-origin, а Web BFF boundary расширен до `18/18`. Это частичный file-policy
-gate; полный production-build archive/delete/orphan browser matrix ещё открыт.
+same-origin, а Web BFF boundary расширен до `18/18`. Полный production-build
+restored-copy archive/delete/orphan/cross-tenant browser matrix exact
+`7efcaeff…` закрыт `5/5`; live production canary остаётся отдельным gate.
 
 Gate 1MT staff attachment browser-boundary CI guard связывает selector-free
 file BFF, Web production build, PostgreSQL matrix всех семи parent kinds и
@@ -184,14 +187,14 @@ file BFF, Web production build, PostgreSQL matrix всех семи parent kinds
 
 Protected production read-only attachment inventory на admitted exact SHA:
 [Gate 1MT production attachment inventory 24.08.2026](./gate-1mt-production-attachment-inventory-2026-08-24.md).
-DB trigger contract прошёл `7/7`. Base production reconciliation уже закрыл
-`4 416` unique-parent rows; остаток составляет `1 030 UNRESOLVED` и `20
-PENDING`. Residual restored-copy proposal сохраняет все `795` нормализованных
-parents для `309` blobs и quarantines `721` no-parent blobs без физического
-удаления. До admitted residual artifact, exact production approval и browser
-matrix внешний beta остаётся `NO-GO`.
-Exact SHA `3542b197…` принят CI run `32263277942` как `4/4 SUCCESS`;
-полноценный live archive/delete/orphan browser journey всё ещё открыт.
+DB trigger contract прошёл `7/7`. Base и residual production reconciliation
+закрыли все `5 446` legacy `UNRESOLVED`: final state `4 764 BOUND`, `10
+PENDING`, `0 UNRESOLVED`, `741 QUARANTINED`, `5 250` bindings; core invariants
+`0`. Exact `7efcaeff…` прошёл restored-copy archive/delete/orphan/cross-tenant
+browser matrix `5/5` с accepted console `0/0`:
+[evidence 24.08.2026](./gate-1mt-attachment-archive-delete-orphan-browser-evidence-2026-08-24.md).
+Production application всё ещё `e26a924b…`/`SHADOW`, поэтому immutable deploy,
+live tenant/store canary и отдельный `ENFORCED` approval остаются `NO-GO`.
 
 Successor Telegram edge config hardening: edge adapter больше не имеет
 production API URL по умолчанию и fail-closed требует явный LeetPlus API URL до
@@ -459,8 +462,9 @@ platform-admin tenant switch и диагностика одноимённых п
    `4/4 + 4/4`, `156` table counts zero-diff и database residue `0`.
    OWNER attachment production-build browser lifecycle, knowledge, shift
    regulations, training, onboarding и checklists STORES adoption также
-   приняты; remaining attachment archive/orphan matrix, outbound
-   digest и job/Telegram/public-guest остаток не закрыты. HTTP
+   приняты. Restored-copy archive/delete/orphan/cross-tenant matrix exact
+   `7efcaeff…` закрыта `5/5`; live attachment canary, outbound digest и
+   job/Telegram/public-guest остаток не закрыты. HTTP
    inventory: `295 = 241 ALLOW + 54
    BLOCKED`.
    0a.5. [Gate 1MT report browser evidence](./gate-1mt-report-browser-evidence-2026-08-18.md) —
@@ -517,6 +521,11 @@ platform-admin tenant switch и диагностика одноимённых п
    local PostgreSQL `13/13` и production-build B1↔B2 browser; network
    template read-only, foreign mutation скрыта `404`, foreign filter
    отклонён `403`; exact push CI `32223728916` завершился `4/4 SUCCESS`.
+   0a.14. [Gate 1MT attachment archive/delete/orphan browser evidence](./gate-1mt-attachment-archive-delete-orphan-browser-evidence-2026-08-24.md) —
+   exact admitted `7efcaeff…`, fresh production backup clone, headed Chromium,
+   full `5/5` upload/remove/archive/delete/orphan/cross-tenant matrix, accepted
+   console `0/0`, PostgreSQL invariants/outbound residue `0`; production
+   runtime/config не изменялись и остались `e26a924b…`/`SHADOW`.
    0b. [CURRENT189 employee invite boundary](./identity-employee-invite-mail-current189.md) —
    tenant-owned mailbox delivery, reissue/revoke/accept, terminal replay и
    PostgreSQL race evidence, dormant bounded runtime/health boundary;

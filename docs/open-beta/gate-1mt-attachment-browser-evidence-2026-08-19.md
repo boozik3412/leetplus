@@ -151,8 +151,11 @@ database sessions были `0`; exact `a2` database удалена. Совоку
 
 ## Остаток до внешнего теста
 
-1. Закрыть archive/delete/orphan-retention browser matrix остальных parent
-   kinds.
+1. Archive/delete/orphan/cross-tenant production-build matrix закрыта на exact
+   `7efcaeff…` в fresh restored-copy;
+   см. [evidence 24.08.2026](./gate-1mt-attachment-archive-delete-orphan-browser-evidence-2026-08-24.md).
+   До process-wide `ENFORCED` остаётся отдельный live production canary после
+   immutable application deployment и exact tenant/store binding.
 2. Закрыть tenant-aware background jobs, Telegram/public guest binding и
    controlled outbound canary.
 3. Выполнить Gate 2 текущей сети и отдельный production `PREPARE/GO`.

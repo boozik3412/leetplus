@@ -1,5 +1,4 @@
 import type { AuthUser } from "./auth";
-import { isCommunicationChatOnlyRole } from "./landing";
 import { canManageUserAccess } from "./roles";
 
 export type Capability =
@@ -534,6 +533,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "export_reports",
     "view_assortment_products",
     "view_assortment_catalog",
+    "view_communications",
     "use_utilities",
     "edit_products",
   ],
@@ -548,6 +548,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "approve_guest_game_rewards",
     "view_marketing",
     "manage_marketing",
+    "view_communications",
   ],
   CLUB_MANAGER: [
     "view_dashboard",
@@ -597,12 +598,45 @@ const elevatedKnowledgeCapabilities: Capability[] = [
   ...staffKnowledgeWriteCapabilities,
 ];
 
+const universalCommunicationCapabilities: Capability[] = [
+  "view_communications",
+];
+
+const administratorWorkspaceCapabilities: Capability[] = [
+  "view_staff",
+  "view_staff_tasks",
+  "view_staff_standards",
+  "view_staff_knowledge",
+];
+
 const minimumRoleCapabilities: Partial<Record<AuthUser["role"], Capability[]>> =
   {
-    OWNER: elevatedKnowledgeCapabilities,
-    ADMIN: elevatedKnowledgeCapabilities,
-    MANAGER: elevatedKnowledgeCapabilities,
+    OWNER: [
+      ...universalCommunicationCapabilities,
+      ...elevatedKnowledgeCapabilities,
+    ],
+    ADMIN: [
+      ...universalCommunicationCapabilities,
+      ...administratorWorkspaceCapabilities,
+      ...elevatedKnowledgeCapabilities,
+    ],
+    MANAGER: [
+      ...universalCommunicationCapabilities,
+      ...elevatedKnowledgeCapabilities,
+    ],
+    BUYER: universalCommunicationCapabilities,
+    MARKETER: universalCommunicationCapabilities,
+    CLUB_MANAGER: universalCommunicationCapabilities,
     STANDARDS_MANAGER: roleCapabilities.STANDARDS_MANAGER,
+    SENIOR_ADMINISTRATOR: [
+      ...universalCommunicationCapabilities,
+      ...administratorWorkspaceCapabilities,
+    ],
+    CLUB_ADMINISTRATOR: [
+      ...universalCommunicationCapabilities,
+      ...administratorWorkspaceCapabilities,
+    ],
+    TRAINEE: universalCommunicationCapabilities,
   };
 
 function mergeCapabilities(
@@ -712,10 +746,6 @@ export function can(user: AuthUser | null, capability: Capability) {
 
 function isShiftWorkspaceRole(user: AuthUser | null) {
   return Boolean(user && shiftWorkspaceRoles.has(user.role));
-}
-
-function isCommunicationChatOnlyUser(user: AuthUser | null) {
-  return Boolean(user && isCommunicationChatOnlyRole(user.role));
 }
 
 function canAccessStaffSalary(user: AuthUser | null) {
@@ -841,10 +871,6 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href === "/communications" || href.startsWith("/communications/")) {
-    if (isCommunicationChatOnlyUser(user)) {
-      return false;
-    }
-
     return can(user, "view_communications") || can(user, "view_guests");
   }
 
@@ -860,10 +886,6 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href.startsWith("/staff/notifications")) {
-    if (isCommunicationChatOnlyUser(user)) {
-      return false;
-    }
-
     return can(user, "view_communications");
   }
 

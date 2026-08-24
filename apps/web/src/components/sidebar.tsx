@@ -181,6 +181,22 @@ function canShowNavItem(user: AuthUser | null, item: NavItem) {
   return true;
 }
 
+function resolveNavItemForUser(user: AuthUser | null, item: NavItem): NavItem {
+  if (
+    user &&
+    isShiftWorkspaceRole(user.role) &&
+    normalizeNavigationPath(item.href) === "/staff/tasks"
+  ) {
+    return {
+      ...item,
+      href: staffTasksWorkspaceHref,
+      label: "Мои задачи",
+    };
+  }
+
+  return item;
+}
+
 function NavLink({ href, label, onNavigate }: NavItem) {
   const pathname = usePathname();
   const isActive = isNavigationItemActive(pathname, href);
@@ -715,7 +731,9 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const allowedNavGroups = navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => canShowNavItem(user, item)),
+      items: group.items
+        .map((item) => resolveNavItemForUser(user, item))
+        .filter((item) => canShowNavItem(user, item)),
     }))
     .filter((group) => group.items.length > 0);
   const showHomeLink = Boolean(user);
@@ -1113,7 +1131,7 @@ function CompactUserPanel({
     return (
       <div className="space-y-2">
         <div
-          title={user.fullName ?? user.email}
+          title={`${user.fullName ?? user.email} · сеть ${user.tenantSlug}`}
           className="flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
         >
           {initials || "LP"}
@@ -1121,12 +1139,15 @@ function CompactUserPanel({
         {user.platformTenantContext ? (
           <button
             type="button"
-            title="К управлению платформой"
-            aria-label="К управлению платформой"
+            title={`Выбрана сеть: ${user.tenantSlug}. К управлению платформой`}
+            aria-label={`Выбрана сеть: ${user.tenantSlug}. К управлению платформой`}
             onClick={onLeaveTenantContext}
-            className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500 text-xs font-bold text-zinc-950 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
+            className="flex h-12 w-12 flex-col items-center justify-center rounded-2xl bg-emerald-500 text-zinc-950 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
           >
-            PA
+            <span className="text-xs font-bold">PA</span>
+            <span className="max-w-10 truncate text-[9px] font-semibold leading-none">
+              {user.tenantSlug}
+            </span>
           </button>
         ) : null}
         <button

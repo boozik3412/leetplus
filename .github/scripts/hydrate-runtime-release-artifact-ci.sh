@@ -14,6 +14,8 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 0077
 
+readonly RELEASE_STAGER_AUTHORITY_SHA256='6e0b7128d31a0ad4439a728d6afe45d006bf2330ccc2f8a3cacffbef1677cc2d'
+readonly RUNTIME_EXTRACTOR_AUTHORITY_SHA256='8b2e687f20a0c3c34bcd7c9108679c28f3a20305debe1aa17d248b4f7115cb6c'
 readonly RUNTIME_VERIFIER_AUTHORITY_SHA256='e8f953a17526b3b972218152721bae54fa5e1fca695a2e9d71abc1e154e6c519'
 
 while IFS= read -r exported_name; do
@@ -624,10 +626,10 @@ source_node_sha256="$(snapshot_regular_file \
   "$node_path" "${tool_root}/node" 268435456 0550)"
 source_stager_sha256="$(snapshot_regular_file \
   "$stager" "$stager_snapshot" 4194304 0550 \
-  6e0b7128d31a0ad4439a728d6afe45d006bf2330ccc2f8a3cacffbef1677cc2d)"
+  "$RELEASE_STAGER_AUTHORITY_SHA256")"
 snapshot_regular_file \
   "$extractor" "$extractor_snapshot" 1048576 0440 \
-  8b2e687f20a0c3c34bcd7c9108679c28f3a20305debe1aa17d248b4f7115cb6c \
+  "$RUNTIME_EXTRACTOR_AUTHORITY_SHA256" \
   >/dev/null
 snapshot_regular_file \
   "$runtime_verifier" "$runtime_verifier_snapshot" 1048576 0440 \

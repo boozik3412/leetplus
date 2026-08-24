@@ -6,8 +6,11 @@ IFS=$'\n\t'
 readonly RELEASE_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 readonly DATABASE_MIGRATION='20260820010000_fixture'
 readonly REPOSITORY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+readonly STAGER="${REPOSITORY_ROOT}/docs/deployment/production-artifact/stage-release-artifact.sh"
+readonly EXTRACTOR="${REPOSITORY_ROOT}/.github/scripts/extract-runtime-release-artifact.py"
 readonly VERIFIER="${REPOSITORY_ROOT}/.github/scripts/verify-runtime-release-artifact.mjs"
 readonly HYDRATION_AUTHORITY="${REPOSITORY_ROOT}/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
+readonly RELEASE_ADMISSION_WORKFLOW="${REPOSITORY_ROOT}/.github/workflows/ci.yml"
 readonly TEST_ROOT="$(mktemp -d)"
 readonly OPERATIONAL_SCRIPTS=(
   current-network-access-scope-classification.cli.mjs
@@ -43,13 +46,36 @@ cleanup() {
 }
 trap cleanup EXIT
 
-expected_verifier_authority_sha256="$(sha256sum -- "$VERIFIER" | awk '{ print $1 }')"
-expected_verifier_authority_declaration="readonly RUNTIME_VERIFIER_AUTHORITY_SHA256='${expected_verifier_authority_sha256}'"
-verifier_authority_declaration_count="$(grep -F -c -x \
-  "$expected_verifier_authority_declaration" \
-  "$HYDRATION_AUTHORITY" || true)"
-if [[ "$verifier_authority_declaration_count" != '1' ]]; then
-  printf 'runtime verifier hydration authority pin is stale or non-unique\n' >&2
+assert_reviewed_authority_pin() {
+  local label="$1"
+  local source_path="$2"
+  local variable_name="$3"
+  local source_sha256 expected_declaration declaration_count
+  source_sha256="$(sha256sum -- "$source_path" | awk '{ print $1 }')"
+  expected_declaration="readonly ${variable_name}='${source_sha256}'"
+  declaration_count="$(grep -F -c -x \
+    "$expected_declaration" \
+    "$HYDRATION_AUTHORITY" || true)"
+  if [[ "$declaration_count" != '1' ]]; then
+    printf '%s hydration authority pin is stale or non-unique\n' "$label" >&2
+    exit 1
+  fi
+}
+
+assert_reviewed_authority_pin \
+  'release stager' "$STAGER" 'RELEASE_STAGER_AUTHORITY_SHA256'
+assert_reviewed_authority_pin \
+  'runtime extractor' "$EXTRACTOR" 'RUNTIME_EXTRACTOR_AUTHORITY_SHA256'
+assert_reviewed_authority_pin \
+  'runtime verifier' "$VERIFIER" 'RUNTIME_VERIFIER_AUTHORITY_SHA256'
+
+expected_hydration_authority_sha256="$(sha256sum -- "$HYDRATION_AUTHORITY" | awk '{ print $1 }')"
+expected_workflow_authority_declaration="          helper_sha256='${expected_hydration_authority_sha256}'"
+workflow_authority_declaration_count="$(grep -F -c -x \
+  "$expected_workflow_authority_declaration" \
+  "$RELEASE_ADMISSION_WORKFLOW" || true)"
+if [[ "$workflow_authority_declaration_count" != '1' ]]; then
+  printf 'release admission hydration controller pin is stale or non-unique\n' >&2
   exit 1
 fi
 

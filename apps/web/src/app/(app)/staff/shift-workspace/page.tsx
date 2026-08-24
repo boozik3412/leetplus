@@ -2,11 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
-import { requireNetworkScopedUser } from "@/lib/auth";
-import { staffTasksWorkspaceHref } from "@/lib/landing";
+import { requireTenantWorkspaceUser } from "@/lib/auth";
 import {
-  getStaffOperators,
-  type StaffOperatorReport,
   type StaffOperatorReportRow,
   type StaffOperatorShiftDetail,
 } from "@/lib/guests";
@@ -19,10 +16,7 @@ import {
   type StaffChecklistRun,
   type StaffChecklistTemplateOption,
 } from "@/lib/staff-checklists";
-import {
-  getStaffShiftWorkspaceProfile,
-  type StaffDirectoryMember,
-} from "@/lib/staff-directory";
+import { getStaffShiftWorkspaceProfile } from "@/lib/staff-directory";
 import {
   getStaffTaskReport,
   type StaffTask,
@@ -103,19 +97,6 @@ const emptyChecklistReport: StaffChecklistReport = {
   checklistTemplates: [],
   stores: [],
   users: [],
-};
-
-const emptyOperatorReport: StaffOperatorReport = {
-  periodFrom: "",
-  periodTo: "",
-  storeId: null,
-  status: "linked",
-  anomaly: null,
-  search: null,
-  sort: "cash",
-  direction: "desc",
-  rows: [],
-  staffOptions: [],
 };
 
 type SearchParams = Promise<{
@@ -247,26 +228,6 @@ function checklistStatusLabel(status: StaffChecklistRun["status"]) {
   };
 
   return labels[status];
-}
-
-function findShiftRow(
-  rows: StaffOperatorReportRow[],
-  staffMember: StaffDirectoryMember | null,
-) {
-  if (!staffMember?.externalUserId) {
-    return null;
-  }
-
-  return (
-    rows.find(
-      (row) =>
-        row.externalUserId === staffMember.externalUserId &&
-        (!staffMember.externalDomain ||
-          row.externalDomain === staffMember.externalDomain),
-    ) ??
-    rows.find((row) => row.externalUserId === staffMember.externalUserId) ??
-    null
-  );
 }
 
 function timeValue(value: string | null) {
@@ -609,9 +570,7 @@ export default async function StaffShiftWorkspacePage({
 }: {
   searchParams: SearchParams;
 }) {
-  const user = await requireNetworkScopedUser({
-    storesFallback: staffTasksWorkspaceHref,
-  });
+  const user = await requireTenantWorkspaceUser();
   const params = await searchParams;
   const selectedChecklistId = searchParam(params.checklistRunId);
   const isChecklistPickerOpen = searchParam(params.checklistPicker) === "1";
@@ -657,9 +616,13 @@ export default async function StaffShiftWorkspacePage({
     }),
     emptyChecklistReport,
   );
-  const profilePromise = safeValue(getStaffShiftWorkspaceProfile(), {
-    staffMember: null,
-  });
+  const profilePromise = safeValue(
+    getStaffShiftWorkspaceProfile({ dateFrom: today, dateTo: today }),
+    {
+      staffMember: null,
+      operator: null,
+    },
+  );
 
   const [myTasks, reviewTasks, checklists, escalatedReport, profile] =
     await Promise.all([
@@ -670,20 +633,7 @@ export default async function StaffShiftWorkspacePage({
       profilePromise,
     ]);
   const staffMember = profile.staffMember;
-  const shiftReport = staffMember?.externalUserId
-    ? await safeValue(
-        getStaffOperators({
-          dateFrom: today,
-          dateTo: today,
-          status: "linked",
-          search: staffMember.externalUserId,
-          sort: "cash",
-          direction: "desc",
-        }),
-        emptyOperatorReport,
-      )
-    : emptyOperatorReport;
-  const shiftRow = findShiftRow(shiftReport.rows, staffMember);
+  const shiftRow = profile.operator;
   const currentShift = findCurrentShiftDetail(shiftRow);
   const currentTotalRevenue = currentShiftTotalRevenue(shiftRow, currentShift);
   const currentBarRevenue = currentShiftBarRevenue(shiftRow, currentShift);

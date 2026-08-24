@@ -831,7 +831,7 @@ function staffDefinitions(): readonly ControllerDefinition[] {
     staffController(
       'staff-shift-workspace.controller.ts',
       'shift-workspace',
-      'NETWORK_VERIFIED',
+      'STORES_VERIFIED',
       [['GET', ['profile']]],
     ),
     staffController(

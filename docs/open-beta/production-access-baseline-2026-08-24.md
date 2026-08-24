@@ -1,12 +1,12 @@
 # Production access baseline — 24.08.2026
 
-| Поле | Значение |
-| --- | --- |
-| Статус | `DEPLOYED / VERIFIED` |
-| PR | [#7](https://github.com/boozik3412/leetplus/pull/7) |
-| Merge SHA | `8d49f2d7fa3b35c2f5bd87a4e4b7fc522f4324a4` |
-| Production data migration | не выполнялась |
-| Решение по дублирующим tenant | отдельное подтверждение обязательно |
+| Поле                          | Значение                                            |
+| ----------------------------- | --------------------------------------------------- |
+| Статус                        | `DEPLOYED / VERIFIED`                               |
+| PR                            | [#7](https://github.com/boozik3412/leetplus/pull/7) |
+| Merge SHA                     | `8d49f2d7fa3b35c2f5bd87a4e4b7fc522f4324a4`          |
+| Production data migration     | не выполнялась                                      |
+| Решение по дублирующим tenant | отдельное подтверждение обязательно                 |
 
 Документ фиксирует восстановленный production-доступ сотрудников, текущую
 привязку пользовательского cohort к рабочей сети и правила выбора tenant для
@@ -18,15 +18,21 @@
 До baseline сохранённая platform-admin cookie могла открыть `/dashboard` без
 поддерживаемого tenant store scope. `/auth/me` отвечал `200`, а dashboard
 получал `401 Fresh tenant store scope is required` и показывал системную
-ошибку. Следующий hotfix направлял часть сменных ролей со scope `STORES` в
-network-only workspace `/staff/shift-workspace`, который штатно завершался
-`404` для такого scope.
+ошибку. Затем сменные роли со scope `STORES` попадали в network-only workspace
+`/staff/shift-workspace`, который штатно завершался `404`; временная защита
+направляла их вместо домашней страницы в список личных задач.
 
 Текущий baseline:
 
 - platform admin без tenant-контекста попадает в `/administration`;
 - выбор tenant создаёт подписанный контекст только выбранной сети;
-- сменные роли с `STORES` scope открывают личные задачи по маршруту
+- `SENIOR_ADMINISTRATOR`, `CLUB_ADMINISTRATOR` и `TRAINEE` открывают домашнюю
+  страницу рабочей смены по маршруту `/staff/shift-workspace` как при `NETWORK`,
+  так и при `STORES` scope;
+- при `STORES` страница смены получает только профиль текущего сотрудника и
+  данные его Langame-смены в привязанном клубе; tenant-wide отчёт сотрудников
+  остаётся под `NETWORK`-ограничением;
+- личные задачи остаются отдельным пунктом «Мои задачи» по маршруту
   `/staff/tasks?view=my&status=all`;
 - коммуникации доступны всем ролям;
 - `ADMIN`, `SENIOR_ADMINISTRATOR` и `CLUB_ADMINISTRATOR` сохраняют read-доступ
@@ -42,11 +48,11 @@ network-only workspace `/staff/shift-workspace`, который штатно з�
 В production существуют три tenant с одинаковым отображаемым названием.
 Рабочие данные не потеряны: они находятся в одном каноническом tenant.
 
-| Назначение | Name | Slug | Users | Stores | Products | Sales facts | Langame |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| Каноническая рабочая сеть | `1337` | `demo` | 28 всего / 26 активных | 4 | 1 485 | 108 226 | 3 активных источника |
-| Пустой duplicate | `1337` | `club-a` | 1 активный OWNER | 0 | 0 | 0 | 0 |
-| Пустой duplicate | `1337` | `1337` | 1 активный OWNER | 0 | 0 | 0 | 0 |
+| Назначение                | Name   | Slug     |                  Users | Stores | Products | Sales facts |              Langame |
+| ------------------------- | ------ | -------- | ---------------------: | -----: | -------: | ----------: | -------------------: |
+| Каноническая рабочая сеть | `1337` | `demo`   | 28 всего / 26 активных |      4 |    1 485 |     108 226 | 3 активных источника |
+| Пустой duplicate          | `1337` | `club-a` |       1 активный OWNER |      0 |        0 |           0 |                    0 |
+| Пустой duplicate          | `1337` | `1337`   |       1 активный OWNER |      0 |        0 |           0 |                    0 |
 
 Для операционной работы нужно выбирать карточку `Рабочая сеть` со slug
 `demo`. Slug `1337` на скриншоте пустого dashboard означал выбор другого,
@@ -57,15 +63,15 @@ network-only workspace `/staff/shift-workspace`, который штатно з�
 Hotfix не переносил и не удалял пользователей. Операционный employee cohort
 остаётся в канонической сети `demo`:
 
-| Роль и scope | Активные | Неактивные |
-| --- | ---: | ---: |
-| `OWNER / NETWORK` | 2 | 0 |
-| `MANAGER / NETWORK` | 1 | 0 |
-| `STANDARDS_MANAGER / NETWORK` | 1 | 0 |
-| `SENIOR_ADMINISTRATOR / STORES` | 4 | 0 |
-| `CLUB_ADMINISTRATOR / NETWORK` | 1 | 0 |
-| `CLUB_ADMINISTRATOR / STORES` | 17 | 2 |
-| **Итого** | **26** | **2** |
+| Роль и scope                    | Активные | Неактивные |
+| ------------------------------- | -------: | ---------: |
+| `OWNER / NETWORK`               |        2 |          0 |
+| `MANAGER / NETWORK`             |        1 |          0 |
+| `STANDARDS_MANAGER / NETWORK`   |        1 |          0 |
+| `SENIOR_ADMINISTRATOR / STORES` |        4 |          0 |
+| `CLUB_ADMINISTRATOR / NETWORK`  |        1 |          0 |
+| `CLUB_ADMINISTRATOR / STORES`   |       17 |          2 |
+| **Итого**                       |   **26** |      **2** |
 
 В production cohort сейчас отсутствуют `ADMIN`, `BUYER`, `MARKETER`,
 `CLUB_MANAGER` и `TRAINEE`. Один `STANDARDS_MANAGER` использует tenant-level

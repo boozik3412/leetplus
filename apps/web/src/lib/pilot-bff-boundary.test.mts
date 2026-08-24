@@ -569,7 +569,6 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
     "operations-dashboard/page.tsx",
     "readiness-report/page.tsx",
     "salary/page.tsx",
-    "shift-workspace/page.tsx",
   ] as const;
   const [authSource, permissionsSource, ...pageSources] = await Promise.all([
     readFile(fileURLToPath(new URL("auth.ts", import.meta.url)), "utf8"),
@@ -603,13 +602,30 @@ test("keeps transitional tenant-wide staff workspaces out of STORES scope", asyn
       `${networkOnlyPages[index]} must apply the scope gate before data access`,
     );
   }
+});
 
-  const shiftWorkspaceSource = pageSources[networkOnlyPages.indexOf(
-    "shift-workspace/page.tsx",
-  )];
+test("keeps the store-aware shift workspace behind authenticated API authority", async () => {
+  const [pageSource, permissionsSource] = await Promise.all([
+    readFile(
+      fileURLToPath(
+        new URL("../app/(app)/staff/shift-workspace/page.tsx", import.meta.url),
+      ),
+      "utf8",
+    ),
+    readFile(fileURLToPath(new URL("permissions.ts", import.meta.url)), "utf8"),
+  ]);
+
   assert.match(
-    shiftWorkspaceSource,
-    /requireNetworkScopedUser\(\{[\s\S]*storesFallback:\s*staffTasksWorkspaceHref[\s\S]*\}\)/,
+    pageSource,
+    /import \{ requireTenantWorkspaceUser \} from ["']@\/lib\/auth["']/,
+  );
+  assert.match(pageSource, /await requireTenantWorkspaceUser\(\)/);
+  assert.doesNotMatch(pageSource, /requireNetworkScopedUser/);
+  assert.match(pageSource, /getStaffShiftWorkspaceProfile\(\{/);
+  assert.doesNotMatch(pageSource, /getStaffOperators/);
+  assert.doesNotMatch(
+    permissionsSource,
+    /const networkOnlyStaffPrefixes = \[[\s\S]*?["']\/staff\/shift-workspace["'][\s\S]*?\];/,
   );
 });
 

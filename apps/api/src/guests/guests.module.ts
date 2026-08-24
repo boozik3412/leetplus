@@ -8,5 +8,6 @@ import { GuestsService } from './guests.service';
   imports: [AuthModule, IntegrationsModule],
   controllers: [GuestsController],
   providers: [GuestsService],
+  exports: [GuestsService],
 })
 export class GuestsModule {}

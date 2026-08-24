@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.26.0                                                                                              |
+| Версия контракта               | 1.27.0                                                                                              |
 | Дата                           | 24.08.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -464,6 +464,11 @@ Worker boundary не принимает `actorUserId`; interactive same-tenant a
 
 ## Changelog
 
+- `1.27.0`, 24.08.2026 — домашняя страница сменных ролей восстановлена на
+  `/staff/shift-workspace` для `NETWORK` и `STORES`. Store-scoped endpoint
+  возвращает только текущего сотрудника и его собственную Langame-смену в
+  серверно определённом клубе; tenant-wide staff-control остаётся
+  `NETWORK`-only. Личные задачи сохранены отдельным пунктом навигации.
 - `1.26.0`, 24.08.2026 — canonical current release synchronized to
   `CURRENT_187`: `187` migrations, latest
   `20260820010000_guest_portal_telegram_update_ledger`, exact additive tail

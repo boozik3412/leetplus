@@ -741,19 +741,15 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const homeLabel =
     homeHref === platformAdministrationHref
       ? "Администрирование"
-      : homeHref === staffTasksWorkspaceHref
-        ? "Мои задачи"
-        : homeHref === "/dashboard"
-          ? "Главная"
-          : "Моя смена";
+      : homeHref === "/dashboard"
+        ? "Главная"
+        : "Моя смена";
   const homeTitle =
     homeHref === platformAdministrationHref
       ? "Главная: администрирование платформы"
-      : homeHref === staffTasksWorkspaceHref
-        ? "Моя смена: задачи и текущие приоритеты"
-        : homeHref === "/dashboard"
-          ? "Главная: сводный дашборд сети"
-          : "Моя смена: задачи, регламенты и текущая выручка";
+      : homeHref === "/dashboard"
+        ? "Главная: сводный дашборд сети"
+        : "Моя смена: задачи, регламенты и текущая выручка";
   const isHomeActive = isNavigationItemActive(pathname, homeHref);
   const isDashboardArea = isDashboardPath(pathname);
   const currentProductArea = resolveCurrentProductArea(pathname);

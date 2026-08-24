@@ -7,6 +7,7 @@ readonly RELEASE_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 readonly DATABASE_MIGRATION='20260820010000_fixture'
 readonly REPOSITORY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly VERIFIER="${REPOSITORY_ROOT}/.github/scripts/verify-runtime-release-artifact.mjs"
+readonly HYDRATION_AUTHORITY="${REPOSITORY_ROOT}/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
 readonly TEST_ROOT="$(mktemp -d)"
 readonly OPERATIONAL_SCRIPTS=(
   current-network-access-scope-classification.cli.mjs
@@ -41,6 +42,16 @@ cleanup() {
   rm -rf -- "$TEST_ROOT"
 }
 trap cleanup EXIT
+
+expected_verifier_authority_sha256="$(sha256sum -- "$VERIFIER" | awk '{ print $1 }')"
+expected_verifier_authority_declaration="readonly RUNTIME_VERIFIER_AUTHORITY_SHA256='${expected_verifier_authority_sha256}'"
+verifier_authority_declaration_count="$(grep -F -c -x \
+  "$expected_verifier_authority_declaration" \
+  "$HYDRATION_AUTHORITY" || true)"
+if [[ "$verifier_authority_declaration_count" != '1' ]]; then
+  printf 'runtime verifier hydration authority pin is stale or non-unique\n' >&2
+  exit 1
+fi
 
 write_manifest() {
   local root="$1"

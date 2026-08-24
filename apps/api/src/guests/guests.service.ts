@@ -169,6 +169,14 @@ export type StaffOperatorReportQuery = GuestsSummaryQuery & {
   direction?: 'asc' | 'desc';
 };
 
+export type StaffShiftWorkspaceOperatorQuery = {
+  dateFrom?: string;
+  dateTo?: string;
+  storeId: string | null;
+  externalDomain: string | null;
+  externalUserId: string;
+};
+
 export type StaffOperationKind =
   | 'refunds'
   | 'discounts'
@@ -2425,6 +2433,33 @@ export class GuestsService {
       rows: filteredRows,
       staffOptions,
     };
+  }
+
+  async getShiftWorkspaceOperator(
+    user: AuthenticatedUser,
+    query: StaffShiftWorkspaceOperatorQuery,
+  ): Promise<StaffOperatorReportRow | null> {
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod({
+      dateFrom: query.dateFrom,
+      dateTo: query.dateTo,
+    });
+    const storeId = query.storeId
+      ? await this.resolveStoreId(tenantId, query.storeId)
+      : null;
+    const rows = await this.buildStaffOperatorRows(tenantId, period, storeId, {
+      externalDomain: query.externalDomain,
+      externalUserId: query.externalUserId,
+    });
+
+    return (
+      rows.find(
+        (row) =>
+          row.externalUserId === query.externalUserId &&
+          (!query.externalDomain ||
+            row.externalDomain === query.externalDomain),
+      ) ?? null
+    );
   }
 
   async exportStaffOperators(
@@ -5148,6 +5183,10 @@ export class GuestsService {
     tenantId: string,
     period: Period,
     storeId: string | null,
+    identity?: {
+      externalDomain: string | null;
+      externalUserId: string;
+    },
   ): Promise<StaffOperatorReportRow[]> {
     const [rows, mappings, groupsByKey, sales, sessions, langameUsersByKey] =
       await Promise.all([
@@ -5156,7 +5195,10 @@ export class GuestsService {
             tenantId,
             startedAt: { gte: period.fromDate, lte: period.toDate },
             ...(storeId ? { storeId } : {}),
-            externalUserId: { not: null },
+            externalUserId: identity ? identity.externalUserId : { not: null },
+            ...(identity?.externalDomain
+              ? { externalDomain: identity.externalDomain }
+              : {}),
           },
           select: {
             guestId: true,
@@ -5180,7 +5222,18 @@ export class GuestsService {
           },
         }),
         this.prisma.guestStaffIdentityMapping.findMany({
-          where: { tenantId, externalProvider: IntegrationProvider.LANGAME },
+          where: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            ...(identity
+              ? {
+                  externalUserId: identity.externalUserId,
+                  ...(identity.externalDomain
+                    ? { externalDomain: identity.externalDomain }
+                    : {}),
+                }
+              : {}),
+          },
           select: {
             id: true,
             externalDomain: true,
@@ -5226,7 +5279,7 @@ export class GuestsService {
             stoppedAt: true,
           },
         }),
-        this.loadLangameStaffUsersByOperatorKey(tenantId),
+        this.loadLangameStaffUsersByOperatorKey(tenantId, identity),
       ]);
     const mappingsByKey = new Map(
       mappings.map((mapping) => [
@@ -5462,9 +5515,25 @@ export class GuestsService {
     );
   }
 
-  private async loadLangameStaffUsersByOperatorKey(tenantId: string) {
+  private async loadLangameStaffUsersByOperatorKey(
+    tenantId: string,
+    identity?: {
+      externalDomain: string | null;
+      externalUserId: string;
+    },
+  ) {
     const rows = await this.prisma.langameStaffUser.findMany({
-      where: { tenantId },
+      where: {
+        tenantId,
+        ...(identity
+          ? {
+              externalUserId: identity.externalUserId,
+              ...(identity.externalDomain
+                ? { externalDomain: identity.externalDomain }
+                : {}),
+            }
+          : {}),
+      },
       select: {
         externalDomain: true,
         externalUserId: true,

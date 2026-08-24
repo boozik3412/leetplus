@@ -25,9 +25,7 @@ export function getDefaultLandingPath(
   }
 
   if (isShiftWorkspaceRole(user?.role)) {
-    return user?.accessScope === "STORES"
-      ? staffTasksWorkspaceHref
-      : staffShiftWorkspaceHref;
+    return staffShiftWorkspaceHref;
   }
 
   return "/dashboard";
@@ -44,21 +42,5 @@ export function getAuthenticatedDestination(
     return platformAdministrationHref;
   }
 
-  if (
-    user.accessScope === "STORES" &&
-    returnTo &&
-    isShiftWorkspacePath(returnTo)
-  ) {
-    return staffTasksWorkspaceHref;
-  }
-
   return returnTo ?? getDefaultLandingPath(user);
-}
-
-function isShiftWorkspacePath(href: string) {
-  const path = href.split("?")[0]?.split("#")[0] ?? href;
-  return (
-    path === staffShiftWorkspaceHref ||
-    path.startsWith(`${staffShiftWorkspaceHref}/`)
-  );
 }

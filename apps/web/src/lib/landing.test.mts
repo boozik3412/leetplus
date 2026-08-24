@@ -5,7 +5,6 @@ import {
   getDefaultLandingPath,
   platformAdministrationHref,
   staffShiftWorkspaceHref,
-  staffTasksWorkspaceHref,
 } from "./landing.ts";
 
 type LandingUser = Parameters<typeof getDefaultLandingPath>[0];
@@ -65,7 +64,7 @@ test("keeps tenant shift roles in the shift workspace", () => {
   );
 });
 
-test("routes store-scoped shift roles to their scoped task workspace", () => {
+test("routes store-scoped shift roles to their shift workspace", () => {
   for (const role of [
     "SENIOR_ADMINISTRATOR",
     "CLUB_ADMINISTRATOR",
@@ -73,18 +72,18 @@ test("routes store-scoped shift roles to their scoped task workspace", () => {
   ] as const) {
     assert.equal(
       getDefaultLandingPath(user({ role, accessScope: "STORES" })),
-      staffTasksWorkspaceHref,
+      staffShiftWorkspaceHref,
     );
   }
 });
 
-test("replaces a stale shift-workspace return path for STORES users", () => {
+test("preserves a shift-workspace return path for STORES users", () => {
   assert.equal(
     getAuthenticatedDestination(
       user({ role: "TRAINEE", accessScope: "STORES" }),
       "/staff/shift-workspace?checklistRunId=old",
     ),
-    staffTasksWorkspaceHref,
+    "/staff/shift-workspace?checklistRunId=old",
   );
 });
 
@@ -93,8 +92,5 @@ test("keeps regular tenant users on the dashboard", () => {
 });
 
 test("preserves a sanitized return path for a regular tenant user", () => {
-  assert.equal(
-    getAuthenticatedDestination(user(), "/reports"),
-    "/reports",
-  );
+  assert.equal(getAuthenticatedDestination(user(), "/reports"), "/reports");
 });

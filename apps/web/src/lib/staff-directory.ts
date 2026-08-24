@@ -1,5 +1,6 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 import type { AuthUser } from "./auth";
+import type { StaffOperatorReportRow } from "./guests";
 
 export type StaffMemberStatus =
   | "ACTIVE"
@@ -116,6 +117,12 @@ export type StaffDirectoryReport = {
 
 export type StaffShiftWorkspaceProfile = {
   staffMember: StaffDirectoryMember | null;
+  operator: StaffOperatorReportRow | null;
+};
+
+export type StaffShiftWorkspaceFilters = {
+  dateFrom?: string;
+  dateTo?: string;
 };
 
 export async function getStaffDirectoryReport(
@@ -136,11 +143,16 @@ export async function getStaffDirectoryReport(
   return response.json() as Promise<StaffDirectoryReport>;
 }
 
-export async function getStaffShiftWorkspaceProfile(): Promise<StaffShiftWorkspaceProfile> {
-  const response = await fetch(`${getApiUrl()}/staff/shift-workspace/profile`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+export async function getStaffShiftWorkspaceProfile(
+  filters: StaffShiftWorkspaceFilters = {},
+): Promise<StaffShiftWorkspaceProfile> {
+  const response = await fetch(
+    `${getApiUrl()}/staff/shift-workspace/profile${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch staff shift workspace profile");

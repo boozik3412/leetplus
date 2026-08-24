@@ -76,11 +76,6 @@ const CONTROLLER_BOUNDARIES: readonly ControllerBoundary[] = [
     className: 'StaffOperationsDashboardController',
     routeIds: ['GET /staff/operations-dashboard'],
   },
-  {
-    source: 'staff/staff-shift-workspace.controller.ts',
-    className: 'StaffShiftWorkspaceController',
-    routeIds: ['GET /staff/shift-workspace/profile'],
-  },
 ] as const;
 
 const STAFF_CONTROL_METHOD_BOUNDARIES: readonly MethodBoundary[] = [
@@ -152,6 +147,11 @@ const COMMUNICATIONS_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
 ] as const;
 
 const STAFF_STORE_BOUNDARIES: readonly ControllerBoundary[] = [
+  {
+    source: 'staff/staff-shift-workspace.controller.ts',
+    className: 'StaffShiftWorkspaceController',
+    routeIds: ['GET /staff/shift-workspace/profile'],
+  },
   {
     source: 'staff/staff-attachments.controller.ts',
     className: 'StaffAttachmentsController',
@@ -415,7 +415,7 @@ function namedMethod(
 }
 
 describe('Gate 1MT staff scope boundaries', () => {
-  it('binds exactly 19 staff workspace routes to a fresh NETWORK class guard', () => {
+  it('binds exactly 18 staff workspace routes to a fresh NETWORK class guard', () => {
     const allRouteIds: string[] = [];
 
     for (const boundary of CONTROLLER_BOUNDARIES) {
@@ -431,7 +431,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       allRouteIds.push(...boundary.routeIds);
     }
 
-    expect(allRouteIds).toHaveLength(19);
+    expect(allRouteIds).toHaveLength(18);
     expect(new Set(allRouteIds).size).toBe(allRouteIds.length);
     expect(allRouteIds.some((id) => id.includes('/scheduled/'))).toBe(false);
   });
@@ -473,7 +473,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       ...STAFF_CONTROL_METHOD_BOUNDARIES.map(({ routeId }) => routeId),
     ];
 
-    expect(selected).toHaveLength(29);
+    expect(selected).toHaveLength(28);
     expect(
       selected.every(
         (id) =>
@@ -538,7 +538,7 @@ describe('Gate 1MT staff scope boundaries', () => {
     }
   });
 
-  it('binds all 23 store-aware staff routes to fresh NETWORK or STORES authority', () => {
+  it('binds all 24 store-aware staff routes to fresh NETWORK or STORES authority', () => {
     const routeIds: string[] = [];
 
     for (const boundary of STAFF_STORE_BOUNDARIES) {
@@ -554,7 +554,7 @@ describe('Gate 1MT staff scope boundaries', () => {
       routeIds.push(...boundary.routeIds);
     }
 
-    expect(routeIds).toHaveLength(23);
+    expect(routeIds).toHaveLength(24);
     expect(new Set(routeIds).size).toBe(routeIds.length);
   });
 

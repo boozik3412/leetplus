@@ -288,7 +288,6 @@ const STAFF_NETWORK_ROUTE_IDS = [
   'GET /staff/operations-dashboard',
   'GET /staff/readiness-report',
   'GET /staff/salary',
-  'GET /staff/shift-workspace/profile',
   'PATCH /staff/assessments/:id',
   'PATCH /staff/discipline/policy',
   'PATCH /staff/discipline/records/:id',

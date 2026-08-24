@@ -10,9 +10,11 @@ describe('FreshStoreScopeService', () => {
   const userFindUnique = jest.fn();
   const userRoleOverrideFindUnique = jest.fn();
   const storeFindMany = jest.fn();
+  const tenantFindUnique = jest.fn();
   const prisma = {
     user: { findUnique: userFindUnique },
     userRoleOverride: { findUnique: userRoleOverrideFindUnique },
+    tenant: { findUnique: tenantFindUnique },
     store: { findMany: storeFindMany },
   } as unknown as PrismaService;
   const service = new FreshStoreScopeService(prisma, new AccessScopeService());
@@ -55,6 +57,7 @@ describe('FreshStoreScopeService', () => {
     userFindUnique.mockResolvedValue(persistedUser());
     userRoleOverrideFindUnique.mockResolvedValue(null);
     storeFindMany.mockResolvedValue([]);
+    tenantFindUnique.mockResolvedValue(null);
   });
 
   it('accepts a matching fresh Tenant A NETWORK authority', async () => {
@@ -79,6 +82,64 @@ describe('FreshStoreScopeService', () => {
       mode: 'NETWORK',
       allowedStoreIds: [],
     });
+  });
+
+  it('accepts a fresh signed platform-admin tenant context', async () => {
+    userFindUnique.mockResolvedValue({
+      id: 'platform-admin-1',
+      isActive: true,
+      isPlatformAdmin: true,
+    });
+    tenantFindUnique.mockResolvedValue({
+      id: 'tenant-b',
+      slug: 'network-b',
+    });
+
+    await expect(
+      service.assertNetwork(
+        requestUser({
+          id: 'platform-admin-1',
+          isPlatformAdmin: true,
+          platformTenantContext: true,
+          tenantId: 'tenant-b',
+          tenantSlug: 'network-b',
+          accessScope: 'NETWORK',
+          allowedStoreIds: [],
+        }),
+      ),
+    ).resolves.toEqual({
+      userId: 'platform-admin-1',
+      tenantId: 'tenant-b',
+      tenantSlug: 'network-b',
+      mode: 'NETWORK',
+      allowedStoreIds: [],
+    });
+  });
+
+  it('denies a platform context after platform-admin access is revoked', async () => {
+    userFindUnique.mockResolvedValue({
+      id: 'platform-admin-1',
+      isActive: true,
+      isPlatformAdmin: false,
+    });
+    tenantFindUnique.mockResolvedValue({
+      id: 'tenant-b',
+      slug: 'network-b',
+    });
+
+    await expect(
+      service.resolve(
+        requestUser({
+          id: 'platform-admin-1',
+          isPlatformAdmin: true,
+          platformTenantContext: true,
+          tenantId: 'tenant-b',
+          tenantSlug: 'network-b',
+          accessScope: 'NETWORK',
+          allowedStoreIds: [],
+        }),
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('rejects a stale Tenant A NETWORK JWT after a DB downgrade to store A1', async () => {

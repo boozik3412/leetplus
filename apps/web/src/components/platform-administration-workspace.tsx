@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { startNavigationFeedback } from "@/components/navigation-feedback";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import type {
   AdminAuditEvent,
@@ -413,6 +414,13 @@ export function PlatformAdministrationWorkspace({
   const [auditCount, setAuditCount] = useState(overview.auditEvents.length);
   const [isAuditLoading, setIsAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
+  const [switchingTenantId, setSwitchingTenantId] = useState<string | null>(
+    null,
+  );
+  const [tenantContextError, setTenantContextError] = useState<{
+    tenantId: string;
+    message: string;
+  } | null>(null);
   const [serviceDiagnosticsByTenant, setServiceDiagnosticsByTenant] = useState<
     Record<string, TenantServiceDiagnosticsResult>
   >({});
@@ -666,6 +674,30 @@ export function PlatformAdministrationWorkspace({
     }));
   }
 
+  async function enterTenantWorkspace(tenant: Tenant) {
+    setSwitchingTenantId(tenant.id);
+    setTenantContextError(null);
+
+    const response = await fetch("/api/auth/tenant-context", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tenantId: tenant.id }),
+    });
+
+    if (!response.ok) {
+      setTenantContextError({
+        tenantId: tenant.id,
+        message: await readError(response),
+      });
+      setSwitchingTenantId(null);
+      return;
+    }
+
+    startNavigationFeedback();
+    router.push("/dashboard");
+    router.refresh();
+  }
+
   const auditExportHref = `/api/admin/audit-events/export?${buildAuditSearchParams().toString()}`;
 
   return (
@@ -876,6 +908,21 @@ export function PlatformAdministrationWorkspace({
                       <p className="mt-1 text-sm text-zinc-500">
                         {tenant.slug}
                       </p>
+                      <button
+                        type="button"
+                        disabled={switchingTenantId !== null}
+                        onClick={() => void enterTenantWorkspace(tenant)}
+                        className="mt-3 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {switchingTenantId === tenant.id
+                          ? "Открываем сеть…"
+                          : "Войти в сеть"}
+                      </button>
+                      {tenantContextError?.tenantId === tenant.id ? (
+                        <p className="mt-2 max-w-md rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200">
+                          {tenantContextError.message}
+                        </p>
+                      ) : null}
                     </div>
                     <dl className="grid min-w-[320px] grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                       <div>

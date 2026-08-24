@@ -19,6 +19,8 @@ export type AuthenticatedUser = {
   permissions?: AccessCapability[];
   isActive?: boolean;
   isPlatformAdmin: boolean;
+  /** True only when a signed platform-admin session selected a tenant. */
+  platformTenantContext?: boolean;
   tenantId: string;
   tenantSlug: string;
   tenantStatus?: TenantLifecycleStatus;
@@ -40,6 +42,8 @@ export type AuthTokenPayload = {
   isPlatformAdmin: boolean;
   tenantId: string;
   tenantSlug: string;
+  /** Signed selector; it is ignored unless the persisted user is platform-admin. */
+  platformTenantId?: string;
 };
 
 export type AuthenticatedRequest = Request & {

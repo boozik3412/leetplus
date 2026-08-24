@@ -822,12 +822,16 @@ function resolveStaffPathCapability(href: string): Capability {
 }
 
 export function canAccessPath(user: AuthUser | null, href: string) {
-  if (href === "/dashboard" || href.startsWith("/dashboard/")) {
-    return can(user, "view_dashboard");
-  }
-
   if (href === "/admin" || href.startsWith("/administration")) {
     return Boolean(user?.isPlatformAdmin);
+  }
+
+  if (user?.isPlatformAdmin && !user.platformTenantContext) {
+    return false;
+  }
+
+  if (href === "/dashboard" || href.startsWith("/dashboard/")) {
+    return can(user, "view_dashboard");
   }
 
   if (href === "/users") {

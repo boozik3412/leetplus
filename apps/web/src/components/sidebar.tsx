@@ -703,6 +703,9 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const desktopSidebarRef = useRef<HTMLElement | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [tenantContextError, setTenantContextError] = useState<string | null>(
+    null,
+  );
   const [openNavState, setOpenNavState] = useState<OpenNavGroupsState>({
     pathname: "",
     groups: {},
@@ -813,6 +816,22 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     });
     startNavigationFeedback();
     router.push("/login");
+    router.refresh();
+  }
+
+  async function handleLeaveTenantContext() {
+    setTenantContextError(null);
+    const response = await fetch("/api/auth/tenant-context", {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      setTenantContextError("Не удалось вернуться в управление платформой");
+      return;
+    }
+
+    startNavigationFeedback();
+    router.push(platformAdministrationHref);
     router.refresh();
   }
 
@@ -938,7 +957,12 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
               ))}
             </nav>
             <div className="border-t border-zinc-200/80 p-3 dark:border-zinc-800">
-              <UserPanel user={user} onLogout={handleLogout} />
+              <UserPanel
+                user={user}
+                tenantContextError={tenantContextError}
+                onLeaveTenantContext={handleLeaveTenantContext}
+                onLogout={handleLogout}
+              />
             </div>
           </div>
         </div>
@@ -991,7 +1015,11 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         </nav>
         <div className="shrink-0 space-y-3 border-t border-zinc-200/80 p-3 dark:border-zinc-800">
           <ThemeSwitcher variant="compact" />
-          <CompactUserPanel user={user} onLogout={handleLogout} />
+          <CompactUserPanel
+            user={user}
+            onLeaveTenantContext={handleLeaveTenantContext}
+            onLogout={handleLogout}
+          />
         </div>
       </aside>
     </>
@@ -1000,9 +1028,13 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
 
 function UserPanel({
   user,
+  tenantContextError,
+  onLeaveTenantContext,
   onLogout,
 }: {
   user: AuthUser | null;
+  tenantContextError: string | null;
+  onLeaveTenantContext: () => void;
   onLogout: () => void;
 }) {
   if (user) {
@@ -1015,7 +1047,26 @@ function UserPanel({
           <p className="truncate text-xs text-zinc-500">
             {user.tenantSlug}.leetplus.ru · {getRoleLabel(user.role)}
           </p>
+          {user.platformTenantContext ? (
+            <p className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+              Выбрана сеть: {user.tenantSlug}
+            </p>
+          ) : null}
         </div>
+        {user.platformTenantContext ? (
+          <button
+            type="button"
+            onClick={onLeaveTenantContext}
+            className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+          >
+            К управлению платформой
+          </button>
+        ) : null}
+        {tenantContextError ? (
+          <p className="text-xs text-red-600 dark:text-red-300">
+            {tenantContextError}
+          </p>
+        ) : null}
         <button
           type="button"
           onClick={onLogout}
@@ -1044,9 +1095,11 @@ function UserPanel({
 
 function CompactUserPanel({
   user,
+  onLeaveTenantContext,
   onLogout,
 }: {
   user: AuthUser | null;
+  onLeaveTenantContext: () => void;
   onLogout: () => void;
 }) {
   if (user) {
@@ -1065,6 +1118,17 @@ function CompactUserPanel({
         >
           {initials || "LP"}
         </div>
+        {user.platformTenantContext ? (
+          <button
+            type="button"
+            title="К управлению платформой"
+            aria-label="К управлению платформой"
+            onClick={onLeaveTenantContext}
+            className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500 text-xs font-bold text-zinc-950 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
+          >
+            PA
+          </button>
+        ) : null}
         <button
           type="button"
           title="Выйти"

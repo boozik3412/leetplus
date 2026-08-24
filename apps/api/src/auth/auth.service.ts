@@ -554,6 +554,128 @@ export class AuthService {
     return this.toAuthenticatedUser(await this.withRoleOverride(user));
   }
 
+  async selectTenantContext(
+    userId: string,
+    tenantIdValue: unknown,
+  ): Promise<AuthResponse> {
+    const tenantId =
+      typeof tenantIdValue === 'string' ? tenantIdValue.trim() : '';
+
+    if (!tenantId) {
+      throw new BadRequestException('Tenant is required');
+    }
+
+    const [account, tenant] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          isActive: true,
+          isPlatformAdmin: true,
+        },
+      }),
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: {
+          id: true,
+          slug: true,
+          status: true,
+          customerStage: true,
+          onboardingStatus: true,
+          trialStartsAt: true,
+          trialEndsAt: true,
+          entitlementProfileRevision: true,
+        },
+      }),
+    ]);
+
+    if (!account?.isActive) {
+      throw new UnauthorizedException('Учетная запись отключена');
+    }
+
+    if (!account.isPlatformAdmin) {
+      throw new ForbiddenException('Platform administrator access is required');
+    }
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    const authenticatedUser: AuthenticatedUser = {
+      id: account.id,
+      email: account.email,
+      fullName: account.fullName,
+      role: UserRole.OWNER,
+      customRoleId: null,
+      customRoleName: null,
+      hasRoleOverride: false,
+      permissions: resolveUserCapabilities({ role: UserRole.OWNER }),
+      isActive: true,
+      isPlatformAdmin: true,
+      platformTenantContext: true,
+      tenantId: tenant.id,
+      tenantSlug: tenant.slug,
+      tenantStatus: tenant.status,
+      tenantCustomerStage: tenant.customerStage,
+      tenantOnboardingStatus: tenant.onboardingStatus,
+      tenantTrialStartsAt: tenant.trialStartsAt,
+      tenantTrialEndsAt: tenant.trialEndsAt,
+      tenantEntitlementProfileRevision: tenant.entitlementProfileRevision,
+      accessScope: 'NETWORK',
+      allowedStoreIds: [],
+    };
+
+    return this.signAuthResponse(authenticatedUser, tenant.id);
+  }
+
+  async clearTenantContext(userId: string): Promise<AuthResponse> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        tenant: {
+          select: {
+            slug: true,
+            status: true,
+            customerStage: true,
+            onboardingStatus: true,
+            trialStartsAt: true,
+            trialEndsAt: true,
+            entitlementProfileRevision: true,
+            executionRevision: true,
+            moduleEntitlements: {
+              select: tenantModuleEntitlementExecutionSelect,
+            },
+          },
+        },
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            permissions: true,
+          },
+        },
+        storeAccesses: {
+          select: {
+            storeId: true,
+            store: { select: { tenantId: true } },
+          },
+        },
+      },
+    });
+
+    if (!user?.isActive) {
+      throw new UnauthorizedException('Учетная запись отключена');
+    }
+
+    if (!user.isPlatformAdmin) {
+      throw new ForbiddenException('Platform administrator access is required');
+    }
+
+    return this.createAuthResponse(user);
+  }
+
   confirmEmail(token: string) {
     return this.emailVerificationService.confirmEmail(token);
   }
@@ -773,6 +895,13 @@ export class AuthService {
 
     const userWithRoleOverride = await this.withRoleOverride(user);
     const authenticatedUser = this.toAuthenticatedUser(userWithRoleOverride);
+    return this.signAuthResponse(authenticatedUser);
+  }
+
+  private async signAuthResponse(
+    authenticatedUser: AuthenticatedUser,
+    platformTenantId?: string,
+  ): Promise<AuthResponse> {
     const payload: AuthTokenPayload = {
       sub: authenticatedUser.id,
       email: authenticatedUser.email,
@@ -782,6 +911,7 @@ export class AuthService {
       isPlatformAdmin: authenticatedUser.isPlatformAdmin,
       tenantId: authenticatedUser.tenantId,
       tenantSlug: authenticatedUser.tenantSlug,
+      ...(platformTenantId ? { platformTenantId } : {}),
     };
 
     return {
@@ -806,6 +936,7 @@ export class AuthService {
       permissions: resolveUserCapabilities(user),
       isActive: user.isActive,
       isPlatformAdmin: user.isPlatformAdmin,
+      platformTenantContext: false,
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,
       tenantStatus: user.tenant.status,

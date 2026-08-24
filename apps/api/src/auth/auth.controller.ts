@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Header,
@@ -19,6 +20,7 @@ import type {
   PreviewUserInviteDto,
   RegisterDto,
   ResendEmailVerificationDto,
+  SelectTenantContextDto,
 } from './auth.dto';
 import type { AuthenticatedUser } from './auth.types';
 import { JwtAuthGuard } from './jwt-auth.guard';
@@ -81,7 +83,22 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
-    return this.authService.me(user.id);
+    return user;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('tenant-context')
+  selectTenantContext(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SelectTenantContextDto,
+  ) {
+    return this.authService.selectTenantContext(user.id, dto?.tenantId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('tenant-context')
+  clearTenantContext(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.clearTenantContext(user.id);
   }
 
   private assertInviteJson(contentType: string | undefined): void {

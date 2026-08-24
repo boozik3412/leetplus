@@ -21,9 +21,12 @@ export function isCommunicationChatOnlyRole(
 }
 
 export function getDefaultLandingPath(
-  user: Pick<AuthUser, "role" | "isPlatformAdmin" | "accessScope"> | null,
+  user: Pick<
+    AuthUser,
+    "role" | "isPlatformAdmin" | "platformTenantContext" | "accessScope"
+  > | null,
 ) {
-  if (user?.isPlatformAdmin) {
+  if (user?.isPlatformAdmin && !user.platformTenantContext) {
     return platformAdministrationHref;
   }
 
@@ -37,10 +40,13 @@ export function getDefaultLandingPath(
 }
 
 export function getAuthenticatedDestination(
-  user: Pick<AuthUser, "role" | "isPlatformAdmin" | "accessScope">,
+  user: Pick<
+    AuthUser,
+    "role" | "isPlatformAdmin" | "platformTenantContext" | "accessScope"
+  >,
   returnTo?: string | null,
 ) {
-  if (user.isPlatformAdmin) {
+  if (user.isPlatformAdmin && !user.platformTenantContext) {
     return platformAdministrationHref;
   }
 

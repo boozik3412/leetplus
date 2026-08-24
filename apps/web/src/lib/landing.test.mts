@@ -36,6 +36,19 @@ test("ignores a stale tenant return path for a platform administrator session", 
   );
 });
 
+test("routes a platform administrator with a signed tenant context to that workspace", () => {
+  const platformTenantUser = user({
+    isPlatformAdmin: true,
+    platformTenantContext: true,
+  });
+
+  assert.equal(getDefaultLandingPath(platformTenantUser), "/dashboard");
+  assert.equal(
+    getAuthenticatedDestination(platformTenantUser, "/reports"),
+    "/reports",
+  );
+});
+
 test("platform administration takes precedence over a tenant shift role", () => {
   assert.equal(
     getDefaultLandingPath(

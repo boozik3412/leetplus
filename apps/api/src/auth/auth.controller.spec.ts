@@ -51,4 +51,17 @@ describe('AuthController invite secret transport', () => {
     ).toThrow('Некорректный запрос приглашения');
     expect(authService.getInvite).not.toHaveBeenCalled();
   });
+
+  it('returns the guard-verified user without losing tenant context', () => {
+    const { authService, controller } = createController();
+    const user = {
+      id: 'platform-admin-1',
+      isPlatformAdmin: true,
+      platformTenantContext: true,
+      tenantId: 'tenant-b',
+    } as never;
+
+    expect(controller.me(user)).toBe(user);
+    expect(authService).not.toHaveProperty('me');
+  });
 });

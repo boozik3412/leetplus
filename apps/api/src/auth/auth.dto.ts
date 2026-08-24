@@ -24,6 +24,10 @@ export type LoginDto = {
   password: string;
 };
 
+export type SelectTenantContextDto = {
+  tenantId?: string;
+};
+
 export type ConfirmEmailDto = {
   token: string;
 };

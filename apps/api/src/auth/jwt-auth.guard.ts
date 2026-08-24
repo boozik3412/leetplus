@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { TenantCustomerStage } from '@prisma/client';
+import { TenantCustomerStage, UserRole } from '@prisma/client';
 import { resolveAccessScopeEnforcementMode } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
@@ -129,6 +129,75 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('Invalid authorization token');
       }
 
+      const platformTenantId =
+        typeof payload.platformTenantId === 'string'
+          ? payload.platformTenantId.trim()
+          : '';
+
+      if (platformTenantId && !user.isPlatformAdmin) {
+        throw new UnauthorizedException('Invalid authorization token');
+      }
+
+      const platformTenant = platformTenantId
+        ? await this.prisma.tenant.findUnique({
+            where: { id: platformTenantId },
+            select: {
+              id: true,
+              slug: true,
+              status: true,
+              customerStage: true,
+              onboardingStatus: true,
+              trialStartsAt: true,
+              trialEndsAt: true,
+              entitlementProfileRevision: true,
+              executionRevision: true,
+              moduleEntitlements: {
+                select: {
+                  module: true,
+                  readEnabled: true,
+                  writeEnabled: true,
+                  outboundEnabled: true,
+                  validFrom: true,
+                  validUntil: true,
+                  profileRevision: true,
+                },
+              },
+            },
+          })
+        : null;
+
+      if (platformTenantId && !platformTenant) {
+        throw new UnauthorizedException('Invalid authorization token');
+      }
+
+      if (platformTenant) {
+        return {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: UserRole.OWNER,
+          customRoleId: null,
+          customRoleName: null,
+          hasRoleOverride: false,
+          permissions: resolveUserCapabilities({ role: UserRole.OWNER }),
+          isActive: user.isActive,
+          isPlatformAdmin: true,
+          platformTenantContext: true,
+          tenantId: platformTenant.id,
+          tenantSlug: platformTenant.slug,
+          tenantStatus: platformTenant.status,
+          tenantCustomerStage: platformTenant.customerStage,
+          tenantOnboardingStatus: platformTenant.onboardingStatus,
+          tenantTrialStartsAt: platformTenant.trialStartsAt,
+          tenantTrialEndsAt: platformTenant.trialEndsAt,
+          tenantEntitlementProfileRevision:
+            platformTenant.entitlementProfileRevision,
+          tenantExecutionSubject: platformTenant,
+          accessScope: 'NETWORK' as const,
+          allowedStoreIds: [],
+        };
+      }
+
       if (!user.isPlatformAdmin) {
         this.tenantExecutionPolicy.assertSessionAllowed(user.tenant);
       }
@@ -179,6 +248,7 @@ export class JwtAuthGuard implements CanActivate {
         permissions: resolveUserCapabilities({ ...user, roleOverride }),
         isActive: user.isActive,
         isPlatformAdmin: user.isPlatformAdmin,
+        platformTenantContext: false,
         tenantId: user.tenantId,
         tenantSlug: user.tenant.slug,
         tenantStatus: user.tenant.status,

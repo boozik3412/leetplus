@@ -27,6 +27,7 @@ export type AuthUser = {
   permissions?: string[];
   isActive?: boolean;
   isPlatformAdmin: boolean;
+  platformTenantContext?: boolean;
   tenantId: string;
   tenantSlug: string;
   accessScope: "NETWORK" | "STORES";
@@ -100,14 +101,13 @@ export async function requireCurrentUser() {
 }
 
 /**
- * Keeps platform operators out of tenant-scoped pages. The API remains the
- * authoritative boundary; this redirect prevents expected tenant-scope
- * rejections from becoming generic server-component failures.
+ * Keeps platform operators without a selected tenant out of tenant-scoped
+ * pages. The API remains the authoritative boundary.
  */
 export async function requireTenantWorkspaceUser() {
   const user = await requireCurrentUser();
 
-  if (user.isPlatformAdmin) {
+  if (user.isPlatformAdmin && !user.platformTenantContext) {
     redirect(platformAdministrationHref);
   }
 

@@ -405,6 +405,64 @@ describe('AuthService', () => {
     });
   });
 
+  it('issues a signed full-access tenant context for a platform administrator', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'platform-admin-1',
+      email: 'platform@example.test',
+      fullName: 'Platform Admin',
+      isActive: true,
+      isPlatformAdmin: true,
+    });
+    prisma.tenant.findUnique.mockResolvedValue({
+      id: 'tenant-2',
+      slug: 'network-two',
+      status: TenantLifecycleStatus.ACTIVE,
+      customerStage: TenantCustomerStage.INTERNAL,
+      onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      trialStartsAt: null,
+      trialEndsAt: null,
+      entitlementProfileRevision: 0,
+    });
+
+    await expect(
+      service.selectTenantContext('platform-admin-1', 'tenant-2'),
+    ).resolves.toMatchObject({
+      accessToken: 'signed-token',
+      user: {
+        role: UserRole.OWNER,
+        isPlatformAdmin: true,
+        platformTenantContext: true,
+        tenantId: 'tenant-2',
+        tenantSlug: 'network-two',
+        accessScope: 'NETWORK',
+        allowedStoreIds: [],
+      },
+    });
+    expect(jwtService.signAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sub: 'platform-admin-1',
+        platformTenantId: 'tenant-2',
+      }),
+      { expiresIn: '24h' },
+    );
+  });
+
+  it('does not issue a tenant context to a regular tenant user', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'owner@example.test',
+      fullName: 'Owner',
+      isActive: true,
+      isPlatformAdmin: false,
+    });
+    prisma.tenant.findUnique.mockResolvedValue({ id: 'tenant-2' });
+
+    await expect(
+      service.selectTenantContext('user-1', 'tenant-2'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(jwtService.signAsync).not.toHaveBeenCalled();
+  });
+
   it('confirms email by verification token', async () => {
     emailVerificationService.confirmEmail.mockResolvedValue({ ok: true });
 

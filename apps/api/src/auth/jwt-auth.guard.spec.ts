@@ -54,6 +54,9 @@ describe('JwtAuthGuard access scope', () => {
     user: {
       findUnique: jest.fn(),
     },
+    tenant: {
+      findUnique: jest.fn(),
+    },
     userRoleOverride: {
       findUnique: jest.fn(),
     },
@@ -114,6 +117,69 @@ describe('JwtAuthGuard access scope', () => {
       accessScope: 'STORES',
       allowedStoreIds: ['a1'],
     });
+  });
+
+  it('resolves a signed platform tenant selector from fresh PostgreSQL state', async () => {
+    jwtService.verifyAsync.mockResolvedValue({
+      sub: 'platform-admin-1',
+      isPlatformAdmin: true,
+      platformTenantId: 'tenant-b',
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'platform-admin-1',
+      email: 'platform@example.test',
+      fullName: 'Platform Admin',
+      role: UserRole.MANAGER,
+      customRoleId: null,
+      customRole: null,
+      isActive: true,
+      isPlatformAdmin: true,
+      tenantId: 'tenant-a',
+      accessScope: 'NETWORK',
+      storeAccesses: [],
+      tenant: admittedTenant,
+    });
+    prisma.tenant.findUnique.mockResolvedValue({
+      ...admittedTenant,
+      id: 'tenant-b',
+      slug: 'network-b',
+    });
+
+    await expect(guard.verify('token')).resolves.toMatchObject({
+      role: UserRole.OWNER,
+      isPlatformAdmin: true,
+      platformTenantContext: true,
+      tenantId: 'tenant-b',
+      tenantSlug: 'network-b',
+      accessScope: 'NETWORK',
+      allowedStoreIds: [],
+    });
+  });
+
+  it('rejects a platform tenant selector carried by a non-platform account', async () => {
+    jwtService.verifyAsync.mockResolvedValue({
+      sub: 'user-a',
+      platformTenantId: 'tenant-b',
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-a',
+      email: 'current@example.test',
+      fullName: 'Current User',
+      role: UserRole.OWNER,
+      customRoleId: null,
+      customRole: null,
+      isActive: true,
+      isPlatformAdmin: false,
+      tenantId: 'tenant-a',
+      accessScope: 'NETWORK',
+      storeAccesses: [],
+      tenant: admittedTenant,
+    });
+
+    await expect(guard.verify('token')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
   });
 
   it('keeps missing persisted scope fail-closed in SHADOW mode', async () => {

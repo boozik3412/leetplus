@@ -3,6 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   normalizeCapabilities,
@@ -35,13 +36,16 @@ export class FreshStoreScopeService {
    * request whose guard-produced scope is no longer identical to DB authority.
    */
   async resolve(user: AuthenticatedUser): Promise<FreshStoreScope> {
-    if (
-      !user?.id ||
-      !user.tenantId ||
-      !user.tenantSlug ||
-      user.isPlatformAdmin
-    ) {
+    if (!user?.id || !user.tenantId || !user.tenantSlug) {
       throw new UnauthorizedException('Fresh tenant store scope is required');
+    }
+
+    if (user.isPlatformAdmin) {
+      if (user.platformTenantContext !== true) {
+        throw new UnauthorizedException('Fresh tenant store scope is required');
+      }
+
+      return this.resolvePlatformTenantContext(user);
     }
 
     const subject = await this.prisma.user.findUnique({
@@ -205,6 +209,55 @@ export class FreshStoreScopeService {
     }
 
     return normalized;
+  }
+
+  private async resolvePlatformTenantContext(
+    user: AuthenticatedUser,
+  ): Promise<FreshStoreScope> {
+    const [account, tenant] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          id: true,
+          isActive: true,
+          isPlatformAdmin: true,
+        },
+      }),
+      this.prisma.tenant.findUnique({
+        where: { id: user.tenantId },
+        select: { id: true, slug: true },
+      }),
+    ]);
+    const expectedPermissions = this.sorted(
+      resolveUserCapabilities({ role: UserRole.OWNER }),
+    );
+    const guardPermissions = this.sorted(
+      normalizeCapabilities(user.permissions),
+    );
+    const guardScope = this.accessScopeService.resolve(user);
+
+    if (
+      !account?.isActive ||
+      !account.isPlatformAdmin ||
+      !tenant ||
+      tenant.id !== guardScope.tenantId ||
+      tenant.slug !== guardScope.tenantSlug ||
+      user.role !== UserRole.OWNER ||
+      (user.customRoleId ?? null) !== null ||
+      guardScope.mode !== 'NETWORK' ||
+      guardScope.allowedStoreIds.length !== 0 ||
+      !this.sameIds(expectedPermissions, guardPermissions)
+    ) {
+      throw new UnauthorizedException('Authorization scope is stale');
+    }
+
+    return {
+      userId: account.id,
+      tenantId: tenant.id,
+      tenantSlug: tenant.slug,
+      mode: 'NETWORK',
+      allowedStoreIds: [],
+    };
   }
 
   private sorted(storeIds: readonly string[]): readonly string[] {

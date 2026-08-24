@@ -517,6 +517,13 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [ ] Control/ratings/motivation/discipline защищены и аудируются.
 - [ ] Salary работает только как planning; payout отсутствует.
 - [ ] Attachments имеют live parent ACL, revoke и tenant/store negative tests.
+- [x] Production attachment inventory выполнен read-only на admitted exact SHA:
+      parent-delete trigger contract `7/7`, `CURRENT_187`, raw identifiers/URL/
+      PII не выводились. Evidence:
+      [24.08.2026](./gate-1mt-production-attachment-inventory-2026-08-24.md).
+- [ ] Attachment reconciliation/backfill закрывает `5 446 UNRESOLVED`,
+      `309` multiple-parent, `741` unreferenced и `243` URL-review cases;
+      повторный inventory имеет zero unexplained/review findings.
 - [ ] OWNER/network manager/club manager/senior/trainee journeys зелёные.
 
 ### E4. `COMMUNICATIONS`

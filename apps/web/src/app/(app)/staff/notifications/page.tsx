@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffNotificationsWorkspace } from "@/components/staff-notifications-workspace";
 import { requireCurrentUser } from "@/lib/auth";
-import { isCommunicationChatOnlyRole } from "@/lib/landing";
 import { can } from "@/lib/permissions";
 import {
   getStaffNotificationsReport,
@@ -44,10 +43,6 @@ export default async function StaffNotificationsPage({
 
   if (!can(user, "view_communications")) {
     redirect("/dashboard");
-  }
-
-  if (isCommunicationChatOnlyRole(user.role)) {
-    redirect("/staff/team-chat");
   }
 
   const params = await searchParams;

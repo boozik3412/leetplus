@@ -903,6 +903,85 @@ describe('RolesGuard', () => {
     });
   });
 
+  it('keeps communications read access for every role after saved access customization', () => {
+    reflector.getAllAndOverride.mockReturnValue(Object.values(UserRole));
+
+    Object.values(UserRole).forEach((role) => {
+      const defaultPermissions = resolveUserCapabilities({ role });
+      const customRolePermissions = resolveUserCapabilities({
+        role,
+        customRole: { permissions: [] },
+      });
+      const overridePermissions = resolveUserCapabilities({
+        role,
+        roleOverride: { permissions: [] },
+      });
+
+      expect(defaultPermissions).toContain('view_communications');
+      expect(customRolePermissions).toContain('view_communications');
+      expect(overridePermissions).toContain('view_communications');
+
+      ['/staff/team-chat', '/staff/notifications'].forEach((path) => {
+        expect(
+          guard.canActivate(
+            createContext({
+              method: 'GET',
+              path,
+              user: {
+                role,
+                customRoleId: 'custom-role-1',
+                permissions: customRolePermissions,
+              },
+            }),
+          ),
+        ).toBe(true);
+      });
+    });
+  });
+
+  it('keeps administrator self-service workspaces after saved access customization', () => {
+    reflector.getAllAndOverride.mockReturnValue(Object.values(UserRole));
+
+    [
+      UserRole.ADMIN,
+      UserRole.SENIOR_ADMINISTRATOR,
+      UserRole.CLUB_ADMINISTRATOR,
+    ].forEach((role) => {
+      const permissions = resolveUserCapabilities({
+        role,
+        roleOverride: { permissions: [] },
+      });
+
+      expect(permissions).toEqual(
+        expect.arrayContaining([
+          'view_staff_tasks',
+          'view_staff_standards',
+          'view_staff_knowledge',
+        ]),
+      );
+
+      [
+        '/staff/tasks',
+        '/staff/shift-regulations',
+        '/staff/knowledge-base',
+      ].forEach((path) => {
+        expect(
+          guard.canActivate(
+            createContext({
+              method: 'GET',
+              path,
+              user: {
+                role,
+                hasRoleOverride: true,
+                permissions,
+              },
+            }),
+          ),
+        ).toBe(true);
+      });
+    });
+  });
+
   it('lets administrators read only their motivation page', () => {
     reflector.getAllAndOverride.mockReturnValue([
       UserRole.OWNER,

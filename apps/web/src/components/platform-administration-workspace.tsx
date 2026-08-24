@@ -138,6 +138,15 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
+function hasTenantBusinessData(tenant: Tenant) {
+  return (
+    tenant.storesCount > 0 ||
+    tenant.productsCount > 0 ||
+    tenant.salesFactsCount > 0 ||
+    tenant.langameSources.some((source) => source.isActive)
+  );
+}
+
 function formatAuditJson(value: unknown) {
   if (value === null || value === undefined) {
     return "Нет данных";
@@ -434,6 +443,21 @@ export function PlatformAdministrationWorkspace({
       ...overview.auditEvents.map((event) => event.targetType),
     ]),
   ).sort();
+  const orderedTenants = [...overview.tenants].sort((left, right) => {
+    const businessDataOrder =
+      Number(hasTenantBusinessData(right)) -
+      Number(hasTenantBusinessData(left));
+
+    if (businessDataOrder !== 0) {
+      return businessDataOrder;
+    }
+
+    return (
+      right.salesFactsCount - left.salesFactsCount ||
+      right.storesCount - left.storesCount ||
+      left.slug.localeCompare(right.slug)
+    );
+  });
 
   const cards = [
     { label: "Сетей", value: overview.totals.tenants },
@@ -762,7 +786,7 @@ export function PlatformAdministrationWorkspace({
             </div>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {overview.tenants.map((tenant) => {
+            {orderedTenants.map((tenant) => {
               const serviceStatus =
                 serviceDiagnosticsStatusByTenant[tenant.id] ?? "idle";
               const serviceDiagnostics =
@@ -882,13 +906,19 @@ export function PlatformAdministrationWorkspace({
             <h2 className="mt-1 text-base font-semibold">Сети tenant</h2>
           </div>
           <div className="mt-4 space-y-4">
-            {overview.tenants.map((tenant) => {
+            {orderedTenants.map((tenant) => {
               const form = forms[tenant.id] ?? initialFormState(tenant);
+              const hasBusinessData = hasTenantBusinessData(tenant);
 
               return (
                 <article
                   key={tenant.id}
-                  className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
+                  className={[
+                    "rounded-lg border bg-zinc-50 p-4 dark:bg-zinc-900/40",
+                    hasBusinessData
+                      ? "border-emerald-300 dark:border-emerald-500/50"
+                      : "border-amber-300 dark:border-amber-500/40",
+                  ].join(" ")}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
@@ -904,9 +934,19 @@ export function PlatformAdministrationWorkspace({
                         >
                           {statusLabels[tenant.status]}
                         </span>
+                        <span
+                          className={[
+                            "rounded-full border px-2.5 py-1 text-xs font-semibold",
+                            hasBusinessData
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                              : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200",
+                          ].join(" ")}
+                        >
+                          {hasBusinessData ? "Рабочая сеть" : "Пустая сеть"}
+                        </span>
                       </div>
                       <p className="mt-1 text-sm text-zinc-500">
-                        {tenant.slug}
+                        slug: {tenant.slug}
                       </p>
                       <button
                         type="button"
@@ -916,8 +956,16 @@ export function PlatformAdministrationWorkspace({
                       >
                         {switchingTenantId === tenant.id
                           ? "Открываем сеть…"
-                          : "Войти в сеть"}
+                          : hasBusinessData
+                            ? "Войти в рабочую сеть"
+                            : "Открыть пустую сеть"}
                       </button>
+                      {!hasBusinessData ? (
+                        <p className="mt-2 max-w-md text-xs font-medium text-amber-700 dark:text-amber-200">
+                          В этой сети нет клубов, товаров и продаж — дашборд
+                          будет пустым.
+                        </p>
+                      ) : null}
                       {tenantContextError?.tenantId === tenant.id ? (
                         <p className="mt-2 max-w-md rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200">
                           {tenantContextError.message}

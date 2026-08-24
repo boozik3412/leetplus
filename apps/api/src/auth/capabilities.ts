@@ -531,6 +531,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'export_reports',
     'view_assortment_products',
     'view_assortment_catalog',
+    'view_communications',
     'use_utilities',
     'edit_products',
   ],
@@ -545,6 +546,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'approve_guest_game_rewards',
     'view_marketing',
     'manage_marketing',
+    'view_communications',
   ],
   [UserRole.CLUB_MANAGER]: [
     'view_dashboard',
@@ -594,11 +596,44 @@ const elevatedKnowledgeCapabilities: AccessCapability[] = [
   ...staffKnowledgeWriteCapabilities,
 ];
 
+const universalCommunicationCapabilities: AccessCapability[] = [
+  'view_communications',
+];
+
+const administratorWorkspaceCapabilities: AccessCapability[] = [
+  'view_staff',
+  'view_staff_tasks',
+  'view_staff_standards',
+  'view_staff_knowledge',
+];
+
 const minimumRoleCapabilities: Partial<Record<UserRole, AccessCapability[]>> = {
-  [UserRole.OWNER]: elevatedKnowledgeCapabilities,
-  [UserRole.ADMIN]: elevatedKnowledgeCapabilities,
-  [UserRole.MANAGER]: elevatedKnowledgeCapabilities,
+  [UserRole.OWNER]: [
+    ...universalCommunicationCapabilities,
+    ...elevatedKnowledgeCapabilities,
+  ],
+  [UserRole.ADMIN]: [
+    ...universalCommunicationCapabilities,
+    ...administratorWorkspaceCapabilities,
+    ...elevatedKnowledgeCapabilities,
+  ],
+  [UserRole.MANAGER]: [
+    ...universalCommunicationCapabilities,
+    ...elevatedKnowledgeCapabilities,
+  ],
+  [UserRole.BUYER]: universalCommunicationCapabilities,
+  [UserRole.MARKETER]: universalCommunicationCapabilities,
+  [UserRole.CLUB_MANAGER]: universalCommunicationCapabilities,
   [UserRole.STANDARDS_MANAGER]: roleCapabilities[UserRole.STANDARDS_MANAGER],
+  [UserRole.SENIOR_ADMINISTRATOR]: [
+    ...universalCommunicationCapabilities,
+    ...administratorWorkspaceCapabilities,
+  ],
+  [UserRole.CLUB_ADMINISTRATOR]: [
+    ...universalCommunicationCapabilities,
+    ...administratorWorkspaceCapabilities,
+  ],
+  [UserRole.TRAINEE]: universalCommunicationCapabilities,
 };
 
 function mergeCapabilities(

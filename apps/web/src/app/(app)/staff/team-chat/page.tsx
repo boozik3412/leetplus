@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTeamChatWorkspace } from "@/components/staff-team-chat-workspace";
 import { requireCurrentUser } from "@/lib/auth";
-import { isCommunicationChatOnlyRole } from "@/lib/landing";
 import { can } from "@/lib/permissions";
 import {
   getStaffTeamChatReport,
@@ -41,7 +40,6 @@ export default async function StaffTeamChatPage({
     redirect("/dashboard");
   }
   const canViewStaff = can(user, "view_staff");
-  const canOpenCommunicationsHub = !isCommunicationChatOnlyRole(user.role);
 
   const params = await searchParams;
   const requestedChannelId = searchParam(params.channelId) ?? null;
@@ -60,9 +58,7 @@ export default async function StaffTeamChatPage({
           current="Командный чат"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            ...(canOpenCommunicationsHub
-              ? [{ href: "/communications", label: "Коммуникации" }]
-              : []),
+            { href: "/communications", label: "Коммуникации" },
           ]}
         />
 
@@ -80,14 +76,12 @@ export default async function StaffTeamChatPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {canOpenCommunicationsHub ? (
-              <Link
-                href="/communications"
-                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
-              >
-                Обзор коммуникаций
-              </Link>
-            ) : null}
+            <Link
+              href="/communications"
+              className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+            >
+              Обзор коммуникаций
+            </Link>
             {canViewStaff ? (
               <Link
                 href="/staff/checklists"

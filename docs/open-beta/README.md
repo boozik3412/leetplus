@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.199                                        |
+| Версия           | 1.200                                        |
 | Дата             | 24.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -18,10 +18,14 @@ scope внешний send и production GO остаются `BLOCKED_MANUAL`.
 Digest-bound attachment reconciliation controller, его protected artifacts,
 detached approval, zero-diff replay и exact rollback описаны в
 [операционном runbook](../security/access-scope/v1/staff-attachment-reconciliation-runbook.md).
-Controller прошёл local PostgreSQL rehearsal, но production apply не
-выполнялся и остаётся отдельным `BLOCKED_MANUAL` gate. Его scanner/controller/
-CLI добавлены в exact immutable release-artifact allowlist; произвольный
-mutable checkout не является допустимым источником production-команды.
+Controller прошёл local PostgreSQL rehearsal. Уже завершённый production base
+subset создал `4 416` unique-parent bindings; zero-diff check/replay прошли с
+downtime `0`. Новый residual owner-decision contract
+прошёл fresh restored-copy PostgreSQL lifecycle (`309 → 795 bindings`, `721`
+no-parent quarantine proposals, `20` active PENDING retained), но его
+production apply остаётся отдельным `BLOCKED_MANUAL` gate. Scanner/controller/
+CLI входят в exact immutable release-artifact allowlist; произвольный mutable
+checkout не является допустимым источником production-команды.
 
 Этот каталог — навигационная точка для перевода текущей сети из demo-режима в
 полноценную работу и последующего invite-only теста с внешними сетями. Он не
@@ -180,9 +184,12 @@ file BFF, Web production build, PostgreSQL matrix всех семи parent kinds
 
 Protected production read-only attachment inventory на admitted exact SHA:
 [Gate 1MT production attachment inventory 24.08.2026](./gate-1mt-production-attachment-inventory-2026-08-24.md).
-DB trigger contract прошёл `7/7`, но `5 446 UNRESOLVED`, `309`
-multiple-parent и `741` unreferenced rows требуют отдельного audited
-reconciliation/backfill; внешний beta остаётся `NO-GO`.
+DB trigger contract прошёл `7/7`. Base production reconciliation уже закрыл
+`4 416` unique-parent rows; остаток составляет `1 030 UNRESOLVED` и `20
+PENDING`. Residual restored-copy proposal сохраняет все `795` нормализованных
+parents для `309` blobs и quarantines `721` no-parent blobs без физического
+удаления. До admitted residual artifact, exact production approval и browser
+matrix внешний beta остаётся `NO-GO`.
 Exact SHA `3542b197…` принят CI run `32263277942` как `4/4 SUCCESS`;
 полноценный live archive/delete/orphan browser journey всё ещё открыт.
 

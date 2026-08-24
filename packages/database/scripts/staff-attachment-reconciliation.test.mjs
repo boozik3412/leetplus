@@ -7,14 +7,21 @@ import {
   EXPECTED_MIGRATION_COUNT,
   EXPECTED_MIGRATION_HEAD,
   PRODUCTION_ATTESTATION,
+  RESIDUAL_APPROVAL_PHRASES,
   StaffAttachmentReconciliationError,
+  buildStaffAttachmentResidualReconciliationPlan,
   buildStaffAttachmentReconciliationPlan,
+  classifyStaffAttachmentResidualReconciliationState,
   classifyStaffAttachmentReconciliationState,
+  createStaffAttachmentResidualReconciliationApproval,
   createStaffAttachmentReconciliationApproval,
+  materializeStaffAttachmentResidualReconciliationState,
   materializeStaffAttachmentReconciliationState,
   parseStaffAttachmentReconciliationRuntime,
   validateStaffAttachmentReconciliationApproval,
   validateStaffAttachmentReconciliationPlan,
+  validateStaffAttachmentResidualReconciliationApproval,
+  validateStaffAttachmentResidualReconciliationPlan,
 } from "./staff-attachment-reconciliation.mjs";
 import { parseStaffAttachmentReconciliationCliArguments } from "./staff-attachment-reconciliation.cli.mjs";
 
@@ -126,6 +133,39 @@ function cleanPlan() {
   source.occurrences = [source.occurrences[0]];
   source.signals = [];
   return buildStaffAttachmentReconciliationPlan(source);
+}
+
+function residualSnapshot() {
+  return {
+    attachments: [
+      attachment(IDS.clean, {
+        pendingExpiresAt: "2026-08-25T00:00:00.000Z",
+        state: "PENDING",
+        stateReasonCode: null,
+      }),
+      attachment(IDS.ambiguous),
+      attachment(IDS.pending, {
+        pendingExpiresAt: "2026-08-23T00:00:00.000Z",
+        state: "PENDING",
+        stateReasonCode: null,
+      }),
+      attachment(IDS.orphan),
+      attachment(IDS.existing),
+    ],
+    bindings: [],
+    database: database(),
+    generatedAt: GENERATED_AT,
+    occurrences: [
+      occurrence(IDS.ambiguous, "CHAT_MESSAGE", "message-a"),
+      occurrence(IDS.ambiguous, "CHAT_MESSAGE", "message-b"),
+      occurrence(IDS.existing, "CHAT_MESSAGE", "message-unique"),
+    ],
+    signals: [],
+  };
+}
+
+function residualPlan() {
+  return buildStaffAttachmentResidualReconciliationPlan(residualSnapshot());
 }
 
 function errorCode(reasonCode) {
@@ -329,6 +369,160 @@ test("unexpected extra binding blocks apply reconciliation", () => {
   );
 });
 
+test("residual planner binds every normalized parent and quarantines only no-parent rows", () => {
+  const plan = residualPlan();
+  assert.equal(plan.summary.actionCount, 3);
+  assert.equal(plan.summary.bindAttachmentCount, 1);
+  assert.equal(plan.summary.bindingCount, 2);
+  assert.equal(plan.summary.quarantineAttachmentCount, 2);
+  assert.equal(plan.summary.reviewAttachmentCount, 2);
+
+  const actions = new Map(
+    plan.actions.map((action) => [action.attachmentId, action]),
+  );
+  assert.equal(
+    actions.get(IDS.ambiguous).disposition,
+    "BIND_ALL_PRIMARY_PARENTS",
+  );
+  assert.deepEqual(
+    actions
+      .get(IDS.ambiguous)
+      .bindings.map((binding) => binding.resourceId),
+    ["message-a", "message-b"],
+  );
+  assert.equal(
+    actions.get(IDS.orphan).after.stateReasonCode,
+    "LEGACY_NO_PRIMARY_PARENT",
+  );
+  assert.equal(
+    actions.get(IDS.pending).after.stateReasonCode,
+    "PENDING_EXPIRED",
+  );
+
+  const reviews = new Map(
+    plan.reviews.map((review) => [review.attachmentId, review]),
+  );
+  assert.deepEqual(reviews.get(IDS.clean).reasonCodes, [
+    "PENDING_NOT_EXPIRED",
+  ]);
+  assert.deepEqual(reviews.get(IDS.existing).reasonCodes, [
+    "UNEXPECTED_UNIQUE_PRIMARY_PARENT",
+  ]);
+  validateStaffAttachmentResidualReconciliationPlan(plan);
+});
+
+test("residual plan and approval are digest-bound to all disposition counts", () => {
+  const plan = residualPlan();
+  const second = residualPlan();
+  assert.equal(plan.planDigest, second.planDigest);
+  assert.deepEqual(plan.actions, second.actions);
+
+  const approval = createStaffAttachmentResidualReconciliationApproval({
+    actionCount: "3",
+    bindingCount: "2",
+    confirmationPhrase: RESIDUAL_APPROVAL_PHRASES.APPLY,
+    confirmedPlanDigest: plan.planDigest,
+    direction: "APPLY",
+    now: new Date(GENERATED_AT),
+    plan,
+    quarantineCount: "2",
+    reviewAttachmentCount: "2",
+  });
+  validateStaffAttachmentResidualReconciliationApproval(
+    approval,
+    plan,
+    "APPLY",
+  );
+  assert.throws(
+    () =>
+      createStaffAttachmentResidualReconciliationApproval({
+        actionCount: "3",
+        bindingCount: "1",
+        confirmationPhrase: RESIDUAL_APPROVAL_PHRASES.APPLY,
+        confirmedPlanDigest: plan.planDigest,
+        direction: "APPLY",
+        plan,
+        quarantineCount: "2",
+        reviewAttachmentCount: "2",
+      }),
+    errorCode(
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_APPROVAL_CONFIRMATION_INVALID",
+    ),
+  );
+
+  const tampered = structuredClone(plan);
+  tampered.actions[0].bindings[0].resourceId = "message-tampered";
+  assert.throws(
+    () => validateStaffAttachmentResidualReconciliationPlan(tampered),
+    errorCode("ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN_INVALID"),
+  );
+});
+
+test("residual apply, replay, rollback and extra-binding checks are exact", () => {
+  const plan = residualPlan();
+  const before = {
+    attachments: plan.actions.map((action) => ({
+      attachmentId: action.attachmentId,
+      ...action.before,
+      tenantId: action.tenantId,
+    })),
+    audits: [],
+    bindings: [],
+  };
+  assert.equal(
+    classifyStaffAttachmentResidualReconciliationState({
+      direction: "APPLY",
+      plan,
+      state: before,
+    }).disposition,
+    "MUTATE",
+  );
+  const applied = materializeStaffAttachmentResidualReconciliationState({
+    applyTransitionAt: APPLY_AT,
+    direction: "APPLY",
+    plan,
+  });
+  assert.equal(applied.bindings.length, 2);
+  assert.equal(
+    classifyStaffAttachmentResidualReconciliationState({
+      direction: "APPLY",
+      plan,
+      state: applied,
+    }).disposition,
+    "RECONCILED",
+  );
+  const drifted = structuredClone(applied);
+  drifted.bindings.push({
+    ...drifted.bindings[0],
+    id: "223e4567-e89b-42d3-a456-426614174099",
+    sourceKey: "f".repeat(64),
+  });
+  assert.throws(
+    () =>
+      classifyStaffAttachmentResidualReconciliationState({
+        direction: "APPLY",
+        plan,
+        state: drifted,
+      }),
+    errorCode("ATTACHMENT_RESIDUAL_RECONCILIATION_APPLIED_BINDING_DRIFT"),
+  );
+  const rolledBack =
+    materializeStaffAttachmentResidualReconciliationState({
+      applyTransitionAt: APPLY_AT,
+      direction: "ROLLBACK",
+      plan,
+      rollbackTransitionAt: ROLLBACK_AT,
+    });
+  assert.equal(
+    classifyStaffAttachmentResidualReconciliationState({
+      direction: "ROLLBACK",
+      plan,
+      state: rolledBack,
+    }).disposition,
+    "RECONCILED",
+  );
+});
+
 test("runtime binds URL target, system identifier, role, SHA and production attestation", () => {
   const databaseUrl =
     "postgresql://writer:first-secret@db.example.test:5432/leetplus_unit?schema=public";
@@ -406,6 +600,29 @@ test("CLI grammar keeps approval and mutation inputs explicit", () => {
       ]),
     errorCode("ATTACHMENT_RECONCILIATION_CLI_REQUIRED_OPTION_MISSING"),
   );
+  const residual = parseStaffAttachmentReconciliationCliArguments([
+    "residual-approve",
+    "--plan",
+    "C:\\evidence\\residual-plan.json",
+    "--direction",
+    "APPLY",
+    "--confirm-plan-digest",
+    "b".repeat(64),
+    "--confirm-action-count",
+    "3",
+    "--confirm-binding-count",
+    "2",
+    "--confirm-quarantine-count",
+    "2",
+    "--confirm-review-count",
+    "2",
+    "--confirm",
+    RESIDUAL_APPROVAL_PHRASES.APPLY,
+    "--output",
+    "C:\\evidence\\residual-approval.json",
+  ]);
+  assert.equal(residual.command, "residual-approve");
+  assert.equal(residual.options["confirm-binding-count"], "2");
 });
 
 test("protected plan capacity covers the current production inventory envelope", () => {

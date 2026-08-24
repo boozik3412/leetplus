@@ -320,9 +320,12 @@ audit-копиями. Они попадают в отчёт scanner, но ник
 На checkpoint 24.08.2026 read-only production inventory выполнен: `5 446`
 `UNRESOLVED`, `4 416` unique-primary candidates, `309` multiple-parent и `741`
 без распознанного reference. Reconciliation controller реализован и прошёл
-unit + disposable PostgreSQL apply/zero-diff/rollback. Production apply не
-выполнялся и не разрешён до restored-copy rehearsal, exact role/backup review
-и отдельного approval exact plan digest.
+unit + disposable PostgreSQL apply/zero-diff/rollback. Base production apply
+затем закрыл `4 416` unique-parent rows (`4 416` bindings, drift/downtime `0`).
+Residual owner-decision contract прошёл fresh restored-copy lifecycle:
+`309 → 795` normalized-parent bindings, `721` reversible no-parent quarantine,
+`20` non-expired PENDING без изменения. Residual production apply не разрешён
+до нового same-SHA admission, fresh plan и отдельного exact approval.
 
 ## 8. Phased rollout
 

@@ -15,6 +15,14 @@ export const APPROVAL_CONTRACT =
   "STAFF_ATTACHMENT_RECONCILIATION_DETACHED_APPROVAL_V1";
 export const RECEIPT_CONTRACT =
   "STAFF_ATTACHMENT_RECONCILIATION_RECEIPT_V1";
+export const RESIDUAL_RECONCILIATION_CONTRACT =
+  "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_V1";
+export const RESIDUAL_PLAN_CONTRACT =
+  "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN_V1";
+export const RESIDUAL_APPROVAL_CONTRACT =
+  "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_DETACHED_APPROVAL_V1";
+export const RESIDUAL_RECEIPT_CONTRACT =
+  "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_RECEIPT_V1";
 export const EXPECTED_MIGRATION_COUNT = 187;
 export const EXPECTED_MIGRATION_HEAD =
   "20260820010000_guest_portal_telegram_update_ledger";
@@ -23,6 +31,11 @@ export const PRODUCTION_ATTESTATION =
 export const APPROVAL_PHRASES = Object.freeze({
   APPLY: "I_ACCEPT_EXACT_STAFF_ATTACHMENT_RECONCILIATION_APPLY",
   ROLLBACK: "I_ACCEPT_EXACT_STAFF_ATTACHMENT_RECONCILIATION_ROLLBACK",
+});
+export const RESIDUAL_APPROVAL_PHRASES = Object.freeze({
+  APPLY: "I_ACCEPT_EXACT_STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_APPLY",
+  ROLLBACK:
+    "I_ACCEPT_EXACT_STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_ROLLBACK",
 });
 
 const TARGETS = new Set(["development", "staging", "production"]);
@@ -41,6 +54,14 @@ const ADVISORY_LOCK_RESOURCE = 20_260_824;
 const APPLY_AUDIT_ACTION = "STAFF_ATTACHMENT_RECONCILIATION_APPLY_V1";
 const ROLLBACK_AUDIT_ACTION = "STAFF_ATTACHMENT_RECONCILIATION_ROLLBACK_V1";
 const TARGET_TYPE = "STAFF_ATTACHMENT_RECONCILIATION_PLAN";
+const RESIDUAL_APPLY_AUDIT_ACTION =
+  "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_APPLY_V1";
+const RESIDUAL_ROLLBACK_AUDIT_ACTION =
+  "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_ROLLBACK_V1";
+const RESIDUAL_TARGET_TYPE =
+  "STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN";
+const RESIDUAL_POLICY =
+  "BIND_ALL_NORMALIZED_PRIMARY_PARENTS_OR_QUARANTINE_NO_PARENT_V1";
 const REQUIRED_ENUMS = Object.freeze({
   StaffAttachmentBindingSource: [
     "NATIVE",
@@ -1973,6 +1994,1474 @@ export async function checkStaffAttachmentReconciliation({
   }
 }
 
+function residualDigest(domain, value) {
+  return sha256(
+    `${RESIDUAL_RECONCILIATION_CONTRACT}\0${domain}\0${canonicalJson(value)}`,
+  );
+}
+
+function residualPlanCore(plan) {
+  const { planDigest: _planDigest, ...core } = plan;
+  return core;
+}
+
+function residualReviewRecord(attachment, parents, reasons) {
+  return Object.freeze({
+    attachmentId: attachment.id,
+    primaryParents: sortParents(parents),
+    reasonCodes: [...reasons].sort(),
+    state: String(attachment.state),
+    tenantId: attachment.tenantId,
+  });
+}
+
+function residualBindingRecord(attachment, parent) {
+  const source = "CHAT_RELATION_BACKFILL";
+  const sourceKey = sourceKeyFor({
+    attachmentId: attachment.id,
+    resourceId: parent.resourceId,
+    resourceKind: parent.resourceKind,
+    source,
+    tenantId: attachment.tenantId,
+  });
+  return Object.freeze({
+    attachmentId: attachment.id,
+    candidateAttachmentId: attachment.id,
+    createdByUserId: null,
+    id: deterministicUuid("binding-id", sourceKey),
+    reasonCode: null,
+    resourceId: parent.resourceId,
+    resourceKind: parent.resourceKind,
+    resourceStoreId: parent.resourceStoreId,
+    source,
+    sourceKey,
+    state: "BOUND",
+    tenantId: attachment.tenantId,
+  });
+}
+
+function residualTenantActionCounts(actions) {
+  const byTenant = new Map();
+  for (const action of actions) {
+    const current = byTenant.get(action.tenantId) ?? {
+      actionCount: 0,
+      bindAttachmentCount: 0,
+      bindingCount: 0,
+      quarantineAttachmentCount: 0,
+      tenantId: action.tenantId,
+    };
+    current.actionCount += 1;
+    current.bindingCount += action.bindings.length;
+    if (action.disposition === "BIND_ALL_PRIMARY_PARENTS") {
+      current.bindAttachmentCount += 1;
+    } else {
+      current.quarantineAttachmentCount += 1;
+    }
+    byTenant.set(action.tenantId, current);
+  }
+  return [...byTenant.values()].sort((left, right) =>
+    left.tenantId.localeCompare(right.tenantId, "en"),
+  );
+}
+
+export function buildStaffAttachmentResidualReconciliationPlan(snapshot) {
+  const normalized = normalizeSnapshot(snapshot);
+  const generatedAt = exactIso(
+    snapshot.generatedAt,
+    "ATTACHMENT_RESIDUAL_RECONCILIATION_GENERATED_AT_INVALID",
+  );
+  const sourcePlan = buildStaffAttachmentReconciliationPlan(snapshot);
+  const bindingsByCandidate = new Map();
+  for (const binding of normalized.bindings) {
+    const candidateId = exactString(
+      binding.candidateAttachmentId,
+      OPAQUE_ID,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_BINDING_CANDIDATE_INVALID",
+    );
+    const entries = bindingsByCandidate.get(candidateId) ?? [];
+    entries.push(binding);
+    bindingsByCandidate.set(candidateId, entries);
+  }
+  const occurrencesByAttachment = new Map();
+  for (const occurrence of normalized.occurrences) {
+    const attachmentId = exactString(
+      occurrence.attachmentId,
+      UUID,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_OCCURRENCE_ATTACHMENT_INVALID",
+    );
+    const entries = occurrencesByAttachment.get(attachmentId) ?? [];
+    entries.push(occurrence);
+    occurrencesByAttachment.set(attachmentId, entries);
+  }
+  const signaledAttachmentIds = new Set(
+    sourcePlan.signalReviews
+      .map((signal) => signal.attachmentId)
+      .filter((attachmentId) => attachmentId !== null),
+  );
+  const actions = [];
+  const reviews = [];
+  let residualAttachmentCount = 0;
+  let alreadyBoundAttachmentCount = 0;
+  let ignoredLifecycleAttachmentCount = 0;
+
+  for (const attachment of [...normalized.attachments].sort((left, right) =>
+    String(left.id).localeCompare(String(right.id), "en"),
+  )) {
+    exactString(
+      attachment.id,
+      UUID,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_ATTACHMENT_ID_INVALID",
+    );
+    exactString(
+      attachment.tenantId,
+      OPAQUE_ID,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_TENANT_ID_INVALID",
+    );
+    if (attachment.state === "BOUND") {
+      alreadyBoundAttachmentCount += 1;
+      continue;
+    }
+    if (!["PENDING", "UNRESOLVED"].includes(attachment.state)) {
+      ignoredLifecycleAttachmentCount += 1;
+      continue;
+    }
+    residualAttachmentCount += 1;
+
+    const reasons = new Set();
+    const validOccurrences = [];
+    const parentsByKey = new Map();
+    for (const occurrence of occurrencesByAttachment.get(attachment.id) ?? []) {
+      const shapeValid =
+        occurrence.parentValid === true &&
+        occurrence.sourceTenantId === attachment.tenantId &&
+        occurrence.parentTenantId === attachment.tenantId &&
+        (occurrence.resourceStoreId === null ||
+          occurrence.resourceStoreTenantId === attachment.tenantId);
+      if (!shapeValid) {
+        reasons.add("INVALID_PRIMARY_OCCURRENCE");
+        continue;
+      }
+      validOccurrences.push(occurrence);
+      const key = parentKey(occurrence);
+      const parent = normalizedParent(occurrence);
+      const previous = parentsByKey.get(key);
+      if (previous && previous.resourceStoreId !== parent.resourceStoreId) {
+        reasons.add("PRIMARY_PARENT_STORE_CONFLICT");
+      }
+      parentsByKey.set(key, parent);
+    }
+    const parents = sortParents(parentsByKey.values());
+    if ((bindingsByCandidate.get(attachment.id) ?? []).length > 0) {
+      reasons.add("EXISTING_BINDING_REVIEW_REQUIRED");
+    }
+    if (signaledAttachmentIds.has(attachment.id)) {
+      reasons.add("PRIMARY_SIGNAL_REVIEW_REQUIRED");
+    }
+
+    const before = beforeImage(attachment);
+    if (attachment.state === "UNRESOLVED") {
+      if (
+        attachment.pendingExpiresAt !== null ||
+        typeof attachment.stateReasonCode !== "string" ||
+        attachment.stateReasonCode.trim().length === 0
+      ) {
+        reasons.add("LIFECYCLE_REASON_REVIEW_REQUIRED");
+      }
+    } else {
+      if (
+        attachment.pendingExpiresAt === null ||
+        attachment.stateReasonCode !== null
+      ) {
+        reasons.add("PENDING_LIFECYCLE_SHAPE_REVIEW_REQUIRED");
+      } else if (iso(attachment.pendingExpiresAt) > generatedAt) {
+        reasons.add("PENDING_NOT_EXPIRED");
+      }
+      if (parents.length > 0) {
+        reasons.add("PENDING_PRIMARY_PARENT_REVIEW_REQUIRED");
+      }
+    }
+
+    if (parents.length === 1) {
+      reasons.add("UNEXPECTED_UNIQUE_PRIMARY_PARENT");
+    }
+    if (parents.length > 1) {
+      const normalizedChatOnly = validOccurrences.every(
+        (occurrence) =>
+          occurrence.resourceKind === "CHAT_MESSAGE" &&
+          occurrence.source === "NORMALIZED_CHAT_RELATION",
+      );
+      if (!normalizedChatOnly) {
+        reasons.add("MULTIPLE_PRIMARY_SOURCE_REVIEW_REQUIRED");
+      }
+      if (parents.length > 32) {
+        reasons.add("PRIMARY_PARENT_COUNT_LIMIT_EXCEEDED");
+      }
+    }
+
+    if (reasons.size > 0) {
+      reviews.push(residualReviewRecord(attachment, parents, reasons));
+      continue;
+    }
+
+    if (parents.length > 1) {
+      const bindings = parents.map((parent) =>
+        residualBindingRecord(attachment, parent),
+      );
+      actions.push(
+        Object.freeze({
+          after: Object.freeze({
+            pendingExpiresAt: null,
+            state: "BOUND",
+            stateReasonCode: null,
+          }),
+          attachmentId: attachment.id,
+          before,
+          bindings,
+          decisionReasonCode: "MULTIPLE_NORMALIZED_PRIMARY_PARENTS",
+          disposition: "BIND_ALL_PRIMARY_PARENTS",
+          tenantId: attachment.tenantId,
+        }),
+      );
+      continue;
+    }
+
+    if (parents.length === 0) {
+      const pending = attachment.state === "PENDING";
+      actions.push(
+        Object.freeze({
+          after: Object.freeze({
+            pendingExpiresAt: null,
+            state: "QUARANTINED",
+            stateReasonCode: pending
+              ? "PENDING_EXPIRED"
+              : "LEGACY_NO_PRIMARY_PARENT",
+          }),
+          attachmentId: attachment.id,
+          before,
+          bindings: Object.freeze([]),
+          decisionReasonCode: pending
+            ? "EXPIRED_PENDING_WITHOUT_PRIMARY_PARENT"
+            : "LEGACY_ATTACHMENT_WITHOUT_PRIMARY_PARENT",
+          disposition: "QUARANTINE_NO_PRIMARY_PARENT",
+          tenantId: attachment.tenantId,
+        }),
+      );
+    }
+  }
+
+  const bindingCount = actions.reduce(
+    (count, action) => count + action.bindings.length,
+    0,
+  );
+  const bindAttachmentCount = actions.filter(
+    (action) => action.disposition === "BIND_ALL_PRIMARY_PARENTS",
+  ).length;
+  const quarantineAttachmentCount = actions.length - bindAttachmentCount;
+  const tenantActionCounts = residualTenantActionCounts(actions);
+  const core = Object.freeze({
+    actions,
+    contractVersion: RESIDUAL_PLAN_CONTRACT,
+    database: Object.freeze({ ...snapshot.database }),
+    generatedAt,
+    inventoryDigest: sourcePlan.inventoryDigest,
+    reviews,
+    safety: Object.freeze({
+      blobDeletionSupported: false,
+      databaseWrites: false,
+      detachedOwnerApprovalRequired: true,
+      physicalDeletionPerformed: false,
+      policy: RESIDUAL_POLICY,
+      productionApplyRequiresDetachedApproval: true,
+      rollbackSupported: true,
+      sourceReferencesRetained: true,
+    }),
+    signalReviews: sourcePlan.signalReviews,
+    sourceGraphDigest: sourcePlan.sourceGraphDigest,
+    sourcePlanDigest: sourcePlan.planDigest,
+    summary: Object.freeze({
+      actionCount: actions.length,
+      alreadyBoundAttachmentCount,
+      attachmentCount: normalized.attachments.length,
+      bindAttachmentCount,
+      bindingCount,
+      ignoredLifecycleAttachmentCount,
+      quarantineAttachmentCount,
+      residualAttachmentCount,
+      reviewAttachmentCount: reviews.length,
+      signalReviewCount: sourcePlan.signalReviews.length,
+      tenantActionCounts,
+    }),
+  });
+  return Object.freeze({
+    ...core,
+    planDigest: residualDigest("plan", core),
+  });
+}
+
+function validateResidualDatabase(database) {
+  if (
+    database?.expectedMigrationCount !== EXPECTED_MIGRATION_COUNT ||
+    database?.expectedMigrationHead !== EXPECTED_MIGRATION_HEAD ||
+    !TARGETS.has(database?.target) ||
+    !RELEASE_SHA.test(database?.releaseSha ?? "") ||
+    !SHA256.test(database?.databaseTargetFingerprint ?? "") ||
+    !SHA256.test(database?.databaseIdentityDigest ?? "") ||
+    !SHA256.test(database?.schemaContractDigest ?? "") ||
+    !SYSTEM_IDENTIFIER.test(database?.systemIdentifier ?? "") ||
+    !ROLE_NAME.test(database?.roleName ?? "") ||
+    typeof database?.databaseName !== "string" ||
+    !Array.isArray(database?.allowedHttpsOrigins)
+  ) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_DATABASE_INVALID");
+  }
+}
+
+function validateResidualBinding(action, binding) {
+  const expectedSourceKey = sourceKeyFor({
+    attachmentId: action.attachmentId,
+    resourceId: binding.resourceId,
+    resourceKind: binding.resourceKind,
+    source: binding.source,
+    tenantId: action.tenantId,
+  });
+  if (
+    binding.attachmentId !== action.attachmentId ||
+    binding.candidateAttachmentId !== action.attachmentId ||
+    binding.tenantId !== action.tenantId ||
+    binding.resourceKind !== "CHAT_MESSAGE" ||
+    binding.source !== "CHAT_RELATION_BACKFILL" ||
+    binding.state !== "BOUND" ||
+    binding.createdByUserId !== null ||
+    binding.reasonCode !== null ||
+    !UUID.test(binding.id ?? "") ||
+    !OPAQUE_ID.test(binding.resourceId ?? "") ||
+    (binding.resourceStoreId !== null &&
+      !OPAQUE_ID.test(binding.resourceStoreId ?? "")) ||
+    binding.sourceKey !== expectedSourceKey ||
+    binding.id !== deterministicUuid("binding-id", expectedSourceKey)
+  ) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_BINDING_INVALID");
+  }
+}
+
+export function validateStaffAttachmentResidualReconciliationPlan(plan) {
+  if (
+    plan === null ||
+    typeof plan !== "object" ||
+    plan.contractVersion !== RESIDUAL_PLAN_CONTRACT ||
+    !Array.isArray(plan.actions) ||
+    !Array.isArray(plan.reviews) ||
+    !Array.isArray(plan.signalReviews) ||
+    !SHA256.test(plan.planDigest ?? "") ||
+    !equalDigest(plan.planDigest, residualDigest("plan", residualPlanCore(plan)))
+  ) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN_INVALID");
+  }
+  const generatedAt = exactIso(
+    plan.generatedAt,
+    "ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN_TIMESTAMP_INVALID",
+  );
+  validateResidualDatabase(plan.database);
+  if (
+    !SHA256.test(plan.inventoryDigest ?? "") ||
+    !SHA256.test(plan.sourceGraphDigest ?? "") ||
+    !SHA256.test(plan.sourcePlanDigest ?? "") ||
+    plan.safety?.blobDeletionSupported !== false ||
+    plan.safety?.databaseWrites !== false ||
+    plan.safety?.detachedOwnerApprovalRequired !== true ||
+    plan.safety?.physicalDeletionPerformed !== false ||
+    plan.safety?.policy !== RESIDUAL_POLICY ||
+    plan.safety?.productionApplyRequiresDetachedApproval !== true ||
+    plan.safety?.rollbackSupported !== true ||
+    plan.safety?.sourceReferencesRetained !== true
+  ) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN_SAFETY_INVALID");
+  }
+
+  let previousAttachmentId = "";
+  const attachmentIds = new Set();
+  const bindingIds = new Set();
+  const sourceKeys = new Set();
+  for (const action of plan.actions) {
+    exactString(
+      action.attachmentId,
+      UUID,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_ACTION_INVALID",
+    );
+    exactString(
+      action.tenantId,
+      OPAQUE_ID,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_ACTION_INVALID",
+    );
+    if (
+      action.attachmentId <= previousAttachmentId ||
+      attachmentIds.has(action.attachmentId) ||
+      !Array.isArray(action.bindings) ||
+      action.before === null ||
+      typeof action.before !== "object" ||
+      action.after === null ||
+      typeof action.after !== "object"
+    ) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_ACTION_INVALID");
+    }
+    attachmentIds.add(action.attachmentId);
+    previousAttachmentId = action.attachmentId;
+    exactIso(
+      action.before.stateChangedAt,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_ACTION_INVALID",
+    );
+    if (action.before.pendingExpiresAt !== null) {
+      exactIso(
+        action.before.pendingExpiresAt,
+        "ATTACHMENT_RESIDUAL_RECONCILIATION_ACTION_INVALID",
+      );
+    }
+    let previousBindingKey = "";
+    for (const binding of action.bindings) {
+      validateResidualBinding(action, binding);
+      const bindingKey = `${binding.resourceKind}\0${binding.resourceId}`;
+      if (
+        bindingKey <= previousBindingKey ||
+        bindingIds.has(binding.id) ||
+        sourceKeys.has(binding.sourceKey)
+      ) {
+        fail("ATTACHMENT_RESIDUAL_RECONCILIATION_BINDING_INVALID");
+      }
+      previousBindingKey = bindingKey;
+      bindingIds.add(binding.id);
+      sourceKeys.add(binding.sourceKey);
+    }
+
+    if (action.disposition === "BIND_ALL_PRIMARY_PARENTS") {
+      if (
+        action.before.state !== "UNRESOLVED" ||
+        action.before.pendingExpiresAt !== null ||
+        typeof action.before.stateReasonCode !== "string" ||
+        action.before.stateReasonCode.trim().length === 0 ||
+        action.after.state !== "BOUND" ||
+        action.after.pendingExpiresAt !== null ||
+        action.after.stateReasonCode !== null ||
+        action.decisionReasonCode !== "MULTIPLE_NORMALIZED_PRIMARY_PARENTS" ||
+        action.bindings.length < 2 ||
+        action.bindings.length > 32
+      ) {
+        fail("ATTACHMENT_RESIDUAL_RECONCILIATION_ACTION_INVALID");
+      }
+    } else if (action.disposition === "QUARANTINE_NO_PRIMARY_PARENT") {
+      const expiredPending = action.before.state === "PENDING";
+      const expectedReason = expiredPending
+        ? "PENDING_EXPIRED"
+        : "LEGACY_NO_PRIMARY_PARENT";
+      const expectedDecision = expiredPending
+        ? "EXPIRED_PENDING_WITHOUT_PRIMARY_PARENT"
+        : "LEGACY_ATTACHMENT_WITHOUT_PRIMARY_PARENT";
+      if (
+        !["PENDING", "UNRESOLVED"].includes(action.before.state) ||
+        action.after.state !== "QUARANTINED" ||
+        action.after.pendingExpiresAt !== null ||
+        action.after.stateReasonCode !== expectedReason ||
+        action.decisionReasonCode !== expectedDecision ||
+        action.bindings.length !== 0 ||
+        (expiredPending &&
+          (action.before.pendingExpiresAt === null ||
+            action.before.pendingExpiresAt > generatedAt ||
+            action.before.stateReasonCode !== null)) ||
+        (!expiredPending &&
+          (action.before.pendingExpiresAt !== null ||
+            typeof action.before.stateReasonCode !== "string" ||
+            action.before.stateReasonCode.trim().length === 0))
+      ) {
+        fail("ATTACHMENT_RESIDUAL_RECONCILIATION_ACTION_INVALID");
+      }
+    } else {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_ACTION_INVALID");
+    }
+  }
+
+  let previousReviewId = "";
+  for (const review of plan.reviews) {
+    exactString(
+      review.attachmentId,
+      UUID,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_REVIEW_INVALID",
+    );
+    if (
+      review.attachmentId <= previousReviewId ||
+      attachmentIds.has(review.attachmentId) ||
+      !["PENDING", "UNRESOLVED"].includes(review.state) ||
+      !Array.isArray(review.primaryParents) ||
+      !Array.isArray(review.reasonCodes) ||
+      review.reasonCodes.length === 0 ||
+      canonicalJson(review.primaryParents) !==
+        canonicalJson(sortParents(review.primaryParents)) ||
+      canonicalJson(review.reasonCodes) !==
+        canonicalJson(sortedUnique(review.reasonCodes)) ||
+      review.reasonCodes.some(
+        (reasonCode) => !/^[A-Z][A-Z0-9_]{2,100}$/u.test(reasonCode),
+      )
+    ) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_REVIEW_INVALID");
+    }
+    exactString(
+      review.tenantId,
+      OPAQUE_ID,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_REVIEW_INVALID",
+    );
+    previousReviewId = review.attachmentId;
+  }
+
+  const bindAttachmentCount = plan.actions.filter(
+    (action) => action.disposition === "BIND_ALL_PRIMARY_PARENTS",
+  ).length;
+  const bindingCount = plan.actions.reduce(
+    (count, action) => count + action.bindings.length,
+    0,
+  );
+  const expectedSummarySubset = {
+    actionCount: plan.actions.length,
+    bindAttachmentCount,
+    bindingCount,
+    quarantineAttachmentCount: plan.actions.length - bindAttachmentCount,
+    reviewAttachmentCount: plan.reviews.length,
+    signalReviewCount: plan.signalReviews.length,
+    tenantActionCounts: residualTenantActionCounts(plan.actions),
+  };
+  for (const [key, value] of Object.entries(expectedSummarySubset)) {
+    if (canonicalJson(plan.summary?.[key]) !== canonicalJson(value)) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_SUMMARY_INVALID");
+    }
+  }
+  const summaryCounts = [
+    plan.summary?.attachmentCount,
+    plan.summary?.residualAttachmentCount,
+    plan.summary?.alreadyBoundAttachmentCount,
+    plan.summary?.ignoredLifecycleAttachmentCount,
+  ];
+  for (const count of summaryCounts) {
+    exactInteger(
+      count,
+      0,
+      MAX_ROWS_PER_RELATION,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_SUMMARY_INVALID",
+    );
+  }
+  if (
+    plan.summary.residualAttachmentCount !==
+      plan.actions.length + plan.reviews.length ||
+    plan.summary.attachmentCount !==
+      plan.summary.alreadyBoundAttachmentCount +
+        plan.summary.residualAttachmentCount +
+        plan.summary.ignoredLifecycleAttachmentCount
+  ) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_SUMMARY_INVALID");
+  }
+  return plan;
+}
+
+export function createStaffAttachmentResidualReconciliationApproval({
+  actionCount,
+  bindingCount,
+  confirmationPhrase,
+  confirmedPlanDigest,
+  direction,
+  now = new Date(),
+  plan,
+  quarantineCount,
+  reviewAttachmentCount,
+}) {
+  validateStaffAttachmentResidualReconciliationPlan(plan);
+  if (
+    !["APPLY", "ROLLBACK"].includes(direction) ||
+    confirmationPhrase !== RESIDUAL_APPROVAL_PHRASES[direction] ||
+    !equalDigest(confirmedPlanDigest, plan.planDigest) ||
+    Number(actionCount) !== plan.summary.actionCount ||
+    Number(bindingCount) !== plan.summary.bindingCount ||
+    Number(quarantineCount) !== plan.summary.quarantineAttachmentCount ||
+    Number(reviewAttachmentCount) !== plan.summary.reviewAttachmentCount
+  ) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_APPROVAL_CONFIRMATION_INVALID");
+  }
+  const core = Object.freeze({
+    actionCount: plan.summary.actionCount,
+    approvedAt: iso(now),
+    bindingCount: plan.summary.bindingCount,
+    contractVersion: RESIDUAL_APPROVAL_CONTRACT,
+    direction,
+    planDigest: plan.planDigest,
+    quarantineAttachmentCount: plan.summary.quarantineAttachmentCount,
+    reviewAttachmentCount: plan.summary.reviewAttachmentCount,
+  });
+  return Object.freeze({
+    ...core,
+    approvalDigest: residualDigest("approval", core),
+  });
+}
+
+export function validateStaffAttachmentResidualReconciliationApproval(
+  approval,
+  plan,
+  direction,
+) {
+  validateStaffAttachmentResidualReconciliationPlan(plan);
+  if (
+    approval === null ||
+    typeof approval !== "object" ||
+    approval.contractVersion !== RESIDUAL_APPROVAL_CONTRACT ||
+    approval.direction !== direction ||
+    approval.planDigest !== plan.planDigest ||
+    approval.actionCount !== plan.summary.actionCount ||
+    approval.bindingCount !== plan.summary.bindingCount ||
+    approval.quarantineAttachmentCount !==
+      plan.summary.quarantineAttachmentCount ||
+    approval.reviewAttachmentCount !== plan.summary.reviewAttachmentCount ||
+    !SHA256.test(approval.approvalDigest ?? "")
+  ) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_APPROVAL_INVALID");
+  }
+  exactIso(
+    approval.approvedAt,
+    "ATTACHMENT_RESIDUAL_RECONCILIATION_APPROVAL_INVALID",
+  );
+  const { approvalDigest, ...core } = approval;
+  if (!equalDigest(approvalDigest, residualDigest("approval", core))) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_APPROVAL_INVALID");
+  }
+  return approval;
+}
+
+export async function createStaffAttachmentResidualReconciliationPlanFromDatabase(
+  config,
+) {
+  const client = new pg.Client({
+    connectionString: connectionString(config, true),
+  });
+  await client.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const snapshotResult = await client.query(`
+      SELECT transaction_timestamp() AS "snapshotAt",
+             current_setting('transaction_read_only') AS "readOnly",
+             current_setting('transaction_isolation') AS "isolation"
+    `);
+    if (
+      snapshotResult.rows[0]?.readOnly !== "on" ||
+      snapshotResult.rows[0]?.isolation !== "repeatable read"
+    ) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_READ_ONLY_SNAPSHOT_INVALID");
+    }
+    const database = await attestDatabase(client, config);
+    const snapshot = await collectPrimarySnapshot(
+      client,
+      config.publicConfig.allowedHttpsOrigins,
+    );
+    await client.query("COMMIT");
+    const plan = buildStaffAttachmentResidualReconciliationPlan({
+      ...snapshot,
+      database,
+      generatedAt: iso(snapshotResult.rows[0].snapshotAt),
+    });
+    validateStaffAttachmentResidualReconciliationPlan(plan);
+    return plan;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+function residualActionAfterImage(action, transitionAt) {
+  return {
+    attachmentId: action.attachmentId,
+    ...action.after,
+    stateChangedAt: transitionAt,
+    tenantId: action.tenantId,
+  };
+}
+
+function residualBindingAfterImage(binding, transitionAt) {
+  return {
+    ...binding,
+    createdAt: transitionAt,
+    resolvedAt: transitionAt,
+    updatedAt: transitionAt,
+  };
+}
+
+function residualBindings(plan, transitionAt) {
+  return plan.actions.flatMap((action) =>
+    action.bindings.map((binding) =>
+      residualBindingAfterImage(binding, transitionAt),
+    ),
+  );
+}
+
+function residualStateCounts(actions, selector) {
+  return Object.fromEntries(
+    Object.entries(
+      actions.reduce((counts, action) => {
+        const state = selector(action);
+        counts[state] = (counts[state] ?? 0) + 1;
+        return counts;
+      }, {}),
+    ).sort(([left], [right]) => left.localeCompare(right, "en")),
+  );
+}
+
+function residualAuditEvents(plan, direction, transitionAt) {
+  const auditAction =
+    direction === "APPLY"
+      ? RESIDUAL_APPLY_AUDIT_ACTION
+      : RESIDUAL_ROLLBACK_AUDIT_ACTION;
+  return plan.summary.tenantActionCounts.map((tenantSummary) => {
+    const tenantActions = plan.actions.filter(
+      (action) => action.tenantId === tenantSummary.tenantId,
+    );
+    const beforeStateCounts = residualStateCounts(
+      tenantActions,
+      (action) => action.before.state,
+    );
+    const afterStateCounts = residualStateCounts(
+      tenantActions,
+      (action) => action.after.state,
+    );
+    return {
+      action: auditAction,
+      after:
+        direction === "APPLY"
+          ? {
+              attachmentCount: tenantSummary.actionCount,
+              attachmentStateCounts: afterStateCounts,
+              bindingCount: tenantSummary.bindingCount,
+            }
+          : {
+              attachmentCount: tenantSummary.actionCount,
+              attachmentStateCounts: beforeStateCounts,
+              bindingCount: 0,
+            },
+      before:
+        direction === "APPLY"
+          ? {
+              attachmentCount: tenantSummary.actionCount,
+              attachmentStateCounts: beforeStateCounts,
+              bindingCount: 0,
+            }
+          : {
+              attachmentCount: tenantSummary.actionCount,
+              attachmentStateCounts: afterStateCounts,
+              bindingCount: tenantSummary.bindingCount,
+            },
+      createdAt: transitionAt,
+      id: deterministicUuid(
+        "residual-audit-id",
+        direction,
+        plan.planDigest,
+        tenantSummary.tenantId,
+      ),
+      metadata: {
+        ...tenantSummary,
+        contractVersion: RESIDUAL_RECONCILIATION_CONTRACT,
+        databaseTargetFingerprint: plan.database.databaseTargetFingerprint,
+        direction,
+        planDigest: plan.planDigest,
+        policy: RESIDUAL_POLICY,
+        releaseSha: plan.database.releaseSha,
+        reviewAttachmentCount: plan.summary.reviewAttachmentCount,
+        transitionAt,
+      },
+      reason:
+        direction === "APPLY"
+          ? "APPROVED_RESIDUAL_ATTACHMENT_BIND_AND_QUARANTINE"
+          : "APPROVED_EXACT_RESIDUAL_ATTACHMENT_ROLLBACK",
+      requestId: plan.planDigest,
+      targetId: plan.planDigest,
+      targetType: RESIDUAL_TARGET_TYPE,
+      tenantId: tenantSummary.tenantId,
+    };
+  });
+}
+
+export function materializeStaffAttachmentResidualReconciliationState({
+  applyTransitionAt,
+  direction,
+  plan,
+  rollbackTransitionAt = null,
+}) {
+  validateStaffAttachmentResidualReconciliationPlan(plan);
+  exactIso(
+    applyTransitionAt,
+    "ATTACHMENT_RESIDUAL_RECONCILIATION_MATERIALIZED_TIMESTAMP_INVALID",
+  );
+  if (direction === "APPLY") {
+    return Object.freeze({
+      attachments: plan.actions.map((action) =>
+        residualActionAfterImage(action, applyTransitionAt),
+      ),
+      audits: residualAuditEvents(plan, "APPLY", applyTransitionAt),
+      bindings: residualBindings(plan, applyTransitionAt),
+    });
+  }
+  if (direction === "ROLLBACK") {
+    exactIso(
+      rollbackTransitionAt,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_MATERIALIZED_TIMESTAMP_INVALID",
+    );
+    return Object.freeze({
+      attachments: plan.actions.map((action) => ({
+        attachmentId: action.attachmentId,
+        ...action.before,
+        tenantId: action.tenantId,
+      })),
+      audits: [
+        ...residualAuditEvents(plan, "APPLY", applyTransitionAt),
+        ...residualAuditEvents(plan, "ROLLBACK", rollbackTransitionAt),
+      ],
+      bindings: [],
+    });
+  }
+  fail("ATTACHMENT_RESIDUAL_RECONCILIATION_DIRECTION_INVALID");
+}
+
+function exactResidualAuditSet(plan, direction, rows) {
+  if (rows.length === 0) return { exists: false, transitionAt: null };
+  const transitionValues = sortedUnique(
+    rows.map((row) => row.metadata?.transitionAt),
+  );
+  if (transitionValues.length !== 1) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_AUDIT_DRIFT");
+  }
+  const transitionAt = exactIso(
+    transitionValues[0],
+    "ATTACHMENT_RESIDUAL_RECONCILIATION_AUDIT_DRIFT",
+  );
+  const expected = residualAuditEvents(plan, direction, transitionAt);
+  const actual = [...rows].sort((left, right) =>
+    left.tenantId.localeCompare(right.tenantId, "en"),
+  );
+  if (canonicalJson(actual) !== canonicalJson(expected)) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_AUDIT_DRIFT");
+  }
+  return { exists: true, transitionAt };
+}
+
+export function classifyStaffAttachmentResidualReconciliationState({
+  direction,
+  plan,
+  state,
+}) {
+  validateStaffAttachmentResidualReconciliationPlan(plan);
+  if (!["APPLY", "ROLLBACK"].includes(direction)) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_DIRECTION_INVALID");
+  }
+  const normalized = normalizeCurrentState(state);
+  const applyAudit = exactResidualAuditSet(
+    plan,
+    "APPLY",
+    normalized.audits.filter(
+      (row) => row.action === RESIDUAL_APPLY_AUDIT_ACTION,
+    ),
+  );
+  const rollbackAudit = exactResidualAuditSet(
+    plan,
+    "ROLLBACK",
+    normalized.audits.filter(
+      (row) => row.action === RESIDUAL_ROLLBACK_AUDIT_ACTION,
+    ),
+  );
+  const beforeRows = plan.actions.map((action) => ({
+    attachmentId: action.attachmentId,
+    ...action.before,
+    tenantId: action.tenantId,
+  }));
+  const afterRows = applyAudit.exists
+    ? plan.actions.map((action) =>
+        residualActionAfterImage(action, applyAudit.transitionAt),
+      )
+    : [];
+  const expectedBindings = applyAudit.exists
+    ? residualBindings(plan, applyAudit.transitionAt)
+    : [];
+
+  if (direction === "APPLY") {
+    if (rollbackAudit.exists) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN_ALREADY_ROLLED_BACK");
+    }
+    if (applyAudit.exists) {
+      compareStateRows(
+        normalized.attachments,
+        afterRows,
+        "ATTACHMENT_RESIDUAL_RECONCILIATION_APPLIED_STATE_DRIFT",
+      );
+      compareBindingRows(
+        normalized.bindings,
+        expectedBindings,
+        "ATTACHMENT_RESIDUAL_RECONCILIATION_APPLIED_BINDING_DRIFT",
+      );
+      return Object.freeze({
+        disposition: "RECONCILED",
+        transitionAt: applyAudit.transitionAt,
+      });
+    }
+    compareStateRows(
+      normalized.attachments,
+      beforeRows,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_BEFORE_STATE_DRIFT",
+    );
+    compareBindingRows(
+      normalized.bindings,
+      [],
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_PREEXISTING_BINDING_DRIFT",
+    );
+    return Object.freeze({ disposition: "MUTATE", transitionAt: null });
+  }
+
+  if (!applyAudit.exists) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_APPLY_AUDIT_REQUIRED");
+  }
+  if (rollbackAudit.exists) {
+    compareStateRows(
+      normalized.attachments,
+      beforeRows,
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_ROLLBACK_STATE_DRIFT",
+    );
+    compareBindingRows(
+      normalized.bindings,
+      [],
+      "ATTACHMENT_RESIDUAL_RECONCILIATION_ROLLBACK_BINDING_DRIFT",
+    );
+    return Object.freeze({
+      disposition: "RECONCILED",
+      transitionAt: rollbackAudit.transitionAt,
+    });
+  }
+  compareStateRows(
+    normalized.attachments,
+    afterRows,
+    "ATTACHMENT_RESIDUAL_RECONCILIATION_APPLIED_STATE_DRIFT",
+  );
+  compareBindingRows(
+    normalized.bindings,
+    expectedBindings,
+    "ATTACHMENT_RESIDUAL_RECONCILIATION_APPLIED_BINDING_DRIFT",
+  );
+  return Object.freeze({ disposition: "MUTATE", transitionAt: null });
+}
+
+async function readResidualCurrentState(client, plan, lockRows) {
+  if (plan.actions.length === 0) {
+    return { attachments: [], audits: [], bindings: [] };
+  }
+  const ids = plan.actions.map((action) => action.attachmentId);
+  const attachmentResult = await client.query(
+    `SELECT attachment."id", attachment."tenantId", attachment."state"::text AS "state",
+            CASE WHEN attachment."pendingExpiresAt" IS NULL THEN NULL ELSE
+              to_char(attachment."pendingExpiresAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+            END AS "pendingExpiresAt",
+            attachment."stateReasonCode",
+            to_char(attachment."stateChangedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "stateChangedAt"
+     FROM public."StaffAttachment" AS attachment
+     WHERE attachment."id" = ANY($1::text[])
+     ORDER BY attachment."id" COLLATE "C"
+     ${lockRows ? "FOR UPDATE" : ""}`,
+    [ids],
+  );
+  const bindingResult = await client.query(
+    `SELECT binding."id", binding."tenantId", binding."attachmentId",
+            binding."candidateAttachmentId", binding."resourceKind"::text AS "resourceKind",
+            binding."resourceId", binding."resourceStoreId",
+            binding."state"::text AS "state", binding."source"::text AS "source",
+            binding."sourceKey", binding."createdByUserId", binding."reasonCode",
+            CASE WHEN binding."resolvedAt" IS NULL THEN NULL ELSE
+              to_char(binding."resolvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+            END AS "resolvedAt",
+            to_char(binding."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
+            to_char(binding."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"
+     FROM public."StaffAttachmentBinding" AS binding
+     WHERE binding."attachmentId" = ANY($1::text[])
+        OR binding."candidateAttachmentId" = ANY($1::text[])
+     ORDER BY binding."id" COLLATE "C"`,
+    [ids],
+  );
+  const auditResult = await client.query(
+    `SELECT event."id", event."tenantId", event."requestId", event."action",
+            event."targetType", event."targetId", event."reason",
+            event."before", event."after", event."metadata",
+            to_char(event."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
+     FROM public."PlatformAdminAuditEvent" AS event
+     WHERE event."requestId" = $1
+       AND event."action" = ANY($2::text[])
+     ORDER BY event."tenantId" COLLATE "C", event."action" COLLATE "C"`,
+    [
+      plan.planDigest,
+      [RESIDUAL_APPLY_AUDIT_ACTION, RESIDUAL_ROLLBACK_AUDIT_ACTION],
+    ],
+  );
+  return {
+    attachments: attachmentResult.rows,
+    audits: auditResult.rows,
+    bindings: bindingResult.rows,
+  };
+}
+
+async function validateCurrentResidualParents(client, plan, allowedOrigins) {
+  if (plan.actions.length === 0) return;
+  const ids = plan.actions.map((action) => action.attachmentId);
+  const actionById = new Map(
+    plan.actions.map((action) => [action.attachmentId, action]),
+  );
+  const expectedParents = new Map(
+    plan.actions.map((action) => [
+      action.attachmentId,
+      new Set(
+        action.bindings.map(
+          (binding) => `${binding.resourceKind}\0${binding.resourceId}`,
+        ),
+      ),
+    ]),
+  );
+  const observedParents = new Map(
+    plan.actions.map((action) => [action.attachmentId, new Set()]),
+  );
+  const chatResult = await client.query(
+    `SELECT relation."id", relation."tenantId" AS "sourceTenantId",
+            relation."attachmentId", relation."messageId" AS "resourceId",
+            message."tenantId" AS "parentTenantId", message."storeId" AS "resourceStoreId",
+            store."tenantId" AS "resourceStoreTenantId",
+            channel."tenantId" AS "channelTenantId", channel."scope" AS "channelScope",
+            channel."storeId" AS "channelStoreId"
+     FROM public."StaffChatMessageAttachment" AS relation
+     JOIN public."StaffChatMessage" AS message ON message."id" = relation."messageId"
+     JOIN public."StaffChatChannel" AS channel ON channel."id" = message."channelId"
+     LEFT JOIN public."Store" AS store ON store."id" = message."storeId"
+     WHERE relation."attachmentId" = ANY($1::text[])
+     ORDER BY relation."attachmentId" COLLATE "C", relation."id" COLLATE "C"`,
+    [ids],
+  );
+  for (const row of chatResult.rows) {
+    const action = actionById.get(row.attachmentId);
+    const storeConflict =
+      row.channelScope === "STORE" &&
+      (!row.resourceStoreId ||
+        !row.channelStoreId ||
+        row.resourceStoreId !== row.channelStoreId);
+    if (
+      !action ||
+      storeConflict ||
+      row.sourceTenantId !== action.tenantId ||
+      row.parentTenantId !== action.tenantId ||
+      row.channelTenantId !== action.tenantId ||
+      (row.resourceStoreId !== null &&
+        row.resourceStoreTenantId !== action.tenantId)
+    ) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PRIMARY_GRAPH_DRIFT");
+    }
+    observedParents
+      .get(row.attachmentId)
+      .add(`CHAT_MESSAGE\0${row.resourceId}`);
+  }
+  const taskRows = await pagedQuery(client, `
+    SELECT comment."id", comment."tenantId" AS "sourceTenantId",
+           comment."evidenceUrl", task."id" AS "resourceId",
+           task."tenantId" AS "parentTenantId", task."storeId" AS "resourceStoreId",
+           store."tenantId" AS "resourceStoreTenantId"
+    FROM public."StaffTaskComment" AS comment
+    JOIN public."StaffTask" AS task ON task."id" = comment."taskId"
+    LEFT JOIN public."Store" AS store ON store."id" = task."storeId"
+    WHERE comment."evidenceUrl" IS NOT NULL
+      AND ($1::text IS NULL OR comment."id" > $1)
+    ORDER BY comment."id" COLLATE "C"
+    LIMIT $2
+  `);
+  const allowed = new Set(allowedOrigins);
+  for (const row of taskRows) {
+    const parsed = parseExactAttachmentReference(row.evidenceUrl, allowed);
+    if (!parsed.match) {
+      if (
+        parsed.reviewAttachmentId &&
+        actionById.has(parsed.reviewAttachmentId.toLowerCase())
+      ) {
+        fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PRIMARY_GRAPH_DRIFT");
+      }
+      continue;
+    }
+    const attachmentId = parsed.match.attachmentId.toLowerCase();
+    if (!actionById.has(attachmentId)) continue;
+    const action = actionById.get(attachmentId);
+    if (
+      row.sourceTenantId !== action.tenantId ||
+      row.parentTenantId !== action.tenantId ||
+      (row.resourceStoreId !== null &&
+        row.resourceStoreTenantId !== action.tenantId)
+    ) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PRIMARY_GRAPH_DRIFT");
+    }
+    observedParents.get(attachmentId).add(`STAFF_TASK\0${row.resourceId}`);
+  }
+  for (const action of plan.actions) {
+    const expected = [...expectedParents.get(action.attachmentId)].sort();
+    const observed = [...observedParents.get(action.attachmentId)].sort();
+    if (canonicalJson(expected) !== canonicalJson(observed)) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PRIMARY_GRAPH_DRIFT");
+    }
+  }
+
+  const bindings = plan.actions.flatMap((action) => action.bindings);
+  if (bindings.length === 0) return;
+  const scopeResult = await client.query(
+    `SELECT desired."attachmentId", desired."resourceKind", desired."resourceId",
+            scope."tenantId", scope."storeId"
+     FROM jsonb_to_recordset($1::jsonb) AS desired(
+       "attachmentId" text, "resourceKind" text, "resourceId" text
+     )
+     LEFT JOIN LATERAL public."resolve_staff_attachment_resource_scope"(
+       desired."resourceKind"::public."StaffAttachmentResourceKind",
+       desired."resourceId"
+     ) AS scope ON true
+     ORDER BY desired."attachmentId" COLLATE "C",
+              desired."resourceKind" COLLATE "C", desired."resourceId" COLLATE "C"`,
+    [JSON.stringify(bindings)],
+  );
+  if (scopeResult.rows.length !== bindings.length) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PARENT_SCOPE_DRIFT");
+  }
+  const bindingByKey = new Map(
+    bindings.map((binding) => [
+      `${binding.attachmentId}\0${binding.resourceKind}\0${binding.resourceId}`,
+      binding,
+    ]),
+  );
+  for (const row of scopeResult.rows) {
+    const binding = bindingByKey.get(
+      `${row.attachmentId}\0${row.resourceKind}\0${row.resourceId}`,
+    );
+    if (
+      !binding ||
+      row.tenantId !== binding.tenantId ||
+      (row.storeId ?? null) !== binding.resourceStoreId
+    ) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PARENT_SCOPE_DRIFT");
+    }
+  }
+}
+
+async function insertResidualBindings(client, plan, transitionAt) {
+  const rows = residualBindings(plan, transitionAt);
+  if (rows.length === 0) return;
+  const result = await client.query(
+    `INSERT INTO public."StaffAttachmentBinding" (
+       "id", "tenantId", "attachmentId", "candidateAttachmentId",
+       "resourceKind", "resourceId", "resourceStoreId", "state", "source",
+       "sourceKey", "createdByUserId", "reasonCode", "resolvedAt", "createdAt", "updatedAt"
+     )
+     SELECT desired."id", desired."tenantId", desired."attachmentId",
+            desired."candidateAttachmentId",
+            desired."resourceKind"::public."StaffAttachmentResourceKind",
+            desired."resourceId", desired."resourceStoreId",
+            desired."state"::public."StaffAttachmentBindingState",
+            desired."source"::public."StaffAttachmentBindingSource",
+            desired."sourceKey", NULL, NULL,
+            desired."resolvedAt"::timestamp(3), desired."createdAt"::timestamp(3),
+            desired."updatedAt"::timestamp(3)
+     FROM jsonb_to_recordset($1::jsonb) AS desired(
+       "id" text, "tenantId" text, "attachmentId" text,
+       "candidateAttachmentId" text, "resourceKind" text, "resourceId" text,
+       "resourceStoreId" text, "state" text, "source" text, "sourceKey" text,
+       "createdByUserId" text, "reasonCode" text, "resolvedAt" text,
+       "createdAt" text, "updatedAt" text
+     )
+     ORDER BY desired."attachmentId" COLLATE "C",
+              desired."resourceKind" COLLATE "C", desired."resourceId" COLLATE "C"`,
+    [JSON.stringify(rows)],
+  );
+  if (result.rowCount !== rows.length) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_BINDING_INSERT_COUNT_MISMATCH");
+  }
+}
+
+async function transitionResidualAttachments(client, plan, transitionAt) {
+  const desired = plan.actions.map((action) => ({
+    afterState: action.after.state,
+    afterStateReasonCode: action.after.stateReasonCode,
+    attachmentId: action.attachmentId,
+    beforePendingExpiresAt: action.before.pendingExpiresAt,
+    beforeState: action.before.state,
+    beforeStateChangedAt: action.before.stateChangedAt,
+    beforeStateReasonCode: action.before.stateReasonCode,
+    tenantId: action.tenantId,
+    transitionAt,
+  }));
+  const result = await client.query(
+    `UPDATE public."StaffAttachment" AS attachment
+     SET "state" = desired."afterState"::public."StaffAttachmentState",
+         "pendingExpiresAt" = NULL,
+         "stateReasonCode" = desired."afterStateReasonCode",
+         "stateChangedAt" = desired."transitionAt"::timestamp(3)
+     FROM jsonb_to_recordset($1::jsonb) AS desired(
+       "attachmentId" text, "tenantId" text, "beforeState" text,
+       "beforePendingExpiresAt" text, "beforeStateReasonCode" text,
+       "beforeStateChangedAt" text, "afterState" text,
+       "afterStateReasonCode" text, "transitionAt" text
+     )
+     WHERE attachment."id" = desired."attachmentId"
+       AND attachment."tenantId" = desired."tenantId"
+       AND attachment."state" = desired."beforeState"::public."StaffAttachmentState"
+       AND attachment."pendingExpiresAt" IS NOT DISTINCT FROM
+           desired."beforePendingExpiresAt"::timestamp(3)
+       AND attachment."stateReasonCode" IS NOT DISTINCT FROM
+           desired."beforeStateReasonCode"
+       AND attachment."stateChangedAt" =
+           desired."beforeStateChangedAt"::timestamp(3)`,
+    [JSON.stringify(desired)],
+  );
+  if (result.rowCount !== plan.actions.length) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_ATTACHMENT_UPDATE_COUNT_MISMATCH");
+  }
+}
+
+async function deleteResidualBindings(client, plan) {
+  const bindings = plan.actions.flatMap((action) => action.bindings);
+  if (bindings.length === 0) return;
+  const result = await client.query(
+    `DELETE FROM public."StaffAttachmentBinding" AS binding
+     USING jsonb_to_recordset($1::jsonb) AS desired(
+       "id" text, "tenantId" text, "attachmentId" text, "sourceKey" text
+     )
+     WHERE binding."id" = desired."id"
+       AND binding."tenantId" = desired."tenantId"
+       AND binding."attachmentId" = desired."attachmentId"
+       AND binding."sourceKey" = desired."sourceKey"`,
+    [JSON.stringify(bindings)],
+  );
+  if (result.rowCount !== bindings.length) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_BINDING_DELETE_COUNT_MISMATCH");
+  }
+}
+
+async function restoreResidualAttachments(client, plan, applyTransitionAt) {
+  const desired = plan.actions.map((action) => ({
+    afterState: action.after.state,
+    afterStateReasonCode: action.after.stateReasonCode,
+    attachmentId: action.attachmentId,
+    beforePendingExpiresAt: action.before.pendingExpiresAt,
+    beforeState: action.before.state,
+    beforeStateChangedAt: action.before.stateChangedAt,
+    beforeStateReasonCode: action.before.stateReasonCode,
+    tenantId: action.tenantId,
+  }));
+  const result = await client.query(
+    `UPDATE public."StaffAttachment" AS attachment
+     SET "state" = desired."beforeState"::public."StaffAttachmentState",
+         "pendingExpiresAt" = desired."beforePendingExpiresAt"::timestamp(3),
+         "stateReasonCode" = desired."beforeStateReasonCode",
+         "stateChangedAt" = desired."beforeStateChangedAt"::timestamp(3)
+     FROM jsonb_to_recordset($1::jsonb) AS desired(
+       "attachmentId" text, "tenantId" text, "beforeState" text,
+       "beforePendingExpiresAt" text, "beforeStateReasonCode" text,
+       "beforeStateChangedAt" text, "afterState" text,
+       "afterStateReasonCode" text
+     )
+     WHERE attachment."id" = desired."attachmentId"
+       AND attachment."tenantId" = desired."tenantId"
+       AND attachment."state" = desired."afterState"::public."StaffAttachmentState"
+       AND attachment."pendingExpiresAt" IS NULL
+       AND attachment."stateReasonCode" IS NOT DISTINCT FROM
+           desired."afterStateReasonCode"
+       AND attachment."stateChangedAt" = $2::timestamp(3)`,
+    [JSON.stringify(desired), applyTransitionAt],
+  );
+  if (result.rowCount !== plan.actions.length) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_ATTACHMENT_RESTORE_COUNT_MISMATCH");
+  }
+}
+
+function validateResidualPlanDatabaseBinding(plan, observed, config) {
+  if (
+    canonicalJson(plan.database) !== canonicalJson(observed) ||
+    plan.database.databaseTargetFingerprint !==
+      config.publicConfig.databaseTargetFingerprint ||
+    plan.database.releaseSha !== config.publicConfig.releaseSha ||
+    canonicalJson(plan.database.allowedHttpsOrigins) !==
+      canonicalJson(config.publicConfig.allowedHttpsOrigins)
+  ) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_PLAN_DATABASE_BINDING_MISMATCH");
+  }
+}
+
+export async function executeStaffAttachmentResidualReconciliation({
+  approval,
+  config,
+  direction,
+  plan,
+}) {
+  validateStaffAttachmentResidualReconciliationApproval(
+    approval,
+    plan,
+    direction,
+  );
+  const client = new pg.Client({
+    connectionString: connectionString(config, false),
+  });
+  await client.connect();
+  try {
+    const database = await attestDatabase(client, config);
+    validateResidualPlanDatabaseBinding(plan, database, config);
+    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+    await client.query(`SET LOCAL lock_timeout = '${config.lockTimeoutMs}ms'`);
+    await client.query(
+      `SET LOCAL statement_timeout = '${config.statementTimeoutMs}ms'`,
+    );
+    await client.query(
+      "SET LOCAL idle_in_transaction_session_timeout = '120s'",
+    );
+    const lock = await client.query(
+      "SELECT pg_catalog.pg_try_advisory_xact_lock($1::integer, $2::integer) AS acquired",
+      [ADVISORY_LOCK_NAMESPACE, ADVISORY_LOCK_RESOURCE],
+    );
+    if (lock.rows[0]?.acquired !== true) {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_ADVISORY_LOCK_BUSY");
+    }
+    validateResidualPlanDatabaseBinding(
+      plan,
+      await attestDatabase(client, config),
+      config,
+    );
+    const initialState = await readResidualCurrentState(client, plan, true);
+    const classification = classifyStaffAttachmentResidualReconciliationState({
+      direction,
+      plan,
+      state: initialState,
+    });
+    if (classification.disposition === "RECONCILED") {
+      await client.query("COMMIT");
+      return Object.freeze({
+        actionCount: plan.summary.actionCount,
+        bindingCount: plan.summary.bindingCount,
+        contractVersion: RESIDUAL_RECEIPT_CONTRACT,
+        decision: "PASS",
+        direction,
+        disposition: "RECONCILED",
+        planDigest: plan.planDigest,
+        quarantineAttachmentCount: plan.summary.quarantineAttachmentCount,
+        transitionAt: classification.transitionAt,
+        zeroDiff: true,
+      });
+    }
+    const transitionResult = await client.query(
+      "SELECT transaction_timestamp() AS \"transitionAt\"",
+    );
+    const transitionAt = iso(transitionResult.rows[0].transitionAt);
+    if (direction === "APPLY") {
+      await validateCurrentResidualParents(
+        client,
+        plan,
+        config.publicConfig.allowedHttpsOrigins,
+      );
+      await insertResidualBindings(client, plan, transitionAt);
+      await transitionResidualAttachments(client, plan, transitionAt);
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await insertAudits(
+        client,
+        residualAuditEvents(plan, direction, transitionAt),
+      );
+    } else {
+      const normalized = normalizeCurrentState(initialState);
+      const applyAudit = exactResidualAuditSet(
+        plan,
+        "APPLY",
+        normalized.audits.filter(
+          (row) => row.action === RESIDUAL_APPLY_AUDIT_ACTION,
+        ),
+      );
+      await deleteResidualBindings(client, plan);
+      await restoreResidualAttachments(
+        client,
+        plan,
+        applyAudit.transitionAt,
+      );
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await insertAudits(
+        client,
+        residualAuditEvents(plan, direction, transitionAt),
+      );
+    }
+    const finalState = await readResidualCurrentState(client, plan, false);
+    const finalClassification =
+      classifyStaffAttachmentResidualReconciliationState({
+        direction,
+        plan,
+        state: finalState,
+      });
+    if (finalClassification.disposition !== "RECONCILED") {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_POST_WRITE_ZERO_DIFF_FAILED");
+    }
+    await client.query("COMMIT");
+    return Object.freeze({
+      actionCount: plan.summary.actionCount,
+      bindingCount: plan.summary.bindingCount,
+      contractVersion: RESIDUAL_RECEIPT_CONTRACT,
+      decision: "PASS",
+      direction,
+      disposition: "APPLIED",
+      planDigest: plan.planDigest,
+      quarantineAttachmentCount: plan.summary.quarantineAttachmentCount,
+      transitionAt,
+      zeroDiff: true,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+export async function checkStaffAttachmentResidualReconciliation({
+  config,
+  direction,
+  plan,
+}) {
+  validateStaffAttachmentResidualReconciliationPlan(plan);
+  const client = new pg.Client({
+    connectionString: connectionString(config, true),
+  });
+  await client.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    validateResidualPlanDatabaseBinding(
+      plan,
+      await attestDatabase(client, config),
+      config,
+    );
+    const state = await readResidualCurrentState(client, plan, false);
+    const classification = classifyStaffAttachmentResidualReconciliationState({
+      direction,
+      plan,
+      state,
+    });
+    if (classification.disposition !== "RECONCILED") {
+      fail("ATTACHMENT_RESIDUAL_RECONCILIATION_CHECK_NOT_RECONCILED");
+    }
+    await client.query("COMMIT");
+    return Object.freeze({
+      actionCount: plan.summary.actionCount,
+      bindingCount: plan.summary.bindingCount,
+      contractVersion: RESIDUAL_RECEIPT_CONTRACT,
+      decision: "PASS",
+      direction,
+      disposition: "CHECKED",
+      planDigest: plan.planDigest,
+      quarantineAttachmentCount: plan.summary.quarantineAttachmentCount,
+      transitionAt: classification.transitionAt,
+      zeroDiff: true,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
 export function selfTestStaffAttachmentReconciliation() {
   const generatedAt = "2026-08-24T00:00:00.000Z";
   const snapshot = {
@@ -2045,12 +3534,92 @@ export function selfTestStaffAttachmentReconciliation() {
     now: new Date(generatedAt),
   });
   validateStaffAttachmentReconciliationApproval(approval, plan, "APPLY");
+  const residualSnapshot = {
+    attachments: [
+      {
+        id: "223e4567-e89b-42d3-a456-426614174000",
+        tenantId: "tenant-a",
+        state: "UNRESOLVED",
+        pendingExpiresAt: null,
+        stateReasonCode: "LEGACY_UNCLASSIFIED",
+        stateChangedAt: generatedAt,
+      },
+      {
+        id: "223e4567-e89b-42d3-a456-426614174001",
+        tenantId: "tenant-a",
+        state: "UNRESOLVED",
+        pendingExpiresAt: null,
+        stateReasonCode: "LEGACY_UNCLASSIFIED",
+        stateChangedAt: generatedAt,
+      },
+      {
+        id: "223e4567-e89b-42d3-a456-426614174002",
+        tenantId: "tenant-a",
+        state: "PENDING",
+        pendingExpiresAt: "2026-08-23T00:00:00.000Z",
+        stateReasonCode: null,
+        stateChangedAt: generatedAt,
+      },
+    ],
+    bindings: [],
+    database: snapshot.database,
+    generatedAt,
+    occurrences: [
+      {
+        ...snapshot.occurrences[0],
+        attachmentId: "223e4567-e89b-42d3-a456-426614174000",
+        resourceId: "message-b",
+        sourceRowId: "relation-b",
+      },
+      {
+        ...snapshot.occurrences[0],
+        attachmentId: "223e4567-e89b-42d3-a456-426614174000",
+        resourceId: "message-c",
+        sourceRowId: "relation-c",
+      },
+    ],
+    signals: [],
+  };
+  const residualPlan = buildStaffAttachmentResidualReconciliationPlan(
+    residualSnapshot,
+  );
+  validateStaffAttachmentResidualReconciliationPlan(residualPlan);
+  if (
+    residualPlan.summary.actionCount !== 3 ||
+    residualPlan.summary.bindAttachmentCount !== 1 ||
+    residualPlan.summary.bindingCount !== 2 ||
+    residualPlan.summary.quarantineAttachmentCount !== 2 ||
+    residualPlan.summary.reviewAttachmentCount !== 0
+  ) {
+    fail("ATTACHMENT_RESIDUAL_RECONCILIATION_SELF_TEST_PLAN_FAILED");
+  }
+  const residualApproval =
+    createStaffAttachmentResidualReconciliationApproval({
+      actionCount: 3,
+      bindingCount: 2,
+      confirmationPhrase: RESIDUAL_APPROVAL_PHRASES.APPLY,
+      confirmedPlanDigest: residualPlan.planDigest,
+      direction: "APPLY",
+      plan: residualPlan,
+      quarantineCount: 2,
+      reviewAttachmentCount: 0,
+      now: new Date(generatedAt),
+    });
+  validateStaffAttachmentResidualReconciliationApproval(
+    residualApproval,
+    residualPlan,
+    "APPLY",
+  );
   return Object.freeze({
     actionCount: plan.summary.actionCount,
     contractVersion: RECONCILIATION_CONTRACT,
     databaseWrites: false,
     decision: "PASS",
     mode: "SELF_TEST",
+    residualActionCount: residualPlan.summary.actionCount,
+    residualBindingCount: residualPlan.summary.bindingCount,
+    residualQuarantineAttachmentCount:
+      residualPlan.summary.quarantineAttachmentCount,
     reviewAttachmentCount: plan.summary.reviewAttachmentCount,
   });
 }

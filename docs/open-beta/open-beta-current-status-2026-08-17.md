@@ -48,8 +48,10 @@ canonical LF Prisma artifact. PostgreSQL 16.15 clean deploy дошёл до `187
 повторился как no-op, а attachment reconciliation завершил plan/apply/replay/
 check/rollback с zero residue. Подробности:
 [canonical deploy/reconciliation evidence](./gate-1mt-canonical-deploy-reconciliation-pg16-evidence-2026-08-24.md).
-Production apply всё ещё `NO-GO`: нужен fresh-backup restored-copy run нового
-admitted exact artifact, temporary role/grant attestation и owner approval.
+Эти prerequisites впоследствии закрыты для base subset: fresh backup,
+restored-copy, exact role/grant attestation и owner approval завершились
+production apply `4 416/4 416`, check/replay `zeroDiff`, drift/downtime `0`.
+Оставшийся residual subset требует отдельного нового admission/approval.
 
 Restored-copy gate 18.08.2026: настоящий production backup восстановлен в
 изолированный PostgreSQL; clean migration/repeat/data-zero-diff и полный
@@ -453,16 +455,17 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    journey, OWNER attachment lifecycle, knowledge, shift-regulations,
    training, onboarding и checklists STORES adoption приняты. Production
    parent-delete trigger inventory `7/7` также принят на read-only snapshot.
-   Новый aggregate inventory выявил `5 446 UNRESOLVED`, `309` multiple-parent,
-   `741` unreferenced и `243` URL-review cases; до browser matrix требуется
-   production reconciliation/backfill и повторный zero-diff inventory.
-   Digest-bound controller уже реализован и локально прошёл PostgreSQL
-   apply/replay/check/rollback, но production plan/apply не выполнялся. В
-   clean-schema rehearsal дополнительно обнаружен manifest-digest blocker в
-   `20260731120000_identity_mail_delivery_release_head`; он должен быть закрыт
-   на exact history до production apply. Также не
-   закрыты outbound digest, remaining STAFF slices, jobs/Telegram/public guest
-   binding и Gate 2 текущей сети.
+   Aggregate inventory выявил `5 446 UNRESOLVED`, из которых production base
+   apply уже закрыл `4 416` unique-parent rows с drift/downtime `0`. Остались
+   `1 030 UNRESOLVED`, `20 PENDING` и `243` URL-review signals. Residual
+   controller прошёл fresh restored-copy lifecycle: `309` blobs получили
+   предложение `795` existing-parent bindings, `721` no-parent blobs —
+   reversible quarantine, `20` non-expired PENDING остались review-only.
+   CURRENT179 manifest blocker закрыт canonical LF deploy. До browser matrix
+   нужны новый same-SHA admission, fresh production residual plan/approval,
+   apply/check/replay и pending TTL disposition. Также не закрыты outbound
+   digest, remaining STAFF slices, jobs/Telegram/public guest binding и Gate 2
+   текущей сети.
 5. External-beta activation, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
@@ -505,8 +508,12 @@ new exact SHA + Fast CI + Full Release Admission [IN PROGRESS]
   → production roles/secrets + controlled SMTP canary
   → [DONE read-only production] attachment trigger/inventory evidence
   → [DONE engineering/local PG] attachment plan/apply/replay/rollback controller
-  → clean-history manifest fix + restored-copy reconciliation rehearsal
-  → reviewed production attachment apply + zero-diff inventory
+  → [DONE] clean-history manifest fix + fresh restored-copy rehearsal
+  → [DONE production] reviewed unique-parent apply: 4 416 bindings, zero drift/downtime
+  → [DONE engineering/restored-copy PG] residual controller: 309→795 bindings,
+    721 no-parent quarantine proposals, 20 active PENDING retained, exact rollback
+  → admitted residual artifact + fresh production plan + exact owner approval
+  → residual production apply/check/replay + pending TTL disposition
   → Gate 1MT attachment archive/orphan browser matrix + remaining STAFF slices
   → Gate 1MT jobs/Telegram/public-guest/outbound
   → Gate 2 current Tenant A/A1..A4

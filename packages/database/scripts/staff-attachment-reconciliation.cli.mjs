@@ -9,10 +9,15 @@ import {
 } from "./current-network-access-scope-classification.mjs";
 import {
   APPROVAL_PHRASES,
+  RESIDUAL_APPROVAL_PHRASES,
   StaffAttachmentReconciliationError,
+  checkStaffAttachmentResidualReconciliation,
   checkStaffAttachmentReconciliation,
+  createStaffAttachmentResidualReconciliationApproval,
+  createStaffAttachmentResidualReconciliationPlanFromDatabase,
   createStaffAttachmentReconciliationApproval,
   createStaffAttachmentReconciliationPlanFromDatabase,
+  executeStaffAttachmentResidualReconciliation,
   executeStaffAttachmentReconciliation,
   parseStaffAttachmentReconciliationRuntime,
   selfTestStaffAttachmentReconciliation,
@@ -44,6 +49,29 @@ const HELP = `Usage:
     --plan <absolute-protected-json> --direction APPLY|ROLLBACK \\
     --output <absolute-protected-json>
 
+  node scripts/staff-attachment-reconciliation.cli.mjs residual-plan \\
+    --output <absolute-protected-json>
+
+  node scripts/staff-attachment-reconciliation.cli.mjs residual-approve \\
+    --plan <absolute-protected-json> --direction APPLY|ROLLBACK \\
+    --confirm-plan-digest <sha256> --confirm-action-count <integer> \\
+    --confirm-binding-count <integer> --confirm-quarantine-count <integer> \\
+    --confirm-review-count <integer> \\
+    --confirm ${RESIDUAL_APPROVAL_PHRASES.APPLY}|${RESIDUAL_APPROVAL_PHRASES.ROLLBACK} \\
+    --output <absolute-protected-json>
+
+  node scripts/staff-attachment-reconciliation.cli.mjs residual-apply \\
+    --plan <absolute-protected-json> --approval <absolute-protected-json> \\
+    --output <absolute-protected-json>
+
+  node scripts/staff-attachment-reconciliation.cli.mjs residual-rollback \\
+    --plan <absolute-protected-json> --approval <absolute-protected-json> \\
+    --output <absolute-protected-json>
+
+  node scripts/staff-attachment-reconciliation.cli.mjs residual-check \\
+    --plan <absolute-protected-json> --direction APPLY|ROLLBACK \\
+    --output <absolute-protected-json>
+
 Required environment for plan/apply/rollback/check:
   DATABASE_URL
   STAFF_ATTACHMENT_RECONCILIATION_TARGET=development|staging|production
@@ -61,7 +89,10 @@ Production additionally requires:
 STAFF_ATTACHMENT_ALLOWED_HTTPS_ORIGINS is optional and must contain HTTPS
 origins only. Plan is read-only. Apply and rollback require a separately
 materialized detached approval with manually re-entered exact plan digest and
-counts. Review rows, PENDING lifecycle and URL signals are never mutated.
+counts. The base workflow never mutates review rows. The residual workflow can
+bind every existing normalized primary parent or quarantine a no-parent blob,
+but never deletes blob/source data and always requires a separate exact owner
+approval. Non-expired PENDING rows and URL signals remain review-only.
 Every input/output must be a direct child of the protected evidence root and
 outputs are created exclusively; existing files are never overwritten.`;
 
@@ -78,6 +109,21 @@ const COMMAND_OPTIONS = Object.freeze({
   ]),
   check: new Set(["direction", "output", "plan"]),
   plan: new Set(["output"]),
+  "residual-apply": new Set(["approval", "output", "plan"]),
+  "residual-approve": new Set([
+    "confirm",
+    "confirm-action-count",
+    "confirm-binding-count",
+    "confirm-plan-digest",
+    "confirm-quarantine-count",
+    "confirm-review-count",
+    "direction",
+    "output",
+    "plan",
+  ]),
+  "residual-check": new Set(["direction", "output", "plan"]),
+  "residual-plan": new Set(["output"]),
+  "residual-rollback": new Set(["approval", "output", "plan"]),
   rollback: new Set(["approval", "output", "plan"]),
 });
 
@@ -130,6 +176,21 @@ export function parseStaffAttachmentReconciliationCliArguments(argv) {
     ],
     check: ["direction", "output", "plan"],
     plan: ["output"],
+    "residual-apply": ["approval", "output", "plan"],
+    "residual-approve": [
+      "confirm",
+      "confirm-action-count",
+      "confirm-binding-count",
+      "confirm-plan-digest",
+      "confirm-quarantine-count",
+      "confirm-review-count",
+      "direction",
+      "output",
+      "plan",
+    ],
+    "residual-check": ["direction", "output", "plan"],
+    "residual-plan": ["output"],
+    "residual-rollback": ["approval", "output", "plan"],
     rollback: ["approval", "output", "plan"],
   }[command];
   if (required.some((name) => !Object.hasOwn(options, name))) {
@@ -155,6 +216,8 @@ function safeSummary(result, evidence) {
     actionCount:
       result.summary?.actionCount ?? result.actionCount ?? null,
     artifactSha256: evidence.receiptSha256,
+    bindingCount:
+      result.summary?.bindingCount ?? result.bindingCount ?? null,
     decision: result.decision ?? "ARTIFACT_WRITTEN",
     direction: result.direction ?? null,
     directorySync: evidence.directorySync,
@@ -163,6 +226,10 @@ function safeSummary(result, evidence) {
     reviewAttachmentCount:
       result.summary?.reviewAttachmentCount ??
       result.reviewAttachmentCount ??
+      null,
+    quarantineAttachmentCount:
+      result.summary?.quarantineAttachmentCount ??
+      result.quarantineAttachmentCount ??
       null,
     sizeBytes: evidence.sizeBytes,
     zeroDiff: result.zeroDiff ?? null,
@@ -189,6 +256,11 @@ export async function runStaffAttachmentReconciliationCli(
     result = await createStaffAttachmentReconciliationPlanFromDatabase(
       parseStaffAttachmentReconciliationRuntime(environment),
     );
+  } else if (parsed.command === "residual-plan") {
+    result =
+      await createStaffAttachmentResidualReconciliationPlanFromDatabase(
+        parseStaffAttachmentReconciliationRuntime(environment),
+      );
   } else if (parsed.command === "approve") {
     const plan = await readAccessScopeJsonFile(
       parsed.options.plan,
@@ -200,6 +272,21 @@ export async function runStaffAttachmentReconciliationCli(
       confirmedPlanDigest: parsed.options["confirm-plan-digest"],
       direction: parsed.options.direction,
       plan,
+      reviewAttachmentCount: parsed.options["confirm-review-count"],
+    });
+  } else if (parsed.command === "residual-approve") {
+    const plan = await readAccessScopeJsonFile(
+      parsed.options.plan,
+      protectedRoot,
+    );
+    result = createStaffAttachmentResidualReconciliationApproval({
+      actionCount: parsed.options["confirm-action-count"],
+      bindingCount: parsed.options["confirm-binding-count"],
+      confirmationPhrase: parsed.options.confirm,
+      confirmedPlanDigest: parsed.options["confirm-plan-digest"],
+      direction: parsed.options.direction,
+      plan,
+      quarantineCount: parsed.options["confirm-quarantine-count"],
       reviewAttachmentCount: parsed.options["confirm-review-count"],
     });
   } else if (["apply", "rollback"].includes(parsed.command)) {
@@ -217,12 +304,40 @@ export async function runStaffAttachmentReconciliationCli(
       direction: parsed.command === "apply" ? "APPLY" : "ROLLBACK",
       plan,
     });
+  } else if (
+    ["residual-apply", "residual-rollback"].includes(parsed.command)
+  ) {
+    const plan = await readAccessScopeJsonFile(
+      parsed.options.plan,
+      protectedRoot,
+    );
+    const approval = await readAccessScopeJsonFile(
+      parsed.options.approval,
+      protectedRoot,
+    );
+    result = await executeStaffAttachmentResidualReconciliation({
+      approval,
+      config: parseStaffAttachmentReconciliationRuntime(environment),
+      direction:
+        parsed.command === "residual-apply" ? "APPLY" : "ROLLBACK",
+      plan,
+    });
   } else if (parsed.command === "check") {
     const plan = await readAccessScopeJsonFile(
       parsed.options.plan,
       protectedRoot,
     );
     result = await checkStaffAttachmentReconciliation({
+      config: parseStaffAttachmentReconciliationRuntime(environment),
+      direction: parsed.options.direction,
+      plan,
+    });
+  } else if (parsed.command === "residual-check") {
+    const plan = await readAccessScopeJsonFile(
+      parsed.options.plan,
+      protectedRoot,
+    );
+    result = await checkStaffAttachmentResidualReconciliation({
       config: parseStaffAttachmentReconciliationRuntime(environment),
       direction: parsed.options.direction,
       plan,

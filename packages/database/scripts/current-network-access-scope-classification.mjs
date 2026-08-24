@@ -27,7 +27,8 @@ export const ACCESS_SCOPE_ROLLBACK_ACTION =
   "CURRENT_NETWORK_ACCESS_SCOPE_CLASSIFICATION_V1_ROLLBACK";
 
 const LOOPBACK = "127.0.0.1";
-const MAX_FILE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_FILE_BYTES = 4 * 1024 * 1024;
+export const MAX_PROTECTED_JSON_FILE_BYTES = 16 * 1024 * 1024;
 const POSIX_PERMISSION_MASK = 0o7777;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_DATABASE = /^leetplus_(?:scope|restored)_[a-z0-9_]{3,80}$/u;
@@ -83,6 +84,18 @@ export class AccessScopeClassificationError extends Error {
 
 function fail(reasonCode) {
   throw new AccessScopeClassificationError(reasonCode);
+}
+
+function protectedJsonFileByteLimit(options) {
+  const value = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > MAX_PROTECTED_JSON_FILE_BYTES
+  ) {
+    fail("ACCESS_SCOPE_FILE_BYTE_LIMIT_INVALID");
+  }
+  return value;
 }
 
 function exactObject(value, keys, reasonCode) {
@@ -2266,6 +2279,7 @@ async function syncEvidenceDirectory(boundary) {
 
 export async function readAccessScopeJsonFile(filePath, options = {}) {
   const boundary = await prepareEvidenceBoundary(filePath, options);
+  const maxFileBytes = protectedJsonFileByteLimit(options);
   const pathStat = await lstat(boundary.destination, { bigint: true }).catch(
     () => null,
   );
@@ -2274,7 +2288,7 @@ export async function readAccessScopeJsonFile(filePath, options = {}) {
     pathStat.isSymbolicLink() ||
     !pathStat.isFile() ||
     pathStat.size <= 0n ||
-    pathStat.size > BigInt(MAX_FILE_BYTES)
+    pathStat.size > BigInt(maxFileBytes)
   ) {
     fail("ACCESS_SCOPE_FILE_INVALID");
   }
@@ -2341,6 +2355,9 @@ export async function writeAccessScopeReceiptExclusive(
 ) {
   const boundary = await prepareEvidenceBoundary(filePath, options);
   const bytes = Buffer.from(`${canonicalJson(value)}\n`, "utf8");
+  if (bytes.length > protectedJsonFileByteLimit(options)) {
+    fail("ACCESS_SCOPE_FILE_INVALID");
+  }
   let durableFileStat;
   const handle = await open(
     boundary.destination,

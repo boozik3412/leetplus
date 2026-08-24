@@ -306,6 +306,9 @@ jobs:
       - name: Validate attachment inventory command
         run: pnpm --filter database check:attachment-inventory
 
+      - name: Validate attachment reconciliation controller
+        run: pnpm --filter database check:attachment-reconciliation
+
       - name: Validate Gate 1MT operational fail-closed preflight
         run: pnpm --filter database check:gate-1mt-operational-preflight
 
@@ -881,6 +884,9 @@ jobs:
             docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh \
             packages/database/scripts/current-network-access-scope-classification.mjs \
             packages/database/scripts/current-network-access-scope-classification.cli.mjs \
+            packages/database/scripts/staff-attachment-backfill-dry-run.mjs \
+            packages/database/scripts/staff-attachment-reconciliation.mjs \
+            packages/database/scripts/staff-attachment-reconciliation.cli.mjs \
             "$release_root/packages/database/scripts/"
           cp -a package.json pnpm-lock.yaml pnpm-workspace.yaml "$release_root/"
 
@@ -900,7 +906,9 @@ jobs:
             '  "currentReleaseRuntimeAcceptanceScriptCount": 3,' \
             '  "currentNetworkAccessScopeClassificationScriptsIncluded": true,' \
             '  "currentNetworkAccessScopeClassificationScriptCount": 2,' \
-            '  "operationalScriptCount": 23,' \
+            '  "staffAttachmentReconciliationScriptsIncluded": true,' \
+            '  "staffAttachmentReconciliationScriptCount": 3,' \
+            '  "operationalScriptCount": 26,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
@@ -985,6 +993,9 @@ jobs:
             './packages/database/scripts/run-current-release-restored-copy-acceptance.sh' \
             './packages/database/scripts/current-network-access-scope-classification.mjs' \
             './packages/database/scripts/current-network-access-scope-classification.cli.mjs' \
+            './packages/database/scripts/staff-attachment-backfill-dry-run.mjs' \
+            './packages/database/scripts/staff-attachment-reconciliation.mjs' \
+            './packages/database/scripts/staff-attachment-reconciliation.cli.mjs' \
             './release-provenance.json' \
             './SHA256SUMS'; do
             grep -F -x "$required_path" "$archive_listing" > /dev/null
@@ -994,7 +1005,7 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '23'
+          test "$script_file_count" = '26'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1
@@ -1032,7 +1043,9 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").currentReleaseRuntimeAcceptanceScriptCount')" = '3'
             test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptCount')" = '2'
-            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '23'
+            test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptsIncluded')" = 'true'
+            test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptCount')" = '3'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '26'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
             node --check packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs
@@ -1045,6 +1058,9 @@ jobs:
             node --check packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs
             bash -n packages/database/scripts/run-current-release-restored-copy-acceptance.sh
             node --check packages/database/scripts/current-network-access-scope-classification.cli.mjs
+            node --check packages/database/scripts/staff-attachment-backfill-dry-run.mjs
+            node --check packages/database/scripts/staff-attachment-reconciliation.mjs
+            node --check packages/database/scripts/staff-attachment-reconciliation.cli.mjs
           )
 
       - name: Upload non-deployable SHA-bound release candidate

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 
 const SCRIPT_NAME = 'staff-attachment-backfill-dry-run';
@@ -240,10 +241,10 @@ function parseTargetEnvironment() {
   return { target, productionAttested: productionRequested };
 }
 
-function parseAllowedOrigins() {
-  const raw = String(
-    process.env.STAFF_ATTACHMENT_ALLOWED_HTTPS_ORIGINS ?? '',
-  ).trim();
+export function parseAllowedOrigins(
+  rawValue = process.env.STAFF_ATTACHMENT_ALLOWED_HTTPS_ORIGINS ?? '',
+) {
+  const raw = String(rawValue).trim();
   if (!raw) {
     return new Set();
   }
@@ -289,7 +290,7 @@ function parseAllowedOrigins() {
   return origins;
 }
 
-function parsePostgresDatabaseUrl(raw) {
+export function parsePostgresDatabaseUrl(raw) {
   if (!raw) {
     failContract('DATABASE_URL_REQUIRED', 'DATABASE_URL is required.');
   }
@@ -321,7 +322,7 @@ function parsePostgresDatabaseUrl(raw) {
   return parsed;
 }
 
-function databaseTargetFingerprint(raw) {
+export function databaseTargetFingerprint(raw) {
   const parsed = parsePostgresDatabaseUrl(raw);
   const canonicalTarget = {
     databasePath: parsed.pathname,
@@ -454,7 +455,7 @@ function mergeReasonCounts(report, sourceName, reasonCounts) {
   }
 }
 
-function parseExactAttachmentReference(value, allowedOrigins) {
+export function parseExactAttachmentReference(value, allowedOrigins) {
   if (typeof value !== 'string' || value.length === 0) {
     return { match: null, reasonCode: null };
   }
@@ -484,10 +485,14 @@ function parseExactAttachmentReference(value, allowedOrigins) {
     };
   }
 
+  const exactPath = ATTACHMENT_PATH_RE.exec(parsed.pathname);
+  const reviewAttachmentId = exactPath?.[1] ?? null;
+
   if (parsed.protocol !== 'https:') {
     return {
       match: null,
       reasonCode: 'ABSOLUTE_REFERENCE_NOT_HTTPS',
+      reviewAttachmentId,
     };
   }
 
@@ -495,14 +500,15 @@ function parseExactAttachmentReference(value, allowedOrigins) {
     return {
       match: null,
       reasonCode: 'ABSOLUTE_REFERENCE_NOT_EXACT',
+      reviewAttachmentId,
     };
   }
 
-  const path = ATTACHMENT_PATH_RE.exec(parsed.pathname);
-  if (!path) {
+  if (!exactPath) {
     return {
       match: null,
       reasonCode: 'ABSOLUTE_REFERENCE_NOT_EXACT',
+      reviewAttachmentId: null,
     };
   }
 
@@ -510,12 +516,13 @@ function parseExactAttachmentReference(value, allowedOrigins) {
     return {
       match: null,
       reasonCode: 'ABSOLUTE_REFERENCE_ORIGIN_NOT_ALLOWLISTED',
+      reviewAttachmentId,
     };
   }
 
   return {
     match: {
-      attachmentId: path[1],
+      attachmentId: exactPath[1],
       referenceForm: 'ABSOLUTE_HTTPS',
     },
     reasonCode: null,
@@ -1692,126 +1699,135 @@ async function runInventory({
   process.stdout.write(`${JSON.stringify(report, null, pretty ? 2 : 0)}\n`);
 }
 
-let prisma;
+export async function main() {
+  let prisma;
 
-try {
-  const argumentsResult = parseArguments(process.argv.slice(2));
-  if (argumentsResult.help) {
-    process.stdout.write(`${HELP}\n`);
-  } else if (argumentsResult.selfTest) {
-    runSelfTests();
-  } else if (argumentsResult.printDatabaseFingerprint) {
-    process.stdout.write(
+  try {
+    const argumentsResult = parseArguments(process.argv.slice(2));
+    if (argumentsResult.help) {
+      process.stdout.write(`${HELP}\n`);
+    } else if (argumentsResult.selfTest) {
+      runSelfTests();
+    } else if (argumentsResult.printDatabaseFingerprint) {
+      process.stdout.write(
+        `${JSON.stringify({
+          schemaVersion: REPORT_SCHEMA_VERSION,
+          script: SCRIPT_NAME,
+          status: 'completed',
+          mode: 'DATABASE_TARGET_FINGERPRINT',
+          databaseTargetFingerprint: databaseTargetFingerprint(
+            process.env.DATABASE_URL,
+          ),
+          credentialsEmitted: false,
+        })}\n`,
+      );
+    } else {
+      const target = parseTargetEnvironment();
+      const allowedOrigins = parseAllowedOrigins();
+      const batchSize = parseBoundedInteger(
+        argumentsResult.batchSize ??
+          process.env.STAFF_ATTACHMENT_BACKFILL_BATCH_SIZE,
+        {
+          code: 'BATCH_SIZE_INVALID',
+          label: 'The backfill batch size',
+          minimum: 1,
+          maximum: MAX_BATCH_SIZE,
+          fallback: DEFAULT_BATCH_SIZE,
+        },
+      );
+      const statementTimeoutMs = parseBoundedInteger(
+        process.env.STAFF_ATTACHMENT_BACKFILL_STATEMENT_TIMEOUT_MS,
+        {
+          code: 'STATEMENT_TIMEOUT_INVALID',
+          label: 'The statement timeout',
+          minimum: MIN_STATEMENT_TIMEOUT_MS,
+          maximum: MAX_STATEMENT_TIMEOUT_MS,
+          fallback: DEFAULT_STATEMENT_TIMEOUT_MS,
+        },
+      );
+      const transactionTimeoutMs = parseBoundedInteger(
+        process.env.STAFF_ATTACHMENT_BACKFILL_TRANSACTION_TIMEOUT_MS,
+        {
+          code: 'TRANSACTION_TIMEOUT_INVALID',
+          label: 'The snapshot transaction timeout',
+          minimum: MIN_TRANSACTION_TIMEOUT_MS,
+          maximum: MAX_TRANSACTION_TIMEOUT_MS,
+          fallback: DEFAULT_TRANSACTION_TIMEOUT_MS,
+        },
+      );
+      const targetFingerprint = databaseTargetFingerprint(
+        process.env.DATABASE_URL,
+      );
+      const operationalBinding = parseOperationalBinding({
+        productionRequested: target.productionAttested,
+        targetFingerprint,
+      });
+      const readOnlyUrl = buildReadOnlyDatabaseUrl(statementTimeoutMs);
+
+      prisma = new PrismaClient({
+        datasources: { db: { url: readOnlyUrl } },
+        log: [],
+      });
+      await runInventory({
+        prisma,
+        batchSize,
+        allowedOrigins,
+        databaseTargetFingerprint:
+          operationalBinding.databaseTargetFingerprint,
+        releaseSha: operationalBinding.releaseSha,
+        target: target.target,
+        productionAttested: target.productionAttested,
+        statementTimeoutMs,
+        transactionTimeoutMs,
+        pretty: argumentsResult.pretty,
+      });
+    }
+  } catch (error) {
+    const safeContractError =
+      error?.safeContractError === true &&
+      typeof error?.code === 'string' &&
+      /^[A-Z][A-Z0-9_]{2,80}$/.test(error.code);
+    const code = safeContractError
+      ? error.code
+      : 'ATTACHMENT_INVENTORY_FAILED';
+    const safeMessage = safeContractError
+      ? error.message
+      : 'The read-only attachment inventory failed. Inspect protected operator logs; no row data was emitted.';
+
+    process.stderr.write(
       `${JSON.stringify({
         schemaVersion: REPORT_SCHEMA_VERSION,
         script: SCRIPT_NAME,
-        status: 'completed',
-        mode: 'DATABASE_TARGET_FINGERPRINT',
-        databaseTargetFingerprint: databaseTargetFingerprint(
-          process.env.DATABASE_URL,
-        ),
-        credentialsEmitted: false,
+        status: 'failed',
+        error: { code, message: safeMessage },
       })}\n`,
     );
-  } else {
-    const target = parseTargetEnvironment();
-    const allowedOrigins = parseAllowedOrigins();
-    const batchSize = parseBoundedInteger(
-      argumentsResult.batchSize ??
-        process.env.STAFF_ATTACHMENT_BACKFILL_BATCH_SIZE,
-      {
-        code: 'BATCH_SIZE_INVALID',
-        label: 'The backfill batch size',
-        minimum: 1,
-        maximum: MAX_BATCH_SIZE,
-        fallback: DEFAULT_BATCH_SIZE,
-      },
-    );
-    const statementTimeoutMs = parseBoundedInteger(
-      process.env.STAFF_ATTACHMENT_BACKFILL_STATEMENT_TIMEOUT_MS,
-      {
-        code: 'STATEMENT_TIMEOUT_INVALID',
-        label: 'The statement timeout',
-        minimum: MIN_STATEMENT_TIMEOUT_MS,
-        maximum: MAX_STATEMENT_TIMEOUT_MS,
-        fallback: DEFAULT_STATEMENT_TIMEOUT_MS,
-      },
-    );
-    const transactionTimeoutMs = parseBoundedInteger(
-      process.env.STAFF_ATTACHMENT_BACKFILL_TRANSACTION_TIMEOUT_MS,
-      {
-        code: 'TRANSACTION_TIMEOUT_INVALID',
-        label: 'The snapshot transaction timeout',
-        minimum: MIN_TRANSACTION_TIMEOUT_MS,
-        maximum: MAX_TRANSACTION_TIMEOUT_MS,
-        fallback: DEFAULT_TRANSACTION_TIMEOUT_MS,
-      },
-    );
-    const targetFingerprint = databaseTargetFingerprint(
-      process.env.DATABASE_URL,
-    );
-    const operationalBinding = parseOperationalBinding({
-      productionRequested: target.productionAttested,
-      targetFingerprint,
-    });
-    const readOnlyUrl = buildReadOnlyDatabaseUrl(statementTimeoutMs);
-
-    prisma = new PrismaClient({
-      datasources: { db: { url: readOnlyUrl } },
-      log: [],
-    });
-    await runInventory({
-      prisma,
-      batchSize,
-      allowedOrigins,
-      databaseTargetFingerprint: operationalBinding.databaseTargetFingerprint,
-      releaseSha: operationalBinding.releaseSha,
-      target: target.target,
-      productionAttested: target.productionAttested,
-      statementTimeoutMs,
-      transactionTimeoutMs,
-      pretty: argumentsResult.pretty,
-    });
-  }
-} catch (error) {
-  const safeContractError =
-    error?.safeContractError === true &&
-    typeof error?.code === 'string' &&
-    /^[A-Z][A-Z0-9_]{2,80}$/.test(error.code);
-  const code = safeContractError ? error.code : 'ATTACHMENT_INVENTORY_FAILED';
-  const safeMessage = safeContractError
-    ? error.message
-    : 'The read-only attachment inventory failed. Inspect protected operator logs; no row data was emitted.';
-
-  process.stderr.write(
-    `${JSON.stringify({
-      schemaVersion: REPORT_SCHEMA_VERSION,
-      script: SCRIPT_NAME,
-      status: 'failed',
-      error: { code, message: safeMessage },
-    })}\n`,
-  );
-  process.exitCode = 1;
-} finally {
-  if (prisma) {
-    try {
-      await prisma.$disconnect();
-    } catch {
-      if (!process.exitCode) {
-        process.stderr.write(
-          `${JSON.stringify({
-            schemaVersion: REPORT_SCHEMA_VERSION,
-            script: SCRIPT_NAME,
-            status: 'failed',
-            error: {
-              code: 'DATABASE_DISCONNECT_FAILED',
-              message:
-                'The read-only database session could not be closed cleanly; no connection details were emitted.',
-            },
-          })}\n`,
-        );
-        process.exitCode = 1;
+    process.exitCode = 1;
+  } finally {
+    if (prisma) {
+      try {
+        await prisma.$disconnect();
+      } catch {
+        if (!process.exitCode) {
+          process.stderr.write(
+            `${JSON.stringify({
+              schemaVersion: REPORT_SCHEMA_VERSION,
+              script: SCRIPT_NAME,
+              status: 'failed',
+              error: {
+                code: 'DATABASE_DISCONNECT_FAILED',
+                message:
+                  'The read-only database session could not be closed cleanly; no connection details were emitted.',
+              },
+            })}\n`,
+          );
+          process.exitCode = 1;
+        }
       }
     }
   }
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  await main();
 }

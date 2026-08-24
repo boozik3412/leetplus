@@ -357,6 +357,7 @@ jobs:
       - name: Validate controlled-beta data and runtime admission contracts
         run: |
           pnpm --filter database check:attachment-inventory
+          pnpm --filter database check:attachment-reconciliation
           pnpm --filter database check:gate-1mt-operational-preflight
           pnpm --filter database check:current-network-access-scope-classification
           pnpm --filter database check:current-release-restored-copy-runtime-acceptance

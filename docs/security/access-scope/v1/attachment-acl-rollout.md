@@ -2,9 +2,9 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | `IMPLEMENTED_CANDIDATE` / rollout modes + EXPAND + chat/task parent adoption |
-| Версия | 0.7.0 |
-| Дата | 27.07.2026 |
+| Статус | `PRODUCTION SHADOW` / reconciliation controller implemented / external beta `NO-GO` |
+| Версия | 0.8.0 |
+| Дата | 24.08.2026 |
 | Владелец | LeetPlus engineering |
 | Backlog | `BETA-MOD-STAFF-009`, `BETA-MOD-COMMS-002`, `BETA-SEC-006` |
 | Release decision | `NO-GO` до выполнения activation gates |
@@ -17,11 +17,13 @@
 Фактически реализованные файлы, миграции, проверки, ограничения и точные
 следующие шаги зафиксированы в
 [implementation checkpoint](./attachment-acl-implementation-checkpoint.md).
-Текущий candidate не deployed. `STAFF_ATTACHMENT_ACL_MODE=ENFORCED` нельзя
-включать до inventory, backfill/reconciliation и выполнения activation gates:
-legacy blobs после EXPAND имеют состояние `UNRESOLVED` и будут корректно
-закрыты через `404`. `LEGACY` и `SHADOW` предназначены только для внутреннего
-перехода; внешний beta в этих режимах запрещён.
+EXPAND, dual-write, parent adoption и parent-delete guards уже находятся в
+production; runtime остаётся в `STAFF_ATTACHMENT_ACL_MODE=SHADOW`.
+`ENFORCED` нельзя включать до reviewed reconciliation, повторного zero-diff
+inventory и выполнения activation gates: legacy blobs имеют состояние
+`UNRESOLVED` и в strict режиме будут корректно закрыты через `404`. `LEGACY` и
+`SHADOW` предназначены только для внутреннего перехода; внешний beta в этих
+режимах запрещён.
 
 Зафиксированная launch topology: четыре текущих клуба являются четырьмя
 `Store` одного `Tenant`. После прохождения gates первый beta tenant получает
@@ -300,7 +302,8 @@ credential-free database target fingerprint; raw UUID, URL, имена файл�
    description/checklist, checklist answers, knowledge current/version,
    regulation current/version, training courses и onboarding plans.
 4. Проверить существование attachment/parent и совпадение tenant.
-5. Сформировать идемпотентные bindings отдельным apply/reconciliation tool.
+5. Сформировать идемпотентные bindings через
+   [reconciliation controller](./staff-attachment-reconciliation-runbook.md).
 6. Поместить cross-tenant, orphan, unsupported, conflicting и неоднозначные
    случаи в quarantine с reason code.
 7. Повторить scanner; необъяснённых внутренних references должно быть ноль.
@@ -314,9 +317,12 @@ checklist answers и task-from-chat description считаются вторич�
 audit-копиями. Они попадают в отчёт scanner, но никогда не создают ACL binding
 и не расширяют доступ.
 
-На текущем checkpoint реализован только scanner. Apply/backfill tool ещё
-отсутствует, production-like inventory текущей сети из четырёх `Store` одного
-`Tenant` не запускался.
+На checkpoint 24.08.2026 read-only production inventory выполнен: `5 446`
+`UNRESOLVED`, `4 416` unique-primary candidates, `309` multiple-parent и `741`
+без распознанного reference. Reconciliation controller реализован и прошёл
+unit + disposable PostgreSQL apply/zero-diff/rollback. Production apply не
+выполнялся и не разрешён до restored-copy rehearsal, exact role/backup review
+и отдельного approval exact plan digest.
 
 ## 8. Phased rollout
 
@@ -382,8 +388,8 @@ pnpm --filter database db:deploy
 
 ### Phase D — reconciliation
 
-- Статус checkpoint: read-only scanner реализован; apply/backfill и
-  production-like run pending.
+- Статус checkpoint: production read-only inventory и controller реализованы;
+  production plan/review/apply и clean-history rehearsal pending.
 - Backfill всех поддерживаемых legacy references.
 - Quarantine всех неоднозначных случаев.
 - Подтвердить ноль необъяснённых внутренних references и ноль tenant mismatch.
@@ -508,6 +514,9 @@ auto-deploy: legacy blobs имеют `UNRESOLVED`, а runtime reader пока п
 
 ## 12. Changelog
 
+- `0.8.0`, 24.08.2026 — зафиксированы production `SHADOW` и aggregate
+  inventory; добавлен digest-bound controller с detached approval,
+  serializable apply, durable audit, zero-diff replay и exact rollback.
 - `0.7.0`, 27.07.2026 — final participants и shift повторно проверяются через
   transaction client после parent lock; добавлены regression-тесты и явно
   зафиксирован residual reference-row race до DB/write-contract hardening.

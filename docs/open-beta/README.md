@@ -169,6 +169,12 @@ Gate 1MT staff attachment browser-boundary CI guard связывает selector-
 file BFF, Web production build, PostgreSQL matrix всех семи parent kinds и
 принятые STORES browser evidence в обязательный GitHub Actions step:
 [Gate 1MT staff attachments browser-boundary CI evidence 19.08.2026](./gate-1mt-staff-attachments-browser-boundary-ci-evidence-2026-08-19.md).
+
+Protected production read-only attachment inventory на admitted exact SHA:
+[Gate 1MT production attachment inventory 24.08.2026](./gate-1mt-production-attachment-inventory-2026-08-24.md).
+DB trigger contract прошёл `7/7`, но `5 446 UNRESOLVED`, `309`
+multiple-parent и `741` unreferenced rows требуют отдельного audited
+reconciliation/backfill; внешний beta остаётся `NO-GO`.
 Exact SHA `3542b197…` принят CI run `32263277942` как `4/4 SUCCESS`;
 полноценный live archive/delete/orphan browser journey всё ещё открыт.
 

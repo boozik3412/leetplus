@@ -439,10 +439,13 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    HTTP SSE и latest
    assortment HTTP `15/15`), browser read/admission и report/download/mutation
    journey, OWNER attachment lifecycle, knowledge, shift-regulations,
-   training, onboarding и checklists STORES adoption приняты. Не закрыты
-   outbound digest, archive/orphan browser matrix attachment parents,
-   remaining STAFF slices, jobs/Telegram/public guest binding и Gate 2
-   текущей сети.
+   training, onboarding и checklists STORES adoption приняты. Production
+   parent-delete trigger inventory `7/7` также принят на read-only snapshot.
+   Новый aggregate inventory выявил `5 446 UNRESOLVED`, `309` multiple-parent,
+   `741` unreferenced и `243` URL-review cases; до browser matrix требуется
+   audited reconciliation/backfill и повторный zero-diff inventory. Также не
+   закрыты outbound digest, remaining STAFF slices, jobs/Telegram/public guest
+   binding и Gate 2 текущей сети.
 5. External-beta activation, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
@@ -483,6 +486,8 @@ new exact SHA + Fast CI + Full Release Admission [IN PROGRESS]
   → [DONE local PostgreSQL/browser] onboarding STORES parent + attachment adoption
   → [DONE local PostgreSQL/browser] checklists STORES parent + attachment adoption
   → production roles/secrets + controlled SMTP canary
+  → [DONE read-only production] attachment trigger/inventory evidence
+  → attachment reconciliation/backfill + zero-diff inventory
   → Gate 1MT attachment archive/orphan browser matrix + remaining STAFF slices
   → Gate 1MT jobs/Telegram/public-guest/outbound
   → Gate 2 current Tenant A/A1..A4

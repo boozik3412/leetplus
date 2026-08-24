@@ -1,12 +1,12 @@
 # Staff attachment reconciliation controller
 
-| Поле | Значение |
-| --- | --- |
-| Статус | `IMPLEMENTED / LOCAL PG REHEARSAL PASS / PRODUCTION APPLY NOT AUTHORIZED` |
-| Версия | 1.0.0 |
-| Дата | 24.08.2026 |
-| Владелец | LeetPlus engineering |
-| Gate | `BETA-MOD-STAFF-009`, `BETA-SEC-006`, Gate 1MT |
+| Поле     | Значение                                                                  |
+| -------- | ------------------------------------------------------------------------- |
+| Статус   | `IMPLEMENTED / LOCAL PG REHEARSAL PASS / PRODUCTION APPLY NOT AUTHORIZED` |
+| Версия   | 1.0.0                                                                     |
+| Дата     | 24.08.2026                                                                |
+| Владелец | LeetPlus engineering                                                      |
+| Gate     | `BETA-MOD-STAFF-009`, `BETA-SEC-006`, Gate 1MT                            |
 
 ## Решение
 
@@ -194,6 +194,34 @@ pnpm --filter database db:reconcile:attachment-acl -- check `
 `ROLLBACK`, ручного повторного ввода тех же digest/counts и фразы
 `I_ACCEPT_EXACT_STAFF_ATTACHMENT_RECONCILIATION_ROLLBACK`.
 
+## Least-privilege role boundary
+
+Disposable PostgreSQL 16.15 rehearsal подтвердила, что одной таблицы DML
+недостаточно. Apply-role должна иметь только перечисленные возможности:
+
+- `CONNECT`, но не `CREATEDB`, `CREATEROLE`, `SUPERUSER`, `INHERIT`,
+  `REPLICATION` или `BYPASSRLS`;
+- `USAGE` на `public` и `SELECT` на exact migration, attachment, binding,
+  audit и seven-parent graph relations, которые читает controller;
+- column-level `UPDATE` только state-полей `StaffAttachment`, `INSERT/DELETE`
+  на `StaffAttachmentBinding` и `INSERT` на `PlatformAdminAuditEvent`;
+- `EXECUTE` только на
+  `resolve_staff_attachment_resource_scope(StaffAttachmentResourceKind,text)`
+  и `assert_staff_attachment_state(text)`;
+- для каждого auto-action — минимальный grant `UPDATE("updatedAt")`, необходимый
+  PostgreSQL для `FOR KEY SHARE`: на `StaffTask` либо одновременно на
+  `StaffChatMessage` и `StaffChatChannel`; при ненулевом `resourceStoreId` такой
+  же column grant нужен на exact `Store`. Whole-table `UPDATE` запрещён.
+  `createdByUserId` в controller contract всегда `NULL`, поэтому row-lock grant
+  на `User` этому workflow не выдаётся.
+
+Эта роль является одноразовой maintenance capability: credential не монтируется
+в API/worker, действует только на reviewed window, после final check grants
+отзываются, role удаляется, а zero effective-grant audit сохраняется в evidence.
+Первый rehearsal специально завершился `42501` до writes при отсутствии
+resolver grant; после добавления только точечных function/row-lock прав полный
+lifecycle прошёл. Это fail-closed поведение обязательно сохранить.
+
 ## Production stop conditions
 
 Production plan разрешён как read-only операция только после зелёных Fast CI и
@@ -227,10 +255,12 @@ lock/statement timeout, deferred-trigger failure, audit drift, partial response
 - disposable PostgreSQL остановлен и удалён;
 - production application/data/config не изменялись.
 
-Во время clean-schema rehearsal отдельно воспроизведён существующий blocker:
-текущий chain падает в
-`20260731120000_identity_mail_delivery_release_head` из-за несовпадения
-preterminal manifest digest. Attachment transaction была проверена на
-одноразовой схеме только после явного локального пропуска нерелевантных mail
-terminal assertions. Это не считается clean-deploy evidence и должно быть
-исправлено отдельным exact-history change до production apply.
+Clean-schema blocker закрыт без изменения уже применённых migration SQL.
+Причиной были `150` CRLF-файлов в старом Windows working tree; Git/LF manifest
+`1..178` всё время оставался каноническим `7f986797…`. `db:deploy` теперь
+материализует отдельный symlink-free UTF-8/LF Prisma artifact. Реальный clean
+PostgreSQL 16.15 deploy применил `187/187`, дошёл до
+`20260820010000_guest_portal_telegram_update_ledger`, подтвердил CURRENT179
+preterminal digest `7f986797…`, а повторный deploy был no-op. Existing
+production-history rehearsal `f4e8d79d…` остаётся историческим evidence и не
+заменяет fresh-backup rehearsal нового exact SHA перед production apply.

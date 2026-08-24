@@ -7,6 +7,7 @@ import process from "node:process";
 import { TextDecoder } from "node:util";
 
 const EXPECTED_OPERATIONAL_SCRIPTS = [
+  "packages/database/scripts/canonical-prisma-deploy.mjs",
   "packages/database/scripts/current-network-access-scope-classification.cli.mjs",
   "packages/database/scripts/current-network-access-scope-classification.mjs",
   "packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs",
@@ -40,6 +41,8 @@ const MANIFEST_PATH = `./${MANIFEST_NAME}`;
 const MAX_MANIFEST_BYTES = 64 * 1024 * 1024;
 const EXPECTED_NODE_VERSION = "22";
 const EXPECTED_PNPM_VERSION = "10.33.2";
+const EXPECTED_DATABASE_DEPLOY_COMMAND =
+  "node scripts/canonical-prisma-deploy.mjs";
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const MIGRATION_NAME_PATTERN = /^[0-9]{14}_[a-z0-9_]+$/u;
 const REQUIRED_CORE_FILES = [
@@ -91,15 +94,20 @@ function assertSafePath(relativePath, source) {
     relativePath !== relativePath.normalize("NFC") ||
     /[\\\p{Cc}]/u.test(relativePath)
   ) {
-    fail(`${source} path is not canonical UTF-8: ${JSON.stringify(relativePath)}`);
+    fail(
+      `${source} path is not canonical UTF-8: ${JSON.stringify(relativePath)}`,
+    );
   }
   const components = relativePath.split("/");
   if (
     components.some(
-      (component) => component.length === 0 || component === "." || component === "..",
+      (component) =>
+        component.length === 0 || component === "." || component === "..",
     )
   ) {
-    fail(`${source} path has an unsafe component: ${JSON.stringify(relativePath)}`);
+    fail(
+      `${source} path has an unsafe component: ${JSON.stringify(relativePath)}`,
+    );
   }
 }
 
@@ -125,8 +133,10 @@ function walkArtifactTree(
       walkArtifactTree(root, absolutePath, relativePath, tree);
       continue;
     }
-    if (!stat.isFile()) fail(`artifact entry is not a regular file: ${relativePath}`);
-    if (stat.nlink !== 1) fail(`artifact regular file has shared hardlinks: ${relativePath}`);
+    if (!stat.isFile())
+      fail(`artifact entry is not a regular file: ${relativePath}`);
+    if (stat.nlink !== 1)
+      fail(`artifact regular file has shared hardlinks: ${relativePath}`);
     tree.regularPaths.push(`./${relativePath}`);
   }
   return tree;
@@ -157,11 +167,13 @@ function readManifest(root) {
   let priorPath;
   for (const line of text.slice(0, -1).split("\n")) {
     const match = /^([0-9a-f]{64})  (\.\/.+)$/u.exec(line);
-    if (!match) fail(`root SHA256SUMS line is not canonical: ${JSON.stringify(line)}`);
+    if (!match)
+      fail(`root SHA256SUMS line is not canonical: ${JSON.stringify(line)}`);
     const [, digest, manifestPath] = match;
     const relativePath = manifestPath.slice(2);
     assertSafePath(relativePath, "manifest");
-    if (manifestPath === MANIFEST_PATH) fail("root SHA256SUMS must not hash itself");
+    if (manifestPath === MANIFEST_PATH)
+      fail("root SHA256SUMS must not hash itself");
     if (seenPaths.has(manifestPath)) {
       fail(`root SHA256SUMS contains a duplicate path: ${manifestPath}`);
     }
@@ -183,7 +195,9 @@ function assertExactTree(root, manifestEntries, actualPaths) {
   ) {
     const manifestSet = new Set(manifestPaths);
     const actualSet = new Set(actualPaths);
-    const unlisted = actualPaths.find((candidate) => !manifestSet.has(candidate));
+    const unlisted = actualPaths.find(
+      (candidate) => !manifestSet.has(candidate),
+    );
     const absent = manifestPaths.find((candidate) => !actualSet.has(candidate));
     fail(
       `root SHA256SUMS path set differs from the regular-file tree` +
@@ -198,7 +212,8 @@ function assertExactTree(root, manifestEntries, actualPaths) {
       .createHash("sha256")
       .update(fs.readFileSync(absolutePath))
       .digest("hex");
-    if (actualDigest !== digest) fail(`root SHA256SUMS digest mismatch: ${manifestPath}`);
+    if (actualDigest !== digest)
+      fail(`root SHA256SUMS digest mismatch: ${manifestPath}`);
   }
 }
 
@@ -221,7 +236,9 @@ function assertExactDirectories(manifestEntries, actualDirectoryPaths) {
     const unlisted = actualDirectoryPaths.find(
       (candidate) => !expectedDirectorySet.has(candidate),
     );
-    const absent = expectedDirectoryPaths.find((candidate) => !actualSet.has(candidate));
+    const absent = expectedDirectoryPaths.find(
+      (candidate) => !actualSet.has(candidate),
+    );
     fail(
       `runtime directory set differs from manifest-derived parent directories` +
         `${unlisted ? `; unlisted=${unlisted}` : ""}` +
@@ -257,7 +274,9 @@ function assertCoreTopology(root, actualPaths, expectedReleaseSha) {
 
   const publicPrefix = "./apps/web/public/";
   if (!actualPaths.some((candidate) => candidate.startsWith(publicPrefix))) {
-    fail("Web public content must contain at least one manifest-bound regular file");
+    fail(
+      "Web public content must contain at least one manifest-bound regular file",
+    );
   }
 
   const buildId = fs.readFileSync(
@@ -270,25 +289,31 @@ function assertCoreTopology(root, actualPaths, expectedReleaseSha) {
 
   const migrationPrefix = "./packages/database/prisma/migrations/";
   const migrationNames = [];
-  for (const candidate of actualPaths.filter((value) => value.startsWith(migrationPrefix))) {
+  for (const candidate of actualPaths.filter((value) =>
+    value.startsWith(migrationPrefix),
+  )) {
     if (candidate === `${migrationPrefix}migration_lock.toml`) continue;
-    const match = /^\.\/packages\/database\/prisma\/migrations\/([^/]+)\/migration\.sql$/u.exec(
-      candidate,
-    );
+    const match =
+      /^\.\/packages\/database\/prisma\/migrations\/([^/]+)\/migration\.sql$/u.exec(
+        candidate,
+      );
     if (!match || !MIGRATION_NAME_PATTERN.test(match[1])) {
       fail(`Prisma migration tree contains an unexpected path: ${candidate}`);
     }
     migrationNames.push(match[1]);
   }
   migrationNames.sort(compareUtf8);
-  if (migrationNames.length === 0) fail("Prisma migration tree must not be empty");
+  if (migrationNames.length === 0)
+    fail("Prisma migration tree must not be empty");
   if (new Set(migrationNames).size !== migrationNames.length) {
     fail("Prisma migration tree contains a duplicate migration identity");
   }
 
   let rootPackage;
   try {
-    rootPackage = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+    rootPackage = JSON.parse(
+      fs.readFileSync(path.join(root, "package.json"), "utf8"),
+    );
   } catch {
     fail("root package.json is not valid JSON");
   }
@@ -299,6 +324,31 @@ function assertCoreTopology(root, actualPaths, expectedReleaseSha) {
     rootPackage.packageManager !== `pnpm@${EXPECTED_PNPM_VERSION}`
   ) {
     fail("root package.json does not pin the exact release pnpm version");
+  }
+
+  let databasePackage;
+  try {
+    databasePackage = JSON.parse(
+      fs.readFileSync(
+        path.join(root, "packages", "database", "package.json"),
+        "utf8",
+      ),
+    );
+  } catch {
+    fail("database package.json is not valid JSON");
+  }
+  if (
+    databasePackage === null ||
+    Array.isArray(databasePackage) ||
+    typeof databasePackage !== "object" ||
+    databasePackage.scripts?.["db:deploy"] !==
+      EXPECTED_DATABASE_DEPLOY_COMMAND ||
+    databasePackage.scripts?.["predb:deploy"] !== undefined ||
+    databasePackage.scripts?.["postdb:deploy"] !== undefined
+  ) {
+    fail(
+      "database deploy command is not the exact canonical artifact boundary",
+    );
   }
 
   return {
@@ -316,12 +366,18 @@ function assertOperationalScriptIdentity(actualPaths) {
   const expectedScripts = [...EXPECTED_OPERATIONAL_SCRIPTS].sort(compareUtf8);
   if (
     actualScripts.length !== expectedScripts.length ||
-    actualScripts.some((actualPath, index) => actualPath !== expectedScripts[index])
+    actualScripts.some(
+      (actualPath, index) => actualPath !== expectedScripts[index],
+    )
   ) {
     const expectedSet = new Set(expectedScripts);
     const actualSet = new Set(actualScripts);
-    const unexpected = actualScripts.find((candidate) => !expectedSet.has(candidate));
-    const missing = expectedScripts.find((candidate) => !actualSet.has(candidate));
+    const unexpected = actualScripts.find(
+      (candidate) => !expectedSet.has(candidate),
+    );
+    const missing = expectedScripts.find(
+      (candidate) => !actualSet.has(candidate),
+    );
     fail(
       `operational script identity set is not exact` +
         `${unexpected ? `; unexpected=${unexpected}` : ""}` +
@@ -338,10 +394,16 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
   } catch {
     fail("release-provenance.json is not valid JSON");
   }
-  if (provenance === null || Array.isArray(provenance) || typeof provenance !== "object") {
+  if (
+    provenance === null ||
+    Array.isArray(provenance) ||
+    typeof provenance !== "object"
+  ) {
     fail("release-provenance.json must contain one JSON object");
   }
   const expectedFields = {
+    canonicalPrismaDeployScriptCount: 1,
+    canonicalPrismaDeployScriptsIncluded: true,
     currentNetworkAccessScopeClassificationScriptCount: 2,
     currentNetworkAccessScopeClassificationScriptsIncluded: true,
     currentReleaseRuntimeAcceptanceScriptCount: 3,
@@ -351,7 +413,7 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
     founderPilotOperationalScriptCount: 12,
     founderPilotOperationalScriptsIncluded: true,
     nodeVersion: EXPECTED_NODE_VERSION,
-    operationalScriptCount: 26,
+    operationalScriptCount: 27,
     pnpmVersion: EXPECTED_PNPM_VERSION,
     releaseSha: expectedReleaseSha,
     runtimeEnrollmentOperationalScriptCount: 6,
@@ -369,7 +431,9 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
   ) {
     const expectedSet = new Set(expectedKeys);
     const actualSet = new Set(actualKeys);
-    const unexpected = actualKeys.find((candidate) => !expectedSet.has(candidate));
+    const unexpected = actualKeys.find(
+      (candidate) => !expectedSet.has(candidate),
+    );
     const missing = expectedKeys.find((candidate) => !actualSet.has(candidate));
     fail(
       `release provenance key set is not exact` +
@@ -384,10 +448,13 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
   }
 }
 
-const { expectedReleaseSha, releaseRoot } = parseArguments(process.argv.slice(2));
+const { expectedReleaseSha, releaseRoot } = parseArguments(
+  process.argv.slice(2),
+);
 const unresolvedRoot = path.resolve(releaseRoot);
 const rootStat = fs.lstatSync(unresolvedRoot);
-if (!rootStat.isDirectory()) fail("release root must be a directory, not a symlink");
+if (!rootStat.isDirectory())
+  fail("release root must be a directory, not a symlink");
 const root = fs.realpathSync.native(unresolvedRoot);
 if (root !== unresolvedRoot) {
   fail("release root and every ancestor must be canonical and symlink-free");
@@ -403,10 +470,17 @@ assertNoForbiddenRuntimePaths(actualPaths, directoryPaths);
 assertExactDirectories(manifestEntries, directoryPaths);
 assertExactTree(root, manifestEntries, actualPaths);
 assertOperationalScriptIdentity(actualPaths);
-const migrationIdentity = assertCoreTopology(root, actualPaths, expectedReleaseSha);
+const migrationIdentity = assertCoreTopology(
+  root,
+  actualPaths,
+  expectedReleaseSha,
+);
 assertProvenance(root, expectedReleaseSha, migrationIdentity);
 
-const manifestDigest = crypto.createHash("sha256").update(manifestBytes).digest("hex");
+const manifestDigest = crypto
+  .createHash("sha256")
+  .update(manifestBytes)
+  .digest("hex");
 process.stdout.write(
   `RUNTIME_RELEASE_ARTIFACT_INTEGRITY=PASS\n` +
     `RUNTIME_RELEASE_SHA=${expectedReleaseSha}\n` +

@@ -1,17 +1,17 @@
 # LeetPlus open beta — текущее состояние на 24.08.2026
 
-| Поле                 | Состояние                                                                 |
-| -------------------- | ------------------------------------------------------------------------- |
-| Release decision     | `NO-GO` для внешнего доступа                                              |
-| Production runtime   | healthy; access baseline deployed; внешний tenant не создавался           |
+| Поле                 | Состояние                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| Release decision     | `NO-GO` для внешнего доступа                                                          |
+| Production runtime   | healthy; access baseline deployed; внешний tenant не создавался                       |
 | Prisma schema        | `CURRENT_187`: 187 applied, head `20260820010000_guest_portal_telegram_update_ledger` |
-| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA |
-| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant          |
-| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK` |
-| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены |
-| Первый внешний пилот | отдельный `Tenant B/Store B1`                                             |
-| Offline/USB key      | исключён из beta critical path                                            |
-| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                        |
+| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA          |
+| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                      |
+| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`              |
+| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены           |
+| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                         |
+| Offline/USB key      | исключён из beta critical path                                                        |
+| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                    |
 
 ## Обновление 24.08.2026
 
@@ -26,11 +26,13 @@ data-quality отклонения зафиксированы в
 
 Предыдущий mutable `main → git pull → build → restart` создал release-gate
 bypass: runtime мог попасть в production до завершения CI. Поэтому текущий
-healthy runtime сам по себе не считается admitted evidence. Следующий release
-разрешён только для exact SHA, у которого Fast CI и Full Release Admission
-успешны, final admission receipt связывает runtime/control digests, а сервер
-получает immutable handoff artifact. До установки и проверки этого контура
-legacy deploy timer является launch blocker.
+healthy runtime сам по себе не считается admitted evidence. Exact SHA
+`d2ea7121…` уже имеет успешные Fast CI `32716122369`, Full Release Admission
+`32716122390` и immutable handoff; legacy deploy timer теперь masked.
+Production всё ещё работает из legacy checkout SHA `59239eeb…`, поэтому
+immutable slot cutover и отдельный GO остаются launch blockers. Canonical-deploy
+successor из текущего change обязан получить новую same-SHA admission до замены
+этого baseline.
 
 В PostgreSQL fixture custom-role raw permissions были ошибочно выданы за
 effective permissions после введения обязательного минимума роли. Runtime
@@ -38,6 +40,16 @@ effective permissions после введения обязательного м�
 данных. StaffTask current-state label также синхронизирован с фактическим
 187-entry manifest: `CURRENT_187`, при сохранении frozen evidence prefix
 `EXPAND_162`.
+
+Ложный CURRENT179 exact-history failure закрыт. Git/LF manifest `1..178`
+канонически равен `7f986797…`; `ba9ca94c…` появился только из-за `150` CRLF
+файлов старого Windows checkout. `db:deploy` теперь использует изолированный
+canonical LF Prisma artifact. PostgreSQL 16.15 clean deploy дошёл до `187/187`,
+повторился как no-op, а attachment reconciliation завершил plan/apply/replay/
+check/rollback с zero residue. Подробности:
+[canonical deploy/reconciliation evidence](./gate-1mt-canonical-deploy-reconciliation-pg16-evidence-2026-08-24.md).
+Production apply всё ещё `NO-GO`: нужен fresh-backup restored-copy run нового
+admitted exact artifact, temporary role/grant attestation и owner approval.
 
 Restored-copy gate 18.08.2026: настоящий production backup восстановлен в
 изолированный PostgreSQL; clean migration/repeat/data-zero-diff и полный

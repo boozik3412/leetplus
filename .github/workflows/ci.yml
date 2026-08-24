@@ -303,6 +303,9 @@ jobs:
       - name: Type-check database scripts
         run: pnpm --filter database typecheck
 
+      - name: Validate canonical Prisma deploy artifact
+        run: pnpm --filter database check:canonical-prisma-deploy
+
       - name: Validate attachment inventory command
         run: pnpm --filter database check:attachment-inventory
 
@@ -861,6 +864,7 @@ jobs:
           cp -a packages/database/prisma/schema.prisma "$release_root/packages/database/prisma/"
           cp -a packages/database/prisma/migrations "$release_root/packages/database/prisma/"
           cp -a \
+            packages/database/scripts/canonical-prisma-deploy.mjs \
             packages/database/scripts/founder-pilot-restored-copy-preflight.mjs \
             packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs \
             packages/database/scripts/founder-pilot-production-history-rehearsal.mjs \
@@ -898,6 +902,8 @@ jobs:
             '  "databaseMigration": "20260820010000_guest_portal_telegram_update_ledger",' \
             '  "databaseMigrationCount": 187,' \
             '  "runtimePackageManifestsIncluded": true,' \
+            '  "canonicalPrismaDeployScriptsIncluded": true,' \
+            '  "canonicalPrismaDeployScriptCount": 1,' \
             '  "founderPilotOperationalScriptsIncluded": true,' \
             '  "founderPilotOperationalScriptCount": 12,' \
             '  "runtimeEnrollmentOperationalScriptsIncluded": true,' \
@@ -908,7 +914,7 @@ jobs:
             '  "currentNetworkAccessScopeClassificationScriptCount": 2,' \
             '  "staffAttachmentReconciliationScriptsIncluded": true,' \
             '  "staffAttachmentReconciliationScriptCount": 3,' \
-            '  "operationalScriptCount": 26,' \
+            '  "operationalScriptCount": 27,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
@@ -980,6 +986,7 @@ jobs:
             './apps/web/public/' \
             './packages/database/package.json' \
             './packages/database/prisma/schema.prisma' \
+            './packages/database/scripts/canonical-prisma-deploy.mjs' \
             './packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs' \
             './packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs' \
             './packages/database/scripts/founder-pilot-production-history-production.cli.mjs' \
@@ -1005,7 +1012,7 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '26'
+          test "$script_file_count" = '27'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1
@@ -1035,6 +1042,8 @@ jobs:
                 --expected-release-sha "$CI_RELEASE_SHA"
             test "$(node -p 'require("./release-provenance.json").releaseSha')" = "$CI_RELEASE_SHA"
             test "$(node -p 'require("./release-provenance.json").runtimePackageManifestsIncluded')" = 'true'
+            test "$(node -p 'require("./release-provenance.json").canonicalPrismaDeployScriptsIncluded')" = 'true'
+            test "$(node -p 'require("./release-provenance.json").canonicalPrismaDeployScriptCount')" = '1'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '12'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptsIncluded')" = 'true'
@@ -1045,8 +1054,9 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptCount')" = '2'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptCount')" = '3'
-            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '26'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '27'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
+            node --check packages/database/scripts/canonical-prisma-deploy.mjs
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
             node --check packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs
             node --check packages/database/scripts/founder-pilot-production-history-production.cli.mjs
@@ -1125,7 +1135,7 @@ jobs:
         run: |
           set -euo pipefail
           helper_source="$GITHUB_WORKSPACE/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
-          helper_sha256='88d5509813411642679df3ef109db75156cac16514a725871f49225851a61be9'
+          helper_sha256='9871734802641b3e6e3ef55f795bed7adec2dc21a3b9103a3c86ac935698c0c0'
           authority_parent='/srv/leetplus-ci-runtime-authority'
           authority_root="$authority_parent/$CI_RELEASE_SHA"
           sudo -n /usr/bin/env -i \

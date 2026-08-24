@@ -13,6 +13,7 @@ readonly HYDRATION_AUTHORITY="${REPOSITORY_ROOT}/.github/scripts/hydrate-runtime
 readonly RELEASE_ADMISSION_WORKFLOW="${REPOSITORY_ROOT}/.github/workflows/ci.yml"
 readonly TEST_ROOT="$(mktemp -d)"
 readonly OPERATIONAL_SCRIPTS=(
+  canonical-prisma-deploy.mjs
   current-network-access-scope-classification.cli.mjs
   current-network-access-scope-classification.mjs
   current-release-restored-copy-runtime-acceptance.cli.mjs
@@ -112,7 +113,8 @@ make_runtime_root() {
     > "$root/package.json"
   printf 'lockfileVersion: 9.0\n' > "$root/pnpm-lock.yaml"
   printf 'packages:\n  - "apps/*"\n  - "packages/*"\n' > "$root/pnpm-workspace.yaml"
-  printf '{"name":"database","private":true}\n' > "$root/packages/database/package.json"
+  printf '{"name":"database","private":true,"scripts":{"db:deploy":"node scripts/canonical-prisma-deploy.mjs"}}\n' \
+    > "$root/packages/database/package.json"
   printf 'generator client { provider = "prisma-client-js" }\n' \
     > "$root/packages/database/prisma/schema.prisma"
   printf 'provider = "postgresql"\n' \
@@ -130,6 +132,8 @@ make_runtime_root() {
   "databaseMigration": "${DATABASE_MIGRATION}",
   "databaseMigrationCount": 1,
   "runtimePackageManifestsIncluded": true,
+  "canonicalPrismaDeployScriptsIncluded": true,
+  "canonicalPrismaDeployScriptCount": 1,
   "founderPilotOperationalScriptsIncluded": true,
   "founderPilotOperationalScriptCount": 12,
   "runtimeEnrollmentOperationalScriptsIncluded": true,
@@ -140,7 +144,7 @@ make_runtime_root() {
   "currentNetworkAccessScopeClassificationScriptCount": 2,
   "staffAttachmentReconciliationScriptsIncluded": true,
   "staffAttachmentReconciliationScriptCount": 3,
-  "operationalScriptCount": 26,
+  "operationalScriptCount": 27,
   "webPublicAssetsIncluded": true
 }
 JSON
@@ -170,7 +174,7 @@ node "$VERIFIER" \
   --expected-release-sha "$RELEASE_SHA" > "${TEST_ROOT}/accepted.out"
 grep -F -x 'RUNTIME_RELEASE_ARTIFACT_INTEGRITY=PASS' "${TEST_ROOT}/accepted.out" > /dev/null
 grep -F -x "RUNTIME_RELEASE_SHA=${RELEASE_SHA}" "${TEST_ROOT}/accepted.out" > /dev/null
-grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=26' "${TEST_ROOT}/accepted.out" > /dev/null
+grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=27' "${TEST_ROOT}/accepted.out" > /dev/null
 
 unexpected_script_root="${TEST_ROOT}/unexpected-script"
 cp -a -- "$accepted_root" "$unexpected_script_root"
@@ -214,6 +218,17 @@ expect_rejected \
   missing-core \
   "$missing_core_root" \
   'required runtime path is missing: ./apps/api/package.json'
+
+raw_deploy_root="${TEST_ROOT}/raw-deploy"
+cp -a -- "$accepted_root" "$raw_deploy_root"
+node -e \
+  'const fs = require("node:fs"); const file = process.argv[1]; const value = JSON.parse(fs.readFileSync(file, "utf8")); value.scripts["db:deploy"] = "prisma migrate deploy"; fs.writeFileSync(file, `${JSON.stringify(value)}\n`);' \
+  "$raw_deploy_root/packages/database/package.json"
+write_manifest "$raw_deploy_root"
+expect_rejected \
+  raw-deploy \
+  "$raw_deploy_root" \
+  'database deploy command is not the exact canonical artifact boundary'
 
 extra_provenance_root="${TEST_ROOT}/extra-provenance"
 cp -a -- "$accepted_root" "$extra_provenance_root"

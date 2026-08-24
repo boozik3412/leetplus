@@ -17,13 +17,13 @@ Production работал и продолжает работать в `STAFF_ATT
 
 ## Release binding
 
-| Evidence | Значение |
-| --- | --- |
-| Exact release SHA | `ddd10931f084d9f53f4893910ebda1f05df37f87` |
-| Fast CI | [`32698634700`](https://github.com/boozik3412/leetplus/actions/runs/32698634700) — `SUCCESS` |
-| Full Release Admission | [`32698634619`](https://github.com/boozik3412/leetplus/actions/runs/32698634619) — `6/6 SUCCESS` |
-| Scanner Git blob | `c11a3a4f317e1bf12f2b9fc709a6cc5a9fdcba7c` |
-| Database target fingerprint | `166b80c79a57a88bd525bba7ac8190d853d12e9622e0786f83d090580741dc00` |
+| Evidence                    | Значение                                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------------------ |
+| Exact release SHA           | `ddd10931f084d9f53f4893910ebda1f05df37f87`                                                       |
+| Fast CI                     | [`32698634700`](https://github.com/boozik3412/leetplus/actions/runs/32698634700) — `SUCCESS`     |
+| Full Release Admission      | [`32698634619`](https://github.com/boozik3412/leetplus/actions/runs/32698634619) — `6/6 SUCCESS` |
+| Scanner Git blob            | `c11a3a4f317e1bf12f2b9fc709a6cc5a9fdcba7c`                                                       |
+| Database target fingerprint | `166b80c79a57a88bd525bba7ac8190d853d12e9622e0786f83d090580741dc00`                               |
 
 Перед подключением server-side scanner blob был независимо сопоставлен с
 тем же файлом из admitted Git tree. Локальный `--self-test` прошёл `PASS`.
@@ -74,20 +74,20 @@ unfinished migrations:      0
 
 ## Aggregate attachment result
 
-| Метрика | Значение |
-| --- | ---: |
-| Attachment rows | `5 466` |
-| `UNRESOLVED` | `5 446` |
-| `PENDING` | `20` |
-| `BOUND` | `0` |
-| Source rows scanned | `6 539` |
-| Valid normalized relation occurrences | `5 211` |
-| Unique recognized existing attachments | `4 725` |
-| Unique primary-parent candidates | `4 416` |
-| Multiple-primary-parent review candidates | `309` |
-| Existing attachments without recognized reference | `741` |
-| Missing attachment candidates | `0` |
-| Absolute reference signals requiring review | `243` |
+| Метрика                                           | Значение |
+| ------------------------------------------------- | -------: |
+| Attachment rows                                   |  `5 466` |
+| `UNRESOLVED`                                      |  `5 446` |
+| `PENDING`                                         |     `20` |
+| `BOUND`                                           |      `0` |
+| Source rows scanned                               |  `6 539` |
+| Valid normalized relation occurrences             |  `5 211` |
+| Unique recognized existing attachments            |  `4 725` |
+| Unique primary-parent candidates                  |  `4 416` |
+| Multiple-primary-parent review candidates         |    `309` |
+| Existing attachments without recognized reference |    `741` |
+| Missing attachment candidates                     |      `0` |
+| Absolute reference signals requiring review       |    `243` |
 
 Три последовательных snapshot дали одинаковые aggregates: с пустым HTTPS
 origin allowlist, с `https://leetplus.ru` и с двумя canonical public origins
@@ -103,25 +103,27 @@ row-level церемонии и owner-approved решения.
 
 Root-only evidence сохранено на production-сервере:
 
-| Snapshot | SHA-256 |
-| --- | --- |
+| Snapshot                                                                                                        | SHA-256                                                             |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `/var/lib/leetplus/gate-1mt-evidence/attachment-parent-delete-trigger-inventory-ddd10931-20260824T082300Z.json` | `35e0f5266eb199abdd22ec7160948f8389db60598a7fa431b010b4ccc91ecc1b2` |
-| `/var/lib/leetplus/gate-1mt-evidence/attachment-inventory-ddd10931-20260824T081643Z.json` | `64b3771a0abc0767e941f3e72ce6543cbbb441fe6cb1460fa5a0cacb3ed32b9e` |
-| `/var/lib/leetplus/gate-1mt-evidence/attachment-inventory-leetplus-origin-ddd10931-20260824T081716Z.json` | `0a83ca6f38fe065cbc2df9d7479759ec9c57f25bfdf54e4651752fcef989600e` |
-| `/var/lib/leetplus/gate-1mt-evidence/attachment-inventory-public-origins-ddd10931-20260824T081750Z.json` | `9157320e7f0a6f79f37395dad7e4a6e2d5cf28ddd8a1aa554c75599666dc24b4` |
+| `/var/lib/leetplus/gate-1mt-evidence/attachment-inventory-ddd10931-20260824T081643Z.json`                       | `64b3771a0abc0767e941f3e72ce6543cbbb441fe6cb1460fa5a0cacb3ed32b9e`  |
+| `/var/lib/leetplus/gate-1mt-evidence/attachment-inventory-leetplus-origin-ddd10931-20260824T081716Z.json`       | `0a83ca6f38fe065cbc2df9d7479759ec9c57f25bfdf54e4651752fcef989600e`  |
+| `/var/lib/leetplus/gate-1mt-evidence/attachment-inventory-public-origins-ddd10931-20260824T081750Z.json`        | `9157320e7f0a6f79f37395dad7e4a6e2d5cf28ddd8a1aa554c75599666dc24b4`  |
 
 Evidence directory имеет mode `0700`, JSON и checksum files — `0600`, owner
 `root:root`.
 
 ## Следующий gate
 
-1. Reconciliation controller реализован и локально проверен:
-   `read-only plan → immutable review → detached approval → explicit apply →
-   zero-diff replay → exact rollback/check`. Production apply не выполнялся;
+1. Reconciliation controller реализован и локально проверен последовательностью
+   `read-only plan → immutable review → detached approval → explicit apply → zero-diff replay → exact rollback/check`.
+   Production apply не выполнялся;
    см. [runbook](../security/access-scope/v1/staff-attachment-reconciliation-runbook.md).
-2. Выполнить restored-copy rehearsal фактической production history и закрыть
-   обнаруженный clean-deploy manifest-digest blocker в
-   `20260731120000_identity_mail_delivery_release_head`.
+2. Clean-deploy manifest-digest blocker закрыт без изменения migration SQL:
+   причиной были CRLF-байты старого Windows checkout. Canonical LF artifact
+   применил `187/187`, подтвердил CURRENT179 digest `7f986797…` и no-op replay.
+   Теперь выполнить fresh-backup restored-copy rehearsal фактической production
+   history на новом admitted exact artifact.
 3. Запретить автоматическое решение multiple-parent, URL-review и orphan
    случаев; для каждого нужен stable reason code и owner decision.
 4. Определить и проверить lifecycle для существующих `PENDING` rows.

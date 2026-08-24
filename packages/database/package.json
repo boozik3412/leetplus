@@ -6,7 +6,7 @@
   "scripts": {
     "db:validate": "prisma validate",
     "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
+    "db:deploy": "node scripts/canonical-prisma-deploy.mjs",
     "db:smoke": "node scripts/ci-smoke.mjs",
     "db:smoke:access-scope": "node scripts/access-scope-smoke.mjs",
     "db:smoke:attachment-acl": "node scripts/staff-attachment-acl-smoke.mjs",
@@ -52,6 +52,7 @@
     "check:design-partner-provisioning": "node --check scripts/design-partner-access-profile.mjs && node --check scripts/design-partner-provisioning.mjs && node --check scripts/design-partner-provision.cli.mjs && node --check scripts/design-partner-provisioning-smoke-target.mjs && node --check scripts/design-partner-provisioning-smoke.mjs && node --check scripts/design-partner-identity-writer-boundary.test.mjs && node scripts/design-partner-provision.cli.mjs --help && node --test scripts/design-partner-provisioning.test.mjs scripts/design-partner-identity-writer-boundary.test.mjs",
     "check:design-partner-runtime-role": "node --check scripts/design-partner-runtime-role-smoke.mjs && node scripts/design-partner-runtime-role-smoke.mjs --self-test",
     "check:attachment-inventory": "node --check scripts/staff-attachment-backfill-dry-run.mjs && node scripts/staff-attachment-backfill-dry-run.mjs --help && node scripts/staff-attachment-backfill-dry-run.mjs --self-test",
+    "check:canonical-prisma-deploy": "node --check scripts/canonical-prisma-deploy.mjs && node --check scripts/canonical-prisma-deploy.test.mjs && node scripts/canonical-prisma-deploy.mjs --help && node --test scripts/canonical-prisma-deploy.test.mjs",
     "check:attachment-reconciliation": "node --check scripts/staff-attachment-reconciliation.mjs && node --check scripts/staff-attachment-reconciliation.cli.mjs && node --check scripts/staff-attachment-reconciliation.test.mjs && node --check scripts/staff-attachment-reconciliation.pg.integration.test.mjs && node scripts/staff-attachment-reconciliation.cli.mjs --help && node scripts/staff-attachment-reconciliation.cli.mjs --self-test && node --test scripts/staff-attachment-reconciliation.test.mjs",
     "test:integration:attachment-reconciliation:pg": "node --test scripts/staff-attachment-reconciliation.pg.integration.test.mjs",
     "check:gate-1mt-operational-preflight": "node --check scripts/gate-1mt-operational-preflight.mjs && node --check scripts/gate-1mt-operational-preflight.cli.mjs && node --check scripts/gate-1mt-operational-preflight.test.mjs && node scripts/gate-1mt-operational-preflight.cli.mjs --help && node --test scripts/gate-1mt-operational-preflight.test.mjs",

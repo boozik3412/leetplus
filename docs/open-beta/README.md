@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.197                                        |
-| Дата             | 20.08.2026                                   |
+| Версия           | 1.198                                        |
+| Дата             | 24.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -19,6 +19,12 @@ scope внешний send и production GO остаются `BLOCKED_MANUAL`.
 полноценную работу и последующего invite-only теста с внешними сетями. Он не
 разрешает deployment, миграцию production-данных или выдачу доступа сам по
 себе.
+
+Актуальный production baseline доступа сотрудников и администратора платформы
+зафиксирован в
+[отчёте 24.08.2026](./production-access-baseline-2026-08-24.md). Рабочий
+tenant сети `1337` сохранён, пользовательский cohort не переносился, а
+одноимённые пустые tenant остаются отдельным подтверждаемым cleanup.
 
 Основной путь первого внешнего клуба — `SHARED_MULTI_TENANT_BETA`: новый
 `Tenant B/Store B1` в общем web/API/workers/PostgreSQL/Telegram data plane.
@@ -379,6 +385,10 @@ checksum. Production и текущая сеть не изменялись.
 ## Канонические документы
 
 Сначала читать:
+[production access baseline 24.08.2026](./production-access-baseline-2026-08-24.md) —
+фактические роли, привязка текущего пользовательского cohort, безопасный
+platform-admin tenant switch и диагностика одноимённых пустых tenant.
+
 [актуальный статус открытого теста на 18.08.2026](./open-beta-current-status-2026-08-17.md) —
 единый вердикт по текущей задаче, release gates, фактическим blockers и пути до
 первого `Tenant B/Store B1`.

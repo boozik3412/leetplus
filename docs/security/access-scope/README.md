@@ -3,8 +3,8 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.24.0                                                                                              |
-| Дата                           | 30.07.2026                                                                                          |
+| Версия контракта               | 1.25.0                                                                                              |
+| Дата                           | 24.08.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
 | Исходный baseline              | `eb7ad9ef7d4783c47a7ddb5efbc271e5eb8a2fe2`                                                          |
@@ -138,6 +138,9 @@ invite-only открытому тесту. Она отвечает на вопр
     disposable harness-fixture, повторный admission, read-only
     row evidence только для восьми proposal codes и явный запрет
     standalone/production-like/apply.
+17. [Роли, обязательные права и tenant-контекст администратора платформы](./v1/role-capabilities-and-platform-tenant-context.md) —
+    deployed capability baseline, непонижаемые права, безопасный выбор сети и
+    диагностика пустого dashboard.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
@@ -449,6 +452,11 @@ Worker boundary не принимает `actorUserId`; interactive same-tenant a
 
 ## Changelog
 
+- `1.25.0`, 24.08.2026 — зафиксирован deployed baseline ролей: коммуникации
+  доступны всем системным ролям, административный workspace защищён
+  непонижаемым минимумом, а platform admin работает только через явный
+  подписанный tenant-контекст `OWNER + NETWORK`. Добавлены правила выбора
+  рабочей сети и диагностики пустого dashboard без ослабления AccessScope.
 - `1.23.0`, 29.07.2026 — единая retroactive evidence correction:
   schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref
   baseline —

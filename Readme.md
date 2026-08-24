@@ -10,6 +10,10 @@ LeetPlus - SaaS-платформа для операционного управ�
 Четыре текущих клуба считаются одной сетью и сохраняются четырьмя `Store`
 одного существующего `Tenant`.
 
+Production-модель ролей, обязательный доступ к коммуникациям, безопасный
+tenant switch администратора платформы и выбор рабочей сети `1337` описаны в
+[access baseline 24.08.2026](./docs/open-beta/production-access-baseline-2026-08-24.md).
+
 Production-backup restored-copy rehearsal от 18.08.2026 принят: clean
 migration/repeat, 134-table row-count zero-diff и activation-role
 TLS/HBA/SCRAM rollback прошли на изолированной копии. Точный evidence и

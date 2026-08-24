@@ -2,8 +2,8 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.35                                                       |
-| Дата       | 20.08.2026                                                 |
+| Версия     | 1.36                                                       |
+| Дата       | 24.08.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
 | Topology   | `Tenant A/A1..A4` + новый `Tenant B/B1`                    |
@@ -21,7 +21,30 @@ Production IDs, email, телефоны, invite URL/token, password, database UR
 API keys, encryption/signing secrets и raw business data запрещено сохранять
 в git. В документах используются только aliases `Tenant A/B` и `Store A1..A4/B1`.
 
-## Текущий engineering-accepted target: `CURRENT_174`
+## Текущий release target: `CURRENT_187`
+
+Канонический migration manifest содержит `187` completed migrations, latest
+`20260820010000_guest_portal_telegram_update_ledger`, unfinished `0`.
+Production schema достигла этого head, но это не означает launch admission.
+Reader-facing StaffTask inventory/planner/admission state синхронизирован с
+`CURRENT_187`; frozen evidence prefix остаётся `EXPAND_162`.
+
+Deployed access baseline отдельно подтверждает:
+
+- employee cohort остаётся в canonical `demo` tenant;
+- все системные роли имеют непонижаемый `view_communications`;
+- административный staff read-контур не снимается custom role/override;
+- platform admin входит в tenant только после явного подписанного выбора и
+  только как `OWNER + NETWORK` выбранной сети;
+- пустые duplicate tenant не удалялись и не используются как рабочая сеть.
+
+Текущий operational release blocker — замена branch-based auto-deploy на exact
+SHA admission handoff. Новый runtime разрешён только если Fast CI и Full
+Release Admission успешны для одного SHA, final receipt связывает immutable
+runtime/control digests, а production больше не может автоматически получить
+произвольный `main`.
+
+## Historical engineering checkpoint: `CURRENT_174`
 
 `CURRENT_174` принят как bounded `BETA-IAM-004I` checkpoint поверх historical
 accepted prerequisite `CURRENT_172`. Он добавляет независимые build и
@@ -118,6 +141,10 @@ deploy и доступ тестеру ещё не приняты.
 - [ ] Перед deploy вручную принят Full Release Admission для exact SHA:
       полный PostgreSQL/artifact/rollback контур; nightly `main` не заменяет
       этот запуск.
+- [ ] Final admission receipt скачан вместе с exact runtime/control handoff,
+      independently verified и связывает те же archive digests и artifact IDs.
+- [ ] Legacy `git pull → build → restart` timer/service disabled and cannot
+      observe or deploy a moving branch; rollback unit не возвращает bypass.
 
 - [ ] Есть один canonical clean candidate SHA.
 - [ ] Mandatory CI, typecheck, tests, schema validation и artifact build
@@ -125,6 +152,8 @@ deploy и доступ тестеру ещё не приняты.
 - [ ] API, web, workers и Telegram edge показывают тот же SHA через version
       evidence.
 - [ ] Deployment выполняется immutable artifact, а не mutable checkout.
+- [ ] Public API release SHA, Web BUILD_ID, installed production-control
+      generation и admission receipt указывают на один exact SHA.
 - [ ] Release owner, reviewer и rollback owner назначены.
 - [ ] Open P0/P1 launch blockers отсутствуют.
 
@@ -492,6 +521,9 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 
 ### E4. `COMMUNICATIONS`
 
+- [x] `view_communications` is a mandatory minimum for every system role;
+      `/communications`, team chat and notifications no longer depend on a
+      role-specific landing shortcut.
 - [ ] Network/store channel membership ограничивает history и posting.
 - [ ] Messages/mentions/read receipts/channel events/task-from-chat защищены.
 - [ ] SSE reconnect не отдаёт события чужого tenant/store.
@@ -501,6 +533,10 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 
 ### E5. `USERS_ROLES`
 
+- [x] Platform admin control plane и signed single-tenant context deployed;
+      tenant workspace is exact `OWNER + NETWORK`, not global data access.
+- [x] Administrative mandatory capability minimums survive custom role and
+      tenant-level override; fresh scope remains fail-closed.
 - [ ] Users/invites/roles/capabilities/scope/audit проходят C/D.
 - [ ] Block/revoke/session revoke действуют немедленно.
 - [ ] Last-owner и owner-transfer invariants зелёные.

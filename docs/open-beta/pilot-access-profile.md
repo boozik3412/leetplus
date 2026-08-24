@@ -3,22 +3,47 @@
 | Поле                            | Значение                                                                  |
 | ------------------------------- | ------------------------------------------------------------------------- |
 | Profile key                     | `OPEN_BETA_FULL_OPERATIONS_V1`                                            |
-| Версия                          | 1.18                                                                      |
-| Дата                            | 30.07.2026                                                                |
-| Статус                          | `NO-GO`; control-plane foundation реализован, adoption pending            |
+| Версия                          | 1.19                                                                      |
+| Дата                            | 24.08.2026                                                                |
+| Статус                          | `NO-GO`; access baseline deployed, Gate 1MT/Gate 2 и release admission pending |
 | Выдача                          | Invite-only, отдельный Tenant на независимую сеть                         |
 | Область                         | Собственная сеть или явно разрешённые клубы                               |
 | Назначение                      | Первый shared external tenant и последующая когорта                       |
-| Schema target                   | engineering-accepted `CURRENT_174`; `NOT_DEPLOYED`                        |
+| Schema target                   | `CURRENT_187`; 187 migrations; deployed schema is not launch authorization |
+| Access baseline                 | deployed `8d49f2d7...`; mandatory role minimums and signed platform-admin tenant context |
+| Release authority               | exact SHA + green Fast CI + Full Release Admission + immutable handoff artifact only |
 | Previous accepted baseline      | PR-head-associated merge-ref `bbef153a...` / `30443837684`; not exact-SHA |
 | Previous accepted exact-head    | `d525b736...` / CI `30447467729`; `3/3 PASS`                              |
 | Previous accepted checkpoint    | exact-head `3b8228dd...` / CI `30460154200`; `3/3 PASS`                   |
-| Current accepted checkpoint     | `CURRENT_174`: `eb056a4...` / CI `30592173595`; `3/3 PASS`                |
+| Historical accepted checkpoint  | `CURRENT_174`: `eb056a4...` / CI `30592173595`; `3/3 PASS`                |
 | Historical accepted prerequisite | `CURRENT_172`: `12d5741...` / CI `30509157338`; `3/3 PASS`               |
 | Historical locator checkpoint   | `CURRENT_170`: `8dfe219...` / CI `30493779099`; `3/3 PASS`                |
 | Historical accepted checkpoint  | `CURRENT_169` exact-head `f5d39fd...` / CI `30467882578`; `3/3 PASS`      |
 | Accepted prerequisite           | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS                 |
 | Historical evidence             | `044ceca2` / `2341b999`, не evidence текущего candidate                   |
+
+## Актуализация на 24.08.2026
+
+Канонический Prisma manifest — `CURRENT_187`: count `187`, latest
+`20260820010000_guest_portal_telegram_update_ledger`, unfinished `0`.
+Профиль использует фактически развёрнутую capability-модель:
+
+- `view_communications` является непонижаемым минимумом каждой системной роли;
+- административные роли сохраняют обязательный read-контур персонала при
+  custom role и tenant override;
+- `NETWORK | STORES` ограничивает tenant/store независимо от capability;
+- platform admin не становится tenant-пользователем: без контекста он работает
+  в `/administration`, а после явного подписанного выбора — только в одном
+  tenant как `OWNER + NETWORK`;
+- сохранённая сессия и прямой URL не обходят fresh scope.
+
+Фактическая production-матрица и известные data-quality отклонения описаны в
+[production access baseline](./production-access-baseline-2026-08-24.md), а
+полная capability-модель — в
+[role/capability and platform tenant-context contract](../security/access-scope/v1/role-capabilities-and-platform-tenant-context.md).
+Legacy `main → git pull → build → restart` не является release authority.
+Следующий production runtime допускается только по final admission receipt и
+immutable runtime/control handoff artifacts одного exact SHA.
 
 Этот профиль фиксирует обязательный продуктовый состав тестового доступа.
 Persisted stage/trial, атомарный six-row entitlement profile и базовый
@@ -64,9 +89,9 @@ Local public-only pinned-path evidence прошёл admission suite `19/19`; е�
 исторический prerequisite вместе с authority/application/PostgreSQL gates
 прошёл remote CI как `CURRENT_165` на
 `4bd6a036...` / `30428288353`; documentation/evidence successor
-`7c20adec...` / `30429463161` также зелёный. Current
-engineering-accepted schema target — `CURRENT_174`; `CURRENT_172` сохраняется
-как historical accepted prerequisite. Previous
+`7c20adec...` / `30429463161` также зелёный. Historical engineering
+checkpoints `CURRENT_174` и `CURRENT_172` сохраняются как accepted
+prerequisites; current manifest — `CURRENT_187`. Previous
 accepted engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856` / merge-ref CI `30443837684`
 (`run #23`), не exact-SHA checkout evidence: `3/3 PASS`, PostgreSQL job

@@ -694,7 +694,7 @@ TENANT_OR_STORE_SYSTEM_IDENTITY`, а также закрепляет
 - Пакет документации запуска:
   [docs/open-beta](./docs/open-beta/README.md)
 - Актуальный status snapshot:
-  [open beta status 18.08.2026](./docs/open-beta/open-beta-current-status-2026-08-17.md)
+  [open beta status 24.08.2026](./docs/open-beta/open-beta-current-status-2026-08-17.md)
 - Канонический AccessScope package:
   [docs/security/access-scope](./docs/security/access-scope/README.md)
 

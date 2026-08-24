@@ -1956,13 +1956,20 @@ describePostgres('Gate 1MT staff attachment PostgreSQL scope matrix', () => {
     rememberFixture(fixtureTenantIds, fixture);
     const services = buildServices(prisma);
     const customRoleId = randomUUID();
-    const customPermissions = ['view_staff_knowledge', 'edit_staff_knowledge'];
+    const customRolePermissions = [
+      'view_staff_knowledge',
+      'edit_staff_knowledge',
+    ];
+    const customPermissions = resolveUserCapabilities({
+      role: UserRole.CLUB_ADMINISTRATOR,
+      customRole: { permissions: customRolePermissions },
+    });
     await prisma.userAccessRole.create({
       data: {
         id: customRoleId,
         tenantId: fixture.tenantAId,
         name: `Attachment custom role ${randomUUID()}`,
-        permissions: customPermissions,
+        permissions: customRolePermissions,
       },
     });
     await prisma.user.update({

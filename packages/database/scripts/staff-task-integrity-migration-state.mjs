@@ -42,4 +42,4 @@ export const CURRENT_EXPECTED_LATEST_MIGRATION =
 
 // Keep the reader-facing admission state explicit. A later release migration
 // must update this value together with the additive-tail allowlist.
-export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_186";
+export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_187";

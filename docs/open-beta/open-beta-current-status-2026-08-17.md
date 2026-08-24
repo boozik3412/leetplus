@@ -1,13 +1,43 @@
-# LeetPlus open beta — текущее состояние на 19.08.2026
+# LeetPlus open beta — текущее состояние на 24.08.2026
 
-| Поле                 | Состояние                                          |
-| -------------------- | -------------------------------------------------- |
-| Release decision     | `NO-GO` для внешнего доступа                       |
-| Production           | не изменён                                         |
-| Текущая сеть         | один Tenant, четыре Store; не изменена             |
-| Первый внешний пилот | отдельный `Tenant B/Store B1`                      |
-| Offline/USB key      | исключён из beta critical path                     |
-| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль |
+| Поле                 | Состояние                                                                 |
+| -------------------- | ------------------------------------------------------------------------- |
+| Release decision     | `NO-GO` для внешнего доступа                                              |
+| Production runtime   | healthy; access baseline deployed; внешний tenant не создавался           |
+| Prisma schema        | `CURRENT_187`: 187 applied, head `20260820010000_guest_portal_telegram_update_ledger` |
+| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA |
+| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant          |
+| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK` |
+| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены |
+| Первый внешний пилот | отдельный `Tenant B/Store B1`                                             |
+| Offline/USB key      | исключён из beta critical path                                            |
+| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                        |
+
+## Обновление 24.08.2026
+
+Инциденты входа platform admin и сотрудников закрыты без расширения
+cross-tenant доступа. Коммуникации доступны всем системным ролям;
+административные роли имеют непонижаемый read-контур рабочих staff-разделов;
+`STORES` landing больше не ведёт на network-only `shift-workspace`.
+Platform admin с сохранённой сессией сначала попадает в control plane и входит
+в tenant только через подписанный выбор. Production cohort и известные
+data-quality отклонения зафиксированы в
+[production access baseline](./production-access-baseline-2026-08-24.md).
+
+Предыдущий mutable `main → git pull → build → restart` создал release-gate
+bypass: runtime мог попасть в production до завершения CI. Поэтому текущий
+healthy runtime сам по себе не считается admitted evidence. Следующий release
+разрешён только для exact SHA, у которого Fast CI и Full Release Admission
+успешны, final admission receipt связывает runtime/control digests, а сервер
+получает immutable handoff artifact. До установки и проверки этого контура
+legacy deploy timer является launch blocker.
+
+В PostgreSQL fixture custom-role raw permissions были ошибочно выданы за
+effective permissions после введения обязательного минимума роли. Runtime
+модель была корректной и fail-closed; исправляется fixture, а не разграничение
+данных. StaffTask current-state label также синхронизирован с фактическим
+187-entry manifest: `CURRENT_187`, при сохранении frozen evidence prefix
+`EXPAND_162`.
 
 Restored-copy gate 18.08.2026: настоящий production backup восстановлен в
 изолированный PostgreSQL; clean migration/repeat/data-zero-diff и полный
@@ -394,13 +424,17 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 
 ## Что блокирует выдачу доступа
 
-1. Production backup/restore, clean migration/repeat/data zero-diff,
+1. Новый exact SHA должен получить одновременно зелёные Fast CI и Full Release
+   Admission; final receipt/runtime/control artifacts должны быть независимо
+   проверены на сервере, а legacy main-watching deploy timer — выведен из
+   authority path. Предыдущий healthy runtime этим gate не закрывает.
+2. Production backup/restore, clean migration/repeat/data zero-diff,
    activation-role TLS/HBA/SCRAM lifecycle и повторная приёмка скачанного
    exact-SHA artifact закрыты.
-2. `SENT`, owner accept, one-tenant enrollment и trusted TLS SMTP доказаны на
+3. `SENT`, owner accept, one-tenant enrollment и trusted TLS SMTP доказаны на
    disposable клонах restored copy. Ещё не выполнены production worker-role
    enrollment, production SMTP secret/config и controlled production canary.
-3. Gate 1MT PostgreSQL A/B matrix (`35/35`, включая attachment reader и native
+4. Gate 1MT PostgreSQL A/B matrix (`35/35`, включая attachment reader и native
    writer/lifecycle, real
    HTTP SSE и latest
    assortment HTTP `15/15`), browser read/admission и report/download/mutation
@@ -409,13 +443,14 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
    outbound digest, archive/orphan browser matrix attachment parents,
    remaining STAFF slices, jobs/Telegram/public guest binding и Gate 2
    текущей сети.
-4. Production deploy, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
+5. External-beta activation, `FOUNDER_OPERATOR_BETA_MODE=ACTIVE`, внешний tenant и
    реальный tester invite не выполнялись.
 
 ## Полный путь до первого внешнего тестера
 
 ```text
-clean SHA + CI artifact [DONE]
+new exact SHA + Fast CI + Full Release Admission [IN PROGRESS]
+  → immutable runtime/control handoff + legacy auto-deploy removal
   → [DONE] live backup + isolated target + read-only preflight
   → [DONE restored copy] production-history migrate + repeat + zero-diff
   → [DONE restored copy] execute-only runtime role/grant/attestation

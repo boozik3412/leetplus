@@ -279,7 +279,7 @@ async function readMigrationPlan() {
     CURRENT_EXPECTED_LATEST_MIGRATION,
     "20260820010000_guest_portal_telegram_update_ledger",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_186");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_187");
   const historicalMigrations = migrationDirectories.slice(0, targetIndex + 1);
   return {
     sourcePrismaDir,

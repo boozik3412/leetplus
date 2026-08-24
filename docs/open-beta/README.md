@@ -87,7 +87,7 @@ Fast CI принят для exact SHA `965612c5…`: GitHub Actions
 [Founder-operator beta GO](./founder-operator-beta-go.md).
 
 Текущий фактический статус после реализации v2:
-[open beta status 18.08.2026](./open-beta-current-status-2026-08-17.md).
+[open beta status 24.08.2026](./open-beta-current-status-2026-08-17.md).
 
 Dedicated database boundary:
 [founder activation runtime v1](./founder-operator-beta-activation-runtime.md).
@@ -389,7 +389,7 @@ checksum. Production и текущая сеть не изменялись.
 фактические роли, привязка текущего пользовательского cohort, безопасный
 platform-admin tenant switch и диагностика одноимённых пустых tenant.
 
-[актуальный статус открытого теста на 18.08.2026](./open-beta-current-status-2026-08-17.md) —
+[актуальный статус открытого теста на 24.08.2026](./open-beta-current-status-2026-08-17.md) —
 единый вердикт по текущей задаче, release gates, фактическим blockers и пути до
 первого `Tenant B/Store B1`.
 

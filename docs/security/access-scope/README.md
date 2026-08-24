@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.25.0                                                                                              |
+| Версия контракта               | 1.26.0                                                                                              |
 | Дата                           | 24.08.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -19,7 +19,8 @@
 | Staff snapshot admission       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; synthetic verified; production-like NO-GO   |
 | Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — included in green remote SHA `d77c7439...`             |
 | Authority operations           | Detached candidate; local 40/40; production public root `{}` / FAIL-CLOSED                          |
-| Schema target                  | `CURRENT_179`; count `179`; head `20260731120000_identity_mail_delivery_release_head`; not deployed |
+| Schema target                  | `CURRENT_187`; count `187`; head `20260820010000_guest_portal_telegram_update_ledger`; deployed      |
+| Deployed access baseline       | `8d49f2d7...`; role minimums, employee routes and signed platform-admin tenant context verified      |
 | Prior merge-ref baseline       | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA                      |
 | Previous accepted exact-head   | `d525b736...` / CI `30447467729` (`run #28`); `3/3 PASS`                                            |
 | Last accepted checkpoint       | exact-head `be8c94c4...` / CI `30449026506` (`run #29`); `3/3 PASS`                                 |
@@ -31,10 +32,10 @@
 
 Reviewed StaffTask boundary остаётся frozen prefix `EXPAND_162`: migration
 count `162`, latest `20260727131000_staff_task_integrity_expand`. Единственный
-поддерживаемый current target — `CURRENT_179`: migration count `179`, latest
-`20260731120000_identity_mail_delivery_release_head`, unfinished `0`.
+поддерживаемый current target — `CURRENT_187`: migration count `187`, latest
+`20260820010000_guest_portal_telegram_update_ledger`, unfinished `0`.
 
-Exact additive tail `163..179` состоит ровно из 17 migrations, в таком порядке:
+Exact additive tail `163..187` состоит ровно из 25 migrations, в таком порядке:
 
 1. `20260728120000_tenant_execution_control_plane_expand`;
 2. `20260728150000_tenant_execution_revision_fence`;
@@ -52,13 +53,21 @@ Exact additive tail `163..179` состоит ровно из 17 migrations, в 
 14. `20260731020000_initial_owner_mail_delivery_boundary`;
 15. `20260731090000_guest_game_case_reward_lifecycle`;
 16. `20260731110000_guest_game_case_reward_contract`;
-17. `20260731120000_identity_mail_delivery_release_head`.
+17. `20260731120000_identity_mail_delivery_release_head`;
+18. `20260804120000_guest_game_max_pending_rewards`;
+19. `20260817010000_founder_operator_beta_go`;
+20. `20260817020000_founder_operator_beta_activation_v2`;
+21. `20260817030000_founder_operator_beta_activation_runtime_v1`;
+22. `20260818010000_founder_owner_invite_reissue_v1`;
+23. `20260818020000_identity_mail_delivery_current_head_v1`;
+24. `20260819010000_staff_attachment_parent_delete_guard`;
+25. `20260820010000_guest_portal_telegram_update_ledger`.
 
 Любой ранее подписанный `CURRENT_166` authority envelope и установленный по
 нему DB marker являются historical evidence только для `CURRENT_166`. Их
 нельзя переименовывать, копировать или выдавать за authority для
-`CURRENT_179`; они не разрешают admission, inventory, planner, apply или
-deployment на `CURRENT_179`. Для `CURRENT_179` обязательны новый acquisition
+`CURRENT_187`; они не разрешают admission, inventory, planner, apply или
+deployment на `CURRENT_187`. Для `CURRENT_187` обязательны новый acquisition
 request, новый `creationNonce`, отдельный state-bound Ed25519 envelope и
 rotation DB marker на digest именно этого нового envelope. Production root
 registry остаётся `{}` / EMPTY, поэтому выпуск такого production-like
@@ -156,13 +165,16 @@ release evidence содержит только opaque reference.
 для внешнего доступа остаётся `NO-GO`. Отсутствующий или противоречивый scope
 обрабатывается fail-closed.
 
-`EXPAND` schema и strict application — два отдельных activation шага. Текущий
-candidate нельзя передавать в auto-deploy как единый production bundle:
-сначала применяется schema-only migration, затем выполняется явная
-классификация, и только при нуле unresolved active subjects включается strict
-reader.
+`EXPAND` schema и strict application — два отдельных activation шага. Release
+может поступить в production только как immutable artifact exact SHA с final
+Full Release Admission receipt; слежение за `main`, `git pull` и branch-based
+auto-deploy запрещены. Сначала применяется отдельно допущенная schema phase,
+затем выполняется явная классификация, и только при нуле unresolved active
+subjects включается strict reader.
 
-Текущий общий schema candidate содержит 162 миграции, latest —
+Текущий общий production manifest содержит `187` миграций, latest —
+`20260820010000_guest_portal_telegram_update_ledger`. Reviewed StaffTask
+schema boundary остаётся frozen prefix из 162 миграций с latest
 `20260727131000_staff_task_integrity_expand`; attachment ACL checkpoint
 завершается миграцией
 `20260727113000_staff_attachment_acl_invariant_hardening`. Native bind и
@@ -302,7 +314,7 @@ smoke для дополнительного конфликтующего FK/не
 `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` —
 `IMPLEMENTED_CANDIDATE`, not deployed. Он допускает только изолированную
 loopback PostgreSQL 16 копию в точном `BASELINE_156`, `EXPAND_162` либо
-`CURRENT_179`,
+`CURRENT_187`,
 сверяет ordered migration names/checksums и фактический runtime content с
 exact Git blobs, FK/index/trigger catalog и отдельную `LOGIN NOINHERIT` роль.
 Её logical allowlist из девяти relations реализован как table `SELECT` на
@@ -323,8 +335,8 @@ transferable audit proof; аудит опирается на protected signed ma
 
 Authority envelope подписывает `expectedState`, поэтому production-like
 ceremony поддерживает ровно три состояния: `BASELINE_156`, `EXPAND_162` и
-`CURRENT_179`. После migrations `157..162`, а затем после exact 17-name
-allowlisted tail `163..179`, перечисленного в каноническом current release
+`CURRENT_187`. После migrations `157..162`, а затем после exact 25-name
+allowlisted tail `163..187`, перечисленного в каноническом current release
 contract выше, выполняются новые
 detached ceremony `prepare → external Ed25519 sign → finalize` с новым
 nonce-bound binding. DB marker заменяется digest нового envelope до каждого
@@ -333,7 +345,7 @@ nonce-bound binding. DB marker заменяется digest нового envelope
 запрещён.
 Существующий signed `CURRENT_166` envelope/marker сохраняется только как
 historical evidence и не может быть переименован или использован для
-`CURRENT_179`.
+`CURRENT_187`.
 `CURRENT_164` остаётся только remote SYNTHETIC prerequisite evidence; runtime
 его не принимает и отдельный production-like envelope для него не выпускается.
 
@@ -389,7 +401,7 @@ reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
 не выполнялись. Historical `CURRENT_165` engineering candidate
 `4bd6a036...` / CI `30428288353` и documentation/evidence successor
 `7c20adec...` / CI `30429463161` прошли remote CI, включая real PostgreSQL
-`164 → 165`; это historical prerequisite. Schema target — `CURRENT_179`.
+`164 → 165`; это historical prerequisite. Schema target — `CURRENT_187`.
 Previous accepted engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
 [`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)
@@ -452,6 +464,15 @@ Worker boundary не принимает `actorUserId`; interactive same-tenant a
 
 ## Changelog
 
+- `1.26.0`, 24.08.2026 — canonical current release synchronized to
+  `CURRENT_187`: `187` migrations, latest
+  `20260820010000_guest_portal_telegram_update_ledger`, exact additive tail
+  `163..187`. The stale reader-facing `CURRENT_186` label for the same
+  187-entry manifest was corrected in inventory/planner/admission contracts.
+  Deployed access baseline now explicitly records mandatory role capabilities,
+  employee landing routes and signed platform-admin tenant context. Deployment
+  of the schema is not StaffTask production-like admission and does not change
+  the external `NO-GO` decision.
 - `1.25.0`, 24.08.2026 — зафиксирован deployed baseline ролей: коммуникации
   доступны всем системным ролям, административный workspace защищён
   непонижаемым минимумом, а platform admin работает только через явный

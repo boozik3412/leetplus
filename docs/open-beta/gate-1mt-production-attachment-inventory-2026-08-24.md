@@ -115,13 +115,20 @@ Evidence directory имеет mode `0700`, JSON и checksum files — `0600`, ow
 
 ## Следующий gate
 
-1. Реализовать отдельный idempotent reconciliation tool:
-   `dry-run → immutable reviewed plan → explicit apply → rollback/zero-diff`.
-2. Запретить автоматическое решение multiple-parent, URL-review и orphan
+1. Reconciliation controller реализован и локально проверен:
+   `read-only plan → immutable review → detached approval → explicit apply →
+   zero-diff replay → exact rollback/check`. Production apply не выполнялся;
+   см. [runbook](../security/access-scope/v1/staff-attachment-reconciliation-runbook.md).
+2. Выполнить restored-copy rehearsal фактической production history и закрыть
+   обнаруженный clean-deploy manifest-digest blocker в
+   `20260731120000_identity_mail_delivery_release_head`.
+3. Запретить автоматическое решение multiple-parent, URL-review и orphan
    случаев; для каждого нужен stable reason code и owner decision.
-3. Определить и проверить lifecycle для существующих `PENDING` rows.
-4. Повторить production inventory до нуля unexplained/review findings.
-5. Только затем выполнить production-build archive/delete/orphan browser
+4. Определить и проверить lifecycle для существующих `PENDING` rows.
+5. После backup, role/grant audit и отдельного approval применить только exact
+   unique-primary plan, затем повторить inventory до нуля unexplained/review
+   findings.
+6. Только затем выполнить production-build archive/delete/orphan browser
    matrix и tenant/store canary перед process-wide `ENFORCED`.
 
 Ни этот inventory, ни будущий backfill сами по себе не разрешают создание

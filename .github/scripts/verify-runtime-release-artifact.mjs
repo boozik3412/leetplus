@@ -29,6 +29,9 @@ const EXPECTED_OPERATIONAL_SCRIPTS = [
   "packages/database/scripts/runtime-function-enrollment.cli.mjs",
   "packages/database/scripts/runtime-function-enrollment.mjs",
   "packages/database/scripts/shared-beta-admission-provenance-catalog.mjs",
+  "packages/database/scripts/staff-attachment-backfill-dry-run.mjs",
+  "packages/database/scripts/staff-attachment-reconciliation.cli.mjs",
+  "packages/database/scripts/staff-attachment-reconciliation.mjs",
   "packages/database/scripts/staff-task-integrity-migration-state.mjs",
 ];
 
@@ -348,12 +351,14 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
     founderPilotOperationalScriptCount: 12,
     founderPilotOperationalScriptsIncluded: true,
     nodeVersion: EXPECTED_NODE_VERSION,
-    operationalScriptCount: 23,
+    operationalScriptCount: 26,
     pnpmVersion: EXPECTED_PNPM_VERSION,
     releaseSha: expectedReleaseSha,
     runtimeEnrollmentOperationalScriptCount: 6,
     runtimeEnrollmentOperationalScriptsIncluded: true,
     runtimePackageManifestsIncluded: true,
+    staffAttachmentReconciliationScriptCount: 3,
+    staffAttachmentReconciliationScriptsIncluded: true,
     webPublicAssetsIncluded: true,
   };
   const expectedKeys = Object.keys(expectedFields).sort(compareUtf8);

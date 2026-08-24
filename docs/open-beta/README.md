@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.198                                        |
+| Версия           | 1.199                                        |
 | Дата             | 24.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -14,6 +14,14 @@ admission contract: [Gate 1MT operational preflight](gate-1mt-operational-prefli
 archive/delete/orphan/cross-tenant checks, CI, observability, rollback и
 отдельно одобренные provider canary. До передачи exact target/test-recipient
 scope внешний send и production GO остаются `BLOCKED_MANUAL`.
+
+Digest-bound attachment reconciliation controller, его protected artifacts,
+detached approval, zero-diff replay и exact rollback описаны в
+[операционном runbook](../security/access-scope/v1/staff-attachment-reconciliation-runbook.md).
+Controller прошёл local PostgreSQL rehearsal, но production apply не
+выполнялся и остаётся отдельным `BLOCKED_MANUAL` gate. Его scanner/controller/
+CLI добавлены в exact immutable release-artifact allowlist; произвольный
+mutable checkout не является допустимым источником production-команды.
 
 Этот каталог — навигационная точка для перевода текущей сети из demo-режима в
 полноценную работу и последующего invite-only теста с внешними сетями. Он не

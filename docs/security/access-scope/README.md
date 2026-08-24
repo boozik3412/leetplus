@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.27.0                                                                                              |
+| Версия контракта               | 1.29.0                                                                                              |
 | Дата                           | 24.08.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -27,6 +27,7 @@
 | Current operational gate       | non-owner runtime/app DB role admission and explicit `EXECUTE`; provider activation remains `NO-GO` |
 | Historical remote evidence     | `CURRENT_165`: `4bd6a036...` / CI `30428288353`; `7c20adec...` / CI `30429463161` PASS              |
 | Staff proposal dry-run         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — all 8 fixtures; SYNTHETIC only; no apply; not deployed |
+| Attachment reconciliation      | digest-bound plan/apply/check/rollback; local PostgreSQL PASS; production apply `NO-GO`             |
 
 ## Канонический current release contract
 
@@ -114,6 +115,9 @@ invite-only открытому тесту. Она отвечает на вопр
 8. [ACL вложений: implementation checkpoint](./v1/attachment-acl-implementation-checkpoint.md) —
    фактически реализованные schema/runtime flows, 155 migrations, проверки,
    текущие ограничения и точные следующие шаги.
+   8a. [Staff attachment reconciliation controller](./v1/staff-attachment-reconciliation-runbook.md) —
+   protected immutable plan, detached approval, serializable apply,
+   lost-response zero-diff, durable audit и exact rollback.
 9. [План templates/recurring tasks](./v1/staff-task-catalog-adoption-plan.md) —
    route/action/job inventory, подтверждённые cross-store разрывы, безопасная
    materialization policy и следующий implementation slice.
@@ -159,7 +163,8 @@ release evidence содержит только opaque reference.
 
 ## Текущая стадия
 
-`DESIGN ACCEPTED → IMPLEMENTED CANDIDATE / EXPAND + CHAT/TASK PARENT ADOPTION`.
+`PRODUCTION SHADOW → READ-ONLY INVENTORY COMPLETE → RECONCILIATION
+CONTROLLER IMPLEMENTED / PRODUCTION APPLY NO-GO`.
 
 До завершения классификации существующих аккаунтов и модульной матрицы решение
 для внешнего доступа остаётся `NO-GO`. Отсутствующий или противоречивый scope
@@ -464,6 +469,17 @@ Worker boundary не принимает `actorUserId`; interactive same-tenant a
 
 ## Changelog
 
+- `1.29.0`, 24.08.2026 — добавлен staff attachment reconciliation controller:
+  protected digest-bound plan, detached approval, explicit apply/check,
+  repeat-safe replay и exact rollback. Unit `9/9`, current-inventory capacity
+  gate, disposable PostgreSQL lifecycle и immutable artifact identity gate
+  прошли; production effect остаётся
+  `NO-GO` до clean-history CURRENT179 fix, restored-copy rehearsal,
+  least-privilege role/grant attestation и owner approval.
+- `1.28.0`, 24.08.2026 — protected read-only production inventory подтвердил
+  `CURRENT_187`, семь attachment parent-delete triggers и aggregate legacy
+  backlog без сохранения raw identifiers в git. `STAFF-02J` остался
+  `ENFORCED`, а не `VERIFIED`.
 - `1.27.0`, 24.08.2026 — домашняя страница сменных ролей восстановлена на
   `/staff/shift-workspace` для `NETWORK` и `STORES`. Store-scoped endpoint
   возвращает только текущего сотрудника и его собственную Langame-смену в

@@ -31,6 +31,9 @@ readonly OPERATIONAL_SCRIPTS=(
   runtime-function-enrollment.cli.mjs
   runtime-function-enrollment.mjs
   shared-beta-admission-provenance-catalog.mjs
+  staff-attachment-backfill-dry-run.mjs
+  staff-attachment-reconciliation.cli.mjs
+  staff-attachment-reconciliation.mjs
   staff-task-integrity-migration-state.mjs
 )
 
@@ -98,7 +101,9 @@ make_runtime_root() {
   "currentReleaseRuntimeAcceptanceScriptCount": 3,
   "currentNetworkAccessScopeClassificationScriptsIncluded": true,
   "currentNetworkAccessScopeClassificationScriptCount": 2,
-  "operationalScriptCount": 23,
+  "staffAttachmentReconciliationScriptsIncluded": true,
+  "staffAttachmentReconciliationScriptCount": 3,
+  "operationalScriptCount": 26,
   "webPublicAssetsIncluded": true
 }
 JSON
@@ -128,7 +133,7 @@ node "$VERIFIER" \
   --expected-release-sha "$RELEASE_SHA" > "${TEST_ROOT}/accepted.out"
 grep -F -x 'RUNTIME_RELEASE_ARTIFACT_INTEGRITY=PASS' "${TEST_ROOT}/accepted.out" > /dev/null
 grep -F -x "RUNTIME_RELEASE_SHA=${RELEASE_SHA}" "${TEST_ROOT}/accepted.out" > /dev/null
-grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=23' "${TEST_ROOT}/accepted.out" > /dev/null
+grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=26' "${TEST_ROOT}/accepted.out" > /dev/null
 
 unexpected_script_root="${TEST_ROOT}/unexpected-script"
 cp -a -- "$accepted_root" "$unexpected_script_root"

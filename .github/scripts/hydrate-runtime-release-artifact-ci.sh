@@ -14,6 +14,8 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 0077
 
+readonly RUNTIME_VERIFIER_AUTHORITY_SHA256='e8f953a17526b3b972218152721bae54fa5e1fca695a2e9d71abc1e154e6c519'
+
 while IFS= read -r exported_name; do
   case "$exported_name" in
     CI|GITHUB_ACTIONS|LANG|LC_ALL|PATH|TZ) ;;
@@ -629,7 +631,7 @@ snapshot_regular_file \
   >/dev/null
 snapshot_regular_file \
   "$runtime_verifier" "$runtime_verifier_snapshot" 1048576 0440 \
-  74da72b8b91bafd79058a621af637cc33e9803f3bc635427cbd45cc962f4ad23 \
+  "$RUNTIME_VERIFIER_AUTHORITY_SHA256" \
   >/dev/null
 /usr/bin/install -d -o root -g "$build_group" -m 0750 -- "$pnpm_runtime_root"
 pnpm_source_inventory="${store_authority_root}/.pnpm-source-inventory"

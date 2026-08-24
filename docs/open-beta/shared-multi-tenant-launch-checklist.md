@@ -521,9 +521,17 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
       parent-delete trigger contract `7/7`, `CURRENT_187`, raw identifiers/URL/
       PII не выводились. Evidence:
       [24.08.2026](./gate-1mt-production-attachment-inventory-2026-08-24.md).
-- [ ] Attachment reconciliation/backfill закрывает `5 446 UNRESOLVED`,
-      `309` multiple-parent, `741` unreferenced и `243` URL-review cases;
-      повторный inventory имеет zero unexplained/review findings.
+- [x] Base attachment reconciliation закрыл `4 416` unique-parent rows;
+      production apply/check/replay и независимый integrity postflight имеют
+      drift `0`, downtime `0`, временная роль удалена.
+- [ ] Residual reconciliation проходит Fast CI и Full Release Admission на
+      одном exact SHA, после чего отдельный production plan/approval закрывает
+      `309` multiple-parent blobs через все `795` существующих normalized
+      parents и reversibly quarantines `721` no-parent blobs. `20` active
+      `PENDING` остаются review-only до TTL; физическое удаление запрещено.
+- [ ] `243` absolute-origin signals классифицированы как external либо
+      исправлены для exact internal origin; повторный inventory имеет zero
+      unexplained drift.
 - [ ] OWNER/network manager/club manager/senior/trainee journeys зелёные.
 
 ### E4. `COMMUNICATIONS`

@@ -2,7 +2,7 @@
 
 | Поле     | Значение                                                                  |
 | -------- | ------------------------------------------------------------------------- |
-| Статус   | `IMPLEMENTED / LOCAL PG REHEARSAL PASS / PRODUCTION APPLY NOT AUTHORIZED` |
+| Статус   | `BASE PRODUCTION APPLY PASS / RESIDUAL LOCAL PG PASS / RESIDUAL PRODUCTION APPLY NOT AUTHORIZED` |
 | Версия   | 1.0.0                                                                     |
 | Дата     | 24.08.2026                                                                |
 | Владелец | LeetPlus engineering                                                      |
@@ -18,9 +18,15 @@ read-only plan -> human review -> detached approval -> apply -> check
                                                      -> exact rollback -> check
 ```
 
-Production-данные этим checkpoint не изменялись. Наличие контроллера само по
-себе не разрешает production apply и не переводит
-`STAFF_ATTACHMENT_ACL_MODE` из `SHADOW` в `ENFORCED`.
+Первый production subset применён 24.08.2026 по отдельному exact approval:
+`4 416` unique-primary attachments получили `4 416` bindings. Apply, check и
+lost-response replay вернули `zeroDiff=true`; три независимые integrity
+проверки дали drift `0`, а Web/API оставались `200` во всех `91` health rounds.
+Режим `STAFF_ATTACHMENT_ACL_MODE` остался `SHADOW`.
+
+Оставшийся residual subset не применялся к production. Наличие residual
+контроллера само по себе не разрешает запись и не переводит режим в
+`ENFORCED`.
 
 Реализация:
 
@@ -70,6 +76,45 @@ Plan содержит exact before image, поэтому незаметно пр
 
 Они остаются в protected plan как stable review reason codes. Контроллер не
 поддерживает auto-quarantine.
+
+## Residual owner-decision workflow
+
+После base apply отдельный contract формирует предложение только для двух
+явных owner decisions:
+
+1. `BIND_ALL_PRIMARY_PARENTS` — сохранить каждый существующий валидный
+   `StaffChatMessageAttachment` parent. Один blob может иметь несколько
+   audiences, поэтому контроллер не выбирает один parent и не выводит новый
+   доступ: он материализует все уже существующие нормализованные связи.
+2. `QUARANTINE_NO_PRIMARY_PARENT` — перевести no-parent legacy blob в
+   `QUARANTINED/LEGACY_NO_PRIMARY_PARENT` либо уже истёкший `PENDING` в
+   `QUARANTINED/PENDING_EXPIRED`.
+
+Blob и legacy source rows не удаляются. Non-expired `PENDING`, invalid/mixed
+source, URL signal, existing binding drift и unexpected unique parent остаются
+review-only. Residual plan требует отдельного detached approval с ручным вводом
+digest, action count, binding count, quarantine count и remaining review count.
+Apply/rollback используют тот же database/schema attestation, общий
+non-blocking advisory lock, стабильный порядок row locks, одну короткую
+`SERIALIZABLE` transaction, durable aggregate audit и zero-diff reread.
+
+На свежей восстановленной production-копии текущая topology дала:
+
+```text
+already BOUND:                  4 416
+residual attachments:           1 050
+bind-all attachments:             309
+bindings to existing parents:     795
+no-parent quarantine proposal:    721
+non-expired PENDING review:         20
+remaining unexplained review:       0 кроме active PENDING lifecycle
+```
+
+Полный `plan → apply → replay → check → rollback → replay → check` прошёл с
+`zeroDiff=true`. Post-apply копия имела `4 725 BOUND`, `5 211 bindings`,
+`721 QUARANTINED`, `20 PENDING`, без lifecycle/binding drift. После rollback
+она вернулась к post-base состоянию `4 416 BOUND / 4 416 bindings / 1 030
+UNRESOLVED / 20 PENDING`.
 
 ## Защитные границы
 
@@ -194,6 +239,37 @@ pnpm --filter database db:reconcile:attachment-acl -- check `
 `ROLLBACK`, ручного повторного ввода тех же digest/counts и фразы
 `I_ACCEPT_EXACT_STAFF_ATTACHMENT_RECONCILIATION_ROLLBACK`.
 
+Residual ceremony использует те же runtime environment и protected root:
+
+```powershell
+pnpm --filter database db:reconcile:attachment-acl -- residual-plan `
+  --output C:\absolute\protected-root\residual-plan.json
+
+pnpm --filter database db:reconcile:attachment-acl -- residual-approve `
+  --plan C:\absolute\protected-root\residual-plan.json `
+  --direction APPLY `
+  --confirm-plan-digest REPLACE_EXACT_SHA256 `
+  --confirm-action-count REPLACE_EXACT_COUNT `
+  --confirm-binding-count REPLACE_EXACT_COUNT `
+  --confirm-quarantine-count REPLACE_EXACT_COUNT `
+  --confirm-review-count REPLACE_EXACT_COUNT `
+  --confirm I_ACCEPT_EXACT_STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_APPLY `
+  --output C:\absolute\protected-root\residual-approval.json
+
+pnpm --filter database db:reconcile:attachment-acl -- residual-apply `
+  --plan C:\absolute\protected-root\residual-plan.json `
+  --approval C:\absolute\protected-root\residual-approval.json `
+  --output C:\absolute\protected-root\residual-apply-receipt.json
+
+pnpm --filter database db:reconcile:attachment-acl -- residual-check `
+  --plan C:\absolute\protected-root\residual-plan.json `
+  --direction APPLY `
+  --output C:\absolute\protected-root\residual-apply-check.json
+```
+
+Rollback phrase:
+`I_ACCEPT_EXACT_STAFF_ATTACHMENT_RESIDUAL_RECONCILIATION_ROLLBACK`.
+
 ## Least-privilege role boundary
 
 Disposable PostgreSQL 16.15 rehearsal подтвердила, что одной таблицы DML
@@ -246,14 +322,19 @@ lock/statement timeout, deferred-trigger failure, audit drift, partial response
 
 ## Проверки checkpoint
 
-- unit/contract suite: `9/9 PASS`;
+- unit/contract suite: `12/12 PASS`, включая residual policy, digest/count
+  tamper, mixed apply state, extra binding и rollback state machine;
 - runtime release artifact identity/provenance adversarial test: `PASS`;
 - real disposable PostgreSQL: plan, apply, lost-response replay, apply check,
   rollback, rollback replay и rollback check — `PASS`;
 - после rollback: `1 UNRESOLVED`, `0 bindings`, exact apply/rollback audit по
   одной строке;
 - disposable PostgreSQL остановлен и удалён;
-- production application/data/config не изменялись.
+- base production apply/check/replay: `4 416/4 416 PASS`, drift `0`, downtime
+  `0`, temporary role removed;
+- residual PostgreSQL restored-copy lifecycle: `1 030 actions / 795 bindings /
+  721 quarantine / 20 review`, apply/replay/check/rollback/replay/check `PASS`;
+- residual production application/data/config не изменялись.
 
 Clean-schema blocker закрыт без изменения уже применённых migration SQL.
 Причиной были `150` CRLF-файлов в старом Windows working tree; Git/LF manifest

@@ -117,7 +117,9 @@ invite-only открытому тесту. Она отвечает на вопр
    текущие ограничения и точные следующие шаги.
    8a. [Staff attachment reconciliation controller](./v1/staff-attachment-reconciliation-runbook.md) —
    protected immutable plan, detached approval, serializable apply,
-   lost-response zero-diff, durable audit и exact rollback.
+   lost-response zero-diff, durable audit и exact rollback; отдельный residual
+   owner-decision contract сохраняет все normalized parents либо выполняет
+   reversible no-parent quarantine без удаления blob/source.
 9. [План templates/recurring tasks](./v1/staff-task-catalog-adoption-plan.md) —
    route/action/job inventory, подтверждённые cross-store разрывы, безопасная
    materialization policy и следующий implementation slice.

@@ -1,19 +1,75 @@
 # Gate 1MT: production attachment inventory — 24.08.2026
 
 Статус:
-`PRODUCTION READ-ONLY INVENTORY PASS / RECONCILIATION REQUIRED / EXTERNAL BETA NO-GO`.
+`BASE PRODUCTION RECONCILIATION PASS / RESIDUAL CONTROLLER REHEARSED / RESIDUAL APPROVAL REQUIRED / EXTERNAL BETA NO-GO`.
 
 ## Решение
 
-Production-схема и DB-level parent-delete guard соответствуют `CURRENT_187`,
-но legacy attachment graph ещё не готов к process-wide `ENFORCED`.
-Read-only inventory обнаружил `5 446 UNRESOLVED` attachment rows, поэтому до
-audited reconciliation/backfill, повторного zero-diff inventory и полной
-archive/delete/orphan browser-матрицы внешний доступ остаётся `NO-GO`.
+Production-схема и DB-level parent-delete guard соответствуют `CURRENT_187`.
+Первый exact reconciliation subset уже применён: `4 416` unique-parent rows
+переведены в `BOUND` и получили ровно `4 416` bindings. Apply/check/replay и
+независимый integrity postflight прошли без drift и downtime.
+
+До process-wide `ENFORCED` остаётся отдельный owner-approved residual subset,
+active `PENDING` lifecycle и полная archive/delete/orphan browser-матрица,
+поэтому внешний доступ остаётся `NO-GO`.
 
 Production работал и продолжает работать в `STAFF_ATTACHMENT_ACL_MODE=SHADOW`.
 Это сохраняет совместимость для текущих сотрудников, но не является режимом
 авторизации внешнего beta.
+
+## Production update после base apply
+
+Exact production plan:
+
+```text
+plan digest:       825c14610e26229d53d5225f78df2c094fad2be0fa0a8d884f9d6658b8df04f9
+actions:           4 416
+review rows:       1 050
+apply:             PASS / APPLIED / zeroDiff=true
+independent check: PASS / CHECKED / zeroDiff=true
+replay:            PASS / RECONCILED / zeroDiff=true
+```
+
+Postflight:
+
+| Метрика                         | Значение |
+| ------------------------------- | -------: |
+| `BOUND` attachments             |  `4 416` |
+| `BOUND` bindings                |  `4 416` |
+| Distinct bound attachments      |  `4 416` |
+| `UNRESOLVED`                    |  `1 030` |
+| `PENDING`                       |     `20` |
+| attachment/binding/scope drift  |      `0` |
+| health-monitor failures         |      `0` |
+| temporary production role left |      `0` |
+
+Platform-admin login, tenant context, dashboard и `/staff/shift-workspace`
+прошли production browser canary без console/RSC failures. Web и API после
+удаления временной роли отвечали `200`.
+
+## Residual restored-copy proposal
+
+Отдельный residual contract не выбирает один из нескольких parents. Он
+сохраняет все существующие нормализованные chat relations и предлагает
+карантин только для blobs без primary parent; физическое удаление запрещено.
+
+Свежая restored-copy rehearsal post-base состояния дала:
+
+| Решение                                          | Значение |
+| ------------------------------------------------ | -------: |
+| Bind all normalized parents                     |      309 |
+| Bindings к этим существующим parents            |      795 |
+| Quarantine legacy no-parent, blob retained       |      721 |
+| Non-expired `PENDING`, без изменения             |       20 |
+| Residual action count                            |    `1 030` |
+| Remaining review after apply                     |       20 |
+
+Lifecycle `plan → apply → replay → check → rollback → replay → check` прошёл
+`PASS`; после apply копия имела `4 725 BOUND`, `5 211 bindings`, `721
+QUARANTINED`, `20 PENDING` и drift `0`. Production residual apply не
+выполнялся и потребует нового admitted exact SHA, свежего production plan и
+отдельного approval его digest/counts.
 
 ## Release binding
 
@@ -124,13 +180,16 @@ Evidence directory имеет mode `0700`, JSON и checksum files — `0600`, ow
    применил `187/187`, подтвердил CURRENT179 digest `7f986797…` и no-op replay.
    Теперь выполнить fresh-backup restored-copy rehearsal фактической production
    history на новом admitted exact artifact.
-3. Запретить автоматическое решение multiple-parent, URL-review и orphan
-   случаев; для каждого нужен stable reason code и owner decision.
-4. Определить и проверить lifecycle для существующих `PENDING` rows.
-5. После backup, role/grant audit и отдельного approval применить только exact
-   unique-primary plan, затем повторить inventory до нуля unexplained/review
-   findings.
-6. Только затем выполнить production-build archive/delete/orphan browser
+3. Выпустить residual controller через Fast CI и Full Release Admission на
+   одном exact SHA и построить свежий read-only production plan.
+4. Получить отдельное owner approval exact residual digest и четырёх counts:
+   actions, bindings, quarantine, remaining review. До этого production write
+   запрещён.
+5. После apply/check/replay оставить non-expired `PENDING` до TTL, повторить
+   inventory и зафиксировать их последующий bind либо `PENDING_EXPIRED`.
+6. Классифицировать `243` absolute-origin signals как external либо исправить
+   exact internal origin; они никогда не создают ACL binding автоматически.
+7. Только затем выполнить production-build archive/delete/orphan browser
    matrix и tenant/store canary перед process-wide `ENFORCED`.
 
 Ни этот inventory, ни будущий backfill сами по себе не разрешают создание

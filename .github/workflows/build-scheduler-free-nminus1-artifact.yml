@@ -1,0 +1,198 @@
+name: Build exact scheduler-free N-1 artifact
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/nminus1-symlink-manifest
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduler-free-nminus1-7de04ff4-v2
+  cancel-in-progress: false
+
+env:
+  N_MINUS_ONE_SHA: 7de04ff4ccc814494810730be3fa6bf661097b07
+  PNPM_VERSION: 10.33.2
+
+jobs:
+  build:
+    name: Build immutable 7de04ff4 rollback runtime with topology manifest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out exact N-1 source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.N_MINUS_ONE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$N_MINUS_ONE_SHA"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Install exact pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Build exact legacy API and Web
+        shell: bash
+        env:
+          API_URL: http://127.0.0.1:4300
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/leetplus?schema=public
+          NEXT_PUBLIC_API_URL: https://api.leetplus.ru
+        run: |
+          set -euo pipefail
+          test "$(node -p 'process.versions.node.split(".")[0]')" = 22
+          test "$(pnpm --version)" = "$PNPM_VERSION"
+          pnpm install --frozen-lockfile
+          pnpm --filter database db:generate
+          pnpm --filter api build
+          pnpm --filter web build
+          test -s apps/api/dist/main.js
+          test -s apps/web/node_modules/next/dist/bin/next
+          test -s apps/web/.next/BUILD_ID
+
+      - name: Assemble and verify complete immutable rollback tree
+        id: assemble
+        shell: bash
+        run: |
+          set -euo pipefail
+          staging_root="$RUNNER_TEMP/leetplus-nminus1-$N_MINUS_ONE_SHA"
+          verification_root="$RUNNER_TEMP/leetplus-nminus1-$N_MINUS_ONE_SHA-verify"
+          archive="$RUNNER_TEMP/leetplus-nminus1-$N_MINUS_ONE_SHA.tar.gz"
+          checksum="$archive.sha256"
+          receipt="$RUNNER_TEMP/leetplus-nminus1-$N_MINUS_ONE_SHA.build-receipt.json"
+          test ! -e "$staging_root"
+          test ! -e "$verification_root"
+          install -d -m 0750 "$staging_root" "$verification_root"
+          rsync -a \
+            --exclude='/.git/' \
+            --exclude='/.github/' \
+            --exclude='/coverage/' \
+            ./ "$staging_root/"
+          install -d -m 0750 "$staging_root/apps/web/.next/cache"
+          find "$staging_root/apps/web/.next/cache" -mindepth 1 -delete
+          printf '%s\n' "$N_MINUS_ONE_SHA" > "$staging_root/.leetplus-source-sha"
+          (
+            cd "$staging_root"
+            find -P . -xdev \
+              -path './apps/web/.next/cache' -prune -o \
+              -type l -printf '%P|%l\n' \
+              | LC_ALL=C sort \
+              > N_MINUS_ONE_SYMLINKS
+            awk -F'|' \
+              'NF != 2 || $1 !~ /^[A-Za-z0-9_.@+\/-]+$/ || $1 ~ /^\// || $2 !~ /^[^|[:space:]]+$/ { exit 1 }' \
+              N_MINUS_ONE_SYMLINKS
+            test -z "$(find -P . -xdev -type f -links +1 -print -quit)"
+            test -z "$(find -P . -xdev -xtype l -print -quit)"
+            while IFS= read -r -d '' link; do
+              resolved="$(realpath -e -- "$link")"
+              case "$resolved" in
+                "$staging_root"/*) ;;
+                *) printf 'escaping symlink: %s -> %s\n' "$link" "$resolved" >&2; exit 1 ;;
+              esac
+            done < <(find -P . -xdev -type l -print0)
+            find -P . -xdev \
+              -path './apps/web/.next/cache' -prune -o \
+              -type f ! -path './N_MINUS_ONE_SHA256SUMS' -print \
+              | LC_ALL=C sort \
+              | xargs sha256sum --text \
+              > N_MINUS_ONE_SHA256SUMS
+            sha256sum --check --strict --quiet N_MINUS_ONE_SHA256SUMS
+            test "$(cat .leetplus-source-sha)" = "$N_MINUS_ONE_SHA"
+          )
+          source_date_epoch="$(git show -s --format=%ct "$N_MINUS_ONE_SHA")"
+          tar --format=posix --sort=name --mtime="@$source_date_epoch" \
+            --owner=0 --group=0 --numeric-owner \
+            -czf "$archive" -C "$staging_root" .
+          (
+            cd "$(dirname "$archive")"
+            sha256sum --text "$(basename "$archive")" > "$(basename "$checksum")"
+            sha256sum --check --strict --quiet "$(basename "$checksum")"
+          )
+          tar -xzf "$archive" --no-same-owner --no-same-permissions -C "$verification_root"
+          (
+            cd "$verification_root"
+            test "$(cat .leetplus-source-sha)" = "$N_MINUS_ONE_SHA"
+            test -z "$(find -P . -xdev ! -type d ! -type f ! -type l -print -quit)"
+            test -z "$(find -P . -xdev -type f -links +1 -print -quit)"
+            test -z "$(find -P . -xdev -xtype l -print -quit)"
+            sha256sum --check --strict --quiet N_MINUS_ONE_SHA256SUMS
+            expected_symlinks="$(LC_ALL=C sort N_MINUS_ONE_SYMLINKS)"
+            actual_symlinks="$(find -P . -xdev \
+              -path './apps/web/.next/cache' -prune -o \
+              -type l -printf '%P|%l\n' | LC_ALL=C sort)"
+            test "$expected_symlinks" = "$actual_symlinks"
+            manifest_paths="$(awk '{ path = $2; sub(/^\*/, "", path); print path }' \
+              N_MINUS_ONE_SHA256SUMS | LC_ALL=C sort)"
+            actual_paths="$(find . -xdev \
+              -path './apps/web/.next/cache' -prune -o \
+              -type f ! -path './N_MINUS_ONE_SHA256SUMS' -print | LC_ALL=C sort)"
+            test "$manifest_paths" = "$actual_paths"
+          )
+          archive_sha="$(sha256sum "$archive" | awk '{print $1}')"
+          manifest_sha="$(sha256sum "$staging_root/N_MINUS_ONE_SHA256SUMS" | awk '{print $1}')"
+          symlink_manifest_sha="$(sha256sum "$staging_root/N_MINUS_ONE_SYMLINKS" | awk '{print $1}')"
+          file_count="$(find -P "$staging_root" -xdev -type f | wc -l | tr -d ' ')"
+          symlink_count="$(find -P "$staging_root" -xdev -type l | wc -l | tr -d ' ')"
+          jq -n -S \
+            --arg schemaVersion '2' \
+            --arg state PASS \
+            --arg sourceSha "$N_MINUS_ONE_SHA" \
+            --arg workflowSha "$GITHUB_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg nodeVersion "$(node --version)" \
+            --arg pnpmVersion "$(pnpm --version)" \
+            --arg archiveSha256 "$archive_sha" \
+            --arg manifestSha256 "$manifest_sha" \
+            --arg symlinkManifestSha256 "$symlink_manifest_sha" \
+            --arg fileCount "$file_count" \
+            --arg symlinkCount "$symlink_count" \
+            '{
+              schemaVersion: ($schemaVersion | tonumber),
+              state: $state,
+              sourceSha: $sourceSha,
+              workflowSha: $workflowSha,
+              runId: $runId,
+              runAttempt: $runAttempt,
+              nodeVersion: $nodeVersion,
+              pnpmVersion: $pnpmVersion,
+              archiveSha256: $archiveSha256,
+              manifestSha256: $manifestSha256,
+              symlinkManifestSha256: $symlinkManifestSha256,
+              fileCount: ($fileCount | tonumber),
+              symlinkCount: ($symlinkCount | tonumber)
+            }' > "$receipt"
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+          printf 'checksum=%s\n' "$checksum" >> "$GITHUB_OUTPUT"
+          printf 'receipt=%s\n' "$receipt" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact scheduler-free N-1 artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-nminus1-7de04ff4-topology-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.assemble.outputs.archive }}
+            ${{ steps.assemble.outputs.checksum }}
+            ${{ steps.assemble.outputs.receipt }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

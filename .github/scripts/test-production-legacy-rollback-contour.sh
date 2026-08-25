@@ -343,6 +343,7 @@ const capabilityKeys = [
   'manage_assortment_reports', 'view_assortment_products', 'view_assortment_catalog',
   'view_assortment_stores', 'view_guests', 'export_guests', 'manage_guest_crm',
   'view_guest_gamification', 'manage_guest_game_rules', 'approve_guest_game_rewards',
+  'operate_guest_game_ledger',
   'view_guest_game_pii', 'view_marketing', 'manage_marketing', 'view_communications',
   'manage_communications', 'view_staff', 'view_staff_shift_workspace', 'view_staff_tasks',
   'manage_staff_tasks', 'view_staff_standards', 'manage_staff_standards',
@@ -350,7 +351,8 @@ const capabilityKeys = [
   'view_staff_control', 'manage_staff_control', 'view_staff_directory',
   'manage_staff_directory', 'view_staff_salary', 'manage_staff_salary',
   'edit_staff_knowledge', 'review_staff_knowledge', 'publish_staff_knowledge',
-  'manage_users', 'manage_integrations', 'run_sync', 'import_data', 'use_utilities',
+  'manage_users', 'manage_integrations', 'run_sync', 'import_guest_foundation',
+  'import_data', 'use_utilities',
   'edit_products', 'edit_catalog', 'edit_stores',
 ];
 const capabilityOptions = capabilityKeys.map((key) => ({

@@ -52,6 +52,12 @@ readonly CONTROL_INSTALL_CONTRACT='LEETPLUS_SCHEDULER_FREE_CONTROL_INSTALL_V1'
 readonly CONTROL_INSTALL_PREPARING_NAME='scheduler-free-control-install.preparing'
 readonly CONTROL_INSTALL_INTENT_NAME='scheduler-free-control-install.intent'
 readonly CONTROL_INSTALL_FENCE_NAME='scheduler-free-control-install.fence'
+# The immediately preceding admitted control generation can leave only this
+# exact preparation pair when systemd reports the installer's own runtime masks
+# as LoadState=masked. Accepting no other predecessor keeps crash recovery
+# bounded while allowing that fail-closed preparation to resume.
+readonly COMPATIBLE_PREPARING_CONTROL_MANIFEST_SHA256='815849b9225b612f4468773b3fb883782eda5abbc3dcc8d761db530a3d5a28d8'
+readonly COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256='86bfb46c71d385051b5087c6eb0231cf77fb36798372dc9f4540d51a9edaac849'
 
 die() {
   printf 'install-legacy-rollback-contour: %s\n' "$*" >&2
@@ -699,9 +705,12 @@ attest_active_route_not_drifting() {
 }
 
 attest_quiescent_runtime() {
+  local expected_runtime_mask_state="${1:-absent}"
   local unit inventory unit_file_inventory line unit_name load_state active_state sub_state main_pid control_group
-  local show_output key value cgroup_path cgroup_pids listener_inventory
+  local show_output key value cgroup_path cgroup_pids listener_inventory marker
   local -A allowed_units=() properties=()
+  [[ "$expected_runtime_mask_state" == absent || "$expected_runtime_mask_state" == exact ]] \
+    || die "invalid expected runtime-mask state: ${expected_runtime_mask_state}"
   for unit in "${protected_units[@]}"; do allowed_units["$unit"]=true; done
   if [[ "$unprivileged_test_mode" == true ]]; then
     [[ "${TEST_INSTALL_SIMULATE_UNIT_ACTIVE:-false}" != true ]] \
@@ -782,8 +791,16 @@ attest_quiescent_runtime() {
       main_pid="${properties[MainPID]}"
       control_group="${properties[ControlGroup]}"
     fi
-    [[ "$load_state" == loaded || "$load_state" == not-found ]] \
-      || die "protected unit load state is unsafe: ${unit}:${load_state}"
+    case "${expected_runtime_mask_state}:${load_state}" in
+      absent:loaded|absent:not-found) ;;
+      exact:masked)
+        marker="/run/systemd/system/${unit}"
+        [[ -L "$marker" && "$(readlink -- "$marker")" == /dev/null \
+          && "$(stat -c '%U:%G:%a:%h' -- "$marker")" == 'root:root:777:1' ]] \
+          || die "masked protected unit lacks its exact installer-owned runtime mask: ${unit}"
+        ;;
+      *) die "protected unit load state is unsafe: ${unit}:${load_state}:${expected_runtime_mask_state}" ;;
+    esac
     [[ "$active_state" == inactive && "$sub_state" == dead && "$main_pid" == 0 ]] \
       || die "protected unit is not inactive/dead with MainPID=0: ${unit}"
     if [[ -n "$control_group" ]]; then
@@ -991,6 +1008,36 @@ attest_runtime_masks() {
         || die "runtime mask is absent or not exact /dev/null: ${unit}"
     fi
   done
+}
+
+runtime_masks_state() {
+  local unit marker absent_count=0 exact_count=0
+  for unit in "${protected_units[@]}"; do
+    if [[ "$unprivileged_test_mode" == true ]]; then
+      marker="${runtime_mask_root}/${unit}"
+    else
+      marker="/run/systemd/system/${unit}"
+    fi
+    if [[ ! -e "$marker" && ! -L "$marker" ]]; then
+      ((absent_count += 1))
+    elif [[ "$unprivileged_test_mode" == true \
+      && -f "$marker" && ! -L "$marker" && "$(tr -d '\r\n' < "$marker")" == /dev/null ]]; then
+      ((exact_count += 1))
+    elif [[ "$unprivileged_test_mode" == false \
+      && -L "$marker" && "$(readlink -- "$marker")" == /dev/null \
+      && "$(stat -c '%U:%G:%a:%h' -- "$marker")" == 'root:root:777:1' ]]; then
+      ((exact_count += 1))
+    else
+      die "runtime mask is noncanonical during control-install recovery: ${unit}"
+    fi
+  done
+  if ((exact_count == 0)); then
+    printf 'absent\n'
+  elif ((absent_count == 0)); then
+    printf 'exact\n'
+  else
+    die 'runtime mask set is partial during control-install recovery'
+  fi
 }
 
 fence_content="[Unit]"$'\n'"ConditionPathExists=!${cutover_state_root}/${CONTROL_INSTALL_FENCE_NAME}"$'\n'
@@ -1341,6 +1388,7 @@ control_intent="${cutover_state_root}/${CONTROL_INSTALL_INTENT_NAME}"
 control_fence="${cutover_state_root}/${CONTROL_INSTALL_FENCE_NAME}"
 original_drift_serialized=''
 preparing_record_sha=''
+preparing_generation=''
 fence_record_sha=''
 intent_record_sha=''
 intent_phase=''
@@ -1354,11 +1402,19 @@ if [[ -e "$control_preparing" || -L "$control_preparing" ]]; then
     || die 'control-install preparation record could not be read completely'
   [[ ${#preparing_lines[@]} == 5 \
     && "${preparing_lines[0]}" == "CONTRACT=${CONTROL_INSTALL_CONTRACT}" \
-    && "${preparing_lines[1]}" == "CONTROL_MANIFEST_SHA256=${control_manifest_sha}" \
-    && "${preparing_lines[2]}" == "INSTALL_PLAN_SHA256=${install_plan_sha}" \
     && "${preparing_lines[3]}" == ORIGINAL_DRIFT_DESTINATIONS=* \
     && "${preparing_lines[4]}" == 'PREEXISTING_RUNTIME_MASKS=NONE' ]] \
     || die 'control-install preparation schema/digests are not exact'
+  if [[ "${preparing_lines[1]}" == "CONTROL_MANIFEST_SHA256=${control_manifest_sha}" \
+    && "${preparing_lines[2]}" == "INSTALL_PLAN_SHA256=${install_plan_sha}" ]]; then
+    preparing_generation=current
+  elif [[ "$unprivileged_test_mode" == false \
+    && "${preparing_lines[1]}" == "CONTROL_MANIFEST_SHA256=${COMPATIBLE_PREPARING_CONTROL_MANIFEST_SHA256}" \
+    && "${preparing_lines[2]}" == "INSTALL_PLAN_SHA256=${COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256}" ]]; then
+    preparing_generation=compatible-predecessor
+  else
+    die 'control-install preparation schema/digests are not exact'
+  fi
   original_drift_serialized="${preparing_lines[3]#ORIGINAL_DRIFT_DESTINATIONS=}"
   preparing_record_sha="$(sha256sum "$control_preparing" | awk '{ print $1 }')"
 fi
@@ -1412,6 +1468,10 @@ if [[ -n "$original_drift_serialized" ]]; then
     [[ -n "${original_drift_set[$path]+x}" ]] \
       || die "new destination drift appeared while a control-install boot fence is outstanding: ${path}"
   done
+  if [[ "$preparing_generation" == compatible-predecessor && -z "$intent_phase" ]]; then
+    [[ "$(serialize_drift_destinations)" == "$original_drift_serialized" ]] \
+      || die 'compatible predecessor preparation has destination mutation without an install intent'
+  fi
 fi
 
 if [[ -z "$preparing_record_sha" ]]; then
@@ -1441,7 +1501,7 @@ if [[ -z "$preparing_record_sha" ]]; then
   fi
   original_drift_serialized="$(serialize_drift_destinations)"
   attest_active_route_not_drifting
-  attest_quiescent_runtime
+  attest_quiescent_runtime absent
   attest_runtime_masks_absent
   preparing_record_content="CONTRACT=${CONTROL_INSTALL_CONTRACT}"$'\n'\
 "CONTROL_MANIFEST_SHA256=${control_manifest_sha}"$'\n'\
@@ -1455,10 +1515,18 @@ fi
 
 if [[ "$intent_phase" != POST_ATTESTED ]]; then
   attest_active_route_not_drifting
-  attest_quiescent_runtime
-  apply_runtime_masks
+  current_runtime_mask_state="$(runtime_masks_state)"
+  if [[ "$current_runtime_mask_state" == exact ]]; then
+    [[ -n "$preparing_record_sha" ]] \
+      || die 'exact runtime masks exist without a control-install preparation record'
+    attest_runtime_masks
+    attest_quiescent_runtime exact
+  else
+    attest_quiescent_runtime absent
+    apply_runtime_masks
+  fi
   attest_runtime_masks
-  attest_quiescent_runtime
+  attest_quiescent_runtime exact
   if [[ "$fence_needs_publish" == true ]]; then
     # The Condition drop-ins are made durable while their marker is absent.
     # A reboot during this preparatory phase may run only the still-coherent
@@ -1466,7 +1534,7 @@ if [[ "$intent_phase" != POST_ATTESTED ]]; then
     apply_persistent_fences
     attest_persistent_fences
     attest_runtime_masks
-    attest_quiescent_runtime
+    attest_quiescent_runtime exact
     fence_record_content="CONTRACT=${CONTROL_INSTALL_CONTRACT}"$'\n'\
 "CONTROL_MANIFEST_SHA256=${control_manifest_sha}"$'\n'\
 "INSTALL_PLAN_SHA256=${install_plan_sha}"$'\n'\
@@ -1483,7 +1551,7 @@ if [[ "$intent_phase" != POST_ATTESTED ]]; then
   fi
   attest_persistent_fences
   attest_runtime_masks
-  attest_quiescent_runtime
+  attest_quiescent_runtime exact
 
   if [[ -z "$intent_phase" ]]; then
     intent_record_content="CONTRACT=${CONTROL_INSTALL_CONTRACT}"$'\n'\
@@ -1525,7 +1593,7 @@ if [[ "$intent_phase" != POST_ATTESTED ]]; then
   ((drift_count == 0)) || die 'installed control generation is still mixed or drifted after mutation'
   attest_runtime_masks
   attest_persistent_fences
-  attest_quiescent_runtime
+  attest_quiescent_runtime exact
   intent_record_content="CONTRACT=${CONTROL_INSTALL_CONTRACT}"$'\n'\
 "CONTROL_MANIFEST_SHA256=${control_manifest_sha}"$'\n'\
 "INSTALL_PLAN_SHA256=${install_plan_sha}"$'\n'\

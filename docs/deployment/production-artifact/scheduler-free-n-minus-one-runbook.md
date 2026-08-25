@@ -199,7 +199,7 @@ entry, writable ancestor, лишний файл или digest drift блокир
 Bootstrap authority берётся из того же immutable CI artifact, но не является
 частью исполняемого control bundle (это устраняет self-verification). Его
 reviewed SHA-256 для этой версии:
-`e601a41e93c3704f1a99ead869ba6ae4a57167494fe082509dadae8a038fe244`.
+`e378409602d0127936e680caeb215fc3f6685b6af3d4d95f5d3ab85f3f4e491c`.
 Сначала byte копируется во временный root-owned файл, проверяется уже после
 копирования и только затем атомарно публикуется:
 
@@ -207,7 +207,7 @@ reviewed SHA-256 для этой версии:
 sudo install -o root -g root -m 0500 \
   <immutable-ci-artifact>/leetplus-install-scheduler-free-nminus1-v1 \
   /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new
-echo 'e601a41e93c3704f1a99ead869ba6ae4a57167494fe082509dadae8a038fe244  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
+echo 'e378409602d0127936e680caeb215fc3f6685b6af3d4d95f5d3ab85f3f4e491c  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
   | sudo sha256sum --check --strict
 sudo mv -T /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new \
   /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1
@@ -225,6 +225,14 @@ attestation, затем install-only provisioning. Authority повторяет 
 sudo /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1 --verify-only
 sudo /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1
 ```
+
+Если fail-closed остановка произошла после установки полного набора runtime
+mask, повтор authority в том же boot обязан продолжить только при exact
+`/run/systemd/system/* -> /dev/null`, canonical preparation record и полностью
+quiescent rollback runtime. После reboot тот же record разрешает восстановить
+исчезнувшие runtime mask. Совместимость между control generations ограничена
+прибитой парой manifest/install-plan непосредственно предшествующей admitted
+generation; произвольный или частичный mask/state set остаётся stop condition.
 
 Прямой запуск `install-legacy-rollback-contour.sh` без authority остаётся
 запрещённым. После provisioning:

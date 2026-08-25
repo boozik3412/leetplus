@@ -63,19 +63,34 @@ jobs:
           receipt="$RUNNER_TEMP/leetplus-pnpm-store-$RELEASE_SHA.build-receipt.json"
           test ! -e "$store_root"
           install -d -m 0750 "$store_root"
-          pnpm fetch --prod --frozen-lockfile --ignore-scripts \
-            --package-import-method=copy --store-dir "$store_root"
-          pnpm install --prod --offline --frozen-lockfile --side-effects-cache \
-            --package-import-method=copy --store-dir "$store_root"
-          test -f node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
-          test -f node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node
           workspace_real="$(realpath -e "$GITHUB_WORKSPACE")"
           case "$workspace_real" in
             /home/runner/work/*/*) ;;
             *) printf 'unexpected disposable workspace: %s\n' "$workspace_real" >&2; exit 1 ;;
           esac
+          pnpm fetch --prod --frozen-lockfile --ignore-scripts \
+            --package-import-method=copy --store-dir "$store_root"
+          if [[ -e "$workspace_real/node_modules" || -L "$workspace_real/node_modules" ]]; then
+            test -d "$workspace_real/node_modules"
+            test ! -L "$workspace_real/node_modules"
+            rm -rf -- "$workspace_real/node_modules"
+          fi
+          if [[ -e "$store_root/v10/projects" || -L "$store_root/v10/projects" ]]; then
+            test -d "$store_root/v10/projects"
+            test ! -L "$store_root/v10/projects"
+            rm -rf -- "$store_root/v10/projects"
+          fi
+          pnpm install --prod --offline --frozen-lockfile --side-effects-cache \
+            --package-import-method=copy --store-dir "$store_root"
+          test -f node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
+          test -f node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node
           find "$workspace_real" -depth -type d -name node_modules \
             -exec rm -rf -- {} +
+          if [[ -e "$store_root/v10/projects" || -L "$store_root/v10/projects" ]]; then
+            test -d "$store_root/v10/projects"
+            test ! -L "$store_root/v10/projects"
+            rm -rf -- "$store_root/v10/projects"
+          fi
           test -z "$(find -P "$store_root" -xdev ! -type d ! -type f -print -quit)"
           test -z "$(find -P "$store_root" -xdev -type f -links +1 -print -quit)"
           test -n "$(find -P "$store_root" -xdev -type f -print -quit)"

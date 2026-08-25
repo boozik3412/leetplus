@@ -67,7 +67,7 @@ jobs:
             --package-import-method=copy --store-dir "$store_root"
           pnpm install --prod --offline --frozen-lockfile --side-effects-cache \
             --package-import-method=copy --store-dir "$store_root"
-          test -x node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
+          test -f node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
           test -f node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node
           workspace_real="$(realpath -e "$GITHUB_WORKSPACE")"
           case "$workspace_real" in

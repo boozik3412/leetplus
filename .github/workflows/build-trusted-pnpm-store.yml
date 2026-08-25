@@ -1,0 +1,136 @@
+name: Build exact trusted production pnpm store
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/nminus1-7de-build
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trusted-pnpm-store-7efcaeff
+  cancel-in-progress: false
+
+env:
+  RELEASE_SHA: 7efcaeff5de06ee8657a13c98c205bba1adc5f9c
+  PNPM_VERSION: 10.33.2
+
+jobs:
+  build:
+    name: Build Linux Node 22 production CAS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out exact release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Install exact pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Build the exact prewarmed production CAS
+        id: assemble
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p 'process.versions.node.split(".")[0]')" = 22
+          test "$(pnpm --version)" = "$PNPM_VERSION"
+          store_root="$RUNNER_TEMP/leetplus-pnpm-store-$RELEASE_SHA"
+          archive="$RUNNER_TEMP/leetplus-pnpm-store-$RELEASE_SHA.tar.gz"
+          checksum="$archive.sha256"
+          lockfile_copy="$RUNNER_TEMP/pnpm-lock-$RELEASE_SHA.yaml"
+          receipt="$RUNNER_TEMP/leetplus-pnpm-store-$RELEASE_SHA.build-receipt.json"
+          test ! -e "$store_root"
+          install -d -m 0750 "$store_root"
+          pnpm fetch --prod --frozen-lockfile --ignore-scripts \
+            --package-import-method=copy --store-dir "$store_root"
+          pnpm install --prod --offline --frozen-lockfile --side-effects-cache \
+            --package-import-method=copy --store-dir "$store_root"
+          test -x node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
+          test -f node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node
+          workspace_real="$(realpath -e "$GITHUB_WORKSPACE")"
+          case "$workspace_real" in
+            /home/runner/work/*/*) ;;
+            *) printf 'unexpected disposable workspace: %s\n' "$workspace_real" >&2; exit 1 ;;
+          esac
+          find "$workspace_real" -depth -type d -name node_modules \
+            -exec rm -rf -- {} +
+          test -z "$(find -P "$store_root" -xdev ! -type d ! -type f -print -quit)"
+          test -z "$(find -P "$store_root" -xdev -type f -links +1 -print -quit)"
+          test -n "$(find -P "$store_root" -xdev -type f -print -quit)"
+          source_date_epoch="$(git show -s --format=%ct "$RELEASE_SHA")"
+          tar --sort=name --mtime="@$source_date_epoch" \
+            --owner=0 --group=0 --numeric-owner \
+            -czf "$archive" -C "$store_root" .
+          cp --reflink=never -- pnpm-lock.yaml "$lockfile_copy"
+          (
+            cd "$(dirname "$archive")"
+            sha256sum --text "$(basename "$archive")" > "$(basename "$checksum")"
+            sha256sum --check --strict --quiet "$(basename "$checksum")"
+          )
+          archive_sha="$(sha256sum "$archive" | awk '{print $1}')"
+          lockfile_sha="$(sha256sum pnpm-lock.yaml | awk '{print $1}')"
+          store_file_count="$(find -P "$store_root" -xdev -type f | wc -l | tr -d ' ')"
+          jq -n -S \
+            --arg schemaVersion '1' \
+            --arg state PASS \
+            --arg releaseSha "$RELEASE_SHA" \
+            --arg workflowSha "$GITHUB_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg nodeVersion "$(node --version)" \
+            --arg pnpmVersion "$(pnpm --version)" \
+            --arg archiveSha256 "$archive_sha" \
+            --arg lockfileSha256 "$lockfile_sha" \
+            --arg storeFileCount "$store_file_count" \
+            '{
+              schemaVersion: ($schemaVersion | tonumber),
+              state: $state,
+              releaseSha: $releaseSha,
+              workflowSha: $workflowSha,
+              runId: $runId,
+              runAttempt: $runAttempt,
+              nodeVersion: $nodeVersion,
+              pnpmVersion: $pnpmVersion,
+              archiveSha256: $archiveSha256,
+              lockfileSha256: $lockfileSha256,
+              storeFileCount: ($storeFileCount | tonumber)
+            }' > "$receipt"
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+          printf 'checksum=%s\n' "$checksum" >> "$GITHUB_OUTPUT"
+          printf 'lockfile=%s\n' "$lockfile_copy" >> "$GITHUB_OUTPUT"
+          printf 'receipt=%s\n' "$receipt" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact trusted pnpm store
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-pnpm-store-7efcaeff-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.assemble.outputs.archive }}
+            ${{ steps.assemble.outputs.checksum }}
+            ${{ steps.assemble.outputs.lockfile }}
+            ${{ steps.assemble.outputs.receipt }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

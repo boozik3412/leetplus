@@ -2,9 +2,6 @@ name: Build exact scheduler-free N-1 artifact
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - codex/nminus1-7de-build
 
 permissions:
   contents: read

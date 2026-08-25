@@ -25,7 +25,7 @@ readonly CONTROL_MANIFEST="${CONTROL_ROOT}/CONTROL_BUNDLE_SHA256SUMS"
 readonly TRUST_FILE='/etc/leetplus/rollback-control-manifest.sha256'
 readonly INSTALLER="${CONTROL_ROOT}/install-legacy-rollback-contour.sh"
 # This digest is updated only after the complete control manifest is frozen.
-readonly EXPECTED_CONTROL_MANIFEST_SHA256='abb10ef6130d6e7a313d5d87c0263bb8e55a20ba641cfd0e98015ed917d3f163'
+readonly EXPECTED_CONTROL_MANIFEST_SHA256='e8d77358c5d75d2c599f04fcb1dcffe8bc681b4cbf12f39bdb0222a133857a4e'
 
 die() {
   printf 'leetplus-legacy-control-authority: %s\n' "$*" >&2

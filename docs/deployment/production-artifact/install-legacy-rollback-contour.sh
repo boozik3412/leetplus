@@ -57,12 +57,16 @@ readonly CONTROL_INSTALL_FENCE_NAME='scheduler-free-control-install.fence'
 # as LoadState=masked. Accepting no other predecessor keeps crash recovery
 # bounded while allowing that fail-closed preparation to resume.
 readonly COMPATIBLE_PREPARING_CONTROL_MANIFEST_SHA256='815849b9225b612f4468773b3fb883782eda5abbc3dcc8d761db530a3d5a28d8'
-readonly COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256='86bfb46c71d385051b5087c6eb0231cf77fb36798372dc9f4540d51a9edaac849'
+readonly COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256='86bfb46c71d385051b5087c6eb0231cf77fb36798372dc9f4540d51a9edac849'
 
 die() {
   printf 'install-legacy-rollback-contour: %s\n' "$*" >&2
   exit 1
 }
+
+[[ "$COMPATIBLE_PREPARING_CONTROL_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+  || die 'compatible predecessor preparation digests are malformed'
 
 source_root="$SCRIPT_ROOT"
 release_root='/srv/leetplus/rollback-releases'

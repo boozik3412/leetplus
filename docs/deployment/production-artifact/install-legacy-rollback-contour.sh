@@ -311,7 +311,7 @@ if [[ "$unprivileged_test_mode" == false ]]; then
   done <<< "$release_mount_inventory"
   [[ "$(stat -c '%U:%G' -- "$release_root" "$release_directory" | sort -u)" == 'root:leetplus-runtime' ]] \
     || die 'rollback release root/directory must be root:leetplus-runtime'
-  [[ -z "$(find -P "$release_directory" -xdev \( ! -user root -o ! -group leetplus-runtime -o -perm /022 \) -print -quit)" ]] \
+  [[ -z "$(find -P "$release_directory" -xdev \( ! -user root -o ! -group leetplus-runtime -o \( ! -type l -perm /022 \) \) -print -quit)" ]] \
     || die 'rollback release ownership/write boundary is unsafe'
 fi
 

@@ -111,7 +111,8 @@ printf '%s\n' "$LEGACY_SHA" > "$release_directory/.leetplus-source-sha"
 printf 'fixture-api\n' > "$release_directory/apps/api/dist/main.js"
 printf '#!/usr/bin/node\n' > "$release_directory/apps/web/node_modules/next/dist/bin/next"
 printf '%s\n' "$LEGACY_SHA" > "$release_directory/apps/web/.next/BUILD_ID"
-: > "$release_directory/N_MINUS_ONE_SYMLINKS"
+ln -s main.js "$release_directory/apps/api/dist/main-link.js"
+printf 'apps/api/dist/main-link.js|main.js\n' > "$release_directory/N_MINUS_ONE_SYMLINKS"
 (
   cd -- "$release_directory"
   find . -xdev -path './apps/web/.next/cache' -prune -o -type f \
@@ -122,6 +123,10 @@ chown -R root:leetplus-runtime "$release_root"
 find -P "$release_root" -type d -exec chmod 0550 {} +
 find -P "$release_root" -type f -exec chmod 0440 {} +
 chmod 0550 "$release_directory/apps/web/node_modules/next/dist/bin/next"
+[[ -L "$release_directory/apps/api/dist/main-link.js" \
+  && "$(readlink -- "$release_directory/apps/api/dist/main-link.js")" == main.js \
+  && "$(stat -c '%U:%G:%a:%h' -- "$release_directory/apps/api/dist/main-link.js")" == 'root:leetplus-runtime:777:1' ]] \
+  || die 'fixture did not create the exact Linux symlink permission boundary'
 [[ "$(stat -c '%h' -- "$release_directory/apps/web/.next/cache")" -ge 2 ]] \
   || die 'fixture did not create a normal Linux directory link count'
 
@@ -282,6 +287,17 @@ cat > /usr/bin/ss <<'SS_STUB'
 exit 0
 SS_STUB
 chmod 0755 /usr/bin/ss
+
+chmod 0660 "$release_directory/apps/api/dist/main.js"
+if "$AUTHORITY_PATH" > /run/fixture-writable-regular.out 2>&1; then
+  die 'installer accepted a group-writable regular release file'
+fi
+grep -F 'rollback release ownership/write boundary is unsafe' \
+  /run/fixture-writable-regular.out >/dev/null || {
+  sed -n '1,120p' /run/fixture-writable-regular.out >&2
+  die 'writable regular-file negative failed for another invariant'
+}
+chmod 0440 "$release_directory/apps/api/dist/main.js"
 
 touch /run/fixture-fail-second-reload
 if "$AUTHORITY_PATH" > /run/fixture-first-install.out 2>&1; then

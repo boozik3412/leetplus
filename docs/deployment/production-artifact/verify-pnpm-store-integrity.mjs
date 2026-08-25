@@ -194,6 +194,28 @@ function scanStore(storeRoot, excludeControlFiles) {
   return files;
 }
 
+function assertRequiredPnpmStoreTopology(storeRoot) {
+  const storeDevice = fs.lstatSync(storeRoot, { bigint: true }).dev;
+  for (const relativePath of ["v10", "v10/files", "v10/index"]) {
+    const absolutePath = path.join(storeRoot, ...relativePath.split("/"));
+    let stat;
+    try {
+      stat = fs.lstatSync(absolutePath, { bigint: true });
+    } catch {
+      fail(`required pnpm store directory is absent: ${relativePath}`);
+    }
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      stat.dev !== storeDevice ||
+      stat.uid !== 0n ||
+      exactMode(stat) !== 0o550
+    ) {
+      fail(`required pnpm store directory is unsafe: ${relativePath}`);
+    }
+  }
+}
+
 function parseReceipt(receiptPath) {
   const text = fs.readFileSync(receiptPath, "utf8");
   if (text.includes("\r") || !text.endsWith("\n"))
@@ -243,6 +265,7 @@ const storeRoot = fs.realpathSync.native(options.storeRoot);
 if (storeRoot !== options.storeRoot || storeRoot === "/")
   fail("store root must be an exact non-root path");
 assertNoMountBoundary(storeRoot);
+assertRequiredPnpmStoreTopology(storeRoot);
 
 const manifestPath = path.join(storeRoot, MANIFEST_NAME);
 const receiptPath = path.join(storeRoot, RECEIPT_NAME);

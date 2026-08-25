@@ -127,6 +127,58 @@ jobs:
             rm -rf -- "$store_root/v10/projects"
           fi
 
+          for trusted_component in "$store_root/v10/files" "$store_root/v10/index"; do
+            [[ -d "$trusted_component" && ! -L "$trusted_component" \
+              && "$(realpath -e -- "$trusted_component")" == "$trusted_component" \
+              && -n "$(find -P "$trusted_component" -type f -print -quit)" ]] \
+              || die "required trusted pnpm CAS component is absent: ${trusted_component}"
+          done
+          store_snapshot_before="$(
+            cd "$store_root"
+            find -P . -xdev -type f -print0 \
+              | LC_ALL=C sort -z \
+              | xargs -0 sha256sum \
+              | sha256sum \
+              | awk '{ print $1 }'
+          )"
+          find -P "$store_root" -xdev -type d -exec chmod a-w -- {} +
+          find -P "$store_root" -xdev -type f -exec chmod a-w -- {} +
+          install_store_dir="$RUNNER_TEMP/leetplus-pnpm-install-store-$RELEASE_SHA"
+          test ! -e "$install_store_dir"
+          install -d -m 0700 "$install_store_dir/v10"
+          ln -s -- "$store_root/v10/files" "$install_store_dir/v10/files"
+          ln -s -- "$store_root/v10/index" "$install_store_dir/v10/index"
+          pnpm install --prod --offline --frozen-lockfile --ignore-scripts \
+            --side-effects-cache-readonly --package-import-method=copy \
+            --store-dir "$install_store_dir"
+          rm -rf -- "$install_store_dir"
+          test ! -e "$install_store_dir"
+          for module_root in \
+            "$workspace_real/node_modules" \
+            "$workspace_real/apps/api/node_modules" \
+            "$workspace_real/apps/web/node_modules" \
+            "$workspace_real/packages/database/node_modules"; do
+            if [[ -e "$module_root" || -L "$module_root" ]]; then
+              [[ -d "$module_root" && ! -L "$module_root" ]] \
+                || die "production-like module root is not one real directory: ${module_root}"
+              rm -rf -- "$module_root"
+            fi
+          done
+          store_snapshot_after="$(
+            cd "$store_root"
+            find -P . -xdev -type f -print0 \
+              | LC_ALL=C sort -z \
+              | xargs -0 sha256sum \
+              | sha256sum \
+              | awk '{ print $1 }'
+          )"
+          [[ "$store_snapshot_after" == "$store_snapshot_before" ]] \
+            || die 'production-like store wrapper changed the trusted pnpm CAS'
+          [[ ! -e "$store_root/v10/projects" && ! -L "$store_root/v10/projects" ]] \
+            || die 'production-like store wrapper wrote project state into the trusted CAS'
+          find -P "$store_root" -xdev -type d -exec chmod u+w -- {} +
+          find -P "$store_root" -xdev -type f -exec chmod u+w -- {} +
+
           pnpm_command_path="$(command -v pnpm)"
           pnpm_home="$(dirname -- "$pnpm_command_path")"
           pnpm_node_modules_root="$(dirname -- "$pnpm_home")"

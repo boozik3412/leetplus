@@ -32,7 +32,8 @@ production hydration receipt и не может быть promoted. Production `-
 изолированного от внешней сети и local Unix sockets. Он запускает exact copy-only
 `pnpm install --prod --offline --frozen-lockfile --ignore-scripts
 --side-effects-cache-readonly --package-import-method=copy` через одноразовый
-writable store-wrapper над read-only `/srv/leetplus/pnpm-store/v10/files`,
+writable store-wrapper над read-only `/srv/leetplus/pnpm-store/v10/files` и
+`/srv/leetplus/pnpm-store/v10/index`,
 затем Prisma generate, отвергает hardlinks и создаёт
 полный `HYDRATED_SHA256SUMS`. Root и
 runtime users не имеют права выполнять hydration. Ошибка сохраняет staging
@@ -248,9 +249,10 @@ file count, затем повторно проверяет весь root-owned r
 `verify-pnpm-store-integrity.mjs`. Hydration выполняет ту же проверку и связывает
 store manifest/receipt SHA-256 со своим sandbox receipt **до** первого `pnpm`.
 Для обязательной pnpm project registration stager создаёт внутри disposable
-`node_modules` отдельный writable store-wrapper, связывает только его
-`v10/files` с immutable trusted CAS, а после offline install полностью удаляет
-wrapper. Unit видит исходный store только read-only; полная integrity-проверка
+`node_modules` отдельный writable store-wrapper, связывает его `v10/files` и
+`v10/index` с immutable trusted CAS, а после offline install полностью удаляет
+wrapper. `v10/projects` остаётся только внутри disposable wrapper. Unit видит
+исходный store только read-only; полная integrity-проверка
 повторяется после install и Prisma generate. Любой topology/ownership/digest,
 Node/pnpm/lockfile mismatch или попытка fallback в сеть останавливает release.
 

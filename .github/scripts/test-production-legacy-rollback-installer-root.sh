@@ -23,6 +23,7 @@ readonly CONTROL_ID='scheduler-free-nminus1-v1'
 readonly REPOSITORY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly DEPLOY_ROOT="${REPOSITORY_ROOT}/docs/deployment/production-artifact"
 readonly AUTHORITY_SOURCE="${REPOSITORY_ROOT}/docs/deployment/production-control-authority/leetplus-install-scheduler-free-nminus1-v1"
+readonly FENCED_PREDECESSOR_FIXTURE_ROOT="${REPOSITORY_ROOT}/.github/fixtures/scheduler-free-control-install-fenced-predecessor"
 readonly CONTROL_ROOT="/srv/leetplus/control-bundles/${CONTROL_ID}"
 readonly AUTHORITY_PATH='/usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1'
 
@@ -41,12 +42,15 @@ unset LEETPLUS_FIXTURE_ACKNOWLEDGEMENT
   || die 'refusing exact production-path mutation outside a disposable container root'
 [[ "$(uname -s)" == Linux ]] || die 'Linux is required'
 
-for command_name in awk cat chmod chown cp find findmnt flock getent grep groupadd id install kill ln \
+for command_name in awk cat chmod chown cmp cp find findmnt flock getent grep groupadd id install kill ln \
   mktemp node paste pkill readlink realpath rm runuser sed sha256sum sleep sort stat sync timeout tr \
   uname useradd userdel xargs; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing fixture command: ${command_name}"
 done
-[[ -f "$DEPLOY_ROOT/CONTROL_BUNDLE_SHA256SUMS" && -f "$AUTHORITY_SOURCE" ]] \
+[[ -f "$DEPLOY_ROOT/CONTROL_BUNDLE_SHA256SUMS" && -f "$AUTHORITY_SOURCE" \
+  && -f "$FENCED_PREDECESSOR_FIXTURE_ROOT/scheduler-free-control-install.preparing" \
+  && -f "$FENCED_PREDECESSOR_FIXTURE_ROOT/scheduler-free-control-install.fence" \
+  && -f "$FENCED_PREDECESSOR_FIXTURE_ROOT/scheduler-free-control-install.intent" ]] \
   || die 'reviewed control sources are absent'
 (
   cd -- "$DEPLOY_ROOT"
@@ -437,6 +441,55 @@ grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
   /run/fixture-compatible-predecessor.out >/dev/null
 [[ ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing ]] \
   || die 'compatible predecessor recovery left its preparation record'
+rm -f /run/fixture-systemd255-template-aliases
+
+# The next admitted generation encountered the same aliases only after the
+# predecessor had durably committed its exact fence and PREPARED intent. Model
+# the byte-identical production records and prove bounded cross-generation
+# roll-forward, including preservation of the old record generation through
+# POST_ATTESTED and complete cleanup only after the new bytes are exact.
+printf '\nfixture-fenced-predecessor-drift\n' >> /etc/systemd/system/leetplus-rollback-egress.service
+for record_name in preparing fence intent; do
+  install -o root -g root -m 0600 \
+    "$FENCED_PREDECESSOR_FIXTURE_ROOT/scheduler-free-control-install.${record_name}" \
+    "/var/lib/leetplus/deploy-receipts/scheduler-free-control-install.${record_name}"
+done
+[[ "$(sha256sum /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing | awk '{ print $1 }')" \
+  == ca3888a804c8087528962dab6829db6737952045816737cd4c73a5a76d9511fd \
+  && "$(sha256sum /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.fence | awk '{ print $1 }')" \
+  == 4d19f787eed9136f32e9fce87b4e42d0ad99cfe0acd2eb0a67f889f8310f435c \
+  && "$(sha256sum /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent | awk '{ print $1 }')" \
+  == c44e87d16ab8f9da0309aba41928210f3e0b970d29a2288f5811ea9998831b7d ]] \
+  || die 'fenced predecessor fixture records lost their exact production identities'
+for unit in leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.service \
+  leetplus-web-rollback@.service leetplus-web-rollback@${LEGACY_SHA}.service \
+  leetplus-rollback-egress.service leetplus-blue-green-recovery.service \
+  leetplus-blue-green-recovery-watchdog.service leetplus-blue-green-recovery.timer; do
+  install -d -o root -g root -m 0755 "/etc/systemd/system/${unit}.d"
+  printf '%s\n' \
+    '[Unit]' \
+    'ConditionPathExists=!/var/lib/leetplus/deploy-receipts/scheduler-free-control-install.fence' \
+    > "/etc/systemd/system/${unit}.d/90-leetplus-control-install-fence.conf"
+  chown root:root "/etc/systemd/system/${unit}.d/90-leetplus-control-install-fence.conf"
+  chmod 0644 "/etc/systemd/system/${unit}.d/90-leetplus-control-install-fence.conf"
+done
+systemctl mask --runtime --no-reload \
+  leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.service \
+  leetplus-web-rollback@.service leetplus-web-rollback@${LEGACY_SHA}.service \
+  leetplus-rollback-egress.service leetplus-blue-green-recovery.service \
+  leetplus-blue-green-recovery-watchdog.service leetplus-blue-green-recovery.timer
+systemctl daemon-reload
+touch /run/fixture-systemd255-template-aliases
+"$AUTHORITY_PATH" > /run/fixture-fenced-predecessor.out
+grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
+  /run/fixture-fenced-predecessor.out >/dev/null
+for record_name in preparing fence intent; do
+  [[ ! -e "/var/lib/leetplus/deploy-receipts/scheduler-free-control-install.${record_name}" ]] \
+    || die "fenced predecessor recovery left transaction residue: ${record_name}"
+done
+cmp -s -- "$DEPLOY_ROOT/systemd/leetplus-rollback-egress.service" \
+  /etc/systemd/system/leetplus-rollback-egress.service \
+  || die 'fenced predecessor recovery did not install the corrected egress unit'
 rm -f /run/fixture-systemd255-template-aliases
 
 printf '\nfixture-systemd255-unmasked-alias-drift\n' >> /etc/nginx/leetplus/upstreams/blue.conf

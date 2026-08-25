@@ -247,7 +247,14 @@ def assert_ancestors(absolute_path, root_prefix, uid, gid, include_leaf=False):
             die(f"trusted ancestor is not immutable expected authority: {candidate}")
 
 
-def ensure_directory(absolute_path, root_prefix, uid, gid, mode):
+def ensure_directory(
+    absolute_path,
+    root_prefix,
+    uid,
+    gid,
+    mode,
+    reconcile_legacy_private_mode=False,
+):
     if not absolute_path.startswith("/"):
         die("directory target is not absolute")
     components = path_components(absolute_path)
@@ -272,11 +279,17 @@ def ensure_directory(absolute_path, root_prefix, uid, gid, mode):
             die(f"directory authority path is not a real directory: {candidate}")
         if details.st_uid != uid or details.st_gid != gid or details.st_mode & 0o022:
             die(f"directory authority path is writable or foreign-owned: {candidate}")
-        if candidate == absolute_path and stat.S_IMODE(details.st_mode) != mode:
+        if (
+            candidate == absolute_path
+            and stat.S_IMODE(details.st_mode) != mode
+            and reconcile_legacy_private_mode
+        ):
+            if stat.S_IMODE(details.st_mode) != 0o700 or mode != 0o755:
+                die(f"legacy private directory mode cannot be reconciled: {candidate}")
             os.chmod(candidate, mode)
             details = os.lstat(candidate)
             fsync_directory(candidate)
-        if candidate == absolute_path or created:
+        if created or (candidate == absolute_path and reconcile_legacy_private_mode):
             if (
                 details.st_uid != uid
                 or details.st_gid != gid
@@ -986,6 +999,7 @@ ensure_directory(
     uid,
     gid,
     0o755,
+    True,
 )
 for source, destination, mode in install_entries:
     source_path = os.path.join(generation_root, *source.split("/"))
@@ -999,7 +1013,18 @@ for source, destination, mode in install_entries:
         destination_parent_mode = 0o500
     else:
         destination_parent_mode = 0o755
-    ensure_directory(destination_parent, root_prefix, uid, gid, destination_parent_mode)
+    reconcile_service_helper_parent = destination_parent == host_path(
+        root_prefix,
+        "/usr/local/libexec/leetplus",
+    )
+    ensure_directory(
+        destination_parent,
+        root_prefix,
+        uid,
+        gid,
+        destination_parent_mode,
+        reconcile_service_helper_parent,
+    )
     reject_exact_mount(destination_path, mount_targets, f"install destination {destination}")
     atomic_write(
         destination_path,

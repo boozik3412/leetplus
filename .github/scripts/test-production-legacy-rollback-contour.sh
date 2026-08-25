@@ -110,6 +110,10 @@ grep -F -x 'TasksMax=128' "$api_unit" >/dev/null
 grep -F -x "ExecStart=/usr/bin/node /usr/local/libexec/leetplus/legacy-rollback-auth-edge.mjs --release-sha %i" "$api_unit" >/dev/null
 grep -F -x 'SocketBindAllow=ipv4:tcp:3300' "$web_unit" >/dev/null
 grep -F -x 'ExecStartPost=/usr/local/libexec/leetplus/apply-legacy-rollback-egress.sh --verify' "$egress_unit" >/dev/null
+if grep -E '^(Before|After|Requires|Wants)=.*leetplus-(api|web)-rollback@\.service([[:space:]]|$)' "$egress_unit" >/dev/null; then
+  printf 'non-template egress unit references an uninstantiated rollback template\n' >&2
+  exit 1
+fi
 grep -F 'meta skuid ${api_uid} ip daddr 127.0.0.1 tcp dport 5432 ct state new accept' "$egress_script" >/dev/null
 grep -F 'meta skuid ${api_uid} ip daddr 127.0.0.1 tcp dport 4301 ct state new accept' "$egress_script" >/dev/null
 grep -F 'ip daddr 127.0.0.1 tcp dport 4301 reject' "$egress_script" >/dev/null

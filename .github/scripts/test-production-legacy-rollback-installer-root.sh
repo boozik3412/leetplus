@@ -205,13 +205,22 @@ property_value() {
       else printf '\n'; fi
       ;;
     FragmentPath) printf '%s\n' "$fragment" ;;
+    Id|Names) printf '%s\n' "$unit" ;;
+    UnitFileState) printf 'disabled\n' ;;
+    Requires) printf 'leetplus-rollback-egress.service\n' ;;
     NeedDaemonReload) [[ -e /run/fixture-stale-manager ]] && printf 'yes\n' || printf 'no\n' ;;
     User) [[ "$unit" == leetplus-api-* ]] && printf 'leetplus-api-nminus1\n' || printf 'leetplus-web-nminus1\n' ;;
     Group) printf 'leetplus-runtime\n' ;;
     WorkingDirectory)
-      [[ "$unit" == leetplus-api-* ]] \
-        && printf '/srv/leetplus/rollback-releases/%s\n' "$legacy_sha" \
-        || printf '/srv/leetplus/rollback-releases/%s/apps/web\n' "$legacy_sha"
+      if [[ "$unit" == leetplus-api-rollback@leetplus-rollback-egress.service ]]; then
+        printf '/srv/leetplus/rollback-releases/leetplus-rollback-egress\n'
+      elif [[ "$unit" == leetplus-web-rollback@leetplus-rollback-egress.service ]]; then
+        printf '/srv/leetplus/rollback-releases/leetplus-rollback-egress/apps/web\n'
+      elif [[ "$unit" == leetplus-api-* ]]; then
+        printf '/srv/leetplus/rollback-releases/%s\n' "$legacy_sha"
+      else
+        printf '/srv/leetplus/rollback-releases/%s/apps/web\n' "$legacy_sha"
+      fi
       ;;
     Environment) printf 'PATH=/usr/sbin:/usr/bin:/sbin:/bin\n' ;;
     EnvironmentFiles)
@@ -242,7 +251,16 @@ property_value() {
   esac
 }
 case "$command_name" in
-  list-units|list-unit-files) exit 0 ;;
+  list-units)
+    if [[ -e /run/fixture-systemd255-template-aliases \
+      && ( -L /run/systemd/system/leetplus-rollback-egress.service \
+        || "$(tr -d '\r\n' < /run/fixture-systemd255-template-aliases)" == always ) ]]; then
+      printf '%s loaded inactive dead fixture\n' \
+        leetplus-api-rollback@leetplus-rollback-egress.service \
+        leetplus-web-rollback@leetplus-rollback-egress.service
+    fi
+    ;;
+  list-unit-files) exit 0 ;;
   is-active|is-enabled) exit 3 ;;
   daemon-reload)
     count=0; [[ ! -f /run/fixture-daemon-reload-count ]] || count="$(</run/fixture-daemon-reload-count)"
@@ -413,11 +431,23 @@ systemctl mask --runtime --no-reload \
   leetplus-rollback-egress.service leetplus-blue-green-recovery.service \
   leetplus-blue-green-recovery-watchdog.service leetplus-blue-green-recovery.timer
 systemctl daemon-reload
+touch /run/fixture-systemd255-template-aliases
 "$AUTHORITY_PATH" > /run/fixture-compatible-predecessor.out
 grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
   /run/fixture-compatible-predecessor.out >/dev/null
 [[ ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing ]] \
   || die 'compatible predecessor recovery left its preparation record'
+rm -f /run/fixture-systemd255-template-aliases
+
+printf '\nfixture-systemd255-unmasked-alias-drift\n' >> /etc/nginx/leetplus/upstreams/blue.conf
+printf 'always\n' > /run/fixture-systemd255-template-aliases
+if "$AUTHORITY_PATH" > /run/fixture-systemd255-unmasked-alias.out 2>&1; then
+  die 'installer accepted a systemd 255 template alias without its exact runtime masks'
+fi
+grep -F 'unclassified rollback/recovery unit is loaded: leetplus-api-rollback@leetplus-rollback-egress.service' \
+  /run/fixture-systemd255-unmasked-alias.out >/dev/null
+rm -f /run/fixture-systemd255-template-aliases
+"$AUTHORITY_PATH" > /run/fixture-systemd255-alias-repair.out
 
 printf '\nfixture-drift\n' >> /etc/nginx/leetplus/upstreams/blue.conf
 ln -s /dev/null /run/systemd/system/leetplus-api-rollback@.service

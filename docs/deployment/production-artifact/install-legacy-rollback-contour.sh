@@ -711,8 +711,8 @@ attest_active_route_not_drifting() {
 attest_quiescent_runtime() {
   local expected_runtime_mask_state="${1:-absent}"
   local unit inventory unit_file_inventory line unit_name load_state active_state sub_state main_pid control_group
-  local show_output key value cgroup_path cgroup_pids listener_inventory marker
-  local -A allowed_units=() properties=()
+  local show_output key value cgroup_path cgroup_pids listener_inventory marker expected_fragment expected_working_directory
+  local -A allowed_units=() properties=() systemd255_template_aliases=()
   [[ "$expected_runtime_mask_state" == absent || "$expected_runtime_mask_state" == exact ]] \
     || die "invalid expected runtime-mask state: ${expected_runtime_mask_state}"
   for unit in "${protected_units[@]}"; do allowed_units["$unit"]=true; done
@@ -734,8 +734,19 @@ attest_quiescent_runtime() {
       leetplus-api-rollback@*.service|leetplus-web-rollback@*.service|\
       leetplus-rollback-egress.service|leetplus-blue-green-recovery.service|\
       leetplus-blue-green-recovery-watchdog.service|leetplus-blue-green-recovery.timer)
-        [[ -n "${allowed_units[$unit_name]+x}" ]] \
-          || die "unclassified rollback/recovery unit is loaded: ${unit_name}"
+        if [[ -n "${allowed_units[$unit_name]+x}" ]]; then
+          :
+        elif [[ "$expected_runtime_mask_state" == exact \
+          && ( "$unit_name" == leetplus-api-rollback@leetplus-rollback-egress.service \
+            || "$unit_name" == leetplus-web-rollback@leetplus-rollback-egress.service ) ]]; then
+          # systemd 255 materializes these two inactive aliases from the old
+          # `Before=foo@.service` edge on the non-template egress unit. They are
+          # accepted only while the required egress unit is installer-masked;
+          # the replacement unit removes the invalid dependency spelling.
+          systemd255_template_aliases["$unit_name"]=true
+        else
+          die "unclassified rollback/recovery unit is loaded: ${unit_name}"
+        fi
         ;;
     esac
   done <<< "$inventory"
@@ -756,6 +767,57 @@ attest_quiescent_runtime() {
         ;;
     esac
   done <<< "$unit_file_inventory"
+  for unit in "${!systemd255_template_aliases[@]}"; do
+    case "$unit" in
+      leetplus-api-rollback@leetplus-rollback-egress.service)
+        expected_fragment="${systemd_root}/leetplus-api-rollback@.service"
+        expected_working_directory="${release_root}/leetplus-rollback-egress"
+        ;;
+      leetplus-web-rollback@leetplus-rollback-egress.service)
+        expected_fragment="${systemd_root}/leetplus-web-rollback@.service"
+        expected_working_directory="${release_root}/leetplus-rollback-egress/apps/web"
+        ;;
+      *) die "internal systemd template-alias classification failed: ${unit}" ;;
+    esac
+    show_output="$(timeout --foreground --kill-after=5s 20s systemctl show "$unit" --no-pager \
+      --property=Id --property=Names --property=LoadState --property=ActiveState \
+      --property=SubState --property=MainPID --property=ControlGroup \
+      --property=FragmentPath --property=UnitFileState --property=Requires \
+      --property=WorkingDirectory)" \
+      || die "systemd template-alias state query failed or timed out: ${unit}"
+    [[ ${#show_output} -le 32768 && "$show_output" != *$'\r'* ]] \
+      || die "systemd template-alias state is oversized or noncanonical: ${unit}"
+    properties=()
+    while IFS='=' read -r key value; do
+      [[ "$key" =~ ^(Id|Names|LoadState|ActiveState|SubState|MainPID|ControlGroup|FragmentPath|UnitFileState|Requires|WorkingDirectory)$ \
+        && -z "${properties[$key]+x}" ]] \
+        || die "systemd template alias returned duplicate/unknown state: ${unit}:${key}"
+      properties["$key"]="$value"
+    done <<< "$show_output"
+    [[ ${#properties[@]} == 11 ]] \
+      || die "systemd template-alias lifecycle state is incomplete: ${unit}"
+    for key in Id Names LoadState ActiveState SubState MainPID ControlGroup FragmentPath UnitFileState Requires WorkingDirectory; do
+      [[ -n "${properties[$key]+x}" ]] \
+        || die "systemd template-alias lifecycle property is absent: ${unit}:${key}"
+    done
+    [[ "${properties[Id]}" == "$unit" \
+      && "${properties[Names]}" == "$unit" \
+      && "${properties[LoadState]}" == loaded \
+      && "${properties[ActiveState]}" == inactive \
+      && "${properties[SubState]}" == dead \
+      && "${properties[MainPID]}" == 0 \
+      && -z "${properties[ControlGroup]}" \
+      && "${properties[FragmentPath]}" == "$expected_fragment" \
+      && "${properties[UnitFileState]}" == disabled \
+      && "${properties[WorkingDirectory]}" == "$expected_working_directory" \
+      && ! -e "$expected_working_directory" && ! -L "$expected_working_directory" \
+      && "$(tr ' ' '\n' <<< "${properties[Requires]}" | grep -F -x -c 'leetplus-rollback-egress.service')" == 1 ]] \
+      || die "systemd template alias is not the exact inactive systemd 255 compatibility shape: ${unit}"
+    marker='/run/systemd/system/leetplus-rollback-egress.service'
+    [[ -L "$marker" && "$(readlink -- "$marker")" == /dev/null \
+      && "$(stat -c '%U:%G:%a:%h' -- "$marker")" == 'root:root:777:1' ]] \
+      || die "systemd template alias lacks the exact masked egress dependency: ${unit}"
+  done
   for unit in "${protected_units[@]}"; do
     # An uninstantiated template is a unit-file authority, not a runtime unit.
     # systemd 255 correctly rejects `show foo@.service`; concrete instances are
@@ -1614,6 +1676,7 @@ fi
 
 remove_persistent_fences
 remove_runtime_masks
+attest_quiescent_runtime absent
 attest_loaded_control_generation
 remove_state_record "$control_intent" "$intent_record_sha"
 remove_state_record "$control_fence" "$fence_record_sha"

@@ -258,17 +258,31 @@ def ensure_directory(absolute_path, root_prefix, uid, gid, mode):
         except ValueError:
             die(f"directory is outside fixture root: {absolute_path}")
     for candidate in components[start:]:
+        created = False
         try:
             details = os.lstat(candidate)
         except FileNotFoundError:
             os.mkdir(candidate, mode)
             os.chown(candidate, uid, gid)
+            os.chmod(candidate, mode)
             fsync_directory(os.path.dirname(candidate))
             details = os.lstat(candidate)
+            created = True
         if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode):
             die(f"directory authority path is not a real directory: {candidate}")
         if details.st_uid != uid or details.st_gid != gid or details.st_mode & 0o022:
             die(f"directory authority path is writable or foreign-owned: {candidate}")
+        if candidate == absolute_path and stat.S_IMODE(details.st_mode) != mode:
+            os.chmod(candidate, mode)
+            details = os.lstat(candidate)
+            fsync_directory(candidate)
+        if candidate == absolute_path or created:
+            if (
+                details.st_uid != uid
+                or details.st_gid != gid
+                or stat.S_IMODE(details.st_mode) != mode
+            ):
+                die(f"directory authority path does not have exact mode {mode:04o}: {candidate}")
 
 
 def read_mount_targets():
@@ -966,6 +980,13 @@ if os.path.lexists(receipt_path):
         die("existing receipt conflicts with the outstanding install intent")
 
 installed_count = 0
+ensure_directory(
+    host_path(root_prefix, "/usr/local/libexec"),
+    root_prefix,
+    uid,
+    gid,
+    0o755,
+)
 for source, destination, mode in install_entries:
     source_path = os.path.join(generation_root, *source.split("/"))
     source_bytes = stable_read(source_path, MAX_MEMBER_BYTES, f"install source {source}")[0]

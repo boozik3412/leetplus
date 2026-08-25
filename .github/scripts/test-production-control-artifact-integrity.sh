@@ -202,7 +202,7 @@ grep -F -x 'PRODUCTION_CONTROL_PAYLOAD_FILE_COUNT=57' \
 grep -F -x "PRODUCTION_CONTROL_NODE_SHA256=$(node_executable_sha256)" \
   "${TEST_ROOT}/accepted.out" >/dev/null
 grep -F -x \
-  'PRODUCTION_CONTROL_INNER_MANIFEST_SHA256=12a20a0fe50a15557db62f153a3fe6e1a1121e477515841c9c6904b44824f976' \
+  'PRODUCTION_CONTROL_INNER_MANIFEST_SHA256=a46ee6186d7df2d36495c6313b2d1a6a60a63c4c9995fdb71e18b5b1ccb68b69' \
   "${TEST_ROOT}/accepted.out" >/dev/null
 if clean_node "$VERIFIER" \
   --artifact-root "$(canonical_root "$accepted_root")" \

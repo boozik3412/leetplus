@@ -2,7 +2,7 @@ dc96e8573f54ef30ef4e88439188524d0d193897a77099975555bbf5659f7467  ./activate-leg
 cf95e1a3a704833a67b27cbc356abf16ab62c517b23ec708d19796818b332de3  ./apply-legacy-database-login-fence.sh
 4a25ff7561727f707ce37aa394ca5e0b0b28f52f5b63516dcdac5dfa6a60c130  ./apply-legacy-rollback-egress.sh
 ac835fe878e9bc3a545f50cb4228889b25d72b5655b0c90a675a75b1f164a27a  ./blue-green-cutover.sh
-e5840fa642611829eb1792cfc2362304ef00edacb93a184978cdd6f71ec2cf74  ./install-legacy-rollback-contour.sh
+dcc50ba08327e0b46eb86278774e991958ac75986ebf3b469a4cb5bbfd9db2b7  ./install-legacy-rollback-contour.sh
 e533a946eb7d4393b7f1f692da2f57f4d8bf86180658ff82d677084fc683b50a  ./legacy-rollback-auth-edge.mjs
 ea25c3cf121ff21f21c02b5bf017ac6b20e943918b6624210d593e800493127c  ./legacy-rollback-child-loopback.cjs
 3553e31012e1c00d695381c76ad4df184113c71c5a8b018bf5d934c2cea3fd8e  ./nginx/blue.conf.example
@@ -13,7 +13,7 @@ c059cada5649c258f9e0a7336cbb8cb8dd41fb898e45c9a18be8f466caa2df57  ./systemd/leet
 783502a1c17ae50f4f2d438c9df258a4d5a805ca577b3017c4ae92f43a54b34f  ./systemd/leetplus-blue-green-recovery-watchdog.service
 bd9e890104a2ca771dbbfebcd781b7648bf39fdee0d5d1fb2f950050b2513709  ./systemd/leetplus-blue-green-recovery.service
 177bc6182827b8942ba4284c2ade725556ac03b560b5be0a9436f803d5e10668  ./systemd/leetplus-blue-green-recovery.timer
-f5946711d0b638c13d84af64c576cf41e128e51491082e0ae10120fd3615884c  ./systemd/leetplus-rollback-egress.service
+c9d90ee74181cd0c705eb717478f39533613070bbed258bfe9c48545f9067ce2  ./systemd/leetplus-rollback-egress.service
 87455fc089e78ac5afcdc615189d2dd75f8352107778a6c19eb32be536502254  ./systemd/leetplus-web-rollback@.service
 76f16367ab7ba14d3bc4aacffcc080425b12464f276cc4b1c3a09bd5046dd5e7  ./systemd/legacy-database-login-fence-authority.sql.example
 aec651650cb936324441bf318e4e1134e8c91072e3ddee4966b2408b875634e6  ./systemd/legacy-drain-database-target.conf.example

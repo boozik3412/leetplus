@@ -63,8 +63,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(node -p 'process.versions.node.split(".")[0]')" = 22
-          test "$(pnpm --version)" = "$PNPM_VERSION"
+          die() {
+            printf 'build-trusted-pnpm-store: %s\n' "$*" >&2
+            exit 1
+          }
+          [[ "$(node -p 'process.versions.node.split(".")[0]')" == '22' ]] \
+            || die 'Node major differs from the reviewed build runtime'
+          [[ "$(pnpm --version)" == "$PNPM_VERSION" ]] \
+            || die 'pnpm version differs from the reviewed build runtime'
           store_root="$RUNNER_TEMP/leetplus-pnpm-store-$RELEASE_SHA"
           archive="$RUNNER_TEMP/leetplus-pnpm-store-$RELEASE_SHA.tar.gz"
           checksum="$archive.sha256"
@@ -93,10 +99,28 @@ jobs:
 
           pnpm install --prod --offline --frozen-lockfile --side-effects-cache \
             --package-import-method=copy --store-dir "$store_root"
-          test -f node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
-          test -f node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node
-          find "$workspace_real" -depth -type d -name node_modules \
-            -exec rm -rf -- {} +
+          prisma_engine_root='node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines'
+          for prisma_engine in \
+            schema-engine-debian-openssl-3.0.x \
+            libquery_engine-debian-openssl-3.0.x.so.node; do
+            prisma_engine_path="${prisma_engine_root}/${prisma_engine}"
+            [[ -f "$prisma_engine_path" && ! -L "$prisma_engine_path" \
+              && -s "$prisma_engine_path" ]] \
+              || die "prewarmed Prisma engine is absent or unsafe: ${prisma_engine}"
+          done
+          for module_root in \
+            "$workspace_real/node_modules" \
+            "$workspace_real/apps/api/node_modules" \
+            "$workspace_real/apps/web/node_modules" \
+            "$workspace_real/packages/database/node_modules"; do
+            if [[ -e "$module_root" || -L "$module_root" ]]; then
+              [[ -d "$module_root" && ! -L "$module_root" ]] \
+                || die "workspace module root is not one real directory: ${module_root}"
+              rm -rf -- "$module_root"
+              [[ ! -e "$module_root" && ! -L "$module_root" ]] \
+                || die "workspace module root survived cleanup: ${module_root}"
+            fi
+          done
           if [[ -e "$store_root/v10/projects" || -L "$store_root/v10/projects" ]]; then
             test -d "$store_root/v10/projects"
             test ! -L "$store_root/v10/projects"
@@ -107,34 +131,57 @@ jobs:
           pnpm_home="$(dirname -- "$pnpm_command_path")"
           pnpm_node_modules_root="$(dirname -- "$pnpm_home")"
           pnpm_runtime_source="$(realpath -e -- "$pnpm_node_modules_root/pnpm")"
-          test "$(basename -- "$pnpm_command_path")" = pnpm
-          test "$(basename -- "$pnpm_home")" = .bin
-          test "$(basename -- "$pnpm_node_modules_root")" = node_modules
-          test -f "$pnpm_runtime_source/package.json"
-          test -f "$pnpm_runtime_source/bin/pnpm.cjs"
-          test -f "$pnpm_runtime_source/dist/pnpm.cjs"
-          test "$(node -p 'require(process.argv[1]).version' "$pnpm_runtime_source/package.json")" = "$PNPM_VERSION"
+          [[ "$(basename -- "$pnpm_command_path")" == 'pnpm' \
+            && "$(basename -- "$pnpm_home")" == '.bin' \
+            && "$(basename -- "$pnpm_node_modules_root")" == 'node_modules' ]] \
+            || die 'pnpm action command layout is outside the reviewed envelope'
+          case "$pnpm_runtime_source" in
+            "$pnpm_node_modules_root"/pnpm|"$pnpm_node_modules_root"/.pnpm/pnpm@"$PNPM_VERSION"/node_modules/pnpm) ;;
+            *) die "pnpm runtime source escaped the reviewed action root: ${pnpm_runtime_source}" ;;
+          esac
+          [[ -f "$pnpm_runtime_source/package.json" \
+            && ! -L "$pnpm_runtime_source/package.json" \
+            && -f "$pnpm_runtime_source/bin/pnpm.cjs" \
+            && ! -L "$pnpm_runtime_source/bin/pnpm.cjs" \
+            && -f "$pnpm_runtime_source/dist/pnpm.cjs" \
+            && ! -L "$pnpm_runtime_source/dist/pnpm.cjs" ]] \
+            || die 'pnpm runtime source lacks the reviewed regular files'
+          [[ "$(node -p 'require(process.argv[1]).version' \
+            "$pnpm_runtime_source/package.json")" == "$PNPM_VERSION" ]] \
+            || die 'pnpm runtime package version differs from the requested version'
+          [[ -z "$(find -P "$pnpm_runtime_source" -xdev ! -type d ! -type f -print -quit)" ]] \
+            || die 'pnpm runtime source contains a link or special entry'
           pnpm_runtime_target="$store_root/.leetplus-tools/pnpm/$PNPM_VERSION"
-          test ! -e "$pnpm_runtime_target"
-          install -d -m 0750 "$(dirname -- "$pnpm_runtime_target")"
-          cp -a -- "$pnpm_runtime_source" "$pnpm_runtime_target"
-          test -z "$(find -P "$pnpm_runtime_target" -xdev ! -type d ! -type f -print -quit)"
-          test -z "$(find -P "$pnpm_runtime_target" -xdev -type f -links +1 -print -quit)"
-          test "$(node "$pnpm_runtime_target/bin/pnpm.cjs" --version)" = "$PNPM_VERSION"
+          [[ ! -e "$pnpm_runtime_target" && ! -L "$pnpm_runtime_target" ]] \
+            || die 'pnpm runtime target already exists'
+          install -d -m 0750 "$pnpm_runtime_target"
+          cp -R --reflink=never \
+            --no-preserve=ownership,mode,timestamps,links \
+            -- "$pnpm_runtime_source"/. "$pnpm_runtime_target"/
+          [[ -z "$(find -P "$pnpm_runtime_target" -xdev ! -type d ! -type f -print -quit)" ]] \
+            || die 'copied pnpm runtime contains a link or special entry'
+          [[ -z "$(find -P "$pnpm_runtime_target" -xdev -type f -links +1 -print -quit)" ]] \
+            || die 'copied pnpm runtime contains a shared hardlink'
+          [[ "$(node "$pnpm_runtime_target/bin/pnpm.cjs" --version)" == "$PNPM_VERSION" ]] \
+            || die 'copied pnpm runtime is not executable by the reviewed Node runtime'
           pnpm_runtime_entry_count="$(find -P "$pnpm_runtime_target" -xdev -mindepth 1 | wc -l | tr -d ' ')"
           pnpm_runtime_total_bytes="$(find -P "$pnpm_runtime_target" -xdev -type f -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }')"
-          test "$pnpm_runtime_entry_count" -gt 0
-          test "$pnpm_runtime_entry_count" -le 5000
-          test "$pnpm_runtime_total_bytes" -gt 0
-          test "$pnpm_runtime_total_bytes" -le 268435456
+          [[ "$pnpm_runtime_entry_count" -gt 0 && "$pnpm_runtime_entry_count" -le 5000 ]] \
+            || die 'copied pnpm runtime entry count is outside the reviewed envelope'
+          [[ "$pnpm_runtime_total_bytes" -gt 0 \
+            && "$pnpm_runtime_total_bytes" -le 268435456 ]] \
+            || die 'copied pnpm runtime byte count is outside the reviewed envelope'
           pnpm_runtime_tree_sha256="$(
             cd "$pnpm_runtime_target"
             find . -xdev -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}'
           )"
 
-          test -z "$(find -P "$store_root" -xdev ! -type d ! -type f -print -quit)"
-          test -z "$(find -P "$store_root" -xdev -type f -links +1 -print -quit)"
-          test -n "$(find -P "$store_root" -xdev -type f -print -quit)"
+          [[ -z "$(find -P "$store_root" -xdev ! -type d ! -type f -print -quit)" ]] \
+            || die 'assembled store contains a link or special entry'
+          [[ -z "$(find -P "$store_root" -xdev -type f -links +1 -print -quit)" ]] \
+            || die 'assembled store contains a shared hardlink'
+          [[ -n "$(find -P "$store_root" -xdev -type f -print -quit)" ]] \
+            || die 'assembled store is empty'
           source_date_epoch="$(git show -s --format=%ct "$RELEASE_SHA")"
           tar --sort=name --mtime="@$source_date_epoch" \
             --owner=0 --group=0 --numeric-owner \

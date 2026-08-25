@@ -172,6 +172,9 @@ grep -F 'ln -s -- "$trusted_store_files"' "$CONSUMER" >/dev/null
 grep -F 'rm -rf -- "$install_store_dir"' "$CONSUMER" >/dev/null
 grep -F 'assert_trusted_store_unchanged' "$CONSUMER" >/dev/null
 grep -F '.leetplus-tools/pnpm/$PNPM_VERSION' "$STORE_WORKFLOW" >/dev/null
+grep -F 'pnpm runtime source contains a link or special entry' "$STORE_WORKFLOW" >/dev/null
+grep -F -- '--no-preserve=ownership,mode,timestamps,links' "$STORE_WORKFLOW" >/dev/null
+grep -F 'copied pnpm runtime contains a shared hardlink' "$STORE_WORKFLOW" >/dev/null
 
 printf 'PRODUCTION_PNPM_STORE_INTEGRITY_FIXTURE=PASS\n'
 printf 'PRODUCTION_PNPM_STORE_ROOT_OWNERSHIP_BOUND=true\n'

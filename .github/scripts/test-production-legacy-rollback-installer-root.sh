@@ -188,7 +188,14 @@ property_value() {
     leetplus-blue-green-recovery.timer) fragment='/etc/systemd/system/leetplus-blue-green-recovery.timer' ;;
   esac
   case "$property" in
-    LoadState) printf 'loaded\n' ;;
+    LoadState)
+      if [[ -L "/run/systemd/system/${unit}" \
+        && "$(readlink -- "/run/systemd/system/${unit}")" == /dev/null ]]; then
+        printf 'masked\n'
+      else
+        printf 'loaded\n'
+      fi
+      ;;
     ActiveState) printf 'inactive\n' ;;
     SubState) printf 'dead\n' ;;
     MainPID|ControlPID|ExecMainPID) printf '0\n' ;;
@@ -333,6 +340,35 @@ for unit in leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.s
   [[ -f "/etc/systemd/system/${unit}.d/90-leetplus-control-install-fence.conf" ]] \
     || die "persistent pre-commit fence is absent: ${unit}"
 done
+rm -f /run/fixture-fail-second-reload
+"$AUTHORITY_PATH" > /run/fixture-same-boot-resumed-install.out
+grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
+  /run/fixture-same-boot-resumed-install.out >/dev/null
+[[ ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing \
+  && ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.fence \
+  && ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent ]] \
+  || die 'same-boot resumed installer left a durable transaction residue'
+for unit in leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.service \
+  leetplus-web-rollback@.service leetplus-web-rollback@${LEGACY_SHA}.service \
+  leetplus-rollback-egress.service leetplus-blue-green-recovery.service \
+  leetplus-blue-green-recovery-watchdog.service leetplus-blue-green-recovery.timer; do
+  [[ ! -e "/run/systemd/system/${unit}" && ! -L "/run/systemd/system/${unit}" ]] \
+    || die "same-boot resumed installer left a runtime mask: ${unit}"
+done
+
+# Repeat the same preparatory failure and prove that reboot recovery remains
+# valid when /run masks disappear while the durable preparation/drop-ins stay.
+printf '\nfixture-reboot-resume-drift\n' >> /etc/nginx/leetplus/upstreams/blue.conf
+printf '0\n' > /run/fixture-daemon-reload-count
+touch /run/fixture-fail-second-reload
+if "$AUTHORITY_PATH" > /run/fixture-reboot-preparation.out 2>&1; then
+  die 'installer ignored the second simulated post-drop-in/pre-marker daemon-reload loss'
+fi
+grep -F -x \
+  'install-legacy-rollback-contour: systemd daemon-reload failed or timed out during control installation' \
+  /run/fixture-reboot-preparation.out >/dev/null
+[[ -f /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing ]] \
+  || die 'reboot fixture did not leave the durable preparation record'
 # Model reboot: /run masks disappear, while durable drop-ins/preparing survive.
 find /run/systemd/system -maxdepth 1 -type l -name 'leetplus-*' -delete
 rm -f /run/fixture-fail-second-reload
@@ -357,6 +393,31 @@ grep -F 'effective loaded control unit source/drop-in generation is not exact' \
 rm -f /run/fixture-stale-manager
 "$AUTHORITY_PATH" > /run/fixture-no-drift.out
 grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALL_DRIFT=false' /run/fixture-no-drift.out >/dev/null
+
+# An admitted predecessor stopped before its fence/intent commit on the real
+# systemd 255 host. Prove that only its pinned preparation pair plus the exact
+# complete runtime-mask set can be resumed by this generation.
+printf '\nfixture-compatible-predecessor-drift\n' >> /etc/nginx/leetplus/upstreams/blue.conf
+cat > /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing <<'PREDECESSOR_PREPARING'
+CONTRACT=LEETPLUS_SCHEDULER_FREE_CONTROL_INSTALL_V1
+CONTROL_MANIFEST_SHA256=815849b9225b612f4468773b3fb883782eda5abbc3dcc8d761db530a3d5a28d8
+INSTALL_PLAN_SHA256=86bfb46c71d385051b5087c6eb0231cf77fb36798372dc9f4540d51a9edaac849
+ORIGINAL_DRIFT_DESTINATIONS=/etc/nginx/leetplus/upstreams/blue.conf
+PREEXISTING_RUNTIME_MASKS=NONE
+PREDECESSOR_PREPARING
+chown root:root /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing
+chmod 0600 /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing
+systemctl mask --runtime --no-reload \
+  leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.service \
+  leetplus-web-rollback@.service leetplus-web-rollback@${LEGACY_SHA}.service \
+  leetplus-rollback-egress.service leetplus-blue-green-recovery.service \
+  leetplus-blue-green-recovery-watchdog.service leetplus-blue-green-recovery.timer
+systemctl daemon-reload
+"$AUTHORITY_PATH" > /run/fixture-compatible-predecessor.out
+grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
+  /run/fixture-compatible-predecessor.out >/dev/null
+[[ ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing ]] \
+  || die 'compatible predecessor recovery left its preparation record'
 
 printf '\nfixture-drift\n' >> /etc/nginx/leetplus/upstreams/blue.conf
 ln -s /dev/null /run/systemd/system/leetplus-api-rollback@.service

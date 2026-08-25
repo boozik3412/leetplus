@@ -58,6 +58,17 @@ readonly CONTROL_INSTALL_FENCE_NAME='scheduler-free-control-install.fence'
 # bounded while allowing that fail-closed preparation to resume.
 readonly COMPATIBLE_PREPARING_CONTROL_MANIFEST_SHA256='815849b9225b612f4468773b3fb883782eda5abbc3dcc8d761db530a3d5a28d8'
 readonly COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256='86bfb46c71d385051b5087c6eb0231cf77fb36798372dc9f4540d51a9edac849'
+# The same production transaction subsequently committed this exact fence and
+# PREPARED intent before systemd 255 exposed the template-dependency aliases.
+# These five record identities are the only cross-generation committed state
+# accepted for roll-forward; their original generation fields remain unchanged
+# until the current destination bytes are post-attested and all records removed.
+readonly COMPATIBLE_FENCED_PREPARING_RECORD_SHA256='ca3888a804c8087528962dab6829db6737952045816737cd4c73a5a76d9511fd'
+readonly COMPATIBLE_FENCED_CONTROL_MANIFEST_SHA256='e8d77358c5d75d2c599f04fcb1dcffe8bc681b4cbf12f39bdb0222a133857a4e'
+readonly COMPATIBLE_FENCED_INSTALL_PLAN_SHA256='5459f911583ac140cebe684ebdf4309ee15324b6a5a5faaa4561eba633288ed2'
+readonly COMPATIBLE_FENCED_FENCE_RECORD_SHA256='4d19f787eed9136f32e9fce87b4e42d0ad99cfe0acd2eb0a67f889f8310f435c'
+readonly COMPATIBLE_FENCED_PREPARED_INTENT_RECORD_SHA256='c44e87d16ab8f9da0309aba41928210f3e0b970d29a2288f5811ea9998831b7d'
+readonly COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256='73f199b02fd9202bc69853151dc2109f69cfa2fef8ab2e97abd659b031291c8a'
 
 die() {
   printf 'install-legacy-rollback-contour: %s\n' "$*" >&2
@@ -65,7 +76,13 @@ die() {
 }
 
 [[ "$COMPATIBLE_PREPARING_CONTROL_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
-  && "$COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+  && "$COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_FENCED_PREPARING_RECORD_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_FENCED_CONTROL_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_FENCED_INSTALL_PLAN_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_FENCED_FENCE_RECORD_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_FENCED_PREPARED_INTENT_RECORD_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256" =~ ^[0-9a-f]{64}$ ]] \
   || die 'compatible predecessor preparation digests are malformed'
 
 source_root="$SCRIPT_ROOT"
@@ -1456,8 +1473,12 @@ original_drift_serialized=''
 preparing_record_sha=''
 preparing_generation=''
 fence_record_sha=''
+fence_generation=''
 intent_record_sha=''
 intent_phase=''
+intent_generation=''
+intent_control_manifest_sha=''
+intent_install_plan_sha=''
 fence_needs_publish=false
 
 if [[ -e "$control_preparing" || -L "$control_preparing" ]]; then
@@ -1494,11 +1515,24 @@ if [[ -e "$control_fence" || -L "$control_fence" ]]; then
     || die 'control-install boot fence record could not be read completely'
   [[ ${#fence_lines[@]} == 4 \
     && "${fence_lines[0]}" == "CONTRACT=${CONTROL_INSTALL_CONTRACT}" \
-    && "${fence_lines[1]}" == "CONTROL_MANIFEST_SHA256=${control_manifest_sha}" \
-    && "${fence_lines[2]}" == "INSTALL_PLAN_SHA256=${install_plan_sha}" \
     && "${fence_lines[3]}" == "PREPARING_SHA256=${preparing_record_sha}" ]] \
     || die 'control-install boot fence schema/digests are not exact'
+  if [[ "${fence_lines[1]}" == "CONTROL_MANIFEST_SHA256=${control_manifest_sha}" \
+    && "${fence_lines[2]}" == "INSTALL_PLAN_SHA256=${install_plan_sha}" ]]; then
+    fence_generation=current
+  elif [[ "$unprivileged_test_mode" == false \
+    && "$preparing_generation" == compatible-predecessor \
+    && "$preparing_record_sha" == "$COMPATIBLE_FENCED_PREPARING_RECORD_SHA256" \
+    && "${fence_lines[1]}" == "CONTROL_MANIFEST_SHA256=${COMPATIBLE_FENCED_CONTROL_MANIFEST_SHA256}" \
+    && "${fence_lines[2]}" == "INSTALL_PLAN_SHA256=${COMPATIBLE_FENCED_INSTALL_PLAN_SHA256}" ]]; then
+    fence_generation=compatible-predecessor
+  else
+    die 'control-install boot fence schema/digests are not exact'
+  fi
   fence_record_sha="$(sha256sum "$control_fence" | awk '{ print $1 }')"
+  [[ "$fence_generation" != compatible-predecessor \
+    || "$fence_record_sha" == "$COMPATIBLE_FENCED_FENCE_RECORD_SHA256" ]] \
+    || die 'compatible predecessor boot fence digest is not exact'
 fi
 
 if [[ -e "$control_intent" || -L "$control_intent" ]]; then
@@ -1510,13 +1544,29 @@ if [[ -e "$control_intent" || -L "$control_intent" ]]; then
     || die 'control-install intent could not be read completely'
   [[ ${#intent_lines[@]} == 5 \
     && "${intent_lines[0]}" == "CONTRACT=${CONTROL_INSTALL_CONTRACT}" \
-    && "${intent_lines[1]}" == "CONTROL_MANIFEST_SHA256=${control_manifest_sha}" \
-    && "${intent_lines[2]}" == "INSTALL_PLAN_SHA256=${install_plan_sha}" \
     && "${intent_lines[3]}" == "FENCE_SHA256=${fence_record_sha}" \
     && "${intent_lines[4]}" =~ ^PHASE=(PREPARED|POST_ATTESTED)$ ]] \
     || die 'control-install intent schema/digests are not exact'
   intent_phase="${intent_lines[4]#PHASE=}"
   intent_record_sha="$(sha256sum "$control_intent" | awk '{ print $1 }')"
+  if [[ "$fence_generation" == current \
+    && "${intent_lines[1]}" == "CONTROL_MANIFEST_SHA256=${control_manifest_sha}" \
+    && "${intent_lines[2]}" == "INSTALL_PLAN_SHA256=${install_plan_sha}" ]]; then
+    intent_generation=current
+    intent_control_manifest_sha="$control_manifest_sha"
+    intent_install_plan_sha="$install_plan_sha"
+  elif [[ "$unprivileged_test_mode" == false \
+    && "$fence_generation" == compatible-predecessor \
+    && "${intent_lines[1]}" == "CONTROL_MANIFEST_SHA256=${COMPATIBLE_FENCED_CONTROL_MANIFEST_SHA256}" \
+    && "${intent_lines[2]}" == "INSTALL_PLAN_SHA256=${COMPATIBLE_FENCED_INSTALL_PLAN_SHA256}" \
+    && ( "$intent_phase:$intent_record_sha" == "PREPARED:${COMPATIBLE_FENCED_PREPARED_INTENT_RECORD_SHA256}" \
+      || "$intent_phase:$intent_record_sha" == "POST_ATTESTED:${COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256}" ) ]]; then
+    intent_generation=compatible-predecessor
+    intent_control_manifest_sha="$COMPATIBLE_FENCED_CONTROL_MANIFEST_SHA256"
+    intent_install_plan_sha="$COMPATIBLE_FENCED_INSTALL_PLAN_SHA256"
+  else
+    die 'control-install intent generation/digests are not exact'
+  fi
 fi
 
 if [[ -n "$original_drift_serialized" ]]; then
@@ -1628,6 +1678,9 @@ if [[ "$intent_phase" != POST_ATTESTED ]]; then
     publish_state_record "$control_intent" "$intent_record_content"
     intent_record_sha="$(sha256sum "$control_intent" | awk '{ print $1 }')"
     intent_phase=PREPARED
+    intent_generation=current
+    intent_control_manifest_sha="$control_manifest_sha"
+    intent_install_plan_sha="$install_plan_sha"
     if [[ "$unprivileged_test_mode" == true && "${TEST_INSTALL_FAIL_AFTER_INTENT_SYNC:-false}" == true ]]; then
       die 'simulated crash after durable prepared intent with boot fences active'
     fi
@@ -1660,14 +1713,20 @@ if [[ "$intent_phase" != POST_ATTESTED ]]; then
   attest_runtime_masks
   attest_persistent_fences
   attest_quiescent_runtime exact
+  [[ "$intent_control_manifest_sha" =~ ^[0-9a-f]{64}$ \
+    && "$intent_install_plan_sha" =~ ^[0-9a-f]{64}$ ]] \
+    || die 'control-install intent generation identity is absent before post-attestation'
   intent_record_content="CONTRACT=${CONTROL_INSTALL_CONTRACT}"$'\n'\
-"CONTROL_MANIFEST_SHA256=${control_manifest_sha}"$'\n'\
-"INSTALL_PLAN_SHA256=${install_plan_sha}"$'\n'\
+"CONTROL_MANIFEST_SHA256=${intent_control_manifest_sha}"$'\n'\
+"INSTALL_PLAN_SHA256=${intent_install_plan_sha}"$'\n'\
 "FENCE_SHA256=${fence_record_sha}"$'\n'\
 "PHASE=POST_ATTESTED"$'\n'
   publish_state_record "$control_intent" "$intent_record_content"
   intent_record_sha="$(sha256sum "$control_intent" | awk '{ print $1 }')"
   intent_phase=POST_ATTESTED
+  [[ "$intent_generation" != compatible-predecessor \
+    || "$intent_record_sha" == "$COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256" ]] \
+    || die 'compatible predecessor post-attested intent digest is not exact'
 else
   compute_install_drift
   ((drift_count == 0)) \

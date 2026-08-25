@@ -199,7 +199,7 @@ entry, writable ancestor, лишний файл или digest drift блокир
 Bootstrap authority берётся из того же immutable CI artifact, но не является
 частью исполняемого control bundle (это устраняет self-verification). Его
 reviewed SHA-256 для этой версии:
-`3988b8074c740ddee80e2e535a511352688484937377afe348fa467b0424511d`.
+`bc2929b0b2ecc21931993b4adc216129ec2da2c039ac8784c374b50ca8c9a78f`.
 Сначала byte копируется во временный root-owned файл, проверяется уже после
 копирования и только затем атомарно публикуется:
 
@@ -207,7 +207,7 @@ reviewed SHA-256 для этой версии:
 sudo install -o root -g root -m 0500 \
   <immutable-ci-artifact>/leetplus-install-scheduler-free-nminus1-v1 \
   /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new
-echo '3988b8074c740ddee80e2e535a511352688484937377afe348fa467b0424511d  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
+echo 'bc2929b0b2ecc21931993b4adc216129ec2da2c039ac8784c374b50ca8c9a78f  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
   | sudo sha256sum --check --strict
 sudo mv -T /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new \
   /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1
@@ -232,7 +232,12 @@ mask, повтор authority в том же boot обязан продолжит
 quiescent rollback runtime. После reboot тот же record разрешает восстановить
 исчезнувшие runtime mask. Совместимость между control generations ограничена
 прибитой парой manifest/install-plan непосредственно предшествующей admitted
-generation; произвольный или частичный mask/state set остаётся stop condition.
+generation. Если предшественник уже зафиксировал boot fence и PREPARED intent,
+roll-forward дополнительно требует byte-identical production preparing/fence/
+intent records и их пять pinned SHA-256. Исходная generation identity этих
+records сохраняется через POST_ATTESTED и удаляется только после attestation
+новых destination bytes; произвольный или частичный mask/state set остаётся
+stop condition.
 
 Прямой запуск `install-legacy-rollback-contour.sh` без authority остаётся
 запрещённым. После provisioning:

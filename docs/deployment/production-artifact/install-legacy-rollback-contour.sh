@@ -1071,6 +1071,13 @@ normalized_word_set() {
   tr ' ' '\n' | awk 'NF == 1 { print }' | LC_ALL=C sort | tr '\n' ' ' | awk '{$1=$1; print}'
 }
 
+systemd_effective_socket_bind_source_set() {
+  # systemd 255 renders an admitted source token such as ipv4:tcp:4300 as
+  # ipv4:tcp4300 in SocketBindAllow. Canonicalize only that separator while
+  # retaining the exact family/protocol/port set for the effective check.
+  sed -E 's/^((ipv4|ipv6):(tcp|udp)):/\1/' | normalized_word_set
+}
+
 effective_environment_file_paths() {
   tr ' ' '\n' | awk '
     {
@@ -1179,10 +1186,14 @@ attest_loaded_control_generation() {
       == "$(printf '%s' "$expected_address" | normalized_word_set)" ]] \
       || die "effective rollback address-family boundary is not exact: ${unit}"
     for property in SocketBindDeny SocketBindAllow; do
-      expected="$(awk -F= -v key="$property" '$1 == key { print substr($0, length($1) + 2) }' "$fragment" \
-        | LC_ALL=C sort | tr '\n' ' ' | awk '{$1=$1; print}')"
+      expected="$(awk -F= -v key="$property" '$1 == key { print substr($0, length($1) + 2) }' "$fragment")"
+      if [[ "$property" == SocketBindAllow ]]; then
+        expected="$(printf '%s\n' "$expected" | systemd_effective_socket_bind_source_set)"
+      else
+        expected="$(printf '%s\n' "$expected" | normalized_word_set)"
+      fi
       actual="$(systemctl_property_value "$unit" "$property")"
-      [[ "$(printf '%s' "$actual" | normalized_word_set)" == "$(printf '%s' "$expected" | normalized_word_set)" ]] \
+      [[ "$(printf '%s' "$actual" | normalized_word_set)" == "$expected" ]] \
         || die "effective rollback ${property} is not exact: ${unit}"
     done
   done

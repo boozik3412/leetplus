@@ -279,6 +279,9 @@ case "$command_name" in
       exit 0
     fi
     for property in "${properties[@]}"; do
+      case "$unit:$property" in
+        *.timer:MainPID|*.timer:ControlGroup) continue ;;
+      esac
       value="$(property_value "$unit" "$property")"
       if [[ "$value_only" == true ]]; then printf '%s\n' "$value"; else printf '%s=%s\n' "$property" "$value"; fi
     done

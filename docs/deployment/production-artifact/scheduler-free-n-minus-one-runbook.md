@@ -199,7 +199,7 @@ entry, writable ancestor, лишний файл или digest drift блокир
 Bootstrap authority берётся из того же immutable CI artifact, но не является
 частью исполняемого control bundle (это устраняет self-verification). Его
 reviewed SHA-256 для этой версии:
-`3fd8fc08295ec4a3bf37ac073e9a2fd9a29311c25e5148cf30c183270ade5c42`.
+`e601a41e93c3704f1a99ead869ba6ae4a57167494fe082509dadae8a038fe244`.
 Сначала byte копируется во временный root-owned файл, проверяется уже после
 копирования и только затем атомарно публикуется:
 
@@ -207,7 +207,7 @@ reviewed SHA-256 для этой версии:
 sudo install -o root -g root -m 0500 \
   <immutable-ci-artifact>/leetplus-install-scheduler-free-nminus1-v1 \
   /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new
-echo '3fd8fc08295ec4a3bf37ac073e9a2fd9a29311c25e5148cf30c183270ade5c42  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
+echo 'e601a41e93c3704f1a99ead869ba6ae4a57167494fe082509dadae8a038fe244  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
   | sudo sha256sum --check --strict
 sudo mv -T /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new \
   /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1

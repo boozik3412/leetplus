@@ -279,6 +279,16 @@ grep -F -x 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=46' "$TEST_ROOT/accepted.out
 [[ -f "$accepted_root/var/lib/leetplus/deploy-receipts/production-control/production-control-generation-${RELEASE_SHA}.receipt.json" \
   && ! -e "$accepted_root/var/lib/leetplus/deploy-receipts/production-control/production-control-generation-${RELEASE_SHA}.intent.json" ]] \
   || die 'accepted install did not finalize the exact durable receipt state'
+fixture_uid="$(id -u)"
+fixture_gid="$(id -g)"
+[[ "$(stat -c '%u:%g:%a' -- "$accepted_root/usr/local/libexec")" == \
+    "${fixture_uid}:${fixture_gid}:755" \
+  && "$(stat -c '%u:%g:%a' -- "$accepted_root/usr/local/libexec/leetplus")" == \
+    "${fixture_uid}:${fixture_gid}:755" \
+  && "$(stat -c '%u:%g:%a:%h' -- \
+    "$accepted_root/usr/local/libexec/leetplus/stage-release-artifact.sh")" == \
+    "${fixture_uid}:${fixture_gid}:555:1" ]] \
+  || die 'accepted install did not preserve executable service-helper authority modes'
 run_installed_verifier "$accepted_root" > "$TEST_ROOT/accepted-verify.out"
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' \
   "$TEST_ROOT/accepted-verify.out" >/dev/null

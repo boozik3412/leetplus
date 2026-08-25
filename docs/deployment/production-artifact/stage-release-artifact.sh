@@ -241,7 +241,7 @@ assert_installed_stager_authority() {
 
   [[ "$candidate" == "$INSTALLED_STAGER" \
     && "$(realpath -e -- "$candidate")" == "$INSTALLED_STAGER" \
-    && "$(stat -c '%u:%g:%a:%h' -- "$candidate")" == '0:0:755:1' ]] \
+    && "$(stat -c '%u:%g:%a:%h' -- "$candidate")" == '0:0:555:1' ]] \
     || die 'production staging authority is not the exact root-owned installed stager'
   ancestor="$(dirname -- "$candidate")"
   while :; do
@@ -1099,13 +1099,18 @@ NODE
 if [[ "$hydrate" == true ]]; then
   capture_trusted_source_manifest
   assert_exact_hydration_output_inventory "$staging_directory"
-  require_command pnpm
+  declare -a pnpm_command=()
   actual_node_major="$(node -p 'process.versions.node.split(".")[0]')"
-  actual_pnpm_version="$(pnpm --version)"
   expected_node_major="$(node -p 'require(process.argv[1]).nodeVersion' "$staging_directory/release-provenance.json")"
   expected_pnpm_version="$(node -p 'require(process.argv[1]).pnpmVersion' "$staging_directory/release-provenance.json")"
   [[ "$actual_node_major" == "$expected_node_major" ]] || die 'hydration Node major differs from release provenance'
-  [[ "$actual_pnpm_version" == "$expected_pnpm_version" ]] || die 'hydration pnpm version differs from release provenance'
+  if [[ "$unprivileged_test_mode" == true ]]; then
+    require_command pnpm
+    actual_pnpm_version="$(pnpm --version)"
+    [[ "$actual_pnpm_version" == "$expected_pnpm_version" ]] \
+      || die 'hydration pnpm version differs from release provenance'
+    pnpm_command=(pnpm)
+  fi
   if [[ "$unprivileged_test_mode" == false ]]; then
     node - <<'NODE' || die 'hydration kernel no-egress probe did not fail closed'
 const net = require('node:net');
@@ -1200,18 +1205,82 @@ NODE
       || die 'trusted pnpm store integrity attestation is malformed'
     store_manifest_sha256="$(awk -F= '$1 == "PNPM_STORE_MANIFEST_SHA256" { print $2 }' <<< "$store_integrity_attestation")"
     store_receipt_sha256="$(sha256sum -- "$store_receipt" | awk '{ print $1 }')"
+    pnpm_runtime_root="${pnpm_store_dir}/.leetplus-tools/pnpm/${expected_pnpm_version}"
+    pnpm_runtime_entry="${pnpm_runtime_root}/bin/pnpm.cjs"
+    [[ -d "$pnpm_runtime_root" && ! -L "$pnpm_runtime_root" \
+      && "$(realpath -e -- "$pnpm_runtime_root")" == "$pnpm_runtime_root" \
+      && -f "${pnpm_runtime_root}/package.json" \
+      && ! -L "${pnpm_runtime_root}/package.json" \
+      && -f "${pnpm_runtime_root}/dist/pnpm.cjs" \
+      && ! -L "${pnpm_runtime_root}/dist/pnpm.cjs" \
+      && -f "$pnpm_runtime_entry" && ! -L "$pnpm_runtime_entry" \
+      && "$(realpath -e -- "$pnpm_runtime_entry")" == "$pnpm_runtime_entry" \
+      && "$(stat -c '%u:%a:%h' -- "$pnpm_runtime_entry")" == '0:440:1' ]] \
+      || die 'trusted pnpm runtime is absent or unsafe'
+    [[ "$(/usr/bin/node -p 'require(process.argv[1]).version' \
+      "${pnpm_runtime_root}/package.json")" == "$expected_pnpm_version" ]] \
+      || die 'trusted pnpm runtime package version differs from release provenance'
+    actual_pnpm_version="$(/usr/bin/node "$pnpm_runtime_entry" --version)"
+    [[ "$actual_pnpm_version" == "$expected_pnpm_version" ]] \
+      || die 'trusted pnpm runtime command differs from release provenance'
+    pnpm_command=(/usr/bin/node "$pnpm_runtime_entry")
   fi
+
+  assert_trusted_store_unchanged() {
+    local current_attestation
+    [[ "$unprivileged_test_mode" == false ]] || return 0
+    current_attestation="$(
+      /usr/bin/node "$store_verifier" verify \
+        --store-root "$pnpm_store_dir" \
+        --lockfile-sha256 "$lockfile_sha" \
+        --node-major "$expected_node_major" \
+        --pnpm-version "$expected_pnpm_version"
+    )" || die 'trusted pnpm store failed post-use integrity verification'
+    [[ "$current_attestation" == "$store_integrity_attestation" ]] \
+      || die 'trusted pnpm store attestation changed during hydration'
+  }
+
   prepare_hydration_module_roots
+  install_store_dir="$pnpm_store_dir"
+  if [[ "$unprivileged_test_mode" == false ]]; then
+    trusted_store_files="${pnpm_store_dir}/v10/files"
+    [[ -d "$trusted_store_files" && ! -L "$trusted_store_files" \
+      && "$(realpath -e -- "$trusted_store_files")" == "$trusted_store_files" \
+      && "$(stat -c '%u:%a' -- "$trusted_store_files")" == '0:550' ]] \
+      || die 'trusted pnpm CAS files root is absent or unsafe'
+    install_store_dir="${staging_directory}/node_modules/.leetplus-pnpm-install-store"
+    [[ ! -e "$install_store_dir" && ! -L "$install_store_dir" ]] \
+      || die 'ephemeral pnpm install store already exists'
+    mkdir -p -- "${install_store_dir}/v10"
+    chmod 0700 -- "$install_store_dir" "${install_store_dir}/v10"
+    ln -s -- "$trusted_store_files" "${install_store_dir}/v10/files"
+    [[ -L "${install_store_dir}/v10/files" \
+      && "$(readlink -- "${install_store_dir}/v10/files")" == "$trusted_store_files" \
+      && "$(realpath -e -- "${install_store_dir}/v10/files")" == "$trusted_store_files" ]] \
+      || die 'ephemeral pnpm install store is not bound to the trusted CAS'
+  fi
   if ! (
     cd -- "$staging_directory"
     assert_exact_hydration_output_inventory "$staging_directory"
     assert_trusted_source_manifest_unchanged
-    pnpm install --prod --offline --frozen-lockfile --ignore-scripts \
+    "${pnpm_command[@]}" install --prod --offline --frozen-lockfile --ignore-scripts \
       --side-effects-cache-readonly --package-import-method=copy \
-      --store-dir "$pnpm_store_dir" || exit 1
+      --store-dir "$install_store_dir" || exit 1
+    if [[ "$unprivileged_test_mode" == false ]]; then
+      [[ "$install_store_dir" == \
+        "${staging_directory}/node_modules/.leetplus-pnpm-install-store" \
+        && -d "$install_store_dir" && ! -L "$install_store_dir" \
+        && "$(realpath -e -- "$(dirname -- "$install_store_dir")")" == \
+          "${staging_directory}/node_modules" ]] \
+        || exit 1
+      rm -rf -- "$install_store_dir"
+      [[ ! -e "$install_store_dir" && ! -L "$install_store_dir" ]] || exit 1
+    fi
+    assert_trusted_store_unchanged
     assert_trusted_source_manifest_unchanged
     assert_exact_hydration_output_inventory "$staging_directory"
-    pnpm --filter database db:generate || exit 1
+    "${pnpm_command[@]}" --filter database db:generate || exit 1
+    assert_trusted_store_unchanged
     assert_trusted_source_manifest_unchanged
     assert_exact_hydration_output_inventory "$staging_directory"
     sha256sum --strict --check --quiet SHA256SUMS || exit 1

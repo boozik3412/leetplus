@@ -346,9 +346,9 @@ def stable_read(pathname, maximum, label):
         os.close(descriptor)
 
 
-def atomic_write(pathname, value, root_prefix, uid, gid, mode):
+def atomic_write(pathname, value, root_prefix, uid, gid, mode, parent_mode=0o700):
     parent = os.path.dirname(pathname)
-    ensure_directory(parent, root_prefix, uid, gid, 0o700)
+    ensure_directory(parent, root_prefix, uid, gid, parent_mode)
     temporary = os.path.join(parent, f".{os.path.basename(pathname)}.new")
     try:
         existing = os.lstat(temporary)
@@ -975,11 +975,20 @@ for source, destination, mode in install_entries:
     destination_parent = os.path.dirname(destination_path)
     if destination.startswith(CONTROL_BUNDLE_ROOT + "/"):
         ensure_directory(host_path(root_prefix, "/srv/leetplus"), root_prefix, uid, gid, 0o755)
-        ensure_directory(destination_parent, root_prefix, uid, gid, 0o500)
+        destination_parent_mode = 0o500
     else:
-        ensure_directory(destination_parent, root_prefix, uid, gid, 0o755)
+        destination_parent_mode = 0o755
+    ensure_directory(destination_parent, root_prefix, uid, gid, destination_parent_mode)
     reject_exact_mount(destination_path, mount_targets, f"install destination {destination}")
-    atomic_write(destination_path, source_bytes, root_prefix, uid, gid, mode)
+    atomic_write(
+        destination_path,
+        source_bytes,
+        root_prefix,
+        uid,
+        gid,
+        mode,
+        destination_parent_mode,
+    )
     installed_bytes = stable_read(destination_path, MAX_MEMBER_BYTES, f"installed destination {destination}")[0]
     details = os.lstat(destination_path)
     if (
@@ -997,7 +1006,15 @@ for source, destination, mode in install_entries:
 inner_digest = sha256_bytes(inner_manifest_bytes)
 trust_path = host_path(root_prefix, "/etc/leetplus/rollback-control-manifest.sha256")
 ensure_directory(os.path.dirname(trust_path), root_prefix, uid, gid, 0o755)
-atomic_write(trust_path, f"{inner_digest}\n".encode("ascii"), root_prefix, uid, gid, 0o400)
+atomic_write(
+    trust_path,
+    f"{inner_digest}\n".encode("ascii"),
+    root_prefix,
+    uid,
+    gid,
+    0o400,
+    0o755,
+)
 
 if not fixture_mode:
     daemon_reload = subprocess.run(

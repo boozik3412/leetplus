@@ -762,12 +762,26 @@ attest_quiescent_runtime() {
         || die "protected unit returned duplicate/unknown state: ${unit}:${key}"
       properties["$key"]="$value"
     done <<< "$show_output"
-    [[ ${#properties[@]} == 5 ]] || die "protected unit state is incomplete: ${unit}"
+    [[ -n "${properties[LoadState]+x}" \
+      && -n "${properties[ActiveState]+x}" \
+      && -n "${properties[SubState]+x}" ]] \
+      || die "protected unit lifecycle state is incomplete: ${unit}"
     load_state="${properties[LoadState]}"
     active_state="${properties[ActiveState]}"
     sub_state="${properties[SubState]}"
-    main_pid="${properties[MainPID]}"
-    control_group="${properties[ControlGroup]}"
+    if [[ "$unit" == *.timer ]]; then
+      [[ ${#properties[@]} == 3 ]] \
+        || die "protected timer returned non-lifecycle process state: ${unit}"
+      main_pid=0
+      control_group=''
+    else
+      [[ ${#properties[@]} == 5 \
+        && -n "${properties[MainPID]+x}" \
+        && -n "${properties[ControlGroup]+x}" ]] \
+        || die "protected service state is incomplete: ${unit}"
+      main_pid="${properties[MainPID]}"
+      control_group="${properties[ControlGroup]}"
+    fi
     [[ "$load_state" == loaded || "$load_state" == not-found ]] \
       || die "protected unit load state is unsafe: ${unit}:${load_state}"
     [[ "$active_state" == inactive && "$sub_state" == dead && "$main_pid" == 0 ]] \

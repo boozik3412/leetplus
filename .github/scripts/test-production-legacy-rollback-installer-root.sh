@@ -282,8 +282,11 @@ property_value() {
     NoNewPrivileges|PrivateTmp|PrivateDevices|ProtectHome) printf 'yes\n' ;;
     ProtectSystem) printf 'strict\n' ;;
     RestrictNetworkInterfaces) printf 'lo\n' ;;
-    IPAddressDeny) printf 'any\n' ;;
-    IPAddressAllow) printf 'localhost\n' ;;
+    IPAddressDeny)
+      [[ ! -e /run/fixture-ip-address-unsafe ]] \
+        && printf '::/0 0.0.0.0/0\n' || printf '0.0.0.0/0\n'
+      ;;
+    IPAddressAllow) printf '127.0.0.0/8 ::1/128\n' ;;
     *) printf '\n' ;;
   esac
 }
@@ -569,6 +572,26 @@ fi
 grep -F 'loaded fenced current unit is not held by the exact effective boot fence: leetplus-blue-green-recovery.service' \
   /run/fixture-fenced-predecessor-recovery-condition.out >/dev/null
 rm -f /run/fixture-recovery-condition-unsafe
+touch /run/fixture-ip-address-unsafe
+if "$AUTHORITY_PATH" > /run/fixture-post-attested-ip-normalization.out 2>&1; then
+  die 'installer accepted an incomplete effective systemd IP deny normalization'
+fi
+grep -F 'effective rollback IP address boundary is not exact: leetplus-api-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service' \
+  /run/fixture-post-attested-ip-normalization.out >/dev/null
+[[ "$(sha256sum /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent | awk '{ print $1 }')" \
+  == 73f199b02fd9202bc69853151dc2109f69cfa2fef8ab2e97abd659b031291c8a \
+  && "$(tail -n 1 /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent)" \
+  == 'PHASE=POST_ATTESTED' ]] \
+  || die 'effective-IP negative did not retain the exact post-attested recovery intent'
+for unit in leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.service \
+  leetplus-web-rollback@.service leetplus-web-rollback@${LEGACY_SHA}.service \
+  leetplus-rollback-egress.service leetplus-blue-green-recovery.service \
+  leetplus-blue-green-recovery-watchdog.service leetplus-blue-green-recovery.timer; do
+  [[ ! -e "/run/systemd/system/${unit}" && ! -L "/run/systemd/system/${unit}" \
+    && ! -e "/etc/systemd/system/${unit}.d/90-leetplus-control-install-fence.conf" ]] \
+    || die "post-attested effective-IP negative retained a fence or mask: ${unit}"
+done
+rm -f /run/fixture-ip-address-unsafe
 "$AUTHORITY_PATH" > /run/fixture-fenced-predecessor.out
 grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
   /run/fixture-fenced-predecessor.out >/dev/null

@@ -10,6 +10,7 @@ readonly VERIFIER="${REPOSITORY_ROOT}/docs/deployment/production-control-authori
 readonly SOURCE_ALLOWLIST="${REPOSITORY_ROOT}/docs/deployment/production-control-authority/production-control-payload.allowlist"
 readonly ARTIFACT_ALLOWLIST='docs/deployment/production-control-authority/production-control-payload.allowlist'
 readonly INNER_MANIFEST='docs/deployment/production-artifact/CONTROL_BUNDLE_SHA256SUMS'
+readonly INNER_INSTALLER='docs/deployment/production-artifact/install-legacy-rollback-contour.sh'
 readonly AUTHORITY='docs/deployment/production-control-authority/leetplus-install-scheduler-free-nminus1-v1'
 readonly INSTALL_AUTHORITY='docs/deployment/production-control-authority/leetplus-install-production-control-v1'
 readonly INSTALL_MAP='docs/deployment/production-control-authority/production-control-install-map.tsv'
@@ -38,7 +39,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for command_name in cp dirname grep head ln mkdir mkfifo mktemp mv realpath rm sed sort tail; do
+for command_name in awk cp dirname grep head ln mkdir mkfifo mktemp mv realpath rm sed sort tail; do
   command -v "$command_name" >/dev/null 2>&1 \
     || die "missing fixture command: ${command_name}"
 done
@@ -54,6 +55,14 @@ done
 [[ "$(grep -c -F "  ./systemd/${DATABASE_FENCE_AUTHORITY##*/}" \
   "${REPOSITORY_ROOT}/${INNER_MANIFEST}")" == '1' ]] \
   || die 'inner control manifest omits the database login fence authority'
+[[ "$(awk -F '\t' '$1 == "docs/deployment/production-artifact/blue-green-cutover.sh" \
+  && $2 == "/usr/local/sbin/leetplus-blue-green-cutover" { print $3 }' \
+  "${REPOSITORY_ROOT}/${INSTALL_MAP}")" == '0500' ]] \
+  || die 'production-control cutover authority mode is not exact 0500'
+grep -F -x \
+  'add_install_file 0500 "${source_root}/blue-green-cutover.sh" "${sbin_root}/leetplus-blue-green-cutover"' \
+  "${REPOSITORY_ROOT}/${INNER_INSTALLER}" >/dev/null \
+  || die 'N-1 and production-control cutover authority modes are inconsistent'
 
 clean_node() {
   /usr/bin/env -i \
@@ -202,7 +211,7 @@ grep -F -x 'PRODUCTION_CONTROL_PAYLOAD_FILE_COUNT=57' \
 grep -F -x "PRODUCTION_CONTROL_NODE_SHA256=$(node_executable_sha256)" \
   "${TEST_ROOT}/accepted.out" >/dev/null
 grep -F -x \
-  'PRODUCTION_CONTROL_INNER_MANIFEST_SHA256=fde80a60d4b102fb886aaf6a41c13ec133c8528743484c5424b509b7a6a42309' \
+  'PRODUCTION_CONTROL_INNER_MANIFEST_SHA256=4ff74a933c69bb6f545f6585ba42c2d48c6eac5c06e60a0c6a63b9418bb93826' \
   "${TEST_ROOT}/accepted.out" >/dev/null
 if clean_node "$VERIFIER" \
   --artifact-root "$(canonical_root "$accepted_root")" \

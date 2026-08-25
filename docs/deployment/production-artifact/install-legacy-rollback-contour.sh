@@ -559,7 +559,10 @@ add_install_file 0755 "${source_root}/verify-legacy-rollback-authenticated-reads
 add_install_file 0755 "${source_root}/verify-legacy-runtime-drain.sh" "${libexec_root}/verify-legacy-runtime-drain.sh"
 add_install_file 0755 "${source_root}/verify-legacy-rollback-readiness.sh" "${libexec_root}/verify-legacy-rollback-readiness.sh"
 add_install_file 0755 "${source_root}/activate-legacy-rollback-contour.sh" "${libexec_root}/activate-legacy-rollback-contour.sh"
-add_install_file 0755 "${source_root}/blue-green-cutover.sh" "${sbin_root}/leetplus-blue-green-cutover"
+# This fixed root authority is also installed by production-control. Keep the
+# mode contract identical so installing a newer admitted control generation
+# cannot manufacture drift in an already post-attested N-1 transaction.
+add_install_file 0500 "${source_root}/blue-green-cutover.sh" "${sbin_root}/leetplus-blue-green-cutover"
 add_install_file 0644 "${systemd_source}/leetplus-api-rollback@.service" "${systemd_root}/leetplus-api-rollback@.service"
 add_install_file 0644 "${systemd_source}/leetplus-web-rollback@.service" "${systemd_root}/leetplus-web-rollback@.service"
 add_install_file 0644 "${systemd_source}/leetplus-rollback-egress.service" "${systemd_root}/leetplus-rollback-egress.service"

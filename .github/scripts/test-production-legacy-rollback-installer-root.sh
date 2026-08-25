@@ -592,6 +592,15 @@ for unit in leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.s
     || die "post-attested effective-IP negative retained a fence or mask: ${unit}"
 done
 rm -f /run/fixture-ip-address-unsafe
+# The admitted production-control installer republishes this shared fixed
+# authority as root:root 0500. Reproduce that exact overlap after POST_ATTESTED
+# and prove recovery does not misclassify the control generation as drifted.
+install -o root -g root -m 0500 \
+  "$DEPLOY_ROOT/blue-green-cutover.sh" \
+  /usr/local/sbin/leetplus-blue-green-cutover
+[[ "$(stat -c '%U:%G:%a:%h' -- /usr/local/sbin/leetplus-blue-green-cutover)" \
+  == 'root:root:500:1' ]] \
+  || die 'production-control cutover authority overlap mode is not exact'
 "$AUTHORITY_PATH" > /run/fixture-fenced-predecessor.out
 grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
   /run/fixture-fenced-predecessor.out >/dev/null

@@ -276,8 +276,18 @@ property_value() {
         printf '{ path=/usr/bin/node ; argv[]=/usr/bin/node /srv/leetplus/rollback-releases/%s/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3300 ; ignore_errors=no ; }\n' "$legacy_sha"
       fi
       ;;
-    UnsetEnvironment|RestrictAddressFamilies|SocketBindDeny|SocketBindAllow)
+    UnsetEnvironment|RestrictAddressFamilies|SocketBindDeny)
       awk -F= -v property="$property" '$1 == property { print substr($0, length($1) + 2) }' "$fragment" | paste -sd' ' -
+      ;;
+    SocketBindAllow)
+      awk -F= -v property="$property" '$1 == property { print substr($0, length($1) + 2) }' "$fragment" \
+        | sed -E 's/^((ipv4|ipv6):(tcp|udp)):/\1/' \
+        | { if [[ -e /run/fixture-socket-bind-unsafe && "$unit" == leetplus-api-* ]]; then
+              grep -F -v 'ipv4:tcp4301'
+            else
+              cat
+            fi; } \
+        | paste -sd' ' -
       ;;
     NoNewPrivileges|PrivateTmp|PrivateDevices|ProtectHome) printf 'yes\n' ;;
     ProtectSystem) printf 'strict\n' ;;
@@ -592,6 +602,18 @@ for unit in leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.s
     || die "post-attested effective-IP negative retained a fence or mask: ${unit}"
 done
 rm -f /run/fixture-ip-address-unsafe
+touch /run/fixture-socket-bind-unsafe
+if "$AUTHORITY_PATH" > /run/fixture-post-attested-socket-bind-normalization.out 2>&1; then
+  die 'installer accepted an incomplete effective systemd socket-bind allow set'
+fi
+grep -F 'effective rollback SocketBindAllow is not exact: leetplus-api-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service' \
+  /run/fixture-post-attested-socket-bind-normalization.out >/dev/null
+[[ "$(sha256sum /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent | awk '{ print $1 }')" \
+  == 73f199b02fd9202bc69853151dc2109f69cfa2fef8ab2e97abd659b031291c8a \
+  && "$(tail -n 1 /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent)" \
+  == 'PHASE=POST_ATTESTED' ]] \
+  || die 'effective socket-bind negative did not retain the exact post-attested recovery intent'
+rm -f /run/fixture-socket-bind-unsafe
 # The admitted production-control installer republishes this shared fixed
 # authority as root:root 0500. Reproduce that exact overlap after POST_ATTESTED
 # and prove recovery does not misclassify the control generation as drifted.

@@ -194,10 +194,12 @@ property_value() {
   esac
   case "$property" in
     LoadState)
-      if [[ "$unit" == leetplus-rollback-egress.service \
-        && -e /run/fixture-systemd255-loaded-egress \
-        && -L "/run/systemd/system/${unit}" \
-        && "$(readlink -- "/run/systemd/system/${unit}")" == /dev/null ]]; then
+      if [[ -L "/run/systemd/system/${unit}" \
+        && "$(readlink -- "/run/systemd/system/${unit}")" == /dev/null ]] \
+        && { [[ "$unit" == leetplus-rollback-egress.service \
+            && -e /run/fixture-systemd255-loaded-egress ]] \
+          || [[ "$unit" =~ ^leetplus-blue-green-recovery(-watchdog)?\.(service|timer)$ \
+            && -e /run/fixture-systemd255-loaded-recovery ]]; }; then
         printf 'loaded\n'
       elif [[ -L "/run/systemd/system/${unit}" \
         && "$(readlink -- "/run/systemd/system/${unit}")" == /dev/null ]]; then
@@ -213,22 +215,28 @@ property_value() {
     DropInPaths)
       if [[ "$unit" == nginx.service ]]; then
         printf '/etc/systemd/system/nginx.service.d/leetplus-blue-green-recovery.conf\n'
-      elif [[ "$unit" == leetplus-rollback-egress.service \
-        && -f /etc/systemd/system/leetplus-rollback-egress.service.d/90-leetplus-control-install-fence.conf ]]; then
-        printf '/etc/systemd/system/leetplus-rollback-egress.service.d/90-leetplus-control-install-fence.conf\n'
+      elif [[ "$unit" =~ ^leetplus-(rollback-egress|blue-green-recovery(-watchdog)?)\.(service|timer)$ \
+        && -f "/etc/systemd/system/${unit}.d/90-leetplus-control-install-fence.conf" ]]; then
+        printf '/etc/systemd/system/%s.d/90-leetplus-control-install-fence.conf\n' "$unit"
       else
         printf '\n'
       fi
       ;;
     FragmentPath) printf '%s\n' "$fragment" ;;
     Id|Names) printf '%s\n' "$unit" ;;
-    UnitFileState) printf 'disabled\n' ;;
+    UnitFileState)
+      [[ "$unit" != leetplus-blue-green-recovery-watchdog.service ]] \
+        && printf 'disabled\n' || printf 'static\n'
+      ;;
     Requires) printf 'leetplus-rollback-egress.service\n' ;;
     ConditionResult)
-      if [[ "$unit" == leetplus-rollback-egress.service \
+      if [[ "$unit" =~ ^leetplus-(rollback-egress|blue-green-recovery(-watchdog)?)\.(service|timer)$ \
         && -f /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.fence \
-        && -f /etc/systemd/system/leetplus-rollback-egress.service.d/90-leetplus-control-install-fence.conf \
-        && ! -e /run/fixture-egress-condition-unsafe ]]; then
+        && -f "/etc/systemd/system/${unit}.d/90-leetplus-control-install-fence.conf" \
+        && ! ( "$unit" == leetplus-rollback-egress.service \
+          && -e /run/fixture-egress-condition-unsafe ) \
+        && ! ( "$unit" == leetplus-blue-green-recovery.service \
+          && -e /run/fixture-recovery-condition-unsafe ) ]]; then
         printf 'no\n'
       else
         printf 'yes\n'
@@ -465,9 +473,16 @@ touch /run/fixture-systemd255-loaded-egress
 if "$AUTHORITY_PATH" > /run/fixture-compatible-predecessor-loaded-egress.out 2>&1; then
   die 'installer accepted a loaded masked egress before the durable boot fence commit'
 fi
-grep -F 'loaded masked egress lacks the exact committed predecessor transaction' \
+grep -F 'loaded masked protected unit lacks the exact committed predecessor transaction: leetplus-rollback-egress.service' \
   /run/fixture-compatible-predecessor-loaded-egress.out >/dev/null
 rm -f /run/fixture-systemd255-loaded-egress
+touch /run/fixture-systemd255-loaded-recovery
+if "$AUTHORITY_PATH" > /run/fixture-compatible-predecessor-loaded-recovery.out 2>&1; then
+  die 'installer accepted loaded masked recovery units before the durable boot fence commit'
+fi
+grep -F 'loaded masked protected unit lacks the exact committed predecessor transaction: leetplus-blue-green-recovery.service' \
+  /run/fixture-compatible-predecessor-loaded-recovery.out >/dev/null
+rm -f /run/fixture-systemd255-loaded-recovery
 "$AUTHORITY_PATH" > /run/fixture-compatible-predecessor.out
 grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
   /run/fixture-compatible-predecessor.out >/dev/null
@@ -518,6 +533,7 @@ systemctl mask --runtime --no-reload \
 systemctl daemon-reload
 touch /run/fixture-systemd255-template-aliases
 touch /run/fixture-systemd255-loaded-egress
+touch /run/fixture-systemd255-loaded-recovery
 printf '\nfixture-loaded-egress-digest-drift\n' >> /etc/systemd/system/leetplus-rollback-egress.service
 if "$AUTHORITY_PATH" > /run/fixture-fenced-predecessor-egress-drift.out 2>&1; then
   die 'installer accepted an unpinned loaded egress byte during fenced recovery'
@@ -535,6 +551,24 @@ fi
 grep -F 'loaded masked egress is not held by the exact effective boot fence' \
   /run/fixture-fenced-predecessor-egress-condition.out >/dev/null
 rm -f /run/fixture-egress-condition-unsafe
+printf '\nfixture-loaded-recovery-digest-drift\n' \
+  >> /etc/systemd/system/leetplus-blue-green-recovery.service
+if "$AUTHORITY_PATH" > /run/fixture-fenced-predecessor-recovery-drift.out 2>&1; then
+  die 'installer accepted a drifting loaded recovery unit during fenced recovery'
+fi
+grep -F 'loaded fenced current unit file identity is not exact: leetplus-blue-green-recovery.service' \
+  /run/fixture-fenced-predecessor-recovery-drift.out >/dev/null
+install -o root -g root -m 0644 \
+  "$DEPLOY_ROOT/systemd/leetplus-blue-green-recovery.service" \
+  /etc/systemd/system/leetplus-blue-green-recovery.service
+systemctl daemon-reload
+touch /run/fixture-recovery-condition-unsafe
+if "$AUTHORITY_PATH" > /run/fixture-fenced-predecessor-recovery-condition.out 2>&1; then
+  die 'installer accepted a loaded recovery unit without the effective false boot condition'
+fi
+grep -F 'loaded fenced current unit is not held by the exact effective boot fence: leetplus-blue-green-recovery.service' \
+  /run/fixture-fenced-predecessor-recovery-condition.out >/dev/null
+rm -f /run/fixture-recovery-condition-unsafe
 "$AUTHORITY_PATH" > /run/fixture-fenced-predecessor.out
 grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
   /run/fixture-fenced-predecessor.out >/dev/null
@@ -545,7 +579,8 @@ done
 cmp -s -- "$DEPLOY_ROOT/systemd/leetplus-rollback-egress.service" \
   /etc/systemd/system/leetplus-rollback-egress.service \
   || die 'fenced predecessor recovery did not install the corrected egress unit'
-rm -f /run/fixture-systemd255-template-aliases /run/fixture-systemd255-loaded-egress
+rm -f /run/fixture-systemd255-template-aliases /run/fixture-systemd255-loaded-egress \
+  /run/fixture-systemd255-loaded-recovery
 
 printf '\nfixture-systemd255-unmasked-alias-drift\n' >> /etc/nginx/leetplus/upstreams/blue.conf
 printf 'always\n' > /run/fixture-systemd255-template-aliases

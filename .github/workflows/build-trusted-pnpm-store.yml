@@ -108,6 +108,21 @@ jobs:
               && -s "$prisma_engine_path" ]] \
               || die "prewarmed Prisma engine is absent or unsafe: ${prisma_engine}"
           done
+          prisma_engine_authority_root="$store_root/.leetplus-tools/prisma-engines/6.19.3/debian-openssl-3.0.x"
+          install -d -m 0750 "$prisma_engine_authority_root"
+          cp --reflink=never --no-preserve=ownership,mode,timestamps,links \
+            "$prisma_engine_root/schema-engine-debian-openssl-3.0.x" \
+            "$prisma_engine_authority_root/schema-engine"
+          cp --reflink=never --no-preserve=ownership,mode,timestamps,links \
+            "$prisma_engine_root/libquery_engine-debian-openssl-3.0.x.so.node" \
+            "$prisma_engine_authority_root/libquery_engine.so.node"
+          chmod 0440 \
+            "$prisma_engine_authority_root/schema-engine" \
+            "$prisma_engine_authority_root/libquery_engine.so.node"
+          test "$(sha256sum "$prisma_engine_authority_root/schema-engine" | awk '{print $1}')" = \
+            "$(sha256sum "$prisma_engine_root/schema-engine-debian-openssl-3.0.x" | awk '{print $1}')"
+          test "$(sha256sum "$prisma_engine_authority_root/libquery_engine.so.node" | awk '{print $1}')" = \
+            "$(sha256sum "$prisma_engine_root/libquery_engine-debian-openssl-3.0.x.so.node" | awk '{print $1}')"
           for module_root in \
             "$workspace_real/node_modules" \
             "$workspace_real/apps/api/node_modules" \
@@ -151,6 +166,30 @@ jobs:
           pnpm install --prod --offline --frozen-lockfile --ignore-scripts \
             --side-effects-cache-readonly --package-import-method=copy \
             --store-dir "$install_store_dir"
+          prisma_engine_input_root="$RUNNER_TEMP/leetplus-prisma-engine-input-$RELEASE_SHA"
+          test ! -e "$prisma_engine_input_root"
+          install -d -m 0700 "$prisma_engine_input_root"
+          cp --reflink=never --no-preserve=ownership,mode,timestamps,links \
+            "$prisma_engine_authority_root/schema-engine" \
+            "$prisma_engine_input_root/schema-engine"
+          cp --reflink=never --no-preserve=ownership,mode,timestamps,links \
+            "$prisma_engine_authority_root/libquery_engine.so.node" \
+            "$prisma_engine_input_root/libquery_engine.so.node"
+          chmod 0500 "$prisma_engine_input_root/schema-engine"
+          chmod 0400 "$prisma_engine_input_root/libquery_engine.so.node"
+          PRISMA_SCHEMA_ENGINE_BINARY="$prisma_engine_input_root/schema-engine" \
+          PRISMA_QUERY_ENGINE_LIBRARY="$prisma_engine_input_root/libquery_engine.so.node" \
+            pnpm --filter database db:generate
+          mapfile -d '' -t generated_prisma_query_engines < <(
+            find -P node_modules/.pnpm -xdev \
+              -path '*/node_modules/.prisma/client/libquery_engine.so.node' \
+              -type f -print0
+          )
+          test "${#generated_prisma_query_engines[@]}" = 1
+          test "$(sha256sum "${generated_prisma_query_engines[0]}" | awk '{print $1}')" = \
+            "$(sha256sum "$prisma_engine_authority_root/libquery_engine.so.node" | awk '{print $1}')"
+          rm -rf -- "$prisma_engine_input_root"
+          test ! -e "$prisma_engine_input_root"
           rm -rf -- "$install_store_dir"
           test ! -e "$install_store_dir"
           for module_root in \

@@ -346,6 +346,84 @@ grep -E \
   sha256sum --strict --check --quiet HYDRATED_SHA256SUMS
 )
 
+authority_store="${TEST_ROOT}/sealed-prisma-store"
+authority_root="${authority_store}/.leetplus-tools/prisma-engines/6.19.3/debian-openssl-3.0.x"
+mkdir -p "$authority_root"
+printf 'fixture schema engine authority\n' > "$authority_root/schema-engine"
+printf 'fixture query engine authority\n' > "$authority_root/libquery_engine.so.node"
+chmod 0550 "$authority_root"
+chmod 0440 "$authority_root/schema-engine" "$authority_root/libquery_engine.so.node"
+authority_pnpm_root="${TEST_ROOT}/authority-pnpm-bin"
+authority_pnpm_log="${TEST_ROOT}/authority-pnpm.log"
+mkdir -p "$authority_pnpm_root"
+cat > "${authority_pnpm_root}/pnpm" <<'PNPM'
+#!/usr/bin/env bash
+if [[ "$#" == '1' && "$1" == '--version' ]]; then
+  printf '10.33.2\n'
+  exit 0
+fi
+printf '%s\n' "$*" >> "${PNPM_FIXTURE_LOG:?}"
+if [[ "${1:-}" == 'install' ]]; then
+  [[ "$*" == "install --prod --offline --frozen-lockfile --ignore-scripts --side-effects-cache-readonly --package-import-method=copy --store-dir ${EXPECTED_PRISMA_AUTHORITY_STORE:?}" ]]
+  exit 0
+fi
+[[ "$*" == '--filter database db:generate' ]]
+[[ "${PRISMA_SCHEMA_ENGINE_BINARY:?}" == \
+  */node_modules/.leetplus-prisma-engine-authority/schema-engine ]]
+[[ "${PRISMA_QUERY_ENGINE_LIBRARY:?}" == \
+  */node_modules/.leetplus-prisma-engine-authority/libquery_engine.so.node ]]
+[[ -f "$PRISMA_SCHEMA_ENGINE_BINARY" && ! -L "$PRISMA_SCHEMA_ENGINE_BINARY" \
+  && -x "$PRISMA_SCHEMA_ENGINE_BINARY" ]]
+[[ -f "$PRISMA_QUERY_ENGINE_LIBRARY" && ! -L "$PRISMA_QUERY_ENGINE_LIBRARY" \
+  && -r "$PRISMA_QUERY_ENGINE_LIBRARY" ]]
+[[ "$(sha256sum "$PRISMA_SCHEMA_ENGINE_BINARY" | awk '{ print $1 }')" == \
+  "${EXPECTED_SCHEMA_ENGINE_SHA256:?}" ]]
+[[ "$(sha256sum "$PRISMA_QUERY_ENGINE_LIBRARY" | awk '{ print $1 }')" == \
+  "${EXPECTED_QUERY_ENGINE_SHA256:?}" ]]
+PNPM
+chmod 0700 "${authority_pnpm_root}/pnpm"
+authority_hydration_root="${TEST_ROOT}/authority-hydration-staged"
+mkdir -p "$authority_hydration_root"
+env -u DATABASE_URL -u JWT_SECRET -u GUEST_PORTAL_JWT_SECRET \
+  -u APP_ENCRYPTION_KEY -u INTEGRATION_ENCRYPTION_KEY -u SYNC_SERVICE_TOKEN -u LANGAME_API_KEY \
+  -u NODE_OPTIONS -u NODE_PATH -u NODE_EXTRA_CA_CERTS -u NODE_USE_ENV_PROXY \
+  -u NODE_V8_COVERAGE -u NODE_COMPILE_CACHE \
+  -u LD_PRELOAD -u LD_LIBRARY_PATH -u LD_AUDIT -u GCONV_PATH -u LOCPATH \
+  -u OPENSSL_CONF -u OPENSSL_MODULES \
+  -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY \
+  -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
+  -u BASH_ENV -u ENV \
+  -u NPM_CONFIG_USERCONFIG -u npm_config_userconfig \
+  -u NPM_CONFIG_GLOBALCONFIG -u npm_config_globalconfig \
+  -u NPM_CONFIG_NODE_OPTIONS -u npm_config_node_options \
+  -u NPM_CONFIG_SCRIPT_SHELL -u npm_config_script_shell \
+  -u PNPM_HOME -u COREPACK_HOME -u SSL_CERT_FILE -u SSL_CERT_DIR \
+  -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM \
+  -u PRISMA_BINARIES_MIRROR -u PRISMA_ENGINES_MIRROR \
+  -u PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING \
+  -u PRISMA_QUERY_ENGINE_BINARY -u PRISMA_QUERY_ENGINE_LIBRARY \
+  -u PRISMA_SCHEMA_ENGINE_BINARY -u PRISMA_FMT_BINARY -u XDG_CACHE_HOME \
+  -u INVOCATION_ID \
+  PNPM_FIXTURE_LOG="$authority_pnpm_log" \
+  EXPECTED_PRISMA_AUTHORITY_STORE="$authority_store" \
+  EXPECTED_SCHEMA_ENGINE_SHA256="$(sha256sum "$authority_root/schema-engine" | awk '{ print $1 }')" \
+  EXPECTED_QUERY_ENGINE_SHA256="$(sha256sum "$authority_root/libquery_engine.so.node" | awk '{ print $1 }')" \
+  PATH="${authority_pnpm_root}:${PATH}" bash "$STAGER" \
+  --release-sha "$RELEASE_SHA" \
+  --artifact "$readonly_archive" \
+  --artifact-sha256 "${readonly_archive}.sha256" \
+  --output-root "$authority_hydration_root" \
+  --pnpm-store-dir "$authority_store" \
+  --hydrate --unprivileged-test-mode > "${TEST_ROOT}/authority-hydration.out"
+authority_hydration_release="${authority_hydration_root}/.untrusted-test-${RELEASE_SHA}"
+grep -F -x -- '--filter database db:generate' "$authority_pnpm_log" >/dev/null
+[[ "$(awk 'END { print NR }' "$authority_pnpm_log")" == '2' ]]
+test ! -e "$authority_hydration_release/node_modules/.leetplus-prisma-engine-authority"
+(
+  cd -- "$authority_hydration_release"
+  sha256sum --strict --check --quiet HYDRATED_SHA256SUMS
+)
+
 lifecycle_regressed_stager="${TEST_ROOT}/lifecycle-regressed-stage-release-artifact.sh"
 cp -- "$STAGER" "$lifecycle_regressed_stager"
 sed -i 's/ --ignore-scripts \\/ \\/' "$lifecycle_regressed_stager"

@@ -34,7 +34,10 @@ production hydration receipt и не может быть promoted. Production `-
 --side-effects-cache-readonly --package-import-method=copy` через одноразовый
 writable store-wrapper над read-only `/srv/leetplus/pnpm-store/v10/files` и
 `/srv/leetplus/pnpm-store/v10/index`,
-затем Prisma generate, отвергает hardlinks и создаёт
+затем копирует два exact Prisma engine из manifest-bound
+`/srv/leetplus/pnpm-store/.leetplus-tools/prisma-engines/6.19.3/debian-openssl-3.0.x`
+во временный private input, запускает Prisma generate с command-scoped engine
+paths, удаляет этот input, отвергает hardlinks и создаёт
 полный `HYDRATED_SHA256SUMS`. Root и
 runtime users не имеют права выполнять hydration. Ошибка сохраняет staging
 directory для расследования и никогда не перезаписывает существующий release.
@@ -232,8 +235,12 @@ code. Затем в disposable exact-source workspace выполняется `pn
 --prod --offline --frozen-lockfile --side-effects-cache
 --package-import-method=copy --store-dir <empty-store>`: pnpm запускает только
 dependency hooks из reviewed `allowBuilds` и сохраняет их platform/Node-bound
-side-effects, включая оба Prisma engine, в тот же CAS. После удаления
-disposable `node_modules` exact package tree самого `pnpm 10.33.2` копируется
+side-effects в тот же CAS. Оба проверенных Prisma engine дополнительно копируются
+как regular-file authority в
+`<empty-store>/.leetplus-tools/prisma-engines/6.19.3/debian-openssl-3.0.x`,
+чтобы production не зависел от ambient `HOME/.cache/prisma` или внутреннего
+выбора pnpm side-effects key. После удаления disposable `node_modules` exact
+package tree самого `pnpm 10.33.2` копируется
 в `<empty-store>/.leetplus-tools/pnpm/10.33.2`, после чего содержимое store
 архивируется и получает отдельный SHA-256. Production hydration не доверяет
 host-level Corepack shim и не допускает сетевой fallback: pnpm запускается
@@ -397,7 +404,9 @@ groups, duplicate UID/primary GID/group-GID alias, отклоняет незав
 из реального nonempty zero-size `cgroup.procs`. Stage fixture отдельно фиксирует
 exact offline/copy/ignore-scripts/side-effects-cache-readonly argv и
 mutation-canary доказывает, что удаление `--ignore-scripts` исполняет dependency
-lifecycle marker и ломает gate.
+lifecycle marker и ломает gate. Full admission запускает hydration без `HOME` и
+`XDG_CACHE_HOME`, в отдельной no-egress systemd unit, сверяет generated Prisma
+query engine с sealed store authority и требует удаления временного engine input.
 Тем же real-systemd fixture выполняются normal promotion и retry после lost
 response, recovery из post-stop/post-move/post-seal состояний, exact sealer root
 authority и dry-run owner/group/mode attestation, exact

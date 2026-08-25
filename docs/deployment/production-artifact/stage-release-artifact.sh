@@ -1244,20 +1244,28 @@ NODE
   install_store_dir="$pnpm_store_dir"
   if [[ "$unprivileged_test_mode" == false ]]; then
     trusted_store_files="${pnpm_store_dir}/v10/files"
-    [[ -d "$trusted_store_files" && ! -L "$trusted_store_files" \
-      && "$(realpath -e -- "$trusted_store_files")" == "$trusted_store_files" \
-      && "$(stat -c '%u:%a' -- "$trusted_store_files")" == '0:550' ]] \
-      || die 'trusted pnpm CAS files root is absent or unsafe'
+    trusted_store_index="${pnpm_store_dir}/v10/index"
+    for trusted_store_component in "$trusted_store_files" "$trusted_store_index"; do
+      [[ -d "$trusted_store_component" && ! -L "$trusted_store_component" \
+        && "$(realpath -e -- "$trusted_store_component")" == "$trusted_store_component" \
+        && "$(stat -c '%u:%a' -- "$trusted_store_component")" == '0:550' ]] \
+        || die "trusted pnpm CAS component is absent or unsafe: ${trusted_store_component}"
+    done
     install_store_dir="${staging_directory}/node_modules/.leetplus-pnpm-install-store"
     [[ ! -e "$install_store_dir" && ! -L "$install_store_dir" ]] \
       || die 'ephemeral pnpm install store already exists'
     mkdir -p -- "${install_store_dir}/v10"
     chmod 0700 -- "$install_store_dir" "${install_store_dir}/v10"
     ln -s -- "$trusted_store_files" "${install_store_dir}/v10/files"
-    [[ -L "${install_store_dir}/v10/files" \
-      && "$(readlink -- "${install_store_dir}/v10/files")" == "$trusted_store_files" \
-      && "$(realpath -e -- "${install_store_dir}/v10/files")" == "$trusted_store_files" ]] \
-      || die 'ephemeral pnpm install store is not bound to the trusted CAS'
+    ln -s -- "$trusted_store_index" "${install_store_dir}/v10/index"
+    for trusted_store_component_name in files index; do
+      trusted_store_component="${pnpm_store_dir}/v10/${trusted_store_component_name}"
+      install_store_component="${install_store_dir}/v10/${trusted_store_component_name}"
+      [[ -L "$install_store_component" \
+        && "$(readlink -- "$install_store_component")" == "$trusted_store_component" \
+        && "$(realpath -e -- "$install_store_component")" == "$trusted_store_component" ]] \
+        || die "ephemeral pnpm install store is not bound to the trusted CAS ${trusted_store_component_name}"
+    done
   fi
   if ! (
     cd -- "$staging_directory"

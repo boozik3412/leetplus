@@ -63,10 +63,12 @@ create_store() {
   STORE_PATH="${TEST_ROOT}/${label}/store"
   install -d -o root -g root -m 0550 \
     "$STORE_PATH/v10/files/aa" \
+    "$STORE_PATH/v10/index/bb" \
     "$STORE_PATH/.leetplus-tools/pnpm/10.17.1/bin" \
     "$STORE_PATH/.leetplus-tools/pnpm/10.17.1/dist"
   find -P "$STORE_PATH" -xdev -type d -exec chmod 0550 -- {} +
   printf 'package-%s\n' "$label" > "$STORE_PATH/v10/files/aa/content"
+  printf 'index-%s\n' "$label" > "$STORE_PATH/v10/index/bb/package-index"
   printf '{"version":"10.17.1"}\n' \
     > "$STORE_PATH/.leetplus-tools/pnpm/10.17.1/package.json"
   printf 'fixture runtime entry\n' \
@@ -107,6 +109,14 @@ verify_store > "$TEST_ROOT/valid.verify.out"
 grep -F -x 'PNPM_STORE_INTEGRITY=PASS' "$TEST_ROOT/valid.verify.out" >/dev/null
 grep -E -x 'PNPM_STORE_MANIFEST_SHA256=[0-9a-f]{64}' \
   "$TEST_ROOT/valid.verify.out" >/dev/null
+
+create_store missing-index
+chmod 0750 -- "$STORE_PATH/v10"
+rm -rf -- "$STORE_PATH/v10/index"
+chmod 0550 -- "$STORE_PATH/v10"
+expect_rejected missing-required-index
+grep -F 'required pnpm store directory is absent: v10/index' \
+  "$TEST_ROOT/missing-required-index.out" >/dev/null
 
 create_store symlink
 ln -s -- 'v10/files/aa/content' "$STORE_PATH/adversarial-link"
@@ -169,12 +179,15 @@ grep -F '.leetplus-tools/pnpm/${expected_pnpm_version}' "$CONSUMER" >/dev/null
 grep -F 'pnpm_command=(/usr/bin/node "$pnpm_runtime_entry")' "$CONSUMER" >/dev/null
 grep -F 'node_modules/.leetplus-pnpm-install-store' "$CONSUMER" >/dev/null
 grep -F 'ln -s -- "$trusted_store_files"' "$CONSUMER" >/dev/null
+grep -F 'ln -s -- "$trusted_store_index"' "$CONSUMER" >/dev/null
+grep -F 'for trusted_store_component_name in files index' "$CONSUMER" >/dev/null
 grep -F 'rm -rf -- "$install_store_dir"' "$CONSUMER" >/dev/null
 grep -F 'assert_trusted_store_unchanged' "$CONSUMER" >/dev/null
 grep -F '.leetplus-tools/pnpm/$PNPM_VERSION' "$STORE_WORKFLOW" >/dev/null
 grep -F 'pnpm runtime source contains a link or special entry' "$STORE_WORKFLOW" >/dev/null
 grep -F -- '--no-preserve=ownership,mode,timestamps,links' "$STORE_WORKFLOW" >/dev/null
 grep -F 'copied pnpm runtime contains a shared hardlink' "$STORE_WORKFLOW" >/dev/null
+grep -F 'production-like store wrapper changed the trusted pnpm CAS' "$STORE_WORKFLOW" >/dev/null
 
 printf 'PRODUCTION_PNPM_STORE_INTEGRITY_FIXTURE=PASS\n'
 printf 'PRODUCTION_PNPM_STORE_ROOT_OWNERSHIP_BOUND=true\n'

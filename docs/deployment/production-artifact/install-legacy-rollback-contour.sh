@@ -744,6 +744,11 @@ attest_quiescent_runtime() {
     esac
   done <<< "$unit_file_inventory"
   for unit in "${protected_units[@]}"; do
+    # An uninstantiated template is a unit-file authority, not a runtime unit.
+    # systemd 255 correctly rejects `show foo@.service`; concrete instances are
+    # already bounded by the loaded-unit allowlist above and the exact N-1
+    # instance remains part of protected_units for the state checks below.
+    [[ "$unit" == *@.service ]] && continue
     show_output="$(timeout --foreground --kill-after=5s 20s systemctl show "$unit" --no-pager \
       --property=LoadState --property=ActiveState --property=SubState \
       --property=MainPID --property=ControlGroup)" \

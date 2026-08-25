@@ -506,7 +506,7 @@ if [[ "$unprivileged_test_mode" == false ]]; then
   [[ -z "$(find -P "$release_directory" -xdev -path "$runtime_cache" -prune -o \
     \( ! -user root -o ! -group leetplus-runtime \) -print -quit)" ]] \
     || die 'rollback release contains non-root/non-runtime-owned content'
-  [[ -z "$(find -P "$release_directory" -xdev -path "$runtime_cache" -prune -o -perm /022 -print -quit)" ]] \
+  [[ -z "$(find -P "$release_directory" -xdev -path "$runtime_cache" -prune -o \( ! -type l -perm /022 \) -print -quit)" ]] \
     || die 'rollback release is writable by its service identities'
   [[ "$(stat -c '%U:%G:%a' -- "$runtime_cache")" == 'root:leetplus-runtime:550' ]] \
     || die 'host-visible Web cache target is not immutable'

@@ -148,7 +148,7 @@ if [[ "$unprivileged_test_mode" == false ]]; then
   [[ -z "$(find -P "$release_directory" -xdev -path "$runtime_cache" -prune -o \
     \( ! -user root -o ! -group leetplus-runtime \) -print -quit)" ]] \
     || die 'rollback release contains an entry outside root:leetplus-runtime ownership'
-  [[ -z "$(find -P "$release_directory" -xdev -path "$runtime_cache" -prune -o -perm /022 -print -quit)" ]] \
+  [[ -z "$(find -P "$release_directory" -xdev -path "$runtime_cache" -prune -o \( ! -type l -perm /022 \) -print -quit)" ]] \
     || die 'rollback release contains group/other-writable content'
   [[ -z "$(find -P "$release_directory" -xdev -path "$runtime_cache" -prune -o ! -readable -print -quit)" ]] \
     || die 'rollback release contains content unreadable by the service identity'

@@ -139,6 +139,10 @@ if grep -E 'systemctl (start|enable|restart)|nginx_reload|psql' "$installer" >/d
   printf 'install-only script contains a runtime/database effect\n' >&2
   exit 1
 fi
+for symlink_permission_gate in "$installer" "$preflight" "$rollback_probe"; do
+  grep -F '! -type l -perm /022' "$symlink_permission_gate" >/dev/null \
+    || { printf 'rollback symlink permission boundary is absent: %s\n' "$symlink_permission_gate" >&2; exit 1; }
+done
 
 # Minimal exact-source artifact proves both integrity coverage and final-env
 # enforcement without using a DB or starting an application.

@@ -117,9 +117,10 @@ grep -F 'meta skuid ${web_uid} ip daddr 127.0.0.1 tcp dport 4300 ct state new ac
 grep -F '/auth/login' "$authenticated_smoke" >/dev/null
 grep -F '/auth/me' "$authenticated_smoke" >/dev/null
 grep -F '\getenv tenant_slug LEETPLUS_ORACLE_TENANT_SLUG' "$authenticated_smoke" >/dev/null
-grep -F '\getenv owner_email LEETPLUS_ORACLE_OWNER_EMAIL' "$authenticated_smoke" >/dev/null
+grep -F '\getenv canary_email LEETPLUS_ORACLE_CANARY_EMAIL' "$authenticated_smoke" >/dev/null
+grep -F 'AND "role" = '\''ADMIN'\'' AND "accessScope" = '\''NETWORK'\''' "$authenticated_smoke" >/dev/null
 grep -F 'DATABASE_ORACLE_PII_IN_CHILD_ARGV' "$authenticated_smoke" >/dev/null
-if grep -E -- '--set=(tenant_slug|owner_email)=' "$authenticated_smoke" >/dev/null; then
+if grep -E -- '--set=(tenant_slug|canary_email)=' "$authenticated_smoke" >/dev/null; then
   printf 'authenticated DB oracle exposes tenant/email through psql argv\n' >&2
   exit 1
 fi
@@ -283,7 +284,7 @@ auth_database_oracle="$TEST_ROOT/auth-database-oracle.json"
 tenant_id_digest="$(printf %s 'tenant-1' | sha256sum | awk '{ print $1 }')"
 store_ids_digest="$(printf '%s\n' store-1 store-2 store-3 store-4 | sha256sum | awk '{ print $1 }')"
 printf '%s\n' \
-  'EMAIL=owner@example.test' \
+  'EMAIL=canary@example.test' \
   'PASSWORD=fixture-password' \
   'TENANT_SLUG=demo' \
   "EXPECTED_TENANT_ID_SHA256=${tenant_id_digest}" \
@@ -315,9 +316,10 @@ cat > "$auth_database_oracle" <<'AUTH_DATABASE_ORACLE'
   "tenantId": "tenant-1",
   "tenantSlug": "demo",
   "users": [
-    {"accessScope":"NETWORK","customRoleId":null,"id":"user-1","isActive":true,"isPlatformAdmin":false,"role":"OWNER","storeIds":[]},
+    {"accessScope":"NETWORK","customRoleId":null,"id":"user-1","isActive":true,"isPlatformAdmin":false,"role":"ADMIN","storeIds":[]},
     {"accessScope":"STORES","customRoleId":null,"id":"user-2","isActive":true,"isPlatformAdmin":false,"role":"MANAGER","storeIds":["store-1"]},
-    {"accessScope":"STORES","customRoleId":"role-1","id":"user-3","isActive":true,"isPlatformAdmin":false,"role":"CLUB_ADMINISTRATOR","storeIds":["store-2"]}
+    {"accessScope":"STORES","customRoleId":"role-1","id":"user-3","isActive":true,"isPlatformAdmin":false,"role":"CLUB_ADMINISTRATOR","storeIds":["store-2"]},
+    {"accessScope":"NETWORK","customRoleId":null,"id":"user-4","isActive":true,"isPlatformAdmin":false,"role":"OWNER","storeIds":[]}
   ]
 }
 AUTH_DATABASE_ORACLE
@@ -383,8 +385,9 @@ const server = createServer((request, response) => {
     payload = {
       accessToken: 'x'.repeat(32),
       user: {
-        email: 'owner@example.test', tenantSlug: 'demo', tenantId: 'tenant-1',
-        role: 'OWNER', accessScope: 'NETWORK', allowedStoreIds: [], isPlatformAdmin: false,
+        email: 'canary@example.test', tenantSlug: 'demo', tenantId: 'tenant-1',
+        role: scenario === 'wrong-canary-role' ? 'OWNER' : 'ADMIN',
+        accessScope: 'NETWORK', allowedStoreIds: [], isPlatformAdmin: false,
       },
     };
   } else if (!request.headers.authorization) {
@@ -396,7 +399,7 @@ const server = createServer((request, response) => {
   } else if (request.url === '/auth/me') {
     payload = {
       tenantSlug: 'demo', tenantId: scenario === 'missing-tenant' ? undefined : 'tenant-1',
-      role: 'OWNER', accessScope: 'NETWORK', allowedStoreIds: [], isPlatformAdmin: false,
+      role: 'ADMIN', accessScope: 'NETWORK', allowedStoreIds: [], isPlatformAdmin: false,
     };
   } else if (request.url === '/stores') {
     payload = scenario === 'wrong-store-baseline'
@@ -453,10 +456,15 @@ const server = createServer((request, response) => {
     const visibleStores = scenario === 'duplicate-users-stores'
       ? [stores[0], stores[0], stores[2], stores[3]]
       : stores;
-    const owner = {
-      id: 'user-1', email: 'owner@example.test', role: 'OWNER',
+    const canaryAdmin = {
+      id: 'user-1', email: 'canary@example.test', role: 'ADMIN',
       customRoleId: null, customRole: null,
-      permissions: scenario === 'wrong-user-permission' ? ['view_dashboard'] : capabilityKeys,
+      permissions: scenario === 'wrong-user-permission' ? ['view_reports'] : ['view_dashboard'],
+      isActive: true, isPlatformAdmin: false, scope: 'NETWORK', stores: [],
+    };
+    const owner = {
+      id: 'user-4', email: 'owner@example.test', role: 'OWNER',
+      customRoleId: null, customRole: null, permissions: capabilityKeys,
       isActive: true, isPlatformAdmin: false, scope: 'NETWORK', stores: [],
     };
     const scopedUser = {
@@ -491,7 +499,7 @@ const server = createServer((request, response) => {
         ? { ...capability, key: 'forged_capability' }
         : capability);
     payload = {
-      users: [owner, scopedUser, customUser], stores: visibleStores,
+      users: [canaryAdmin, scopedUser, customUser, owner], stores: visibleStores,
       roleOptions: visibleRoleOptions,
       customRoles: [customRole], invites: [invite],
       capabilityOptions: visibleCapabilities,
@@ -529,6 +537,14 @@ if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
   exit 1
 fi
 grep -F 'AUTH_ME_SCOPE_INVALID' "$TEST_ROOT/auth-missing-tenant.out" >/dev/null
+
+printf 'wrong-canary-role\n' > "$auth_scenario_file"
+if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_credentials" --database-oracle "$auth_database_oracle" > "$TEST_ROOT/auth-wrong-canary-role.out" 2>&1; then
+  printf 'authenticated smoke accepted an OWNER credential in place of the ADMIN canary\n' >&2
+  exit 1
+fi
+grep -F 'LOGIN_SCOPE_INVALID' "$TEST_ROOT/auth-wrong-canary-role.out" >/dev/null
 
 printf 'unauthenticated-critical-read\n' > "$auth_scenario_file"
 if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \

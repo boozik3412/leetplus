@@ -319,15 +319,16 @@ function validateOracle(oracle, target) {
 
 const oracleSql = String.raw`
 \getenv tenant_slug LEETPLUS_ORACLE_TENANT_SLUG
-\getenv owner_email LEETPLUS_ORACLE_OWNER_EMAIL
+\getenv canary_email LEETPLUS_ORACLE_CANARY_EMAIL
 BEGIN TRANSACTION READ ONLY;
 WITH target_tenant AS MATERIALIZED (
   SELECT "id", "slug" FROM public."Tenant" WHERE "slug" = :'tenant_slug'
-), owner_user AS MATERIALIZED (
+), canary_user AS MATERIALIZED (
   SELECT "id" FROM public."User"
   WHERE "tenantId" = (SELECT "id" FROM target_tenant)
-    AND lower("email") = lower(:'owner_email')
-    AND "role" = 'OWNER' AND "isActive" AND NOT "isPlatformAdmin"
+    AND lower("email") = lower(:'canary_email')
+    AND "role" = 'ADMIN' AND "accessScope" = 'NETWORK'
+    AND "isActive" AND NOT "isPlatformAdmin"
 ), baseline AS (
   SELECT pg_catalog.jsonb_build_object(
     'databaseName', pg_catalog.current_database(),
@@ -403,12 +404,12 @@ WITH target_tenant AS MATERIALIZED (
       WHERE channel."tenantId" = (SELECT "id" FROM target_tenant) AND NOT channel."isArchived"
         AND (channel."name" <> 'Геймификация' OR EXISTS (
           SELECT 1 FROM public."StaffChatChannelMember" member
-          WHERE member."channelId" = channel."id" AND member."userId" = (SELECT "id" FROM owner_user)
+          WHERE member."channelId" = channel."id" AND member."userId" = (SELECT "id" FROM canary_user)
         ))), '[]'::jsonb)
   ) AS value
 )
 SELECT value::text FROM baseline
-WHERE (SELECT count(*) FROM target_tenant) = 1 AND (SELECT count(*) FROM owner_user) = 1;
+WHERE (SELECT count(*) FROM target_tenant) = 1 AND (SELECT count(*) FROM canary_user) = 1;
 COMMIT;
 `;
 
@@ -438,7 +439,7 @@ async function loadDatabaseOracle() {
         PGCONNECT_TIMEOUT: "5",
         PGOPTIONS: "-c statement_timeout=15000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=15000 -c default_transaction_read_only=on",
         PGSERVICE: EXACT_PG_SERVICE, PGSERVICEFILE: EXACT_PG_SERVICE_FILE, TZ: "UTC",
-        LEETPLUS_ORACLE_OWNER_EMAIL: credentials.get("EMAIL"),
+        LEETPLUS_ORACLE_CANARY_EMAIL: credentials.get("EMAIL"),
         LEETPLUS_ORACLE_TENANT_SLUG: credentials.get("TENANT_SLUG"),
       },
       input: oracleSql,
@@ -573,7 +574,7 @@ if (
   loginBody?.user?.tenantSlug !== credentials.get("TENANT_SLUG") ||
   typeof loginBody?.user?.tenantId !== "string" || !loginBody.user.tenantId ||
   sha256(loginBody.user.tenantId) !== credentials.get("EXPECTED_TENANT_ID_SHA256") ||
-  loginBody?.user?.role !== "OWNER" || loginBody?.user?.accessScope !== "NETWORK" ||
+  loginBody?.user?.role !== "ADMIN" || loginBody?.user?.accessScope !== "NETWORK" ||
   !Array.isArray(loginBody?.user?.allowedStoreIds) || loginBody.user.allowedStoreIds.length !== 0 ||
   loginBody?.user?.isPlatformAdmin === true
 ) {
@@ -595,7 +596,7 @@ if (
   typeof meBody?.tenantId !== "string" || !meBody.tenantId ||
   meBody.tenantId !== loginBody.user.tenantId ||
   sha256(meBody.tenantId) !== credentials.get("EXPECTED_TENANT_ID_SHA256") ||
-  meBody?.role !== "OWNER" || meBody?.accessScope !== "NETWORK" ||
+  meBody?.role !== "ADMIN" || meBody?.accessScope !== "NETWORK" ||
   !Array.isArray(meBody?.allowedStoreIds) || meBody.allowedStoreIds.length !== 0 ||
   meBody?.isPlatformAdmin === true
 ) {
@@ -707,9 +708,9 @@ if (checklist.rows.length + knowledge.rows.length < minimumStaffRows) {
 }
 
 // The exact N-1 GET /staff/notifications synchronizes signals for NETWORK
-// owners, so it is deliberately excluded from a read-only gate. The no-query
-// team-chat SSE path calls getLiveState without selecting the reporting
-// channel, which keeps its reconciliation branch unreachable.
+// administrative canaries, so it is deliberately excluded from a read-only
+// gate. The no-query team-chat SSE path calls getLiveState without selecting
+// the reporting channel, which keeps its reconciliation branch unreachable.
 const communicationsEvent = await requestFirstServerEvent(
   "/staff/team-chat/events",
   { token },
@@ -791,7 +792,7 @@ if (
   ) ||
   !users.users.some((user) =>
     user.email.toLowerCase() === credentials.get("EMAIL").toLowerCase() &&
-    user.role === "OWNER" && user.scope === "NETWORK" && user.isActive === true
+    user.role === "ADMIN" && user.scope === "NETWORK" && user.isActive === true
   ) ||
   !Array.isArray(users.roleOptions) || users.roleOptions.length !== EXACT_ROLE_OPTION_ROLES.length ||
   users.roleOptions.some((role, index) =>

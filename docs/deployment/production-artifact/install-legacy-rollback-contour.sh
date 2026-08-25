@@ -69,6 +69,12 @@ readonly COMPATIBLE_FENCED_INSTALL_PLAN_SHA256='5459f911583ac140cebe684ebdf4309e
 readonly COMPATIBLE_FENCED_FENCE_RECORD_SHA256='4d19f787eed9136f32e9fce87b4e42d0ad99cfe0acd2eb0a67f889f8310f435c'
 readonly COMPATIBLE_FENCED_PREPARED_INTENT_RECORD_SHA256='c44e87d16ab8f9da0309aba41928210f3e0b970d29a2288f5811ea9998831b7d'
 readonly COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256='73f199b02fd9202bc69853151dc2109f69cfa2fef8ab2e97abd659b031291c8a'
+# systemd 255 keeps this exact predecessor egress unit loaded while the two
+# invalid template-dependency instances still reference it, even after the
+# installer has committed an exact /run mask. Recovery accepts that cached
+# byte only behind the already committed boot fence and replaces it with the
+# current admitted unit before either fence is removed.
+readonly COMPATIBLE_FENCED_LOADED_EGRESS_UNIT_SHA256='f5946711d0b638c13d84af64c576cf41e128e51491082e0ae10120fd3615884c'
 
 die() {
   printf 'install-legacy-rollback-contour: %s\n' "$*" >&2
@@ -82,7 +88,8 @@ die() {
   && "$COMPATIBLE_FENCED_INSTALL_PLAN_SHA256" =~ ^[0-9a-f]{64}$ \
   && "$COMPATIBLE_FENCED_FENCE_RECORD_SHA256" =~ ^[0-9a-f]{64}$ \
   && "$COMPATIBLE_FENCED_PREPARED_INTENT_RECORD_SHA256" =~ ^[0-9a-f]{64}$ \
-  && "$COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+  && "$COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_FENCED_LOADED_EGRESS_UNIT_SHA256" =~ ^[0-9a-f]{64}$ ]] \
   || die 'compatible predecessor preparation digests are malformed'
 
 source_root="$SCRIPT_ROOT"
@@ -725,6 +732,74 @@ attest_active_route_not_drifting() {
   done
 }
 
+attest_compatible_fenced_loaded_egress() {
+  local template_alias_count="$1"
+  local marker='/run/systemd/system/leetplus-rollback-egress.service'
+  local destination="${systemd_root}/leetplus-rollback-egress.service"
+  local expected_dropin="${systemd_root}/leetplus-rollback-egress.service.d/90-leetplus-control-install-fence.conf"
+  local actual_digest current_digest show_output key value record_spec record_path record_digest
+  local -A effective_properties=()
+
+  [[ "$preparing_generation" == compatible-predecessor \
+    && "$fence_generation" == compatible-predecessor \
+    && "$intent_generation" == compatible-predecessor \
+    && "$preparing_record_sha" == "$COMPATIBLE_FENCED_PREPARING_RECORD_SHA256" \
+    && "$fence_record_sha" == "$COMPATIBLE_FENCED_FENCE_RECORD_SHA256" \
+    && ( "$intent_phase:$intent_record_sha" == "PREPARED:${COMPATIBLE_FENCED_PREPARED_INTENT_RECORD_SHA256}" \
+      || "$intent_phase:$intent_record_sha" == "POST_ATTESTED:${COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256}" ) ]] \
+    || die 'loaded masked egress lacks the exact committed predecessor transaction'
+  for record_spec in \
+    "${control_preparing}:${preparing_record_sha}" \
+    "${control_fence}:${fence_record_sha}" \
+    "${control_intent}:${intent_record_sha}"; do
+    record_path="${record_spec%%:*}"
+    record_digest="${record_spec##*:}"
+    [[ -f "$record_path" && ! -L "$record_path" \
+      && "$(stat -c '%U:%a:%h' -- "$record_path")" == "$(state_record_identity)" \
+      && "$(sha256sum "$record_path" | awk '{ print $1 }')" == "$record_digest" ]] \
+      || die "loaded masked egress transaction record drifted: ${record_path}"
+  done
+  [[ -L "$marker" && "$(readlink -- "$marker")" == /dev/null \
+    && "$(stat -c '%U:%G:%a:%h' -- "$marker")" == 'root:root:777:1' ]] \
+    || die 'loaded masked egress lacks its exact installer-owned runtime mask'
+  attest_persistent_fences
+
+  [[ -f "$destination" && ! -L "$destination" \
+    && "$(stat -c '%U:%G:%a:%h' -- "$destination")" == 'root:root:644:1' ]] \
+    || die 'loaded masked egress unit file identity is unsafe'
+  actual_digest="$(sha256sum "$destination" | awk '{ print $1 }')"
+  current_digest="$(sha256sum "${systemd_source}/leetplus-rollback-egress.service" | awk '{ print $1 }')"
+  case "$actual_digest" in
+    "$COMPATIBLE_FENCED_LOADED_EGRESS_UNIT_SHA256")
+      ((template_alias_count == 2)) \
+        || die 'compatible loaded egress lacks both exact systemd 255 template aliases'
+      ;;
+    "$current_digest") ;;
+    *) die 'compatible loaded egress unit file digest is not exact' ;;
+  esac
+
+  show_output="$(timeout --foreground --kill-after=5s 20s systemctl show \
+    leetplus-rollback-egress.service --no-pager \
+    --property=FragmentPath --property=UnitFileState --property=DropInPaths \
+    --property=ConditionResult --property=NeedDaemonReload)" \
+    || die 'loaded masked egress effective-state query failed or timed out'
+  [[ ${#show_output} -le 16384 && "$show_output" != *$'\r'* ]] \
+    || die 'loaded masked egress effective state is oversized or noncanonical'
+  while IFS='=' read -r key value; do
+    [[ "$key" =~ ^(FragmentPath|UnitFileState|DropInPaths|ConditionResult|NeedDaemonReload)$ \
+      && -z "${effective_properties[$key]+x}" ]] \
+      || die "loaded masked egress returned duplicate/unknown effective state: ${key}"
+    effective_properties["$key"]="$value"
+  done <<< "$show_output"
+  [[ ${#effective_properties[@]} == 5 \
+    && "${effective_properties[FragmentPath]}" == "$destination" \
+    && "${effective_properties[UnitFileState]}" == disabled \
+    && "${effective_properties[DropInPaths]}" == "$expected_dropin" \
+    && "${effective_properties[ConditionResult]}" == no \
+    && "${effective_properties[NeedDaemonReload]}" == no ]] \
+    || die 'loaded masked egress is not held by the exact effective boot fence'
+}
+
 attest_quiescent_runtime() {
   local expected_runtime_mask_state="${1:-absent}"
   local unit inventory unit_file_inventory line unit_name load_state active_state sub_state main_pid control_group
@@ -881,6 +956,11 @@ attest_quiescent_runtime() {
         [[ -L "$marker" && "$(readlink -- "$marker")" == /dev/null \
           && "$(stat -c '%U:%G:%a:%h' -- "$marker")" == 'root:root:777:1' ]] \
           || die "masked protected unit lacks its exact installer-owned runtime mask: ${unit}"
+        ;;
+      exact:loaded)
+        [[ "$unit" == leetplus-rollback-egress.service ]] \
+          || die "protected unit load state is unsafe: ${unit}:${load_state}:${expected_runtime_mask_state}"
+        attest_compatible_fenced_loaded_egress "${#systemd255_template_aliases[@]}"
         ;;
       *) die "protected unit load state is unsafe: ${unit}:${load_state}:${expected_runtime_mask_state}" ;;
     esac

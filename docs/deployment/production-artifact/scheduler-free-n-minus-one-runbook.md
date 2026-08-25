@@ -146,7 +146,7 @@ nginx-конфигурациях нет независимых API/Web `backup` 
    SHA-bound, установленный из exact control bundle
    `/usr/local/libexec/leetplus/legacy-database-login-fence-authority.sql`
    (source path `systemd/legacy-database-login-fence-authority.sql.example`,
-   SHA-256 `b7ac0eba9f7d2ad58637054208953401ed9ef2a55983d14e29b5f215c9cf4753`).
+   SHA-256 `76f16367ab7ba14d3bc4aacffcc080425b12464f276cc4b1c3a09bd5046dd5e7`).
    Скрипт создаёт
    единственную `SECURITY DEFINER` функцию в `leetplus_ops`, пинит её owner,
    source/search_path/ACL и даёт executor только schema `USAGE` + function
@@ -199,7 +199,7 @@ entry, writable ancestor, лишний файл или digest drift блокир
 Bootstrap authority берётся из того же immutable CI artifact, но не является
 частью исполняемого control bundle (это устраняет self-verification). Его
 reviewed SHA-256 для этой версии:
-`bc2929b0b2ecc21931993b4adc216129ec2da2c039ac8784c374b50ca8c9a78f`.
+`868ec2790b74bf6131ca7dda0b75a241e09df066304751f26f4b26197ef50c91`.
 Сначала byte копируется во временный root-owned файл, проверяется уже после
 копирования и только затем атомарно публикуется:
 
@@ -207,7 +207,7 @@ reviewed SHA-256 для этой версии:
 sudo install -o root -g root -m 0500 \
   <immutable-ci-artifact>/leetplus-install-scheduler-free-nminus1-v1 \
   /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new
-echo 'bc2929b0b2ecc21931993b4adc216129ec2da2c039ac8784c374b50ca8c9a78f  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
+echo '868ec2790b74bf6131ca7dda0b75a241e09df066304751f26f4b26197ef50c91  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
   | sudo sha256sum --check --strict
 sudo mv -T /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new \
   /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1
@@ -238,6 +238,14 @@ intent records и их пять pinned SHA-256. Исходная generation iden
 records сохраняется через POST_ATTESTED и удаляется только после attestation
 новых destination bytes; произвольный или частичный mask/state set остаётся
 stop condition.
+
+На systemd 255 два старых template-dependency alias могут удерживать exact
+предшествующий `leetplus-rollback-egress.service` в `LoadState=loaded`, несмотря
+на canonical runtime mask. Такой cached state принимается только для pinned
+predecessor egress SHA-256 при полном committed fence/intent, восьми exact
+persistent drop-in, `ConditionResult=no`, `NeedDaemonReload=no` и строго
+inactive/dead aliases. Authority заменяет этот byte admitted unit-файлом до
+снятия любого fence; иной digest или effective state остаётся stop condition.
 
 Прямой запуск `install-legacy-rollback-contour.sh` без authority остаётся
 запрещённым. После provisioning:

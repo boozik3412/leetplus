@@ -787,8 +787,12 @@ for foreign_primary_group in shared api web; do
     printf 'installer accepted a foreign %s runtime secret-group primary GID\n' "$foreign_primary_group" >&2
     exit 1
   fi
-  grep -F 'runtime secret-group reverse primary-GID sets are not exact' \
-    "$install_root/foreign-primary-${foreign_primary_group}.out" >/dev/null
+  if ! grep -F 'runtime secret-group reverse primary-GID sets are not exact' \
+    "$install_root/foreign-primary-${foreign_primary_group}.out" >/dev/null; then
+    printf 'foreign %s primary-GID rejection output:\n' "$foreign_primary_group" >&2
+    sed -n '1,80p' "$install_root/foreign-primary-${foreign_primary_group}.out" >&2
+    exit 1
+  fi
 done
 installer_dropin_directory="$install_root/systemd/leetplus-api-rollback@.service.d"
 mkdir -p "$installer_dropin_directory"

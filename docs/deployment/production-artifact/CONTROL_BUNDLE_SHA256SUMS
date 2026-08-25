@@ -21,6 +21,6 @@ aec651650cb936324441bf318e4e1134e8c91072e3ddee4966b2408b875634e6  ./systemd/lega
 891dbecdafa8dcca3ce746402cf8fedf8be28659a3ade1f280a0fed75a63b61a  ./systemd/legacy-rollback-7de04ff4.env.example
 b12c41795c0c798498dbfd20f338edfdc75f80decb9bf91d7c5d928a40e03808  ./systemd/legacy-rollback-safe.env.example
 65d7aae54bdded580a491713185229d81bec9f560249f5f4cb82e279900358f8  ./systemd/nginx.service.d/leetplus-blue-green-recovery.conf
-b13e2979b40bf4c5a96b74e3ee0b4bd01a8d1d9e0b22ce6d7732f11d063acd9d  ./verify-legacy-rollback-authenticated-reads.mjs
+2e21fb208c076778478d28d5c900f2df794cdb19d07326f1d4994e471c1b58ab  ./verify-legacy-rollback-authenticated-reads.mjs
 a9c67167f3e833dd55a18c9650722c999613831ac6054dc24c1b4517b6566a9f  ./verify-legacy-rollback-readiness.sh
 e13929a3800cdeeef34a100875caf388f6cd1bc8d1bf99bd6a4c9580c4c9eba0  ./verify-legacy-runtime-drain.sh

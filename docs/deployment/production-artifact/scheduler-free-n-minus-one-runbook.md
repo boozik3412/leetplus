@@ -177,7 +177,8 @@ nginx-конфигурациях нет независимых API/Web `backup` 
    restored production copy и отдельно сверяется release owner до окна; нулевые
    или произвольные значения запрещены. Скрипт открывает файл через
    `O_NOFOLLOW`, запускается с `env -i`, отвергает proxy/Node injection env и
-   проверяет `/auth/me`, NETWORK owner role, exact tenant и topology текущих
+   проверяет `/auth/me`, выделенную неплатформенную `ADMIN + NETWORK` canary role,
+   exact tenant и topology текущих
    четырёх stores, exact users/invites/custom roles/permissions/access scopes,
    непустые baseline-bound assortment, staff/KB и gamification,
    communications и users/scope. Отдельная unauthenticated матрица обязана
@@ -198,7 +199,7 @@ entry, writable ancestor, лишний файл или digest drift блокир
 Bootstrap authority берётся из того же immutable CI artifact, но не является
 частью исполняемого control bundle (это устраняет self-verification). Его
 reviewed SHA-256 для этой версии:
-`85bb20f668a48ee98fc723eb83f15eb9c1ff0b659bb2f4f152b8c21f10d2f60b`.
+`dc8b17d5b9266dfa95f80a9e88e95f0c8ae55fc826102d51374bdec95d139bcb`.
 Сначала byte копируется во временный root-owned файл, проверяется уже после
 копирования и только затем атомарно публикуется:
 
@@ -206,7 +207,7 @@ reviewed SHA-256 для этой версии:
 sudo install -o root -g root -m 0500 \
   <immutable-ci-artifact>/leetplus-install-scheduler-free-nminus1-v1 \
   /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new
-echo '85bb20f668a48ee98fc723eb83f15eb9c1ff0b659bb2f4f152b8c21f10d2f60b  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
+echo 'dc8b17d5b9266dfa95f80a9e88e95f0c8ae55fc826102d51374bdec95d139bcb  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
   | sudo sha256sum --check --strict
 sudo mv -T /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new \
   /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1

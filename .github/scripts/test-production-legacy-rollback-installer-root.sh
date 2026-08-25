@@ -265,6 +265,12 @@ case "$command_name" in
         *) [[ -n "$unit" ]] || unit="$argument" ;;
       esac
     done
+    case "$unit" in
+      leetplus-api-rollback@.service|leetplus-web-rollback@.service)
+        printf 'Unit name %s requires an instance.\n' "$unit" >&2
+        exit 64
+        ;;
+    esac
     if ((${#properties[@]} == 0)); then
       printf '%s\n' \
         'ActiveState=inactive' 'SubState=dead' 'MainPID=0' \

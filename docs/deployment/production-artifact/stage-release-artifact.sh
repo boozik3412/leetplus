@@ -58,6 +58,14 @@ readonly FORBIDDEN_HYDRATION_ENV_KEYS=(
   SSL_CERT_DIR
   GIT_CONFIG_GLOBAL
   GIT_CONFIG_SYSTEM
+  PRISMA_BINARIES_MIRROR
+  PRISMA_ENGINES_MIRROR
+  PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING
+  PRISMA_QUERY_ENGINE_BINARY
+  PRISMA_QUERY_ENGINE_LIBRARY
+  PRISMA_SCHEMA_ENGINE_BINARY
+  PRISMA_FMT_BINARY
+  XDG_CACHE_HOME
 )
 
 usage() {
@@ -1240,6 +1248,105 @@ NODE
       || die 'trusted pnpm store attestation changed during hydration'
   }
 
+  trusted_prisma_engine_authority_root="${pnpm_store_dir}/.leetplus-tools/prisma-engines/6.19.3/debian-openssl-3.0.x"
+  use_trusted_prisma_engine_authority=false
+  prisma_engine_input_root=''
+  prisma_schema_engine_input=''
+  prisma_query_engine_input=''
+  if [[ "$unprivileged_test_mode" == false \
+    || -e "$trusted_prisma_engine_authority_root" \
+    || -L "$trusted_prisma_engine_authority_root" ]]; then
+    use_trusted_prisma_engine_authority=true
+  fi
+
+  prepare_trusted_prisma_engine_inputs() {
+    local authority_file authority_mode authority_owner current_gid destination_file
+    local file_size source_sha256 destination_sha256
+    local -a authority_files=()
+
+    [[ "$use_trusted_prisma_engine_authority" == true ]] || return 0
+    [[ -d "$trusted_prisma_engine_authority_root" \
+      && ! -L "$trusted_prisma_engine_authority_root" \
+      && "$(realpath -e -- "$trusted_prisma_engine_authority_root")" == \
+        "$trusted_prisma_engine_authority_root" ]] \
+      || die 'sealed Prisma engine authority root is absent or unsafe'
+    authority_owner="$(stat -c '%u' -- "$trusted_prisma_engine_authority_root")"
+    authority_mode="$(stat -c '%a' -- "$trusted_prisma_engine_authority_root")"
+    current_gid="$(id -g)"
+    if [[ "$unprivileged_test_mode" == false ]]; then
+      [[ "$authority_owner" == '0' \
+        && "$(stat -c '%g' -- "$trusted_prisma_engine_authority_root")" == \
+          "$current_gid" \
+        && "$authority_mode" == '550' ]] \
+        || die 'sealed Prisma engine authority root metadata is unsafe'
+    else
+      [[ "$authority_owner" == '0' || "$authority_owner" == "$EUID" ]] \
+        || die 'test Prisma engine authority has an unexpected owner'
+      path_is_not_group_or_other_writable "$trusted_prisma_engine_authority_root" \
+        || die 'test Prisma engine authority root is writable outside its owner'
+    fi
+
+    authority_files=(
+      "${trusted_prisma_engine_authority_root}/schema-engine"
+      "${trusted_prisma_engine_authority_root}/libquery_engine.so.node"
+    )
+    if find_has_match -P "$trusted_prisma_engine_authority_root" \
+      -mindepth 1 -maxdepth 1 \
+      ! \( -name 'schema-engine' -o -name 'libquery_engine.so.node' \); then
+      die 'sealed Prisma engine authority contains an unexpected entry'
+    fi
+    for authority_file in "${authority_files[@]}"; do
+      [[ -f "$authority_file" && ! -L "$authority_file" \
+        && "$(realpath -e -- "$authority_file")" == "$authority_file" \
+        && "$(stat -c '%h' -- "$authority_file")" == '1' ]] \
+        || die "sealed Prisma engine authority file is absent or unsafe: ${authority_file}"
+      file_size="$(stat -c '%s' -- "$authority_file")"
+      [[ "$file_size" =~ ^[1-9][0-9]*$ && "$file_size" -le 134217728 ]] \
+        || die "sealed Prisma engine authority file size is outside its bound: ${authority_file}"
+      authority_owner="$(stat -c '%u' -- "$authority_file")"
+      authority_mode="$(stat -c '%a' -- "$authority_file")"
+      if [[ "$unprivileged_test_mode" == false ]]; then
+        [[ "$authority_owner" == '0' \
+          && "$(stat -c '%g' -- "$authority_file")" == "$current_gid" \
+          && "$authority_mode" == '440' ]] \
+          || die "sealed Prisma engine authority file metadata is unsafe: ${authority_file}"
+      else
+        [[ "$authority_owner" == '0' || "$authority_owner" == "$EUID" ]] \
+          || die "test Prisma engine authority file has an unexpected owner: ${authority_file}"
+        path_is_not_group_or_other_writable "$authority_file" \
+          || die "test Prisma engine authority file is writable outside its owner: ${authority_file}"
+      fi
+    done
+
+    prisma_engine_input_root="${staging_directory}/node_modules/.leetplus-prisma-engine-authority"
+    [[ ! -e "$prisma_engine_input_root" && ! -L "$prisma_engine_input_root" ]] \
+      || die 'ephemeral Prisma engine input root already exists'
+    mkdir -- "$prisma_engine_input_root"
+    chmod 0700 -- "$prisma_engine_input_root"
+    prisma_schema_engine_input="${prisma_engine_input_root}/schema-engine"
+    prisma_query_engine_input="${prisma_engine_input_root}/libquery_engine.so.node"
+    for authority_file in "${authority_files[@]}"; do
+      case "$(basename -- "$authority_file")" in
+        schema-engine) destination_file="$prisma_schema_engine_input" ;;
+        libquery_engine.so.node) destination_file="$prisma_query_engine_input" ;;
+        *) die 'sealed Prisma engine authority file set is internally invalid' ;;
+      esac
+      cp --reflink=never --no-preserve=mode,ownership,timestamps -- \
+        "$authority_file" "$destination_file"
+      [[ -f "$destination_file" && ! -L "$destination_file" \
+        && "$(stat -c '%u:%g:%h' -- "$destination_file")" == \
+          "${EUID}:${current_gid}:1" ]] \
+        || die "ephemeral Prisma engine input copy is unsafe: ${destination_file}"
+      source_sha256="$(sha256sum -- "$authority_file" | awk '{ print $1 }')"
+      destination_sha256="$(sha256sum -- "$destination_file" | awk '{ print $1 }')"
+      [[ "$source_sha256" =~ ^[0-9a-f]{64}$ \
+        && "$destination_sha256" == "$source_sha256" ]] \
+        || die "ephemeral Prisma engine input differs from sealed authority: ${destination_file}"
+    done
+    chmod 0500 -- "$prisma_schema_engine_input"
+    chmod 0400 -- "$prisma_query_engine_input"
+  }
+
   prepare_hydration_module_roots
   install_store_dir="$pnpm_store_dir"
   if [[ "$unprivileged_test_mode" == false ]]; then
@@ -1287,7 +1394,20 @@ NODE
     assert_trusted_store_unchanged
     assert_trusted_source_manifest_unchanged
     assert_exact_hydration_output_inventory "$staging_directory"
-    "${pnpm_command[@]}" --filter database db:generate || exit 1
+    if [[ "$use_trusted_prisma_engine_authority" == true ]]; then
+      prepare_trusted_prisma_engine_inputs
+      PRISMA_SCHEMA_ENGINE_BINARY="$prisma_schema_engine_input" \
+      PRISMA_QUERY_ENGINE_LIBRARY="$prisma_query_engine_input" \
+        "${pnpm_command[@]}" --filter database db:generate || exit 1
+      rm -rf -- "$prisma_engine_input_root"
+      [[ ! -e "$prisma_engine_input_root" && ! -L "$prisma_engine_input_root" ]] \
+        || exit 1
+      prisma_engine_input_root=''
+      prisma_schema_engine_input=''
+      prisma_query_engine_input=''
+    else
+      "${pnpm_command[@]}" --filter database db:generate || exit 1
+    fi
     assert_trusted_store_unchanged
     assert_trusted_source_manifest_unchanged
     assert_exact_hydration_output_inventory "$staging_directory"

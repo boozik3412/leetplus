@@ -14,7 +14,7 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 0077
 
-readonly RELEASE_STAGER_AUTHORITY_SHA256='2922af242b3d48c93241334ba2916cfbb15a79403cc14ae16e94e5af2787e32f'
+readonly RELEASE_STAGER_AUTHORITY_SHA256='76ffb6b1d22be8c0519d7aa80d6f90e294392572676209b8c316b181421c7c62'
 readonly RUNTIME_EXTRACTOR_AUTHORITY_SHA256='8b2e687f20a0c3c34bcd7c9108679c28f3a20305debe1aa17d248b4f7115cb6c'
 readonly RUNTIME_VERIFIER_AUTHORITY_SHA256='0e28bb7c532115e7d9b08aacbba0a20952f4a78992db502ea04ba0c6932d64b1'
 
@@ -888,6 +888,20 @@ prewarmed_prisma_schema_sha256="$(/usr/bin/sha256sum -- "$prewarmed_prisma_schem
 prewarmed_prisma_schema_sha256="${prewarmed_prisma_schema_sha256%% *}"
 prewarmed_prisma_query_sha256="$(/usr/bin/sha256sum -- "$prewarmed_prisma_query_engine")"
 prewarmed_prisma_query_sha256="${prewarmed_prisma_query_sha256%% *}"
+prisma_engine_authority_root="${store_root}/.leetplus-tools/prisma-engines/6.19.3/debian-openssl-3.0.x"
+/usr/bin/install -d -o root -g "$build_group" -m 0550 -- \
+  "$prisma_engine_authority_root"
+/usr/bin/install -o root -g "$build_group" -m 0440 -- \
+  "$prewarmed_prisma_schema_engine" \
+  "${prisma_engine_authority_root}/schema-engine"
+/usr/bin/install -o root -g "$build_group" -m 0440 -- \
+  "$prewarmed_prisma_query_engine" \
+  "${prisma_engine_authority_root}/libquery_engine.so.node"
+[[ "$(/usr/bin/sha256sum -- "${prisma_engine_authority_root}/schema-engine")" == \
+    "${prewarmed_prisma_schema_sha256}  ${prisma_engine_authority_root}/schema-engine" \
+  && "$(/usr/bin/sha256sum -- "${prisma_engine_authority_root}/libquery_engine.so.node")" == \
+    "${prewarmed_prisma_query_sha256}  ${prisma_engine_authority_root}/libquery_engine.so.node" ]] \
+  || die 'sealed Prisma engine authority differs from reviewed prewarm output'
 
 for prewarm_module_root in \
   "${reference_root}/node_modules" \
@@ -1063,15 +1077,12 @@ run_hydration_and_verify() {
     --property=LimitNOFILE=4096 \
     --property=RuntimeMaxSec=700 \
     --property=UMask=0077 \
-    --property="WorkingDirectory=${home_root}" \
+    --property=WorkingDirectory=/ \
     /usr/bin/env -i \
       PATH="$tool_path" \
-      HOME="$home_root" \
       LANG=C.UTF-8 \
       LC_ALL=C.UTF-8 \
       TZ=UTC \
-      CI=true \
-      GITHUB_ACTIONS=true \
       /usr/bin/bash -p "$stager_snapshot" \
       --release-sha "$release_sha" \
       --artifact "$artifact_snapshot" \
@@ -1121,26 +1132,26 @@ run_hydration_and_verify() {
     && -s "${hydrated_release}/HYDRATED_SYMLINKS.json" \
     && -d "${hydrated_release}/node_modules" ]] \
     || die 'hydrated release is incomplete'
-  hydrated_prisma_engine_root="${hydrated_release}/node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines"
-  for hydrated_engine in \
-    "${hydrated_prisma_engine_root}/schema-engine-debian-openssl-3.0.x" \
-    "${hydrated_prisma_engine_root}/libquery_engine-debian-openssl-3.0.x.so.node"; do
-    [[ -f "$hydrated_engine" && ! -L "$hydrated_engine" \
-      && "$(/usr/bin/stat -c '%u:%g:%h' -- "$hydrated_engine")" == \
-        "${build_uid}:${build_gid}:1" ]] \
-      || die "offline hydration produced an unsafe Prisma engine: ${hydrated_engine}"
-  done
-  hydrated_prisma_schema_sha256="$(/usr/bin/sha256sum -- \
-    "${hydrated_prisma_engine_root}/schema-engine-debian-openssl-3.0.x")" \
-    || die 'offline hydration did not reuse the prewarmed Prisma schema engine'
-  hydrated_prisma_schema_sha256="${hydrated_prisma_schema_sha256%% *}"
-  hydrated_prisma_query_sha256="$(/usr/bin/sha256sum -- \
-    "${hydrated_prisma_engine_root}/libquery_engine-debian-openssl-3.0.x.so.node")" \
-    || die 'offline hydration did not reuse the prewarmed Prisma query engine'
+  mapfile -d '' -t hydrated_prisma_query_engines < <(
+    /usr/bin/find -P "${hydrated_release}/node_modules/.pnpm" -xdev \
+      -path '*/node_modules/.prisma/client/libquery_engine.so.node' \
+      -type f -print0
+  )
+  ((${#hydrated_prisma_query_engines[@]} == 1)) \
+    || die 'offline hydration did not produce exactly one Prisma client query engine'
+  hydrated_prisma_query_engine="${hydrated_prisma_query_engines[0]}"
+  [[ -f "$hydrated_prisma_query_engine" && ! -L "$hydrated_prisma_query_engine" \
+    && "$(/usr/bin/stat -c '%u:%g:%h' -- "$hydrated_prisma_query_engine")" == \
+      "${build_uid}:${build_gid}:1" ]] \
+    || die 'offline hydration produced an unsafe Prisma client query engine'
+  hydrated_prisma_query_sha256="$(/usr/bin/sha256sum -- "$hydrated_prisma_query_engine")" \
+    || die 'offline hydration did not materialize the sealed Prisma query engine'
   hydrated_prisma_query_sha256="${hydrated_prisma_query_sha256%% *}"
-  [[ "$hydrated_prisma_schema_sha256" == "$prewarmed_prisma_schema_sha256" \
-    && "$hydrated_prisma_query_sha256" == "$prewarmed_prisma_query_sha256" ]] \
-    || die 'offline hydration Prisma engines differ from the frozen prewarm authority'
+  [[ "$hydrated_prisma_query_sha256" == "$prewarmed_prisma_query_sha256" ]] \
+    || die 'offline hydration Prisma client differs from the sealed engine authority'
+  [[ ! -e "${hydrated_release}/node_modules/.leetplus-prisma-engine-authority" \
+    && ! -L "${hydrated_release}/node_modules/.leetplus-prisma-engine-authority" ]] \
+    || die 'ephemeral Prisma engine input survived offline hydration'
   hydrated_lockfile_sha256="$(/usr/bin/sha256sum -- "${hydrated_release}/pnpm-lock.yaml")"
   hydrated_lockfile_sha256="${hydrated_lockfile_sha256%% *}"
   [[ "$hydrated_lockfile_sha256" == "$source_lockfile_sha256" ]] \
@@ -1174,7 +1185,7 @@ run_hydration_and_verify() {
   printf 'CI_RUNTIME_HYDRATION=PASS\n'
   printf 'CI_RUNTIME_BUILD_IDENTITY=EPHEMERAL_NOLOGIN_NO_SUDO\n'
   printf 'CI_RUNTIME_DEPENDENCY_INSTALL=OFFLINE_FROZEN_IGNORE_SCRIPTS_COPY\n'
-  printf 'CI_RUNTIME_PRISMA_ENGINES=PREWARMED_FROZEN_REUSED\n'
+  printf 'CI_RUNTIME_PRISMA_ENGINES=SEALED_STORE_AUTHORITY_REUSED_WITHOUT_HOME_CACHE\n'
   printf 'CI_RUNTIME_PNPM_PACKAGE_STORE_MUTATED=false\n'
   printf 'CI_RUNTIME_PNPM_PROJECT_REGISTRY=EPHEMERAL_ISOLATED_REMOVED\n'
   printf 'CI_HYDRATED_RELEASE_DIRECTORY=%s\n' "$hydrated_release"

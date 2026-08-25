@@ -1088,6 +1088,7 @@ attest_loaded_control_generation() {
   local unit fragment expected_fragment actual_fragment dropins need_reload load_state
   local runtime_kind expected_user expected_working expected_exec expected_env_paths
   local actual_exec actual_env_files actual_unset expected_unset actual_address expected_address
+  local source_ip_deny source_ip_allow actual_ip_deny actual_ip_allow
   local property expected actual
   if [[ "$unprivileged_test_mode" == true ]]; then
     [[ "${TEST_INSTALL_STALE_MANAGER:-false}" != true ]] \
@@ -1142,10 +1143,18 @@ attest_loaded_control_generation() {
       && "$(systemctl_property_value "$unit" PrivateDevices)" == yes \
       && "$(systemctl_property_value "$unit" ProtectSystem)" == strict \
       && "$(systemctl_property_value "$unit" ProtectHome)" == yes \
-      && "$(systemctl_property_value "$unit" RestrictNetworkInterfaces)" == lo \
-      && "$(systemctl_property_value "$unit" IPAddressDeny)" == any \
-      && "$(systemctl_property_value "$unit" IPAddressAllow)" == localhost ]] \
+      && "$(systemctl_property_value "$unit" RestrictNetworkInterfaces)" == lo ]] \
       || die "effective rollback runtime identity/sandbox is not exact: ${unit}"
+    source_ip_deny="$(awk -F= '$1 == "IPAddressDeny" { print substr($0, length($1) + 2) }' "$fragment")"
+    source_ip_allow="$(awk -F= '$1 == "IPAddressAllow" { print substr($0, length($1) + 2) }' "$fragment")"
+    actual_ip_deny="$(systemctl_property_value "$unit" IPAddressDeny)" \
+      || die "effective rollback IPAddressDeny read failed: ${unit}"
+    actual_ip_allow="$(systemctl_property_value "$unit" IPAddressAllow)" \
+      || die "effective rollback IPAddressAllow read failed: ${unit}"
+    [[ "$source_ip_deny" == any && "$source_ip_allow" == localhost \
+      && "$(printf '%s' "$actual_ip_deny" | normalized_word_set)" == '0.0.0.0/0 ::/0' \
+      && "$(printf '%s' "$actual_ip_allow" | normalized_word_set)" == '127.0.0.0/8 ::1/128' ]] \
+      || die "effective rollback IP address boundary is not exact: ${unit}"
     actual_exec="$(systemctl_property_value "$unit" ExecStart)" \
       || die "effective rollback ExecStart read failed: ${unit}"
     [[ "$actual_exec" == *"argv[]=${expected_exec} ;"* && "$actual_exec" != *'} {'* ]] \

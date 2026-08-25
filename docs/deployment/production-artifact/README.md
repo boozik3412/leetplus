@@ -31,8 +31,9 @@ production hydration receipt и не может быть promoted. Production `-
 `leetplus-build`, чистого от runtime secrets/production credentials и
 изолированного от внешней сети и local Unix sockets. Он запускает exact copy-only
 `pnpm install --prod --offline --frozen-lockfile --ignore-scripts
---side-effects-cache-readonly --package-import-method=copy --store-dir
-/srv/leetplus/pnpm-store`, затем Prisma generate, отвергает hardlinks и создаёт
+--side-effects-cache-readonly --package-import-method=copy` через одноразовый
+writable store-wrapper над read-only `/srv/leetplus/pnpm-store/v10/files`,
+затем Prisma generate, отвергает hardlinks и создаёт
 полный `HYDRATED_SHA256SUMS`. Root и
 runtime users не имеют права выполнять hydration. Ошибка сохраняет staging
 directory для расследования и никогда не перезаписывает существующий release.
@@ -231,8 +232,12 @@ code. Затем в disposable exact-source workspace выполняется `pn
 --package-import-method=copy --store-dir <empty-store>`: pnpm запускает только
 dependency hooks из reviewed `allowBuilds` и сохраняет их platform/Node-bound
 side-effects, включая оба Prisma engine, в тот же CAS. После удаления
-disposable `node_modules` содержимое `<empty-store>` архивируется и
-архив получает отдельный SHA-256. На production оба файла и exact
+disposable `node_modules` exact package tree самого `pnpm 10.33.2` копируется
+в `<empty-store>/.leetplus-tools/pnpm/10.33.2`, после чего содержимое store
+архивируется и получает отдельный SHA-256. Production hydration не доверяет
+host-level Corepack shim и не допускает сетевой fallback: pnpm запускается
+через `/usr/bin/node` непосредственно из этого manifest-bound read-only tree.
+На production оба файла и exact
 `pnpm-lock.yaml` импортируются только через root
 `stage-pnpm-store.sh --archive ... --archive-sha256 ... --lockfile ...
 --node-major 22 --pnpm-version 10.33.2`. Скрипт не выполняет package code,
@@ -242,7 +247,11 @@ disposable `node_modules` содержимое `<empty-store>` архивиру�
 file count, затем повторно проверяет весь root-owned read-only tree общим
 `verify-pnpm-store-integrity.mjs`. Hydration выполняет ту же проверку и связывает
 store manifest/receipt SHA-256 со своим sandbox receipt **до** первого `pnpm`.
-Unit видит store только read-only; любой topology/ownership/digest,
+Для обязательной pnpm project registration stager создаёт внутри disposable
+`node_modules` отдельный writable store-wrapper, связывает только его
+`v10/files` с immutable trusted CAS, а после offline install полностью удаляет
+wrapper. Unit видит исходный store только read-only; полная integrity-проверка
+повторяется после install и Prisma generate. Любой topology/ownership/digest,
 Node/pnpm/lockfile mismatch или попытка fallback в сеть останавливает release.
 
 Команды создания identity выполняются только если exact user/group ещё нет;

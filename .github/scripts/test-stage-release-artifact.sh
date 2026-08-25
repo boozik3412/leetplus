@@ -349,7 +349,7 @@ grep -E \
 lifecycle_regressed_stager="${TEST_ROOT}/lifecycle-regressed-stage-release-artifact.sh"
 cp -- "$STAGER" "$lifecycle_regressed_stager"
 sed -i 's/ --ignore-scripts \\/ \\/' "$lifecycle_regressed_stager"
-grep -F 'pnpm install --prod --offline --frozen-lockfile \' \
+grep -F '"${pnpm_command[@]}" install --prod --offline --frozen-lockfile \' \
   "$lifecycle_regressed_stager" >/dev/null
 if grep -F -- '--ignore-scripts' "$lifecycle_regressed_stager" >/dev/null; then
   printf 'lifecycle regression fixture did not remove --ignore-scripts\n' >&2

@@ -460,7 +460,7 @@ if [[ ! -d /usr/local/libexec/leetplus ]]; then
   install -d -o root -g root -m 0755 /usr/local/libexec/leetplus
   created_libexec_directory=true
 fi
-install -o root -g root -m 0755 "$STAGER_SOURCE" "$INSTALLED_STAGER"
+install -o root -g root -m 0555 "$STAGER_SOURCE" "$INSTALLED_STAGER"
 install -o root -g root -m 0644 "$UNIT_SOURCE" "$INSTALLED_UNIT"
 
 production_stage_fixture_candidate="/srv/leetplus-stage-input-fixture-${RANDOM}-${BASHPID}"
@@ -1126,7 +1126,7 @@ printf '{"releaseSha":"%s"}\n' "$release_sha" > "$release_directory/release-prov
 )
 FAKE_STAGER
 chmod 0755 "$fake_stager"
-install -o root -g root -m 0755 "$fake_stager" "$INSTALLED_STAGER"
+install -o root -g root -m 0555 "$fake_stager" "$INSTALLED_STAGER"
 fake_stager_sha256="$(sha256sum -- "$INSTALLED_STAGER" | awk '{ print $1 }')"
 fixture_attestor="${TEST_ROOT}/fixture-verify-release-hydration-systemd.mjs"
 awk -v sha="$fake_stager_sha256" '
@@ -1667,7 +1667,7 @@ prepare_recovery_hydration "$mount_sha"
 groupadd --system --non-unique --gid "$(id -g leetplus-build)" \
   leetplus-build-gid-adversarial
 created_adversarial_gid_group=true
-install -o root -g root -m 0755 "$STAGER_SOURCE" "$INSTALLED_STAGER"
+install -o root -g root -m 0555 "$STAGER_SOURCE" "$INSTALLED_STAGER"
 if "$INSTALLED_STAGER" --release-sha "$mount_sha" --preflight-build-uid-fence \
   > "${TEST_ROOT}/stager-gid-alias.out" 2>&1; then
   die 'production stager accepted a second NSS group aliasing the build GID'
@@ -1676,7 +1676,7 @@ assert_fixture_output_contains \
   "${TEST_ROOT}/stager-gid-alias.out" \
   'another NSS group aliases the leetplus-build GID' \
   stager-gid-alias
-install -o root -g root -m 0755 "$fake_stager" "$INSTALLED_STAGER"
+install -o root -g root -m 0555 "$fake_stager" "$INSTALLED_STAGER"
 if run_promoter "$mount_sha" "${TEST_ROOT}/promoter-gid-alias.out" 2>&1; then
   die 'production promoter accepted a second NSS group aliasing the build GID'
 fi

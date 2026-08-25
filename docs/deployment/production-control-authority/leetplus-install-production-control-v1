@@ -247,7 +247,14 @@ def assert_ancestors(absolute_path, root_prefix, uid, gid, include_leaf=False):
             die(f"trusted ancestor is not immutable expected authority: {candidate}")
 
 
-def ensure_directory(absolute_path, root_prefix, uid, gid, mode):
+def ensure_directory(
+    absolute_path,
+    root_prefix,
+    uid,
+    gid,
+    mode,
+    reconcile_legacy_private_mode=False,
+):
     if not absolute_path.startswith("/"):
         die("directory target is not absolute")
     components = path_components(absolute_path)
@@ -258,17 +265,37 @@ def ensure_directory(absolute_path, root_prefix, uid, gid, mode):
         except ValueError:
             die(f"directory is outside fixture root: {absolute_path}")
     for candidate in components[start:]:
+        created = False
         try:
             details = os.lstat(candidate)
         except FileNotFoundError:
             os.mkdir(candidate, mode)
             os.chown(candidate, uid, gid)
+            os.chmod(candidate, mode)
             fsync_directory(os.path.dirname(candidate))
             details = os.lstat(candidate)
+            created = True
         if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode):
             die(f"directory authority path is not a real directory: {candidate}")
         if details.st_uid != uid or details.st_gid != gid or details.st_mode & 0o022:
             die(f"directory authority path is writable or foreign-owned: {candidate}")
+        if (
+            candidate == absolute_path
+            and stat.S_IMODE(details.st_mode) != mode
+            and reconcile_legacy_private_mode
+        ):
+            if stat.S_IMODE(details.st_mode) != 0o700 or mode != 0o755:
+                die(f"legacy private directory mode cannot be reconciled: {candidate}")
+            os.chmod(candidate, mode)
+            details = os.lstat(candidate)
+            fsync_directory(candidate)
+        if created or (candidate == absolute_path and reconcile_legacy_private_mode):
+            if (
+                details.st_uid != uid
+                or details.st_gid != gid
+                or stat.S_IMODE(details.st_mode) != mode
+            ):
+                die(f"directory authority path does not have exact mode {mode:04o}: {candidate}")
 
 
 def read_mount_targets():
@@ -346,9 +373,9 @@ def stable_read(pathname, maximum, label):
         os.close(descriptor)
 
 
-def atomic_write(pathname, value, root_prefix, uid, gid, mode):
+def atomic_write(pathname, value, root_prefix, uid, gid, mode, parent_mode=0o700):
     parent = os.path.dirname(pathname)
-    ensure_directory(parent, root_prefix, uid, gid, 0o700)
+    ensure_directory(parent, root_prefix, uid, gid, parent_mode)
     temporary = os.path.join(parent, f".{os.path.basename(pathname)}.new")
     try:
         existing = os.lstat(temporary)
@@ -966,6 +993,14 @@ if os.path.lexists(receipt_path):
         die("existing receipt conflicts with the outstanding install intent")
 
 installed_count = 0
+ensure_directory(
+    host_path(root_prefix, "/usr/local/libexec"),
+    root_prefix,
+    uid,
+    gid,
+    0o755,
+    True,
+)
 for source, destination, mode in install_entries:
     source_path = os.path.join(generation_root, *source.split("/"))
     source_bytes = stable_read(source_path, MAX_MEMBER_BYTES, f"install source {source}")[0]
@@ -975,11 +1010,31 @@ for source, destination, mode in install_entries:
     destination_parent = os.path.dirname(destination_path)
     if destination.startswith(CONTROL_BUNDLE_ROOT + "/"):
         ensure_directory(host_path(root_prefix, "/srv/leetplus"), root_prefix, uid, gid, 0o755)
-        ensure_directory(destination_parent, root_prefix, uid, gid, 0o500)
+        destination_parent_mode = 0o500
     else:
-        ensure_directory(destination_parent, root_prefix, uid, gid, 0o755)
+        destination_parent_mode = 0o755
+    reconcile_service_helper_parent = destination_parent == host_path(
+        root_prefix,
+        "/usr/local/libexec/leetplus",
+    )
+    ensure_directory(
+        destination_parent,
+        root_prefix,
+        uid,
+        gid,
+        destination_parent_mode,
+        reconcile_service_helper_parent,
+    )
     reject_exact_mount(destination_path, mount_targets, f"install destination {destination}")
-    atomic_write(destination_path, source_bytes, root_prefix, uid, gid, mode)
+    atomic_write(
+        destination_path,
+        source_bytes,
+        root_prefix,
+        uid,
+        gid,
+        mode,
+        destination_parent_mode,
+    )
     installed_bytes = stable_read(destination_path, MAX_MEMBER_BYTES, f"installed destination {destination}")[0]
     details = os.lstat(destination_path)
     if (
@@ -997,7 +1052,15 @@ for source, destination, mode in install_entries:
 inner_digest = sha256_bytes(inner_manifest_bytes)
 trust_path = host_path(root_prefix, "/etc/leetplus/rollback-control-manifest.sha256")
 ensure_directory(os.path.dirname(trust_path), root_prefix, uid, gid, 0o755)
-atomic_write(trust_path, f"{inner_digest}\n".encode("ascii"), root_prefix, uid, gid, 0o400)
+atomic_write(
+    trust_path,
+    f"{inner_digest}\n".encode("ascii"),
+    root_prefix,
+    uid,
+    gid,
+    0o400,
+    0o755,
+)
 
 if not fixture_mode:
     daemon_reload = subprocess.run(

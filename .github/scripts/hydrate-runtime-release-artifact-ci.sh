@@ -14,7 +14,7 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 0077
 
-readonly RELEASE_STAGER_AUTHORITY_SHA256='76ffb6b1d22be8c0519d7aa80d6f90e294392572676209b8c316b181421c7c62'
+readonly RELEASE_STAGER_AUTHORITY_SHA256='71325e3099d84790cfcba81aac5608787df7234026468cffb7125e0ce3fe6962'
 readonly RUNTIME_EXTRACTOR_AUTHORITY_SHA256='8b2e687f20a0c3c34bcd7c9108679c28f3a20305debe1aa17d248b4f7115cb6c'
 readonly RUNTIME_VERIFIER_AUTHORITY_SHA256='0e28bb7c532115e7d9b08aacbba0a20952f4a78992db502ea04ba0c6932d64b1'
 
@@ -896,11 +896,11 @@ prisma_engine_authority_root="${store_root}/.leetplus-tools/prisma-engines/6.19.
   "${prisma_engine_authority_root}/schema-engine"
 /usr/bin/install -o root -g "$build_group" -m 0440 -- \
   "$prewarmed_prisma_query_engine" \
-  "${prisma_engine_authority_root}/libquery_engine.so.node"
+  "${prisma_engine_authority_root}/libquery_engine-debian-openssl-3.0.x.so.node"
 [[ "$(/usr/bin/sha256sum -- "${prisma_engine_authority_root}/schema-engine")" == \
     "${prewarmed_prisma_schema_sha256}  ${prisma_engine_authority_root}/schema-engine" \
-  && "$(/usr/bin/sha256sum -- "${prisma_engine_authority_root}/libquery_engine.so.node")" == \
-    "${prewarmed_prisma_query_sha256}  ${prisma_engine_authority_root}/libquery_engine.so.node" ]] \
+  && "$(/usr/bin/sha256sum -- "${prisma_engine_authority_root}/libquery_engine-debian-openssl-3.0.x.so.node")" == \
+    "${prewarmed_prisma_query_sha256}  ${prisma_engine_authority_root}/libquery_engine-debian-openssl-3.0.x.so.node" ]] \
   || die 'sealed Prisma engine authority differs from reviewed prewarm output'
 
 for prewarm_module_root in \
@@ -1134,7 +1134,7 @@ run_hydration_and_verify() {
     || die 'hydrated release is incomplete'
   mapfile -d '' -t hydrated_prisma_query_engines < <(
     /usr/bin/find -P "${hydrated_release}/node_modules/.pnpm" -xdev \
-      -path '*/node_modules/.prisma/client/libquery_engine.so.node' \
+      -path '*/node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node' \
       -type f -print0
   )
   ((${#hydrated_prisma_query_engines[@]} == 1)) \

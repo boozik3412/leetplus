@@ -350,9 +350,9 @@ authority_store="${TEST_ROOT}/sealed-prisma-store"
 authority_root="${authority_store}/.leetplus-tools/prisma-engines/6.19.3/debian-openssl-3.0.x"
 mkdir -p "$authority_root"
 printf 'fixture schema engine authority\n' > "$authority_root/schema-engine"
-printf 'fixture query engine authority\n' > "$authority_root/libquery_engine.so.node"
+printf 'fixture query engine authority\n' > "$authority_root/libquery_engine-debian-openssl-3.0.x.so.node"
 chmod 0550 "$authority_root"
-chmod 0440 "$authority_root/schema-engine" "$authority_root/libquery_engine.so.node"
+chmod 0440 "$authority_root/schema-engine" "$authority_root/libquery_engine-debian-openssl-3.0.x.so.node"
 authority_pnpm_root="${TEST_ROOT}/authority-pnpm-bin"
 authority_pnpm_log="${TEST_ROOT}/authority-pnpm.log"
 mkdir -p "$authority_pnpm_root"
@@ -371,7 +371,7 @@ fi
 [[ "${PRISMA_SCHEMA_ENGINE_BINARY:?}" == \
   */node_modules/.leetplus-prisma-engine-authority/schema-engine ]]
 [[ "${PRISMA_QUERY_ENGINE_LIBRARY:?}" == \
-  */node_modules/.leetplus-prisma-engine-authority/libquery_engine.so.node ]]
+  */node_modules/.leetplus-prisma-engine-authority/libquery_engine-debian-openssl-3.0.x.so.node ]]
 [[ -f "$PRISMA_SCHEMA_ENGINE_BINARY" && ! -L "$PRISMA_SCHEMA_ENGINE_BINARY" \
   && -x "$PRISMA_SCHEMA_ENGINE_BINARY" ]]
 [[ -f "$PRISMA_QUERY_ENGINE_LIBRARY" && ! -L "$PRISMA_QUERY_ENGINE_LIBRARY" \
@@ -380,6 +380,10 @@ fi
   "${EXPECTED_SCHEMA_ENGINE_SHA256:?}" ]]
 [[ "$(sha256sum "$PRISMA_QUERY_ENGINE_LIBRARY" | awk '{ print $1 }')" == \
   "${EXPECTED_QUERY_ENGINE_SHA256:?}" ]]
+generated_query_engine_root='node_modules/.pnpm/prisma-fixture/node_modules/.prisma/client'
+mkdir -p -- "$generated_query_engine_root"
+cp -- "$PRISMA_QUERY_ENGINE_LIBRARY" \
+  "$generated_query_engine_root/libquery_engine-debian-openssl-3.0.x.so.node"
 PNPM
 chmod 0700 "${authority_pnpm_root}/pnpm"
 authority_hydration_root="${TEST_ROOT}/authority-hydration-staged"
@@ -407,7 +411,7 @@ env -u DATABASE_URL -u JWT_SECRET -u GUEST_PORTAL_JWT_SECRET \
   PNPM_FIXTURE_LOG="$authority_pnpm_log" \
   EXPECTED_PRISMA_AUTHORITY_STORE="$authority_store" \
   EXPECTED_SCHEMA_ENGINE_SHA256="$(sha256sum "$authority_root/schema-engine" | awk '{ print $1 }')" \
-  EXPECTED_QUERY_ENGINE_SHA256="$(sha256sum "$authority_root/libquery_engine.so.node" | awk '{ print $1 }')" \
+  EXPECTED_QUERY_ENGINE_SHA256="$(sha256sum "$authority_root/libquery_engine-debian-openssl-3.0.x.so.node" | awk '{ print $1 }')" \
   PATH="${authority_pnpm_root}:${PATH}" bash "$STAGER" \
   --release-sha "$RELEASE_SHA" \
   --artifact "$readonly_archive" \

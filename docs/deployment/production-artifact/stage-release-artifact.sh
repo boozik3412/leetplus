@@ -1288,11 +1288,11 @@ NODE
 
     authority_files=(
       "${trusted_prisma_engine_authority_root}/schema-engine"
-      "${trusted_prisma_engine_authority_root}/libquery_engine.so.node"
+      "${trusted_prisma_engine_authority_root}/libquery_engine-debian-openssl-3.0.x.so.node"
     )
     if find_has_match -P "$trusted_prisma_engine_authority_root" \
       -mindepth 1 -maxdepth 1 \
-      ! \( -name 'schema-engine' -o -name 'libquery_engine.so.node' \); then
+      ! \( -name 'schema-engine' -o -name 'libquery_engine-debian-openssl-3.0.x.so.node' \); then
       die 'sealed Prisma engine authority contains an unexpected entry'
     fi
     for authority_file in "${authority_files[@]}"; do
@@ -1324,11 +1324,11 @@ NODE
     mkdir -- "$prisma_engine_input_root"
     chmod 0700 -- "$prisma_engine_input_root"
     prisma_schema_engine_input="${prisma_engine_input_root}/schema-engine"
-    prisma_query_engine_input="${prisma_engine_input_root}/libquery_engine.so.node"
+    prisma_query_engine_input="${prisma_engine_input_root}/libquery_engine-debian-openssl-3.0.x.so.node"
     for authority_file in "${authority_files[@]}"; do
       case "$(basename -- "$authority_file")" in
         schema-engine) destination_file="$prisma_schema_engine_input" ;;
-        libquery_engine.so.node) destination_file="$prisma_query_engine_input" ;;
+        libquery_engine-debian-openssl-3.0.x.so.node) destination_file="$prisma_query_engine_input" ;;
         *) die 'sealed Prisma engine authority file set is internally invalid' ;;
       esac
       cp --reflink=never --no-preserve=mode,ownership,timestamps -- \
@@ -1399,6 +1399,20 @@ NODE
       PRISMA_SCHEMA_ENGINE_BINARY="$prisma_schema_engine_input" \
       PRISMA_QUERY_ENGINE_LIBRARY="$prisma_query_engine_input" \
         "${pnpm_command[@]}" --filter database db:generate || exit 1
+      mapfile -d '' -t generated_prisma_query_engines < <(
+        find -P node_modules/.pnpm -xdev \
+          -path '*/node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node' \
+          -type f -print0
+      )
+      ((${#generated_prisma_query_engines[@]} == 1)) || exit 1
+      generated_prisma_query_engine="${generated_prisma_query_engines[0]}"
+      [[ -f "$generated_prisma_query_engine" \
+        && ! -L "$generated_prisma_query_engine" \
+        && "$(stat -c '%u:%g:%h' -- "$generated_prisma_query_engine")" == \
+          "${EUID}:$(id -g):1" \
+        && "$(sha256sum -- "$generated_prisma_query_engine" | awk '{ print $1 }')" == \
+          "$(sha256sum -- "$prisma_query_engine_input" | awk '{ print $1 }')" ]] \
+        || exit 1
       rm -rf -- "$prisma_engine_input_root"
       [[ ! -e "$prisma_engine_input_root" && ! -L "$prisma_engine_input_root" ]] \
         || exit 1

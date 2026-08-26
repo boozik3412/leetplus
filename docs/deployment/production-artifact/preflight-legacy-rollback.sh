@@ -217,13 +217,19 @@ actual_symlinks="$(LC_ALL=C sort <<< "$actual_symlinks_unsorted")" \
 [[ "$expected_symlinks" == "$actual_symlinks" ]] || die 'rollback symlink topology does not match the exact artifact'
 
 if awk '
+  BEGIN {
+    allowed_path_characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.@+/-[]()~"
+  }
   {
     path = $2
     sub(/^\*/, "", path)
     relative = path
     sub(/^\.\//, "", relative)
+    if (NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || substr(path, 1, 2) != "./" || relative ~ /(^|\/)\.\.?(\/|$)/) exit 1
+    for (index_value = 1; index_value <= length(path); index_value += 1) {
+      if (index(allowed_path_characters, substr(path, index_value, 1)) == 0) exit 1
+    }
   }
-  NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || path !~ /^\.\/[A-Za-z0-9_.@+\/-]+$/ || relative ~ /(^|\/)\.\.?(\/|$)/ { exit 1 }
 ' "$integrity_manifest"; then
   :
 else

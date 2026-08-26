@@ -112,11 +112,11 @@ printf 'NODE_ENV=production\n' > "$environment_root/web-runtime.env"
 printf 'RELEASE_SHA=%s\nWEB_BUILD_ID=%s\n' "$RELEASE_SHA" "$RELEASE_SHA" \
   > "$environment_root/slots/blue.env"
 cp "$environment_root/slots/blue.env" "$environment_root/slots/green.env"
-chmod 0644 "$systemd_root/leetplus-api@.service" "$systemd_root/leetplus-web@.service"
+chmod 0444 "$systemd_root/leetplus-api@.service" "$systemd_root/leetplus-web@.service"
 chmod 0440 "$environment_root/canary-safe.env" "$environment_root/slots/blue.env" \
   "$environment_root/slots/green.env"
 chmod 0640 "$environment_root/runtime.env" "$environment_root/web-runtime.env"
-chmod 0755 "$libexec_root/preflight-release-slot.sh"
+chmod 0555 "$libexec_root/preflight-release-slot.sh"
 
 (
   cd -- "$release_directory"

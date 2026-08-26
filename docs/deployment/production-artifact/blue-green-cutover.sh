@@ -52,8 +52,8 @@ readonly BLUE_NGINX_SHA256='3553e31012e1c00d695381c76ad4df184113c71c5a8b018bf5d9
 readonly GREEN_NGINX_SHA256='a9e449bcd5f7d56be97f347455f7d0629f393d471cdf2b87029b4bede2d58462'
 readonly LEGACY_SAFE_NGINX_SHA256='ebd449a4221dcb0c1d5449b4f87893bcad58b1f16319551730ca5aefde571b25'
 readonly RELEASE_READINESS_SHA256='4bbddf358298c27878ea03a6811a2f5f54af933ad1cd7da2eebfe7f7558351a0'
-readonly LEGACY_READINESS_SHA256='3d010362a3ed30d16addcbfbf1439e3c5ee3248b2b33080ac8f6bb2b4ae771cb'
-readonly AUTHENTICATED_READS_SHA256='b13e2979b40bf4c5a96b74e3ee0b4bd01a8d1d9e0b22ce6d7732f11d063acd9d'
+readonly LEGACY_READINESS_SHA256='ca9da0c50ef02ea921ce1550400ede357b95b76ac1e5e35427772da21581ceae'
+readonly AUTHENTICATED_READS_SHA256='931b5ef69af8446f1225dd832b4b45c00d4849a512f54577d197cbee53e38cf4'
 
 die() {
   printf 'blue-green-cutover: %s\n' "$*" >&2
@@ -367,11 +367,11 @@ attest_candidate_unit() {
   load_unit_property_snapshot "$unit" \
     || { candidate_unit_failure "${unit} effective property snapshot"; return; }
 
-  trusted_installed_file "$fragment" "$fragment_digest" root 644 \
+  trusted_installed_file "$fragment" "$fragment_digest" root 444 \
     || { candidate_unit_failure "${unit} fragment byte/identity"; return; }
   trusted_installed_file "$safe_environment" "$CANARY_SAFE_ENV_SHA256" leetplus-runtime 440 \
     || { candidate_unit_failure "${unit} final safety overlay byte/identity"; return; }
-  trusted_installed_file "${libexec_root}/preflight-release-slot.sh" "$SLOT_PREFLIGHT_SHA256" root 755 \
+  trusted_installed_file "${libexec_root}/preflight-release-slot.sh" "$SLOT_PREFLIGHT_SHA256" root 555 \
     || { candidate_unit_failure "${unit} slot preflight byte/identity"; return; }
   [[ -f "$runtime_environment" && ! -L "$runtime_environment" \
     && "$(realpath -e -- "$runtime_environment")" == "$runtime_environment" ]] \
@@ -1170,7 +1170,7 @@ if [[ "$unprivileged_test_mode" == false ]]; then
   [[ -z "$(find -P "$systemd_root" -maxdepth 0 -perm /022 -print -quit)" ]] || die 'systemd root is group/other-writable'
   [[ -z "$(find -P "$environment_root" -maxdepth 0 -perm /022 -print -quit)" ]] || die 'environment root is group/other-writable'
   [[ -z "$(find -P "$libexec_root" -maxdepth 0 -perm /022 -print -quit)" ]] || die 'libexec root is group/other-writable'
-  trusted_installed_file "$probe" "$RELEASE_READINESS_SHA256" root 755 \
+  trusted_installed_file "$probe" "$RELEASE_READINESS_SHA256" root 555 \
     || die 'release readiness probe byte/identity differs from the pinned verifier'
   trusted_installed_file "$legacy_rollback_probe" "$LEGACY_READINESS_SHA256" root 755 \
     || die 'N-1 readiness probe byte/identity differs from the pinned verifier'

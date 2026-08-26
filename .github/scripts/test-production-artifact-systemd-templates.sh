@@ -136,6 +136,25 @@ assert_multivalue_systemd_property_contract() {
 assert_multivalue_systemd_property_contract "$blue_green_cutover"
 assert_multivalue_systemd_property_contract "$legacy_readiness"
 
+assert_systemd_socket_bind_rendering_contract() {
+  local authority_path="$1" function_source
+  function_source="$(sed -n '/^normalized_word_set() {$/,/^}$/p' "$authority_path")"$'\n'
+  function_source+="$(sed -n '/^normalized_systemd_socket_bind_set() {$/,/^}$/p' "$authority_path")"
+  test -n "$function_source"
+  NORMALIZATION_FUNCTIONS="$function_source" bash --noprofile --norc -c '
+    set -euo pipefail
+    eval "$NORMALIZATION_FUNCTIONS"
+    expected="ipv4:tcp4300 ipv4:tcp4301"
+    test "$(printf "%s" "ipv4:tcp:4300 ipv4:tcp:4301" | normalized_systemd_socket_bind_set)" = "$expected"
+    test "$(printf "%s\n" "ipv4:tcp4301" "ipv4:tcp4300" | normalized_systemd_socket_bind_set)" = "$expected"
+    test "$(printf "%s" "ipv4:tcp:4300 ipv4:tcp4301 ipv6:udp:53" | normalized_systemd_socket_bind_set)" \
+      = "ipv4:tcp4300 ipv4:tcp4301 ipv6:udp53"
+  '
+  test "$(grep -Fc 'normalized_systemd_socket_bind_set)' "$authority_path")" = 3
+}
+
+assert_systemd_socket_bind_rendering_contract "$legacy_readiness"
+
 awk '
   /publish_state_record "\$control_preparing"/ { published = 1; next }
   published && /preparing_record_sha=/ { hashed = 1; next }

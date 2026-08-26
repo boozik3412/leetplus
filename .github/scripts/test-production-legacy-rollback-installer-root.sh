@@ -547,8 +547,12 @@ touch /run/fixture-systemd255-loaded-egress /run/fixture-systemd255-loaded-recov
 if "$AUTHORITY_PATH" > /run/fixture-compatible-loaded-predecessor-unsafe.out 2>&1; then
   die 'installer accepted a loaded recovery unit before its boot fence became effective'
 fi
-grep -F 'loaded fenced current unit is not held by the exact effective boot fence: leetplus-blue-green-recovery.service' \
-  /run/fixture-compatible-loaded-predecessor-unsafe.out >/dev/null
+if ! grep -F 'loaded fenced current unit is not held by the exact effective boot fence: leetplus-blue-green-recovery.service' \
+  /run/fixture-compatible-loaded-predecessor-unsafe.out >/dev/null; then
+  printf '%s\n' 'loaded predecessor negative stopped at an unexpected guard:' >&2
+  cat /run/fixture-compatible-loaded-predecessor-unsafe.out >&2
+  die 'loaded predecessor negative stopped at an unexpected guard'
+fi
 [[ -f /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.fence \
   && ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent ]] \
   || die 'loaded predecessor negative did not stop between fence and intent commits'

@@ -1121,7 +1121,11 @@ attest_durable_mount_boundaries() {
     inventory="$(cat -- "$TEST_CUTOVER_MOUNT_INVENTORY_FILE")" \
       || die 'fixture mount inventory could not be read completely'
   else
-    inventory="$(findmnt --raw --noheadings --output TARGET)" \
+    # Recovery units run in a private mount namespace because
+    # ProtectSystem=strict plus ReadWritePaths creates sandbox bind mounts on
+    # the two durable roots. Attest PID 1's host namespace so those expected
+    # sandbox mounts cannot mask (or be confused with) a durable host mount.
+    inventory="$(findmnt --task 1 --raw --noheadings --output TARGET)" \
       || die 'durable deployment mount inventory failed or returned partial output'
   fi
   [[ ${#inventory} -le 4194304 && "$inventory" != *$'\r'* ]] \

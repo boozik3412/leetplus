@@ -257,7 +257,11 @@ grep -F -x 'ExecStart=/usr/bin/bash -p /usr/local/sbin/leetplus-blue-green-cutov
 for recovery_runtime_unit in "$recovery_unit" "$recovery_watchdog_unit"; do
   grep -F -x 'Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin' "$recovery_runtime_unit" > /dev/null
   grep -F -x 'UnsetEnvironment=BASH_ENV ENV HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM' "$recovery_runtime_unit" > /dev/null
+  grep -F -x 'ProtectSystem=strict' "$recovery_runtime_unit" > /dev/null
+  grep -F -x 'ReadWritePaths=/etc/nginx/leetplus /var/lib/leetplus/deploy-receipts' "$recovery_runtime_unit" > /dev/null
 done
+grep -F 'inventory="$(findmnt --task 1 --raw --noheadings --output TARGET)"' \
+  "$REPOSITORY_ROOT/docs/deployment/production-artifact/blue-green-cutover.sh" > /dev/null
 if grep -F -x 'Before=nginx.service' "$recovery_watchdog_unit" > /dev/null; then
   printf 'post-start recovery watchdog is incorrectly ordered before nginx\n' >&2
   exit 1

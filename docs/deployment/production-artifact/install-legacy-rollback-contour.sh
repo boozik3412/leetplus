@@ -1141,7 +1141,10 @@ attest_loaded_control_generation() {
       fragment="${systemd_root}/leetplus-web-rollback@.service"
       expected_user='leetplus-web-nminus1'
       expected_working="${release_directory}/apps/web"
-      expected_exec="/usr/bin/node ${release_directory}/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3300"
+      # systemctl show reports the admitted argv token before EnvironmentFile
+      # substitution. The separately attested Web runtime environment and
+      # preflight pin WEB_PORT=3300, so require the exact literal token here.
+      expected_exec="/usr/bin/node ${release_directory}/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port \${WEB_PORT}"
       expected_env_paths="${web_runtime_environment}"$'\n'"${leetplus_root}/rollback-releases/${LEGACY_SHA}.env"$'\n'"${safe_environment}"
     fi
     [[ "$(systemctl_property_value "$unit" User)" == "$expected_user" \

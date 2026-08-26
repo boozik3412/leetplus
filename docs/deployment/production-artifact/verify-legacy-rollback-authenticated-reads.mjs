@@ -184,6 +184,16 @@ function hasCompatibleNetworkScopeShape(record) {
     Array.isArray(record.allowedStoreIds) && record.allowedStoreIds.length === 0;
 }
 
+function hasCompatibleStaffAccessScope(record, legacyCanaryScopeOmitted) {
+  if (!record || typeof record !== "object") return false;
+
+  // The admitted exact N-1 predates this report field. Its NETWORK boundary is
+  // independently proven by its matching legacy auth shape, exact store
+  // topology and read-only DB oracle.
+  if (!Object.hasOwn(record, "accessScope")) return legacyCanaryScopeOmitted;
+  return ["NETWORK", "STORES"].includes(record.accessScope);
+}
+
 async function readProtectedFile(path, failureCode, { rootOnly = false } = {}) {
   let handle;
   try {
@@ -616,6 +626,9 @@ if (
 ) {
   fail("AUTH_ME_SCOPE_INVALID");
 }
+const legacyCanaryScopeOmitted = [loginBody.user, meBody].every((record) =>
+  !Object.hasOwn(record, "accessScope") && !Object.hasOwn(record, "allowedStoreIds")
+);
 
 const criticalBodies = new Map();
 for (const [name, path] of READS) {
@@ -690,7 +703,7 @@ function validStaffBase(body) {
 const checklist = criticalBodies.get("staff-checklist-templates");
 if (
   !validStaffBase(checklist) ||
-  !["NETWORK", "STORES"].includes(checklist.accessScope) ||
+  !hasCompatibleStaffAccessScope(checklist, legacyCanaryScopeOmitted) ||
   !["total", "draft", "active", "archived"].every((key) =>
     Number.isInteger(checklist.summary[key]) && checklist.summary[key] >= 0
   ) ||
@@ -705,7 +718,7 @@ if (
 const knowledge = criticalBodies.get("staff-knowledge-base");
 if (
   !validStaffBase(knowledge) ||
-  !["NETWORK", "STORES"].includes(knowledge.accessScope) ||
+  !hasCompatibleStaffAccessScope(knowledge, legacyCanaryScopeOmitted) ||
   !["total", "published", "draft", "archived"].every((key) =>
     Number.isInteger(knowledge.summary[key]) && knowledge.summary[key] >= 0
   ) ||

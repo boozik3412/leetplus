@@ -65,8 +65,8 @@ readonly COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256='86bfb46c71d385051b5087c6eb023
 # destination mutation, so this generation can establish the durable boot fence
 # before trusting those cached units.
 readonly COMPATIBLE_LOADED_PREPARING_CONTROL_MANIFEST_SHA256='bc69b6cfd9189ed1877b3fcaec4dfe5746fd20e5ba43b4b18f318b515a89f532'
-readonly COMPATIBLE_LOADED_PREPARING_INSTALL_PLAN_SHA256='a73ce1452933b4b620a5ab46a963592d4e53afd3e385f5882235f41d944bb9ef6'
-readonly COMPATIBLE_LOADED_PREPARING_RECORD_SHA256='a13e4ee44db0322bb7b1ef74677e638cf9aa7bc842bcf68abd465c9442f525d65'
+readonly COMPATIBLE_LOADED_PREPARING_INSTALL_PLAN_SHA256='a73ce1452933b4b620a5ab46a963592d4e53afd3e385f5882235f41d944b9ef6'
+readonly COMPATIBLE_LOADED_PREPARING_RECORD_SHA256='a13e4ee4db0322bb7b1ef74677e638cf9aa7bc842bcf68abd465c9442f525d65'
 # The same production transaction subsequently committed this exact fence and
 # PREPARED intent before systemd 255 exposed the template-dependency aliases.
 # These five record identities are the only cross-generation committed state

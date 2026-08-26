@@ -526,14 +526,14 @@ printf '\nfixture-compatible-loaded-predecessor-drift\n' \
 cat > /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing <<'LOADED_PREDECESSOR_PREPARING'
 CONTRACT=LEETPLUS_SCHEDULER_FREE_CONTROL_INSTALL_V1
 CONTROL_MANIFEST_SHA256=bc69b6cfd9189ed1877b3fcaec4dfe5746fd20e5ba43b4b18f318b515a89f532
-INSTALL_PLAN_SHA256=a73ce1452933b4b620a5ab46a963592d4e53afd3e385f5882235f41d944bb9ef6
+INSTALL_PLAN_SHA256=a73ce1452933b4b620a5ab46a963592d4e53afd3e385f5882235f41d944b9ef6
 ORIGINAL_DRIFT_DESTINATIONS=/usr/local/libexec/leetplus/preflight-legacy-rollback.sh
 PREEXISTING_RUNTIME_MASKS=NONE
 LOADED_PREDECESSOR_PREPARING
 chown root:root /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing
 chmod 0600 /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing
 [[ "$(sha256sum /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing | awk '{ print $1 }')" \
-  == a13e4ee44db0322bb7b1ef74677e638cf9aa7bc842bcf68abd465c9442f525d65 ]] \
+  == a13e4ee4db0322bb7b1ef74677e638cf9aa7bc842bcf68abd465c9442f525d65 ]] \
   || die 'loaded predecessor preparation fixture lost its exact production identity'
 systemctl mask --runtime --no-reload \
   leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.service \

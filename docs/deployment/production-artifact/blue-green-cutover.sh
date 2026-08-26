@@ -136,8 +136,8 @@ candidate_full_config_test() {
   fi
 
   local validation_root
-  validation_root="$(mktemp -d /run/leetplus-nginx-validation.XXXXXX)"
-  case "$validation_root" in /run/leetplus-nginx-validation.*) ;; *) die 'unsafe nginx validation directory' ;; esac
+  validation_root="$(mktemp -d /tmp/leetplus-nginx-validation.XXXXXX)"
+  case "$validation_root" in /tmp/leetplus-nginx-validation.*) ;; *) die 'unsafe nginx validation directory' ;; esac
   cp -a -- "$config_root/." "$validation_root/"
   rm -f -- "$validation_root/active-upstreams.conf"
   ln -s -- "upstreams/$(basename -- "$slot_target")" "$validation_root/active-upstreams.conf"
@@ -1387,7 +1387,7 @@ collect_state_records() {
   if [[ "$unprivileged_test_mode" == true ]]; then
     temporary="$(mktemp "${state_root}/.runtime-record-inventory.XXXXXX")"
   else
-    temporary="$(mktemp /run/leetplus-cutover-record-inventory.XXXXXX)"
+    temporary="$(mktemp /tmp/leetplus-cutover-record-inventory.XXXXXX)"
   fi
   [[ -f "$temporary" && ! -L "$temporary" && "$(stat -c '%h' -- "$temporary")" == 1 ]] \
     || die 'cutover record inventory temporary is unsafe'

@@ -196,6 +196,7 @@ done
 
 for slot_unit in "$slot_api_unit" "$slot_web_unit"; do
   grep -F -x 'Group=leetplus-runtime' "$slot_unit" > /dev/null
+  grep -F -x 'Slice=system.slice' "$slot_unit" > /dev/null
   grep -F -x 'EnvironmentFile=/etc/leetplus/slots/%i.env' "$slot_unit" > /dev/null
   grep -F -x 'EnvironmentFile=/etc/leetplus/canary-safe.env' "$slot_unit" > /dev/null
   grep -F -x 'Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin' "$slot_unit" > /dev/null

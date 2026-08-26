@@ -6,6 +6,7 @@ Before=nginx.service
 
 [Service]
 Type=simple
+Slice=system.slice
 User=leetplus-api-%i
 Group=leetplus-runtime
 WorkingDirectory=/srv/leetplus/slots/%i

@@ -7,6 +7,7 @@ Before=nginx.service
 
 [Service]
 Type=simple
+Slice=system.slice
 User=leetplus-web-nminus1
 Group=leetplus-runtime
 WorkingDirectory=/srv/leetplus/rollback-releases/%i/apps/web

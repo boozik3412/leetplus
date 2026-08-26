@@ -123,7 +123,10 @@ unit_property() {
 
 load_unit_property_snapshot() {
   local unit="$1" snapshot
-  snapshot="$(systemctl_bounded show --no-pager "$unit")" || return 1
+  # systemctl suppresses empty properties unless --all is requested. Empty
+  # security properties (notably DropInPaths) are still part of the exact
+  # attestation contract and must remain distinguishable from missing output.
+  snapshot="$(systemctl_bounded show --all --no-pager "$unit")" || return 1
   [[ -n "$snapshot" && ${#snapshot} -le 262144 && "$snapshot" != *$'\r'* ]] || return 1
   unit_property_snapshot_unit="$unit"
   unit_property_snapshot="$snapshot"

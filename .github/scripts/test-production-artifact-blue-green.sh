@@ -450,8 +450,8 @@ case "${1:-}" in
       SystemCallArchitectures) printf 'native\n' ;;
       RestrictAddressFamilies) printf 'AF_INET6 AF_INET\n' ;;
       RestrictNetworkInterfaces) printf 'lo\n' ;;
-      IPAddressDeny) printf 'any\n' ;;
-      IPAddressAllow) printf 'localhost\n' ;;
+      IPAddressDeny) printf '::/0 0.0.0.0/0\n' ;;
+      IPAddressAllow) printf '127.0.0.0/8 ::1/128\n' ;;
       ReadOnlyPaths) printf '/srv/leetplus/slots /srv/leetplus/releases\n' ;;
       ReadWritePaths)
         if [[ "$kind" == api ]]; then printf '/var/lib/leetplus/langame-sync\n'; else printf '/var/cache/leetplus-web-%s\n' "$slot_name"; fi

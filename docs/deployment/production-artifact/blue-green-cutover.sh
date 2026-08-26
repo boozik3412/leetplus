@@ -53,7 +53,7 @@ readonly BLUE_NGINX_SHA256='3553e31012e1c00d695381c76ad4df184113c71c5a8b018bf5d9
 readonly GREEN_NGINX_SHA256='a9e449bcd5f7d56be97f347455f7d0629f393d471cdf2b87029b4bede2d58462'
 readonly LEGACY_SAFE_NGINX_SHA256='ebd449a4221dcb0c1d5449b4f87893bcad58b1f16319551730ca5aefde571b25'
 readonly RELEASE_READINESS_SHA256='4bbddf358298c27878ea03a6811a2f5f54af933ad1cd7da2eebfe7f7558351a0'
-readonly LEGACY_READINESS_SHA256='7643a11195ac1de588b99f17cbe4e05fc1acc5a4a8377ded640033777170476e'
+readonly LEGACY_READINESS_SHA256='fb9b76af3de4861e60f77fc67b20b1df3abc4939f5c45678b283164815ca8c05'
 readonly AUTHENTICATED_READS_SHA256='931b5ef69af8446f1225dd832b4b45c00d4849a512f54577d197cbee53e38cf4'
 
 die() {
@@ -234,6 +234,14 @@ load_unit_property_snapshot() {
 
 normalized_word_set() {
   tr ' ' '\n' | awk 'NF == 1 { print }' | LC_ALL=C sort | tr '\n' ' ' | awk '{$1=$1; print}'
+}
+
+systemd_localhost_ip_boundary_is_exact() {
+  local ip_deny="$1" ip_allow="$2"
+  # systemd 255 expands the admitted source aliases `any` and `localhost` in
+  # effective properties. Accept only their complete IPv4/IPv6 CIDR sets.
+  [[ "$(printf '%s' "$ip_deny" | normalized_word_set)" == '0.0.0.0/0 ::/0' \
+    && "$(printf '%s' "$ip_allow" | normalized_word_set)" == '127.0.0.0/8 ::1/128' ]]
 }
 
 runtime_secret_group_reverse_sets_are_exact() {
@@ -467,12 +475,14 @@ attest_candidate_unit() {
     && "$remove_ipc" == yes && "$syscall_architectures" == native && "$unit_umask" == 0027 \
     && -z "$capability_bounding" && -z "$ambient_capabilities" ]] \
     || { candidate_unit_failure "${unit} effective sandbox/capability boundary"; return; }
-  [[ "$(printf '%s' "$address_families" | normalized_word_set)" == 'AF_INET AF_INET6' \
-    && "$(printf '%s' "$network_interfaces" | normalized_word_set)" == lo \
-    && "$ip_deny" == any && "$ip_allow" == localhost \
-    && "$(printf '%s' "$read_only_paths" | normalized_word_set)" == '/srv/leetplus/releases /srv/leetplus/slots' \
-    && "$(printf '%s' "$read_write_paths" | normalized_word_set)" == "$(printf '%s' "$expected_read_write_paths" | normalized_word_set)" ]] \
-    || { candidate_unit_failure "${unit} effective network/path sandbox"; return; }
+  if ! [[ "$(printf '%s' "$address_families" | normalized_word_set)" == 'AF_INET AF_INET6' \
+      && "$(printf '%s' "$network_interfaces" | normalized_word_set)" == lo ]] \
+    || ! systemd_localhost_ip_boundary_is_exact "$ip_deny" "$ip_allow" \
+    || ! [[ "$(printf '%s' "$read_only_paths" | normalized_word_set)" == '/srv/leetplus/releases /srv/leetplus/slots' \
+      && "$(printf '%s' "$read_write_paths" | normalized_word_set)" == "$(printf '%s' "$expected_read_write_paths" | normalized_word_set)" ]]; then
+    candidate_unit_failure "${unit} effective network/path sandbox"
+    return
+  fi
   [[ "$main_pid" =~ ^[1-9][0-9]*$ && "$invocation_id" =~ ^[0-9a-f]{32}$ \
     && "$invocation_id" != 00000000000000000000000000000000 && "$control_group" == /* \
     && -r "/proc/${main_pid}/cgroup" ]] \

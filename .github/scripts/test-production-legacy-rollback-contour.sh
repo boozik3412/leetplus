@@ -156,17 +156,25 @@ release_directory="${release_root}/${LEGACY_SHA}"
 mkdir -p \
   "$release_directory/apps/api/dist" \
   "$release_directory/apps/web/node_modules/next/dist/bin" \
-  "$release_directory/apps/web/.next/cache"
+  "$release_directory/apps/web/.next/cache" \
+  "$release_directory/apps/web/.next/build/chunks" \
+  "$release_directory/apps/web/.next/server/app/(app)/admin"
 printf '%s\n' "$LEGACY_SHA" > "$release_directory/.leetplus-source-sha"
 printf 'api\n' > "$release_directory/apps/api/dist/main.js"
 printf 'next\n' > "$release_directory/apps/web/node_modules/next/dist/bin/next"
 printf 'legacy-build\n' > "$release_directory/apps/web/.next/BUILD_ID"
+printf 'turbopack chunk\n' > "$release_directory/apps/web/.next/build/chunks/[root-of-the-server]__fixture._.js"
+printf 'route group\n' > "$release_directory/apps/web/.next/server/app/(app)/admin/page.js"
+printf 'tilde chunk\n' > "$release_directory/apps/web/.next/build/chunks/route~fixture.js"
 : > "$release_directory/N_MINUS_ONE_SYMLINKS"
-(
-  cd -- "$release_directory"
-  find . -type f ! -path './N_MINUS_ONE_SHA256SUMS' -print0 \
-    | LC_ALL=C sort -z | xargs -0 sha256sum > N_MINUS_ONE_SHA256SUMS
-)
+refresh_fixture_manifest() {
+  (
+    cd -- "$release_directory"
+    find . -type f ! -path './N_MINUS_ONE_SHA256SUMS' -print0 \
+      | LC_ALL=C sort -z | xargs -0 sha256sum > N_MINUS_ONE_SHA256SUMS
+  )
+}
+refresh_fixture_manifest
 
 set -a
 # shellcheck disable=SC1090
@@ -190,6 +198,19 @@ unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
   --release-root "$release_root" --safe-environment "$safe_overlay" --unprivileged-test-mode \
   > "$TEST_ROOT/preflight.out"
 grep -F -x "LEGACY_ROLLBACK_PREFLIGHT_ACCEPTED_SHA=${LEGACY_SHA}" "$TEST_ROOT/preflight.out" >/dev/null
+unsafe_manifest_path="$release_directory/apps/api/dist/unsafe|path.js"
+printf 'unsafe manifest path\n' > "$unsafe_manifest_path"
+refresh_fixture_manifest
+if /usr/bin/bash -p "$preflight" --release-sha "$LEGACY_SHA" --api-runtime \
+  --release-root "$release_root" --safe-environment "$safe_overlay" --unprivileged-test-mode \
+  > "$TEST_ROOT/unsafe-manifest-path.out" 2>&1; then
+  printf 'preflight accepted a manifest path outside the explicit safe alphabet\n' >&2
+  exit 1
+fi
+grep -F 'rollback integrity manifest contains an unsafe or malformed entry' \
+  "$TEST_ROOT/unsafe-manifest-path.out" >/dev/null
+rm -- "$unsafe_manifest_path"
+refresh_fixture_manifest
 valid_fixture_jwt_secret="$JWT_SECRET"
 for rejected_jwt_secret in '__UNSET__' 'leetplus-dev-jwt-secret-change-before-production' 'too-short'; do
   if [[ "$rejected_jwt_secret" == '__UNSET__' ]]; then

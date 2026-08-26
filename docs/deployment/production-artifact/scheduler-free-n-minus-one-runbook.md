@@ -73,7 +73,10 @@ nginx-конфигурациях нет независимых API/Web `backup` 
    покрывает каждый regular file, кроме самого manifest. Artifact переносится
    в `/srv/leetplus/rollback-releases/<SHA>` и становится root-owned,
    service-readable, group/other-nonwritable. Любой dangling/escaping symlink,
-   special entry или multiply-linked file — stop condition.
+   special entry или multiply-linked file — stop condition. Path admission
+   явно допускает Next.js route/chunk-символы `[]()~`, но по-прежнему запрещает
+   whitespace, `|`, backslash, absolute/traversal и любой символ вне reviewed
+   алфавита.
 3. Root-only inventory всех установленных `leetplus-*` services/timers.
    Каждая запись должна быть осознанно отнесена к `REQUIRED_DRAIN`,
    `OPTIONAL_DRAIN` или `SAFE`. Нельзя удалять неизвестную запись из inventory,

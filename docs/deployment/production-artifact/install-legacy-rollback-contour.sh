@@ -1947,6 +1947,7 @@ if [[ "$intent_phase" != POST_ATTESTED ]]; then
 "PREPARING_SHA256=${preparing_record_sha}"$'\n'
     publish_state_record "$control_fence" "$fence_record_content"
     fence_record_sha="$(sha256sum "$control_fence" | awk '{ print $1 }')"
+    fence_generation=current
     if [[ "$unprivileged_test_mode" == true && "${TEST_INSTALL_FAIL_AFTER_FENCE_SYNC:-false}" == true ]]; then
       die 'simulated reboot after the durable boot-fence commit and before install intent'
     fi

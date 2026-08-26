@@ -217,7 +217,12 @@ property_value() {
         printf '/etc/systemd/system/nginx.service.d/leetplus-blue-green-recovery.conf\n'
       elif [[ "$unit" =~ ^leetplus-(rollback-egress|blue-green-recovery(-watchdog)?)\.(service|timer)$ \
         && -f "/etc/systemd/system/${unit}.d/90-leetplus-control-install-fence.conf" ]]; then
-        printf '/etc/systemd/system/%s.d/90-leetplus-control-install-fence.conf\n' "$unit"
+        if [[ "$unit" == leetplus-blue-green-recovery.service \
+          && -e /run/fixture-recovery-dropin-unsafe ]]; then
+          printf '\n'
+        else
+          printf '/etc/systemd/system/%s.d/90-leetplus-control-install-fence.conf\n' "$unit"
+        fi
       else
         printf '\n'
       fi
@@ -225,8 +230,14 @@ property_value() {
     FragmentPath) printf '%s\n' "$fragment" ;;
     Id|Names) printf '%s\n' "$unit" ;;
     UnitFileState)
-      [[ "$unit" != leetplus-blue-green-recovery-watchdog.service ]] \
-        && printf 'disabled\n' || printf 'static\n'
+      if [[ "$unit" == leetplus-blue-green-recovery-watchdog.service ]]; then
+        printf 'static\n'
+      elif [[ "$unit" == leetplus-blue-green-recovery.service \
+        && -e /run/fixture-recovery-enabled ]]; then
+        printf 'enabled\n'
+      else
+        printf 'disabled\n'
+      fi
       ;;
     Requires) printf 'leetplus-rollback-egress.service\n' ;;
     ConditionResult)
@@ -488,14 +499,14 @@ touch /run/fixture-systemd255-loaded-egress
 if "$AUTHORITY_PATH" > /run/fixture-compatible-predecessor-loaded-egress.out 2>&1; then
   die 'installer accepted a loaded masked egress before the durable boot fence commit'
 fi
-grep -F 'loaded masked protected unit lacks the exact committed predecessor transaction: leetplus-rollback-egress.service' \
+grep -F 'loaded masked protected unit lacks the exact uncommitted preparation: leetplus-rollback-egress.service' \
   /run/fixture-compatible-predecessor-loaded-egress.out >/dev/null
 rm -f /run/fixture-systemd255-loaded-egress
 touch /run/fixture-systemd255-loaded-recovery
 if "$AUTHORITY_PATH" > /run/fixture-compatible-predecessor-loaded-recovery.out 2>&1; then
   die 'installer accepted loaded masked recovery units before the durable boot fence commit'
 fi
-grep -F 'loaded masked protected unit lacks the exact committed predecessor transaction: leetplus-blue-green-recovery.service' \
+grep -F 'loaded masked protected unit lacks the exact uncommitted preparation: leetplus-blue-green-recovery.service' \
   /run/fixture-compatible-predecessor-loaded-recovery.out >/dev/null
 rm -f /run/fixture-systemd255-loaded-recovery
 "$AUTHORITY_PATH" > /run/fixture-compatible-predecessor.out
@@ -504,6 +515,64 @@ grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
 [[ ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing ]] \
   || die 'compatible predecessor recovery left its preparation record'
 rm -f /run/fixture-systemd255-template-aliases
+
+# The latest admitted production generation stopped in PREPARING after all
+# runtime masks were committed, while previously used systemd 255 units stayed
+# cached as loaded/inactive. Reproduce its exact record and prove that the next
+# generation first commits an effective boot fence, rejects an unsafe drop-in,
+# leaves destination bytes untouched, and then rolls the transaction forward.
+printf '\nfixture-compatible-loaded-predecessor-drift\n' \
+  >> /usr/local/libexec/leetplus/preflight-legacy-rollback.sh
+cat > /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing <<'LOADED_PREDECESSOR_PREPARING'
+CONTRACT=LEETPLUS_SCHEDULER_FREE_CONTROL_INSTALL_V1
+CONTROL_MANIFEST_SHA256=bc69b6cfd9189ed1877b3fcaec4dfe5746fd20e5ba43b4b18f318b515a89f532
+INSTALL_PLAN_SHA256=a73ce1452933b4b620a5ab46a963592d4e53afd3e385f5882235f41d944b9ef6
+ORIGINAL_DRIFT_DESTINATIONS=/usr/local/libexec/leetplus/preflight-legacy-rollback.sh
+PREEXISTING_RUNTIME_MASKS=NONE
+LOADED_PREDECESSOR_PREPARING
+chown root:root /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing
+chmod 0600 /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing
+[[ "$(sha256sum /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.preparing | awk '{ print $1 }')" \
+  == a13e4ee4db0322bb7b1ef74677e638cf9aa7bc842bcf68abd465c9442f525d65 ]] \
+  || die 'loaded predecessor preparation fixture lost its exact production identity'
+systemctl mask --runtime --no-reload \
+  leetplus-api-rollback@.service leetplus-api-rollback@${LEGACY_SHA}.service \
+  leetplus-web-rollback@.service leetplus-web-rollback@${LEGACY_SHA}.service \
+  leetplus-rollback-egress.service leetplus-blue-green-recovery.service \
+  leetplus-blue-green-recovery-watchdog.service leetplus-blue-green-recovery.timer
+systemctl daemon-reload
+touch /run/fixture-systemd255-loaded-egress /run/fixture-systemd255-loaded-recovery \
+  /run/fixture-recovery-enabled /run/fixture-recovery-condition-unsafe \
+  /run/fixture-recovery-dropin-unsafe
+if "$AUTHORITY_PATH" > /run/fixture-compatible-loaded-predecessor-unsafe.out 2>&1; then
+  die 'installer accepted a loaded recovery unit before its boot fence became effective'
+fi
+if ! grep -F 'loaded fenced current unit is not held by the exact effective boot fence: leetplus-blue-green-recovery.service' \
+  /run/fixture-compatible-loaded-predecessor-unsafe.out >/dev/null; then
+  printf '%s\n' 'loaded predecessor negative stopped at an unexpected guard:' >&2
+  cat /run/fixture-compatible-loaded-predecessor-unsafe.out >&2
+  die 'loaded predecessor negative stopped at an unexpected guard'
+fi
+[[ -f /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.fence \
+  && ! -e /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent ]] \
+  || die 'loaded predecessor negative did not stop between fence and intent commits'
+if cmp -s -- "$DEPLOY_ROOT/preflight-legacy-rollback.sh" \
+  /usr/local/libexec/leetplus/preflight-legacy-rollback.sh; then
+  die 'loaded predecessor negative mutated its drifting destination before install intent'
+fi
+rm -f /run/fixture-recovery-dropin-unsafe
+"$AUTHORITY_PATH" > /run/fixture-compatible-loaded-predecessor.out
+grep -F -x 'LEGACY_ROLLBACK_CONTOUR_INSTALLED=true' \
+  /run/fixture-compatible-loaded-predecessor.out >/dev/null
+for record_name in preparing fence intent; do
+  [[ ! -e "/var/lib/leetplus/deploy-receipts/scheduler-free-control-install.${record_name}" ]] \
+    || die "loaded predecessor recovery left transaction residue: ${record_name}"
+done
+cmp -s -- "$DEPLOY_ROOT/preflight-legacy-rollback.sh" \
+  /usr/local/libexec/leetplus/preflight-legacy-rollback.sh \
+  || die 'loaded predecessor recovery did not install the admitted preflight bytes'
+rm -f /run/fixture-systemd255-loaded-egress /run/fixture-systemd255-loaded-recovery \
+  /run/fixture-recovery-enabled /run/fixture-recovery-condition-unsafe
 
 # The next admitted generation encountered the same aliases only after the
 # predecessor had durably committed its exact fence and PREPARED intent. Model

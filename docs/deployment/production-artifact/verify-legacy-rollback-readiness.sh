@@ -147,6 +147,13 @@ normalized_word_set() {
   tr ' ' '\n' | awk 'NF == 1 { print }' | LC_ALL=C sort | tr '\n' ' ' | awk '{$1=$1; print}'
 }
 
+normalized_systemd_socket_bind_set() {
+  # systemd 255 renders an admitted source token such as ipv4:tcp:4300 as
+  # ipv4:tcp4300. Normalize only that known separator difference; the exact
+  # family/protocol/port set is still compared below.
+  tr ' ' '\n' | sed -E 's/^((ipv4|ipv6):(tcp|udp)):/\1/' | normalized_word_set
+}
+
 attest_runtime_secret_group_reverse_sets() {
   local shared_line api_line web_line shared_gid api_gid web_gid shared_primary api_primary web_primary
   shared_line="$(awk -F: '$1 == "leetplus-runtime" { print }' <<< "$group_inventory")"
@@ -359,7 +366,8 @@ attest_rollback_identity_and_process_boundary() {
   [[ "$(printf '%s' "$address_families" | normalized_word_set)" == 'AF_INET AF_INET6' \
     && "$(printf '%s' "$network_interfaces" | normalized_word_set)" == lo \
     && "$ip_deny" == any && "$ip_allow" == localhost && "$socket_bind_deny" == any \
-    && "$(printf '%s' "$socket_bind_allow" | normalized_word_set)" == "$expected_socket_bind_allow" \
+    && "$(printf '%s' "$socket_bind_allow" | normalized_systemd_socket_bind_set)" \
+      == "$(printf '%s' "$expected_socket_bind_allow" | normalized_systemd_socket_bind_set)" \
     && "$(printf '%s' "$read_only_paths" | normalized_word_set)" == "$expected_read_only" \
     && "$(printf '%s' "$read_write_paths" | normalized_word_set)" == "$expected_read_write" ]] \
     || die "rollback unit effective network/path sandbox mismatch: ${unit}"

@@ -35,6 +35,7 @@ legacy_safe_nginx="${REPOSITORY_ROOT}/docs/deployment/production-artifact/nginx/
 blue_green_cutover="${REPOSITORY_ROOT}/docs/deployment/production-artifact/blue-green-cutover.sh"
 release_readiness="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-release-readiness.sh"
 legacy_readiness="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-rollback-readiness.sh"
+legacy_installer="${REPOSITORY_ROOT}/docs/deployment/production-artifact/install-legacy-rollback-contour.sh"
 authenticated_reads="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs"
 production_control_install_map="${REPOSITORY_ROOT}/docs/deployment/production-control-authority/production-control-install-map.tsv"
 
@@ -112,6 +113,35 @@ assert_complete_systemd_property_snapshot() {
 # must retain them so an exact empty DropInPaths is not misclassified as absent.
 assert_complete_systemd_property_snapshot "$blue_green_cutover"
 assert_complete_systemd_property_snapshot "$legacy_readiness"
+
+assert_multivalue_systemd_property_contract() {
+  local authority_path="$1" function_source
+  function_source="$(sed -n '/^unit_property() {$/,/^}$/p' "$authority_path")"
+  test -n "$function_source"
+  UNIT_PROPERTY_FUNCTION="$function_source" bash --noprofile --norc -c '
+    set -euo pipefail
+    eval "$UNIT_PROPERTY_FUNCTION"
+    unit_property_snapshot_unit=fixture.service
+    unit_property_snapshot=$'"'"'ActiveState=active\nEnvironmentFiles=/one (ignore_errors=no)\nEnvironmentFiles=/two (ignore_errors=no)\nSocketBindAllow=ipv4:tcp:4300\nSocketBindAllow=ipv4:tcp:4301'"'"'
+    test "$(unit_property fixture.service EnvironmentFiles)" = $'"'"'/one (ignore_errors=no)\n/two (ignore_errors=no)'"'"'
+    test "$(unit_property fixture.service SocketBindAllow)" = $'"'"'ipv4:tcp:4300\nipv4:tcp:4301'"'"'
+    test "$(unit_property fixture.service ActiveState)" = active
+    unit_property_snapshot+=$'"'"'\nActiveState=failed'"'"'
+    if unit_property fixture.service ActiveState >/dev/null; then
+      exit 1
+    fi
+  '
+}
+
+assert_multivalue_systemd_property_contract "$blue_green_cutover"
+assert_multivalue_systemd_property_contract "$legacy_readiness"
+
+awk '
+  /publish_state_record "\$control_preparing"/ { published = 1; next }
+  published && /preparing_record_sha=/ { hashed = 1; next }
+  hashed && $0 == "  preparing_generation=current" { accepted = 1; exit }
+  END { exit !accepted }
+' "$legacy_installer"
 
 for candidate_nginx in "$blue_nginx" "$green_nginx"; do
   ! grep -E '[[:space:]]backup([[:space:];]|$)' "$candidate_nginx" > /dev/null

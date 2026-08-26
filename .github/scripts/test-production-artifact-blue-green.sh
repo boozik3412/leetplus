@@ -373,9 +373,18 @@ case "${1:-}" in
         RestrictAddressFamilies RestrictNetworkInterfaces IPAddressDeny IPAddressAllow ReadOnlyPaths \
         ReadWritePaths CapabilityBoundingSet AmbientCapabilities UMask MainPID InvocationID ControlGroup; do
         snapshot_value="$("$0" show --property="$snapshot_property" --value "$unit")"
-        if [[ -n "$snapshot_value" || "$show_all" == true ]]; then
-          printf '%s=%s\n' "$snapshot_property" "$snapshot_value"
-        fi
+        case "$snapshot_property" in
+          EnvironmentFiles|SocketBindAllow)
+            while IFS= read -r snapshot_item; do
+              printf '%s=%s\n' "$snapshot_property" "$snapshot_item"
+            done <<< "$snapshot_value"
+            ;;
+          *)
+            if [[ -n "$snapshot_value" || "$show_all" == true ]]; then
+              printf '%s=%s\n' "$snapshot_property" "$snapshot_value"
+            fi
+            ;;
+        esac
       done
       exit 0
     fi
@@ -428,8 +437,9 @@ case "${1:-}" in
         ;;
       EnvironmentFiles)
         if [[ "$kind" == api ]]; then runtime_file=runtime.env; else runtime_file=web-runtime.env; fi
-        printf '%s/%s (ignore_errors=no) %s/slots/%s.env (ignore_errors=no) %s/canary-safe.env (ignore_errors=no)\n' \
-          "${TEST_ENVIRONMENT_ROOT:?}" "$runtime_file" "${TEST_ENVIRONMENT_ROOT:?}" "$slot_name" "${TEST_ENVIRONMENT_ROOT:?}"
+        printf '%s/%s (ignore_errors=no)\n' "${TEST_ENVIRONMENT_ROOT:?}" "$runtime_file"
+        printf '%s/slots/%s.env (ignore_errors=no)\n' "${TEST_ENVIRONMENT_ROOT:?}" "$slot_name"
+        printf '%s/canary-safe.env (ignore_errors=no)\n' "${TEST_ENVIRONMENT_ROOT:?}"
         ;;
       Environment) printf 'PATH=/usr/sbin:/usr/bin:/sbin:/bin\n' ;;
       UnsetEnvironment) printf 'BASH_ENV ENV HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM\n' ;;

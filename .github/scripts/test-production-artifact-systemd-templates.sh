@@ -31,6 +31,12 @@ green_environment="${TEMPLATE_ROOT}/green.env.example"
 web_runtime_environment="${TEMPLATE_ROOT}/web-runtime.env.example"
 blue_nginx="${REPOSITORY_ROOT}/docs/deployment/production-artifact/nginx/blue.conf.example"
 green_nginx="${REPOSITORY_ROOT}/docs/deployment/production-artifact/nginx/green.conf.example"
+legacy_safe_nginx="${REPOSITORY_ROOT}/docs/deployment/production-artifact/nginx/legacy-safe.conf.example"
+blue_green_cutover="${REPOSITORY_ROOT}/docs/deployment/production-artifact/blue-green-cutover.sh"
+release_readiness="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-release-readiness.sh"
+legacy_readiness="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-rollback-readiness.sh"
+authenticated_reads="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs"
+production_control_install_map="${REPOSITORY_ROOT}/docs/deployment/production-control-authority/production-control-install-map.tsv"
 
 # Closed root-authority inventory: every privileged operational entrypoint must
 # enter Bash privileged mode before parsing, scrub the complete inherited
@@ -261,7 +267,29 @@ for recovery_runtime_unit in "$recovery_unit" "$recovery_watchdog_unit"; do
   grep -F -x 'ReadWritePaths=/etc/nginx/leetplus /var/lib/leetplus/deploy-receipts' "$recovery_runtime_unit" > /dev/null
 done
 grep -F 'inventory="$(findmnt --task 1 --raw --noheadings --output TARGET)"' \
-  "$REPOSITORY_ROOT/docs/deployment/production-artifact/blue-green-cutover.sh" > /dev/null
+  "$blue_green_cutover" > /dev/null
+assert_cutover_sha_pin() {
+  local pin_name="$1" source_path="$2" source_digest
+  source_digest="$(sha256sum "$source_path" | awk '{ print $1 }')"
+  grep -F -x "readonly ${pin_name}='${source_digest}'" "$blue_green_cutover" > /dev/null
+}
+assert_cutover_sha_pin SLOT_API_UNIT_SHA256 "$slot_api_unit"
+assert_cutover_sha_pin SLOT_WEB_UNIT_SHA256 "$slot_web_unit"
+assert_cutover_sha_pin CANARY_SAFE_ENV_SHA256 "$safe_overlay"
+assert_cutover_sha_pin SLOT_PREFLIGHT_SHA256 "$slot_preflight"
+assert_cutover_sha_pin BLUE_NGINX_SHA256 "$blue_nginx"
+assert_cutover_sha_pin GREEN_NGINX_SHA256 "$green_nginx"
+assert_cutover_sha_pin LEGACY_SAFE_NGINX_SHA256 "$legacy_safe_nginx"
+assert_cutover_sha_pin RELEASE_READINESS_SHA256 "$release_readiness"
+assert_cutover_sha_pin LEGACY_READINESS_SHA256 "$legacy_readiness"
+assert_cutover_sha_pin AUTHENTICATED_READS_SHA256 "$authenticated_reads"
+grep -F 'trusted_installed_file "$fragment" "$fragment_digest" root 444' "$blue_green_cutover" > /dev/null
+grep -F 'trusted_installed_file "${libexec_root}/preflight-release-slot.sh" "$SLOT_PREFLIGHT_SHA256" root 555' "$blue_green_cutover" > /dev/null
+grep -F 'trusted_installed_file "$probe" "$RELEASE_READINESS_SHA256" root 555' "$blue_green_cutover" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-api@.service\t/etc/systemd/system/leetplus-api@.service\t0444' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-web@.service\t/etc/systemd/system/leetplus-web@.service\t0444' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/preflight-release-slot.sh\t/usr/local/libexec/leetplus/preflight-release-slot.sh\t0555' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/verify-release-readiness.sh\t/usr/local/libexec/leetplus/verify-release-readiness.sh\t0555' "$production_control_install_map" > /dev/null
 if grep -F -x 'Before=nginx.service' "$recovery_watchdog_unit" > /dev/null; then
   printf 'post-start recovery watchdog is incorrectly ordered before nginx\n' >&2
   exit 1

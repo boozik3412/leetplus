@@ -340,9 +340,13 @@ case "${1:-}" in
     ;;
   show)
     property=''
+    show_all=false
     unit="${!#}"
     for argument in "$@"; do
-      case "$argument" in --property=*) property="${argument#--property=}" ;; esac
+      case "$argument" in
+        --all) show_all=true ;;
+        --property=*) property="${argument#--property=}" ;;
+      esac
     done
     if [[ -z "$property" && "${TEST_UNIT_ATTESTATION:-false}" != true ]]; then
       cache_state="${TEST_WEB_STATE:-inactive}"
@@ -369,7 +373,9 @@ case "${1:-}" in
         RestrictAddressFamilies RestrictNetworkInterfaces IPAddressDeny IPAddressAllow ReadOnlyPaths \
         ReadWritePaths CapabilityBoundingSet AmbientCapabilities UMask MainPID InvocationID ControlGroup; do
         snapshot_value="$("$0" show --property="$snapshot_property" --value "$unit")"
-        printf '%s=%s\n' "$snapshot_property" "$snapshot_value"
+        if [[ -n "$snapshot_value" || "$show_all" == true ]]; then
+          printf '%s=%s\n' "$snapshot_property" "$snapshot_value"
+        fi
       done
       exit 0
     fi

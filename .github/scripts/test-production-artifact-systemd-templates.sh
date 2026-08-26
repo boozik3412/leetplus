@@ -101,6 +101,18 @@ assert_inventory_producer_failure_is_fatal \
 assert_inventory_producer_failure_is_fatal \
   "$release_promoter" 'required promotion filesystem inventory producer failed'
 
+assert_complete_systemd_property_snapshot() {
+  local authority_path="$1" function_source
+  function_source="$(sed -n '/^load_unit_property_snapshot() {$/,/^}$/p' "$authority_path")"
+  test -n "$function_source"
+  grep -F 'show --all --no-pager' <<< "$function_source" >/dev/null
+}
+
+# `systemctl show` omits empty values by default. Both atomic unit attestations
+# must retain them so an exact empty DropInPaths is not misclassified as absent.
+assert_complete_systemd_property_snapshot "$blue_green_cutover"
+assert_complete_systemd_property_snapshot "$legacy_readiness"
+
 for candidate_nginx in "$blue_nginx" "$green_nginx"; do
   ! grep -E '[[:space:]]backup([[:space:];]|$)' "$candidate_nginx" > /dev/null
   test "$(grep -Ec '^[[:space:]]+server 127\.0\.0\.1:[0-9]+ max_fails=2 fail_timeout=5s;$' "$candidate_nginx")" = 2

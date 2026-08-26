@@ -262,13 +262,13 @@ function validateOracle(oracle, target) {
       "channelIds", "checklistIds", "checklistNetworkIds", "customRoles",
       "databaseAddress", "databaseName", "databasePort", "databaseReadOnly",
       "databaseSystemIdentifier", "invites", "knowledgeIds", "knowledgeNetworkIds",
-      "lootBoxIds", "missionIds", "productCount", "roleOverrides", "seasonIds",
+      "activeProductCount", "lootBoxIds", "missionIds", "roleOverrides", "seasonIds",
       "sessionUser", "storeIds", "tenantId", "tenantSlug", "users",
     ].sort().join("|") ||
     !arrays.every(isSortedUniqueStringArray) ||
     !Array.isArray(oracle.users) || !Array.isArray(oracle.customRoles) ||
     !Array.isArray(oracle.invites) || !Array.isArray(oracle.roleOverrides) ||
-    !Number.isInteger(oracle.productCount) || oracle.productCount < 1 ||
+    !Number.isInteger(oracle.activeProductCount) || oracle.activeProductCount < 1 ||
     oracle.storeIds.length !== 4 || oracle.users.length < 1 ||
     oracle.checklistIds.length + oracle.knowledgeIds.length < 1 ||
     oracle.lootBoxIds.length + oracle.missionIds.length + oracle.seasonIds.length < 1 ||
@@ -356,7 +356,8 @@ WITH target_tenant AS MATERIALIZED (
     'tenantSlug', (SELECT "slug" FROM target_tenant),
     'storeIds', COALESCE((SELECT pg_catalog.jsonb_agg("id" ORDER BY "id") FROM public."Store"
       WHERE "tenantId" = (SELECT "id" FROM target_tenant)), '[]'::jsonb),
-    'productCount', (SELECT count(*) FROM public."Product" WHERE "tenantId" = (SELECT "id" FROM target_tenant)),
+    'activeProductCount', (SELECT count(*) FROM public."Product"
+      WHERE "tenantId" = (SELECT "id" FROM target_tenant) AND "isActive"),
     'users', COALESCE((SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
       'id', account."id", 'role', account."role"::text,
       'accessScope', account."accessScope"::text, 'customRoleId', account."customRoleId",
@@ -661,7 +662,7 @@ if (
   !["totalSku", "operationalActiveSku", "categorizedSku", "suppliedSku"]
     .every((key) => Number.isInteger(summary[key]) && summary[key] >= 0) ||
   summary.totalSku < minimumAssortmentTotalSku ||
-  summary.totalSku !== databaseOracleBefore.productCount ||
+  summary.totalSku !== databaseOracleBefore.activeProductCount ||
   ["operationalActiveSku", "categorizedSku", "suppliedSku"]
     .some((key) => summary[key] > summary.totalSku)
 ) fail("ASSORTMENT_SUMMARY_SHAPE_INVALID");

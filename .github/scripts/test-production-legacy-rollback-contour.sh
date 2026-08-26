@@ -124,6 +124,8 @@ grep -F '/auth/me' "$authenticated_smoke" >/dev/null
 grep -F '\getenv tenant_slug LEETPLUS_ORACLE_TENANT_SLUG' "$authenticated_smoke" >/dev/null
 grep -F '\getenv canary_email LEETPLUS_ORACLE_CANARY_EMAIL' "$authenticated_smoke" >/dev/null
 grep -F 'AND "role" = '\''ADMIN'\'' AND "accessScope" = '\''NETWORK'\''' "$authenticated_smoke" >/dev/null
+grep -F -x '      WHERE "tenantId" = (SELECT "id" FROM target_tenant) AND "isActive"),' \
+  "$authenticated_smoke" >/dev/null
 grep -F 'DATABASE_ORACLE_PII_IN_CHILD_ARGV' "$authenticated_smoke" >/dev/null
 if grep -E -- '--set=(tenant_slug|canary_email)=' "$authenticated_smoke" >/dev/null; then
   printf 'authenticated DB oracle exposes tenant/email through psql argv\n' >&2
@@ -334,7 +336,7 @@ cat > "$auth_database_oracle" <<'AUTH_DATABASE_ORACLE'
   "knowledgeNetworkIds": ["kb-1"],
   "lootBoxIds": [],
   "missionIds": ["mission-1"],
-  "productCount": 1,
+  "activeProductCount": 1,
   "roleOverrides": [],
   "seasonIds": [],
   "sessionUser": "leetplus_drain_audit",
@@ -442,7 +444,9 @@ const server = createServer((request, response) => {
   } else if (request.url === '/products/summary') {
     payload = scenario === 'empty-assortment'
       ? { totalSku: 0, operationalActiveSku: 0, categorizedSku: 0, suppliedSku: 0 }
-      : { totalSku: 1, operationalActiveSku: 1, categorizedSku: 1, suppliedSku: 1 };
+      : scenario === 'inactive-product-inflation'
+        ? { totalSku: 2, operationalActiveSku: 1, categorizedSku: 1, suppliedSku: 1 }
+        : { totalSku: 1, operationalActiveSku: 1, categorizedSku: 1, suppliedSku: 1 };
   } else if (request.url.startsWith('/staff/checklist-templates')) {
     const checklistRows = scenario === 'foreign-staff'
       ? [{ id: 'row-1', title: 'Foreign', store: { id: 'foreign', name: 'Foreign', isActive: true } }]
@@ -629,6 +633,16 @@ if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
   exit 1
 fi
 grep -F 'ASSORTMENT_SUMMARY_SHAPE_INVALID' "$TEST_ROOT/auth-empty-assortment.out" >/dev/null
+
+printf 'inactive-product-inflation\n' > "$auth_scenario_file"
+if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_credentials" --database-oracle "$auth_database_oracle" \
+  > "$TEST_ROOT/auth-inactive-product-inflation.out" 2>&1; then
+  printf 'authenticated smoke accepted inactive-product inflation over the DB oracle\n' >&2
+  exit 1
+fi
+grep -F 'ASSORTMENT_SUMMARY_SHAPE_INVALID' \
+  "$TEST_ROOT/auth-inactive-product-inflation.out" >/dev/null
 
 printf 'foreign-staff\n' > "$auth_scenario_file"
 if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \

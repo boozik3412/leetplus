@@ -53,7 +53,7 @@ readonly BLUE_NGINX_SHA256='3553e31012e1c00d695381c76ad4df184113c71c5a8b018bf5d9
 readonly GREEN_NGINX_SHA256='a9e449bcd5f7d56be97f347455f7d0629f393d471cdf2b87029b4bede2d58462'
 readonly LEGACY_SAFE_NGINX_SHA256='ebd449a4221dcb0c1d5449b4f87893bcad58b1f16319551730ca5aefde571b25'
 readonly RELEASE_READINESS_SHA256='4bbddf358298c27878ea03a6811a2f5f54af933ad1cd7da2eebfe7f7558351a0'
-readonly LEGACY_READINESS_SHA256='6bdef7588f396254b80c9da8b18b1c887bfeece9b2bc3b9a1dd10e45668368cf'
+readonly LEGACY_READINESS_SHA256='ab0ee18ee3060209e5bcb7262f96387c849a55b02b8466ab43c892c379cbd91b'
 readonly AUTHENTICATED_READS_SHA256='931b5ef69af8446f1225dd832b4b45c00d4849a512f54577d197cbee53e38cf4'
 
 die() {
@@ -205,8 +205,19 @@ unit_property() {
   local unit="$1" property="$2"
   [[ "${unit_property_snapshot_unit:-}" == "$unit" ]] || return 1
   awk -F= -v property="$property" '
-    $1 == property { count += 1; value = substr($0, length(property) + 2) }
-    END { if (count != 1) exit 1; printf "%s", value }
+    $1 == property {
+      count += 1
+      candidate = substr($0, length(property) + 2)
+      value = (count == 1 ? candidate : value "\n" candidate)
+    }
+    END {
+      if (property == "EnvironmentFiles" || property == "SocketBindAllow") {
+        if (count < 1) exit 1
+      } else if (count != 1) {
+        exit 1
+      }
+      printf "%s", value
+    }
   ' <<< "$unit_property_snapshot"
 }
 

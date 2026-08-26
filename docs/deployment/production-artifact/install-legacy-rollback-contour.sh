@@ -1914,6 +1914,7 @@ if [[ -z "$preparing_record_sha" ]]; then
 "PREEXISTING_RUNTIME_MASKS=NONE"$'\n'
   publish_state_record "$control_preparing" "$preparing_record_content"
   preparing_record_sha="$(sha256sum "$control_preparing" | awk '{ print $1 }')"
+  preparing_generation=current
 fi
 [[ -n "$fence_record_sha" ]] || fence_needs_publish=true
 

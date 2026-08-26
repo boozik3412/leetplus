@@ -202,7 +202,7 @@ entry, writable ancestor, лишний файл или digest drift блокир
 Bootstrap authority берётся из того же immutable CI artifact, но не является
 частью исполняемого control bundle (это устраняет self-verification). Его
 reviewed SHA-256 для этой версии:
-`ddb1b39f5ef43d6b1fbe1d70ce78f6b67c489d32fe80be1e7c0147101cda0a44`.
+`d3ed65caf961f6339b8038a6f95a4a06b10e2d0c19ac382b027d40293f9faf31`.
 Сначала byte копируется во временный root-owned файл, проверяется уже после
 копирования и только затем атомарно публикуется:
 
@@ -210,7 +210,7 @@ reviewed SHA-256 для этой версии:
 sudo install -o root -g root -m 0500 \
   <immutable-ci-artifact>/leetplus-install-scheduler-free-nminus1-v1 \
   /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new
-echo 'ddb1b39f5ef43d6b1fbe1d70ce78f6b67c489d32fe80be1e7c0147101cda0a44  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
+echo 'd3ed65caf961f6339b8038a6f95a4a06b10e2d0c19ac382b027d40293f9faf31  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
   | sudo sha256sum --check --strict
 sudo mv -T /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new \
   /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1
@@ -223,6 +223,23 @@ sudo sync -d /usr/local/sbin
 attestation, затем install-only provisioning. Authority повторяет проверку
 непосредственно перед первым исполнением bundle bytes; installer повторно
 проверяет manifest и final destination byte/owner/mode/link-count:
+
+При roll-forward уже установленного контура сначала выключаются и отключаются
+от автозапуска exact N−1 instances, recovery timer и egress oneshot. Recovery
+service нельзя останавливать явно: nginx имеет к нему `Requires=` и будет
+остановлен вместе с ним. Он и watchdog должны естественно находиться в
+`inactive/dead`; main nginx/API/Web продолжают работать во время установки.
+
+```bash
+sudo systemctl disable --now \
+  leetplus-api-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service \
+  leetplus-web-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service \
+  leetplus-blue-green-recovery.timer \
+  leetplus-rollback-egress.service
+systemctl show -p ActiveState -p SubState -p MainPID \
+  leetplus-blue-green-recovery.service \
+  leetplus-blue-green-recovery-watchdog.service
+```
 
 ```bash
 sudo /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1 --verify-only

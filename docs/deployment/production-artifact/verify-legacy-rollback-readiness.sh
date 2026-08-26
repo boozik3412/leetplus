@@ -116,8 +116,19 @@ unit_property() {
   local unit="$1" property="$2"
   [[ "${unit_property_snapshot_unit:-}" == "$unit" ]] || return 1
   awk -F= -v property="$property" '
-    $1 == property { count += 1; value = substr($0, length(property) + 2) }
-    END { if (count != 1) exit 1; printf "%s", value }
+    $1 == property {
+      count += 1
+      candidate = substr($0, length(property) + 2)
+      value = (count == 1 ? candidate : value "\n" candidate)
+    }
+    END {
+      if (property == "EnvironmentFiles" || property == "SocketBindAllow") {
+        if (count < 1) exit 1
+      } else if (count != 1) {
+        exit 1
+      }
+      printf "%s", value
+    }
   ' <<< "$unit_property_snapshot"
 }
 

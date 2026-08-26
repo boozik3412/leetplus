@@ -54,6 +54,8 @@ CREATE TABLE public."User" ("id" text PRIMARY KEY, "tenantId" text NOT NULL, "em
   "role" text NOT NULL, "isActive" boolean NOT NULL, "isPlatformAdmin" boolean NOT NULL);
 CREATE TABLE public."UserStoreAccess" ("id" text PRIMARY KEY);
 CREATE TABLE public."UserAccessRole" ("id" text PRIMARY KEY, "tenantId" text NOT NULL);
+CREATE TABLE public."UserRoleOverride" ("id" text PRIMARY KEY, "tenantId" text NOT NULL,
+  "role" text NOT NULL, "permissions" text[] NOT NULL);
 CREATE TABLE public."UserInvite" ("id" text PRIMARY KEY, "tenantId" text NOT NULL,
   "acceptedAt" timestamptz, "revokedAt" timestamptz, "expiresAt" timestamptz NOT NULL, "createdAt" timestamptz NOT NULL);
 CREATE TABLE public."StaffChecklistTemplate" ("id" text PRIMARY KEY, "tenantId" text NOT NULL,

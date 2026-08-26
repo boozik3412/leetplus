@@ -490,17 +490,17 @@ SELECT
         WHERE grantee.rolname = :'audit_role'
           AND namespace.nspname = 'public'
           AND relation.relname IN (
-            'Tenant', 'Store', 'Product', 'User', 'UserStoreAccess', 'UserAccessRole', 'UserInvite',
+            'Tenant', 'Store', 'Product', 'User', 'UserStoreAccess', 'UserAccessRole', 'UserRoleOverride', 'UserInvite',
             'StaffChecklistTemplate', 'StaffKnowledgeArticle', 'GuestGameLootBox', 'GuestGameMission',
             'GuestGameSeason', 'StaffChatChannel', 'StaffChatChannelMember'
-          ) AND acl.privilege_type = 'SELECT' AND NOT acl.is_grantable) = 14
+          ) AND acl.privilege_type = 'SELECT' AND NOT acl.is_grantable) = 15
       AND (SELECT count(*)
         FROM pg_catalog.pg_class relation
         JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
         CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(relation.relacl, pg_catalog.acldefault('r', relation.relowner))) acl
         JOIN pg_catalog.pg_roles grantee ON grantee.oid = acl.grantee
         WHERE grantee.rolname = :'audit_role' AND namespace.nspname NOT LIKE 'pg_%'
-          AND namespace.nspname <> 'information_schema') = 14
+          AND namespace.nspname <> 'information_schema') = 15
   ),
   (
     SELECT count(*)

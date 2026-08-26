@@ -171,6 +171,19 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function hasCompatibleNetworkScopeShape(record) {
+  if (!record || typeof record !== "object") return false;
+  const hasAccessScope = Object.hasOwn(record, "accessScope");
+  const hasAllowedStoreIds = Object.hasOwn(record, "allowedStoreIds");
+
+  // The admitted exact N-1 predates these response fields. Its canary scope is
+  // independently proven by the database oracle before tenant reads are checked.
+  if (!hasAccessScope && !hasAllowedStoreIds) return true;
+  return hasAccessScope && hasAllowedStoreIds &&
+    record.accessScope === "NETWORK" &&
+    Array.isArray(record.allowedStoreIds) && record.allowedStoreIds.length === 0;
+}
+
 async function readProtectedFile(path, failureCode, { rootOnly = false } = {}) {
   let handle;
   try {
@@ -576,8 +589,7 @@ if (
   loginBody?.user?.tenantSlug !== credentials.get("TENANT_SLUG") ||
   typeof loginBody?.user?.tenantId !== "string" || !loginBody.user.tenantId ||
   sha256(loginBody.user.tenantId) !== credentials.get("EXPECTED_TENANT_ID_SHA256") ||
-  loginBody?.user?.role !== "ADMIN" || loginBody?.user?.accessScope !== "NETWORK" ||
-  !Array.isArray(loginBody?.user?.allowedStoreIds) || loginBody.user.allowedStoreIds.length !== 0 ||
+  loginBody?.user?.role !== "ADMIN" || !hasCompatibleNetworkScopeShape(loginBody?.user) ||
   loginBody?.user?.isPlatformAdmin === true
 ) {
   fail("LOGIN_SCOPE_INVALID");
@@ -598,8 +610,7 @@ if (
   typeof meBody?.tenantId !== "string" || !meBody.tenantId ||
   meBody.tenantId !== loginBody.user.tenantId ||
   sha256(meBody.tenantId) !== credentials.get("EXPECTED_TENANT_ID_SHA256") ||
-  meBody?.role !== "ADMIN" || meBody?.accessScope !== "NETWORK" ||
-  !Array.isArray(meBody?.allowedStoreIds) || meBody.allowedStoreIds.length !== 0 ||
+  meBody?.role !== "ADMIN" || !hasCompatibleNetworkScopeShape(meBody) ||
   meBody?.isPlatformAdmin === true
 ) {
   fail("AUTH_ME_SCOPE_INVALID");

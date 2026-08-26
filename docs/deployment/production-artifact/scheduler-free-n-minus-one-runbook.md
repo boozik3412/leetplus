@@ -149,7 +149,7 @@ nginx-конфигурациях нет независимых API/Web `backup` 
    SHA-bound, установленный из exact control bundle
    `/usr/local/libexec/leetplus/legacy-database-login-fence-authority.sql`
    (source path `systemd/legacy-database-login-fence-authority.sql.example`,
-   SHA-256 `76f16367ab7ba14d3bc4aacffcc080425b12464f276cc4b1c3a09bd5046dd5e7`).
+   SHA-256 `3283ce5f488ed7b3fe145ec12340602fa3bdcf22d0faee1f635ddd095de4017d`).
    Скрипт создаёт
    единственную `SECURITY DEFINER` функцию в `leetplus_ops`, пинит её owner,
    source/search_path/ACL и даёт executor только schema `USAGE` + function

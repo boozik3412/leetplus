@@ -29,7 +29,7 @@ REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM leetplus_drain_audit;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM leetplus_drain_audit;
 GRANT SELECT ON TABLE
   public."Tenant", public."Store", public."Product", public."User",
-  public."UserStoreAccess", public."UserAccessRole", public."UserInvite",
+  public."UserStoreAccess", public."UserAccessRole", public."UserRoleOverride", public."UserInvite",
   public."StaffChecklistTemplate", public."StaffKnowledgeArticle",
   public."GuestGameLootBox", public."GuestGameMission", public."GuestGameSeason",
   public."StaffChatChannel", public."StaffChatChannelMember"

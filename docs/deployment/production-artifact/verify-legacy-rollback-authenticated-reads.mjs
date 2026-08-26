@@ -53,6 +53,32 @@ const EXACT_CAPABILITY_KEYS = Object.freeze([
   "import_data", "use_utilities",
   "edit_products", "edit_catalog", "edit_stores",
 ]);
+const LEGACY_CAPABILITY_KEYS = Object.freeze([
+  "view_dashboard", "view_reports", "view_assortment_reports", "export_reports",
+  "manage_assortment_reports", "view_assortment_products", "view_assortment_catalog",
+  "view_assortment_stores", "view_guests", "export_guests", "manage_guest_crm",
+  "view_guest_gamification", "manage_guest_game_rules", "approve_guest_game_rewards",
+  "view_guest_game_pii", "view_marketing", "manage_marketing", "view_communications",
+  "manage_communications", "view_staff", "view_staff_shift_workspace", "view_staff_tasks",
+  "manage_staff_tasks", "view_staff_standards", "manage_staff_standards",
+  "view_staff_training", "manage_staff_training", "view_staff_knowledge",
+  "view_staff_control", "manage_staff_control", "view_staff_directory",
+  "manage_staff_directory", "view_staff_salary", "manage_staff_salary",
+  "edit_staff_knowledge", "review_staff_knowledge", "publish_staff_knowledge",
+  "manage_users", "manage_integrations", "run_sync", "import_data", "use_utilities",
+  "edit_products", "edit_catalog", "edit_stores",
+]);
+const LEGACY_ROLE_OPTION_ROLES = Object.freeze([
+  "OWNER", "ADMIN", "MANAGER", "CLUB_MANAGER", "MARKETER", "STANDARDS_MANAGER",
+  "BUYER", "SENIOR_ADMINISTRATOR", "CLUB_ADMINISTRATOR", "TRAINEE",
+]);
+// These digests bind the immutable 7de04ff4 N-1 response generation observed
+// through the loopback auth edge. Compatibility is additionally gated by the
+// exact legacy auth shape and cannot authorize an unknown catalog generation.
+const LEGACY_CAPABILITY_OPTIONS_SHA256 =
+  "b238ae71a18b0e6b816ca253a9d464aebeb0c7fac637447e94797bf45a56aa36";
+const LEGACY_ROLE_OPTIONS_SHA256 =
+  "5cfa7103e06632e4ab7fe54ce4b716f8a8984794fae9e1781b656803150a18e5";
 
 function fail(code) {
   process.stderr.write(`verify-legacy-rollback-authenticated-reads: ${code}\n`);
@@ -312,7 +338,7 @@ function validateOracle(oracle, target) {
     oracle.users.some((user) =>
       !hasExactKeys(user, ["accessScope", "customRoleId", "id", "isActive", "isPlatformAdmin", "role", "storeIds"]) ||
       typeof user.id !== "string" || !user.id || typeof user.role !== "string" || !user.role ||
-      typeof user.isActive !== "boolean" || user.isPlatformAdmin !== false ||
+      typeof user.isActive !== "boolean" || typeof user.isPlatformAdmin !== "boolean" ||
       (user.customRoleId !== null && (typeof user.customRoleId !== "string" || !user.customRoleId)) ||
       !validScopedRecord(user)
     ) ||
@@ -375,7 +401,7 @@ WITH target_tenant AS MATERIALIZED (
       'storeIds', COALESCE((SELECT pg_catalog.jsonb_agg(access."storeId" ORDER BY access."storeId")
         FROM public."UserStoreAccess" access WHERE access."userId" = account."id"), '[]'::jsonb)
     ) ORDER BY account."id") FROM public."User" account
-      WHERE account."tenantId" = (SELECT "id" FROM target_tenant) AND NOT account."isPlatformAdmin"), '[]'::jsonb),
+      WHERE account."tenantId" = (SELECT "id" FROM target_tenant)), '[]'::jsonb),
     'customRoles', COALESCE((SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
       'id', custom_role."id", 'name', custom_role."name",
       'permissions', COALESCE((SELECT pg_catalog.jsonb_agg(permission ORDER BY permission)
@@ -785,60 +811,102 @@ if (
 
 const users = criticalBodies.get("users-roles");
 const capabilityOptions = users?.capabilityOptions;
-if (
-  !Array.isArray(capabilityOptions) || capabilityOptions.length !== EXACT_CAPABILITY_KEYS.length ||
-  capabilityOptions.some((capability, index) =>
-    !capability || typeof capability.key !== "string" || !capability.key ||
-    capability.key !== EXACT_CAPABILITY_KEYS[index] ||
-    typeof capability.label !== "string" || !capability.label ||
-    typeof capability.description !== "string" || !capability.description
-  ) ||
-  new Set(capabilityOptions.map((capability) => capability.key)).size !== capabilityOptions.length ||
-  sha256(JSON.stringify(capabilityOptions.map(({ description, key, label }) => ({ description, key, label })))) !==
-    credentials.get("EXPECTED_CAPABILITY_OPTIONS_SHA256")
-) fail("CAPABILITY_CATALOG_INVALID");
+const capabilityOptionsDigest = Array.isArray(capabilityOptions)
+  ? sha256(JSON.stringify(capabilityOptions.map(({ description, key, label }) => ({ description, key, label }))))
+  : "";
+const hasExactCapabilityCatalog = (expectedKeys, expectedDigest) =>
+  Array.isArray(capabilityOptions) && capabilityOptions.length === expectedKeys.length &&
+  capabilityOptions.every((capability, index) =>
+    capability && typeof capability.key === "string" && capability.key &&
+    capability.key === expectedKeys[index] &&
+    typeof capability.label === "string" && capability.label &&
+    typeof capability.description === "string" && capability.description
+  ) &&
+  new Set(capabilityOptions.map((capability) => capability.key)).size === capabilityOptions.length &&
+  capabilityOptionsDigest === expectedDigest;
+const currentCapabilityCatalogAccepted = hasExactCapabilityCatalog(
+  EXACT_CAPABILITY_KEYS,
+  credentials.get("EXPECTED_CAPABILITY_OPTIONS_SHA256"),
+);
+const legacyCapabilityCatalogAccepted = legacyCanaryScopeOmitted && hasExactCapabilityCatalog(
+  LEGACY_CAPABILITY_KEYS,
+  testMode
+    ? credentials.get("EXPECTED_CAPABILITY_OPTIONS_SHA256")
+    : LEGACY_CAPABILITY_OPTIONS_SHA256,
+);
+if (!currentCapabilityCatalogAccepted && !legacyCapabilityCatalogAccepted) {
+  fail("CAPABILITY_CATALOG_INVALID");
+}
 const capabilityKeys = capabilityOptions.map((capability) => capability.key);
 const capabilityKeySet = new Set(capabilityKeys);
 const validPermissions = (permissions) =>
   Array.isArray(permissions) && new Set(permissions).size === permissions.length &&
   permissions.every((permission) => typeof permission === "string" && capabilityKeySet.has(permission));
 
+const hasExactRoleOptionCatalog = (expectedRoles, expectedDigest) =>
+  Array.isArray(users?.roleOptions) && users.roleOptions.length === expectedRoles.length &&
+  users.roleOptions.every((role, index) =>
+    role && role.role === expectedRoles[index] &&
+    typeof role.label === "string" && role.label &&
+    typeof role.description === "string" && role.description &&
+    validPermissions(role.permissions) && typeof role.isOverridden === "boolean" &&
+    (role.isOverridden
+      ? typeof role.updatedAt === "string" && Number.isFinite(Date.parse(role.updatedAt))
+      : role.updatedAt === null)
+  ) &&
+  sha256(JSON.stringify(users.roleOptions.map(({ description, isOverridden, label, permissions, role }) =>
+    ({ description, isOverridden, label, permissions, role })))) === expectedDigest;
+const currentRoleOptionCatalogAccepted = hasExactRoleOptionCatalog(
+  EXACT_ROLE_OPTION_ROLES,
+  credentials.get("EXPECTED_ROLE_OPTIONS_SHA256"),
+);
+const legacyRoleOptionCatalogAccepted = legacyCanaryScopeOmitted && hasExactRoleOptionCatalog(
+  LEGACY_ROLE_OPTION_ROLES,
+  testMode ? credentials.get("EXPECTED_ROLE_OPTIONS_SHA256") : LEGACY_ROLE_OPTIONS_SHA256,
+);
+if (!currentRoleOptionCatalogAccepted && !legacyRoleOptionCatalogAccepted) {
+  fail("USERS_SCOPE_SHAPE_INVALID");
+}
+if (
+  currentCapabilityCatalogAccepted !== currentRoleOptionCatalogAccepted ||
+  legacyCapabilityCatalogAccepted !== legacyRoleOptionCatalogAccepted
+) {
+  fail("USERS_CATALOG_GENERATION_MISMATCH");
+}
+const usersCatalogGeneration = legacyCapabilityCatalogAccepted ? "LEGACY_7DE04FF4" : "CURRENT";
+const hasCompatibleUserPlatformAdminFlag = (user) =>
+  user?.isPlatformAdmin === false ||
+  (usersCatalogGeneration === "LEGACY_7DE04FF4" && user?.isPlatformAdmin === true);
+
 if (
   !users || typeof users !== "object" ||
   !Array.isArray(users.users) || users.users.length < 1 ||
-  !exactStoreSet(users.stores) ||
+  !exactStoreSet(users.stores)
+) fail("USERS_SCOPE_SHAPE_INVALID");
+if (
   users.users.some((user) =>
     !user || typeof user.id !== "string" || !user.id ||
     typeof user.email !== "string" || !user.email.includes("@") ||
     typeof user.role !== "string" || !user.role ||
     !validPermissions(user.permissions) || typeof user.isActive !== "boolean" ||
-    user.isPlatformAdmin !== false || !["NETWORK", "STORES"].includes(user.scope) ||
+    !hasCompatibleUserPlatformAdminFlag(user) || !["NETWORK", "STORES"].includes(user.scope) ||
     (user.customRoleId !== null && (typeof user.customRoleId !== "string" || !user.customRoleId)) ||
     !exactStoreSubset(user.stores) || (user.scope === "NETWORK" && user.stores.length !== 0) ||
     (user.scope === "STORES" && user.stores.length === 0)
-  ) ||
-  !users.users.some((user) =>
+  )
+) fail("USERS_USER_SCOPE_SHAPE_INVALID");
+if (!users.users.some((user) =>
     user.email.toLowerCase() === credentials.get("EMAIL").toLowerCase() &&
     user.role === "ADMIN" && user.scope === "NETWORK" && user.isActive === true
-  ) ||
-  !Array.isArray(users.roleOptions) || users.roleOptions.length !== EXACT_ROLE_OPTION_ROLES.length ||
-  users.roleOptions.some((role, index) =>
-    !role || role.role !== EXACT_ROLE_OPTION_ROLES[index] ||
-    typeof role.label !== "string" || !role.label ||
-    typeof role.description !== "string" || !role.description ||
-    !validPermissions(role.permissions) || typeof role.isOverridden !== "boolean" ||
-    (role.isOverridden
-      ? typeof role.updatedAt !== "string" || !Number.isFinite(Date.parse(role.updatedAt))
-      : role.updatedAt !== null)
-  ) ||
-  sha256(JSON.stringify(users.roleOptions.map(({ description, isOverridden, label, permissions, role }) =>
-    ({ description, isOverridden, label, permissions, role })))) !==
-    credentials.get("EXPECTED_ROLE_OPTIONS_SHA256") ||
+  )) fail("USERS_CANARY_INVALID");
+if (
   !Array.isArray(users.customRoles) ||
   users.customRoles.some((role) =>
     !role || typeof role.id !== "string" || !role.id ||
     typeof role.name !== "string" || !role.name || !validPermissions(role.permissions)
-  ) ||
+  )
+) fail("USERS_CUSTOM_ROLE_SHAPE_INVALID");
+if (
   !Array.isArray(users.invites) ||
   users.invites.some((invite) =>
     !invite || typeof invite.id !== "string" || !invite.id ||
@@ -848,7 +916,7 @@ if (
     (invite.scope === "NETWORK" && invite.stores.length !== 0) ||
     (invite.scope === "STORES" && invite.stores.length === 0)
   )
-) fail("USERS_SCOPE_SHAPE_INVALID");
+) fail("USERS_INVITE_SHAPE_INVALID");
 if (
   !exactIdSet(users.users, databaseOracleBefore.userIds) ||
   !exactIdSet(users.customRoles, databaseOracleBefore.customRoleIds) ||
@@ -876,11 +944,46 @@ const inviteAuthority = [...users.invites].sort((left, right) => left.id.localeC
   role: invite.role,
   storeIds: invite.stores.map((store) => store.id).sort(),
 }));
-if (
-  JSON.stringify(userAuthority) !== JSON.stringify(databaseOracleBefore.users) ||
-  JSON.stringify(customRoleAuthority) !== JSON.stringify(databaseOracleBefore.customRoles) ||
-  JSON.stringify(inviteAuthority) !== JSON.stringify(databaseOracleBefore.invites)
-) fail("USERS_DATABASE_AUTHORITY_INVALID");
+const databaseUserAuthority = databaseOracleBefore.users.map((user) => ({
+  accessScope: user.accessScope,
+  customRoleId: user.customRoleId,
+  id: user.id,
+  isActive: user.isActive,
+  isPlatformAdmin: user.isPlatformAdmin,
+  role: user.role,
+  storeIds: user.storeIds,
+}));
+const databaseCustomRoleAuthority = databaseOracleBefore.customRoles.map((role) => ({
+  id: role.id,
+  name: role.name,
+  permissions: role.permissions,
+}));
+const databaseInviteAuthority = databaseOracleBefore.invites.map((invite) => ({
+  accessScope: invite.accessScope,
+  customRoleId: invite.customRoleId,
+  id: invite.id,
+  role: invite.role,
+  storeIds: invite.storeIds,
+}));
+if (JSON.stringify(userAuthority) !== JSON.stringify(databaseUserAuthority)) {
+  const authorityFields = [
+    "accessScope", "customRoleId", "id", "isActive", "isPlatformAdmin", "role", "storeIds",
+  ];
+  const driftFields = authorityFields.filter((field) =>
+    userAuthority.some((user, index) =>
+      JSON.stringify(user[field]) !== JSON.stringify(databaseUserAuthority[index]?.[field]))
+  );
+  process.stderr.write(
+    `verify-legacy-rollback-authenticated-reads: USERS_DATABASE_AUTHORITY_FIELD_DRIFT=${driftFields.join(",")}\n`,
+  );
+  fail("USERS_DATABASE_AUTHORITY_INVALID");
+}
+if (JSON.stringify(customRoleAuthority) !== JSON.stringify(databaseCustomRoleAuthority)) {
+  fail("CUSTOM_ROLES_DATABASE_AUTHORITY_INVALID");
+}
+if (JSON.stringify(inviteAuthority) !== JSON.stringify(databaseInviteAuthority)) {
+  fail("INVITES_DATABASE_AUTHORITY_INVALID");
+}
 
 const roleOptionByRole = new Map(users.roleOptions.map((role) => [role.role, role]));
 const customRoleById = new Map(users.customRoles.map((role) => [role.id, role]));
@@ -936,4 +1039,5 @@ if (JSON.stringify(databaseOracleAfter) !== JSON.stringify(databaseOracleBefore)
 }
 
 process.stdout.write("LEGACY_ROLLBACK_AUTHENTICATED_READS_ACCEPTED=true\n");
+process.stdout.write(`LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG=${usersCatalogGeneration}\n`);
 process.stdout.write(`LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT=${exactStoreIds.size}\n`);

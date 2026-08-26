@@ -60,6 +60,30 @@ for required_file in \
   test -f "$required_file"
 done
 
+legacy_capability_digest="$(node --input-type=module - "$REPOSITORY_ROOT" "$LEGACY_SHA" <<'LEGACY_CATALOG_DIGEST'
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+const [repositoryRoot, legacySha] = process.argv.slice(2);
+const source = execFileSync(
+  'git', ['show', `${legacySha}:apps/api/src/auth/capabilities.ts`],
+  { cwd: repositoryRoot, encoding: 'utf8' },
+);
+const marker = 'export const accessCapabilityCatalog = ';
+const start = source.indexOf(marker) + marker.length;
+const end = source.indexOf('] as const;', start) + 1;
+if (start < marker.length || end < 1) process.exit(1);
+const catalog = Function(`return ${source.slice(start, end)}`)();
+const canonical = JSON.stringify(catalog.map(({ description, key, label }) =>
+  ({ description, key, label })));
+process.stdout.write(createHash('sha256').update(canonical).digest('hex'));
+LEGACY_CATALOG_DIGEST
+)"
+test "$legacy_capability_digest" = \
+  'b238ae71a18b0e6b816ca253a9d464aebeb0c7fac637447e94797bf45a56aa36'
+grep -F "$legacy_capability_digest" "$authenticated_smoke" >/dev/null
+grep -F '5cfa7103e06632e4ab7fe54ce4b716f8a8984794fae9e1781b656803150a18e5' \
+  "$authenticated_smoke" >/dev/null
+
 while IFS= read -r canary_assignment; do
   grep -F -x "$canary_assignment" "$safe_overlay" >/dev/null \
     || { printf 'rollback overlay lost canary deny: %s\n' "$canary_assignment" >&2; exit 1; }
@@ -308,7 +332,10 @@ done
 # Root-owned smoke credentials can never cross a proxy boundary, and generic
 # JSON 200 responses cannot satisfy route-specific data oracles.
 auth_credentials="$TEST_ROOT/auth-smoke.env"
+auth_legacy_credentials="$TEST_ROOT/auth-legacy-smoke.env"
+auth_mixed_credentials="$TEST_ROOT/auth-mixed-smoke.env"
 auth_database_oracle="$TEST_ROOT/auth-database-oracle.json"
+auth_legacy_database_oracle="$TEST_ROOT/auth-legacy-database-oracle.json"
 tenant_id_digest="$(printf %s 'tenant-1' | sha256sum | awk '{ print $1 }')"
 store_ids_digest="$(printf '%s\n' store-1 store-2 store-3 store-4 | sha256sum | awk '{ print $1 }')"
 printf '%s\n' \
@@ -320,6 +347,8 @@ printf '%s\n' \
   'MIN_ASSORTMENT_TOTAL_SKU=1' \
   'MIN_STAFF_ROWS=1' \
   'MIN_GAMIFICATION_CONFIG_ITEMS=1' > "$auth_credentials"
+cp -- "$auth_credentials" "$auth_legacy_credentials"
+cp -- "$auth_credentials" "$auth_mixed_credentials"
 cat > "$auth_database_oracle" <<'AUTH_DATABASE_ORACLE'
 {
   "channelIds": ["channel-1"],
@@ -351,15 +380,24 @@ cat > "$auth_database_oracle" <<'AUTH_DATABASE_ORACLE'
   ]
 }
 AUTH_DATABASE_ORACLE
+node -e '
+  const fs = require("node:fs");
+  const source = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const user = source.users.find((candidate) => candidate.id === "user-2");
+  if (!user) process.exit(1);
+  user.isPlatformAdmin = true;
+  fs.writeFileSync(process.argv[2], `${JSON.stringify(source)}\n`);
+' "$auth_database_oracle" "$auth_legacy_database_oracle"
 auth_port_file="$TEST_ROOT/auth-port"
 auth_request_log="$TEST_ROOT/auth-requests.log"
 auth_scenario_file="$TEST_ROOT/auth-scenario"
 auth_security_baseline="$TEST_ROOT/auth-security-baseline.env"
+auth_legacy_security_baseline="$TEST_ROOT/auth-legacy-security-baseline.env"
 cat > "$TEST_ROOT/auth-server.mjs" <<'AUTH_SERVER'
 import { createServer } from 'node:http';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-const [portFile, requestLog, scenarioFile, securityBaselineFile] = process.argv.slice(2);
+const [portFile, requestLog, scenarioFile, securityBaselineFile, legacySecurityBaselineFile] = process.argv.slice(2);
 const stores = Array.from({ length: 4 }, (_, index) => ({
   id: `store-${index + 1}`,
   name: `Store ${index + 1}`,
@@ -386,6 +424,10 @@ const capabilityKeys = [
 const capabilityOptions = capabilityKeys.map((key) => ({
   key, label: `Label ${key}`, description: `Description ${key}`,
 }));
+const legacyCapabilityKeys = capabilityKeys.filter((key) =>
+  key !== 'operate_guest_game_ledger' && key !== 'import_guest_foundation');
+const legacyCapabilityOptions = capabilityOptions.filter((capability) =>
+  legacyCapabilityKeys.includes(capability.key));
 const roleOptions = [
   'ADMIN', 'MANAGER', 'CLUB_MANAGER', 'MARKETER', 'STANDARDS_MANAGER', 'BUYER',
   'SENIOR_ADMINISTRATOR', 'CLUB_ADMINISTRATOR', 'TRAINEE',
@@ -393,10 +435,22 @@ const roleOptions = [
   role, label: `Label ${role}`, description: `Description ${role}`,
   permissions: ['view_dashboard'], isOverridden: false, updatedAt: null,
 }));
+const legacyRoleOptions = [
+  {
+    role: 'OWNER', label: 'Label OWNER', description: 'Description OWNER',
+    permissions: legacyCapabilityKeys, isOverridden: false, updatedAt: null,
+  },
+  ...roleOptions,
+];
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 writeFileSync(securityBaselineFile, [
   `EXPECTED_ROLE_OPTIONS_SHA256=${sha256(JSON.stringify(roleOptions.map(({ description, isOverridden, label, permissions, role }) => ({ description, isOverridden, label, permissions, role }))))}`,
   `EXPECTED_CAPABILITY_OPTIONS_SHA256=${sha256(JSON.stringify(capabilityOptions.map(({ description, key, label }) => ({ description, key, label }))))}`,
+  '',
+].join('\n'));
+writeFileSync(legacySecurityBaselineFile, [
+  `EXPECTED_ROLE_OPTIONS_SHA256=${sha256(JSON.stringify(legacyRoleOptions.map(({ description, isOverridden, label, permissions, role }) => ({ description, isOverridden, label, permissions, role }))))}`,
+  `EXPECTED_CAPABILITY_OPTIONS_SHA256=${sha256(JSON.stringify(legacyCapabilityOptions.map(({ description, key, label }) => ({ description, key, label }))))}`,
   '',
 ].join('\n'));
 const staffBase = {
@@ -411,7 +465,12 @@ const server = createServer((request, response) => {
   response.setHeader('content-type', 'application/json');
   const scenario = readFileSync(scenarioFile, 'utf8').trim();
   const scopeFields = (surface) => {
-    if (scenario === 'legacy-scope-omitted' || scenario === 'legacy-staff-scope-omitted') return {};
+    if (
+      scenario === 'legacy-scope-omitted' ||
+      scenario === 'legacy-staff-scope-omitted' ||
+      (scenario.startsWith('legacy-capability-catalog') &&
+        scenario !== 'legacy-capability-catalog-current-scope')
+    ) return {};
     if (scenario === 'partial-login-scope' && surface === 'login') return { accessScope: 'NETWORK' };
     if (scenario === 'partial-me-scope' && surface === 'me') return { allowedStoreIds: [] };
     return { accessScope: 'NETWORK', allowedStoreIds: [] };
@@ -494,6 +553,27 @@ const server = createServer((request, response) => {
     const visibleStores = scenario === 'duplicate-users-stores'
       ? [stores[0], stores[0], stores[2], stores[3]]
       : stores;
+    const legacyCatalogScenario = scenario.startsWith('legacy-capability-catalog');
+    const baseVisibleCapabilities = scenario === 'legacy-capability-catalog-partial'
+      ? capabilityOptions.filter((capability) => capability.key !== 'operate_guest_game_ledger')
+      : legacyCatalogScenario
+        ? legacyCapabilityOptions
+        : capabilityOptions;
+    const visibleCapabilities = baseVisibleCapabilities.map((capability, index) =>
+      (scenario === 'wrong-capability-catalog' ||
+        scenario === 'legacy-capability-catalog-forged') && index === 0
+        ? { ...capability, key: 'forged_capability' }
+        : capability);
+    const visibleCapabilityKeys = visibleCapabilities.map((capability) => capability.key);
+    const baseVisibleRoleOptions = scenario === 'legacy-capability-catalog-mixed-roles'
+      ? roleOptions
+      : legacyCatalogScenario
+        ? legacyRoleOptions
+        : roleOptions;
+    const visibleRoleOptions = baseVisibleRoleOptions.map((role, index) =>
+      scenario === 'wrong-role-option-permission' && index === 0
+        ? { ...role, permissions: ['view_reports'] }
+        : role);
     const canaryAdmin = {
       id: 'user-1', email: 'canary@example.test', role: 'ADMIN',
       customRoleId: null, customRole: null,
@@ -502,14 +582,15 @@ const server = createServer((request, response) => {
     };
     const owner = {
       id: 'user-4', email: 'owner@example.test', role: 'OWNER',
-      customRoleId: null, customRole: null, permissions: capabilityKeys,
+      customRoleId: null, customRole: null, permissions: visibleCapabilityKeys,
       isActive: true, isPlatformAdmin: false, scope: 'NETWORK', stores: [],
     };
     const scopedUser = {
       id: 'user-2', email: 'manager@example.test',
       role: scenario === 'wrong-user-role' ? 'BUYER' : 'MANAGER',
       customRoleId: null, customRole: null,
-      permissions: ['view_dashboard'], isActive: true, isPlatformAdmin: false,
+      permissions: ['view_dashboard'], isActive: true,
+      isPlatformAdmin: scenario === 'legacy-capability-catalog-platform-admin',
       scope: 'STORES', stores: scenario === 'foreign-user-store'
         ? [{ id: 'foreign', name: 'Foreign', isActive: true }]
         : [stores[0]],
@@ -528,14 +609,6 @@ const server = createServer((request, response) => {
       role: 'CLUB_ADMINISTRATOR', customRoleId: 'role-1', customRole,
       scope: 'STORES', stores: [stores[0]],
     };
-    const visibleRoleOptions = roleOptions.map((role, index) =>
-      scenario === 'wrong-role-option-permission' && index === 0
-        ? { ...role, permissions: ['view_reports'] }
-        : role);
-    const visibleCapabilities = capabilityOptions.map((capability, index) =>
-      scenario === 'wrong-capability-catalog' && index === 0
-        ? { ...capability, key: 'forged_capability' }
-        : capability);
     payload = {
       users: [canaryAdmin, scopedUser, customUser, owner], stores: visibleStores,
       roleOptions: visibleRoleOptions,
@@ -545,7 +618,9 @@ const server = createServer((request, response) => {
   } else {
     payload = {};
   }
-  if (scenario === 'legacy-staff-scope-omitted' &&
+  if ((scenario === 'legacy-staff-scope-omitted' ||
+    (scenario.startsWith('legacy-capability-catalog') &&
+      scenario !== 'legacy-capability-catalog-current-scope')) &&
     (request.url.startsWith('/staff/checklist-templates') || request.url === '/staff/knowledge-base')) {
     delete payload.accessScope;
   }
@@ -559,15 +634,20 @@ server.listen(0, '127.0.0.1', () => writeFileSync(portFile, String(server.addres
 AUTH_SERVER
 : > "$auth_request_log"
 printf 'valid\n' > "$auth_scenario_file"
-node "$TEST_ROOT/auth-server.mjs" "$auth_port_file" "$auth_request_log" "$auth_scenario_file" "$auth_security_baseline" &
+node "$TEST_ROOT/auth-server.mjs" "$auth_port_file" "$auth_request_log" "$auth_scenario_file" \
+  "$auth_security_baseline" "$auth_legacy_security_baseline" &
 auth_server_pid=$!
 for _ in 1 2 3 4 5; do
-  [[ -s "$auth_port_file" && -s "$auth_security_baseline" ]] && break
+  [[ -s "$auth_port_file" && -s "$auth_security_baseline" && -s "$auth_legacy_security_baseline" ]] && break
   sleep 1
 done
 test -s "$auth_port_file"
 test -s "$auth_security_baseline"
+test -s "$auth_legacy_security_baseline"
 cat "$auth_security_baseline" >> "$auth_credentials"
+cat "$auth_legacy_security_baseline" >> "$auth_legacy_credentials"
+grep '^EXPECTED_ROLE_OPTIONS_SHA256=' "$auth_security_baseline" >> "$auth_mixed_credentials"
+grep '^EXPECTED_CAPABILITY_OPTIONS_SHA256=' "$auth_legacy_security_baseline" >> "$auth_mixed_credentials"
 auth_url="http://127.0.0.1:$(cat "$auth_port_file")"
 if HTTP_PROXY='http://127.0.0.1:9999' node "$authenticated_smoke" \
   --unprivileged-test-mode --base-url "$auth_url" --credentials "$auth_credentials" --database-oracle "$auth_database_oracle" \
@@ -597,6 +677,65 @@ node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
   > "$TEST_ROOT/auth-legacy-staff-scope-omitted.out"
 grep -F -x 'LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT=4' \
   "$TEST_ROOT/auth-legacy-staff-scope-omitted.out" >/dev/null
+
+printf 'legacy-capability-catalog\n' > "$auth_scenario_file"
+node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_legacy_credentials" --database-oracle "$auth_database_oracle" \
+  > "$TEST_ROOT/auth-legacy-capability-catalog.out"
+grep -F -x 'LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG=LEGACY_7DE04FF4' \
+  "$TEST_ROOT/auth-legacy-capability-catalog.out" >/dev/null
+grep -F -x 'LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT=4' \
+  "$TEST_ROOT/auth-legacy-capability-catalog.out" >/dev/null
+
+printf 'legacy-capability-catalog-platform-admin\n' > "$auth_scenario_file"
+node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_legacy_credentials" --database-oracle "$auth_legacy_database_oracle" \
+  > "$TEST_ROOT/auth-legacy-capability-platform-admin.out"
+grep -F -x 'LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG=LEGACY_7DE04FF4' \
+  "$TEST_ROOT/auth-legacy-capability-platform-admin.out" >/dev/null
+if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_legacy_credentials" --database-oracle "$auth_database_oracle" \
+  > "$TEST_ROOT/auth-legacy-capability-unbound-platform-admin.out" 2>&1; then
+  printf 'authenticated smoke accepted a legacy platform admin outside the DB oracle\n' >&2
+  exit 1
+fi
+grep -F 'USERS_DATABASE_AUTHORITY_INVALID' \
+  "$TEST_ROOT/auth-legacy-capability-unbound-platform-admin.out" >/dev/null
+
+if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_credentials" --database-oracle "$auth_database_oracle" \
+  > "$TEST_ROOT/auth-legacy-capability-current-baseline.out" 2>&1; then
+  printf 'authenticated smoke accepted the legacy capability catalog against the current baseline\n' >&2
+  exit 1
+fi
+grep -F 'CAPABILITY_CATALOG_INVALID' \
+  "$TEST_ROOT/auth-legacy-capability-current-baseline.out" >/dev/null
+
+for legacy_catalog_scenario in \
+  legacy-capability-catalog-current-scope \
+  legacy-capability-catalog-forged \
+  legacy-capability-catalog-partial; do
+  printf '%s\n' "$legacy_catalog_scenario" > "$auth_scenario_file"
+  if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+    --credentials "$auth_legacy_credentials" --database-oracle "$auth_database_oracle" \
+    > "$TEST_ROOT/auth-${legacy_catalog_scenario}.out" 2>&1; then
+    printf 'authenticated smoke accepted legacy capability drift: %s\n' \
+      "$legacy_catalog_scenario" >&2
+    exit 1
+  fi
+  grep -F 'CAPABILITY_CATALOG_INVALID' \
+    "$TEST_ROOT/auth-${legacy_catalog_scenario}.out" >/dev/null
+done
+
+printf 'legacy-capability-catalog-mixed-roles\n' > "$auth_scenario_file"
+if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_mixed_credentials" --database-oracle "$auth_database_oracle" \
+  > "$TEST_ROOT/auth-legacy-capability-catalog-mixed-roles.out" 2>&1; then
+  printf 'authenticated smoke accepted mixed current/legacy catalog generations\n' >&2
+  exit 1
+fi
+grep -F 'USERS_CATALOG_GENERATION_MISMATCH' \
+  "$TEST_ROOT/auth-legacy-capability-catalog-mixed-roles.out" >/dev/null
 
 printf 'wrong-staff-scope\n' > "$auth_scenario_file"
 if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
@@ -715,7 +854,7 @@ if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
   printf 'authenticated smoke accepted a foreign nested user store\n' >&2
   exit 1
 fi
-grep -F 'USERS_SCOPE_SHAPE_INVALID' "$TEST_ROOT/auth-foreign-user-store.out" >/dev/null
+grep -F 'USERS_USER_SCOPE_SHAPE_INVALID' "$TEST_ROOT/auth-foreign-user-store.out" >/dev/null
 
 printf 'foreign-custom-role\n' > "$auth_scenario_file"
 if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
@@ -750,6 +889,8 @@ grep -F 'CAPABILITY_CATALOG_INVALID' "$TEST_ROOT/auth-wrong-capability-catalog.o
 printf 'valid\n' > "$auth_scenario_file"
 node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
   --credentials "$auth_credentials" --database-oracle "$auth_database_oracle" > "$TEST_ROOT/auth-valid.out"
+grep -F -x 'LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG=CURRENT' \
+  "$TEST_ROOT/auth-valid.out" >/dev/null
 grep -F -x 'LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT=4' "$TEST_ROOT/auth-valid.out" >/dev/null
 if grep -F 'demo' "$TEST_ROOT/auth-valid.out" >/dev/null; then
   printf 'authenticated smoke leaked raw tenant identity to stdout\n' >&2

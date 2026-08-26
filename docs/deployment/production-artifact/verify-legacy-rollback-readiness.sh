@@ -154,6 +154,14 @@ normalized_systemd_socket_bind_set() {
   tr ' ' '\n' | sed -E 's/^((ipv4|ipv6):(tcp|udp)):/\1/' | normalized_word_set
 }
 
+systemd_localhost_ip_boundary_is_exact() {
+  local ip_deny="$1" ip_allow="$2"
+  # systemd 255 expands the admitted source aliases `any` and `localhost` in
+  # effective properties. Accept only their complete IPv4/IPv6 CIDR sets.
+  [[ "$(printf '%s' "$ip_deny" | normalized_word_set)" == '0.0.0.0/0 ::/0' \
+    && "$(printf '%s' "$ip_allow" | normalized_word_set)" == '127.0.0.0/8 ::1/128' ]]
+}
+
 attest_runtime_secret_group_reverse_sets() {
   local shared_line api_line web_line shared_gid api_gid web_gid shared_primary api_primary web_primary
   shared_line="$(awk -F: '$1 == "leetplus-runtime" { print }' <<< "$group_inventory")"
@@ -363,14 +371,16 @@ attest_rollback_identity_and_process_boundary() {
     || die "rollback unit effective sandbox mismatch: ${unit}"
   expected_socket_bind_allow="ipv4:tcp:${expected_port}"
   [[ "$runtime_kind" == api ]] && expected_socket_bind_allow='ipv4:tcp:4300 ipv4:tcp:4301'
-  [[ "$(printf '%s' "$address_families" | normalized_word_set)" == 'AF_INET AF_INET6' \
-    && "$(printf '%s' "$network_interfaces" | normalized_word_set)" == lo \
-    && "$ip_deny" == any && "$ip_allow" == localhost && "$socket_bind_deny" == any \
-    && "$(printf '%s' "$socket_bind_allow" | normalized_systemd_socket_bind_set)" \
-      == "$(printf '%s' "$expected_socket_bind_allow" | normalized_systemd_socket_bind_set)" \
-    && "$(printf '%s' "$read_only_paths" | normalized_word_set)" == "$expected_read_only" \
-    && "$(printf '%s' "$read_write_paths" | normalized_word_set)" == "$expected_read_write" ]] \
-    || die "rollback unit effective network/path sandbox mismatch: ${unit}"
+  if ! [[ "$(printf '%s' "$address_families" | normalized_word_set)" == 'AF_INET AF_INET6' \
+      && "$(printf '%s' "$network_interfaces" | normalized_word_set)" == lo \
+      && "$socket_bind_deny" == any ]] \
+    || ! systemd_localhost_ip_boundary_is_exact "$ip_deny" "$ip_allow" \
+    || ! [[ "$(printf '%s' "$socket_bind_allow" | normalized_systemd_socket_bind_set)" \
+        == "$(printf '%s' "$expected_socket_bind_allow" | normalized_systemd_socket_bind_set)" \
+      && "$(printf '%s' "$read_only_paths" | normalized_word_set)" == "$expected_read_only" \
+      && "$(printf '%s' "$read_write_paths" | normalized_word_set)" == "$expected_read_write" ]]; then
+    die "rollback unit effective network/path sandbox mismatch: ${unit}"
+  fi
   [[ "$runtime_kind" != web || "$inaccessible_paths" == '/etc/leetplus/rollback-runtime.env' ]] \
     || die 'rollback Web effective secret-inaccessible path is missing'
   [[ "$runtime_kind" != api || ( "$memory_max" == 805306368 && "$tasks_max" == 128 ) ]] \

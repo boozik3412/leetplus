@@ -155,6 +155,33 @@ assert_systemd_socket_bind_rendering_contract() {
 
 assert_systemd_socket_bind_rendering_contract "$legacy_readiness"
 
+assert_systemd_ip_address_rendering_contract() {
+  local authority_path="$1" function_source
+  function_source="$(sed -n '/^normalized_word_set() {$/,/^}$/p' "$authority_path")"$'\n'
+  function_source+="$(sed -n '/^systemd_localhost_ip_boundary_is_exact() {$/,/^}$/p' "$authority_path")"
+  test -n "$function_source"
+  IP_BOUNDARY_FUNCTIONS="$function_source" bash --noprofile --norc -c '
+    set -euo pipefail
+    eval "$IP_BOUNDARY_FUNCTIONS"
+    systemd_localhost_ip_boundary_is_exact "::/0 0.0.0.0/0" "::1/128 127.0.0.0/8"
+    systemd_localhost_ip_boundary_is_exact $'"'"'0.0.0.0/0\n::/0'"'"' $'"'"'127.0.0.0/8\n::1/128'"'"'
+    for boundary in \
+      "any|localhost" \
+      "0.0.0.0/0|127.0.0.0/8 ::1/128" \
+      "0.0.0.0/0 ::/0|127.0.0.1/32 ::1/128" \
+      "0.0.0.0/0 ::/0|127.0.0.0/8 ::1/128 10.0.0.0/8"; do
+      IFS="|" read -r deny allow <<< "$boundary"
+      if systemd_localhost_ip_boundary_is_exact "$deny" "$allow"; then
+        exit 1
+      fi
+    done
+  '
+  test "$(grep -Fc 'systemd_localhost_ip_boundary_is_exact' "$authority_path")" = 2
+}
+
+assert_systemd_ip_address_rendering_contract "$blue_green_cutover"
+assert_systemd_ip_address_rendering_contract "$legacy_readiness"
+
 awk '
   /publish_state_record "\$control_preparing"/ { published = 1; next }
   published && /preparing_record_sha=/ { hashed = 1; next }

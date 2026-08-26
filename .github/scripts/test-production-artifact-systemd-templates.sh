@@ -182,6 +182,20 @@ assert_systemd_ip_address_rendering_contract() {
 assert_systemd_ip_address_rendering_contract "$blue_green_cutover"
 assert_systemd_ip_address_rendering_contract "$legacy_readiness"
 
+# systemd 255 reports ExecStart before EnvironmentFile expansion. Keep the
+# verifier bound to that exact literal token while separately requiring the
+# preflight and listener boundary to prove its admitted value.
+grep -F 'expected_exec="/usr/bin/node ${release_directory}/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port \${WEB_PORT}"' \
+  "$legacy_readiness" >/dev/null
+grep -F -x '[[ "${WEB_PORT:-}" == '\''3300'\'' ]] || die '\''rollback Web port must be 3300'\''' \
+  "${REPOSITORY_ROOT}/docs/deployment/production-artifact/preflight-legacy-rollback.sh" >/dev/null
+grep -F -x '      expected_port=3300' "$legacy_readiness" >/dev/null
+if grep -F 'expected_exec="/usr/bin/node ${release_directory}/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3300"' \
+  "$legacy_readiness" >/dev/null; then
+  printf 'legacy readiness expects post-expansion Web ExecStart rendering\n' >&2
+  exit 1
+fi
+
 awk '
   /publish_state_record "\$control_preparing"/ { published = 1; next }
   published && /preparing_record_sha=/ { hashed = 1; next }

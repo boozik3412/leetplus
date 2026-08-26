@@ -270,7 +270,11 @@ attest_rollback_identity_and_process_boundary() {
       expected_user='leetplus-web-nminus1'
       expected_supplementary='leetplus-web-runtime'
       expected_working_directory="${release_directory}/apps/web"
-      expected_exec="/usr/bin/node ${release_directory}/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3300"
+      # systemctl show exposes the reviewed ExecStart argv before EnvironmentFile
+      # expansion. On systemd 255 the effective property therefore retains the
+      # literal ${WEB_PORT} token; the preflight and live listener checks below
+      # independently prove that it resolves to the exact admitted port 3300.
+      expected_exec="/usr/bin/node ${release_directory}/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port \${WEB_PORT}"
       expected_preflight="/usr/bin/bash -p /usr/local/libexec/leetplus/preflight-legacy-rollback.sh --release-sha ${LEGACY_SHA} --web-runtime"
       runtime_environment='/etc/leetplus/rollback-web-runtime.env'
       runtime_group='leetplus-web-runtime'

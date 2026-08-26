@@ -83,6 +83,7 @@ done
 
 for unit in "$api_unit" "$web_unit"; do
   grep -F -x 'Group=leetplus-runtime' "$unit" >/dev/null
+  grep -F -x 'Slice=system.slice' "$unit" >/dev/null
   grep -F -x 'EnvironmentFile=/etc/leetplus/rollback-safe.env' "$unit" >/dev/null
   grep -F -x 'KillMode=control-group' "$unit" >/dev/null
   grep -F -x 'RestrictNetworkInterfaces=lo' "$unit" >/dev/null

@@ -408,6 +408,12 @@ const server = createServer((request, response) => {
   appendFileSync(requestLog, `${request.method} ${request.url}\n`);
   response.setHeader('content-type', 'application/json');
   const scenario = readFileSync(scenarioFile, 'utf8').trim();
+  const scopeFields = (surface) => {
+    if (scenario === 'legacy-scope-omitted') return {};
+    if (scenario === 'partial-login-scope' && surface === 'login') return { accessScope: 'NETWORK' };
+    if (scenario === 'partial-me-scope' && surface === 'me') return { allowedStoreIds: [] };
+    return { accessScope: 'NETWORK', allowedStoreIds: [] };
+  };
   let payload;
   if (request.url === '/auth/login') {
     payload = {
@@ -415,7 +421,7 @@ const server = createServer((request, response) => {
       user: {
         email: 'canary@example.test', tenantSlug: 'demo', tenantId: 'tenant-1',
         role: scenario === 'wrong-canary-role' ? 'OWNER' : 'ADMIN',
-        accessScope: 'NETWORK', allowedStoreIds: [], isPlatformAdmin: false,
+        ...scopeFields('login'), isPlatformAdmin: false,
       },
     };
   } else if (!request.headers.authorization) {
@@ -427,7 +433,7 @@ const server = createServer((request, response) => {
   } else if (request.url === '/auth/me') {
     payload = {
       tenantSlug: 'demo', tenantId: scenario === 'missing-tenant' ? undefined : 'tenant-1',
-      role: 'ADMIN', accessScope: 'NETWORK', allowedStoreIds: [], isPlatformAdmin: false,
+      role: 'ADMIN', ...scopeFields('me'), isPlatformAdmin: false,
     };
   } else if (request.url === '/stores') {
     payload = scenario === 'wrong-store-baseline'
@@ -565,6 +571,31 @@ if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
   exit 1
 fi
 grep -F 'AUTH_ME_SCOPE_INVALID' "$TEST_ROOT/auth-missing-tenant.out" >/dev/null
+
+printf 'legacy-scope-omitted\n' > "$auth_scenario_file"
+node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_credentials" --database-oracle "$auth_database_oracle" \
+  > "$TEST_ROOT/auth-legacy-scope-omitted.out"
+grep -F -x 'LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT=4' \
+  "$TEST_ROOT/auth-legacy-scope-omitted.out" >/dev/null
+
+printf 'partial-login-scope\n' > "$auth_scenario_file"
+if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_credentials" --database-oracle "$auth_database_oracle" \
+  > "$TEST_ROOT/auth-partial-login-scope.out" 2>&1; then
+  printf 'authenticated smoke accepted a partially emitted login scope\n' >&2
+  exit 1
+fi
+grep -F 'LOGIN_SCOPE_INVALID' "$TEST_ROOT/auth-partial-login-scope.out" >/dev/null
+
+printf 'partial-me-scope\n' > "$auth_scenario_file"
+if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_credentials" --database-oracle "$auth_database_oracle" \
+  > "$TEST_ROOT/auth-partial-me-scope.out" 2>&1; then
+  printf 'authenticated smoke accepted a partially emitted /auth/me scope\n' >&2
+  exit 1
+fi
+grep -F 'AUTH_ME_SCOPE_INVALID' "$TEST_ROOT/auth-partial-me-scope.out" >/dev/null
 
 printf 'wrong-canary-role\n' > "$auth_scenario_file"
 if node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \

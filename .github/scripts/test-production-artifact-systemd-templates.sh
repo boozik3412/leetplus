@@ -150,7 +150,7 @@ assert_systemd_socket_bind_rendering_contract() {
     test "$(printf "%s" "ipv4:tcp:4300 ipv4:tcp4301 ipv6:udp:53" | normalized_systemd_socket_bind_set)" \
       = "ipv4:tcp4300 ipv4:tcp4301 ipv6:udp53"
   '
-  test "$(grep -Fc 'normalized_systemd_socket_bind_set)' "$authority_path")" = 3
+  test "$(grep -Fc 'normalized_systemd_socket_bind_set)' "$authority_path")" = 2
 }
 
 assert_systemd_socket_bind_rendering_contract "$legacy_readiness"

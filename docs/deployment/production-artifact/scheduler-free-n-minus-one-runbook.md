@@ -382,6 +382,11 @@ host clock назад stale/superseded/consumed receipt отклоняется.
 заменяет intent. Частично записанный uncommitted temp отбрасывается только при
 наличии неизменённого schema-exact intent; committed phase после host loss
 детерминированно завершается под тем же lock.
+Blue/green inventory резервирует timestamp/generation namespace
+`YYYYMMDDT...Z-g...-<sha>-<slot>` и не интерпретирует находящиеся в общем
+durable root receipts других release authorities как cutover journal. Любая
+запись внутри зарезервированного namespace по-прежнему проходит полную exact
+schema/filename-проверку и при drift останавливает recovery fail-closed.
 `legacy.conf` и receipt с `LEGACY_UNVERSIONED` отклоняются.
 
 При candidate failure nginx возвращается на scheduler-free `4300/3300`. Старый

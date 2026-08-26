@@ -43,6 +43,7 @@ umask 0077
 readonly RELEASE_SHA_PATTERN='^[0-9a-f]{40}$'
 readonly MIGRATION_PATTERN='^[0-9]{14}_[a-z0-9_]+$'
 readonly SLOT_PATTERN='^(blue|green)$'
+readonly CUTOVER_RECORD_NAMESPACE_GLOB='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T*-g*-*-*'
 readonly FIRST_CUTOVER_ROLLBACK_SHA='7de04ff4ccc814494810730be3fa6bf661097b07'
 readonly SLOT_API_UNIT_SHA256='a6b7a9d2f640c7202923d2e7fa471d2814aecda39704330fa66196af4b676053'
 readonly SLOT_WEB_UNIT_SHA256='77510268182b14bd528705be349e8221b4c970eeababf0405e53d3c243222cc9'
@@ -1401,13 +1402,20 @@ collect_state_records() {
   case "$record_kind" in
     phase)
       timeout --foreground --kill-after=2s 10s find -P "$state_root" -maxdepth 1 -type f \
-        \( -name '*.intent.accepting.new' -o -name '*.intent.recovering.new' \) -print0 >&"$write_fd" \
+        \( -name "${CUTOVER_RECORD_NAMESPACE_GLOB}.intent.accepting.new" \
+          -o -name "${CUTOVER_RECORD_NAMESPACE_GLOB}.intent.recovering.new" \) \
+        -print0 >&"$write_fd" \
         || die 'complete cutover phase-record inventory failed or timed out'
       ;;
     intent)
       timeout --foreground --kill-after=2s 10s find -P "$state_root" -maxdepth 1 -type f \
-        -name '*.intent' -print0 >&"$write_fd" \
+        -name "${CUTOVER_RECORD_NAMESPACE_GLOB}.intent" -print0 >&"$write_fd" \
         || die 'complete cutover intent inventory failed or timed out'
+      ;;
+    receipt)
+      timeout --foreground --kill-after=2s 10s find -P "$state_root" -maxdepth 1 -type f \
+        -name "${CUTOVER_RECORD_NAMESPACE_GLOB}.receipt" -print0 >&"$write_fd" \
+        || die 'complete cutover accepted-receipt inventory failed or timed out'
       ;;
     *) die 'internal cutover record inventory kind is not reviewed' ;;
   esac
@@ -1508,9 +1516,7 @@ reconcile_unindexed_accepted_generation() {
   local indexed_generation_value=0 candidate_generation candidate_generation_value
   local seen_generations=' ' indexed_generation_receipt=''
   local -a accepted_receipts=() newer_receipts=()
-  shopt -s nullglob
-  accepted_receipts=("$state_root"/*.receipt)
-  shopt -u nullglob
+  collect_state_records accepted_receipts receipt
   ((${#accepted_receipts[@]} > 0)) || return 0
 
   if [[ -e "$latest_index" || -L "$latest_index" ]]; then
@@ -1679,7 +1685,8 @@ if [[ "$mode" == 'rollback' || "$mode" == 'recover-pending' || "$mode" == 'recov
   exit 0
 fi
 
-outstanding_intent="$(find -P "$state_root" -maxdepth 1 -type f -name '*.intent' -print -quit)"
+outstanding_intent="$(find -P "$state_root" -maxdepth 1 -type f \
+  -name "${CUTOVER_RECORD_NAMESPACE_GLOB}.intent" -print -quit)"
 [[ -z "$outstanding_intent" ]] \
   || die 'an outstanding cutover intent must be recovered before a new switch'
 

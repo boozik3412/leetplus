@@ -689,6 +689,37 @@ export TEST_ENVIRONMENT_ROOT="$environment_root"
 export TEST_MAIN_PID="$$"
 export TEST_CONTROL_GROUP="$test_control_group"
 
+# The durable receipt root is shared with release hydration and promotion
+# authorities. Their suffixes are intentionally similar, but only the reserved
+# timestamp/generation namespace belongs to blue/green recovery.
+foreign_receipt="$state_root/release-hydration-attestation-${RELEASE_SHA}.receipt"
+foreign_intent="$state_root/release-promotion-intent-${RELEASE_SHA}.intent"
+printf 'foreign hydration evidence\n' > "$foreign_receipt"
+printf 'foreign promotion evidence\n' > "$foreign_intent"
+chmod 0600 "$foreign_receipt" "$foreign_intent"
+PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
+  /usr/bin/bash -p "$CUTOVER" recover-pending "${recovery_common_arguments[@]}" \
+  > "$TEST_ROOT/foreign-receipt-namespace.out"
+grep -F -x 'BLUE_GREEN_PENDING_RECOVERY=false' "$TEST_ROOT/foreign-receipt-namespace.out" >/dev/null
+grep -F -x 'foreign hydration evidence' "$foreign_receipt" >/dev/null
+grep -F -x 'foreign promotion evidence' "$foreign_intent" >/dev/null
+rm -- "$foreign_receipt" "$foreign_intent"
+
+# A record inside the reserved namespace remains fail-closed even when its
+# schema is malformed; namespace isolation must not weaken journal validation.
+malformed_cutover_receipt="$state_root/20990101T000000000000000Z-g1-${RELEASE_SHA}-blue.receipt"
+printf 'not a cutover receipt\n' > "$malformed_cutover_receipt"
+chmod 0600 "$malformed_cutover_receipt"
+if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
+  /usr/bin/bash -p "$CUTOVER" recover-pending "${recovery_common_arguments[@]}" \
+  > "$TEST_ROOT/malformed-cutover-receipt.out" 2>&1; then
+  printf 'recovery accepted a malformed receipt inside the cutover namespace\n' >&2
+  exit 1
+fi
+grep -F 'accepted receipt filename or schema is not canonical' \
+  "$TEST_ROOT/malformed-cutover-receipt.out" >/dev/null
+rm -- "$malformed_cutover_receipt"
+
 latest_receipt_by_generation() {
   local candidate candidate_generation best='' best_generation=0
   while IFS= read -r -d '' candidate; do
@@ -698,7 +729,8 @@ latest_receipt_by_generation() {
       best="$candidate"
       best_generation=$((10#$candidate_generation))
     fi
-  done < <(find "$state_root" -maxdepth 1 -type f -name '*.receipt' -print0)
+  done < <(find "$state_root" -maxdepth 1 -type f \
+    -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T*-g*-*-*.receipt' -print0)
   [[ -n "$best" ]] || return 1
   printf '%s\n' "$best"
 }

@@ -58,6 +58,15 @@ readonly CONTROL_INSTALL_FENCE_NAME='scheduler-free-control-install.fence'
 # bounded while allowing that fail-closed preparation to resume.
 readonly COMPATIBLE_PREPARING_CONTROL_MANIFEST_SHA256='815849b9225b612f4468773b3fb883782eda5abbc3dcc8d761db530a3d5a28d8'
 readonly COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256='86bfb46c71d385051b5087c6eb0231cf77fb36798372dc9f4540d51a9edac849'
+# The immediately preceding admitted generation can also leave this one exact
+# PREPARING-only record after its runtime masks were accepted by systemd 255,
+# while already-loaded inactive recovery units remain cached as LoadState=loaded.
+# It is admitted only as a complete record identity, with no fence, intent or
+# destination mutation, so this generation can establish the durable boot fence
+# before trusting those cached units.
+readonly COMPATIBLE_LOADED_PREPARING_CONTROL_MANIFEST_SHA256='bc69b6cfd9189ed1877b3fcaec4dfe5746fd20e5ba43b4b18f318b515a89f532'
+readonly COMPATIBLE_LOADED_PREPARING_INSTALL_PLAN_SHA256='a73ce1452933b4b620a5ab46a963592d4e53afd3e385f5882235f41d944bb9ef6'
+readonly COMPATIBLE_LOADED_PREPARING_RECORD_SHA256='a13e4ee44db0322bb7b1ef74677e638cf9aa7bc842bcf68abd465c9442f525d65'
 # The same production transaction subsequently committed this exact fence and
 # PREPARED intent before systemd 255 exposed the template-dependency aliases.
 # These five record identities are the only cross-generation committed state
@@ -83,6 +92,9 @@ die() {
 
 [[ "$COMPATIBLE_PREPARING_CONTROL_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
   && "$COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_LOADED_PREPARING_CONTROL_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_LOADED_PREPARING_INSTALL_PLAN_SHA256" =~ ^[0-9a-f]{64}$ \
+  && "$COMPATIBLE_LOADED_PREPARING_RECORD_SHA256" =~ ^[0-9a-f]{64}$ \
   && "$COMPATIBLE_FENCED_PREPARING_RECORD_SHA256" =~ ^[0-9a-f]{64}$ \
   && "$COMPATIBLE_FENCED_CONTROL_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
   && "$COMPATIBLE_FENCED_INSTALL_PLAN_SHA256" =~ ^[0-9a-f]{64}$ \
@@ -735,28 +747,74 @@ attest_active_route_not_drifting() {
   done
 }
 
+attest_pre_fence_loaded_transaction() {
+  local unit="$1"
+  local marker="/run/systemd/system/${unit}"
+  local destination="${systemd_root}/${unit}"
+  local source="${systemd_source}/${unit}"
+
+  case "$unit" in
+    leetplus-rollback-egress.service|leetplus-blue-green-recovery.service|\
+    leetplus-blue-green-recovery-watchdog.service|leetplus-blue-green-recovery.timer) ;;
+    *) die "internal pre-fence loaded unit classification failed: ${unit}" ;;
+  esac
+  [[ -z "$fence_record_sha" && -z "$intent_phase" \
+    && ( "$preparing_generation" == current \
+      || ( "$preparing_generation" == compatible-loaded-predecessor \
+        && "$preparing_record_sha" == "$COMPATIBLE_LOADED_PREPARING_RECORD_SHA256" ) ) ]] \
+    || die "loaded masked protected unit lacks the exact uncommitted preparation: ${unit}"
+  [[ -f "$control_preparing" && ! -L "$control_preparing" \
+    && "$(stat -c '%U:%a:%h' -- "$control_preparing")" == "$(state_record_identity)" \
+    && "$(sha256sum "$control_preparing" | awk '{ print $1 }')" == "$preparing_record_sha" ]] \
+    || die "loaded masked protected-unit preparation record drifted: ${unit}"
+  [[ -L "$marker" && "$(readlink -- "$marker")" == /dev/null \
+    && "$(stat -c '%U:%G:%a:%h' -- "$marker")" == 'root:root:777:1' ]] \
+    || die "loaded masked protected unit lacks its exact installer-owned runtime mask: ${unit}"
+  [[ -f "$destination" && ! -L "$destination" \
+    && "$(stat -c '%U:%G:%a:%h' -- "$destination")" == 'root:root:644:1' \
+    && -f "$source" && ! -L "$source" ]] \
+    && cmp -s -- "$source" "$destination" \
+    || die "pre-fence loaded protected unit file identity is not exact: ${unit}"
+}
+
 attest_compatible_fenced_loaded_transaction() {
   local unit="$1"
   local marker="/run/systemd/system/${unit}"
   local record_spec record_path record_digest
+  local -a record_specs=()
 
   case "$unit" in
     leetplus-rollback-egress.service|leetplus-blue-green-recovery.service|\
     leetplus-blue-green-recovery-watchdog.service|leetplus-blue-green-recovery.timer) ;;
     *) die "internal loaded masked unit classification failed: ${unit}" ;;
   esac
-  [[ "$preparing_generation" == compatible-predecessor \
+  if [[ "$preparing_generation" == compatible-predecessor \
     && "$fence_generation" == compatible-predecessor \
     && "$intent_generation" == compatible-predecessor \
     && "$preparing_record_sha" == "$COMPATIBLE_FENCED_PREPARING_RECORD_SHA256" \
     && "$fence_record_sha" == "$COMPATIBLE_FENCED_FENCE_RECORD_SHA256" \
     && ( "$intent_phase:$intent_record_sha" == "PREPARED:${COMPATIBLE_FENCED_PREPARED_INTENT_RECORD_SHA256}" \
-      || "$intent_phase:$intent_record_sha" == "POST_ATTESTED:${COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256}" ) ]] \
-    || die "loaded masked protected unit lacks the exact committed predecessor transaction: ${unit}"
-  for record_spec in \
-    "${control_preparing}:${preparing_record_sha}" \
-    "${control_fence}:${fence_record_sha}" \
-    "${control_intent}:${intent_record_sha}"; do
+      || "$intent_phase:$intent_record_sha" == "POST_ATTESTED:${COMPATIBLE_FENCED_POST_ATTESTED_INTENT_RECORD_SHA256}" ) ]]; then
+    :
+  elif [[ "$fence_generation" == current \
+    && ( "$preparing_generation" == current \
+      || ( "$preparing_generation" == compatible-loaded-predecessor \
+        && "$preparing_record_sha" == "$COMPATIBLE_LOADED_PREPARING_RECORD_SHA256" ) ) \
+    && ( -z "$intent_phase" \
+      || ( "$intent_generation" == current \
+        && ( "$intent_phase" == PREPARED || "$intent_phase" == POST_ATTESTED ) ) ) ]]; then
+    :
+  else
+    die "loaded masked protected unit lacks the exact committed predecessor transaction: ${unit}"
+  fi
+  record_specs=(
+    "${control_preparing}:${preparing_record_sha}"
+    "${control_fence}:${fence_record_sha}"
+  )
+  if [[ -n "$intent_phase" ]]; then
+    record_specs+=("${control_intent}:${intent_record_sha}")
+  fi
+  for record_spec in "${record_specs[@]}"; do
     record_path="${record_spec%%:*}"
     record_digest="${record_spec##*:}"
     [[ -f "$record_path" && ! -L "$record_path" \
@@ -774,10 +832,17 @@ attest_compatible_fenced_loaded_egress() {
   local template_alias_count="$1"
   local destination="${systemd_root}/leetplus-rollback-egress.service"
   local expected_dropin="${systemd_root}/leetplus-rollback-egress.service.d/90-leetplus-control-install-fence.conf"
-  local actual_digest current_digest show_output key value
+  local actual_digest current_digest show_output key value expected_condition_result_pattern='^no$'
   local -A effective_properties=()
 
   attest_compatible_fenced_loaded_transaction leetplus-rollback-egress.service
+  if [[ "$fence_generation" == current ]]; then
+    # ConditionResult is the last condition check, not a live evaluation. The
+    # newly committed marker can therefore coexist with a stale `yes`; exact
+    # DropInPaths + NeedDaemonReload=no + the digested marker/drop-in establish
+    # the effective next-start fence for the current transaction.
+    expected_condition_result_pattern='^(yes|no)$'
+  fi
 
   [[ -f "$destination" && ! -L "$destination" \
     && "$(stat -c '%U:%G:%a:%h' -- "$destination")" == 'root:root:644:1' ]] \
@@ -810,25 +875,26 @@ attest_compatible_fenced_loaded_egress() {
     && "${effective_properties[FragmentPath]}" == "$destination" \
     && "${effective_properties[UnitFileState]}" == disabled \
     && "${effective_properties[DropInPaths]}" == "$expected_dropin" \
-    && "${effective_properties[ConditionResult]}" == no \
+    && "${effective_properties[ConditionResult]}" =~ $expected_condition_result_pattern \
     && "${effective_properties[NeedDaemonReload]}" == no ]] \
     || die 'loaded masked egress is not held by the exact effective boot fence'
 }
 
 attest_compatible_fenced_loaded_current_unit() {
   local unit="$1"
-  local expected_unit_file_state destination source expected_dropin show_output key value
+  local expected_unit_file_state_pattern destination source expected_dropin show_output key value
+  local expected_condition_result_pattern='^no$'
   local -A effective_properties=()
 
   case "$unit" in
     leetplus-blue-green-recovery.service)
-      expected_unit_file_state=disabled
+      expected_unit_file_state_pattern='^(disabled|enabled)$'
       ;;
     leetplus-blue-green-recovery-watchdog.service)
-      expected_unit_file_state=static
+      expected_unit_file_state_pattern='^static$'
       ;;
     leetplus-blue-green-recovery.timer)
-      expected_unit_file_state=disabled
+      expected_unit_file_state_pattern='^(disabled|enabled)$'
       ;;
     *) die "internal loaded current unit classification failed: ${unit}" ;;
   esac
@@ -837,6 +903,9 @@ attest_compatible_fenced_loaded_current_unit() {
   expected_dropin="${systemd_root}/${unit}.d/90-leetplus-control-install-fence.conf"
 
   attest_compatible_fenced_loaded_transaction "$unit"
+  if [[ "$fence_generation" == current ]]; then
+    expected_condition_result_pattern='^(yes|no)$'
+  fi
   [[ -f "$destination" && ! -L "$destination" \
     && "$(stat -c '%U:%G:%a:%h' -- "$destination")" == 'root:root:644:1' ]] \
     && cmp -s -- "$source" "$destination" \
@@ -857,9 +926,9 @@ attest_compatible_fenced_loaded_current_unit() {
   done <<< "$show_output"
   [[ ${#effective_properties[@]} == 5 \
     && "${effective_properties[FragmentPath]}" == "$destination" \
-    && "${effective_properties[UnitFileState]}" == "$expected_unit_file_state" \
+    && "${effective_properties[UnitFileState]}" =~ $expected_unit_file_state_pattern \
     && "${effective_properties[DropInPaths]}" == "$expected_dropin" \
-    && "${effective_properties[ConditionResult]}" == no \
+    && "${effective_properties[ConditionResult]}" =~ $expected_condition_result_pattern \
     && "${effective_properties[NeedDaemonReload]}" == no ]] \
     || die "loaded fenced current unit is not held by the exact effective boot fence: ${unit}"
 }
@@ -869,7 +938,8 @@ attest_quiescent_runtime() {
   local unit inventory unit_file_inventory line unit_name load_state active_state sub_state main_pid control_group
   local show_output key value cgroup_path cgroup_pids listener_inventory marker expected_fragment expected_working_directory
   local -A allowed_units=() properties=() systemd255_template_aliases=()
-  [[ "$expected_runtime_mask_state" == absent || "$expected_runtime_mask_state" == exact ]] \
+  [[ "$expected_runtime_mask_state" == absent || "$expected_runtime_mask_state" == pre-fence \
+    || "$expected_runtime_mask_state" == exact ]] \
     || die "invalid expected runtime-mask state: ${expected_runtime_mask_state}"
   for unit in "${protected_units[@]}"; do allowed_units["$unit"]=true; done
   if [[ "$unprivileged_test_mode" == true ]]; then
@@ -892,7 +962,7 @@ attest_quiescent_runtime() {
       leetplus-blue-green-recovery-watchdog.service|leetplus-blue-green-recovery.timer)
         if [[ -n "${allowed_units[$unit_name]+x}" ]]; then
           :
-        elif [[ "$expected_runtime_mask_state" == exact \
+        elif [[ "$expected_runtime_mask_state" != absent \
           && ( "$unit_name" == leetplus-api-rollback@leetplus-rollback-egress.service \
             || "$unit_name" == leetplus-web-rollback@leetplus-rollback-egress.service ) ]]; then
           # systemd 255 materializes these two inactive aliases from the old
@@ -1015,11 +1085,14 @@ attest_quiescent_runtime() {
     fi
     case "${expected_runtime_mask_state}:${load_state}" in
       absent:loaded|absent:not-found) ;;
-      exact:masked)
+      exact:masked|pre-fence:masked)
         marker="/run/systemd/system/${unit}"
         [[ -L "$marker" && "$(readlink -- "$marker")" == /dev/null \
           && "$(stat -c '%U:%G:%a:%h' -- "$marker")" == 'root:root:777:1' ]] \
           || die "masked protected unit lacks its exact installer-owned runtime mask: ${unit}"
+        ;;
+      pre-fence:loaded)
+        attest_pre_fence_loaded_transaction "$unit"
         ;;
       exact:loaded)
         case "$unit" in
@@ -1417,6 +1490,40 @@ attest_persistent_fences() {
   done
 }
 
+attest_uncommitted_persistent_fences() {
+  local unit destination directory entry_inventory expected_owner expected_group expected_identity expected_mode=644
+  expected_owner='root'
+  expected_group='root'
+  if [[ "$unprivileged_test_mode" == true ]]; then
+    expected_owner="$(id -un)"
+    expected_group="$(id -gn)"
+    [[ "${TEST_INSTALL_MSYS_MODE_COMPAT:-false}" != true ]] || expected_mode=640
+  fi
+  expected_identity="${expected_owner}:${expected_group}:${expected_mode}:1"
+  for unit in "${protected_units[@]}"; do
+    destination="$(fence_destination_for_unit "$unit")"
+    directory="$(dirname -- "$destination")"
+    if [[ ! -e "$directory" && ! -L "$directory" ]]; then
+      continue
+    fi
+    [[ -d "$directory" && ! -L "$directory" ]] \
+      || die "uncommitted persistent-fence directory is unsafe: ${directory}"
+    attest_persistent_fence_directory "$directory"
+    entry_inventory="$(find -P "$directory" -mindepth 1 -maxdepth 1 -printf '%f|%y\n')" \
+      || die "uncommitted persistent-fence inventory failed: ${unit}"
+    [[ ${#entry_inventory} -le 4096 && "$entry_inventory" != *$'\r'* ]] \
+      || die "uncommitted persistent-fence inventory is noncanonical: ${unit}"
+    if [[ -n "$entry_inventory" ]]; then
+      [[ "$entry_inventory" == '90-leetplus-control-install-fence.conf|f' ]] \
+        || die "uncommitted persistent-fence directory contains an unexpected entry: ${unit}"
+      [[ -f "$destination" && ! -L "$destination" \
+        && "$(stat -c '%U:%G:%a:%h' -- "$destination")" == "$expected_identity" \
+        && "$(sha256sum "$destination" | awk '{ print $1 }')" == "$fence_sha" ]] \
+        || die "uncommitted persistent install fence is drifted: ${unit}"
+    fi
+  done
+}
+
 remove_persistent_fences() {
   local unit destination directory expected_owner expected_group expected_identity expected_mode=644
   expected_owner='root'
@@ -1673,11 +1780,18 @@ if [[ -e "$control_preparing" || -L "$control_preparing" ]]; then
     && "${preparing_lines[1]}" == "CONTROL_MANIFEST_SHA256=${COMPATIBLE_PREPARING_CONTROL_MANIFEST_SHA256}" \
     && "${preparing_lines[2]}" == "INSTALL_PLAN_SHA256=${COMPATIBLE_PREPARING_INSTALL_PLAN_SHA256}" ]]; then
     preparing_generation=compatible-predecessor
+  elif [[ "$unprivileged_test_mode" == false \
+    && "${preparing_lines[1]}" == "CONTROL_MANIFEST_SHA256=${COMPATIBLE_LOADED_PREPARING_CONTROL_MANIFEST_SHA256}" \
+    && "${preparing_lines[2]}" == "INSTALL_PLAN_SHA256=${COMPATIBLE_LOADED_PREPARING_INSTALL_PLAN_SHA256}" ]]; then
+    preparing_generation=compatible-loaded-predecessor
   else
     die 'control-install preparation schema/digests are not exact'
   fi
   original_drift_serialized="${preparing_lines[3]#ORIGINAL_DRIFT_DESTINATIONS=}"
   preparing_record_sha="$(sha256sum "$control_preparing" | awk '{ print $1 }')"
+  [[ "$preparing_generation" != compatible-loaded-predecessor \
+    || "$preparing_record_sha" == "$COMPATIBLE_LOADED_PREPARING_RECORD_SHA256" ]] \
+    || die 'compatible loaded predecessor preparation digest is not exact'
 fi
 
 if [[ -e "$control_fence" || -L "$control_fence" ]]; then
@@ -1758,9 +1872,9 @@ if [[ -n "$original_drift_serialized" ]]; then
     [[ -n "${original_drift_set[$path]+x}" ]] \
       || die "new destination drift appeared while a control-install boot fence is outstanding: ${path}"
   done
-  if [[ "$preparing_generation" == compatible-predecessor && -z "$intent_phase" ]]; then
+  if [[ -z "$intent_phase" ]]; then
     [[ "$(serialize_drift_destinations)" == "$original_drift_serialized" ]] \
-      || die 'compatible predecessor preparation has destination mutation without an install intent'
+      || die 'control-install preparation has destination mutation without an install intent'
   fi
 fi
 
@@ -1810,21 +1924,23 @@ if [[ "$intent_phase" != POST_ATTESTED ]]; then
     [[ -n "$preparing_record_sha" ]] \
       || die 'exact runtime masks exist without a control-install preparation record'
     attest_runtime_masks
-    attest_quiescent_runtime exact
   else
     attest_quiescent_runtime absent
     apply_runtime_masks
   fi
   attest_runtime_masks
-  attest_quiescent_runtime exact
   if [[ "$fence_needs_publish" == true ]]; then
     # The Condition drop-ins are made durable while their marker is absent.
     # A reboot during this preparatory phase may run only the still-coherent
     # old generation; no install intent or destination mutation exists yet.
+    # systemd 255 may retain inactive units as loaded behind the exact runtime
+    # masks. Admit that shape only from the exact uncommitted preparation, then
+    # commit and activate the durable boot fence before normal loaded-unit trust.
+    attest_uncommitted_persistent_fences
+    attest_quiescent_runtime pre-fence
     apply_persistent_fences
     attest_persistent_fences
     attest_runtime_masks
-    attest_quiescent_runtime exact
     fence_record_content="CONTRACT=${CONTROL_INSTALL_CONTRACT}"$'\n'\
 "CONTROL_MANIFEST_SHA256=${control_manifest_sha}"$'\n'\
 "INSTALL_PLAN_SHA256=${install_plan_sha}"$'\n'\

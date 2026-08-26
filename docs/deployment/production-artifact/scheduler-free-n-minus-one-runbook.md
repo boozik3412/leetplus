@@ -202,7 +202,7 @@ entry, writable ancestor, лишний файл или digest drift блокир
 Bootstrap authority берётся из того же immutable CI artifact, но не является
 частью исполняемого control bundle (это устраняет self-verification). Его
 reviewed SHA-256 для этой версии:
-`03799ce7d6174c5a21d7a380617de9fb5a50e6ee5f65a841279fe9940adfbe0c`.
+`3f4b378b9b164274f6555bc4735ee7aa0321acecac1bd9f4d6c52e19e3126f16`.
 Сначала byte копируется во временный root-owned файл, проверяется уже после
 копирования и только затем атомарно публикуется:
 
@@ -210,7 +210,7 @@ reviewed SHA-256 для этой версии:
 sudo install -o root -g root -m 0500 \
   <immutable-ci-artifact>/leetplus-install-scheduler-free-nminus1-v1 \
   /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new
-echo '03799ce7d6174c5a21d7a380617de9fb5a50e6ee5f65a841279fe9940adfbe0c  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
+echo '3f4b378b9b164274f6555bc4735ee7aa0321acecac1bd9f4d6c52e19e3126f16  /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new' \
   | sudo sha256sum --check --strict
 sudo mv -T /usr/local/sbin/.leetplus-install-scheduler-free-nminus1-v1.new \
   /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1
@@ -232,9 +232,19 @@ sudo /usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1
 Если fail-closed остановка произошла после установки полного набора runtime
 mask, повтор authority в том же boot обязан продолжить только при exact
 `/run/systemd/system/* -> /dev/null`, canonical preparation record и полностью
-quiescent rollback runtime. После reboot тот же record разрешает восстановить
-исчезнувшие runtime mask. Совместимость между control generations ограничена
-прибитой парой manifest/install-plan непосредственно предшествующей admitted
+quiescent rollback runtime. Для уже загруженных, но inactive/dead systemd 255
+юнитов отдельная `PRE_FENCE`-фаза дополнительно требует byte-identical pinned
+PREPARING record, отсутствие fence/intent и destination mutation, пустые
+PID/cgroup/listener boundaries и admitted unit bytes. Только после этих проверок
+installer завершает exact persistent drop-in set, публикует boot-fence marker и
+требует exact `DropInPaths`, `NeedDaemonReload=no` и canonical condition result;
+install intent и destination mutation до этого запрещены. `ConditionResult`
+является результатом последней попытки start, поэтому для только что committed
+current fence допускается его stale `yes` при доказанных marker/drop-in bytes;
+для ранее committed predecessor по-прежнему требуется pinned `no`. После reboot
+тот же record разрешает восстановить исчезнувшие
+runtime mask. Совместимость между control generations ограничена точными
+manifest/install-plan/record SHA-256 непосредственно предшествующей admitted
 generation. Если предшественник уже зафиксировал boot fence и PREPARED intent,
 roll-forward дополнительно требует byte-identical production preparing/fence/
 intent records и их пять pinned SHA-256. Исходная generation identity этих
@@ -244,11 +254,12 @@ stop condition.
 
 На systemd 255 два старых template-dependency alias могут удерживать exact
 предшествующий `leetplus-rollback-egress.service` в `LoadState=loaded`, несмотря
-на canonical runtime mask. Такой cached state принимается только для pinned
-predecessor egress SHA-256 при полном committed fence/intent, восьми exact
-persistent drop-in, `ConditionResult=no`, `NeedDaemonReload=no` и строго
-inactive/dead aliases. Authority заменяет этот byte admitted unit-файлом до
-снятия любого fence; иной digest или effective state остаётся stop condition.
+на canonical runtime mask. До boot-fence commit такой cached state допускается
+только в описанной `PRE_FENCE`-фазе с current admitted unit bytes; после commit —
+только для pinned predecessor egress SHA-256 либо current bytes при полном exact
+persistent drop-in set, описанном выше condition contract, `NeedDaemonReload=no`
+и строго inactive/dead aliases. Authority заменяет predecessor byte admitted unit-файлом
+до снятия любого fence; иной digest или effective state остаётся stop condition.
 
 Прямой запуск `install-legacy-rollback-contour.sh` без authority остаётся
 запрещённым. После provisioning:

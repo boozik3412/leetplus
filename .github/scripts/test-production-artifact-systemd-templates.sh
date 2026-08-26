@@ -264,6 +264,7 @@ for recovery_runtime_unit in "$recovery_unit" "$recovery_watchdog_unit"; do
   grep -F -x 'Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin' "$recovery_runtime_unit" > /dev/null
   grep -F -x 'UnsetEnvironment=BASH_ENV ENV HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM' "$recovery_runtime_unit" > /dev/null
   grep -F -x 'ProtectSystem=strict' "$recovery_runtime_unit" > /dev/null
+  grep -F -x 'PrivateTmp=true' "$recovery_runtime_unit" > /dev/null
   grep -F -x 'ReadWritePaths=/etc/nginx/leetplus /var/lib/leetplus/deploy-receipts' "$recovery_runtime_unit" > /dev/null
 done
 grep -F 'inventory="$(findmnt --task 1 --raw --noheadings --output TARGET)"' \
@@ -286,6 +287,12 @@ assert_cutover_sha_pin AUTHENTICATED_READS_SHA256 "$authenticated_reads"
 grep -F 'trusted_installed_file "$fragment" "$fragment_digest" root 444' "$blue_green_cutover" > /dev/null
 grep -F 'trusted_installed_file "${libexec_root}/preflight-release-slot.sh" "$SLOT_PREFLIGHT_SHA256" root 555' "$blue_green_cutover" > /dev/null
 grep -F 'trusted_installed_file "$probe" "$RELEASE_READINESS_SHA256" root 555' "$blue_green_cutover" > /dev/null
+grep -F 'validation_root="$(mktemp -d /tmp/leetplus-nginx-validation.XXXXXX)"' "$blue_green_cutover" > /dev/null
+grep -F 'temporary="$(mktemp /tmp/leetplus-cutover-record-inventory.XXXXXX)"' "$blue_green_cutover" > /dev/null
+if grep -F '/run/leetplus-' "$blue_green_cutover" > /dev/null; then
+  printf 'blue-green recovery uses a ProtectSystem-strict read-only /run path\n' >&2
+  exit 1
+fi
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-api@.service\t/etc/systemd/system/leetplus-api@.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-web@.service\t/etc/systemd/system/leetplus-web@.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/preflight-release-slot.sh\t/usr/local/libexec/leetplus/preflight-release-slot.sh\t0555' "$production_control_install_map" > /dev/null

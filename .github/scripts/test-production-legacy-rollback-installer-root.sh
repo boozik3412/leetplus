@@ -272,8 +272,10 @@ property_value() {
     ExecStart)
       if [[ "$unit" == leetplus-api-* ]]; then
         printf '{ path=/usr/bin/node ; argv[]=/usr/bin/node /usr/local/libexec/leetplus/legacy-rollback-auth-edge.mjs --release-sha %s ; ignore_errors=no ; }\n' "$legacy_sha"
+      elif [[ -e /run/fixture-exec-start-unsafe ]]; then
+        printf '{ path=/usr/bin/node ; argv[]=/usr/bin/node /srv/leetplus/rollback-releases/%s/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3399 ; ignore_errors=no ; }\n' "$legacy_sha"
       else
-        printf '{ path=/usr/bin/node ; argv[]=/usr/bin/node /srv/leetplus/rollback-releases/%s/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3300 ; ignore_errors=no ; }\n' "$legacy_sha"
+        printf '{ path=/usr/bin/node ; argv[]=/usr/bin/node /srv/leetplus/rollback-releases/%s/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port ${WEB_PORT} ; ignore_errors=no ; }\n' "$legacy_sha"
       fi
       ;;
     UnsetEnvironment|RestrictAddressFamilies|SocketBindDeny)
@@ -614,6 +616,18 @@ grep -F 'effective rollback SocketBindAllow is not exact: leetplus-api-rollback@
   == 'PHASE=POST_ATTESTED' ]] \
   || die 'effective socket-bind negative did not retain the exact post-attested recovery intent'
 rm -f /run/fixture-socket-bind-unsafe
+touch /run/fixture-exec-start-unsafe
+if "$AUTHORITY_PATH" > /run/fixture-post-attested-exec-start.out 2>&1; then
+  die 'installer accepted a non-admitted effective Web ExecStart argv'
+fi
+grep -F 'effective rollback ExecStart is not exact: leetplus-web-rollback@7de04ff4ccc814494810730be3fa6bf661097b07.service' \
+  /run/fixture-post-attested-exec-start.out >/dev/null
+[[ "$(sha256sum /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent | awk '{ print $1 }')" \
+  == 73f199b02fd9202bc69853151dc2109f69cfa2fef8ab2e97abd659b031291c8a \
+  && "$(tail -n 1 /var/lib/leetplus/deploy-receipts/scheduler-free-control-install.intent)" \
+  == 'PHASE=POST_ATTESTED' ]] \
+  || die 'effective ExecStart negative did not retain the exact post-attested recovery intent'
+rm -f /run/fixture-exec-start-unsafe
 # The admitted production-control installer republishes this shared fixed
 # authority as root:root 0500. Reproduce that exact overlap after POST_ATTESTED
 # and prove recovery does not misclassify the control generation as drifted.

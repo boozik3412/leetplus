@@ -944,8 +944,7 @@ export class AuthService {
       tenantOnboardingStatus: user.tenant.onboardingStatus,
       tenantTrialStartsAt: user.tenant.trialStartsAt,
       tenantTrialEndsAt: user.tenant.trialEndsAt,
-      tenantEntitlementProfileRevision:
-        user.tenant.entitlementProfileRevision,
+      tenantEntitlementProfileRevision: user.tenant.entitlementProfileRevision,
       accessScope: accessScope.mode,
       allowedStoreIds: [...accessScope.storeIds],
     };

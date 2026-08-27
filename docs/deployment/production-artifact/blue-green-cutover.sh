@@ -244,6 +244,15 @@ systemd_localhost_ip_boundary_is_exact() {
     && "$(printf '%s' "$ip_allow" | normalized_word_set)" == '127.0.0.0/8 ::1/128' ]]
 }
 
+systemd_unrestricted_network_interfaces_is_exact() {
+  local normalized
+  normalized="$(printf '%s' "$1" | normalized_word_set)" || return 1
+  # systemd 255 serializes an unrestricted RestrictNetworkInterfaces= reset as
+  # a bare complement marker (`~`). Older releases returned an empty value.
+  # Both are the same unrestricted policy; any named interface remains drift.
+  [[ -z "$normalized" || "$normalized" == '~' ]]
+}
+
 runtime_secret_group_reverse_sets_are_exact() {
   local passwd_inventory="$1" group_inventory="$2"
   local shared_line api_line web_line shared_gid api_gid web_gid
@@ -482,9 +491,9 @@ attest_candidate_unit() {
     return
   fi
   if [[ "$runtime_kind" == api ]]; then
-    [[ -z "$(printf '%s' "$network_interfaces" | normalized_word_set)" \
-      && -z "$(printf '%s' "$ip_deny" | normalized_word_set)" \
-      && -z "$(printf '%s' "$ip_allow" | normalized_word_set)" ]] \
+    systemd_unrestricted_network_interfaces_is_exact "$network_interfaces" \
+      && [[ -z "$(printf '%s' "$ip_deny" | normalized_word_set)" \
+        && -z "$(printf '%s' "$ip_allow" | normalized_word_set)" ]] \
       || { candidate_unit_failure "${unit} reviewed integration egress profile"; return; }
   else
     [[ "$(printf '%s' "$network_interfaces" | normalized_word_set)" == lo ]] \

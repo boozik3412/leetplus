@@ -340,28 +340,15 @@ case "${1:-}" in
     ;;
   show)
     property=''
-    property_count=0
-    declare -A requested_properties=()
     show_all=false
     unit="${!#}"
     for argument in "$@"; do
       case "$argument" in
         --all) show_all=true ;;
-        --property=*)
-          property="${argument#--property=}"
-          property_count=$((property_count + 1))
-          requested_properties["$property"]=true
-          ;;
+        --property=*) property="${argument#--property=}" ;;
       esac
     done
-    if [[ "${TEST_UNIT_ATTESTATION:-false}" != true \
-      && ( "$property_count" == 0 || "$property_count" == 6 ) ]]; then
-      if [[ "$property_count" == 6 ]]; then
-        for required_property in \
-          ActiveState SubState MainPID ControlGroup UnitFileState NeedDaemonReload; do
-          [[ "${requested_properties[$required_property]:-false}" == true ]] || exit 76
-        done
-      fi
+    if [[ -z "$property" && "${TEST_UNIT_ATTESTATION:-false}" != true ]]; then
       cache_state="${TEST_WEB_STATE:-inactive}"
       case "$cache_state" in
         active) cache_sub_state=running; cache_main_pid=123 ;;

@@ -29,12 +29,7 @@ mkdir -p "$TEST_ROOT/bin"
 cat > "$TEST_ROOT/bin/systemctl" <<'SYSTEMCTL'
 #!/usr/bin/env bash
 set -euo pipefail
-expected=(
-  show --no-pager
-  --property=ActiveState --property=SubState --property=MainPID
-  --property=ControlGroup --property=UnitFileState --property=NeedDaemonReload
-  leetplus-web@blue.service
-)
+expected=(show --all --no-pager leetplus-web@blue.service)
 actual=("$@")
 [[ "$#" == "${#expected[@]}" ]] || exit 64
 for index in "${!expected[@]}"; do

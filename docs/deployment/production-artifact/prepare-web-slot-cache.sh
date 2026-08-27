@@ -285,10 +285,7 @@ unit_property() {
 attest_slot_stopped() {
   local phase="$1" snapshot active_state sub_state main_pid control_group unit_file_state need_reload
   local expected_control_group cgroup_path pid_inventory status_file status_result
-  snapshot="$(timeout --foreground --kill-after=2s 10s systemctl show --no-pager \
-    --property=ActiveState --property=SubState --property=MainPID \
-    --property=ControlGroup --property=UnitFileState --property=NeedDaemonReload \
-    "$unit")" \
+  snapshot="$(timeout --foreground --kill-after=2s 10s systemctl show --all --no-pager "$unit")" \
     || die "cannot prove Web slot unit state (${phase})"
   [[ -n "$snapshot" && ${#snapshot} -le 262144 && "$snapshot" != *$'\r'* ]] \
     || die "Web slot unit snapshot is noncanonical (${phase})"

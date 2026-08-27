@@ -4,6 +4,19 @@ export const staffShiftWorkspaceHref = "/staff/shift-workspace";
 export const staffTasksWorkspaceHref = "/staff/tasks?view=my&status=all";
 export const platformAdministrationHref = "/administration";
 
+export function shouldShowTenantOnboardingNotice(
+  user: Pick<
+    AuthUser,
+    "role" | "isPlatformAdmin" | "tenantOnboardingStatus"
+  >,
+) {
+  return (
+    !user.isPlatformAdmin &&
+    user.role === "OWNER" &&
+    user.tenantOnboardingStatus === "ONBOARDING"
+  );
+}
+
 export function isShiftWorkspaceRole(
   role: AuthUser["role"] | null | undefined,
 ) {

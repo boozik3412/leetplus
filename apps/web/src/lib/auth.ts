@@ -30,6 +30,18 @@ export type AuthUser = {
   platformTenantContext?: boolean;
   tenantId: string;
   tenantSlug: string;
+  tenantStatus?: "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+  tenantCustomerStage?: "INTERNAL" | "PILOT" | "BETA" | "LIVE";
+  tenantOnboardingStatus?:
+    | "PROVISIONING"
+    | "OWNER_INVITED"
+    | "ONBOARDING"
+    | "READY"
+    | "ACTIVE"
+    | "OFFBOARDING";
+  tenantTrialStartsAt?: string | null;
+  tenantTrialEndsAt?: string | null;
+  tenantEntitlementProfileRevision?: number;
   accessScope: "NETWORK" | "STORES";
   allowedStoreIds: string[];
 };

@@ -79,6 +79,19 @@ export function SettingsWorkspace() {
     };
   }, []);
 
+  useEffect(() => {
+    if (state.isLoading || !window.location.hash) {
+      return;
+    }
+
+    const targetId = window.location.hash.slice(1);
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({ block: "start" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [state.isLoading]);
+
   if (state.isLoading) {
     return (
       <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">

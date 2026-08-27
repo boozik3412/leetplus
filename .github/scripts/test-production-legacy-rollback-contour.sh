@@ -1404,7 +1404,15 @@ case "$command_name" in
           printf '0\n'
         fi
         ;;
-      ControlPID|ExecMainPID) printf '0\n' ;;
+      ControlPID) printf '0\n' ;;
+      ExecMainPID)
+        if [[ "${TEST_ONESHOT_HISTORICAL_EXEC_MAIN_PID:-false}" == true \
+          && "$unit" == 'leetplus-guest-game-bot-consumer.service' ]]; then
+          printf '5151\n'
+        else
+          printf '0\n'
+        fi
+        ;;
       ControlGroup)
         case "$unit" in
           leetplus-api.service) printf '/legacy-api\n' ;;
@@ -1761,6 +1769,32 @@ if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$success_root/commands.log" \
   printf 'durably fenced legacy unit was manually startable\n' >&2
   exit 1
 fi
+
+# systemd 255 retains ExecMainPID for an inactive completed oneshot. The
+# historical value is safe only when there is no matching live /proc identity.
+historical_exec_root="${TEST_ROOT}/activation-historical-exec-main-pid"
+reset_fixture "$historical_exec_root"
+run_activation "$historical_exec_root" env TEST_ONESHOT_HISTORICAL_EXEC_MAIN_PID=true \
+  > "$historical_exec_root/activation.out"
+test -f "$historical_exec_root/state/activation.receipt"
+if grep -F '|5151|' "$historical_exec_root/state/legacy-processes.snapshot" >/dev/null; then
+  printf 'activation recorded a historical oneshot ExecMainPID as live\n' >&2
+  exit 1
+fi
+
+live_exec_root="${TEST_ROOT}/activation-live-exec-main-pid"
+reset_fixture "$live_exec_root"
+mkdir -p "$live_exec_root/proc/5151"
+printf '5151 (oneshot) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 777\n' \
+  > "$live_exec_root/proc/5151/stat"
+if run_activation "$live_exec_root" env TEST_ONESHOT_HISTORICAL_EXEC_MAIN_PID=true \
+  > "$live_exec_root/activation.out" 2>&1; then
+  printf 'activation accepted a live oneshot ExecMainPID\n' >&2
+  exit 1
+fi
+grep -F 'legacy unit retains a systemd PID: unit=leetplus-guest-game-bot-consumer.service pid=5151' \
+  "$live_exec_root/activation.out" >/dev/null
+test ! -e "$live_exec_root/state/activation.receipt"
 
 # An unknown installed LeetPlus unit blocks before any route or stop effect.
 unknown_root="${TEST_ROOT}/activation-unknown"

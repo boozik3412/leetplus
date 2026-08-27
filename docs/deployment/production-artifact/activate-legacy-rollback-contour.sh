@@ -470,7 +470,14 @@ capture_unit_processes() {
     for property in MainPID ControlPID ExecMainPID; do
       pid="$(systemctl_bounded show --property="$property" --value "$unit" 2>/dev/null || true)"
       [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
-      start_ticks="$(process_start_ticks "$pid")" || die "cannot capture stable PID identity for ${unit}"
+      if ! start_ticks="$(process_start_ticks "$pid")"; then
+        # systemd retains ExecMainPID after a completed oneshot on supported
+        # production versions. It is historical only when the PID has no live
+        # /proc identity; an existing but unreadable identity remains a hard
+        # failure so the snapshot cannot silently omit a process.
+        [[ ! -e "${proc_root}/${pid}" ]] && continue
+        die "cannot capture stable PID identity for ${unit}"
+      fi
       printf '%s|%s|%s\n' "$unit" "$pid" "$start_ticks" >> "$temporary"
     done
     control_group="$(systemctl_bounded show --property=ControlGroup --value "$unit" 2>/dev/null || true)"

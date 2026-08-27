@@ -402,6 +402,12 @@ describe('AuthService', () => {
       id: 'user-1',
       email: 'owner@club-a.leetplus.ru',
       tenantSlug: 'club-a',
+      tenantStatus: TenantLifecycleStatus.ACTIVE,
+      tenantCustomerStage: TenantCustomerStage.INTERNAL,
+      tenantOnboardingStatus: TenantOnboardingStatus.ACTIVE,
+      tenantTrialStartsAt: null,
+      tenantTrialEndsAt: null,
+      tenantEntitlementProfileRevision: 0,
     });
   });
 
@@ -598,6 +604,15 @@ describe('AuthService', () => {
       ({ where }: { where: { id: string } }) => ({
         ...createUserWithTenant(),
         id: where.id,
+        tenant: {
+          ...createUserWithTenant().tenant,
+          customerStage: TenantCustomerStage.PILOT,
+          onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+          trialStartsAt: ownerInvite.tenant.trialStartsAt,
+          trialEndsAt: ownerInvite.tenant.trialEndsAt,
+          entitlementProfileRevision: 1,
+          moduleEntitlements: completeEntitlements(),
+        },
       }),
     );
 
@@ -623,6 +638,9 @@ describe('AuthService', () => {
       user: {
         id: generatedUserId,
         role: UserRole.OWNER,
+        tenantCustomerStage: TenantCustomerStage.PILOT,
+        tenantOnboardingStatus: TenantOnboardingStatus.ONBOARDING,
+        tenantEntitlementProfileRevision: 1,
       },
     });
     expect(userCreate).toHaveBeenCalledTimes(1);

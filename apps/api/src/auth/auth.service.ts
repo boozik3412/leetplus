@@ -940,6 +940,12 @@ export class AuthService {
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,
       tenantStatus: user.tenant.status,
+      tenantCustomerStage: user.tenant.customerStage,
+      tenantOnboardingStatus: user.tenant.onboardingStatus,
+      tenantTrialStartsAt: user.tenant.trialStartsAt,
+      tenantTrialEndsAt: user.tenant.trialEndsAt,
+      tenantEntitlementProfileRevision:
+        user.tenant.entitlementProfileRevision,
       accessScope: accessScope.mode,
       allowedStoreIds: [...accessScope.storeIds],
     };

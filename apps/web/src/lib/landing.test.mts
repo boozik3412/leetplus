@@ -4,6 +4,7 @@ import {
   getAuthenticatedDestination,
   getDefaultLandingPath,
   platformAdministrationHref,
+  shouldShowTenantOnboardingNotice,
   staffShiftWorkspaceHref,
 } from "./landing.ts";
 
@@ -93,4 +94,35 @@ test("keeps regular tenant users on the dashboard", () => {
 
 test("preserves a sanitized return path for a regular tenant user", () => {
   assert.equal(getAuthenticatedDestination(user(), "/reports"), "/reports");
+});
+
+test("shows guided setup only to a newly registered tenant owner", () => {
+  assert.equal(
+    shouldShowTenantOnboardingNotice({
+      role: "OWNER",
+      isPlatformAdmin: false,
+      tenantOnboardingStatus: "ONBOARDING",
+    }),
+    true,
+  );
+
+  for (const candidate of [
+    {
+      role: "OWNER" as const,
+      isPlatformAdmin: false,
+      tenantOnboardingStatus: "ACTIVE" as const,
+    },
+    {
+      role: "MANAGER" as const,
+      isPlatformAdmin: false,
+      tenantOnboardingStatus: "ONBOARDING" as const,
+    },
+    {
+      role: "OWNER" as const,
+      isPlatformAdmin: true,
+      tenantOnboardingStatus: "ONBOARDING" as const,
+    },
+  ]) {
+    assert.equal(shouldShowTenantOnboardingNotice(candidate), false);
+  }
 });

@@ -4,8 +4,13 @@ import { DashboardFilters } from "@/components/dashboard-filters";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
 import { DashboardRevenuePanel } from "@/components/dashboard-revenue-panel";
 import { RevenueSnapshotGate } from "@/components/revenue-snapshot-gate";
+import { TenantOnboardingNotice } from "@/components/tenant-onboarding-notice";
 import { requireTenantWorkspaceUser } from "@/lib/auth";
-import { isShiftWorkspaceRole, staffShiftWorkspaceHref } from "@/lib/landing";
+import {
+  isShiftWorkspaceRole,
+  shouldShowTenantOnboardingNotice,
+  staffShiftWorkspaceHref,
+} from "@/lib/landing";
 import {
   getGuestCrmTaskReport,
   getGuestsSummary,
@@ -505,6 +510,10 @@ export default async function DashboardPage({
   return (
     <main className="px-4 py-5 text-zinc-950 sm:px-6 sm:py-8 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
+        {shouldShowTenantOnboardingNotice(user) ? (
+          <TenantOnboardingNotice />
+        ) : null}
+
         <section className="overflow-visible rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <div className="grid min-w-0 gap-5 p-4 min-[1250px]:grid-cols-[1.1fr_0.9fr] sm:p-5 lg:p-8">
             <div className="min-w-0">

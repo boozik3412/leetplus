@@ -75,8 +75,14 @@ export function LangameSettingsForm({
   }
 
   return (
-    <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,420px)_1fr]">
-      <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <section
+      id="langame"
+      className="mt-6 grid scroll-mt-6 gap-6 lg:grid-cols-[minmax(0,420px)_1fr]"
+    >
+      <div
+        id="network-profile"
+        className="scroll-mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+      >
         <h2 className="text-base font-semibold">Langame API</h2>
         <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
           Ключ сохраняется в зашифрованном виде и применяется только внутри

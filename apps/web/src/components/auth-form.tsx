@@ -169,6 +169,7 @@ export function AuthForm({
     form.password.length > 0 &&
     form.confirmPassword.length > 0 &&
     form.password !== form.confirmPassword;
+  const isOwnerInvite = invite?.role === "OWNER";
 
   useEffect(() => {
     if (isRegister) {
@@ -377,6 +378,13 @@ export function AuthForm({
                   ? "вся сеть"
                   : invite.stores.map((store) => store.name).join(", ")}
               </p>
+              {isOwnerInvite ? (
+                <p className="mt-2 rounded-md bg-white/70 px-3 py-2 text-emerald-950">
+                  После регистрации откроется короткий чек-лист: замените
+                  временные названия сети и клуба, проверьте часовой пояс и
+                  подключите Langame API.
+                </p>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -386,7 +394,9 @@ export function AuthForm({
         <>
           <label className="block">
             <span className="text-sm font-medium text-zinc-700">
-              {isInviteRegister ? "Имя сотрудника" : "Имя владельца"}
+              {isInviteRegister && !isOwnerInvite
+                ? "Имя сотрудника"
+                : "Имя владельца"}
             </span>
             <input
               name="name"

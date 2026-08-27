@@ -180,7 +180,7 @@ for command_name in find id node realpath sha256sum stat tr; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is unavailable: $command_name"
 done
 
-if [[ "$unprivileged_test_mode" == false ]]; then
+if [[ "$unprivileged_test_mode" == false && "$web_runtime" == true ]]; then
   # This process is an ExecStartPre of the candidate unit, so the connection
   # attempt runs in that unit's live cgroup and effective IP firewall. Target
   # the host's own non-loopback IPv4 on the closed discard port: a working
@@ -217,7 +217,12 @@ const accepted = await new Promise((resolve) => {
 });
 if (!accepted) process.exit(62);
 NETWORK_DENY_SELF_TEST
-  printf 'RELEASE_SLOT_LIVE_KERNEL_NO_EGRESS=true\n'
+  printf 'RELEASE_SLOT_NETWORK_PROFILE=localhost-only\n'
+elif [[ "$unprivileged_test_mode" == false && "$api_runtime" == true ]]; then
+  # The API is the reviewed integration boundary. Its public listener remains
+  # loopback-only, while outbound TCP/DNS is required for Langame and the other
+  # configured providers.
+  printf 'RELEASE_SLOT_NETWORK_PROFILE=external-integrations\n'
 fi
 
 [[ "${EXPECTED_DATABASE_MIGRATION:-}" =~ ^[0-9]{14}_[a-z0-9_]+$ ]] \

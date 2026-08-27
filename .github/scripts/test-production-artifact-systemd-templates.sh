@@ -234,14 +234,11 @@ for slot_unit in "$slot_api_unit" "$slot_web_unit"; do
   grep -F -x 'RestrictSUIDSGID=true' "$slot_unit" > /dev/null
   grep -F -x 'RemoveIPC=true' "$slot_unit" > /dev/null
   grep -F -x 'SystemCallArchitectures=native' "$slot_unit" > /dev/null
-  grep -F -x 'RestrictNetworkInterfaces=lo' "$slot_unit" > /dev/null
   grep -F -x 'RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK' "$slot_unit" > /dev/null
   if grep -F 'AF_UNIX' "$slot_unit" > /dev/null; then
     printf 'candidate runtime unit retains AF_UNIX outside the inet egress fence\n' >&2
     exit 1
   fi
-  grep -F -x 'IPAddressDeny=any' "$slot_unit" > /dev/null
-  grep -F -x 'IPAddressAllow=localhost' "$slot_unit" > /dev/null
   grep -F -x 'Before=nginx.service' "$slot_unit" > /dev/null
   grep -F -x 'WantedBy=multi-user.target' "$slot_unit" > /dev/null
   if grep -E '/home/admin/leetplus|ExecStart=.*/srv/leetplus/current|Restart=always' "$slot_unit" > /dev/null; then
@@ -250,11 +247,19 @@ for slot_unit in "$slot_api_unit" "$slot_web_unit"; do
   fi
 done
 
+grep -F -x 'RestrictNetworkInterfaces=' "$slot_api_unit" > /dev/null
+grep -F -x 'IPAddressDeny=' "$slot_api_unit" > /dev/null
+grep -F -x 'IPAddressAllow=' "$slot_api_unit" > /dev/null
+grep -F -x 'RestrictNetworkInterfaces=lo' "$slot_web_unit" > /dev/null
+grep -F -x 'IPAddressDeny=any' "$slot_web_unit" > /dev/null
+grep -F -x 'IPAddressAllow=localhost' "$slot_web_unit" > /dev/null
+
 grep -F "entry.family === \"IPv4\" && entry.internal === false" "$slot_preflight" > /dev/null
 grep -F 'error?.code === "EACCES" || error?.code === "EPERM"' "$slot_preflight" > /dev/null
 grep -F 'socket.setTimeout(1500, () => finish(true))' "$slot_preflight" > /dev/null
 grep -F "socket.connect({ family: 4, host: target, port: 1 })" "$slot_preflight" > /dev/null
-grep -F "RELEASE_SLOT_LIVE_KERNEL_NO_EGRESS=true" "$slot_preflight" > /dev/null
+grep -F "RELEASE_SLOT_NETWORK_PROFILE=localhost-only" "$slot_preflight" > /dev/null
+grep -F "RELEASE_SLOT_NETWORK_PROFILE=external-integrations" "$slot_preflight" > /dev/null
 
 if command -v systemd-analyze >/dev/null 2>&1; then
   verification_root="$(mktemp -d)"

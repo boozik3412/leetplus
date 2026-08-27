@@ -26,11 +26,15 @@ docs/deployment/production-artifact/stage-release-artifact.sh
 docs/deployment/production-artifact/systemd/blue.env.example
 docs/deployment/production-artifact/systemd/canary-safe.env.example
 docs/deployment/production-artifact/systemd/green.env.example
+docs/deployment/production-artifact/systemd/identity-mail-smtp-egress.env.example
+docs/deployment/production-artifact/systemd/identity-mail-worker.env.example
 docs/deployment/production-artifact/systemd/leetplus-api-rollback@.service
 docs/deployment/production-artifact/systemd/leetplus-api@.service
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery-watchdog.service
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.service
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.timer
+docs/deployment/production-artifact/systemd/leetplus-identity-mail-smtp-egress@.service
+docs/deployment/production-artifact/systemd/leetplus-identity-mail-worker@.service
 docs/deployment/production-artifact/systemd/leetplus-release-hydrate@.service
 docs/deployment/production-artifact/systemd/leetplus-rollback-egress.service
 docs/deployment/production-artifact/systemd/leetplus-web-rollback@.service

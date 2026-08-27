@@ -80,7 +80,11 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/systemd/blue.env.example`,
   `${INNER_ROOT}/systemd/canary-safe.env.example`,
   `${INNER_ROOT}/systemd/green.env.example`,
+  `${INNER_ROOT}/systemd/identity-mail-smtp-egress.env.example`,
+  `${INNER_ROOT}/systemd/identity-mail-worker.env.example`,
   `${INNER_ROOT}/systemd/leetplus-api@.service`,
+  `${INNER_ROOT}/systemd/leetplus-identity-mail-smtp-egress@.service`,
+  `${INNER_ROOT}/systemd/leetplus-identity-mail-worker@.service`,
   `${INNER_ROOT}/systemd/leetplus-release-hydrate@.service`,
   `${INNER_ROOT}/systemd/leetplus-web@.service`,
   `${INNER_ROOT}/systemd/legacy-database-login-fence-authority.sql.example`,
@@ -558,10 +562,12 @@ function assertInstallAuthorityContract(root) {
     priorLine = line;
     destinations.add(destination);
   }
-  if (lines.length !== 46) {
+  if (lines.length !== 48) {
     fail("production control install map does not have the exact reviewed entry count");
   }
   for (const requiredDestination of [
+    "/etc/systemd/system/leetplus-identity-mail-smtp-egress@.service",
+    "/etc/systemd/system/leetplus-identity-mail-worker@.service",
     "/etc/systemd/system/leetplus-release-hydrate@.service",
     "/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/CONTROL_BUNDLE_SHA256SUMS",
     "/usr/local/libexec/leetplus/stage-release-artifact.sh",

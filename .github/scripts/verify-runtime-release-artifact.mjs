@@ -34,6 +34,8 @@ const EXPECTED_OPERATIONAL_SCRIPTS = [
   "packages/database/scripts/staff-attachment-reconciliation.cli.mjs",
   "packages/database/scripts/staff-attachment-reconciliation.mjs",
   "packages/database/scripts/staff-task-integrity-migration-state.mjs",
+  "packages/database/scripts/telegram-update-ledger-runtime-acl-reconciliation.cli.mjs",
+  "packages/database/scripts/telegram-update-ledger-runtime-acl-reconciliation.mjs",
 ];
 
 const MANIFEST_NAME = "SHA256SUMS";
@@ -413,10 +415,10 @@ function assertProvenance(root, expectedReleaseSha, migrationIdentity) {
     founderPilotOperationalScriptCount: 12,
     founderPilotOperationalScriptsIncluded: true,
     nodeVersion: EXPECTED_NODE_VERSION,
-    operationalScriptCount: 27,
+    operationalScriptCount: 29,
     pnpmVersion: EXPECTED_PNPM_VERSION,
     releaseSha: expectedReleaseSha,
-    runtimeEnrollmentOperationalScriptCount: 6,
+    runtimeEnrollmentOperationalScriptCount: 8,
     runtimeEnrollmentOperationalScriptsIncluded: true,
     runtimePackageManifestsIncluded: true,
     staffAttachmentReconciliationScriptCount: 3,

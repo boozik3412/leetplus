@@ -1,0 +1,49 @@
+[Unit]
+Description=LeetPlus identity-mail fixed SMTP egress broker for slot %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Slice=system.slice
+DynamicUser=yes
+User=leetplus-identity-mail-egress
+SupplementaryGroups=leetplus-runtime
+WorkingDirectory=/srv/leetplus/slots/%i
+EnvironmentFile=/etc/leetplus/identity-mail-smtp-egress-%i.env
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+UnsetEnvironment=BASH_ENV ENV HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM
+ExecStart=/usr/bin/node /srv/leetplus/slots/%i/apps/api/dist/identity-mail-worker/identity-mail-smtp-egress-broker.cli.js
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK
+ReadOnlyPaths=/srv/leetplus/releases /srv/leetplus/slots
+InaccessiblePaths=/etc/leetplus
+LogsDirectory=leetplus/identity-mail-egress-%i
+LogsDirectoryMode=0750
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

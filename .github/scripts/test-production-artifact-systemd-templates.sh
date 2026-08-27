@@ -20,6 +20,10 @@ hydration_tmpfiles="${TEMPLATE_ROOT}/tmpfiles.d/leetplus-release.conf"
 release_environment="${TEMPLATE_ROOT}/release.env.example"
 slot_api_unit="${TEMPLATE_ROOT}/leetplus-api@.service"
 slot_web_unit="${TEMPLATE_ROOT}/leetplus-web@.service"
+identity_mail_egress_unit="${TEMPLATE_ROOT}/leetplus-identity-mail-smtp-egress@.service"
+identity_mail_worker_unit="${TEMPLATE_ROOT}/leetplus-identity-mail-worker@.service"
+identity_mail_egress_environment="${TEMPLATE_ROOT}/identity-mail-smtp-egress.env.example"
+identity_mail_worker_environment="${TEMPLATE_ROOT}/identity-mail-worker.env.example"
 safe_overlay="${TEMPLATE_ROOT}/canary-safe.env.example"
 slot_preflight="${REPOSITORY_ROOT}/docs/deployment/production-artifact/preflight-release-slot.sh"
 cache_preparer="${REPOSITORY_ROOT}/docs/deployment/production-artifact/prepare-web-slot-cache.sh"
@@ -69,9 +73,46 @@ done
 
 for required_file in \
   "$api_unit" "$web_unit" "$migration_unit" "$hydration_unit" "$release_environment" \
-  "$slot_api_unit" "$slot_web_unit" "$safe_overlay" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
+  "$slot_api_unit" "$slot_web_unit" "$identity_mail_egress_unit" "$identity_mail_worker_unit" "$identity_mail_egress_environment" "$identity_mail_worker_environment" "$safe_overlay" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
   test -f "$required_file"
 done
+
+for identity_mail_unit in "$identity_mail_egress_unit" "$identity_mail_worker_unit"; do
+  grep -F -x 'DynamicUser=yes' "$identity_mail_unit" > /dev/null
+  grep -F -x 'SupplementaryGroups=leetplus-runtime' "$identity_mail_unit" > /dev/null
+  grep -F -x 'WorkingDirectory=/srv/leetplus/slots/%i' "$identity_mail_unit" > /dev/null
+  grep -F -x 'EnvironmentFile=/etc/leetplus/identity-mail-smtp-egress-%i.env' "$identity_mail_unit" > /dev/null
+  grep -F -x 'NoNewPrivileges=true' "$identity_mail_unit" > /dev/null
+  grep -F -x 'CapabilityBoundingSet=' "$identity_mail_unit" > /dev/null
+  grep -F -x 'AmbientCapabilities=' "$identity_mail_unit" > /dev/null
+  grep -F -x 'ProtectSystem=strict' "$identity_mail_unit" > /dev/null
+  grep -F -x 'ProtectProc=invisible' "$identity_mail_unit" > /dev/null
+  grep -F -x 'RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK' "$identity_mail_unit" > /dev/null
+  grep -F -x 'ReadOnlyPaths=/srv/leetplus/releases /srv/leetplus/slots' "$identity_mail_unit" > /dev/null
+  grep -F -x 'InaccessiblePaths=/etc/leetplus' "$identity_mail_unit" > /dev/null
+  if grep -F -x 'EnvironmentFile=/etc/leetplus/slots/%i.env' "$identity_mail_unit" > /dev/null; then
+    printf 'identity-mail unit receives the broad slot environment\n' >&2
+    exit 1
+  fi
+done
+grep -F -x 'EnvironmentFile=/etc/leetplus/identity-mail-worker-%i.env' "$identity_mail_worker_unit" > /dev/null
+grep -F -x 'RestrictNetworkInterfaces=lo' "$identity_mail_worker_unit" > /dev/null
+grep -F -x 'IPAddressDeny=any' "$identity_mail_worker_unit" > /dev/null
+grep -F -x 'IPAddressAllow=localhost' "$identity_mail_worker_unit" > /dev/null
+grep -F '/usr/bin/flock --exclusive --no-fork /run/leetplus-identity-mail/worker.lock' "$identity_mail_worker_unit" > /dev/null
+if grep -E -x 'EnvironmentFile=/etc/leetplus/identity-mail-worker(-%i)?[.]env' "$identity_mail_egress_unit" > /dev/null; then
+  printf 'SMTP egress broker receives worker credentials\n' >&2
+  exit 1
+fi
+grep -F 'identity-mail-smtp-egress-broker.cli.js' "$identity_mail_egress_unit" > /dev/null
+grep -F 'identity-mail-worker.cli.js' "$identity_mail_worker_unit" > /dev/null
+grep -F -x 'IDENTITY_MAIL_SMTP_EGRESS_ENABLED=false' "$identity_mail_egress_environment" > /dev/null
+grep -F -x 'IDENTITY_MAIL_WORKER_ENABLED=false' "$identity_mail_worker_environment" > /dev/null
+grep -F -x 'IDENTITY_MAIL_WORKER_REAL_SEND_ENABLED=false' "$identity_mail_worker_environment" > /dev/null
+grep -F -x 'IDENTITY_MAIL_WORKER_LIVE_CANARY_ENABLED=false' "$identity_mail_worker_environment" > /dev/null
+grep -F -x 'RELEASE_SHA=<same-exact-40-character-release-sha>' "$identity_mail_worker_environment" > /dev/null
+grep -F -x 'EXPECTED_DATABASE_MIGRATION=<same-exact-migration-as-slot>' "$identity_mail_worker_environment" > /dev/null
+grep -F -x 'EXPECTED_DATABASE_MIGRATION_COUNT=<same-exact-count-as-slot>' "$identity_mail_worker_environment" > /dev/null
 
 assert_inventory_producer_failure_is_fatal() {
   local authority_path="$1"
@@ -361,6 +402,8 @@ grep -F "printf 'EnvironmentFiles=\\n' >> \"\$output_path\"" "$release_promoter"
 grep -F '[[ -z "$control_group" || "$control_group" == "$expected_control_group" ]]' "$release_promoter" > /dev/null
 grep -F 'systemd may prune a completed oneshot cgroup before ControlGroup is read' "$release_promoter" > /dev/null
 grep -F -x 'f /run/leetplus-release/hydration.lock 0660 root leetplus-build -' "$hydration_tmpfiles" > /dev/null
+grep -F -x 'd /run/leetplus-identity-mail 0750 root leetplus-runtime -' "$hydration_tmpfiles" > /dev/null
+grep -F -x 'f /run/leetplus-identity-mail/worker.lock 0660 root leetplus-runtime -' "$hydration_tmpfiles" > /dev/null
 grep -F -x 'ExecStart=/usr/bin/bash -p /usr/local/sbin/leetplus-blue-green-cutover recover-before-nginx' "$recovery_unit" > /dev/null
 grep -F -x 'Before=nginx.service' "$recovery_unit" > /dev/null
 grep -F -x 'ExecStart=/usr/bin/bash -p /usr/local/sbin/leetplus-blue-green-cutover recover-pending' "$recovery_watchdog_unit" > /dev/null
@@ -399,6 +442,8 @@ if grep -F '/run/leetplus-' "$blue_green_cutover" > /dev/null; then
 fi
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-api@.service\t/etc/systemd/system/leetplus-api@.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-web@.service\t/etc/systemd/system/leetplus-web@.service\t0444' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-identity-mail-smtp-egress@.service\t/etc/systemd/system/leetplus-identity-mail-smtp-egress@.service\t0444' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-identity-mail-worker@.service\t/etc/systemd/system/leetplus-identity-mail-worker@.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/preflight-release-slot.sh\t/usr/local/libexec/leetplus/preflight-release-slot.sh\t0555' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/verify-release-readiness.sh\t/usr/local/libexec/leetplus/verify-release-readiness.sh\t0555' "$production_control_install_map" > /dev/null
 if grep -F -x 'Before=nginx.service' "$recovery_watchdog_unit" > /dev/null; then
@@ -440,6 +485,7 @@ for safe_value in \
   'STAFF_TASK_RULES_SCHEDULER_ENABLED=false' \
   'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED=false' \
   'IDENTITY_MAIL_WORKER_REAL_SEND_ENABLED=false' \
+  'IDENTITY_MAIL_SMTP_EGRESS_ENABLED=false' \
   'TENANT_ACTIVATION_OUTBOUND_ENABLED=false'; do
   grep -F -x "$safe_value" "$safe_overlay" > /dev/null
 done

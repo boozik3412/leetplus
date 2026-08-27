@@ -17,7 +17,10 @@ export type IdentityMailWorkerConfigBindings = {
 export function snapshotIdentityMailWorkerSmtpConfig(
   config: IdentityMailWorkerSmtpConfig,
 ): IdentityMailWorkerSmtpConfig {
-  return Object.freeze({ ...config });
+  return Object.freeze({
+    ...config,
+    egress: config.egress ? Object.freeze({ ...config.egress }) : undefined,
+  });
 }
 
 export function snapshotEnabledIdentityMailWorkerConfig(
@@ -59,6 +62,11 @@ export function buildIdentityMailWorkerConfigBindings(
     const smtpPasswordBindingHmac = createHmac('sha256', authorityBindingKey)
       .update(config.smtp.password, 'utf8')
       .digest('hex');
+    const smtpEgress = config.smtp.egress ?? {
+      mode: 'DIRECT' as const,
+      targetHost: config.smtp.host,
+      targetPort: config.smtp.port,
+    };
 
     const providerAuthorityDigest = digest({
       contract: 'IDENTITY_MAIL_PROVIDER_AUTHORITY_V1',
@@ -75,8 +83,11 @@ export function buildIdentityMailWorkerConfigBindings(
       encryptionKeyFingerprint,
       aadEnvironment: config.aadEnvironment,
       smtp: {
-        host: config.smtp.host,
-        port: config.smtp.port,
+        // Provider authority follows the externally authenticated SMTP
+        // endpoint. Moving the TCP path behind the admitted loopback broker
+        // must not rotate a tenant enrollment for the same TLS provider.
+        host: smtpEgress.targetHost,
+        port: smtpEgress.targetPort,
         tlsMode: config.smtp.tlsMode,
         servername: config.smtp.servername,
         usernameDigest: digest(config.smtp.username),
@@ -105,6 +116,11 @@ export function buildIdentityMailWorkerConfigBindings(
         maxRetryMs: config.maxRetryMs,
         healthHost: config.healthHost,
         healthPort: config.healthPort,
+        smtpTransport: {
+          connectHost: config.smtp.host,
+          connectPort: config.smtp.port,
+          egress: smtpEgress,
+        },
       }),
     };
   } finally {

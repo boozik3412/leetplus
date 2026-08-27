@@ -151,6 +151,9 @@ IDENTITY_MAIL_WORKER_MAX_RETRY_MS
 IDENTITY_MAIL_SMTP_HOST
 IDENTITY_MAIL_SMTP_PORT
 IDENTITY_MAIL_SMTP_TLS_MODE
+IDENTITY_MAIL_SMTP_EGRESS_MODE
+IDENTITY_MAIL_SMTP_EGRESS_TARGET_HOST
+IDENTITY_MAIL_SMTP_EGRESS_TARGET_PORT
 IDENTITY_MAIL_SMTP_SERVERNAME
 IDENTITY_MAIL_SMTP_USERNAME
 IDENTITY_MAIL_SMTP_PASSWORD
@@ -199,6 +202,14 @@ SMTP:
 - запрещены file/URL access в шаблоне;
 - bounded connection, greeting и socket timeouts;
 - raw provider error/response не логируется.
+
+Production systemd-профиль разделяет secrets и сеть. Worker имеет только
+loopback egress и подключается к `127.0.0.1`; отдельный broker без SMTP/DB/AES
+credentials разрешает ровно один provider DNS target на `465` или `587`,
+отклоняет non-public IPv4 и соединяется по уже проверенному адресу. TLS/SNI и
+сертификат по-прежнему проверяет SMTP-клиент worker против exact
+`IDENTITY_MAIL_SMTP_SERVERNAME`. Broker и worker имеют независимые health ports,
+а их env examples по умолчанию выключены.
 
 Health слушает только `127.0.0.1` и публикует только bounded
 `service/release/ok/reasonCode`, без tenant, email, очереди, токена или

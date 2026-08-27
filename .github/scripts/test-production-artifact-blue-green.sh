@@ -20,6 +20,14 @@ sink_server_pid=''
 replaced_system_node=false
 original_system_node_present=false
 
+grep -F '&& "$(realpath -e -- "/proc/${main_pid}/cwd")" == "$(realpath -e -- "$working_directory")" ]] \' \
+  "$CUTOVER" >/dev/null
+if grep -F '&& "$(realpath -e -- "/proc/${main_pid}/cwd")" == "$working_directory" ]] \' \
+  "$CUTOVER" >/dev/null; then
+  printf 'blue/green cutover compares a canonical process cwd to an unresolved slot symlink\n' >&2
+  exit 1
+fi
+
 cleanup() {
   if [[ -n "$sink_server_pid" ]]; then
     kill "$sink_server_pid" 2>/dev/null || true
@@ -432,7 +440,7 @@ case "${1:-}" in
         if [[ "$kind" == api ]]; then
           printf '{ path=/usr/bin/node ; argv[]=/usr/bin/node /srv/leetplus/slots/%s/apps/api/dist/main.js ; ignore_errors=no ; }\n' "$slot_name"
         else
-          printf '{ path=/usr/bin/node ; argv[]=/usr/bin/node /srv/leetplus/slots/%s/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port %s ; ignore_errors=no ; }\n' "$slot_name" "$web_port"
+          printf '{ path=/usr/bin/node ; argv[]=/usr/bin/node /srv/leetplus/slots/%s/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port ${WEB_PORT} ; ignore_errors=no ; }\n' "$slot_name"
         fi
         ;;
       EnvironmentFiles)

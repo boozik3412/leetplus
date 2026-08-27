@@ -874,6 +874,10 @@ if (
   fail("USERS_CATALOG_GENERATION_MISMATCH");
 }
 const usersCatalogGeneration = legacyCapabilityCatalogAccepted ? "LEGACY_7DE04FF4" : "CURRENT";
+const databaseVisibleUsers = usersCatalogGeneration === "LEGACY_7DE04FF4"
+  ? databaseOracleBefore.users
+  : databaseOracleBefore.users.filter((user) => !user.isPlatformAdmin);
+const databaseVisibleUserIds = databaseVisibleUsers.map((user) => user.id);
 const hasCompatibleUserPlatformAdminFlag = (user) =>
   user?.isPlatformAdmin === false ||
   (usersCatalogGeneration === "LEGACY_7DE04FF4" && user?.isPlatformAdmin === true);
@@ -918,7 +922,7 @@ if (
   )
 ) fail("USERS_INVITE_SHAPE_INVALID");
 if (
-  !exactIdSet(users.users, databaseOracleBefore.userIds) ||
+  !exactIdSet(users.users, databaseVisibleUserIds) ||
   !exactIdSet(users.customRoles, databaseOracleBefore.customRoleIds) ||
   !exactIdSet(users.invites, databaseOracleBefore.inviteIds)
 ) fail("USERS_DATABASE_ORACLE_INVALID");
@@ -944,7 +948,7 @@ const inviteAuthority = [...users.invites].sort((left, right) => left.id.localeC
   role: invite.role,
   storeIds: invite.stores.map((store) => store.id).sort(),
 }));
-const databaseUserAuthority = databaseOracleBefore.users.map((user) => ({
+const databaseUserAuthority = databaseVisibleUsers.map((user) => ({
   accessScope: user.accessScope,
   customRoleId: user.customRoleId,
   id: user.id,

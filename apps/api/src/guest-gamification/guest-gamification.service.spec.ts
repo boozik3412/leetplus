@@ -19398,6 +19398,55 @@ describe('GuestGamificationService', () => {
   });
 
   describe('runSnapshotPipeline', () => {
+    it('routes a domain-only primary fact only when the rule selected every active club on that domain', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: 'mission-network-wide-domain',
+          storeIds: ['store-shared-1', 'store-shared-2', 'store-unique'],
+        },
+        {
+          id: 'mission-one-shared-club',
+          storeIds: ['store-shared-1'],
+        },
+      ]);
+      prisma.guestGameSeason.findMany.mockResolvedValue([]);
+      prisma.store.findMany.mockResolvedValue([
+        {
+          id: 'store-shared-1',
+          externalDomain: 'shared.langame.test',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+        {
+          id: 'store-shared-2',
+          externalDomain: 'shared.langame.test',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+        {
+          id: 'store-unique',
+          externalDomain: 'unique.langame.test',
+          timeZone: 'Europe/Moscow',
+        },
+      ]);
+
+      const routing = await (
+        service as any
+      ).buildUnambiguousPrimaryDomainRouting(user);
+
+      expect(
+        routing.ruleExternalDomains.get('mission-network-wide-domain'),
+      ).toEqual(['shared.langame.test', 'unique.langame.test']);
+      expect(
+        routing.ruleExternalDomains.get('mission-one-shared-club'),
+      ).toEqual([]);
+      expect(
+        routing.ruleDomainTimeZones
+          .get('mission-network-wide-domain')
+          ?.get('shared.langame.test'),
+      ).toBe('Asia/Yekaterinburg');
+    });
+
     it('scopes profile backfill to the legacy guest and every active identity link', async () => {
       const fixture = createService();
       const { service, prisma, guestIdentityResolver } = fixture;

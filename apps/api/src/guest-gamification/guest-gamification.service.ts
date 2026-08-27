@@ -15223,14 +15223,34 @@ export class GuestGamificationService {
       processIdentityGuestIds[0] ??
       (processExternalDomain ? null : (profile.guest?.id ?? null)) ??
       null;
+
+    // Some Langame endpoints return an exact domain but omit club_id. This is
+    // common for sessions and product expenses on installations where two
+    // clubs share one Langame domain. In that case the canonical fact cannot
+    // honestly claim one Store, but a network-wide rule can still be scoped
+    // safely when it selected every active Store behind that domain.
+    //
+    // Keep an explicit store authoritative and never widen a partially
+    // selected shared domain. Supplemental ledger callers may also provide a
+    // stricter precomputed routing map; their map remains authoritative.
+    const inferredDomainRouting =
+      !requestedStoreId &&
+      processExternalDomain &&
+      (!options.ruleDomainTimeZones || !options.ruleExternalDomains)
+        ? await this.buildUnambiguousPrimaryDomainRouting(user)
+        : null;
+    const ruleDomainTimeZones =
+      options.ruleDomainTimeZones ?? inferredDomainRouting?.ruleDomainTimeZones;
+    const ruleExternalDomains =
+      options.ruleExternalDomains ?? inferredDomainRouting?.ruleExternalDomains;
     const dryRunOptions =
-      options.ruleDomainTimeZones ||
-      options.ruleExternalDomains ||
+      ruleDomainTimeZones ||
+      ruleExternalDomains ||
       options.replayRewardScope ||
       options.prequalifiedLootBoxOpen
         ? {
-            ruleDomainTimeZones: options.ruleDomainTimeZones,
-            ruleExternalDomains: options.ruleExternalDomains,
+            ruleDomainTimeZones,
+            ruleExternalDomains,
             prequalifiedLootBoxOpen: options.prequalifiedLootBoxOpen,
             ...(options.replayRewardScope
               ? {
@@ -16130,6 +16150,72 @@ export class GuestGamificationService {
       },
       note: 'Событие и очередь наград созданы внутри LeetPlus. Запись в Langame не выполнялась.',
     };
+  }
+
+  private async buildUnambiguousPrimaryDomainRouting(
+    user: AuthenticatedUser,
+  ): Promise<{
+    ruleDomainTimeZones: ReadonlyMap<
+      string,
+      ReadonlyMap<string, string | null>
+    >;
+    ruleExternalDomains: ReadonlyMap<string, readonly string[]>;
+  } | null> {
+    const [lootBoxes, missions, seasons, stores] = await Promise.all([
+      this.prisma.guestGameLootBox.findMany({
+        where: { tenantId: user.tenantId },
+        select: { id: true, storeIds: true },
+      }),
+      this.prisma.guestGameMission.findMany({
+        where: { tenantId: user.tenantId },
+        select: { id: true, storeIds: true },
+      }),
+      this.prisma.guestGameSeason.findMany({
+        where: { tenantId: user.tenantId },
+        select: { id: true, storeIds: true },
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId: user.tenantId, isActive: true },
+        select: { id: true, externalDomain: true, timeZone: true },
+      }),
+    ]);
+    const rules = [
+      ...(lootBoxes ?? []),
+      ...(missions ?? []),
+      ...(seasons ?? []),
+    ];
+    const ruleExternalDomains = new Map<string, readonly string[]>();
+    const ruleDomainTimeZones = new Map<
+      string,
+      ReadonlyMap<string, string | null>
+    >();
+
+    for (const rule of rules) {
+      const storeIds = guestGameStringArray(rule.storeIds);
+      if (!storeIds.length) continue;
+      const domains = unambiguousPrimaryRuleExternalDomains(
+        storeIds,
+        stores ?? [],
+      );
+      const configuredTimeZones = guestGameRuleDomainTimeZones(
+        storeIds,
+        stores ?? [],
+      );
+      ruleExternalDomains.set(rule.id, domains);
+      ruleDomainTimeZones.set(
+        rule.id,
+        new Map(
+          domains.map((domain) => [
+            domain,
+            configuredTimeZones[domain] ?? null,
+          ]),
+        ),
+      );
+    }
+
+    return ruleExternalDomains.size
+      ? { ruleDomainTimeZones, ruleExternalDomains }
+      : null;
   }
 
   async processLiveSessionStart(
@@ -31431,6 +31517,29 @@ function supplementalRuleExternalDomains(
   return configuredDomains.length
     ? uniqueStrings(configuredDomains)
     : uniqueStrings(stores.map((store) => store.externalDomain ?? ''));
+}
+
+function unambiguousPrimaryRuleExternalDomains(
+  storeIds: string[],
+  stores: Array<{ id: string; externalDomain: string | null }>,
+) {
+  const selectedStoreIds = new Set(storeIds);
+  const activeStoresByDomain = new Map<string, string[]>();
+
+  for (const store of stores) {
+    const domain = nullableString(store.externalDomain);
+    if (!domain) continue;
+    const ids = activeStoresByDomain.get(domain) ?? [];
+    ids.push(store.id);
+    activeStoresByDomain.set(domain, ids);
+  }
+
+  return [...activeStoresByDomain.entries()]
+    .filter(([, activeStoreIds]) =>
+      activeStoreIds.every((storeId) => selectedStoreIds.has(storeId)),
+    )
+    .map(([domain]) => domain)
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function seasonHasSupplementalBattlePassStep(

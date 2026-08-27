@@ -284,8 +284,11 @@ unit_property() {
 
 attest_slot_stopped() {
   local phase="$1" snapshot active_state sub_state main_pid control_group unit_file_state need_reload
-  local cgroup_path pid_inventory status_file status_result
-  snapshot="$(timeout --foreground --kill-after=2s 10s systemctl show --no-pager "$unit")" \
+  local expected_control_group cgroup_path pid_inventory status_file status_result
+  snapshot="$(timeout --foreground --kill-after=2s 10s systemctl show --no-pager \
+    --property=ActiveState --property=SubState --property=MainPID \
+    --property=ControlGroup --property=UnitFileState --property=NeedDaemonReload \
+    "$unit")" \
     || die "cannot prove Web slot unit state (${phase})"
   [[ -n "$snapshot" && ${#snapshot} -le 262144 && "$snapshot" != *$'\r'* ]] \
     || die "Web slot unit snapshot is noncanonical (${phase})"
@@ -295,12 +298,17 @@ attest_slot_stopped() {
   control_group="$(unit_property "$snapshot" ControlGroup)" || die "Web slot ControlGroup missing (${phase})"
   unit_file_state="$(unit_property "$snapshot" UnitFileState)" || die "Web slot UnitFileState missing (${phase})"
   need_reload="$(unit_property "$snapshot" NeedDaemonReload)" || die "Web slot NeedDaemonReload missing (${phase})"
+  expected_control_group="/system.slice/${unit}"
   [[ ( "$active_state" == inactive && "$sub_state" == dead \
       || "$active_state" == failed && "$sub_state" == failed ) \
-    && "$main_pid" == 0 && "$control_group" == "/system.slice/${unit}" \
+    && "$main_pid" == 0 \
+    && ( -z "$control_group" || "$control_group" == "$expected_control_group" ) \
     && "$unit_file_state" == enabled && "$need_reload" == no ]] \
     || die "Web slot must be stopped with no MainPID before cache preparation (${phase})"
-  cgroup_path="${cgroup_root}${control_group}"
+  # systemd 255 can omit/prune ControlGroup for a loaded, inactive instance
+  # that has never owned a process. Inspect the canonical unit path anyway so
+  # a stale cgroup cannot hide behind the empty property.
+  cgroup_path="${cgroup_root}${expected_control_group}"
   if [[ -e "$cgroup_path" || -L "$cgroup_path" ]]; then
     [[ -d "$cgroup_path" && ! -L "$cgroup_path" ]] \
       || die "Web slot cgroup boundary is unsafe (${phase})"

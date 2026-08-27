@@ -29,21 +29,32 @@ mkdir -p "$TEST_ROOT/bin"
 cat > "$TEST_ROOT/bin/systemctl" <<'SYSTEMCTL'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "${1:-}" == show && "${2:-}" == --no-pager \
-  && "${3:-}" == 'leetplus-web@blue.service' ]] || exit 64
+expected=(
+  show --no-pager
+  --property=ActiveState --property=SubState --property=MainPID
+  --property=ControlGroup --property=UnitFileState --property=NeedDaemonReload
+  leetplus-web@blue.service
+)
+actual=("$@")
+[[ "$#" == "${#expected[@]}" ]] || exit 64
+for index in "${!expected[@]}"; do
+  [[ "${actual[$index]}" == "${expected[$index]}" ]] || exit 64
+done
 count=0
 [[ ! -f "${TEST_SYSTEMCTL_COUNT:?}" ]] || count="$(<"$TEST_SYSTEMCTL_COUNT")"
 count=$((count + 1))
 printf '%s\n' "$count" > "$TEST_SYSTEMCTL_COUNT"
+control_group="${TEST_CONTROL_GROUP:-/system.slice/leetplus-web@blue.service}"
+[[ "${TEST_EMPTY_CONTROL_GROUP:-false}" != true ]] || control_group=''
 if [[ "${TEST_RACE_AT:-0}" == "$count" ]]; then
   printf '%s\n' \
     'ActiveState=active' 'SubState=running' 'MainPID=99999' \
-    'ControlGroup=/system.slice/leetplus-web@blue.service' \
+    "ControlGroup=${control_group}" \
     'UnitFileState=enabled' 'NeedDaemonReload=no'
 else
   printf '%s\n' \
     'ActiveState=inactive' 'SubState=dead' 'MainPID=0' \
-    'ControlGroup=/system.slice/leetplus-web@blue.service' \
+    "ControlGroup=${control_group}" \
     'UnitFileState=enabled' 'NeedDaemonReload=no'
 fi
 SYSTEMCTL
@@ -77,6 +88,25 @@ test "$(tr -d '\r\n' < "$valid_root/markers/blue.sha")" = "$RELEASE_SHA"
 test -d "$valid_root/cache/leetplus-web-blue"
 run_preparer "$valid_root" env > "$valid_root/retry.out"
 grep -F -x 'WEB_CACHE_ALREADY_PREPARED_SLOT=blue' "$valid_root/retry.out" >/dev/null
+
+empty_control_group_root="$TEST_ROOT/empty-control-group"
+prepare_fixture "$empty_control_group_root"
+rm -rf -- "$empty_control_group_root/cgroup/system.slice/leetplus-web@blue.service"
+run_preparer "$empty_control_group_root" env TEST_EMPTY_CONTROL_GROUP=true \
+  > "$empty_control_group_root/out"
+grep -F -x 'WEB_CACHE_PREPARED_SLOT=blue' "$empty_control_group_root/out" >/dev/null
+test "$(tr -d '\r\n' < "$empty_control_group_root/markers/blue.sha")" = "$RELEASE_SHA"
+
+wrong_control_group_root="$TEST_ROOT/wrong-control-group"
+prepare_fixture "$wrong_control_group_root"
+if run_preparer "$wrong_control_group_root" env \
+  TEST_CONTROL_GROUP='/system.slice/foreign.service' \
+  > "$wrong_control_group_root/out" 2>&1; then
+  printf 'cache preparer accepted a foreign Web slot cgroup\n' >&2
+  exit 1
+fi
+grep -F 'Web slot must be stopped with no MainPID' "$wrong_control_group_root/out" >/dev/null
+test ! -e "$wrong_control_group_root/markers/blue.sha"
 
 race_root="$TEST_ROOT/race"
 prepare_fixture "$race_root"

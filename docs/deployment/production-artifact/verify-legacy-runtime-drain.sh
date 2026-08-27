@@ -332,10 +332,17 @@ unit_not_drained() {
     control_pid="$(systemctl_bounded show --property=ControlPID --value "$unit" 2>/dev/null || true)"
     exec_main_pid="$(systemctl_bounded show --property=ExecMainPID --value "$unit" 2>/dev/null || true)"
     for cgroup_pid in "$main_pid" "$control_pid" "$exec_main_pid"; do
-      [[ -z "$cgroup_pid" || "$cgroup_pid" == 0 ]] || {
-        printf 'legacy unit retains a systemd PID: unit=%s pid=%s\n' "$unit" "$cgroup_pid" >&2
+      [[ -z "$cgroup_pid" || "$cgroup_pid" == 0 ]] && continue
+      [[ "$cgroup_pid" =~ ^[1-9][0-9]*$ ]] || {
+        printf 'legacy unit exposes an invalid systemd PID: unit=%s pid=%s\n' "$unit" "$cgroup_pid" >&2
         return 0
       }
+      # ExecMainPID is historical for a completed oneshot on systemd 255.
+      # A nonzero property blocks drain only while that PID still has a live
+      # /proc identity; PID reuse is deliberately conservative and blocks too.
+      [[ ! -e "${proc_root}/${cgroup_pid}" ]] && continue
+      printf 'legacy unit retains a systemd PID: unit=%s pid=%s\n' "$unit" "$cgroup_pid" >&2
+      return 0
     done
     control_group="$(systemctl_bounded show --property=ControlGroup --value "$unit" 2>/dev/null || true)"
     if [[ -n "$control_group" ]]; then

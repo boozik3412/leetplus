@@ -437,14 +437,29 @@ isolated VM/host copy.
 
 Пока instance unit подключает `canary-safe.env`, owner activation физически
 невозможна: final layer всегда возвращает `FOUNDER_OPERATOR_BETA_MODE=DISABLED`.
-Safety overlay не редактируется in-place. Текущие instance units также
+Safety overlay не редактируется in-place. Основные API/Web instance units также
 запрещают non-loopback egress на уровне systemd, поэтому одной заменой env
-невозможно включить рабочий Langame/SMTP/Telegram/provider контур. До owner
-activation нужен отдельный reviewed network-profile unit/drop-in (или localhost
-egress broker), exact-digest activation env и production-like rehearsal; затем
-перезапускается только активный artifact slot и повторяется readiness/rollback.
-Этот activation profile пока не реализован и является явным `NO-GO` для
-внешнего owner invite, но не блокирует localhost-only technical canary.
+невозможно включить рабочий Langame/SMTP/Telegram/provider контур.
+
+Для initial-owner SMTP подготовлен отдельный, по умолчанию выключенный профиль:
+
+- `leetplus-identity-mail-worker@.service` остаётся loopback-only, использует
+  отдельный DB role/secret env и глобальный `flock`, исключающий два активных
+  slot worker;
+- `leetplus-identity-mail-smtp-egress@.service` не получает DB/SMTP/encryption
+  secrets и пересылает TCP только на один DNS target и только на `465`/`587`;
+- broker повторно разрешает DNS для каждого соединения, подключается к уже
+  проверенному IPv4 и отклоняет private, loopback, link-local, carrier-grade NAT,
+  benchmark, documentation и multicast/reserved ranges;
+- TLS завершается в worker SMTP-клиенте: certificate проверяется против exact
+  provider `servername`, хотя TCP connection идёт через `127.0.0.1`;
+- slot SHA/migration aliases, broker target/TLS identity и fail-closed enable
+  switches проверяются до доступа к внешним ресурсам.
+
+Это только admitted deployment capability, а не разрешение на production
+отправку. Для activation всё ещё нужны отдельное окно, exact env, SMTP canary,
+worker enrollment и rollback/readiness evidence; units и оба env example
+остаются выключенными до такого решения.
 
 Candidate не создаёт второй scheduler tick. До любого schema effect обязательна
 процедура scheduler-free N−1: auth-edge/exact-child/Web rollback contour

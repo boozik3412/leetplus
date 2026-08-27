@@ -40,6 +40,10 @@ function enabledEnvironment(): IdentityMailWorkerEnvironment {
       '20260731120000_identity_mail_delivery_release_head',
     IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_COUNT: '179',
     IDENTITY_MAIL_WORKER_RELEASE_SHA: 'a'.repeat(40),
+    EXPECTED_DATABASE_MIGRATION:
+      '20260731120000_identity_mail_delivery_release_head',
+    EXPECTED_DATABASE_MIGRATION_COUNT: '179',
+    RELEASE_SHA: 'a'.repeat(40),
     IDENTITY_MAIL_WORKER_CANARY_TENANT_IDS: TENANT_ID,
     IDENTITY_MAIL_PUBLIC_WEB_ORIGIN: 'https://leetplus.ru',
     IDENTITY_MAIL_ENCRYPTION_KEY: ENCRYPTION_KEY,
@@ -54,6 +58,7 @@ function enabledEnvironment(): IdentityMailWorkerEnvironment {
     IDENTITY_MAIL_SMTP_HOST: 'smtp.example.test',
     IDENTITY_MAIL_SMTP_PORT: '587',
     IDENTITY_MAIL_SMTP_TLS_MODE: 'STARTTLS',
+    IDENTITY_MAIL_SMTP_EGRESS_MODE: 'DIRECT',
     IDENTITY_MAIL_SMTP_SERVERNAME: 'smtp.example.test',
     IDENTITY_MAIL_SMTP_USERNAME: 'smtp-user',
     IDENTITY_MAIL_SMTP_PASSWORD: 'smtp-password',
@@ -107,6 +112,11 @@ describe('loadIdentityMailWorkerConfig', () => {
         host: 'smtp.example.test',
         tlsMode: 'STARTTLS',
         servername: 'smtp.example.test',
+        egress: {
+          mode: 'DIRECT',
+          targetHost: 'smtp.example.test',
+          targetPort: 587,
+        },
       },
     });
     expect(Object.isFrozen(config)).toBe(true);
@@ -117,6 +127,65 @@ describe('loadIdentityMailWorkerConfig', () => {
     }
     expect(Object.isFrozen(config.canaryTenantIds)).toBe(true);
     expect(Object.isFrozen(config.smtp)).toBe(true);
+    expect(Object.isFrozen(config.smtp.egress)).toBe(true);
+  });
+
+  it('binds a loopback-only worker transport to one external TLS identity', () => {
+    const config = loadIdentityMailWorkerConfig({
+      ...enabledEnvironment(),
+      IDENTITY_MAIL_SMTP_EGRESS_MODE: 'LOOPBACK_BROKER',
+      IDENTITY_MAIL_SMTP_EGRESS_ENABLED: 'true',
+      IDENTITY_MAIL_SMTP_EGRESS_RELEASE_SHA: 'a'.repeat(40),
+      IDENTITY_MAIL_SMTP_HOST: '127.0.0.1',
+      IDENTITY_MAIL_SMTP_PORT: '4465',
+      IDENTITY_MAIL_SMTP_TLS_MODE: 'IMPLICIT_TLS',
+      IDENTITY_MAIL_SMTP_EGRESS_TARGET_HOST: 'smtp.example.test',
+      IDENTITY_MAIL_SMTP_EGRESS_TARGET_PORT: '465',
+    });
+
+    expect(config).toMatchObject({
+      enabled: true,
+      smtp: {
+        host: '127.0.0.1',
+        port: 4465,
+        tlsMode: 'IMPLICIT_TLS',
+        servername: 'smtp.example.test',
+        egress: {
+          mode: 'LOOPBACK_BROKER',
+          targetHost: 'smtp.example.test',
+          targetPort: 465,
+        },
+      },
+    });
+  });
+
+  it.each([
+    [
+      'disabled broker',
+      { IDENTITY_MAIL_SMTP_EGRESS_ENABLED: 'false' },
+      'IDENTITY_MAIL_SMTP_EGRESS_NOT_EXPLICITLY_ENABLED',
+    ],
+    [
+      'release drift',
+      { IDENTITY_MAIL_SMTP_EGRESS_RELEASE_SHA: 'b'.repeat(40) },
+      'IDENTITY_MAIL_SMTP_EGRESS_RELEASE_SHA_MISMATCH',
+    ],
+  ])('rejects loopback broker %s', (_case, override, reason) => {
+    expectConfigurationReason(
+      {
+        ...enabledEnvironment(),
+        IDENTITY_MAIL_SMTP_EGRESS_MODE: 'LOOPBACK_BROKER',
+        IDENTITY_MAIL_SMTP_EGRESS_ENABLED: 'true',
+        IDENTITY_MAIL_SMTP_EGRESS_RELEASE_SHA: 'a'.repeat(40),
+        IDENTITY_MAIL_SMTP_HOST: '127.0.0.1',
+        IDENTITY_MAIL_SMTP_PORT: '4465',
+        IDENTITY_MAIL_SMTP_TLS_MODE: 'IMPLICIT_TLS',
+        IDENTITY_MAIL_SMTP_EGRESS_TARGET_HOST: 'smtp.example.test',
+        IDENTITY_MAIL_SMTP_EGRESS_TARGET_PORT: '465',
+        ...override,
+      },
+      reason,
+    );
   });
 
   it('returns canary tenants in canonical order', () => {
@@ -134,6 +203,32 @@ describe('loadIdentityMailWorkerConfig', () => {
       canaryTenantIds: MAXIMUM_CANARY_TENANT_IDS,
     });
   });
+
+  it.each([
+    [
+      'release SHA',
+      { RELEASE_SHA: 'b'.repeat(40) },
+      'IDENTITY_MAIL_WORKER_RELEASE_SHA_ALIAS_MISMATCH',
+    ],
+    [
+      'migration head',
+      { EXPECTED_DATABASE_MIGRATION: '20260101000000_wrong_head' },
+      'IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_ALIAS_MISMATCH',
+    ],
+    [
+      'migration count',
+      { EXPECTED_DATABASE_MIGRATION_COUNT: '180' },
+      'IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_COUNT_ALIAS_MISMATCH',
+    ],
+  ])(
+    'rejects slot %s drift before external access',
+    (_case, override, reason) => {
+      expectConfigurationReason(
+        { ...enabledEnvironment(), ...override },
+        reason,
+      );
+    },
+  );
 
   it('accepts at most four exact unique canary tenants', () => {
     const config = loadIdentityMailWorkerConfig({

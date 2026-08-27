@@ -357,6 +357,9 @@ jobs:
       - name: Validate runtime function ACL enrollment contract
         run: pnpm --filter database check:runtime-function-enrollment
 
+      - name: Validate Telegram update ledger runtime ACL reconciliation
+        run: pnpm --filter database check:telegram-update-ledger-runtime-acl
+
       - name: Validate identity email claim foundation
         run: pnpm --filter database check:identity-email-claim
 
@@ -891,6 +894,8 @@ jobs:
             packages/database/scripts/staff-attachment-backfill-dry-run.mjs \
             packages/database/scripts/staff-attachment-reconciliation.mjs \
             packages/database/scripts/staff-attachment-reconciliation.cli.mjs \
+            packages/database/scripts/telegram-update-ledger-runtime-acl-reconciliation.mjs \
+            packages/database/scripts/telegram-update-ledger-runtime-acl-reconciliation.cli.mjs \
             "$release_root/packages/database/scripts/"
           cp -a package.json pnpm-lock.yaml pnpm-workspace.yaml "$release_root/"
 
@@ -907,14 +912,14 @@ jobs:
             '  "founderPilotOperationalScriptsIncluded": true,' \
             '  "founderPilotOperationalScriptCount": 12,' \
             '  "runtimeEnrollmentOperationalScriptsIncluded": true,' \
-            '  "runtimeEnrollmentOperationalScriptCount": 6,' \
+            '  "runtimeEnrollmentOperationalScriptCount": 8,' \
             '  "currentReleaseRuntimeAcceptanceScriptsIncluded": true,' \
             '  "currentReleaseRuntimeAcceptanceScriptCount": 3,' \
             '  "currentNetworkAccessScopeClassificationScriptsIncluded": true,' \
             '  "currentNetworkAccessScopeClassificationScriptCount": 2,' \
             '  "staffAttachmentReconciliationScriptsIncluded": true,' \
             '  "staffAttachmentReconciliationScriptCount": 3,' \
-            '  "operationalScriptCount": 27,' \
+            '  "operationalScriptCount": 29,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
@@ -1047,14 +1052,14 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '12'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptsIncluded')" = 'true'
-            test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptCount')" = '6'
+            test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptCount')" = '8'
             test "$(node -p 'require("./release-provenance.json").currentReleaseRuntimeAcceptanceScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").currentReleaseRuntimeAcceptanceScriptCount')" = '3'
             test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptCount')" = '2'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptCount')" = '3'
-            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '27'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '29'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
             node --check packages/database/scripts/canonical-prisma-deploy.mjs
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
@@ -1065,6 +1070,7 @@ jobs:
             node --check packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs
             node --check packages/database/scripts/runtime-function-enrollment.cli.mjs
             node --check packages/database/scripts/identity-mail-worker-enrollment.cli.mjs
+            node --check packages/database/scripts/telegram-update-ledger-runtime-acl-reconciliation.cli.mjs
             node --check packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs
             bash -n packages/database/scripts/run-current-release-restored-copy-acceptance.sh
             node --check packages/database/scripts/current-network-access-scope-classification.cli.mjs
@@ -1135,7 +1141,7 @@ jobs:
         run: |
           set -euo pipefail
           helper_source="$GITHUB_WORKSPACE/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
-          helper_sha256='39f49a738c7e5b35869501ddfe0469dddece2c7dc6f9f633b52a43b878557aa4'
+          helper_sha256='b05f34b726e3657c61226d76369421e0094855720fb08dd17cd63bc06d4110c2'
           authority_parent='/srv/leetplus-ci-runtime-authority'
           authority_root="$authority_parent/$CI_RELEASE_SHA"
           sudo -n /usr/bin/env -i \
@@ -1906,6 +1912,11 @@ jobs:
         env:
           LANGAME_CURRENT194_PRISMA_INTEGRATION: run-langame-current194-actual-prisma-on-disposable-github-ci
         run: pnpm --filter database test:integration:langame-runtime-prisma-current194:pg
+
+      - name: Verify exact Telegram update ledger ACL on PostgreSQL 16
+        env:
+          TELEGRAM_UPDATE_LEDGER_ACL_PG_INTEGRATION: run-telegram-update-ledger-runtime-acl-on-disposable-postgresql
+        run: pnpm --filter database test:integration:telegram-update-ledger-runtime-acl:pg
 
   production-control-candidate:
     name: Production-control candidate

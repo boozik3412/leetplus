@@ -102,7 +102,38 @@ export function loadIdentityMailWorkerConfig(
     AAD_ENVIRONMENT_PATTERN,
     'IDENTITY_MAIL_AAD_ENVIRONMENT_INVALID',
   );
-  const smtp = smtpConfig(environment);
+  const expectedMigration = requiredPattern(
+    environment.IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION,
+    MIGRATION_PATTERN,
+    'IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_INVALID',
+  );
+  const expectedMigrationCount = boundedInteger(
+    environment.IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_COUNT,
+    1,
+    100_000,
+    'IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_COUNT_INVALID',
+  );
+  const releaseSha = requiredPattern(
+    environment.IDENTITY_MAIL_WORKER_RELEASE_SHA,
+    SHA_PATTERN,
+    'IDENTITY_MAIL_WORKER_RELEASE_SHA_INVALID',
+  );
+  assertReleaseAlias(
+    environment.EXPECTED_DATABASE_MIGRATION,
+    expectedMigration,
+    'IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_ALIAS_MISMATCH',
+  );
+  assertReleaseAlias(
+    environment.EXPECTED_DATABASE_MIGRATION_COUNT,
+    String(expectedMigrationCount),
+    'IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_COUNT_ALIAS_MISMATCH',
+  );
+  assertReleaseAlias(
+    environment.RELEASE_SHA,
+    releaseSha,
+    'IDENTITY_MAIL_WORKER_RELEASE_SHA_ALIAS_MISMATCH',
+  );
+  const smtp = smtpConfig(environment, releaseSha);
   const minimumAcknowledgeSeconds = Math.ceil(
     (smtp.connectionTimeoutMs + smtp.greetingTimeoutMs + smtp.socketTimeoutMs) /
       1000,
@@ -127,22 +158,9 @@ export function loadIdentityMailWorkerConfig(
     databaseSocketTimeoutSeconds,
     expectedDatabase,
     expectedRole,
-    expectedMigration: requiredPattern(
-      environment.IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION,
-      MIGRATION_PATTERN,
-      'IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_INVALID',
-    ),
-    expectedMigrationCount: boundedInteger(
-      environment.IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_COUNT,
-      1,
-      100_000,
-      'IDENTITY_MAIL_WORKER_EXPECTED_MIGRATION_COUNT_INVALID',
-    ),
-    releaseSha: requiredPattern(
-      environment.IDENTITY_MAIL_WORKER_RELEASE_SHA,
-      SHA_PATTERN,
-      'IDENTITY_MAIL_WORKER_RELEASE_SHA_INVALID',
-    ),
+    expectedMigration,
+    expectedMigrationCount,
+    releaseSha,
     canaryTenantIds,
     publicWebOrigin: publicWebOrigin(
       environment.IDENTITY_MAIL_PUBLIC_WEB_ORIGIN,
@@ -207,28 +225,89 @@ export function loadIdentityMailWorkerConfig(
 
 function smtpConfig(
   environment: IdentityMailWorkerEnvironment,
+  releaseSha: string,
 ): IdentityMailWorkerSmtpConfig {
-  const host = dnsName(
-    environment.IDENTITY_MAIL_SMTP_HOST,
-    'IDENTITY_MAIL_SMTP_HOST_INVALID',
-  );
-  const servername = dnsName(
-    environment.IDENTITY_MAIL_SMTP_SERVERNAME,
-    'IDENTITY_MAIL_SMTP_SERVERNAME_INVALID',
-  );
   const tlsMode = exactOneOf(
     environment.IDENTITY_MAIL_SMTP_TLS_MODE,
     ['IMPLICIT_TLS', 'STARTTLS'] as const,
     'IDENTITY_MAIL_SMTP_TLS_MODE_INVALID',
   );
-  return {
-    host,
-    port: boundedInteger(
-      environment.IDENTITY_MAIL_SMTP_PORT,
+  const egressMode = exactOneOf(
+    environment.IDENTITY_MAIL_SMTP_EGRESS_MODE,
+    ['DIRECT', 'LOOPBACK_BROKER'] as const,
+    'IDENTITY_MAIL_SMTP_EGRESS_MODE_INVALID',
+  );
+  const servername = dnsName(
+    environment.IDENTITY_MAIL_SMTP_SERVERNAME,
+    'IDENTITY_MAIL_SMTP_SERVERNAME_INVALID',
+  );
+  const configuredPort = boundedInteger(
+    environment.IDENTITY_MAIL_SMTP_PORT,
+    1,
+    65_535,
+    'IDENTITY_MAIL_SMTP_PORT_INVALID',
+  );
+  let host: string;
+  let targetHost: string;
+  let targetPort: number;
+  if (egressMode === 'LOOPBACK_BROKER') {
+    exactValue(
+      environment.IDENTITY_MAIL_SMTP_EGRESS_ENABLED,
+      'true',
+      'IDENTITY_MAIL_SMTP_EGRESS_NOT_EXPLICITLY_ENABLED',
+    );
+    exactValue(
+      environment.IDENTITY_MAIL_SMTP_EGRESS_RELEASE_SHA,
+      releaseSha,
+      'IDENTITY_MAIL_SMTP_EGRESS_RELEASE_SHA_MISMATCH',
+    );
+    host = exactValue(
+      environment.IDENTITY_MAIL_SMTP_HOST,
+      '127.0.0.1',
+      'IDENTITY_MAIL_SMTP_BROKER_HOST_INVALID',
+    );
+    if (configuredPort < 1_024) {
+      fail('IDENTITY_MAIL_SMTP_BROKER_PORT_INVALID');
+    }
+    targetHost = dnsName(
+      environment.IDENTITY_MAIL_SMTP_EGRESS_TARGET_HOST,
+      'IDENTITY_MAIL_SMTP_EGRESS_TARGET_HOST_INVALID',
+    );
+    targetPort = boundedInteger(
+      environment.IDENTITY_MAIL_SMTP_EGRESS_TARGET_PORT,
       1,
       65_535,
-      'IDENTITY_MAIL_SMTP_PORT_INVALID',
-    ),
+      'IDENTITY_MAIL_SMTP_EGRESS_TARGET_PORT_INVALID',
+    );
+    if (targetHost !== servername) {
+      fail('IDENTITY_MAIL_SMTP_EGRESS_TLS_IDENTITY_MISMATCH');
+    }
+  } else {
+    host = dnsName(
+      environment.IDENTITY_MAIL_SMTP_HOST,
+      'IDENTITY_MAIL_SMTP_HOST_INVALID',
+    );
+    if (
+      environment.IDENTITY_MAIL_SMTP_EGRESS_ENABLED !== undefined ||
+      environment.IDENTITY_MAIL_SMTP_EGRESS_RELEASE_SHA !== undefined ||
+      environment.IDENTITY_MAIL_SMTP_EGRESS_TARGET_HOST !== undefined ||
+      environment.IDENTITY_MAIL_SMTP_EGRESS_TARGET_PORT !== undefined
+    ) {
+      fail('IDENTITY_MAIL_SMTP_DIRECT_EGRESS_OVERRIDE_FORBIDDEN');
+    }
+    if (host !== servername) {
+      fail('IDENTITY_MAIL_SMTP_DIRECT_TLS_IDENTITY_MISMATCH');
+    }
+    targetHost = host;
+    targetPort = configuredPort;
+  }
+  const canonicalProviderPort = tlsMode === 'IMPLICIT_TLS' ? 465 : 587;
+  if (targetPort !== canonicalProviderPort) {
+    fail('IDENTITY_MAIL_SMTP_PROVIDER_PORT_INVALID');
+  }
+  return {
+    host,
+    port: configuredPort,
     tlsMode,
     servername,
     username: required(
@@ -265,6 +344,11 @@ function smtpConfig(
       300_000,
       'IDENTITY_MAIL_SMTP_SOCKET_TIMEOUT_MS_INVALID',
     ),
+    egress: {
+      mode: egressMode,
+      targetHost,
+      targetPort,
+    },
   };
 }
 
@@ -459,6 +543,16 @@ function secretDigest(value: string, encoding: BufferEncoding): Buffer {
 
 function compareSecretDigests(left: Buffer, right: Buffer): boolean {
   return timingSafeEqual(left, right);
+}
+
+function assertReleaseAlias(
+  value: string | undefined,
+  expected: string,
+  reasonCode: string,
+): void {
+  if (value !== undefined && value !== expected) {
+    fail(reasonCode);
+  }
 }
 
 function exactBoolean(value: string | undefined, reasonCode: string): boolean {

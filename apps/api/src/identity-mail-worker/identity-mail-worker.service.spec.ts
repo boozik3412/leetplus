@@ -402,6 +402,19 @@ describe('IdentityMailWorkerService', () => {
         socketTimeoutMs: 31_000,
       },
     });
+    const loopbackSmtpBroker = harness({
+      ...config(),
+      smtp: {
+        ...config().smtp,
+        host: '127.0.0.1',
+        port: 4465,
+        egress: {
+          mode: 'LOOPBACK_BROKER',
+          targetHost: 'smtp.example.test',
+          targetPort: 587,
+        },
+      },
+    });
     const changedRelease = harness({
       ...config(),
       releaseSha: 'b'.repeat(40),
@@ -443,6 +456,7 @@ describe('IdentityMailWorkerService', () => {
       largerBatch,
       fasterPoll,
       changedPolicy,
+      loopbackSmtpBroker,
     ]) {
       expect(runtimeOnly.service.providerAuthorityDigest).toBe(
         first.service.providerAuthorityDigest,

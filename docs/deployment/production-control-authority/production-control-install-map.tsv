@@ -24,6 +24,8 @@ docs/deployment/production-artifact/systemd/leetplus-api@.service	/etc/systemd/s
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery-watchdog.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-blue-green-recovery-watchdog.service	0400
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-blue-green-recovery.service	0400
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.timer	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-blue-green-recovery.timer	0400
+docs/deployment/production-artifact/systemd/leetplus-identity-mail-smtp-egress@.service	/etc/systemd/system/leetplus-identity-mail-smtp-egress@.service	0444
+docs/deployment/production-artifact/systemd/leetplus-identity-mail-worker@.service	/etc/systemd/system/leetplus-identity-mail-worker@.service	0444
 docs/deployment/production-artifact/systemd/leetplus-release-hydrate@.service	/etc/systemd/system/leetplus-release-hydrate@.service	0444
 docs/deployment/production-artifact/systemd/leetplus-rollback-egress.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-rollback-egress.service	0400
 docs/deployment/production-artifact/systemd/leetplus-web-rollback@.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-web-rollback@.service	0400

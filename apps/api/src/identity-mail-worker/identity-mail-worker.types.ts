@@ -2,6 +2,12 @@ export type IdentityMailWorkerEnvironment = Record<string, string | undefined>;
 
 export type IdentityMailSmtpTlsMode = 'IMPLICIT_TLS' | 'STARTTLS';
 
+export type IdentityMailSmtpEgressBinding = {
+  readonly mode: 'DIRECT' | 'LOOPBACK_BROKER';
+  readonly targetHost: string;
+  readonly targetPort: number;
+};
+
 export type IdentityMailWorkerSmtpConfig = {
   readonly host: string;
   readonly port: number;
@@ -14,6 +20,12 @@ export type IdentityMailWorkerSmtpConfig = {
   readonly connectionTimeoutMs: number;
   readonly greetingTimeoutMs: number;
   readonly socketTimeoutMs: number;
+  /**
+   * The loader always supplies this binding. It remains optional on the
+   * structural type so isolated provider tests can construct a direct SMTP
+   * transport without pretending to be the production worker bootstrap.
+   */
+  readonly egress?: IdentityMailSmtpEgressBinding;
 };
 
 export type DisabledIdentityMailWorkerConfig = {

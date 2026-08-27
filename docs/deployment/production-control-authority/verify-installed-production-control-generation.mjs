@@ -12,7 +12,7 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const SAFE_SOURCE_PATTERN = /^[A-Za-z0-9_.@+/-]+$/u;
 const SAFE_DESTINATION_PATTERN = /^\/[A-Za-z0-9_.@+/-]+$/u;
 const EXPECTED_INSTALL_MAP_SHA256 =
-  "0e1424555628f95dd706412b46dc07aedb46d7880d08e0158bbb61f46b1fa801";
+  "ee37840ca23ecdb95ee136a35b847c94237bf88d25ff5ba3a25e9596740c2254";
 const EXPECTED_REPOSITORY = "boozik3412/leetplus";
 const GENERATION_BASE = "/srv/leetplus/production-control-generations";
 const RECEIPT_BASE = "/var/lib/leetplus/deploy-receipts/production-control";
@@ -60,6 +60,8 @@ const DANGEROUS_ENVIRONMENT_NAMES = [
 ];
 const REQUIRED_DESTINATIONS = new Set([
   "/etc/systemd/system/leetplus-api@.service",
+  "/etc/systemd/system/leetplus-identity-mail-smtp-egress@.service",
+  "/etc/systemd/system/leetplus-identity-mail-worker@.service",
   "/etc/systemd/system/leetplus-release-hydrate@.service",
   "/etc/systemd/system/leetplus-web@.service",
   "/etc/tmpfiles.d/leetplus-release.conf",

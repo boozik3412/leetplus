@@ -40,6 +40,8 @@ readonly OPERATIONAL_SCRIPTS=(
   staff-attachment-reconciliation.cli.mjs
   staff-attachment-reconciliation.mjs
   staff-task-integrity-migration-state.mjs
+  telegram-update-ledger-runtime-acl-reconciliation.cli.mjs
+  telegram-update-ledger-runtime-acl-reconciliation.mjs
 )
 
 cleanup() {
@@ -137,14 +139,14 @@ make_runtime_root() {
   "founderPilotOperationalScriptsIncluded": true,
   "founderPilotOperationalScriptCount": 12,
   "runtimeEnrollmentOperationalScriptsIncluded": true,
-  "runtimeEnrollmentOperationalScriptCount": 6,
+  "runtimeEnrollmentOperationalScriptCount": 8,
   "currentReleaseRuntimeAcceptanceScriptsIncluded": true,
   "currentReleaseRuntimeAcceptanceScriptCount": 3,
   "currentNetworkAccessScopeClassificationScriptsIncluded": true,
   "currentNetworkAccessScopeClassificationScriptCount": 2,
   "staffAttachmentReconciliationScriptsIncluded": true,
   "staffAttachmentReconciliationScriptCount": 3,
-  "operationalScriptCount": 27,
+  "operationalScriptCount": 29,
   "webPublicAssetsIncluded": true
 }
 JSON
@@ -174,7 +176,7 @@ node "$VERIFIER" \
   --expected-release-sha "$RELEASE_SHA" > "${TEST_ROOT}/accepted.out"
 grep -F -x 'RUNTIME_RELEASE_ARTIFACT_INTEGRITY=PASS' "${TEST_ROOT}/accepted.out" > /dev/null
 grep -F -x "RUNTIME_RELEASE_SHA=${RELEASE_SHA}" "${TEST_ROOT}/accepted.out" > /dev/null
-grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=27' "${TEST_ROOT}/accepted.out" > /dev/null
+grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=29' "${TEST_ROOT}/accepted.out" > /dev/null
 
 unexpected_script_root="${TEST_ROOT}/unexpected-script"
 cp -a -- "$accepted_root" "$unexpected_script_root"

@@ -457,9 +457,15 @@ case "${1:-}" in
       ProcSubset) printf 'pid\n' ;;
       SystemCallArchitectures) printf 'native\n' ;;
       RestrictAddressFamilies) printf 'AF_NETLINK AF_INET6 AF_INET\n' ;;
-      RestrictNetworkInterfaces) printf 'lo\n' ;;
-      IPAddressDeny) printf '::/0 0.0.0.0/0\n' ;;
-      IPAddressAllow) printf '127.0.0.0/8 ::1/128\n' ;;
+      RestrictNetworkInterfaces)
+        if [[ "$kind" == web ]]; then printf 'lo\n'; fi
+        ;;
+      IPAddressDeny)
+        if [[ "$kind" == web ]]; then printf '::/0 0.0.0.0/0\n'; fi
+        ;;
+      IPAddressAllow)
+        if [[ "$kind" == web ]]; then printf '127.0.0.0/8 ::1/128\n'; fi
+        ;;
       ReadOnlyPaths) printf '/srv/leetplus/slots /srv/leetplus/releases\n' ;;
       ReadWritePaths)
         if [[ "$kind" == api ]]; then printf '/var/lib/leetplus/langame-sync\n'; else printf '/var/cache/leetplus-web-%s\n' "$slot_name"; fi

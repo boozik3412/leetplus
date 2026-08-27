@@ -95,10 +95,13 @@ group `leetplus-runtime`, а API env явно недоступен Web unit. П�
 service-user preflight проверяет root ownership/permissions, post-hydration
 manifest, provenance/migration и Web BUILD_ID; только API запускает production
 config validator.
-Оба shadow unit дополнительно имеют systemd `IPAddressDeny=any` и разрешают
-только localhost: nginx, paired Web/API и локальный PostgreSQL. Поэтому даже
-неизвестный application path не получает внешний egress во время technical
-canary. Нелокальный `DATABASE_URL` приведёт к fail-closed readiness до switch.
+Web shadow unit имеет systemd `IPAddressDeny=any` и разрешает только localhost:
+nginx и paired API. API по-прежнему слушает только `127.0.0.1`, но использует
+отдельный reviewed network profile с исходящим TCP/DNS, потому что текущая
+архитектура выполняет интеграции Langame/SMTP/SMS/provider непосредственно из
+API-процесса. Применение Web-профиля `localhost-only` к API является production
+regression: оно отключает актуальные сессии Langame и чек-ин во всех клубах.
+Нелокальный `DATABASE_URL` по-прежнему приведёт к fail-closed readiness до switch.
 
 Одноэкземплярные `leetplus-api.service`/`leetplus-web.service` сохранены только
 как исторические templates и не разрешены для первого artifact cutover: restart

@@ -289,8 +289,10 @@ runtime на `/srv/leetplus/slots/blue|green` и secrets в
    Cutover принимает только одновременно active и boot-enabled units; Web
    зависит от paired API, оба упорядочены до nginx. `ExecStartPre` проверяет
    immutable slot/service-user write boundary, exact NSS groups, safe PATH,
-   полный loader/Node/proxy/curl env scrub и live kernel no-egress через
-   ожидаемый `EACCES/EPERM` к собственному non-loopback адресу. API затем выполняет
+   полный loader/Node/proxy/curl env scrub. Web подтверждает live kernel
+   localhost-only через ожидаемый `EACCES/EPERM` к собственному non-loopback
+   адресу; API подтверждается как отдельная integration boundary с исходящим
+   TCP/DNS, необходимым Langame/SMTP/SMS/provider. API затем выполняет
    `config:validate:production`. Legacy units продолжают обслуживать traffic.
 9. Проверить loopback: API `/version`, API `/health/ready`, Web root,
    динамический no-store `/api/release-identity` и static asset smoke. Для этого использовать versioned read-only
@@ -329,17 +331,18 @@ runtime на `/srv/leetplus/slots/blue|green` и secrets в
 ### C. Минимальный canary
 
 1. Не включать Telegram/MAX outbound и публичную регистрацию. Public technical
-   switch выполняется только в объявленном коротком maintenance window: shadow
-   egress intentionally localhost-only, поэтому ручные external-integration
-   actions текущих четырёх клубов временно недоступны. Watchdog дополняется
-   authenticated critical-read smoke; любая деградация возвращает legacy.
+   switch выполняется только в объявленном коротком maintenance window. Web
+   shadow остаётся localhost-only; API использует reviewed integration egress,
+   поэтому Langame и остальные уже действующие интеграции четырёх клубов должны
+   входить в обязательный smoke до cutover. Watchdog дополняется authenticated
+   critical-read и Langame diagnostics smoke; любая деградация возвращает legacy.
 2. После принятия technical canary заменить неизменяемый safety overlay только
    через отдельный reviewed owner-activation gate; in-place edit запрещён.
    Пока overlay подключён, `FOUNDER_OPERATOR_BETA_MODE=DISABLED` блокирует GO.
-   Одной замены env недостаточно: technical units kernel-level разрешают только
-   loopback. До owner GO нужно реализовать и принять отдельный network profile
-   (unit/drop-in либо localhost egress broker) для Langame/SMTP/Telegram/provider.
-   Сейчас этот профиль отсутствует, поэтому внешний invite остаётся `NO-GO`.
+   API integration profile уже допускает исходящие подключения текущих
+   Langame/SMTP/SMS/provider-контуров; новые провайдеры по-прежнему требуют
+   отдельного review, smoke и owner GO. В перспективе прямой API egress можно
+   заменить localhost broker, не меняя продуктовый контракт интеграций.
 3. Выполнить protected `FOUNDER_OPERATOR_BETA_GO_V1` для единственного
    `Tenant B/Store B1` с 30-дневной trial policy и rollback owner.
 4. Создать один email-bound `OWNER/NETWORK` invite. Владелец сам устанавливает

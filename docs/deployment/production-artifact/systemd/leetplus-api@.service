@@ -43,9 +43,12 @@ RestrictSUIDSGID=true
 RemoveIPC=true
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK
-RestrictNetworkInterfaces=lo
-IPAddressDeny=any
-IPAddressAllow=localhost
+# The API performs the reviewed Langame/SMTP/SMS/provider integrations directly.
+# Keep its listener on API_BIND_HOST=127.0.0.1, but do not apply the Web unit's
+# localhost-only egress fence to this process.
+RestrictNetworkInterfaces=
+IPAddressDeny=
+IPAddressAllow=
 ReadOnlyPaths=/srv/leetplus/releases /srv/leetplus/slots
 ReadWritePaths=/var/lib/leetplus/langame-sync
 LogsDirectory=leetplus/api-%i

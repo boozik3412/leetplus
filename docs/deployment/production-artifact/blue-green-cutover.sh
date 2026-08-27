@@ -45,10 +45,10 @@ readonly MIGRATION_PATTERN='^[0-9]{14}_[a-z0-9_]+$'
 readonly SLOT_PATTERN='^(blue|green)$'
 readonly CUTOVER_RECORD_NAMESPACE_GLOB='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T*-g*-*-*'
 readonly FIRST_CUTOVER_ROLLBACK_SHA='7de04ff4ccc814494810730be3fa6bf661097b07'
-readonly SLOT_API_UNIT_SHA256='a9bdb23d45bd4cef0b1d9debbc29bb8707db9e6f92da265db927831d2727241d'
+readonly SLOT_API_UNIT_SHA256='c8243da78f0228d0d312cdbc4b3c63fc36136321e0c55da74852a6e201fa53ff'
 readonly SLOT_WEB_UNIT_SHA256='8c47b412ed3b42bcbbb421a78939c232d82919ca0995d28c1c4140c8775ae81e'
 readonly CANARY_SAFE_ENV_SHA256='dd87543ca654cf9ca1a94fae06d4f3e2f04c88e8ba0be84f45df2a7e03075d48'
-readonly SLOT_PREFLIGHT_SHA256='3d3fa0ff089af692ceafb0492f77cb855e51e4ad75924bd624694e76a3beb26c'
+readonly SLOT_PREFLIGHT_SHA256='f2e5dcef196e01cd7d2f95cbef8e7955dee526e81249d2b4894dbe7ec2f1869e'
 readonly BLUE_NGINX_SHA256='3553e31012e1c00d695381c76ad4df184113c71c5a8b018bf5d934c2cea3fd8e'
 readonly GREEN_NGINX_SHA256='a9e449bcd5f7d56be97f347455f7d0629f393d471cdf2b87029b4bede2d58462'
 readonly LEGACY_SAFE_NGINX_SHA256='ebd449a4221dcb0c1d5449b4f87893bcad58b1f16319551730ca5aefde571b25'
@@ -476,12 +476,20 @@ attest_candidate_unit() {
     && -z "$capability_bounding" && -z "$ambient_capabilities" ]] \
     || { candidate_unit_failure "${unit} effective sandbox/capability boundary"; return; }
   if ! [[ "$(printf '%s' "$address_families" | normalized_word_set)" == 'AF_INET AF_INET6 AF_NETLINK' \
-      && "$(printf '%s' "$network_interfaces" | normalized_word_set)" == lo ]] \
-    || ! systemd_localhost_ip_boundary_is_exact "$ip_deny" "$ip_allow" \
-    || ! [[ "$(printf '%s' "$read_only_paths" | normalized_word_set)" == '/srv/leetplus/releases /srv/leetplus/slots' \
+      && "$(printf '%s' "$read_only_paths" | normalized_word_set)" == '/srv/leetplus/releases /srv/leetplus/slots' \
       && "$(printf '%s' "$read_write_paths" | normalized_word_set)" == "$(printf '%s' "$expected_read_write_paths" | normalized_word_set)" ]]; then
     candidate_unit_failure "${unit} effective network/path sandbox"
     return
+  fi
+  if [[ "$runtime_kind" == api ]]; then
+    [[ -z "$(printf '%s' "$network_interfaces" | normalized_word_set)" \
+      && -z "$(printf '%s' "$ip_deny" | normalized_word_set)" \
+      && -z "$(printf '%s' "$ip_allow" | normalized_word_set)" ]] \
+      || { candidate_unit_failure "${unit} reviewed integration egress profile"; return; }
+  else
+    [[ "$(printf '%s' "$network_interfaces" | normalized_word_set)" == lo ]] \
+      && systemd_localhost_ip_boundary_is_exact "$ip_deny" "$ip_allow" \
+      || { candidate_unit_failure "${unit} localhost-only egress profile"; return; }
   fi
   [[ "$main_pid" =~ ^[1-9][0-9]*$ && "$invocation_id" =~ ^[0-9a-f]{32}$ \
     && "$invocation_id" != 00000000000000000000000000000000 && "$control_group" == /* \

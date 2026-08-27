@@ -458,7 +458,11 @@ case "${1:-}" in
       SystemCallArchitectures) printf 'native\n' ;;
       RestrictAddressFamilies) printf 'AF_NETLINK AF_INET6 AF_INET\n' ;;
       RestrictNetworkInterfaces)
-        if [[ "$kind" == web ]]; then printf 'lo\n'; fi
+        if [[ "$kind" == web ]]; then
+          printf 'lo\n'
+        else
+          printf '%s\n' "${TEST_API_NETWORK_INTERFACES:-}"
+        fi
         ;;
       IPAddressDeny)
         if [[ "$kind" == web ]]; then printf '::/0 0.0.0.0/0\n'; fi
@@ -849,6 +853,16 @@ test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/up
 test -z "$(find "$state_root" -maxdepth 1 -type f \( -name '*.intent' -o -name '*.receipt' \) -print -quit)"
 
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
+  TEST_API_NETWORK_INTERFACES='eth0' \
+  /usr/bin/bash -p "$CUTOVER" switch --slot blue "${common_arguments[@]}" > "$TEST_ROOT/api-network-interface-drift.out" 2>&1; then
+  printf 'switch with a restricted API network interface was unexpectedly accepted\n' >&2
+  exit 1
+fi
+grep -F 'reviewed integration egress profile' "$TEST_ROOT/api-network-interface-drift.out" >/dev/null
+test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
+test -z "$(find "$state_root" -maxdepth 1 -type f \( -name '*.intent' -o -name '*.receipt' \) -print -quit)"
+
+if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
   TEST_UNIT_DRIFT_PROPERTY=UnsetEnvironment TEST_UNIT_DRIFT_VALUE='HTTP_PROXY' \
   /usr/bin/bash -p "$CUTOVER" switch --slot blue "${common_arguments[@]}" > "$TEST_ROOT/unit-env-scrub-drift.out" 2>&1; then
   printf 'switch with incomplete effective environment scrub was unexpectedly accepted\n' >&2
@@ -909,6 +923,7 @@ for failed_side in API WEB; do
 done
 
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
+  TEST_API_NETWORK_INTERFACES='~' \
   HTTP_PROXY=http://127.0.0.1:9999 NODE_OPTIONS=--definitely-invalid \
   LEETPLUS_TEST_TIMESTAMP_OVERRIDE=20991231T235959999999999Z \
   /usr/bin/bash -p "$CUTOVER" switch --slot blue "${common_arguments[@]}" > "$TEST_ROOT/switch.out"

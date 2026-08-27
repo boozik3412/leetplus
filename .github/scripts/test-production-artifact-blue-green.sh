@@ -456,7 +456,7 @@ case "${1:-}" in
       ProtectProc) printf 'invisible\n' ;;
       ProcSubset) printf 'pid\n' ;;
       SystemCallArchitectures) printf 'native\n' ;;
-      RestrictAddressFamilies) printf 'AF_INET6 AF_INET\n' ;;
+      RestrictAddressFamilies) printf 'AF_NETLINK AF_INET6 AF_INET\n' ;;
       RestrictNetworkInterfaces) printf 'lo\n' ;;
       IPAddressDeny) printf '::/0 0.0.0.0/0\n' ;;
       IPAddressAllow) printf '127.0.0.0/8 ::1/128\n' ;;

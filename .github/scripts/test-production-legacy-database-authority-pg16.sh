@@ -21,7 +21,7 @@ readonly DRAIN_VERIFIER="${DEPLOY_ROOT}/verify-legacy-runtime-drain.sh"
 readonly TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
 
-for command_name in docker psql pg_isready sed sha256sum; do
+for command_name in docker grep psql pg_isready sed sha256sum; do
   command -v "$command_name" >/dev/null 2>&1 || {
     printf 'missing PG16 fixture command: %s\n' "$command_name" >&2
     exit 1
@@ -70,6 +70,50 @@ CREATE TABLE public."StaffChatChannel" ("id" text PRIMARY KEY, "tenantId" text N
 CREATE TABLE public."StaffChatChannelMember" ("id" text PRIMARY KEY, "channelId" text NOT NULL, "userId" text NOT NULL);
 SQL
 "${psql_admin[@]}" --file "$AUTHORITY_SQL" >/dev/null
+
+if grep -F "'leetplus_ops.apply_nminus1_legacy_login_fence(text,text,integer,text,text)'::regprocedure" \
+  "$DRAIN_VERIFIER" >/dev/null; then
+  printf 'drain verifier resolves the protected function through schema USAGE\n' >&2
+  exit 1
+fi
+audit_catalog_acl_counts="$(
+  env PGPASSWORD=audit-fixture \
+    psql -h 127.0.0.1 -p 5432 -U leetplus_drain_audit -d leetplus \
+      --no-psqlrc --set=ON_ERROR_STOP=1 --tuples-only --no-align <<'SQL'
+SELECT
+  (SELECT count(*)
+    FROM pg_catalog.pg_proc fn
+    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = fn.pronamespace
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+      COALESCE(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
+    WHERE namespace.nspname = 'leetplus_ops'
+      AND fn.proname = 'apply_nminus1_legacy_login_fence'
+      AND pg_catalog.pg_get_function_identity_arguments(fn.oid) =
+        'expected_database text, expected_address text, expected_port integer, expected_system_identifier text, expected_session_user text'),
+  (SELECT count(*)
+    FROM pg_catalog.pg_proc fn
+    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = fn.pronamespace
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+      COALESCE(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
+    JOIN pg_catalog.pg_roles grantee ON grantee.oid = acl.grantee
+    JOIN pg_catalog.pg_roles grantor ON grantor.oid = acl.grantor
+    WHERE namespace.nspname = 'leetplus_ops'
+      AND fn.proname = 'apply_nminus1_legacy_login_fence'
+      AND pg_catalog.pg_get_function_identity_arguments(fn.oid) =
+        'expected_database text, expected_address text, expected_port integer, expected_system_identifier text, expected_session_user text'
+      AND acl.privilege_type = 'EXECUTE' AND NOT acl.is_grantable
+      AND grantor.rolname = 'leetplus_fence_authority'
+      AND grantee.rolname IN ('leetplus_fence_authority', 'leetplus_role_fencer')),
+  pg_catalog.has_schema_privilege(
+    current_user, 'leetplus_ops', 'USAGE'),
+  current_user;
+SQL
+)"
+[[ "$audit_catalog_acl_counts" == '2|2|f|leetplus_drain_audit' ]] || {
+  printf 'schema-blind audit catalog lookup is not exact: %s\n' \
+    "$audit_catalog_acl_counts" >&2
+  exit 1
+}
 
 pinned_function_source_md5="$(sed -nE \
   "s/.*pg_catalog\\.md5\\(fn\\.prosrc\\) = '([0-9a-f]{32})'.*/\\1/p" \

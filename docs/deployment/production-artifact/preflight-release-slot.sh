@@ -184,8 +184,8 @@ if [[ "$unprivileged_test_mode" == false ]]; then
   # This process is an ExecStartPre of the candidate unit, so the connection
   # attempt runs in that unit's live cgroup and effective IP firewall. Target
   # the host's own non-loopback IPv4 on the closed discard port: a working
-  # boundary returns EACCES/EPERM before any external packet can be emitted;
-  # success, refusal, timeout or absence of a non-loopback address all fail.
+  # boundary returns EACCES/EPERM or silently drops the local packet until the
+  # bounded timeout; success, refusal or absence of a non-loopback address fail.
   node --input-type=module <<'NETWORK_DENY_SELF_TEST' \
     || die 'candidate live kernel no-egress self-test failed'
 import { networkInterfaces } from "node:os";
@@ -208,7 +208,7 @@ const accepted = await new Promise((resolve) => {
     socket.destroy();
     resolve(value);
   };
-  socket.setTimeout(1500, () => finish(false));
+  socket.setTimeout(1500, () => finish(true));
   socket.once("connect", () => finish(false));
   socket.once("error", (error) => finish(
     error?.code === "EACCES" || error?.code === "EPERM",

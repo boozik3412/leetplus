@@ -45,16 +45,16 @@ readonly MIGRATION_PATTERN='^[0-9]{14}_[a-z0-9_]+$'
 readonly SLOT_PATTERN='^(blue|green)$'
 readonly CUTOVER_RECORD_NAMESPACE_GLOB='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T*-g*-*-*'
 readonly FIRST_CUTOVER_ROLLBACK_SHA='7de04ff4ccc814494810730be3fa6bf661097b07'
-readonly SLOT_API_UNIT_SHA256='d8dad96e12bfb2d6c5d97a1a491937605fa9eca309bae6feb028790472a656dd'
-readonly SLOT_WEB_UNIT_SHA256='33af89e1ad455cf55091ecfb4603d573052d9ae874ecdaaf3bc8b2da80d97b3f'
+readonly SLOT_API_UNIT_SHA256='a9bdb23d45bd4cef0b1d9debbc29bb8707db9e6f92da265db927831d2727241d'
+readonly SLOT_WEB_UNIT_SHA256='8c47b412ed3b42bcbbb421a78939c232d82919ca0995d28c1c4140c8775ae81e'
 readonly CANARY_SAFE_ENV_SHA256='dd87543ca654cf9ca1a94fae06d4f3e2f04c88e8ba0be84f45df2a7e03075d48'
-readonly SLOT_PREFLIGHT_SHA256='8f3bfcfa2046cc95c80e855b598de2e0f14b998c957906cbba03d7ef114a18b9'
+readonly SLOT_PREFLIGHT_SHA256='3d3fa0ff089af692ceafb0492f77cb855e51e4ad75924bd624694e76a3beb26c'
 readonly BLUE_NGINX_SHA256='3553e31012e1c00d695381c76ad4df184113c71c5a8b018bf5d934c2cea3fd8e'
 readonly GREEN_NGINX_SHA256='a9e449bcd5f7d56be97f347455f7d0629f393d471cdf2b87029b4bede2d58462'
 readonly LEGACY_SAFE_NGINX_SHA256='ebd449a4221dcb0c1d5449b4f87893bcad58b1f16319551730ca5aefde571b25'
 readonly RELEASE_READINESS_SHA256='4bbddf358298c27878ea03a6811a2f5f54af933ad1cd7da2eebfe7f7558351a0'
 readonly LEGACY_READINESS_SHA256='9ba94b6f162e3df1f002b0da316b0bf797e94704bbf73f3fdf119ed47bcebb42'
-readonly AUTHENTICATED_READS_SHA256='8b64014a094fffe8a98e8bb2423653e42e95c0ba3da904817c9a8f4b468dc6d8'
+readonly AUTHENTICATED_READS_SHA256='ba865d917997f34a440a0648431cb72c5584e527d4bfa88e67b1cb47e4e2e2d9'
 
 die() {
   printf 'blue-green-cutover: %s\n' "$*" >&2
@@ -373,7 +373,7 @@ attest_candidate_unit() {
       working_directory="/srv/leetplus/slots/${slot}/apps/web"
       expected_exec_path='/usr/bin/node'
       if [[ "$slot" == blue ]]; then expected_listener_port=3100; else expected_listener_port=3200; fi
-      expected_exec_argv="/usr/bin/node /srv/leetplus/slots/${slot}/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port ${expected_listener_port}"
+      expected_exec_argv="/usr/bin/node /srv/leetplus/slots/${slot}/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port \${WEB_PORT}"
       runtime_environment="${environment_root}/web-runtime.env"
       runtime_group='leetplus-web-runtime'
       runtime_mode='640'
@@ -475,7 +475,7 @@ attest_candidate_unit() {
     && "$remove_ipc" == yes && "$syscall_architectures" == native && "$unit_umask" == 0027 \
     && -z "$capability_bounding" && -z "$ambient_capabilities" ]] \
     || { candidate_unit_failure "${unit} effective sandbox/capability boundary"; return; }
-  if ! [[ "$(printf '%s' "$address_families" | normalized_word_set)" == 'AF_INET AF_INET6' \
+  if ! [[ "$(printf '%s' "$address_families" | normalized_word_set)" == 'AF_INET AF_INET6 AF_NETLINK' \
       && "$(printf '%s' "$network_interfaces" | normalized_word_set)" == lo ]] \
     || ! systemd_localhost_ip_boundary_is_exact "$ip_deny" "$ip_allow" \
     || ! [[ "$(printf '%s' "$read_only_paths" | normalized_word_set)" == '/srv/leetplus/releases /srv/leetplus/slots' \
@@ -555,7 +555,7 @@ attest_candidate_unit() {
       || { candidate_unit_failure "${unit} NSS group inventory"; return; }
 
     [[ "$control_group" == "/system.slice/${unit}" \
-      && "$(realpath -e -- "/proc/${main_pid}/cwd")" == "$working_directory" ]] \
+      && "$(realpath -e -- "/proc/${main_pid}/cwd")" == "$(realpath -e -- "$working_directory")" ]] \
       || { candidate_unit_failure "${unit} exact cgroup/cwd identity"; return; }
     cgroup_path="/sys/fs/cgroup${control_group}"
     [[ -d "$cgroup_path" && ! -L "$cgroup_path" ]] \

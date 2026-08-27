@@ -651,17 +651,25 @@ SELECT
           AND pg_catalog.md5(fn.prosrc) = '51957bdd1436c5072787194eda27c431') = 1
       AND (SELECT count(*)
         FROM pg_catalog.pg_proc fn
+        JOIN pg_catalog.pg_namespace namespace ON namespace.oid = fn.pronamespace
         CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
         JOIN pg_catalog.pg_roles grantee ON grantee.oid = acl.grantee
         JOIN pg_catalog.pg_roles grantor ON grantor.oid = acl.grantor
-        WHERE fn.oid = 'leetplus_ops.apply_nminus1_legacy_login_fence(text,text,integer,text,text)'::regprocedure
+        WHERE namespace.nspname = 'leetplus_ops'
+          AND fn.proname = 'apply_nminus1_legacy_login_fence'
+          AND pg_catalog.pg_get_function_identity_arguments(fn.oid) =
+            'expected_database text, expected_address text, expected_port integer, expected_system_identifier text, expected_session_user text'
           AND acl.privilege_type = 'EXECUTE' AND NOT acl.is_grantable
           AND grantor.rolname = 'leetplus_fence_authority'
           AND grantee.rolname IN ('leetplus_fence_authority', 'leetplus_role_fencer')) = 2
       AND (SELECT count(*)
         FROM pg_catalog.pg_proc fn
+        JOIN pg_catalog.pg_namespace namespace ON namespace.oid = fn.pronamespace
         CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(fn.proacl, pg_catalog.acldefault('f', fn.proowner))) acl
-        WHERE fn.oid = 'leetplus_ops.apply_nminus1_legacy_login_fence(text,text,integer,text,text)'::regprocedure) = 2
+        WHERE namespace.nspname = 'leetplus_ops'
+          AND fn.proname = 'apply_nminus1_legacy_login_fence'
+          AND pg_catalog.pg_get_function_identity_arguments(fn.oid) =
+            'expected_database text, expected_address text, expected_port integer, expected_system_identifier text, expected_session_user text') = 2
       AND (SELECT count(*)
         FROM pg_catalog.pg_namespace namespace
         CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))) acl
@@ -694,7 +702,7 @@ WHERE datname = current_database();
 COMMIT;
 SQL
   )" || return 0
-  counts="$(tr -d '[:space:]' <<< "$counts")"
+  counts="$(awk -F'|' 'NF == 22 { last = $0 } END { print last }' <<< "$counts")"
   IFS='|' read -r legacy_sessions legacy_transactions legacy_workers rollback_wrong_identity \
     rollback_role_contract rollback_membership_contract rollback_direct_memberships \
     legacy_reverse_memberships rollback_reverse_memberships unauthorized_legacy_member_sessions \

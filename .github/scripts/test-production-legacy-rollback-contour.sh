@@ -336,6 +336,7 @@ auth_legacy_credentials="$TEST_ROOT/auth-legacy-smoke.env"
 auth_mixed_credentials="$TEST_ROOT/auth-mixed-smoke.env"
 auth_database_oracle="$TEST_ROOT/auth-database-oracle.json"
 auth_legacy_database_oracle="$TEST_ROOT/auth-legacy-database-oracle.json"
+auth_current_hidden_admin_database_oracle="$TEST_ROOT/auth-current-hidden-admin-database-oracle.json"
 tenant_id_digest="$(printf %s 'tenant-1' | sha256sum | awk '{ print $1 }')"
 store_ids_digest="$(printf '%s\n' store-1 store-2 store-3 store-4 | sha256sum | awk '{ print $1 }')"
 printf '%s\n' \
@@ -388,6 +389,16 @@ node -e '
   user.isPlatformAdmin = true;
   fs.writeFileSync(process.argv[2], `${JSON.stringify(source)}\n`);
 ' "$auth_database_oracle" "$auth_legacy_database_oracle"
+node -e '
+  const fs = require("node:fs");
+  const source = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  source.users.push({
+    accessScope: "NETWORK", customRoleId: null, id: "user-platform-admin",
+    isActive: true, isPlatformAdmin: true, role: "ADMIN", storeIds: [],
+  });
+  source.users.sort((left, right) => left.id.localeCompare(right.id));
+  fs.writeFileSync(process.argv[2], `${JSON.stringify(source)}\n`);
+' "$auth_database_oracle" "$auth_current_hidden_admin_database_oracle"
 auth_port_file="$TEST_ROOT/auth-port"
 auth_request_log="$TEST_ROOT/auth-requests.log"
 auth_scenario_file="$TEST_ROOT/auth-scenario"
@@ -896,6 +907,11 @@ if grep -F 'demo' "$TEST_ROOT/auth-valid.out" >/dev/null; then
   printf 'authenticated smoke leaked raw tenant identity to stdout\n' >&2
   exit 1
 fi
+node "$authenticated_smoke" --unprivileged-test-mode --base-url "$auth_url" \
+  --credentials "$auth_credentials" --database-oracle "$auth_current_hidden_admin_database_oracle" \
+  > "$TEST_ROOT/auth-current-hidden-admin.out"
+grep -F -x 'LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG=CURRENT' \
+  "$TEST_ROOT/auth-current-hidden-admin.out" >/dev/null
 kill "$auth_server_pid"
 wait "$auth_server_pid" 2>/dev/null || true
 auth_server_pid=''
@@ -1489,6 +1505,7 @@ cat > "$bin_root/psql" <<'PSQL'
 set -euo pipefail
 cat >/dev/null
 [[ "${TEST_PSQL_HANG:-false}" != true ]] || { sleep 30; exit 0; }
+printf 'BEGIN\n'
 if [[ "${TEST_DB_DIRTY:-false}" == true ]]; then
   printf '1|1|0|0|1|1|1|2|0|0|1|1|1|1|0|0|1|leetplus|127.0.0.1|5432|1234567890123456789|leetplus_drain_audit\n'
 elif [[ "${TEST_DB_IDENTITY_WRONG:-false}" == true ]]; then
@@ -1498,6 +1515,7 @@ elif [[ "${TEST_DB_EXTRA_MEMBER:-false}" == true ]]; then
 else
   printf '0|0|0|0|1|1|1|2|0|0|1|1|1|1|0|0|1|leetplus|127.0.0.1|5432|1234567890123456789|leetplus_drain_audit\n'
 fi
+printf 'COMMIT\n'
 PSQL
 
 cat > "$bin_root/database-fence" <<'DATABASE_FENCE'

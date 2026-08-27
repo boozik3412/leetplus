@@ -12,6 +12,7 @@ import { UsersService } from './users.service';
 
 const tenantId = 'tenant-a';
 const now = new Date('2026-07-27T00:00:00.000Z');
+const oneDayMilliseconds = 24 * 60 * 60 * 1000;
 
 function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
@@ -108,7 +109,7 @@ function inviteRow(
     accessScope,
     storeIds,
     tokenHash: `${id}-token`,
-    expiresAt: new Date('2026-08-27T00:00:00.000Z'),
+    expiresAt: new Date(Date.now() + 30 * oneDayMilliseconds),
     acceptedAt: null,
     acceptedByUserId: null,
     createdByUserId: storeActor.id,
@@ -859,7 +860,7 @@ describe('UsersService AccessScope boundary', () => {
   });
 
   it('explicitly revokes and releases a naturally expired invite', async () => {
-    const expiredAt = new Date('2026-07-01T00:00:00.000Z');
+    const expiredAt = new Date(Date.now() - oneDayMilliseconds);
     const existing = {
       ...inviteRow('invite-expired-a1', 'STORES', ['a1']),
       expiresAt: expiredAt,

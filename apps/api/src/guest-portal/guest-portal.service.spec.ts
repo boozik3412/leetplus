@@ -69,6 +69,7 @@ function createPrismaMock() {
     },
     guestPortalOtpChallenge: {
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       count: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
@@ -350,6 +351,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.store.findMany.mockResolvedValue([]);
   prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
   prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue(null);
+  prisma.guestPortalOtpChallenge.findUnique.mockResolvedValue(null);
   prisma.guestPortalOtpChallenge.count.mockResolvedValue(0);
   prisma.guestPortalOtpChallenge.create.mockResolvedValue({});
   prisma.guestPortalOtpChallenge.update.mockResolvedValue({});
@@ -10435,8 +10437,12 @@ describe('GuestPortalService', () => {
       expect(prisma.guestPortalOtpChallenge.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            storeId: 'store-1',
             deliveryChannel: 'USER_CALL',
-            status: 'PENDING',
+            status: {
+              in: ['PENDING', 'CALL_PROVIDER_STARTING'],
+            },
           }),
           data: { status: 'EXPIRED' },
         }),
@@ -10447,10 +10453,16 @@ describe('GuestPortalService', () => {
             tenantId: 'tenant-1',
             storeId: 'store-1',
             phoneMasked: '***9999',
-            status: 'PENDING',
+            status: 'CALL_PROVIDER_STARTING',
             deliveryChannel: 'USER_CALL',
             gameConsentVersion: 'guest-game-v1-2026-06-15',
           }),
+        }),
+      );
+      expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: result.challengeId },
+          data: expect.objectContaining({ status: 'PENDING' }),
         }),
       );
       expect(result).toMatchObject({
@@ -10514,13 +10526,26 @@ describe('GuestPortalService', () => {
         expect(prisma.guestPortalOtpChallenge.create).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
-              status: 'PENDING',
+              status: 'CALL_PROVIDER_STARTING',
               deliveryChannel: 'USER_CALL',
+              providerName: 'SMS_RU_CALLCHECK',
+              providerChallengeId: null,
+            }),
+          }),
+        );
+        expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: result.challengeId },
+            data: expect.objectContaining({
+              status: 'PENDING',
               providerName: 'SMS_RU_CALLCHECK',
               providerChallengeId: 'smsru-check-1',
             }),
           }),
         );
+        expect(
+          prisma.guestPortalOtpChallenge.create.mock.invocationCallOrder[0],
+        ).toBeLessThan(fetchMock.mock.invocationCallOrder[0]);
         expect(result).toMatchObject({
           phoneMasked: '***9999',
           callNumber: '+7 343 000-00-00',
@@ -10533,6 +10558,146 @@ describe('GuestPortalService', () => {
         );
         expect(result.message).not.toContain('SMS.ru');
         expect(JSON.stringify(result)).not.toContain('smsru-api-id');
+      } finally {
+        fetchMock.mockRestore();
+      }
+    });
+
+    it('does not serialize different guest phones behind one application lock', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_PORTAL_USER_CALL_ENABLED: 'true',
+        GUEST_PORTAL_USER_CALL_PHONE_NUMBER: '+7 343 000-00-00',
+        GUEST_PORTAL_USER_CALL_SECRET: 'call-secret',
+      });
+      mockLeetTenant(prisma);
+      const guestCount = 120;
+
+      await Promise.all(
+        Array.from({ length: guestCount }, (_, index) =>
+          service.startUserCallAuth('leet', 'club-1337', {
+            phone: String(7_900_000_0000 + index),
+            gameConsentAccepted: true,
+          }),
+        ),
+      );
+
+      const scopeLockKeys = prisma.$queryRaw.mock.calls
+        .map((call: unknown[]) => call[1])
+        .filter(
+          (value: unknown): value is string =>
+            typeof value === 'string' && value.includes('guest-auth-scope-v1'),
+        );
+      expect(scopeLockKeys).toHaveLength(guestCount);
+      expect(new Set(scopeLockKeys).size).toBe(guestCount);
+      expect(prisma.guestPortalOtpChallenge.create).toHaveBeenCalledTimes(
+        guestCount,
+      );
+    });
+
+    it('rejects a duplicate phone after taking the exact guest scope lock', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_PORTAL_USER_CALL_ENABLED: 'true',
+        GUEST_PORTAL_USER_CALL_PHONE_NUMBER: '+7 343 000-00-00',
+        GUEST_PORTAL_USER_CALL_SECRET: 'call-secret',
+      });
+      mockLeetTenant(prisma);
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: 'existing-call',
+      });
+
+      await expect(
+        service.startUserCallAuth('leet', 'club-1337', {
+          phone: '+7 999 999-99-99',
+          gameConsentAccepted: true,
+        }),
+      ).rejects.toThrow('Звонок уже ожидается');
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.guestPortalOtpChallenge.create).not.toHaveBeenCalled();
+    });
+
+    it('bounds a stalled provider request and releases the reservation', async () => {
+      const fetchMock = jest.spyOn(globalThis, 'fetch').mockImplementation(
+        (_input, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => {
+                const error = new Error('provider request aborted');
+                error.name = 'AbortError';
+                reject(error);
+              },
+              { once: true },
+            );
+          }),
+      );
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_PORTAL_USER_CALL_ENABLED: 'true',
+        GUEST_PORTAL_USER_CALL_PROVIDER: 'SMS_RU_CALLCHECK',
+        GUEST_PORTAL_USER_CALL_SMS_RU_API_ID: 'smsru-api-id',
+        GUEST_PORTAL_USER_CALL_PROVIDER_TIMEOUT_MS: '100',
+      });
+      mockLeetTenant(prisma);
+
+      try {
+        await expect(
+          service.startUserCallAuth('leet', 'club-1337', {
+            phone: '+7 999 999-99-99',
+            gameConsentAccepted: true,
+          }),
+        ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+        expect(prisma.guestPortalOtpChallenge.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              status: 'CALL_PROVIDER_STARTING',
+            }),
+            data: expect.objectContaining({ status: 'FAILED' }),
+          }),
+        );
+      } finally {
+        fetchMock.mockRestore();
+      }
+    });
+
+    it('coalesces duplicate provider polling for one challenge', async () => {
+      const fetchMock = jest.spyOn(globalThis, 'fetch');
+      const { prisma, service } = createService({
+        GUEST_PORTAL_USER_CALL_PROVIDER: 'SMS_RU_CALLCHECK',
+        GUEST_PORTAL_USER_CALL_SMS_RU_API_ID: 'smsru-api-id',
+        GUEST_PORTAL_USER_CALL_STATUS_POLL_MIN_INTERVAL_MS: '2500',
+      });
+      mockLeetTenant(prisma);
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: 'call-auth-coalesced',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: null,
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        status: 'PENDING',
+        deliveryChannel: 'USER_CALL',
+        providerName: 'SMS_RU_CALLCHECK',
+        providerChallengeId: 'smsru-check-coalesced',
+        providerStatusCode: '400',
+        providerStatusText: 'Ожидание звонка',
+        expiresAt: new Date(Date.now() + 60_000),
+        updatedAt: new Date(),
+      });
+
+      try {
+        const status = await service.getUserCallAuthStatus(
+          'leet',
+          'club-1337',
+          { challengeId: 'call-auth-coalesced' },
+        );
+
+        expect(status).toMatchObject({ status: 'PENDING' });
+        expect(fetchMock).not.toHaveBeenCalled();
       } finally {
         fetchMock.mockRestore();
       }

@@ -19,10 +19,11 @@
 | Staff snapshot admission       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; synthetic verified; production-like NO-GO   |
 | Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — included in green remote SHA `d77c7439...`             |
 | Authority operations           | Detached candidate; local 40/40; production public root `{}` / FAIL-CLOSED                          |
-| Schema target                  | `CURRENT_187`; count `187`; head `20260820010000_guest_portal_telegram_update_ledger`; deployed      |
-| Deployed access baseline       | `8d49f2d7...`; role minimums, employee routes and signed platform-admin tenant context verified      |
-| Role-aware landing candidate   | `359e5aeb...`; merged/admitted, production deploy and real-account canary pending                    |
-| Prior merge-ref baseline       | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA                      |
+| Schema target                  | `CURRENT_187`; count `187`; head `20260820010000_guest_portal_telegram_update_ledger`; deployed     |
+| Deployed access baseline       | `8d49f2d7...`; role minimums, employee routes and signed platform-admin tenant context verified     |
+| Role-aware landing candidate   | `359e5aeb...`; merged/admitted, production deploy and real-account canary pending                   |
+| Runtime contour contract       | [`public guest / corporate / workers`](../runtime-security-contours.md); canonical 28.08.2026       |
+| Prior merge-ref baseline       | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA                        |
 | Previous accepted exact-head   | `d525b736...` / CI `30447467729` (`run #28`); `3/3 PASS`                                            |
 | Last accepted checkpoint       | exact-head `be8c94c4...` / CI `30449026506` (`run #29`); `3/3 PASS`                                 |
 | Current operational gate       | non-owner runtime/app DB role admission and explicit `EXECUTE`; provider activation remains `NO-GO` |

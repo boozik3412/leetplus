@@ -70,9 +70,12 @@ secrets не сохраняются.
 
 Tenant-очередь видят пользователи с capability `view_support_tickets` в свежем
 network scope. Назначение, смена статуса и внутренний комментарий требуют
-`manage_support_tickets`. OWNER/ADMIN получают обе capability по стандартной
-роли; техническому специалисту их можно выдать через custom role или exact
-tenant role override. Platform-wide очередь доступна только platform admin.
+`manage_support_tickets`. OWNER/ADMIN получают обе capability как обязательный
+минимум роли, в том числе при наличии custom role или role override. Это не
+изменяет frozen shared-beta provisioning profile и не требует массового
+переписывания `UserRoleOverride`. Техническому специалисту capability выдаются
+явно через custom role или exact tenant role override. Platform-wide очередь
+доступна только platform admin.
 
 Каждое создание, изменение и комментарий записываются в отдельный support audit
 ledger. Tenant API всегда добавляет `tenantId` в read/update/comment/download;

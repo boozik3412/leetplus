@@ -628,14 +628,21 @@ const administratorWorkspaceCapabilities: Capability[] = [
   "view_staff_knowledge",
 ];
 
+const supportAdministrationCapabilities: Capability[] = [
+  "view_support_tickets",
+  "manage_support_tickets",
+];
+
 const minimumRoleCapabilities: Partial<Record<AuthUser["role"], Capability[]>> =
   {
     OWNER: [
       ...universalCommunicationCapabilities,
+      ...supportAdministrationCapabilities,
       ...elevatedKnowledgeCapabilities,
     ],
     ADMIN: [
       ...universalCommunicationCapabilities,
+      ...supportAdministrationCapabilities,
       ...administratorWorkspaceCapabilities,
       ...elevatedKnowledgeCapabilities,
     ],

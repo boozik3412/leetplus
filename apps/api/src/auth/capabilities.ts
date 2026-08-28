@@ -304,8 +304,6 @@ export const SHARED_BETA_INITIAL_OWNER_CAPABILITIES = [
   'operate_guest_game_ledger',
   'view_communications',
   'manage_communications',
-  'view_support_tickets',
-  'manage_support_tickets',
   'view_staff',
   'view_staff_shift_workspace',
   'view_staff_tasks',
@@ -626,13 +624,20 @@ const administratorWorkspaceCapabilities: AccessCapability[] = [
   'view_staff_knowledge',
 ];
 
+const supportAdministrationCapabilities: AccessCapability[] = [
+  'view_support_tickets',
+  'manage_support_tickets',
+];
+
 const minimumRoleCapabilities: Partial<Record<UserRole, AccessCapability[]>> = {
   [UserRole.OWNER]: [
     ...universalCommunicationCapabilities,
+    ...supportAdministrationCapabilities,
     ...elevatedKnowledgeCapabilities,
   ],
   [UserRole.ADMIN]: [
     ...universalCommunicationCapabilities,
+    ...supportAdministrationCapabilities,
     ...administratorWorkspaceCapabilities,
     ...elevatedKnowledgeCapabilities,
   ],

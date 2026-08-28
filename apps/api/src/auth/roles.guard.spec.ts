@@ -982,6 +982,44 @@ describe('RolesGuard', () => {
     });
   });
 
+  it('keeps support administration for owner and admin after saved access customization', () => {
+    [UserRole.OWNER, UserRole.ADMIN].forEach((role) => {
+      const customRolePermissions = resolveUserCapabilities({
+        role,
+        customRole: { permissions: [] },
+      });
+      const overridePermissions = resolveUserCapabilities({
+        role,
+        roleOverride: { permissions: [] },
+      });
+
+      expect(customRolePermissions).toEqual(
+        expect.arrayContaining([
+          'view_support_tickets',
+          'manage_support_tickets',
+        ]),
+      );
+      expect(overridePermissions).toEqual(
+        expect.arrayContaining([
+          'view_support_tickets',
+          'manage_support_tickets',
+        ]),
+      );
+    });
+
+    expect(
+      resolveUserCapabilities({
+        role: UserRole.MANAGER,
+        roleOverride: { permissions: [] },
+      }),
+    ).not.toEqual(
+      expect.arrayContaining([
+        'view_support_tickets',
+        'manage_support_tickets',
+      ]),
+    );
+  });
+
   it('lets administrators read only their motivation page', () => {
     reflector.getAllAndOverride.mockReturnValue([
       UserRole.OWNER,

@@ -60,6 +60,41 @@ for required_file in \
   test -f "$required_file"
 done
 
+node --input-type=module - "$REPOSITORY_ROOT" "$authenticated_smoke" <<'CURRENT_CAPABILITY_CONTRACT'
+import { readFile } from 'node:fs/promises';
+const [repositoryRoot, authenticatedSmokePath] = process.argv.slice(2);
+const capabilitiesSource = await readFile(
+  `${repositoryRoot}/apps/api/src/auth/capabilities.ts`,
+  'utf8',
+);
+const catalogMarker = 'export const accessCapabilityCatalog = ';
+const catalogStart = capabilitiesSource.indexOf(catalogMarker) + catalogMarker.length;
+const catalogEnd = capabilitiesSource.indexOf('] as const;', catalogStart) + 1;
+if (catalogStart < catalogMarker.length || catalogEnd < 1) process.exit(1);
+const capabilityCatalog = Function(
+  `return ${capabilitiesSource.slice(catalogStart, catalogEnd)}`,
+)();
+
+const smokeSource = await readFile(authenticatedSmokePath, 'utf8');
+const smokeMarker = 'const EXACT_CAPABILITY_KEYS = Object.freeze(';
+const smokeStart = smokeSource.indexOf(smokeMarker) + smokeMarker.length;
+const smokeEnd = smokeSource.indexOf(');', smokeStart);
+if (smokeStart < smokeMarker.length || smokeEnd < 1) process.exit(1);
+const smokeCapabilityKeys = Function(
+  `return ${smokeSource.slice(smokeStart, smokeEnd)}`,
+)();
+const applicationCapabilityKeys = capabilityCatalog.map(({ key }) => key);
+if (
+  JSON.stringify(smokeCapabilityKeys) !==
+  JSON.stringify(applicationCapabilityKeys)
+) {
+  process.stderr.write(
+    'authenticated smoke capability catalog differs from the application catalog\n',
+  );
+  process.exit(1);
+}
+CURRENT_CAPABILITY_CONTRACT
+
 legacy_capability_digest="$(node --input-type=module - "$REPOSITORY_ROOT" "$LEGACY_SHA" <<'LEGACY_CATALOG_DIGEST'
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -422,7 +457,8 @@ const capabilityKeys = [
   'view_guest_gamification', 'manage_guest_game_rules', 'approve_guest_game_rewards',
   'operate_guest_game_ledger',
   'view_guest_game_pii', 'view_marketing', 'manage_marketing', 'view_communications',
-  'manage_communications', 'view_staff', 'view_staff_shift_workspace', 'view_staff_tasks',
+  'manage_communications', 'view_support_tickets', 'manage_support_tickets',
+  'view_staff', 'view_staff_shift_workspace', 'view_staff_tasks',
   'manage_staff_tasks', 'view_staff_standards', 'manage_staff_standards',
   'view_staff_training', 'manage_staff_training', 'view_staff_knowledge',
   'view_staff_control', 'manage_staff_control', 'view_staff_directory',
@@ -436,7 +472,8 @@ const capabilityOptions = capabilityKeys.map((key) => ({
   key, label: `Label ${key}`, description: `Description ${key}`,
 }));
 const legacyCapabilityKeys = capabilityKeys.filter((key) =>
-  key !== 'operate_guest_game_ledger' && key !== 'import_guest_foundation');
+  key !== 'operate_guest_game_ledger' && key !== 'import_guest_foundation' &&
+  key !== 'view_support_tickets' && key !== 'manage_support_tickets');
 const legacyCapabilityOptions = capabilityOptions.filter((capability) =>
   legacyCapabilityKeys.includes(capability.key));
 const roleOptions = [

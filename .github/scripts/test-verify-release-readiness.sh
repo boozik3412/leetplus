@@ -5,6 +5,7 @@ IFS=$'\n\t'
 
 readonly RELEASE_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 readonly MIGRATION='20260828190000_guest_support_bug_reports'
+readonly BRIDGE_SOURCE_MIGRATION='20260820010000_guest_portal_telegram_update_ledger'
 readonly REPOSITORY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly PROBE="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-release-readiness.sh"
 readonly TEST_ROOT="$(mktemp -d)"
@@ -133,6 +134,7 @@ chmod 0700 "$TEST_ROOT/bin/curl"
 
 valid_version="{\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"}}"
 valid_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${MIGRATION}\",\"migrationCount\":188}}}"
+valid_bridge_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${BRIDGE_SOURCE_MIGRATION}\",\"migrationCount\":187,\"compatibility\":{\"mode\":\"GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE\",\"targetMigration\":\"${MIGRATION}\",\"targetMigrationCount\":188}}}}"
 valid_web_identity="{\"ok\":true,\"release\":{\"sha\":\"${RELEASE_SHA}\",\"webBuildId\":\"${RELEASE_SHA}\"}}"
 
 PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$valid_ready" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \
@@ -146,8 +148,56 @@ PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="
     --unprivileged-test-mode > "$TEST_ROOT/accepted.out"
 
 grep -F -x "RELEASE_READINESS_ACCEPTED_SHA=${RELEASE_SHA}" "$TEST_ROOT/accepted.out" > /dev/null
+grep -F -x 'RELEASE_READINESS_ACCEPTED_DATABASE_STATE=EXACT_TARGET' "$TEST_ROOT/accepted.out" > /dev/null
+grep -F -x "RELEASE_READINESS_OBSERVED_MIGRATION=${MIGRATION}" "$TEST_ROOT/accepted.out" > /dev/null
+grep -F -x 'RELEASE_READINESS_OBSERVED_MIGRATION_COUNT=188' "$TEST_ROOT/accepted.out" > /dev/null
 grep -F -x "https://web.example.test/_next/static/${RELEASE_SHA}/_buildManifest.js" "$TEST_ROOT/curl.log" > /dev/null
 grep -F -x 'https://web.example.test/api/release-identity' "$TEST_ROOT/curl.log" > /dev/null
+
+PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$valid_bridge_ready" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/bridge-curl.log" \
+  /usr/bin/bash -p "$PROBE" \
+    --release-sha "$RELEASE_SHA" \
+    --expected-migration "$MIGRATION" \
+    --expected-migration-count 188 \
+    --expected-web-build-id "$RELEASE_SHA" \
+    --api-base-url https://api.example.test/ \
+    --web-url https://web.example.test/ \
+    --unprivileged-test-mode > "$TEST_ROOT/bridge-accepted.out"
+
+grep -F -x 'RELEASE_READINESS_ACCEPTED_DATABASE_STATE=GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE' \
+  "$TEST_ROOT/bridge-accepted.out" > /dev/null
+grep -F -x "RELEASE_READINESS_OBSERVED_MIGRATION=${BRIDGE_SOURCE_MIGRATION}" \
+  "$TEST_ROOT/bridge-accepted.out" > /dev/null
+grep -F -x 'RELEASE_READINESS_OBSERVED_MIGRATION_COUNT=187' \
+  "$TEST_ROOT/bridge-accepted.out" > /dev/null
+
+bridge_with_extra_evidence="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${BRIDGE_SOURCE_MIGRATION}\",\"migrationCount\":187,\"compatibility\":{\"mode\":\"GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE\",\"targetMigration\":\"${MIGRATION}\",\"targetMigrationCount\":188,\"unexpected\":true}}}}"
+if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$bridge_with_extra_evidence" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \
+  /usr/bin/bash -p "$PROBE" \
+    --release-sha "$RELEASE_SHA" \
+    --expected-migration "$MIGRATION" \
+    --expected-migration-count 188 \
+    --expected-web-build-id "$RELEASE_SHA" \
+    --api-base-url https://api.example.test \
+    --web-url https://web.example.test/ \
+    --unprivileged-test-mode > "$TEST_ROOT/bridge-extra-evidence-rejected.out" 2>&1; then
+  printf 'bridge readiness with an extended compatibility envelope was unexpectedly accepted\n' >&2
+  exit 1
+fi
+
+exact_target_with_bridge="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${MIGRATION}\",\"migrationCount\":188,\"compatibility\":{\"mode\":\"GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE\",\"targetMigration\":\"${MIGRATION}\",\"targetMigrationCount\":188}}}}"
+if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$exact_target_with_bridge" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \
+  /usr/bin/bash -p "$PROBE" \
+    --release-sha "$RELEASE_SHA" \
+    --expected-migration "$MIGRATION" \
+    --expected-migration-count 188 \
+    --expected-web-build-id "$RELEASE_SHA" \
+    --api-base-url https://api.example.test \
+    --web-url https://web.example.test/ \
+    --unprivileged-test-mode > "$TEST_ROOT/exact-target-with-bridge-rejected.out" 2>&1; then
+  printf 'exact target carrying stale bridge evidence was unexpectedly accepted\n' >&2
+  exit 1
+fi
 
 invalid_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${MIGRATION}\",\"migrationCount\":186}}}"
 if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$invalid_ready" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \

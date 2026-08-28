@@ -6,7 +6,14 @@ import {
   randomBytes,
   randomUUID,
 } from "node:crypto";
-import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -35,6 +42,7 @@ const enabled =
   REQUIRED_CONFIRMATION;
 const SAFE_IDENTIFIER = /^[a-z][a-z0-9_]{2,62}$/u;
 const RELEASE_SHA = /^[0-9a-f]{40}$/u;
+const SOURCE_MIGRATION_COUNT = 187;
 const SOURCE_HEAD = "20260820010000_guest_portal_telegram_update_ledger";
 const TARGET_HEAD = "20260828190000_guest_support_bug_reports";
 const REPOSITORY_ROOT = path.resolve(
@@ -192,6 +200,35 @@ async function runPrismaDeploy(databaseUrl, laneRoot) {
   );
 }
 
+async function synchronizeAppliedChecksums(client, laneRoot) {
+  const migrationsRoot = path.join(laneRoot, "migrations");
+  const migrationNames = (await readdir(migrationsRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.equal(migrationNames.length, SOURCE_MIGRATION_COUNT);
+  assert.equal(migrationNames.at(-1), SOURCE_HEAD);
+
+  for (const migrationName of migrationNames) {
+    const checksum = sha256(
+      await readFile(
+        path.join(migrationsRoot, migrationName, "migration.sql"),
+      ),
+    );
+    const update = await client.query(
+      `
+        UPDATE public."_prisma_migrations"
+        SET checksum = $1
+        WHERE migration_name = $2
+          AND finished_at IS NOT NULL
+          AND rolled_back_at IS NULL
+      `,
+      [checksum, migrationName],
+    );
+    assert.equal(update.rowCount, 1);
+  }
+}
+
 function manifest({
   artifactPath,
   artifactSha256,
@@ -285,6 +322,7 @@ test(
       "leetplus-founder-production-history-current188-pg",
     );
     const sourceLaneRoot = path.join(temporaryRoot, "source-current187");
+    const bootstrapLaneRoot = path.join(temporaryRoot, "bootstrap-current187");
     const artifactPath = path.join(temporaryRoot, "release-artifact.tar.gz");
     const artifactBytes = Buffer.from("current188-pg16-release-artifact\n");
     const keyPair = generateKeyPairSync("ed25519");
@@ -306,6 +344,10 @@ test(
       });
       await cp(targetLaneRoot, sourceLaneRoot, { recursive: true });
       await rm(path.join(sourceLaneRoot, "migrations", TARGET_HEAD), {
+        recursive: true,
+      });
+      await cp(SOURCE_PRISMA_ROOT, bootstrapLaneRoot, { recursive: true });
+      await rm(path.join(bootstrapLaneRoot, "migrations", TARGET_HEAD), {
         recursive: true,
       });
       await writeFile(artifactPath, artifactBytes, { flag: "wx", mode: 0o600 });
@@ -369,7 +411,13 @@ test(
         migrationPassword,
         objectOwnerRoleName,
       );
-      await runPrismaDeploy(databaseUrl, sourceLaneRoot);
+      // The production-history lane is intentionally not a clean-install
+      // sequence: CURRENT_179 was applied after a previously deployed branch
+      // migration and therefore carries production-specific preconditions.
+      // Bootstrap the disposable database with the canonical clean sequence,
+      // then reproduce the exact production migration ledger before exercising
+      // the CURRENT_188 controller.
+      await runPrismaDeploy(databaseUrl, bootstrapLaneRoot);
 
       const runtimeUrl = credentialUrl(
         adminUrl,
@@ -384,6 +432,7 @@ test(
         query_timeout: 10_000,
       });
       await runtime.connect();
+      await synchronizeAppliedChecksums(runtime, sourceLaneRoot);
       for (const row of LEGACY_APPLIED_CHECKSUMS) {
         const update = await runtime.query(
           `

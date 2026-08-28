@@ -30,10 +30,7 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import {
-  isProductionConfig,
-  resolveSecuritySecret,
-} from '../config/environment-validation';
+import { resolveSecuritySecret } from '../config/environment-validation';
 import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
 import { GuestBonusLedgerSchedulerService } from '../guest-gamification/guest-bonus-ledger-scheduler.service';
 import { evaluateLegacyGuestGameDeliveryProtocolGate } from '../guest-gamification/guest-game-delivery-protocol-gate';
@@ -82,6 +79,7 @@ import {
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_RESEND_SECONDS = 60;
+const OTP_AUTH_DELIVERY_CHANNELS = ['DEV', 'SMS', 'TELEGRAM', 'MAX'] as const;
 const OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES = 60;
 const OTP_SMS_RATE_LIMIT_PHONE_MAX = 3;
 const OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES = 10;
@@ -120,9 +118,16 @@ const TELEGRAM_AUTH_AWAITING_CONTACT_STATUS = 'AUTH_AWAITING_CONTACT';
 const TELEGRAM_AUTH_VERIFIED_STATUS = 'AUTH_VERIFIED';
 const TELEGRAM_AUTH_SESSION_ISSUED_STATUS = 'AUTH_SESSION_ISSUED';
 const USER_CALL_AUTH_CHANNEL = 'USER_CALL';
+const USER_CALL_AUTH_PROVIDER_STARTING_STATUS = 'CALL_PROVIDER_STARTING';
 const USER_CALL_AUTH_CONFIRMED_STATUS = 'CALL_CONFIRMED';
 const USER_CALL_AUTH_SESSION_ISSUED_STATUS = 'CALL_SESSION_ISSUED';
 const USER_CALL_PROVIDER_MANUAL = 'MANUAL';
+const USER_CALL_PROVIDER_TIMEOUT_MS = 8_000;
+const USER_CALL_PROVIDER_TIMEOUT_MIN_MS = 100;
+const USER_CALL_PROVIDER_TIMEOUT_MAX_MS = 30_000;
+const USER_CALL_STATUS_POLL_MIN_INTERVAL_MS = 2_500;
+const USER_CALL_STATUS_POLL_MIN_INTERVAL_MIN_MS = 500;
+const USER_CALL_STATUS_POLL_MIN_INTERVAL_MAX_MS = 10_000;
 const LOOTBOX_CASE_RARITY_LABELS = {
   common: 'Обычный',
   rare: 'Редкий',
@@ -2507,6 +2512,10 @@ export class GuestPortalService {
 
     await this.prisma.guestPortalOtpChallenge.updateMany({
       where: {
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        phoneHash: phone.hash,
+        deliveryChannel: { in: [...OTP_AUTH_DELIVERY_CHANNELS] },
         status: 'PENDING',
         expiresAt: { lt: now },
       },
@@ -2519,6 +2528,7 @@ export class GuestPortalService {
           tenantId: context.tenant.id,
           storeId: context.store.id,
           phoneHash: phone.hash,
+          deliveryChannel: { in: [...OTP_AUTH_DELIVERY_CHANNELS] },
           status: 'PENDING',
           createdAt: { gt: resendAfter },
         },
@@ -2676,35 +2686,6 @@ export class GuestPortalService {
         : OTP_TTL_MINUTES;
     const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
 
-    await this.prisma.guestPortalOtpChallenge.updateMany({
-      where: {
-        deliveryChannel: USER_CALL_AUTH_CHANNEL,
-        status: 'PENDING',
-        expiresAt: { lt: now },
-      },
-      data: { status: 'EXPIRED' },
-    });
-
-    const recentChallenge = await this.prisma.guestPortalOtpChallenge.findFirst(
-      {
-        where: {
-          tenantId: context.tenant.id,
-          storeId: context.store.id,
-          phoneHash: phone.hash,
-          deliveryChannel: USER_CALL_AUTH_CHANNEL,
-          status: 'PENDING',
-          createdAt: { gt: resendAfter },
-        },
-        orderBy: { createdAt: 'desc' },
-      },
-    );
-
-    if (recentChallenge) {
-      throw new BadRequestException(
-        'Звонок уже ожидается. Попробуйте повторить чуть позже.',
-      );
-    }
-
     const [guest, profileByPhone] = await Promise.all([
       this.prisma.guest.findFirst({
         where: {
@@ -2755,31 +2736,104 @@ export class GuestPortalService {
       : profileByPhone;
     const id = randomUUID();
     const opaqueCode = randomBytes(18).toString('hex');
-    const providerStart = await this.startUserCallProvider({
-      config: callConfig,
-      phone,
+    const lockKey = guestAuthScopeLockKey({
+      tenantId: context.tenant.id,
+      storeId: context.store.id,
+      phoneHash: phone.hash,
+      channel: USER_CALL_AUTH_CHANNEL,
     });
 
-    await this.prisma.guestPortalOtpChallenge.create({
-      data: {
-        id,
-        tenantId: context.tenant.id,
-        storeId: context.store.id,
-        phoneHash: phone.hash,
-        phoneMasked: phone.masked,
-        phoneEncrypted: this.encryptPhone(phone),
-        guestId: guest?.id ?? null,
-        profileId: profile?.id ?? null,
-        codeHash: this.hashOtpCode(id, opaqueCode),
-        status: 'PENDING',
-        deliveryChannel: USER_CALL_AUTH_CHANNEL,
-        providerName: providerStart.providerName,
-        providerChallengeId: providerStart.providerChallengeId,
-        expiresAt,
-        gameConsentAcceptedAt: now,
-        gameConsentVersion: GAME_CONSENT_VERSION,
-      },
+    // Reserve this exact phone/channel before calling the provider. The short
+    // transaction serializes duplicate clicks for one phone across API
+    // instances, while different phones never share an application lock or a
+    // database transaction during the outbound provider request.
+    await this.prisma.$transaction(async (tx) => {
+      await this.acquireGuestAuthAdvisoryLock(tx, lockKey);
+      await tx.guestPortalOtpChallenge.updateMany({
+        where: {
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          phoneHash: phone.hash,
+          deliveryChannel: USER_CALL_AUTH_CHANNEL,
+          status: {
+            in: ['PENDING', USER_CALL_AUTH_PROVIDER_STARTING_STATUS],
+          },
+          expiresAt: { lt: now },
+        },
+        data: { status: 'EXPIRED' },
+      });
+
+      const recentChallenge = await tx.guestPortalOtpChallenge.findFirst({
+        where: {
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          phoneHash: phone.hash,
+          deliveryChannel: USER_CALL_AUTH_CHANNEL,
+          status: {
+            in: ['PENDING', USER_CALL_AUTH_PROVIDER_STARTING_STATUS],
+          },
+          createdAt: { gt: resendAfter },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (recentChallenge) {
+        throw new BadRequestException(
+          'Звонок уже ожидается. Попробуйте повторить чуть позже.',
+        );
+      }
+
+      await tx.guestPortalOtpChallenge.create({
+        data: {
+          id,
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          phoneHash: phone.hash,
+          phoneMasked: phone.masked,
+          phoneEncrypted: this.encryptPhone(phone),
+          guestId: guest?.id ?? null,
+          profileId: profile?.id ?? null,
+          codeHash: this.hashOtpCode(id, opaqueCode),
+          status: USER_CALL_AUTH_PROVIDER_STARTING_STATUS,
+          deliveryChannel: USER_CALL_AUTH_CHANNEL,
+          providerName: callConfig.provider,
+          providerChallengeId: null,
+          expiresAt,
+          gameConsentAcceptedAt: now,
+          gameConsentVersion: GAME_CONSENT_VERSION,
+        },
+      });
     });
+
+    let providerStart: GuestPortalUserCallProviderStart;
+    try {
+      providerStart = await this.startUserCallProvider({
+        config: callConfig,
+        phone,
+      });
+      await this.prisma.guestPortalOtpChallenge.update({
+        where: { id },
+        data: {
+          status: 'PENDING',
+          providerName: providerStart.providerName,
+          providerChallengeId: providerStart.providerChallengeId,
+        },
+      });
+    } catch (error) {
+      await this.prisma.guestPortalOtpChallenge
+        .updateMany({
+          where: {
+            id,
+            status: USER_CALL_AUTH_PROVIDER_STARTING_STATUS,
+          },
+          data: {
+            status: 'FAILED',
+            providerStatusText: safeDeliveryErrorMessage(error),
+          },
+        })
+        .catch(() => undefined);
+      throw error;
+    }
 
     return {
       challengeId: id,
@@ -3000,6 +3054,9 @@ export class GuestPortalService {
 
     await this.prisma.guestPortalOtpChallenge.updateMany({
       where: {
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        phoneHash: phone.hash,
         deliveryChannel: INCOMING_CALL_LAST4_CHANNEL,
         status: 'PENDING',
         expiresAt: { lt: now },
@@ -3681,6 +3738,29 @@ export class GuestPortalService {
     const staffTestData = this.staffTestProfilePatch(staffTestMatch);
 
     return this.prisma.$transaction(async (tx) => {
+      await this.acquireGuestAuthAdvisoryLock(
+        tx,
+        guestAuthChallengeLockKey(challenge.id),
+      );
+      const persistedChallenge = await tx.guestPortalOtpChallenge.findUnique({
+        where: { id: challenge.id },
+      });
+
+      if (
+        persistedChallenge?.profileId &&
+        (persistedChallenge.status === 'VERIFIED' ||
+          persistedChallenge.status === USER_CALL_AUTH_SESSION_ISSUED_STATUS)
+      ) {
+        return {
+          id: persistedChallenge.profileId,
+          guestId: persistedChallenge.guestId,
+        };
+      }
+
+      if (persistedChallenge) {
+        challenge = persistedChallenge;
+      }
+
       const guest = challenge.guestId
         ? await tx.guest.findFirst({
             where: {
@@ -14699,13 +14779,27 @@ export class GuestPortalService {
       phone: phone.normalized,
       json: '1',
     });
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    });
-    const payload = (await safeJson(
-      response,
-    )) as SmsRuCallcheckAddResponse | null;
+    let providerResponse: Awaited<ReturnType<typeof fetchJsonWithTimeout>>;
+    try {
+      providerResponse = await fetchJsonWithTimeout(
+        url,
+        {
+          method: 'GET',
+          headers: { accept: 'application/json' },
+        },
+        config.providerTimeoutMs,
+      );
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new ServiceUnavailableException(
+        'Провайдер входа по звонку временно недоступен. Используйте другой способ входа или повторите позже.',
+      );
+    }
+    const { response } = providerResponse;
+    const payload =
+      providerResponse.payload as SmsRuCallcheckAddResponse | null;
     const statusCode = smsRuResponseString(payload?.status_code);
     const checkId = smsRuResponseString(payload?.check_id);
     const callPhone = smsRuResponseString(payload?.call_phone);
@@ -14754,6 +14848,7 @@ export class GuestPortalService {
         message: 'Идентификатор проверки звонка не найден у call challenge.',
       };
     }
+    const providerChallengeId = challenge.providerChallengeId;
 
     const config = guestPortalUserCallConfig(this.configService);
 
@@ -14768,10 +14863,23 @@ export class GuestPortalService {
       };
     }
 
+    const pollClaim = await this.claimUserCallProviderPoll(
+      challenge,
+      config.statusPollMinIntervalMs,
+    );
+    if (!pollClaim.claimed) {
+      return {
+        challenge: pollClaim.challenge,
+        message:
+          'Ожидаем звонок на выданный номер. Страница проверяет статус автоматически.',
+      };
+    }
+    challenge = pollClaim.challenge;
+
     try {
       const providerStatus = await this.readSmsRuCallcheckStatus(
         config,
-        challenge.providerChallengeId,
+        providerChallengeId,
       );
       const providerStatusData = {
         providerStatusCode: providerStatus.code,
@@ -14858,13 +14966,15 @@ export class GuestPortalService {
       check_id: checkId,
       json: '1',
     });
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    });
-    const payload = (await safeJson(
-      response,
-    )) as SmsRuCallcheckStatusResponse | null;
+    const { response, payload: rawPayload } = await fetchJsonWithTimeout(
+      url,
+      {
+        method: 'GET',
+        headers: { accept: 'application/json' },
+      },
+      config.providerTimeoutMs,
+    );
+    const payload = rawPayload as SmsRuCallcheckStatusResponse | null;
     const statusCode = smsRuResponseString(payload?.status_code);
     const checkStatus = smsRuResponseString(payload?.check_status);
     const code = checkStatus || statusCode || null;
@@ -14903,6 +15013,44 @@ export class GuestPortalService {
       this.configService.get<string>('GUEST_PORTAL_DEV_OTP_ENABLED') ===
         'true' || this.configService.get<string>('NODE_ENV') !== 'production'
     );
+  }
+
+  private async acquireGuestAuthAdvisoryLock(
+    tx: Prisma.TransactionClient,
+    lockKey: string,
+  ) {
+    await tx.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))
+    `;
+  }
+
+  private async claimUserCallProviderPoll(
+    challenge: GuestPortalOtpChallenge,
+    minIntervalMs: number,
+  ): Promise<{ claimed: boolean; challenge: GuestPortalOtpChallenge }> {
+    if (!(challenge.updatedAt instanceof Date)) {
+      return { claimed: true, challenge };
+    }
+
+    const now = new Date();
+    if (now.getTime() - challenge.updatedAt.getTime() < minIntervalMs) {
+      return { claimed: false, challenge };
+    }
+
+    const claim = await this.prisma.guestPortalOtpChallenge.updateMany({
+      where: {
+        id: challenge.id,
+        status: 'PENDING',
+        updatedAt: challenge.updatedAt,
+      },
+      data: { updatedAt: now },
+    });
+
+    return {
+      claimed: claim.count === 1,
+      challenge:
+        claim.count === 1 ? { ...challenge, updatedAt: now } : challenge,
+    };
   }
 
   private async deliverOtpCode(input: {
@@ -15317,15 +15465,11 @@ export class GuestPortalService {
   }
 
   private guestPortalJwtSecret() {
-    const secret = this.configService
-      .get<string>('GUEST_PORTAL_JWT_SECRET')
-      ?.trim();
-
-    if (!secret && isProductionConfig(this.configService)) {
-      throw new Error('GUEST_PORTAL_JWT_SECRET is required in production');
-    }
-
-    return secret || null;
+    return resolveSecuritySecret(
+      this.configService,
+      'GUEST_PORTAL_JWT_SECRET',
+      ['JWT_SECRET'],
+    );
   }
 
   private publicWebUrl() {
@@ -17077,6 +17221,20 @@ function guestPortalUserCallConfig(configService: ConfigService) {
     phoneNumber: rawPhoneNumber,
     callHref: phoneTelHref(rawPhoneNumber),
     secret,
+    providerTimeoutMs: configBoundedInteger(
+      configService,
+      'GUEST_PORTAL_USER_CALL_PROVIDER_TIMEOUT_MS',
+      USER_CALL_PROVIDER_TIMEOUT_MS,
+      USER_CALL_PROVIDER_TIMEOUT_MIN_MS,
+      USER_CALL_PROVIDER_TIMEOUT_MAX_MS,
+    ),
+    statusPollMinIntervalMs: configBoundedInteger(
+      configService,
+      'GUEST_PORTAL_USER_CALL_STATUS_POLL_MIN_INTERVAL_MS',
+      USER_CALL_STATUS_POLL_MIN_INTERVAL_MS,
+      USER_CALL_STATUS_POLL_MIN_INTERVAL_MIN_MS,
+      USER_CALL_STATUS_POLL_MIN_INTERVAL_MAX_MS,
+    ),
     smsRu: {
       apiId: smsRuApiId,
       baseUrl:
@@ -17446,12 +17604,50 @@ async function sendTelegramWebhookReply({
   }
 }
 
+async function fetchJsonWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+    return { response, payload: await safeJson(response) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function safeJson(response: Response) {
   try {
     return (await response.json()) as unknown;
   } catch {
     return null;
   }
+}
+
+function guestAuthScopeLockKey(input: {
+  tenantId: string;
+  storeId: string;
+  phoneHash: string;
+  channel: string;
+}) {
+  return JSON.stringify([
+    'guest-auth-scope-v1',
+    input.tenantId,
+    input.storeId,
+    input.phoneHash,
+    input.channel,
+  ]);
+}
+
+function guestAuthChallengeLockKey(challengeId: string) {
+  return JSON.stringify(['guest-auth-challenge-v1', challengeId]);
 }
 
 function providerErrorText(payload: unknown) {

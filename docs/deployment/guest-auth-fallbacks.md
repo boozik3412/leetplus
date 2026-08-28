@@ -1,6 +1,6 @@
 # Fallback-вход в геймификацию
 
-Дата актуализации: 30.07.2026
+Дата актуализации: 28.08.2026
 
 Этот runbook описывает резервные каналы авторизации участника геймификации. Канонический пользовательский маршрут: `/game/auth -> /game/clubs -> /game`; `/play` сохраняется только как совместимый legacy-вход. Основной канал остаётся Telegram-бот с contact-share; fallback нужен, чтобы не останавливать регистрацию при временно неготовом Telegram или высокой цене SMS.
 
@@ -30,6 +30,8 @@ GUEST_PORTAL_USER_CALL_ENABLED="true"
 GUEST_PORTAL_USER_CALL_PROVIDER="SMS_RU_CALLCHECK"
 GUEST_PORTAL_USER_CALL_SMS_RU_API_ID="<sms-ru-api-id>"
 GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL="https://sms.ru"
+GUEST_PORTAL_USER_CALL_PROVIDER_TIMEOUT_MS="8000"
+GUEST_PORTAL_USER_CALL_STATUS_POLL_MIN_INTERVAL_MS="2500"
 ```
 
 `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID` хранится только в production env. Не коммитить реальное значение в `.env.example`, runbook или issue.
@@ -53,6 +55,18 @@ x-guest-portal-user-call-secret: <provider-callback-secret>
 ```
 
 Callback должен передавать номер звонящего только backend-у LeetPlus. При SMS.ru callback secret не нужен: в challenge сохраняется только provider name и внешний `check_id`. Frontend получает только статус, маски и safe local match; raw phone, `api_id`, callback secret и Langame payload не возвращаются в браузер.
+
+### Отдельный guest-auth контур и параллельность
+
+- `/guest-portal/*`, guest JWT с purpose `guest_portal`, `GUEST_PORTAL_JWT_SECRET` и HttpOnly guest-cookie отделены от корпоративных `/auth/*`, corporate JWT/cookie, ролей и fresh employee scope. `GuestPortalModule` больше не получает `JwtService` через прямой импорт корпоративного `AuthModule`; ограничения корпоративного входа не являются лимитом игрового модуля.
+- Глобального лимита на число одновременно авторизующихся гостей нет. Сотни разных телефонов получают разные advisory lock keys и не ждут один общий application mutex. Защита от двойного клика сериализует только совпадающий `tenant + store + phoneHash + channel` и освобождает DB connection до сетевого запроса provider-а.
+- Старт `USER_CALL` сначала сохраняет короткую reservation `CALL_PROVIDER_STARTING`, затем вне транзакции обращается к provider-у и переводит challenge в `PENDING`. Поэтому два параллельных запроса одного телефона не создают два платных provider challenge.
+- Очистка просроченных challenge выполняется только в текущем `tenant + store + phoneHash + channel`. Запрос одного гостя не обновляет строки остальных клубов, телефонов или каналов; `USER_CALL` не блокирует `SMS/Telegram/MAX/DEV` OTP.
+- `GUEST_PORTAL_USER_CALL_PROVIDER_TIMEOUT_MS` ограничивает полный provider request вместе с чтением JSON. По умолчанию `8000`, допустимый диапазон `100..30000` мс. Timeout старта возвращает безопасный повторяемый `503` и не оставляет reservation активной.
+- `GUEST_PORTAL_USER_CALL_STATUS_POLL_MIN_INTERVAL_MS` объединяет дублирующие status poll одного challenge между вкладками и API instances через optimistic DB lease. По умолчанию `2500`, допустимый диапазон `500..10000` мс; это не лимит пользователей, а защита provider-а от повторов одного challenge.
+- Создание/переиспользование `GuestGameProfile` сериализуется транзакционным lock только по `challengeId`. Разные гости выполняются параллельно, а повторный poll одного подтвержденного звонка не создает второй профиль или consent/referral lifecycle.
+
+Корпоративный и игровой контуры пока могут работать в одном Node.js process, поэтому это логическая, token/module и DB-concurrency изоляция, но не полная process-level fault isolation. Перед широким публичным трафиком рекомендуется отдельный runtime pool для `/guest-portal/*`; его отказ не должен менять `/auth/*`, и наоборот.
 
 ## SMS-код
 
@@ -109,6 +123,7 @@ GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN="<provider-token>"
 5. SMS держать как резервный канал после user-call: в staged/test-mode проверять provider acceptance и отсутствие утечек; live-режим включать отдельно только через `GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED=true`, с включенными rate limits, anti-abuse guard и бюджетным контролем.
 6. `INCOMING_CALL_LAST4` включать только после выбора provider-а исходящих звонков и отдельного теста блокировок: `NOT_CONFIGURED`, `BLOCKED`, успешный verify.
 7. В Guest Game Hub проверить readiness `USER_CALL_AUTH` и `INCOMING_CALL_LAST4_AUTH`: карточки должны показывать только наличие env, required env и QA-шаг, без номера, endpoint, token, raw phone и Langame payload.
+8. Нагрузочный canary выполнять разными тестовыми телефонами: отсутствие общего 429/503, отсутствие роста latency `/auth/me`, bounded provider timeout и не более одного `callcheck/status` на challenge за настроенный poll interval. Повтор одного телефона в течение cooldown — ожидаемая anti-abuse блокировка, а не ограничение общей конкурентности.
 
 ## Откат
 
@@ -123,3 +138,5 @@ GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN="<provider-token>"
 - Сырой телефон не возвращается в браузер.
 - Секреты provider-ов, SMS.ru `api_id`, номера callback, endpoint token и Langame payload не попадают в readiness, audit и frontend.
 - Связка с общей базой гостей появляется только через подтвержденный `phoneHash` и сохраненный Langame snapshot.
+- Ни один guest-auth request не выполняет глобальный `updateMany` по challenge других пользователей.
+- Ограничения, cookie и guard корпоративного входа не применяются к public guest-auth routes.

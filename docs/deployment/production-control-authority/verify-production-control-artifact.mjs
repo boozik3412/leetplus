@@ -559,7 +559,7 @@ function assertInstallAuthorityContract(root) {
     priorLine = line;
     destinations.add(destination);
   }
-  if (lines.length !== 46) {
+  if (lines.length !== 47) {
     fail("production control install map does not have the exact reviewed entry count");
   }
   for (const requiredDestination of [

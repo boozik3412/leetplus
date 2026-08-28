@@ -1204,7 +1204,7 @@ process.stdout.write(
     `PRODUCTION_CONTROL_HYDRATION_UNIT_SHA256=${digest("/etc/systemd/system/leetplus-release-hydrate@.service")}\n` +
     `PRODUCTION_CONTROL_SEALER_SHA256=${digest("/usr/local/sbin/leetplus-seal-release-artifact")}\n` +
     `PRODUCTION_CONTROL_PROMOTER_SHA256=${digest("/usr/local/sbin/leetplus-promote-release-artifact")}\n` +
-    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=46\n`,
+    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=47\n`,
 );
 FIXTURE_GENERATION_VERIFIER
 /usr/bin/node --check "$fixture_generation_verifier"

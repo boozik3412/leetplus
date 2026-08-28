@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (28.08.2026)
+## Canonical current-state guardrail (29.08.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -9,7 +9,7 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий runtime implementation baseline — merge SHA
-`8b1d5972aec3c61b62789002ddacf1653a8b5bbc` (PR #67, включает PR #66). Fast CI
+`a1ddfdee5baf89c1d6e50a18278a72028f7a5a74` (PR #72, включает PR #67). Fast CI
 и Full Release Admission зелёные на exact merge SHA. В source реализованы отдельные
 `CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
 pools, но production cutover не выполнялся: последний зафиксированный
@@ -37,6 +37,17 @@ readiness `187 -> target 188`, применяет одну additive migration и
 успеха требует от того же bridge readiness `188/188`. LIVE функция запускается
 вторым slot с bridge `OFF`. Merge/CI сами по себе этот production rollout не
 выполняют.
+
+Production rollout 29.08 дошёл до exact inactive green bridge, но два public
+switch были fail-closed возвращены на blue до database effect: stateful
+authenticated smoke создаёт краткий post-login ingress cooldown, из-за которого
+следующая `/version` probe получает `400` и прежний watchdog не мог накопить три
+успеха подряд. Текущий production остаётся blue SHA `04f967f3…`, схема
+`CURRENT_187`, bug reporting `OFF`. Controller successor сначала доказывает три
+последовательных public readiness samples, а затем выполняет один authenticated
+catalog smoke в том же deadline. Bounded readiness/auth children запускаются с
+закрытым deployment-lock descriptor, поэтому процесс, переживший deadline, не
+может удержать controller lock после возврата родительской операции.
 
 ## Detailed gamification state (updated through 28.08.2026)
 
@@ -86,7 +97,7 @@ readiness `187 -> target 188`, применяет одну additive migration и
 - The ordinary LIVE snapshot window remains the primary path. Historical anti-join recovery for guest-bound sessions and purchases is independently gated by `GUEST_GAME_PIPELINE_BACKFILL_MODE=OFF|SHADOW|LIVE` and defaults to `OFF`, where it executes no anti-join SQL. Every enabled mode requires an exact tenant and an explicitly false kill switch; `LIVE` also requires a timezone-qualified cutoff plus an exact profile unless tenant-wide rollout is explicitly allowed. `SHADOW` records diagnostic decisions only and cannot create event, XP, reward or entitlement. `PLAY_HOUR` is emitted only after a session has stopped, so an intermediate duration cannot seal a stale event before the final 60-minute boundary. The Ledger recovery lane remains secondary and acts only after the primary grace window.
 - Standalone cases, mission-target cases and Battle Pass lootbox rewards share entitlement limits and opening semantics. `STANDALONE` is directly earnable, `REWARD_TEMPLATE` is only granted by a mission or Battle Pass target, and `BOTH` supports both paths. Qualification never selects a random prize; the guest's manual open action does that exactly once.
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 ## Current Workflow
 

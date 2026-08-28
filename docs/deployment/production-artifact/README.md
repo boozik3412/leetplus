@@ -347,6 +347,16 @@ pre-effect intent, до effect проверяет full host nginx config с cand
 в private mount namespace, атомарно меняет nginx include, выполняет `nginx -t`, graceful
 reload и bounded public watchdog. При любой ошибке exact previous target
 восстанавливается и проверяется отдельным authenticated read-only smoke.
+Watchdog сначала требует три последовательных public readiness-пробы одного
+release/schema/Web BUILD_ID, затем в том же абсолютном deadline выполняет один
+authenticated catalog smoke и принимает switch только при его успехе. Такой
+порядок не смешивает здоровье runtime с наблюдаемым production ingress
+post-login cooldown: сразу после stateful smoke следующий запрос может кратко
+получить `400`, поэтому auth не запускается между тремя readiness samples.
+Любая readiness-ошибка обнуляет серию, а auth-ошибка отклоняет switch. Readiness
+и authenticated child processes не наследуют descriptor shared cutover lock:
+даже если bounded probe оставит краткоживущий descendant после deadline, он не
+может блокировать следующую reconciliation/cutover операцию.
 Blue/green не останавливает previous scheduler-free pair; scheduler-capable
 legacy units уже durably fenced/stopped предыдущей обязательной процедурой и
 никогда не возвращаются в route. До switch candidate API/Web обязаны

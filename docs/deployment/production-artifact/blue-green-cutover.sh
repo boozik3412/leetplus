@@ -171,7 +171,8 @@ run_probe_bounded() {
     clean_environment=("PATH=$PATH" 'LC_ALL=C' 'LANG=C' 'TZ=UTC')
     for environment_key in \
       TEST_COMMAND_LOG TEST_FAIL_PREVIOUS TEST_FAIL_PUBLIC TEST_FAIL_ROLLBACK_SMOKE \
-      TEST_FAIL_PUBLIC_API TEST_FAIL_PUBLIC_WEB TEST_PROBE_DELAY_SECONDS; do
+      TEST_FAIL_PUBLIC_API TEST_FAIL_PUBLIC_WEB TEST_PROBE_DELAY_SECONDS \
+      TEST_POST_AUTH_COOLDOWN_MARKER; do
       if [[ -v "$environment_key" ]]; then
         clean_environment+=("${environment_key}=${!environment_key}")
       fi
@@ -179,8 +180,11 @@ run_probe_bounded() {
   else
     clean_environment=('PATH=/usr/sbin:/usr/bin:/sbin:/bin' 'LC_ALL=C' 'LANG=C' 'TZ=UTC')
   fi
+  # The probe and every descendant must not inherit the deployment lock. A
+  # command killed at the absolute watchdog deadline can otherwise leave a
+  # short-lived child holding fd 9 and spuriously block the next reconciliation.
   timeout --foreground --kill-after=5s "${duration_seconds}s" \
-    /usr/bin/env -i "${clean_environment[@]}" /usr/bin/bash -p "$script" "$@"
+    /usr/bin/env -i "${clean_environment[@]}" /usr/bin/bash -p "$script" "$@" 9>&-
 }
 
 run_authenticated_smoke_bounded() {
@@ -190,7 +194,7 @@ run_authenticated_smoke_bounded() {
   if [[ "$unprivileged_test_mode" == true ]]; then
     clean_environment=("PATH=$PATH" 'LC_ALL=C' 'LANG=C' 'TZ=UTC')
     for environment_key in TEST_COMMAND_LOG TEST_AUTH_SMOKE_FAIL TEST_AUTH_SMOKE_FAIL_PUBLIC \
-      TEST_AUTH_DELAY_SECONDS; do
+      TEST_AUTH_DELAY_SECONDS TEST_POST_AUTH_COOLDOWN_MARKER; do
       if [[ -v "$environment_key" ]]; then clean_environment+=("${environment_key}=${!environment_key}"); fi
     done
     arguments=(--unprivileged-test-mode --base-url "$target_api_url")
@@ -199,7 +203,7 @@ run_authenticated_smoke_bounded() {
     arguments=(--base-url "$target_api_url")
   fi
   timeout --foreground --kill-after=5s "${duration_seconds}s" \
-    /usr/bin/env -i "${clean_environment[@]}" /usr/bin/node "$authenticated_smoke" "${arguments[@]}"
+    /usr/bin/env -i "${clean_environment[@]}" /usr/bin/node "$authenticated_smoke" "${arguments[@]}" 9>&-
 }
 
 unit_property() {
@@ -1889,33 +1893,37 @@ fi
 
 watchdog_deadline=$((SECONDS + watchdog_seconds))
 watchdog_accepted=false
-watchdog_consecutive_successes=0
+watchdog_consecutive_readiness_successes=0
 while ((SECONDS < watchdog_deadline)); do
   if attest_candidate_units watchdog \
     && unit_is_active "leetplus-api@${slot}.service" \
     && unit_is_active "leetplus-web@${slot}.service"; then
     watchdog_remaining=$((watchdog_deadline - SECONDS))
-    watchdog_sample_accepted=false
     if ((watchdog_remaining > 0)) \
       && run_probe_bounded "$watchdog_remaining" "$probe" "${probe_arguments[@]}" \
         --api-base-url "$public_api_url" --web-url "$public_web_url"; then
-      watchdog_remaining=$((watchdog_deadline - SECONDS))
-      if ((watchdog_remaining > 0)) \
-        && run_authenticated_smoke_bounded "$watchdog_remaining" "$public_api_url"; then
-        watchdog_sample_accepted=true
-      fi
-    fi
-    if [[ "$watchdog_sample_accepted" == true ]]; then
-      watchdog_consecutive_successes=$((watchdog_consecutive_successes + 1))
-      if ((watchdog_consecutive_successes >= 3)); then
-        watchdog_accepted=true
-        break
+      watchdog_consecutive_readiness_successes=$((watchdog_consecutive_readiness_successes + 1))
+      # Establish public serving stability before the stateful authenticated
+      # probe. Production ingress can emit a short 400 cooldown on the next
+      # request after this smoke; probing /version immediately after every
+      # login would measure that transition instead of runtime health and can
+      # never accumulate consecutive samples. Three independent readiness
+      # samples followed by one authenticated catalog smoke preserve both gates
+      # without teaching the controller to ignore an HTTP failure.
+      if ((watchdog_consecutive_readiness_successes >= 3)); then
+        watchdog_remaining=$((watchdog_deadline - SECONDS))
+        if ((watchdog_remaining > 0)) \
+          && run_authenticated_smoke_bounded "$watchdog_remaining" "$public_api_url"; then
+          watchdog_accepted=true
+          break
+        fi
+        watchdog_consecutive_readiness_successes=0
       fi
     else
-      watchdog_consecutive_successes=0
+      watchdog_consecutive_readiness_successes=0
     fi
   else
-    watchdog_consecutive_successes=0
+    watchdog_consecutive_readiness_successes=0
   fi
   if ((SECONDS < watchdog_deadline)); then
     sleep 1

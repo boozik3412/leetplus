@@ -17,8 +17,7 @@ describe('AppController', () => {
         .mockResolvedValueOnce([{ ok: 1 }])
         .mockResolvedValueOnce([
           {
-            migration_name:
-              '20260726110000_reconcile_completed_reward_wallet',
+            migration_name: '20260726110000_reconcile_completed_reward_wallet',
             completed_count: 150,
             unfinished_count: 0,
           },
@@ -88,8 +87,7 @@ describe('AppController', () => {
       .mockResolvedValueOnce([{ ok: 1 }])
       .mockResolvedValueOnce([
         {
-          migration_name:
-            '20260726110000_reconcile_completed_reward_wallet',
+          migration_name: '20260726110000_reconcile_completed_reward_wallet',
           completed_count: 150,
           unfinished_count: 1,
         },
@@ -106,8 +104,7 @@ describe('AppController', () => {
       .mockResolvedValueOnce([{ ok: 1 }])
       .mockResolvedValueOnce([
         {
-          migration_name:
-            '20260726110000_reconcile_completed_reward_wallet',
+          migration_name: '20260726110000_reconcile_completed_reward_wallet',
           completed_count: 149,
           unfinished_count: 0,
         },
@@ -145,5 +142,18 @@ describe('AppController', () => {
         builtAt: '2026-07-26T15:00:00.000Z',
       },
     });
+  });
+
+  it.each([
+    ['CORPORATE', 'leetplus-api-corporate'],
+    ['GUEST', 'leetplus-api-guest'],
+  ])('reports the %s pool identity', (role, serviceName) => {
+    const service = new AppService(
+      new ConfigService({ LEETPLUS_API_RUNTIME_ROLE: role }),
+      prisma as unknown as PrismaService,
+    );
+
+    expect(service.getLiveness()).toMatchObject({ service: serviceName });
+    expect(service.getVersion()).toMatchObject({ service: serviceName });
   });
 });

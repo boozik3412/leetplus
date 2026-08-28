@@ -29,6 +29,37 @@ import { GuestGamificationStatisticsService } from './guest-gamification-statist
 import { GuestGamificationController } from './guest-gamification.controller';
 import { GuestGamificationService } from './guest-gamification.service';
 
+export const GUEST_GAMIFICATION_PROVIDERS = [
+  GuestGamificationService,
+  GuestGamificationStatisticsService,
+  GuestGamificationPipelineSchedulerService,
+  GuestGamificationSupplementalPipelineSchedulerService,
+  GuestGamificationLogService,
+  GuestActivityLedgerService,
+  GuestActivityLedgerSchedulerService,
+  GuestGameDataRetentionService,
+  GuestGameDataRetentionSchedulerService,
+  GuestGameLedgerFallbackService,
+  GuestGameLedgerFallbackSchedulerService,
+  GuestGameLootBoxSessionRecoveryService,
+  GuestGameLootBoxSessionRecoverySchedulerService,
+  GuestGameQualityMonitoringService,
+  GuestGameMediaService,
+  GuestGameQualityMonitoringSchedulerService,
+  GuestGameRewardMaterializerSchedulerService,
+  GuestGameRuleReplayService,
+  GuestBonusLedgerService,
+  GuestBonusLedgerSchedulerService,
+] as const;
+
+export const GUEST_GAMIFICATION_EXPORTS = [
+  GuestGamificationService,
+  GuestGamificationLogService,
+  GuestActivityLedgerService,
+  GuestGameQualityMonitoringService,
+  GuestBonusLedgerSchedulerService,
+] as const;
+
 @Module({
   imports: [AuthModule, IntegrationsModule, StaffModule],
   controllers: [
@@ -37,34 +68,7 @@ import { GuestGamificationService } from './guest-gamification.service';
     GuestGameMediaController,
     GuestGamePublicMediaController,
   ],
-  providers: [
-    GuestGamificationService,
-    GuestGamificationStatisticsService,
-    GuestGamificationPipelineSchedulerService,
-    GuestGamificationSupplementalPipelineSchedulerService,
-    GuestGamificationLogService,
-    GuestActivityLedgerService,
-    GuestActivityLedgerSchedulerService,
-    GuestGameDataRetentionService,
-    GuestGameDataRetentionSchedulerService,
-    GuestGameLedgerFallbackService,
-    GuestGameLedgerFallbackSchedulerService,
-    GuestGameLootBoxSessionRecoveryService,
-    GuestGameLootBoxSessionRecoverySchedulerService,
-    GuestGameQualityMonitoringService,
-    GuestGameMediaService,
-    GuestGameQualityMonitoringSchedulerService,
-    GuestGameRewardMaterializerSchedulerService,
-    GuestGameRuleReplayService,
-    GuestBonusLedgerService,
-    GuestBonusLedgerSchedulerService,
-  ],
-  exports: [
-    GuestGamificationService,
-    GuestGamificationLogService,
-    GuestActivityLedgerService,
-    GuestGameQualityMonitoringService,
-    GuestBonusLedgerSchedulerService,
-  ],
+  providers: [...GUEST_GAMIFICATION_PROVIDERS],
+  exports: [...GUEST_GAMIFICATION_EXPORTS],
 })
 export class GuestGamificationModule {}

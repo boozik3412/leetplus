@@ -12,6 +12,8 @@ import {
   resolveStaffAttachmentAclMode,
   validateEnvironment,
 } from './environment-validation';
+import { API_RUNTIME_ROLE_KEY } from './api-runtime-role';
+import { DEDICATED_API_DATABASE_ROLES } from './api-runtime-database';
 
 const VALID_IDENTITY_MAIL_ENCRYPTION_KEY = Buffer.from(
   Array.from({ length: 32 }, (_, index) => index + 1),
@@ -72,6 +74,107 @@ describe('validateEnvironment', () => {
     const local = { NODE_ENV: 'test' };
 
     expect(validateEnvironment(local)).toBe(local);
+  });
+
+  it('normalizes an explicit API runtime role in every environment', () => {
+    expect(
+      validateEnvironment({
+        NODE_ENV: 'test',
+        [API_RUNTIME_ROLE_KEY]: ' corporate ',
+      }),
+    ).toMatchObject({
+      [API_RUNTIME_ROLE_KEY]: 'CORPORATE',
+    });
+  });
+
+  it('rejects an unknown API runtime role before application bootstrap', () => {
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'test',
+        [API_RUNTIME_ROLE_KEY]: 'PUBLIC',
+      }),
+    ).toThrow(/must be COMBINED, CORPORATE, or GUEST/);
+  });
+
+  it('requires background scheduling to be disabled in a guest runtime', () => {
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'test',
+        [API_RUNTIME_ROLE_KEY]: 'GUEST',
+      }),
+    ).toThrow(
+      /GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED must equal false in GUEST API runtime/,
+    );
+
+    expect(
+      validateEnvironment({
+        NODE_ENV: 'test',
+        [API_RUNTIME_ROLE_KEY]: 'GUEST',
+        GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: 'false',
+      }),
+    ).toMatchObject({
+      [API_RUNTIME_ROLE_KEY]: 'GUEST',
+      GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: 'false',
+    });
+  });
+
+  it('accepts only guest-domain secrets in a production guest runtime', () => {
+    const guestEnvironment: Record<string, string | undefined> = {
+      ...validProductionEnvironment(),
+      [API_RUNTIME_ROLE_KEY]: 'GUEST',
+      GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: 'false',
+      DATABASE_URL: dedicatedRuntimeDatabaseUrl('GUEST'),
+    };
+    for (const key of [
+      'JWT_SECRET',
+      'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY',
+      'IDENTITY_MAIL_ENCRYPTION_KEY',
+      'SYNC_SERVICE_TOKEN',
+    ]) {
+      delete guestEnvironment[key];
+    }
+    delete guestEnvironment.IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION;
+    delete guestEnvironment.IDENTITY_MAIL_ENCRYPTION_KEY_VERSION;
+    delete guestEnvironment.IDENTITY_MAIL_AAD_ENVIRONMENT;
+
+    const validatedGuest = validateEnvironment(guestEnvironment);
+    expect(validatedGuest[API_RUNTIME_ROLE_KEY]).toBe('GUEST');
+    expect(validatedGuest.GUEST_PORTAL_JWT_SECRET).toBe(
+      guestEnvironment.GUEST_PORTAL_JWT_SECRET,
+    );
+    expect(validatedGuest.GUEST_GAME_REFERRAL_SECRET).toBe(
+      guestEnvironment.GUEST_GAME_REFERRAL_SECRET,
+    );
+
+    expect(() =>
+      validateEnvironment({
+        ...guestEnvironment,
+        JWT_SECRET: `corporate_${'x'.repeat(40)}`,
+      }),
+    ).toThrow(/JWT_SECRET must be absent in GUEST API runtime/);
+  });
+
+  it('accepts only corporate-domain secrets in a production corporate runtime', () => {
+    const corporateEnvironment: Record<string, string | undefined> = {
+      ...validProductionEnvironment(),
+      [API_RUNTIME_ROLE_KEY]: 'CORPORATE',
+      DATABASE_URL: dedicatedRuntimeDatabaseUrl('CORPORATE'),
+    };
+    delete corporateEnvironment.GUEST_PORTAL_JWT_SECRET;
+    delete corporateEnvironment.GUEST_GAME_REFERRAL_SECRET;
+
+    const validatedCorporate = validateEnvironment(corporateEnvironment);
+    expect(validatedCorporate[API_RUNTIME_ROLE_KEY]).toBe('CORPORATE');
+    expect(validatedCorporate.JWT_SECRET).toBe(corporateEnvironment.JWT_SECRET);
+
+    expect(() =>
+      validateEnvironment({
+        ...corporateEnvironment,
+        GUEST_PORTAL_JWT_SECRET: `guest_${'x'.repeat(40)}`,
+      }),
+    ).toThrow(
+      /GUEST_PORTAL_JWT_SECRET must be absent in CORPORATE API runtime/,
+    );
   });
 
   it.each(['disabled', 'PREPARE', 'active'])(
@@ -503,6 +606,14 @@ describe('validateEnvironment', () => {
     ).toThrow(/must be exactly true or false/);
   });
 });
+
+function dedicatedRuntimeDatabaseUrl(role: 'CORPORATE' | 'GUEST'): string {
+  return (
+    `postgresql://${DEDICATED_API_DATABASE_ROLES[role]}:${'p'.repeat(40)}` +
+    '@db.internal.leetplus.ru:5432/leetplus' +
+    '?schema=public&connection_limit=12&pool_timeout=5&connect_timeout=5&sslmode=verify-full'
+  );
+}
 
 describe('resolveAccessScopeEnforcementMode', () => {
   it('defaults to fail-closed enforcement outside a rollout override', () => {

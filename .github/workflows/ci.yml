@@ -727,6 +727,11 @@ jobs:
       - name: Run focused API security tests
         run: pnpm --filter api test:ci:focused
 
+      - name: Verify split guest/corporate runtime boundary
+        run: |
+          pnpm --filter api lint:ci:runtime-boundary
+          pnpm --filter api test:ci:runtime-boundary
+
       - name: Test Gate 1MT pilot HTTP and fresh store-scope boundary
         run: pnpm --filter api test:ci:pilot-http-surface
 

@@ -66,7 +66,15 @@ Callback должен передавать номер звонящего тол�
 - `GUEST_PORTAL_USER_CALL_STATUS_POLL_MIN_INTERVAL_MS` объединяет дублирующие status poll одного challenge между вкладками и API instances через optimistic DB lease. По умолчанию `2500`, допустимый диапазон `500..10000` мс; это не лимит пользователей, а защита provider-а от повторов одного challenge.
 - Создание/переиспользование `GuestGameProfile` сериализуется транзакционным lock только по `challengeId`. Разные гости выполняются параллельно, а повторный poll одного подтвержденного звонка не создает второй профиль или consent/referral lifecycle.
 
-Корпоративный и игровой контуры пока могут работать в одном Node.js process, поэтому это логическая, token/module и DB-concurrency изоляция, но не полная process-level fault isolation. Перед широким публичным трафиком рекомендуется отдельный runtime pool для `/guest-portal/*`; его отказ не должен менять `/auth/*`, и наоборот.
+Для полной process-level fault isolation реализован dormant split-runtime candidate:
+`corporate-main` не регистрирует guest controllers/schedulers, а `guest-main`
+содержит только `/guest-portal/*`, public guest media и health/version. Роли
+`CORPORATE`/`GUEST`, HTTP allowlist и разные наборы секретов проверяются
+fail-closed при старте; injected bonus scheduler в guest process является
+явным no-op. Systemd/nginx/отдельные bounded PostgreSQL pool templates описаны
+в [guest runtime pool candidate](./guest-runtime-pool-candidate/README.md).
+Кандидат ещё не активирован в production: до отдельного GO текущий runtime
+остаётся `COMBINED`.
 
 ## SMS-код
 

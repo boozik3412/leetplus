@@ -400,6 +400,11 @@ jobs:
       - name: Run focused API acceptance tests
         run: pnpm --filter api test:ci:focused
 
+      - name: Verify split guest/corporate runtime boundary
+        run: |
+          pnpm --filter api lint:ci:runtime-boundary
+          pnpm --filter api test:ci:runtime-boundary
+
       - name: Type-check and build API
         run: |
           pnpm --filter api typecheck

@@ -3,19 +3,16 @@ import { resolve } from 'node:path';
 
 const API_AUTH_CONTROLLER = resolve(__dirname, 'auth.controller.ts');
 const API_MAIN = resolve(__dirname, '../main.ts');
+const API_CORPORATE_MAIN = resolve(__dirname, '../corporate-main.ts');
+const API_GUEST_MAIN = resolve(__dirname, '../guest-main.ts');
+const API_BOOTSTRAP = resolve(__dirname, '../runtime/api-bootstrap.ts');
 const API_BODY_LIMIT = resolve(__dirname, 'invite-secret-body-limit.ts');
 const API_USERS_SERVICE = resolve(__dirname, '../users/users.service.ts');
-const API_USERS_CONTROLLER = resolve(
-  __dirname,
-  '../users/users.controller.ts',
-);
+const API_USERS_CONTROLLER = resolve(__dirname, '../users/users.controller.ts');
 const WEB_ROOT = resolve(__dirname, '../../../web/src');
 const WEB_REGISTER_PAGE = resolve(WEB_ROOT, 'app/(auth)/register/page.tsx');
 const WEB_AUTH_FORM = resolve(WEB_ROOT, 'components/auth-form.tsx');
-const WEB_GATE = resolve(
-  WEB_ROOT,
-  'components/invite-registration-gate.tsx',
-);
+const WEB_GATE = resolve(WEB_ROOT, 'components/invite-registration-gate.tsx');
 const WEB_PREVIEW_ROUTE = resolve(
   WEB_ROOT,
   'app/api/auth/invites/preview/route.ts',
@@ -24,10 +21,7 @@ const WEB_ACCEPT_ROUTE = resolve(
   WEB_ROOT,
   'app/api/auth/invites/accept/route.ts',
 );
-const WEB_TRANSPORT_CORE = resolve(
-  WEB_ROOT,
-  'lib/invite-transport-core.mts',
-);
+const WEB_TRANSPORT_CORE = resolve(WEB_ROOT, 'lib/invite-transport-core.mts');
 const WEB_PROXY = resolve(WEB_ROOT, 'lib/proxy.ts');
 const WEB_INTERNAL_INVITE_ROUTE = resolve(
   WEB_ROOT,
@@ -54,30 +48,36 @@ describe('INVITE_SECRET_TRANSPORT_V1 source boundary', () => {
   it('has no API or BFF invite token path routes', () => {
     const controller = source(API_AUTH_CONTROLLER);
     const main = source(API_MAIN);
+    const corporateMain = source(API_CORPORATE_MAIN);
+    const guestMain = source(API_GUEST_MAIN);
+    const bootstrap = source(API_BOOTSTRAP);
     const bodyLimit = source(API_BODY_LIMIT);
     expect(controller).toContain("@Post('invites/preview')");
     expect(controller).toContain("@Post('invites/accept')");
     expect(controller).toContain("'application/json'");
     expect(controller).not.toMatch(/invites\/:token/u);
     expect(controller).not.toMatch(/@Param\(['"]token['"]\)/u);
-    expect(main).toContain(
+    expect(bootstrap).toContain(
       "app.use('/auth/invites/preview', inviteSecretJsonParser())",
     );
-    expect(main).toContain(
+    expect(bootstrap).toContain(
       "app.use('/auth/invites/accept', inviteSecretJsonParser())",
     );
-    expect(main).toContain(
+    expect(bootstrap).toContain(
       "app.use('/auth/invites/preview', inviteSecretParserErrorHandler())",
     );
-    expect(main).toContain(
+    expect(bootstrap).toContain(
       "app.use('/auth/invites/accept', inviteSecretParserErrorHandler())",
     );
-    expect(main).toContain(
+    expect(bootstrap).toContain(
       "app.use('/auth/invites/preview', inviteSecretContentTypeGuard())",
     );
-    expect(main).toContain(
+    expect(bootstrap).toContain(
       "app.use('/auth/invites/accept', inviteSecretContentTypeGuard())",
     );
+    expect(main).toContain('inviteSecretTransport: true');
+    expect(corporateMain).toContain('inviteSecretTransport: true');
+    expect(guestMain).toContain('inviteSecretTransport: false');
     expect(bodyLimit).toContain("INVITE_SECRET_REQUEST_LIMIT = '4kb'");
     expect(bodyLimit).toContain('INVITE_REQUEST_BODY_INVALID');
     expect(existsSync(LEGACY_WEB_PREVIEW_ROUTE)).toBe(false);

@@ -1,0 +1,26 @@
+# Include only inside the api.leetplus.ru server block. Preserve the existing
+# reviewed proxy headers/timeouts in the final production-controlled copy.
+location = /guest-portal {
+    include /etc/nginx/proxy_params;
+    proxy_pass http://leetplus_guest_api;
+}
+
+location ^~ /guest-portal/ {
+    include /etc/nginx/proxy_params;
+    proxy_pass http://leetplus_guest_api;
+}
+
+location = /public/guest-game/media {
+    include /etc/nginx/proxy_params;
+    proxy_pass http://leetplus_guest_api;
+}
+
+location ^~ /public/guest-game/media/ {
+    include /etc/nginx/proxy_params;
+    proxy_pass http://leetplus_guest_api;
+}
+
+location / {
+    include /etc/nginx/proxy_params;
+    proxy_pass http://leetplus_api;
+}

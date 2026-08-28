@@ -1,0 +1,10 @@
+[Unit]
+Description=LeetPlus public guest API resource contour
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+IOAccounting=true
+CPUWeight=200
+IOWeight=200
+TasksMax=1024

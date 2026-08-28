@@ -9,9 +9,11 @@ const scriptsDirectory = path.dirname(fileURLToPath(import.meta.url));
 const databaseRoot = path.resolve(scriptsDirectory, "..");
 const repositoryRoot = path.resolve(databaseRoot, "../..");
 const migrationsRoot = path.join(databaseRoot, "prisma", "migrations");
-const migrationName = "20260819010000_staff_attachment_parent_delete_guard";
-const currentMigrationName =
+const guardMigrationName =
+  "20260819010000_staff_attachment_parent_delete_guard";
+const previousCurrentMigrationName =
   "20260820010000_guest_portal_telegram_update_ledger";
+const currentMigrationName = "20260828190000_guest_support_bug_reports";
 const predecessorName = "20260818020000_identity_mail_delivery_current_head_v1";
 const preterminalManifestDigest =
   "589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda";
@@ -45,19 +47,22 @@ async function canonicalManifest() {
   return { entries, rows };
 }
 
-test("CURRENT186 is one forward-only guard and readiness re-pin over exact CURRENT185", async () => {
+test("CURRENT188 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
   const { entries, rows } = await canonicalManifest();
-  assert.equal(entries.length, 187);
-  assert.equal(entries.at(-3), predecessorName);
-  assert.equal(entries.at(-2), migrationName);
+  assert.equal(entries.length, 188);
+  assert.equal(entries.at(-4), predecessorName);
+  assert.equal(entries.at(-3), guardMigrationName);
+  assert.equal(entries.at(-2), previousCurrentMigrationName);
   assert.equal(entries.at(-1), currentMigrationName);
   assert.equal(
-    sha256(`${rows.slice(0, -2).join("\n")}\n`),
+    sha256(`${rows.slice(0, -3).join("\n")}\n`),
     preterminalManifestDigest,
   );
 
   const sql = normalizedBytes(
-    await readFile(path.join(migrationsRoot, migrationName, "migration.sql")),
+    await readFile(
+      path.join(migrationsRoot, guardMigrationName, "migration.sql"),
+    ),
   ).toString("utf8");
   assert.match(sql, /completed_migration_count IS DISTINCT FROM 185/u);
   assert.match(sql, new RegExp(predecessorName, "u"));
@@ -67,7 +72,7 @@ test("CURRENT186 is one forward-only guard and readiness re-pin over exact CURRE
     new RegExp(productionHistoryPreterminalManifestDigest, "u"),
   );
   assert.match(sql, /migration_count IS DISTINCT FROM 186/u);
-  assert.match(sql, new RegExp(migrationName, "u"));
+  assert.match(sql, new RegExp(guardMigrationName, "u"));
   assert.match(sql, new RegExp(workerAssertSourceDigest, "u"));
   assert.equal(
     sql.match(
@@ -84,14 +89,35 @@ test("CURRENT186 is one forward-only guard and readiness re-pin over exact CURRE
   assert.match(sql, /SET search_path = public, pg_catalog/u);
   assert.match(sql, /privilege\.is_grantable/u);
   assert.match(sql, /FROM PUBLIC;/u);
+  const previousCurrentSql = normalizedBytes(
+    await readFile(
+      path.join(migrationsRoot, previousCurrentMigrationName, "migration.sql"),
+    ),
+  ).toString("utf8");
+  assert.match(previousCurrentSql, /migration_count IS DISTINCT FROM 187/u);
+  assert.match(
+    previousCurrentSql,
+    new RegExp(previousCurrentMigrationName, "u"),
+  );
+  assert.match(previousCurrentSql, new RegExp(guardMigrationName, "u"));
+  assert.match(
+    previousCurrentSql,
+    new RegExp(preterminalManifestDigest, "u"),
+  );
+  assert.match(
+    previousCurrentSql,
+    new RegExp(productionHistoryPreterminalManifestDigest, "u"),
+  );
+
   const currentSql = normalizedBytes(
     await readFile(
       path.join(migrationsRoot, currentMigrationName, "migration.sql"),
     ),
   ).toString("utf8");
-  assert.match(currentSql, /migration_count IS DISTINCT FROM 187/u);
+  assert.match(currentSql, /migration_count IS DISTINCT FROM 188/u);
   assert.match(currentSql, new RegExp(currentMigrationName, "u"));
-  assert.match(currentSql, new RegExp(migrationName, "u"));
+  assert.match(currentSql, new RegExp(previousCurrentMigrationName, "u"));
+  assert.match(currentSql, new RegExp(guardMigrationName, "u"));
   assert.match(currentSql, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     currentSql,
@@ -99,7 +125,7 @@ test("CURRENT186 is one forward-only guard and readiness re-pin over exact CURRE
   );
 });
 
-test("the active worker repository consumes the exact CURRENT187 receipt", async () => {
+test("the active worker repository consumes the exact CURRENT188 receipt", async () => {
   const repository = await readFile(
     path.join(
       repositoryRoot,
@@ -112,7 +138,7 @@ test("the active worker repository consumes the exact CURRENT187 receipt", async
     "utf8",
   );
   assert.match(repository, new RegExp(currentMigrationName, "u"));
-  assert.match(repository, /CURRENT_MIGRATION_COUNT = 187 as const/u);
+  assert.match(repository, /CURRENT_MIGRATION_COUNT = 188 as const/u);
   assert.match(repository, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     repository,

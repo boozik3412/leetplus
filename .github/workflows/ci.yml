@@ -779,8 +779,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260820010000_guest_portal_telegram_update_ledger
-          EXPECTED_DATABASE_MIGRATION_COUNT: "187"
+          EXPECTED_DATABASE_MIGRATION: 20260828190000_guest_support_bug_reports
+          EXPECTED_DATABASE_MIGRATION_COUNT: "188"
           API_BIND_HOST: 127.0.0.1
           LANGAME_DISCREPANCY_LOG_ROOT: /var/lib/leetplus/langame-sync
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
@@ -904,8 +904,8 @@ jobs:
             "  \"releaseSha\": \"$CI_RELEASE_SHA\"," \
             '  "nodeVersion": "22",' \
             '  "pnpmVersion": "10.33.2",' \
-            '  "databaseMigration": "20260820010000_guest_portal_telegram_update_ledger",' \
-            '  "databaseMigrationCount": 187,' \
+            '  "databaseMigration": "20260828190000_guest_support_bug_reports",' \
+            '  "databaseMigrationCount": 188,' \
             '  "runtimePackageManifestsIncluded": true,' \
             '  "canonicalPrismaDeployScriptsIncluded": true,' \
             '  "canonicalPrismaDeployScriptCount": 1,' \

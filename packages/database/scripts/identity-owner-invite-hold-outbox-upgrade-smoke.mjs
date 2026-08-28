@@ -368,9 +368,9 @@ async function readMigrationPlan() {
   ]);
   assert.equal(
     CURRENT_EXPECTED_LATEST_MIGRATION,
-    "20260820010000_guest_portal_telegram_update_ledger",
+    "20260828190000_guest_support_bug_reports",
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_187");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_188");
   const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
   assert.equal(
     targetIndex,

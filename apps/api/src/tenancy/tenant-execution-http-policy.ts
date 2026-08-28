@@ -35,6 +35,7 @@ const MODULE_PREFIXES: ReadonlyArray<{
   { prefix: '/guests/staff-control', module: TenantModule.STAFF },
   { prefix: '/staff/team-chat', module: TenantModule.COMMUNICATIONS },
   { prefix: '/staff/notifications', module: TenantModule.COMMUNICATIONS },
+  { prefix: '/support/bug-reports', module: TenantModule.COMMUNICATIONS },
   { prefix: '/staff', module: TenantModule.STAFF },
   { prefix: '/users', module: TenantModule.USERS_ROLES },
   { prefix: '/integrations', module: TenantModule.INTEGRATIONS },

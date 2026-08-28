@@ -4,7 +4,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly RELEASE_SHA='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-readonly MIGRATION='20260820010000_guest_portal_telegram_update_ledger'
+readonly MIGRATION='20260828190000_guest_support_bug_reports'
 readonly REPOSITORY_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly PROBE="${REPOSITORY_ROOT}/docs/deployment/production-artifact/verify-release-readiness.sh"
 readonly TEST_ROOT="$(mktemp -d)"
@@ -132,14 +132,14 @@ CURL
 chmod 0700 "$TEST_ROOT/bin/curl"
 
 valid_version="{\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"}}"
-valid_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${MIGRATION}\",\"migrationCount\":187}}}"
+valid_ready="{\"ok\":true,\"service\":\"leetplus-api\",\"release\":{\"sha\":\"${RELEASE_SHA}\"},\"dependencies\":{\"database\":{\"ok\":true,\"migration\":\"${MIGRATION}\",\"migrationCount\":188}}}"
 valid_web_identity="{\"ok\":true,\"release\":{\"sha\":\"${RELEASE_SHA}\",\"webBuildId\":\"${RELEASE_SHA}\"}}"
 
 PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BODY="$valid_ready" TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$TEST_ROOT/curl.log" \
   /usr/bin/bash -p "$PROBE" \
     --release-sha "$RELEASE_SHA" \
     --expected-migration "$MIGRATION" \
-    --expected-migration-count 187 \
+    --expected-migration-count 188 \
     --expected-web-build-id "$RELEASE_SHA" \
     --api-base-url https://api.example.test/ \
     --web-url https://web.example.test/ \
@@ -154,7 +154,7 @@ if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BOD
   /usr/bin/bash -p "$PROBE" \
     --release-sha "$RELEASE_SHA" \
     --expected-migration "$MIGRATION" \
-    --expected-migration-count 187 \
+    --expected-migration-count 188 \
     --expected-web-build-id "$RELEASE_SHA" \
     --api-base-url https://api.example.test \
     --web-url https://web.example.test/ \
@@ -167,7 +167,7 @@ if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BOD
   /usr/bin/bash -p "$PROBE" \
     --release-sha "$RELEASE_SHA" \
     --expected-migration "$MIGRATION" \
-    --expected-migration-count 187 \
+    --expected-migration-count 188 \
     --expected-web-build-id "$(printf 'b%.0s' {1..40})" \
     --api-base-url https://api.example.test \
     --web-url https://web.example.test/ \
@@ -181,7 +181,7 @@ if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BOD
   /usr/bin/bash -p "$PROBE" \
     --release-sha "$RELEASE_SHA" \
     --expected-migration "$MIGRATION" \
-    --expected-migration-count 187 \
+    --expected-migration-count 188 \
     --expected-web-build-id "$RELEASE_SHA" \
     --api-base-url https://api.example.test \
     --web-url https://web.example.test/ \
@@ -196,7 +196,7 @@ if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BOD
   /usr/bin/bash -p "$PROBE" \
     --release-sha "$RELEASE_SHA" \
     --expected-migration "$MIGRATION" \
-    --expected-migration-count 187 \
+    --expected-migration-count 188 \
     --expected-web-build-id "$RELEASE_SHA" \
     --api-base-url https://api.example.test \
     --web-url https://web.example.test/ \
@@ -217,7 +217,7 @@ TEST_WEB_IDENTITY_BODY="$valid_web_identity" TEST_CURL_LOG="$hostile_log" \
   /usr/bin/bash -p "$PROBE" \
     --release-sha "$RELEASE_SHA" \
     --expected-migration "$MIGRATION" \
-    --expected-migration-count 187 \
+    --expected-migration-count 188 \
     --expected-web-build-id "$RELEASE_SHA" \
     --api-base-url https://api.example.test \
     --web-url https://web.example.test \
@@ -231,7 +231,7 @@ if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BOD
   /usr/bin/bash -p "$PROBE" \
     --release-sha "$RELEASE_SHA" \
     --expected-migration "$MIGRATION" \
-    --expected-migration-count 187 \
+    --expected-migration-count 188 \
     --expected-web-build-id "$RELEASE_SHA" \
     --api-base-url https://api.example.test \
     --web-url https://web.example.test \
@@ -248,7 +248,7 @@ if PATH="$TEST_ROOT/bin:$PATH" TEST_VERSION_BODY="$valid_version" TEST_READY_BOD
   /usr/bin/bash -p "$PROBE" \
     --release-sha "$RELEASE_SHA" \
     --expected-migration "$MIGRATION" \
-    --expected-migration-count 187 \
+    --expected-migration-count 188 \
     --expected-web-build-id "$RELEASE_SHA" \
     --api-base-url https://api.example.test \
     --web-url https://web.example.test \

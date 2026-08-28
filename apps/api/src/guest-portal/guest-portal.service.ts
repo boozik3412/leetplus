@@ -54,6 +54,16 @@ import { GuestIdentityResolverService } from '../integrations/guest-identity-res
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import { buildTelegramSendMessageBody } from './telegram-send-message-payload';
 import {
+  GUEST_BUG_REPORT_MAX_BYTES,
+  GUEST_BUG_REPORT_TOPICS,
+  GUEST_BUG_REPORT_TOPIC_LABELS,
+  GuestSupportService,
+  isGuestBugReportingLive,
+  type GuestBugReportInput,
+  type GuestBugReportResponse,
+  type GuestBugReportUploadFile,
+} from './guest-support.service';
+import {
   evaluateGuestGameProgress,
   guestGameProgressPeriodicity,
   guestGameTriggerMatches,
@@ -1031,6 +1041,13 @@ export type GuestPortalGameSummary = {
   tenant: GuestPortalPayload['tenant'];
   store: GuestPortalPayload['store'];
   profile: GuestPortalPayload['profile'];
+  support: {
+    bugReporting: {
+      enabled: boolean;
+      maxAttachmentBytes: number;
+      topics: Array<{ value: string; label: string }>;
+    };
+  };
   referral: {
     status: 'READY';
     code: string;
@@ -1929,6 +1946,7 @@ export class GuestPortalService {
     private readonly secretEncryptionService: SecretEncryptionService,
     private readonly guestIdentityResolver: GuestIdentityResolverService,
     private readonly tenantExecutionAdmission: TenantExecutionAdmissionService,
+    private readonly guestSupportService: GuestSupportService,
   ) {}
 
   private gameDebugTraceId(prefix: string) {
@@ -4068,6 +4086,39 @@ export class GuestPortalService {
     return portal;
   }
 
+  async createBugReport(
+    authorization: string | undefined,
+    idempotencyKey: string | undefined,
+    userAgent: string | undefined,
+    input: GuestBugReportInput,
+    file?: GuestBugReportUploadFile,
+  ): Promise<GuestBugReportResponse> {
+    const payload = await this.verifyGuestToken(
+      authorization,
+      GUEST_PORTAL_WRITE_REQUIREMENTS,
+    );
+    const profile = await this.findProfile(payload, payload.guestId ?? null);
+
+    if (!profile) {
+      throw new BadRequestException(
+        'Игровой профиль гостя не найден. Сначала подтвердите телефон и выберите клуб.',
+      );
+    }
+
+    return this.guestSupportService.createBugReport(
+      {
+        tenantId: payload.tenantId,
+        storeId: payload.storeId,
+        profileId: profile.id,
+        guestId: payload.guestId ?? profile.guestId ?? null,
+        idempotencyKey,
+        userAgent,
+      },
+      input,
+      file,
+    );
+  }
+
   async getGameSummary(
     authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
@@ -4090,6 +4141,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
+      support: this.guestSupportConfiguration(),
     });
 
     this.logGuestGameDebug('summary-result', {
@@ -4129,6 +4181,19 @@ export class GuestPortalService {
     });
 
     return summary;
+  }
+
+  private guestSupportConfiguration(): GuestPortalGameSummary['support'] {
+    return {
+      bugReporting: {
+        enabled: isGuestBugReportingLive(this.configService),
+        maxAttachmentBytes: GUEST_BUG_REPORT_MAX_BYTES,
+        topics: GUEST_BUG_REPORT_TOPICS.map((value) => ({
+          value,
+          label: GUEST_BUG_REPORT_TOPIC_LABELS[value],
+        })),
+      },
+    };
   }
 
   async getGameMissions(
@@ -6468,6 +6533,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
+      support: this.guestSupportConfiguration(),
     });
 
     return {
@@ -6574,6 +6640,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications: previousCompletionNotifications,
       rewardWallet: previousRewardWallet,
+      support: this.guestSupportConfiguration(),
     });
 
     const liveSessionStartResult =
@@ -6650,6 +6717,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
+      support: this.guestSupportConfiguration(),
     });
 
     this.recordGameAuditEvent({
@@ -7415,6 +7483,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
+      support: this.guestSupportConfiguration(),
     });
 
     this.logGuestGameDebug('open-success', {
@@ -7607,6 +7676,7 @@ export class GuestPortalService {
       referralStats,
       completionNotifications,
       rewardWallet,
+      support: this.guestSupportConfiguration(),
     });
     const clubId = `${context.tenant.slug}:${
       context.store.publicSlug ?? context.store.id
@@ -16157,6 +16227,7 @@ function buildGameSummaryFromPortal(
     referralStats: GuestPortalReferralStats;
     completionNotifications?: GuestPortalCompletionNotification[];
     rewardWallet?: GuestPortalRewardWallet;
+    support: GuestPortalGameSummary['support'];
   },
 ): GuestPortalGameSummary {
   const recentRewards = [...portal.gamification.rewards]
@@ -16247,6 +16318,7 @@ function buildGameSummaryFromPortal(
     tenant: portal.tenant,
     store: portal.store,
     profile: portal.profile,
+    support: options.support,
     referral: buildGameReferral(portal, options),
     account: {
       guestFound: portal.guestFound,

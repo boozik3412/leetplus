@@ -4,6 +4,7 @@ import { GuestGamificationModule } from '../guest-gamification/guest-gamificatio
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { GuestPortalController } from './guest-portal.controller';
 import { GuestPortalService } from './guest-portal.service';
+import { GuestSupportService } from './guest-support.service';
 
 @Module({
   // Guest tokens always provide their own purpose and secret. Do not obtain
@@ -15,6 +16,6 @@ import { GuestPortalService } from './guest-portal.service';
     GuestGamificationModule,
   ],
   controllers: [GuestPortalController],
-  providers: [GuestPortalService],
+  providers: [GuestPortalService, GuestSupportService],
 })
 export class GuestPortalModule {}

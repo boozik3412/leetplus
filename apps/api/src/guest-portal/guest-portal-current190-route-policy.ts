@@ -176,6 +176,14 @@ export const GUEST_PORTAL_CURRENT190_ROUTE_MANIFEST = Object.freeze([
     'PERSISTED_WRITE',
   ),
   route(
+    'createBugReport',
+    'POST',
+    '/guest-portal/session/support/bug-reports',
+    'WRITE',
+    'GUEST_SESSION',
+    'PERSISTED_WRITE',
+  ),
+  route(
     'acknowledgeCompletionNotification',
     'POST',
     '/guest-portal/session/completion-notifications/:notificationId/acknowledge',

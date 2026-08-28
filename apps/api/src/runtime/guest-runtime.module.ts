@@ -11,6 +11,7 @@ import { GuestGameMediaService } from '../guest-gamification/guest-game-media.se
 import { GuestGamificationService } from '../guest-gamification/guest-gamification.service';
 import { GuestPortalController } from '../guest-portal/guest-portal.controller';
 import { GuestPortalService } from '../guest-portal/guest-portal.service';
+import { GuestSupportService } from '../guest-portal/guest-support.service';
 import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import { LangameClient } from '../integrations/langame.client';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
@@ -73,6 +74,7 @@ const disabledBonusLedgerScheduler = {
     GuestGamificationService,
     GuestActivityLedgerService,
     GuestPortalService,
+    GuestSupportService,
   ],
 })
 export class GuestRuntimeModule {}

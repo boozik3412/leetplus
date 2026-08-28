@@ -731,6 +731,13 @@ export type GuestPortalGameSummary = {
   tenant: GuestPortalPayload["tenant"];
   store: GuestPortalPayload["store"];
   profile: GuestPortalPayload["profile"];
+  support: {
+    bugReporting: {
+      enabled: boolean;
+      maxAttachmentBytes: number;
+      topics: Array<{ value: string; label: string }>;
+    };
+  };
   referral: {
     status: "READY";
     code: string;

@@ -118,6 +118,18 @@ export const accessCapabilityCatalog = [
       'Контактные CRM-задачи и события, отправка сообщений, создание каналов, закрепление, отметки прочтения и задачи из чата.',
   },
   {
+    key: 'view_support_tickets',
+    label: 'Техническая поддержка: просмотр',
+    description:
+      'Просмотр обращений пользователей игрового модуля и их безопасных вложений.',
+  },
+  {
+    key: 'manage_support_tickets',
+    label: 'Техническая поддержка: обработка',
+    description:
+      'Назначение ответственных, изменение статусов и внутренние комментарии к обращениям.',
+  },
+  {
     key: 'view_staff',
     label: 'Персонал: весь блок',
     description:
@@ -396,6 +408,7 @@ const requestedCapabilityAlternatives: Partial<
   view_guests: guestActionCapabilities,
   view_marketing: ['manage_marketing'],
   view_communications: ['manage_communications'],
+  view_support_tickets: ['manage_support_tickets'],
   view_staff: [...staffSectionCapabilities, ...staffActionCapabilities],
   view_staff_tasks: ['manage_staff_tasks'],
   view_staff_standards: ['manage_staff_standards'],
@@ -468,6 +481,8 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'manage_marketing',
     'view_communications',
     'manage_communications',
+    'view_support_tickets',
+    'manage_support_tickets',
     ...ownerStaffCapabilities,
     'manage_users',
     'manage_integrations',
@@ -493,6 +508,8 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'manage_marketing',
     'view_communications',
     'manage_communications',
+    'view_support_tickets',
+    'manage_support_tickets',
     ...ownerStaffCapabilities,
     'manage_users',
     'manage_integrations',
@@ -607,13 +624,20 @@ const administratorWorkspaceCapabilities: AccessCapability[] = [
   'view_staff_knowledge',
 ];
 
+const supportAdministrationCapabilities: AccessCapability[] = [
+  'view_support_tickets',
+  'manage_support_tickets',
+];
+
 const minimumRoleCapabilities: Partial<Record<UserRole, AccessCapability[]>> = {
   [UserRole.OWNER]: [
     ...universalCommunicationCapabilities,
+    ...supportAdministrationCapabilities,
     ...elevatedKnowledgeCapabilities,
   ],
   [UserRole.ADMIN]: [
     ...universalCommunicationCapabilities,
+    ...supportAdministrationCapabilities,
     ...administratorWorkspaceCapabilities,
     ...elevatedKnowledgeCapabilities,
   ],

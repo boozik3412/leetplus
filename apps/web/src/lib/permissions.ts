@@ -22,6 +22,8 @@ export type Capability =
   | "manage_marketing"
   | "view_communications"
   | "manage_communications"
+  | "view_support_tickets"
+  | "manage_support_tickets"
   | "view_staff"
   | "view_staff_shift_workspace"
   | "view_staff_tasks"
@@ -124,6 +126,7 @@ const requestedCapabilityAlternatives: Partial<
   view_guests: guestActionCapabilities,
   view_marketing: ["manage_marketing"],
   view_communications: ["manage_communications"],
+  view_support_tickets: ["manage_support_tickets"],
   view_staff: [...staffSectionCapabilities, ...staffActionCapabilities],
   view_staff_tasks: ["manage_staff_tasks"],
   view_staff_standards: ["manage_staff_standards"],
@@ -250,6 +253,18 @@ export const capabilityOptions: CapabilityOption[] = [
     label: "Коммуникации: действия",
     description:
       "Отправка сообщений, создание каналов, закрепление, отметки прочтения и задачи из чата.",
+  },
+  {
+    key: "view_support_tickets",
+    label: "Техническая поддержка: просмотр",
+    description:
+      "Просмотр обращений пользователей игрового модуля и их безопасных вложений.",
+  },
+  {
+    key: "manage_support_tickets",
+    label: "Техническая поддержка: обработка",
+    description:
+      "Назначение ответственных, изменение статусов и внутренние комментарии к обращениям.",
   },
   {
     key: "view_staff",
@@ -472,6 +487,8 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "manage_marketing",
     "view_communications",
     "manage_communications",
+    "view_support_tickets",
+    "manage_support_tickets",
     ...ownerStaffCapabilities,
     "manage_users",
     "manage_integrations",
@@ -496,6 +513,8 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "manage_marketing",
     "view_communications",
     "manage_communications",
+    "view_support_tickets",
+    "manage_support_tickets",
     ...ownerStaffCapabilities,
     "manage_users",
     "manage_integrations",
@@ -609,14 +628,21 @@ const administratorWorkspaceCapabilities: Capability[] = [
   "view_staff_knowledge",
 ];
 
+const supportAdministrationCapabilities: Capability[] = [
+  "view_support_tickets",
+  "manage_support_tickets",
+];
+
 const minimumRoleCapabilities: Partial<Record<AuthUser["role"], Capability[]>> =
   {
     OWNER: [
       ...universalCommunicationCapabilities,
+      ...supportAdministrationCapabilities,
       ...elevatedKnowledgeCapabilities,
     ],
     ADMIN: [
       ...universalCommunicationCapabilities,
+      ...supportAdministrationCapabilities,
       ...administratorWorkspaceCapabilities,
       ...elevatedKnowledgeCapabilities,
     ],
@@ -871,6 +897,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
 
   if (href === "/communications" || href.startsWith("/communications/")) {
     return can(user, "view_communications") || can(user, "view_guests");
+  }
+
+  if (href === "/support" || href.startsWith("/support/")) {
+    return can(user, "view_support_tickets");
   }
 
   if (

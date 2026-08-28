@@ -36694,6 +36694,13 @@ function buildVisualEditorPreviewSummary(
       levelProgressPercent: 0,
       frame: 'starter',
     },
+    support: {
+      bugReporting: {
+        enabled: false,
+        maxAttachmentBytes: 5 * 1024 * 1024,
+        topics: [],
+      },
+    },
     referral: {
       status: 'READY',
       code: 'PREVIEW',

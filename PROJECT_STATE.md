@@ -9,8 +9,8 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий runtime implementation baseline — merge SHA
-`8871934273c2545531b28dfd0da66ca413eea14c` (PR #66). Fast CI и Full Release
-Admission зелёные на exact merge SHA. В source реализованы отдельные
+`8b1d5972aec3c61b62789002ddacf1653a8b5bbc` (PR #67, включает PR #66). Fast CI
+и Full Release Admission зелёные на exact merge SHA. В source реализованы отдельные
 `CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
 pools, но production cutover не выполнялся: последний зафиксированный
 production runtime остаётся `COMBINED`, а split systemd/nginx candidate —
@@ -20,6 +20,15 @@ production runtime остаётся `COMBINED`, а split systemd/nginx candidate
 не имеет общего лимита одновременно вошедших пользователей.
 `/guests/gamification*` — tenant-authenticated управление игрой и остаётся в
 corporate contour. Background jobs не регистрируются в public guest runtime.
+
+Bug-report production candidate следует этим же границам: guest submission
+`/guest-portal/session/support/bug-reports` принадлежит только GuestRuntime;
+tenant queue `/support/bug-reports*` и platform queue
+`/admin/support-tickets*` принадлежат CorporateRuntime. Вложения ограничены
+одним signature-validated JPG/PNG/WebP до 5 MiB, обращения не создают StaffTask
+и не вызывают outbound providers. Runtime flag
+`GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed; authoritative runbook:
+[`docs/support/guest-bug-reporting.md`](docs/support/guest-bug-reporting.md).
 
 ## Detailed gamification state (updated through 28.08.2026)
 

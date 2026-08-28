@@ -8,6 +8,7 @@ import {
   LANGAME_DISCREPANCY_LOG_ROOT_KEY,
   PRODUCTION_SECRET_KEYS,
   resolveAccessScopeEnforcementMode,
+  resolveGuestBugReportingMode,
   resolveSecuritySecret,
   resolveStaffAttachmentAclMode,
   validateEnvironment,
@@ -625,6 +626,20 @@ describe('resolveAccessScopeEnforcementMode', () => {
   it('rejects unknown modes', () => {
     expect(() => resolveAccessScopeEnforcementMode('legacy')).toThrow(
       /must be SHADOW or ENFORCED/,
+    );
+  });
+});
+
+describe('resolveGuestBugReportingMode', () => {
+  it('defaults to OFF and accepts only the explicit live switch', () => {
+    expect(resolveGuestBugReportingMode(undefined)).toBe('OFF');
+    expect(resolveGuestBugReportingMode(' off ')).toBe('OFF');
+    expect(resolveGuestBugReportingMode('live')).toBe('LIVE');
+  });
+
+  it('rejects ambiguous rollout values', () => {
+    expect(() => resolveGuestBugReportingMode('enabled')).toThrow(
+      /must be OFF or LIVE/,
     );
   });
 });

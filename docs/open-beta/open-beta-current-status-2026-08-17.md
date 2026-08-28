@@ -1,19 +1,19 @@
 # LeetPlus open beta — текущее состояние на 28.08.2026
 
-| Поле                 | Состояние                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------- |
-| Release decision     | `NO-GO` для внешнего доступа                                                          |
-| Production runtime   | healthy; access baseline deployed; внешний tenant не создавался                       |
+| Поле                 | Состояние                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| Release decision     | `NO-GO` для внешнего доступа                                                              |
+| Production runtime   | healthy; access baseline deployed; внешний tenant не создавался                           |
 | Prisma schema        | source candidate `CURRENT_188`; production remains `CURRENT_187` until controlled rollout |
-| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA          |
-| Runtime successor    | current-context merge `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`; gates green          |
-| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                      |
-| Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending        |
-| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`              |
-| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены           |
-| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                         |
-| Offline/USB key      | исключён из beta critical path                                                        |
-| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                    |
+| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA              |
+| Runtime successor    | current-context merge `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`; gates green             |
+| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                          |
+| Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending            |
+| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                  |
+| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены               |
+| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                             |
+| Offline/USB key      | исключён из beta critical path                                                            |
+| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                        |
 
 ## Обновление 28.08.2026
 
@@ -59,6 +59,16 @@ Support storage не связан со StaffTask, уведомлениями и�
 canary и atomic cutover production считается `CURRENT_187`, а runtime flag
 остаётся `OFF`. Runbook:
 [guest bug reporting](../support/guest-bug-reporting.md).
+
+Для текущего exact `CURRENT_187` подготовлен отдельный fail-closed переход:
+сначала candidate с выключенной функцией принимает только точный source head,
+затем подписанный controller V2 удерживает root-owned blue/green lock, связывает
+план с active slot, same-SHA release, accepted cutover receipt, protected
+env/unit digests и live readiness `187 -> target 188`, применяет единственную
+checksum-pinned миграцию и требует от того же bridge readiness `188/188` вместе
+с полным support catalog. После этого второй slot запускается на exact
+`CURRENT_188` с bridge `OFF`. Старый runtime не считается rollback после смены
+схемы; rollback target — уже проверенный bridge slot того же admitted SHA.
 
 ### Role-aware landing
 

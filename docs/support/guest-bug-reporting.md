@@ -17,11 +17,11 @@ Telegram-сообщения, не создаёт `StaffTask` и не вызыв�
 
 ## Runtime-контуры и маршруты
 
-| Субъект | Web | API | Runtime/guard |
-| --- | --- | --- | --- |
-| Public guest | `POST /api/guest-support/bug-report` | `POST /guest-portal/session/support/bug-reports` | `GuestRuntimeModule`, guest JWT и write requirements |
-| Tenant support | `/support` и private BFF `/api/support/bug-reports/*` | `/support/bug-reports/*` | `CorporateRuntimeModule`, corporate JWT, capability и `FreshNetworkScopeGuard` |
-| Platform support | `/administration/support-tickets` и private BFF `/api/admin/support-tickets/*` | `/admin/support-tickets/*` | `CorporateRuntimeModule`, corporate JWT и `PlatformAdminGuard` |
+| Субъект          | Web                                                                            | API                                              | Runtime/guard                                                                  |
+| ---------------- | ------------------------------------------------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------ |
+| Public guest     | `POST /api/guest-support/bug-report`                                           | `POST /guest-portal/session/support/bug-reports` | `GuestRuntimeModule`, guest JWT и write requirements                           |
+| Tenant support   | `/support` и private BFF `/api/support/bug-reports/*`                          | `/support/bug-reports/*`                         | `CorporateRuntimeModule`, corporate JWT, capability и `FreshNetworkScopeGuard` |
+| Platform support | `/administration/support-tickets` и private BFF `/api/admin/support-tickets/*` | `/admin/support-tickets/*`                       | `CorporateRuntimeModule`, corporate JWT и `PlatformAdminGuard`                 |
 
 Guest runtime не импортирует corporate `AuthModule`, `SupportModule` или
 `StaffModule`. Corporate runtime не регистрирует public guest route. COMBINED
@@ -89,18 +89,54 @@ Additive migration:
 identity-mail readiness receipt на exact новый head. Удаление или изменение
 существующих business rows не выполняется.
 
-Порядок rollout:
+Production сейчас может находиться на `CURRENT_187`, тогда как admitted artifact
+ожидает `CURRENT_188`. Поэтому rollout выполняется двумя cutover, без окна 502 и
+без запуска нового кода с доступной гостю записью до появления таблиц:
 
-1. green Fast CI + Full Release Admission на одном exact SHA;
-2. backup и apply/repeat/rollback/zero-residue rehearsal на restored copy;
-3. migration deploy из immutable artifact и проверка exact head/count;
-4. запуск inactive API/Web slot с `GUEST_BUG_REPORTING_MODE=LIVE`;
-5. readiness, negative contour matrix, guest submit/idempotency/invalid-file и
-   tenant/platform isolation canary;
-6. atomic cutover и bounded soak с сохранённым N-1 rollback receipt.
+1. получить green Fast CI + Full Release Admission одного exact SHA и проверить
+   SHA-bound runtime/control artifacts и final admission receipt;
+2. сделать backup, восстановить его в изолированную PostgreSQL 16 copy и пройти
+   exact checksum-pinned database path `187 -> 188`, repeat/catalog check и
+   обычный restored-copy acceptance. Production `V2 plan/apply` здесь не
+   подменяется: его live bridge-attestation возможна только после реального
+   первого cutover;
+3. запустить inactive slot с release identity `CURRENT_188`, но с
+   `GUEST_BUG_REPORTING_MODE=OFF` и
+   `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_187`; readiness принимает
+   только exact чистый `CURRENT_187` и публикует явную compatibility evidence;
+   tenant/platform support API в этом режиме отвечает safe not found до любого
+   запроса к отсутствующим support tables, а Web-страницы очередей возвращают
+   пользователя в соответствующий dashboard;
+4. пройти loopback/public read-only canary и атомарно переключить трафик на этот
+   bridge slot. Предыдущий `CURRENT_187` slot остаётся точным N-1;
+5. применить только подписанный checksum-pinned
+   `FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V2` controller. До любого
+   database effect он берёт тот же root-owned cutover lock, проверяет активный
+   nginx target, непросроченный accepted receipt/index с `CONSUMED=false`,
+   отсутствие pending intent, exact release/slot/systemd/environment identity,
+   `COMBINED + OFF + ALLOW_CURRENT_187` и live readiness `187 -> target 188`.
+   Эта attestation входит в подписанный plan вместе с production database
+   identity. Controller допускает ровно
+   `187 applied / 4 rolled back / 0 unfinished`, одну целевую миграцию и после
+   deploy под тем же lock проверяет readiness `188/188`, таблицы, enum,
+   constraints, indexes, owner/runtime fingerprint и отсутствие PUBLIC grants;
+6. убедиться, что active bridge после изменения БД готов уже как exact
+   `CURRENT_188`. Запустить второй slot с `GUEST_BUG_REPORTING_MODE=LIVE` и
+   `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`;
+7. пройти negative contour matrix, guest submit/idempotency/invalid-file,
+   tenant/platform isolation canary, затем второй atomic cutover и bounded soak.
+
+Executable controller и команды описаны в
+[CURRENT_188 production upgrade controller](../open-beta/founder-pilot-current188-production-upgrade-controller.md).
+Bridge не является общим допуском N/N+1: он принимает только одну пару
+`187 -> 188`, только `COMBINED` runtime и только при выключенной отправке багов.
+После второго cutover значение обязано вернуться в `OFF`.
 
 Rollback приложения не требует schema rollback: additive objects остаются, а
-N-1 код их не использует. Операционный kill switch — вернуть
+после перехода схемы rollback target — первый bridge slot того же admitted SHA,
+который уже прошёл exact `CURRENT_188` readiness. Старый `CURRENT_187` runtime
+нельзя возвращать после миграции, потому что его exact-head readiness справедливо
+откажет. Операционный kill switch — вернуть
 `GUEST_BUG_REPORTING_MODE=OFF` и перезапустить active API; форма исчезает из
 следующего game-summary, create route отвечает safe not found. Уже сохранённые
 обращения не удаляются.

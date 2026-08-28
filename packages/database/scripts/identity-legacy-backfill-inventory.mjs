@@ -2027,6 +2027,7 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
       "35fcd3935f02366fce3d43d4dcc2724334f156bcb22e8599713582a4f523ffce",
       "e5df3c4b1f785f99925776d72d16a2c2f9f6a2fc7f94c21dd8dd3088d576d9c1",
       "a7dd17037ceaccb294953dce145e0fcc589fb2646962db724d919c24ba87c53c",
+      "a9a4bf75b8d5a381ebfc5ed9a35c6b966cbaac9b631a321ee66c1a6c1cc113a5",
     ]),
   },
   {

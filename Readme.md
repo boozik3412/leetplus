@@ -10,6 +10,10 @@ LeetPlus - SaaS-платформа для операционного управ�
 Четыре текущих клуба считаются одной сетью и сохраняются четырьмя `Store`
 одного существующего `Tenant`.
 
+Каноническое разделение public guest, corporate tenant и worker-контуров,
+включая инцидентные уроки 27–28.08.2026, закреплено в
+[runtime/security contract](./docs/security/runtime-security-contours.md).
+
 Production-модель ролей, обязательный доступ к коммуникациям, безопасный
 tenant switch администратора платформы и выбор рабочей сети `1337` описаны в
 [access baseline 24.08.2026](./docs/open-beta/production-access-baseline-2026-08-24.md).
@@ -42,29 +46,36 @@ authority.
 
 ## Текущий статус
 
-На 27.06.2026 проект находится в production-стадии ранней операционной платформы: рабочий контур развернут на VDS, подключен к реальным источникам Langame и развивается быстрыми итерациями от пользовательских сценариев. LeetPlus уже покрывает дашборд сети, ассортимент, гостей/CRM, маркетинг, игровой модуль, выдачу доступа сотрудникам и большой блок `Персонал` с задачами, регламентами, чек-листами, обучением, дисциплиной и коммуникациями.
+На 28.08.2026 проект находится в production-стадии ранней операционной платформы: рабочий контур развернут на VDS, подключен к реальным источникам Langame и развивается быстрыми итерациями от пользовательских сценариев. LeetPlus уже покрывает дашборд сети, ассортимент, гостей/CRM, маркетинг, игровой модуль, выдачу доступа сотрудникам и большой блок `Персонал` с задачами, регламентами, чек-листами, обучением, дисциплиной и коммуникациями.
 
 - Web: `https://leetplus.ru`
 - API: `https://api.leetplus.ru`
 - Telegram edge VDS: live edge `https://tg.leetplus.ru` runs on server 1337 (`188.234.220.76`) through Docker Compose; the primary production path is Telegram long polling via `telegram-poller`, not a public Telegram webhook. Mini App is served at `/game/app`, the main API receives only safe internal updates at `/guest-portal/telegram/webhook`, and the full handoff is fixed in `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md`.
 - Production-ветка: `main`
 - VDS: Ubuntu 24.04 LTS
-- Автообновление VDS: включено, сервер проверяет `origin/main` через `leetplus-deploy.timer`
+- Legacy auto-deploy `leetplus-deploy.timer` masked и не является release
+  authority; merge в `main` не означает production deployment
 - SSL: Let's Encrypt для `leetplus.ru`, `www.leetplus.ru`, `api.leetplus.ru`
 - Production-почта: `reports@leetplus.ru` через Mail.ru/VK WorkSpace SMTP
 - Публичная главная и левая колонка экранов входа/регистрации показывают компактные реквизиты владельца сайта для подтверждения оператором авторизационных SMS: ООО "ЛИТ", ОГРН 1231800017063, ИНН 1800006677, КПП 180001001
 - Публичный стартовый UX: `/` и `/start` открывают выбор модулей `Аналитика и управление` / `Игровой модуль`; кнопка аналитики ведет в текущий рабочий контур, а игровой модуль ведет на `/game/auth`
 - Корпоративный вход выбирает домашнюю страницу по эффективной роли: управляющие роли → `/dashboard`, закупщик → `/assortment/dashboard`, маркетолог → `/marketing`, менеджер по стандартам → `/staff`, сменные роли → `/staff/shift-workspace`, platform admin без tenant-контекста → `/administration`. Сохранённый `returnTo=/dashboard` и прямой `/dashboard` не отменяют специализированный маршрут.
 - Публичный план входа игрового модуля сейчас показывает готовыми основные каналы: Telegram-бот через polling edge 1337 и бесплатный звонок пользователя на номер через SMS.ru Callcheck. Резервный SMS-код через SMS.ru `/sms/send` считается готовым только в staged `test=1` или при явном `GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED=true`; live-рассылка SMS остается отдельным контролируемым canary-шагом после лимитов и anti-abuse QA.
-- Основной рабочий процесс: локально меняем код, проверяем, коммитим и пушим в `main`; VDS забирает изменения автоматически
-- Локальную БД и локальные сервисы не трогаем без отдельной необходимости: актуальная проверка пользовательского результата идет сразу на `leetplus.ru`
+- Основной рабочий процесс: branch/PR → Fast CI + Full Release Admission одного
+  exact SHA → immutable artifact/control handoff → отдельный production GO
+- Локальная/source проверка и production canary — разные evidence. Без
+  отдельного cutover нельзя считать изменение доступным на `leetplus.ru`
 
 Ключевые рабочие зоны production:
 
 - `/dashboard` - управленческий дашборд сети.
 - `/products`, `/reports`, `/assortment` - ассортимент, продажи, остатки, маржинальность и рекомендации.
 - `/guests`, `/guests/report`, `/marketing` - гости, CRM, сегменты, кампании и промо-сценарии.
-- `/gamification`, `/gamification/log`, `/play`, `/play/game`, `/game/app` - управление игровым модулем, диагностика, Telegram/Mini App, рефералы, награды и outbox коммуникаций. Старые UI-маршруты `/guests/gamification` и `/gamification-log` сохранены как редиректы.
+- `/gamification`, `/gamification/log` и API `/guests/gamification*` —
+  tenant-authenticated управление игрой в corporate contour; `/game*`,
+  `/play*`, `/game/app` и API `/guest-portal*` — независимый public guest
+  contour. Старые UI-маршруты `/guests/gamification` и `/gamification-log`
+  сохранены как редиректы.
 - `/staff/*` - персонал, задачи, сменные регламенты, чек-листы, обучение, дисциплина, коммуникации и операционный контроль.
 - `/users`, `/administration`, `/settings` - доступы, platform admin, tenant lifecycle и интеграции.
 
@@ -674,7 +685,10 @@ Production-развертывание доступно по адресам:
 - SSL: Let's Encrypt
 - nginx proxy timeout: 15 минут для длинных ручных синхронизаций
 
-Автообновление настроено через systemd timer `leetplus-deploy.timer`. Скрипт `/usr/local/bin/leetplus-deploy.sh` проверяет `origin/main`; при новом коммите выполняет:
+Исторический auto-deploy был настроен через systemd timer
+`leetplus-deploy.timer`, но теперь masked и исключён из release authority.
+Ниже сохранена только историческая последовательность старого скрипта; её
+нельзя запускать как production release:
 
 ```bash
 git pull --ff-only origin main

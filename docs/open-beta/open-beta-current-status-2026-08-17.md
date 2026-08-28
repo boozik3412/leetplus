@@ -6,6 +6,7 @@
 | Production runtime   | healthy; access baseline deployed; внешний tenant не создавался                       |
 | Prisma schema        | `CURRENT_187`: 187 applied, head `20260820010000_guest_portal_telegram_update_ledger` |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA          |
+| Runtime successor    | implementation merge `8871934273c2545531b28dfd0da66ca413eea14c`; gates green          |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                      |
 | Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending        |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`              |
@@ -17,12 +18,22 @@
 ## Обновление 28.08.2026
 
 После production-инцидента `USER_CALL` подготовлено разделение B2B и public
-guest runtime без изменения production. Engineering candidate содержит
-отдельные `corporate-main`/`guest-main`: guest graph не импортирует
-`AuthModule`, `StaffModule` и широкие domain modules; corporate graph не
-импортирует `GuestPortalModule`/`GuestGamificationModule`. HTTP perimeter,
-entrypoint role и secret allowlist работают fail-closed. Guest process не
-регистрирует background scheduler: требуемый bonus signal заменён no-op.
+guest runtime без изменения production. Successor слит в `main` merge SHA
+`8871934273c2545531b28dfd0da66ca413eea14c`; его post-merge Fast CI
+[`33146506113`](https://github.com/boozik3412/leetplus/actions/runs/33146506113)
+и Full Release Admission
+[`33146506160`](https://github.com/boozik3412/leetplus/actions/runs/33146506160)
+зелёные.
+
+Отдельные `corporate-main`/`guest-main` имеют разные module graphs. Guest graph
+не импортирует `AuthModule`, `StaffModule` и широкие domain modules. Corporate
+graph не импортирует public `GuestPortalModule` или полный смешанный
+`GuestGamificationModule`, но через `CorporateGuestGamificationModule`
+сохраняет tenant-authenticated `/guests/gamification*`, media management и
+controlled game jobs. Public guest controllers в corporate process не
+регистрируются. HTTP perimeter, entrypoint role и secret allowlist работают
+fail-closed. Guest process не регистрирует background scheduler: требуемый
+bonus signal заменён no-op.
 
 Подготовлены dormant systemd/nginx templates для отдельных UID/slices, портов
 `4100/4101` и `4200/4201`, route split и разных bounded PostgreSQL pools на
@@ -31,6 +42,8 @@ attestation/watchdog/rollback ещё знают только одну API unit; 
 отдельные DB-роли, restored-copy ACL/pool rehearsal, нагрузочный canary и явный
 GO. Текущий production остаётся `COMBINED` и не изменён. Runbook:
 [split guest runtime candidate](../deployment/guest-runtime-pool-candidate/README.md).
+Канонические route/identity/process инварианты:
+[runtime/security contours](../security/runtime-security-contours.md).
 
 ### Role-aware landing
 
@@ -511,8 +524,9 @@ browser/store-scope срез Gate 1MT. Владелец синтетическо
 ## Полный путь до первого внешнего тестера
 
 ```text
-new exact SHA + Fast CI + Full Release Admission [IN PROGRESS]
-  → immutable runtime/control handoff + legacy auto-deploy removal
+[DONE main 88719342] exact SHA + Fast CI + Full Release Admission
+  → [DONE CI] immutable runtime/control handoff
+  → [DONE operational baseline] legacy auto-deploy removal from authority path
   → [DONE] live backup + isolated target + read-only preflight
   → [DONE restored copy] production-history migrate + repeat + zero-diff
   → [DONE restored copy] execute-only runtime role/grant/attestation

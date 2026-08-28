@@ -32,6 +32,12 @@ checkout не является допустимым источником product
 разрешает deployment, миграцию production-данных или выдачу доступа сам по
 себе.
 
+Перед изменением auth, role landing, access scope, игрового HTTP, game
+administration, workers или deployment обязателен единый
+[runtime/security contour contract](../security/runtime-security-contours.md).
+Он фиксирует, что public `/guest-portal*`, corporate
+`/guests/gamification*` и unattended jobs принадлежат разным контурам.
+
 Актуальный production baseline доступа сотрудников и администратора платформы
 зафиксирован в
 [отчёте 24.08.2026](./production-access-baseline-2026-08-24.md). Рабочий

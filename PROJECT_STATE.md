@@ -1,6 +1,27 @@
 # LeetPlus Project State
 
-## Current gamification state (23.08.2026)
+## Canonical current-state guardrail (28.08.2026)
+
+Перед задачами по auth, landing, access scope, игровому модулю, integrations,
+workers или deployment обязательно прочитать
+[`docs/security/runtime-security-contours.md`](docs/security/runtime-security-contours.md).
+Он фиксирует три независимых контура: public guest, corporate tenant и
+workers/control plane, а также инцидентные уроки 27–28.08.2026.
+
+Текущий runtime implementation baseline — merge SHA
+`8871934273c2545531b28dfd0da66ca413eea14c` (PR #66). Fast CI и Full Release
+Admission зелёные на exact merge SHA. В source реализованы отдельные
+`CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
+pools, но production cutover не выполнялся: последний зафиксированный
+production runtime остаётся `COMBINED`, а split systemd/nginx candidate —
+`DORMANT / NOT INSTALLED`.
+
+Публичный игровой вход (`/guest-portal*`) не зависит от corporate JWT/scope и
+не имеет общего лимита одновременно вошедших пользователей.
+`/guests/gamification*` — tenant-authenticated управление игрой и остаётся в
+corporate contour. Background jobs не регистрируются в public guest runtime.
+
+## Detailed gamification state (updated through 28.08.2026)
 
 - The canonical manager route is `/gamification`, diagnostics live at `/gamification/log`, missions are created and edited only in `/gamification/missions/wizard`, and the guest flow is `/game/auth -> /game/clubs -> /game` with reward history at `/game/rewards`.
 - Mission v2 and Battle Pass share the same condition family: `APP_OPEN`, `PLAY_TIME`, `PRODUCT_PURCHASE`, `BALANCE_TOPUP`, and `CHECK_IN`. Loot boxes accept `ANY`, `HOURLY`, or `PACKAGE_OR_SUBSCRIPTION`.
@@ -48,18 +69,23 @@
 - The ordinary LIVE snapshot window remains the primary path. Historical anti-join recovery for guest-bound sessions and purchases is independently gated by `GUEST_GAME_PIPELINE_BACKFILL_MODE=OFF|SHADOW|LIVE` and defaults to `OFF`, where it executes no anti-join SQL. Every enabled mode requires an exact tenant and an explicitly false kill switch; `LIVE` also requires a timezone-qualified cutoff plus an exact profile unless tenant-wide rollout is explicitly allowed. `SHADOW` records diagnostic decisions only and cannot create event, XP, reward or entitlement. `PLAY_HOUR` is emitted only after a session has stopped, so an intermediate duration cannot seal a stale event before the final 60-minute boundary. The Ledger recovery lane remains secondary and acts only after the primary grace window.
 - Standalone cases, mission-target cases and Battle Pass lootbox rewards share entitlement limits and opening semantics. `STANDALONE` is directly earnable, `REWARD_TEMPLATE` is only granted by a mission or Battle Pass target, and `BOTH` supports both paths. Qualification never selects a random prize; the guest's manual open action does that exactly once.
 
-Last updated: 2026-08-23
+Last updated: 2026-08-28
 
 ## Current Workflow
 
-- Main local repo: `C:\Users\ALIENWARE\Desktop\leetplus`
+- Main local repo: `C:\Users\ALIENWARE\Documents\New project\leetplus-role-aware-landing`
 - Production site: `https://leetplus.ru`
 - API: `https://api.leetplus.ru`
 - GitHub repo: `https://github.com/boozik3412/leetplus`
 - Production branch: `main`
-- VDS auto-deploy watches `origin/main`; preferred workflow is code change, verify build if needed, commit, push.
+- `main` is canonical source, but merge/push is not production deployment.
+  Legacy `leetplus-deploy.timer` is masked and is not release authority.
+  Production accepts only an immutable artifact/control handoff for one exact
+  SHA after green Fast CI + Full Release Admission and a separate explicit GO.
 - VDS deploy script builds API and Web sequentially (`pnpm --filter api build`, then `pnpm --filter web build`). The VDS has limited memory and parallel workspace builds have previously been OOM-killed, leaving an incomplete `.next`; available swap does not remove the sequential-build rule.
-- Do not spend time refreshing local DB state or restarting local services unless explicitly requested. User reviews changes directly on `leetplus.ru`.
+- Do not infer production state from local/main state. Read-only diagnostics may
+  verify it; server, DB, nginx, systemd or provider mutations require explicit
+  production authorization.
 - Production QA uses dedicated operator accounts. Credentials remain outside the repository and project documentation.
 
 ## Stack

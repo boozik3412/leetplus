@@ -1,6 +1,6 @@
 # Live-награды гостевого игрового модуля
 
-Last updated: 2026-08-13
+Last updated: 2026-08-28
 
 Этот документ описывает боевой контракт гостевой геймификации. Он важнее старых заметок о ручной выдаче, если они расходятся.
 
@@ -16,6 +16,8 @@ Last updated: 2026-08-13
 | Чекин | Отдельный LIVE check-in pipeline | Generic visit/session не является заменой |
 
 Наличие fallback, supplemental или materializer в коде не подтверждает его production-режим. Перед диагностикой проверяются runtime status/env, tenant scope, cutoff, fact allow-list, lag/retry/dead-letter и фактические решения в `/gamification/log`.
+
+На 28.08.2026 активный production blue slot использует финальный `canary-safe.env`: primary activity/snapshot, supplemental, reward-materializer и bonus-ledger schedulers явно выключены. API имеет reviewed outbound TCP/DNS для прямых Langame/provider запросов, но сетевой egress не включает ни scheduler, ни provider write. Direct LIVE check-in работает независимо от фоновых processors. Подробности восстановления 27–28.08.2026: [`production-incident-2026-08-27-langame-recovery.md`](./production-incident-2026-08-27-langame-recovery.md).
 
 ## Гостевая авторизация и восстановление
 
@@ -81,7 +83,7 @@ Last updated: 2026-08-13
 5. Bonus ledger dispatcher выбирает claim-required reward только при доказанном своевременном `deliveryRequestedAt < claimExpiresAt` и связанном wallet item `PROCESSING/FAILED`.
 6. Подтверждённая внешняя доставка завершает reward/wallet. Если запрос во внешний Langame write уже был отправлен, но результат неоднозначен, ledger переходит в `RECONCILIATION_REQUIRED`, wallet остаётся `PROCESSING`, а автоматический и гостевой retry запрещены до сверки.
 
-Scheduler работает внутри `leetplus-api.service`, отдельный systemd unit не нужен. В production он включен автоматически при наличии `SYNC_SERVICE_TOKEN`, если `GUEST_GAME_PIPELINE_SCHEDULER_ENABLED` не задан явно.
+Scheduler работает внутри API-процесса, отдельный systemd unit не нужен. Legacy/default-конфигурация может вывести его из наличия `SYNC_SERVICE_TOKEN`, но production artifact обязан задавать `GUEST_GAME_PIPELINE_SCHEDULER_ENABLED` явно. Фактический статус определяется effective env и `/gamification/log`; текущий `canary-safe.env` задаёт `false`.
 
 ### Второй боевой слой игрового журнала
 
@@ -100,6 +102,18 @@ Scheduler работает внутри `leetplus-api.service`, отдельны
 Пополнение — доменный факт Langame. Если несколько клубов используют один домен, пополнение в любом из них может выполнить задание выбранного клуба того же домена. Supplemental evaluator строит доменную и timezone-карту из выбранных клубов: факт того же домена допускается, факт другого домена и клуб без заполненного `externalDomain` блокируются. Мастер показывает доменную семантику до активации.
 
 Receipt supplemental-очереди использует lease. Просроченный `PROCESSING` атомарно возвращается в обработку; после трёх неуспешных попыток запись переводится в `DEAD_LETTER`. Fresh claim другого worker не перехватывается.
+
+### Domain-only факты primary pipeline
+
+Для нормализованного факта с `externalDomain`, но без `club_id`, primary evaluator строит fail-closed routing через `buildUnambiguousPrimaryDomainRouting`:
+
+- явный `storeId` остаётся authoritative;
+- домен допускается к правилу только если правило выбрало все активные stores tenant за этим доменом;
+- частично выбранный shared domain никогда не расширяется до остальных клубов;
+- stricter routing map supplemental/fallback caller имеет приоритет над inferred primary map;
+- mission, loot-box и season получают club-local timezone для каждого разрешённого домена.
+
+Следовательно, domain-wide правило не теряет валидный факт только из-за отсутствующего `club_id`, но правило одного клуба не получает факт соседнего клуба на том же домене.
 
 ### Последовательный LIVE → Ledger fallback
 
@@ -208,7 +222,7 @@ Production gate остаётся fail-closed: `GuestGameRewardMaterializerSchedu
 - атомарный конкурентный claim intent и effect через `FOR UPDATE SKIP LOCKED`, lease/reclaim и `leaseVersion` fencing;
 - fault-injection на транзакционных границах event/XP/intent и reward/effect, безопасный retry/dead-letter до внешнего write и `RECONCILIATION_REQUIRED` без retry после неоднозначного Langame write;
 - restart/retry/replay и конкурентная обработка, при которой materializer читает immutable plan и не переоценивает актуальный шаг Battle Pass или случайный выбор лутбокса;
-- reward-effect materializer не выполняет provider dispatch: эта граница остаётся под отдельным действующим bonus-ledger scheduler.
+- reward-effect materializer не выполняет provider dispatch: эта граница принадлежит отдельному bonus-ledger scheduler, фактическое включение которого подтверждается только runtime env/status. На 28.08.2026 production `canary-safe.env` держит его выключенным и в dry-run.
 
 Операционный gate: проверить миграции и индексы на production-объёме, задеплоить API при выключенном materializer, подтвердить очереди и метрики, затем провести tenant-scoped canary.
 
@@ -257,6 +271,19 @@ Production gate остаётся fail-closed: `GuestGameRewardMaterializerSchedu
 - Черновики не участвуют в боевом запуске и не могут подавить совпадающее активное правило.
 - `/gamification` и `/gamification/log` показывают диагностические решения правила, факты игрового журнала, freshness источника и историю наград. Для тестов используйте эти данные вместе с summary гостя.
 - Не сохраняйте в документации или клиентских логах raw phone, токены, ключи Langame, payload Langame и VDS credentials.
+
+## Incident recovery и back-credit
+
+Пропущенный результат после сбоя интеграции восстанавливается через ту же каноническую цепочку, а не SQL-правкой reward-таблиц:
+
+1. Зафиксировать outage window, exact tenant/store/domain, effective feature flags и queue baseline.
+2. До data effect создать и проверить production backup.
+3. Сверить exact факт с activation boundary, source identity, rule version, previous-cycle cutoff, staff-test policy и существующими event/intent/effect/wallet/entitlement/posting.
+4. Использовать canonical event. Если exact canonical identity уже связана с неверным duplicate guest, создать аудируемое compensation event с новым стабильным external ID.
+5. Запустить ordinary bounded materializer. Не обходить claim, staff, audience, period, `maxPendingRewards` или reconciliation guards и не открывать case за гостя.
+6. Повторить вход и доказать идемпотентность. Второй bounded materializer pass должен создать ноль новых результатов; active и dead-letter queues должны быть пусты.
+
+Принятый production пример, backup/receipt SHA-256 и masked результаты проверки находятся в [`production-incident-2026-08-27-langame-recovery.md`](./production-incident-2026-08-27-langame-recovery.md).
 
 ## Production QA
 

@@ -1,17 +1,18 @@
 # Bonus ledger scheduler для геймификации
 
-## Текущий production-контракт (13.08.2026)
+## Текущий production-контракт (28.08.2026)
 
-- Входящее пополнение для условий заданий обрабатывается отдельным tenant-scoped `LEDGER_SUPPLEMENTAL` только как `BALANCE_TOPUP`; наличие игровой сессии не требуется.
-- Автономный reward materializer включён для tenant `demo` и последовательно обрабатывает immutable intent, затем effect. Он не выполняет внешний Langame write.
-- Bonus-ledger scheduler и Langame write gate разрешают все поддерживаемые балансные награды: `BONUS`, `BONUS_POINTS`, `BONUS_BALANCE`, `LOYALTY_BONUS` отправляются как `bonus_balance`; `BALANCE`, `MONEY_BALANCE`, `CASH_BALANCE`, `DEPOSIT`, `WALLET_BALANCE`, `LANGAME_BALANCE` — как `balance`.
+- Активный blue slot загружает final `canary-safe.env`: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=true`, `GUEST_GAME_REWARD_MATERIALIZER_ENABLED=false`, materializer kill switch включён и `LANGAME_BONUS_ACCRUAL_ENABLED=false`. Очереди reward intent/effect после recovery пусты. Наличие API egress и `SYNC_SERVICE_TOKEN` не меняет эту boundary.
+- Входящее пополнение для условий заданий использует отдельный tenant-scoped `LEDGER_SUPPLEMENTAL` только как `BALANCE_TOPUP`, когда этот processor отдельно включён; наличие игровой сессии не требуется. Текущий production overlay держит supplemental OFF.
+- Код autonomous reward materializer может последовательно обработать immutable intent, затем effect в одном tenant, но текущий production runtime держит его OFF. Он сам не выполняет внешний Langame write.
+- Bonus-ledger scheduler и Langame write gate поддерживают балансные награды: `BONUS`, `BONUS_POINTS`, `BONUS_BALANCE`, `LOYALTY_BONUS` отправляются как `bonus_balance`; `BALANCE`, `MONEY_BALANCE`, `CASH_BALANCE`, `DEPOSIT`, `WALLET_BALANCE`, `LANGAME_BALANCE` — как `balance`. Поддержка типа не является разрешением включить scheduler/write.
 - `BALANCE_WRITE_OFF` и `BONUS_TOPUP` могут присутствовать в activity ledger для диагностики, но не являются доступными типами условия mission v2. Их нельзя добавлять в supplemental allow-list до появления отдельного versioned evaluator-контракта.
 - Все контуры остаются tenant-scoped, используют claim/idempotency, а неоднозначный внешний POST переводится в `RECONCILIATION_REQUIRED` без автоматического повтора.
 - Модалка задания и `/game/rewards` являются двумя UI-входами к одному exact wallet claim. Один wallet item не может поставить две ledger-записи; повторный claim возвращает уже достигнутый результат. Отдельная защита прогресса запрещает старому completed fact создать новый reward cycle после последующего snapshot.
 
-> Актуальный контракт от 30.07.2026: этот scheduler доставляет legacy non-claim rewards и обычные claim-required rewards только после своевременного явного claim гостя. `GuestGamificationPipelineSchedulerService` автоматически фиксирует квалификацию Battle Pass/заданий/check-in/event, но не начисляет бонус и не обходит 30-дневный кошелёк. Completion ACK не является claim; завершённые и ожидающие результаты остаются доступны через reward wallet/history.
+> Контракт qualification/delivery: при отдельно включённом runtime `GuestGamificationPipelineSchedulerService` фиксирует квалификацию Battle Pass/заданий/event, но не начисляет бонус и не обходит 30-дневный кошелёк. Check-in остаётся прямым LIVE запросом. Bonus-ledger scheduler доставляет legacy non-claim rewards и обычные claim-required rewards только после своевременного явного claim гостя. Completion ACK не является claim; завершённые и ожидающие результаты остаются доступны через reward wallet/history.
 
-Этот runbook включает API-side scheduler `GuestBonusLedgerSchedulerService`, который без админского клика вызывает защищенный контур `POST /guests/gamification/scheduled/bonus-ledger/dispatch`. Scheduler работает внутри `leetplus-api.service`, поэтому отдельный systemd unit не нужен.
+Этот runbook описывает отдельный rollout API-side scheduler `GuestBonusLedgerSchedulerService`, который без админского клика вызывает защищенный контур `POST /guests/gamification/scheduled/bonus-ledger/dispatch`. Scheduler работает внутри active blue/green API slot, поэтому отдельный systemd unit не нужен. Следование runbook не разрешает включение без exact release decision, tenant scope, queue baseline и provider canary.
 
 Bonus ledger не оценивает условия миссии, Battle Pass, лутбокса или чекина. LIVE, последовательный Ledger fallback и supplemental-контур сходятся до него в единые immutable event/intent/effect/wallet записи; дальше действует один claim gate и один контур доставки.
 
@@ -48,18 +49,18 @@ GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES="BONUS,BONUS_POINTS,BONUS_BALANCE
 
 ## Связь с игровым pipeline
 
-Для автоматической квалификации активных Battle Pass и заданий дополнительно используется API-side scheduler внутри `leetplus-api.service`:
+Для автоматической квалификации активных Battle Pass и заданий дополнительно используется API-side scheduler внутри exact active `leetplus-api@<active-slot>.service`:
 
 ```env
-# Пустое значение: в production scheduler включается автоматически при заданном SYNC_SERVICE_TOKEN.
-GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=""
+# Production artifact задаёт значение явно. Без отдельного GO оставлять false.
+GUEST_GAME_PIPELINE_SCHEDULER_ENABLED="false"
 GUEST_GAME_PIPELINE_SCHEDULER_INTERVAL_MS="15000"
 GUEST_GAME_PIPELINE_SCHEDULER_LIMIT="30"
 GUEST_GAME_PIPELINE_SCHEDULER_TENANT_ID=""
 GUEST_GAME_PIPELINE_SCHEDULER_TENANT_SLUG=""
 ```
 
-- `GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=true|false` явно переопределяет production default.
+- `GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=true|false` задаётся явно; не полагаться на legacy default от `SYNC_SERVICE_TOKEN`.
 - `GUEST_GAME_BONUS_LEDGER_SCHEDULER_QUEUE_APPROVED_REWARDS=true` не отменяет claim gate: один `APPROVED` недостаточен для reward с `claimRequired=true`.
 - Scheduler запускает `runSnapshotPipelineScheduled`, принимает только подготовленные факты и не допускает параллельных tick-ов.
 - При обработке используются только активные правила. Черновик с совпадающими условиями не должен подавлять активное правило.
@@ -83,11 +84,11 @@ GUEST_GAME_PIPELINE_SCHEDULER_TENANT_SLUG=""
 
 1. Проверить в Guest Game Hub, что `Langame write API` видит активный tenant-источник Langame и что пилотный scope имеет ровно одну готовую ledger-запись в runbook preflight. Для claim-required reward дополнительно проверить своевременный `deliveryRequestedAt` и wallet `PROCESSING/FAILED`.
 2. Оставить `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=true`, `LANGAME_BONUS_ACCRUAL_ENABLED=false`, `LIMIT=1`, `TENANT_SLUG` только для пилотной сети.
-3. Перезапустить API:
+3. Перезапустить только verified active artifact slot. Исторический single-instance `leetplus-api.service` не использовать:
 
 ```bash
-sudo systemctl restart leetplus-api.service
-sudo journalctl -u leetplus-api.service -n 100 --no-pager
+sudo systemctl restart leetplus-api@<active-slot>.service
+sudo journalctl -u leetplus-api@<active-slot>.service -n 100 --no-pager
 ```
 
 4. В Guest Game Hub открыть `Готовность интеграций -> Автозапуск bonus ledger`. В runtime-деталях должны появиться последний запуск, результат и отсутствие overlap-skip ошибок.
@@ -99,7 +100,7 @@ sudo journalctl -u leetplus-api.service -n 100 --no-pager
 
 ## Откат
 
-- Мгновенно остановить автономную обработку: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false`, затем `sudo systemctl restart leetplus-api.service`.
+- Мгновенно остановить автономную обработку: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false`, затем перезапустить только exact active `leetplus-api@<active-slot>.service` и повторить readiness. Не менять N−1 или USER_CALL sidecars.
 - Оставить scheduler для наблюдения, но запретить запись: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=true`.
 - Запретить сам Langame write, даже если scheduler включен: `LANGAME_BONUS_ACCRUAL_ENABLED=false`.
 - До принятого claim `WAITING_CLAIM` можно безопасно закрыть истечением wallet item. После принятия claim нельзя вручную отменять или менять связанный reward, пока `PROCESSING/FAILED` не завершён подтверждённо. `RECONCILIATION_REQUIRED` не возвращать в обычный retry.

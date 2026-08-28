@@ -13,6 +13,13 @@
 вносятся. Для них используется защищённая операционная запись; здесь
 сохраняются alias, checksum, counts и ссылка на неё.
 
+> Это исторический in-place checklist и не является receipt artifact-deploy
+> 27.08.2026. Текущий accepted blue/green checkpoint и фактическая runtime
+> boundary описаны в
+> [`controlled-beta-1-production-canary-plan.md`](./controlled-beta-1-production-canary-plan.md)
+> и
+> [`../deployment/production-incident-2026-08-27-langame-recovery.md`](../deployment/production-incident-2026-08-27-langame-recovery.md).
+
 Все фиксированные SHA ниже — historical checkpoints. Они не заполняют
 `Full candidate SHA` и не заменяют CI/review/evidence нового exact current
 candidate, который должен включать exact additive migrations `163..179` и пройти

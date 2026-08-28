@@ -1,5 +1,12 @@
 # Reward materializer: production rollout
 
+Current production note (28.08.2026): the active blue artifact loads
+`canary-safe.env`, so the autonomous materializer is disabled and kill-switched.
+Intent/effect queues were empty after the accepted recovery replay. Any rollout
+from this document is a new, tenant-scoped GO; provider egress or historical
+activation is not sufficient. See
+[`production-incident-2026-08-27-langame-recovery.md`](./production-incident-2026-08-27-langame-recovery.md).
+
 This runbook covers the additive reward-materializer migration series from
 `20260718150000_guest_game_origin_fallback` through
 the expand migration `20260731090000_guest_game_case_reward_lifecycle` and its
@@ -15,7 +22,8 @@ each `CREATE INDEX CONCURRENTLY` outside an implicit multi-statement transaction
 - Background processing is fail-closed unless one tenant is selected by `...TENANT_ID` or `...TENANT_SLUG`. `...ALLOW_ALL_TENANTS=true` is not permitted during canary.
 - A rollback never deletes posting, intent, or effect rows. Disable the scheduler or enable the kill switch, revert the application, and fix forward.
 
-Safe initial values:
+Activation-candidate values after a separately accepted queue baseline (not the
+current production overlay):
 
 ```dotenv
 GUEST_GAME_REWARD_MATERIALIZER_ENABLED=false
@@ -29,19 +37,15 @@ Use `KILL_SWITCH=true` only when pausing all new reward claims is intended.
 
 ## Before deployment
 
-1. Stop the deployment timer and confirm that no deployment service is running.
-2. Take a current database/VDS snapshot and confirm the restore owner.
-3. Inspect `leetplus-api.service` with `systemctl show -p WorkingDirectory -p EnvironmentFiles -p ExecStart`. Do not print the complete environment.
-4. Confirm the real deployment script builds API and web sequentially. Never run the root `pnpm build` on the VDS.
-5. Build the API before applying migrations.
-6. Treat the case lifecycle as two deployments. Apply the expand migration and replace every API process before creating or applying its contract migration.
+1. Confirm the exact admitted release and production-control artifacts. Do not use a mutable checkout or legacy deployment timer.
+2. Take and verify a current database backup, run the restored-copy/history rehearsal and confirm the restore owner.
+3. Inspect the exact active `leetplus-api@blue|green.service` effective properties and environment-file paths. Do not print the complete environment.
+4. Apply migrations only through the accepted production-history controller; raw `prisma migrate deploy` on production is forbidden.
+5. Start and verify the inactive slot from the sealed release, then use the reviewed blue/green cutover and accepted receipt.
+6. Treat the case lifecycle as two admitted deployment waves. Apply expand, replace and drain every old API process, capture evidence, and only then admit contract.
 
-```bash
-pnpm install --frozen-lockfile
-pnpm --filter database db:generate
-pnpm --filter api build
-pnpm --filter database exec prisma migrate status
-```
+The former `pnpm install/build/db:deploy` commands are retained only for local or
+disposable restored-copy work. They are not production commands.
 
 ## Database preflight
 
@@ -181,19 +185,10 @@ application-wave evidence, and only then apply the contract and terminal
 separated path synthetically; it is not evidence of a production binary
 restart or drain.
 
-```bash
-PGOPTIONS='-c lock_timeout=5000' pnpm --filter database db:deploy
-pnpm --filter database exec prisma migrate status
-sudo systemctl restart leetplus-api.service
-curl --fail --silent --show-error http://127.0.0.1:4000/health
-```
-
-After the API is stable, build and restart web separately:
-
-```bash
-pnpm --filter web build
-sudo systemctl restart leetplus-web.service
-```
+On production, the accepted history controller applies the migration from the
+exact staged artifact. The inactive API/Web slot is then started and verified by
+release SHA, migration name/count and Web BUILD_ID before nginx switch. Do not
+build or restart the historical single-instance units in place.
 
 For the contract wave, repeat the preflight and the same sequential API-then-web
 deployment. Do not apply `20260731110000_guest_game_case_reward_contract` until

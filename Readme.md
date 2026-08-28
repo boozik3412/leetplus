@@ -20,6 +20,14 @@ TLS/HBA/SCRAM rollback прошли на изолированной копии. 
 оставшийся путь до первого внешнего tenant зафиксированы в
 [отчёте restored-copy rehearsal](./docs/open-beta/founder-production-restored-copy-rehearsal-2026-08-18.md).
 
+Первый SHA-bound blue/green cutover принят 27.08.2026: public route работает на
+release `04f967f3f32c4ccb612f0458823de65f62ad59ff`, schema `187/187`, а
+scheduler-free N−1 остаётся hot. Причина Langame/check-in outage, domain routing,
+back-credit и точные backup/cutover receipts описаны в
+[production incident record](./docs/deployment/production-incident-2026-08-27-langame-recovery.md).
+Активный slot сохраняет `canary-safe.env`: API provider egress доступен для
+прямых запросов, но autonomous schedulers и provider writes выключены.
+
 Текущий StaffTask hardening checkpoint —
 [snapshot evidence boundary и SYNTHETIC reconciliation proposal dry-run](./docs/security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
 на runtime candidate SHA `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`.
@@ -103,7 +111,7 @@ Guest Game Hub читает такие eligible-события как snapshot-f
 
 ### Langame balance write API
 
-Автоматические бонусы могут получать все участники, включая профили, чей телефон совпал с сотрудником tenant или Langame staff. Такой профиль остается помеченным как staff/test для аудита, но reward и bonus ledger по умолчанию проходят к начислению, а evidence/ledger metadata/audit payload сохраняют причину и признак override. Если нужно временно вернуть старую блокировку staff/test-начислений, выставьте `GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED=false`.
+Код поддерживает отдельно одобряемый override для staff/test-наград через `GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED=true`, при котором evidence/ledger metadata/audit сохраняют причину. Production `canary-safe.env` задаёт `false`: профиль, совпавший с tenant или Langame staff, остаётся помеченным для аудита, а автоматические reward и XP блокируются. Recovery/back-credit не имеет права обходить этот guard.
 
 Для геймификации подтвержден отдельный master endpoint Langame: `POST /master_api/guests/balance/phone`. Backend вызывает его по активному tenant-источнику Langame с заголовком `X-Request-Token`, используя сохраненный зашифрованный ключ источника; токены не передаются на frontend и не пишутся в audit.
 
@@ -113,7 +121,7 @@ Payload: `phone`, `type`, `sum`, `comment`, где `type` может быть `b
 
 Каждый Langame balance write принудительно ограничен таймаутом не более 30 секунд; отключить его значением `0` или увеличить выше этого предела нельзя. Перед вызовом provider bonus ledger заново проверяет ownership текущей claim-generation вместе с `Tenant.executionRevision`, tenant permit, normalized phone target, deliverability reward/staff-профиля и активные tenant source/credential. Неоднозначный timeout не запускает автоматический write retry: запись переходит в `RECONCILIATION_REQUIRED`, а решение `NOT_APPLIED` разрешается только после fail-closed quarantine `LANGAME_BONUS_RECONCILIATION_QUARANTINE_MINUTES` (по умолчанию `30`). Это не является доказательством at-most-once без подтверждённой idempotency/status-семантики Langame, поэтому для нового tenant outbound остаётся выключенным до отдельного canary gate.
 
-Для автономной работы без админского запуска добавлен API-side scheduler `GuestBonusLedgerSchedulerService`: в production он стартует при наличии `SYNC_SERVICE_TOKEN`, если `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED` не выключен явно. Scheduler вызывает существующий `POST /guests/gamification/scheduled/bonus-ledger/dispatch`-контур внутри backend, пропускает пересекающиеся тики и логирует только агрегаты tenant/queued/confirmed/failed/blocked без raw phone, токенов и Langame payload. Настройки: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_QUEUE_APPROVED_REWARDS`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_ID`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES`. Реальная запись в Langame все равно требует `LANGAME_BONUS_ACCRUAL_ENABLED=true`; если write-флаг не включен, ledger остается в safe dry-run/disabled режиме.
+Для автономной работы без админского запуска реализован API-side scheduler `GuestBonusLedgerSchedulerService`. Production artifact обязан задавать `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED` явно; активный 28.08.2026 `canary-safe.env` задаёт `false` и `DRY_RUN=true`, даже при наличии `SYNC_SERVICE_TOKEN`. При отдельном rollout scheduler вызывает существующий `POST /guests/gamification/scheduled/bonus-ledger/dispatch`-контур внутри backend, пропускает пересекающиеся тики и логирует только агрегаты tenant/queued/confirmed/failed/blocked без raw phone, токенов и Langame payload. Настройки: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_QUEUE_APPROVED_REWARDS`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_ID`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES`. Реальная запись в Langame всё равно требует отдельного `LANGAME_BONUS_ACCRUAL_ENABLED=true`; наличие кода или API egress не является разрешением write.
 
 Для внешнего Telegram/MAX bot-consumer добавлены сервисные endpoints под тем же `SYNC_SERVICE_TOKEN`: `POST /guests/gamification/scheduled/deliveries/bot/pull` принимает `tenantId` или `tenantSlug`, `channels` и `limit`, возвращает только готовые `READY_FOR_BOT` доставки из `GuestGameDelivery` с безопасным текстом сообщения, масками и подтвержденным bot identity для отправки; `POST /guests/gamification/scheduled/deliveries/bot/ack` принимает `deliveryId`, `status=SENT|FAILED|BLOCKED`, короткие provider-поля и переводит delivery в итоговый статус с записью `GuestGameDeliveryEvent`. Повторный terminal ack с тем же статусом идемпотентно возвращает текущую delivery без нового события, а смена terminal-статуса требует явного retry из Guest Game Hub. Эти endpoints не делают live-запросы в Langame, не пишут в Langame, не отдают raw phone и не сохраняют raw Telegram update.
 
@@ -148,6 +156,13 @@ Langame-сверка после входа в игровой модуль явл
 Каталог `/guest-portal/gamification/clubs` дополнительно возвращает `verification`: ранжированный план каналов входа для `/play`. Приоритет за Telegram-ботом как будущим фундаментом регистрации, уведомлений, рефералок и возврата гостей; звонок пользователя на номер заложен как дешевый fallback; SMS-код остается обязательным резервом; входящий звонок с последними 4 цифрами помечен как поздний резерв из-за менее очевидного UX. Public UI показывает этот порядок и статусы без раскрытия env, секретов, телефонов или внутренних ID.
 
 Fallback-звонок пользователя включается env `GUEST_PORTAL_USER_CALL_ENABLED=true`. Текущий production-вариант поддерживает SMS.ru Callcheck: `GUEST_PORTAL_USER_CALL_PROVIDER=SMS_RU_CALLCHECK`, `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID`, опционально `GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL`; `/play` создает `POST /guest-portal/:tenantSlug/:storeId/user-call-auth/start`, backend получает временный номер SMS.ru, показывает гостю `tel:`-ссылку и poll-ит `POST /guest-portal/:tenantSlug/:storeId/user-call-auth/status` до подтверждения `check_id`. Для SMS.ru API возвращает `freeCall=true`, а UI нейтрально сообщает гостю: `Звонок будет сброшен сразу после проверки`. Ручной call-provider остается совместимым через `GUEST_PORTAL_USER_CALL_PROVIDER=MANUAL`, `GUEST_PORTAL_USER_CALL_PHONE_NUMBER`, `GUEST_PORTAL_USER_CALL_SECRET` и callback `POST /guest-portal/user-call/confirm` с заголовком `x-guest-portal-user-call-secret`. Оба пути сверяют только `phoneHash`, активируют или создают отдельный `GuestGameProfile`, выдают обычный `leetplus_guest_token` и не создают общий `Guest` публичной регистрацией; raw phone, SMS.ru `api_id`, callback secret и Langame payload не возвращаются на frontend.
+
+Production USER_CALL surface вынесен в release-pinned API/Web sidecars с
+dedicated nologin/no-home users `leetplus-api-user-call` и
+`leetplus-web-user-call`; они не переиспользуют UID blue/green slots и имеют
+только read-only `Group=leetplus-runtime`. Main slot может держать USER_CALL
+выключенным в `canary-safe.env`, пока exact isolated sidecars healthy и nginx
+маршрутизирует только reviewed auth endpoints.
 
 SMS-код как резервный канал может использовать SMS.ru `/sms/send`: включаются `GUEST_PORTAL_OTP_REAL_SEND_ENABLED=true`, `GUEST_PORTAL_OTP_SMS_ENABLED=true` и `GUEST_PORTAL_OTP_SMS_RU_API_ID` либо уже настроенный `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID`. Для staged QA есть `GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true`, который отправляет запрос SMS.ru с `test=1` без списания баланса. Live-отправка без `test=1` дополнительно требует `GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED=true`; иначе backend возвращает безопасный `DELIVERY_BLOCKED` до вызова SMS.ru. Перед provider-вызовом backend применяет anti-abuse лимиты `GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_*`, `GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_*` и `GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_*` по сохраненным SMS-challenge; дефолт - 3 SMS на телефон за 60 минут, 30 SMS на клуб за 10 минут и 300 SMS на tenant за 24 часа, при срабатывании API возвращает безопасный 429 без вызова SMS.ru. Generic `GUEST_PORTAL_OTP_SMS_ENDPOINT` + `GUEST_PORTAL_OTP_SMS_TOKEN` остается fallback-адаптером для другого SMS-шлюза; браузер получает только safe-статус доставки, маску телефона и текст без provider secret/raw payload.
 
@@ -651,16 +666,19 @@ Production-развертывание доступно по адресам:
 Инфраструктура:
 
 - VDS: Ubuntu 24.04 LTS
-- Приложение на сервере: `/home/admin/leetplus`
-- web: Next.js, systemd unit `leetplus-web.service`, порт `127.0.0.1:3000`
-- api: NestJS, systemd unit `leetplus-api.service`, порт `4000`
+- Immutable releases: `/srv/leetplus/releases/<exact-sha>`; active links: `/srv/leetplus/slots/blue|green`
+- web: Next.js, `leetplus-web@blue|green.service`, loopback `3100/3200`
+- api: NestJS, `leetplus-api@blue|green.service`, loopback `4100/4200`
+- scheduler-free N−1: API/Web `4300/3300`; release-pinned USER_CALL sidecars use separate dedicated identities
 - reverse proxy: `nginx`
 - database: PostgreSQL 16
 - cache/service dependency: Redis
 - SSL: Let's Encrypt
 - nginx proxy timeout: 15 минут для длинных ручных синхронизаций
 
-Автообновление настроено через systemd timer `leetplus-deploy.timer`. Скрипт `/usr/local/bin/leetplus-deploy.sh` проверяет `origin/main`; при новом коммите выполняет:
+Исторический mutable checkout `/home/admin/leetplus`, single-instance units
+`leetplus-api.service`/`leetplus-web.service` и `leetplus-deploy.timer` не являются
+release authority и не должны возвращаться в public route. Запрещён legacy-путь:
 
 ```bash
 git pull --ff-only origin main
@@ -669,20 +687,19 @@ pnpm --filter database db:generate
 pnpm --filter api build
 pnpm --filter database db:deploy
 systemctl restart leetplus-api.service
-curl --fail --silent --show-error http://127.0.0.1:4000/health
 pnpm --filter web build
 systemctl restart leetplus-web.service
 ```
 
-Запуск защищен через `flock`, чтобы два деплоя не выполнялись параллельно.
-
-Этот legacy auto-deploy не является допустимым release-механизмом для открытой
-beta. Перед внешним тестом production должен получать только проверенный
-immutable artifact. Для каждого release обязательны полный `RELEASE_SHA`,
-UTC `BUILD_TIME`, точное имя `EXPECTED_DATABASE_MIGRATION` и количество
-`EXPECTED_DATABASE_MIGRATION_COUNT`. API публикует эти данные через `/version`
-и `/health/live`, а `/health/ready` дополнительно проверяет БД и ожидаемую
-revision/count миграций.
+Production получает только Full Release Admission artifact и отдельный
+production-control artifact. Обязательный порядок: verified backup/restored
+copy → production-history controller → sealed release → inactive blue/green
+slot readiness → durable intent → atomic nginx switch/watchdog → accepted
+generation-bound receipt. Scheduler-free N−1 остаётся hot. Полный runbook:
+[`docs/deployment/production-artifact/README.md`](./docs/deployment/production-artifact/README.md).
+Для каждого release обязательны полный `RELEASE_SHA`, UTC `BUILD_TIME`, точное
+имя и количество migrations; `/version`, `/health/live` и `/health/ready`
+подтверждают эти значения до switch.
 
 Быстрая проверка production:
 

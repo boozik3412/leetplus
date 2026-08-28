@@ -1,17 +1,34 @@
-# LeetPlus open beta — текущее состояние на 24.08.2026
+# LeetPlus open beta — текущее состояние на 28.08.2026
 
 | Поле                 | Состояние                                                                             |
 | -------------------- | ------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                          |
-| Production runtime   | healthy; access baseline deployed; внешний tenant не создавался                       |
+| Production runtime   | healthy; blue `04f967f3…`, scheduler-free N−1 hot; внешний tenant не создавался       |
 | Prisma schema        | `CURRENT_187`: 187 applied, head `20260820010000_guest_portal_telegram_update_ledger` |
-| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA          |
+| Release authority    | exact admitted artifact + effective-unit checks + accepted generation-bound receipt   |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                      |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`              |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены           |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                         |
 | Offline/USB key      | исключён из beta critical path                                                        |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                    |
+
+## Обновление 28.08.2026
+
+Первый production artifact blue/green cutover принят на действующей сети без
+создания внешнего tenant. API слушает loopback и имеет reviewed provider egress;
+Web остаётся localhost-only. Final `canary-safe.env` держит autonomous
+schedulers, materializers и provider writes OFF. Отдельные USER_CALL sidecars
+используют dedicated identities, а previous scheduler-free release остаётся N−1.
+
+Langame/check-in outage и пропущенные игровые результаты восстановлены через
+verified backup, canonical/compensation events и обычный bounded materializer.
+Идемпотентный второй pass создал ноль новых effects; staff-test guard не
+обходился. Exact release, receipt, backup digest и masked evidence:
+[production incident 27–28.08.2026](../deployment/production-incident-2026-08-27-langame-recovery.md).
+
+Этот checkpoint не меняет `NO-GO` для `Tenant B/Store B1`: owner activation,
+external provider canary и autonomous effects требуют отдельного решения.
 
 ## Обновление 24.08.2026
 

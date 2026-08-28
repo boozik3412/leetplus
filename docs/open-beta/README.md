@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.200                                        |
-| Дата             | 24.08.2026                                   |
+| Версия           | 1.201                                        |
+| Дата             | 28.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -37,6 +37,13 @@ checkout не является допустимым источником product
 [отчёте 24.08.2026](./production-access-baseline-2026-08-24.md). Рабочий
 tenant сети `1337` сохранён, пользовательский cohort не переносился, а
 одноимённые пустые tenant остаются отдельным подтверждаемым cleanup.
+
+Первый artifact blue/green cutover для действующего tenant принят 27.08.2026.
+Причина Langame/check-in outage, recovery/back-credit, exact release/rollback
+SHA, backup digest и runtime boundary зафиксированы в
+[production incident record](../deployment/production-incident-2026-08-27-langame-recovery.md).
+Этот checkpoint принимает control plane, но не меняет `NO-GO` для внешнего
+Tenant B и не включает autonomous schedulers/provider writes.
 
 Основной путь первого внешнего клуба — `SHARED_MULTI_TENANT_BETA`: новый
 `Tenant B/Store B1` в общем web/API/workers/PostgreSQL/Telegram data plane.

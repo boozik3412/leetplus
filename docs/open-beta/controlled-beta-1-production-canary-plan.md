@@ -1,6 +1,6 @@
 # Controlled Beta-1: production canary и SHA-bound deploy
 
-Статус: `F4 ARTIFACT + RESTORED-COPY + CRASH/N-1 ACCEPTED / OPERATIONAL SUCCESSOR AND PRODUCTION CANARY PENDING / PRODUCTION NO-GO`.
+Статус: `PRODUCTION ARTIFACT CUTOVER ACCEPTED / CURRENT TENANT HEALTHY / TENANT B ACTIVATION NO-GO`.
 
 Актуальный машиночитаемый вход перед canary —
 [`Gate 1MT operational preflight`](./gate-1mt-operational-preflight.md).
@@ -13,6 +13,24 @@ target fingerprints. Provider traffic в `CONTROLLED_CANARY` запрещён.
 внешнего `Tenant B/Store B1`. Он не разрешает выпуск по ветке, `git pull` или
 из произвольной рабочей директории. Единственный разрешённый вход — exact
 release artifact, созданный Full Release Admission для того же commit SHA.
+
+## Applied production checkpoint 27.08.2026
+
+Первый artifact blue/green cutover принят для существующего production tenant:
+
+- active blue release: `04f967f3f32c4ccb612f0458823de65f62ad59ff`;
+- scheduler-free N−1 release: `39e11b61fc41c638ab399a448803f15dc89f5408`;
+- database schema: `187/187`, head
+  `20260820010000_guest_portal_telegram_update_ledger`;
+- blue, green, N−1 и isolated USER_CALL units active;
+- public health и guest routes healthy, outstanding cutover intent отсутствует;
+- final `canary-safe.env` оставляет все autonomous schedulers, materializers и
+  provider writes OFF.
+
+Это принимает production artifact/cutover mechanism, но не разрешает создание
+или активацию внешнего `Tenant B`, owner invite или outbound canary. Incident,
+backup и accepted receipt описаны в
+[`../deployment/production-incident-2026-08-27-langame-recovery.md`](../deployment/production-incident-2026-08-27-langame-recovery.md).
 
 ## Superseded artifact evidence и новый candidate gate
 
@@ -140,8 +158,11 @@ copies хранятся до declared retention deadline; дополнитель
    manifest доступен как дополнительный (не авторитетный) asset smoke.
 8. Shadow runtime всегда получает final overlay
    `FOUNDER_OPERATOR_BETA_MODE=DISABLED`,
-   `DESIGN_PARTNER_ISOLATED_MODE=false`, все schedulers и outbound OFF. systemd
-   egress разрешён только к localhost; нелокальная БД является stop condition.
+   `DESIGN_PARTNER_ISOLATED_MODE=false`, все schedulers и outbound features OFF.
+   Web egress разрешён только к localhost. API слушает loopback, но имеет reviewed
+   outbound TCP/DNS для прямых Langame/provider integrations; feature flags и
+   pinned closed endpoints не дают этой capability превратиться в effect.
+   Нелокальная БД остаётся stop condition текущего profile.
 9. Внешний owner invite, SMTP send, Telegram/MAX outbound и создание tenant
    запрещены, пока весь canary не принят явно.
 
@@ -218,12 +239,13 @@ Repository-side implementation:
 
 Read-only unit audit дополнительно подтвердил active legacy deploy timer и
 запуск API/Web от `admin` из mutable checkout с environment file внутри
-checkout. Текущие команды запуска зафиксированы как input к rollout, но
+checkout. Это исторический pre-cutover baseline; команды были зафиксированы как input к rollout, но
 содержимое environment file не читалось. Подготовленные versioned
 [systemd templates](../deployment/production-artifact/systemd/) переносят
 runtime на `/srv/leetplus/slots/blue|green` и secrets в
-`/etc/leetplus/runtime.env`; они не установлены и не меняют production без
-отдельного approval.
+`/etc/leetplus/runtime.env`; 27.08.2026 они установлены из admitted control
+artifact и приняты cutover receipt. Следующее изменение по-прежнему требует
+отдельного approval и нового exact artifact.
 
 6. Сохранить root-only exact copies текущих legacy API/Web/timer/nginx units,
    checkout SHA и status. Не использовать `legacy.conf` и порты `4000/3000`
@@ -398,7 +420,7 @@ runtime работает на новой схеме, а DB incident идёт ч�
 - repository blue/green fixtures и новый exact-SHA Full Release Admission;
 - privileged Linux rehearsal: systemd parser, real full nginx parser,
   tmpfiles/cache bind, offline store/hydrate/promote/seal и reboot recovery;
-- reviewed owner-activation network profile с outbound rehearsal;
+- reviewed owner-activation env/provider profile с tenant-scoped outbound rehearsal;
 - отдельный release record с SHA, artifact digest, backup checksum,
   migration metadata, rollback target и результатами readiness.
 

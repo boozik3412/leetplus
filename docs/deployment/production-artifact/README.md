@@ -75,6 +75,12 @@ symlink, group/other write или unreviewed mount boundary. Единствен�
 5. atomic nginx link switch с bounded watchdog и exact rollback receipt;
 6. только после этого controlled `Tenant B/Store B1` activation.
 
+Production checkpoint 27.08.2026: reviewed blue/green control plane установлен,
+а публичный route переведён на blue release
+`04f967f3f32c4ccb612f0458823de65f62ad59ff`, schema `187/187`. Accepted receipt,
+backup digest, N−1 SHA и recovery evidence зафиксированы в
+[`../production-incident-2026-08-27-langame-recovery.md`](../production-incident-2026-08-27-langame-recovery.md).
+
 Legacy `git pull → build → restart` не является допустимым заменителем этой
 процедуры. Замена production timer/unit, перенос sensitive backup residue и
 runtime switch требуют отдельного разрешения владельца production.
@@ -103,19 +109,30 @@ API-процесса. Применение Web-профиля `localhost-only` �
 regression: оно отключает актуальные сессии Langame и чек-ин во всех клубах.
 Нелокальный `DATABASE_URL` по-прежнему приведёт к fail-closed readiness до switch.
 
+API egress является только capability boundary. Final `canary-safe.env`
+по-прежнему выключает autonomous schedulers, recovery/materialization и provider
+writes. Разрешённая сеть не должна интерпретироваться как feature activation.
+
 Одноэкземплярные `leetplus-api.service`/`leetplus-web.service` сохранены только
 как исторические templates и не разрешены для первого artifact cutover: restart
 на тех же портах создаёт окно 502. Шаблон migration unit также не считается
 production-safe history controller и не запускается до отдельного принятия
 production-history пути.
 
-Эти файлы ещё **не установлены** на server. Перед установкой оператор обязан
-сверить текущие units, создать защищённый runtime env из существующей
-конфигурации без вывода secrets, подготовить `/srv/leetplus/releases` и
-`/etc/leetplus/release-env`, выполнить restored-copy rehearsal, затем отдельным
-окном применить reviewed files, `daemon-reload` и проверку rollback. До этого
-legacy deploy timer остаётся production blocker и не должен отключаться
-автоматически.
+Эти templates и control helpers установлены на production и приняты первым
+blue/green cutover 27.08.2026. Следующая установка всё равно выполняется только
+из admitted production-control artifact: оператор сверяет effective units,
+защищённые runtime env, release admission, restored-copy/history evidence,
+`daemon-reload`, readiness и rollback. Mutable checkout, legacy deploy timer и
+ручная подмена установленного helper не являются authority.
+
+Release-pinned USER_CALL sidecars используют отдельные nologin/no-home identities
+`leetplus-api-user-call` и `leetplus-web-user-call`, отдельные primary groups и
+`Group=leetplus-runtime`. Они не могут использовать UID
+`leetplus-api-blue|green` или `leetplus-web-blue|green`: foreign same-UID process
+и reverse primary-GID alias являются stop condition до nginx effect. Sidecars
+остаются на reviewed узкой auth surface и не наследуют право включать фоновые
+процессоры основного slot.
 
 Ручное `install`/`cp` этих файлов из checkout запрещено. Full Release Admission
 теперь строит отдельный `leetplus-production-control-<SHA>.tar.gz` и внешний
@@ -365,6 +382,13 @@ pre-nginx recovery unit восстанавливает и syntax-check'ит N-1 
 делает reload/public serving confirmation и архивирует intent. Новый switch
 запрещён, пока существует outstanding intent.
 
+На systemd 255 очищенное `RestrictNetworkInterfaces=` может отображаться в
+effective properties как точный marker `~`. Cutover verifier принимает для
+unrestricted API profile только exact empty или exact `~`; любое имя интерфейса,
+включая `eth0`, остаётся fail-closed. Это parser-совместимость, а не ослабление
+network allow-list. Ошибка identity/effective-property до nginx effect оставляет
+публичный route на предыдущем scheduler-free slot.
+
 Mutable Langame discrepancy evidence не записывается в immutable release.
 До запуска API оператор создаёт отдельный persistent root и фиксирует тот же
 абсолютный путь в `/etc/leetplus/runtime.env`:
@@ -440,14 +464,14 @@ isolated VM/host copy.
 
 Пока instance unit подключает `canary-safe.env`, owner activation физически
 невозможна: final layer всегда возвращает `FOUNDER_OPERATOR_BETA_MODE=DISABLED`.
-Safety overlay не редактируется in-place. Текущие instance units также
-запрещают non-loopback egress на уровне systemd, поэтому одной заменой env
-невозможно включить рабочий Langame/SMTP/Telegram/provider контур. До owner
-activation нужен отдельный reviewed network-profile unit/drop-in (или localhost
-egress broker), exact-digest activation env и production-like rehearsal; затем
-перезапускается только активный artifact slot и повторяется readiness/rollback.
-Этот activation profile пока не реализован и является явным `NO-GO` для
-внешнего owner invite, но не блокирует localhost-only technical canary.
+Safety overlay не редактируется in-place. API network profile уже допускает
+reviewed исходящие Langame/SMTP/SMS/provider соединения, а Web остаётся
+localhost-only. Однако overlay принудительно выключает schedulers, outbound
+features и provider writes, поэтому одной сетевой доступности недостаточно для
+owner activation. Нужны отдельный exact-digest activation env,
+production-like rehearsal, tenant scope и provider canary; затем перезапускается
+только активный artifact slot и повторяется readiness/rollback. До такого GO
+external owner invite и автономные effects остаются запрещены.
 
 Candidate не создаёт второй scheduler tick. До любого schema effect обязательна
 процедура scheduler-free N−1: auth-edge/exact-child/Web rollback contour

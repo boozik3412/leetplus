@@ -1,6 +1,6 @@
 # Fallback-вход в геймификацию
 
-Дата актуализации: 30.07.2026
+Дата актуализации: 28.08.2026
 
 Этот runbook описывает резервные каналы авторизации участника геймификации. Канонический пользовательский маршрут: `/game/auth -> /game/clubs -> /game`; `/play` сохраняется только как совместимый legacy-вход. Основной канал остаётся Telegram-бот с contact-share; fallback нужен, чтобы не останавливать регистрацию при временно неготовом Telegram или высокой цене SMS.
 
@@ -11,6 +11,23 @@
 - Network/timeout/5xx — повторяемая техническая ошибка, а не доказательство истёкшей сессии. UI показывает `Повторить` и безопасный переход на `/start`, не стирая валидную cookie заранее.
 - Возврат из Telegram должен продолжать тот же handoff/challenge. Повторный status polling обязан быть идемпотентным и не создавать второй профиль, referral event или guest-token lifecycle.
 - После выбора клуба первый trusted `APP_OPEN` фиксирует `GuestGameProfile.gameActivatedAt`; одно подтверждение телефона без выбора клуба и `APP_OPEN` ещё не является входом в игровой контур.
+
+## Production topology USER_CALL
+
+На 28.08.2026 USER_CALL обслуживается release-pinned изолированной API/Web парой,
+а не identities основного blue/green slot. Systemd units используют dedicated
+nologin/no-home users `leetplus-api-user-call` и `leetplus-web-user-call`, каждый
+с отдельной primary group и read-only `Group=leetplus-runtime`. Запрещено
+переиспользовать `leetplus-api-blue|green` или `leetplus-web-blue|green`: любой
+foreign process с slot UID блокирует cutover до nginx effect.
+
+Изолированная пара публикует только reviewed auth surface: `/game/auth`, `/play`,
+получение списка клубов и USER_CALL start/status. Она может оставаться на
+отдельном одобренном release во время blue/green rollout, но её SHA, active state,
+loopback listener и public smoke входят в release evidence. Main slot
+`canary-safe.env` держит `GUEST_PORTAL_USER_CALL_ENABLED=false`; это не означает
+отказ канала, пока exact USER_CALL sidecars healthy и nginx направляет только
+разрешённые маршруты.
 
 ## Приоритет каналов
 
@@ -112,7 +129,7 @@ GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN="<provider-token>"
 
 ## Откат
 
-- Отключить звонок пользователя: `GUEST_PORTAL_USER_CALL_ENABLED=false`, затем перезапустить `leetplus-api.service`.
+- Отключить звонок пользователя: `GUEST_PORTAL_USER_CALL_ENABLED=false`, затем перезапустить exact USER_CALL API unit. Не использовать исторический single-instance `leetplus-api.service` и не менять основной blue/green slot без отдельного release decision.
 - Отключить входящий звонок с 4 цифрами: `GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED=false`.
 - Если SMS.ru `api_id` или provider callback скомпрометирован, заменить `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID`, `GUEST_PORTAL_USER_CALL_SECRET` или `GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN` на VDS и перезапустить API.
 - `/game/auth` автоматически откроет первый готовый канал из оставшихся: Telegram, user-call, SMS или incoming-call-last4.

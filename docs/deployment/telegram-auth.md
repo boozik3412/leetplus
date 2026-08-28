@@ -47,7 +47,7 @@ WEB_URL=https://leetplus.ru
 API_URL=https://api.leetplus.ru
 ```
 
-API-side Telegram sender на основной VDS по умолчанию выключен. Guest Game Hub считает live sender готовым через 1337 polling edge, если настроены `GUEST_GAME_TELEGRAM_WEBHOOK_SECRET` и `GUEST_GAME_TG_EDGE_SHARED_SECRET`. Для прямой API-side отправки нужно отдельно добавить `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN`, поставить `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED=true` и перезапустить `leetplus-api.service`.
+API-side Telegram sender на основной VDS по умолчанию выключен. Guest Game Hub считает live sender готовым через 1337 polling edge, если настроены `GUEST_GAME_TELEGRAM_WEBHOOK_SECRET` и `GUEST_GAME_TG_EDGE_SHARED_SECRET`. Для прямой API-side отправки нужен отдельный provider canary и admitted activation env с `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN` и `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED=true`; перезапускается только exact active `leetplus-api@<active-slot>.service`, не исторический single-instance unit.
 
 ## Env 1337 edge
 
@@ -182,7 +182,7 @@ docker compose up -d telegram-edge telegram-poller telegram-mini-app-web
 
 - Для отключения Mini App кнопки временно убрать `GUEST_GAME_TELEGRAM_MINI_APP_URL` на основной VDS.
 - Для полного отключения Telegram-входа остановить `telegram-poller` или убрать `GUEST_GAME_TELEGRAM_WEBHOOK_SECRET` на основной VDS; `/play` откроет первый готовый fallback.
-- Для rollback API-side sender задать `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED=false` и перезапустить `leetplus-api.service`: edge adapter снова будет отправлять safe reply payload.
+- Для rollback API-side sender задать `GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED=false` в admitted slot env и перезапустить только exact active `leetplus-api@<active-slot>.service`: edge adapter снова будет отправлять safe reply payload.
 
 ## Правила безопасности
 

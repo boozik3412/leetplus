@@ -71,6 +71,7 @@ const WHOLE_ROUTE_PREFIXES = [
   '/staff',
   '/stores',
   '/suppliers',
+  '/support',
   '/users',
   '/utilities',
 ] as const;
@@ -613,9 +614,9 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       (entry) => entry.effect === 'OUTBOUND',
     );
 
-    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(296);
-    expect(allowed).toHaveLength(242);
-    expect(blocked).toHaveLength(54);
+    expect(PILOT_HTTP_SURFACE_MANIFEST).toHaveLength(301);
+    expect(allowed).toHaveLength(246);
+    expect(blocked).toHaveLength(55);
     expect(outbound).toHaveLength(21);
     expect(
       PILOT_HTTP_SURFACE_MANIFEST.filter((entry) =>
@@ -785,7 +786,7 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
     ).toEqual(['POST /staff/task-rules/scheduled/run-due']);
   });
 
-  it('opens exactly the NETWORK-only CRM contact-task slice under communications capabilities', () => {
+  it('opens the NETWORK-only CRM and support slices under dedicated communications capabilities', () => {
     const communications = PILOT_HTTP_SURFACE_MANIFEST.filter(
       (entry) => entry.module === 'COMMUNICATIONS',
     );
@@ -793,10 +794,14 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
       entry.path.startsWith('/guests/crm/'),
     );
 
-    expect(communications).toHaveLength(18);
+    const support = communications.filter((entry) =>
+      entry.path.startsWith('/support/bug-reports'),
+    );
+
+    expect(communications).toHaveLength(22);
     expect(
       communications.filter((entry) => entry.decision === 'ALLOW'),
-    ).toHaveLength(18);
+    ).toHaveLength(22);
     expect(crm).toHaveLength(8);
     expect(
       crm.every(
@@ -809,6 +814,22 @@ describe('Gate 1MT pilot HTTP surface manifest', () => {
             (entry.method === 'GET'
               ? 'view_communications'
               : 'manage_communications') &&
+          entry.effect !== 'OUTBOUND' &&
+          entry.gaps.length === 0,
+      ),
+    ).toBe(true);
+    expect(support).toHaveLength(4);
+    expect(
+      support.every(
+        (entry) =>
+          entry.decision === 'ALLOW' &&
+          entry.minimumScope === 'NETWORK' &&
+          entry.storeFilter === 'NOT_APPLICABLE' &&
+          entry.entitlement === 'COMMUNICATIONS' &&
+          entry.capability ===
+            (entry.method === 'GET'
+              ? 'view_support_tickets'
+              : 'manage_support_tickets') &&
           entry.effect !== 'OUTBOUND' &&
           entry.gaps.length === 0,
       ),

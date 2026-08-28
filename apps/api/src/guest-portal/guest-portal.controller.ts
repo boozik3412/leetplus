@@ -6,7 +6,10 @@ import {
   Param,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   type GuestPortalAppOpenResponse,
   type GuestPortalCheckInResponse,
@@ -38,6 +41,12 @@ import {
   type GuestPortalUserCallAuthStatusResponse,
   type GuestPortalUserCallConfirmResponse,
 } from './guest-portal.service';
+import {
+  GUEST_BUG_REPORT_MAX_BYTES,
+  type GuestBugReportInput,
+  type GuestBugReportResponse,
+  type GuestBugReportUploadFile,
+} from './guest-support.service';
 
 @Controller('guest-portal')
 export class GuestPortalController {
@@ -186,6 +195,34 @@ export class GuestPortalController {
     @Body() dto: { surface?: unknown },
   ): Promise<GuestPortalAppOpenResponse> {
     return this.guestPortalService.recordAppOpen(authorization, dto);
+  }
+
+  @Post('session/support/bug-reports')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: GUEST_BUG_REPORT_MAX_BYTES,
+        files: 1,
+        fields: 5,
+        fieldSize: 4 * 1024,
+        parts: 6,
+      },
+    }),
+  )
+  createBugReport(
+    @Headers('authorization') authorization: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-client-user-agent') userAgent: string | undefined,
+    @Body() dto: GuestBugReportInput,
+    @UploadedFile() file?: GuestBugReportUploadFile,
+  ): Promise<GuestBugReportResponse> {
+    return this.guestPortalService.createBugReport(
+      authorization,
+      idempotencyKey,
+      userAgent,
+      dto,
+      file,
+    );
   }
 
   @Post('session/completion-notifications/:notificationId/acknowledge')

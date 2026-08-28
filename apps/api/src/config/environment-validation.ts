@@ -126,6 +126,20 @@ export const FOUNDER_OPERATOR_BETA_MODES = [
 export type FounderOperatorBetaMode =
   (typeof FOUNDER_OPERATOR_BETA_MODES)[number];
 
+export const GUEST_BUG_REPORTING_MODES = ['OFF', 'LIVE'] as const;
+export type GuestBugReportingMode = (typeof GUEST_BUG_REPORTING_MODES)[number];
+
+export function resolveGuestBugReportingMode(
+  value: unknown,
+): GuestBugReportingMode {
+  const normalized = stringValue(value).toUpperCase();
+  if (!normalized) return 'OFF';
+  if (GUEST_BUG_REPORTING_MODES.includes(normalized as GuestBugReportingMode)) {
+    return normalized as GuestBugReportingMode;
+  }
+  throw new Error('GUEST_BUG_REPORTING_MODE must be OFF or LIVE');
+}
+
 export const FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE =
   'leetplus_founder_beta_activation_runtime' as const;
 const FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_OPTIONS = Object.freeze({
@@ -374,6 +388,9 @@ export function validateEnvironment(config: EnvironmentValues) {
   const founderOperatorBetaMode = resolveFounderOperatorBetaMode(
     config.FOUNDER_OPERATOR_BETA_MODE,
   );
+  const guestBugReportingMode = resolveGuestBugReportingMode(
+    config.GUEST_BUG_REPORTING_MODE,
+  );
 
   if (isolatedMode && isolatedMode !== 'true' && isolatedMode !== 'false') {
     throw new Error(
@@ -400,6 +417,7 @@ export function validateEnvironment(config: EnvironmentValues) {
       ...config,
       [API_RUNTIME_ROLE_KEY]: apiRuntimeRole,
       FOUNDER_OPERATOR_BETA_MODE: founderOperatorBetaMode,
+      GUEST_BUG_REPORTING_MODE: guestBugReportingMode,
     };
   }
 
@@ -674,6 +692,7 @@ export function validateEnvironment(config: EnvironmentValues) {
     STAFF_ATTACHMENT_ACL_MODE: staffAttachmentAclMode,
     DESIGN_PARTNER_ISOLATED_MODE: isolatedMode || undefined,
     FOUNDER_OPERATOR_BETA_MODE: founderOperatorBetaMode,
+    GUEST_BUG_REPORTING_MODE: guestBugReportingMode,
     FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL:
       founderOperatorBetaActivationDatabaseUrl,
   };

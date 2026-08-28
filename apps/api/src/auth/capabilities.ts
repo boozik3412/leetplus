@@ -118,6 +118,18 @@ export const accessCapabilityCatalog = [
       'Контактные CRM-задачи и события, отправка сообщений, создание каналов, закрепление, отметки прочтения и задачи из чата.',
   },
   {
+    key: 'view_support_tickets',
+    label: 'Техническая поддержка: просмотр',
+    description:
+      'Просмотр обращений пользователей игрового модуля и их безопасных вложений.',
+  },
+  {
+    key: 'manage_support_tickets',
+    label: 'Техническая поддержка: обработка',
+    description:
+      'Назначение ответственных, изменение статусов и внутренние комментарии к обращениям.',
+  },
+  {
     key: 'view_staff',
     label: 'Персонал: весь блок',
     description:
@@ -292,6 +304,8 @@ export const SHARED_BETA_INITIAL_OWNER_CAPABILITIES = [
   'operate_guest_game_ledger',
   'view_communications',
   'manage_communications',
+  'view_support_tickets',
+  'manage_support_tickets',
   'view_staff',
   'view_staff_shift_workspace',
   'view_staff_tasks',
@@ -396,6 +410,7 @@ const requestedCapabilityAlternatives: Partial<
   view_guests: guestActionCapabilities,
   view_marketing: ['manage_marketing'],
   view_communications: ['manage_communications'],
+  view_support_tickets: ['manage_support_tickets'],
   view_staff: [...staffSectionCapabilities, ...staffActionCapabilities],
   view_staff_tasks: ['manage_staff_tasks'],
   view_staff_standards: ['manage_staff_standards'],
@@ -468,6 +483,8 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'manage_marketing',
     'view_communications',
     'manage_communications',
+    'view_support_tickets',
+    'manage_support_tickets',
     ...ownerStaffCapabilities,
     'manage_users',
     'manage_integrations',
@@ -493,6 +510,8 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'manage_marketing',
     'view_communications',
     'manage_communications',
+    'view_support_tickets',
+    'manage_support_tickets',
     ...ownerStaffCapabilities,
     'manage_users',
     'manage_integrations',

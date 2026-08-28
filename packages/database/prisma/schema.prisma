@@ -56,6 +56,19 @@ enum StaffAttachmentBindingSource {
   MANUAL_RECONCILIATION
 }
 
+enum GuestSupportTicketStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum GuestSupportAttachmentState {
+  PENDING
+  AVAILABLE
+  REJECTED
+}
+
 enum StockMovementType {
   WRITEOFF
   RETURN
@@ -368,6 +381,10 @@ model Tenant {
   staffChatMentions                    StaffChatMention[]
   staffChatReadReceipts                StaffChatReadReceipt[]
   staffNotifications                   StaffNotification[]
+  guestSupportTickets                  GuestSupportTicket[]
+  guestSupportAttachments              GuestSupportAttachment[]
+  guestSupportTicketComments           GuestSupportTicketComment[]
+  guestSupportTicketAuditEvents        GuestSupportTicketAuditEvent[]
   guestSavedFilters                    GuestSavedFilter[]
   guestAudiences                       GuestAudience[]
   guestAudienceMembers                 GuestAudienceMember[]
@@ -427,6 +444,9 @@ model User {
   updatedAt             DateTime         @updatedAt
 
   tenant                               Tenant                                 @relation(fields: [tenantId], references: [id])
+  assignedGuestSupportTickets          GuestSupportTicket[]                   @relation("GuestSupportTicketAssignedTo")
+  guestSupportTicketComments           GuestSupportTicketComment[]            @relation("GuestSupportTicketCommentAuthor")
+  guestSupportTicketAuditEvents        GuestSupportTicketAuditEvent[]         @relation("GuestSupportTicketAuditActor")
   customRole                           UserAccessRole?                        @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
   emailVerificationTokens              EmailVerificationToken[]
   importJobs                           ImportJob[]
@@ -1369,6 +1389,7 @@ model Store {
   staffChatChannels               StaffChatChannel[]
   staffChatMessages               StaffChatMessage[]
   staffNotifications              StaffNotification[]
+  guestSupportTickets             GuestSupportTicket[]
   staffMembers                    StaffMember[]
   userAccesses                    UserStoreAccess[]
   langameProductConfigurations    LangameClubProductConfiguration[]
@@ -2087,6 +2108,7 @@ model Guest {
   gameEntitlements           GuestGameEntitlement[]
   gameTelegramLinkChallenges GuestGameTelegramLinkChallenge[]
   guestPortalOtpChallenges   GuestPortalOtpChallenge[]
+  supportTickets             GuestSupportTicket[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
   @@unique([tenantId, id], map: "guest_tenant_id_uidx")
@@ -2471,6 +2493,7 @@ model GuestGameProfile {
   activitySyncJobs         GuestActivitySyncJob[]
   telegramLinkChallenges   GuestGameTelegramLinkChallenge[]
   portalOtpChallenges      GuestPortalOtpChallenge[]
+  supportTickets           GuestSupportTicket[]
   identityLinks            GuestGameProfileIdentityLink[]
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
@@ -5182,6 +5205,104 @@ model StaffChatReadReceipt {
   @@unique([messageId, userId], map: "staff_chat_read_receipt_message_user_unique")
   @@index([tenantId, userId, readAt], map: "staff_chat_read_receipt_user_idx")
   @@index([channelId, userId], map: "staff_chat_read_receipt_channel_user_idx")
+}
+
+model GuestSupportTicket {
+  id               String                   @id @default(uuid())
+  ticketNumber     String                   @unique
+  tenantId         String
+  storeId          String
+  profileId        String
+  guestId          String?
+  assignedToUserId String?
+  idempotencyKey   String
+  kind             String                   @default("BUG")
+  topic            String
+  description      String
+  status           GuestSupportTicketStatus @default(NEW)
+  route            String?
+  releaseSha       String?
+  browser          String?
+  device           String?
+  viewport         String?
+  timeZone         String?
+  resolvedAt       DateTime?
+  closedAt         DateTime?
+  lastActivityAt   DateTime                 @default(now())
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  tenant      Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store       Store                          @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+  profile     GuestGameProfile               @relation(fields: [tenantId, profileId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict)
+  guest       Guest?                         @relation(fields: [tenantId, guestId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+  assignedTo  User?                          @relation("GuestSupportTicketAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  attachments GuestSupportAttachment[]
+  comments    GuestSupportTicketComment[]
+  auditEvents GuestSupportTicketAuditEvent[]
+
+  @@unique([tenantId, id], map: "guest_support_ticket_tenant_id_uidx")
+  @@unique([tenantId, profileId, idempotencyKey], map: "guest_support_ticket_profile_idempotency_uidx")
+  @@index([tenantId, status, lastActivityAt], map: "guest_support_ticket_status_activity_idx")
+  @@index([tenantId, storeId, createdAt], map: "guest_support_ticket_store_created_idx")
+  @@index([tenantId, topic, createdAt], map: "guest_support_ticket_topic_created_idx")
+  @@index([assignedToUserId, status], map: "guest_support_ticket_assignee_status_idx")
+  @@index([guestId], map: "guest_support_ticket_guest_idx")
+}
+
+model GuestSupportAttachment {
+  id            String                      @id @default(uuid())
+  tenantId      String
+  ticketId      String
+  fileName      String
+  contentType   String
+  byteSize      Int
+  contentSha256 String
+  data          Bytes
+  state         GuestSupportAttachmentState @default(PENDING)
+  rejectionCode String?
+  processedAt   DateTime?
+  createdAt     DateTime                    @default(now())
+
+  tenant Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket GuestSupportTicket @relation(fields: [tenantId, ticketId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@index([tenantId, ticketId, createdAt], map: "guest_support_attachment_ticket_idx")
+  @@index([tenantId, state, createdAt], map: "guest_support_attachment_state_idx")
+  @@index([contentSha256], map: "guest_support_attachment_sha_idx")
+}
+
+model GuestSupportTicketComment {
+  id           String   @id @default(uuid())
+  tenantId     String
+  ticketId     String
+  authorUserId String?
+  body         String
+  createdAt    DateTime @default(now())
+
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket     GuestSupportTicket @relation(fields: [tenantId, ticketId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict)
+  authorUser User?              @relation("GuestSupportTicketCommentAuthor", fields: [authorUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+
+  @@index([tenantId, ticketId, createdAt], map: "guest_support_comment_ticket_idx")
+  @@index([authorUserId], map: "guest_support_comment_author_idx")
+}
+
+model GuestSupportTicketAuditEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  ticketId    String
+  actorUserId String?
+  action      String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket    GuestSupportTicket @relation(fields: [tenantId, ticketId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict)
+  actorUser User?              @relation("GuestSupportTicketAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+
+  @@index([tenantId, ticketId, createdAt], map: "guest_support_audit_ticket_idx")
+  @@index([actorUserId], map: "guest_support_audit_actor_idx")
 }
 
 model StaffNotification {

@@ -11,8 +11,10 @@ import { GuestGamificationController } from '../guest-gamification/guest-gamific
 import { GuestGamificationService } from '../guest-gamification/guest-gamification.service';
 import { GuestPortalModule } from '../guest-portal/guest-portal.module';
 import { GuestPortalService } from '../guest-portal/guest-portal.service';
+import { GuestSupportService } from '../guest-portal/guest-support.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StaffTeamChatService } from '../staff/staff-team-chat.service';
+import { SupportTicketsService } from '../support/support-tickets.service';
 import { assertEntrypointRole } from './api-bootstrap';
 import { CorporateGuestGamificationModule } from './corporate-guest-gamification.module';
 import { CorporateRuntimeModule } from './corporate-runtime.module';
@@ -85,6 +87,12 @@ describe('split API runtime boundary', () => {
     expect(
       moduleRef.get(GuestBonusLedgerSchedulerService, { strict: false }),
     ).toBeInstanceOf(GuestBonusLedgerSchedulerService);
+    expect(
+      moduleRef.get(SupportTicketsService, { strict: false }),
+    ).toBeInstanceOf(SupportTicketsService);
+    expect(() =>
+      moduleRef.get(GuestSupportService, { strict: false }),
+    ).toThrow();
 
     await moduleRef.close();
   });
@@ -103,9 +111,15 @@ describe('split API runtime boundary', () => {
     expect(moduleRef.get(GuestPortalService)).toBeInstanceOf(
       GuestPortalService,
     );
+    expect(moduleRef.get(GuestSupportService)).toBeInstanceOf(
+      GuestSupportService,
+    );
     expect(() => moduleRef.get(AuthService, { strict: false })).toThrow();
     expect(() =>
       moduleRef.get(StaffTeamChatService, { strict: false }),
+    ).toThrow();
+    expect(() =>
+      moduleRef.get(SupportTicketsService, { strict: false }),
     ).toThrow();
 
     const scheduler = moduleRef.get(GuestBonusLedgerSchedulerService);

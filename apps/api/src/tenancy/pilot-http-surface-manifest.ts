@@ -530,6 +530,7 @@ const definitions: readonly ControllerDefinition[] = [
           ':tenantSlug/:storeId/telegram-auth/start',
           ':tenantSlug/:storeId/telegram-auth/status',
           'session/app-open',
+          'session/support/bug-reports',
           'session/completion-notifications/:notificationId/acknowledge',
           'session/reward-wallet/claim-all',
           'session/reward-wallet/items/:walletItemId/claim',
@@ -653,6 +654,17 @@ const definitions: readonly ControllerDefinition[] = [
       'PATCH /users/roles/:id': { profile: 'NETWORK_VERIFIED' },
       'PATCH /users/system-roles/:role': { profile: 'NETWORK_VERIFIED' },
     },
+  },
+  {
+    source: 'src/support/support-tickets.controller.ts',
+    prefix: '/support/bug-reports',
+    module: 'COMMUNICATIONS',
+    profile: 'NETWORK_VERIFIED',
+    routes: [
+      ['GET', ['', ':id/attachments/:attachmentId']],
+      ['POST', [':id/comments']],
+      ['PATCH', [':id']],
+    ],
   },
 ];
 
@@ -999,6 +1011,9 @@ function resolveCapability(
 
   if (module === 'USERS_ROLES') {
     return 'manage_users';
+  }
+  if (path.startsWith('/support/bug-reports')) {
+    return method === 'GET' ? 'view_support_tickets' : 'manage_support_tickets';
   }
   if (module === 'COMMUNICATIONS') {
     return method === 'GET' ? 'view_communications' : 'manage_communications';

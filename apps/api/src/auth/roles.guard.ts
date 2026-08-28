@@ -114,10 +114,7 @@ export class RolesGuard implements CanActivate {
     const capability = this.resolveRequiredCapability(request, role);
     const additionalCapabilities =
       this.resolveAdditionalRequiredCapabilities(request);
-    if (
-      this.isIntegrationPath(request) &&
-      capability === null
-    ) {
+    if (this.isIntegrationPath(request) && capability === null) {
       throw new ForbiddenException('Insufficient role permissions');
     }
     const mustUseCapabilityDecision = Boolean(
@@ -145,11 +142,7 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Insufficient role permissions');
     }
 
-    if (
-      role &&
-      allowedRoles.includes(role) &&
-      !mustUseCapabilityDecision
-    ) {
+    if (role && allowedRoles.includes(role) && !mustUseCapabilityDecision) {
       return true;
     }
 
@@ -231,6 +224,12 @@ export class RolesGuard implements CanActivate {
 
     if (path.startsWith('/marketing')) {
       return this.isReadMethod(method) ? 'view_marketing' : 'manage_marketing';
+    }
+
+    if (path.startsWith('/support/bug-reports')) {
+      return this.isReadMethod(method)
+        ? 'view_support_tickets'
+        : 'manage_support_tickets';
     }
 
     if (
@@ -632,9 +631,7 @@ export class RolesGuard implements CanActivate {
       return '';
     }
 
-    const withLeadingSlash = rawPath.startsWith('/')
-      ? rawPath
-      : `/${rawPath}`;
+    const withLeadingSlash = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
     return withLeadingSlash.length > 1 && withLeadingSlash.endsWith('/')
       ? withLeadingSlash.slice(0, -1)
       : withLeadingSlash;
@@ -642,10 +639,7 @@ export class RolesGuard implements CanActivate {
 
   private isIntegrationPath(request: AuthenticatedRequest) {
     const path = this.normalizePath(request);
-    return (
-      path === '/integrations' ||
-      path.startsWith('/integrations/')
-    );
+    return path === '/integrations' || path.startsWith('/integrations/');
   }
 
   private isUserAccessPath(request: AuthenticatedRequest) {

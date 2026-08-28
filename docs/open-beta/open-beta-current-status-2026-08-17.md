@@ -4,9 +4,9 @@
 | -------------------- | ------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                          |
 | Production runtime   | healthy; access baseline deployed; внешний tenant не создавался                       |
-| Prisma schema        | `CURRENT_187`: 187 applied, head `20260820010000_guest_portal_telegram_update_ledger` |
+| Prisma schema        | source candidate `CURRENT_188`; production remains `CURRENT_187` until controlled rollout |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA          |
-| Runtime successor    | implementation merge `8871934273c2545531b28dfd0da66ca413eea14c`; gates green          |
+| Runtime successor    | current-context merge `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`; gates green          |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                      |
 | Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending        |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`              |
@@ -18,11 +18,11 @@
 ## Обновление 28.08.2026
 
 После production-инцидента `USER_CALL` подготовлено разделение B2B и public
-guest runtime без изменения production. Successor слит в `main` merge SHA
-`8871934273c2545531b28dfd0da66ca413eea14c`; его post-merge Fast CI
-[`33146506113`](https://github.com/boozik3412/leetplus/actions/runs/33146506113)
+guest runtime без изменения production. Актуальный контекст слит в `main` merge
+SHA `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`; его post-merge Fast CI
+[`33149292335`](https://github.com/boozik3412/leetplus/actions/runs/33149292335)
 и Full Release Admission
-[`33146506160`](https://github.com/boozik3412/leetplus/actions/runs/33146506160)
+[`33149292273`](https://github.com/boozik3412/leetplus/actions/runs/33149292273)
 зелёные.
 
 Отдельные `corporate-main`/`guest-main` имеют разные module graphs. Guest graph
@@ -44,6 +44,21 @@ GO. Текущий production остаётся `COMBINED` и не изменён
 [split guest runtime candidate](../deployment/guest-runtime-pool-candidate/README.md).
 Канонические route/identity/process инварианты:
 [runtime/security contours](../security/runtime-security-contours.md).
+
+### Guest bug-report support candidate
+
+Подготовлена fail-closed система обращений для игрового модуля. Public submit
+зарегистрирован только в GuestRuntime и требует действующую guest identity;
+tenant queue зарегистрирована только в CorporateRuntime и требует support
+capability + fresh network scope; общая очередь требует PlatformAdminGuard.
+Support storage не связан со StaffTask, уведомлениями или outbound providers.
+Один JPG/PNG/WebP до 5 MiB проверяется по bytes, очищается от metadata и
+выдаётся сотруднику только как private attachment. Additive migration
+`20260828190000_guest_support_bug_reports` переводит exact schema contract в
+`CURRENT_188`. До same-SHA admission, restored-copy rehearsal, inactive-slot
+canary и atomic cutover production считается `CURRENT_187`, а runtime flag
+остаётся `OFF`. Runbook:
+[guest bug reporting](../support/guest-bug-reporting.md).
 
 ### Role-aware landing
 

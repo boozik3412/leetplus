@@ -53,6 +53,11 @@ describe('guest runtime HTTP boundary', () => {
       .expect(404)
       .expect({ statusCode: 404, message: 'Not Found' });
 
+    await request(httpServer)
+      .get('/support/bug-reports')
+      .expect(404)
+      .expect({ statusCode: 404, message: 'Not Found' });
+
     await app.close();
   });
 });

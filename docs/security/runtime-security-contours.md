@@ -4,8 +4,8 @@
 
 Актуально на: **28.08.2026**
 Runtime implementation baseline:
-`8871934273c2545531b28dfd0da66ca413eea14c` (PR #66; последующие
-documentation-only commits могут быть потомками этого SHA)
+`8b1d5972aec3c61b62789002ddacf1653a8b5bbc` (PR #67; включает PR #66 и
+последующую фиксацию актуального контекста)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -16,8 +16,8 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | split-contour successor слит PR [#66](https://github.com/boozik3412/leetplus/pull/66), merge SHA `8871934273c2545531b28dfd0da66ca413eea14c`                                        |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33146506113) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33146506160) — `SUCCESS` |
+| Runtime implementation   | current-context successor слит PR [#67](https://github.com/boozik3412/leetplus/pull/67), merge SHA `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`                                           |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33149292335) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33149292273) — `SUCCESS` |
 | Production API topology  | последний зафиксированный runtime остаётся `COMBINED`; dedicated `CORPORATE`/`GUEST` не установлены                                                                                |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
 | Corporate landing        | role-aware successor слит и admitted; отдельный production deploy/real-account canary всё ещё должен подтверждаться фактическим runtime                                            |
@@ -45,6 +45,27 @@ env, systemd, nginx и database roles проверяются отдельно.
 импортировать корпоративную авторизацию. Название домена `guest-gamification`
 в коде само по себе не определяет runtime-контур; определяет субъект и HTTP
 contract.
+
+## Техническая поддержка игрового модуля
+
+Support-функциональность следует тем же трём границам и не образует четвёртый
+смешанный контур:
+
+- public guest отправляет обращение только через
+  `/guest-portal/session/support/bug-reports`; identity — guest JWT и exact
+  `GuestGameProfile`, rate/idempotency scoped по tenant + profile;
+- tenant user работает только с `/support/bug-reports*` после corporate JWT,
+  support capability и `FreshNetworkScopeGuard`;
+- platform-wide `/admin/support-tickets*` требует `PlatformAdminGuard`;
+- guest process пишет только support-owned tables и не импортирует corporate
+  auth, staff tasks, notifications или outbound transports;
+- вложение ограничено одним JPG/PNG/WebP до 5 MiB, проверяется по bytes,
+  очищается от metadata и выдаётся только как private attachment;
+- runtime flag `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed и по умолчанию
+  равен `OFF`.
+
+Подробный контракт и rollout:
+[`docs/support/guest-bug-reporting.md`](../support/guest-bug-reporting.md).
 
 ## Инварианты публичного игрового входа
 
@@ -150,6 +171,7 @@ cutover. Он не является целевой долгосрочной из
 | PR #63/#64 — role-aware landing                       | Строгий API scope должен сочетаться с поддерживаемым landing; неверный redirect не чинится расширением прав.                                                               |
 | PR #65 — logical guest auth isolation                 | Locks, cleanup, provider timeout и poll dedupe должны быть challenge-scoped; корпоративный auth contour не ограничивает public guest concurrency.                          |
 | PR #66 — process/module/runtime isolation             | Public guest, B2B game administration и workers требуют разных module graphs, secret sets, pools и resource identities.                                                    |
+| PR #67 — current-context fixation                     | Source/admission и фактический production state фиксируются раздельно; green admission не является автоматическим deploy.                                                 |
 
 ## Проверка перед изменением пересекающей области
 

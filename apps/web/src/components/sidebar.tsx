@@ -38,6 +38,7 @@ type NavGroup = {
     | "guests"
     | "gamification"
     | "communications"
+    | "support"
     | "staff"
     | "marketing"
     | "assortment"
@@ -92,6 +93,11 @@ const navGroups: NavGroup[] = [
       { href: "/staff/notifications", label: "Уведомления" },
       { href: "/guests/crm/tasks", label: "CRM-задачи контакта" },
     ],
+  },
+  {
+    title: "Поддержка",
+    icon: "support",
+    items: [{ href: "/support", label: "Обращения гостей" }],
   },
   {
     title: "Персонал",
@@ -159,6 +165,7 @@ const navGroups: NavGroup[] = [
       { href: "/administration#tenants", label: "Сети tenant" },
       { href: "/administration#sync-jobs", label: "Синхронизации" },
       { href: "/administration#audit", label: "Audit trail" },
+      { href: "/administration/support-tickets", label: "Тикеты поддержки" },
     ],
   },
 ];
@@ -508,6 +515,16 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
     );
   }
 
+  if (icon === "support") {
+    return (
+      <svg {...common}>
+        <path d="M9 4.5 7.7 2.8M15 4.5l1.3-1.7M8 9H4.5M19.5 9H16M8 14H4.5M19.5 14H16M9 19.5l-1.8 1.7M15 19.5l1.8 1.7" />
+        <path d="M8 8.5a4 4 0 0 1 8 0v6.3a4 4 0 0 1-8 0V8.5Z" />
+        <path d="M8 11.5h8M12 7v10" />
+      </svg>
+    );
+  }
+
   if (icon === "management") {
     return (
       <svg {...common}>
@@ -695,6 +712,10 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
     currentPathname.startsWith("/staff/notifications")
   ) {
     return "Коммуникации";
+  }
+
+  if (currentPathname.startsWith("/support")) {
+    return "Поддержка";
   }
 
   if (

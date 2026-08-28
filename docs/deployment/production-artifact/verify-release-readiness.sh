@@ -58,10 +58,11 @@ Usage:
     --web-url <http(s)-url>
 
 The API must expose /version and /health/ready. The probe accepts only an
-exact release SHA, expected completed migration name/count, an HTTP-success
-Web response and the exact Next.js BUILD_ID static manifest. It performs no
-write or restart operation. Tests may add --unprivileged-test-mode; root may
-not use that mode.
+exact release SHA and either the expected completed migration name/count or
+the single exact guest-support CURRENT_187 -> CURRENT_188 compatibility
+envelope. It also requires an HTTP-success Web response and the exact Next.js
+BUILD_ID static manifest. It performs no write or restart operation. Tests may
+add --unprivileged-test-mode; root may not use that mode.
 USAGE
 }
 
@@ -245,19 +246,44 @@ function readJson(filePath, label) {
 const version = readJson(versionPath, 'version');
 const ready = readJson(readyPath, 'readiness');
 const webIdentity = readJson(webIdentityPath, 'Web release identity');
+const database = ready.dependencies?.database;
+const expectedMigrationCountNumber = Number(expectedMigrationCount);
+const exactTargetAccepted =
+  database?.migration === expectedMigration &&
+  database?.migrationCount === expectedMigrationCountNumber &&
+  database?.compatibility === undefined;
+const bridge = database?.compatibility;
+const bridgeKeys = bridge && typeof bridge === 'object' && !Array.isArray(bridge)
+  ? Object.keys(bridge).sort().join(',')
+  : '';
+const guestSupportForwardBridgeAccepted =
+  expectedMigration === '20260828190000_guest_support_bug_reports' &&
+  expectedMigrationCountNumber === 188 &&
+  database?.migration === '20260820010000_guest_portal_telegram_update_ledger' &&
+  database?.migrationCount === 187 &&
+  bridgeKeys === 'mode,targetMigration,targetMigrationCount' &&
+  bridge.mode === 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE' &&
+  bridge.targetMigration === expectedMigration &&
+  bridge.targetMigrationCount === expectedMigrationCountNumber;
 if (
   version.service !== 'leetplus-api' ||
   version.release?.sha !== releaseSha ||
   ready.ok !== true ||
   ready.service !== 'leetplus-api' ||
   ready.release?.sha !== releaseSha ||
-  ready.dependencies?.database?.ok !== true ||
-  ready.dependencies.database.migration !== expectedMigration ||
-  ready.dependencies.database.migrationCount !== Number(expectedMigrationCount) ||
+  database?.ok !== true ||
+  (!exactTargetAccepted && !guestSupportForwardBridgeAccepted) ||
   webIdentity.ok !== true ||
   webIdentity.release?.sha !== releaseSha ||
   webIdentity.release?.webBuildId !== expectedWebBuildId
 ) throw new Error('running release readiness contract does not match expected evidence');
+process.stdout.write(
+  `RELEASE_READINESS_ACCEPTED_DATABASE_STATE=${guestSupportForwardBridgeAccepted
+    ? 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE'
+    : 'EXACT_TARGET'}\n` +
+  `RELEASE_READINESS_OBSERVED_MIGRATION=${database.migration}\n` +
+  `RELEASE_READINESS_OBSERVED_MIGRATION_COUNT=${database.migrationCount}\n`,
+);
 NODE
 
 printf 'RELEASE_READINESS_ACCEPTED_SHA=%s\n' "$release_sha"

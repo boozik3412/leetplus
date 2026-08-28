@@ -1,0 +1,10 @@
+[Unit]
+Description=LeetPlus corporate API resource contour
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+IOAccounting=true
+CPUWeight=100
+IOWeight=100
+TasksMax=1024

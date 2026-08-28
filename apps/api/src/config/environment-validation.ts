@@ -1,6 +1,12 @@
 import type { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
 import { posix } from 'node:path';
+import {
+  API_RUNTIME_ROLE_KEY,
+  guestRuntimeEnvironmentErrors,
+  resolveApiRuntimeRole,
+} from './api-runtime-role';
+import { dedicatedApiDatabaseEnvironmentErrors } from './api-runtime-database';
 
 const MINIMUM_PRODUCTION_SECRET_LENGTH = 32;
 const ENVIRONMENT_MARKER_KEYS = [
@@ -24,6 +30,30 @@ export const PRODUCTION_SECRET_KEYS = [
 ] as const;
 
 export type ProductionSecretKey = (typeof PRODUCTION_SECRET_KEYS)[number];
+export const GUEST_RUNTIME_PRODUCTION_SECRET_KEYS = [
+  'GUEST_PORTAL_JWT_SECRET',
+  'GUEST_GAME_REFERRAL_SECRET',
+  'APP_ENCRYPTION_KEY',
+  'INTEGRATION_ENCRYPTION_KEY',
+] as const satisfies readonly ProductionSecretKey[];
+export const CORPORATE_RUNTIME_PRODUCTION_SECRET_KEYS = [
+  'JWT_SECRET',
+  'APP_ENCRYPTION_KEY',
+  'INTEGRATION_ENCRYPTION_KEY',
+  'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY',
+  'IDENTITY_MAIL_ENCRYPTION_KEY',
+  'SYNC_SERVICE_TOKEN',
+] as const satisfies readonly ProductionSecretKey[];
+const GUEST_RUNTIME_FORBIDDEN_SECRET_KEYS = [
+  'JWT_SECRET',
+  'IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY',
+  'IDENTITY_MAIL_ENCRYPTION_KEY',
+  'SYNC_SERVICE_TOKEN',
+] as const satisfies readonly ProductionSecretKey[];
+const CORPORATE_RUNTIME_FORBIDDEN_SECRET_KEYS = [
+  'GUEST_PORTAL_JWT_SECRET',
+  'GUEST_GAME_REFERRAL_SECRET',
+] as const satisfies readonly ProductionSecretKey[];
 type FallbackProductionSecretKey = Exclude<
   ProductionSecretKey,
   'IDENTITY_MAIL_ENCRYPTION_KEY'
@@ -335,6 +365,11 @@ export function resolveIdentityMailAadEnvironment(
  */
 export function validateEnvironment(config: EnvironmentValues) {
   const isProduction = productionEnvironment(config);
+  const apiRuntimeRole = resolveApiRuntimeRole(config[API_RUNTIME_ROLE_KEY]);
+  const runtimeRoleWasConfigured = Boolean(
+    stringValue(config[API_RUNTIME_ROLE_KEY]),
+  );
+  const runtimeErrors = guestRuntimeEnvironmentErrors(config, apiRuntimeRole);
   const isolatedMode = stringValue(config.DESIGN_PARTNER_ISOLATED_MODE);
   const founderOperatorBetaMode = resolveFounderOperatorBetaMode(
     config.FOUNDER_OPERATOR_BETA_MODE,
@@ -346,18 +381,39 @@ export function validateEnvironment(config: EnvironmentValues) {
     );
   }
 
+  if (runtimeErrors.length > 0 && !isProduction && isolatedMode !== 'true') {
+    throw new Error(
+      `Invalid API runtime environment:\n${runtimeErrors
+        .map((error) => `- ${error}`)
+        .join('\n')}`,
+    );
+  }
+
   if (!isProduction && isolatedMode !== 'true') {
-    if (!stringValue(config.FOUNDER_OPERATOR_BETA_MODE)) {
+    if (
+      !stringValue(config.FOUNDER_OPERATOR_BETA_MODE) &&
+      !runtimeRoleWasConfigured
+    ) {
       return config;
     }
     return {
       ...config,
+      [API_RUNTIME_ROLE_KEY]: apiRuntimeRole,
       FOUNDER_OPERATOR_BETA_MODE: founderOperatorBetaMode,
     };
   }
 
-  const errors: string[] = [];
+  const errors: string[] = [
+    ...runtimeErrors,
+    ...dedicatedApiDatabaseEnvironmentErrors(
+      config.DATABASE_URL,
+      apiRuntimeRole,
+    ),
+  ];
   const configuredSecrets = new Map<ProductionSecretKey, string>();
+  const requiredSecretKeys = productionSecretKeysForRole(apiRuntimeRole);
+  const forbiddenSecretKeys =
+    productionForbiddenSecretKeysForRole(apiRuntimeRole);
 
   let founderOperatorBetaActivationDatabaseUrl: string | undefined;
   if (founderOperatorBetaMode === 'ACTIVE') {
@@ -396,7 +452,7 @@ export function validateEnvironment(config: EnvironmentValues) {
     }
   }
 
-  for (const key of PRODUCTION_SECRET_KEYS) {
+  for (const key of requiredSecretKeys) {
     const value = stringValue(config[key]);
 
     if (!value) {
@@ -414,6 +470,12 @@ export function validateEnvironment(config: EnvironmentValues) {
 
     if (isPlaceholderSecret(value)) {
       errors.push(`${key} must not contain a placeholder value`);
+    }
+  }
+
+  for (const key of forbiddenSecretKeys) {
+    if (stringValue(config[key])) {
+      errors.push(`${key} must be absent in ${apiRuntimeRole} API runtime`);
     }
   }
 
@@ -537,15 +599,22 @@ export function validateEnvironment(config: EnvironmentValues) {
       `${API_BIND_HOST_KEY} must equal ${PRODUCTION_API_BIND_HOST} in production`,
     );
   }
-  if (identityEmailFingerprintKeyVersion !== 'v1') {
+  if (
+    requiredSecretKeys.includes('IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY') &&
+    identityEmailFingerprintKeyVersion !== 'v1'
+  ) {
     errors.push('IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY_VERSION must equal v1');
   }
   if (
+    requiredSecretKeys.includes('IDENTITY_MAIL_ENCRYPTION_KEY') &&
     identityMailEncryptionKeyVersion !== IDENTITY_MAIL_ENCRYPTION_KEY_VERSION
   ) {
     errors.push('IDENTITY_MAIL_ENCRYPTION_KEY_VERSION must equal v1');
   }
-  if (!identityMailAadEnvironment) {
+  if (
+    requiredSecretKeys.includes('IDENTITY_MAIL_ENCRYPTION_KEY') &&
+    !identityMailAadEnvironment
+  ) {
     errors.push(
       'IDENTITY_MAIL_AAD_ENVIRONMENT must be an exact lowercase environment identifier',
     );
@@ -589,6 +658,7 @@ export function validateEnvironment(config: EnvironmentValues) {
 
   return {
     ...config,
+    [API_RUNTIME_ROLE_KEY]: apiRuntimeRole,
     ...Object.fromEntries(configuredSecrets),
     RELEASE_SHA: releaseSha,
     BUILD_TIME: buildTime,
@@ -607,6 +677,22 @@ export function validateEnvironment(config: EnvironmentValues) {
     FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL:
       founderOperatorBetaActivationDatabaseUrl,
   };
+}
+
+function productionSecretKeysForRole(
+  role: ReturnType<typeof resolveApiRuntimeRole>,
+): readonly ProductionSecretKey[] {
+  if (role === 'GUEST') return GUEST_RUNTIME_PRODUCTION_SECRET_KEYS;
+  if (role === 'CORPORATE') return CORPORATE_RUNTIME_PRODUCTION_SECRET_KEYS;
+  return PRODUCTION_SECRET_KEYS;
+}
+
+function productionForbiddenSecretKeysForRole(
+  role: ReturnType<typeof resolveApiRuntimeRole>,
+): readonly ProductionSecretKey[] {
+  if (role === 'GUEST') return GUEST_RUNTIME_FORBIDDEN_SECRET_KEYS;
+  if (role === 'CORPORATE') return CORPORATE_RUNTIME_FORBIDDEN_SECRET_KEYS;
+  return [];
 }
 
 export function isProductionConfig(configService: ConfigService) {

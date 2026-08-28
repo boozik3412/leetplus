@@ -4,6 +4,11 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  API_RUNTIME_ROLE_KEY,
+  apiRuntimeServiceName,
+  resolveApiRuntimeRole,
+} from './config/api-runtime-role';
 import { PrismaService } from './prisma/prisma.service';
 
 @Injectable()
@@ -22,7 +27,7 @@ export class AppService {
   getLiveness() {
     return {
       ok: true,
-      service: 'leetplus-api',
+      service: this.serviceName(),
       checkedAt: new Date().toISOString(),
       release: this.releaseIdentity(),
     };
@@ -88,7 +93,7 @@ export class AppService {
 
       return {
         ok: true,
-        service: 'leetplus-api',
+        service: this.serviceName(),
         checkedAt: new Date().toISOString(),
         release: this.releaseIdentity(),
         dependencies: {
@@ -101,14 +106,12 @@ export class AppService {
       };
     } catch (error) {
       const reason =
-        error instanceof ReadinessFailure
-          ? error.code
-          : 'DATABASE_UNAVAILABLE';
+        error instanceof ReadinessFailure ? error.code : 'DATABASE_UNAVAILABLE';
       this.logger.error(`Readiness check failed: ${reason}`);
 
       throw new ServiceUnavailableException({
         ok: false,
-        service: 'leetplus-api',
+        service: this.serviceName(),
         checkedAt: new Date().toISOString(),
         release: this.releaseIdentity(),
         dependencies: {
@@ -123,7 +126,7 @@ export class AppService {
 
   getVersion() {
     return {
-      service: 'leetplus-api',
+      service: this.serviceName(),
       release: this.releaseIdentity(),
     };
   }
@@ -136,6 +139,12 @@ export class AppService {
         'unknown',
       builtAt: this.optionalConfig('BUILD_TIME'),
     };
+  }
+
+  private serviceName() {
+    return apiRuntimeServiceName(
+      resolveApiRuntimeRole(this.configService.get(API_RUNTIME_ROLE_KEY)),
+    );
   }
 
   private optionalConfig(key: string) {

@@ -1,0 +1,14 @@
+upstream leetplus_api {
+    server 127.0.0.1:4100 max_fails=2 fail_timeout=5s;
+    keepalive 32;
+}
+
+upstream leetplus_guest_api {
+    server 127.0.0.1:4101 max_fails=2 fail_timeout=5s;
+    keepalive 128;
+}
+
+upstream leetplus_web {
+    server 127.0.0.1:3100 max_fails=2 fail_timeout=5s;
+    keepalive 32;
+}

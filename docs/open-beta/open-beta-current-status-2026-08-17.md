@@ -7,7 +7,7 @@
 | Prisma schema        | `CURRENT_187`: 187 applied, head `20260820010000_guest_portal_telegram_update_ledger` |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA          |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                      |
-| Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending         |
+| Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending        |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`              |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены           |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                         |
@@ -15,6 +15,24 @@
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                    |
 
 ## Обновление 28.08.2026
+
+После production-инцидента `USER_CALL` подготовлено разделение B2B и public
+guest runtime без изменения production. Engineering candidate содержит
+отдельные `corporate-main`/`guest-main`: guest graph не импортирует
+`AuthModule`, `StaffModule` и широкие domain modules; corporate graph не
+импортирует `GuestPortalModule`/`GuestGamificationModule`. HTTP perimeter,
+entrypoint role и secret allowlist работают fail-closed. Guest process не
+регистрирует background scheduler: требуемый bonus signal заменён no-op.
+
+Подготовлены dormant systemd/nginx templates для отдельных UID/slices, портов
+`4100/4101` и `4200/4201`, route split и разных bounded PostgreSQL pools на
+том же VDS. Это пока не production-ready cutover: production-control
+attestation/watchdog/rollback ещё знают только одну API unit; также нужны
+отдельные DB-роли, restored-copy ACL/pool rehearsal, нагрузочный canary и явный
+GO. Текущий production остаётся `COMBINED` и не изменён. Runbook:
+[split guest runtime candidate](../deployment/guest-runtime-pool-candidate/README.md).
+
+### Role-aware landing
 
 Закрыт кодовый дефект общей post-login маршрутизации: tenant-роли больше не
 используют `/dashboard` как универсальный fallback. Каноническая карта:

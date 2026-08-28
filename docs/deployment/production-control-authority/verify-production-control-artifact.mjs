@@ -80,6 +80,7 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/systemd/blue.env.example`,
   `${INNER_ROOT}/systemd/canary-safe.env.example`,
   `${INNER_ROOT}/systemd/green.env.example`,
+  `${INNER_ROOT}/systemd/guest-user-call-live.env.example`,
   `${INNER_ROOT}/systemd/leetplus-api@.service`,
   `${INNER_ROOT}/systemd/leetplus-release-hydrate@.service`,
   `${INNER_ROOT}/systemd/leetplus-web@.service`,

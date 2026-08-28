@@ -15,6 +15,7 @@ readonly PREFLIGHT="${DEPLOY_ROOT}/preflight-release-slot.sh"
 readonly SEALER="${DEPLOY_ROOT}/seal-release-artifact.sh"
 readonly CACHE_PREPARER="${DEPLOY_ROOT}/prepare-web-slot-cache.sh"
 readonly SAFE_OVERLAY="${DEPLOY_ROOT}/systemd/canary-safe.env.example"
+readonly USER_CALL_LIVE_OVERLAY="${DEPLOY_ROOT}/systemd/guest-user-call-live.env.example"
 readonly TEST_ROOT="$(mktemp -d)"
 sink_server_pid=''
 replaced_system_node=false
@@ -114,8 +115,9 @@ fi
 cp "$DEPLOY_ROOT/systemd/leetplus-api@.service" "$systemd_root/leetplus-api@.service"
 cp "$DEPLOY_ROOT/systemd/leetplus-web@.service" "$systemd_root/leetplus-web@.service"
 cp "$SAFE_OVERLAY" "$environment_root/canary-safe.env"
+cp "$USER_CALL_LIVE_OVERLAY" "$environment_root/guest-user-call-live.env"
 cp "$PREFLIGHT" "$libexec_root/preflight-release-slot.sh"
-printf 'NODE_ENV=production\n' > "$environment_root/runtime.env"
+printf 'NODE_ENV=production\nGUEST_PORTAL_USER_CALL_SMS_RU_API_ID=fixture-api-id\n' > "$environment_root/runtime.env"
 printf 'NODE_ENV=production\n' > "$environment_root/web-runtime.env"
 printf 'RELEASE_SHA=%s\nWEB_BUILD_ID=%s\n' "$RELEASE_SHA" "$RELEASE_SHA" \
   > "$environment_root/slots/blue.env"
@@ -123,6 +125,7 @@ cp "$environment_root/slots/blue.env" "$environment_root/slots/green.env"
 chmod 0444 "$systemd_root/leetplus-api@.service" "$systemd_root/leetplus-web@.service"
 chmod 0440 "$environment_root/canary-safe.env" "$environment_root/slots/blue.env" \
   "$environment_root/slots/green.env"
+chmod 0400 "$environment_root/guest-user-call-live.env"
 chmod 0640 "$environment_root/runtime.env" "$environment_root/web-runtime.env"
 chmod 0555 "$libexec_root/preflight-release-slot.sh"
 
@@ -448,6 +451,9 @@ case "${1:-}" in
         printf '%s/%s (ignore_errors=no)\n' "${TEST_ENVIRONMENT_ROOT:?}" "$runtime_file"
         printf '%s/slots/%s.env (ignore_errors=no)\n' "${TEST_ENVIRONMENT_ROOT:?}" "$slot_name"
         printf '%s/canary-safe.env (ignore_errors=no)\n' "${TEST_ENVIRONMENT_ROOT:?}"
+        if [[ "$kind" == api ]]; then
+          printf '%s/guest-user-call-live.env (ignore_errors=no)\n' "${TEST_ENVIRONMENT_ROOT:?}"
+        fi
         ;;
       Environment) printf 'PATH=/usr/sbin:/usr/bin:/sbin:/bin\n' ;;
       UnsetEnvironment) printf 'BASH_ENV ENV HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR PRISMA_QUERY_ENGINE_BINARY PRISMA_QUERY_ENGINE_LIBRARY PRISMA_SCHEMA_ENGINE_BINARY PRISMA_FMT_BINARY TMPDIR TMP TEMP XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig PNPM_HOME COREPACK_HOME COREPACK_NPM_REGISTRY COREPACK_INTEGRITY_KEYS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM\n' ;;

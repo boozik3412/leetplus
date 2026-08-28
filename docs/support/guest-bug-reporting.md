@@ -77,6 +77,11 @@ network scope. Назначение, смена статуса и внутрен
 явно через custom role или exact tenant role override. Platform-wide очередь
 доступна только platform admin.
 
+Production authenticated read-smoke обязан принимать эти две capability как
+часть exact текущего каталога. Их отсутствие в application response либо в
+immutable smoke allowlist является fail-closed deployment drift и блокирует
+cutover до создания durable intent.
+
 Каждое создание, изменение и комментарий записываются в отдельный support audit
 ledger. Tenant API всегда добавляет `tenantId` в read/update/comment/download;
 несуществующий или cross-tenant объект возвращается как not found.

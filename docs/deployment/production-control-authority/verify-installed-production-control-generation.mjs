@@ -12,7 +12,7 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const SAFE_SOURCE_PATTERN = /^[A-Za-z0-9_.@+/-]+$/u;
 const SAFE_DESTINATION_PATTERN = /^\/[A-Za-z0-9_.@+/-]+$/u;
 const EXPECTED_INSTALL_MAP_SHA256 =
-  "0e1424555628f95dd706412b46dc07aedb46d7880d08e0158bbb61f46b1fa801";
+  "7404801cef6d9eb2aca40411789df7fcb76fb6e0260520f0be809f4812d2a56e";
 const EXPECTED_REPOSITORY = "boozik3412/leetplus";
 const GENERATION_BASE = "/srv/leetplus/production-control-generations";
 const RECEIPT_BASE = "/var/lib/leetplus/deploy-receipts/production-control";

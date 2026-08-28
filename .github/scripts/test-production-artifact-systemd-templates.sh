@@ -21,6 +21,7 @@ release_environment="${TEMPLATE_ROOT}/release.env.example"
 slot_api_unit="${TEMPLATE_ROOT}/leetplus-api@.service"
 slot_web_unit="${TEMPLATE_ROOT}/leetplus-web@.service"
 safe_overlay="${TEMPLATE_ROOT}/canary-safe.env.example"
+user_call_live_overlay="${TEMPLATE_ROOT}/guest-user-call-live.env.example"
 slot_preflight="${REPOSITORY_ROOT}/docs/deployment/production-artifact/preflight-release-slot.sh"
 cache_preparer="${REPOSITORY_ROOT}/docs/deployment/production-artifact/prepare-web-slot-cache.sh"
 release_promoter="${REPOSITORY_ROOT}/docs/deployment/production-artifact/promote-release-artifact.sh"
@@ -69,9 +70,28 @@ done
 
 for required_file in \
   "$api_unit" "$web_unit" "$migration_unit" "$hydration_unit" "$release_environment" \
-  "$slot_api_unit" "$slot_web_unit" "$safe_overlay" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
+  "$slot_api_unit" "$slot_web_unit" "$safe_overlay" "$user_call_live_overlay" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
   test -f "$required_file"
 done
+
+grep -F -x 'EnvironmentFile=/etc/leetplus/guest-user-call-live.env' "$slot_api_unit" > /dev/null
+if grep -F -x 'EnvironmentFile=/etc/leetplus/guest-user-call-live.env' "$slot_web_unit" > /dev/null; then
+  printf 'Web slot inherited the API-only USER_CALL activation profile\n' >&2
+  exit 1
+fi
+for live_value in \
+  'GUEST_PORTAL_USER_CALL_ENABLED=true' \
+  'GUEST_PORTAL_USER_CALL_PROVIDER=SMS_RU_CALLCHECK' \
+  'GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL=https://sms.ru' \
+  'GUEST_PORTAL_USER_CALL_PROVIDER_TIMEOUT_MS=8000'; do
+  grep -F -x "$live_value" "$user_call_live_overlay" > /dev/null
+done
+grep -F -x '      GUEST_PORTAL_USER_CALL_ENABLED|GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL)' \
+  "$slot_preflight" > /dev/null
+grep -F "reviewed public guest USER_CALL activation profile is absent or unsafe" \
+  "$slot_preflight" > /dev/null
+grep -F "Web runtime inherited the public guest USER_CALL provider profile" \
+  "$slot_preflight" > /dev/null
 
 assert_inventory_producer_failure_is_fatal() {
   local authority_path="$1"
@@ -403,6 +423,7 @@ if grep -F '/run/leetplus-' "$blue_green_cutover" > /dev/null; then
   exit 1
 fi
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-api@.service\t/etc/systemd/system/leetplus-api@.service\t0444' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/guest-user-call-live.env.example\t/etc/leetplus/guest-user-call-live.env\t0400' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-web@.service\t/etc/systemd/system/leetplus-web@.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/preflight-release-slot.sh\t/usr/local/libexec/leetplus/preflight-release-slot.sh\t0555' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/verify-release-readiness.sh\t/usr/local/libexec/leetplus/verify-release-readiness.sh\t0555' "$production_control_install_map" > /dev/null

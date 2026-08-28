@@ -45,10 +45,11 @@ readonly MIGRATION_PATTERN='^[0-9]{14}_[a-z0-9_]+$'
 readonly SLOT_PATTERN='^(blue|green)$'
 readonly CUTOVER_RECORD_NAMESPACE_GLOB='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T*-g*-*-*'
 readonly FIRST_CUTOVER_ROLLBACK_SHA='7de04ff4ccc814494810730be3fa6bf661097b07'
-readonly SLOT_API_UNIT_SHA256='c8243da78f0228d0d312cdbc4b3c63fc36136321e0c55da74852a6e201fa53ff'
+readonly SLOT_API_UNIT_SHA256='d712c7635fd49efa76885624330815965a92dbfadeb3dba2891eaf45d4b66669'
 readonly SLOT_WEB_UNIT_SHA256='8c47b412ed3b42bcbbb421a78939c232d82919ca0995d28c1c4140c8775ae81e'
 readonly CANARY_SAFE_ENV_SHA256='dd87543ca654cf9ca1a94fae06d4f3e2f04c88e8ba0be84f45df2a7e03075d48'
-readonly SLOT_PREFLIGHT_SHA256='f2e5dcef196e01cd7d2f95cbef8e7955dee526e81249d2b4894dbe7ec2f1869e'
+readonly GUEST_USER_CALL_LIVE_ENV_SHA256='4254a9a8956b95dd937a2d35ec63cfe6cf278cfabef56b557401207677762685'
+readonly SLOT_PREFLIGHT_SHA256='2b53884adef77a4e07e0e33ece78a70978dcea340f57692f0fc6198590fa5dd2'
 readonly BLUE_NGINX_SHA256='3553e31012e1c00d695381c76ad4df184113c71c5a8b018bf5d934c2cea3fd8e'
 readonly GREEN_NGINX_SHA256='a9e449bcd5f7d56be97f347455f7d0629f393d471cdf2b87029b4bede2d58462'
 readonly LEGACY_SAFE_NGINX_SHA256='ebd449a4221dcb0c1d5449b4f87893bcad58b1f16319551730ca5aefde571b25'
@@ -352,7 +353,7 @@ attest_candidate_unit() {
   local syscall_architectures address_families network_interfaces ip_deny ip_allow read_only_paths read_write_paths
   local capability_bounding ambient_capabilities main_pid invocation_id control_group process_cgroup
   local unit_umask
-  local runtime_environment slot_environment safe_environment runtime_group runtime_mode expected_listener_port
+  local runtime_environment slot_environment safe_environment user_call_live_environment runtime_group runtime_mode expected_listener_port
   local listener_snapshot listener_count listener_address expected_nss_groups actual_nss_groups passwd_entry
   local passwd_inventory group_inventory runtime_group_line runtime_group_name runtime_group_password runtime_gid runtime_group_members
   local supplementary_line supplementary_name supplementary_password supplementary_gid supplementary_members expected_supplementary_members
@@ -394,6 +395,10 @@ attest_candidate_unit() {
   slot_environment="${environment_root}/slots/${slot}.env"
   safe_environment="${environment_root}/canary-safe.env"
   expected_environment_paths="${runtime_environment}"$'\n'"${slot_environment}"$'\n'"${safe_environment}"
+  if [[ "$runtime_kind" == api ]]; then
+    user_call_live_environment="${environment_root}/guest-user-call-live.env"
+    expected_environment_paths+=$'\n'"${user_call_live_environment}"
+  fi
 
   load_unit_property_snapshot "$unit" \
     || { candidate_unit_failure "${unit} effective property snapshot"; return; }
@@ -402,6 +407,10 @@ attest_candidate_unit() {
     || { candidate_unit_failure "${unit} fragment byte/identity"; return; }
   trusted_installed_file "$safe_environment" "$CANARY_SAFE_ENV_SHA256" leetplus-runtime 440 \
     || { candidate_unit_failure "${unit} final safety overlay byte/identity"; return; }
+  if [[ "$runtime_kind" == api ]]; then
+    trusted_installed_file "$user_call_live_environment" "$GUEST_USER_CALL_LIVE_ENV_SHA256" root 400 \
+      || { candidate_unit_failure "${unit} USER_CALL activation profile byte/identity"; return; }
+  fi
   trusted_installed_file "${libexec_root}/preflight-release-slot.sh" "$SLOT_PREFLIGHT_SHA256" root 555 \
     || { candidate_unit_failure "${unit} slot preflight byte/identity"; return; }
   [[ -f "$runtime_environment" && ! -L "$runtime_environment" \

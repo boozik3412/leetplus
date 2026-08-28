@@ -25,6 +25,16 @@ SHA `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`; его post-merge Fast CI
 [`33149292273`](https://github.com/boozik3412/leetplus/actions/runs/33149292273)
 зелёные.
 
+При preflight bug-report rollout обнаружен ручной emergency USER_CALL sidecar
+от 27.08.2026 на старом release `39e11b61…`. Он обслуживает только allowlisted
+public auth routes на localhost `3400/4400`, но не имеет immutable handoff,
+schema bridge и migration/rollback receipt, поэтому не может пережить
+`CURRENT_187 -> CURRENT_188`. Production gate корректно остановил rollout до
+database effect. Source successor формализует Callcheck как API-only exact
+`guest-user-call-live.env`: admitted main slot сначала принимает USER_CALL без
+простоя, после чего ручной sidecar выводится до миграции. Это не включает owner
+activation, scheduler или delivery workers.
+
 Отдельные `corporate-main`/`guest-main` имеют разные module graphs. Guest graph
 не импортирует `AuthModule`, `StaffModule` и широкие domain modules. Corporate
 graph не импортирует public `GuestPortalModule` или полный смешанный

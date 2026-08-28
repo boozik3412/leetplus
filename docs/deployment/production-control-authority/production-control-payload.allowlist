@@ -26,6 +26,7 @@ docs/deployment/production-artifact/stage-release-artifact.sh
 docs/deployment/production-artifact/systemd/blue.env.example
 docs/deployment/production-artifact/systemd/canary-safe.env.example
 docs/deployment/production-artifact/systemd/green.env.example
+docs/deployment/production-artifact/systemd/guest-user-call-live.env.example
 docs/deployment/production-artifact/systemd/leetplus-api-rollback@.service
 docs/deployment/production-artifact/systemd/leetplus-api@.service
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery-watchdog.service

@@ -80,6 +80,7 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/systemd/blue.env.example`,
   `${INNER_ROOT}/systemd/canary-safe.env.example`,
   `${INNER_ROOT}/systemd/green.env.example`,
+  `${INNER_ROOT}/systemd/guest-user-call-live.env.example`,
   `${INNER_ROOT}/systemd/leetplus-api@.service`,
   `${INNER_ROOT}/systemd/leetplus-release-hydrate@.service`,
   `${INNER_ROOT}/systemd/leetplus-web@.service`,
@@ -558,7 +559,7 @@ function assertInstallAuthorityContract(root) {
     priorLine = line;
     destinations.add(destination);
   }
-  if (lines.length !== 46) {
+  if (lines.length !== 47) {
     fail("production control install map does not have the exact reviewed entry count");
   }
   for (const requiredDestination of [

@@ -112,6 +112,9 @@ Production сейчас может находиться на `CURRENT_187`, то
    tenant/platform support API в этом режиме отвечает safe not found до любого
    запроса к отсутствующим support tables, а Web-страницы очередей возвращают
    пользователя в соответствующий dashboard;
+   API slot одновременно обязан пройти exact `guest-user-call-live.env`
+   attestation, чтобы публичный Callcheck можно было переключить с временного
+   old-SHA sidecar до schema effect без окна недоступности;
 4. пройти loopback/public read-only canary и атомарно переключить трафик на этот
    bridge slot. Предыдущий `CURRENT_187` slot остаётся точным N-1;
 5. применить только подписанный checksum-pinned

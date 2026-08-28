@@ -440,14 +440,18 @@ isolated VM/host copy.
 
 Пока instance unit подключает `canary-safe.env`, owner activation физически
 невозможна: final layer всегда возвращает `FOUNDER_OPERATOR_BETA_MODE=DISABLED`.
-Safety overlay не редактируется in-place. Текущие instance units также
-запрещают non-loopback egress на уровне systemd, поэтому одной заменой env
-невозможно включить рабочий Langame/SMTP/Telegram/provider контур. До owner
-activation нужен отдельный reviewed network-profile unit/drop-in (или localhost
-egress broker), exact-digest activation env и production-like rehearsal; затем
-перезапускается только активный artifact slot и повторяется readiness/rollback.
-Этот activation profile пока не реализован и является явным `NO-GO` для
-внешнего owner invite, но не блокирует localhost-only technical canary.
+Safety overlay не редактируется in-place. Единственное принятое исключение —
+API-only профиль `guest-user-call-live.env`: он загружается после safety overlay,
+имеет exact digest в production-control generation и включает только
+пользовательский SMS.ru Callcheck с bounded timeout. Web этот профиль не читает,
+а scheduler, delivery, reward materializer, mail и остальные provider paths
+остаются выключены.
+
+API slot сохраняет reviewed outbound egress для Langame/SMS/SMTP и других
+явных integrations; Web остаётся localhost-only. Полная owner activation всё
+ещё требует отдельного reviewed network/activation profile и production-like
+rehearsal. `guest-user-call-live.env` не является owner GO и не разрешает
+фоновые эффекты.
 
 Candidate не создаёт второй scheduler tick. До любого schema effect обязательна
 процедура scheduler-free N−1: auth-edge/exact-child/Web rollback contour

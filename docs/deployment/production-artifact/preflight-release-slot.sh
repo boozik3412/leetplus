@@ -261,6 +261,13 @@ while IFS='=' read -r safe_key safe_expected; do
   if [[ "$safe_key" == '# BEGIN CANARY_SAFE_REQUIRED_SETTINGS' || "$safe_key" == '# END CANARY_SAFE_REQUIRED_SETTINGS' ]]; then
     continue
   fi
+  if [[ "$api_runtime" == true ]]; then
+    case "$safe_key" in
+      GUEST_PORTAL_USER_CALL_ENABLED|GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL)
+        continue
+        ;;
+    esac
+  fi
   [[ -v "$safe_key" ]] || die "shadow safety setting is absent or unsafe: ${safe_key}"
   safe_actual="${!safe_key}"
   [[ "$safe_actual" == "$safe_expected" ]] || die "shadow safety setting is absent or unsafe: ${safe_key}"
@@ -346,6 +353,19 @@ LANGAME_INITIAL_SYNC_PREFLIGHT_CURRENT188_ENABLED=false
 LANGAME_INITIAL_SYNC_EXECUTION_CURRENT192_ENABLED=false
 # END CANARY_SAFE_REQUIRED_SETTINGS
 CANARY_SAFE_REQUIRED_SETTINGS
+
+if [[ "$api_runtime" == true ]]; then
+  [[ "${GUEST_PORTAL_USER_CALL_ENABLED:-}" == 'true' \
+    && "${GUEST_PORTAL_USER_CALL_PROVIDER:-}" == 'SMS_RU_CALLCHECK' \
+    && "${GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL:-}" == 'https://sms.ru' \
+    && "${GUEST_PORTAL_USER_CALL_PROVIDER_TIMEOUT_MS:-}" == '8000' \
+    && -n "${GUEST_PORTAL_USER_CALL_SMS_RU_API_ID:-}" ]] \
+    || die 'reviewed public guest USER_CALL activation profile is absent or unsafe'
+else
+  [[ "${GUEST_PORTAL_USER_CALL_ENABLED:-}" == 'false' \
+    && "${GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL:-}" == 'http://127.0.0.1:1' ]] \
+    || die 'Web runtime inherited the public guest USER_CALL provider profile'
+fi
 
 # Every direct provider/SMTP fallback is pinned to loopback port 1. Prove from
 # the unit cgroup that this sink is actually unbound; otherwise a local relay

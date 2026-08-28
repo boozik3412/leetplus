@@ -46,6 +46,22 @@ env, systemd, nginx и database roles проверяются отдельно.
 в коде само по себе не определяет runtime-контур; определяет субъект и HTTP
 contract.
 
+### Production USER_CALL continuity
+
+Публичный вход по SMS.ru Callcheck — пользовательский request path, а не worker.
+Для текущего `COMBINED` blue/green runtime он включается только API-only файлом
+`/etc/leetplus/guest-user-call-live.env`, установленным и проверенным exact
+production-control generation. Профиль разрешает только `USER_CALL`, provider
+`SMS_RU_CALLCHECK`, canonical `https://sms.ru` и timeout `8000`; API key остаётся
+в API runtime secret set. Web не загружает этот файл. Все scheduler/delivery/
+materializer switches остаются fail-closed в `canary-safe.env`.
+
+Ручные `leetplus-user-call-api.service`/`leetplus-user-call-web.service` не
+являются допустимым постоянным контуром: они не имеют immutable same-SHA,
+schema-bridge и rollback authority. Перед `CURRENT_188` они должны быть
+переключены на admitted slot без разрыва публичного входа, остановлены,
+disabled и удалены из systemd inventory. Помечать такой sidecar `SAFE` нельзя.
+
 ## Техническая поддержка игрового модуля
 
 Support-функциональность следует тем же трём границам и не образует четвёртый
@@ -177,6 +193,7 @@ cutover. Он не является целевой долгосрочной из
 | PR #65 — logical guest auth isolation                 | Locks, cleanup, provider timeout и poll dedupe должны быть challenge-scoped; корпоративный auth contour не ограничивает public guest concurrency.                          |
 | PR #66 — process/module/runtime isolation             | Public guest, B2B game administration и workers требуют разных module graphs, secret sets, pools и resource identities.                                                    |
 | PR #67 — current-context fixation                     | Source/admission и фактический production state фиксируются раздельно; green admission не является автоматическим deploy.                                                  |
+| USER_CALL production handoff                          | Пользовательский Callcheck допускается только через exact API activation profile; ручной old-SHA sidecar должен быть выведен до schema migration.                         |
 
 ## Проверка перед изменением пересекающей области
 

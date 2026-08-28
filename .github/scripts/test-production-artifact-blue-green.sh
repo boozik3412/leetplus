@@ -570,6 +570,13 @@ if [[ "${TEST_FAIL_PUBLIC_WEB:-false}" == true \
   printf 'fixture probe requested public Web failure\n' >&2
   exit 72
 fi
+if [[ -n "${TEST_POST_AUTH_COOLDOWN_MARKER:-}" \
+  && "$*" == *'https://'* \
+  && -f "$TEST_POST_AUTH_COOLDOWN_MARKER" ]]; then
+  rm -f -- "$TEST_POST_AUTH_COOLDOWN_MARKER"
+  printf 'fixture probe observed post-auth cooldown\n' >&2
+  exit 72
+fi
 if [[ "${TEST_PROBE_DELAY_SECONDS:-0}" =~ ^[0-9]+$ \
   && "${TEST_PROBE_DELAY_SECONDS:-0}" != 0 && "$*" == *'https://'* ]]; then
   sleep "$TEST_PROBE_DELAY_SECONDS"
@@ -587,6 +594,9 @@ if (/^[0-9]+$/.test(process.env.TEST_AUTH_DELAY_SECONDS ?? '')
 }
 if (process.env.TEST_AUTH_SMOKE_FAIL === 'true') process.exit(81);
 if (process.env.TEST_AUTH_SMOKE_FAIL_PUBLIC === 'true' && argumentsText.includes('https://')) process.exit(82);
+if (process.env.TEST_POST_AUTH_COOLDOWN_MARKER && argumentsText.includes('https://')) {
+  appendFileSync(process.env.TEST_POST_AUTH_COOLDOWN_MARKER, 'cooldown\n');
+}
 AUTHENTICATED_SMOKE
 chmod 0700 "$bin_root/systemctl" "$bin_root/ss" "$bin_root/nginx" "$bin_root/curl" "$bin_root/sync" "$TEST_ROOT/probe" "$TEST_ROOT/authenticated-smoke.mjs"
 
@@ -931,8 +941,13 @@ for failed_side in API WEB; do
   test -z "$(find "$state_root" -maxdepth 1 -type f -name '*.receipt' -print -quit)"
 done
 
+main_watchdog_auth_before="$(awk '/^authenticated-smoke .*https:\/\/api\.example\.test/ { count += 1 } END { print count + 0 }' "$command_log")"
+main_watchdog_probe_before="$(awk '/^probe .*--api-base-url https:\/\/api\.example\.test/ { count += 1 } END { print count + 0 }' "$command_log")"
+post_auth_cooldown_marker="$TEST_ROOT/post-auth-cooldown.marker"
+rm -f -- "$post_auth_cooldown_marker"
 PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
   TEST_API_NETWORK_INTERFACES='~' \
+  TEST_POST_AUTH_COOLDOWN_MARKER="$post_auth_cooldown_marker" \
   HTTP_PROXY=http://127.0.0.1:9999 NODE_OPTIONS=--definitely-invalid \
   LEETPLUS_TEST_TIMESTAMP_OVERRIDE=20991231T235959999999999Z \
   /usr/bin/bash -p "$CUTOVER" switch --slot blue "${common_arguments[@]}" > "$TEST_ROOT/switch.out"
@@ -946,7 +961,11 @@ grep -F -x 'GENERATION=1' "$receipt" >/dev/null
 grep -F -x 'RECORD_VERSION=2' "$state_root/latest-accepted.index" >/dev/null
 grep -F -x 'GENERATION=1' "$state_root/latest-accepted.index" >/dev/null
 grep -F -x 'BLUE_GREEN_OLD_PROCESSES_STOPPED=false' "$TEST_ROOT/switch.out" >/dev/null
-test "$(grep -c 'https://api.example.test' "$command_log")" -ge 3
+test -f "$post_auth_cooldown_marker"
+main_watchdog_auth_after="$(awk '/^authenticated-smoke .*https:\/\/api\.example\.test/ { count += 1 } END { print count + 0 }' "$command_log")"
+main_watchdog_probe_after="$(awk '/^probe .*--api-base-url https:\/\/api\.example\.test/ { count += 1 } END { print count + 0 }' "$command_log")"
+test "$((main_watchdog_auth_after - main_watchdog_auth_before))" -eq 1
+test "$((main_watchdog_probe_after - main_watchdog_probe_before))" -eq 3
 if grep -E 'systemctl (stop|restart|disable)' "$command_log" >/dev/null; then
   printf 'cutover attempted to stop or restart a process\n' >&2
   exit 1
@@ -1270,7 +1289,12 @@ if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$con
   printf 'watchdog accepted a changed candidate systemd invocation\n' >&2
   exit 1
 fi
-grep -F 'restarted during watchdog' "$TEST_ROOT/unit-drift-watchdog.out" >/dev/null
+if ! grep -F 'restarted during watchdog' "$TEST_ROOT/unit-drift-watchdog.out" >/dev/null; then
+  printf 'unit-drift watchdog did not report the expected restart attestation; output=' >&2
+  tr '\n' '|' < "$TEST_ROOT/unit-drift-watchdog.out" >&2
+  printf '\n' >&2
+  exit 1
+fi
 test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
 rm -f -- "$unit_drift_marker"
 

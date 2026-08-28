@@ -1,4 +1,4 @@
-# LeetPlus open beta — текущее состояние на 28.08.2026
+# LeetPlus open beta — текущее состояние на 29.08.2026
 
 | Поле                 | Состояние                                                                                 |
 | -------------------- | ----------------------------------------------------------------------------------------- |
@@ -6,7 +6,7 @@
 | Production runtime   | healthy; access baseline deployed; внешний tenant не создавался                           |
 | Prisma schema        | source candidate `CURRENT_188`; production remains `CURRENT_187` until controlled rollout |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA              |
-| Runtime successor    | current-context merge `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`; gates green             |
+| Runtime successor    | bug-report/USER_CALL merge `a1ddfdee5baf89c1d6e50a18278a72028f7a5a74`; gates green             |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                          |
 | Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending            |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                  |
@@ -14,6 +14,28 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                             |
 | Offline/USB key      | исключён из beta critical path                                                            |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                        |
+
+## Обновление 29.08.2026 — bug-report rollout watchdog
+
+Bug-report successor был слит в `main` как PR #72, exact merge SHA
+`a1ddfdee5baf89c1d6e50a18278a72028f7a5a74`; Fast CI `33197502572` и Full
+Release Admission `33197502617` зелёные. Exact runtime/control artifact был
+гидратирован и запущен на inactive green slot в bridge-режиме
+`CURRENT_187 -> CURRENT_188`, `GUEST_BUG_REPORTING_MODE=OFF`; loopback
+release/schema/Web identity и authenticated reads прошли.
+
+Два public cutover корректно откатились до database effect: после каждого
+успешного authenticated smoke production ingress кратко возвращал `400` на
+следующий `/version`. Та же последовательность воспроизводится на текущем blue
+release, тогда как loopback остаётся стабильным; значит это дефект порядка
+release-controller probes, а не bug-report runtime. Production продолжает
+обслуживаться blue SHA `04f967f3f32c4ccb612f0458823de65f62ad59ff`, схема остаётся
+`CURRENT_187`, green остановлен. Successor-controller теперь требует три
+последовательных public readiness samples, после них один authenticated smoke и
+принимает switch только если оба gate прошли внутри общего deadline. Его bounded
+probe children запускаются без inherited deployment-lock descriptor, поэтому
+истёкший probe не блокирует следующую безопасную операцию. До нового same-SHA
+admission и повторного cutover bug-report LIVE не включён.
 
 ## Обновление 28.08.2026
 

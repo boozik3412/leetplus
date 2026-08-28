@@ -2,10 +2,10 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **28.08.2026**
+Актуально на: **29.08.2026**
 Runtime implementation baseline:
-`8b1d5972aec3c61b62789002ddacf1653a8b5bbc` (PR #67; включает PR #66 и
-последующую фиксацию актуального контекста)
+`a1ddfdee5baf89c1d6e50a18278a72028f7a5a74` (PR #72; включает PR #67,
+bug-report support candidate и USER_CALL production handoff)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -16,8 +16,8 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | current-context successor слит PR [#67](https://github.com/boozik3412/leetplus/pull/67), merge SHA `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`                                      |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33149292335) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33149292273) — `SUCCESS` |
+| Runtime implementation   | bug-report/USER_CALL successor слит PR [#72](https://github.com/boozik3412/leetplus/pull/72), merge SHA `a1ddfdee5baf89c1d6e50a18278a72028f7a5a74`                                      |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33197502572) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33197502617) — `SUCCESS` |
 | Production API topology  | последний зафиксированный runtime остаётся `COMBINED`; dedicated `CORPORATE`/`GUEST` не установлены                                                                                |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
 | Corporate landing        | role-aware successor слит и admitted; отдельный production deploy/real-account canary всё ещё должен подтверждаться фактическим runtime                                            |
@@ -194,6 +194,7 @@ cutover. Он не является целевой долгосрочной из
 | PR #66 — process/module/runtime isolation             | Public guest, B2B game administration и workers требуют разных module graphs, secret sets, pools и resource identities.                                                    |
 | PR #67 — current-context fixation                     | Source/admission и фактический production state фиксируются раздельно; green admission не является автоматическим deploy.                                                  |
 | USER_CALL production handoff                          | Пользовательский Callcheck допускается только через exact API activation profile; ручной old-SHA sidecar должен быть выведен до schema migration.                         |
+| Blue/green post-auth watchdog                         | Stateful authenticated smoke выполняется после трёх последовательных public readiness samples; bounded probe children не наследуют cutover lock, поэтому ни ingress cooldown, ни переживший deadline descendant не обнуляют/блокируют доказанную runtime-стабильность. |
 
 ## Проверка перед изменением пересекающей области
 

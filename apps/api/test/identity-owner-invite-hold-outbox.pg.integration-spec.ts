@@ -139,8 +139,8 @@ describePostgres(
           AND rolled_back_at IS NULL
       `);
       expect(migrationState).toEqual({
-        migration_count: 187,
-        latest_migration: '20260820010000_guest_portal_telegram_update_ledger',
+        migration_count: 188,
+        latest_migration: '20260828190000_guest_support_bug_reports',
       });
 
       encryptionKey = randomBytes(32).toString('base64url');

@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  assortmentWorkspaceHref,
   getAuthenticatedDestination,
   getDefaultLandingPath,
+  marketingWorkspaceHref,
   platformAdministrationHref,
   shouldShowTenantOnboardingNotice,
+  staffStandardsWorkspaceHref,
   staffShiftWorkspaceHref,
 } from "./landing.ts";
 
@@ -76,6 +80,80 @@ test("routes store-scoped shift roles to their shift workspace", () => {
       staffShiftWorkspaceHref,
     );
   }
+});
+
+test("routes specialist tenant roles to their supported workspaces", () => {
+  const expectedLandings = new Map<
+    NonNullable<LandingUser>["role"],
+    string
+  >([
+    ["OWNER", "/dashboard"],
+    ["ADMIN", "/dashboard"],
+    ["MANAGER", "/dashboard"],
+    ["CLUB_MANAGER", "/dashboard"],
+    ["BUYER", assortmentWorkspaceHref],
+    ["MARKETER", marketingWorkspaceHref],
+    ["STANDARDS_MANAGER", staffStandardsWorkspaceHref],
+    ["SENIOR_ADMINISTRATOR", staffShiftWorkspaceHref],
+    ["CLUB_ADMINISTRATOR", staffShiftWorkspaceHref],
+    ["TRAINEE", staffShiftWorkspaceHref],
+  ]);
+
+  for (const [role, expectedLanding] of expectedLandings) {
+    assert.equal(
+      getDefaultLandingPath(user({ role })),
+      expectedLanding,
+      role,
+    );
+  }
+});
+
+test("ignores a stale dashboard return path for specialist roles", () => {
+  for (const role of [
+    "BUYER",
+    "MARKETER",
+    "STANDARDS_MANAGER",
+    "SENIOR_ADMINISTRATOR",
+    "CLUB_ADMINISTRATOR",
+    "TRAINEE",
+  ] as const) {
+    assert.equal(
+      getAuthenticatedDestination(user({ role }), "/dashboard?period=full-day"),
+      getDefaultLandingPath(user({ role })),
+      role,
+    );
+  }
+});
+
+test("preserves a specialist deep link outside the incompatible dashboard", () => {
+  assert.equal(
+    getAuthenticatedDestination(
+      user({ role: "STANDARDS_MANAGER" }),
+      "/staff/training-courses",
+    ),
+    "/staff/training-courses",
+  );
+});
+
+test("redirects an incompatible direct dashboard visit before dashboard data loads", () => {
+  const dashboardSource = readFileSync(
+    new URL("../app/(app)/dashboard/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const landingGuardIndex = dashboardSource.indexOf(
+    "const landingPath = getDefaultLandingPath(user)",
+  );
+  const dashboardFetchIndex = dashboardSource.indexOf(
+    "const [summary, stores] = await Promise.all",
+  );
+
+  assert.notEqual(landingGuardIndex, -1);
+  assert.notEqual(dashboardFetchIndex, -1);
+  assert.ok(landingGuardIndex < dashboardFetchIndex);
+  assert.match(
+    dashboardSource.slice(landingGuardIndex, dashboardFetchIndex),
+    /if \(landingPath !== dashboardWorkspaceHref\) \{\s*redirect\(landingPath\);\s*\}/u,
+  );
 });
 
 test("preserves a shift-workspace return path for STORES users", () => {

@@ -7,9 +7,9 @@ import { RevenueSnapshotGate } from "@/components/revenue-snapshot-gate";
 import { TenantOnboardingNotice } from "@/components/tenant-onboarding-notice";
 import { requireTenantWorkspaceUser } from "@/lib/auth";
 import {
-  isShiftWorkspaceRole,
+  dashboardWorkspaceHref,
+  getDefaultLandingPath,
   shouldShowTenantOnboardingNotice,
-  staffShiftWorkspaceHref,
 } from "@/lib/landing";
 import {
   getGuestCrmTaskReport,
@@ -474,9 +474,10 @@ export default async function DashboardPage({
   }
 
   const user = await requireTenantWorkspaceUser();
+  const landingPath = getDefaultLandingPath(user);
 
-  if (isShiftWorkspaceRole(user.role)) {
-    redirect(staffShiftWorkspaceHref);
+  if (landingPath !== dashboardWorkspaceHref) {
+    redirect(landingPath);
   }
 
   const filters = {

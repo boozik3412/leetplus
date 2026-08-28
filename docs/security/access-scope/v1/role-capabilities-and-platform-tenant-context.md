@@ -72,6 +72,15 @@ override, его разрешения объединяются с обязате
 
 ## Пользовательские маршруты
 
+- Домашний маршрут выбирается по рабочему контуру роли: `OWNER`, `ADMIN`,
+  `MANAGER` и `CLUB_MANAGER` открывают `/dashboard`; `BUYER` —
+  `/assortment/dashboard`; `MARKETER` — `/marketing`; `STANDARDS_MANAGER` —
+  `/staff`; сменные роли — `/staff/shift-workspace`. Platform admin без
+  подписанного tenant-контекста всегда открывает `/administration`.
+- Сохранённый `returnTo=/dashboard` не отменяет специализированный домашний
+  маршрут. Прямой вход на `/dashboard` также перенаправляется до загрузки
+  dashboard API, поэтому роль не получает системный RSC-экран из-за
+  недоступной зависимости страницы.
 - `/communications`, `/staff/team-chat` и `/staff/notifications` доступны при
   `view_communications`; роль больше не перенаправляет пользователя только в
   чат или только в уведомления.

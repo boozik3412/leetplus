@@ -86,6 +86,12 @@ for live_value in \
   'GUEST_PORTAL_USER_CALL_PROVIDER_TIMEOUT_MS=8000'; do
   grep -F -x "$live_value" "$user_call_live_overlay" > /dev/null
 done
+grep -F -x '      GUEST_PORTAL_USER_CALL_ENABLED|GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL)' \
+  "$slot_preflight" > /dev/null
+grep -F "reviewed public guest USER_CALL activation profile is absent or unsafe" \
+  "$slot_preflight" > /dev/null
+grep -F "Web runtime inherited the public guest USER_CALL provider profile" \
+  "$slot_preflight" > /dev/null
 
 assert_inventory_producer_failure_is_fatal() {
   local authority_path="$1"

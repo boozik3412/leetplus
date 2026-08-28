@@ -261,6 +261,13 @@ while IFS='=' read -r safe_key safe_expected; do
   if [[ "$safe_key" == '# BEGIN CANARY_SAFE_REQUIRED_SETTINGS' || "$safe_key" == '# END CANARY_SAFE_REQUIRED_SETTINGS' ]]; then
     continue
   fi
+  if [[ "$api_runtime" == true ]]; then
+    case "$safe_key" in
+      GUEST_PORTAL_USER_CALL_ENABLED|GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL)
+        continue
+        ;;
+    esac
+  fi
   [[ -v "$safe_key" ]] || die "shadow safety setting is absent or unsafe: ${safe_key}"
   safe_actual="${!safe_key}"
   [[ "$safe_actual" == "$safe_expected" ]] || die "shadow safety setting is absent or unsafe: ${safe_key}"
@@ -282,6 +289,7 @@ GUEST_GAME_MAX_DELIVERY_ENDPOINT=http://127.0.0.1:1
 GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT=http://127.0.0.1:1
 GUEST_PORTAL_OTP_SMS_ENDPOINT=http://127.0.0.1:1
 GUEST_PORTAL_OTP_SMS_RU_BASE_URL=http://127.0.0.1:1
+GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL=http://127.0.0.1:1
 GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=false
 GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false
 GUEST_GAME_RETENTION_SCHEDULER_ENABLED=false
@@ -319,6 +327,7 @@ GUEST_GAME_BOT_CONSUMER_ENABLED=false
 GUEST_GAME_TG_EDGE_ADAPTER_ENABLED=false
 GUEST_GAME_TG_EDGE_POLLER_ENABLED=false
 GUEST_GAME_TG_EDGE_POLLING_DELETE_WEBHOOK_ON_START=false
+GUEST_PORTAL_USER_CALL_ENABLED=false
 GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED=false
 GUEST_PORTAL_DEV_OTP_ENABLED=false
 GUEST_PORTAL_OTP_REAL_SEND_ENABLED=false

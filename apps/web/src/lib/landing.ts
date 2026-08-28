@@ -2,7 +2,24 @@ import type { AuthUser } from "./auth";
 
 export const staffShiftWorkspaceHref = "/staff/shift-workspace";
 export const staffTasksWorkspaceHref = "/staff/tasks?view=my&status=all";
+export const staffStandardsWorkspaceHref = "/staff";
+export const assortmentWorkspaceHref = "/assortment/dashboard";
+export const marketingWorkspaceHref = "/marketing";
+export const dashboardWorkspaceHref = "/dashboard";
 export const platformAdministrationHref = "/administration";
+
+const tenantRoleLandingPaths = {
+  OWNER: dashboardWorkspaceHref,
+  ADMIN: dashboardWorkspaceHref,
+  MANAGER: dashboardWorkspaceHref,
+  CLUB_MANAGER: dashboardWorkspaceHref,
+  BUYER: assortmentWorkspaceHref,
+  MARKETER: marketingWorkspaceHref,
+  STANDARDS_MANAGER: staffStandardsWorkspaceHref,
+  SENIOR_ADMINISTRATOR: staffShiftWorkspaceHref,
+  CLUB_ADMINISTRATOR: staffShiftWorkspaceHref,
+  TRAINEE: staffShiftWorkspaceHref,
+} satisfies Record<AuthUser["role"], string>;
 
 export function shouldShowTenantOnboardingNotice(
   user: Pick<
@@ -41,7 +58,9 @@ export function getDefaultLandingPath(
     return staffShiftWorkspaceHref;
   }
 
-  return "/dashboard";
+  return user
+    ? tenantRoleLandingPaths[user.role]
+    : dashboardWorkspaceHref;
 }
 
 export function getAuthenticatedDestination(
@@ -55,5 +74,21 @@ export function getAuthenticatedDestination(
     return platformAdministrationHref;
   }
 
-  return returnTo ?? getDefaultLandingPath(user);
+  const defaultLandingPath = getDefaultLandingPath(user);
+
+  if (
+    returnTo &&
+    defaultLandingPath !== dashboardWorkspaceHref &&
+    isDashboardPath(returnTo)
+  ) {
+    return defaultLandingPath;
+  }
+
+  return returnTo ?? defaultLandingPath;
+}
+
+function isDashboardPath(value: string) {
+  const path = value.split(/[?#]/u, 1)[0] ?? value;
+
+  return path === dashboardWorkspaceHref || path.startsWith("/dashboard/");
 }

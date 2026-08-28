@@ -2,15 +2,18 @@
 
 | Поле                | Значение                                   |
 | ------------------- | ------------------------------------------ |
-| Статус              | `DEPLOYED`                                 |
-| Версия              | 1.0.0                                      |
-| Дата                | 24.08.2026                                 |
+| Статус              | `DEPLOYED BASELINE / ADMITTED LANDING CANDIDATE` |
+| Версия              | 1.1.0                                      |
+| Дата                | 28.08.2026                                 |
 | Владелец            | LeetPlus engineering / operations          |
 | Production baseline | `8d49f2d7fa3b35c2f5bd87a4e4b7fc522f4324a4` |
+| Landing candidate   | `359e5aeb1a7e0b53197747ef781adaf166baf6d3`; production deploy pending |
 
-Документ фиксирует фактическую модель доступа после открытия коммуникаций для
-всех системных ролей, восстановления рабочих разделов администраторов и
-введения явного tenant-контекста для администратора платформы.
+Документ фиксирует фактическую deployed-модель доступа после открытия
+коммуникаций для всех системных ролей, восстановления рабочих разделов
+администраторов и введения явного tenant-контекста для администратора
+платформы. Карта домашних маршрутов ниже уже merged и admitted, но станет
+production baseline только после отдельного deploy и canary.
 
 ## Источники полномочий
 
@@ -81,6 +84,10 @@ override, его разрешения объединяются с обязате
   маршрут. Прямой вход на `/dashboard` также перенаправляется до загрузки
   dashboard API, поэтому роль не получает системный RSC-экран из-за
   недоступной зависимости страницы.
+- Домашний маршрут является product/navigation policy и может быть строже
+  отдельной capability. Он не расширяет права: после redirect каждый API
+  запрос независимо проходит module entitlement, fresh scope и resource
+  policy.
 - `/communications`, `/staff/team-chat` и `/staff/notifications` доступны при
   `view_communications`; роль больше не перенаправляет пользователя только в
   чат или только в уведомления.
@@ -147,11 +154,21 @@ SalesFact или активный Langame source. Рабочие сети сор
 - Архивация и слияние дублирующих tenant требуют отдельного подтверждённого
   data-change с backup, dry-run и rollback.
 
-## Проверки baseline
+## Проверки и delivery state
 
-- focused API regression: `794` tests;
-- API и Web lint/typecheck/build: `PASS`;
-- Fast CI run `32692322613`: `2/2 SUCCESS`;
-- production browser smoke: platform-admin tenant switch, dashboard,
-  communications и employee navigation — `PASS`;
-- миграции БД и перенос пользователей в этом изменении отсутствуют.
+- deployed baseline `8d49f2d7...`:
+  - focused API regression: `794` tests;
+  - API и Web lint/typecheck/build: `PASS`;
+  - Fast CI run `32692322613`: `2/2 SUCCESS`;
+  - production browser smoke: platform-admin tenant switch, dashboard,
+    communications и employee navigation — `PASS`;
+  - миграции БД и перенос пользователей в этом изменении отсутствуют.
+- role-aware landing candidate `359e5aeb...`:
+  - landing matrix `14/14`, pilot BFF `22/22`, release build boundary `12/12`;
+  - Web lint/typecheck/build и локальный browser scenario
+    `STANDARDS_MANAGER → /staff` — `PASS`;
+  - Fast CI `33136172976` и Full Release Admission `33136173010` — `SUCCESS`;
+  - production deploy и real-account canary — `PENDING`.
+
+Полное evidence и production-canary checklist:
+[role-aware corporate landing 28.08.2026](../../../open-beta/role-aware-corporate-landing-evidence-2026-08-28.md).

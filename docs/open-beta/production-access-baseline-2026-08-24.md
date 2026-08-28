@@ -43,6 +43,21 @@
 Полная capability-модель описана в
 [матрице ролей и tenant-контекста](../security/access-scope/v1/role-capabilities-and-platform-tenant-context.md).
 
+## Admitted successor 28.08.2026 — ещё не production baseline
+
+После этого deployed baseline обнаружен отдельный navigation defect:
+`STANDARDS_MANAGER` проходил авторизацию, но общий `/dashboard` fallback
+открывал неподдерживаемую для его рабочего контура композицию страницы.
+Successor направляет роль на `/staff`, задаёт специализированные домашние
+маршруты для buyer/marketer/сменных ролей и защищает stale
+`returnTo=/dashboard` вместе с прямым `/dashboard`.
+
+Exact implementation SHA `359e5aeb...` merged и прошёл Fast CI + Full Release
+Admission, но на дату документационного обновления не deployed. Поэтому
+production cohort, счётчики tenant и evidence исходного baseline ниже не
+переписаны задним числом. После отдельного deploy нужен real-account canary по
+[операционному checklist](./role-aware-corporate-landing-evidence-2026-08-28.md#production-canary-после-отдельного-deploy-approval).
+
 ## Текущая карта production tenant
 
 В production существуют три tenant с одинаковым отображаемым названием.

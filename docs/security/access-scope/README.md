@@ -3,8 +3,8 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.29.0                                                                                              |
-| Дата                           | 24.08.2026                                                                                          |
+| Версия контракта               | 1.30.0                                                                                              |
+| Дата                           | 28.08.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
 | Исходный baseline              | `eb7ad9ef7d4783c47a7ddb5efbc271e5eb8a2fe2`                                                          |
@@ -21,6 +21,7 @@
 | Authority operations           | Detached candidate; local 40/40; production public root `{}` / FAIL-CLOSED                          |
 | Schema target                  | `CURRENT_187`; count `187`; head `20260820010000_guest_portal_telegram_update_ledger`; deployed      |
 | Deployed access baseline       | `8d49f2d7...`; role minimums, employee routes and signed platform-admin tenant context verified      |
+| Role-aware landing candidate   | `359e5aeb...`; merged/admitted, production deploy and real-account canary pending                    |
 | Prior merge-ref baseline       | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA                      |
 | Previous accepted exact-head   | `d525b736...` / CI `30447467729` (`run #28`); `3/3 PASS`                                            |
 | Last accepted checkpoint       | exact-head `be8c94c4...` / CI `30449026506` (`run #29`); `3/3 PASS`                                 |
@@ -471,6 +472,14 @@ Worker boundary не принимает `actorUserId`; interactive same-tenant a
 
 ## Changelog
 
+- `1.30.0`, 28.08.2026 — корпоративный landing переведён с общего
+  `/dashboard` fallback на карту эффективных ролей. `STANDARDS_MANAGER`
+  открывает `/staff`, buyer/marketer и сменные роли получают собственные
+  рабочие контуры, а platform admin без tenant-контекста остаётся в
+  `/administration`. Stale `returnTo=/dashboard` и прямой `/dashboard`
+  защищены до dashboard API fetch. Exact implementation SHA `359e5aeb...`
+  прошёл Fast CI `33136172976` и Full Release Admission `33136173010`;
+  production deploy и canary ещё не выполнялись.
 - `1.29.0`, 24.08.2026 — добавлен staff attachment reconciliation controller:
   protected digest-bound plan, detached approval, explicit apply/check,
   repeat-safe replay и exact rollback. Unit `9/9`, current-inventory capacity

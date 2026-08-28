@@ -3,14 +3,15 @@
 | Поле                            | Значение                                                                  |
 | ------------------------------- | ------------------------------------------------------------------------- |
 | Profile key                     | `OPEN_BETA_FULL_OPERATIONS_V1`                                            |
-| Версия                          | 1.19                                                                      |
-| Дата                            | 24.08.2026                                                                |
+| Версия                          | 1.20                                                                      |
+| Дата                            | 28.08.2026                                                                |
 | Статус                          | `NO-GO`; access baseline deployed, Gate 1MT/Gate 2 и release admission pending |
 | Выдача                          | Invite-only, отдельный Tenant на независимую сеть                         |
 | Область                         | Собственная сеть или явно разрешённые клубы                               |
 | Назначение                      | Первый shared external tenant и последующая когорта                       |
 | Schema target                   | `CURRENT_187`; 187 migrations; deployed schema is not launch authorization |
 | Access baseline                 | deployed `8d49f2d7...`; mandatory role minimums and signed platform-admin tenant context |
+| Role-aware landing              | `359e5aeb...` admitted; production deploy/canary pending                  |
 | Release authority               | exact SHA + green Fast CI + Full Release Admission + immutable handoff artifact only |
 | Previous accepted baseline      | PR-head-associated merge-ref `bbef153a...` / `30443837684`; not exact-SHA |
 | Previous accepted exact-head    | `d525b736...` / CI `30447467729`; `3/3 PASS`                              |
@@ -22,7 +23,7 @@
 | Accepted prerequisite           | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS                 |
 | Historical evidence             | `044ceca2` / `2341b999`, не evidence текущего candidate                   |
 
-## Актуализация на 24.08.2026
+## Актуализация на 28.08.2026
 
 Канонический Prisma manifest — `CURRENT_187`: count `187`, latest
 `20260820010000_guest_portal_telegram_update_ledger`, unfinished `0`.
@@ -35,6 +36,12 @@
 - platform admin не становится tenant-пользователем: без контекста он работает
   в `/administration`, а после явного подписанного выбора — только в одном
   tenant как `OWNER + NETWORK`;
+- post-login destination выводится из эффективной роли: owner/управляющие
+  роли → `/dashboard`, `BUYER` → `/assortment/dashboard`, `MARKETER` →
+  `/marketing`, `STANDARDS_MANAGER` → `/staff`, сменные роли →
+  `/staff/shift-workspace`;
+- stale `returnTo=/dashboard` и прямой dashboard не заменяют
+  специализированный рабочий контур;
 - сохранённая сессия и прямой URL не обходят fresh scope.
 
 Фактическая production-матрица и известные data-quality отклонения описаны в
@@ -69,7 +76,8 @@ non-consuming signed admission provenance. Engineering-accepted `CURRENT_174`
 (`run #57`) — `3/3 PASS`; статус
 `ENGINEERING_ACCEPTED / NOT_DEPLOYED / EXTERNAL_PILOT_NO-GO`. Production roots,
 production-like rehearsal, delivery worker/SMTP, admin route,
-job/Telegram/integration adoption и полная role matrix ещё не приняты.
+job/Telegram/integration adoption и полная end-to-end role/capability matrix
+ещё не приняты. Принятый landing candidate не повышает эти Gate 1MT строки.
 Initial shared-beta profile содержит пять product modules и supporting
 `INTEGRATIONS`; у всех шести `read/write=ON`, `outbound=OFF`. Generic profile
 mutation не включает outbound.

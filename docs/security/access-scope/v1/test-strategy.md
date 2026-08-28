@@ -3,10 +3,10 @@
 | Поле | Значение |
 |---|---|
 | Статус | Active |
-| Версия | 1.0.0 |
-| Дата | 27.07.2026 |
+| Версия | 1.1.0 |
+| Дата | 28.08.2026 |
 | Владелец | LeetPlus engineering / QA |
-| Related | `BETA-SEC-003`, `BETA-CUT-003`, `BETA-CUT-008` |
+| Related | `BETA-SEC-003`, `BETA-IAM-001`, `BETA-CUT-003`, `BETA-CUT-008` |
 
 ## Fixture topology
 
@@ -85,6 +85,12 @@ mutation, export/file и jobs/SSE, если surface существует.
 - UI не показывает запрещённые clubs/actions;
 - payload users/invites всегда содержит explicit mode;
 - deep links и stale client state не обходят серверную проверку;
+- post-login landing проверяется для каждой системной роли и platform-admin
+  control plane;
+- stale `returnTo=/dashboard` не отменяет специализированный landing, а
+  разрешённый deep link внутри рабочего контура сохраняется;
+- прямой `/dashboard` для специализированной роли перенаправляется до вызова
+  dashboard API и не создаёт RSC error или redirect loop;
 - network/restricted totals в UI совпадают с API.
 
 ## Release gates
@@ -115,4 +121,6 @@ Shadow metrics не содержат PII и группируются по module
 
 ## Changelog
 
+- `1.1.0`, 28.08.2026 — добавлена обязательная Web/browser матрица домашних
+  маршрутов, stale `returnTo` и direct-dashboard guard.
 - `1.0.0` — исходная test strategy.

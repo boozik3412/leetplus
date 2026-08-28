@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.200                                        |
-| Дата             | 24.08.2026                                   |
+| Версия           | 1.201                                        |
+| Дата             | 28.08.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -37,6 +37,13 @@ checkout не является допустимым источником product
 [отчёте 24.08.2026](./production-access-baseline-2026-08-24.md). Рабочий
 tenant сети `1337` сохранён, пользовательский cohort не переносился, а
 одноимённые пустые tenant остаются отдельным подтверждаемым cleanup.
+
+Role-aware successor корпоративного входа слит и admitted на exact SHA
+`359e5aeb...`: менеджер по стандартам получает `/staff`, остальные системные
+роли — свой поддерживаемый рабочий контур, а stale dashboard `returnTo` не
+обходит выбор роли. Production deploy и real-account canary ещё не выполнены;
+статус и исполнимый checklist находятся в
+[evidence 28.08.2026](./role-aware-corporate-landing-evidence-2026-08-28.md).
 
 Основной путь первого внешнего клуба — `SHARED_MULTI_TENANT_BETA`: новый
 `Tenant B/Store B1` в общем web/API/workers/PostgreSQL/Telegram data plane.
@@ -99,7 +106,7 @@ Fast CI принят для exact SHA `965612c5…`: GitHub Actions
 [Founder-operator beta GO](./founder-operator-beta-go.md).
 
 Текущий фактический статус после реализации v2:
-[open beta status 24.08.2026](./open-beta-current-status-2026-08-17.md).
+[open beta status 28.08.2026](./open-beta-current-status-2026-08-17.md).
 
 Dedicated database boundary:
 [founder activation runtime v1](./founder-operator-beta-activation-runtime.md).

@@ -532,7 +532,13 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [ ] `243` absolute-origin signals классифицированы как external либо
       исправлены для exact internal origin; повторный inventory имеет zero
       unexplained drift.
-- [ ] OWNER/network manager/club manager/senior/trainee journeys зелёные.
+- [x] Role-aware post-auth landing candidate проверяет все системные роли,
+      stale `returnTo=/dashboard` и прямой dashboard guard до API fetch.
+      Exact implementation `359e5aeb...` прошёл локальный browser QA, Fast CI
+      `33136172976` и Full Release Admission `33136173010`; production canary
+      остаётся открытым.
+- [ ] OWNER/network manager/club manager/standards manager/senior/trainee
+      production journeys зелёные.
 
 ### E4. `COMMUNICATIONS`
 
@@ -552,6 +558,8 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
       tenant workspace is exact `OWNER + NETWORK`, not global data access.
 - [x] Administrative mandatory capability minimums survive custom role and
       tenant-level override; fresh scope remains fail-closed.
+- [x] Landing destination derives from effective role and cannot be replaced
+      by stale dashboard `returnTo`; redirect не расширяет capability/scope.
 - [ ] Users/invites/roles/capabilities/scope/audit проходят C/D.
 - [ ] Block/revoke/session revoke действуют немедленно.
 - [ ] Last-owner и owner-transfer invariants зелёные.

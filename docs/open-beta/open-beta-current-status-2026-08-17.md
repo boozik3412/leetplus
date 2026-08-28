@@ -1,4 +1,4 @@
-# LeetPlus open beta — текущее состояние на 24.08.2026
+# LeetPlus open beta — текущее состояние на 28.08.2026
 
 | Поле                 | Состояние                                                                             |
 | -------------------- | ------------------------------------------------------------------------------------- |
@@ -7,11 +7,32 @@
 | Prisma schema        | `CURRENT_187`: 187 applied, head `20260820010000_guest_portal_telegram_update_ledger` |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA          |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                      |
+| Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending         |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`              |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены           |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                         |
 | Offline/USB key      | исключён из beta critical path                                                        |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                    |
+
+## Обновление 28.08.2026
+
+Закрыт кодовый дефект общей post-login маршрутизации: tenant-роли больше не
+используют `/dashboard` как универсальный fallback. Каноническая карта:
+управляющие роли → `/dashboard`, `BUYER` → `/assortment/dashboard`,
+`MARKETER` → `/marketing`, `STANDARDS_MANAGER` → `/staff`, сменные роли →
+`/staff/shift-workspace`, platform admin без tenant-контекста →
+`/administration`. Stale `returnTo=/dashboard` и прямой `/dashboard`
+проверяются сервером до загрузки dashboard API.
+
+Implementation SHA `359e5aeb1a7e0b53197747ef781adaf166baf6d3` слит через
+[PR #63](https://github.com/boozik3412/leetplus/pull/63). Fast CI
+[`33136172976`](https://github.com/boozik3412/leetplus/actions/runs/33136172976)
+и Full Release Admission
+[`33136173010`](https://github.com/boozik3412/leetplus/actions/runs/33136173010)
+зелёные на одном exact SHA. Production для этого изменения ещё не переключён;
+до этого момента реальный пользовательский инцидент нельзя считать закрытым
+production canary. Полное evidence:
+[role-aware corporate landing](./role-aware-corporate-landing-evidence-2026-08-28.md).
 
 ## Обновление 24.08.2026
 

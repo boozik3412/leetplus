@@ -8,6 +8,7 @@ import {
   FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONFIRMATION,
   applyFounderPilotCurrent188ProductionUpgradePlan,
   buildFounderPilotCurrent188ProductionUpgradePlan,
+  createFounderPilotCurrent188ProductionBridgeRuntimeAdapter,
   createFounderPilotCurrent188ProductionUpgradePgAdapter,
   inspectFounderPilotCurrent188ProductionUpgradeInventory,
   normalizeFounderPilotCurrent188ProductionUpgradeManifest,
@@ -62,7 +63,10 @@ inventory and plan are database read-only. apply accepts only exact 187 applied
 plus the four checksum-pinned historical rolled-back rows,
 the one checksum-pinned CURRENT_188 migration, a live short-lived signed plan,
 and a durable phase journal. Partial or unknown migration state blocks without
-changing systemd, slots, nginx, feature flags, or outbound configuration.`;
+changing systemd, slots, nginx, feature flags, or outbound configuration. plan,
+apply and check also hold the protected blue/green lock and require the exact
+accepted CURRENT_187 bridge cutover; apply verifies the same live bridge at
+CURRENT_188 before returning success.`;
 }
 
 function absolutePath(value) {
@@ -235,7 +239,7 @@ function assertProductionEnvironment(environment) {
 
 function blocked(error) {
   return {
-    contractVersion: "FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V1",
+    contractVersion: "FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V2",
     decision: "BLOCKED_MANUAL",
     reasonCode:
       typeof error?.reasonCode === "string"
@@ -263,6 +267,7 @@ export async function main(
     return 0;
   }
   let adapter = null;
+  let runtimeAdapter = null;
   let journal = null;
   try {
     const manifest = normalizeFounderPilotCurrent188ProductionUpgradeManifest(
@@ -301,11 +306,15 @@ export async function main(
       process.stdout.write(`${JSON.stringify(inventory, null, 2)}\n`);
       return 0;
     }
+    runtimeAdapter = createFounderPilotCurrent188ProductionBridgeRuntimeAdapter(
+      { releaseSha: manifest.release.releaseSha },
+    );
     if (args.mode === "plan") {
       const plan = await buildFounderPilotCurrent188ProductionUpgradePlan({
         adapter,
         laneRoot: args.laneRoot,
         manifest,
+        runtimeAdapter,
         sourcePrismaRoot: args.sourcePrismaRoot,
       });
       await writeExclusiveJson(args.outputPlanPath, plan);
@@ -315,20 +324,14 @@ export async function main(
       return 0;
     }
     if (args.mode === "check") {
-      await adapter.acquireLock();
-      try {
-        const result = await verifyFounderPilotCurrent188ProductionUpgradeFinal(
-          {
-            adapter,
-            laneRoot: args.laneRoot,
-            manifest,
-            sourcePrismaRoot: args.sourcePrismaRoot,
-          },
-        );
-        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-      } finally {
-        await adapter.releaseLock().catch(() => undefined);
-      }
+      const result = await verifyFounderPilotCurrent188ProductionUpgradeFinal({
+        adapter,
+        laneRoot: args.laneRoot,
+        manifest,
+        runtimeAdapter,
+        sourcePrismaRoot: args.sourcePrismaRoot,
+      });
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       return 0;
     }
     const [plan, approval] = await Promise.all([
@@ -355,6 +358,7 @@ export async function main(
       pinnedApprovalKeySpkiSha256: environment[APPROVAL_PIN_ENV],
       plan,
       productionConfirmation: environment[CONFIRMATION_ENV],
+      runtimeAdapter,
       sourcePrismaRoot: args.sourcePrismaRoot,
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -364,6 +368,7 @@ export async function main(
     return 1;
   } finally {
     await journal?.close().catch(() => undefined);
+    await runtimeAdapter?.close().catch(() => undefined);
     await adapter?.close().catch(() => undefined);
   }
 }

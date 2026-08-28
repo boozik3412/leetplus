@@ -31,9 +31,12 @@ tenant queue `/support/bug-reports*` и platform queue
 [`docs/support/guest-bug-reporting.md`](docs/support/guest-bug-reporting.md).
 Переход production `CURRENT_187 -> CURRENT_188` использует двухфазный cutover:
 exact bridge slot работает только в `COMBINED + reporting OFF`, затем отдельный
-подписанный controller проверяет и применяет одну additive migration, а LIVE
-функция запускается вторым slot с bridge `OFF`. Merge/CI сами по себе этот
-production rollout не выполняют.
+подписанный controller V2 под root-owned blue/green lock сверяет active slot,
+same-SHA release, accepted cutover receipt, protected env/unit digests и live
+readiness `187 -> target 188`, применяет одну additive migration и до возврата
+успеха требует от того же bridge readiness `188/188`. LIVE функция запускается
+вторым slot с bridge `OFF`. Merge/CI сами по себе этот production rollout не
+выполняют.
 
 ## Detailed gamification state (updated through 28.08.2026)
 

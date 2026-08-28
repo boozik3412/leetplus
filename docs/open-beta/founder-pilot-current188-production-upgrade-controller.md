@@ -16,7 +16,8 @@ Controller переводит только фактически наблюдае
 
 Это не универсальный migration runner. Любое расхождение source identity,
 истории, checksum, role topology, artifact digest, плана, подписи или времени
-действия плана завершает команду `BLOCKED_MANUAL` до effect.
+действия плана, active cutover или bridge runtime завершает команду
+`BLOCKED_MANUAL` до effect.
 
 ## Обязательные свойства
 
@@ -26,6 +27,19 @@ Controller переводит только фактически наблюдае
 - approval — detached Ed25519 signature короткоживущего exact plan digest;
 - публичный ключ связан manifest, а его SPKI SHA-256 независимо передаётся через
   protected environment;
+- `plan` разрешён только после первого accepted bridge-cutover. Controller под
+  root-owned blue/green lock проверяет latest receipt/index, `CONSUMED=false`,
+  отсутствие pending intent, active nginx slot, exact release symlink,
+  API/Web systemd units, protected environment file digests и loopback
+  `/version`, `/health/ready`, `/api/release-identity`;
+- source bridge обязан быть `COMBINED`,
+  `GUEST_BUG_REPORTING_MODE=OFF`,
+  `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_187` и публиковать exact
+  compatibility `CURRENT_187 -> CURRENT_188`. Полная attestation вместе с
+  database system identity входит в подписываемый plan;
+- `apply` повторно берёт cutover lock, сверяет attestation byte-for-byte и
+  удерживает lock до postcheck. Поэтому routing/cutover не может измениться
+  между последней проверкой и schema effect;
 - PostgreSQL advisory lock удерживается от повторной live-проверки до final
   postcheck;
 - каждая effect phase записывается в exclusive append-only fsynced JSONL journal;
@@ -33,6 +47,8 @@ Controller переводит только фактически наблюдае
   находится в точном source state; partial state всегда блокируется;
 - lost success восстанавливается только после полного exact `CURRENT_188`
   postcheck;
+- final postcheck требует тот же accepted release/slot/receipt/environment и
+  live readiness `CURRENT_188/188`; только database success недостаточен;
 - postcheck проверяет migration history, runtime-role fingerprint, identity-mail
   worker digest, четыре support tables, два enum, весь список indexes/
   constraints и отсутствие PUBLIC table/function privileges.
@@ -48,7 +64,9 @@ node packages/database/scripts/founder-pilot-current188-production-upgrade.cli.m
 Последовательность режимов:
 
 1. `inventory` — read-only проверка source state;
-2. `plan` — повторная read-only проверка и exclusive запись short-lived plan;
+2. `plan` — повторная read-only проверка database и уже активного bridge,
+   удержание cutover lock на время snapshot и exclusive запись short-lived
+   plan;
 3. `approve` — подпись plan на доверенной operator-машине без подключения к БД;
 4. `apply` — exact digest confirmation, independent key pin, lock, bounded
    deploy и durable phase journal;
@@ -59,7 +77,7 @@ node packages/database/scripts/founder-pilot-current188-production-upgrade.cli.m
 
 ```text
 FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_DATABASE_URL=<loopback migration role URL with one exact SET ROLE>
-FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONFIRM=I_ACCEPT_EXACT_PRODUCTION_HISTORY_187_TO_188_V1
+FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONFIRM=I_ACCEPT_EXACT_PRODUCTION_HISTORY_187_TO_188_V2
 FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_APPROVAL_KEY_SPKI_SHA256=<independent pin>
 ```
 
@@ -71,8 +89,9 @@ root-controlled каталоге вне checkout и release tree. URL, private k
 
 Controller запускается только после backup + restored-copy lifecycle и первого
 cutover на exact bridge slot с `GUEST_BUG_REPORTING_MODE=OFF`. После успешного
-apply active bridge обязан пройти readiness уже на `188/188`; если этого нет,
-второй slot и LIVE не запускаются.
+apply active bridge обязан пройти readiness уже на `188/188`; это проверяет сам
+controller до successful result. Если postcheck не пройден, второй slot и LIVE
+не запускаются.
 
 После schema upgrade старый `CURRENT_187` runtime больше не является допустимым
 rollback target. HTTP rollback выполняется на первый bridge slot того же SHA,
@@ -88,3 +107,5 @@ pnpm --filter database test:integration:founder-pilot-current188-production-upgr
 
 Вторая команда исполняется Full Release Admission на PostgreSQL 16 и проверяет
 реальный `187 -> 188`, exact catalog, replay и cleanup изолированной БД/ролей.
+Её in-process bridge fixture проверяет cryptographic plan binding, но не является
+production attestation или способом обойти root-owned live checks CLI.

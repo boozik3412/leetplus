@@ -96,7 +96,10 @@ Production сейчас может находиться на `CURRENT_187`, то
 1. получить green Fast CI + Full Release Admission одного exact SHA и проверить
    SHA-bound runtime/control artifacts и final admission receipt;
 2. сделать backup, восстановить его в изолированную PostgreSQL 16 copy и пройти
-   exact `187 -> 188` controller, repeat/check и обычный restored-copy acceptance;
+   exact checksum-pinned database path `187 -> 188`, repeat/catalog check и
+   обычный restored-copy acceptance. Production `V2 plan/apply` здесь не
+   подменяется: его live bridge-attestation возможна только после реального
+   первого cutover;
 3. запустить inactive slot с release identity `CURRENT_188`, но с
    `GUEST_BUG_REPORTING_MODE=OFF` и
    `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_187`; readiness принимает
@@ -107,10 +110,16 @@ Production сейчас может находиться на `CURRENT_187`, то
 4. пройти loopback/public read-only canary и атомарно переключить трафик на этот
    bridge slot. Предыдущий `CURRENT_187` slot остаётся точным N-1;
 5. применить только подписанный checksum-pinned
-   `FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V1` controller. Он допускает
-   ровно `187 applied / 4 rolled back / 0 unfinished`, одну целевую миграцию и
-   после deploy проверяет таблицы, enum, constraints, indexes, owner/runtime
-   fingerprint и отсутствие PUBLIC grants;
+   `FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V2` controller. До любого
+   database effect он берёт тот же root-owned cutover lock, проверяет активный
+   nginx target, непросроченный accepted receipt/index с `CONSUMED=false`,
+   отсутствие pending intent, exact release/slot/systemd/environment identity,
+   `COMBINED + OFF + ALLOW_CURRENT_187` и live readiness `187 -> target 188`.
+   Эта attestation входит в подписанный plan вместе с production database
+   identity. Controller допускает ровно
+   `187 applied / 4 rolled back / 0 unfinished`, одну целевую миграцию и после
+   deploy под тем же lock проверяет readiness `188/188`, таблицы, enum,
+   constraints, indexes, owner/runtime fingerprint и отсутствие PUBLIC grants;
 6. убедиться, что active bridge после изменения БД готов уже как exact
    `CURRENT_188`. Запустить второй slot с `GUEST_BUG_REPORTING_MODE=LIVE` и
    `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`;

@@ -202,7 +202,9 @@ async function runPrismaDeploy(databaseUrl, laneRoot) {
 
 async function synchronizeAppliedChecksums(client, laneRoot) {
   const migrationsRoot = path.join(laneRoot, "migrations");
-  const migrationNames = (await readdir(migrationsRoot, { withFileTypes: true }))
+  const migrationNames = (
+    await readdir(migrationsRoot, { withFileTypes: true })
+  )
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
@@ -211,9 +213,7 @@ async function synchronizeAppliedChecksums(client, laneRoot) {
 
   for (const migrationName of migrationNames) {
     const checksum = sha256(
-      await readFile(
-        path.join(migrationsRoot, migrationName, "migration.sql"),
-      ),
+      await readFile(path.join(migrationsRoot, migrationName, "migration.sql")),
     );
     const update = await client.query(
       `
@@ -278,6 +278,57 @@ function manifest({
       objectOwnerRoleName: objectOwnerRole.name,
       objectOwnerRoleOid: objectOwnerRole.oid,
       port: 5432,
+    },
+  };
+}
+
+function bridgeAttestation(releaseSha, phase) {
+  const source = phase === "SOURCE_187";
+  return {
+    acceptedAt: "2026-08-28T11:58:00.000000000Z",
+    activeTarget: "/etc/nginx/leetplus/upstreams/green.conf",
+    activeTargetSha256: "1".repeat(64),
+    apiBaseUrl: "http://127.0.0.1:4200",
+    apiUnit: "leetplus-api@green.service",
+    apiUnitFileSha256: "2".repeat(64),
+    bridgeContract: "GUEST_SUPPORT_CURRENT187_ACTIVE_BRIDGE_CUTOVER_V1",
+    bugReportingMode: "OFF",
+    canarySafeEnvironmentSha256: "3".repeat(64),
+    compatibilityMode: source ? "GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE" : null,
+    compatibilityTargetMigration: source ? TARGET_HEAD : null,
+    compatibilityTargetMigrationCount: source ? 188 : null,
+    cutoverGeneration: 4,
+    cutoverReceiptName: `20260828T115800000000000Z-g4-${releaseSha}-green.receipt`,
+    cutoverReceiptSha256: "4".repeat(64),
+    databaseMigration: source ? SOURCE_HEAD : TARGET_HEAD,
+    databaseMigrationCount: source ? 187 : 188,
+    latestReceiptConsumed: false,
+    pendingIntentCount: 0,
+    phase,
+    releaseSha,
+    runtimeEnvironmentSha256: "5".repeat(64),
+    runtimeRole: "COMBINED",
+    schemaBridgeMode: "ALLOW_CURRENT_187",
+    slot: "green",
+    slotEnvironmentSha256: "6".repeat(64),
+    webBaseUrl: "http://127.0.0.1:3200",
+    webBuildId: releaseSha,
+    webUnit: "leetplus-web@green.service",
+    webUnitFileSha256: "7".repeat(64),
+  };
+}
+
+function bridgeRuntimeAdapter(releaseSha) {
+  let locks = 0;
+  return {
+    acquireLock: async () => {
+      locks += 1;
+    },
+    inspectSource: async () => bridgeAttestation(releaseSha, "SOURCE_187"),
+    inspectTarget: async () => bridgeAttestation(releaseSha, "TARGET_188"),
+    releaseLock: async () => {
+      locks -= 1;
+      assert.ok(locks >= 0);
     },
   };
 }
@@ -494,11 +545,15 @@ test(
         },
       );
       const now = new Date("2026-08-28T12:00:00.000Z");
+      const bridgeRuntime = bridgeRuntimeAdapter(
+        productionManifest.release.releaseSha,
+      );
       const plan = await buildFounderPilotCurrent188ProductionUpgradePlan({
         adapter,
         laneRoot: targetLaneRoot,
         manifest: productionManifest,
         now: () => now,
+        runtimeAdapter: bridgeRuntime,
         sourcePrismaRoot: SOURCE_PRISMA_ROOT,
       });
       const approval = signFounderPilotCurrent188ProductionUpgradePlan({
@@ -530,6 +585,7 @@ test(
         plan,
         productionConfirmation:
           FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONFIRMATION,
+        runtimeAdapter: bridgeRuntime,
         sourcePrismaRoot: SOURCE_PRISMA_ROOT,
       });
       assert.equal(applied.decision, "CURRENT188_UPGRADE_APPLIED");
@@ -542,6 +598,7 @@ test(
         adapter,
         laneRoot: targetLaneRoot,
         manifest: productionManifest,
+        runtimeAdapter: bridgeRuntime,
         sourcePrismaRoot: SOURCE_PRISMA_ROOT,
       });
       assert.equal(final.migrationCount, 188);
@@ -563,6 +620,7 @@ test(
         plan,
         productionConfirmation:
           FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONFIRMATION,
+        runtimeAdapter: bridgeRuntime,
         sourcePrismaRoot: SOURCE_PRISMA_ROOT,
       });
       assert.equal(replay.deploymentAttempt, 0);

@@ -62,8 +62,11 @@ canary и atomic cutover production считается `CURRENT_187`, а runtime
 
 Для текущего exact `CURRENT_187` подготовлен отдельный fail-closed переход:
 сначала candidate с выключенной функцией принимает только точный source head,
-затем подписанный controller применяет единственную checksum-pinned миграцию и
-проверяет полный support catalog, после чего второй slot запускается на exact
+затем подписанный controller V2 удерживает root-owned blue/green lock, связывает
+план с active slot, same-SHA release, accepted cutover receipt, protected
+env/unit digests и live readiness `187 -> target 188`, применяет единственную
+checksum-pinned миграцию и требует от того же bridge readiness `188/188` вместе
+с полным support catalog. После этого второй slot запускается на exact
 `CURRENT_188` с bridge `OFF`. Старый runtime не считается rollback после смены
 схемы; rollback target — уже проверенный bridge slot того же admitted SHA.
 

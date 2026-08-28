@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { GuestSupportTicketStatus, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { roleCapabilities, type AccessCapability } from '../auth/capabilities';
@@ -55,14 +56,17 @@ export class SupportTicketsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly configService: ConfigService,
   ) {}
 
   getTenantTickets(user: AuthenticatedUser, query: SupportTicketsQuery) {
+    this.assertSupportSchemaReady();
     const { tenantId } = this.tenantContextService.resolve(user);
     return this.getTickets({ kind: 'TENANT', tenantId }, query);
   }
 
   getPlatformTickets(query: SupportTicketsQuery) {
+    this.assertSupportSchemaReady();
     const tenantId = normalizeOptionalUuid(query.tenantId, 'tenantId');
     return this.getTickets({ kind: 'PLATFORM', tenantId }, query);
   }
@@ -72,6 +76,7 @@ export class SupportTicketsService {
     id: string,
     dto: SupportTicketUpdateDto,
   ) {
+    this.assertSupportSchemaReady();
     const { tenantId } = this.tenantContextService.resolve(user);
     return this.updateTicket(user, { kind: 'TENANT', tenantId }, id, dto);
   }
@@ -81,6 +86,7 @@ export class SupportTicketsService {
     id: string,
     dto: SupportTicketUpdateDto,
   ) {
+    this.assertSupportSchemaReady();
     return this.updateTicket(
       user,
       { kind: 'PLATFORM', tenantId: null },
@@ -94,6 +100,7 @@ export class SupportTicketsService {
     id: string,
     dto: SupportTicketCommentDto,
   ) {
+    this.assertSupportSchemaReady();
     const { tenantId } = this.tenantContextService.resolve(user);
     return this.addComment(user, { kind: 'TENANT', tenantId }, id, dto);
   }
@@ -103,6 +110,7 @@ export class SupportTicketsService {
     id: string,
     dto: SupportTicketCommentDto,
   ) {
+    this.assertSupportSchemaReady();
     return this.addComment(user, { kind: 'PLATFORM', tenantId: null }, id, dto);
   }
 
@@ -111,6 +119,7 @@ export class SupportTicketsService {
     ticketId: string,
     attachmentId: string,
   ) {
+    this.assertSupportSchemaReady();
     const { tenantId } = this.tenantContextService.resolve(user);
     return this.getAttachment(
       { kind: 'TENANT', tenantId },
@@ -120,11 +129,23 @@ export class SupportTicketsService {
   }
 
   getPlatformAttachment(ticketId: string, attachmentId: string) {
+    this.assertSupportSchemaReady();
     return this.getAttachment(
       { kind: 'PLATFORM', tenantId: null },
       ticketId,
       attachmentId,
     );
+  }
+
+  private assertSupportSchemaReady() {
+    if (
+      this.configService
+        .get<string>('GUEST_SUPPORT_SCHEMA_BRIDGE_MODE')
+        ?.trim()
+        .toUpperCase() === 'ALLOW_CURRENT_187'
+    ) {
+      throw new NotFoundException('Раздел поддержки временно недоступен.');
+    }
   }
 
   private async getTickets(scope: TicketScope, query: SupportTicketsQuery) {

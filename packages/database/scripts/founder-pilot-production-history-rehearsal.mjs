@@ -25,6 +25,9 @@ const SOURCE_ROLLED_BACK_MIGRATION_MANIFEST_DIGEST =
 const FINAL_MIGRATION_COUNT = 187;
 const FINAL_MIGRATION_HEAD =
   "20260820010000_guest_portal_telegram_update_ledger";
+const CURRENT_SOURCE_MIGRATION_COUNT = 188;
+const CURRENT_SOURCE_MIGRATION_HEAD =
+  "20260828190000_guest_support_bug_reports";
 const FINAL_PRETERMINAL_MANIFEST_DIGEST =
   "094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b";
 const FINAL_WORKER_FUNCTION_DIGEST =
@@ -284,8 +287,20 @@ export function materializeFounderPilotProductionHistorySql(
 
 async function inspectSourceTree(
   sourcePrismaRoot,
-  { materialized = false } = {},
+  {
+    materialized = false,
+    targetMigrationCount = FINAL_MIGRATION_COUNT,
+    targetMigrationHead = FINAL_MIGRATION_HEAD,
+  } = {},
 ) {
+  const supportedTarget =
+    (targetMigrationCount === FINAL_MIGRATION_COUNT &&
+      targetMigrationHead === FINAL_MIGRATION_HEAD) ||
+    (targetMigrationCount === CURRENT_SOURCE_MIGRATION_COUNT &&
+      targetMigrationHead === CURRENT_SOURCE_MIGRATION_HEAD);
+  if (!supportedTarget) {
+    fail("FOUNDER_PILOT_HISTORY_MATERIALIZATION_TARGET_INVALID");
+  }
   exactPath(sourcePrismaRoot, "FOUNDER_PILOT_HISTORY_SOURCE_ROOT_INVALID");
   const rootStat = await lstat(sourcePrismaRoot, { bigint: true }).catch(
     () => null,
@@ -313,18 +328,32 @@ async function inspectSourceTree(
     fail("FOUNDER_PILOT_HISTORY_MIGRATIONS_ROOT_INVALID");
   }
   const entries = await readdir(migrationsRoot, { withFileTypes: true });
-  const migrationNames = entries
+  const availableMigrationNames = entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
+  const expectedAvailableCount = materialized
+    ? targetMigrationCount
+    : CURRENT_SOURCE_MIGRATION_COUNT;
+  const expectedAvailableHead = materialized
+    ? targetMigrationHead
+    : CURRENT_SOURCE_MIGRATION_HEAD;
   if (
-    migrationNames.length !== FINAL_MIGRATION_COUNT ||
+    availableMigrationNames.length !== expectedAvailableCount ||
+    availableMigrationNames.at(-1) !== expectedAvailableHead ||
     entries.some(
       (entry) =>
         !entry.isDirectory() &&
         !(entry.isFile() && entry.name === "migration_lock.toml"),
     ) ||
-    migrationNames.some((name) => !MIGRATION_NAME.test(name))
+    availableMigrationNames.some((name) => !MIGRATION_NAME.test(name))
+  ) {
+    fail("FOUNDER_PILOT_HISTORY_MIGRATION_TREE_INVALID");
+  }
+  const migrationNames = availableMigrationNames.slice(0, targetMigrationCount);
+  if (
+    migrationNames.length !== targetMigrationCount ||
+    migrationNames.at(-1) !== targetMigrationHead
   ) {
     fail("FOUNDER_PILOT_HISTORY_MIGRATION_TREE_INVALID");
   }
@@ -423,9 +452,14 @@ function assertLaneRoot(laneRoot) {
 export async function materializeFounderPilotProductionHistoryLane({
   laneRoot,
   sourcePrismaRoot,
+  targetMigrationCount = FINAL_MIGRATION_COUNT,
+  targetMigrationHead = FINAL_MIGRATION_HEAD,
 }) {
   assertLaneRoot(laneRoot);
-  const source = await inspectSourceTree(sourcePrismaRoot);
+  const source = await inspectSourceTree(sourcePrismaRoot, {
+    targetMigrationCount,
+    targetMigrationHead,
+  });
   const requestedParent = path.dirname(laneRoot);
   const parentStat = await lstat(requestedParent, { bigint: true }).catch(
     () => null,
@@ -451,6 +485,8 @@ export async function materializeFounderPilotProductionHistoryLane({
     }
     const verification = await inspectSourceTree(resolvedLaneRoot, {
       materialized: true,
+      targetMigrationCount,
+      targetMigrationHead,
     });
     if (verification.treeDigest !== source.treeDigest) {
       fail("FOUNDER_PILOT_HISTORY_EXISTING_LANE_DRIFT");
@@ -458,7 +494,7 @@ export async function materializeFounderPilotProductionHistoryLane({
     return Object.freeze({
       current179Sha256: MATERIALIZED_CURRENT179_SHA256,
       current185Sha256: MATERIALIZED_CURRENT185_SHA256,
-      migrationCount: FINAL_MIGRATION_COUNT,
+      migrationCount: targetMigrationCount,
       treeDigest: source.treeDigest,
     });
   }
@@ -476,6 +512,8 @@ export async function materializeFounderPilotProductionHistoryLane({
   }
   const verification = await inspectSourceTree(resolvedLaneRoot, {
     materialized: true,
+    targetMigrationCount,
+    targetMigrationHead,
   });
   if (verification.treeDigest !== source.treeDigest) {
     fail("FOUNDER_PILOT_HISTORY_LANE_VERIFICATION_FAILED");
@@ -483,7 +521,7 @@ export async function materializeFounderPilotProductionHistoryLane({
   return Object.freeze({
     current179Sha256: MATERIALIZED_CURRENT179_SHA256,
     current185Sha256: MATERIALIZED_CURRENT185_SHA256,
-    migrationCount: FINAL_MIGRATION_COUNT,
+    migrationCount: targetMigrationCount,
     treeDigest: source.treeDigest,
   });
 }
@@ -771,7 +809,8 @@ export async function createFounderPilotProductionHistoryPgAdapter(
               ) FILTER (
                 WHERE migration."migration_name" NOT IN (
                   '20260819010000_staff_attachment_parent_delete_guard',
-                  '20260820010000_guest_portal_telegram_update_ledger'
+                  '20260820010000_guest_portal_telegram_update_ledger',
+                  '20260828190000_guest_support_bug_reports'
                 )
               ) || E'\\n',
               'UTF8'

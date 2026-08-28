@@ -29,6 +29,11 @@ tenant queue `/support/bug-reports*` и platform queue
 и не вызывают outbound providers. Runtime flag
 `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed; authoritative runbook:
 [`docs/support/guest-bug-reporting.md`](docs/support/guest-bug-reporting.md).
+Переход production `CURRENT_187 -> CURRENT_188` использует двухфазный cutover:
+exact bridge slot работает только в `COMBINED + reporting OFF`, затем отдельный
+подписанный controller проверяет и применяет одну additive migration, а LIVE
+функция запускается вторым slot с bridge `OFF`. Merge/CI сами по себе этот
+production rollout не выполняют.
 
 ## Detailed gamification state (updated through 28.08.2026)
 

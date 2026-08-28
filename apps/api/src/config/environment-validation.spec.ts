@@ -9,6 +9,7 @@ import {
   PRODUCTION_SECRET_KEYS,
   resolveAccessScopeEnforcementMode,
   resolveGuestBugReportingMode,
+  resolveGuestSupportSchemaBridgeMode,
   resolveSecuritySecret,
   resolveStaffAttachmentAclMode,
   validateEnvironment,
@@ -641,6 +642,49 @@ describe('resolveGuestBugReportingMode', () => {
     expect(() => resolveGuestBugReportingMode('enabled')).toThrow(
       /must be OFF or LIVE/,
     );
+  });
+});
+
+describe('resolveGuestSupportSchemaBridgeMode', () => {
+  it('defaults to off and accepts only the explicit CURRENT_187 bridge', () => {
+    expect(resolveGuestSupportSchemaBridgeMode(undefined)).toBe('OFF');
+    expect(resolveGuestSupportSchemaBridgeMode(' off ')).toBe('OFF');
+    expect(resolveGuestSupportSchemaBridgeMode('allow_current_187')).toBe(
+      'ALLOW_CURRENT_187',
+    );
+    expect(() => resolveGuestSupportSchemaBridgeMode('enabled')).toThrow(
+      /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE must be OFF or ALLOW_CURRENT_187/,
+    );
+  });
+
+  it('admits the schema bridge only for the disabled combined CURRENT_188 release', () => {
+    const bridge = {
+      ...validProductionEnvironment(),
+      EXPECTED_DATABASE_MIGRATION: '20260828190000_guest_support_bug_reports',
+      EXPECTED_DATABASE_MIGRATION_COUNT: '188',
+      GUEST_BUG_REPORTING_MODE: 'OFF',
+      GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: 'ALLOW_CURRENT_187',
+    };
+
+    expect(validateEnvironment(bridge)).toMatchObject({
+      GUEST_BUG_REPORTING_MODE: 'OFF',
+      GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: 'ALLOW_CURRENT_187',
+    });
+    expect(() =>
+      validateEnvironment({ ...bridge, GUEST_BUG_REPORTING_MODE: 'LIVE' }),
+    ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
+    expect(() =>
+      validateEnvironment({
+        ...bridge,
+        EXPECTED_DATABASE_MIGRATION_COUNT: '187',
+      }),
+    ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
+    expect(() =>
+      validateEnvironment({
+        ...bridge,
+        LEETPLUS_API_RUNTIME_ROLE: 'GUEST',
+      }),
+    ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
   });
 });
 

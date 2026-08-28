@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffSupportTicketsWorkspace } from "@/components/staff-support-tickets-workspace";
 import { requireCurrentUser } from "@/lib/auth";
@@ -14,6 +15,12 @@ export default async function PlatformSupportTicketsPage({
 }: {
   searchParams: SearchParams;
 }) {
+  if (
+    process.env.GUEST_SUPPORT_SCHEMA_BRIDGE_MODE?.trim().toUpperCase() ===
+    "ALLOW_CURRENT_187"
+  ) {
+    redirect("/administration");
+  }
   const user = await requireCurrentUser();
   if (!user.isPlatformAdmin) {
     return (

@@ -629,7 +629,10 @@ common_arguments=(
   --loopback-web-url http://127.0.0.1:3100
   --public-api-url https://api.example.test
   --public-web-url https://web.example.test
-  --watchdog-seconds 5
+  # Five seconds is below the observed cold-start variance of GitHub-hosted
+  # runners. Ten still keeps this fixture bounded while preventing an
+  # infrastructure delay from masquerading as an injected durability fault.
+  --watchdog-seconds 10
   --config-root "$config_root"
   --state-root "$state_root"
   --systemd-root "$systemd_root"
@@ -1000,10 +1003,22 @@ grep -F -x 'CONSUMED=true' "$state_root/latest-accepted.index" >/dev/null
 # mv the new exact index is already authoritative despite the missing fsync
 # response in the fixture process.
 for index_failure_phase in before-latest-index-mv after-latest-index-mv; do
+  index_failure_expected_status=93
+  if [[ "$index_failure_phase" == after-latest-index-mv ]]; then
+    index_failure_expected_status=94
+  fi
   if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
     LEETPLUS_TEST_FAIL_PHASE="$index_failure_phase" \
     /usr/bin/bash -p "$CUTOVER" switch --slot blue "${common_arguments[@]}" > "$TEST_ROOT/${index_failure_phase}.out" 2>&1; then
     printf 'fixture-requested %s interruption was unexpectedly successful\n' "$index_failure_phase" >&2
+    exit 1
+  else
+    index_failure_status=$?
+  fi
+  if [[ "$index_failure_status" != "$index_failure_expected_status" ]]; then
+    printf 'fixture-requested %s interruption returned %s, expected %s\n' \
+      "$index_failure_phase" "$index_failure_status" "$index_failure_expected_status" >&2
+    sed -n '1,200p' "$TEST_ROOT/${index_failure_phase}.out" >&2
     exit 1
   fi
   test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/blue.conf"
@@ -1228,14 +1243,14 @@ test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/up
 # individually successful slow probes cannot consume the budget twice.
 watchdog_deadline_started=$SECONDS
 if PATH="$bin_root:$PATH" TEST_COMMAND_LOG="$command_log" TEST_ACTIVE_LINK="$config_root/active-upstreams.conf" \
-  TEST_PROBE_DELAY_SECONDS=4 TEST_AUTH_DELAY_SECONDS=4 \
+  TEST_PROBE_DELAY_SECONDS=6 TEST_AUTH_DELAY_SECONDS=6 \
   /usr/bin/bash -p "$CUTOVER" switch --slot green "${common_arguments[@]}" \
   > "$TEST_ROOT/watchdog-shared-deadline.out" 2>&1; then
   printf 'watchdog accepted sequential probes beyond its one absolute deadline\n' >&2
   exit 1
 fi
 watchdog_deadline_elapsed=$((SECONDS - watchdog_deadline_started))
-((watchdog_deadline_elapsed < 9)) \
+((watchdog_deadline_elapsed < 14)) \
   || { printf 'watchdog sequential probe chain exceeded its bounded deadline: %ss\n' "$watchdog_deadline_elapsed" >&2; exit 1; }
 test "$(realpath -e -- "$config_root/active-upstreams.conf")" = "$config_root/upstreams/legacy-safe.conf"
 

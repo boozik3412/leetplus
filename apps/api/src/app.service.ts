@@ -9,6 +9,10 @@ import {
   apiRuntimeServiceName,
   resolveApiRuntimeRole,
 } from './config/api-runtime-role';
+import {
+  GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE,
+  GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET,
+} from './config/environment-validation';
 import { PrismaService } from './prisma/prisma.service';
 
 @Injectable()
@@ -71,6 +75,12 @@ export class AppService {
       const expectedMigrationCount = this.optionalPositiveInt(
         'EXPECTED_DATABASE_MIGRATION_COUNT',
       );
+      const schemaBridgeAccepted = this.schemaBridgeAccepted({
+        completedMigrations,
+        databaseMigration,
+        expectedMigration,
+        expectedMigrationCount,
+      });
 
       if (!databaseMigration) {
         throw new ReadinessFailure('NO_COMPLETED_MIGRATIONS');
@@ -80,13 +90,18 @@ export class AppService {
         throw new ReadinessFailure('UNFINISHED_MIGRATIONS');
       }
 
-      if (expectedMigration && databaseMigration !== expectedMigration) {
+      if (
+        expectedMigration &&
+        databaseMigration !== expectedMigration &&
+        !schemaBridgeAccepted
+      ) {
         throw new ReadinessFailure('MIGRATION_REVISION_MISMATCH');
       }
 
       if (
         expectedMigrationCount &&
-        completedMigrations !== expectedMigrationCount
+        completedMigrations !== expectedMigrationCount &&
+        !schemaBridgeAccepted
       ) {
         throw new ReadinessFailure('MIGRATION_COUNT_MISMATCH');
       }
@@ -101,6 +116,17 @@ export class AppService {
             ok: true,
             migration: databaseMigration,
             migrationCount: completedMigrations,
+            ...(schemaBridgeAccepted
+              ? {
+                  compatibility: {
+                    mode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
+                    targetMigration:
+                      GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migration,
+                    targetMigrationCount:
+                      GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migrationCount,
+                  },
+                }
+              : {}),
           },
         },
       };
@@ -144,6 +170,29 @@ export class AppService {
   private serviceName() {
     return apiRuntimeServiceName(
       resolveApiRuntimeRole(this.configService.get(API_RUNTIME_ROLE_KEY)),
+    );
+  }
+
+  private schemaBridgeAccepted(input: {
+    completedMigrations: number;
+    databaseMigration: string | null;
+    expectedMigration: string | null;
+    expectedMigrationCount: number | null;
+  }) {
+    return (
+      this.optionalConfig('GUEST_SUPPORT_SCHEMA_BRIDGE_MODE') ===
+        'ALLOW_CURRENT_187' &&
+      this.optionalConfig('GUEST_BUG_REPORTING_MODE') === 'OFF' &&
+      resolveApiRuntimeRole(this.configService.get(API_RUNTIME_ROLE_KEY)) ===
+        'COMBINED' &&
+      input.expectedMigration ===
+        GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migration &&
+      input.expectedMigrationCount ===
+        GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migrationCount &&
+      input.databaseMigration ===
+        GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE.migration &&
+      input.completedMigrations ===
+        GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE.migrationCount
     );
   }
 

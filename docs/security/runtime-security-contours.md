@@ -16,7 +16,7 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | current-context successor слит PR [#67](https://github.com/boozik3412/leetplus/pull/67), merge SHA `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`                                           |
+| Runtime implementation   | current-context successor слит PR [#67](https://github.com/boozik3412/leetplus/pull/67), merge SHA `8b1d5972aec3c61b62789002ddacf1653a8b5bbc`                                      |
 | Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33149292335) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33149292273) — `SUCCESS` |
 | Production API topology  | последний зафиксированный runtime остаётся `COMBINED`; dedicated `CORPORATE`/`GUEST` не установлены                                                                                |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
@@ -63,6 +63,11 @@ Support-функциональность следует тем же трём г�
   очищается от metadata и выдаётся только как private attachment;
 - runtime flag `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed и по умолчанию
   равен `OFF`.
+- единственный schema bridge допускает exact `CURRENT_187 -> CURRENT_188`
+  только для `COMBINED` runtime при `GUEST_BUG_REPORTING_MODE=OFF`; любой другой
+  head/count, unfinished migration, split runtime или `LIVE` блокирует startup/
+  readiness. Это переходный deployment-контракт, а не разрешение читать
+  отсутствующие support tables.
 
 Подробный контракт и rollout:
 [`docs/support/guest-bug-reporting.md`](../support/guest-bug-reporting.md).
@@ -171,7 +176,7 @@ cutover. Он не является целевой долгосрочной из
 | PR #63/#64 — role-aware landing                       | Строгий API scope должен сочетаться с поддерживаемым landing; неверный redirect не чинится расширением прав.                                                               |
 | PR #65 — logical guest auth isolation                 | Locks, cleanup, provider timeout и poll dedupe должны быть challenge-scoped; корпоративный auth contour не ограничивает public guest concurrency.                          |
 | PR #66 — process/module/runtime isolation             | Public guest, B2B game administration и workers требуют разных module graphs, secret sets, pools и resource identities.                                                    |
-| PR #67 — current-context fixation                     | Source/admission и фактический production state фиксируются раздельно; green admission не является автоматическим deploy.                                                 |
+| PR #67 — current-context fixation                     | Source/admission и фактический production state фиксируются раздельно; green admission не является автоматическим deploy.                                                  |
 
 ## Проверка перед изменением пересекающей области
 

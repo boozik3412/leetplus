@@ -617,6 +617,13 @@ function normalizeIdentityEvidence(value, target) {
   });
 }
 
+export function normalizeFounderPilotProductionHistoryProductionIdentity(
+  value,
+  target,
+) {
+  return normalizeIdentityEvidence(value, target);
+}
+
 function productionStaleProjection(row) {
   return {
     completedAt: row.completedAt,
@@ -970,6 +977,12 @@ function liveTargetIdentityDigest(identity) {
     ...identity,
     runtimeRoles: identity.runtimeRoles,
   });
+}
+
+export function founderPilotProductionHistoryProductionIdentityDigest(
+  identity,
+) {
+  return liveTargetIdentityDigest(identity);
 }
 
 async function inspectProductionReleaseIdentity({
@@ -1929,7 +1942,8 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
               ) FILTER (
                 WHERE migration."migration_name" NOT IN (
                   '20260819010000_staff_attachment_parent_delete_guard',
-                  '20260820010000_guest_portal_telegram_update_ledger'
+                  '20260820010000_guest_portal_telegram_update_ledger',
+                  '20260828190000_guest_support_bug_reports'
                 )
               ) || E'\\n',
               'UTF8'
@@ -1954,6 +1968,115 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
     return result.rows[0];
   }
 
+  async function inspectCurrent188SupportContract() {
+    const active = await currentClient();
+    await active.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    try {
+      await active.query("SET LOCAL lock_timeout = '3s'");
+      await active.query("SET LOCAL statement_timeout = '15s'");
+      await active.query(
+        "SET LOCAL idle_in_transaction_session_timeout = '20s'",
+      );
+      const result = await active.query(`
+        SELECT
+          COALESCE((
+            SELECT pg_catalog.jsonb_agg(relation.relname ORDER BY relation.relname COLLATE "C")
+            FROM pg_catalog.pg_class AS relation
+            WHERE relation.relnamespace = pg_catalog.to_regnamespace('public')
+              AND relation.relkind = 'r'
+              AND relation.relname = ANY(ARRAY[
+                'GuestSupportAttachment',
+                'GuestSupportTicket',
+                'GuestSupportTicketAuditEvent',
+                'GuestSupportTicketComment'
+              ]::text[])
+          ), '[]'::jsonb) AS "tableNames",
+          COALESCE((
+            SELECT pg_catalog.jsonb_agg(indexes.indexname ORDER BY indexes.indexname COLLATE "C")
+            FROM pg_catalog.pg_indexes AS indexes
+            WHERE indexes.schemaname = 'public'
+              AND indexes.tablename = ANY(ARRAY[
+                'GuestSupportAttachment',
+                'GuestSupportTicket',
+                'GuestSupportTicketAuditEvent',
+                'GuestSupportTicketComment'
+              ]::text[])
+          ), '[]'::jsonb) AS "indexNames",
+          COALESCE((
+            SELECT pg_catalog.jsonb_agg(constraint_record.conname ORDER BY constraint_record.conname COLLATE "C")
+            FROM pg_catalog.pg_constraint AS constraint_record
+            WHERE constraint_record.connamespace = pg_catalog.to_regnamespace('public')
+              AND constraint_record.conrelid = ANY(ARRAY[
+                pg_catalog.to_regclass('public."GuestSupportAttachment"'),
+                pg_catalog.to_regclass('public."GuestSupportTicket"'),
+                pg_catalog.to_regclass('public."GuestSupportTicketAuditEvent"'),
+                pg_catalog.to_regclass('public."GuestSupportTicketComment"')
+              ]::oid[])
+          ), '[]'::jsonb) AS "constraintNames",
+          COALESCE((
+            SELECT pg_catalog.jsonb_agg(
+              pg_catalog.jsonb_build_object(
+                'name', enum_type.typname,
+                'labels', enum_labels.labels
+              )
+              ORDER BY enum_type.typname COLLATE "C"
+            )
+            FROM pg_catalog.pg_type AS enum_type
+            CROSS JOIN LATERAL (
+              SELECT pg_catalog.jsonb_agg(enum_value.enumlabel ORDER BY enum_value.enumsortorder)
+                AS labels
+              FROM pg_catalog.pg_enum AS enum_value
+              WHERE enum_value.enumtypid = enum_type.oid
+            ) AS enum_labels
+            WHERE enum_type.typnamespace = pg_catalog.to_regnamespace('public')
+              AND enum_type.typname = ANY(ARRAY[
+                'GuestSupportAttachmentState',
+                'GuestSupportTicketStatus'
+              ]::text[])
+          ), '[]'::jsonb) AS "enumTypes",
+          (
+            SELECT pg_catalog.count(*)::INTEGER
+            FROM information_schema.table_privileges AS privilege
+            WHERE privilege.table_schema = 'public'
+              AND privilege.table_name = ANY(ARRAY[
+                'GuestSupportAttachment',
+                'GuestSupportTicket',
+                'GuestSupportTicketAuditEvent',
+                'GuestSupportTicketComment'
+              ]::text[])
+              AND privilege.grantee = 'PUBLIC'
+          ) AS "publicTablePrivilegeCount",
+          (
+            SELECT pg_catalog.count(*)::INTEGER
+            FROM pg_catalog.pg_proc AS routine
+            CROSS JOIN LATERAL pg_catalog.aclexplode(
+              COALESCE(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+            ) AS privilege
+            WHERE routine.oid = pg_catalog.to_regprocedure(
+              'public."identity_mail_delivery_worker_assert_v1"(text)'
+            )
+              AND privilege.grantee = 0
+              AND privilege.privilege_type = 'EXECUTE'
+          ) AS "publicWorkerExecuteCount",
+          (
+            SELECT migration.checksum
+            FROM public."_prisma_migrations" AS migration
+            WHERE migration.migration_name =
+              '20260828190000_guest_support_bug_reports'
+              AND migration.finished_at IS NOT NULL
+              AND migration.rolled_back_at IS NULL
+            ORDER BY migration.started_at DESC
+            LIMIT 1
+          ) AS "migrationChecksum"
+      `);
+      await active.query("COMMIT");
+      return result.rows[0];
+    } catch (error) {
+      await active.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
+  }
+
   await connect();
   return Object.freeze({
     acquireLock,
@@ -1966,6 +2089,7 @@ export async function createFounderPilotProductionHistoryProductionPgAdapter(
       lockedBackendPid = null;
     },
     inspectFinal,
+    inspectCurrent188SupportContract,
     inspectReconciliation,
     inspectTarget: readTarget,
     reconcile,

@@ -129,6 +129,22 @@ export type FounderOperatorBetaMode =
 export const GUEST_BUG_REPORTING_MODES = ['OFF', 'LIVE'] as const;
 export type GuestBugReportingMode = (typeof GUEST_BUG_REPORTING_MODES)[number];
 
+export const GUEST_SUPPORT_SCHEMA_BRIDGE_MODES = [
+  'OFF',
+  'ALLOW_CURRENT_187',
+] as const;
+export type GuestSupportSchemaBridgeMode =
+  (typeof GUEST_SUPPORT_SCHEMA_BRIDGE_MODES)[number];
+
+export const GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE = Object.freeze({
+  migration: '20260820010000_guest_portal_telegram_update_ledger',
+  migrationCount: 187,
+});
+export const GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET = Object.freeze({
+  migration: '20260828190000_guest_support_bug_reports',
+  migrationCount: 188,
+});
+
 export function resolveGuestBugReportingMode(
   value: unknown,
 ): GuestBugReportingMode {
@@ -138,6 +154,23 @@ export function resolveGuestBugReportingMode(
     return normalized as GuestBugReportingMode;
   }
   throw new Error('GUEST_BUG_REPORTING_MODE must be OFF or LIVE');
+}
+
+export function resolveGuestSupportSchemaBridgeMode(
+  value: unknown,
+): GuestSupportSchemaBridgeMode {
+  const normalized = stringValue(value).toUpperCase();
+  if (!normalized) return 'OFF';
+  if (
+    GUEST_SUPPORT_SCHEMA_BRIDGE_MODES.includes(
+      normalized as GuestSupportSchemaBridgeMode,
+    )
+  ) {
+    return normalized as GuestSupportSchemaBridgeMode;
+  }
+  throw new Error(
+    'GUEST_SUPPORT_SCHEMA_BRIDGE_MODE must be OFF or ALLOW_CURRENT_187',
+  );
 }
 
 export const FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE =
@@ -391,6 +424,9 @@ export function validateEnvironment(config: EnvironmentValues) {
   const guestBugReportingMode = resolveGuestBugReportingMode(
     config.GUEST_BUG_REPORTING_MODE,
   );
+  const guestSupportSchemaBridgeMode = resolveGuestSupportSchemaBridgeMode(
+    config.GUEST_SUPPORT_SCHEMA_BRIDGE_MODE,
+  );
 
   if (isolatedMode && isolatedMode !== 'true' && isolatedMode !== 'false') {
     throw new Error(
@@ -418,6 +454,7 @@ export function validateEnvironment(config: EnvironmentValues) {
       [API_RUNTIME_ROLE_KEY]: apiRuntimeRole,
       FOUNDER_OPERATOR_BETA_MODE: founderOperatorBetaMode,
       GUEST_BUG_REPORTING_MODE: guestBugReportingMode,
+      GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: guestSupportSchemaBridgeMode,
     };
   }
 
@@ -607,6 +644,18 @@ export function validateEnvironment(config: EnvironmentValues) {
   if (!/^[1-9]\d*$/.test(expectedMigrationCount)) {
     errors.push('EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer');
   }
+  if (
+    guestSupportSchemaBridgeMode === 'ALLOW_CURRENT_187' &&
+    (apiRuntimeRole !== 'COMBINED' ||
+      guestBugReportingMode !== 'OFF' ||
+      expectedMigration !== GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migration ||
+      expectedMigrationCount !==
+        String(GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migrationCount))
+  ) {
+    errors.push(
+      'GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_187 requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF, and exact CURRENT_188 release identity',
+    );
+  }
   if (!langameDiscrepancyLogRoot) {
     errors.push(
       'LANGAME_DISCREPANCY_LOG_ROOT must be a non-root absolute POSIX path without traversal segments',
@@ -693,6 +742,7 @@ export function validateEnvironment(config: EnvironmentValues) {
     DESIGN_PARTNER_ISOLATED_MODE: isolatedMode || undefined,
     FOUNDER_OPERATOR_BETA_MODE: founderOperatorBetaMode,
     GUEST_BUG_REPORTING_MODE: guestBugReportingMode,
+    GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: guestSupportSchemaBridgeMode,
     FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_URL:
       founderOperatorBetaActivationDatabaseUrl,
   };

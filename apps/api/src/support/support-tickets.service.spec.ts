@@ -1,9 +1,10 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
 import { SupportTicketsService } from './support-tickets.service';
 
 describe('SupportTicketsService tenant boundaries', () => {
-  function fixture() {
+  function fixture(schemaBridgeMode = 'OFF') {
     const prisma = {
       guestSupportAttachment: { findFirst: jest.fn() },
       guestSupportTicket: { findFirst: jest.fn() },
@@ -17,6 +18,9 @@ describe('SupportTicketsService tenant boundaries', () => {
     const service = new SupportTicketsService(
       prisma as never,
       tenantContext as never,
+      new ConfigService({
+        GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: schemaBridgeMode,
+      }),
     );
     return { service, prisma };
   }
@@ -26,6 +30,14 @@ describe('SupportTicketsService tenant boundaries', () => {
     tenantId: 'tenant-a',
     role: UserRole.ADMIN,
   } as never;
+
+  it('fails closed before querying support tables during the CURRENT_187 bridge', () => {
+    const { service, prisma } = fixture('ALLOW_CURRENT_187');
+
+    expect(() => service.getPlatformTickets({})).toThrow(NotFoundException);
+    expect(prisma.guestSupportTicket.findFirst).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
 
   it('includes tenant and ticket identity in every attachment lookup', async () => {
     const { service, prisma } = fixture();

@@ -16,6 +16,12 @@ export default async function SupportTicketsPage({
 }: {
   searchParams: SearchParams;
 }) {
+  if (
+    process.env.GUEST_SUPPORT_SCHEMA_BRIDGE_MODE?.trim().toUpperCase() ===
+    "ALLOW_CURRENT_187"
+  ) {
+    redirect("/dashboard");
+  }
   const user = await requireNetworkScopedUser({ storesFallback: "/dashboard" });
   if (!can(user, "view_support_tickets")) {
     redirect("/dashboard");

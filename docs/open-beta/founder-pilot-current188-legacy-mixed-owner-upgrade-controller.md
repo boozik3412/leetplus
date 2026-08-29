@@ -1,0 +1,123 @@
+# CURRENT_187 → CURRENT_188 legacy mixed-owner controller
+
+Статус: **production candidate; effect только после exact-SHA admission и
+отдельного GO**
+
+Актуально на: **29.08.2026**
+
+## Почему нужен отдельный controller
+
+Фактическая production-база имеет историческую mixed-owner topology: часть
+объектов схемы public принадлежит роли приложения, часть — postgres. Функция
+identity_mail_delivery_worker_assert_v1(TEXT) также принадлежит postgres.
+Обычный CURRENT_188 controller правильно блокирует такую базу, потому что его
+контракт рассчитан на единый migration owner.
+
+Этот одноразовый controller допускает только фактически наблюдаемое состояние
+187 applied / 4 rolled back / 0 unfinished и только миграцию
+20260828190000_guest_support_bug_reports с SHA-256
+c40d5eeb84cc980053af48b56385bf48882ee355aec718a442dab855ea33eb9b.
+Он не нормализует владельцев и не является универсальным privileged migration
+runner.
+
+## Fail-closed контракт
+
+- admitted release SHA, архив, materialized tree, PostgreSQL system identifier,
+  database/host/port и OID/attributes всех значимых ролей входят в manifest;
+- source snapshot закрепляет пообъектный digest всех исторических
+  class/proc/type: kind, OID, name/signature, owner name/OID и raw ACL;
+- role memberships и активные database identities также закрепляются exact
+  digest/list;
+- plan строится только против активного bridge runtime того же admitted SHA:
+  COMBINED + GUEST_BUG_REPORTING_MODE=OFF +
+  GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_187;
+- plan подписывается detached Ed25519 ключом, а SPKI SHA-256 передаётся
+  независимым protected pin;
+- root-owned blue/green lock и PostgreSQL advisory lock удерживаются от live
+  сверки до final postcheck;
+- migration выполняется локально через Unix socket от OS/database identity
+  postgres; пароль суперпользователя не создаётся и не передаётся;
+- разрешённый DDL ограничен checksum-pinned Prisma migration. Запрещены
+  ALTER OWNER, REASSIGN OWNED, ALTER DEFAULT PRIVILEGES и любые другие
+  изменения исторической topology;
+- body и comment identity-mail readiness function обязаны точно перейти с
+  CURRENT_187 на CURRENT_188, сохранив OID, owner и отсутствие PUBLIC EXECUTE;
+- intent/response каждой effect-фазы попадает в exclusive fsynced JSONL
+  journal.
+
+## Единственные допустимые состояния
+
+1. SOURCE_187 — целевой migration row и support-объекты отсутствуют.
+2. MIGRATED_188_NO_RUNTIME_ACL — миграция полностью закончена, catalog exact,
+   новые enum ещё имеют только ожидаемый default PUBLIC USAGE, а runtime grants
+   отсутствуют.
+3. FINAL_188_EXACT_ACL — migration/catalog/function/ownership exact, PUBLIC
+   grants отсутствуют, runtime имеет только указанную ниже матрицу.
+
+Unfinished Prisma row, лишний support object, частичный ACL, owner/OID/role
+drift или иной catalog delta дают BLOCKED_MANUAL.
+
+## Минимальный runtime ACL
+
+| Объект                       | Прямые права переходной роли leetplus_runtime |
+| ---------------------------- | --------------------------------------------- |
+| GuestSupportTicket           | SELECT, INSERT, UPDATE                        |
+| GuestSupportAttachment       | SELECT, INSERT                                |
+| GuestSupportTicketComment    | SELECT, INSERT                                |
+| GuestSupportTicketAuditEvent | SELECT, INSERT                                |
+| GuestSupportAttachmentState  | USAGE                                         |
+| GuestSupportTicketStatus     | USAGE                                         |
+
+ACL-фаза выполняется одной транзакцией. Сначала отзываются все права PUBLIC и
+старые прямые права runtime на новых объектах, затем выдаётся только эта
+матрица. DELETE, TRUNCATE, REFERENCES, TRIGGER, schema CREATE, ownership,
+membership и worker-function EXECUTE не выдаются.
+
+Это временный COMBINED ACL. Он не переносится автоматически на будущие
+раздельные guest/corporate database roles.
+
+## Recovery
+
+Обычное effect-окно плана не превышает часа. Подписанный manifest отдельно
+задаёт bounded recovery window не более 24 часов:
+
+- из exact SOURCE_187 после окончания effect-окна новый effect запрещён;
+- из exact MIGRATED_188_NO_RUNTIME_ACL можно завершить только ACL-фазу;
+- из exact FINAL_188_EXACT_ACL повторный apply возвращает zero-effect recovered
+  success;
+- неоднозначный ответ допускает не более одного повтора и только после новой
+  exact inspection.
+
+Таким образом, уже совершившаяся migration не требует создавать новую
+неподписанную authority для восстановления.
+
+## Порядок production rollout
+
+1. Fast CI и Full Release Admission должны быть зелёными на новом exact SHA.
+2. Этот же SHA сначала запускается и атомарно становится active bridge runtime
+   при CURRENT_187, reporting OFF.
+3. Ручные old-SHA leetplus-user-call-\* sidecar units выводятся из routing,
+   останавливаются, disable/remove; USER_CALL остаётся на admitted main slot.
+4. Identity-mail, guest-game-bot и остальные delivery/scheduler workers
+   drained, disabled/start-fenced; active worker sessions отсутствуют.
+5. Выполняются inventory → plan → approve → apply → check.
+6. Только после exact 188/188 и ACL postcheck запускается второй slot с bridge
+   OFF, reporting LIVE, проходит negative/guest/tenant/platform QA и atomic
+   cutover.
+
+После schema effect rollback target — уже проверенный CURRENT_188 bridge slot
+того же SHA. Старый CURRENT_187 runtime возвращать нельзя. Операционный kill
+switch — GUEST_BUG_REPORTING_MODE=OFF; schema rollback не выполняется.
+
+## Команды и admission
+
+    node packages/database/scripts/founder-pilot-current188-legacy-ownership-upgrade.cli.mjs --help
+    pnpm --filter database check:founder-pilot-current188-legacy-ownership-upgrade
+    pnpm --filter database test:integration:founder-pilot-current188-legacy-ownership-upgrade:pg
+
+CLI поддерживает inventory, plan, approve, apply, check. Manifest, plan,
+approval, private key и journal находятся в root-controlled каталоге вне
+checkout/release. Production apply дополнительно требует exact confirmation и
+independent SPKI pin. Full Release Admission выполняет реальный PostgreSQL 16
+тест: mixed-owner CURRENT_187, privileged migration, минимальный ACL,
+postcheck, replay и cleanup disposable database/roles.

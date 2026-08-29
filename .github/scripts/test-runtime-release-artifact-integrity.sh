@@ -24,6 +24,8 @@ readonly OPERATIONAL_SCRIPTS=(
   founder-pilot-activation-role-network-acceptance.mjs
   founder-pilot-mail-tenant-enrollment.cli.mjs
   founder-pilot-mail-tenant-enrollment.mjs
+  founder-pilot-current188-legacy-ownership-upgrade.cli.mjs
+  founder-pilot-current188-legacy-ownership-upgrade.mjs
   founder-pilot-current188-production-upgrade.cli.mjs
   founder-pilot-current188-production-upgrade.mjs
   founder-pilot-production-history-production.cli.mjs
@@ -137,7 +139,7 @@ make_runtime_root() {
   "canonicalPrismaDeployScriptsIncluded": true,
   "canonicalPrismaDeployScriptCount": 1,
   "founderPilotOperationalScriptsIncluded": true,
-  "founderPilotOperationalScriptCount": 14,
+  "founderPilotOperationalScriptCount": 16,
   "runtimeEnrollmentOperationalScriptsIncluded": true,
   "runtimeEnrollmentOperationalScriptCount": 6,
   "currentReleaseRuntimeAcceptanceScriptsIncluded": true,
@@ -146,7 +148,7 @@ make_runtime_root() {
   "currentNetworkAccessScopeClassificationScriptCount": 2,
   "staffAttachmentReconciliationScriptsIncluded": true,
   "staffAttachmentReconciliationScriptCount": 3,
-  "operationalScriptCount": 29,
+  "operationalScriptCount": 31,
   "webPublicAssetsIncluded": true
 }
 JSON

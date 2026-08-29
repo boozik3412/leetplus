@@ -2,7 +2,15 @@
 
 Статус: **production candidate; effect только после отдельного exact-SHA GO**
 
-Актуально на: **28.08.2026**
+Актуально на: **29.08.2026**
+
+> Этот strict V2 controller остаётся каноническим для базы с единым
+> checksum-pinned migration owner. Фактическая production-база 29.08.2026 имеет
+> подтверждённую mixed-owner topology и поэтому правильно блокируется этим
+> controller до effect. Для одного exact production перехода используется
+> отдельный
+> [legacy mixed-owner controller](./founder-pilot-current188-legacy-mixed-owner-upgrade-controller.md);
+> он не ослабляет и не заменяет strict-контракт для других баз.
 
 ## Назначение
 

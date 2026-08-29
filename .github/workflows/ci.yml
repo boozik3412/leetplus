@@ -585,6 +585,9 @@ jobs:
       - name: Validate fail-closed CURRENT_187 to CURRENT_188 production upgrade controller
         run: pnpm --filter database check:founder-pilot-current188-production-upgrade
 
+      - name: Validate fail-closed CURRENT_188 legacy mixed-owner upgrade controller
+        run: pnpm --filter database check:founder-pilot-current188-legacy-ownership-upgrade
+
       - name: Validate founder-pilot exact activation-role deployment
         run: pnpm --filter database check:founder-pilot-activation-role-deployment
 
@@ -881,6 +884,8 @@ jobs:
             packages/database/scripts/founder-pilot-production-history-production.cli.mjs \
             packages/database/scripts/founder-pilot-current188-production-upgrade.mjs \
             packages/database/scripts/founder-pilot-current188-production-upgrade.cli.mjs \
+            packages/database/scripts/founder-pilot-current188-legacy-ownership-upgrade.mjs \
+            packages/database/scripts/founder-pilot-current188-legacy-ownership-upgrade.cli.mjs \
             packages/database/scripts/founder-pilot-activation-role-deployment.mjs \
             packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs \
             packages/database/scripts/founder-pilot-activation-role-network-acceptance.mjs \
@@ -915,7 +920,7 @@ jobs:
             '  "canonicalPrismaDeployScriptsIncluded": true,' \
             '  "canonicalPrismaDeployScriptCount": 1,' \
             '  "founderPilotOperationalScriptsIncluded": true,' \
-            '  "founderPilotOperationalScriptCount": 14,' \
+            '  "founderPilotOperationalScriptCount": 16,' \
             '  "runtimeEnrollmentOperationalScriptsIncluded": true,' \
             '  "runtimeEnrollmentOperationalScriptCount": 6,' \
             '  "currentReleaseRuntimeAcceptanceScriptsIncluded": true,' \
@@ -924,7 +929,7 @@ jobs:
             '  "currentNetworkAccessScopeClassificationScriptCount": 2,' \
             '  "staffAttachmentReconciliationScriptsIncluded": true,' \
             '  "staffAttachmentReconciliationScriptCount": 3,' \
-            '  "operationalScriptCount": 29,' \
+            '  "operationalScriptCount": 31,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
@@ -1001,6 +1006,7 @@ jobs:
             './packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs' \
             './packages/database/scripts/founder-pilot-production-history-production.cli.mjs' \
             './packages/database/scripts/founder-pilot-current188-production-upgrade.cli.mjs' \
+            './packages/database/scripts/founder-pilot-current188-legacy-ownership-upgrade.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs' \
             './packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs' \
             './packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs' \
@@ -1023,7 +1029,7 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '29'
+          test "$script_file_count" = '31'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1
@@ -1056,7 +1062,7 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").canonicalPrismaDeployScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").canonicalPrismaDeployScriptCount')" = '1'
             test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptsIncluded')" = 'true'
-            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '14'
+            test "$(node -p 'require("./release-provenance.json").founderPilotOperationalScriptCount')" = '16'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptCount')" = '6'
             test "$(node -p 'require("./release-provenance.json").currentReleaseRuntimeAcceptanceScriptsIncluded')" = 'true'
@@ -1065,13 +1071,14 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptCount')" = '2'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptCount')" = '3'
-            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '29'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '31'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
             node --check packages/database/scripts/canonical-prisma-deploy.mjs
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
             node --check packages/database/scripts/founder-pilot-production-history-rehearsal.cli.mjs
             node --check packages/database/scripts/founder-pilot-production-history-production.cli.mjs
             node --check packages/database/scripts/founder-pilot-current188-production-upgrade.cli.mjs
+            node --check packages/database/scripts/founder-pilot-current188-legacy-ownership-upgrade.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-deployment.cli.mjs
             node --check packages/database/scripts/founder-pilot-activation-role-network-acceptance.cli.mjs
             node --check packages/database/scripts/founder-pilot-mail-tenant-enrollment.cli.mjs
@@ -1147,7 +1154,7 @@ jobs:
         run: |
           set -euo pipefail
           helper_source="$GITHUB_WORKSPACE/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
-          helper_sha256='4733314aabe981c786fbd3f5a825bcfceb8da9a4e6ec41561a77592629b19e43'
+          helper_sha256='a66d22e07b38740cdc66d208064a8a9088f8ec844e5062ca8859b72f82709992'
           authority_parent='/srv/leetplus-ci-runtime-authority'
           authority_root="$authority_parent/$CI_RELEASE_SHA"
           sudo -n /usr/bin/env -i \
@@ -1464,6 +1471,41 @@ jobs:
           POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
           NODE_ENV: test
           FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_PG_E2E_CONFIRM: run-founder-pilot-current188-production-upgrade-postgres-e2e
+          TZ: America/New_York
+
+      - name: Verify exact CURRENT_188 legacy mixed-owner controller on PostgreSQL 16
+        shell: bash
+        run: |
+          test -n "$POSTGRES_SERVICE_CONTAINER_ID"
+          [[ "$POSTGRES_SERVICE_CONTAINER_ID" =~ ^[0-9a-f]{64}$ ]]
+          postgres_pid="$(docker inspect --format '{{.State.Pid}}' "$POSTGRES_SERVICE_CONTAINER_ID")"
+          [[ "$postgres_pid" =~ ^[1-9][0-9]*$ ]]
+          sudo -n test -e "/proc/$postgres_pid/ns/net"
+          pnpm_bin="$(command -v pnpm)"
+          test -x "$pnpm_bin"
+          timeout --signal=TERM --kill-after=10s 300s \
+            sudo -n nsenter \
+              --target "$postgres_pid" \
+              --net \
+              --setuid "$(id -u)" \
+              --setgid "$(id -g)" \
+              -- \
+              env \
+                CI_RELEASE_SHA="$CI_RELEASE_SHA" \
+                DATABASE_URL="$DATABASE_URL" \
+                FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_PG_E2E_CONFIRM="$FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_PG_E2E_CONFIRM" \
+                HOME="$HOME" \
+                NODE_ENV="$NODE_ENV" \
+                PATH="$PATH" \
+                PGOPTIONS="$PGOPTIONS" \
+                TZ="$TZ" \
+                "$pnpm_bin" \
+                --filter database \
+                test:integration:founder-pilot-current188-legacy-ownership-upgrade:pg
+        env:
+          POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
+          NODE_ENV: test
+          FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_PG_E2E_CONFIRM: run-founder-pilot-current188-legacy-ownership-postgres-e2e
           TZ: America/New_York
 
       - name: Verify current-network access-scope controller with exact grants and concurrency

@@ -741,6 +741,22 @@ test("bridge attestation is exact and rejects unsafe first-cutover states", asyn
 });
 
 test("production bridge adapter matches the canonical slot-link receipt contract", async () => {
+  assert.equal(
+    FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS
+      .bridgeHydratedSha256SumsMaxBytes,
+    16 * 1024 * 1024,
+  );
+  const controller = await readFile(
+    path.resolve(
+      SCRIPT_ROOT,
+      "founder-pilot-current188-production-upgrade.mjs",
+    ),
+    "utf8",
+  );
+  assert.match(
+    controller,
+    /readProtectedBridgeFile\(`\$\{releaseRoot\}\/HYDRATED_SHA256SUMS`, \{\s*mode: 0o440,\s*maximumBytes: BRIDGE_HYDRATED_SHA256SUMS_MAX_BYTES,/u,
+  );
   assert.deepEqual(
     [...FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.bridgeAuthorityLockPaths],
     [

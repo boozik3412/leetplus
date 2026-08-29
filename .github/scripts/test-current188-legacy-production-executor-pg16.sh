@@ -90,22 +90,28 @@ env -i \
   TZ='UTC' \
   "$NODE_BIN" --test "$test_file"
 
-unit_residue="$(
-  systemctl list-units \
-    --all \
-    --no-legend \
-    --no-pager \
-    --plain \
-    'current188-upgrade-control-*' \
-    | sed '/^[[:space:]]*$/d'
-)"
+unit_residue='pending'
+cgroup_residue='pending'
+for _attempt in $(seq 1 50); do
+  unit_residue="$(
+    systemctl list-units \
+      --all \
+      --no-legend \
+      --no-pager \
+      --plain \
+      'current188-upgrade-control-*' \
+      | sed '/^[[:space:]]*$/d'
+  )"
+  cgroup_residue="$(
+    find /sys/fs/cgroup/system.slice \
+      -maxdepth 1 \
+      -type d \
+      -name 'current188-upgrade-control-*.service' \
+      -print \
+      -quit
+  )"
+  [[ -z "$unit_residue" && -z "$cgroup_residue" ]] && break
+  sleep 0.1
+done
 [[ -z "$unit_residue" ]] || die 'transient production-executor unit residue remains'
-cgroup_residue="$(
-  find /sys/fs/cgroup/system.slice \
-    -maxdepth 1 \
-    -type d \
-    -name 'current188-upgrade-control-*.service' \
-    -print \
-    -quit
-)"
 [[ -z "$cgroup_residue" ]] || die 'production-executor cgroup residue remains'

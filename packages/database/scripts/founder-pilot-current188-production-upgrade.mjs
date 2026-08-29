@@ -66,6 +66,7 @@ const BRIDGE_SYSTEMD_ROOT = "/etc/systemd/system";
 const BRIDGE_RELEASE_ROOT = "/srv/leetplus/releases";
 const BRIDGE_SLOT_ROOT = "/srv/leetplus/slots";
 const BRIDGE_MAX_FILE_BYTES = 1024 * 1024;
+const BRIDGE_HYDRATED_SHA256SUMS_MAX_BYTES = 16 * 1024 * 1024;
 const BRIDGE_MAX_HTTP_BYTES = 1024 * 1024;
 const BRIDGE_LOCK_TIMEOUT_MS = 5_000;
 const BRIDGE_AUTHENTICATED_SMOKE_TIMEOUT_MS = 120_000;
@@ -984,6 +985,7 @@ async function inspectBridgeSlotReleaseAuthority({ releaseSha, slot }) {
     readProtectedBridgeFile(`${releaseRoot}/SHA256SUMS`, { mode: 0o440 }),
     readProtectedBridgeFile(`${releaseRoot}/HYDRATED_SHA256SUMS`, {
       mode: 0o440,
+      maximumBytes: BRIDGE_HYDRATED_SHA256SUMS_MAX_BYTES,
     }),
     readProtectedBridgeFile(`${releaseRoot}/HYDRATED_SYMLINKS.json`, {
       mode: 0o440,
@@ -2624,6 +2626,8 @@ export async function createFounderPilotCurrent188ProductionUpgradePgAdapter(
 export const FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS =
   Object.freeze({
     bridgeAuthorityLockPaths: BRIDGE_AUTHORITY_LOCK_PATHS,
+    bridgeHydratedSha256SumsMaxBytes:
+      BRIDGE_HYDRATED_SHA256SUMS_MAX_BYTES,
     bridgeProductionControlVerifierAuthorityArgument:
       BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG,
     bridgeSlotLinkBoundEffectState: BRIDGE_SLOT_LINK_BOUND_EFFECT_STATE,

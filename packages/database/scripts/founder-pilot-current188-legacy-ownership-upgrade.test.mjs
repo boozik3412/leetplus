@@ -685,6 +685,35 @@ test("runtime safety drift after approval fails closed before effects", async (t
   assert.equal(value.runtime.locks(), 0);
 });
 
+test("runtime safety drift during effects fails before final receipt", async (t) => {
+  const value = await fixture(t);
+  const state = stateAdapter(evidence(value.rows));
+  const plan = await buildPlan(value, state);
+  await assert.rejects(
+    applyFounderPilotCurrent188LegacyOwnershipPlan(
+      applyOptions(value, state, plan, {
+        grantRuntimeAccess: async () => {
+          state.set(evidence(value.rows, "FINAL"));
+          value.runtimeSafety.set({
+            ...RUNTIME_SAFETY,
+            legacyDrainVerifierOutputSha256: "4".repeat(64),
+          });
+          return { status: "SUCCEEDED" };
+        },
+        migrate: async () => {
+          state.set(evidence(value.rows, "PRE_GRANT"));
+          return { status: "SUCCEEDED" };
+        },
+      }),
+    ),
+    {
+      reasonCode: "CURRENT188_LEGACY_RUNTIME_SAFETY_CHANGED_DURING_EFFECT",
+    },
+  );
+  assert.equal(state.locks(), 0);
+  assert.equal(value.runtime.locks(), 0);
+});
+
 test("manifest rejects a privileged application runtime role", async (t) => {
   const value = await fixture(t);
   const raw = structuredClone(value.manifest);

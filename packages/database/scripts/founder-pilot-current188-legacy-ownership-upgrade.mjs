@@ -1623,6 +1623,13 @@ export async function applyFounderPilotCurrent188LegacyOwnershipPlan({
         fail("CURRENT188_LEGACY_RUNTIME_ACL_NOT_REACHED");
       }
     }
+    const finalRuntimeSafetyReceipt = await verifyRuntimeSafety({
+      adapter: runtimeSafety,
+      manifest,
+    });
+    if (finalRuntimeSafetyReceipt.digest !== plan.runtimeSafetyDigest) {
+      fail("CURRENT188_LEGACY_RUNTIME_SAFETY_CHANGED_DURING_EFFECT");
+    }
     const bridgeReceipt = await verifyBridgeTarget({
       manifest,
       runtimeAdapter: bridge,

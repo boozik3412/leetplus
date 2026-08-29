@@ -41,9 +41,18 @@ const EXPECTED_SQL_STATES = Object.freeze({
   mismatch: "23514",
   denied: "42501",
 });
+const HISTORICAL_CURRENT_170_RUNTIME_FUNCTION_KEYS = Object.freeze([
+  "deliveryTransitionKey",
+  "rewardDeliveryLock",
+  "identityEmailClaimReserveInvite",
+  "identityEmailClaimAssertInvite",
+  "identityEmailClaimAssertInviteLocator",
+  "identityEmailClaimTransition",
+  "identityEmailClaimRelease",
+]);
 const HISTORICAL_CURRENT_170_RUNTIME_FUNCTIONS = Object.freeze(
-  APPLICATION_RUNTIME_FUNCTIONS.filter(
-    (entry) => entry.key !== "identityInitialOwnerInviteDeliveryAssertSent",
+  APPLICATION_RUNTIME_FUNCTIONS.filter((entry) =>
+    HISTORICAL_CURRENT_170_RUNTIME_FUNCTION_KEYS.includes(entry.key),
   ),
 );
 

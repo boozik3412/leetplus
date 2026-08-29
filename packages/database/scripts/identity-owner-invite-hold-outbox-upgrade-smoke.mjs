@@ -99,9 +99,18 @@ const HISTORICAL_CURRENT_171_IDENTITY_CLAIM_COLUMNS = Object.freeze([
   "updatedAt",
   "workflowLocator",
 ]);
+const HISTORICAL_CURRENT_171_RUNTIME_FUNCTION_KEYS = Object.freeze([
+  "deliveryTransitionKey",
+  "rewardDeliveryLock",
+  "identityEmailClaimReserveInvite",
+  "identityEmailClaimAssertInvite",
+  "identityEmailClaimAssertInviteLocator",
+  "identityEmailClaimTransition",
+  "identityEmailClaimRelease",
+]);
 const HISTORICAL_CURRENT_171_RUNTIME_FUNCTIONS = Object.freeze(
-  APPLICATION_RUNTIME_FUNCTIONS.filter(
-    (entry) => entry.key !== "identityInitialOwnerInviteDeliveryAssertSent",
+  APPLICATION_RUNTIME_FUNCTIONS.filter((entry) =>
+    HISTORICAL_CURRENT_171_RUNTIME_FUNCTION_KEYS.includes(entry.key),
   ),
 );
 const HISTORICAL_CURRENT_171_EXCLUDED_FUNCTIONS = Object.freeze([

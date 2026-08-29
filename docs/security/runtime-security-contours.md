@@ -4,8 +4,8 @@
 
 Актуально на: **29.08.2026**
 Runtime implementation baseline:
-`a1ddfdee5baf89c1d6e50a18278a72028f7a5a74` (PR #72; включает PR #67,
-bug-report support candidate и USER_CALL production handoff)
+`8d26acae670f5244f0f30fd2a9aac70eae940d1a` (PR #73; включает PR #72/#67,
+bug-report support candidate, USER_CALL handoff и corrected cutover watchdog)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -16,9 +16,9 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | bug-report/USER_CALL successor слит PR [#72](https://github.com/boozik3412/leetplus/pull/72), merge SHA `a1ddfdee5baf89c1d6e50a18278a72028f7a5a74`                                      |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33197502572) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33197502617) — `SUCCESS` |
-| Production API topology  | последний зафиксированный runtime остаётся `COMBINED`; dedicated `CORPORATE`/`GUEST` не установлены                                                                                |
+| Runtime implementation   | watchdog successor слит PR [#73](https://github.com/boozik3412/leetplus/pull/73), merge SHA `8d26acae670f5244f0f30fd2a9aac70eae940d1a`                                             |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33205114353) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33205114384) — `SUCCESS` |
+| Production API topology  | подтверждённый runtime — exact `8d26acae…`, `COMBINED`, bridge `CURRENT_187 -> CURRENT_188`, reporting `OFF`; dedicated `CORPORATE`/`GUEST` не установлены                         |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
 | Corporate landing        | role-aware successor слит и admitted; отдельный production deploy/real-account canary всё ещё должен подтверждаться фактическим runtime                                            |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
@@ -84,6 +84,11 @@ Support-функциональность следует тем же трём г�
   head/count, unfinished migration, split runtime или `LIVE` блокирует startup/
   readiness. Это переходный deployment-контракт, а не разрешение читать
   отсутствующие support tables.
+- фактическая production schema имеет историческую mixed-owner topology.
+  Единственный допустимый переход — same-SHA signed legacy controller с
+  пообъектным OID/owner/ACL digest, migration от локальной postgres identity,
+  неизменностью всех исторических owners и минимальным ACL только новых
+  support-объектов. Универсальная owner normalization запрещена.
 
 Подробный контракт и rollout:
 [`docs/support/guest-bug-reporting.md`](../support/guest-bug-reporting.md).
@@ -183,17 +188,17 @@ cutover. Он не является целевой долгосрочной из
 
 ## Что произошло 27–28.08.2026
 
-| Изменение                                             | Зафиксированный урок                                                                                                                                                       |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PR #53/#54/#55/#61 — systemd 255 и production-control | Проверять effective runtime semantics, stale PID/cgroup и serializer формы; verifier обязан остановиться до nginx mutation, но не отвергать безопасную canonical форму ОС. |
-| PR #56/#57 — guided OWNER onboarding                  | Invite-bound owner сам задаёт пароль и получает явные шаги замены временных названий/часового пояса/API credentials; это не меняет employee/platform-admin landing.        |
-| PR #59 — восстановление API egress                    | Web localhost policy нельзя переносить на API: Langame/check-in требуют reviewed outbound.                                                                                 |
-| PR #60 — shared Langame domain routing                | Отсутствующий `club_id` не повод расширять store scope; domain fallback допустим только для правила на все клубы domain.                                                   |
-| PR #63/#64 — role-aware landing                       | Строгий API scope должен сочетаться с поддерживаемым landing; неверный redirect не чинится расширением прав.                                                               |
-| PR #65 — logical guest auth isolation                 | Locks, cleanup, provider timeout и poll dedupe должны быть challenge-scoped; корпоративный auth contour не ограничивает public guest concurrency.                          |
-| PR #66 — process/module/runtime isolation             | Public guest, B2B game administration и workers требуют разных module graphs, secret sets, pools и resource identities.                                                    |
-| PR #67 — current-context fixation                     | Source/admission и фактический production state фиксируются раздельно; green admission не является автоматическим deploy.                                                  |
-| USER_CALL production handoff                          | Пользовательский Callcheck допускается только через exact API activation profile; ручной old-SHA sidecar должен быть выведен до schema migration.                         |
+| Изменение                                             | Зафиксированный урок                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PR #53/#54/#55/#61 — systemd 255 и production-control | Проверять effective runtime semantics, stale PID/cgroup и serializer формы; verifier обязан остановиться до nginx mutation, но не отвергать безопасную canonical форму ОС.                                                                                             |
+| PR #56/#57 — guided OWNER onboarding                  | Invite-bound owner сам задаёт пароль и получает явные шаги замены временных названий/часового пояса/API credentials; это не меняет employee/platform-admin landing.                                                                                                    |
+| PR #59 — восстановление API egress                    | Web localhost policy нельзя переносить на API: Langame/check-in требуют reviewed outbound.                                                                                                                                                                             |
+| PR #60 — shared Langame domain routing                | Отсутствующий `club_id` не повод расширять store scope; domain fallback допустим только для правила на все клубы domain.                                                                                                                                               |
+| PR #63/#64 — role-aware landing                       | Строгий API scope должен сочетаться с поддерживаемым landing; неверный redirect не чинится расширением прав.                                                                                                                                                           |
+| PR #65 — logical guest auth isolation                 | Locks, cleanup, provider timeout и poll dedupe должны быть challenge-scoped; корпоративный auth contour не ограничивает public guest concurrency.                                                                                                                      |
+| PR #66 — process/module/runtime isolation             | Public guest, B2B game administration и workers требуют разных module graphs, secret sets, pools и resource identities.                                                                                                                                                |
+| PR #67 — current-context fixation                     | Source/admission и фактический production state фиксируются раздельно; green admission не является автоматическим deploy.                                                                                                                                              |
+| USER_CALL production handoff                          | Пользовательский Callcheck допускается только через exact API activation profile; ручной old-SHA sidecar должен быть выведен до schema migration.                                                                                                                      |
 | Blue/green post-auth watchdog                         | Stateful authenticated smoke выполняется после трёх последовательных public readiness samples; bounded probe children не наследуют cutover lock, поэтому ни ingress cooldown, ни переживший deadline descendant не обнуляют/блокируют доказанную runtime-стабильность. |
 
 ## Проверка перед изменением пересекающей области

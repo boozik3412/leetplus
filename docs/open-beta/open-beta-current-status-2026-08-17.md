@@ -3,10 +3,10 @@
 | Поле                 | Состояние                                                                                 |
 | -------------------- | ----------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                              |
-| Production runtime   | healthy; access baseline deployed; внешний tenant не создавался                           |
+| Production runtime   | healthy; exact `8d26acae…`, `COMBINED`, schema bridge ON, bug reporting OFF               |
 | Prisma schema        | source candidate `CURRENT_188`; production remains `CURRENT_187` until controlled rollout |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA              |
-| Runtime successor    | bug-report/USER_CALL merge `a1ddfdee5baf89c1d6e50a18278a72028f7a5a74`; gates green             |
+| Runtime successor    | watchdog merge `8d26acae670f5244f0f30fd2a9aac70eae940d1a`; gates green                    |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                          |
 | Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending            |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                  |
@@ -17,25 +17,35 @@
 
 ## Обновление 29.08.2026 — bug-report rollout watchdog
 
-Bug-report successor был слит в `main` как PR #72, exact merge SHA
-`a1ddfdee5baf89c1d6e50a18278a72028f7a5a74`; Fast CI `33197502572` и Full
-Release Admission `33197502617` зелёные. Exact runtime/control artifact был
-гидратирован и запущен на inactive green slot в bridge-режиме
-`CURRENT_187 -> CURRENT_188`, `GUEST_BUG_REPORTING_MODE=OFF`; loopback
-release/schema/Web identity и authenticated reads прошли.
+Bug-report/USER_CALL successor из PR #72 и исправленный cutover watchdog из
+PR #73 объединены в exact merge SHA
+`8d26acae670f5244f0f30fd2a9aac70eae940d1a`. Post-merge Fast CI
+[`33205114353`](https://github.com/boozik3412/leetplus/actions/runs/33205114353)
+и Full Release Admission
+[`33205114384`](https://github.com/boozik3412/leetplus/actions/runs/33205114384)
+зелёные. Этот exact SHA уже обслуживает production как `COMBINED` bridge
+`CURRENT_187 -> CURRENT_188`; `GUEST_BUG_REPORTING_MODE=OFF`, поэтому новые
+support routes остаются fail-closed до изменения схемы и отдельного LIVE
+cutover. Схема остаётся чистой `CURRENT_187`.
 
-Два public cutover корректно откатились до database effect: после каждого
-успешного authenticated smoke production ingress кратко возвращал `400` на
-следующий `/version`. Та же последовательность воспроизводится на текущем blue
-release, тогда как loopback остаётся стабильным; значит это дефект порядка
-release-controller probes, а не bug-report runtime. Production продолжает
-обслуживаться blue SHA `04f967f3f32c4ccb612f0458823de65f62ad59ff`, схема остаётся
-`CURRENT_187`, green остановлен. Successor-controller теперь требует три
-последовательных public readiness samples, после них один authenticated smoke и
-принимает switch только если оба gate прошли внутри общего deadline. Его bounded
-probe children запускаются без inherited deployment-lock descriptor, поэтому
-истёкший probe не блокирует следующую безопасную операцию. До нового same-SHA
-admission и повторного cutover bug-report LIVE не включён.
+Ранние public cutover корректно откатились до database effect: stateful
+authenticated smoke создавал краткий post-login ingress cooldown, а прежний
+watchdog ошибочно запускал readiness probe после него. Исправленный controller
+сначала требует три последовательных readiness samples, затем один
+authenticated smoke в общем deadline; bounded children не наследуют deployment
+lock descriptor. Повторять тот же application deploy больше не требуется.
+
+Строгий production migration controller V2 ожидает единый migration owner и
+правильно блокируется на фактической исторической mixed-owner topology. Для
+production подготовлен отдельный fail-closed signed controller: план фиксирует
+OID, owner identity и ACL каждого исторического объекта; target migration
+выполняется локальной `postgres` identity; владельцы старых объектов не
+меняются; одной транзакцией выдаётся только минимальный runtime ACL новых
+support tables/enums. Он допускает только source `187/4/0`, pre-grant
+`188/4/0` или exact final `188/4/0`, удерживает тот же root-owned cutover lock и
+до успеха требует readiness активного same-SHA bridge уже как `188/188`. Этот
+контроллер должен получить собственные зелёные Fast CI + Full Release Admission
+до production database effect.
 
 ## Обновление 28.08.2026
 
@@ -93,14 +103,15 @@ canary и atomic cutover production считается `CURRENT_187`, а runtime
 [guest bug reporting](../support/guest-bug-reporting.md).
 
 Для текущего exact `CURRENT_187` подготовлен отдельный fail-closed переход:
-сначала candidate с выключенной функцией принимает только точный source head,
-затем подписанный controller V2 удерживает root-owned blue/green lock, связывает
-план с active slot, same-SHA release, accepted cutover receipt, protected
-env/unit digests и live readiness `187 -> target 188`, применяет единственную
-checksum-pinned миграцию и требует от того же bridge readiness `188/188` вместе
-с полным support catalog. После этого второй slot запускается на exact
-`CURRENT_188` с bridge `OFF`. Старый runtime не считается rollback после смены
-схемы; rollback target — уже проверенный bridge slot того же admitted SHA.
+active same-SHA bridge уже принимает точный source head. Подписанный legacy
+mixed-owner controller удерживает root-owned blue/green lock, связывает план с
+active slot, same-SHA release, accepted cutover receipt, protected env/unit
+digests и live readiness `187 -> target 188`, применяет единственную
+checksum-pinned migration через локальную `postgres` identity без owner
+normalization и требует от того же bridge readiness `188/188` вместе с полным
+support catalog и exact минимальным ACL. После этого второй slot запускается на
+exact `CURRENT_188` с bridge `OFF`. Старый runtime не считается rollback после
+смены схемы; rollback target — уже проверенный bridge slot того же admitted SHA.
 
 ### Role-aware landing
 

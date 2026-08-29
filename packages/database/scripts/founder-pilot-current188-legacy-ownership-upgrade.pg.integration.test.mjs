@@ -751,6 +751,33 @@ test(
             migrate: (options) => requireProductionSuccess("migrate", options),
           }
         : fixtureExecutor;
+      if (productionExecutorEnabled) {
+        const blocker = new pg.Client({
+          connectionString: databaseAdminUrl.toString(),
+          connectionTimeoutMillis: 5_000,
+          query_timeout: 20_000,
+        });
+        await blocker.connect();
+        try {
+          await blocker.query("BEGIN");
+          await blocker.query(
+            'LOCK TABLE public."_prisma_migrations" IN ACCESS EXCLUSIVE MODE',
+          );
+          const bounded = await productionExecutor.migrate({
+            laneRoot: targetLaneRoot,
+            materializedTreeDigest: lane.treeDigest,
+            target: productionManifest.target,
+            timeoutSeconds: 1,
+          });
+          assert.ok(["AMBIGUOUS", "FAILED"].includes(bounded.status));
+        } finally {
+          await blocker.query("ROLLBACK").catch(() => undefined);
+          await blocker.end();
+        }
+        const afterTimeout = await adapter.inspect();
+        assert.equal(afterTimeout.migrationCount, SOURCE_MIGRATION_COUNT);
+        assert.equal(afterTimeout.migrationHead, SOURCE_HEAD);
+      }
       const applied = await applyFounderPilotCurrent188LegacyOwnershipPlan({
         adapter,
         approval,
@@ -858,39 +885,6 @@ test(
       });
       assert.equal(replay.deploymentAttempt, 0);
       assert.equal(replay.grantAttempt, 0);
-      if (productionExecutorEnabled) {
-        const blocker = new pg.Client({
-          connectionString: databaseAdminUrl.toString(),
-          connectionTimeoutMillis: 5_000,
-          query_timeout: 20_000,
-        });
-        await blocker.connect();
-        try {
-          await blocker.query("BEGIN");
-          await blocker.query(
-            'LOCK TABLE public."GuestSupportTicket" IN ACCESS EXCLUSIVE MODE',
-          );
-          const bounded = await productionExecutor.grantRuntimeAccess({
-            applicationRuntimeRole: runtimeRoleName,
-            target: productionManifest.target,
-            timeoutSeconds: 1,
-          });
-          assert.ok(["AMBIGUOUS", "FAILED"].includes(bounded.status));
-        } finally {
-          await blocker.query("ROLLBACK").catch(() => undefined);
-          await blocker.end();
-        }
-        const afterTimeout =
-          await verifyFounderPilotCurrent188LegacyOwnershipFinal({
-            adapter,
-            laneRoot: targetLaneRoot,
-            manifest: productionManifest,
-            runtimeAdapter: bridge,
-            runtimeSafetyAdapter: runtimeSafety,
-            sourcePrismaRoot: SOURCE_PRISMA_ROOT,
-          });
-        assert.equal(afterTimeout.migrationHead, TARGET_HEAD);
-      }
       await adapter.close();
       adapter = null;
     } catch (error) {

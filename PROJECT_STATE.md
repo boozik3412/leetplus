@@ -9,14 +9,16 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий runtime implementation baseline — merge SHA
-`a5eeec326a935db5a1c33bf94cfad3b942361f70` (PR #74).
-Fast CI `33238585320` и Full Release Admission `33238585296` зелёные на exact
+`fdf97624674112858dc7303dcee33c8acb7041e2` (PR #78).
+Fast CI `33257317114` и Full Release Admission `33257317130` зелёные на exact
 merge SHA. В source реализованы отдельные
 `CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
-pools, но production cutover не выполнялся: последний зафиксированный
-production runtime остаётся `COMBINED`, а split systemd/nginx candidate —
-`DORMANT / NOT INSTALLED`. Production уже работает на exact `a5eeec32…` в
-bridge-режиме `CURRENT_187 -> CURRENT_188`, но bug reporting остаётся `OFF`.
+pools. Split systemd/nginx candidate остаётся `DORMANT / NOT INSTALLED`, а
+production продолжает работать в `COMBINED`. Фактический active runtime —
+blue exact `fdf97624…`, cutover generation 11; schema — exact `CURRENT_188`,
+bridge `OFF`, bug reporting `LIVE`. Rollback green —
+`cc4d1c5949c3ac33dfe6eef14daa9cc5c6f41d3c`, exact `CURRENT_188`,
+bridge/reporting `OFF/OFF`.
 
 Публичный игровой вход (`/guest-portal*`) не зависит от corporate JWT/scope и
 не имеет общего лимита одновременно вошедших пользователей.
@@ -31,7 +33,7 @@ tenant queue `/support/bug-reports*` и platform queue
 и не вызывают outbound providers. Runtime flag
 `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed; authoritative runbook:
 [`docs/support/guest-bug-reporting.md`](docs/support/guest-bug-reporting.md).
-Переход production `CURRENT_187 -> CURRENT_188` использует двухфазный cutover и
+Выполненный переход production `CURRENT_187 -> CURRENT_188` использовал двухфазный cutover и
 `DUAL_BRIDGE_N_MINUS_ONE`. До DDL active и rollback slot независимо связаны с
 target-188 release provenance, hydration/slot-link receipts, API/Web invocation,
 exact migration checksum, authenticated reads и работают только в
@@ -44,16 +46,19 @@ lock и blue/green lock образуют одно authority window до post-eff
 migration выполняется локальной `postgres` identity, не меняя owners
 существующих объектов, а runtime получает только минимальный ACL новых
 support-объектов. До возврата успеха оба slot обязаны дать readiness `188/188`.
-Только затем candidate запускается с bridge `OFF` и reporting `LIVE`. Merge/CI
-сами по себе этот production rollout не выполняют.
+После exact apply candidate запущен с bridge `OFF` и reporting `LIVE`.
+Merge/CI сами по себе этот production rollout не выполняют.
 
-Ранние public switch 29.08 fail-closed вернулись до database effect из-за
-неверного порядка stateful authenticated smoke и readiness probes. Исправленный
-watchdog successor из PR #74 успешно admitted и развернут: production сейчас
-обслуживает exact SHA `a5eeec32…` в bridge-режиме, оставаясь на чистой схеме
-`CURRENT_187` с bug reporting `OFF`. Следующий database effect допустим только
-после admission dual-slot controller и отдельного exact-SHA GO; повторять
-прежний deploy не нужно.
+Финальный rollout 29.08.2026 выполнен подписанным планом
+`f109a174df1954aa4787ab95a1d1b963c6eb920a8910143777af061255124b7f`.
+Recovery receipt подтвердил `188` migrations, exact ownership/role digests и
+`recoveredFromLostResponse=true`; повторного DDL не было. Последний pre-apply
+backup:
+`/var/lib/leetplus/backups/current188-preapply-fdf97624-20260829T150010Z`,
+dump SHA-256
+`5b663c8204ca4ea060f502bc4229624cc6d6c3128cd3bf169d584bb86ad17780`.
+Production HTTP/DB/ACL/guard QA прошёл; синтетический тикет без guest JWT не
+создавался, поэтому интерактивный signed-in canary остаётся отдельной проверкой.
 
 ## Detailed gamification state (updated through 28.08.2026)
 

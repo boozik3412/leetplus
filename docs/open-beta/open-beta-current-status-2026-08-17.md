@@ -3,17 +3,38 @@
 | Поле                 | Состояние                                                                                 |
 | -------------------- | ----------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                              |
-| Production runtime   | healthy; exact `a5eeec32…`, `COMBINED`, schema bridge ON, bug reporting OFF               |
-| Prisma schema        | source candidate `CURRENT_188`; production remains `CURRENT_187` until controlled rollout |
+| Production runtime   | healthy; active blue `fdf97624…`, generation 11, `COMBINED`, bridge OFF, bug reporting LIVE |
+| Prisma schema        | source и production exact `CURRENT_188`                                                   |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA              |
-| Runtime successor    | mixed-owner merge `a5eeec326a935db5a1c33bf94cfad3b942361f70`; gates green                  |
+| Runtime successor    | CURRENT188 merge `fdf97624674112858dc7303dcee33c8acb7041e2`; gates green                     |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                          |
-| Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending            |
+| Role-aware landing   | входит в active `fdf97624…`; real-account canary pending                                  |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                  |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены               |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                             |
 | Offline/USB key      | исключён из beta critical path                                                            |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                        |
+
+## Обновление 29.08.2026 — bug-report production LIVE
+
+PR [#78](https://github.com/boozik3412/leetplus/pull/78), merge SHA
+`fdf97624674112858dc7303dcee33c8acb7041e2`, прошёл Fast CI
+`33257317114` и Full Release Admission `33257317130`. Production schema
+переведена подписанным mixed-owner планом
+`f109a174df1954aa4787ab95a1d1b963c6eb920a8910143777af061255124b7f`
+на exact `CURRENT_188`. Финальный active slot — blue `fdf97624…`, cutover
+generation 11, `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
+`GUEST_BUG_REPORTING_MODE=LIVE`. Rollback green `cc4d1c59…` прошёл exact
+CURRENT188 readiness и остаётся `OFF/OFF`.
+
+Финальный pre-apply backup:
+`/var/lib/leetplus/backups/current188-preapply-fdf97624-20260829T150010Z`;
+dump SHA-256
+`5b663c8204ca4ea060f502bc4229624cc6d6c3128cd3bf169d584bb86ad17780`.
+DB objects/ACL, оба slot, public health/release identity, anonymous guard и
+tenant/platform login redirects проверены. Позитивный гостевой submit без
+действующего guest JWT не имитировался; support row counts после rollout —
+`0/0/0/0`.
 
 ## Обновление 29.08.2026 — bug-report rollout watchdog
 

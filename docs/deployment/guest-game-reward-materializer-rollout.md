@@ -26,6 +26,12 @@ GUEST_GAME_REWARD_MATERIALIZER_ALLOW_ALL_TENANTS=false
 ```
 
 Use `KILL_SWITCH=true` only when pausing all new reward claims is intended.
+The canonical production-artifact `canary-safe.env` must therefore keep the
+autonomous scheduler disabled and the kill switch false. A permanent true kill
+switch makes an AVAILABLE entitlement look openable in the UI while every
+inline claim is rejected. The legacy rollback-safe profile may keep the
+emergency stop only when that rollback is deliberately expected to pause all
+reward claims.
 
 ## Before deployment
 

@@ -120,6 +120,13 @@ grep -F '5cfa7103e06632e4ab7fe54ce4b716f8a8984794fae9e1781b656803150a18e5' \
   "$authenticated_smoke" >/dev/null
 
 while IFS= read -r canary_assignment; do
+  if [[ "$canary_assignment" == 'GUEST_GAME_REWARD_MATERIALIZER_KILL_SWITCH=false' ]]; then
+    # The ordinary API overlay allows idempotent inline claims while keeping
+    # the scheduler off. The legacy rollback contour intentionally freezes
+    # every reward claim and therefore keeps this emergency switch true.
+    grep -F -x 'GUEST_GAME_REWARD_MATERIALIZER_KILL_SWITCH=true' "$safe_overlay" >/dev/null
+    continue
+  fi
   grep -F -x "$canary_assignment" "$safe_overlay" >/dev/null \
     || { printf 'rollback overlay lost canary deny: %s\n' "$canary_assignment" >&2; exit 1; }
 done < <(grep -E '^[A-Z0-9_]+=' "$canary_overlay")

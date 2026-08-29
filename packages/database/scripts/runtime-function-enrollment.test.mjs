@@ -287,7 +287,7 @@ for (const [environment, expectedCode] of [
 test("builds only the exact application grants and sealed exclusions", () => {
   const statements =
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime");
-  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 8);
+  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 10);
   assert.equal(EXCLUDED_WORKER_FUNCTIONS.length, 6);
   assert.equal(EXCLUDED_PENDING_FUNCTIONS.length, 13);
   assert.equal(EXCLUDED_ADMISSION_FUNCTIONS.length, 9);
@@ -298,7 +298,7 @@ test("builds only the exact application grants and sealed exclusions", () => {
       EXCLUDED_PENDING_FUNCTIONS.length +
       EXCLUDED_ADMISSION_FUNCTIONS.length +
       EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
-    56,
+    58,
   );
   const updatedAdmissionGuard = EXCLUDED_ADMISSION_FUNCTIONS.find(
     (entry) =>
@@ -405,18 +405,18 @@ test("builds only the exact application grants and sealed exclusions", () => {
   assert.equal(SEALED_RUNTIME_TYPES.length, 2);
   assert.equal(
     statements.length,
-    104 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+    108 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
   );
   assert.equal(
     statements.filter((statement) => statement.startsWith("GRANT EXECUTE"))
       .length,
-    8,
+    10,
   );
   assert.equal(
     statements.filter((statement) =>
       statement.startsWith("REVOKE GRANT OPTION"),
     ).length,
-    8,
+    10,
   );
   assert.equal(
     statements.filter((statement) => statement.startsWith("REVOKE EXECUTE"))
@@ -447,6 +447,8 @@ test("builds only the exact application grants and sealed exclusions", () => {
   const sql = statements.join("\n");
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
+  assert.match(sql, /assert_staff_attachment_state/u);
+  assert.match(sql, /resolve_staff_attachment_resource_scope/u);
   assert.match(sql, /guest_game_delivery_record_event_v1/u);
   assert.match(sql, /identity_email_claim_lock_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);

@@ -493,6 +493,13 @@ done < "$ROOT_ENV_EXAMPLE"
 while IFS='=' read -r safety_key safety_value; do
   case "$safety_key" in
     ''|DESIGN_PARTNER_ISOLATED_MODE|DESIGN_PARTNER_TENANT_SLUG|DESIGN_PARTNER_TENANT_DOMAIN) continue ;;
+    GUEST_GAME_REWARD_MATERIALIZER_KILL_SWITCH)
+      # The design-partner profile deliberately freezes every reward claim.
+      # The ordinary API overlay disables only the autonomous scheduler and
+      # must leave idempotent inline claims available.
+      grep -F -x 'GUEST_GAME_REWARD_MATERIALIZER_KILL_SWITCH=false' "$safe_overlay" > /dev/null
+      continue
+      ;;
   esac
   grep -F -x "${safety_key}=${safety_value}" "$safe_overlay" > /dev/null || {
     printf 'canary overlay diverges from canonical deny setting: %s\n' "$safety_key" >&2

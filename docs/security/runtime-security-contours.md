@@ -63,6 +63,31 @@ schema-bridge и rollback authority. Перед `CURRENT_188` они должн�
 переключены на admitted slot без разрыва публичного входа, остановлены,
 disabled и удалены из systemd inventory. Помечать такой sidecar `SAFE` нельзя.
 
+### Runtime repair contract 29.08.2026
+
+- `USER_CALL` остаётся обычным public API request path. Advisory transaction
+  lock обязан возвращать Prisma-поддерживаемый scalar (`::text AS
+  "lockResult"`); запрос, возвращающий PostgreSQL `void`, запрещён, потому что
+  превращает корректный provider flow в HTTP 500 до создания challenge.
+- Автономный reward materializer и inline reward claim имеют разные controls.
+  Безопасный обычный API overlay — `GUEST_GAME_REWARD_MATERIALIZER_ENABLED=false`
+  и `GUEST_GAME_REWARD_MATERIALIZER_KILL_SWITCH=false`: scheduler не запускается,
+  а уже заработанный кейс можно открыть вручную. `KILL_SWITCH=true` допустим
+  только как аварийная остановка всех новых claim, а не как постоянный
+  fail-closed default.
+- Application runtime role получает `EXECUTE` ровно на десять зарегистрированных
+  функций CURRENT188. В этот allowlist входят
+  `assert_staff_attachment_state(text)` и
+  `resolve_staff_attachment_resource_scope("StaffAttachmentResourceKind",text)`,
+  необходимые вызывающим их attachment triggers. Гранты выдаются только
+  `leetplus_runtime`, без `GRANT OPTION`; `PUBLIC` execute остаётся отозванным.
+- Runtime grant repair выполняется только versioned exact controller из
+  admitted artifact. Ручной широкий `GRANT EXECUTE ON ALL FUNCTIONS` запрещён.
+- Пока background materializer выключен, parked entitlement/reward rows не
+  дренируются автоматически. Повтор exact пользовательского open/claim после
+  снятия emergency kill switch безопасен благодаря idempotency intent/effect и
+  является предпочтительным recovery для отдельного доступного кейса.
+
 ## Техническая поддержка игрового модуля
 
 Support-функциональность следует тем же трём границам и не образует четвёртый

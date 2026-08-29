@@ -45,7 +45,7 @@ Safety:
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
   - Deliberate target-role and PUBLIC function/table/column/type ACL drift is
-    remediated across all fifty-six exact CURRENT_176 routine contracts.
+    remediated across all fifty-eight exact CURRENT_188 routine contracts.
   - Dedicated activation/coordinator roles are rejected, never enrolled.
   - The generated role and every grant are removed in finally.
 `;

@@ -10434,6 +10434,17 @@ describe('GuestPortalService', () => {
         gameConsentAccepted: true,
       });
 
+      const advisoryLockQuery = prisma.$queryRaw.mock.calls.find(
+        (call: unknown[]) =>
+          Array.isArray(call[0]) &&
+          String((call[0] as unknown[]).join(' ')).includes(
+            'pg_advisory_xact_lock',
+          ),
+      );
+      expect(
+        (advisoryLockQuery?.[0] as unknown[] | undefined)?.join(' '),
+      ).toContain('::text');
+
       expect(prisma.guestPortalOtpChallenge.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({

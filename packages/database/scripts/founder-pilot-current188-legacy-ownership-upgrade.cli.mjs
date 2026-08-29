@@ -46,8 +46,7 @@ function usage() {
     --mode apply --target production --manifest <absolute-json-path> \\
     --source-prisma-root <absolute-path> --lane-root <absolute-path> \\
     --plan <absolute-json-path> --approval <absolute-json-path> \\
-    --confirm-plan-digest <sha256> --prisma-cli <absolute-js-path> \\
-    --receipt <absolute-jsonl-path>
+    --confirm-plan-digest <sha256> --receipt <absolute-jsonl-path>
 
   node founder-pilot-current188-legacy-ownership-upgrade.cli.mjs \\
     --mode check --target production --manifest <absolute-json-path> \\
@@ -107,7 +106,6 @@ function parseArgs(argv) {
       "--manifest",
       "--mode",
       "--plan",
-      "--prisma-cli",
       "--receipt",
       "--source-prisma-root",
       "--target",
@@ -157,7 +155,6 @@ function parseArgs(argv) {
     ["--output-approval", "outputApprovalPath"],
     ["--output-plan", "outputPlanPath"],
     ["--plan", "planPath"],
-    ["--prisma-cli", "prismaCliPath"],
     ["--private-key", "privateKeyPath"],
     ["--receipt", "receiptPath"],
     ["--source-prisma-root", "sourcePrismaRoot"],
@@ -346,9 +343,7 @@ export async function main(
       args.receiptPath,
     );
     const executor =
-      createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor({
-        prismaCliPath: args.prismaCliPath,
-      });
+      createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor();
     const result = await applyFounderPilotCurrent188LegacyOwnershipPlan({
       adapter,
       approval,

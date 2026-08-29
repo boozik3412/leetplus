@@ -3,6 +3,8 @@ import {
   createHash,
   createPrivateKey,
   createPublicKey,
+  randomBytes,
+  randomUUID,
   sign,
   timingSafeEqual,
   verify,
@@ -69,6 +71,7 @@ const SAFE_KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/u;
 const BASE64URL_SIGNATURE = /^[A-Za-z0-9_-]{86}$/u;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const SAFE_LANE_PARENT = "/var/lib/leetplus/current188-legacy-lanes";
+const SAFE_POSTGRES_SOCKET_DIRECTORY = "/var/run/postgresql";
 const MAX_CHILD_OUTPUT_BYTES = 128 * 1024;
 
 const LEGACY_APPLIED_CHECKSUMS = new Map([
@@ -333,11 +336,13 @@ function normalizeTarget(value) {
       "expectedRoleMembershipDigest",
       "expectedRoles",
       "expectedServerMajor",
+      "expectedSupportCatalogDigest",
       "expectedSystemIdentifier",
       "host",
       "inspectionRole",
       "port",
       "privilegedExecutionRole",
+      "socketDirectory",
       "workerFunctionOwnerRole",
     ],
     "CURRENT188_LEGACY_TARGET_INVALID",
@@ -383,6 +388,10 @@ function normalizeTarget(value) {
       "CURRENT188_LEGACY_TARGET_INVALID",
       99,
     ),
+    expectedSupportCatalogDigest: sha256Value(
+      target.expectedSupportCatalogDigest,
+      "CURRENT188_LEGACY_TARGET_INVALID",
+    ),
     expectedSystemIdentifier: nonEmptyString(
       target.expectedSystemIdentifier,
       "CURRENT188_LEGACY_TARGET_INVALID",
@@ -402,6 +411,11 @@ function normalizeTarget(value) {
       target.privilegedExecutionRole,
       "CURRENT188_LEGACY_TARGET_INVALID",
     ),
+    socketDirectory: nonEmptyString(
+      target.socketDirectory,
+      "CURRENT188_LEGACY_TARGET_INVALID",
+      128,
+    ),
     workerFunctionOwnerRole: roleReference(
       target.workerFunctionOwnerRole,
       "CURRENT188_LEGACY_TARGET_INVALID",
@@ -412,6 +426,7 @@ function normalizeTarget(value) {
     new Set(result.activeRuntimeRoleNames).size !==
       result.activeRuntimeRoleNames.length ||
     result.host !== "127.0.0.1" ||
+    result.socketDirectory !== SAFE_POSTGRES_SOCKET_DIRECTORY ||
     result.expectedServerMajor !== 16 ||
     result.privilegedExecutionRole.name !== "postgres" ||
     !roleEqual(result.privilegedExecutionRole, result.workerFunctionOwnerRole)
@@ -772,6 +787,9 @@ function supportStructureExact(support, runtimeRole, { aclMode }) {
     stableJson(support?.enumTypes) !== stableJson(SUPPORT_ENUMS) ||
     support?.migrationChecksum !== TARGET_MIGRATION_SHA256 ||
     support?.publicWorkerExecuteCount !== 0 ||
+    support?.catalogDigest !== undefined &&
+      support.catalogDigest !== null &&
+      typeof support.catalogDigest !== "string" ||
     support?.workerFunctionOwnerRoleName !== "postgres"
   ) {
     return false;
@@ -850,7 +868,20 @@ function exactTargetBase(evidence, lane, manifest) {
     exactLedger(evidence, lane, true) &&
     evidence.preterminalManifestDigest === TARGET_PRETERMINAL_MANIFEST_SHA256 &&
     evidence.workerFunctionDigest === TARGET_WORKER_FUNCTION_SHA256 &&
-    evidence.workerFunctionComment === TARGET_WORKER_FUNCTION_COMMENT
+    evidence.workerFunctionComment === TARGET_WORKER_FUNCTION_COMMENT &&
+    evidence.support.catalogDigest ===
+      manifest.target.expectedSupportCatalogDigest &&
+    evidence.workerFunctionSecurityDefiner === true &&
+    evidence.workerFunctionLanguage === "plpgsql" &&
+    evidence.workerFunctionReturnType === "jsonb" &&
+    stableJson(evidence.workerFunctionConfig) ===
+      stableJson(["search_path=pg_catalog"]) &&
+    evidence.workerFunctionKind === "f" &&
+    evidence.workerFunctionVolatility === "v" &&
+    evidence.workerFunctionLeakproof === false &&
+    evidence.workerFunctionStrict === false &&
+    evidence.workerFunctionReturnsSet === false &&
+    evidence.workerFunctionParallel === "u"
   );
 }
 
@@ -1404,8 +1435,8 @@ export async function applyFounderPilotCurrent188LegacyOwnershipPlan({
         });
         const result = await executor.migrate({
           attempt: deploymentAttempt,
-          databaseName: manifest.target.databaseName,
           laneRoot,
+          target: manifest.target,
           timeoutSeconds: manifest.operation.deployTimeoutSeconds,
         });
         await emitPhase(onPhase, plan, "PRIVILEGED_MIGRATION_RESPONSE", {
@@ -1437,7 +1468,7 @@ export async function applyFounderPilotCurrent188LegacyOwnershipPlan({
       const result = await executor.grantRuntimeAccess({
         applicationRuntimeRole: manifest.target.applicationRuntimeRole.name,
         attempt: grantAttempt,
-        databaseName: manifest.target.databaseName,
+        target: manifest.target,
         timeoutSeconds: manifest.operation.deployTimeoutSeconds,
       });
       await emitPhase(onPhase, plan, "RUNTIME_ACL_RESPONSE", {
@@ -1795,6 +1826,18 @@ export async function createFounderPilotCurrent188LegacyOwnershipPgAdapter(
               owner.rolname AS "workerFunctionOwnerRoleName",
               owner.oid::INTEGER AS "workerFunctionOwnerRoleOid",
               routine.prosrc AS "workerFunctionSource",
+              routine.prosecdef AS "workerFunctionSecurityDefiner",
+              language.lanname AS "workerFunctionLanguage",
+              pg_catalog.format_type(routine.prorettype, NULL)
+                AS "workerFunctionReturnType",
+              COALESCE(pg_catalog.to_jsonb(routine.proconfig), '[]'::jsonb)
+                AS "workerFunctionConfig",
+              routine.prokind::TEXT AS "workerFunctionKind",
+              routine.provolatile::TEXT AS "workerFunctionVolatility",
+              routine.proleakproof AS "workerFunctionLeakproof",
+              routine.proisstrict AS "workerFunctionStrict",
+              routine.proretset AS "workerFunctionReturnsSet",
+              routine.proparallel::TEXT AS "workerFunctionParallel",
               pg_catalog.obj_description(routine.oid, 'pg_proc')
                 AS "workerFunctionComment",
               (
@@ -1823,6 +1866,7 @@ export async function createFounderPilotCurrent188LegacyOwnershipPgAdapter(
               ) AS "preterminalManifestDigest"
             FROM pg_catalog.pg_proc AS routine
             JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+            JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
             WHERE routine.oid = pg_catalog.to_regprocedure(
               'public."identity_mail_delivery_worker_assert_v1"(text)'
             )
@@ -1830,6 +1874,91 @@ export async function createFounderPilotCurrent188LegacyOwnershipPgAdapter(
         active.query(
           `
             SELECT
+              COALESCE((
+                SELECT pg_catalog.jsonb_agg(
+                  pg_catalog.jsonb_build_object(
+                    'tableName', table_relation.relname,
+                    'ordinal', column_record.attnum,
+                    'name', column_record.attname,
+                    'type', pg_catalog.format_type(
+                      column_record.atttypid,
+                      column_record.atttypmod
+                    ),
+                    'notNull', column_record.attnotnull,
+                    'default', pg_catalog.pg_get_expr(
+                      default_record.adbin,
+                      default_record.adrelid,
+                      true
+                    ),
+                    'identity', column_record.attidentity::TEXT,
+                    'generated', column_record.attgenerated::TEXT,
+                    'collation', CASE
+                      WHEN column_record.attcollation = 0 THEN NULL
+                      ELSE collation_namespace.nspname || '.' || collation_record.collname
+                    END
+                  ) ORDER BY table_relation.relname COLLATE "C", column_record.attnum
+                )
+                FROM pg_catalog.pg_class AS table_relation
+                JOIN pg_catalog.pg_attribute AS column_record
+                  ON column_record.attrelid = table_relation.oid
+                 AND column_record.attnum > 0
+                 AND NOT column_record.attisdropped
+                LEFT JOIN pg_catalog.pg_attrdef AS default_record
+                  ON default_record.adrelid = table_relation.oid
+                 AND default_record.adnum = column_record.attnum
+                LEFT JOIN pg_catalog.pg_collation AS collation_record
+                  ON collation_record.oid = column_record.attcollation
+                LEFT JOIN pg_catalog.pg_namespace AS collation_namespace
+                  ON collation_namespace.oid = collation_record.collnamespace
+                WHERE table_relation.relnamespace = pg_catalog.to_regnamespace('public')
+                  AND table_relation.relkind = 'r'
+                  AND table_relation.relname = ANY($1::TEXT[])
+              ), '[]'::jsonb) AS "columnDefinitions",
+              COALESCE((
+                SELECT pg_catalog.jsonb_agg(
+                  pg_catalog.jsonb_build_object(
+                    'name', index_relation.relname,
+                    'tableName', table_relation.relname,
+                    'definition', pg_catalog.pg_get_indexdef(
+                      index_relation.oid,
+                      0,
+                      true
+                    ),
+                    'unique', index_record.indisunique,
+                    'primary', index_record.indisprimary,
+                    'valid', index_record.indisvalid,
+                    'ready', index_record.indisready
+                  ) ORDER BY index_relation.relname COLLATE "C"
+                )
+                FROM pg_catalog.pg_index AS index_record
+                JOIN pg_catalog.pg_class AS index_relation
+                  ON index_relation.oid = index_record.indexrelid
+                JOIN pg_catalog.pg_class AS table_relation
+                  ON table_relation.oid = index_record.indrelid
+                WHERE table_relation.relnamespace = pg_catalog.to_regnamespace('public')
+                  AND table_relation.relname = ANY($1::TEXT[])
+              ), '[]'::jsonb) AS "indexDefinitions",
+              COALESCE((
+                SELECT pg_catalog.jsonb_agg(
+                  pg_catalog.jsonb_build_object(
+                    'name', constraint_record.conname,
+                    'tableName', table_relation.relname,
+                    'type', constraint_record.contype::TEXT,
+                    'definition', pg_catalog.pg_get_constraintdef(
+                      constraint_record.oid,
+                      true
+                    ),
+                    'validated', constraint_record.convalidated,
+                    'deferrable', constraint_record.condeferrable,
+                    'deferred', constraint_record.condeferred
+                  ) ORDER BY constraint_record.conname COLLATE "C"
+                )
+                FROM pg_catalog.pg_constraint AS constraint_record
+                JOIN pg_catalog.pg_class AS table_relation
+                  ON table_relation.oid = constraint_record.conrelid
+                WHERE constraint_record.connamespace = pg_catalog.to_regnamespace('public')
+                  AND table_relation.relname = ANY($1::TEXT[])
+              ), '[]'::jsonb) AS "constraintDefinitions",
               COALESCE((
                 SELECT pg_catalog.jsonb_agg(relation.relname ORDER BY relation.relname COLLATE "C")
                 FROM pg_catalog.pg_class AS relation
@@ -1989,6 +2118,11 @@ export async function createFounderPilotCurrent188LegacyOwnershipPgAdapter(
       );
       const runtimeRow = runtime.rows[0] ?? {};
       const supportRow = support.rows[0] ?? {};
+      const supportCatalog = {
+        columnDefinitions: supportRow.columnDefinitions ?? [],
+        constraintDefinitions: supportRow.constraintDefinitions ?? [],
+        indexDefinitions: supportRow.indexDefinitions ?? [],
+      };
       return Object.freeze({
         ...normalizeMigrationEvidence(migrations.rows),
         ...identity.rows[0],
@@ -2000,6 +2134,7 @@ export async function createFounderPilotCurrent188LegacyOwnershipPgAdapter(
         roles: roles.rows,
         support: {
           ...supportRow,
+          catalogDigest: sha256(stableJson(supportCatalog)),
           tableAccess: (supportRow.tableAccess ?? []).map((entry) => ({
             ...entry,
             nonOwnerPrivileges: normalizePrivileges(
@@ -2022,6 +2157,17 @@ export async function createFounderPilotCurrent188LegacyOwnershipPgAdapter(
           runtimeRow.workerFunctionOwnerRoleName ?? null,
         workerFunctionOwnerRoleOid:
           runtimeRow.workerFunctionOwnerRoleOid ?? null,
+        workerFunctionSecurityDefiner:
+          runtimeRow.workerFunctionSecurityDefiner ?? null,
+        workerFunctionLanguage: runtimeRow.workerFunctionLanguage ?? null,
+        workerFunctionReturnType: runtimeRow.workerFunctionReturnType ?? null,
+        workerFunctionConfig: runtimeRow.workerFunctionConfig ?? null,
+        workerFunctionKind: runtimeRow.workerFunctionKind ?? null,
+        workerFunctionVolatility: runtimeRow.workerFunctionVolatility ?? null,
+        workerFunctionLeakproof: runtimeRow.workerFunctionLeakproof ?? null,
+        workerFunctionStrict: runtimeRow.workerFunctionStrict ?? null,
+        workerFunctionReturnsSet: runtimeRow.workerFunctionReturnsSet ?? null,
+        workerFunctionParallel: runtimeRow.workerFunctionParallel ?? null,
       });
     } catch (error) {
       await active.query("ROLLBACK").catch(() => undefined);
@@ -2091,7 +2237,8 @@ async function trustedExecutable(filePath) {
     canonicalStat.isSymbolicLink() ||
     !canonicalStat.isFile() ||
     canonicalStat.uid !== 0n ||
-    (Number(canonicalStat.mode) & 0o022) !== 0
+    (Number(canonicalStat.mode) & 0o022) !== 0 ||
+    (Number(canonicalStat.mode) & 0o111) === 0
   ) {
     fail("CURRENT188_LEGACY_PRIVILEGED_EXECUTABLE_INVALID");
   }
@@ -2152,13 +2299,10 @@ async function preparePostgresLane(laneRoot) {
   }
   await visit(root);
   for (const entry of entries) {
-    await chown(
-      entry.filePath,
-      Number(postgresHome.uid),
-      Number(postgresHome.gid),
-    );
-    await chmod(entry.filePath, entry.directory ? 0o500 : 0o400);
+    await chown(entry.filePath, 0, Number(postgresHome.gid));
+    await chmod(entry.filePath, entry.directory ? 0o550 : 0o440);
   }
+  return root;
 }
 
 function childEvidence(status, code, signal, stdout, stderr) {
@@ -2173,21 +2317,175 @@ function childEvidence(status, code, signal, stdout, stderr) {
   });
 }
 
-async function spawnBounded(executable, args, environment, timeoutSeconds) {
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function spawnUtility(executable, args, timeoutMilliseconds = 5_000) {
   return new Promise((resolve) => {
     const child = spawn(executable, args, {
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        LANG: "C.UTF-8",
+        LC_ALL: "C.UTF-8",
+        PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
+        TZ: "UTC",
+      },
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    let settled = false;
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      settle(false);
+    }, timeoutMilliseconds);
+    child.once("error", () => settle(false));
+    child.once("close", (code, signal) =>
+      settle(code === 0 && signal === null),
+    );
+  });
+}
+
+async function systemdCgroupEmpty(unitName) {
+  const cgroupProcesses = path.join(
+    "/sys/fs/cgroup/system.slice",
+    `${unitName}.service`,
+    "cgroup.procs",
+  );
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const value = await readFile(cgroupProcesses, "utf8").catch((error) => {
+      if (error?.code === "ENOENT") return "";
+      throw error;
+    });
+    if (value.trim() === "") return true;
+    await delay(100);
+  }
+  return false;
+}
+
+async function stopSystemdExecution(systemctl, unitName) {
+  const serviceName = `${unitName}.service`;
+  await spawnUtility(systemctl, [
+    "kill",
+    "--kill-who=all",
+    "--signal=SIGTERM",
+    serviceName,
+  ]);
+  await delay(250);
+  if (!(await systemdCgroupEmpty(unitName))) {
+    await spawnUtility(systemctl, [
+      "kill",
+      "--kill-who=all",
+      "--signal=SIGKILL",
+      serviceName,
+    ]);
+  }
+  await spawnUtility(systemctl, ["stop", serviceName]);
+  return systemdCgroupEmpty(unitName);
+}
+
+async function spawnBoundedSystemd({
+  executable,
+  executableArgs,
+  readOnlyPath,
+  stdin,
+  timeoutSeconds,
+}) {
+  const systemdRun = await trustedExecutable("/usr/bin/systemd-run");
+  const systemctl = await trustedExecutable("/usr/bin/systemctl");
+  const env = await trustedExecutable("/usr/bin/env");
+  const unitName = `leetplus-current188-upgrade-${process.pid}-${randomBytes(8).toString("hex")}`;
+  const systemdArgs = [
+    "--quiet",
+    "--wait",
+    "--collect",
+    "--pipe",
+    `--unit=${unitName}`,
+    "--service-type=exec",
+    "--property=User=postgres",
+    "--property=Group=postgres",
+    "--property=KillMode=control-group",
+    "--property=TimeoutStopSec=5s",
+    `--property=RuntimeMaxSec=${timeoutSeconds}s`,
+    "--property=NoNewPrivileges=yes",
+    "--property=PrivateTmp=yes",
+    "--property=ProtectHome=yes",
+    "--property=ProtectSystem=strict",
+    "--property=ProtectControlGroups=yes",
+    "--property=RestrictSUIDSGID=yes",
+    "--property=LockPersonality=yes",
+    "--property=RestrictAddressFamilies=AF_UNIX",
+    "--property=IPAddressDeny=any",
+    "--property=UMask=0077",
+  ];
+  if (readOnlyPath) systemdArgs.push(`--property=ReadOnlyPaths=${readOnlyPath}`);
+  systemdArgs.push(
+    env,
+    "-i",
+    "HOME=/var/lib/postgresql",
+    "LANG=C.UTF-8",
+    "LC_ALL=C.UTF-8",
+    "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+    "TZ=UTC",
+    executable,
+    ...executableArgs,
+  );
+  return new Promise((resolve) => {
+    const child = spawn(systemdRun, systemdArgs, {
+      env: {
+        LANG: "C.UTF-8",
+        LC_ALL: "C.UTF-8",
+        PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
+        TZ: "UTC",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
     let overflow = false;
     let timedOut = false;
+    let settled = false;
+    let cleanupPromise = null;
+    let forceTimer = null;
+    const cleanup = () => {
+      if (cleanupPromise === null) {
+        cleanupPromise = stopSystemdExecution(systemctl, unitName);
+      }
+      return cleanupPromise;
+    };
+    const settle = async (code, signal, spawnFailed = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (forceTimer !== null) clearTimeout(forceTimer);
+      const cgroupEmpty = await cleanup().catch(() => false);
+      if (!cgroupEmpty) {
+        resolve(childEvidence("AMBIGUOUS", code, signal, stdout, stderr));
+        return;
+      }
+      resolve(
+        childEvidence(
+          timedOut
+            ? "AMBIGUOUS"
+            : !spawnFailed && !overflow && code === 0 && signal === null
+              ? "SUCCEEDED"
+              : "FAILED",
+          code,
+          signal,
+          stdout,
+          stderr,
+        ),
+      );
+    };
     const collect = (target, chunk) => {
       const next = target + chunk.toString("utf8");
       if (Buffer.byteLength(next) > MAX_CHILD_OUTPUT_BYTES) {
         overflow = true;
-        child.kill("SIGKILL");
+        void cleanup();
         return target;
       }
       return next;
@@ -2200,36 +2498,60 @@ async function spawnBounded(executable, args, environment, timeoutSeconds) {
     });
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
-    }, timeoutSeconds * 1000);
-    child.once("error", () => {
-      clearTimeout(timer);
-      resolve(childEvidence("FAILED", null, null, stdout, stderr));
-    });
-    child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      resolve(
-        childEvidence(
-          timedOut
-            ? "AMBIGUOUS"
-            : !overflow && code === 0 && signal === null
-              ? "SUCCEEDED"
-              : "FAILED",
-          code,
-          signal,
-          stdout,
-          stderr,
-        ),
-      );
-    });
+      void cleanup();
+      forceTimer = setTimeout(() => child.kill("SIGKILL"), 7_000);
+      forceTimer.unref();
+    }, (timeoutSeconds + 5) * 1000);
+    child.once("error", () => void settle(null, null, true));
+    child.once("close", (code, signal) => void settle(code, signal));
+    child.stdin.end(stdin);
   });
 }
 
-export function createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor({
-  nodeExecutable = process.execPath,
-  prismaCliPath,
-} = {}) {
+function sqlLiteral(value, reasonCode = "CURRENT188_LEGACY_SQL_VALUE_INVALID") {
+  if (typeof value !== "string" || value.includes("\0")) fail(reasonCode);
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function exactClusterGuardSql(target) {
+  return `
+DO $current188_exact_cluster$
+DECLARE
+  observed_system_identifier TEXT;
+BEGIN
+  SELECT control.system_identifier::TEXT
+  INTO observed_system_identifier
+  FROM pg_catalog.pg_control_system() AS control;
+  IF pg_catalog.current_database() IS DISTINCT FROM ${sqlLiteral(target.databaseName)}
+     OR pg_catalog.inet_server_port() IS DISTINCT FROM ${target.port}
+     OR observed_system_identifier IS DISTINCT FROM ${sqlLiteral(target.expectedSystemIdentifier)}
+     OR pg_catalog.pg_is_in_recovery()
+     OR SESSION_USER IS DISTINCT FROM ${sqlLiteral(target.privilegedExecutionRole.name)}
+  THEN
+    RAISE EXCEPTION 'CURRENT188_LEGACY_PRIVILEGED_CLUSTER_IDENTITY_MISMATCH';
+  END IF;
+END
+$current188_exact_cluster$;
+`;
+}
+
+function targetMigrationBody(rawSql) {
+  const beginMarker = "\nBEGIN;\n";
+  const commitMarker = "\nCOMMIT;\n";
+  const begin = rawSql.indexOf(beginMarker);
+  const commit = rawSql.lastIndexOf(commitMarker);
+  if (
+    begin < 0 ||
+    commit < begin ||
+    commit + commitMarker.length !== rawSql.length ||
+    rawSql.indexOf(beginMarker, begin + beginMarker.length) !== -1
+  ) {
+    fail("CURRENT188_LEGACY_TARGET_MIGRATION_BOUNDARY_INVALID");
+  }
+  return rawSql.slice(begin + beginMarker.length, commit);
+}
+
+export function createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor() {
   if (
     process.platform !== "linux" ||
     typeof process.geteuid !== "function" ||
@@ -2237,46 +2559,30 @@ export function createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor
   ) {
     fail("CURRENT188_LEGACY_PRIVILEGED_AUTHORITY_REQUIRED");
   }
-  async function command(databaseName, commandArgs, timeoutSeconds) {
-    const runuser = await trustedExecutable("/usr/sbin/runuser");
-    const env = await trustedExecutable("/usr/bin/env");
-    const databaseUrl = `postgresql:///${identifier(
-      databaseName,
-      "CURRENT188_LEGACY_DATABASE_INVALID",
-    )}?host=%2Fvar%2Frun%2Fpostgresql&application_name=current188_legacy_owner_privileged`;
-    return spawnBounded(
-      runuser,
-      [
-        "--user",
-        "postgres",
-        "--",
-        env,
-        "-i",
-        "HOME=/var/lib/postgresql",
-        "LANG=C.UTF-8",
-        "LC_ALL=C.UTF-8",
-        "NODE_ENV=production",
-        "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
-        "TZ=UTC",
-        `DATABASE_URL=${databaseUrl}`,
-        ...commandArgs,
+  async function command(target, sql, timeoutSeconds, readOnlyPath) {
+    const psql = await trustedExecutable("/usr/lib/postgresql/16/bin/psql");
+    return spawnBoundedSystemd({
+      executable: psql,
+      executableArgs: [
+        "--no-psqlrc",
+        "--set=ON_ERROR_STOP=1",
+        `--host=${target.socketDirectory}`,
+        `--port=${target.port}`,
+        `--username=${target.privilegedExecutionRole.name}`,
+        `--dbname=${target.databaseName}`,
+        "--file=-",
       ],
-      {
-        LANG: "C.UTF-8",
-        LC_ALL: "C.UTF-8",
-        PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
-        TZ: "UTC",
-      },
+      readOnlyPath,
+      stdin: sql,
       timeoutSeconds,
-    );
+    });
   }
   return Object.freeze({
     grantRuntimeAccess: async ({
       applicationRuntimeRole,
-      databaseName,
+      target,
       timeoutSeconds,
     }) => {
-      const psql = await trustedExecutable("/usr/lib/postgresql/16/bin/psql");
       const role = quoteIdentifier(applicationRuntimeRole);
       const tables = SUPPORT_TABLES.map((name) => `public."${name}"`).join(
         ", ",
@@ -2294,6 +2600,7 @@ export function createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor
         "BEGIN;",
         "SET LOCAL lock_timeout = '5s';",
         "SET LOCAL statement_timeout = '2min';",
+        exactClusterGuardSql(target),
         `REVOKE ALL PRIVILEGES ON TABLE ${tables} FROM PUBLIC;`,
         `REVOKE ALL PRIVILEGES ON TYPE ${types} FROM PUBLIC;`,
         `REVOKE ALL PRIVILEGES ON TABLE ${tables} FROM ${role};`,
@@ -2303,33 +2610,38 @@ export function createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor
         `GRANT USAGE ON TYPE ${types} TO ${role};`,
         "COMMIT;",
       ].join("\n");
-      return command(
-        databaseName,
-        [
-          psql,
-          "--no-psqlrc",
-          "--set=ON_ERROR_STOP=1",
-          `--dbname=${databaseName}`,
-          `--command=${sql}`,
-        ],
-        timeoutSeconds,
-      );
+      return command(target, sql, timeoutSeconds);
     },
-    migrate: async ({ databaseName, laneRoot, timeoutSeconds }) => {
-      await trustedExecutable(nodeExecutable);
-      await trustedExecutable(prismaCliPath);
-      await preparePostgresLane(laneRoot);
+    migrate: async ({ laneRoot, target, timeoutSeconds }) => {
+      const canonicalLaneRoot = await preparePostgresLane(laneRoot);
+      const migrationPath = path.join(
+        canonicalLaneRoot,
+        "migrations",
+        TARGET_HEAD,
+        "migration.sql",
+      );
+      const rawMigration = await readFile(migrationPath, "utf8");
+      if (sha256(rawMigration) !== TARGET_MIGRATION_SHA256) {
+        fail("CURRENT188_LEGACY_TARGET_MIGRATION_DRIFT");
+      }
+      const migrationId = randomUUID();
+      const migrationSql = [
+        "BEGIN;",
+        "SET LOCAL lock_timeout = '5s';",
+        "SET LOCAL statement_timeout = '2min';",
+        exactClusterGuardSql(target),
+        `INSERT INTO public."_prisma_migrations" ("id", "checksum", "finished_at", "migration_name", "logs", "rolled_back_at", "started_at", "applied_steps_count") VALUES (${sqlLiteral(migrationId)}, ${sqlLiteral(TARGET_MIGRATION_SHA256)}, NULL, ${sqlLiteral(TARGET_HEAD)}, NULL, NULL, pg_catalog.clock_timestamp(), 0);`,
+        targetMigrationBody(rawMigration),
+        `UPDATE public."_prisma_migrations" SET "finished_at" = pg_catalog.clock_timestamp(), "applied_steps_count" = 1 WHERE "id" = ${sqlLiteral(migrationId)} AND "migration_name" = ${sqlLiteral(TARGET_HEAD)} AND "checksum" = ${sqlLiteral(TARGET_MIGRATION_SHA256)} AND "finished_at" IS NULL AND "rolled_back_at" IS NULL;`,
+        `DO $current188_migration_receipt$ BEGIN IF (SELECT pg_catalog.count(*) FROM public."_prisma_migrations" WHERE "id" = ${sqlLiteral(migrationId)} AND "migration_name" = ${sqlLiteral(TARGET_HEAD)} AND "checksum" = ${sqlLiteral(TARGET_MIGRATION_SHA256)} AND "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL AND "applied_steps_count" = 1) <> 1 THEN RAISE EXCEPTION 'CURRENT188_LEGACY_MIGRATION_RECEIPT_NOT_WRITTEN'; END IF; END $current188_migration_receipt$;`,
+        "COMMIT;",
+        "",
+      ].join("\n");
       return command(
-        databaseName,
-        [
-          nodeExecutable,
-          prismaCliPath,
-          "migrate",
-          "deploy",
-          "--schema",
-          path.join(laneRoot, "schema.prisma"),
-        ],
+        target,
+        migrationSql,
         timeoutSeconds,
+        canonicalLaneRoot,
       );
     },
   });

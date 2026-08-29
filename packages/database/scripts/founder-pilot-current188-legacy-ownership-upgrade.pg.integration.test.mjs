@@ -288,6 +288,7 @@ function manifest({
       expectedRoleMembershipDigest: roleMembershipDigest,
       expectedRoles: roles.map(roleProjection),
       expectedServerMajor: 16,
+      expectedSupportCatalogDigest: "0".repeat(64),
       expectedSystemIdentifier: systemIdentifier,
       host: "127.0.0.1",
       inspectionRole: { name: runtimeRole.name, oid: runtimeRole.oid },
@@ -296,6 +297,7 @@ function manifest({
         name: postgresRole.name,
         oid: postgresRole.oid,
       },
+      socketDirectory: "/var/run/postgresql",
       workerFunctionOwnerRole: {
         name: postgresRole.name,
         oid: postgresRole.oid,
@@ -666,6 +668,10 @@ test(
         migrate: async () => {
           try {
             await runPrismaDeploy(databaseAdminUrl.toString(), targetLaneRoot);
+            const targetEvidence = await adapter.inspect();
+            process.stdout.write(
+              `CURRENT188_LEGACY_SUPPORT_CATALOG_DIGEST=${targetEvidence.support.catalogDigest}\n`,
+            );
             return { status: "SUCCEEDED" };
           } catch {
             return { status: "FAILED" };

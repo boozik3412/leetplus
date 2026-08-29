@@ -24,6 +24,7 @@ const SYSTEM_IDENTIFIER = "7675301746759083084";
 const RELEASE_SHA = "c".repeat(40);
 const HISTORICAL_OWNERSHIP_DIGEST = "a".repeat(64);
 const MEMBERSHIP_DIGEST = "b".repeat(64);
+const SUPPORT_CATALOG_DIGEST = "e".repeat(64);
 const LEGACY_APPLIED_CHECKSUMS = new Map([
   [
     "20260518120000_guest_data_foundation",
@@ -183,6 +184,13 @@ function runtimeAdapter() {
 function support(mode) {
   if (mode === "SOURCE") {
     return {
+      catalogDigest: sha256(
+        JSON.stringify({
+          columnDefinitions: [],
+          constraintDefinitions: [],
+          indexDefinitions: [],
+        }),
+      ),
       constraintNames: [],
       enumTypes: [],
       indexNames: [],
@@ -198,6 +206,7 @@ function support(mode) {
   }
   const final = mode === "FINAL";
   return {
+    catalogDigest: SUPPORT_CATALOG_DIGEST,
     constraintNames:
       FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.supportConstraints,
     enumTypes: FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.supportEnums,
@@ -288,6 +297,16 @@ function evidence(rows, mode = "SOURCE", overrides = {}) {
         : FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.targetWorkerFunctionComment,
     workerFunctionOwnerRoleName: "postgres",
     workerFunctionOwnerRoleOid: 10,
+    workerFunctionSecurityDefiner: true,
+    workerFunctionLanguage: "plpgsql",
+    workerFunctionReturnType: "jsonb",
+    workerFunctionConfig: ["search_path=pg_catalog"],
+    workerFunctionKind: "f",
+    workerFunctionVolatility: "v",
+    workerFunctionLeakproof: false,
+    workerFunctionStrict: false,
+    workerFunctionReturnsSet: false,
+    workerFunctionParallel: "u",
     ...overrides,
   };
 }
@@ -356,11 +375,13 @@ async function fixture(t) {
       expectedRoleMembershipDigest: MEMBERSHIP_DIGEST,
       expectedRoles: EXPECTED_ROLES,
       expectedServerMajor: 16,
+      expectedSupportCatalogDigest: SUPPORT_CATALOG_DIGEST,
       expectedSystemIdentifier: SYSTEM_IDENTIFIER,
       host: "127.0.0.1",
       inspectionRole: { name: "leetplus_runtime", oid: 19002 },
       port: 5432,
       privilegedExecutionRole: { name: "postgres", oid: 10 },
+      socketDirectory: "/var/run/postgresql",
       workerFunctionOwnerRole: { name: "postgres", oid: 10 },
     },
   });

@@ -75,6 +75,7 @@ const BRIDGE_PRODUCTION_CONTROL_VERIFIER =
   "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs";
 const BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG =
   "--require-root-authority";
+const BRIDGE_SLOT_LINK_BOUND_EFFECT_STATE = "REQUESTED_BOUND";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SHA40 = /^[0-9a-f]{40}$/u;
 const INVOCATION_ID = /^[0-9a-f]{32}$/u;
@@ -1123,7 +1124,7 @@ async function inspectBridgeSlotReleaseAuthority({ releaseSha, slot }) {
     slotLinkReceipt.SOURCE_RECEIPT_SHA256 !== "" ||
     slotLinkReceipt.ACTIVE_SLOT_SAFE_MODE !== "false" ||
     !SHA256.test(slotLinkReceipt.INTENT_SHA256) ||
-    slotLinkReceipt.EFFECT_STATE !== "BOUND" ||
+    slotLinkReceipt.EFFECT_STATE !== BRIDGE_SLOT_LINK_BOUND_EFFECT_STATE ||
     parseNanoTimestamp(slotLinkReceipt.CREATED_AT) === null ||
     parseNanoTimestamp(slotLinkReceipt.ACCEPTED_AT) === null
   ) {
@@ -2625,6 +2626,7 @@ export const FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS =
     bridgeAuthorityLockPaths: BRIDGE_AUTHORITY_LOCK_PATHS,
     bridgeProductionControlVerifierAuthorityArgument:
       BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG,
+    bridgeSlotLinkBoundEffectState: BRIDGE_SLOT_LINK_BOUND_EFFECT_STATE,
     sourceMigrationCount: SOURCE_COUNT,
     sourceMigrationHead: SOURCE_HEAD,
     targetMigrationCount: TARGET_COUNT,

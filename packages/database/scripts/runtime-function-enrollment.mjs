@@ -20,6 +20,18 @@ export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT =
   CURRENT_EXPECTED_MIGRATION_COUNT;
 
+const DEFAULT_FUNCTION_SEARCH_PATH = "pg_catalog";
+const STAFF_ATTACHMENT_FUNCTION_SEARCH_PATH =
+  "pg_catalog, public, pg_temp";
+
+function expectedFunctionSearchPath(entry) {
+  return entry.enrollmentSearchPath ?? DEFAULT_FUNCTION_SEARCH_PATH;
+}
+
+function expectedFunctionConfig(entry) {
+  return [`search_path=${expectedFunctionSearchPath(entry)}`];
+}
+
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
     key: "deliveryTransitionKey",
@@ -44,6 +56,8 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
     securityDefiner: false,
     volatility: "v",
     language: "plpgsql",
+    enrollmentSearchPath: STAFF_ATTACHMENT_FUNCTION_SEARCH_PATH,
+    allowLegacyUnsetSearchPath: true,
   }),
   Object.freeze({
     key: "staffAttachmentResourceScopeResolver",
@@ -54,6 +68,8 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
     securityDefiner: false,
     volatility: "v",
     language: "plpgsql",
+    enrollmentSearchPath: STAFF_ATTACHMENT_FUNCTION_SEARCH_PATH,
+    allowLegacyUnsetSearchPath: true,
   }),
   Object.freeze({
     key: "identityEmailClaimReserveInvite",
@@ -1118,7 +1134,7 @@ export function runtimeFunctionContractDigest() {
         requiredMigration: RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION,
         migration: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION,
         migrationCount: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT,
-        exactFunctionSearchPath: "pg_catalog",
+        defaultFunctionSearchPath: DEFAULT_FUNCTION_SEARCH_PATH,
         application: APPLICATION_RUNTIME_FUNCTIONS.map(
           ({
             key,
@@ -1126,12 +1142,18 @@ export function runtimeFunctionContractDigest() {
             securityDefiner,
             volatility,
             language,
+            enrollmentSearchPath,
+            allowLegacyUnsetSearchPath,
           }) => ({
             key,
             catalogSignature,
             securityDefiner,
             volatility,
             language: language ?? null,
+            expectedSearchPath:
+              enrollmentSearchPath ?? DEFAULT_FUNCTION_SEARCH_PATH,
+            allowLegacyUnsetSearchPath:
+              allowLegacyUnsetSearchPath === true,
           }),
         ),
         excludedWorker: EXCLUDED_WORKER_FUNCTIONS.map(
@@ -1237,6 +1259,11 @@ export function buildRuntimeFunctionEnrollmentStatements(roleName) {
     );
   }
   for (const entry of APPLICATION_RUNTIME_FUNCTIONS) {
+    if (typeof entry.enrollmentSearchPath === "string") {
+      statements.push(
+        `ALTER FUNCTION ${entry.grantSignature} SET search_path TO ${entry.enrollmentSearchPath}`,
+      );
+    }
     statements.push(
       `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
     );
@@ -1262,11 +1289,7 @@ async function inspectFunction(prisma, roleName, entry) {
         function_object.prosecdef AS security_definer,
         function_object.provolatile::text AS volatility,
         language_object.lanname AS language_name,
-        COALESCE(
-          function_object.proconfig =
-            ARRAY['search_path=pg_catalog']::TEXT[],
-          FALSE
-        ) AS search_path_pg_catalog_only,
+        function_object.proconfig AS function_config,
         CASE
           WHEN function_object.oid IS NULL THEN FALSE
           ELSE pg_catalog.has_function_privilege(
@@ -1345,6 +1368,10 @@ async function inspectFunction(prisma, roleName, entry) {
     entry.catalogSignature,
   );
   const row = rows[0];
+  const functionConfig = Array.isArray(row?.function_config)
+    ? [...row.function_config]
+    : null;
+  const exactFunctionConfig = expectedFunctionConfig(entry);
   return {
     key: entry.key,
     catalogSignature: entry.catalogSignature,
@@ -1353,10 +1380,19 @@ async function inspectFunction(prisma, roleName, entry) {
     expectedVolatility: entry.volatility,
     expectedLanguage:
       typeof entry.language === "string" ? entry.language : null,
+    expectedSearchPath: expectedFunctionSearchPath(entry),
+    allowLegacyUnsetSearchPath: entry.allowLegacyUnsetSearchPath === true,
     exists: row?.exists === true,
     ownerName: typeof row?.owner_name === "string" ? row.owner_name : null,
     securityDefiner: row?.security_definer === true,
-    searchPathPgCatalogOnly: row?.search_path_pg_catalog_only === true,
+    functionConfig,
+    searchPathUnset: functionConfig === null,
+    searchPathMatchesExpected:
+      functionConfig !== null &&
+      functionConfig.length === exactFunctionConfig.length &&
+      functionConfig.every(
+        (value, index) => value === exactFunctionConfig[index],
+      ),
     volatility: typeof row?.volatility === "string" ? row.volatility : null,
     language: typeof row?.language_name === "string" ? row.language_name : null,
     effectiveExecute: row?.effective_execute === true,
@@ -1770,6 +1806,11 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
           'public',
           'USAGE'
         ) AS schema_usage,
+        pg_catalog.has_schema_privilege(
+          role.rolname,
+          'public',
+          'CREATE'
+        ) AS schema_create,
         (
           SELECT pg_catalog.count(*)::integer
           FROM pg_catalog.pg_auth_members AS membership
@@ -1900,6 +1941,7 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
             bypassesRls: role.rolbypassrls === true,
             databaseConnect: role.database_connect === true,
             schemaUsage: role.schema_usage === true,
+            schemaCreate: role.schema_create === true,
             membershipCount: Number(role.membership_count ?? -1),
             ownershipCount: Number(role.ownership_count ?? -1),
             liveActivationChallengeBindingCount: Number(
@@ -1962,6 +2004,9 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
     if (!snapshot.role.schemaUsage) {
       violations.push("RUNTIME_ROLE_SCHEMA_USAGE_MISSING");
     }
+    if (snapshot.role.schemaCreate) {
+      violations.push("RUNTIME_ROLE_SCHEMA_CREATE_PRESENT");
+    }
     if (snapshot.role.membershipCount !== 0) {
       violations.push("RUNTIME_ROLE_MEMBERSHIP_PRESENT");
     }
@@ -2013,7 +2058,10 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
     ) {
       violations.push(`${entry.key}:LANGUAGE_MISMATCH`);
     }
-    if (!entry.searchPathPgCatalogOnly) {
+    if (
+      !entry.searchPathMatchesExpected &&
+      !(entry.allowLegacyUnsetSearchPath && entry.searchPathUnset)
+    ) {
       violations.push(`${entry.key}:SEARCH_PATH_MISMATCH`);
     }
     if (entry.publicExecute) {
@@ -2077,6 +2125,9 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
 
   for (const entry of snapshot.functions) {
     if (applicationKeys.has(entry.key)) {
+      if (!entry.searchPathMatchesExpected) {
+        violations.push(`${entry.key}:SEARCH_PATH_ENROLLMENT_MISSING`);
+      }
       if (!entry.effectiveExecute || !entry.directExecute) {
         violations.push(`${entry.key}:EXECUTE_MISSING`);
       }
@@ -2169,7 +2220,11 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
     currentMigrationCount: config.expectedMigrationCount,
     contractDigest: runtimeFunctionContractDigest(),
     applicationFunctions: APPLICATION_RUNTIME_FUNCTIONS.map(
-      ({ key, catalogSignature }) => ({ key, catalogSignature }),
+      (entry) => ({
+        key: entry.key,
+        catalogSignature: entry.catalogSignature,
+        expectedSearchPath: expectedFunctionSearchPath(entry),
+      }),
     ),
     excludedWorkerFunctions: EXCLUDED_WORKER_FUNCTIONS.map(
       ({ key, catalogSignature }) => ({ key, catalogSignature }),
@@ -2389,7 +2444,7 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").join("\n");
   assert.equal(
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").length,
-    108 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+    110 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
   );
   assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 10);
   assert.equal(EXCLUDED_WORKER_FUNCTIONS.length, 6);

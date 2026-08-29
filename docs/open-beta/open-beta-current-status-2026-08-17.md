@@ -24,7 +24,10 @@
   больше не обрывает public request до создания challenge;
 - CURRENT188 runtime-function enrollment добавляет два минимальных
   attachment-helper grant для `leetplus_runtime`, сохраняя `PUBLIC` revoke и
-  запрет `GRANT OPTION`;
+  запрет `GRANT OPTION`; перед грантом exact controller идемпотентно закрепляет
+  для этих двух исторических `SECURITY INVOKER` helpers безопасный
+  `search_path=pg_catalog, public, pg_temp` и отклоняет runtime role с `CREATE`
+  на `public`;
 - canonical API overlay оставляет автономный reward scheduler выключенным, но
   меняет emergency materializer kill switch на `false`, чтобы ручное открытие
   уже заработанного кейса проходило через idempotent inline pipeline.

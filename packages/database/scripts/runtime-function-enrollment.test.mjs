@@ -46,6 +46,7 @@ function compliantSnapshot() {
       bypassesRls: false,
       databaseConnect: true,
       schemaUsage: true,
+      schemaCreate: false,
       membershipCount: 0,
       ownershipCount: 0,
       liveActivationChallengeBindingCount: 0,
@@ -65,10 +66,17 @@ function compliantSnapshot() {
         expectedSecurityDefiner: entry.securityDefiner,
         expectedVolatility: entry.volatility,
         expectedLanguage: entry.language ?? null,
+        expectedSearchPath: entry.enrollmentSearchPath ?? "pg_catalog",
+        allowLegacyUnsetSearchPath:
+          entry.allowLegacyUnsetSearchPath === true,
         exists: true,
         ownerName: "migration_owner",
         securityDefiner: entry.securityDefiner,
-        searchPathPgCatalogOnly: true,
+        functionConfig: [
+          `search_path=${entry.enrollmentSearchPath ?? "pg_catalog"}`,
+        ],
+        searchPathUnset: false,
+        searchPathMatchesExpected: true,
         volatility: entry.volatility,
         language: entry.language ?? "plpgsql",
         effectiveExecute: true,
@@ -83,10 +91,14 @@ function compliantSnapshot() {
         expectedSecurityDefiner: entry.securityDefiner,
         expectedVolatility: entry.volatility,
         expectedLanguage: entry.language ?? null,
+        expectedSearchPath: "pg_catalog",
+        allowLegacyUnsetSearchPath: false,
         exists: true,
         ownerName: "migration_owner",
         securityDefiner: entry.securityDefiner,
-        searchPathPgCatalogOnly: true,
+        functionConfig: ["search_path=pg_catalog"],
+        searchPathUnset: false,
+        searchPathMatchesExpected: true,
         volatility: entry.volatility,
         language: entry.language ?? "plpgsql",
         effectiveExecute: false,
@@ -101,10 +113,14 @@ function compliantSnapshot() {
         expectedSecurityDefiner: entry.securityDefiner,
         expectedVolatility: entry.volatility,
         expectedLanguage: entry.language ?? null,
+        expectedSearchPath: "pg_catalog",
+        allowLegacyUnsetSearchPath: false,
         exists: true,
         ownerName: "migration_owner",
         securityDefiner: entry.securityDefiner,
-        searchPathPgCatalogOnly: true,
+        functionConfig: ["search_path=pg_catalog"],
+        searchPathUnset: false,
+        searchPathMatchesExpected: true,
         volatility: entry.volatility,
         language: entry.language ?? "plpgsql",
         effectiveExecute: false,
@@ -119,10 +135,14 @@ function compliantSnapshot() {
         expectedSecurityDefiner: entry.securityDefiner,
         expectedVolatility: entry.volatility,
         expectedLanguage: entry.language,
+        expectedSearchPath: "pg_catalog",
+        allowLegacyUnsetSearchPath: false,
         exists: true,
         ownerName: "migration_owner",
         securityDefiner: entry.securityDefiner,
-        searchPathPgCatalogOnly: true,
+        functionConfig: ["search_path=pg_catalog"],
+        searchPathUnset: false,
+        searchPathMatchesExpected: true,
         volatility: entry.volatility,
         language: entry.language,
         effectiveExecute: false,
@@ -137,10 +157,14 @@ function compliantSnapshot() {
         expectedSecurityDefiner: entry.securityDefiner,
         expectedVolatility: entry.volatility,
         expectedLanguage: entry.language,
+        expectedSearchPath: "pg_catalog",
+        allowLegacyUnsetSearchPath: false,
         exists: true,
         ownerName: "migration_owner",
         securityDefiner: entry.securityDefiner,
-        searchPathPgCatalogOnly: true,
+        functionConfig: ["search_path=pg_catalog"],
+        searchPathUnset: false,
+        searchPathMatchesExpected: true,
         volatility: entry.volatility,
         language: entry.language,
         effectiveExecute: false,
@@ -405,12 +429,17 @@ test("builds only the exact application grants and sealed exclusions", () => {
   assert.equal(SEALED_RUNTIME_TYPES.length, 2);
   assert.equal(
     statements.length,
-    108 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+    110 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
   );
   assert.equal(
     statements.filter((statement) => statement.startsWith("GRANT EXECUTE"))
       .length,
     10,
+  );
+  assert.equal(
+    statements.filter((statement) => statement.startsWith("ALTER FUNCTION"))
+      .length,
+    2,
   );
   assert.equal(
     statements.filter((statement) =>
@@ -449,6 +478,14 @@ test("builds only the exact application grants and sealed exclusions", () => {
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /assert_staff_attachment_state/u);
   assert.match(sql, /resolve_staff_attachment_resource_scope/u);
+  assert.match(
+    sql,
+    /ALTER FUNCTION public\."assert_staff_attachment_state"\(TEXT\) SET search_path TO pg_catalog, public, pg_temp/u,
+  );
+  assert.match(
+    sql,
+    /ALTER FUNCTION public\."resolve_staff_attachment_resource_scope"\(public\."StaffAttachmentResourceKind", TEXT\) SET search_path TO pg_catalog, public, pg_temp/u,
+  );
   assert.match(sql, /guest_game_delivery_record_event_v1/u);
   assert.match(sql, /identity_email_claim_lock_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
@@ -616,7 +653,7 @@ test("detects authority, migration and function ACL drift independently", () => 
   ).securityDefiner = true;
   snapshot.functions.find(
     (entry) => entry.key === "identityEmailClaimReserveInvite",
-  ).searchPathPgCatalogOnly = false;
+  ).searchPathMatchesExpected = false;
   snapshot.functions.find(
     (entry) => entry.key === "identityEmailClaimAssertInviteLocator",
   ).securityDefiner = false;
@@ -705,6 +742,7 @@ test("detects authority, migration and function ACL drift independently", () => 
     ],
   );
   assert.deepEqual(runtimeFunctionEnrollmentComplianceViolations(snapshot), [
+    "identityEmailClaimReserveInvite:SEARCH_PATH_ENROLLMENT_MISSING",
     "durableDeliveryEventWriter:WORKER_EXECUTE_PRESENT",
     "identityEmailClaimDirectLock:PENDING_EXECUTE_PRESENT",
     "identityOwnerInviteIssueHold:PENDING_EXECUTE_PRESENT",
@@ -724,6 +762,50 @@ test("detects authority, migration and function ACL drift independently", () => 
     `${sealedType.key}:RUNTIME_TYPE_USAGE_PRESENT`,
     `${sealedType.key}:PUBLIC_TYPE_USAGE_PRESENT`,
   ]);
+});
+
+test("admits only the exact legacy-unset attachment path for enrollment", () => {
+  const legacySnapshot = compliantSnapshot();
+  const helper = legacySnapshot.functions.find(
+    (entry) => entry.key === "staffAttachmentStateAssert",
+  );
+  helper.functionConfig = null;
+  helper.searchPathUnset = true;
+  helper.searchPathMatchesExpected = false;
+  const config = parseRuntimeFunctionEnrollmentConfig(
+    SAFE_ENVIRONMENT,
+    "check",
+  );
+
+  assert.deepEqual(
+    runtimeFunctionEnrollmentPreconditionViolations(legacySnapshot, config),
+    [],
+  );
+  assert.deepEqual(
+    runtimeFunctionEnrollmentComplianceViolations(legacySnapshot),
+    ["staffAttachmentStateAssert:SEARCH_PATH_ENROLLMENT_MISSING"],
+  );
+
+  helper.functionConfig = ["search_path=public, pg_catalog"];
+  helper.searchPathUnset = false;
+  assert.deepEqual(
+    runtimeFunctionEnrollmentPreconditionViolations(legacySnapshot, config),
+    ["staffAttachmentStateAssert:SEARCH_PATH_MISMATCH"],
+  );
+});
+
+test("rejects CREATE on public for the runtime role", () => {
+  const snapshot = compliantSnapshot();
+  snapshot.role.schemaCreate = true;
+  const config = parseRuntimeFunctionEnrollmentConfig(
+    SAFE_ENVIRONMENT,
+    "check",
+  );
+
+  assert.deepEqual(
+    runtimeFunctionEnrollmentPreconditionViolations(snapshot, config),
+    ["RUNTIME_ROLE_SCHEMA_CREATE_PRESENT"],
+  );
 });
 
 test("rejects any exact sealed-column manifest drift before enrollment", () => {

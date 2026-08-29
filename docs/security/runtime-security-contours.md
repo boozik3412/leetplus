@@ -81,6 +81,13 @@ disabled и удалены из systemd inventory. Помечать такой s
   `resolve_staff_attachment_resource_scope("StaffAttachmentResourceKind",text)`,
   необходимые вызывающим их attachment triggers. Гранты выдаются только
   `leetplus_runtime`, без `GRANT OPTION`; `PUBLIC` execute остаётся отозванным.
+- Эти две исторические `SECURITY INVOKER` функции до runtime enrollment могут
+  иметь только legacy-состояние без function-local `search_path`. Exact
+  controller в одной транзакции закрепляет для них
+  `pg_catalog, public, pg_temp` (с `pg_temp` строго последним) и только затем
+  выдаёт `EXECUTE`. Любой иной pre-existing `search_path`, а также `CREATE` на
+  `public` у runtime role, блокирует операцию. Для остальных 56 функций
+  сохраняется точное требование `search_path=pg_catalog`.
 - Runtime grant repair выполняется только versioned exact controller из
   admitted artifact. Ручной широкий `GRANT EXECUTE ON ALL FUNCTIONS` запрещён.
 - Пока background materializer выключен, parked entitlement/reward rows не

@@ -28,13 +28,23 @@ runner.
   class/proc/type: kind, OID, name/signature, owner name/OID и raw ACL;
 - role memberships и активные database identities также закрепляются exact
   digest/list;
-- plan строится только против активного bridge runtime того же admitted SHA:
+- plan строится только против `DUAL_BRIDGE_N_MINUS_ONE` topology. Active и
+  rollback slot должны быть независимо аттестованы как target-188 release
+  artifacts и одновременно показывать exact CURRENT_187 compatibility:
   COMBINED + GUEST_BUG_REPORTING_MODE=OFF +
   GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_187;
+- signed bridge section закрепляет для обоих slot release/hydration/slot-link
+  authority, systemd invocation, loopback authenticated reads и source
+  readiness, а также exact checksum `c40d5eeb…` target migration bytes; active
+  slot дополнительно обязан совпадать с установленной production-control
+  generation этого же SHA;
 - plan подписывается detached Ed25519 ключом, а SPKI SHA-256 передаётся
   независимым protected pin;
 - root-owned blue/green lock и PostgreSQL advisory lock удерживаются от live
   сверки до final postcheck;
+- `/run/leetplus-production-control/install.lock` берётся вместе с blue/green
+  lock и удерживается до проверки обоих slot после effect; control generation,
+  verifier и unit bytes нельзя заменить внутри подписанного окна DDL;
 - signed runtime-safety section закрепляет SHA-256 active API unit template,
   canary worker-off environment, immutable legacy-drain activation receipt,
   verifier и полный systemd unit inventory. Эти доказательства повторно
@@ -115,18 +125,23 @@ membership и worker-function EXECUTE не выдаются.
 
 1. Fast CI и Full Release Admission должны быть зелёными на новом exact SHA.
 2. Этот же SHA сначала запускается и атомарно становится active bridge runtime
-   при CURRENT_187, reporting OFF.
+   при CURRENT_187, reporting OFF. Второй slot также переводится на independently
+   bound target-188 artifact и проходит тот же compatibility/authenticated
+   smoke; старый CURRENT_187 artifact перестаёт быть rollback authority до DDL.
 3. Ручные old-SHA leetplus-user-call-\* sidecar units выводятся из routing,
    останавливаются, disable/remove; USER_CALL остаётся на admitted main slot.
 4. Identity-mail, guest-game-bot и остальные delivery/scheduler workers
    drained, disabled/start-fenced; active worker sessions отсутствуют.
-5. Выполняются inventory → plan → approve → apply → check.
-6. Только после exact 188/188 и ACL postcheck запускается второй slot с bridge
-   OFF, reporting LIVE, проходит negative/guest/tenant/platform QA и atomic
-   cutover.
+5. Выполняются inventory → plan → approve → apply → check с contract
+   `FOUNDER_PILOT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V2` и confirmation
+   `I_ACCEPT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V2`.
+6. Сразу перед DDL controller повторно сверяет оба slot; после DDL оба обязаны
+   показать exact 188/188 без active compatibility evidence. Только затем
+   reporting переводится в LIVE, выполняются negative/guest/tenant/platform QA
+   и atomic cutover готового runtime.
 
-После schema effect rollback target — уже проверенный CURRENT_188 bridge slot
-того же SHA. Старый CURRENT_187 runtime возвращать нельзя. Операционный kill
+После schema effect rollback target — заранее проверенный CURRENT_188 rollback
+bridge slot. Старый CURRENT_187 runtime возвращать нельзя. Операционный kill
 switch — GUEST_BUG_REPORTING_MODE=OFF; schema rollback не выполняется.
 
 ## Команды и admission

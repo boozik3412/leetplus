@@ -30,14 +30,15 @@ import {
 import {
   FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS,
   createFounderPilotCurrent188ProductionBridgeRuntimeAdapter,
+  founderPilotCurrent188BridgeAttestationInvariant,
   founderPilotCurrent188BridgeAttestationDigest,
   normalizeFounderPilotCurrent188BridgeAttestation,
 } from "./founder-pilot-current188-production-upgrade.mjs";
 
 export const FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONTRACT =
-  "FOUNDER_PILOT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V1";
+  "FOUNDER_PILOT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V2";
 export const FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONFIRMATION =
-  "I_ACCEPT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V1";
+  "I_ACCEPT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V2";
 export const FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_INVENTORY_READY =
   "CURRENT188_LEGACY_OWNERSHIP_INVENTORY_READY_NOT_AUTHORIZATION";
 export const FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_PLAN_READY =
@@ -1063,7 +1064,13 @@ function normalizePlan(value) {
   }
   return Object.freeze({
     ...base,
-    bridgeAttestation: Object.freeze({ ...plan.bridgeAttestation }),
+    bridgeAttestation: normalizeFounderPilotCurrent188BridgeAttestation(
+      plan.bridgeAttestation,
+      {
+        expectedPhase: BRIDGE_SOURCE_PHASE,
+        expectedReleaseSha: plan.releaseSha,
+      },
+    ),
     planDigest: plan.planDigest,
   });
 }
@@ -1379,20 +1386,6 @@ async function emitPhase(onPhase, plan, phase, extra = {}) {
   );
 }
 
-function bridgeInvariant(attestation) {
-  const {
-    acceptedAt: _acceptedAt,
-    compatibilityMode: _compatibilityMode,
-    compatibilityTargetMigration: _compatibilityTargetMigration,
-    compatibilityTargetMigrationCount: _compatibilityTargetMigrationCount,
-    databaseMigration: _databaseMigration,
-    databaseMigrationCount: _databaseMigrationCount,
-    phase: _phase,
-    ...invariant
-  } = attestation;
-  return invariant;
-}
-
 async function verifyBridgeTarget({ manifest, runtimeAdapter, source }) {
   const target = normalizeFounderPilotCurrent188BridgeAttestation(
     await runtimeAdapter.inspectTarget(),
@@ -1403,7 +1396,8 @@ async function verifyBridgeTarget({ manifest, runtimeAdapter, source }) {
   );
   if (
     source !== null &&
-    stableJson(bridgeInvariant(source)) !== stableJson(bridgeInvariant(target))
+    stableJson(founderPilotCurrent188BridgeAttestationInvariant(source)) !==
+      stableJson(founderPilotCurrent188BridgeAttestationInvariant(target))
   ) {
     fail("CURRENT188_LEGACY_BRIDGE_TARGET_STATE_MISMATCH");
   }
@@ -1416,7 +1410,7 @@ async function verifyBridgeTarget({ manifest, runtimeAdapter, source }) {
       },
     ),
     bridgeCutoverGeneration: target.cutoverGeneration,
-    bridgeSlot: target.slot,
+    bridgeSlot: target.active.slot,
   });
 }
 
@@ -1495,6 +1489,7 @@ export async function applyFounderPilotCurrent188LegacyOwnershipPlan({
   try {
     await bridge.acquireLock();
     bridgeLockHeld = true;
+    await emitPhase(onPhase, plan, "PRODUCTION_CONTROL_INSTALL_LOCK_ACQUIRED");
     await emitPhase(onPhase, plan, "BRIDGE_CUTOVER_LOCK_ACQUIRED");
     await adapter.acquireLock();
     databaseLockHeld = true;

@@ -65,7 +65,9 @@ the one checksum-pinned CURRENT_188 migration, a live short-lived signed plan,
 and a durable phase journal. Partial or unknown migration state blocks without
 changing systemd, slots, nginx, feature flags, or outbound configuration. plan,
 apply and check also hold the protected blue/green lock and require the exact
-accepted CURRENT_187 bridge cutover; apply verifies the same live bridge at
+accepted dual-slot CURRENT_187 bridge cutover. Both independently admitted
+target-188 slots, the active production-control generation and authenticated
+read evidence are signed into the plan; apply verifies both slots at exact
 CURRENT_188 before returning success.`;
 }
 
@@ -239,7 +241,7 @@ function assertProductionEnvironment(environment) {
 
 function blocked(error) {
   return {
-    contractVersion: "FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V2",
+    contractVersion: "FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V3",
     decision: "BLOCKED_MANUAL",
     reasonCode:
       typeof error?.reasonCode === "string"

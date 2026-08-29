@@ -3,10 +3,10 @@
 | Поле                 | Состояние                                                                                 |
 | -------------------- | ----------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                              |
-| Production runtime   | healthy; exact `8d26acae…`, `COMBINED`, schema bridge ON, bug reporting OFF               |
+| Production runtime   | healthy; exact `a5eeec32…`, `COMBINED`, schema bridge ON, bug reporting OFF               |
 | Prisma schema        | source candidate `CURRENT_188`; production remains `CURRENT_187` until controlled rollout |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA              |
-| Runtime successor    | watchdog merge `8d26acae670f5244f0f30fd2a9aac70eae940d1a`; gates green                    |
+| Runtime successor    | mixed-owner merge `a5eeec326a935db5a1c33bf94cfad3b942361f70`; gates green                  |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                          |
 | Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending            |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                  |
@@ -35,17 +35,23 @@ watchdog ошибочно запускал readiness probe после него. 
 authenticated smoke в общем deadline; bounded children не наследуют deployment
 lock descriptor. Повторять тот же application deploy больше не требуется.
 
-Строгий production migration controller V2 ожидает единый migration owner и
+Строгий production migration controller V3 ожидает единый migration owner и
 правильно блокируется на фактической исторической mixed-owner topology. Для
-production подготовлен отдельный fail-closed signed controller: план фиксирует
-OID, owner identity и ACL каждого исторического объекта; target migration
-выполняется локальной `postgres` identity; владельцы старых объектов не
-меняются; одной транзакцией выдаётся только минимальный runtime ACL новых
+production подготовлен отдельный fail-closed signed mixed-owner controller V2:
+план фиксирует OID, owner identity и ACL каждого исторического объекта; target
+migration выполняется локальной `postgres` identity; владельцы старых объектов
+не меняются; одной транзакцией выдаётся только минимальный runtime ACL новых
 support tables/enums. Он допускает только source `187/4/0`, pre-grant
-`188/4/0` или exact final `188/4/0`, удерживает тот же root-owned cutover lock и
-до успеха требует readiness активного same-SHA bridge уже как `188/188`. Этот
-контроллер должен получить собственные зелёные Fast CI + Full Release Admission
-до production database effect.
+`188/4/0` или exact final `188/4/0` и удерживает тот же root-owned cutover lock.
+Перед DDL он требует `DUAL_BRIDGE_N_MINUS_ONE`: active и rollback slot должны
+быть independently admitted target-188 artifacts с exact provenance,
+hydration/slot-link receipts, migration checksum, unit invocation,
+authenticated reads и reporting OFF; active production-control generation
+должна совпадать с controller SHA, а production-control install lock удерживается
+вместе с cutover lock до post-effect проверки.
+До успешного результата оба slot обязаны перейти из readiness
+`187 -> target 188` в exact `188/188`. Controller должен получить собственные
+зелёные Fast CI + Full Release Admission до production database effect.
 
 ## Обновление 28.08.2026
 
@@ -102,16 +108,16 @@ canary и atomic cutover production считается `CURRENT_187`, а runtime
 остаётся `OFF`. Runbook:
 [guest bug reporting](../support/guest-bug-reporting.md).
 
-Для текущего exact `CURRENT_187` подготовлен отдельный fail-closed переход:
-active same-SHA bridge уже принимает точный source head. Подписанный legacy
-mixed-owner controller удерживает root-owned blue/green lock, связывает план с
-active slot, same-SHA release, accepted cutover receipt, protected env/unit
-digests и live readiness `187 -> target 188`, применяет единственную
-checksum-pinned migration через локальную `postgres` identity без owner
-normalization и требует от того же bridge readiness `188/188` вместе с полным
-support catalog и exact минимальным ACL. После этого второй slot запускается на
-exact `CURRENT_188` с bridge `OFF`. Старый runtime не считается rollback после
-смены схемы; rollback target — уже проверенный bridge slot того же admitted SHA.
+Для текущего exact `CURRENT_187` подготовлен отдельный fail-closed переход.
+Подписанный legacy mixed-owner controller удерживает root-owned blue/green lock
+и связывает план одновременно с active и rollback target-188 slot, accepted
+cutover, production-control, release/hydration/slot-link authority, protected
+env/unit invocation и authenticated live reads. Оба slot должны показывать
+`187 -> target 188`, reporting OFF, а старый CURRENT_187 artifact выводится из
+rollback authority до DDL. Controller применяет единственную checksum-pinned
+migration через локальную `postgres` identity без owner normalization и требует
+от обоих slot readiness `188/188` вместе с полным support catalog и exact
+минимальным ACL. Затем candidate slot запускается с bridge OFF и reporting LIVE.
 
 ### Role-aware landing
 

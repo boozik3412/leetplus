@@ -9,13 +9,13 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий runtime implementation baseline — merge SHA
-`8d26acae670f5244f0f30fd2a9aac70eae940d1a` (PR #73, включает PR #72/#67).
-Fast CI `33205114353` и Full Release Admission `33205114384` зелёные на exact
+`a5eeec326a935db5a1c33bf94cfad3b942361f70` (PR #74).
+Fast CI `33238585320` и Full Release Admission `33238585296` зелёные на exact
 merge SHA. В source реализованы отдельные
 `CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
 pools, но production cutover не выполнялся: последний зафиксированный
 production runtime остаётся `COMBINED`, а split systemd/nginx candidate —
-`DORMANT / NOT INSTALLED`. Production уже работает на exact `8d26acae…` в
+`DORMANT / NOT INSTALLED`. Production уже работает на exact `a5eeec32…` в
 bridge-режиме `CURRENT_187 -> CURRENT_188`, но bug reporting остаётся `OFF`.
 
 Публичный игровой вход (`/guest-portal*`) не зависит от corporate JWT/scope и
@@ -31,23 +31,29 @@ tenant queue `/support/bug-reports*` и platform queue
 и не вызывают outbound providers. Runtime flag
 `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed; authoritative runbook:
 [`docs/support/guest-bug-reporting.md`](docs/support/guest-bug-reporting.md).
-Переход production `CURRENT_187 -> CURRENT_188` использует двухфазный cutover:
-exact bridge slot работает только в `COMBINED + reporting OFF`, затем отдельный
-подписанный mixed-owner controller под root-owned blue/green lock сверяет active
-slot, same-SHA release, accepted cutover receipt, protected env/unit digests и
-live readiness `187 -> target 188`. Его план фиксирует пообъектный OID/owner/ACL
-digest фактической исторической схемы; целевая additive migration выполняется
-локальной `postgres` identity, не меняя owners существующих объектов, а runtime
-получает только минимальный ACL новых support-объектов. До возврата успеха тот же
-bridge обязан дать readiness `188/188`. LIVE функция запускается вторым slot с
-bridge `OFF`. Merge/CI сами по себе этот production rollout не выполняют.
+Переход production `CURRENT_187 -> CURRENT_188` использует двухфазный cutover и
+`DUAL_BRIDGE_N_MINUS_ONE`. До DDL active и rollback slot независимо связаны с
+target-188 release provenance, hydration/slot-link receipts, API/Web invocation,
+exact migration checksum, authenticated reads и работают только в
+`COMBINED + reporting OFF`; active slot дополнительно совпадает с
+production-control generation exact controller SHA. Production-control install
+lock и blue/green lock образуют одно authority window до post-effect проверки.
+Подписанный mixed-owner controller V2 под root-owned blue/green lock повторно
+сверяет оба slot и их live readiness `187 -> target 188`. Его план фиксирует
+пообъектный OID/owner/ACL digest фактической исторической схемы; целевая additive
+migration выполняется локальной `postgres` identity, не меняя owners
+существующих объектов, а runtime получает только минимальный ACL новых
+support-объектов. До возврата успеха оба slot обязаны дать readiness `188/188`.
+Только затем candidate запускается с bridge `OFF` и reporting `LIVE`. Merge/CI
+сами по себе этот production rollout не выполняют.
 
 Ранние public switch 29.08 fail-closed вернулись до database effect из-за
 неверного порядка stateful authenticated smoke и readiness probes. Исправленный
-watchdog из PR #73 успешно admitted и развернут: production сейчас обслуживает
-exact SHA `8d26acae…` в bridge-режиме, оставаясь на чистой схеме `CURRENT_187` с
-bug reporting `OFF`. Следующий database effect допустим только после admission
-отдельного same-SHA mixed-owner controller; повторять прежний deploy не нужно.
+watchdog successor из PR #74 успешно admitted и развернут: production сейчас
+обслуживает exact SHA `a5eeec32…` в bridge-режиме, оставаясь на чистой схеме
+`CURRENT_187` с bug reporting `OFF`. Следующий database effect допустим только
+после admission dual-slot controller и отдельного exact-SHA GO; повторять
+прежний deploy не нужно.
 
 ## Detailed gamification state (updated through 28.08.2026)
 

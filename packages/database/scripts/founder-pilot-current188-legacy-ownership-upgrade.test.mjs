@@ -134,43 +134,82 @@ async function targetRows(laneRoot) {
   );
 }
 
-function bridgeAttestation(phase) {
+function bridgeSlotAttestation(phase, releaseSha, slot, seed) {
   const source = phase === "SOURCE_187";
+  const blue = slot === "blue";
   return {
-    acceptedAt: "2026-08-29T09:58:00.000000000Z",
-    activeTarget: "/etc/nginx/leetplus/upstreams/green.conf",
-    activeTargetSha256: "1".repeat(64),
-    apiBaseUrl: "http://127.0.0.1:4200",
-    apiUnit: "leetplus-api@green.service",
-    apiUnitFileSha256: "2".repeat(64),
-    bridgeContract: "GUEST_SUPPORT_CURRENT187_ACTIVE_BRIDGE_CUTOVER_V1",
+    apiBaseUrl: `http://127.0.0.1:${blue ? 4100 : 4200}`,
+    apiInvocationId: seed.repeat(32),
+    apiUnit: `leetplus-api@${slot}.service`,
+    apiUnitFileSha256: seed.repeat(64),
+    authenticatedSmokeSha256: seed.repeat(64),
+    authenticatedSmokeStoreCount: 4,
+    authenticatedSmokeUsersCatalog: "CURRENT",
     bugReportingMode: "OFF",
-    canarySafeEnvironmentSha256: "3".repeat(64),
+    canarySafeEnvironmentSha256: seed.repeat(64),
     compatibilityMode: source ? "GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE" : null,
     compatibilityTargetMigration: source
       ? FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.targetMigrationHead
       : null,
     compatibilityTargetMigrationCount: source ? 188 : null,
-    cutoverGeneration: 4,
-    cutoverReceiptName: `20260829T095800000000000Z-g4-${RELEASE_SHA}-green.receipt`,
-    cutoverReceiptSha256: "4".repeat(64),
     databaseMigration: source
       ? FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.sourceMigrationHead
       : FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.targetMigrationHead,
     databaseMigrationCount: source ? 187 : 188,
+    hydratedManifestSha256: seed.repeat(64),
+    hydratedSha256SumsSha256: seed.repeat(64),
+    hydrationAttestationSha256: seed.repeat(64),
+    releaseProvenanceMigration:
+      FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.targetMigrationHead,
+    releaseProvenanceMigrationCount: 188,
+    releaseProvenanceSha256: seed.repeat(64),
+    releaseSha,
+    runtimeEnvironmentSha256: seed.repeat(64),
+    runtimeRole: "COMBINED",
+    schemaBridgeMode: "ALLOW_CURRENT_187",
+    sha256SumsSha256: seed.repeat(64),
+    slot,
+    slotEnvironmentSha256: seed.repeat(64),
+    slotLinkReceiptSha256: seed.repeat(64),
+    symlinkManifestSha256: seed.repeat(64),
+    targetMigrationSha256:
+      FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.targetMigrationSha256,
+    upstreamTarget: `/etc/nginx/leetplus/upstreams/${slot}.conf`,
+    upstreamTargetSha256: seed.repeat(64),
+    webBaseUrl: `http://127.0.0.1:${blue ? 3100 : 3200}`,
+    webBuildId: releaseSha,
+    webInvocationId: seed.repeat(32),
+    webUnit: `leetplus-web@${slot}.service`,
+    webUnitFileSha256: seed.repeat(64),
+  };
+}
+
+function bridgeAttestation(phase) {
+  return {
+    acceptedAt: "2026-08-29T09:58:00.000000000Z",
+    active: bridgeSlotAttestation(phase, RELEASE_SHA, "green", "1"),
+    bridgeContract: "GUEST_SUPPORT_CURRENT187_DUAL_BRIDGE_CUTOVER_V2",
+    cutoverGeneration: 4,
+    cutoverReceiptName: `20260829T095800000000000Z-g4-${RELEASE_SHA}-green.receipt`,
+    cutoverReceiptSha256: "4".repeat(64),
     latestReceiptConsumed: false,
     pendingIntentCount: 0,
     phase,
-    releaseSha: RELEASE_SHA,
-    runtimeEnvironmentSha256: "5".repeat(64),
-    runtimeRole: "COMBINED",
-    schemaBridgeMode: "ALLOW_CURRENT_187",
-    slot: "green",
-    slotEnvironmentSha256: "6".repeat(64),
-    webBaseUrl: "http://127.0.0.1:3200",
-    webBuildId: RELEASE_SHA,
-    webUnit: "leetplus-web@green.service",
-    webUnitFileSha256: "7".repeat(64),
+    productionControl: {
+      attestationSha256: "5".repeat(64),
+      installMapSha256: "6".repeat(64),
+      receiptSha256: "7".repeat(64),
+      releaseSha: RELEASE_SHA,
+      rootManifestSha256: "8".repeat(64),
+      verifierSha256: "9".repeat(64),
+    },
+    rollback: bridgeSlotAttestation(
+      phase,
+      "b".repeat(40),
+      "blue",
+      "a",
+    ),
+    topologyMode: "DUAL_BRIDGE_N_MINUS_ONE",
   };
 }
 
@@ -379,7 +418,7 @@ async function fixture(t) {
       publicKeyPem: key.publicKeyPem,
       publicKeySpkiSha256: key.publicKeySpkiSha256,
     },
-    contractVersion: "FOUNDER_PILOT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V1",
+    contractVersion: "FOUNDER_PILOT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V2",
     environment: "PRODUCTION",
     operation: { deployTimeoutSeconds: 120 },
     release: {

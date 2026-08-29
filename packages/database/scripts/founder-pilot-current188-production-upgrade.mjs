@@ -28,9 +28,9 @@ import {
 } from "./founder-pilot-production-history-production.mjs";
 
 export const FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONTRACT =
-  "FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V2";
+  "FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V3";
 export const FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONFIRMATION =
-  "I_ACCEPT_EXACT_PRODUCTION_HISTORY_187_TO_188_V2";
+  "I_ACCEPT_EXACT_PRODUCTION_HISTORY_187_TO_188_V3";
 export const FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_INVENTORY_READY =
   "CURRENT188_UPGRADE_INVENTORY_READY_NOT_AUTHORIZATION";
 export const FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_PLAN_READY =
@@ -49,11 +49,17 @@ const TARGET_WORKER_FUNCTION_SHA256 =
 const TARGET_PRETERMINAL_MANIFEST_SHA256 =
   "094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b";
 const BRIDGE_ATTESTATION_CONTRACT =
-  "GUEST_SUPPORT_CURRENT187_ACTIVE_BRIDGE_CUTOVER_V1";
+  "GUEST_SUPPORT_CURRENT187_DUAL_BRIDGE_CUTOVER_V2";
+const BRIDGE_TOPOLOGY_MODE = "DUAL_BRIDGE_N_MINUS_ONE";
 const BRIDGE_SOURCE_PHASE = "SOURCE_187";
 const BRIDGE_TARGET_PHASE = "TARGET_188";
 const BRIDGE_COMPATIBILITY_MODE = "GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE";
 const BRIDGE_STATE_ROOT = "/var/lib/leetplus/deploy-receipts";
+const BRIDGE_SLOT_LINK_STATE_ROOT = `${BRIDGE_STATE_ROOT}/slot-links`;
+const BRIDGE_PRODUCTION_CONTROL_RUN_ROOT =
+  "/run/leetplus-production-control";
+const BRIDGE_PRODUCTION_CONTROL_INSTALL_LOCK =
+  `${BRIDGE_PRODUCTION_CONTROL_RUN_ROOT}/install.lock`;
 const BRIDGE_CONFIG_ROOT = "/etc/nginx/leetplus";
 const BRIDGE_ENVIRONMENT_ROOT = "/etc/leetplus";
 const BRIDGE_SYSTEMD_ROOT = "/etc/systemd/system";
@@ -62,9 +68,20 @@ const BRIDGE_SLOT_ROOT = "/srv/leetplus/slots";
 const BRIDGE_MAX_FILE_BYTES = 1024 * 1024;
 const BRIDGE_MAX_HTTP_BYTES = 1024 * 1024;
 const BRIDGE_LOCK_TIMEOUT_MS = 5_000;
+const BRIDGE_AUTHENTICATED_SMOKE_TIMEOUT_MS = 120_000;
+const BRIDGE_AUTHENTICATED_SMOKE =
+  "/usr/local/libexec/leetplus/verify-legacy-rollback-authenticated-reads.mjs";
+const BRIDGE_PRODUCTION_CONTROL_VERIFIER =
+  "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs";
+const BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG =
+  "--require-root-authority";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SHA40 = /^[0-9a-f]{40}$/u;
 const INVOCATION_ID = /^[0-9a-f]{32}$/u;
+const BRIDGE_AUTHORITY_LOCK_PATHS = Object.freeze([
+  BRIDGE_PRODUCTION_CONTROL_INSTALL_LOCK,
+  `${BRIDGE_STATE_ROOT}/cutover.lock`,
+]);
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const NANO_ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}Z$/u;
 const BASE64URL_SIGNATURE = /^[A-Za-z0-9_-]{86}$/u;
@@ -222,87 +239,126 @@ function parseNanoTimestamp(value) {
   return Number.isFinite(parsed.valueOf()) ? parsed : null;
 }
 
-const BRIDGE_ATTESTATION_KEYS = Object.freeze([
-  "acceptedAt",
-  "activeTarget",
-  "activeTargetSha256",
+const BRIDGE_SLOT_ATTESTATION_KEYS = Object.freeze([
   "apiBaseUrl",
+  "apiInvocationId",
   "apiUnit",
   "apiUnitFileSha256",
-  "bridgeContract",
+  "authenticatedSmokeSha256",
+  "authenticatedSmokeStoreCount",
+  "authenticatedSmokeUsersCatalog",
   "bugReportingMode",
   "canarySafeEnvironmentSha256",
   "compatibilityMode",
   "compatibilityTargetMigration",
   "compatibilityTargetMigrationCount",
-  "cutoverGeneration",
-  "cutoverReceiptName",
-  "cutoverReceiptSha256",
   "databaseMigration",
   "databaseMigrationCount",
-  "latestReceiptConsumed",
-  "pendingIntentCount",
-  "phase",
+  "hydratedManifestSha256",
+  "hydratedSha256SumsSha256",
+  "hydrationAttestationSha256",
+  "releaseProvenanceMigration",
+  "releaseProvenanceMigrationCount",
+  "releaseProvenanceSha256",
   "releaseSha",
   "runtimeEnvironmentSha256",
   "runtimeRole",
   "schemaBridgeMode",
+  "sha256SumsSha256",
   "slot",
   "slotEnvironmentSha256",
+  "slotLinkReceiptSha256",
+  "symlinkManifestSha256",
+  "targetMigrationSha256",
+  "upstreamTarget",
+  "upstreamTargetSha256",
   "webBaseUrl",
   "webBuildId",
+  "webInvocationId",
   "webUnit",
   "webUnitFileSha256",
 ]);
 
-export function normalizeFounderPilotCurrent188BridgeAttestation(
+const BRIDGE_PRODUCTION_CONTROL_KEYS = Object.freeze([
+  "attestationSha256",
+  "installMapSha256",
+  "receiptSha256",
+  "releaseSha",
+  "rootManifestSha256",
+  "verifierSha256",
+]);
+
+const BRIDGE_ATTESTATION_KEYS = Object.freeze([
+  "acceptedAt",
+  "active",
+  "bridgeContract",
+  "cutoverGeneration",
+  "cutoverReceiptName",
+  "cutoverReceiptSha256",
+  "latestReceiptConsumed",
+  "pendingIntentCount",
+  "phase",
+  "productionControl",
+  "rollback",
+  "topologyMode",
+]);
+
+function normalizeBridgeSlotAttestation(
   value,
-  { expectedPhase, expectedReleaseSha } = {},
+  { expectedPhase, expectedReleaseSha = null, expectedSlot },
 ) {
   const attestation = exactRecord(
     value,
-    BRIDGE_ATTESTATION_KEYS,
+    BRIDGE_SLOT_ATTESTATION_KEYS,
     "CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID",
   );
   const source = expectedPhase === BRIDGE_SOURCE_PHASE;
   const target = expectedPhase === BRIDGE_TARGET_PHASE;
-  const expectedSlot = attestation.slot;
   const expectedApiPort = expectedSlot === "blue" ? 4100 : 4200;
   const expectedWebPort = expectedSlot === "blue" ? 3100 : 3200;
   if (
     (!source && !target) ||
-    !SHA40.test(expectedReleaseSha ?? "") ||
-    attestation.bridgeContract !== BRIDGE_ATTESTATION_CONTRACT ||
-    attestation.phase !== expectedPhase ||
-    attestation.releaseSha !== expectedReleaseSha ||
     !["blue", "green"].includes(expectedSlot) ||
+    !SHA40.test(attestation.releaseSha ?? "") ||
+    (expectedReleaseSha !== null &&
+      attestation.releaseSha !== expectedReleaseSha) ||
+    attestation.slot !== expectedSlot ||
     attestation.apiUnit !== `leetplus-api@${expectedSlot}.service` ||
     attestation.webUnit !== `leetplus-web@${expectedSlot}.service` ||
     attestation.apiBaseUrl !== `http://127.0.0.1:${expectedApiPort}` ||
     attestation.webBaseUrl !== `http://127.0.0.1:${expectedWebPort}` ||
-    attestation.activeTarget !==
+    attestation.upstreamTarget !==
       `${BRIDGE_CONFIG_ROOT}/upstreams/${expectedSlot}.conf` ||
-    parseNanoTimestamp(attestation.acceptedAt) === null ||
-    !Number.isSafeInteger(attestation.cutoverGeneration) ||
-    attestation.cutoverGeneration < 1 ||
-    attestation.cutoverGeneration > 999_999_999 ||
-    attestation.cutoverReceiptName !==
-      `${attestation.cutoverReceiptName.match(/^([0-9]{8}T[0-9]{15}Z)-/u)?.[1] ?? ""}-g${attestation.cutoverGeneration}-${expectedReleaseSha}-${expectedSlot}.receipt` ||
+    !INVOCATION_ID.test(attestation.apiInvocationId ?? "") ||
+    !INVOCATION_ID.test(attestation.webInvocationId ?? "") ||
     ![
-      attestation.activeTargetSha256,
       attestation.apiUnitFileSha256,
+      attestation.authenticatedSmokeSha256,
       attestation.canarySafeEnvironmentSha256,
-      attestation.cutoverReceiptSha256,
+      attestation.hydratedManifestSha256,
+      attestation.hydratedSha256SumsSha256,
+      attestation.hydrationAttestationSha256,
+      attestation.releaseProvenanceSha256,
       attestation.runtimeEnvironmentSha256,
+      attestation.sha256SumsSha256,
       attestation.slotEnvironmentSha256,
+      attestation.slotLinkReceiptSha256,
+      attestation.symlinkManifestSha256,
+      attestation.upstreamTargetSha256,
       attestation.webUnitFileSha256,
-    ].every((candidate) => SHA256.test(candidate)) ||
-    attestation.latestReceiptConsumed !== false ||
-    attestation.pendingIntentCount !== 0 ||
+    ].every((candidate) => SHA256.test(candidate ?? "")) ||
+    !/^[A-Z][A-Z0-9_]{2,63}$/u.test(
+      attestation.authenticatedSmokeUsersCatalog ?? "",
+    ) ||
+    !Number.isSafeInteger(attestation.authenticatedSmokeStoreCount) ||
+    attestation.authenticatedSmokeStoreCount < 1 ||
+    attestation.releaseProvenanceMigration !== TARGET_HEAD ||
+    attestation.releaseProvenanceMigrationCount !== TARGET_COUNT ||
+    attestation.targetMigrationSha256 !== TARGET_MIGRATION_SHA256 ||
     attestation.runtimeRole !== "COMBINED" ||
     attestation.bugReportingMode !== "OFF" ||
     attestation.schemaBridgeMode !== "ALLOW_CURRENT_187" ||
-    attestation.webBuildId !== expectedReleaseSha
+    attestation.webBuildId !== attestation.releaseSha
   ) {
     fail("CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID");
   }
@@ -324,17 +380,96 @@ export function normalizeFounderPilotCurrent188BridgeAttestation(
   return Object.freeze({ ...attestation });
 }
 
-function bridgeAttestationInvariant(attestation) {
+function normalizeBridgeProductionControl(value, expectedReleaseSha) {
+  const attestation = exactRecord(
+    value,
+    BRIDGE_PRODUCTION_CONTROL_KEYS,
+    "CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID",
+  );
+  if (
+    attestation.releaseSha !== expectedReleaseSha ||
+    ![
+      attestation.attestationSha256,
+      attestation.installMapSha256,
+      attestation.receiptSha256,
+      attestation.rootManifestSha256,
+      attestation.verifierSha256,
+    ].every((candidate) => SHA256.test(candidate ?? ""))
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID");
+  }
+  return Object.freeze({ ...attestation });
+}
+
+export function normalizeFounderPilotCurrent188BridgeAttestation(
+  value,
+  { expectedPhase, expectedReleaseSha } = {},
+) {
+  const attestation = exactRecord(
+    value,
+    BRIDGE_ATTESTATION_KEYS,
+    "CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID",
+  );
+  const expectedActiveSlot = attestation.active?.slot;
+  const expectedRollbackSlot = attestation.rollback?.slot;
+  if (
+    ![BRIDGE_SOURCE_PHASE, BRIDGE_TARGET_PHASE].includes(expectedPhase) ||
+    !SHA40.test(expectedReleaseSha ?? "") ||
+    attestation.bridgeContract !== BRIDGE_ATTESTATION_CONTRACT ||
+    attestation.topologyMode !== BRIDGE_TOPOLOGY_MODE ||
+    attestation.phase !== expectedPhase ||
+    !["blue", "green"].includes(expectedActiveSlot) ||
+    !["blue", "green"].includes(expectedRollbackSlot) ||
+    expectedActiveSlot === expectedRollbackSlot ||
+    parseNanoTimestamp(attestation.acceptedAt) === null ||
+    !Number.isSafeInteger(attestation.cutoverGeneration) ||
+    attestation.cutoverGeneration < 1 ||
+    attestation.cutoverGeneration > 999_999_999 ||
+    attestation.cutoverReceiptName !==
+      `${attestation.cutoverReceiptName.match(/^([0-9]{8}T[0-9]{15}Z)-/u)?.[1] ?? ""}-g${attestation.cutoverGeneration}-${expectedReleaseSha}-${expectedActiveSlot}.receipt` ||
+    !SHA256.test(attestation.cutoverReceiptSha256 ?? "") ||
+    attestation.latestReceiptConsumed !== false ||
+    attestation.pendingIntentCount !== 0
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID");
+  }
+  return Object.freeze({
+    ...attestation,
+    active: normalizeBridgeSlotAttestation(attestation.active, {
+      expectedPhase,
+      expectedReleaseSha,
+      expectedSlot: expectedActiveSlot,
+    }),
+    productionControl: normalizeBridgeProductionControl(
+      attestation.productionControl,
+      expectedReleaseSha,
+    ),
+    rollback: normalizeBridgeSlotAttestation(attestation.rollback, {
+      expectedPhase,
+      expectedSlot: expectedRollbackSlot,
+    }),
+  });
+}
+
+function bridgeSlotAttestationInvariant(attestation) {
   const {
     compatibilityMode: _compatibilityMode,
     compatibilityTargetMigration: _compatibilityTargetMigration,
     compatibilityTargetMigrationCount: _compatibilityTargetMigrationCount,
     databaseMigration: _databaseMigration,
     databaseMigrationCount: _databaseMigrationCount,
-    phase: _phase,
     ...invariant
   } = attestation;
   return invariant;
+}
+
+export function founderPilotCurrent188BridgeAttestationInvariant(attestation) {
+  const { phase: _phase, ...invariant } = attestation;
+  return {
+    ...invariant,
+    active: bridgeSlotAttestationInvariant(attestation.active),
+    rollback: bridgeSlotAttestationInvariant(attestation.rollback),
+  };
 }
 
 export function founderPilotCurrent188BridgeAttestationDigest(value, options) {
@@ -509,7 +644,18 @@ async function trustedBridgeExecutable(input, expectedPattern) {
   return resolved;
 }
 
-async function runBridgeCommand(executable, args) {
+async function runBridgeCommand(
+  executable,
+  args,
+  { timeoutMs = BRIDGE_LOCK_TIMEOUT_MS } = {},
+) {
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > BRIDGE_AUTHENTICATED_SMOKE_TIMEOUT_MS
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       env: {
@@ -525,7 +671,7 @@ async function runBridgeCommand(executable, args) {
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       reject(new Error("BRIDGE_COMMAND_TIMEOUT"));
-    }, BRIDGE_LOCK_TIMEOUT_MS);
+    }, timeoutMs);
     const append = (current, chunk) => {
       const next = Buffer.concat([current, chunk]);
       if (next.length > 256 * 1024) {
@@ -656,6 +802,7 @@ async function inspectBridgeUnit({ slot, systemctl, runtimeKind }) {
   });
   return Object.freeze({
     fragmentSha256: sha256(fragmentBytes),
+    invocationId: properties.InvocationID,
     unit,
   });
 }
@@ -736,9 +883,471 @@ function fetchBridgeJson({ port, requestPath }) {
   }).catch(() => fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID"));
 }
 
+const SLOT_LINK_RECEIPT_KEYS = Object.freeze([
+  "RECORD_VERSION",
+  "RECORD_KIND",
+  "OPERATION",
+  "OPERATION_ID",
+  "SLOT",
+  "REQUESTED_RELEASE_SHA",
+  "REQUESTED_TARGET",
+  "REQUESTED_SHA256SUMS_SHA256",
+  "REQUESTED_HYDRATED_SHA256SUMS_SHA256",
+  "REQUESTED_SYMLINK_MANIFEST_SHA256",
+  "REQUESTED_PROVENANCE_SHA256",
+  "REQUESTED_HYDRATION_ATTESTATION_SHA256",
+  "PRIOR_STATE",
+  "PRIOR_RELEASE_SHA",
+  "PRIOR_TARGET",
+  "PRIOR_SHA256SUMS_SHA256",
+  "PRIOR_HYDRATED_SHA256SUMS_SHA256",
+  "PRIOR_SYMLINK_MANIFEST_SHA256",
+  "PRIOR_PROVENANCE_SHA256",
+  "PRIOR_HYDRATION_ATTESTATION_SHA256",
+  "SOURCE_RECEIPT_SHA256",
+  "ACTIVE_SLOT_SAFE_MODE",
+  "CREATED_AT",
+  "INTENT_SHA256",
+  "EFFECT_STATE",
+  "ACCEPTED_AT",
+]);
+const SLOT_LINK_OPERATION_ID =
+  /^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[1-9][0-9]*$/u;
+
+function parseBridgeJson(bytes) {
+  let value;
+  try {
+    value = JSON.parse(decodeBridgeUtf8(bytes));
+  } catch {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  return value;
+}
+
+async function inspectBridgeSlotReleaseAuthority({ releaseSha, slot }) {
+  const releaseRoot = `${BRIDGE_RELEASE_ROOT}/${releaseSha}`;
+  const slotLink = `${BRIDGE_SLOT_ROOT}/${slot}`;
+  const slotMetadata = await lstat(slotLink, { bigint: true }).catch(
+    () => null,
+  );
+  if (
+    !slotMetadata?.isSymbolicLink() ||
+    slotMetadata.uid !== 0n ||
+    (await realpath(slotLink).catch(() => null)) !== releaseRoot
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  await assertProtectedBridgeDirectory(releaseRoot);
+
+  const [
+    provenanceBytes,
+    buildIdBytes,
+    sha256SumsBytes,
+    hydratedSha256SumsBytes,
+    symlinkManifestBytes,
+    hydrationSourceReceiptBytes,
+    hydrationAttestationBytes,
+    targetMigrationBytes,
+  ] = await Promise.all([
+    readProtectedBridgeFile(`${releaseRoot}/release-provenance.json`, {
+      mode: 0o440,
+    }),
+    readProtectedBridgeFile(`${releaseRoot}/apps/web/.next/BUILD_ID`, {
+      mode: 0o440,
+    }),
+    readProtectedBridgeFile(`${releaseRoot}/SHA256SUMS`, { mode: 0o440 }),
+    readProtectedBridgeFile(`${releaseRoot}/HYDRATED_SHA256SUMS`, {
+      mode: 0o440,
+    }),
+    readProtectedBridgeFile(`${releaseRoot}/HYDRATED_SYMLINKS.json`, {
+      mode: 0o440,
+    }),
+    readProtectedBridgeFile(`${releaseRoot}/HYDRATION_SANDBOX_RECEIPT`, {
+      mode: 0o440,
+    }),
+    readProtectedBridgeFile(
+      `${BRIDGE_STATE_ROOT}/release-hydration-attestation-${releaseSha}.receipt`,
+      { mode: 0o400 },
+    ),
+    readProtectedBridgeFile(
+      `${releaseRoot}/packages/database/prisma/migrations/${TARGET_HEAD}/migration.sql`,
+      { mode: 0o440, maximumBytes: 16 * 1024 * 1024 },
+    ),
+  ]);
+  const provenance = parseBridgeJson(provenanceBytes);
+  if (
+    provenance.releaseSha !== releaseSha ||
+    provenance.databaseMigration !== TARGET_HEAD ||
+    provenance.databaseMigrationCount !== TARGET_COUNT ||
+    ![releaseSha, `${releaseSha}\n`].includes(decodeBridgeUtf8(buildIdBytes))
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  const hydration = parseExactBridgeKeyValues(hydrationAttestationBytes, [
+    "RECORD_VERSION",
+    "RELEASE_SHA",
+    "RELEASE_SLOT",
+    "HYDRATION_INVOCATION_ID",
+    "HYDRATION_SOURCE_RECEIPT_SHA256",
+    "HYDRATION_UNIT_SHA256",
+    "HYDRATION_STAGER_SHA256",
+    "HYDRATION_POLICY_SHA256",
+    "HYDRATED_MANIFEST_SHA256",
+    "RELEASE_DIRECTORY",
+    "PUBLICATION_AUTHORIZED",
+    "RUNTIME_SWITCHED",
+  ]);
+  const hydrationAttestationSha256 = sha256(hydrationAttestationBytes);
+  if (
+    hydration.RECORD_VERSION !== "1" ||
+    hydration.RELEASE_SHA !== releaseSha ||
+    hydration.RELEASE_SLOT !== slot ||
+    !INVOCATION_ID.test(hydration.HYDRATION_INVOCATION_ID) ||
+    hydration.RELEASE_DIRECTORY !== releaseRoot ||
+    hydration.PUBLICATION_AUTHORIZED !== "true" ||
+    hydration.RUNTIME_SWITCHED !== "false" ||
+    hydration.HYDRATION_SOURCE_RECEIPT_SHA256 !==
+      sha256(hydrationSourceReceiptBytes) ||
+    hydration.HYDRATED_MANIFEST_SHA256 !==
+      sha256(hydratedSha256SumsBytes) ||
+    ![
+      hydration.HYDRATION_UNIT_SHA256,
+      hydration.HYDRATION_STAGER_SHA256,
+      hydration.HYDRATION_POLICY_SHA256,
+    ].every((candidate) => SHA256.test(candidate))
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+
+  const latestIndexPath = `${BRIDGE_SLOT_LINK_STATE_ROOT}/${slot}.latest`;
+  const latestIndex = parseExactBridgeKeyValues(
+    await readProtectedBridgeFile(latestIndexPath, { mode: 0o600 }),
+    [
+      "RECORD_VERSION",
+      "RECORD_KIND",
+      "SLOT",
+      "OPERATION_ID",
+      "RECEIPT_PATH",
+      "RECEIPT_SHA256",
+      "UPDATED_AT",
+    ],
+  );
+  const expectedReceiptPath = `${BRIDGE_SLOT_LINK_STATE_ROOT}/${slot}-${latestIndex.OPERATION_ID}.bind.receipt`;
+  if (
+    latestIndex.RECORD_VERSION !== "1" ||
+    latestIndex.RECORD_KIND !== "SLOT_LINK_LATEST" ||
+    latestIndex.SLOT !== slot ||
+    !SLOT_LINK_OPERATION_ID.test(latestIndex.OPERATION_ID) ||
+    latestIndex.RECEIPT_PATH !== expectedReceiptPath ||
+    !SHA256.test(latestIndex.RECEIPT_SHA256) ||
+    parseNanoTimestamp(latestIndex.UPDATED_AT) === null
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  const slotLinkReceiptBytes = await readProtectedBridgeFile(
+    expectedReceiptPath,
+    { mode: 0o600 },
+  );
+  const slotLinkReceipt = parseExactBridgeKeyValues(
+    slotLinkReceiptBytes,
+    SLOT_LINK_RECEIPT_KEYS,
+  );
+  const requestedFingerprints = [
+    slotLinkReceipt.REQUESTED_SHA256SUMS_SHA256,
+    slotLinkReceipt.REQUESTED_HYDRATED_SHA256SUMS_SHA256,
+    slotLinkReceipt.REQUESTED_SYMLINK_MANIFEST_SHA256,
+    slotLinkReceipt.REQUESTED_PROVENANCE_SHA256,
+    slotLinkReceipt.REQUESTED_HYDRATION_ATTESTATION_SHA256,
+  ];
+  const priorFingerprints = [
+    slotLinkReceipt.PRIOR_SHA256SUMS_SHA256,
+    slotLinkReceipt.PRIOR_HYDRATED_SHA256SUMS_SHA256,
+    slotLinkReceipt.PRIOR_SYMLINK_MANIFEST_SHA256,
+    slotLinkReceipt.PRIOR_PROVENANCE_SHA256,
+    slotLinkReceipt.PRIOR_HYDRATION_ATTESTATION_SHA256,
+  ];
+  if (
+    latestIndex.RECEIPT_SHA256 !== sha256(slotLinkReceiptBytes) ||
+    slotLinkReceipt.RECORD_VERSION !== "1" ||
+    slotLinkReceipt.RECORD_KIND !== "SLOT_LINK_RECEIPT" ||
+    slotLinkReceipt.OPERATION !== "BIND" ||
+    slotLinkReceipt.OPERATION_ID !== latestIndex.OPERATION_ID ||
+    slotLinkReceipt.SLOT !== slot ||
+    slotLinkReceipt.REQUESTED_RELEASE_SHA !== releaseSha ||
+    slotLinkReceipt.REQUESTED_TARGET !== releaseRoot ||
+    slotLinkReceipt.REQUESTED_SHA256SUMS_SHA256 !== sha256(sha256SumsBytes) ||
+    slotLinkReceipt.REQUESTED_HYDRATED_SHA256SUMS_SHA256 !==
+      sha256(hydratedSha256SumsBytes) ||
+    slotLinkReceipt.REQUESTED_SYMLINK_MANIFEST_SHA256 !==
+      sha256(symlinkManifestBytes) ||
+    slotLinkReceipt.REQUESTED_PROVENANCE_SHA256 !== sha256(provenanceBytes) ||
+    slotLinkReceipt.REQUESTED_HYDRATION_ATTESTATION_SHA256 !==
+      hydrationAttestationSha256 ||
+    !requestedFingerprints.every((candidate) => SHA256.test(candidate)) ||
+    !["ABSENT", "BOUND"].includes(slotLinkReceipt.PRIOR_STATE) ||
+    (slotLinkReceipt.PRIOR_STATE === "ABSENT"
+      ? [
+          slotLinkReceipt.PRIOR_RELEASE_SHA,
+          slotLinkReceipt.PRIOR_TARGET,
+          ...priorFingerprints,
+        ].some((candidate) => candidate !== "")
+      : !SHA40.test(slotLinkReceipt.PRIOR_RELEASE_SHA) ||
+        slotLinkReceipt.PRIOR_TARGET !==
+          `${BRIDGE_RELEASE_ROOT}/${slotLinkReceipt.PRIOR_RELEASE_SHA}` ||
+        !priorFingerprints.every((candidate) => SHA256.test(candidate))) ||
+    slotLinkReceipt.SOURCE_RECEIPT_SHA256 !== "" ||
+    slotLinkReceipt.ACTIVE_SLOT_SAFE_MODE !== "false" ||
+    !SHA256.test(slotLinkReceipt.INTENT_SHA256) ||
+    slotLinkReceipt.EFFECT_STATE !== "BOUND" ||
+    parseNanoTimestamp(slotLinkReceipt.CREATED_AT) === null ||
+    parseNanoTimestamp(slotLinkReceipt.ACCEPTED_AT) === null
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  return Object.freeze({
+    hydratedManifestSha256: hydration.HYDRATED_MANIFEST_SHA256,
+    hydratedSha256SumsSha256: sha256(hydratedSha256SumsBytes),
+    hydrationAttestationSha256,
+    releaseProvenanceMigration: provenance.databaseMigration,
+    releaseProvenanceMigrationCount: provenance.databaseMigrationCount,
+    releaseProvenanceSha256: sha256(provenanceBytes),
+    sha256SumsSha256: sha256(sha256SumsBytes),
+    slotLinkReceiptSha256: sha256(slotLinkReceiptBytes),
+    symlinkManifestSha256: sha256(symlinkManifestBytes),
+    targetMigrationSha256: sha256(targetMigrationBytes),
+  });
+}
+
+async function inspectBridgeProductionControl({ node, releaseSha }) {
+  const verifier = await trustedBridgeExecutable(
+    BRIDGE_PRODUCTION_CONTROL_VERIFIER,
+    /^\/usr\/local\/libexec\/leetplus\/verify-installed-production-control-generation\.mjs$/u,
+  );
+  const verifierBytes = await readProtectedBridgeFile(verifier, { mode: 0o555 });
+  const output = await runBridgeCommand(
+    node,
+    [
+      verifier,
+      "--release-sha",
+      releaseSha,
+      BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG,
+    ],
+    { timeoutMs: 30_000 },
+  );
+  const values = parseExactBridgeKeyValues(Buffer.from(output), [
+    "PRODUCTION_CONTROL_INSTALLED_GENERATION",
+    "PRODUCTION_CONTROL_RELEASE_SHA",
+    "PRODUCTION_CONTROL_RECEIPT_PATH",
+    "PRODUCTION_CONTROL_RECEIPT_SHA256",
+    "PRODUCTION_CONTROL_ROOT_MANIFEST_SHA256",
+    "PRODUCTION_CONTROL_INSTALL_MAP_SHA256",
+    "PRODUCTION_CONTROL_INSTALLER_SHA256",
+    "PRODUCTION_CONTROL_VERIFIER_SHA256",
+    "PRODUCTION_CONTROL_STAGER_SHA256",
+    "PRODUCTION_CONTROL_ATTESTOR_SHA256",
+    "PRODUCTION_CONTROL_HYDRATION_UNIT_SHA256",
+    "PRODUCTION_CONTROL_SEALER_SHA256",
+    "PRODUCTION_CONTROL_PROMOTER_SHA256",
+    "PRODUCTION_CONTROL_INSTALLED_FILE_COUNT",
+  ]);
+  if (
+    values.PRODUCTION_CONTROL_INSTALLED_GENERATION !== "PASS" ||
+    values.PRODUCTION_CONTROL_RELEASE_SHA !== releaseSha ||
+    values.PRODUCTION_CONTROL_RECEIPT_PATH !==
+      `${BRIDGE_STATE_ROOT}/production-control/production-control-generation-${releaseSha}.receipt.json` ||
+    values.PRODUCTION_CONTROL_VERIFIER_SHA256 !== sha256(verifierBytes) ||
+    ![
+      values.PRODUCTION_CONTROL_RECEIPT_SHA256,
+      values.PRODUCTION_CONTROL_ROOT_MANIFEST_SHA256,
+      values.PRODUCTION_CONTROL_INSTALL_MAP_SHA256,
+      values.PRODUCTION_CONTROL_INSTALLER_SHA256,
+      values.PRODUCTION_CONTROL_STAGER_SHA256,
+      values.PRODUCTION_CONTROL_ATTESTOR_SHA256,
+      values.PRODUCTION_CONTROL_HYDRATION_UNIT_SHA256,
+      values.PRODUCTION_CONTROL_SEALER_SHA256,
+      values.PRODUCTION_CONTROL_PROMOTER_SHA256,
+    ].every((candidate) => SHA256.test(candidate)) ||
+    !/^[1-9][0-9]{0,5}$/u.test(
+      values.PRODUCTION_CONTROL_INSTALLED_FILE_COUNT,
+    )
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  return Object.freeze({
+    attestationSha256: sha256(output),
+    installMapSha256: values.PRODUCTION_CONTROL_INSTALL_MAP_SHA256,
+    receiptSha256: values.PRODUCTION_CONTROL_RECEIPT_SHA256,
+    releaseSha,
+    rootManifestSha256: values.PRODUCTION_CONTROL_ROOT_MANIFEST_SHA256,
+    verifierSha256: values.PRODUCTION_CONTROL_VERIFIER_SHA256,
+  });
+}
+
+async function inspectBridgeAuthenticatedSmoke({ apiPort, node }) {
+  const verifier = await trustedBridgeExecutable(
+    BRIDGE_AUTHENTICATED_SMOKE,
+    /^\/usr\/local\/libexec\/leetplus\/verify-legacy-rollback-authenticated-reads\.mjs$/u,
+  );
+  await readProtectedBridgeFile(verifier, { mode: 0o755 });
+  const output = await runBridgeCommand(
+    node,
+    [verifier, "--base-url", `http://127.0.0.1:${apiPort}`],
+    { timeoutMs: BRIDGE_AUTHENTICATED_SMOKE_TIMEOUT_MS },
+  );
+  const values = parseExactBridgeKeyValues(Buffer.from(output), [
+    "LEGACY_ROLLBACK_AUTHENTICATED_READS_ACCEPTED",
+    "LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG",
+    "LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT",
+  ]);
+  if (
+    values.LEGACY_ROLLBACK_AUTHENTICATED_READS_ACCEPTED !== "true" ||
+    !/^[A-Z][A-Z0-9_]{2,63}$/u.test(
+      values.LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG,
+    ) ||
+    !/^[1-9][0-9]{0,8}$/u.test(
+      values.LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT,
+    )
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  return Object.freeze({
+    sha256: sha256(output),
+    storeCount: Number(
+      values.LEGACY_ROLLBACK_AUTHENTICATED_READS_STORE_COUNT,
+    ),
+    usersCatalog:
+      values.LEGACY_ROLLBACK_AUTHENTICATED_READS_USERS_CATALOG,
+  });
+}
+
+async function inspectBridgeSlotRuntime({
+  expectedPhase,
+  node,
+  observedAt,
+  releaseSha,
+  slot,
+  systemctl,
+}) {
+  const apiPort = slot === "blue" ? 4100 : 4200;
+  const webPort = slot === "blue" ? 3100 : 3200;
+  const upstreamTarget = `${BRIDGE_CONFIG_ROOT}/upstreams/${slot}.conf`;
+  const runtimeEnvironmentPath = `${BRIDGE_ENVIRONMENT_ROOT}/runtime.env`;
+  const slotEnvironmentPath = `${BRIDGE_ENVIRONMENT_ROOT}/slots/${slot}.env`;
+  const canarySafeEnvironmentPath = `${BRIDGE_ENVIRONMENT_ROOT}/canary-safe.env`;
+  const [
+    authority,
+    upstreamTargetBytes,
+    runtimeEnvironment,
+    slotEnvironment,
+    canarySafeEnvironment,
+    apiUnit,
+    webUnit,
+    version,
+    readiness,
+    webIdentity,
+    authenticatedSmoke,
+  ] = await Promise.all([
+    inspectBridgeSlotReleaseAuthority({ releaseSha, slot }),
+    readProtectedBridgeFile(upstreamTarget, { mode: 0o644 }),
+    readProtectedBridgeFile(runtimeEnvironmentPath, { mode: 0o640 }),
+    readProtectedBridgeFile(slotEnvironmentPath, { mode: 0o440 }),
+    readProtectedBridgeFile(canarySafeEnvironmentPath, { mode: 0o440 }),
+    inspectBridgeUnit({ runtimeKind: "api", slot, systemctl }),
+    inspectBridgeUnit({ runtimeKind: "web", slot, systemctl }),
+    fetchBridgeJson({ port: apiPort, requestPath: "/version" }),
+    fetchBridgeJson({ port: apiPort, requestPath: "/health/ready" }),
+    fetchBridgeJson({ port: webPort, requestPath: "/api/release-identity" }),
+    inspectBridgeAuthenticatedSmoke({ apiPort, node }),
+  ]);
+  const environment = {};
+  mergeBridgeEnvironment(environment, runtimeEnvironment);
+  mergeBridgeEnvironment(environment, slotEnvironment);
+  mergeBridgeEnvironment(environment, canarySafeEnvironment);
+  if (
+    environment.RELEASE_SHA !== releaseSha ||
+    environment.WEB_BUILD_ID !== releaseSha ||
+    environment.EXPECTED_DATABASE_MIGRATION !== TARGET_HEAD ||
+    environment.EXPECTED_DATABASE_MIGRATION_COUNT !== String(TARGET_COUNT) ||
+    (environment.LEETPLUS_API_RUNTIME_ROLE ?? "COMBINED") !== "COMBINED" ||
+    environment.GUEST_BUG_REPORTING_MODE !== "OFF" ||
+    environment.GUEST_SUPPORT_SCHEMA_BRIDGE_MODE !== "ALLOW_CURRENT_187"
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  const database = readiness?.dependencies?.database;
+  const compatibility = database?.compatibility;
+  const readinessCheckedAt = new Date(readiness?.checkedAt ?? "invalid");
+  if (
+    version?.service !== "leetplus-api" ||
+    version?.release?.sha !== releaseSha ||
+    readiness?.ok !== true ||
+    readiness?.service !== "leetplus-api" ||
+    readiness?.release?.sha !== releaseSha ||
+    database?.ok !== true ||
+    webIdentity?.ok !== true ||
+    webIdentity?.release?.sha !== releaseSha ||
+    webIdentity?.release?.webBuildId !== releaseSha ||
+    !Number.isFinite(readinessCheckedAt.valueOf()) ||
+    Math.abs(observedAt.valueOf() - readinessCheckedAt.valueOf()) > 30_000
+  ) {
+    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+  }
+  const raw = {
+    apiBaseUrl: `http://127.0.0.1:${apiPort}`,
+    apiInvocationId: apiUnit.invocationId,
+    apiUnit: apiUnit.unit,
+    apiUnitFileSha256: apiUnit.fragmentSha256,
+    authenticatedSmokeSha256: authenticatedSmoke.sha256,
+    authenticatedSmokeStoreCount: authenticatedSmoke.storeCount,
+    authenticatedSmokeUsersCatalog: authenticatedSmoke.usersCatalog,
+    bugReportingMode: environment.GUEST_BUG_REPORTING_MODE,
+    canarySafeEnvironmentSha256: sha256(canarySafeEnvironment),
+    compatibilityMode:
+      expectedPhase === BRIDGE_SOURCE_PHASE ? compatibility?.mode : null,
+    compatibilityTargetMigration:
+      expectedPhase === BRIDGE_SOURCE_PHASE
+        ? compatibility?.targetMigration
+        : null,
+    compatibilityTargetMigrationCount:
+      expectedPhase === BRIDGE_SOURCE_PHASE
+        ? compatibility?.targetMigrationCount
+        : null,
+    databaseMigration: database?.migration,
+    databaseMigrationCount: database?.migrationCount,
+    ...authority,
+    releaseSha,
+    runtimeEnvironmentSha256: sha256(runtimeEnvironment),
+    runtimeRole: "COMBINED",
+    schemaBridgeMode: environment.GUEST_SUPPORT_SCHEMA_BRIDGE_MODE,
+    slot,
+    slotEnvironmentSha256: sha256(slotEnvironment),
+    upstreamTarget,
+    upstreamTargetSha256: sha256(upstreamTargetBytes),
+    webBaseUrl: `http://127.0.0.1:${webPort}`,
+    webBuildId: webIdentity.release.webBuildId,
+    webInvocationId: webUnit.invocationId,
+    webUnit: webUnit.unit,
+    webUnitFileSha256: webUnit.fragmentSha256,
+  };
+  return normalizeBridgeSlotAttestation(raw, {
+    expectedPhase,
+    expectedReleaseSha: releaseSha,
+    expectedSlot: slot,
+  });
+}
+
 async function inspectLiveBridgeRuntime({ expectedPhase, now, releaseSha }) {
   for (const directory of [
     BRIDGE_STATE_ROOT,
+    BRIDGE_SLOT_LINK_STATE_ROOT,
     BRIDGE_CONFIG_ROOT,
     `${BRIDGE_CONFIG_ROOT}/upstreams`,
     BRIDGE_ENVIRONMENT_ROOT,
@@ -768,25 +1377,9 @@ async function inspectLiveBridgeRuntime({ expectedPhase, now, releaseSha }) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
   }
   const slot = activeMatch[1];
-  const apiPort = slot === "blue" ? 4100 : 4200;
-  const webPort = slot === "blue" ? 3100 : 3200;
   const activeTargetBytes = await readProtectedBridgeFile(activeTarget, {
     mode: 0o644,
   });
-
-  const slotLink = `${BRIDGE_SLOT_ROOT}/${slot}`;
-  const slotMetadata = await lstat(slotLink, { bigint: true }).catch(
-    () => null,
-  );
-  const expectedReleaseRoot = `${BRIDGE_RELEASE_ROOT}/${releaseSha}`;
-  if (
-    !slotMetadata?.isSymbolicLink() ||
-    slotMetadata.uid !== 0n ||
-    (await realpath(slotLink).catch(() => null)) !== expectedReleaseRoot
-  ) {
-    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
-  }
-  await assertProtectedBridgeDirectory(expectedReleaseRoot);
 
   const latestIndexPath = `${BRIDGE_STATE_ROOT}/latest-accepted.index`;
   const latestIndex = parseExactBridgeKeyValues(
@@ -859,8 +1452,8 @@ async function inspectLiveBridgeRuntime({ expectedPhase, now, releaseSha }) {
     receipt.PREVIOUS_API_URL !== `http://127.0.0.1:${previousApiPort}` ||
     receipt.PREVIOUS_WEB_URL !== `http://127.0.0.1:${previousWebPort}` ||
     !SHA40.test(receipt.PREVIOUS_RELEASE_SHA) ||
-    receipt.PREVIOUS_MIGRATION !== SOURCE_HEAD ||
-    receipt.PREVIOUS_MIGRATION_COUNT !== String(SOURCE_COUNT) ||
+    receipt.PREVIOUS_MIGRATION !== TARGET_HEAD ||
+    receipt.PREVIOUS_MIGRATION_COUNT !== String(TARGET_COUNT) ||
     receipt.PREVIOUS_WEB_BUILD_ID !== receipt.PREVIOUS_RELEASE_SHA ||
     latestIndex.RECEIPT_SHA256 !== sha256(receiptBytes) ||
     receiptName !==
@@ -870,37 +1463,16 @@ async function inspectLiveBridgeRuntime({ expectedPhase, now, releaseSha }) {
   ) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
   }
-  const pendingIntentCount = (
-    await readdir(BRIDGE_STATE_ROOT, { withFileTypes: true })
-  ).filter(
-    (entry) => entry.isFile() && /\.intent(?:\.|$)/u.test(entry.name),
+  const [cutoverEntries, slotLinkEntries] = await Promise.all([
+    readdir(BRIDGE_STATE_ROOT, { withFileTypes: true }),
+    readdir(BRIDGE_SLOT_LINK_STATE_ROOT, { withFileTypes: true }),
+  ]);
+  const pendingIntentCount = [...cutoverEntries, ...slotLinkEntries].filter(
+    (entry) =>
+      entry.isFile() &&
+      (/\.intent(?:\.|$)/u.test(entry.name) || /\.new(?:\.|$)/u.test(entry.name)),
   ).length;
   if (pendingIntentCount !== 0) {
-    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
-  }
-
-  const runtimeEnvironmentPath = `${BRIDGE_ENVIRONMENT_ROOT}/runtime.env`;
-  const slotEnvironmentPath = `${BRIDGE_ENVIRONMENT_ROOT}/slots/${slot}.env`;
-  const canarySafeEnvironmentPath = `${BRIDGE_ENVIRONMENT_ROOT}/canary-safe.env`;
-  const [runtimeEnvironment, slotEnvironment, canarySafeEnvironment] =
-    await Promise.all([
-      readProtectedBridgeFile(runtimeEnvironmentPath, { mode: 0o640 }),
-      readProtectedBridgeFile(slotEnvironmentPath, { mode: 0o440 }),
-      readProtectedBridgeFile(canarySafeEnvironmentPath, { mode: 0o440 }),
-    ]);
-  const environment = {};
-  mergeBridgeEnvironment(environment, runtimeEnvironment);
-  mergeBridgeEnvironment(environment, slotEnvironment);
-  mergeBridgeEnvironment(environment, canarySafeEnvironment);
-  if (
-    environment.RELEASE_SHA !== releaseSha ||
-    environment.WEB_BUILD_ID !== releaseSha ||
-    environment.EXPECTED_DATABASE_MIGRATION !== TARGET_HEAD ||
-    environment.EXPECTED_DATABASE_MIGRATION_COUNT !== String(TARGET_COUNT) ||
-    (environment.LEETPLUS_API_RUNTIME_ROLE ?? "COMBINED") !== "COMBINED" ||
-    environment.GUEST_BUG_REPORTING_MODE !== "OFF" ||
-    environment.GUEST_SUPPORT_SCHEMA_BRIDGE_MODE !== "ALLOW_CURRENT_187"
-  ) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
   }
 
@@ -908,44 +1480,37 @@ async function inspectLiveBridgeRuntime({ expectedPhase, now, releaseSha }) {
     "/usr/bin/systemctl",
     /^\/usr\/bin\/systemctl$/u,
   );
-  const [apiUnit, webUnit, version, readiness, webIdentity] = await Promise.all(
-    [
-      inspectBridgeUnit({ runtimeKind: "api", slot, systemctl }),
-      inspectBridgeUnit({ runtimeKind: "web", slot, systemctl }),
-      fetchBridgeJson({ port: apiPort, requestPath: "/version" }),
-      fetchBridgeJson({ port: apiPort, requestPath: "/health/ready" }),
-      fetchBridgeJson({ port: webPort, requestPath: "/api/release-identity" }),
-    ],
+  const node = await trustedBridgeExecutable(
+    "/usr/bin/node",
+    /^\/usr\/bin\/node$/u,
   );
-  const database = readiness?.dependencies?.database;
-  const compatibility = database?.compatibility;
-  const readinessCheckedAt = new Date(readiness?.checkedAt ?? "invalid");
+  const [active, productionControl] = await Promise.all([
+    inspectBridgeSlotRuntime({
+      expectedPhase,
+      node,
+      observedAt: currentDate(now),
+      releaseSha,
+      slot,
+      systemctl,
+    }),
+    inspectBridgeProductionControl({ node, releaseSha }),
+  ]);
+  // The authenticated verifier performs a stateful login. Keep the two slot
+  // probes sequential so one canary identity never creates concurrent ingress
+  // state while the other slot is being attested.
+  const rollback = await inspectBridgeSlotRuntime({
+    expectedPhase,
+    node,
+    observedAt: currentDate(now),
+    releaseSha: receipt.PREVIOUS_RELEASE_SHA,
+    slot: previousSlot,
+    systemctl,
+  });
   if (
-    version?.service !== "leetplus-api" ||
-    version?.release?.sha !== releaseSha ||
-    readiness?.ok !== true ||
-    readiness?.service !== "leetplus-api" ||
-    readiness?.release?.sha !== releaseSha ||
-    database?.ok !== true ||
-    webIdentity?.ok !== true ||
-    webIdentity?.release?.sha !== releaseSha ||
-    webIdentity?.release?.webBuildId !== releaseSha ||
-    !Number.isFinite(readinessCheckedAt.valueOf()) ||
-    Math.abs(observedAt.valueOf() - readinessCheckedAt.valueOf()) > 30_000
-  ) {
-    fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
-  }
-  if (
-    expectedPhase === BRIDGE_SOURCE_PHASE
-      ? database.migration !== SOURCE_HEAD ||
-        database.migrationCount !== SOURCE_COUNT ||
-        compatibility?.mode !== BRIDGE_COMPATIBILITY_MODE ||
-        compatibility?.targetMigration !== TARGET_HEAD ||
-        compatibility?.targetMigrationCount !== TARGET_COUNT
-      : expectedPhase !== BRIDGE_TARGET_PHASE ||
-        database.migration !== TARGET_HEAD ||
-        database.migrationCount !== TARGET_COUNT ||
-        compatibility !== undefined
+    active.upstreamTarget !== activeTarget ||
+    active.upstreamTargetSha256 !== sha256(activeTargetBytes) ||
+    rollback.upstreamTarget !== previousTarget ||
+    rollback.upstreamTargetSha256 !== sha256(previousTargetBytes)
   ) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
   }
@@ -953,42 +1518,17 @@ async function inspectLiveBridgeRuntime({ expectedPhase, now, releaseSha }) {
   return normalizeFounderPilotCurrent188BridgeAttestation(
     {
       acceptedAt: receipt.ACCEPTED_AT,
-      activeTarget,
-      activeTargetSha256: sha256(activeTargetBytes),
-      apiBaseUrl: `http://127.0.0.1:${apiPort}`,
-      apiUnit: apiUnit.unit,
-      apiUnitFileSha256: apiUnit.fragmentSha256,
+      active,
       bridgeContract: BRIDGE_ATTESTATION_CONTRACT,
-      bugReportingMode: environment.GUEST_BUG_REPORTING_MODE,
-      canarySafeEnvironmentSha256: sha256(canarySafeEnvironment),
-      compatibilityMode:
-        expectedPhase === BRIDGE_SOURCE_PHASE ? compatibility.mode : null,
-      compatibilityTargetMigration:
-        expectedPhase === BRIDGE_SOURCE_PHASE
-          ? compatibility.targetMigration
-          : null,
-      compatibilityTargetMigrationCount:
-        expectedPhase === BRIDGE_SOURCE_PHASE
-          ? compatibility.targetMigrationCount
-          : null,
       cutoverGeneration: Number(latestIndex.GENERATION),
       cutoverReceiptName: receiptName,
       cutoverReceiptSha256: latestIndex.RECEIPT_SHA256,
-      databaseMigration: database.migration,
-      databaseMigrationCount: database.migrationCount,
       latestReceiptConsumed: false,
       pendingIntentCount,
       phase: expectedPhase,
-      releaseSha,
-      runtimeEnvironmentSha256: sha256(runtimeEnvironment),
-      runtimeRole: "COMBINED",
-      schemaBridgeMode: environment.GUEST_SUPPORT_SCHEMA_BRIDGE_MODE,
-      slot,
-      slotEnvironmentSha256: sha256(slotEnvironment),
-      webBaseUrl: `http://127.0.0.1:${webPort}`,
-      webBuildId: webIdentity.release.webBuildId,
-      webUnit: webUnit.unit,
-      webUnitFileSha256: webUnit.fragmentSha256,
+      productionControl,
+      rollback,
+      topologyMode: BRIDGE_TOPOLOGY_MODE,
     },
     { expectedPhase, expectedReleaseSha: releaseSha },
   );
@@ -996,26 +1536,29 @@ async function inspectLiveBridgeRuntime({ expectedPhase, now, releaseSha }) {
 
 const BRIDGE_LOCK_HOLDER = String.raw`
 import fcntl, os, stat, sys
-p = sys.argv[1]
-fd = os.open(p, os.O_RDWR | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
-s = os.fstat(fd)
-ps = os.stat(p, follow_symlinks=False)
-if (not stat.S_ISREG(s.st_mode) or s.st_uid != 0 or s.st_gid != 0 or
-    stat.S_IMODE(s.st_mode) != 0o600 or s.st_nlink != 1 or
-    (s.st_dev, s.st_ino) != (ps.st_dev, ps.st_ino)):
-    raise SystemExit(71)
-try:
-    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-except BlockingIOError:
-    raise SystemExit(72)
-ps2 = os.stat(p, follow_symlinks=False)
-if (s.st_dev, s.st_ino) != (ps2.st_dev, ps2.st_ino):
-    raise SystemExit(73)
+fds = []
+for p in sys.argv[1:]:
+    fd = os.open(p, os.O_RDWR | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+    s = os.fstat(fd)
+    ps = os.stat(p, follow_symlinks=False)
+    if (not stat.S_ISREG(s.st_mode) or s.st_uid != 0 or s.st_gid != 0 or
+        stat.S_IMODE(s.st_mode) != 0o600 or s.st_nlink != 1 or
+        (s.st_dev, s.st_ino) != (ps.st_dev, ps.st_ino)):
+        raise SystemExit(71)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit(72)
+    ps2 = os.stat(p, follow_symlinks=False)
+    if (s.st_dev, s.st_ino) != (ps2.st_dev, ps2.st_ino):
+        raise SystemExit(73)
+    fds.append(fd)
 sys.stdout.write("LOCKED\n")
 sys.stdout.flush()
 sys.stdin.buffer.read()
-fcntl.flock(fd, fcntl.LOCK_UN)
-os.close(fd)
+for fd in reversed(fds):
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    os.close(fd)
 `;
 
 export function createFounderPilotCurrent188ProductionBridgeRuntimeAdapter({
@@ -1034,11 +1577,14 @@ export function createFounderPilotCurrent188ProductionBridgeRuntimeAdapter({
   async function acquireLock() {
     if (lock !== null) fail("CURRENT188_UPGRADE_BRIDGE_LOCK_INVALID");
     await assertProtectedBridgeDirectory(BRIDGE_STATE_ROOT);
-    await readProtectedBridgeFile(`${BRIDGE_STATE_ROOT}/cutover.lock`, {
-      allowEmpty: true,
-      maximumBytes: 16 * 1024,
-      mode: 0o600,
-    });
+    await assertProtectedBridgeDirectory(BRIDGE_PRODUCTION_CONTROL_RUN_ROOT);
+    for (const lockPath of BRIDGE_AUTHORITY_LOCK_PATHS) {
+      await readProtectedBridgeFile(lockPath, {
+        allowEmpty: true,
+        maximumBytes: 16 * 1024,
+        mode: 0o600,
+      });
+    }
     const python = await trustedBridgeExecutable(
       "/usr/bin/python3",
       /^\/usr\/bin\/python3(?:\.\d+)*$/u,
@@ -1051,7 +1597,7 @@ export function createFounderPilotCurrent188ProductionBridgeRuntimeAdapter({
         "-E",
         "-c",
         BRIDGE_LOCK_HOLDER,
-        `${BRIDGE_STATE_ROOT}/cutover.lock`,
+        ...BRIDGE_AUTHORITY_LOCK_PATHS,
       ],
       {
         env: {
@@ -1762,8 +2308,12 @@ async function verifyBridgeTarget({
   );
   if (
     sourceAttestation !== null &&
-    stableJson(bridgeAttestationInvariant(sourceAttestation)) !==
-      stableJson(bridgeAttestationInvariant(targetAttestation))
+    stableJson(
+      founderPilotCurrent188BridgeAttestationInvariant(sourceAttestation),
+    ) !==
+      stableJson(
+        founderPilotCurrent188BridgeAttestationInvariant(targetAttestation),
+      )
   ) {
     fail("CURRENT188_UPGRADE_BRIDGE_TARGET_STATE_MISMATCH");
   }
@@ -1776,7 +2326,7 @@ async function verifyBridgeTarget({
       },
     ),
     bridgeCutoverGeneration: targetAttestation.cutoverGeneration,
-    bridgeSlot: targetAttestation.slot,
+    bridgeSlot: targetAttestation.active.slot,
   });
 }
 
@@ -1879,6 +2429,7 @@ export async function applyFounderPilotCurrent188ProductionUpgradePlan({
   try {
     await bridgeRuntime.acquireLock();
     bridgeLockHeld = true;
+    await emitPhase(onPhase, plan, "PRODUCTION_CONTROL_INSTALL_LOCK_ACQUIRED");
     await emitPhase(onPhase, plan, "BRIDGE_CUTOVER_LOCK_ACQUIRED");
     await adapter.acquireLock();
     lockHeld = true;
@@ -1954,7 +2505,7 @@ export async function applyFounderPilotCurrent188ProductionUpgradePlan({
       ),
       bridgeCutoverGeneration:
         normalizedFreshBridgeAttestation.cutoverGeneration,
-      bridgeSlot: normalizedFreshBridgeAttestation.slot,
+      bridgeSlot: normalizedFreshBridgeAttestation.active.slot,
     });
     let attempt = 1;
     let recoveredFromLostResponse = false;
@@ -2054,6 +2605,9 @@ export async function createFounderPilotCurrent188ProductionUpgradePgAdapter(
 
 export const FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS =
   Object.freeze({
+    bridgeAuthorityLockPaths: BRIDGE_AUTHORITY_LOCK_PATHS,
+    bridgeProductionControlVerifierAuthorityArgument:
+      BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG,
     sourceMigrationCount: SOURCE_COUNT,
     sourceMigrationHead: SOURCE_HEAD,
     targetMigrationCount: TARGET_COUNT,

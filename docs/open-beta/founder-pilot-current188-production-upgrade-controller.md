@@ -4,7 +4,7 @@
 
 Актуально на: **29.08.2026**
 
-> Этот strict V2 controller остаётся каноническим для базы с единым
+> Этот strict V3 controller остаётся каноническим для базы с единым
 > checksum-pinned migration owner. Фактическая production-база 29.08.2026 имеет
 > подтверждённую mixed-owner topology и поэтому правильно блокируется этим
 > controller до effect. Для одного exact production перехода используется
@@ -35,19 +35,31 @@ Controller переводит только фактически наблюдае
 - approval — detached Ed25519 signature короткоживущего exact plan digest;
 - публичный ключ связан manifest, а его SPKI SHA-256 независимо передаётся через
   protected environment;
-- `plan` разрешён только после первого accepted bridge-cutover. Controller под
-  root-owned blue/green lock проверяет latest receipt/index, `CONSUMED=false`,
-  отсутствие pending intent, active nginx slot, exact release symlink,
-  API/Web systemd units, protected environment file digests и loopback
-  `/version`, `/health/ready`, `/api/release-identity`;
-- source bridge обязан быть `COMBINED`,
+- `plan` разрешён только после accepted dual-slot bridge-cutover. Controller
+  под root-owned blue/green lock проверяет latest receipt/index,
+  `CONSUMED=false`, отсутствие cutover/slot-link pending intent, active nginx
+  slot и отдельный rollback slot;
+- active и rollback обязаны быть запущены, иметь разные slot identity и
+  target-188 release provenance. Для каждого закрепляются exact release
+  symlink, hydration и slot-link receipts, API/Web systemd unit + invocation,
+  protected environment digests, Web build identity, exact SHA-256 bytes
+  migration `c40d5eeb…` и loopback authenticated read-smoke. Active
+  production-control generation обязана принадлежать тому же release SHA,
+  который исполняет controller;
+- оба source bridge slot обязаны быть `COMBINED`,
   `GUEST_BUG_REPORTING_MODE=OFF`,
   `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_187` и публиковать exact
-  compatibility `CURRENT_187 -> CURRENT_188`. Полная attestation вместе с
-  database system identity входит в подписываемый plan;
+  compatibility `CURRENT_187 -> CURRENT_188`. Cutover receipt обязан честно
+  закреплять предыдущий target-188 release, а не старый CURRENT_187 artifact.
+  Полная `DUAL_BRIDGE_N_MINUS_ONE` attestation вместе с database system
+  identity входит в подписываемый plan;
 - `apply` повторно берёт cutover lock, сверяет attestation byte-for-byte и
   удерживает lock до postcheck. Поэтому routing/cutover не может измениться
   между последней проверкой и schema effect;
+- тот же runtime authority lock одновременно и в каноническом порядке удерживает
+  `/run/leetplus-production-control/install.lock`; installed control generation,
+  verifier и unit bytes нельзя заменить между финальной dual-slot attestation,
+  DDL и post-effect проверкой;
 - PostgreSQL advisory lock удерживается от повторной live-проверки до final
   postcheck;
 - каждая effect phase записывается в exclusive append-only fsynced JSONL journal;
@@ -55,8 +67,10 @@ Controller переводит только фактически наблюдае
   находится в точном source state; partial state всегда блокируется;
 - lost success восстанавливается только после полного exact `CURRENT_188`
   postcheck;
-- final postcheck требует тот же accepted release/slot/receipt/environment и
-  live readiness `CURRENT_188/188`; только database success недостаточен;
+- final postcheck требует тот же accepted cutover, active и rollback release,
+  receipts, invocations, production-control и authenticated smoke; оба slot
+  должны показать live readiness `CURRENT_188/188` без compatibility evidence.
+  Только database success недостаточен;
 - postcheck проверяет migration history, runtime-role fingerprint, identity-mail
   worker digest, четыре support tables, два enum, весь список indexes/
   constraints и отсутствие PUBLIC table/function privileges.
@@ -85,7 +99,7 @@ node packages/database/scripts/founder-pilot-current188-production-upgrade.cli.m
 
 ```text
 FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_DATABASE_URL=<loopback migration role URL with one exact SET ROLE>
-FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONFIRM=I_ACCEPT_EXACT_PRODUCTION_HISTORY_187_TO_188_V2
+FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONFIRM=I_ACCEPT_EXACT_PRODUCTION_HISTORY_187_TO_188_V3
 FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_APPROVAL_KEY_SPKI_SHA256=<independent pin>
 ```
 
@@ -95,16 +109,18 @@ root-controlled каталоге вне checkout и release tree. URL, private k
 
 ## Rollout и rollback
 
-Controller запускается только после backup + restored-copy lifecycle и первого
-cutover на exact bridge slot с `GUEST_BUG_REPORTING_MODE=OFF`. После успешного
-apply active bridge обязан пройти readiness уже на `188/188`; это проверяет сам
-controller до successful result. Если postcheck не пройден, второй slot и LIVE
-не запускаются.
+Controller запускается только после backup + restored-copy lifecycle и
+dual-slot cutover на два независимо admitted target-188 release artifact с
+`GUEST_BUG_REPORTING_MODE=OFF`. До DDL controller повторно сверяет оба slot под
+тем же lock. После успешного apply active и rollback bridge обязаны пройти
+readiness уже на `188/188`; это проверяет сам controller до successful result.
+Если postcheck не пройден, reporting LIVE не включается.
 
-После schema upgrade старый `CURRENT_187` runtime больше не является допустимым
-rollback target. HTTP rollback выполняется на первый bridge slot того же SHA,
-который уже подтвердил exact `CURRENT_188`. Schema rollback не выполняется:
-миграция additive, а runtime kill switch отключает создание новых обращений.
+Старый `CURRENT_187` runtime удаляется из rollback authority до schema effect.
+После upgrade HTTP rollback выполняется только на уже аттестованный rollback
+bridge slot, который также подтвердил exact `CURRENT_188`. Schema rollback не
+выполняется: миграция additive, а runtime kill switch отключает создание новых
+обращений.
 
 ## Проверки admission
 

@@ -740,7 +740,7 @@ test("bridge attestation is exact and rejects unsafe first-cutover states", asyn
   }
 });
 
-test("production bridge adapter has no unprivileged or non-Linux fallback", () => {
+test("production bridge adapter matches the canonical slot-link receipt contract", async () => {
   assert.deepEqual(
     [...FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.bridgeAuthorityLockPaths],
     [
@@ -752,6 +752,23 @@ test("production bridge adapter has no unprivileged or non-Linux fallback", () =
     FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS
       .bridgeProductionControlVerifierAuthorityArgument,
     "--require-root-authority",
+  );
+  assert.equal(
+    FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS
+      .bridgeSlotLinkBoundEffectState,
+    "REQUESTED_BOUND",
+  );
+  const binder = await readFile(
+    path.resolve(
+      SCRIPT_ROOT,
+      "../../../docs/deployment/production-artifact/bind-release-slot.sh",
+    ),
+    "utf8",
+  );
+  assert.match(binder, /effect_state='REQUESTED_BOUND'/u);
+  assert.match(
+    binder,
+    /record_value "\$record" EFFECT_STATE\)" == 'REQUESTED_BOUND'/u,
   );
   if (
     process.platform !== "linux" ||

@@ -14,6 +14,7 @@ import {
   founderPilotCurrent188BridgeAttestationDigest,
   normalizeFounderPilotCurrent188BridgeAttestation,
   normalizeFounderPilotCurrent188ProductionUpgradeManifest,
+  parseFounderPilotCurrent188BridgeSystemdProperties,
   signFounderPilotCurrent188ProductionUpgradePlan,
   verifyFounderPilotCurrent188ProductionUpgradeApproval,
 } from "./founder-pilot-current188-production-upgrade.mjs";
@@ -91,6 +92,49 @@ const SUPPORT_CONSTRAINTS = [
   "guest_support_ticket_terminal_timestamps_chk",
   "guest_support_ticket_topic_chk",
 ].sort();
+
+test("bridge systemd parser preserves repeated API-only environment files", () => {
+  const keys = [
+    "ActiveState",
+    "EnvironmentFiles",
+    "InvocationID",
+  ];
+  const parsed = parseFounderPilotCurrent188BridgeSystemdProperties(
+    [
+      "ActiveState=active",
+      "EnvironmentFiles=/etc/leetplus/runtime.env (ignore_errors=no)",
+      "EnvironmentFiles=/etc/leetplus/slots/green.env (ignore_errors=no)",
+      "EnvironmentFiles=/etc/leetplus/canary-safe.env (ignore_errors=no)",
+      "EnvironmentFiles=/etc/leetplus/guest-user-call-live.env (ignore_errors=no)",
+      "InvocationID=6d33f354c01e4610aa311492ffc4c58b",
+      "",
+    ].join("\n"),
+    keys,
+  );
+
+  assert.equal(parsed.ActiveState, "active");
+  assert.equal(parsed.InvocationID, "6d33f354c01e4610aa311492ffc4c58b");
+  assert.equal(
+    parsed.EnvironmentFiles,
+    [
+      "/etc/leetplus/runtime.env (ignore_errors=no)",
+      "/etc/leetplus/slots/green.env (ignore_errors=no)",
+      "/etc/leetplus/canary-safe.env (ignore_errors=no)",
+      "/etc/leetplus/guest-user-call-live.env (ignore_errors=no)",
+    ].join("\n"),
+  );
+});
+
+test("bridge systemd parser rejects repeated scalar properties", () => {
+  assert.throws(
+    () =>
+      parseFounderPilotCurrent188BridgeSystemdProperties(
+        "ActiveState=active\nActiveState=inactive\nEnvironmentFiles=/one\n",
+        ["ActiveState", "EnvironmentFiles"],
+      ),
+    { reasonCode: "CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID" },
+  );
+});
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");

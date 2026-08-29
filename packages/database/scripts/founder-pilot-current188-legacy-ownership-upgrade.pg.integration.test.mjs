@@ -732,8 +732,24 @@ test(
           }
         },
       };
-      const executor = productionExecutorEnabled
+      const productionExecutor = productionExecutorEnabled
         ? createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor()
+        : null;
+      const requireProductionSuccess = async (operation, options) => {
+        const result = await productionExecutor[operation](options);
+        assert.equal(
+          result.status,
+          "SUCCEEDED",
+          `${operation}: ${result.stderr}`,
+        );
+        return result;
+      };
+      const executor = productionExecutorEnabled
+        ? {
+            grantRuntimeAccess: (options) =>
+              requireProductionSuccess("grantRuntimeAccess", options),
+            migrate: (options) => requireProductionSuccess("migrate", options),
+          }
         : fixtureExecutor;
       const applied = await applyFounderPilotCurrent188LegacyOwnershipPlan({
         adapter,
@@ -854,7 +870,7 @@ test(
           await blocker.query(
             'LOCK TABLE public."GuestSupportTicket" IN ACCESS EXCLUSIVE MODE',
           );
-          const bounded = await executor.grantRuntimeAccess({
+          const bounded = await productionExecutor.grantRuntimeAccess({
             applicationRuntimeRole: runtimeRoleName,
             target: productionManifest.target,
             timeoutSeconds: 1,
@@ -935,6 +951,9 @@ test(
       } catch (error) {
         cleanupErrors.push(error);
       }
+    }
+    if (operationError !== null && cleanupErrors.length === 0) {
+      throw operationError;
     }
     if (operationError !== null || cleanupErrors.length > 0) {
       throw new AggregateError(

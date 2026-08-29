@@ -2462,6 +2462,7 @@ function childEvidence(status, code, signal, stdout, stderr) {
     status,
     stderrBytes: Buffer.byteLength(stderr),
     stderrSha256: sha256(stderr),
+    stderr,
     stdoutBytes: Buffer.byteLength(stdout),
     stdoutSha256: sha256(stdout),
     stdout,

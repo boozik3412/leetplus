@@ -116,24 +116,36 @@ Production сейчас может находиться на `CURRENT_187`, то
    attestation, чтобы публичный Callcheck можно было переключить с временного
    old-SHA sidecar до schema effect без окна недоступности;
 4. пройти loopback/public read-only canary и атомарно переключить трафик на этот
-   bridge slot. Предыдущий `CURRENT_187` slot остаётся точным N-1;
+   bridge slot. До schema effect предыдущий slot также обязан быть заменён на
+   independently admitted target-188 artifact, пройти hydration/slot-link,
+   unit/env/Web identity и authenticated read-smoke и работать при фактической
+   БД CURRENT_187 только через тот же explicit bridge. Старый CURRENT_187
+   artifact не остаётся rollback target;
 5. для фактической production mixed-owner topology применить только подписанный
    checksum-pinned
-   `FOUNDER_PILOT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V1` controller. До любого
+   `FOUNDER_PILOT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V2` controller. До любого
    database effect он берёт тот же root-owned cutover lock, проверяет активный
    nginx target, непросроченный accepted receipt/index с `CONSUMED=false`,
-   отсутствие pending intent, exact same-SHA release/slot/systemd/environment
-   identity, `COMBINED + OFF + ALLOW_CURRENT_187` и live readiness
-   `187 -> target 188`. Подписанный plan закрепляет production database/role
-   identity и пообъектный digest исторических OID/owner/ACL. Controller
+   отсутствие cutover/slot-link intent и exact active + rollback runtime.
+   Для обоих slot он закрепляет target-188 provenance, hydration/slot-link
+   receipts, systemd invocation, environment/Web identity, authenticated smoke,
+   exact target migration checksum, `COMBINED + OFF + ALLOW_CURRENT_187` и live
+   readiness `187 -> target 188`; active production-control generation обязана
+   совпадать с controller SHA. Production-control install lock удерживается
+   вместе с blue/green lock до post-effect проверки, поэтому control generation
+   не может смениться во время DDL. Подписанный plan закрепляет эту
+   `DUAL_BRIDGE_N_MINUS_ONE` topology, production database/role identity и
+   пообъектный digest исторических OID/owner/ACL. Controller
    допускает ровно `187 applied / 4 rolled back / 0 unfinished`, выполняет
    одну целевую миграцию локально от `postgres`, не меняет исторических
    owners, одной транзакцией отзывает PUBLIC grants и выдаёт runtime только
    минимальный support ACL. Под тем же lock он проверяет readiness `188/188`,
    body/comment worker function, таблицы, enum, constraints, indexes,
-   неизменность ownership digest и exact ACL;
-6. убедиться, что active bridge после изменения БД готов уже как exact
-   `CURRENT_188`. Запустить второй slot с `GUEST_BUG_REPORTING_MODE=LIVE` и
+   неизменность ownership digest и exact ACL. Под тем же lock оба slot обязаны
+   перейти в exact `CURRENT_188` readiness без active compatibility evidence;
+6. убедиться, что active и rollback bridge после изменения БД готовы уже как
+   exact `CURRENT_188`. Перезапустить candidate slot с
+   `GUEST_BUG_REPORTING_MODE=LIVE` и
    `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`;
 7. пройти negative contour matrix, guest submit/idempotency/invalid-file,
    tenant/platform isolation canary, затем второй atomic cutover и bounded soak.
@@ -141,7 +153,7 @@ Production сейчас может находиться на `CURRENT_187`, то
 Executable production controller и команды описаны в
 [CURRENT_188 legacy mixed-owner controller](../open-beta/founder-pilot-current188-legacy-mixed-owner-upgrade-controller.md).
 Строгий
-[CURRENT_188 V2 controller](../open-beta/founder-pilot-current188-production-upgrade-controller.md)
+[CURRENT_188 V3 controller](../open-beta/founder-pilot-current188-production-upgrade-controller.md)
 остаётся для базы с единым migration owner и на текущей mixed-owner production
 топологии обязан блокироваться до effect.
 Bridge не является общим допуском N/N+1: он принимает только одну пару

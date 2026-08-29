@@ -89,6 +89,21 @@ Support-функциональность следует тем же трём г�
   пообъектным OID/owner/ACL digest, migration от локальной postgres identity,
   неизменностью всех исторических owners и минимальным ACL только новых
   support-объектов. Универсальная owner normalization запрещена.
+- до database effect active и rollback slot образуют только explicit
+  `DUAL_BRIDGE_N_MINUS_ONE`: каждый обязан быть independently admitted
+  target-188 artifact с release provenance, hydration/slot-link receipt,
+  exact target migration checksum, API/Web invocation, authenticated DB-bound
+  smoke и reporting OFF. Старый
+  CURRENT_187 artifact не является rollback authority. Active slot и
+  production-control generation обязаны принадлежать одному exact SHA;
+  подписанный plan закрепляет доказательства обоих slot;
+- production-control `install.lock` и blue/green cutover lock удерживаются одним
+  authority window от финальной dual-slot сверки до post-effect проверки;
+  замена control generation или runtime bytes во время DDL запрещена;
+- под тем же root-owned cutover lock непосредственно перед DDL оба slot снова
+  подтверждают actual database CURRENT_187 и единственную compatibility
+  `187 -> 188`; сразу после DDL оба обязаны подтвердить exact CURRENT_188 без
+  active compatibility evidence. До этого reporting LIVE запрещён.
 
 Подробный контракт и rollout:
 [`docs/support/guest-bug-reporting.md`](../support/guest-bug-reporting.md).

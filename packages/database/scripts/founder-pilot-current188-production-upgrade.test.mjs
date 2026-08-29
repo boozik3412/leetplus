@@ -238,19 +238,19 @@ function supportContract(overrides = {}) {
   };
 }
 
-function bridgeAttestation(phase = "SOURCE_187", overrides = {}) {
+function bridgeSlotAttestation({ phase, releaseSha, slot, seed }) {
   const source = phase === "SOURCE_187";
-  const releaseSha = "c".repeat(40);
+  const blue = slot === "blue";
   return {
-    acceptedAt: "2026-08-28T13:58:00.000000000Z",
-    activeTarget: "/etc/nginx/leetplus/upstreams/green.conf",
-    activeTargetSha256: "1".repeat(64),
-    apiBaseUrl: "http://127.0.0.1:4200",
-    apiUnit: "leetplus-api@green.service",
-    apiUnitFileSha256: "2".repeat(64),
-    bridgeContract: "GUEST_SUPPORT_CURRENT187_ACTIVE_BRIDGE_CUTOVER_V1",
+    apiBaseUrl: `http://127.0.0.1:${blue ? 4100 : 4200}`,
+    apiInvocationId: seed.repeat(32),
+    apiUnit: `leetplus-api@${slot}.service`,
+    apiUnitFileSha256: seed.repeat(64),
+    authenticatedSmokeSha256: seed.repeat(64),
+    authenticatedSmokeStoreCount: 4,
+    authenticatedSmokeUsersCatalog: "CURRENT",
     bugReportingMode: "OFF",
-    canarySafeEnvironmentSha256: "3".repeat(64),
+    canarySafeEnvironmentSha256: seed.repeat(64),
     compatibilityMode: source ? "GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE" : null,
     compatibilityTargetMigration: source
       ? FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationHead
@@ -258,28 +258,73 @@ function bridgeAttestation(phase = "SOURCE_187", overrides = {}) {
     compatibilityTargetMigrationCount: source
       ? FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationCount
       : null,
-    cutoverGeneration: 4,
-    cutoverReceiptName: `20260828T135800000000000Z-g4-${releaseSha}-green.receipt`,
-    cutoverReceiptSha256: "4".repeat(64),
     databaseMigration: source
       ? FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.sourceMigrationHead
       : FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationHead,
     databaseMigrationCount: source
       ? FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.sourceMigrationCount
       : FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationCount,
+    hydratedManifestSha256: seed.repeat(64),
+    hydratedSha256SumsSha256: seed.repeat(64),
+    hydrationAttestationSha256: seed.repeat(64),
+    releaseProvenanceMigration:
+      FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationHead,
+    releaseProvenanceMigrationCount:
+      FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationCount,
+    releaseProvenanceSha256: seed.repeat(64),
+    releaseSha,
+    runtimeEnvironmentSha256: seed.repeat(64),
+    runtimeRole: "COMBINED",
+    schemaBridgeMode: "ALLOW_CURRENT_187",
+    sha256SumsSha256: seed.repeat(64),
+    slot,
+    slotEnvironmentSha256: seed.repeat(64),
+    slotLinkReceiptSha256: seed.repeat(64),
+    symlinkManifestSha256: seed.repeat(64),
+    targetMigrationSha256:
+      FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationSha256,
+    upstreamTarget: `/etc/nginx/leetplus/upstreams/${slot}.conf`,
+    upstreamTargetSha256: seed.repeat(64),
+    webBaseUrl: `http://127.0.0.1:${blue ? 3100 : 3200}`,
+    webBuildId: releaseSha,
+    webInvocationId: seed.repeat(32),
+    webUnit: `leetplus-web@${slot}.service`,
+    webUnitFileSha256: seed.repeat(64),
+  };
+}
+
+function bridgeAttestation(phase = "SOURCE_187", overrides = {}) {
+  const releaseSha = "c".repeat(40);
+  return {
+    acceptedAt: "2026-08-28T13:58:00.000000000Z",
+    active: bridgeSlotAttestation({
+      phase,
+      releaseSha,
+      seed: "1",
+      slot: "green",
+    }),
+    bridgeContract: "GUEST_SUPPORT_CURRENT187_DUAL_BRIDGE_CUTOVER_V2",
+    cutoverGeneration: 4,
+    cutoverReceiptName: `20260828T135800000000000Z-g4-${releaseSha}-green.receipt`,
+    cutoverReceiptSha256: "4".repeat(64),
     latestReceiptConsumed: false,
     pendingIntentCount: 0,
     phase,
-    releaseSha,
-    runtimeEnvironmentSha256: "5".repeat(64),
-    runtimeRole: "COMBINED",
-    schemaBridgeMode: "ALLOW_CURRENT_187",
-    slot: "green",
-    slotEnvironmentSha256: "6".repeat(64),
-    webBaseUrl: "http://127.0.0.1:3200",
-    webBuildId: releaseSha,
-    webUnit: "leetplus-web@green.service",
-    webUnitFileSha256: "7".repeat(64),
+    productionControl: {
+      attestationSha256: "5".repeat(64),
+      installMapSha256: "6".repeat(64),
+      receiptSha256: "7".repeat(64),
+      releaseSha,
+      rootManifestSha256: "8".repeat(64),
+      verifierSha256: "9".repeat(64),
+    },
+    rollback: bridgeSlotAttestation({
+      phase,
+      releaseSha: "b".repeat(40),
+      seed: "a",
+      slot: "blue",
+    }),
+    topologyMode: "DUAL_BRIDGE_N_MINUS_ONE",
     ...overrides,
   };
 }
@@ -337,7 +382,7 @@ async function fixture(t) {
       publicKeyPem: key.publicKeyPem,
       publicKeySpkiSha256: key.publicKeySpkiSha256,
     },
-    contractVersion: "FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V2",
+    contractVersion: "FOUNDER_PILOT_PRODUCTION_HISTORY_187_TO_188_V3",
     environment: "PRODUCTION",
     operation: { deployTimeoutSeconds: 600 },
     release: {
@@ -608,17 +653,39 @@ test("bridge attestation is exact and rejects unsafe first-cutover states", asyn
     normalizeFounderPilotCurrent188BridgeAttestation(exact, {
       expectedPhase: "SOURCE_187",
       expectedReleaseSha: "c".repeat(40),
-    }).runtimeRole,
+    }).active.runtimeRole,
     "COMBINED",
   );
+  assert.equal(exact.topologyMode, "DUAL_BRIDGE_N_MINUS_ONE");
   for (const unsafe of [
-    { ...exact, bugReportingMode: "LIVE" },
-    { ...exact, schemaBridgeMode: "OFF" },
-    { ...exact, runtimeRole: "GUEST" },
+    { ...exact, active: { ...exact.active, bugReportingMode: "LIVE" } },
+    { ...exact, rollback: { ...exact.rollback, schemaBridgeMode: "OFF" } },
+    { ...exact, rollback: { ...exact.rollback, runtimeRole: "GUEST" } },
     { ...exact, pendingIntentCount: 1 },
     { ...exact, latestReceiptConsumed: true },
-    { ...exact, releaseSha: "d".repeat(40) },
-    { ...exact, databaseMigrationCount: 188 },
+    { ...exact, active: { ...exact.active, releaseSha: "d".repeat(40) } },
+    {
+      ...exact,
+      rollback: { ...exact.rollback, databaseMigrationCount: 188 },
+    },
+    {
+      ...exact,
+      active: { ...exact.active, targetMigrationSha256: "d".repeat(64) },
+    },
+    {
+      ...exact,
+      rollback: {
+        ...exact.rollback,
+        authenticatedSmokeUsersCatalog: "",
+      },
+    },
+    {
+      ...exact,
+      productionControl: {
+        ...exact.productionControl,
+        releaseSha: "d".repeat(40),
+      },
+    },
     { ...exact, cutoverReceiptName: "forged.receipt" },
   ]) {
     value.bridge.setSource(unsafe);
@@ -630,6 +697,13 @@ test("bridge attestation is exact and rejects unsafe first-cutover states", asyn
 });
 
 test("production bridge adapter has no unprivileged or non-Linux fallback", () => {
+  assert.deepEqual(
+    [...FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.bridgeAuthorityLockPaths],
+    [
+      "/run/leetplus-production-control/install.lock",
+      "/var/lib/leetplus/deploy-receipts/cutover.lock",
+    ],
+  );
   if (
     process.platform !== "linux" ||
     typeof process.geteuid !== "function" ||
@@ -672,6 +746,40 @@ test("apply refuses bridge drift after approval before any database effect", asy
   assert.equal(value.bridge.locks(), 0);
 });
 
+test("apply refuses rollback-slot drift after approval before any database effect", async (t) => {
+  const value = await fixture(t);
+  const state = adapterWithState(value.source);
+  const plan = await buildPlan(value, state.adapter);
+  const exact = bridgeAttestation("SOURCE_187");
+  let deployCalls = 0;
+  for (const rollbackDrift of [
+    { hydrationAttestationSha256: "d".repeat(64) },
+    { slotLinkReceiptSha256: "d".repeat(64) },
+    { webUnitFileSha256: "d".repeat(64) },
+    { runtimeEnvironmentSha256: "d".repeat(64) },
+    { webInvocationId: "e".repeat(32) },
+    { authenticatedSmokeUsersCatalog: "CURRENT_DRIFT" },
+  ]) {
+    value.bridge.setSource({
+      ...exact,
+      rollback: { ...exact.rollback, ...rollbackDrift },
+    });
+    await assert.rejects(
+      () =>
+        applyFounderPilotCurrent188ProductionUpgradePlan(
+          applyOptions(value, state, plan, async () => {
+            deployCalls += 1;
+            return { status: "SUCCEEDED" };
+          }),
+        ),
+      { reasonCode: "CURRENT188_UPGRADE_BRIDGE_ATTESTATION_MISMATCH" },
+    );
+    assert.equal(state.locks(), 0);
+    assert.equal(value.bridge.locks(), 0);
+  }
+  assert.equal(deployCalls, 0);
+});
+
 test("post-migration verification requires the same accepted bridge cutover", async (t) => {
   const value = await fixture(t);
   const state = adapterWithState(value.source);
@@ -690,6 +798,92 @@ test("post-migration verification requires the same accepted bridge cutover", as
         }),
       ),
     { reasonCode: "CURRENT188_UPGRADE_BRIDGE_TARGET_STATE_MISMATCH" },
+  );
+  assert.equal(state.locks(), 0);
+  assert.equal(value.bridge.locks(), 0);
+});
+
+test("post-migration verification requires the same rollback-slot authority", async (t) => {
+  const value = await fixture(t);
+  const state = adapterWithState(value.source);
+  const plan = await buildPlan(value, state.adapter);
+  const target = bridgeAttestation("TARGET_188");
+  value.bridge.setTarget({
+    ...target,
+    rollback: {
+      ...target.rollback,
+      authenticatedSmokeSha256: "d".repeat(64),
+    },
+  });
+  await assert.rejects(
+    () =>
+      applyFounderPilotCurrent188ProductionUpgradePlan(
+        applyOptions(value, state, plan, async () => {
+          state.setState(value.target);
+          return { status: "SUCCEEDED" };
+        }),
+      ),
+    { reasonCode: "CURRENT188_UPGRADE_BRIDGE_TARGET_STATE_MISMATCH" },
+  );
+  assert.equal(state.locks(), 0);
+  assert.equal(value.bridge.locks(), 0);
+});
+
+test("post-migration verification rejects a changed production-control generation", async (t) => {
+  const value = await fixture(t);
+  const state = adapterWithState(value.source);
+  const plan = await buildPlan(value, state.adapter);
+  const target = bridgeAttestation("TARGET_188");
+  value.bridge.setTarget({
+    ...target,
+    productionControl: {
+      ...target.productionControl,
+      receiptSha256: "d".repeat(64),
+    },
+  });
+  await assert.rejects(
+    () =>
+      applyFounderPilotCurrent188ProductionUpgradePlan(
+        applyOptions(value, state, plan, async () => {
+          state.setState(value.target);
+          return { status: "SUCCEEDED" };
+        }),
+      ),
+    { reasonCode: "CURRENT188_UPGRADE_BRIDGE_TARGET_STATE_MISMATCH" },
+  );
+  assert.equal(state.locks(), 0);
+  assert.equal(value.bridge.locks(), 0);
+});
+
+test("post-migration verification cannot succeed while one slot remains on CURRENT_187", async (t) => {
+  const value = await fixture(t);
+  const state = adapterWithState(value.source);
+  const plan = await buildPlan(value, state.adapter);
+  const target = bridgeAttestation("TARGET_188");
+  value.bridge.setTarget({
+    ...target,
+    rollback: {
+      ...target.rollback,
+      compatibilityMode: "GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE",
+      compatibilityTargetMigration:
+        FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationHead,
+      compatibilityTargetMigrationCount:
+        FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.targetMigrationCount,
+      databaseMigration:
+        FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.sourceMigrationHead,
+      databaseMigrationCount:
+        FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS.sourceMigrationCount,
+    },
+  });
+  await assert.rejects(
+    () =>
+      applyFounderPilotCurrent188ProductionUpgradePlan(
+        applyOptions(value, state, plan, async () => {
+          state.setState(value.target);
+          return { status: "SUCCEEDED" };
+        }),
+      ),
+    { reasonCode: "CURRENT188_UPGRADE_BRIDGE_ATTESTATION_INVALID" },
   );
   assert.equal(state.locks(), 0);
   assert.equal(value.bridge.locks(), 0);

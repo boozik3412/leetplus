@@ -65,6 +65,9 @@ owner tuple, revokes PUBLIC access on the two new enum types, and grants the
 declared runtime role SELECT/INSERT/UPDATE only on the ticket table,
 SELECT/INSERT on the three append-only support tables, and USAGE on the two
 enum types. The feature flag remains outside this controller.
+The signed plan additionally requires an exact DUAL_BRIDGE_N_MINUS_ONE active
+and rollback topology with reporting OFF before DDL and exact CURRENT_188
+readiness on both slots after DDL.
 The production lane root must be /var/lib/leetplus/current188-legacy-lanes/
 leetplus-founder-production-history-current188-<materialized-tree-digest>.`;
 }
@@ -240,7 +243,7 @@ function assertProductionEnvironment(environment) {
 
 function blocked(error) {
   return {
-    contractVersion: "FOUNDER_PILOT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V1",
+    contractVersion: "FOUNDER_PILOT_CURRENT188_LEGACY_MIXED_OWNERSHIP_V2",
     decision: "BLOCKED_MANUAL",
     reasonCode:
       typeof error?.reasonCode === "string"

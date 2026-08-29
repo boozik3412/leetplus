@@ -9,13 +9,13 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий runtime implementation baseline — merge SHA
-`8d26acae670f5244f0f30fd2a9aac70eae940d1a` (PR #73, включает PR #72/#67).
-Fast CI `33205114353` и Full Release Admission `33205114384` зелёные на exact
+`a5eeec326a935db5a1c33bf94cfad3b942361f70` (PR #74).
+Fast CI `33238585320` и Full Release Admission `33238585296` зелёные на exact
 merge SHA. В source реализованы отдельные
 `CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
 pools, но production cutover не выполнялся: последний зафиксированный
 production runtime остаётся `COMBINED`, а split systemd/nginx candidate —
-`DORMANT / NOT INSTALLED`. Production уже работает на exact `8d26acae…` в
+`DORMANT / NOT INSTALLED`. Production уже работает на exact `a5eeec32…` в
 bridge-режиме `CURRENT_187 -> CURRENT_188`, но bug reporting остаётся `OFF`.
 
 Публичный игровой вход (`/guest-portal*`) не зависит от corporate JWT/scope и
@@ -49,11 +49,11 @@ support-объектов. До возврата успеха оба slot обя�
 
 Ранние public switch 29.08 fail-closed вернулись до database effect из-за
 неверного порядка stateful authenticated smoke и readiness probes. Исправленный
-watchdog из PR #73 успешно admitted и развернут: production сейчас обслуживает
-exact SHA `8d26acae…` в bridge-режиме, оставаясь на чистой схеме `CURRENT_187` с
-bug reporting `OFF`. Следующий database effect допустим только после admission
-dual-slot controller и отдельного exact-SHA GO; повторять прежний deploy не
-нужно.
+watchdog successor из PR #74 успешно admitted и развернут: production сейчас
+обслуживает exact SHA `a5eeec32…` в bridge-режиме, оставаясь на чистой схеме
+`CURRENT_187` с bug reporting `OFF`. Следующий database effect допустим только
+после admission dual-slot controller и отдельного exact-SHA GO; повторять
+прежний deploy не нужно.
 
 ## Detailed gamification state (updated through 28.08.2026)
 

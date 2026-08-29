@@ -4,8 +4,9 @@
 
 Актуально на: **29.08.2026**
 Runtime implementation baseline:
-`8d26acae670f5244f0f30fd2a9aac70eae940d1a` (PR #73; включает PR #72/#67,
-bug-report support candidate, USER_CALL handoff и corrected cutover watchdog)
+`a5eeec326a935db5a1c33bf94cfad3b942361f70` (PR #74; включает bug-report
+support candidate, USER_CALL handoff, corrected cutover watchdog и исходный
+mixed-owner CURRENT188 controller)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -16,9 +17,9 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | watchdog successor слит PR [#73](https://github.com/boozik3412/leetplus/pull/73), merge SHA `8d26acae670f5244f0f30fd2a9aac70eae940d1a`                                             |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33205114353) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33205114384) — `SUCCESS` |
-| Production API topology  | подтверждённый runtime — exact `8d26acae…`, `COMBINED`, bridge `CURRENT_187 -> CURRENT_188`, reporting `OFF`; dedicated `CORPORATE`/`GUEST` не установлены                         |
+| Runtime implementation   | mixed-owner successor слит PR [#74](https://github.com/boozik3412/leetplus/pull/74), merge SHA `a5eeec326a935db5a1c33bf94cfad3b942361f70`                                                |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33238585320) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33238585296) — `SUCCESS` |
+| Production API topology  | подтверждённый runtime — exact `a5eeec32…`, `COMBINED`, bridge `CURRENT_187 -> CURRENT_188`, reporting `OFF`; dedicated `CORPORATE`/`GUEST` не установлены                         |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
 | Corporate landing        | role-aware successor слит и admitted; отдельный production deploy/real-account canary всё ещё должен подтверждаться фактическим runtime                                            |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |

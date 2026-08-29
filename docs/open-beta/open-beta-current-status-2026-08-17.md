@@ -3,10 +3,10 @@
 | Поле                 | Состояние                                                                                 |
 | -------------------- | ----------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                              |
-| Production runtime   | healthy; exact `8d26acae…`, `COMBINED`, schema bridge ON, bug reporting OFF               |
+| Production runtime   | healthy; exact `a5eeec32…`, `COMBINED`, schema bridge ON, bug reporting OFF               |
 | Prisma schema        | source candidate `CURRENT_188`; production remains `CURRENT_187` until controlled rollout |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA              |
-| Runtime successor    | watchdog merge `8d26acae670f5244f0f30fd2a9aac70eae940d1a`; gates green                    |
+| Runtime successor    | mixed-owner merge `a5eeec326a935db5a1c33bf94cfad3b942361f70`; gates green                  |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                          |
 | Role-aware landing   | `359e5aeb...` merged/admitted; production deploy и real-account canary pending            |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                  |

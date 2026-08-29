@@ -704,6 +704,11 @@ test("production bridge adapter has no unprivileged or non-Linux fallback", () =
       "/var/lib/leetplus/deploy-receipts/cutover.lock",
     ],
   );
+  assert.equal(
+    FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS
+      .bridgeProductionControlVerifierAuthorityArgument,
+    "--require-root-authority",
+  );
   if (
     process.platform !== "linux" ||
     typeof process.geteuid !== "function" ||

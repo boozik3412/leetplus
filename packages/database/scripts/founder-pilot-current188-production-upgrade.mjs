@@ -73,6 +73,8 @@ const BRIDGE_AUTHENTICATED_SMOKE =
   "/usr/local/libexec/leetplus/verify-legacy-rollback-authenticated-reads.mjs";
 const BRIDGE_PRODUCTION_CONTROL_VERIFIER =
   "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs";
+const BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG =
+  "--require-root-authority";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SHA40 = /^[0-9a-f]{40}$/u;
 const INVOCATION_ID = /^[0-9a-f]{32}$/u;
@@ -1132,7 +1134,12 @@ async function inspectBridgeProductionControl({ node, releaseSha }) {
   const verifierBytes = await readProtectedBridgeFile(verifier, { mode: 0o555 });
   const output = await runBridgeCommand(
     node,
-    [verifier, "--release-sha", releaseSha],
+    [
+      verifier,
+      "--release-sha",
+      releaseSha,
+      BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG,
+    ],
     { timeoutMs: 30_000 },
   );
   const values = parseExactBridgeKeyValues(Buffer.from(output), [
@@ -2599,6 +2606,8 @@ export async function createFounderPilotCurrent188ProductionUpgradePgAdapter(
 export const FOUNDER_PILOT_CURRENT188_PRODUCTION_UPGRADE_CONSTANTS =
   Object.freeze({
     bridgeAuthorityLockPaths: BRIDGE_AUTHORITY_LOCK_PATHS,
+    bridgeProductionControlVerifierAuthorityArgument:
+      BRIDGE_PRODUCTION_CONTROL_VERIFIER_AUTHORITY_ARG,
     sourceMigrationCount: SOURCE_COUNT,
     sourceMigrationHead: SOURCE_HEAD,
     targetMigrationCount: TARGET_COUNT,

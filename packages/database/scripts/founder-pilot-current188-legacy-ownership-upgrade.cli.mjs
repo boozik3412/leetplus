@@ -12,6 +12,7 @@ import {
   createFounderPilotCurrent188LegacyOwnershipBridgeRuntimeAdapter,
   createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor,
   createFounderPilotCurrent188LegacyOwnershipPgAdapter,
+  createFounderPilotCurrent188LegacyOwnershipRuntimeSafetyAdapter,
   inspectFounderPilotCurrent188LegacyOwnershipInventory,
   normalizeFounderPilotCurrent188LegacyOwnershipManifest,
   signFounderPilotCurrent188LegacyOwnershipPlan,
@@ -268,6 +269,7 @@ export async function main(
   }
   let adapter = null;
   let runtimeAdapter = null;
+  let runtimeSafetyAdapter = null;
   let journal = null;
   try {
     const manifest = normalizeFounderPilotCurrent188LegacyOwnershipManifest(
@@ -295,12 +297,17 @@ export async function main(
       manifest,
       { productionConfirmation: environment[CONFIRMATION_ENV] },
     );
+    runtimeSafetyAdapter =
+      createFounderPilotCurrent188LegacyOwnershipRuntimeSafetyAdapter(
+        manifest,
+      );
     if (args.mode === "inventory") {
       const inventory =
         await inspectFounderPilotCurrent188LegacyOwnershipInventory({
           adapter,
           laneRoot: args.laneRoot,
           manifest,
+          runtimeSafetyAdapter,
           sourcePrismaRoot: args.sourcePrismaRoot,
         });
       process.stdout.write(`${JSON.stringify(inventory, null, 2)}\n`);
@@ -315,6 +322,7 @@ export async function main(
         adapter,
         laneRoot: args.laneRoot,
         manifest,
+        runtimeSafetyAdapter,
         runtimeAdapter,
         sourcePrismaRoot: args.sourcePrismaRoot,
       });
@@ -329,6 +337,7 @@ export async function main(
         adapter,
         laneRoot: args.laneRoot,
         manifest,
+        runtimeSafetyAdapter,
         runtimeAdapter,
         sourcePrismaRoot: args.sourcePrismaRoot,
       });
@@ -355,6 +364,7 @@ export async function main(
       pinnedApprovalKeySpkiSha256: environment[APPROVAL_PIN_ENV],
       plan,
       productionConfirmation: environment[CONFIRMATION_ENV],
+      runtimeSafetyAdapter,
       runtimeAdapter,
       sourcePrismaRoot: args.sourcePrismaRoot,
     });

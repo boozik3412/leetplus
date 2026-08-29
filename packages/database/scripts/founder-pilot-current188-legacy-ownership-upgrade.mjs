@@ -61,6 +61,8 @@ const TARGET_WORKER_FUNCTION_COMMENT =
   "Fail-closed identity mail worker readiness receipt bound to exact CURRENT_188 while preserving the approved CURRENT_185 preterminal digest boundary.";
 const TARGET_PRETERMINAL_MANIFEST_SHA256 =
   "094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b";
+const TARGET_SUPPORT_CATALOG_SHA256 =
+  "3aeb4f73b99b849ff90dccb27600fb0b2d9ab17d75e7c33afd05d179ddf18d88";
 const CONTROLLER_LOCK_KEY = "781920260828188";
 const BRIDGE_SOURCE_PHASE = "SOURCE_187";
 const BRIDGE_TARGET_PHASE = "TARGET_188";
@@ -72,7 +74,37 @@ const BASE64URL_SIGNATURE = /^[A-Za-z0-9_-]{86}$/u;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const SAFE_LANE_PARENT = "/var/lib/leetplus/current188-legacy-lanes";
 const SAFE_POSTGRES_SOCKET_DIRECTORY = "/var/run/postgresql";
+const SAFE_API_UNIT_TEMPLATE = "/etc/systemd/system/leetplus-api@.service";
+const SAFE_CANARY_ENVIRONMENT = "/etc/leetplus/canary-safe.env";
+const SAFE_LEGACY_DRAIN_RECEIPT =
+  "/var/lib/leetplus/legacy-drain/activation.receipt";
+const SAFE_LEGACY_DRAIN_VERIFIER =
+  "/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh";
 const MAX_CHILD_OUTPUT_BYTES = 128 * 1024;
+const REQUIRED_DISABLED_WORKER_ENVIRONMENT = Object.freeze({
+  GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED: "false",
+  GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: "false",
+  GUEST_GAME_BOT_CONSUMER_ENABLED: "false",
+  GUEST_GAME_PIPELINE_SCHEDULER_ENABLED: "false",
+  GUEST_GAME_RETENTION_SCHEDULER_ENABLED: "false",
+  GUEST_GAME_REWARD_MATERIALIZER_ENABLED: "false",
+  IDENTITY_MAIL_WORKER_ENABLED: "false",
+  LANGAME_DAILY_SYNC_SCHEDULER_ENABLED: "false",
+  REPORT_DIGEST_SCHEDULER_ENABLED: "false",
+  STAFF_TASK_RULES_SCHEDULER_ENABLED: "false",
+});
+const FORBIDDEN_MANUAL_UNITS = Object.freeze([
+  "leetplus-user-call-api.service",
+  "leetplus-user-call-web.service",
+]);
+const DRAINED_BACKGROUND_UNITS = Object.freeze([
+  "leetplus-api.service",
+  "leetplus-deploy.service",
+  "leetplus-deploy.timer",
+  "leetplus-guest-game-bot-consumer.service",
+  "leetplus-guest-game-bot-consumer.timer",
+  "leetplus-web.service",
+]);
 
 const LEGACY_APPLIED_CHECKSUMS = new Map([
   [
@@ -428,6 +460,7 @@ function normalizeTarget(value) {
     result.host !== "127.0.0.1" ||
     result.socketDirectory !== SAFE_POSTGRES_SOCKET_DIRECTORY ||
     result.expectedServerMajor !== 16 ||
+    result.expectedSupportCatalogDigest !== TARGET_SUPPORT_CATALOG_SHA256 ||
     result.privilegedExecutionRole.name !== "postgres" ||
     !roleEqual(result.privilegedExecutionRole, result.workerFunctionOwnerRole)
   ) {
@@ -482,6 +515,7 @@ export function normalizeFounderPilotCurrent188LegacyOwnershipManifest(value) {
       "environment",
       "operation",
       "release",
+      "runtimeSafety",
       "target",
     ],
     "CURRENT188_LEGACY_MANIFEST_INVALID",
@@ -514,6 +548,21 @@ export function normalizeFounderPilotCurrent188LegacyOwnershipManifest(value) {
     ["artifactPath", "artifactSha256", "materializedTreeDigest", "releaseSha"],
     "CURRENT188_LEGACY_RELEASE_INVALID",
   );
+  const runtimeSafety = exactRecord(
+    manifest.runtimeSafety,
+    [
+      "apiUnitTemplatePath",
+      "apiUnitTemplateSha256",
+      "canaryEnvironmentPath",
+      "canaryEnvironmentSha256",
+      "expectedSystemdUnitInventoryDigest",
+      "legacyDrainReceiptPath",
+      "legacyDrainReceiptSha256",
+      "legacyDrainVerifierPath",
+      "legacyDrainVerifierSha256",
+    ],
+    "CURRENT188_LEGACY_RUNTIME_SAFETY_INVALID",
+  );
   if (
     typeof approval.keyId !== "string" ||
     !SAFE_KEY_ID.test(approval.keyId) ||
@@ -532,6 +581,14 @@ export function normalizeFounderPilotCurrent188LegacyOwnershipManifest(value) {
     !SHA40.test(release.releaseSha)
   ) {
     fail("CURRENT188_LEGACY_MANIFEST_INVALID");
+  }
+  if (
+    runtimeSafety.apiUnitTemplatePath !== SAFE_API_UNIT_TEMPLATE ||
+    runtimeSafety.canaryEnvironmentPath !== SAFE_CANARY_ENVIRONMENT ||
+    runtimeSafety.legacyDrainReceiptPath !== SAFE_LEGACY_DRAIN_RECEIPT ||
+    runtimeSafety.legacyDrainVerifierPath !== SAFE_LEGACY_DRAIN_VERIFIER
+  ) {
+    fail("CURRENT188_LEGACY_RUNTIME_SAFETY_INVALID");
   }
   const publicKeyPem = approval.publicKeyPem;
   if (
@@ -582,6 +639,32 @@ export function normalizeFounderPilotCurrent188LegacyOwnershipManifest(value) {
         "CURRENT188_LEGACY_RELEASE_INVALID",
       ),
       releaseSha: release.releaseSha,
+    }),
+    runtimeSafety: Object.freeze({
+      apiUnitTemplatePath: runtimeSafety.apiUnitTemplatePath,
+      apiUnitTemplateSha256: sha256Value(
+        runtimeSafety.apiUnitTemplateSha256,
+        "CURRENT188_LEGACY_RUNTIME_SAFETY_INVALID",
+      ),
+      canaryEnvironmentPath: runtimeSafety.canaryEnvironmentPath,
+      canaryEnvironmentSha256: sha256Value(
+        runtimeSafety.canaryEnvironmentSha256,
+        "CURRENT188_LEGACY_RUNTIME_SAFETY_INVALID",
+      ),
+      expectedSystemdUnitInventoryDigest: sha256Value(
+        runtimeSafety.expectedSystemdUnitInventoryDigest,
+        "CURRENT188_LEGACY_RUNTIME_SAFETY_INVALID",
+      ),
+      legacyDrainReceiptPath: runtimeSafety.legacyDrainReceiptPath,
+      legacyDrainReceiptSha256: sha256Value(
+        runtimeSafety.legacyDrainReceiptSha256,
+        "CURRENT188_LEGACY_RUNTIME_SAFETY_INVALID",
+      ),
+      legacyDrainVerifierPath: runtimeSafety.legacyDrainVerifierPath,
+      legacyDrainVerifierSha256: sha256Value(
+        runtimeSafety.legacyDrainVerifierSha256,
+        "CURRENT188_LEGACY_RUNTIME_SAFETY_INVALID",
+      ),
     }),
     target: normalizeTarget(manifest.target),
   });
@@ -787,9 +870,9 @@ function supportStructureExact(support, runtimeRole, { aclMode }) {
     stableJson(support?.enumTypes) !== stableJson(SUPPORT_ENUMS) ||
     support?.migrationChecksum !== TARGET_MIGRATION_SHA256 ||
     support?.publicWorkerExecuteCount !== 0 ||
-    support?.catalogDigest !== undefined &&
+    (support?.catalogDigest !== undefined &&
       support.catalogDigest !== null &&
-      typeof support.catalogDigest !== "string" ||
+      typeof support.catalogDigest !== "string") ||
     support?.workerFunctionOwnerRoleName !== "postgres"
   ) {
     return false;
@@ -935,6 +1018,7 @@ function normalizePlan(value) {
       "recoveryExpiresAt",
       "releaseSha",
       "roleMembershipDigest",
+      "runtimeSafetyDigest",
       "sourceMigrationCount",
       "sourceMigrationManifestDigest",
       "sourceSchemaHead",
@@ -968,6 +1052,7 @@ function normalizePlan(value) {
     "planDigest",
     "productionManifestDigest",
     "roleMembershipDigest",
+    "runtimeSafetyDigest",
     "sourceMigrationManifestDigest",
   ]) {
     sha256Value(plan[key], "CURRENT188_LEGACY_PLAN_INVALID");
@@ -989,6 +1074,7 @@ function createPlan({
   manifest,
   plannedAt,
   release,
+  runtimeSafety,
 }) {
   if (!exactSourceState(evidence, release.lane, manifest)) {
     fail("CURRENT188_LEGACY_SOURCE_STATE_MISMATCH");
@@ -1020,6 +1106,7 @@ function createPlan({
     ).toISOString(),
     releaseSha: manifest.release.releaseSha,
     roleMembershipDigest: evidence.roleMembershipDigest,
+    runtimeSafetyDigest: runtimeSafety.digest,
     sourceMigrationCount: SOURCE_COUNT,
     sourceMigrationManifestDigest: release.lane.sourceManifestDigest,
     sourceSchemaHead: SOURCE_HEAD,
@@ -1047,12 +1134,44 @@ function exactBridgeAdapter(value) {
   return value;
 }
 
+function exactRuntimeSafetyAdapter(value) {
+  if (typeof value?.inspect !== "function") {
+    fail("CURRENT188_LEGACY_RUNTIME_SAFETY_ADAPTER_INVALID");
+  }
+  return value;
+}
+
+async function verifyRuntimeSafety({ adapter, manifest }) {
+  const evidence = await adapter.inspect();
+  if (
+    evidence?.accepted !== true ||
+    evidence?.apiUnitTemplateSha256 !==
+      manifest.runtimeSafety.apiUnitTemplateSha256 ||
+    evidence?.canaryEnvironmentSha256 !==
+      manifest.runtimeSafety.canaryEnvironmentSha256 ||
+    evidence?.legacyDrainReceiptSha256 !==
+      manifest.runtimeSafety.legacyDrainReceiptSha256 ||
+    evidence?.legacyDrainVerifierSha256 !==
+      manifest.runtimeSafety.legacyDrainVerifierSha256 ||
+    evidence?.systemdUnitInventoryDigest !==
+      manifest.runtimeSafety.expectedSystemdUnitInventoryDigest ||
+    !SHA256.test(evidence?.legacyDrainVerifierOutputSha256 ?? "")
+  ) {
+    fail("CURRENT188_LEGACY_RUNTIME_SAFETY_MISMATCH");
+  }
+  return Object.freeze({
+    digest: digest("runtime-safety", evidence),
+    evidence: Object.freeze({ ...evidence }),
+  });
+}
+
 export async function buildFounderPilotCurrent188LegacyOwnershipPlan({
   adapter,
   inspectArtifact = inspectFounderPilotImmutableFile,
   laneRoot,
   manifest: rawManifest,
   now = () => new Date(),
+  runtimeSafetyAdapter,
   runtimeAdapter,
   sourcePrismaRoot,
 }) {
@@ -1062,12 +1181,14 @@ export async function buildFounderPilotCurrent188LegacyOwnershipPlan({
     fail("CURRENT188_LEGACY_ADAPTER_INVALID");
   }
   const bridge = exactBridgeAdapter(runtimeAdapter);
+  const runtimeSafety = exactRuntimeSafetyAdapter(runtimeSafetyAdapter);
   let bridgeLockHeld = false;
   try {
     await bridge.acquireLock();
     bridgeLockHeld = true;
     const plannedAt = currentDate(now);
-    const [release, evidence, bridgeAttestation] = await Promise.all([
+    const [release, evidence, bridgeAttestation, runtimeSafetyReceipt] =
+      await Promise.all([
       inspectRelease({
         inspectArtifact,
         laneRoot,
@@ -1076,6 +1197,7 @@ export async function buildFounderPilotCurrent188LegacyOwnershipPlan({
       }),
       adapter.inspect(),
       bridge.inspectSource(),
+      verifyRuntimeSafety({ adapter: runtimeSafety, manifest }),
     ]);
     return createPlan({
       bridgeAttestation,
@@ -1083,6 +1205,7 @@ export async function buildFounderPilotCurrent188LegacyOwnershipPlan({
       manifest,
       plannedAt,
       release,
+      runtimeSafety: runtimeSafetyReceipt,
     });
   } finally {
     if (bridgeLockHeld) await bridge.releaseLock();
@@ -1094,13 +1217,16 @@ export async function inspectFounderPilotCurrent188LegacyOwnershipInventory({
   laneRoot,
   manifest: rawManifest,
   now = () => new Date(),
+  runtimeSafetyAdapter,
   sourcePrismaRoot,
 }) {
   const manifest =
     normalizeFounderPilotCurrent188LegacyOwnershipManifest(rawManifest);
-  const [release, evidence] = await Promise.all([
+  const safety = exactRuntimeSafetyAdapter(runtimeSafetyAdapter);
+  const [release, evidence, runtimeSafety] = await Promise.all([
     inspectRelease({ laneRoot, manifest, sourcePrismaRoot }),
     adapter.inspect(),
+    verifyRuntimeSafety({ adapter: safety, manifest }),
   ]);
   return Object.freeze({
     contractVersion: FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONTRACT,
@@ -1131,6 +1257,7 @@ export async function inspectFounderPilotCurrent188LegacyOwnershipInventory({
     ownershipCounts: evidence.ownershipCounts,
     reasonCode: null,
     roleMembershipDigest: evidence.roleMembershipDigest,
+    runtimeSafetyDigest: runtimeSafety.digest,
     target: manifest.target,
   });
 }
@@ -1304,6 +1431,7 @@ function finalReceipt(evidence, bridge, plan, extra = {}) {
     planDigest: plan.planDigest,
     reasonCode: null,
     roleMembershipDigest: evidence.roleMembershipDigest,
+    runtimeSafetyDigest: plan.runtimeSafetyDigest ?? null,
     supportContractDigest: digest("support-contract", evidence.support),
     workerFunctionComment: evidence.workerFunctionComment,
     workerFunctionDigest: evidence.workerFunctionDigest,
@@ -1324,6 +1452,7 @@ export async function applyFounderPilotCurrent188LegacyOwnershipPlan({
   pinnedApprovalKeySpkiSha256,
   plan: rawPlan,
   productionConfirmation,
+  runtimeSafetyAdapter,
   runtimeAdapter,
   sourcePrismaRoot,
 }) {
@@ -1357,6 +1486,7 @@ export async function applyFounderPilotCurrent188LegacyOwnershipPlan({
     }
   }
   const bridge = exactBridgeAdapter(runtimeAdapter);
+  const runtimeSafety = exactRuntimeSafetyAdapter(runtimeSafetyAdapter);
   await emitPhase(onPhase, plan, "APPROVAL_VERIFIED", {
     approvalDigest: approvalReceipt.approvalDigest,
   });
@@ -1369,17 +1499,21 @@ export async function applyFounderPilotCurrent188LegacyOwnershipPlan({
     await adapter.acquireLock();
     databaseLockHeld = true;
     await emitPhase(onPhase, plan, "CONTROLLER_LOCK_ACQUIRED");
-    const release = await inspectRelease({
-      inspectArtifact,
-      laneRoot,
-      manifest,
-      sourcePrismaRoot,
-    });
+    const [release, runtimeSafetyReceipt] = await Promise.all([
+      inspectRelease({
+        inspectArtifact,
+        laneRoot,
+        manifest,
+        sourcePrismaRoot,
+      }),
+      verifyRuntimeSafety({ adapter: runtimeSafety, manifest }),
+    ]);
     if (
       plan.productionManifestDigest !==
         founderPilotCurrent188LegacyOwnershipManifestDigest(manifest) ||
       plan.materializedTreeDigest !== release.lane.treeDigest ||
-      plan.artifactSha256 !== manifest.release.artifactSha256
+      plan.artifactSha256 !== manifest.release.artifactSha256 ||
+      plan.runtimeSafetyDigest !== runtimeSafetyReceipt.digest
     ) {
       fail("CURRENT188_LEGACY_FRESH_PLAN_MISMATCH");
     }
@@ -1436,6 +1570,7 @@ export async function applyFounderPilotCurrent188LegacyOwnershipPlan({
         const result = await executor.migrate({
           attempt: deploymentAttempt,
           laneRoot,
+          materializedTreeDigest: release.lane.treeDigest,
           target: manifest.target,
           timeoutSeconds: manifest.operation.deployTimeoutSeconds,
         });
@@ -1511,12 +1646,14 @@ export async function verifyFounderPilotCurrent188LegacyOwnershipFinal({
   adapter,
   laneRoot,
   manifest: rawManifest,
+  runtimeSafetyAdapter,
   runtimeAdapter,
   sourcePrismaRoot,
 }) {
   const manifest =
     normalizeFounderPilotCurrent188LegacyOwnershipManifest(rawManifest);
   const bridge = exactBridgeAdapter(runtimeAdapter);
+  const runtimeSafety = exactRuntimeSafetyAdapter(runtimeSafetyAdapter);
   let bridgeLockHeld = false;
   let databaseLockHeld = false;
   try {
@@ -1524,9 +1661,10 @@ export async function verifyFounderPilotCurrent188LegacyOwnershipFinal({
     bridgeLockHeld = true;
     await adapter.acquireLock();
     databaseLockHeld = true;
-    const [release, evidence] = await Promise.all([
+    const [release, evidence, runtimeSafetyReceipt] = await Promise.all([
       inspectRelease({ laneRoot, manifest, sourcePrismaRoot }),
       adapter.inspect(),
+      verifyRuntimeSafety({ adapter: runtimeSafety, manifest }),
     ]);
     if (!exactFinalState(evidence, release.lane, manifest)) {
       fail("CURRENT188_LEGACY_FINAL_STATE_NOT_REACHED");
@@ -1538,6 +1676,7 @@ export async function verifyFounderPilotCurrent188LegacyOwnershipFinal({
     });
     return finalReceipt(evidence, bridgeReceipt, {
       planDigest: "0".repeat(64),
+      runtimeSafetyDigest: runtimeSafetyReceipt.digest,
     });
   } finally {
     if (databaseLockHeld) await adapter.releaseLock();
@@ -2245,13 +2384,13 @@ async function trustedExecutable(filePath) {
   return canonicalPath;
 }
 
-async function preparePostgresLane(laneRoot) {
+async function preparePostgresLane(laneRoot, expectedTreeDigest) {
   if (
     !path.isAbsolute(laneRoot) ||
     path.dirname(laneRoot) !== SAFE_LANE_PARENT ||
-    !/^leetplus-founder-production-history-current188-[0-9a-f]{64}$/u.test(
-      path.basename(laneRoot),
-    )
+    !SHA256.test(expectedTreeDigest ?? "") ||
+    path.basename(laneRoot) !==
+      `leetplus-founder-production-history-current188-${expectedTreeDigest}`
   ) {
     fail("CURRENT188_LEGACY_PRIVILEGED_LANE_INVALID");
   }
@@ -2282,7 +2421,11 @@ async function preparePostgresLane(laneRoot) {
   const entries = [];
   async function visit(current) {
     const metadata = await lstat(current, { bigint: true });
-    if (metadata.isSymbolicLink()) {
+    if (
+      metadata.isSymbolicLink() ||
+      metadata.uid !== 0n ||
+      (Number(metadata.mode) & 0o022) !== 0
+    ) {
       fail("CURRENT188_LEGACY_PRIVILEGED_LANE_INVALID");
     }
     if (metadata.isDirectory()) {
@@ -2314,6 +2457,7 @@ function childEvidence(status, code, signal, stdout, stderr) {
     stderrSha256: sha256(stderr),
     stdoutBytes: Buffer.byteLength(stdout),
     stdoutSha256: sha256(stdout),
+    stdout,
   });
 }
 
@@ -2389,16 +2533,20 @@ async function stopSystemdExecution(systemctl, unitName) {
 }
 
 async function spawnBoundedSystemd({
+  addressFamilies = "AF_UNIX",
+  denyIp = true,
   executable,
   executableArgs,
-  readOnlyPath,
+  group = "postgres",
+  readOnlyPaths = [],
   stdin,
   timeoutSeconds,
+  user = "postgres",
 }) {
   const systemdRun = await trustedExecutable("/usr/bin/systemd-run");
   const systemctl = await trustedExecutable("/usr/bin/systemctl");
   const env = await trustedExecutable("/usr/bin/env");
-  const unitName = `leetplus-current188-upgrade-${process.pid}-${randomBytes(8).toString("hex")}`;
+  const unitName = `current188-upgrade-control-${process.pid}-${randomBytes(8).toString("hex")}`;
   const systemdArgs = [
     "--quiet",
     "--wait",
@@ -2406,8 +2554,8 @@ async function spawnBoundedSystemd({
     "--pipe",
     `--unit=${unitName}`,
     "--service-type=exec",
-    "--property=User=postgres",
-    "--property=Group=postgres",
+    `--property=User=${user}`,
+    `--property=Group=${group}`,
     "--property=KillMode=control-group",
     "--property=TimeoutStopSec=5s",
     `--property=RuntimeMaxSec=${timeoutSeconds}s`,
@@ -2418,11 +2566,13 @@ async function spawnBoundedSystemd({
     "--property=ProtectControlGroups=yes",
     "--property=RestrictSUIDSGID=yes",
     "--property=LockPersonality=yes",
-    "--property=RestrictAddressFamilies=AF_UNIX",
-    "--property=IPAddressDeny=any",
+    `--property=RestrictAddressFamilies=${addressFamilies}`,
     "--property=UMask=0077",
   ];
-  if (readOnlyPath) systemdArgs.push(`--property=ReadOnlyPaths=${readOnlyPath}`);
+  if (denyIp) systemdArgs.push("--property=IPAddressDeny=any");
+  for (const readOnlyPath of readOnlyPaths) {
+    systemdArgs.push(`--property=ReadOnlyPaths=${readOnlyPath}`);
+  }
   systemdArgs.push(
     env,
     "-i",
@@ -2523,7 +2673,7 @@ BEGIN
   INTO observed_system_identifier
   FROM pg_catalog.pg_control_system() AS control;
   IF pg_catalog.current_database() IS DISTINCT FROM ${sqlLiteral(target.databaseName)}
-     OR pg_catalog.inet_server_port() IS DISTINCT FROM ${target.port}
+     OR pg_catalog.current_setting('port')::INTEGER IS DISTINCT FROM ${target.port}
      OR observed_system_identifier IS DISTINCT FROM ${sqlLiteral(target.expectedSystemIdentifier)}
      OR pg_catalog.pg_is_in_recovery()
      OR SESSION_USER IS DISTINCT FROM ${sqlLiteral(target.privilegedExecutionRole.name)}
@@ -2572,7 +2722,7 @@ export function createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor
         `--dbname=${target.databaseName}`,
         "--file=-",
       ],
-      readOnlyPath,
+      readOnlyPaths: readOnlyPath ? [readOnlyPath] : [],
       stdin: sql,
       timeoutSeconds,
     });
@@ -2612,8 +2762,16 @@ export function createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor
       ].join("\n");
       return command(target, sql, timeoutSeconds);
     },
-    migrate: async ({ laneRoot, target, timeoutSeconds }) => {
-      const canonicalLaneRoot = await preparePostgresLane(laneRoot);
+    migrate: async ({
+      laneRoot,
+      materializedTreeDigest,
+      target,
+      timeoutSeconds,
+    }) => {
+      const canonicalLaneRoot = await preparePostgresLane(
+        laneRoot,
+        materializedTreeDigest,
+      );
       const migrationPath = path.join(
         canonicalLaneRoot,
         "migrations",
@@ -2647,6 +2805,244 @@ export function createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor
   });
 }
 
+async function inspectRootProtectedFile(filePath, expectedSha256) {
+  const metadata = await lstat(filePath, { bigint: true }).catch(() => null);
+  if (
+    metadata === null ||
+    metadata.isSymbolicLink() ||
+    !metadata.isFile() ||
+    metadata.uid !== 0n ||
+    metadata.nlink !== 1n ||
+    (Number(metadata.mode) & 0o022) !== 0
+  ) {
+    fail("CURRENT188_LEGACY_RUNTIME_SAFETY_FILE_INVALID");
+  }
+  return inspectFounderPilotImmutableFile({ expectedSha256, filePath });
+}
+
+function parseExactEnvironment(raw) {
+  const values = new Map();
+  for (const rawLine of raw.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator <= 0) fail("CURRENT188_LEGACY_CANARY_ENVIRONMENT_INVALID");
+    const key = line.slice(0, separator);
+    const value = line.slice(separator + 1);
+    if (!/^[A-Z][A-Z0-9_]*$/u.test(key) || values.has(key)) {
+      fail("CURRENT188_LEGACY_CANARY_ENVIRONMENT_INVALID");
+    }
+    values.set(key, value);
+  }
+  for (const [key, expected] of Object.entries(
+    REQUIRED_DISABLED_WORKER_ENVIRONMENT,
+  )) {
+    if (values.get(key) !== expected) {
+      fail("CURRENT188_LEGACY_WORKER_ENVIRONMENT_NOT_DRAINED");
+    }
+  }
+  return Object.fromEntries([...values.entries()].sort());
+}
+
+function normalizeSystemdInventory(stdout, kind) {
+  const rows = stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("leetplus-"))
+    .map((line) => line.split(/\s+/u));
+  if (kind === "UNIT_FILES") {
+    return rows.map(([name, state, preset]) => ({ name, preset, state }));
+  }
+  return rows.map(([name, load, active, sub]) => ({
+    active,
+    load,
+    name,
+    sub,
+  }));
+}
+
+function parseSystemdShow(stdout) {
+  const values = Object.fromEntries(
+    stdout
+      .split("\n")
+      .filter((line) => line.includes("="))
+      .map((line) => {
+        const separator = line.indexOf("=");
+        return [line.slice(0, separator), line.slice(separator + 1)];
+      }),
+  );
+  return Object.freeze({
+    activeState: values.ActiveState ?? null,
+    loadState: values.LoadState ?? null,
+    unitFileState: values.UnitFileState ?? null,
+  });
+}
+
+export function createFounderPilotCurrent188LegacyOwnershipRuntimeSafetyAdapter(
+  rawManifest,
+) {
+  if (
+    process.platform !== "linux" ||
+    typeof process.geteuid !== "function" ||
+    process.geteuid() !== 0
+  ) {
+    fail("CURRENT188_LEGACY_PRIVILEGED_AUTHORITY_REQUIRED");
+  }
+  const manifest =
+    normalizeFounderPilotCurrent188LegacyOwnershipManifest(rawManifest);
+  const safety = manifest.runtimeSafety;
+  async function run(executable, executableArgs, timeoutSeconds = 120) {
+    const trusted = await trustedExecutable(executable);
+    const result = await spawnBoundedSystemd({
+      addressFamilies: "AF_UNIX AF_INET AF_INET6",
+      denyIp: false,
+      executable: trusted,
+      executableArgs,
+      group: "root",
+      readOnlyPaths: [
+        safety.apiUnitTemplatePath,
+        safety.canaryEnvironmentPath,
+        safety.legacyDrainReceiptPath,
+        safety.legacyDrainVerifierPath,
+      ],
+      stdin: "",
+      timeoutSeconds,
+      user: "root",
+    });
+    if (result.status !== "SUCCEEDED") {
+      fail("CURRENT188_LEGACY_RUNTIME_SAFETY_COMMAND_FAILED");
+    }
+    return result;
+  }
+  return Object.freeze({
+    inspect: async () => {
+      const [apiUnit, canaryEnvironment, drainReceipt, drainVerifier] =
+        await Promise.all([
+          inspectRootProtectedFile(
+            safety.apiUnitTemplatePath,
+            safety.apiUnitTemplateSha256,
+          ),
+          inspectRootProtectedFile(
+            safety.canaryEnvironmentPath,
+            safety.canaryEnvironmentSha256,
+          ),
+          inspectRootProtectedFile(
+            safety.legacyDrainReceiptPath,
+            safety.legacyDrainReceiptSha256,
+          ),
+          inspectRootProtectedFile(
+            safety.legacyDrainVerifierPath,
+            safety.legacyDrainVerifierSha256,
+          ),
+        ]);
+      const [apiUnitSource, canarySource] = await Promise.all([
+        readFile(safety.apiUnitTemplatePath, "utf8"),
+        readFile(safety.canaryEnvironmentPath, "utf8"),
+      ]);
+      const slotEnvironment = apiUnitSource.indexOf(
+        "EnvironmentFile=/etc/leetplus/slots/%i.env",
+      );
+      const canaryOverlay = apiUnitSource.indexOf(
+        "EnvironmentFile=/etc/leetplus/canary-safe.env",
+      );
+      const userCallOverlay = apiUnitSource.indexOf(
+        "EnvironmentFile=/etc/leetplus/guest-user-call-live.env",
+      );
+      if (
+        slotEnvironment < 0 ||
+        canaryOverlay <= slotEnvironment ||
+        userCallOverlay <= canaryOverlay
+      ) {
+        fail("CURRENT188_LEGACY_API_UNIT_ENVIRONMENT_ORDER_INVALID");
+      }
+      const workerEnvironment = parseExactEnvironment(canarySource);
+      const systemctl = await trustedExecutable("/usr/bin/systemctl");
+      const [verifierResult, unitFilesResult, unitsResult] = await Promise.all([
+        run(safety.legacyDrainVerifierPath, []),
+        run(systemctl, [
+          "list-unit-files",
+          "--type=service",
+          "--type=timer",
+          "--no-legend",
+          "--no-pager",
+          "--plain",
+        ]),
+        run(systemctl, [
+          "list-units",
+          "--all",
+          "--type=service",
+          "--type=timer",
+          "--no-legend",
+          "--no-pager",
+          "--plain",
+        ]),
+      ]);
+      if (
+        !verifierResult.stdout
+          .split("\n")
+          .includes("LEGACY_RUNTIME_DRAIN_ACCEPTED=true")
+      ) {
+        fail("CURRENT188_LEGACY_DRAIN_RECEIPT_NOT_LIVE");
+      }
+      const unitFiles = normalizeSystemdInventory(
+        unitFilesResult.stdout,
+        "UNIT_FILES",
+      );
+      const units = normalizeSystemdInventory(unitsResult.stdout, "UNITS");
+      const states = {};
+      for (const unit of [
+        ...FORBIDDEN_MANUAL_UNITS,
+        ...DRAINED_BACKGROUND_UNITS,
+      ]) {
+        const result = await run(systemctl, [
+          "show",
+          unit,
+          "--property=LoadState",
+          "--property=ActiveState",
+          "--property=UnitFileState",
+          "--no-pager",
+        ]);
+        states[unit] = parseSystemdShow(result.stdout);
+      }
+      for (const unit of FORBIDDEN_MANUAL_UNITS) {
+        const state = states[unit];
+        if (
+          state.loadState !== "not-found" ||
+          state.activeState !== "inactive" ||
+          unitFiles.some(({ name }) => name === unit) ||
+          units.some(({ name }) => name === unit)
+        ) {
+          fail("CURRENT188_LEGACY_MANUAL_USER_CALL_UNIT_PRESENT");
+        }
+      }
+      for (const unit of DRAINED_BACKGROUND_UNITS) {
+        const state = states[unit];
+        if (
+          !["loaded", "not-found"].includes(state.loadState) ||
+          state.activeState === "active" ||
+          (state.loadState === "loaded" &&
+            !["disabled", "masked", "static"].includes(state.unitFileState))
+        ) {
+          fail("CURRENT188_LEGACY_BACKGROUND_UNIT_NOT_DRAINED");
+        }
+      }
+      const systemdUnitInventoryDigest = sha256(
+        stableJson({ states, unitFiles, units }),
+      );
+      return Object.freeze({
+        accepted: true,
+        apiUnitTemplateSha256: apiUnit.actualSha256,
+        canaryEnvironmentSha256: canaryEnvironment.actualSha256,
+        legacyDrainReceiptSha256: drainReceipt.actualSha256,
+        legacyDrainVerifierOutputSha256: verifierResult.stdoutSha256,
+        legacyDrainVerifierSha256: drainVerifier.actualSha256,
+        systemdUnitInventoryDigest,
+        workerEnvironmentDigest: sha256(stableJson(workerEnvironment)),
+      });
+    },
+  });
+}
+
 export function createFounderPilotCurrent188LegacyOwnershipBridgeRuntimeAdapter(
   options,
 ) {
@@ -2669,6 +3065,7 @@ export const FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS =
     targetMigrationHead: TARGET_HEAD,
     targetMigrationSha256: TARGET_MIGRATION_SHA256,
     targetPreterminalManifestSha256: TARGET_PRETERMINAL_MANIFEST_SHA256,
+    targetSupportCatalogSha256: TARGET_SUPPORT_CATALOG_SHA256,
     targetWorkerFunctionComment: TARGET_WORKER_FUNCTION_COMMENT,
     targetWorkerFunctionSha256: TARGET_WORKER_FUNCTION_SHA256,
   });

@@ -172,6 +172,7 @@ jobs:
           bash -n .github/scripts/test-production-legacy-rollback-service-user.sh
           bash -n .github/scripts/test-production-legacy-rollback-control-bundle.sh
           bash -n .github/scripts/test-production-legacy-database-authority-pg16.sh
+          bash -n .github/scripts/test-current188-legacy-production-executor-pg16.sh
           node --check docs/deployment/production-artifact/legacy-rollback-auth-edge.mjs
           node --check .github/scripts/test-legacy-rollback-auth-edge.mjs
           node --check docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs

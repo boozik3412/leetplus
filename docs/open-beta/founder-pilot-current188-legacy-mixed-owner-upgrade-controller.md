@@ -35,11 +35,31 @@ runner.
   независимым protected pin;
 - root-owned blue/green lock и PostgreSQL advisory lock удерживаются от live
   сверки до final postcheck;
+- signed runtime-safety section закрепляет SHA-256 active API unit template,
+  canary worker-off environment, immutable legacy-drain activation receipt,
+  verifier и полный systemd unit inventory. Эти доказательства повторно
+  снимаются под blue/green lock непосредственно перед DDL и входят в digest
+  подписанного плана;
 - migration выполняется локально через Unix socket от OS/database identity
-  postgres; пароль суперпользователя не создаётся и не передаётся;
-- разрешённый DDL ограничен checksum-pinned Prisma migration. Запрещены
+  postgres; manifest закрепляет socket directory, порт и PostgreSQL system
+  identifier, а тот же psql session сверяет их до начала DDL. Пароль
+  суперпользователя не создаётся и не передаётся;
+- privileged executor не принимает произвольный Prisma CLI или команду. Он
+  исполняет только единственный встроенный checksum-pinned SQL body миграции
+  и сам атомарно записывает exact Prisma migration receipt. Запрещены
   ALTER OWNER, REASSIGN OWNED, ALTER DEFAULT PRIVILEGES и любые другие
   изменения исторической topology;
+- materialized lane обязан называться по tree digest, до privileged execution
+  принадлежать root и не быть writable для group/other; executor переводит
+  его в root:postgres 0550/0440, оставляя postgres только право чтения;
+- psql запускается в transient systemd cgroup с RuntimeMaxSec, KillMode=
+  control-group и сетевым запретом. При timeout/overflow контроллер убивает
+  весь cgroup, подтверждает его пустоту и только затем возвращает результат;
+- exact catalog postcheck закрепляет не только имена, но и типы/defaults
+  колонок, определения/флаги индексов и constraints, а также security,
+  language, return type, config, volatility, strict/leakproof/parallel
+  свойства изменённой worker function. Канонический PostgreSQL 16 catalog
+  digest: `3aeb4f73b99b849ff90dccb27600fb0b2d9ab17d75e7c33afd05d179ddf18d88`;
 - body и comment identity-mail readiness function обязаны точно перейти с
   CURRENT_187 на CURRENT_188, сохранив OID, owner и отсутствие PUBLIC EXECUTE;
 - intent/response каждой effect-фазы попадает в exclusive fsynced JSONL
@@ -118,6 +138,10 @@ switch — GUEST_BUG_REPORTING_MODE=OFF; schema rollback не выполняет
 CLI поддерживает inventory, plan, approve, apply, check. Manifest, plan,
 approval, private key и journal находятся в root-controlled каталоге вне
 checkout/release. Production apply дополнительно требует exact confirmation и
-independent SPKI pin. Full Release Admission выполняет реальный PostgreSQL 16
-тест: mixed-owner CURRENT_187, privileged migration, минимальный ACL,
-postcheck, replay и cleanup disposable database/roles.
+independent SPKI pin. Full Release Admission выполняет PostgreSQL 16 проверку
+в двух независимых вариантах: полный mixed-owner CURRENT_187 catalog/ACL
+fixture и isolated host cluster, на котором root запускает именно production
+systemd/psql executor. Оба варианта проверяют migration, минимальный ACL,
+semantic catalog postcheck, replay и cleanup disposable database/roles;
+production-executor gate дополнительно подтверждает exact Unix socket/port/
+system identifier и отсутствие потомков transient cgroup.

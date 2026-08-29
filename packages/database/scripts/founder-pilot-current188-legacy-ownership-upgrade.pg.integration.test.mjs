@@ -23,9 +23,11 @@ import { promisify } from "node:util";
 import pg from "pg";
 import {
   FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONFIRMATION,
+  FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS,
   FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONTRACT,
   applyFounderPilotCurrent188LegacyOwnershipPlan,
   buildFounderPilotCurrent188LegacyOwnershipPlan,
+  createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor,
   createFounderPilotCurrent188LegacyOwnershipPgAdapter,
   signFounderPilotCurrent188LegacyOwnershipPlan,
   verifyFounderPilotCurrent188LegacyOwnershipFinal,
@@ -37,11 +39,24 @@ const REQUIRED_CONFIRMATION =
 const enabled =
   process.env.FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_PG_E2E_CONFIRM ===
   REQUIRED_CONFIRMATION;
+const productionExecutorEnabled =
+  process.env
+    .FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_PRODUCTION_EXECUTOR_E2E ===
+  "run-exact-production-executor";
 const SAFE_IDENTIFIER = /^[a-z][a-z0-9_]{2,62}$/u;
 const RELEASE_SHA = /^[0-9a-f]{40}$/u;
 const SOURCE_MIGRATION_COUNT = 187;
 const SOURCE_HEAD = "20260820010000_guest_portal_telegram_update_ledger";
 const TARGET_HEAD = "20260828190000_guest_support_bug_reports";
+const RUNTIME_SAFETY = Object.freeze({
+  apiUnitTemplateSha256: "8".repeat(64),
+  canaryEnvironmentSha256: "9".repeat(64),
+  legacyDrainReceiptSha256: "f".repeat(64),
+  legacyDrainVerifierOutputSha256: "2".repeat(64),
+  legacyDrainVerifierSha256: "1".repeat(64),
+  systemdUnitInventoryDigest: "d".repeat(64),
+  workerEnvironmentDigest: "3".repeat(64),
+});
 const REPOSITORY_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../..",
@@ -104,11 +119,12 @@ function requiredDisposableAdminUrl() {
     throw new Error("CURRENT188_LEGACY_PG_E2E_DATABASE_URL_REQUIRED");
   }
   const source = new URL(raw);
+  const expectedPort = productionExecutorEnabled ? "55432" : "5432";
   const entries = [...source.searchParams.entries()];
   if (
     source.protocol !== "postgresql:" ||
     source.hostname !== "127.0.0.1" ||
-    source.port !== "5432" ||
+    source.port !== expectedPort ||
     decodeURIComponent(source.pathname.slice(1)) !== "leetplus_ci" ||
     decodeURIComponent(source.username) !== "postgres" ||
     source.password.length === 0 ||
@@ -157,10 +173,11 @@ function ownerMigrationUrl(
   migrationRoleName,
   migrationPassword,
   ownerRoleName,
+  port,
 ) {
   return (
     `postgresql://${migrationRoleName}:${migrationPassword}` +
-    `@127.0.0.1:5432/${databaseName}` +
+    `@127.0.0.1:${port}/${databaseName}` +
     `?options=-c%20role%3D${ownerRoleName}`
   );
 }
@@ -243,6 +260,7 @@ function manifest({
   roles,
   runtimeRole,
   systemIdentifier,
+  port,
 }) {
   const publicKeyPem = keyPair.publicKey
     .export({ format: "pem", type: "spki" })
@@ -273,6 +291,20 @@ function manifest({
       materializedTreeDigest,
       releaseSha,
     },
+    runtimeSafety: {
+      apiUnitTemplatePath: "/etc/systemd/system/leetplus-api@.service",
+      apiUnitTemplateSha256: RUNTIME_SAFETY.apiUnitTemplateSha256,
+      canaryEnvironmentPath: "/etc/leetplus/canary-safe.env",
+      canaryEnvironmentSha256: RUNTIME_SAFETY.canaryEnvironmentSha256,
+      expectedSystemdUnitInventoryDigest:
+        RUNTIME_SAFETY.systemdUnitInventoryDigest,
+      legacyDrainReceiptPath:
+        "/var/lib/leetplus/legacy-drain/activation.receipt",
+      legacyDrainReceiptSha256: RUNTIME_SAFETY.legacyDrainReceiptSha256,
+      legacyDrainVerifierPath:
+        "/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh",
+      legacyDrainVerifierSha256: RUNTIME_SAFETY.legacyDrainVerifierSha256,
+    },
     target: {
       activeRuntimeRoleNames: [],
       applicationRuntimeRole: {
@@ -288,11 +320,12 @@ function manifest({
       expectedRoleMembershipDigest: roleMembershipDigest,
       expectedRoles: roles.map(roleProjection),
       expectedServerMajor: 16,
-      expectedSupportCatalogDigest: "0".repeat(64),
+      expectedSupportCatalogDigest:
+        FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.targetSupportCatalogSha256,
       expectedSystemIdentifier: systemIdentifier,
       host: "127.0.0.1",
       inspectionRole: { name: runtimeRole.name, oid: runtimeRole.oid },
-      port: 5432,
+      port,
       privilegedExecutionRole: {
         name: postgresRole.name,
         oid: postgresRole.oid,
@@ -357,6 +390,12 @@ function bridgeRuntimeAdapter(releaseSha) {
   };
 }
 
+function runtimeSafetyAdapter() {
+  return {
+    inspect: async () => ({ accepted: true, ...RUNTIME_SAFETY }),
+  };
+}
+
 async function closeClient(client, errors) {
   if (client === null) return;
   try {
@@ -385,7 +424,7 @@ test(
     const temporaryRoot = await mkdtemp(
       path.join(os.tmpdir(), "leetplus-current188-legacy-pg16-"),
     );
-    const targetLaneRoot = path.join(
+    let targetLaneRoot = path.join(
       temporaryRoot,
       "leetplus-founder-production-history-current188-legacy-pg",
     );
@@ -412,6 +451,15 @@ test(
         targetMigrationCount: 188,
         targetMigrationHead: TARGET_HEAD,
       });
+      if (productionExecutorEnabled) {
+        const sealedLaneRoot = path.join(
+          "/var/lib/leetplus/current188-legacy-lanes",
+          `leetplus-founder-production-history-current188-${lane.treeDigest}`,
+        );
+        await cp(targetLaneRoot, sealedLaneRoot, { recursive: true });
+        await rm(targetLaneRoot, { recursive: true });
+        targetLaneRoot = sealedLaneRoot;
+      }
       await cp(targetLaneRoot, sourceLaneRoot, { recursive: true });
       await rm(path.join(sourceLaneRoot, "migrations", TARGET_HEAD), {
         recursive: true,
@@ -463,6 +511,7 @@ test(
         migrationRoleName,
         migrationPassword,
         ownerRoleName,
+        adminUrl.port,
       );
       await runPrismaDeploy(ownerUrl, bootstrapLaneRoot);
       const migrationClient = new pg.Client({
@@ -558,6 +607,7 @@ test(
         roles: roleRows.rows,
         runtimeRole,
         systemIdentifier: cluster.rows[0].systemIdentifier,
+        port: Number(adminUrl.port),
       });
       const discovery =
         await createFounderPilotCurrent188LegacyOwnershipPgAdapter(
@@ -587,6 +637,7 @@ test(
         roles: roleRows.rows,
         runtimeRole,
         systemIdentifier: cluster.rows[0].systemIdentifier,
+        port: Number(adminUrl.port),
       });
       adapter = await createFounderPilotCurrent188LegacyOwnershipPgAdapter(
         runtimeUrl.toString(),
@@ -599,12 +650,14 @@ test(
       const bridge = bridgeRuntimeAdapter(
         productionManifest.release.releaseSha,
       );
+      const runtimeSafety = runtimeSafetyAdapter();
       const plan = await buildFounderPilotCurrent188LegacyOwnershipPlan({
         adapter,
         laneRoot: targetLaneRoot,
         manifest: productionManifest,
         now: () => new Date("2026-08-29T12:00:00.000Z"),
         runtimeAdapter: bridge,
+        runtimeSafetyAdapter: runtimeSafety,
         sourcePrismaRoot: SOURCE_PRISMA_ROOT,
       });
       const approval = signFounderPilotCurrent188LegacyOwnershipPlan({
@@ -615,7 +668,7 @@ test(
           type: "pkcs8",
         }),
       });
-      const executor = {
+      const fixtureExecutor = {
         grantRuntimeAccess: async () => {
           const grantClient = new pg.Client({
             connectionString: databaseAdminUrl.toString(),
@@ -669,8 +722,9 @@ test(
           try {
             await runPrismaDeploy(databaseAdminUrl.toString(), targetLaneRoot);
             const targetEvidence = await adapter.inspect();
-            process.stdout.write(
-              `CURRENT188_LEGACY_SUPPORT_CATALOG_DIGEST=${targetEvidence.support.catalogDigest}\n`,
+            assert.equal(
+              targetEvidence.support.catalogDigest,
+              FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.targetSupportCatalogSha256,
             );
             return { status: "SUCCEEDED" };
           } catch {
@@ -678,6 +732,9 @@ test(
           }
         },
       };
+      const executor = productionExecutorEnabled
+        ? createFounderPilotCurrent188LegacyOwnershipLocalPostgresExecutor()
+        : fixtureExecutor;
       const applied = await applyFounderPilotCurrent188LegacyOwnershipPlan({
         adapter,
         approval,
@@ -693,6 +750,7 @@ test(
         productionConfirmation:
           FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONFIRMATION,
         runtimeAdapter: bridge,
+        runtimeSafetyAdapter: runtimeSafety,
         sourcePrismaRoot: SOURCE_PRISMA_ROOT,
       });
       assert.equal(applied.decision, "CURRENT188_LEGACY_OWNERSHIP_APPLIED");
@@ -707,6 +765,7 @@ test(
         laneRoot: targetLaneRoot,
         manifest: productionManifest,
         runtimeAdapter: bridge,
+        runtimeSafetyAdapter: runtimeSafety,
         sourcePrismaRoot: SOURCE_PRISMA_ROOT,
       });
       assert.equal(verified.migrationHead, TARGET_HEAD);
@@ -778,10 +837,44 @@ test(
         productionConfirmation:
           FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONFIRMATION,
         runtimeAdapter: bridge,
+        runtimeSafetyAdapter: runtimeSafety,
         sourcePrismaRoot: SOURCE_PRISMA_ROOT,
       });
       assert.equal(replay.deploymentAttempt, 0);
       assert.equal(replay.grantAttempt, 0);
+      if (productionExecutorEnabled) {
+        const blocker = new pg.Client({
+          connectionString: databaseAdminUrl.toString(),
+          connectionTimeoutMillis: 5_000,
+          query_timeout: 20_000,
+        });
+        await blocker.connect();
+        try {
+          await blocker.query("BEGIN");
+          await blocker.query(
+            'LOCK TABLE public."GuestSupportTicket" IN ACCESS EXCLUSIVE MODE',
+          );
+          const bounded = await executor.grantRuntimeAccess({
+            applicationRuntimeRole: runtimeRoleName,
+            target: productionManifest.target,
+            timeoutSeconds: 1,
+          });
+          assert.ok(["AMBIGUOUS", "FAILED"].includes(bounded.status));
+        } finally {
+          await blocker.query("ROLLBACK").catch(() => undefined);
+          await blocker.end();
+        }
+        const afterTimeout =
+          await verifyFounderPilotCurrent188LegacyOwnershipFinal({
+            adapter,
+            laneRoot: targetLaneRoot,
+            manifest: productionManifest,
+            runtimeAdapter: bridge,
+            runtimeSafetyAdapter: runtimeSafety,
+            sourcePrismaRoot: SOURCE_PRISMA_ROOT,
+          });
+        assert.equal(afterTimeout.migrationHead, TARGET_HEAD);
+      }
       await adapter.close();
       adapter = null;
     } catch (error) {
@@ -835,6 +928,13 @@ test(
       await rm(temporaryRoot, { force: true, recursive: true });
     } catch (error) {
       cleanupErrors.push(error);
+    }
+    if (productionExecutorEnabled) {
+      try {
+        await rm(targetLaneRoot, { force: true, recursive: true });
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
     }
     if (operationError !== null || cleanupErrors.length > 0) {
       throw new AggregateError(

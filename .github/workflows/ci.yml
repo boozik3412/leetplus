@@ -169,6 +169,7 @@ jobs:
           bash -n .github/scripts/test-production-legacy-rollback-service-user.sh
           bash -n .github/scripts/test-production-legacy-rollback-control-bundle.sh
           bash -n .github/scripts/test-production-legacy-database-authority-pg16.sh
+          bash -n .github/scripts/test-current188-legacy-production-executor-pg16.sh
           node --check docs/deployment/production-artifact/legacy-rollback-auth-edge.mjs
           node --check .github/scripts/test-legacy-rollback-auth-edge.mjs
           node --check docs/deployment/production-artifact/verify-legacy-rollback-authenticated-reads.mjs
@@ -1507,6 +1508,18 @@ jobs:
           NODE_ENV: test
           FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_PG_E2E_CONFIRM: run-founder-pilot-current188-legacy-ownership-postgres-e2e
           TZ: America/New_York
+
+      - name: Verify CURRENT_188 real production executor on isolated PostgreSQL 16
+        shell: bash
+        run: |
+          node_bin="$(command -v node)"
+          test -x "$node_bin"
+          sudo -n env \
+            CI_RELEASE_SHA="$CI_RELEASE_SHA" \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            NODE_BIN="$node_bin" \
+            NODE_ENV=test \
+            bash .github/scripts/test-current188-legacy-production-executor-pg16.sh
 
       - name: Verify current-network access-scope controller with exact grants and concurrency
         shell: bash

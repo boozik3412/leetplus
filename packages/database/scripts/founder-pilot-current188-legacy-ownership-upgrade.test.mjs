@@ -24,7 +24,17 @@ const SYSTEM_IDENTIFIER = "7675301746759083084";
 const RELEASE_SHA = "c".repeat(40);
 const HISTORICAL_OWNERSHIP_DIGEST = "a".repeat(64);
 const MEMBERSHIP_DIGEST = "b".repeat(64);
-const SUPPORT_CATALOG_DIGEST = "e".repeat(64);
+const SUPPORT_CATALOG_DIGEST =
+  FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONSTANTS.targetSupportCatalogSha256;
+const RUNTIME_SAFETY = Object.freeze({
+  apiUnitTemplateSha256: "8".repeat(64),
+  canaryEnvironmentSha256: "9".repeat(64),
+  legacyDrainReceiptSha256: "f".repeat(64),
+  legacyDrainVerifierOutputSha256: "2".repeat(64),
+  legacyDrainVerifierSha256: "1".repeat(64),
+  systemdUnitInventoryDigest: "d".repeat(64),
+  workerEnvironmentDigest: "3".repeat(64),
+});
 const LEGACY_APPLIED_CHECKSUMS = new Map([
   [
     "20260518120000_guest_data_foundation",
@@ -331,6 +341,18 @@ function stateAdapter(initial) {
   };
 }
 
+function runtimeSafetyAdapter(initial = RUNTIME_SAFETY) {
+  let evidence = initial;
+  return {
+    adapter: {
+      inspect: async () => ({ accepted: true, ...evidence }),
+    },
+    set: (value) => {
+      evidence = value;
+    },
+  };
+}
+
 async function fixture(t) {
   const root = await temporaryRoot(t);
   const laneRoot = path.join(
@@ -366,6 +388,20 @@ async function fixture(t) {
       materializedTreeDigest: lane.treeDigest,
       releaseSha: RELEASE_SHA,
     },
+    runtimeSafety: {
+      apiUnitTemplatePath: "/etc/systemd/system/leetplus-api@.service",
+      apiUnitTemplateSha256: RUNTIME_SAFETY.apiUnitTemplateSha256,
+      canaryEnvironmentPath: "/etc/leetplus/canary-safe.env",
+      canaryEnvironmentSha256: RUNTIME_SAFETY.canaryEnvironmentSha256,
+      expectedSystemdUnitInventoryDigest:
+        RUNTIME_SAFETY.systemdUnitInventoryDigest,
+      legacyDrainReceiptPath:
+        "/var/lib/leetplus/legacy-drain/activation.receipt",
+      legacyDrainReceiptSha256: RUNTIME_SAFETY.legacyDrainReceiptSha256,
+      legacyDrainVerifierPath:
+        "/usr/local/libexec/leetplus/verify-legacy-runtime-drain.sh",
+      legacyDrainVerifierSha256: RUNTIME_SAFETY.legacyDrainVerifierSha256,
+    },
     target: {
       activeRuntimeRoleNames: ["leetplus_runtime"],
       applicationRuntimeRole: { name: "leetplus_runtime", oid: 19002 },
@@ -385,7 +421,14 @@ async function fixture(t) {
       workerFunctionOwnerRole: { name: "postgres", oid: 10 },
     },
   });
-  return { key, laneRoot, manifest, rows, runtime: runtimeAdapter() };
+  return {
+    key,
+    laneRoot,
+    manifest,
+    rows,
+    runtime: runtimeAdapter(),
+    runtimeSafety: runtimeSafetyAdapter(),
+  };
 }
 
 async function buildPlan(value, state) {
@@ -395,6 +438,7 @@ async function buildPlan(value, state) {
     manifest: value.manifest,
     now: () => new Date(NOW),
     runtimeAdapter: value.runtime.adapter,
+    runtimeSafetyAdapter: value.runtimeSafety.adapter,
     sourcePrismaRoot: PRISMA_ROOT,
   });
 }
@@ -428,6 +472,7 @@ function applyOptions(
     productionConfirmation:
       FOUNDER_PILOT_CURRENT188_LEGACY_OWNERSHIP_CONFIRMATION,
     runtimeAdapter: value.runtime.adapter,
+    runtimeSafetyAdapter: value.runtimeSafety.adapter,
     sourcePrismaRoot: PRISMA_ROOT,
   };
 }
@@ -612,6 +657,31 @@ test("ownership drift after approval fails closed and releases locks", async (t)
     { reasonCode: "CURRENT188_LEGACY_SOURCE_STATE_MISMATCH" },
   );
   assert.equal(drifted.locks(), 0);
+  assert.equal(value.runtime.locks(), 0);
+});
+
+test("runtime safety drift after approval fails closed before effects", async (t) => {
+  const value = await fixture(t);
+  const state = stateAdapter(evidence(value.rows));
+  const plan = await buildPlan(value, state);
+  value.runtimeSafety.set({
+    ...RUNTIME_SAFETY,
+    systemdUnitInventoryDigest: "4".repeat(64),
+  });
+  await assert.rejects(
+    applyFounderPilotCurrent188LegacyOwnershipPlan(
+      applyOptions(value, state, plan, {
+        grantRuntimeAccess: async () => {
+          throw new Error("MUST_NOT_GRANT");
+        },
+        migrate: async () => {
+          throw new Error("MUST_NOT_MIGRATE");
+        },
+      }),
+    ),
+    { reasonCode: "CURRENT188_LEGACY_RUNTIME_SAFETY_MISMATCH" },
+  );
+  assert.equal(state.locks(), 0);
   assert.equal(value.runtime.locks(), 0);
 });
 

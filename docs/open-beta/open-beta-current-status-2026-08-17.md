@@ -15,6 +15,26 @@
 | Offline/USB key      | исключён из beta critical path                                                            |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                        |
 
+## Обновление 29.08.2026 — runtime repair candidate
+
+Подготовлен единый exact release candidate для трёх production-регрессий без
+расширения security-контуров:
+
+- USER_CALL advisory lock приводит PostgreSQL `void` к `text`, поэтому Prisma
+  больше не обрывает public request до создания challenge;
+- CURRENT188 runtime-function enrollment добавляет два минимальных
+  attachment-helper grant для `leetplus_runtime`, сохраняя `PUBLIC` revoke и
+  запрет `GRANT OPTION`;
+- canonical API overlay оставляет автономный reward scheduler выключенным, но
+  меняет emergency materializer kill switch на `false`, чтобы ручное открытие
+  уже заработанного кейса проходило через idempotent inline pipeline.
+
+Локально зелёные USER_CALL unit regression, API lint/typecheck,
+runtime-function enrollment tests и production-artifact checks. На момент
+фиксации этого раздела production остаётся на active blue `fdf97624…`; merge,
+admission и отдельный controlled rollout ещё не являются выполненными только
+из-за наличия candidate в source.
+
 ## Обновление 29.08.2026 — bug-report production LIVE
 
 PR [#78](https://github.com/boozik3412/leetplus/pull/78), merge SHA

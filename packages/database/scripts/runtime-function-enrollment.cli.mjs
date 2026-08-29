@@ -30,9 +30,9 @@ Safety contract:
   - The command never creates a role, database, schema, table, or function.
   - The migration/admin DATABASE_URL must be different from the target role.
   - PostgreSQL 16, completed migration 166, exact terminal migration 188 and exact count 188 are required.
-  - Only eight exact application functions receive EXECUTE: two delivery
-    helpers, five sealed identity-email boundaries, and the PII-free initial
-    OWNER invite SENT assertion.
+  - Only ten exact application functions receive EXECUTE: two delivery
+    helpers, two staff-attachment invariant helpers, five sealed identity-email
+    boundaries, and the PII-free initial OWNER invite SENT assertion.
   - All six worker-only functions, including the four leased mail delivery
     RPCs and their role assertion, are explicitly excluded.
   - The raw identity-email lock helper remains excluded.

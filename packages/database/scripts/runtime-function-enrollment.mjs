@@ -38,6 +38,24 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
     volatility: "v",
   }),
   Object.freeze({
+    key: "staffAttachmentStateAssert",
+    catalogSignature: 'public."assert_staff_attachment_state"(text)',
+    grantSignature: 'public."assert_staff_attachment_state"(TEXT)',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
+    key: "staffAttachmentResourceScopeResolver",
+    catalogSignature:
+      'public."resolve_staff_attachment_resource_scope"("StaffAttachmentResourceKind",text)',
+    grantSignature:
+      'public."resolve_staff_attachment_resource_scope"(public."StaffAttachmentResourceKind", TEXT)',
+    securityDefiner: false,
+    volatility: "v",
+    language: "plpgsql",
+  }),
+  Object.freeze({
     key: "identityEmailClaimReserveInvite",
     catalogSignature:
       'public."identity_email_claim_reserve_invite_v2"(text,text,text)',
@@ -522,8 +540,8 @@ const ALL_RUNTIME_FUNCTIONS = Object.freeze([
 ]);
 assert.equal(
   ALL_RUNTIME_FUNCTIONS.length,
-  56,
-  "Runtime enrollment must inspect exactly 56 CURRENT_176 function contracts.",
+  58,
+  "Runtime enrollment must inspect exactly 58 CURRENT_188 function contracts.",
 );
 assert.equal(
   new Set(ALL_RUNTIME_FUNCTIONS.map(({ catalogSignature }) => catalogSignature))
@@ -2371,9 +2389,9 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").join("\n");
   assert.equal(
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime").length,
-    104 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
+    108 + EXCLUDED_RUNTIME_RELEASE_FUNCTIONS.length,
   );
-  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 8);
+  assert.equal(APPLICATION_RUNTIME_FUNCTIONS.length, 10);
   assert.equal(EXCLUDED_WORKER_FUNCTIONS.length, 6);
   assert.equal(EXCLUDED_PENDING_FUNCTIONS.length, 13);
   assert.equal(EXCLUDED_ADMISSION_FUNCTIONS.length, 9);
@@ -2382,6 +2400,8 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.equal(SEALED_RUNTIME_TYPES.length, 2);
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
+  assert.match(sql, /assert_staff_attachment_state/u);
+  assert.match(sql, /resolve_staff_attachment_resource_scope/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v2/u);
   assert.match(sql, /identity_email_claim_assert_invite_v1/u);

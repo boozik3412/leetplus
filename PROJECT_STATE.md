@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (29.08.2026)
+## Canonical current-state guardrail (30.08.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -9,16 +9,24 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий runtime implementation baseline — merge SHA
-`fdf97624674112858dc7303dcee33c8acb7041e2` (PR #78).
-Fast CI `33257317114` и Full Release Admission `33257317130` зелёные на exact
+`ca3f332ff6f9105793da4e85cfecd8f34770ab21` (PR #82).
+Fast CI `33272038099` и Full Release Admission `33272038128` зелёные на exact
 merge SHA. В source реализованы отдельные
 `CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
 pools. Split systemd/nginx candidate остаётся `DORMANT / NOT INSTALLED`, а
 production продолжает работать в `COMBINED`. Фактический active runtime —
-blue exact `fdf97624…`, cutover generation 11; schema — exact `CURRENT_188`,
-bridge `OFF`, bug reporting `LIVE`. Rollback green —
-`cc4d1c5949c3ac33dfe6eef14daa9cc5c6f41d3c`, exact `CURRENT_188`,
-bridge/reporting `OFF/OFF`.
+green exact `ca3f332f…`, cutover generation 12; schema — exact `CURRENT_188`,
+bridge `OFF`, bug reporting `LIVE`. Hot rollback blue — `fdf97624…`; оба slot
+остаются active и проходят exact CURRENT188 readiness.
+
+Production repair 30.08.2026 восстановил три сценария без смешения контуров:
+USER_CALL advisory lock возвращает Prisma-safe `text`; autonomous reward
+materializer выключен, но emergency kill switch снят для idempotent inline
+open; runtime получил минимальный EXECUTE только на два historical attachment
+helpers с `PUBLIC` revoke. Postflight подтвердил public health, отсутствие новых
+`P2010`, staff attachment upload/download `200/200` и сохранённый
+`AVAILABLE/<unconsumed>/PENDING` кейс «УТРО» у `***6035` без открытия от имени
+гостя.
 
 Публичный игровой вход (`/guest-portal*`) не зависит от corporate JWT/scope и
 не имеет общего лимита одновременно вошедших пользователей.
@@ -60,23 +68,23 @@ dump SHA-256
 Production HTTP/DB/ACL/guard QA прошёл; синтетический тикет без guest JWT не
 создавался, поэтому интерактивный signed-in canary остаётся отдельной проверкой.
 
-## Detailed gamification state (updated through 28.08.2026)
+## Detailed gamification state (updated through 30.08.2026)
 
 - The canonical manager route is `/gamification`, diagnostics live at `/gamification/log`, missions are created and edited only in `/gamification/missions/wizard`, and the guest flow is `/game/auth -> /game/clubs -> /game` with reward history at `/game/rewards`.
 - Mission v2 and Battle Pass share the same condition family: `APP_OPEN`, `PLAY_TIME`, `PRODUCT_PURCHASE`, `BALANCE_TOPUP`, and `CHECK_IN`. Loot boxes accept `ANY`, `HOURLY`, or `PACKAGE_OR_SUBSCRIPTION`.
 - Source policy is intentionally layered. `APP_OPEN` and check-in remain direct LIVE-only facts. Session start and play time can use sequential `LIVE_WITH_LEDGER_FALLBACK`. Purchases remain LIVE-primary with Ledger in SHADOW. Balance top-up uses the isolated `LEDGER_SUPPLEMENTAL` path.
 - Fallback/supplemental/materializer availability in code is not proof that it is enabled on production. Runtime env/status and `/gamification/log` are authoritative for mode, tenant scope, cutoff, fact allow-list, lag, retries, and dead letters.
 - Production `LEDGER_SUPPLEMENTAL` was verified and enabled on 05.08.2026 in tenant-scoped `LIVE` mode for tenant slug `demo`, with the fact allow-list restricted to `BALANCE_TOPUP`, the kill switch disabled, a 15-second interval, and a batch size of 30. Before this change the variables were absent, so the safe `OFF` default accepted normalized top-up facts but never evaluated them. A sessionless, guest-bound exact top-up fact was then processed once through a `PROCESSED` receipt and the shared evaluator, advancing the active count mission to `1/10`; an active game session is not required for a balance top-up.
-- The complete supported production balance path was enabled for tenant slug `demo` on 05.08.2026. The autonomous reward materializer now drains immutable intents and effects every 15 seconds with batch 30, a disabled kill switch and no all-tenant scope. The existing 30-second bonus-ledger scheduler and Langame write gate accept both bonus-balance rewards (`BONUS`, `BONUS_POINTS`, `BONUS_BALANCE`, `LOYALTY_BONUS`) and money-balance rewards (`BALANCE`, `MONEY_BALANCE`, `CASH_BALANCE`, `DEPOSIT`, `WALLET_BALANCE`, `LANGAME_BALANCE`). Qualification still requires the normal explicit wallet claim; delivery remains idempotent and ambiguous provider writes stop in reconciliation instead of retrying. `BALANCE_WRITE_OFF` and `BONUS_TOPUP` ledger facts remain diagnostic facts rather than mission condition types and must not be added to the supplemental allow-list without a versioned evaluator contract.
+- The supported balance-write contract still accepts both bonus-balance rewards (`BONUS`, `BONUS_POINTS`, `BONUS_BALANCE`, `LOYALTY_BONUS`) and money-balance rewards (`BALANCE`, `MONEY_BALANCE`, `CASH_BALANCE`, `DEPOSIT`, `WALLET_BALANCE`, `LANGAME_BALANCE`). After the 30.08.2026 repair rollout the autonomous reward materializer is explicitly disabled in the combined API overlay, while its emergency kill switch is false so an exact user-initiated wallet claim/open can execute through the idempotent inline path. Qualification still requires the normal explicit wallet action; delivery remains idempotent and ambiguous provider writes stop in reconciliation instead of retrying. `BALANCE_WRITE_OFF` and `BONUS_TOPUP` ledger facts remain diagnostic facts rather than mission condition types and must not be added to the supplemental allow-list without a versioned evaluator contract.
 - Completion notifications for missions and Battle Pass are durable and return after reload until the guest explicitly acknowledges them. ACK is read-only and is separate from wallet claim/open.
 - The reward wallet and `/game/rewards` keep pending and completed outcomes visible. Ordinary reward and XP are claimed independently; a loot box is an entitlement and rolls a prize only on manual open.
 - A loot box configured as the reward for a mission, Battle Pass step, or another activity follows the durable `event -> reward intent -> reward effect -> entitlement -> wallet` path. Its parent reward does not wait for an ordinary claim or claim deadline; the only guest action is the exact manual open. `sourceRewardId` preserves the granting activity while `rewardId` records only the opened outcome after the two-wave expand/contract cutover. Profile-scoped summary recovery and a replay-safe migration repair both missing legacy intents and rewards that were parked before entitlement materialization.
-- Production verification on 31.07.2026 found and fixed a shared case-issuance failure: PostgreSQL `pg_advisory_xact_lock` returns `void`, which Prisma could not deserialize. The lock helper now casts the result to `text`, and reward issuance follows the same advisory-lock-before-row-lock order as loot-box mutation paths. A controlled manual materializer pass recovered all 5 parked case effects with 0 failed, stale, or dead-letter effects; the target mission reward produced one entitlement and wallet item, and an immediate second pass applied 0 intents/effects. Inline claims remain allowed, and the tenant-scoped autonomous materializer has been enabled since 05.08.2026 with the kill switch disabled.
+- Production verification on 31.07.2026 found and fixed a shared case-issuance failure: PostgreSQL `pg_advisory_xact_lock` returns `void`, which Prisma could not deserialize. The lock helper casts the result to `text`, and reward issuance follows the same advisory-lock-before-row-lock order as loot-box mutation paths. A controlled manual materializer pass recovered all 5 parked case effects with 0 failed, stale, or dead-letter effects; the target mission reward produced one entitlement and wallet item, and an immediate second pass applied 0 intents/effects. The 30.08.2026 USER_CALL repair applies the same Prisma-safe scalar rule to public auth. Inline claims remain allowed; the autonomous materializer is currently disabled and the emergency kill switch is false.
 - Expired or missing guest sessions on `/game` and `/game/rewards` return the guest to `/game/auth`; retryable API/network failures keep a separate retry path and do not masquerade as an authentication failure.
 - A domain-scoped, idempotent identity resolver refreshes stale Langame links from the verified guest identity during authentication and synchronization. Ambiguous matches fail closed instead of binding a profile to the wrong guest.
 - Check-in streak progress is based on unique club-local calendar dates and resets after a missed date. Reward-only `REWARD_TEMPLATE` loot boxes are excluded from the standalone catalog.
 - Product categories keep separate `LANGAME` and `LEETPLUS` identities. Exact tariff dictionaries remain blocked by readiness checks until a reliable structured source is available.
-- The production snapshot at documentation time is revision `29d409b6`; `origin/main`, the VDS checkout, API and Web were aligned and both services were active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
+- The production snapshot at documentation time is exact release `ca3f332ff6f9105793da4e85cfecd8f34770ab21`, active green generation 12; admitted API/Web are aligned and both green and rollback blue services remain active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
 - The LIVE-primary purchase pipeline now reserves bounded scheduler capacity for `PRODUCT_EXPENSE`, drains eligible pending external purchase facts beyond the newest 30-row window, and prioritizes facts that match active category missions. A positive guest-bound device-rental expense can qualify like any other mapped product expense; it is not rejected merely because the business calls it a service. Stable sale identity, cancellation, return and supersede handling remain required before enabling a Ledger purchase fallback.
 - Purchase missions support `ANY_PRODUCT`, exact products, or explicitly sourced categories, plus ANY/ALL selection and per-purchase/cumulative amount thresholds. Guest-facing conditions list the selected categories and omit the internal completion-window value.
 - Mission and loot-box editors expose `maxPendingRewards` (`Максимальное количество накопленных наград для получения`). The default for newly created and migrated existing elements is `1`; an explicit operator value is preserved. The guard counts pending ordinary rewards and unconsumed entitlements from the same source and blocks only a new qualification, not an already-earned claim/open.
@@ -108,7 +116,7 @@ Production HTTP/DB/ACL/guard QA прошёл; синтетический тик�
 - The ordinary LIVE snapshot window remains the primary path. Historical anti-join recovery for guest-bound sessions and purchases is independently gated by `GUEST_GAME_PIPELINE_BACKFILL_MODE=OFF|SHADOW|LIVE` and defaults to `OFF`, where it executes no anti-join SQL. Every enabled mode requires an exact tenant and an explicitly false kill switch; `LIVE` also requires a timezone-qualified cutoff plus an exact profile unless tenant-wide rollout is explicitly allowed. `SHADOW` records diagnostic decisions only and cannot create event, XP, reward or entitlement. `PLAY_HOUR` is emitted only after a session has stopped, so an intermediate duration cannot seal a stale event before the final 60-minute boundary. The Ledger recovery lane remains secondary and acts only after the primary grace window.
 - Standalone cases, mission-target cases and Battle Pass lootbox rewards share entitlement limits and opening semantics. `STANDALONE` is directly earnable, `REWARD_TEMPLATE` is only granted by a mission or Battle Pass target, and `BOTH` supports both paths. Qualification never selects a random prize; the guest's manual open action does that exactly once.
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 ## Current Workflow
 

@@ -2,11 +2,11 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **29.08.2026**
+Актуально на: **30.08.2026**
 Runtime implementation baseline:
-`fdf97624674112858dc7303dcee33c8acb7041e2` (PR #78; включает bug-report
-support, USER_CALL handoff, mixed-owner CURRENT188 controller и bounded чтение
-canonical hydrated checksums)
+`ca3f332ff6f9105793da4e85cfecd8f34770ab21` (PR #82; включает production
+repair USER_CALL, inline loot-box open и exact CURRENT188 attachment-helper
+enrollment поверх bug-report baseline PR #78)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -17,11 +17,11 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | CURRENT188 successor слит PR [#78](https://github.com/boozik3412/leetplus/pull/78), merge SHA `fdf97624674112858dc7303dcee33c8acb7041e2`                                                           |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33257317114) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33257317130) — `SUCCESS` |
-| Production API topology  | active blue exact `fdf97624…`, generation 11, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; rollback green `cc4d1c59…` — `OFF/OFF`                 |
+| Runtime implementation   | CURRENT188 repair слит PR [#82](https://github.com/boozik3412/leetplus/pull/82), merge SHA `ca3f332ff6f9105793da4e85cfecd8f34770ab21`                                                               |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33272038099) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33272038128) — `SUCCESS`     |
+| Production API topology  | active green exact `ca3f332f…`, generation 12, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `fdf97624…`, оба slot active                  |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
-| Corporate landing        | role-aware successor входит в active `fdf97624…`; real-account canary остаётся отдельной проверкой                                                                                  |
+| Corporate landing        | role-aware successor входит в active `ca3f332f…`; real-account canary остаётся отдельной проверкой                                                                                  |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -63,7 +63,7 @@ schema-bridge и rollback authority. Перед `CURRENT_188` они должн�
 переключены на admitted slot без разрыва публичного входа, остановлены,
 disabled и удалены из systemd inventory. Помечать такой sidecar `SAFE` нельзя.
 
-### Runtime repair contract 29.08.2026
+### Runtime repair contract 29–30.08.2026
 
 - `USER_CALL` остаётся обычным public API request path. Advisory transaction
   lock обязан возвращать Prisma-поддерживаемый scalar (`::text AS
@@ -94,6 +94,23 @@ disabled и удалены из systemd inventory. Помечать такой s
   дренируются автоматически. Повтор exact пользовательского open/claim после
   снятия emergency kill switch безопасен благодаря idempotency intent/effect и
   является предпочтительным recovery для отдельного доступного кейса.
+
+Production rollout завершён 30.08.2026 на exact admitted SHA `ca3f332f…`:
+
+- active nginx upstream — green, rollback blue `fdf97624…` оставлен активным;
+- canonical API overlay подтверждён как materializer scheduler `false`,
+  emergency kill switch `false`, USER_CALL `true/SMS_RU_CALLCHECK`;
+- exact enrollment закрепил `search_path=pg_catalog, public, pg_temp` и
+  `EXECUTE` для `leetplus_runtime` только у двух attachment helpers; `PUBLIC`
+  execute остался `false`;
+- production postflight: public API/Web ready, runtime advisory-lock cast
+  исполняется, отрицательный USER_CALL status path возвращает контролируемый
+  `400`, после cutover нет `P2010`/PostgreSQL `void` deserialize errors;
+- staff QA через штатные login + signed tenant context прошёл upload/download
+  одного 34-byte attachment (`200/200`);
+- entitlement гостя `***6035` для `КЕЙС «УТРО»` остался `AVAILABLE`,
+  `<unconsumed>`, wallet `PENDING`; QA намеренно не открывал кейс от имени
+  пользователя.
 
 ## Техническая поддержка игрового модуля
 
@@ -138,11 +155,12 @@ Support-функциональность следует тем же трём г�
   `187 -> 188`; сразу после DDL оба обязаны подтвердить exact CURRENT_188 без
   active compatibility evidence. До этого reporting LIVE запрещён.
 
-Фактический rollout завершён 29.08.2026: active blue `fdf97624…` работает на
-exact CURRENT188 с bridge `OFF` и reporting `LIVE`; rollback green
-`cc4d1c59…` — exact CURRENT188 с `OFF/OFF`. Это не меняет split-runtime
-решение: production по-прежнему `COMBINED`, а три логических security-контура
-сохраняются guards/module boundaries.
+Bug-report schema rollout завершён 29.08.2026, а runtime repair — 30.08.2026.
+Active green `ca3f332f…` работает на exact CURRENT188 с bridge `OFF` и
+reporting `LIVE`; hot rollback blue `fdf97624…` остаётся exact CURRENT188 и
+активным. Это не меняет split-runtime решение: production по-прежнему
+`COMBINED`, а три логических security-контура сохраняются guards/module
+boundaries.
 
 Подробный контракт и rollout:
 [`docs/support/guest-bug-reporting.md`](../support/guest-bug-reporting.md).

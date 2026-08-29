@@ -1,24 +1,24 @@
-# LeetPlus open beta — текущее состояние на 29.08.2026
+# LeetPlus open beta — текущее состояние на 30.08.2026
 
 | Поле                 | Состояние                                                                                 |
 | -------------------- | ----------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                              |
-| Production runtime   | healthy; active blue `fdf97624…`, generation 11, `COMBINED`, bridge OFF, bug reporting LIVE |
+| Production runtime   | healthy; active green `ca3f332f…`, generation 12, `COMBINED`, bridge OFF, bug reporting LIVE |
 | Prisma schema        | source и production exact `CURRENT_188`                                                   |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA              |
-| Runtime successor    | CURRENT188 merge `fdf97624674112858dc7303dcee33c8acb7041e2`; gates green                     |
+| Runtime successor    | CURRENT188 repair merge `ca3f332ff6f9105793da4e85cfecd8f34770ab21`; production active       |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                          |
-| Role-aware landing   | входит в active `fdf97624…`; real-account canary pending                                  |
+| Role-aware landing   | входит в active `ca3f332f…`; real-account canary pending                                  |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                  |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены               |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                             |
 | Offline/USB key      | исключён из beta critical path                                                            |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                        |
 
-## Обновление 29.08.2026 — runtime repair candidate
+## Обновление 30.08.2026 — runtime repair production rollout
 
-Подготовлен единый exact release candidate для трёх production-регрессий без
-расширения security-контуров:
+Выпущен единый exact release для трёх production-регрессий без расширения
+security-контуров:
 
 - USER_CALL advisory lock приводит PostgreSQL `void` к `text`, поэтому Prisma
   больше не обрывает public request до создания challenge;
@@ -32,11 +32,28 @@
   меняет emergency materializer kill switch на `false`, чтобы ручное открытие
   уже заработанного кейса проходило через idempotent inline pipeline.
 
-Локально зелёные USER_CALL unit regression, API lint/typecheck,
-runtime-function enrollment tests и production-artifact checks. На момент
-фиксации этого раздела production остаётся на active blue `fdf97624…`; merge,
-admission и отдельный controlled rollout ещё не являются выполненными только
-из-за наличия candidate в source.
+Финальный exact SHA `ca3f332ff6f9105793da4e85cfecd8f34770ab21` слит PR
+[#82](https://github.com/boozik3412/leetplus/pull/82). Post-merge
+[Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33272038099) и
+[Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33272038128)
+зелёные. Admitted runtime/control artifacts установлены; runtime-function
+controller перевёл только два attachment helpers из exact legacy `<unset>` в
+`search_path=pg_catalog, public, pg_temp`, выдал `leetplus_runtime` EXECUTE без
+grant option и сохранил `PUBLIC=false`.
+
+Blue/green controller переключил production на active green `ca3f332f…`,
+generation 12. Blue `fdf97624…` оставлен активным hot rollback. Public API/Web,
+exact CURRENT188 readiness и authenticated reads прошли watchdog. Production
+postflight подтвердил materializer `false`, emergency kill switch `false`,
+USER_CALL `true/SMS_RU_CALLCHECK`, корректный scalar advisory lock и отсутствие
+новых `P2010` после cutover. Отрицательный USER_CALL status request вернул
+контролируемый `400`, а штатный staff upload/download после signed tenant
+context — `200/200` с побайтовым совпадением файла.
+
+Для `***6035` entitlement `КЕЙС «УТРО»` остаётся `AVAILABLE`, не потреблён,
+wallet item `PENDING`; production QA не имитировал пользовательское открытие и
+не выбирал приз. Повторное открытие теперь проходит через включённый inline
+pipeline, при этом автономный materializer остаётся выключенным.
 
 ## Обновление 29.08.2026 — bug-report production LIVE
 

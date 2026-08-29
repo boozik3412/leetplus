@@ -2958,7 +2958,7 @@ export function createFounderPilotCurrent188LegacyOwnershipRuntimeSafetyAdapter(
       const workerEnvironment = parseExactEnvironment(canarySource);
       const systemctl = await trustedExecutable("/usr/bin/systemctl");
       const [verifierResult, unitFilesResult, unitsResult] = await Promise.all([
-        run(safety.legacyDrainVerifierPath, []),
+        run("/usr/bin/bash", ["-p", safety.legacyDrainVerifierPath]),
         run(systemctl, [
           "list-unit-files",
           "--type=service",

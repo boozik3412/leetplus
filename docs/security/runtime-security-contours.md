@@ -4,9 +4,9 @@
 
 Актуально на: **29.08.2026**
 Runtime implementation baseline:
-`a5eeec326a935db5a1c33bf94cfad3b942361f70` (PR #74; включает bug-report
-support candidate, USER_CALL handoff, corrected cutover watchdog и исходный
-mixed-owner CURRENT188 controller)
+`fdf97624674112858dc7303dcee33c8acb7041e2` (PR #78; включает bug-report
+support, USER_CALL handoff, mixed-owner CURRENT188 controller и bounded чтение
+canonical hydrated checksums)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -17,11 +17,11 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | mixed-owner successor слит PR [#74](https://github.com/boozik3412/leetplus/pull/74), merge SHA `a5eeec326a935db5a1c33bf94cfad3b942361f70`                                                |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33238585320) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33238585296) — `SUCCESS` |
-| Production API topology  | подтверждённый runtime — exact `a5eeec32…`, `COMBINED`, bridge `CURRENT_187 -> CURRENT_188`, reporting `OFF`; dedicated `CORPORATE`/`GUEST` не установлены                         |
+| Runtime implementation   | CURRENT188 successor слит PR [#78](https://github.com/boozik3412/leetplus/pull/78), merge SHA `fdf97624674112858dc7303dcee33c8acb7041e2`                                                           |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33257317114) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33257317130) — `SUCCESS` |
+| Production API topology  | active blue exact `fdf97624…`, generation 11, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; rollback green `cc4d1c59…` — `OFF/OFF`                 |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
-| Corporate landing        | role-aware successor слит и admitted; отдельный production deploy/real-account canary всё ещё должен подтверждаться фактическим runtime                                            |
+| Corporate landing        | role-aware successor входит в active `fdf97624…`; real-account canary остаётся отдельной проверкой                                                                                  |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -105,6 +105,12 @@ Support-функциональность следует тем же трём г�
   подтверждают actual database CURRENT_187 и единственную compatibility
   `187 -> 188`; сразу после DDL оба обязаны подтвердить exact CURRENT_188 без
   active compatibility evidence. До этого reporting LIVE запрещён.
+
+Фактический rollout завершён 29.08.2026: active blue `fdf97624…` работает на
+exact CURRENT188 с bridge `OFF` и reporting `LIVE`; rollback green
+`cc4d1c59…` — exact CURRENT188 с `OFF/OFF`. Это не меняет split-runtime
+решение: production по-прежнему `COMBINED`, а три логических security-контура
+сохраняются guards/module boundaries.
 
 Подробный контракт и rollout:
 [`docs/support/guest-bug-reporting.md`](../support/guest-bug-reporting.md).

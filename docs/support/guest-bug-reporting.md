@@ -1,8 +1,16 @@
 # Сообщения о проблемах из игрового модуля
 
-Статус: **production candidate; default OFF**
+Статус: **production LIVE; code default OFF**
 
 Актуально на: **29.08.2026**
+
+Фактический production state: active blue
+`fdf97624674112858dc7303dcee33c8acb7041e2`, cutover generation 11, exact
+`CURRENT_188`, `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
+`GUEST_BUG_REPORTING_MODE=LIVE`. Rollback green `cc4d1c59…` работает на
+exact CURRENT188 с `OFF/OFF`. Серверный HTTP/DB/ACL/guard QA прошёл; первый
+signed-in guest canary должен использовать реальную гостевую сессию, а не
+синтетическую вставку в support tables.
 
 ## Назначение
 

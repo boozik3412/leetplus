@@ -705,7 +705,10 @@ async function runBridgeCommand(
   }).catch(() => fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID"));
 }
 
-function parseBridgeSystemdProperties(text, keys) {
+export function parseFounderPilotCurrent188BridgeSystemdProperties(
+  text,
+  keys,
+) {
   if (!text.endsWith("\n") || text.includes("\0") || text.includes("\r")) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
   }
@@ -714,10 +717,18 @@ function parseBridgeSystemdProperties(text, keys) {
     const separator = line.indexOf("=");
     if (separator < 1) fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
     const key = line.slice(0, separator);
-    if (!keys.includes(key) || Object.hasOwn(result, key)) {
+    if (!keys.includes(key)) {
       fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
     }
-    result[key] = line.slice(separator + 1);
+    const value = line.slice(separator + 1);
+    if (Object.hasOwn(result, key)) {
+      if (key !== "EnvironmentFiles") {
+        fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
+      }
+      result[key] = `${result[key]}\n${value}`;
+    } else {
+      result[key] = value;
+    }
   }
   if (Object.keys(result).length !== keys.length) {
     fail("CURRENT188_UPGRADE_BRIDGE_LIVE_STATE_INVALID");
@@ -758,12 +769,18 @@ async function inspectBridgeUnit({ slot, systemctl, runtimeKind }) {
     ...keys.map((key) => `--property=${key}`),
     unit,
   ]);
-  const properties = parseBridgeSystemdProperties(output, keys);
+  const properties = parseFounderPilotCurrent188BridgeSystemdProperties(
+    output,
+    keys,
+  );
   const expectedFragment = `${BRIDGE_SYSTEMD_ROOT}/leetplus-${runtimeKind}@.service`;
   const expectedEnvironmentFiles = [
     `${BRIDGE_ENVIRONMENT_ROOT}/${runtimeKind === "api" ? "runtime" : "web-runtime"}.env`,
     `${BRIDGE_ENVIRONMENT_ROOT}/slots/${slot}.env`,
     `${BRIDGE_ENVIRONMENT_ROOT}/canary-safe.env`,
+    ...(runtimeKind === "api"
+      ? [`${BRIDGE_ENVIRONMENT_ROOT}/guest-user-call-live.env`]
+      : []),
   ];
   if (
     properties.ActiveState !== "active" ||

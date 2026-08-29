@@ -33,6 +33,10 @@ Safety contract:
   - Only ten exact application functions receive EXECUTE: two delivery
     helpers, two staff-attachment invariant helpers, five sealed identity-email
     boundaries, and the PII-free initial OWNER invite SENT assertion.
+  - Before the two historical staff-attachment helpers receive EXECUTE, their
+    function-local search_path is hardened to exactly pg_catalog, public,
+    pg_temp; pg_temp is deliberately last and the runtime role must not have
+    CREATE on public.
   - All six worker-only functions, including the four leased mail delivery
     RPCs and their role assertion, are explicitly excluded.
   - The raw identity-email lock helper remains excluded.

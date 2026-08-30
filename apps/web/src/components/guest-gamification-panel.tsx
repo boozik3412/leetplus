@@ -8964,6 +8964,9 @@ function SeasonsTab({
             guestLogRuleSummary(item.xpRules),
             formatDate(item.periodFrom),
             formatBudgetAmount(item.budgetAmount),
+            item.manualApprovalRequired
+              ? "выдача: после подтверждения сотрудником"
+              : "выдача: автоматически",
           ]}
           details={<BattlePassLevelIdSummary season={item} />}
           onEdit={() => onEdit(item)}

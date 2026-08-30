@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the LeetPlus bonus-ledger worker every 30 seconds
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=30s
+AccuracySec=1s
+RandomizedDelaySec=2s
+Persistent=false
+Unit=leetplus-bonus-ledger-worker.service
+
+[Install]
+WantedBy=timers.target

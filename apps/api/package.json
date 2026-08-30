@@ -16,6 +16,7 @@
     "start:guest:prod": "node dist/guest-main",
     "identity-mail:worker": "node dist/identity-mail-worker/identity-mail-worker.cli",
     "guest-game:bot-consumer": "node dist/guest-gamification/guest-game-delivery-bot-consumer.cli",
+    "guest-game:bonus-ledger-worker": "node dist/guest-gamification/guest-bonus-ledger-worker.cli",
     "guest-game:telegram-edge": "node dist/guest-portal/telegram-edge-adapter.cli",
     "guest-game:telegram-poller": "node dist/guest-portal/telegram-edge-poller.cli",
     "config:validate:production": "node dist/config/validate-production-environment.cli.js",

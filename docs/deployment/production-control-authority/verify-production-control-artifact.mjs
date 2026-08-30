@@ -71,6 +71,7 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/preflight-release-slot.sh`,
   `${INNER_ROOT}/prepare-web-slot-cache.sh`,
   `${INNER_ROOT}/promote-release-artifact.sh`,
+  `${INNER_ROOT}/run-active-bonus-ledger-worker.sh`,
   `${INNER_ROOT}/run-current-release-restored-copy-acceptance.sh`,
   `${INNER_ROOT}/scheduler-free-n-minus-one-runbook.md`,
   `${INNER_ROOT}/seal-release-artifact.sh`,
@@ -78,10 +79,13 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/stage-pnpm-store.sh`,
   `${INNER_ROOT}/stage-release-artifact.sh`,
   `${INNER_ROOT}/systemd/blue.env.example`,
+  `${INNER_ROOT}/systemd/bonus-ledger-worker.env.example`,
   `${INNER_ROOT}/systemd/canary-safe.env.example`,
   `${INNER_ROOT}/systemd/green.env.example`,
   `${INNER_ROOT}/systemd/guest-user-call-live.env.example`,
   `${INNER_ROOT}/systemd/leetplus-api@.service`,
+  `${INNER_ROOT}/systemd/leetplus-bonus-ledger-worker.service`,
+  `${INNER_ROOT}/systemd/leetplus-bonus-ledger-worker.timer`,
   `${INNER_ROOT}/systemd/leetplus-release-hydrate@.service`,
   `${INNER_ROOT}/systemd/leetplus-web@.service`,
   `${INNER_ROOT}/systemd/legacy-database-login-fence-authority.sql.example`,
@@ -559,13 +563,16 @@ function assertInstallAuthorityContract(root) {
     priorLine = line;
     destinations.add(destination);
   }
-  if (lines.length !== 47) {
+  if (lines.length !== 50) {
     fail("production control install map does not have the exact reviewed entry count");
   }
   for (const requiredDestination of [
     "/etc/systemd/system/leetplus-release-hydrate@.service",
+    "/etc/systemd/system/leetplus-bonus-ledger-worker.service",
+    "/etc/systemd/system/leetplus-bonus-ledger-worker.timer",
     "/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/CONTROL_BUNDLE_SHA256SUMS",
     "/usr/local/libexec/leetplus/stage-release-artifact.sh",
+    "/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh",
     "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs",
     "/usr/local/libexec/leetplus/verify-release-hydration-systemd.mjs",
     "/usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1",

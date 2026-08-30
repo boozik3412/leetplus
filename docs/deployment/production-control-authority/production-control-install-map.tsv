@@ -15,6 +15,7 @@ docs/deployment/production-artifact/preflight-legacy-rollback.sh	/srv/leetplus/c
 docs/deployment/production-artifact/preflight-release-slot.sh	/usr/local/libexec/leetplus/preflight-release-slot.sh	0555
 docs/deployment/production-artifact/prepare-web-slot-cache.sh	/usr/local/libexec/leetplus/prepare-web-slot-cache.sh	0555
 docs/deployment/production-artifact/promote-release-artifact.sh	/usr/local/sbin/leetplus-promote-release-artifact	0500
+docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh	/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh	0555
 docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh	/usr/local/sbin/leetplus-run-current-release-restored-copy-acceptance	0500
 docs/deployment/production-artifact/seal-release-artifact.sh	/usr/local/sbin/leetplus-seal-release-artifact	0500
 docs/deployment/production-artifact/stage-pnpm-store.sh	/usr/local/libexec/leetplus/stage-pnpm-store.sh	0555
@@ -25,6 +26,8 @@ docs/deployment/production-artifact/systemd/leetplus-api@.service	/etc/systemd/s
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery-watchdog.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-blue-green-recovery-watchdog.service	0400
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-blue-green-recovery.service	0400
 docs/deployment/production-artifact/systemd/leetplus-blue-green-recovery.timer	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-blue-green-recovery.timer	0400
+docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.service	/etc/systemd/system/leetplus-bonus-ledger-worker.service	0444
+docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.timer	/etc/systemd/system/leetplus-bonus-ledger-worker.timer	0444
 docs/deployment/production-artifact/systemd/leetplus-release-hydrate@.service	/etc/systemd/system/leetplus-release-hydrate@.service	0444
 docs/deployment/production-artifact/systemd/leetplus-rollback-egress.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-rollback-egress.service	0400
 docs/deployment/production-artifact/systemd/leetplus-web-rollback@.service	/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/systemd/leetplus-web-rollback@.service	0400

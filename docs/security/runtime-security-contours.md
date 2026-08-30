@@ -63,6 +63,35 @@ schema-bridge и rollback authority. Перед `CURRENT_188` они должн�
 переключены на admitted slot без разрыва публичного входа, остановлены,
 disabled и удалены из systemd inventory. Помечать такой sidecar `SAFE` нельзя.
 
+### Autonomous bonus-ledger worker
+
+Langame bonus accrual относится только к workers/control-plane contour. В
+production встроенный `GuestBonusLedgerSchedulerService` обязан оставаться
+выключенным в обоих одновременно активных blue/green API slot. Единственный
+допустимый автономный владелец — отдельный
+`leetplus-bonus-ledger-worker.timer`/oneshot service:
+
+- runner разрешает active nginx slot на каждом tick, сверяет slot env с
+  immutable release SHA и запускает CLI из этого exact release;
+- worker имеет отдельный минимальный `/etc/leetplus/bonus-ledger-worker.env`,
+  не загружает широкий API runtime env, не регистрирует HTTP controllers и не
+  импортируется public guest runtime;
+- systemd запрещает overlap одного oneshot unit; database claim generation,
+  row locks и idempotency key остаются второй exactly-once границей;
+- live fail-closed требует exact tenant, worker enable, `DRY_RUN=false` и
+  `LANGAME_BONUS_ACCRUAL_ENABLED=true`; canary ограничен одной exact reward;
+- staff/test accrual override в production остаётся `false`: такие записи
+  отменяются до provider write и не попадают на реальные балансы сотрудников;
+- pre-dispatch ошибки используют bounded retry, а неоднозначный внешний POST
+  остаётся `RECONCILIATION_REQUIRED` без автоматического повтора.
+
+Установка unit/runner выполняется только exact production-control artifact с
+отдельно закреплённым install-map digest. Само наличие файлов в `main` или
+установка control generation не включает timer. Production activation требует
+one-item canary, сверку Langame balance before/after и отдельный GO; rollback —
+`systemctl disable --now leetplus-bonus-ledger-worker.timer` без переключения
+public/corporate runtime.
+
 ### Runtime repair contract 29–30.08.2026
 
 - `USER_CALL` остаётся обычным public API request path. Advisory transaction

@@ -138,6 +138,21 @@ Last updated: 2026-08-30
   Production accepts only an immutable artifact/control handoff for one exact
   SHA after green Fast CI + Full Release Admission and a separate explicit GO.
 - VDS deploy script builds API and Web sequentially (`pnpm --filter api build`, then `pnpm --filter web build`). The VDS has limited memory and parallel workspace builds have previously been OOM-killed, leaving an incomplete `.next`; available swap does not remove the sequential-build rule.
+
+## Bonus-ledger autonomy candidate (30.08.2026)
+
+- Production bonus rewards currently have a confirmed backlog caused by the
+  absence of a running autonomous queue owner; embedded schedulers remain
+  intentionally disabled in both active blue/green API slots.
+- The implementation candidate adds a dedicated
+  `leetplus-bonus-ledger-worker.timer` and oneshot CLI bound to the exact active
+  release. It uses a separate minimal worker environment and preserves the
+  existing database lease/idempotency/reconciliation boundary.
+- Activation sequence is fixed: exact admitted artifact -> inactive-slot
+  rollout -> one non-staff canary -> Langame and database reconciliation ->
+  bounded batch -> enable timer. Staff/test accrual remains disabled.
+- Until that sequence completes, source/green admission is not evidence that
+  production rewards have been credited.
 - Do not infer production state from local/main state. Read-only diagnostics may
   verify it; server, DB, nginx, systemd or provider mutations require explicit
   production authorization.

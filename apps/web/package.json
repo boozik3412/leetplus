@@ -12,7 +12,7 @@
     "test:invite-secret-transport": "node --test --experimental-strip-types src/lib/invite-secret.test.mts src/lib/invite-transport-core.test.mts",
     "test:pilot-bff-boundary": "node --test --experimental-strip-types src/lib/pilot-bff-boundary.test.mts",
     "test:users-roles-bff-boundary": "node --test --experimental-strip-types src/lib/users-roles-bff-boundary.test.mts",
-    "test:gate-1mt-staff-attachments-browser-boundary": "node --test --experimental-strip-types src/lib/gate-1mt-staff-attachments-browser-boundary.test.mts",
+    "test:gate-1mt-staff-attachments-browser-boundary": "node --test --experimental-strip-types src/lib/gate-1mt-staff-attachments-browser-boundary.test.mts src/lib/staff-checklist-update-payload.test.mts",
     "test:release-build-boundary": "node --test --experimental-strip-types src/lib/release-build-boundary.test.mts src/lib/api-url.test.mts src/lib/web-release-identity.test.mts",
     "test:guest-session-transport": "node --test --experimental-strip-types src/lib/guest-session-transport.test.mts",
     "test:guest-session-current190-bff-candidate": "node --test --experimental-strip-types src/lib/guest-session-current190-bff-candidate.test.mts",

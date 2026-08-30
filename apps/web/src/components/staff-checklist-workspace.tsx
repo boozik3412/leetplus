@@ -18,6 +18,7 @@ import type {
   StaffChecklistStatus,
   StaffChecklistTemplateOption,
 } from "@/lib/staff-checklists";
+import { buildStaffChecklistUpdatePayload } from "@/lib/staff-checklist-update-payload";
 
 const statusLabels: Record<StaffChecklistStatus, string> = {
   OPEN: "Новый",
@@ -1052,11 +1053,13 @@ function ChecklistRunEditor({
     const response = await fetch(`/api/staff/checklists/${run.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        answers: nextAnswers,
-        status,
-        reviewComment,
-      }),
+      body: JSON.stringify(
+        buildStaffChecklistUpdatePayload({
+          answers: nextAnswers,
+          status,
+          reviewComment,
+        }),
+      ),
     });
 
     setIsPending(false);

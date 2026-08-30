@@ -9,15 +9,23 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий runtime implementation baseline — merge SHA
-`ca3f332ff6f9105793da4e85cfecd8f34770ab21` (PR #82).
-Fast CI `33272038099` и Full Release Admission `33272038128` зелёные на exact
+`6ec3a5f18cf4448b0460efee266254908bbef1a1` (PR #84 + PR #85).
+Fast CI `33300382020` и Full Release Admission `33300382035` зелёные на exact
 merge SHA. В source реализованы отдельные
 `CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
 pools. Split systemd/nginx candidate остаётся `DORMANT / NOT INSTALLED`, а
 production продолжает работать в `COMBINED`. Фактический active runtime —
-green exact `ca3f332f…`, cutover generation 12; schema — exact `CURRENT_188`,
-bridge `OFF`, bug reporting `LIVE`. Hot rollback blue — `fdf97624…`; оба slot
+blue exact `6ec3a5f1…`, cutover generation 13; schema — exact `CURRENT_188`,
+bridge `OFF`, bug reporting `LIVE`. Hot rollback green — `ca3f332f…`; оба slot
 остаются active и проходят exact CURRENT188 readiness.
+
+Production UI/state repair 30.08.2026 исключил подстановочный onboarding из
+Battle Pass: сезон показывается гостю только при наличии реально активного и
+доступного этому клубу правила с уровнями. Второй onboarding-шаг теперь требует
+подтверждённый `CHECK_IN`, а обычная сессия или постороннее игровое событие его
+не закрывают. При смене клубов редактор Battle Pass безопасно сопоставляет
+устаревший category ID по единственному семантическому имени, показывает ошибку
+сохранения у кнопки и маркирует способ выдачи наград в сохранённой карточке.
 
 Production repair 30.08.2026 восстановил три сценария без смешения контуров:
 USER_CALL advisory lock возвращает Prisma-safe `text`; autonomous reward
@@ -84,7 +92,7 @@ Production HTTP/DB/ACL/guard QA прошёл; синтетический тик�
 - A domain-scoped, idempotent identity resolver refreshes stale Langame links from the verified guest identity during authentication and synchronization. Ambiguous matches fail closed instead of binding a profile to the wrong guest.
 - Check-in streak progress is based on unique club-local calendar dates and resets after a missed date. Reward-only `REWARD_TEMPLATE` loot boxes are excluded from the standalone catalog.
 - Product categories keep separate `LANGAME` and `LEETPLUS` identities. Exact tariff dictionaries remain blocked by readiness checks until a reliable structured source is available.
-- The production snapshot at documentation time is exact release `ca3f332ff6f9105793da4e85cfecd8f34770ab21`, active green generation 12; admitted API/Web are aligned and both green and rollback blue services remain active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
+- The production snapshot at documentation time is exact release `6ec3a5f18cf4448b0460efee266254908bbef1a1`, active blue generation 13; admitted API/Web are aligned and both blue and rollback green services remain active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
 - The LIVE-primary purchase pipeline now reserves bounded scheduler capacity for `PRODUCT_EXPENSE`, drains eligible pending external purchase facts beyond the newest 30-row window, and prioritizes facts that match active category missions. A positive guest-bound device-rental expense can qualify like any other mapped product expense; it is not rejected merely because the business calls it a service. Stable sale identity, cancellation, return and supersede handling remain required before enabling a Ledger purchase fallback.
 - Purchase missions support `ANY_PRODUCT`, exact products, or explicitly sourced categories, plus ANY/ALL selection and per-purchase/cumulative amount thresholds. Guest-facing conditions list the selected categories and omit the internal completion-window value.
 - Mission and loot-box editors expose `maxPendingRewards` (`Максимальное количество накопленных наград для получения`). The default for newly created and migrated existing elements is `1`; an explicit operator value is preserved. The guard counts pending ordinary rewards and unconsumed entitlements from the same source and blocks only a new qualification, not an already-earned claim/open.

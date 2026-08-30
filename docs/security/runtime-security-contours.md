@@ -4,9 +4,9 @@
 
 Актуально на: **30.08.2026**
 Runtime implementation baseline:
-`ca3f332ff6f9105793da4e85cfecd8f34770ab21` (PR #82; включает production
-repair USER_CALL, inline loot-box open и exact CURRENT188 attachment-helper
-enrollment поверх bug-report baseline PR #78)
+`6ec3a5f18cf4448b0460efee266254908bbef1a1` (PR #84 + PR #85; включает
+production repair USER_CALL, inline loot-box open, exact CURRENT188
+attachment-helper enrollment и guest Battle Pass/store-scope repair)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -17,11 +17,11 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | CURRENT188 repair слит PR [#82](https://github.com/boozik3412/leetplus/pull/82), merge SHA `ca3f332ff6f9105793da4e85cfecd8f34770ab21`                                                               |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33272038099) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33272038128) — `SUCCESS`     |
-| Production API topology  | active green exact `ca3f332f…`, generation 12, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `fdf97624…`, оба slot active                  |
+| Runtime implementation   | Battle Pass/store-scope repair слит PR [#84](https://github.com/boozik3412/leetplus/pull/84) и PR [#85](https://github.com/boozik3412/leetplus/pull/85), merge SHA `6ec3a5f18cf4448b0460efee266254908bbef1a1` |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33300382020) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33300382035) — `SUCCESS`     |
+| Production API topology  | active blue exact `6ec3a5f1…`, generation 13, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback green `ca3f332f…`, оба slot active                 |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
-| Corporate landing        | role-aware successor входит в active `ca3f332f…`; real-account canary остаётся отдельной проверкой                                                                                  |
+| Corporate landing        | role-aware successor входит в active `6ec3a5f1…`; real-account canary остаётся отдельной проверкой                                                                                  |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -95,9 +95,11 @@ disabled и удалены из systemd inventory. Помечать такой s
   снятия emergency kill switch безопасен благодаря idempotency intent/effect и
   является предпочтительным recovery для отдельного доступного кейса.
 
-Production rollout завершён 30.08.2026 на exact admitted SHA `ca3f332f…`:
+Production runtime repair rollout завершён 30.08.2026 на exact admitted SHA
+`ca3f332f…`. Следующий UI/state rollout выполнен на exact admitted SHA
+`6ec3a5f1…` без изменения схемы и security-контуров:
 
-- active nginx upstream — green, rollback blue `fdf97624…` оставлен активным;
+- active nginx upstream — blue, rollback green `ca3f332f…` оставлен активным;
 - canonical API overlay подтверждён как materializer scheduler `false`,
   emergency kill switch `false`, USER_CALL `true/SMS_RU_CALLCHECK`;
 - exact enrollment закрепил `search_path=pg_catalog, public, pg_temp` и
@@ -111,6 +113,14 @@ Production rollout завершён 30.08.2026 на exact admitted SHA `ca3f332f
 - entitlement гостя `***6035` для `КЕЙС «УТРО»` остался `AVAILABLE`,
   `<unconsumed>`, wallet `PENDING`; QA намеренно не открывал кейс от имени
   пользователя.
+- guest Battle Pass больше не использует onboarding fallback как реальный
+  сезон: API сохраняет tenant/status/period/store scope, а Web рендерит блок
+  только для активного сезона с уровнями;
+- onboarding-шаг «Активность в клубе» закрывается только подтверждённым
+  `CHECK_IN`; произвольная сессия или другое game event не засчитываются;
+- редактор сохраняет смену club scope с безопасным remap category по
+  единственному semantic name, выводит backend-ошибку у действия сохранения и
+  показывает способ выдачи наград в сохранённой карточке.
 
 ## Техническая поддержка игрового модуля
 
@@ -155,9 +165,10 @@ Support-функциональность следует тем же трём г�
   `187 -> 188`; сразу после DDL оба обязаны подтвердить exact CURRENT_188 без
   active compatibility evidence. До этого reporting LIVE запрещён.
 
-Bug-report schema rollout завершён 29.08.2026, а runtime repair — 30.08.2026.
-Active green `ca3f332f…` работает на exact CURRENT188 с bridge `OFF` и
-reporting `LIVE`; hot rollback blue `fdf97624…` остаётся exact CURRENT188 и
+Bug-report schema rollout завершён 29.08.2026, runtime repair и последующий
+Battle Pass/store-scope repair — 30.08.2026. Active blue `6ec3a5f1…` работает
+на exact CURRENT188 с bridge `OFF` и reporting `LIVE`; hot rollback green
+`ca3f332f…` остаётся exact CURRENT188 и
 активным. Это не меняет split-runtime решение: production по-прежнему
 `COMBINED`, а три логических security-контура сохраняются guards/module
 boundaries.

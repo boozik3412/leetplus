@@ -1,19 +1,19 @@
 # LeetPlus open beta — текущее состояние на 30.08.2026
 
-| Поле                 | Состояние                                                                                 |
-| -------------------- | ----------------------------------------------------------------------------------------- |
-| Release decision     | `NO-GO` для внешнего доступа                                                              |
-| Production runtime   | healthy; active blue `6ec3a5f1…`, generation 13, `COMBINED`, bridge OFF, bug reporting LIVE |
-| Prisma schema        | source и production exact `CURRENT_188`                                                   |
-| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA              |
-| Runtime successor    | Battle Pass/store-scope repair merge `6ec3a5f18cf4448b0460efee266254908bbef1a1`; production active      |
-| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                          |
-| Role-aware landing   | входит в active `6ec3a5f1…`; real-account canary pending                                  |
-| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                  |
-| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены               |
-| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                             |
-| Offline/USB key      | исключён из beta critical path                                                            |
-| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                        |
+| Поле                 | Состояние                                                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Release decision     | `NO-GO` для внешнего доступа                                                                                                     |
+| Production runtime   | healthy; active green `d8c97649…`, generation 14, `COMBINED`, bridge OFF, bug reporting LIVE                                     |
+| Prisma schema        | source и production exact `CURRENT_188`                                                                                          |
+| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA                                                     |
+| Runtime successor    | Dedicated bonus-ledger worker merge `d8c97649d155f1fc9994ea12b80ab2b3f54285b3`; production active, timer disabled pending canary |
+| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                 |
+| Role-aware landing   | входит в active `6ec3a5f1…`; real-account canary pending                                                                         |
+| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                         |
+| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                      |
+| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                    |
+| Offline/USB key      | исключён из beta critical path                                                                                                   |
+| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                               |
 
 ## Autonomous bonus-ledger recovery candidate (30.08.2026)
 
@@ -29,6 +29,15 @@ set и live gates; staff/test rewards остаются исключены. Rollo
 только после Fast CI + Full Release Admission, установки exact
 production-control generation и одной non-staff canary со сверкой Langame.
 До canary и явного enable timer production-состояние остаётся прежним.
+
+Первый live canary безопасно остановился до claim и Langame write: scheduled
+tenant-wide pass не задаёт один общий `storeId`, тогда как прежняя aggregate
+проверка требовала store identity ещё до выбора записей. Исправление не
+ослабляет corporate/manual dispatch. Только scheduled worker/control-plane path
+откладывает эту проверку до уже существующей per-entry границы, где перед каждым
+внешним write заново требуется exact `entry.storeId`; запись без клуба остаётся
+заблокированной. Timer остаётся выключенным до нового admitted release,
+успешной canary и сверки Langame.
 
 ## Обновление 30.08.2026 — Battle Pass/store-scope production repair
 

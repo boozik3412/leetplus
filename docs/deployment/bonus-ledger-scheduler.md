@@ -30,6 +30,12 @@ Bonus ledger не оценивает условия миссии, Battle Pass, �
 ## Что делает scheduler
 
 - на каждом tick проходит по активным tenant или по заданному scope;
+- tenant-wide tick выбирает записи разных клубов без единого aggregate
+  `storeId`, но не расширяет runtime identity: перед каждым Langame write
+  worker повторно требует exact `TENANT_STORE_SYSTEM` для `entry.storeId`;
+  запись без клуба возвращается в безопасное blocked/pending состояние;
+- corporate/manual dispatch без exact `storeId` остаётся fail-closed и не
+  использует tenant-wide worker bypass;
 - ставит в bonus ledger только разрешённые reward: legacy `claimRequired=false` либо claim-required reward с зафиксированным `deliveryRequestedAt < claimExpiresAt`;
 - для claim-required reward требует связанный wallet item `PROCESSING` или безопасно повторяемый `FAILED`; один статус `APPROVED` больше не разрешает доставку;
 - claim-ит готовые ledger-записи и отправляет бонусы в Langame через `POST /master_api/guests/balance/phone`;

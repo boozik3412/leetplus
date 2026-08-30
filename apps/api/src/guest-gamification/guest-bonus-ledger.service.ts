@@ -617,6 +617,14 @@ export class GuestBonusLedgerService {
     user: Pick<AuthenticatedUser, 'id' | 'tenantId'>,
     dto: GuestGameBonusLedgerDispatchDto = {},
   ): Promise<GuestGameBonusLedgerDispatchResult> {
+    return this.dispatchWithRuntimeScope(user, dto, false);
+  }
+
+  private async dispatchWithRuntimeScope(
+    user: Pick<AuthenticatedUser, 'id' | 'tenantId'>,
+    dto: GuestGameBonusLedgerDispatchDto,
+    allowTenantWideStoreEntries: boolean,
+  ): Promise<GuestGameBonusLedgerDispatchResult> {
     const config = this.resolveConfig(dto);
     const shouldQueue =
       !config.canary && booleanValue(dto.queueApprovedRewards, true);
@@ -700,30 +708,32 @@ export class GuestBonusLedgerService {
       };
     }
 
-    const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
-      decision: backgroundExecution,
-      actorKind: 'TENANT_STORE_SYSTEM',
-      tenantId: user.tenantId,
-      storeId: config.storeId,
-    });
-    if (!runtimeIdentity.accepted) {
-      const status = await this.getStatus(user, dto);
+    if (!allowTenantWideStoreEntries || config.storeId) {
+      const runtimeIdentity = evaluateTenantBackgroundRuntimeIdentity({
+        decision: backgroundExecution,
+        actorKind: 'TENANT_STORE_SYSTEM',
+        tenantId: user.tenantId,
+        storeId: config.storeId,
+      });
+      if (!runtimeIdentity.accepted) {
+        const status = await this.getStatus(user, dto);
 
-      return {
-        mode: config.mode,
-        dryRun: false,
-        canary: config.canary,
-        ready: config.ready,
-        queued: null,
-        checked: 0,
-        confirmed: 0,
-        failed: 0,
-        skipped: 0,
-        blocked: status.pending + status.failed,
-        items: [],
-        status,
-        note: tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
-      };
+        return {
+          mode: config.mode,
+          dryRun: false,
+          canary: config.canary,
+          ready: config.ready,
+          queued: null,
+          checked: 0,
+          confirmed: 0,
+          failed: 0,
+          skipped: 0,
+          blocked: status.pending + status.failed,
+          items: [],
+          status,
+          note: tenantBackgroundRuntimeIdentityNote(runtimeIdentity),
+        };
+      }
     }
 
     const queued = shouldQueue
@@ -1234,12 +1244,13 @@ export class GuestBonusLedgerService {
       }
 
       try {
-        const result = await this.dispatch(
+        const result = await this.dispatchWithRuntimeScope(
           {
             id: actor.id,
             tenantId: tenant.id,
           },
           dto,
+          true,
         );
 
         tenantResults.push({

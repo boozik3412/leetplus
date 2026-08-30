@@ -206,7 +206,7 @@ grep -F -x 'PRODUCTION_CONTROL_ARTIFACT_INTEGRITY=PASS' \
   "${TEST_ROOT}/accepted.out" >/dev/null
 grep -F -x "PRODUCTION_CONTROL_RELEASE_SHA=${RELEASE_SHA}" \
   "${TEST_ROOT}/accepted.out" >/dev/null
-grep -F -x 'PRODUCTION_CONTROL_PAYLOAD_FILE_COUNT=58' \
+grep -F -x 'PRODUCTION_CONTROL_PAYLOAD_FILE_COUNT=62' \
   "${TEST_ROOT}/accepted.out" >/dev/null
 grep -F -x "PRODUCTION_CONTROL_NODE_SHA256=$(node_executable_sha256)" \
   "${TEST_ROOT}/accepted.out" >/dev/null

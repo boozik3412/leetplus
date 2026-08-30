@@ -100,6 +100,18 @@ test("shows a Battle Pass save failure next to the save action", async () => {
   );
 });
 
+test("labels the reward delivery method on every saved Battle Pass card", async () => {
+  const panel = await readFile(
+    path.join(sourceRoot, "components", "guest-gamification-panel.tsx"),
+    "utf8",
+  );
+
+  assert.match(
+    panel,
+    /item\.manualApprovalRequired\s*\?\s*"выдача: после подтверждения сотрудником"\s*:\s*"выдача: автоматически"/,
+  );
+});
+
 test("keeps tenant and platform ticket mutations on separate private BFF routes", async () => {
   const routes = [
     ["support", "bug-reports", "[id]", "route.ts"],

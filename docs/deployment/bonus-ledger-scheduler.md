@@ -9,6 +9,29 @@
 - Все контуры остаются tenant-scoped, используют claim/idempotency, а неоднозначный внешний POST переводится в `RECONCILIATION_REQUIRED` без автоматического повтора.
 - Модалка задания и `/game/rewards` являются двумя UI-входами к одному exact wallet claim. Один wallet item не может поставить две ledger-записи; повторный claim возвращает уже достигнутый результат. Отдельная защита прогресса запрещает старому completed fact создать новый reward cycle после последующего snapshot.
 
+## Фактическая production-активация (30.08.2026)
+
+- Exact runtime SHA `4036d312b5760e9daf292e416288d68949419aaa`
+  прошёл Fast CI `33309468458` и Full Release Admission `33309468461`.
+- Blue/green cutover generation 15 переключил active upstream на blue; green
+  `d8c97649…` сохранён запущенным hot rollback. Production schema осталась
+  `CURRENT_188` (`188` migrations), bridge `OFF`, bug reporting `LIVE`.
+- Dry-run ограничился одной exact canary. Live canary начислил `500` бонусов и
+  подтвердил полный переход `ledger CONFIRMED -> reward PAID -> wallet CLAIMED`
+  вместе с балансом `0 -> 500` и последующим локальным Langame snapshot `500`.
+- Recovery batch: `queued=1`, `checked=28`, `confirmed=18`, `failed=0`,
+  `blocked=0`, `skipped=10`. Все 10 skipped относятся к staff/test profile и
+  отменены до внешнего write; unresolved ledger backlog после прохода — `0`.
+- Четыре оставшихся balance wallet item имеют `PENDING` без ledger: три
+  non-staff на `350` и один staff/test на `100`. Это незабранные награды, а не
+  зависшее начисление; worker не имеет права обходить явный claim.
+- `leetplus-bonus-ledger-worker.timer` включён и находится в
+  `active (waiting)`. Повторный ручной запуск и два последовательных
+  30-секундных tick дали пустые успешные агрегаты без повторного provider POST.
+
+Cutover receipt:
+`/var/lib/leetplus/deploy-receipts/20260830T1218599055208832Z-g15-4036d312b5760e9daf292e416288d68949419aaa-blue.receipt`.
+
 > Актуальный контракт от 30.07.2026: этот scheduler доставляет legacy non-claim rewards и обычные claim-required rewards только после своевременного явного claim гостя. `GuestGamificationPipelineSchedulerService` автоматически фиксирует квалификацию Battle Pass/заданий/check-in/event, но не начисляет бонус и не обходит 30-дневный кошелёк. Completion ACK не является claim; завершённые и ожидающие результаты остаются доступны через reward wallet/history.
 
 Production не запускает `GuestBonusLedgerSchedulerService` внутри blue/green API:

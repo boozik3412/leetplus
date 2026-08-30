@@ -9,14 +9,14 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий runtime implementation baseline — merge SHA
-`6ec3a5f18cf4448b0460efee266254908bbef1a1` (PR #84 + PR #85).
-Fast CI `33300382020` и Full Release Admission `33300382035` зелёные на exact
+`4036d312b5760e9daf292e416288d68949419aaa` (PR #88 поверх PR #87).
+Fast CI `33309468458` и Full Release Admission `33309468461` зелёные на exact
 merge SHA. В source реализованы отдельные
 `CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
 pools. Split systemd/nginx candidate остаётся `DORMANT / NOT INSTALLED`, а
 production продолжает работать в `COMBINED`. Фактический active runtime —
-blue exact `6ec3a5f1…`, cutover generation 13; schema — exact `CURRENT_188`,
-bridge `OFF`, bug reporting `LIVE`. Hot rollback green — `ca3f332f…`; оба slot
+blue exact `4036d312…`, cutover generation 15; schema — exact `CURRENT_188`,
+bridge `OFF`, bug reporting `LIVE`. Hot rollback green — `d8c97649…`; оба slot
 остаются active и проходят exact CURRENT188 readiness.
 
 Production UI/state repair 30.08.2026 исключил подстановочный onboarding из
@@ -35,6 +35,16 @@ helpers с `PUBLIC` revoke. Postflight подтвердил public health, от�
 `P2010`, staff attachment upload/download `200/200` и сохранённый
 `AVAILABLE/<unconsumed>/PENDING` кейс «УТРО» у `***6035` без открытия от имени
 гостя.
+
+Autonomous bonus-ledger production rollout 30.08.2026 включён на exact active
+release, а встроенный scheduler в обоих API slot остаётся выключенным. Live
+canary подтвердила начисление `0 -> 500`; bounded recovery batch проверил 28
+записей, подтвердил 18 реальных начислений и отменил 10 staff/test записей до
+provider write без failed/blocked результатов. Unresolved ledger backlog равен
+нулю. Четыре wallet item остаются `PENDING`, потому что пользователи ещё не
+выполнили явный claim. Отдельный `leetplus-bonus-ledger-worker.timer` включён,
+находится в `active (waiting)` и два последовательных автоматических tick
+завершил с пустой очередью и кодом 0.
 
 Публичный игровой вход (`/guest-portal*`) не зависит от corporate JWT/scope и
 не имеет общего лимита одновременно вошедших пользователей.
@@ -139,20 +149,20 @@ Last updated: 2026-08-30
   SHA after green Fast CI + Full Release Admission and a separate explicit GO.
 - VDS deploy script builds API and Web sequentially (`pnpm --filter api build`, then `pnpm --filter web build`). The VDS has limited memory and parallel workspace builds have previously been OOM-killed, leaving an incomplete `.next`; available swap does not remove the sequential-build rule.
 
-## Bonus-ledger autonomy candidate (30.08.2026)
+## Bonus-ledger autonomy production state (30.08.2026)
 
-- Production bonus rewards currently have a confirmed backlog caused by the
-  absence of a running autonomous queue owner; embedded schedulers remain
-  intentionally disabled in both active blue/green API slots.
-- The implementation candidate adds a dedicated
-  `leetplus-bonus-ledger-worker.timer` and oneshot CLI bound to the exact active
-  release. It uses a separate minimal worker environment and preserves the
-  existing database lease/idempotency/reconciliation boundary.
-- Activation sequence is fixed: exact admitted artifact -> inactive-slot
-  rollout -> one non-staff canary -> Langame and database reconciliation ->
-  bounded batch -> enable timer. Staff/test accrual remains disabled.
-- Until that sequence completes, source/green admission is not evidence that
-  production rewards have been credited.
+- Production backlog is drained; embedded schedulers remain intentionally
+  disabled in both active blue/green API slots.
+- The dedicated `leetplus-bonus-ledger-worker.timer` is active; its oneshot CLI
+  is bound to the exact active release. It uses a separate minimal worker
+  environment and preserves the existing database
+  lease/idempotency/reconciliation boundary.
+- The activation sequence completed on exact `4036d312…`: admitted artifact ->
+  inactive blue rollout -> one non-staff canary -> Langame/database
+  reconciliation -> bounded batch -> enabled timer. Staff/test accrual remains
+  disabled.
+- Cutover receipt:
+  `/var/lib/leetplus/deploy-receipts/20260830T1218599055208832Z-g15-4036d312b5760e9daf292e416288d68949419aaa-blue.receipt`.
 - Do not infer production state from local/main state. Read-only diagnostics may
   verify it; server, DB, nginx, systemd or provider mutations require explicit
   production authorization.

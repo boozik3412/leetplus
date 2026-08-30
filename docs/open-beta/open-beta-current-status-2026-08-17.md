@@ -3,10 +3,10 @@
 | Поле                 | Состояние                                                                                                                        |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                     |
-| Production runtime   | healthy; active green `d8c97649…`, generation 14, `COMBINED`, bridge OFF, bug reporting LIVE                                     |
+| Production runtime   | healthy; active blue `4036d312…`, generation 15, `COMBINED`, bridge OFF, bug reporting LIVE                                       |
 | Prisma schema        | source и production exact `CURRENT_188`                                                                                          |
-| Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA                                                     |
-| Runtime successor    | Dedicated bonus-ledger worker merge `d8c97649d155f1fc9994ea12b80ab2b3f54285b3`; production active, timer disabled pending canary |
+| Release authority    | exact SHA `4036d312…`: Fast CI `33309468458`, Full Release Admission `33309468461`, immutable handoff и generation 15 receipt     |
+| Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                  |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                 |
 | Role-aware landing   | входит в active `6ec3a5f1…`; real-account canary pending                                                                         |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                         |
@@ -15,20 +15,17 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                   |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                               |
 
-## Autonomous bonus-ledger recovery candidate (30.08.2026)
+## Autonomous bonus-ledger production rollout (30.08.2026)
 
 Накопившиеся bonus-ledger entries не обрабатывались автономно, потому что
 `canary-safe.env` корректно выключал scheduler во всех blue/green API slot, а
 отдельного worker unit не существовало. Источник проблемы — отсутствие
 единственного production owner очереди, а не ошибки claim/idempotency ledger.
 
-Текущий candidate добавляет отдельный bounded worker, который запускается
+Отдельный bounded worker запускается
 systemd timer из exact active release и не входит ни в public guest, ни в
 corporate API process. Он fail-closed требует exact tenant, отдельный secret
-set и live gates; staff/test rewards остаются исключены. Rollout допускается
-только после Fast CI + Full Release Admission, установки exact
-production-control generation и одной non-staff canary со сверкой Langame.
-До canary и явного enable timer production-состояние остаётся прежним.
+set и live gates; staff/test rewards остаются исключены.
 
 Первый live canary безопасно остановился до claim и Langame write: scheduled
 tenant-wide pass не задаёт один общий `storeId`, тогда как прежняя aggregate
@@ -36,8 +33,24 @@ tenant-wide pass не задаёт один общий `storeId`, тогда к�
 ослабляет corporate/manual dispatch. Только scheduled worker/control-plane path
 откладывает эту проверку до уже существующей per-entry границы, где перед каждым
 внешним write заново требуется exact `entry.storeId`; запись без клуба остаётся
-заблокированной. Timer остаётся выключенным до нового admitted release,
-успешной canary и сверки Langame.
+заблокированной. Исправление слито PR
+[#88](https://github.com/boozik3412/leetplus/pull/88), exact SHA
+`4036d312b5760e9daf292e416288d68949419aaa`; Fast CI
+[`33309468458`](https://github.com/boozik3412/leetplus/actions/runs/33309468458)
+и Full Release Admission
+[`33309468461`](https://github.com/boozik3412/leetplus/actions/runs/33309468461)
+успешны.
+
+Generation 15 переключил production на active blue `4036d312…`; green
+`d8c97649…` оставлен активным hot rollback. Live canary подтвердила одну
+операцию `0 -> 500` во всех трёх локальных состояниях и Langame snapshot.
+Recovery batch поставил одну своевременно claimed reward, проверил 28 ledger
+entries, подтвердил 18 реальных начислений и отменил 10 staff/test записей до
+provider write; `failed=0`, `blocked=0`, unresolved backlog `0`. Четыре
+оставшихся wallet item имеют `PENDING` и ещё не были забраны пользователями,
+поэтому не являются зависшими начислениями. После пустого повторного прохода
+timer включён; два последовательных 30-секундных tick завершились успешно с
+нулевой очередью.
 
 ## Обновление 30.08.2026 — Battle Pass/store-scope production repair
 

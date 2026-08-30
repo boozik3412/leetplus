@@ -4,10 +4,10 @@
 
 Актуально на: **30.08.2026**
 Runtime implementation baseline:
-`d8c97649d155f1fc9994ea12b80ab2b3f54285b3` (PR #87; включает отдельный
-bonus-ledger worker поверх production repair USER_CALL, inline loot-box open,
-exact CURRENT188 attachment-helper enrollment и guest Battle Pass/store-scope
-repair)
+`4036d312b5760e9daf292e416288d68949419aaa` (PR #88; включает отдельный
+bonus-ledger worker, безопасный tenant-wide scheduled dispatch с повторной
+exact-store проверкой перед каждым Langame write и все repair предыдущего
+production baseline)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -18,9 +18,9 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | Dedicated bonus-ledger worker слит PR [#87](https://github.com/boozik3412/leetplus/pull/87), merge SHA `d8c97649d155f1fc9994ea12b80ab2b3f54285b3`                                  |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33305732947) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33305732938) — `SUCCESS` |
-| Production API topology  | active green exact `d8c97649…`, generation 14, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `6ec3a5f1…`, оба slot active                    |
+| Runtime implementation   | Scheduled exact-store boundary слита PR [#88](https://github.com/boozik3412/leetplus/pull/88), merge SHA `4036d312b5760e9daf292e416288d68949419aaa`                                      |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33309468458) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33309468461) — `SUCCESS` |
+| Production API topology  | active blue exact `4036d312…`, generation 15, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback green `d8c97649…`, оба slot active                      |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `6ec3a5f1…`; real-account canary остаётся отдельной проверкой                                                                                 |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
@@ -97,6 +97,26 @@ production встроенный `GuestBonusLedgerSchedulerService` обязан 
 one-item canary, сверку Langame balance before/after и отдельный GO; rollback —
 `systemctl disable --now leetplus-bonus-ledger-worker.timer` без переключения
 public/corporate runtime.
+
+Production activation завершена 30.08.2026 на exact admitted SHA
+`4036d312b5760e9daf292e416288d68949419aaa`:
+
+- blue/green controller принял generation 15; active upstream — blue, hot
+  rollback green `d8c97649…` оставлен активным;
+- dry-run увидел ровно одну canary-запись, live canary подтвердил одну операцию
+  `0 -> 500`: ledger `CONFIRMED`, reward `PAID`, wallet `CLAIMED`, локальный
+  Langame snapshot `500`;
+- bounded recovery pass проверил 28 записей: 18 реальных начислений
+  подтверждены, 10 staff/test записей отменены до provider write, ошибок и
+  blocked entries не было; ещё одна своевременно claimed reward была поставлена
+  в ledger этим же проходом;
+- после повторного пустого прохода unresolved ledger backlog равен `0`;
+  четыре wallet item со статусом `PENDING` остаются незабранными пользователями
+  и поэтому корректно не попадают в delivery;
+- `leetplus-bonus-ledger-worker.timer` включён, имеет состояние
+  `active (waiting)` и выполняет 30-секундные проходы из exact active release;
+  два последовательных автоматических tick завершились `0/0/0` без failed,
+  blocked или reconciliation записей.
 
 ### Runtime repair contract 29–30.08.2026
 
@@ -200,11 +220,11 @@ Support-функциональность следует тем же трём г�
   `187 -> 188`; сразу после DDL оба обязаны подтвердить exact CURRENT_188 без
   active compatibility evidence. До этого reporting LIVE запрещён.
 
-Bug-report schema rollout завершён 29.08.2026, runtime repair и последующий
-Battle Pass/store-scope repair — 30.08.2026. Active blue `6ec3a5f1…` работает
-на exact CURRENT188 с bridge `OFF` и reporting `LIVE`; hot rollback green
-`ca3f332f…` остаётся exact CURRENT188 и
-активным. Это не меняет split-runtime решение: production по-прежнему
+Bug-report schema rollout завершён 29.08.2026, runtime repair, последующий
+Battle Pass/store-scope repair и autonomous bonus-ledger rollout — 30.08.2026.
+Active blue `4036d312…` работает на exact CURRENT188 с bridge `OFF` и reporting
+`LIVE`; hot rollback green `d8c97649…` остаётся exact CURRENT188 и активным.
+Это не меняет split-runtime решение: production по-прежнему
 `COMBINED`, а три логических security-контура сохраняются guards/module
 boundaries.
 

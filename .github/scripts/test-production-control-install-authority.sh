@@ -275,7 +275,7 @@ prepare_fixture_root "$accepted_root" "$archive"
 run_installer "$accepted_root" > "$TEST_ROOT/accepted.out"
 grep -F -x 'PRODUCTION_CONTROL_INSTALL=PASS' "$TEST_ROOT/accepted.out" >/dev/null
 grep -F -x 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' "$TEST_ROOT/accepted.out" >/dev/null
-grep -F -x 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=47' "$TEST_ROOT/accepted.out" >/dev/null
+grep -F -x 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=50' "$TEST_ROOT/accepted.out" >/dev/null
 [[ -f "$accepted_root/var/lib/leetplus/deploy-receipts/production-control/production-control-generation-${RELEASE_SHA}.receipt.json" \
   && ! -e "$accepted_root/var/lib/leetplus/deploy-receipts/production-control/production-control-generation-${RELEASE_SHA}.intent.json" ]] \
   || die 'accepted install did not finalize the exact durable receipt state'

@@ -3,17 +3,36 @@
 | Поле                 | Состояние                                                                                 |
 | -------------------- | ----------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                              |
-| Production runtime   | healthy; active green `ca3f332f…`, generation 12, `COMBINED`, bridge OFF, bug reporting LIVE |
+| Production runtime   | healthy; active blue `6ec3a5f1…`, generation 13, `COMBINED`, bridge OFF, bug reporting LIVE |
 | Prisma schema        | source и production exact `CURRENT_188`                                                   |
 | Release authority    | только green Fast CI + Full Release Admission + immutable handoff одного SHA              |
-| Runtime successor    | CURRENT188 repair merge `ca3f332ff6f9105793da4e85cfecd8f34770ab21`; production active       |
+| Runtime successor    | Battle Pass/store-scope repair merge `6ec3a5f18cf4448b0460efee266254908bbef1a1`; production active      |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                          |
-| Role-aware landing   | входит в active `ca3f332f…`; real-account canary pending                                  |
+| Role-aware landing   | входит в active `6ec3a5f1…`; real-account canary pending                                  |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                  |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены               |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                             |
 | Offline/USB key      | исключён из beta critical path                                                            |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                        |
+
+## Обновление 30.08.2026 — Battle Pass/store-scope production repair
+
+PR [#84](https://github.com/boozik3412/leetplus/pull/84) исключил ложный
+onboarding fallback из Battle Pass, привязал второй onboarding-шаг только к
+подтверждённому `CHECK_IN`, добавил безопасный category remap при смене клубов
+и вывел ошибки сохранения рядом с кнопкой. PR
+[#85](https://github.com/boozik3412/leetplus/pull/85) добавил в сохранённую
+карточку Battle Pass явную метку автоматической или ручной выдачи наград.
+
+Exact merge SHA `6ec3a5f18cf4448b0460efee266254908bbef1a1` прошёл
+[Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33300382020) и
+[Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33300382035).
+Immutable runtime/control handoff установлен в blue slot; штатный verifier
+принял exact API SHA, Web BUILD_ID и `CURRENT_188` (`188` migrations).
+Blue/green controller переключил nginx на blue и выдал generation 13 receipt.
+Green `ca3f332f…` оставлен активным hot rollback. Public API/Web identity,
+страницы `/game` и `/gamification?tab=seasons`, watchdog и post-cutover
+error scan прошли; schema и security-контуры не изменялись.
 
 ## Обновление 30.08.2026 — runtime repair production rollout
 

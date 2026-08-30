@@ -3232,6 +3232,7 @@ export function GuestGamificationPanel({
               onStatus={updateRuleStatus}
               onDelete={deleteRuleTemplate}
               saving={saving}
+              error={error}
               canManage={access.canManageRules}
             />
           ) : null}
@@ -5598,8 +5599,8 @@ function BonusLedgerAuditCard({
 
       {!canApproveRewards ? (
         <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-          Для управления ledger нужно право `Геймификация: bonus ledger`;
-          журнал и сверка доступны только на просмотр.
+          Для управления ledger нужно право `Геймификация: bonus ledger`; журнал
+          и сверка доступны только на просмотр.
         </p>
       ) : null}
 
@@ -8752,6 +8753,7 @@ function SeasonsTab({
   onStatus,
   onDelete,
   saving,
+  error,
   canManage,
 }: {
   form: SeasonForm;
@@ -8774,6 +8776,7 @@ function SeasonsTab({
   ) => Promise<void>;
   onDelete: (type: RuleTemplateType, id: string, name: string) => Promise<void>;
   saving: string | null;
+  error: string | null;
   canManage: boolean;
 }) {
   const seasonTitle = form.name.trim();
@@ -8913,6 +8916,14 @@ function SeasonsTab({
                 }
               />
             </Field>
+            {error ? (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+              >
+                {error}
+              </div>
+            ) : null}
             <button
               type="button"
               className={primaryButtonClass}

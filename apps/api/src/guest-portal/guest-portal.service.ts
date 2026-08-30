@@ -907,6 +907,7 @@ export type GuestPortalPayload = {
       logsCount: number;
       transactionsCount: number;
       gameEventsCount: number;
+      checkInsCount: number;
       lastActivityAt: string | null;
     };
     timeline: GuestPortalActivityItem[];
@@ -13602,6 +13603,7 @@ export class GuestPortalService {
       transactionStats,
       transactions,
       gameEventStats,
+      checkInsCount,
       gameEvents,
     ] = await Promise.all([
       guest
@@ -13658,6 +13660,16 @@ export class GuestPortalService {
             _max: { occurredAt: true },
           })
         : null,
+      gameEventScope.length
+        ? this.prisma.guestGameEvent.count({
+            where: {
+              tenantId,
+              eventType: 'CHECK_IN',
+              occurredAt: { gte: gameActivatedAt! },
+              OR: gameEventScope,
+            },
+          })
+        : 0,
       gameEventScope.length
         ? this.prisma.guestGameEvent.findMany({
             where: {
@@ -13719,6 +13731,7 @@ export class GuestPortalService {
         logsCount,
         transactionsCount: transactionStats?._count.id ?? 0,
         gameEventsCount: gameEventStats?._count.id ?? 0,
+        checkInsCount: checkInsCount ?? 0,
         lastActivityAt: iso(lastActivityAt),
       },
       timeline,
@@ -16948,9 +16961,7 @@ function buildGameJourney(
   const hasGameProfile = Boolean(portal.profile.id);
   const langameLinked =
     portal.guestSnapshot.participation.accountState === 'LANGAME_SYNCED';
-  const hasActivity =
-    portal.activity.summary.gameEventsCount > 0 ||
-    portal.activity.summary.sessionsCount > 0;
+  const hasActivity = portal.activity.summary.checkInsCount > 0;
   const missionsTotal = portal.gamification.missions.length;
   const missionsCompleted = progress.summary.missionsCompleted;
   const rewardSummary = portal.gamification.rewardSummary;
@@ -16991,9 +17002,9 @@ function buildGameJourney(
       label: 'Активность в клубе',
       status: hasActivity ? 'DONE' : langameLinked ? 'CURRENT' : 'WAITING',
       hint: hasActivity
-        ? 'LeetPlus уже видит игровую активность или чек-ин.'
+        ? 'LeetPlus уже видит подтвержденный чек-ин.'
         : langameLinked
-          ? 'Сделайте чек-ин или начните сессию в клубе.'
+          ? 'Сделайте чек-ин в клубе.'
           : 'Сначала нужна связь с Langame.',
       anchor: 'progress',
     },
@@ -21826,6 +21837,7 @@ function emptyActivity(): GuestPortalPayload['activity'] {
       logsCount: 0,
       transactionsCount: 0,
       gameEventsCount: 0,
+      checkInsCount: 0,
       lastActivityAt: null,
     },
     timeline: [],

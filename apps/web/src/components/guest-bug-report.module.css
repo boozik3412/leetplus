@@ -1,12 +1,19 @@
 .trigger {
   display: grid;
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
+  width: var(--lp-club-header-control-size, 44px);
+  height: var(--lp-club-header-control-size, 44px);
+  flex: 0 0 var(--lp-club-header-control-size, 44px);
+  box-sizing: border-box;
   place-items: center;
-  border: 1px solid rgba(131, 228, 236, 0.28);
-  border-radius: 9px;
-  background: rgba(7, 12, 16, 0.66);
+  border: var(
+    --lp-club-header-control-border,
+    1px solid rgba(196, 224, 225, 0.2)
+  );
+  border-radius: var(--lp-club-header-control-radius, 8px);
+  background: var(
+    --lp-club-header-control-background,
+    rgba(196, 224, 225, 0.035)
+  );
   color: var(--cyan, #83e4ec);
   cursor: pointer;
   transition:
@@ -53,8 +60,7 @@
   border: 1px solid rgba(131, 228, 236, 0.35);
   border-radius: 18px;
   background:
-    linear-gradient(145deg, rgba(131, 228, 236, 0.07), transparent 34%),
-    #071014;
+    linear-gradient(145deg, rgba(131, 228, 236, 0.07), transparent 34%), #071014;
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.62);
   color: #edf8f8;
 }
@@ -305,12 +311,6 @@
 }
 
 @media (max-width: 560px) {
-  .trigger {
-    width: 40px;
-    height: 40px;
-    flex-basis: 40px;
-  }
-
   .backdrop {
     align-items: end;
     padding: 0;

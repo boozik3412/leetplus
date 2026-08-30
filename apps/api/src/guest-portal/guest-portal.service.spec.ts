@@ -1034,6 +1034,7 @@ function portalPayloadFixture() {
         logsCount: 0,
         transactionsCount: 0,
         gameEventsCount: 3,
+        checkInsCount: 1,
         lastActivityAt: '2026-06-15T08:00:00.000Z',
       },
       timeline: [
@@ -3001,6 +3002,55 @@ describe('GuestPortalService', () => {
       expect(summary).not.toHaveProperty('guestSnapshot');
       expect(summary.activity).not.toHaveProperty('timeline');
       expect(summary.activity).not.toHaveProperty('xpHistory');
+    });
+
+    it('does not treat page opens or pre-activation sessions as a completed check-in journey step', async () => {
+      const { service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      portal.gamification.seasons = [];
+      portal.gamification.rewards = [];
+      portal.gamification.rewardSummary = {
+        total: 0,
+        ready: 0,
+        waitingApproval: 0,
+        redeemed: 0,
+        expired: 0,
+        nextExpiresAt: null,
+      };
+      portal.gamification.bonusHistory = {
+        summary: {
+          total: 0,
+          confirmedAmount: 0,
+          pendingAmount: 0,
+          failed: 0,
+          latestAt: null,
+        },
+        items: [],
+      };
+      portal.activity.summary = {
+        ...portal.activity.summary,
+        sessionsCount: 9,
+        gameEventsCount: 4,
+        checkInsCount: 0,
+      };
+      mockGameSummarySession(service, portal);
+
+      const summary = await service.getGameSummary('Bearer guest-token');
+
+      expect(summary.battlePass.active).toBeNull();
+      expect(summary.rewards.recent).toEqual([]);
+      expect(summary.journey.steps).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'CHECK_IN',
+            status: 'CURRENT',
+            hint: 'Сделайте чек-ин в клубе.',
+          }),
+        ]),
+      );
     });
 
     it('processes a live session-start event before returning game summary', async () => {

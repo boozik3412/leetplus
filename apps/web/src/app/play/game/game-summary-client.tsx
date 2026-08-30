@@ -1287,49 +1287,53 @@ function GameModuleTopbar({ summary }: { summary: GuestPortalGameSummary }) {
 
   return (
     <header className="lp-club-topbar">
-      <div className="lp-club-menu">
-        <button
-          type="button"
-          className="lp-club-menu-button"
-          aria-label="Открыть меню"
-          aria-expanded={menuOpen}
-          aria-controls="gameModuleMenu"
-          onClick={() => setMenuOpen((value) => !value)}
-        >
-          <MenuIcon />
-        </button>
-
-        <nav
-          id="gameModuleMenu"
-          className={["lp-club-menu-panel", menuOpen ? "is-open" : ""].join(
-            " ",
-          )}
-          aria-label="Меню игрового модуля"
-          hidden={!menuOpen}
-        >
-          <button type="button" onClick={handleLogout}>
-            <ExitIcon />
-            <span>Выйти</span>
+      <div className="lp-club-topbar-inner">
+        <div className="lp-club-menu">
+          <button
+            type="button"
+            className="lp-club-menu-button"
+            aria-label="Открыть меню"
+            aria-expanded={menuOpen}
+            aria-controls="gameModuleMenu"
+            onClick={() => setMenuOpen((value) => !value)}
+          >
+            <MenuIcon />
           </button>
-        </nav>
-      </div>
 
-      <div className="lp-club-network">
-        <div className="lp-club-switch">
-          <BrandMark logoUrl={brandLogoUrl} />
-          <Link href="/game/clubs">{summary.store.name}</Link>
+          <nav
+            id="gameModuleMenu"
+            className={["lp-club-menu-panel", menuOpen ? "is-open" : ""].join(
+              " ",
+            )}
+            aria-label="Меню игрового модуля"
+            hidden={!menuOpen}
+          >
+            <button type="button" onClick={handleLogout}>
+              <ExitIcon />
+              <span>Выйти</span>
+            </button>
+          </nav>
         </div>
-      </div>
 
-      <div className="lp-club-header-actions">
-        {summary.support?.bugReporting?.enabled ? (
-          <GuestBugReportButton configuration={summary.support.bugReporting} />
-        ) : null}
-        <div
-          className="lp-club-session-state"
-          title="Телефон подтвержден, клуб выбран"
-        >
-          Профиль активен
+        <div className="lp-club-network">
+          <div className="lp-club-switch">
+            <BrandMark logoUrl={brandLogoUrl} />
+            <Link href="/game/clubs">{summary.store.name}</Link>
+          </div>
+        </div>
+
+        <div className="lp-club-header-actions">
+          {summary.support?.bugReporting?.enabled ? (
+            <GuestBugReportButton
+              configuration={summary.support.bugReporting}
+            />
+          ) : null}
+          <div
+            className="lp-club-session-state"
+            title="Телефон подтвержден, клуб выбран"
+          >
+            Профиль активен
+          </div>
         </div>
       </div>
     </header>
@@ -2489,15 +2493,17 @@ function ReadyGameView({
             onSelect={openLootboxOverlay}
           />
 
-          <HomeBattlePass
-            sectionRef={battlePassRef}
-            summary={summary}
-            battlePass={summary.battlePass.active}
-            quests={battleQuests}
-            progress={battlePassProgress}
-            rewardLabel={mainRewardLabel}
-            seasonName={summary.battlePass.active?.name ?? "Сезон клуба"}
-          />
+          {summary.battlePass.active?.levels.length ? (
+            <HomeBattlePass
+              sectionRef={battlePassRef}
+              summary={summary}
+              battlePass={summary.battlePass.active}
+              quests={battleQuests}
+              progress={battlePassProgress}
+              rewardLabel={mainRewardLabel}
+              seasonName={summary.battlePass.active.name}
+            />
+          ) : null}
         </div>
 
         <PlayerProfilePanel
@@ -7816,11 +7822,7 @@ function formatPlayerPhoneMasked(value: string | null) {
   return value?.trim() || null;
 }
 
-function BrandMark({
-  logoUrl,
-}: {
-  logoUrl?: string | null;
-}) {
+function BrandMark({ logoUrl }: { logoUrl?: string | null }) {
   if (logoUrl) {
     return (
       <span className="lp-club-brand-mark is-custom-logo" aria-hidden="true">
@@ -8587,7 +8589,10 @@ function RewardJournalPanel({
         <span className="lp-reward-sync-pill">История обновлена</span>
       </header>
 
-      <div className="lp-reward-filter-panel" aria-label="Фильтры истории наград">
+      <div
+        className="lp-reward-filter-panel"
+        aria-label="Фильтры истории наград"
+      >
         <label className="lp-reward-scope-field">
           <span className="lp-club-small-label">Клуб</span>
           <select
@@ -8699,8 +8704,8 @@ function RewardJournalPanel({
                 type="button"
                 className="lp-reward-load-more"
                 onClick={() =>
-                  setVisibleRewardCount((current) =>
-                    current + REWARD_HISTORY_PAGE_SIZE,
+                  setVisibleRewardCount(
+                    (current) => current + REWARD_HISTORY_PAGE_SIZE,
                   )
                 }
               >
@@ -10448,14 +10453,20 @@ const clubHomeCss = `
   position: sticky;
   top: 0;
   z-index: 10;
+  min-height: 78px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.96), rgba(0, 0, 0, 0.72), transparent);
+  backdrop-filter: blur(14px);
+}
+
+.lp-club-topbar-inner {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 18px;
+  width: min(1480px, 100%);
   min-height: 78px;
+  margin: 0 auto;
   padding: 18px clamp(18px, 3.4vw, 46px);
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.96), rgba(0, 0, 0, 0.72), transparent);
-  backdrop-filter: blur(14px);
 }
 
 .lp-club-menu-button,
@@ -10676,16 +10687,19 @@ const clubHomeCss = `
 .lp-club-session-state {
   justify-self: end;
   display: inline-flex;
+  height: var(--lp-club-header-control-size);
+  box-sizing: border-box;
   align-items: center;
   gap: 9px;
-  padding: 11px 13px;
-  border: 1px solid rgba(196, 224, 225, 0.18);
-  border-radius: 8px;
-  background: rgba(7, 12, 16, 0.56);
+  padding: 0 13px;
+  border: var(--lp-club-header-control-border);
+  border-radius: var(--lp-club-header-control-radius);
+  background: var(--lp-club-header-control-background);
   color: var(--muted);
   font-size: 10px;
   font-weight: 820;
   letter-spacing: 0.12em;
+  white-space: nowrap;
   text-transform: uppercase;
 }
 
@@ -10699,6 +10713,10 @@ const clubHomeCss = `
 }
 
 .lp-club-header-actions {
+  --lp-club-header-control-size: 44px;
+  --lp-club-header-control-border: 1px solid rgba(196, 224, 225, 0.2);
+  --lp-club-header-control-radius: 8px;
+  --lp-club-header-control-background: rgba(196, 224, 225, 0.035);
   position: relative;
   justify-self: end;
   display: flex;
@@ -16011,7 +16029,7 @@ const clubHomeCss = `
 }
 
 @media (max-width: 920px) {
-  .lp-club-topbar {
+  .lp-club-topbar-inner {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
@@ -16120,6 +16138,10 @@ const clubHomeCss = `
 
 @media (max-width: 560px) {
   .lp-club-topbar {
+    min-height: 70px;
+  }
+
+  .lp-club-topbar-inner {
     min-height: 70px;
     padding: 14px;
   }
@@ -16878,8 +16900,7 @@ function lootboxRouletteRewardFromOpenReward(
     visualMode: reward?.visualMode ?? configuredVisual?.visualMode ?? "AUTO",
     iconKey: reward?.iconKey ?? configuredVisual?.iconKey ?? "gift",
     imageUrl: reward?.imageUrl ?? configuredVisual?.imageUrl ?? null,
-    borderColor:
-      reward?.borderColor ?? configuredVisual?.borderColor ?? null,
+    borderColor: reward?.borderColor ?? configuredVisual?.borderColor ?? null,
     textColor: reward?.textColor ?? configuredVisual?.textColor ?? null,
     backgroundColor:
       reward?.backgroundColor ?? configuredVisual?.backgroundColor ?? null,

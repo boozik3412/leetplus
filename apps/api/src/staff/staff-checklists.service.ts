@@ -42,6 +42,12 @@ const checklistStatuses = [
   'ESCALATED',
   'CANCELED',
 ] as const;
+const checklistStatusOnlyActions = new Set<StaffChecklistStatus>([
+  'ACCEPTED',
+  'RETURNED',
+  'ESCALATED',
+  'CANCELED',
+]);
 const checklistUseOnlyRoles = new Set([
   'SENIOR_ADMINISTRATOR',
   'CLUB_ADMINISTRATOR',
@@ -1067,19 +1073,22 @@ export class StaffChecklistsService {
     const currentStatus = current.status as StaffChecklistStatus;
     const now = new Date();
     const currentAnswers = this.normalizeAnswers(current.answers, sections);
-    const answers =
-      dto.answers === undefined
-        ? currentAnswers
-        : this.normalizeAnswers(dto.answers, sections, {
-            previousAnswers: currentAnswers,
-            serverCompletedAt: now.toISOString(),
-          });
-    const metrics = this.calculateMetrics(sections, answers);
     const nextStatus =
       dto.status === undefined
         ? currentStatus
         : this.resolveOne(dto.status, checklistStatuses, currentStatus);
     this.ensureCanUpdateChecklist(user, current, currentStatus, nextStatus);
+    const isStatusOnlyAction =
+      dto.status !== undefined && checklistStatusOnlyActions.has(nextStatus);
+    const shouldUpdateAnswers =
+      dto.answers !== undefined && !isStatusOnlyAction;
+    const answers = shouldUpdateAnswers
+      ? this.normalizeAnswers(dto.answers, sections, {
+          previousAnswers: currentAnswers,
+          serverCompletedAt: now.toISOString(),
+        })
+      : currentAnswers;
+    const metrics = this.calculateMetrics(sections, answers);
     const normalizedReviewComment =
       dto.reviewComment === undefined
         ? undefined
@@ -1143,7 +1152,7 @@ export class StaffChecklistsService {
         select: { id: true },
       });
 
-      if (dto.answers !== undefined) {
+      if (shouldUpdateAnswers) {
         await this.staffAttachmentBindingsService.syncNativeResourceAttachments(
           tx,
           {

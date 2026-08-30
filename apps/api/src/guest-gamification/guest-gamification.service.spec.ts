@@ -7480,6 +7480,123 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('remaps a saved Langame category by name when the Battle Pass club scope changes', async () => {
+      const { service, prisma } = createService();
+      const oldCategoryId = 'old-scope-device-category';
+      const current = seasonRow({
+        status: 'DRAFT',
+        storeIds: ['store-1'],
+        levels: [
+          {
+            id: 'device-step',
+            level: 1,
+            sequence: 1,
+            activationRules: {
+              source: 'battle_pass_step',
+              schemaVersion: 2,
+              taskType: 'PRODUCT_PURCHASE',
+              triggerKind: 'PRODUCT_PURCHASE',
+              purchaseSource: 'CATEGORY',
+              categoryCatalogSource: 'LANGAME',
+              metric: {
+                eventTypes: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
+                aggregation: 'count',
+                target: 1,
+                unit: 'покупок',
+                windowDays: 30,
+                purchaseSource: 'CATEGORY',
+                categoryCatalogSource: 'LANGAME',
+                productMatch: 'ANY',
+                categorySelectionIds: [oldCategoryId],
+                categorySelectionLabels: [
+                  { id: oldCategoryId, name: 'Девайсы' },
+                ],
+              },
+            },
+          },
+        ],
+      });
+      let updatedLevels: any[] = [];
+      prisma.guestGameSeason.findFirst.mockResolvedValue(current);
+      prisma.store.findMany.mockResolvedValue([
+        {
+          id: 'store-1',
+          name: 'Пушкинская',
+          externalDomain: '46.langamepro.ru',
+        },
+        {
+          id: 'store-2',
+          name: 'Родонитовая',
+          externalDomain: '443.langame.ru',
+        },
+      ]);
+      prisma.langameClubProductConfiguration.findMany.mockResolvedValue([
+        {
+          storeId: 'store-1',
+          productId: null,
+          externalDomain: '46.langamepro.ru',
+          externalGroupId: '16',
+          externalProductId: 'device-1',
+          syncedAt: now,
+        },
+        {
+          storeId: 'store-2',
+          productId: null,
+          externalDomain: '443.langame.ru',
+          externalGroupId: '18',
+          externalProductId: 'device-2',
+          syncedAt: now,
+        },
+      ]);
+      prisma.langameProductGroup.findMany.mockResolvedValue([
+        {
+          externalDomain: '46.langamepro.ru',
+          externalGroupId: '16',
+          name: 'Девайсы',
+          syncedAt: now,
+        },
+        {
+          externalDomain: '443.langame.ru',
+          externalGroupId: '18',
+          name: 'Девайсы',
+          syncedAt: now,
+        },
+      ]);
+      prisma.guestGameSeason.updateMany.mockImplementation(
+        ({ data }: { data: { levels: any[] } }) => {
+          updatedLevels = data.levels;
+          return Promise.resolve({ count: 1 });
+        },
+      );
+      prisma.guestGameSeason.findFirstOrThrow.mockImplementation(() =>
+        Promise.resolve(
+          seasonRow({
+            ...current,
+            storeIds: ['store-1', 'store-2'],
+            levels: updatedLevels,
+          }),
+        ),
+      );
+
+      await expect(
+        service.updateSeason(user, 'season-1', {
+          storeIds: ['store-1', 'store-2'],
+          levels: current.levels,
+        }),
+      ).resolves.toBeDefined();
+
+      const metric = updatedLevels[0]?.activationRules?.metric;
+      expect(metric.categorySelectionIds).toHaveLength(1);
+      expect(metric.categorySelectionIds[0]).not.toBe(oldCategoryId);
+      expect(metric.categorySelections).toEqual([
+        expect.objectContaining({
+          name: 'Девайсы',
+          externalCategoryKeys: ['443.langame.ru:18', '46.langamepro.ru:16'],
+        }),
+      ]);
+      expect(prisma.guestGameSeason.updateMany).toHaveBeenCalledTimes(1);
+    });
+
     it('fails closed on ambiguous persisted level identity during a season save', async () => {
       const { service, prisma } = createService();
       prisma.guestGameSeason.findFirst.mockResolvedValue(

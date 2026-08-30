@@ -20694,8 +20694,10 @@ export class GuestGamificationService {
               storeIds,
               categoryCatalogSource,
             );
-            const selected = catalog.groups.filter((group) =>
-              selectionIds.includes(group.id),
+            const selected = resolveScopedProductGroupSelections(
+              catalog.groups,
+              selectionIds,
+              metric,
             );
             if (
               !selectionIds.length ||
@@ -36251,6 +36253,60 @@ function matchPersistedBattlePassLevels(
   }
 
   return matches;
+}
+
+function resolveScopedProductGroupSelections<
+  T extends { id: string; name: string },
+>(groups: T[], selectionIds: string[], metric: Record<string, unknown>): T[] {
+  const groupsById = new Map(groups.map((group) => [group.id, group]));
+  const groupsByName = new Map<string, T[]>();
+  for (const group of groups) {
+    const key = normalizedProductGroupName(group.name);
+    const matches = groupsByName.get(key) ?? [];
+    matches.push(group);
+    groupsByName.set(key, matches);
+  }
+
+  const labelsById = new Map<string, string>();
+  for (const rawSelection of [
+    ...jsonRecordArray(metric.categorySelections),
+    ...jsonRecordArray(metric.categorySelectionLabels),
+  ]) {
+    const id = nullableString(rawSelection.id);
+    const name = nullableString(rawSelection.name);
+    if (id && name && !labelsById.has(id)) {
+      labelsById.set(id, name);
+    }
+  }
+
+  const resolved: T[] = [];
+  const resolvedIds = new Set<string>();
+  for (const selectionId of selectionIds) {
+    let group = groupsById.get(selectionId) ?? null;
+    if (!group) {
+      const savedName = labelsById.get(selectionId);
+      const semanticMatches = savedName
+        ? (groupsByName.get(normalizedProductGroupName(savedName)) ?? [])
+        : [];
+      group = semanticMatches.length === 1 ? semanticMatches[0] : null;
+    }
+
+    if (!group || resolvedIds.has(group.id)) {
+      return [];
+    }
+    resolved.push(group);
+    resolvedIds.add(group.id);
+  }
+
+  return resolved;
+}
+
+function jsonRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function normalizedProductGroupName(value: string): string {
+  return value.trim().toLocaleLowerCase('ru-RU');
 }
 
 function duplicateBattlePassLevelIdentity<T>(

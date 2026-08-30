@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import type { GuestPortalGameSummary } from "@/lib/guest-portal";
 import styles from "./guest-bug-report.module.css";
 
@@ -94,9 +95,7 @@ export function GuestBugReportButton({
       removeFile();
       return;
     }
-    if (
-      !["image/jpeg", "image/png", "image/webp"].includes(nextFile.type)
-    ) {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(nextFile.type)) {
       removeFile();
       setError("Можно приложить только JPG, PNG или WebP.");
       return;
@@ -197,123 +196,129 @@ export function GuestBugReportButton({
         <BugIcon />
       </button>
 
-      {open ? (
-        <div className={styles.backdrop} onMouseDown={handleBackdropClick}>
-          <section
-            className={styles.dialog}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="guestBugReportTitle"
-          >
-            <button
-              type="button"
-              className={styles.close}
-              aria-label="Закрыть форму"
-              disabled={submitting}
-              onClick={closeDialog}
-            >
-              ×
-            </button>
-
-            {result ? (
-              <div className={styles.success} aria-live="polite">
-                <span className={styles.successIcon}>✓</span>
-                <p className={styles.eyebrow}>Сообщение отправлено</p>
-                <h2 id="guestBugReportTitle">Спасибо, мы всё получили</h2>
-                <p>Номер обращения</p>
-                <strong>{result.ticketNumber}</strong>
-                <button type="button" onClick={closeDialog}>
-                  Понятно
+      {open
+        ? createPortal(
+            <div className={styles.backdrop} onMouseDown={handleBackdropClick}>
+              <section
+                className={styles.dialog}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="guestBugReportTitle"
+              >
+                <button
+                  type="button"
+                  className={styles.close}
+                  aria-label="Закрыть форму"
+                  disabled={submitting}
+                  onClick={closeDialog}
+                >
+                  ×
                 </button>
-              </div>
-            ) : (
-              <form className={styles.form} onSubmit={handleSubmit}>
-                <p className={styles.eyebrow}>Техническая поддержка</p>
-                <h2 id="guestBugReportTitle">Сообщить о проблеме</h2>
-                <p className={styles.intro}>
-                  Опишите, что произошло. Мы автоматически приложим данные о
-                  странице и устройстве.
-                </p>
 
-                <label className={styles.field}>
-                  <span>Тема инцидента</span>
-                  <select
-                    ref={topicRef}
-                    value={topic}
-                    required
-                    onChange={(event) => setTopic(event.target.value)}
-                  >
-                    <option value="">Выберите тему</option>
-                    {configuration.topics.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className={styles.field}>
-                  <span>Описание</span>
-                  <textarea
-                    value={description}
-                    minLength={30}
-                    maxLength={2000}
-                    required
-                    placeholder="Что вы делали, что ожидали увидеть и что произошло?"
-                    onChange={(event) => setDescription(event.target.value)}
-                  />
-                  <small>{description.length} / 2000</small>
-                </label>
-
-                <div className={styles.field}>
-                  <span>Скриншот, если есть</span>
-                  <label className={styles.upload}>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      onChange={handleFileChange}
-                    />
-                    <span>{file ? "Заменить изображение" : "Выбрать файл"}</span>
-                    <small>
-                      JPG, PNG или WebP · до {formatBytes(configuration.maxAttachmentBytes)}
-                    </small>
-                  </label>
-                </div>
-
-                {previewUrl && file ? (
-                  <div className={styles.preview}>
-                    {/* Blob URLs are local previews and cannot use next/image. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={previewUrl} alt="Предпросмотр скриншота" />
-                    <div>
-                      <span>{file.name}</span>
-                      <small>{formatBytes(file.size)}</small>
-                    </div>
-                    <button type="button" onClick={removeFile}>
-                      Удалить
+                {result ? (
+                  <div className={styles.success} aria-live="polite">
+                    <span className={styles.successIcon}>✓</span>
+                    <p className={styles.eyebrow}>Сообщение отправлено</p>
+                    <h2 id="guestBugReportTitle">Спасибо, мы всё получили</h2>
+                    <p>Номер обращения</p>
+                    <strong>{result.ticketNumber}</strong>
+                    <button type="button" onClick={closeDialog}>
+                      Понятно
                     </button>
                   </div>
-                ) : null}
+                ) : (
+                  <form className={styles.form} onSubmit={handleSubmit}>
+                    <p className={styles.eyebrow}>Техническая поддержка</p>
+                    <h2 id="guestBugReportTitle">Сообщить о проблеме</h2>
+                    <p className={styles.intro}>
+                      Опишите, что произошло. Мы автоматически приложим данные о
+                      странице и устройстве.
+                    </p>
 
-                {error ? (
-                  <p className={styles.error} role="alert">
-                    {error}
-                  </p>
-                ) : null}
+                    <label className={styles.field}>
+                      <span>Тема инцидента</span>
+                      <select
+                        ref={topicRef}
+                        value={topic}
+                        required
+                        onChange={(event) => setTopic(event.target.value)}
+                      >
+                        <option value="">Выберите тему</option>
+                        {configuration.topics.map((item) => (
+                          <option key={item.value} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                <button
-                  type="submit"
-                  className={styles.submit}
-                  disabled={submitting}
-                >
-                  {submitting ? "Отправляем…" : "Отправить сообщение"}
-                </button>
-              </form>
-            )}
-          </section>
-        </div>
-      ) : null}
+                    <label className={styles.field}>
+                      <span>Описание</span>
+                      <textarea
+                        value={description}
+                        minLength={30}
+                        maxLength={2000}
+                        required
+                        placeholder="Что вы делали, что ожидали увидеть и что произошло?"
+                        onChange={(event) => setDescription(event.target.value)}
+                      />
+                      <small>{description.length} / 2000</small>
+                    </label>
+
+                    <div className={styles.field}>
+                      <span>Скриншот, если есть</span>
+                      <label className={styles.upload}>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={handleFileChange}
+                        />
+                        <span>
+                          {file ? "Заменить изображение" : "Выбрать файл"}
+                        </span>
+                        <small>
+                          JPG, PNG или WebP · до{" "}
+                          {formatBytes(configuration.maxAttachmentBytes)}
+                        </small>
+                      </label>
+                    </div>
+
+                    {previewUrl && file ? (
+                      <div className={styles.preview}>
+                        {/* Blob URLs are local previews and cannot use next/image. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={previewUrl} alt="Предпросмотр скриншота" />
+                        <div>
+                          <span>{file.name}</span>
+                          <small>{formatBytes(file.size)}</small>
+                        </div>
+                        <button type="button" onClick={removeFile}>
+                          Удалить
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {error ? (
+                      <p className={styles.error} role="alert">
+                        {error}
+                      </p>
+                    ) : null}
+
+                    <button
+                      type="submit"
+                      className={styles.submit}
+                      disabled={submitting}
+                    >
+                      {submitting ? "Отправляем…" : "Отправить сообщение"}
+                    </button>
+                  </form>
+                )}
+              </section>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

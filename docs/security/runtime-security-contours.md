@@ -4,9 +4,10 @@
 
 Актуально на: **30.08.2026**
 Runtime implementation baseline:
-`6ec3a5f18cf4448b0460efee266254908bbef1a1` (PR #84 + PR #85; включает
-production repair USER_CALL, inline loot-box open, exact CURRENT188
-attachment-helper enrollment и guest Battle Pass/store-scope repair)
+`d8c97649d155f1fc9994ea12b80ab2b3f54285b3` (PR #87; включает отдельный
+bonus-ledger worker поверх production repair USER_CALL, inline loot-box open,
+exact CURRENT188 attachment-helper enrollment и guest Battle Pass/store-scope
+repair)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -17,11 +18,11 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | Battle Pass/store-scope repair слит PR [#84](https://github.com/boozik3412/leetplus/pull/84) и PR [#85](https://github.com/boozik3412/leetplus/pull/85), merge SHA `6ec3a5f18cf4448b0460efee266254908bbef1a1` |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33300382020) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33300382035) — `SUCCESS`     |
-| Production API topology  | active blue exact `6ec3a5f1…`, generation 13, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback green `ca3f332f…`, оба slot active                 |
+| Runtime implementation   | Dedicated bonus-ledger worker слит PR [#87](https://github.com/boozik3412/leetplus/pull/87), merge SHA `d8c97649d155f1fc9994ea12b80ab2b3f54285b3`                                  |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33305732947) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33305732938) — `SUCCESS` |
+| Production API topology  | active green exact `d8c97649…`, generation 14, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `6ec3a5f1…`, оба slot active                    |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
-| Corporate landing        | role-aware successor входит в active `6ec3a5f1…`; real-account canary остаётся отдельной проверкой                                                                                  |
+| Corporate landing        | role-aware successor входит в active `6ec3a5f1…`; real-account canary остаётся отдельной проверкой                                                                                 |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -80,6 +81,11 @@ production встроенный `GuestBonusLedgerSchedulerService` обязан 
   row locks и idempotency key остаются второй exactly-once границей;
 - live fail-closed требует exact tenant, worker enable, `DRY_RUN=false` и
   `LANGAME_BONUS_ACCRUAL_ENABLED=true`; canary ограничен одной exact reward;
+- tenant-wide scheduled pass может не задавать один `storeId`, но только внутри
+  worker/control-plane path: перед каждым provider write claimed entry повторно
+  проходит `TENANT_STORE_SYSTEM` identity с exact `entry.storeId`; запись без
+  store остаётся заблокированной без Langame write. Corporate/manual dispatch
+  без exact `storeId` по-прежнему отклоняется до claim;
 - staff/test accrual override в production остаётся `false`: такие записи
   отменяются до provider write и не попадают на реальные балансы сотрудников;
 - pre-dispatch ошибки используют bounded retry, а неоднозначный внешний POST

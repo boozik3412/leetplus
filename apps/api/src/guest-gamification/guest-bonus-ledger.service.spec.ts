@@ -937,11 +937,69 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
+  it('lets the trusted scheduled tenant-wide worker defer store identity to each claimed entry', async () => {
+    const { service, prisma } = createService({
+      LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
+    });
+    const entry = ledgerEntry({ storeId: 'store-1337' });
+
+    prisma.tenant.findMany.mockResolvedValue([
+      {
+        id: user.tenantId,
+        slug: user.tenantSlug,
+        status: TenantLifecycleStatus.ACTIVE,
+        users: [
+          {
+            id: user.id,
+            email: user.email,
+            fullName: user.fullName,
+            role: user.role,
+            customRoleId: null,
+            isPlatformAdmin: false,
+          },
+        ],
+      },
+    ]);
+    jest.spyOn(service as any, 'claimReadyEntries').mockResolvedValue([entry]);
+    jest.spyOn(service as any, 'processClaimedEntry').mockResolvedValue({
+      ledgerEntryId: entry.id,
+      rewardId: entry.rewardId,
+      status: 'CONFIRMED',
+      amount: 25,
+      externalDomain: entry.externalDomain,
+      externalGuestId: entry.externalGuestId,
+      note: 'confirmed',
+    });
+
+    const result = await service.runScheduledDispatch({
+      dryRun: false,
+      queueApprovedRewards: false,
+      tenantSlug: user.tenantSlug,
+      limit: 5,
+    });
+
+    expect((service as any).claimReadyEntries).toHaveBeenCalledWith(
+      user.tenantId,
+      expect.objectContaining({ storeId: null, limit: 5 }),
+    );
+    expect((service as any).processClaimedEntry).toHaveBeenCalledWith(
+      user.id,
+      entry,
+      expect.objectContaining({ executionRevision: 3 }),
+    );
+    expect(result).toMatchObject({
+      processedTenants: 1,
+      checked: 1,
+      confirmed: 1,
+      blocked: 0,
+    });
+  });
+
   it('runs scheduled dispatch per active tenant with audit-safe actors and isolated failures', async () => {
     const { service, prisma } = createService({
       LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
     });
-    const dispatch = jest.spyOn(service, 'dispatch');
+    const dispatch = jest.spyOn(service as any, 'dispatchWithRuntimeScope');
 
     prisma.tenant.findMany.mockResolvedValue([
       {
@@ -1052,6 +1110,7 @@ describe('GuestBonusLedgerService', () => {
         tenantSlug: 'network',
         limit: 3,
       }),
+      true,
     );
     expect(dispatch).toHaveBeenNthCalledWith(
       2,
@@ -1060,6 +1119,7 @@ describe('GuestBonusLedgerService', () => {
         dryRun: false,
         tenantSlug: 'network',
       }),
+      true,
     );
     expect(result).toMatchObject({
       mode: 'READY',
@@ -1107,12 +1167,14 @@ describe('GuestBonusLedgerService', () => {
     const { service, prisma, tenantExecutionAdmission } = createService({
       LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
     });
-    const dispatch = jest.spyOn(service, 'dispatch').mockResolvedValue(
-      dispatchResult({
-        checked: 1,
-        confirmed: 1,
-      }),
-    );
+    const dispatch = jest
+      .spyOn(service as any, 'dispatchWithRuntimeScope')
+      .mockResolvedValue(
+        dispatchResult({
+          checked: 1,
+          confirmed: 1,
+        }),
+      );
     const owner = {
       id: 'owner-1',
       email: 'owner@example.com',
@@ -1187,6 +1249,7 @@ describe('GuestBonusLedgerService', () => {
     expect(dispatch).toHaveBeenCalledWith(
       { id: 'owner-2', tenantId: 'tenant-admitted' },
       expect.objectContaining({ queueApprovedRewards: false }),
+      true,
     );
     expect(result).toMatchObject({
       checkedTenants: 2,

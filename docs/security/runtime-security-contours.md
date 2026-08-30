@@ -2,12 +2,12 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **30.08.2026**
+Актуально на: **31.08.2026**
 Runtime implementation baseline:
-`4036d312b5760e9daf292e416288d68949419aaa` (PR #88; включает отдельный
-bonus-ledger worker, безопасный tenant-wide scheduled dispatch с повторной
-exact-store проверкой перед каждым Langame write и все repair предыдущего
-production baseline)
+`a130c13e8d694b605d86a924b1524a6174ae1b51` (PR #90 + #91 поверх PR #88;
+включает status-only review-переходы чек-листов без повторной записи legacy
+answers, отдельный bonus-ledger worker и все repair предыдущего production
+baseline)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -18,11 +18,11 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                          |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime implementation   | Scheduled exact-store boundary слита PR [#88](https://github.com/boozik3412/leetplus/pull/88), merge SHA `4036d312b5760e9daf292e416288d68949419aaa`                                      |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33309468458) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33309468461) — `SUCCESS` |
-| Production API topology  | active blue exact `4036d312…`, generation 15, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback green `d8c97649…`, оба slot active                      |
+| Runtime implementation   | Checklist status-only review boundary слита PR [#90](https://github.com/boozik3412/leetplus/pull/90) и [#91](https://github.com/boozik3412/leetplus/pull/91), merge SHA `a130c13e8d694b605d86a924b1524a6174ae1b51` |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33330505183) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33330505182) — `SUCCESS` |
+| Production API topology  | active green exact `a130c13e…`, generation 16, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `4036d312…`, оба slot active                      |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
-| Corporate landing        | role-aware successor входит в active `6ec3a5f1…`; real-account canary остаётся отдельной проверкой                                                                                 |
+| Corporate landing        | role-aware successor входит в active `a130c13e…`; real-account canary остаётся отдельной проверкой                                                                                 |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -222,8 +222,31 @@ Support-функциональность следует тем же трём г�
 
 Bug-report schema rollout завершён 29.08.2026, runtime repair, последующий
 Battle Pass/store-scope repair и autonomous bonus-ledger rollout — 30.08.2026.
-Active blue `4036d312…` работает на exact CURRENT188 с bridge `OFF` и reporting
-`LIVE`; hot rollback green `d8c97649…` остаётся exact CURRENT188 и активным.
+После checklist review rollout 31.08.2026 active green `a130c13e…` работает на
+exact CURRENT188 с bridge `OFF` и reporting `LIVE`; hot rollback blue
+`4036d312…` остаётся exact CURRENT188 и активным.
+
+### Checklist review status-only rollout 31.08.2026
+
+Два старых checklist run сотрудника оставались `ON_REVIEW`, потому что review
+клиент повторно отправлял весь snapshot `answers` с legacy абсолютными URL
+вложений. Строгая attachment boundary корректно отвергала такие ссылки как
+`Invalid attachment references`, но review-решение не должно повторно менять
+ответы или attachment bindings.
+
+Exact runtime `a130c13e8d694b605d86a924b1524a6174ae1b51` разделяет эти контракты:
+
+- `ACCEPTED`, `RETURNED`, `ESCALATED` и `CANCELED` являются status-only
+  переходами и не записывают `answers`, score/evidence metrics или attachment
+  bindings даже для stale клиента;
+- редактирование и отправка ответов сохраняют прежнюю строгую signature,
+  quarantine, tenant/resource-scope и reference validation;
+- historical absolute URLs не мигрировались, `QUARANTINED` файлы не
+  разблокировались, два run не принимались от имени менеджера автоматически;
+- Fast CI `33330505183` и Full Release Admission `33330505182` успешны;
+  immutable handoff переключил production на generation 16, active green;
+  public API/Web, exact schema `188`, authenticated catalog smoke и четыре
+  последующих bonus-ledger tick прошли без ошибок и с пустой очередью.
 Это не меняет split-runtime решение: production по-прежнему
 `COMBINED`, а три логических security-контура сохраняются guards/module
 boundaries.

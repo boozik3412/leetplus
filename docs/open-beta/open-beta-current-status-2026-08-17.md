@@ -1,19 +1,40 @@
-# LeetPlus open beta — текущее состояние на 30.08.2026
+# LeetPlus open beta — текущее состояние на 31.08.2026
 
 | Поле                 | Состояние                                                                                                                        |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                     |
-| Production runtime   | healthy; active blue `4036d312…`, generation 15, `COMBINED`, bridge OFF, bug reporting LIVE                                       |
+| Production runtime   | healthy; active green `a130c13e…`, generation 16, `COMBINED`, bridge OFF, bug reporting LIVE                                      |
 | Prisma schema        | source и production exact `CURRENT_188`                                                                                          |
-| Release authority    | exact SHA `4036d312…`: Fast CI `33309468458`, Full Release Admission `33309468461`, immutable handoff и generation 15 receipt     |
+| Release authority    | exact SHA `a130c13e…`: Fast CI `33330505183`, Full Release Admission `33330505182`, immutable handoff и generation 16 receipt     |
 | Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                  |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                 |
-| Role-aware landing   | входит в active `6ec3a5f1…`; real-account canary pending                                                                         |
+| Role-aware landing   | входит в active `a130c13e…`; real-account canary pending                                                                         |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                         |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                      |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                    |
 | Offline/USB key      | исключён из beta critical path                                                                                                   |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                               |
+
+## Checklist review production rollout (31.08.2026)
+
+PR [#90](https://github.com/boozik3412/leetplus/pull/90) и
+[#91](https://github.com/boozik3412/leetplus/pull/91) разделили изменение
+ответов чек-листа и review-решение. `ACCEPTED`, `RETURNED`, `ESCALATED` и
+`CANCELED` теперь меняют только status/comment/audit metadata; stale клиент не
+может заставить API повторно записать answers, score/evidence или attachment
+bindings. Обычная отправка и редактирование ответов по-прежнему проходят
+строгую attachment validation.
+
+Exact SHA `a130c13e8d694b605d86a924b1524a6174ae1b51` прошёл Fast CI
+[`33330505183`](https://github.com/boozik3412/leetplus/actions/runs/33330505183)
+и Full Release Admission
+[`33330505182`](https://github.com/boozik3412/leetplus/actions/runs/33330505182).
+Immutable handoff установил production-control generation, offline hydration,
+sealed release и переключил nginx generation 16 на active green. Postflight:
+exact API/Web SHA, schema `188/20260828190000_guest_support_bug_reports`, public
+`/game`, authenticated catalog smoke и autonomous bonus-ledger timer — healthy.
+Legacy absolute attachment URLs и `QUARANTINED` файлы не мигрировались; два
+ожидающих checklist run не принимались автоматически.
 
 ## Autonomous bonus-ledger production rollout (30.08.2026)
 

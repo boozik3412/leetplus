@@ -22,6 +22,10 @@ slot_api_unit="${TEMPLATE_ROOT}/leetplus-api@.service"
 slot_web_unit="${TEMPLATE_ROOT}/leetplus-web@.service"
 safe_overlay="${TEMPLATE_ROOT}/canary-safe.env.example"
 user_call_live_overlay="${TEMPLATE_ROOT}/guest-user-call-live.env.example"
+bonus_ledger_worker_overlay="${TEMPLATE_ROOT}/bonus-ledger-worker.env.example"
+bonus_ledger_worker_service="${TEMPLATE_ROOT}/leetplus-bonus-ledger-worker.service"
+bonus_ledger_worker_timer="${TEMPLATE_ROOT}/leetplus-bonus-ledger-worker.timer"
+bonus_ledger_worker_runner="${REPOSITORY_ROOT}/docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh"
 slot_preflight="${REPOSITORY_ROOT}/docs/deployment/production-artifact/preflight-release-slot.sh"
 cache_preparer="${REPOSITORY_ROOT}/docs/deployment/production-artifact/prepare-web-slot-cache.sh"
 release_promoter="${REPOSITORY_ROOT}/docs/deployment/production-artifact/promote-release-artifact.sh"
@@ -70,7 +74,7 @@ done
 
 for required_file in \
   "$api_unit" "$web_unit" "$migration_unit" "$hydration_unit" "$release_environment" \
-  "$slot_api_unit" "$slot_web_unit" "$safe_overlay" "$user_call_live_overlay" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
+  "$slot_api_unit" "$slot_web_unit" "$safe_overlay" "$user_call_live_overlay" "$bonus_ledger_worker_overlay" "$bonus_ledger_worker_service" "$bonus_ledger_worker_timer" "$bonus_ledger_worker_runner" "$slot_preflight" "$cache_preparer" "$release_promoter" "$release_sealer" "$store_stager" "$blue_environment" "$green_environment" "$web_runtime_environment" "$blue_nginx" "$green_nginx" "$recovery_unit" "$recovery_watchdog_unit" "$recovery_timer" "$nginx_recovery_dropin" "$hydration_tmpfiles"; do
   test -f "$required_file"
 done
 
@@ -320,6 +324,13 @@ if command -v systemd-analyze >/dev/null 2>&1; then
     -e "s#/var/cache/leetplus-web-blue#${verification_cache}#g" \
     -e "s#^User=.*#User=$(id -un)#" -e "s#^Group=.*#Group=$(id -gn)#" \
     "$slot_web_unit" > "$verification_root/leetplus-web@blue.service"
+  sed -e 's#^EnvironmentFile=.*#EnvironmentFile=-/dev/null#' \
+    -e 's#^ExecStart=.*#ExecStart=/bin/true#' \
+    -e '/^SupplementaryGroups=/d' \
+    "$bonus_ledger_worker_service" \
+    > "$verification_root/leetplus-bonus-ledger-worker.service"
+  cp "$bonus_ledger_worker_timer" \
+    "$verification_root/leetplus-bonus-ledger-worker.timer"
   printf '[Unit]\nDescription=fixture target\n' > "$verification_root/network-online.target"
   cp "$verification_root/network-online.target" "$verification_root/multi-user.target"
   printf '[Unit]\nDescription=fixture nginx\n[Service]\nType=oneshot\nExecStart=/bin/true\n' \
@@ -327,7 +338,9 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   SYSTEMD_UNIT_PATH="$verification_root:/usr/lib/systemd/system:/lib/systemd/system" \
     systemd-analyze verify \
       "$verification_root/leetplus-api@blue.service" \
-      "$verification_root/leetplus-web@blue.service"
+      "$verification_root/leetplus-web@blue.service" \
+      "$verification_root/leetplus-bonus-ledger-worker.service" \
+      "$verification_root/leetplus-bonus-ledger-worker.timer"
   case "$verification_root" in /tmp/tmp.*) ;; *) printf 'unsafe systemd verification root\n' >&2; exit 1 ;; esac
   rm -rf -- "$verification_root"
 fi
@@ -424,6 +437,9 @@ if grep -F '/run/leetplus-' "$blue_green_cutover" > /dev/null; then
 fi
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-api@.service\t/etc/systemd/system/leetplus-api@.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/guest-user-call-live.env.example\t/etc/leetplus/guest-user-call-live.env\t0400' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh\t/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh\t0555' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.service\t/etc/systemd/system/leetplus-bonus-ledger-worker.service\t0444' "$production_control_install_map" > /dev/null
+grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-bonus-ledger-worker.timer\t/etc/systemd/system/leetplus-bonus-ledger-worker.timer\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/systemd/leetplus-web@.service\t/etc/systemd/system/leetplus-web@.service\t0444' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/preflight-release-slot.sh\t/usr/local/libexec/leetplus/preflight-release-slot.sh\t0555' "$production_control_install_map" > /dev/null
 grep -F -x $'docs/deployment/production-artifact/verify-release-readiness.sh\t/usr/local/libexec/leetplus/verify-release-readiness.sh\t0555' "$production_control_install_map" > /dev/null
@@ -441,6 +457,21 @@ grep -F -x 'Unit=leetplus-blue-green-recovery-watchdog.service' "$recovery_timer
 grep -F -x 'Requires=leetplus-blue-green-recovery.service' "$nginx_recovery_dropin" > /dev/null
 grep -F 'production pnpm store already exists' "$store_stager" > /dev/null
 grep -F 'PNPM_STORE_PACKAGE_CODE_EXECUTED=false' "$store_stager" > /dev/null
+grep -F -x 'DynamicUser=yes' "$bonus_ledger_worker_service" > /dev/null
+grep -F -x 'Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin' "$bonus_ledger_worker_service" > /dev/null
+grep -F -x 'EnvironmentFile=/etc/leetplus/bonus-ledger-worker.env' "$bonus_ledger_worker_service" > /dev/null
+grep -F -x 'ExecStart=/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh' "$bonus_ledger_worker_service" > /dev/null
+grep -F -x 'ProtectSystem=strict' "$bonus_ledger_worker_service" > /dev/null
+grep -F -x 'RemoveIPC=true' "$bonus_ledger_worker_service" > /dev/null
+grep -F 'UnsetEnvironment=BASH_ENV ENV HTTP_PROXY HTTPS_PROXY' "$bonus_ledger_worker_service" > /dev/null
+grep -F -x 'OnUnitInactiveSec=30s' "$bonus_ledger_worker_timer" > /dev/null
+grep -F -x 'Unit=leetplus-bonus-ledger-worker.service' "$bonus_ledger_worker_timer" > /dev/null
+grep -F 'active-upstreams.conf' "$bonus_ledger_worker_runner" > /dev/null
+grep -F 'guest-bonus-ledger-worker.cli.js' "$bonus_ledger_worker_runner" > /dev/null
+if grep -F -x 'EnvironmentFile=/etc/leetplus/runtime.env' "$bonus_ledger_worker_service" > /dev/null; then
+  printf 'Bonus-ledger worker inherited the broad API runtime profile\n' >&2
+  exit 1
+fi
 if grep -F '/var/lib/leetplus' "$slot_web_unit" > /dev/null; then
   printf 'Web slot has unnecessary API mutable-state access\n' >&2
   exit 1

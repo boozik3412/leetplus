@@ -12,7 +12,7 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const SAFE_SOURCE_PATTERN = /^[A-Za-z0-9_.@+/-]+$/u;
 const SAFE_DESTINATION_PATTERN = /^\/[A-Za-z0-9_.@+/-]+$/u;
 const EXPECTED_INSTALL_MAP_SHA256 =
-  "7404801cef6d9eb2aca40411789df7fcb76fb6e0260520f0be809f4812d2a56e";
+  "5614593a211fef47d251682b8f2f65f49ef864c1d6f2aa4cf7631cafc5f08863";
 const EXPECTED_REPOSITORY = "boozik3412/leetplus";
 const GENERATION_BASE = "/srv/leetplus/production-control-generations";
 const RECEIPT_BASE = "/var/lib/leetplus/deploy-receipts/production-control";
@@ -59,12 +59,15 @@ const DANGEROUS_ENVIRONMENT_NAMES = [
   "NO_PROXY",
 ];
 const REQUIRED_DESTINATIONS = new Set([
+  "/etc/systemd/system/leetplus-bonus-ledger-worker.service",
+  "/etc/systemd/system/leetplus-bonus-ledger-worker.timer",
   "/etc/systemd/system/leetplus-api@.service",
   "/etc/systemd/system/leetplus-release-hydrate@.service",
   "/etc/systemd/system/leetplus-web@.service",
   "/etc/tmpfiles.d/leetplus-release.conf",
   "/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/CONTROL_BUNDLE_SHA256SUMS",
   "/usr/local/libexec/leetplus/stage-release-artifact.sh",
+  "/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh",
   "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs",
   "/usr/local/libexec/leetplus/verify-production-control-artifact.mjs",
   "/usr/local/libexec/leetplus/verify-release-hydration-systemd.mjs",

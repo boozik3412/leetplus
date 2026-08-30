@@ -15,6 +15,21 @@
 | Offline/USB key      | исключён из beta critical path                                                            |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                        |
 
+## Autonomous bonus-ledger recovery candidate (30.08.2026)
+
+Накопившиеся bonus-ledger entries не обрабатывались автономно, потому что
+`canary-safe.env` корректно выключал scheduler во всех blue/green API slot, а
+отдельного worker unit не существовало. Источник проблемы — отсутствие
+единственного production owner очереди, а не ошибки claim/idempotency ledger.
+
+Текущий candidate добавляет отдельный bounded worker, который запускается
+systemd timer из exact active release и не входит ни в public guest, ни в
+corporate API process. Он fail-closed требует exact tenant, отдельный secret
+set и live gates; staff/test rewards остаются исключены. Rollout допускается
+только после Fast CI + Full Release Admission, установки exact
+production-control generation и одной non-staff canary со сверкой Langame.
+До canary и явного enable timer production-состояние остаётся прежним.
+
 ## Обновление 30.08.2026 — Battle Pass/store-scope production repair
 
 PR [#84](https://github.com/boozik3412/leetplus/pull/84) исключил ложный

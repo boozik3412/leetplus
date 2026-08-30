@@ -1,6 +1,6 @@
-# Bonus ledger scheduler для геймификации
+# Автономный bonus-ledger worker для геймификации
 
-## Текущий production-контракт (13.08.2026)
+## Текущий production-контракт (30.08.2026)
 
 - Входящее пополнение для условий заданий обрабатывается отдельным tenant-scoped `LEDGER_SUPPLEMENTAL` только как `BALANCE_TOPUP`; наличие игровой сессии не требуется.
 - Автономный reward materializer включён для tenant `demo` и последовательно обрабатывает immutable intent, затем effect. Он не выполняет внешний Langame write.
@@ -11,7 +11,19 @@
 
 > Актуальный контракт от 30.07.2026: этот scheduler доставляет legacy non-claim rewards и обычные claim-required rewards только после своевременного явного claim гостя. `GuestGamificationPipelineSchedulerService` автоматически фиксирует квалификацию Battle Pass/заданий/check-in/event, но не начисляет бонус и не обходит 30-дневный кошелёк. Completion ACK не является claim; завершённые и ожидающие результаты остаются доступны через reward wallet/history.
 
-Этот runbook включает API-side scheduler `GuestBonusLedgerSchedulerService`, который без админского клика вызывает защищенный контур `POST /guests/gamification/scheduled/bonus-ledger/dispatch`. Scheduler работает внутри `leetplus-api.service`, поэтому отдельный systemd unit не нужен.
+Production не запускает `GuestBonusLedgerSchedulerService` внутри blue/green API:
+оба API slot остаются активны одновременно, поэтому встроенный scheduler создавал
+бы два независимых владельца очереди. Доставка выполняется отдельным
+`leetplus-bonus-ledger-worker.timer`. Один oneshot worker каждые 30 секунд
+разрешает фактически активный nginx slot, проверяет его immutable release SHA и
+запускает CLI именно из этого release. systemd не допускает overlap одного
+oneshot unit, а database claim/idempotency остаются второй exactly-once границей.
+
+Worker использует отдельный минимальный secret set из
+`/etc/leetplus/bonus-ledger-worker.env`; он не загружает широкий API runtime
+profile, не регистрирует HTTP controllers и не входит в public guest process.
+Смена blue/green slot не требует второго worker: следующий tick автоматически
+возьмёт новый active release.
 
 Bonus ledger не оценивает условия миссии, Battle Pass, лутбокса или чекина. LIVE, последовательный Ledger fallback и supplemental-контур сходятся до него в единые immutable event/intent/effect/wallet записи; дальше действует один claim gate и один контур доставки.
 
@@ -32,19 +44,29 @@ Bonus ledger не оценивает условия миссии, Battle Pass, �
 Минимальные переменные:
 
 ```env
-SYNC_SERVICE_TOKEN="<service-token>"
-LANGAME_BONUS_ACCRUAL_ENABLED="false"
+DATABASE_URL="<runtime database url>"
+APP_ENCRYPTION_KEY="<runtime application key>"
+INTEGRATION_ENCRYPTION_KEY="<runtime integration key>"
+LANGAME_BONUS_ACCRUAL_ENABLED="true"
 LANGAME_BONUS_ACCRUAL_PATH="/master_api/guests/balance/phone"
 LANGAME_BONUS_ACCRUAL_REWARD_TYPES="BONUS,BONUS_POINTS,BONUS_BALANCE,LOYALTY_BONUS"
 
-GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED="true"
-GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN="true"
-GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS="300000"
-GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT="1"
-GUEST_GAME_BONUS_LEDGER_SCHEDULER_QUEUE_APPROVED_REWARDS="true"
-GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG="<tenant-slug>"
-GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES="BONUS,BONUS_POINTS,BONUS_BALANCE,LOYALTY_BONUS"
+GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED="false"
+GUEST_BONUS_LEDGER_WORKER_ENABLED="true"
+GUEST_BONUS_LEDGER_WORKER_TENANT_SLUG="<tenant-slug>"
+GUEST_BONUS_LEDGER_WORKER_DRY_RUN="true"
+GUEST_BONUS_LEDGER_WORKER_CANARY="true"
+GUEST_BONUS_LEDGER_WORKER_LIMIT="1"
+GUEST_BONUS_LEDGER_WORKER_QUEUE_APPROVED_REWARDS="true"
+GUEST_BONUS_LEDGER_WORKER_REWARD_TYPES="BONUS,BONUS_POINTS,BONUS_BALANCE,LOYALTY_BONUS"
+# Только для контролируемой canary одной существующей записи:
+# GUEST_BONUS_LEDGER_WORKER_REWARD_ID="<uuid>"
 ```
+
+Одновременно задаётся ровно один `TENANT_ID` или `TENANT_SLUG`. Live tick
+fail-closed требует `WORKER_ENABLED=true`, `DRY_RUN=false` и
+`LANGAME_BONUS_ACCRUAL_ENABLED=true`. `CANARY=true` всегда принудительно
+ограничивает batch одной записью; exact `REWARD_ID` запрещён вне canary.
 
 ## Связь с игровым pipeline
 
@@ -60,7 +82,7 @@ GUEST_GAME_PIPELINE_SCHEDULER_TENANT_SLUG=""
 ```
 
 - `GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=true|false` явно переопределяет production default.
-- `GUEST_GAME_BONUS_LEDGER_SCHEDULER_QUEUE_APPROVED_REWARDS=true` не отменяет claim gate: один `APPROVED` недостаточен для reward с `claimRequired=true`.
+- `GUEST_BONUS_LEDGER_WORKER_QUEUE_APPROVED_REWARDS=true` не отменяет claim gate: один `APPROVED` недостаточен для reward с `claimRequired=true`.
 - Scheduler запускает `runSnapshotPipelineScheduled`, принимает только подготовленные факты и не допускает параллельных tick-ов.
 - При обработке используются только активные правила. Черновик с совпадающими условиями не должен подавлять активное правило.
 - Профиль допускается к прогрессу только после первого trusted `APP_OPEN`, сохранённого в `GuestGameProfile.gameActivatedAt`. Исторические факты до этой границы не создают wallet item.
@@ -82,31 +104,54 @@ GUEST_GAME_PIPELINE_SCHEDULER_TENANT_SLUG=""
 ## Безопасный запуск
 
 1. Проверить в Guest Game Hub, что `Langame write API` видит активный tenant-источник Langame и что пилотный scope имеет ровно одну готовую ledger-запись в runbook preflight. Для claim-required reward дополнительно проверить своевременный `deliveryRequestedAt` и wallet `PROCESSING/FAILED`.
-2. Оставить `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=true`, `LANGAME_BONUS_ACCRUAL_ENABLED=false`, `LIMIT=1`, `TENANT_SLUG` только для пилотной сети.
-3. Перезапустить API:
+2. Создать `/etc/leetplus/bonus-ledger-worker.env` как
+   `root:leetplus-api-runtime 0640`, оставить `DRY_RUN=true`, `CANARY=true`,
+   `LIMIT=1`, exact tenant и exact `REWARD_ID` одной non-staff записи.
+3. Проверить unit и выполнить dry-run без включения timer:
 
 ```bash
-sudo systemctl restart leetplus-api.service
-sudo journalctl -u leetplus-api.service -n 100 --no-pager
+sudo systemd-analyze verify /etc/systemd/system/leetplus-bonus-ledger-worker.service /etc/systemd/system/leetplus-bonus-ledger-worker.timer
+sudo systemctl start leetplus-bonus-ledger-worker.service
+sudo journalctl -u leetplus-bonus-ledger-worker.service -n 100 --no-pager
 ```
 
-4. В Guest Game Hub открыть `Готовность интеграций -> Автозапуск bonus ledger`. В runtime-деталях должны появиться последний запуск, результат и отсутствие overlap-skip ошибок.
-5. Для canary включить `LANGAME_BONUS_ACCRUAL_ENABLED=true`, оставить `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=true` и сначала выполнить ручной canary live dispatch из пилотного runbook Guest Game Hub. Ручной путь обязан пройти тот же claim gate; он не может отправить `WAITING_CLAIM`. Это проверяет ровно одну запись и не даёт scheduler случайно забрать лишний batch.
-6. После успешной сверки canary поставить `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=false`, оставить `LIMIT=1` на первый tick и снова проверить Guest Game Hub: confirmed ledger, wallet `CLAIMED`, `GuestBonusBalanceCurrent` и свежий `GuestBonusBalanceSnapshot`.
-7. После production-наблюдения увеличить `LIMIT` и убрать tenant scope только если все подключенные клубы имеют согласованные правила, Langame-ключи и политику бонусов.
+4. Для live canary поставить `DRY_RUN=false`, сохранив `CANARY=true`, `LIMIT=1`
+   и exact `REWARD_ID`; запустить service один раз. Проверить одну
+   `CONFIRMED` ledger-запись, reward `PAID`, wallet `CLAIMED`, balance before/
+   after и последующий Langame snapshot.
+5. Удалить `REWARD_ID`, поставить `CANARY=false`, задать bounded `LIMIT=50`,
+   ещё раз вручную запустить service и проверить агрегаты. Staff/test profile
+   при выключенном staff override должен перейти в безопасную отмену без
+   внешнего Langame write.
+6. Только после успешной сверки включить автономный контур:
 
-Для рабочего production-контура после canary рекомендуется `INTERVAL_MS=30000` и `LIMIT=50`: явный claim всё равно будит worker сразу, а 30-секундный tick подхватывает запись после рестарта или кратковременного overlap.
+```bash
+sudo systemctl enable --now leetplus-bonus-ledger-worker.timer
+systemctl list-timers leetplus-bonus-ledger-worker.timer --no-pager
+```
+
+7. После blue/green cutover проверить, что runner разрешает новый active SHA,
+   timer остаётся единственным владельцем и claimed pending backlog дренируется
+   без `FAILED`/`RECONCILIATION_REQUIRED`.
+
+Для рабочего production-контура timer фиксирован на 30 секунд, а рекомендуемый
+`LIMIT=50`. Tick подхватывает запись после рестарта; безопасные pre-dispatch
+ошибки используют существующие bounded retries. Неоднозначный provider result
+по-прежнему останавливается в `RECONCILIATION_REQUIRED` и никогда не
+повторяется автоматически.
 
 ## Откат
 
-- Мгновенно остановить автономную обработку: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false`, затем `sudo systemctl restart leetplus-api.service`.
-- Оставить scheduler для наблюдения, но запретить запись: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=true`.
+- Мгновенно остановить автономную обработку: `sudo systemctl disable --now leetplus-bonus-ledger-worker.timer`.
+- Оставить worker для наблюдения, но запретить запись: `GUEST_BONUS_LEDGER_WORKER_DRY_RUN=true`; затем запускать oneshot вручную.
 - Запретить сам Langame write, даже если scheduler включен: `LANGAME_BONUS_ACCRUAL_ENABLED=false`.
 - До принятого claim `WAITING_CLAIM` можно безопасно закрыть истечением wallet item. После принятия claim нельзя вручную отменять или менять связанный reward, пока `PROCESSING/FAILED` не завершён подтверждённо. `RECONCILIATION_REQUIRED` не возвращать в обычный retry.
 
 ## Проверка после запуска
 
-- Readiness `BONUS_LEDGER_SCHEDULER` должен стать `READY` только при `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN=false` и `LANGAME_BONUS_ACCRUAL_ENABLED=true`.
-- Runtime-детали должны показывать агрегаты, а не персональные данные.
+- `leetplus-bonus-ledger-worker.timer` должен быть `active (waiting)`, последний
+  `leetplus-bonus-ledger-worker.service` — завершаться успешно, а journal —
+  содержать только агрегаты без телефонов, токенов и provider payload.
+- В обоих blue/green API встроенный bonus-ledger scheduler остаётся выключен.
 - Canary считается готовым только после confirmed положительной `bonus_balance` операции, wallet `CLAIMED` и сверки `balanceAfter` с последующим Langame snapshot.
 - Fault-injection `внешний write применился, ответ потерян` должен доказать: состояние `RECONCILIATION_REQUIRED`, отсутствие `nextAttemptAt` и отсутствие второго POST на следующем scheduler tick.

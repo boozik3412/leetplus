@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (30.08.2026)
+## Canonical current-state guardrail (31.08.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -9,15 +9,22 @@ workers или deployment обязательно прочитать
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
 Текущий runtime implementation baseline — merge SHA
-`4036d312b5760e9daf292e416288d68949419aaa` (PR #88 поверх PR #87).
-Fast CI `33309468458` и Full Release Admission `33309468461` зелёные на exact
+`a130c13e8d694b605d86a924b1524a6174ae1b51` (PR #90 + #91 поверх PR #88).
+Fast CI `33330505183` и Full Release Admission `33330505182` зелёные на exact
 merge SHA. В source реализованы отдельные
 `CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
 pools. Split systemd/nginx candidate остаётся `DORMANT / NOT INSTALLED`, а
 production продолжает работать в `COMBINED`. Фактический active runtime —
-blue exact `4036d312…`, cutover generation 15; schema — exact `CURRENT_188`,
-bridge `OFF`, bug reporting `LIVE`. Hot rollback green — `d8c97649…`; оба slot
+green exact `a130c13e…`, cutover generation 16; schema — exact `CURRENT_188`,
+bridge `OFF`, bug reporting `LIVE`. Hot rollback blue — `4036d312…`; оба slot
 остаются active и проходят exact CURRENT188 readiness.
+
+Checklist review repair 31.08.2026 устранил ложный `400 Invalid attachment
+references` для старых run: review/cancel transition больше не повторяет write
+snapshot `answers` и derived score/evidence, а stale клиент принудительно
+обрабатывается API как status-only. Строгая attachment validation для
+редактирования/отправки ответов не менялась; historical absolute URLs и
+`QUARANTINED` bindings не мигрировались, run не принимались автоматически.
 
 Production UI/state repair 30.08.2026 исключил подстановочный onboarding из
 Battle Pass: сезон показывается гостю только при наличии реально активного и
@@ -102,7 +109,7 @@ Production HTTP/DB/ACL/guard QA прошёл; синтетический тик�
 - A domain-scoped, idempotent identity resolver refreshes stale Langame links from the verified guest identity during authentication and synchronization. Ambiguous matches fail closed instead of binding a profile to the wrong guest.
 - Check-in streak progress is based on unique club-local calendar dates and resets after a missed date. Reward-only `REWARD_TEMPLATE` loot boxes are excluded from the standalone catalog.
 - Product categories keep separate `LANGAME` and `LEETPLUS` identities. Exact tariff dictionaries remain blocked by readiness checks until a reliable structured source is available.
-- The production snapshot at documentation time is exact release `6ec3a5f18cf4448b0460efee266254908bbef1a1`, active blue generation 13; admitted API/Web are aligned and both blue and rollback green services remain active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
+- The production snapshot at documentation time is exact release `a130c13e8d694b605d86a924b1524a6174ae1b51`, active green generation 16; admitted API/Web are aligned and both green and rollback blue services remain active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
 - The LIVE-primary purchase pipeline now reserves bounded scheduler capacity for `PRODUCT_EXPENSE`, drains eligible pending external purchase facts beyond the newest 30-row window, and prioritizes facts that match active category missions. A positive guest-bound device-rental expense can qualify like any other mapped product expense; it is not rejected merely because the business calls it a service. Stable sale identity, cancellation, return and supersede handling remain required before enabling a Ledger purchase fallback.
 - Purchase missions support `ANY_PRODUCT`, exact products, or explicitly sourced categories, plus ANY/ALL selection and per-purchase/cumulative amount thresholds. Guest-facing conditions list the selected categories and omit the internal completion-window value.
 - Mission and loot-box editors expose `maxPendingRewards` (`Максимальное количество накопленных наград для получения`). The default for newly created and migrated existing elements is `1`; an explicit operator value is preserved. The guard counts pending ordinary rewards and unconsumed entitlements from the same source and blocks only a new qualification, not an already-earned claim/open.

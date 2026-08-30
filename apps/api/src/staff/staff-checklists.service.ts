@@ -1130,15 +1130,19 @@ export class StaffChecklistsService {
         where: { id: current.id },
         data: {
           status: nextStatus,
-          answers,
-          scoreTotal: metrics.scoreTotal,
-          scoreEarned: metrics.scoreEarned,
-          requiredItemsTotal: metrics.requiredItemsTotal,
-          requiredItemsDone: metrics.requiredItemsDone,
-          evidenceTotal: metrics.evidenceTotal,
-          evidenceDone: metrics.evidenceDone,
-          failedItems: metrics.failedItems,
-          blockingIssues: metrics.blockingIssues,
+          ...(shouldUpdateAnswers
+            ? {
+                answers,
+                scoreTotal: metrics.scoreTotal,
+                scoreEarned: metrics.scoreEarned,
+                requiredItemsTotal: metrics.requiredItemsTotal,
+                requiredItemsDone: metrics.requiredItemsDone,
+                evidenceTotal: metrics.evidenceTotal,
+                evidenceDone: metrics.evidenceDone,
+                failedItems: metrics.failedItems,
+                blockingIssues: metrics.blockingIssues,
+              }
+            : {}),
           reviewComment: normalizedReviewComment,
           startedAt:
             current.startedAt ??

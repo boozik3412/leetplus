@@ -196,7 +196,7 @@ describe('Staff checklist review decisions', () => {
       where: { id: string };
       data: {
         status: string;
-        answers: Array<{
+        answers?: Array<{
           itemId: string;
           note: string | null;
           evidenceUrl: string | null;
@@ -205,14 +205,7 @@ describe('Staff checklist review decisions', () => {
     };
     expect(updateInput.where).toEqual({ id: runId });
     expect(updateInput.data.status).toBe('ACCEPTED');
-    expect(updateInput.data.answers).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          itemId: 'item-1',
-          note: 'Ответ сотрудника',
-          evidenceUrl: legacyUrl,
-        }),
-      ]),
-    );
+    expect('answers' in updateInput.data).toBe(false);
+    expect('scoreEarned' in updateInput.data).toBe(false);
   });
 });

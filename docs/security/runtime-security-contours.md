@@ -22,6 +22,7 @@ fail-closed правилу одного контура снова сломать
 | Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33330505183) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33330505182) — `SUCCESS` |
 | Production API topology  | active green exact `a130c13e…`, generation 16, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `4036d312…`, оба slot active                      |
 | Source repair candidate  | guest bug-report input repair: 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair` (`CURRENT_189`); **не deployed** |
+| Corporate invite repair  | `STANDARDS_MANAGER` может делегировать canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides и custom permissions остаются capability-bounded; **не deployed** |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `a130c13e…`; real-account canary остаётся отдельной проверкой                                                                                 |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
@@ -316,6 +317,25 @@ boundaries.
   cross-tenant доступа.
 - Сохранённая platform-admin сессия не является tenant-контекстом. Tenant
   выбирается явно и подписывается.
+
+### Делегирование учётных записей сотрудникам
+
+- `/users/invites*` принадлежит corporate tenant contour и всегда требует
+  corporate JWT, exact tenant identity и свежий store scope.
+- Матрица системных ролей является отдельной authority boundary. Для
+  `STANDARDS_MANAGER` canonical роли `SENIOR_ADMINISTRATOR` и
+  `CLUB_ADMINISTRATOR` разрешены как прямой рабочий процесс подбора
+  администраторов, даже если штатная роль получателя содержит capability,
+  которой нет у самого менеджера по стандартам.
+- Это исключение действует только для неизменённого canonical system role.
+  Tenant role override и custom role по-прежнему должны целиком помещаться в
+  capability envelope инициатора.
+- `STORES` scope приглашения обязан быть непустым подмножеством свежего scope
+  инициатора. Делегирование `NETWORK`, чужого клуба, `OWNER`, platform role или
+  более широкой системной роли этим правилом не разрешается.
+- Source repair 31.08.2026 не меняет capabilities самого
+  `STANDARDS_MANAGER`, public guest contour, worker identities или схему БД и
+  не считается deployed до exact-SHA admission и отдельного rollout.
 
 ## Game administration и background jobs
 

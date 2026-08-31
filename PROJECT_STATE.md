@@ -29,6 +29,14 @@ Source repair candidate 31.08.2026 переводит следующий canonic
 сохранены. Dormant noncanonical employee-invite proposal с логическим ярлыком
 CURRENT189 не активирован и перед будущей promotion требует rebase/refreeze.
 
+Corporate invite source repair 31.08.2026 возвращает прямой рабочий процесс
+менеджера по стандартам: canonical `CLUB_ADMINISTRATOR` и
+`SENIOR_ADMINISTRATOR` можно приглашать только в непустое подмножество свежего
+store scope инициатора. Это не выдаёт менеджеру игровые capabilities
+администраторов. Tenant role overrides и custom roles сохраняют полный
+capability-subset guard; чужой клуб, `NETWORK`, broad `CLUB_MANAGER`, `OWNER`
+и platform authority остаются fail-closed. Production пока не изменён.
+
 Release admission для source candidate больше не дублирует migration head и
 count вручную: provenance вычисляется из уже скопированного в immutable artifact
 набора `prisma/migrations`, после чего независимый verifier повторно сверяет оба

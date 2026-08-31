@@ -45,6 +45,13 @@ const storeActor = {
   allowedStoreIds: ['a1', 'a2'],
 } satisfies AuthenticatedUser;
 
+const storeStandardsManagerActor = {
+  ...storeActor,
+  id: 'standards-manager-a1-a2',
+  email: 'standards-manager@example.test',
+  role: UserRole.STANDARDS_MANAGER,
+} satisfies AuthenticatedUser;
+
 const networkAdminActor = {
   ...storeActor,
   id: 'network-admin',
@@ -509,6 +516,83 @@ describe('UsersService AccessScope boundary', () => {
         storeIds: ['a3'],
       }),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it.each([
+    ['club administrator', UserRole.CLUB_ADMINISTRATOR],
+    ['senior administrator', UserRole.SENIOR_ADMINISTRATOR],
+  ])(
+    'allows a store-scoped standards manager to invite a %s inside the exact club scope',
+    async (_label, role) => {
+      const { prisma, service } = createService({});
+
+      await expect(
+        service.createInvite(storeStandardsManagerActor, {
+          email: `${role.toLowerCase()}@example.test`,
+          role,
+          scope: 'STORES',
+          storeIds: ['a1'],
+        }),
+      ).resolves.toMatchObject({
+        role,
+        scope: 'STORES',
+        stores: [{ id: 'a1' }],
+      });
+      const createCall = firstMockArgument<{
+        data: Record<string, unknown>;
+      }>(prisma.userInvite.create);
+      expect(createCall.data).toMatchObject({
+        role,
+        accessScope: 'STORES',
+        storeIds: ['a1'],
+        createdByUserId: storeStandardsManagerActor.id,
+      });
+    },
+  );
+
+  it('does not allow a standards manager to invite an administrator outside the exact club scope', async () => {
+    const { prisma, service } = createService({});
+
+    await expect(
+      service.createInvite(storeStandardsManagerActor, {
+        email: 'outside-scope@example.test',
+        role: UserRole.CLUB_ADMINISTRATOR,
+        scope: 'STORES',
+        storeIds: ['a3'],
+      }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.userInvite.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps tenant role overrides outside a standards manager capability envelope fail-closed', async () => {
+    const { prisma, service } = createService({});
+    prisma.userRoleOverride.findUnique.mockResolvedValueOnce({
+      permissions: ['view_marketing'],
+    });
+
+    await expect(
+      service.createInvite(storeStandardsManagerActor, {
+        email: 'overridden-administrator@example.test',
+        role: UserRole.CLUB_ADMINISTRATOR,
+        scope: 'STORES',
+        storeIds: ['a1'],
+      }),
+    ).rejects.toThrow('You cannot grant permissions outside your access scope');
+    expect(prisma.userInvite.create).not.toHaveBeenCalled();
+  });
+
+  it('does not turn standards recruitment into broad club-manager delegation', async () => {
+    const { prisma, service } = createService({});
+
+    await expect(
+      service.createInvite(storeStandardsManagerActor, {
+        email: 'club-manager@example.test',
+        role: UserRole.CLUB_MANAGER,
+        scope: 'STORES',
+        storeIds: ['a1'],
+      }),
+    ).rejects.toThrow('You cannot grant permissions outside your access scope');
+    expect(prisma.userInvite.create).not.toHaveBeenCalled();
   });
 
   it.each([

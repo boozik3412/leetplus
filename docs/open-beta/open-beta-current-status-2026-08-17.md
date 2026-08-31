@@ -15,6 +15,24 @@
 | Offline/USB key      | исключён из beta critical path                                                                                                   |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                               |
 
+## Standards-manager invite delegation repair candidate (31.08.2026)
+
+Локализована причина ошибки `You cannot grant permissions outside your access
+scope`: матрица ролей уже разрешала `STANDARDS_MANAGER` создавать
+`CLUB_ADMINISTRATOR` и `SENIOR_ADMINISTRATOR`, но общий capability guard
+повторно сравнивал весь canonical набор прав получателя с личными правами
+инициатора. После появления у администраторских ролей отдельного игрового
+capability штатный процесс подбора администраторов стал fail-closed.
+
+Source repair разделяет две границы. Неизменённые canonical роли
+`CLUB_ADMINISTRATOR` и `SENIOR_ADMINISTRATOR` делегируются менеджером по
+стандартам по явной матрице ролей; tenant overrides и custom roles по-прежнему
+проходят полный capability-subset guard. Fresh scope остаётся обязательным:
+приглашение можно создать только для непустого подмножества клубов инициатора,
+а чужой клуб, `NETWORK`, broad `CLUB_MANAGER`, `OWNER` и platform authority не
+разрешены. Focused regression покрывает обе разрешённые роли и все эти
+отрицательные границы. Production этим изменением пока не затронут.
+
 ## Guest bug-report input repair candidate (31.08.2026)
 
 Source candidate снижает минимальное описание обращения с 30 до 20 символов и

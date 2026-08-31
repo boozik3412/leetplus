@@ -25,9 +25,9 @@ const SOURCE_ROLLED_BACK_MIGRATION_MANIFEST_DIGEST =
 const FINAL_MIGRATION_COUNT = 187;
 const FINAL_MIGRATION_HEAD =
   "20260820010000_guest_portal_telegram_update_ledger";
-const CURRENT_SOURCE_MIGRATION_COUNT = 188;
+const CURRENT_SOURCE_MIGRATION_COUNT = 189;
 const CURRENT_SOURCE_MIGRATION_HEAD =
-  "20260828190000_guest_support_bug_reports";
+  "20260831120000_guest_support_bug_report_input_repair";
 const FINAL_PRETERMINAL_MANIFEST_DIGEST =
   "094f3ad34ef8846f6088f51d5fb9491ff89af4509b60063453c22af07466d99b";
 const FINAL_WORKER_FUNCTION_DIGEST =
@@ -810,7 +810,8 @@ export async function createFounderPilotProductionHistoryPgAdapter(
                 WHERE migration."migration_name" NOT IN (
                   '20260819010000_staff_attachment_parent_delete_guard',
                   '20260820010000_guest_portal_telegram_update_ledger',
-                  '20260828190000_guest_support_bug_reports'
+                  '20260828190000_guest_support_bug_reports',
+                  '20260831120000_guest_support_bug_report_input_repair'
                 )
               ) || E'\\n',
               'UTF8'

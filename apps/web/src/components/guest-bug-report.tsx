@@ -6,6 +6,9 @@ import { createPortal } from "react-dom";
 import type { GuestPortalGameSummary } from "@/lib/guest-portal";
 import styles from "./guest-bug-report.module.css";
 
+const MIN_DESCRIPTION_LENGTH = 20;
+const MAX_DESCRIPTION_LENGTH = 2000;
+
 type BugReportResponse = {
   ticketNumber: string;
   createdAt: string;
@@ -124,10 +127,12 @@ export function GuestBugReportButton({
       return;
     }
     if (
-      normalizedDescription.length < 30 ||
-      normalizedDescription.length > 2000
+      normalizedDescription.length < MIN_DESCRIPTION_LENGTH ||
+      normalizedDescription.length > MAX_DESCRIPTION_LENGTH
     ) {
-      setError("Описание должно содержать от 30 до 2000 символов.");
+      setError(
+        `Описание должно содержать от ${MIN_DESCRIPTION_LENGTH} до ${MAX_DESCRIPTION_LENGTH} символов.`,
+      );
       return;
     }
 
@@ -256,8 +261,8 @@ export function GuestBugReportButton({
                       <span>Описание</span>
                       <textarea
                         value={description}
-                        minLength={30}
-                        maxLength={2000}
+                        minLength={MIN_DESCRIPTION_LENGTH}
+                        maxLength={MAX_DESCRIPTION_LENGTH}
                         required
                         placeholder="Что вы делали, что ожидали увидеть и что произошло?"
                         onChange={(event) => setDescription(event.target.value)}

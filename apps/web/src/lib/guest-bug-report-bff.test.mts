@@ -37,8 +37,9 @@ test("renders the server-owned incident topics and bounded image input", async (
 
   assert.match(component, /configuration\.topics\.map/);
   assert.match(component, /configuration\.maxAttachmentBytes/);
-  assert.match(component, /minLength=\{30\}/);
-  assert.match(component, /maxLength=\{2000\}/);
+  assert.match(component, /const MIN_DESCRIPTION_LENGTH = 20/);
+  assert.match(component, /minLength=\{MIN_DESCRIPTION_LENGTH\}/);
+  assert.match(component, /maxLength=\{MAX_DESCRIPTION_LENGTH\}/);
   assert.match(component, /accept="image\/jpeg,image\/png,image\/webp"/);
   assert.match(component, /createPortal\(/);
   assert.match(component, /document\.body/);

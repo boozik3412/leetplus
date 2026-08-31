@@ -557,7 +557,7 @@ const ALL_RUNTIME_FUNCTIONS = Object.freeze([
 assert.equal(
   ALL_RUNTIME_FUNCTIONS.length,
   58,
-  "Runtime enrollment must inspect exactly 58 CURRENT_188 function contracts.",
+  "Runtime enrollment must inspect exactly 58 CURRENT_189 function contracts.",
 );
 assert.equal(
   new Set(ALL_RUNTIME_FUNCTIONS.map(({ catalogSignature }) => catalogSignature))

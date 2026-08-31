@@ -4,7 +4,7 @@
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                     |
 | Production runtime   | healthy; active green `a130c13e…`, generation 16, `COMBINED`, bridge OFF, bug reporting LIVE                                      |
-| Prisma schema        | source и production exact `CURRENT_188`                                                                                          |
+| Prisma schema        | production exact `CURRENT_188`; source repair candidate `CURRENT_189` не deployed                                                 |
 | Release authority    | exact SHA `a130c13e…`: Fast CI `33330505183`, Full Release Admission `33330505182`, immutable handoff и generation 16 receipt     |
 | Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                  |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                 |
@@ -14,6 +14,28 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                    |
 | Offline/USB key      | исключён из beta critical path                                                                                                   |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                               |
+
+## Guest bug-report input repair candidate (31.08.2026)
+
+Source candidate снижает минимальное описание обращения с 30 до 20 символов и
+исправляет ложный `Too many parts` для канонической формы с пятью служебными
+полями и одним JPG/PNG/WebP. Allowlist и независимые пределы не ослаблены:
+`fields=5`, `files=1`, `fileSize=5 MiB`, `fieldSize=4 KiB`; только exclusive
+Busboy `parts` cap исправлен на `7`.
+
+Новая additive migration
+`20260831120000_guest_support_bug_report_input_repair` меняет только длину
+description check на `20..2000` и переводит exact worker readiness на 189-й
+head. Локально прошли API multipart/boundary tests, focused API, runtime
+boundary, Prisma validation/typecheck, Web boundary/lint/build и current-head
+operational gates. Фактический production не менялся: active runtime остаётся
+`a130c13e…`, generation 16, schema CURRENT_188, reporting LIVE. До exact-SHA
+CI/admission, restored-copy rehearsal и контролируемого schema/application
+cutover этот repair нельзя считать доступным пользователям.
+
+Существующий dormant/noncanonical employee-invite proposal с логическим
+названием CURRENT189 этим изменением не активируется. Его будущая canonical
+promotion требует rebase/refreeze поверх фактического нового head.
 
 ## Checklist review production rollout (31.08.2026)
 

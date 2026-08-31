@@ -21,6 +21,7 @@ fail-closed правилу одного контура снова сломать
 | Runtime implementation   | Checklist status-only review boundary слита PR [#90](https://github.com/boozik3412/leetplus/pull/90) и [#91](https://github.com/boozik3412/leetplus/pull/91), merge SHA `a130c13e8d694b605d86a924b1524a6174ae1b51` |
 | Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33330505183) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33330505182) — `SUCCESS` |
 | Production API topology  | active green exact `a130c13e…`, generation 16, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `4036d312…`, оба slot active                      |
+| Source repair candidate  | guest bug-report input repair: 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair` (`CURRENT_189`); **не deployed** |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `a130c13e…`; real-account canary остаётся отдельной проверкой                                                                                 |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
@@ -28,6 +29,15 @@ fail-closed правилу одного контура снова сломать
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
 зелёный CI не доказывают production deployment. Фактический production runtime,
 env, systemd, nginx и database roles проверяются отдельно.
+
+Source repair CURRENT_189 не смешивает контуры: Web отправляет bug-report через
+same-origin guest BFF, GuestRuntime принимает только guest JWT и bounded
+multipart, а tenant/platform очереди остаются в CorporateRuntime. Изменение
+exclusive `parts` cap с 6 на 7 не расширяет allowlist: `fields=5`, `files=1`,
+тип, сигнатура и размер файла продолжают проверяться отдельно. Production
+остаётся exact CURRENT_188 до отдельного admitted rollout. Дормантный
+noncanonical employee-invite proposal с логическим ярлыком CURRENT189 не
+активируется этим repair и требует будущего rebase/refreeze.
 
 ## Три независимых контура
 

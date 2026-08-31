@@ -42,7 +42,7 @@ import {
   type GuestPortalUserCallConfirmResponse,
 } from './guest-portal.service';
 import {
-  GUEST_BUG_REPORT_MAX_BYTES,
+  GUEST_BUG_REPORT_MULTIPART_LIMITS,
   type GuestBugReportInput,
   type GuestBugReportResponse,
   type GuestBugReportUploadFile,
@@ -200,13 +200,7 @@ export class GuestPortalController {
   @Post('session/support/bug-reports')
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: {
-        fileSize: GUEST_BUG_REPORT_MAX_BYTES,
-        files: 1,
-        fields: 5,
-        fieldSize: 4 * 1024,
-        parts: 6,
-      },
+      limits: GUEST_BUG_REPORT_MULTIPART_LIMITS,
     }),
   )
   createBugReport(

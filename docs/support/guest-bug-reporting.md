@@ -1,16 +1,16 @@
 # Сообщения о проблемах из игрового модуля
 
-Статус: **production LIVE; code default OFF**
+Статус: **production LIVE на CURRENT_188; source repair candidate CURRENT_189**
 
-Актуально на: **29.08.2026**
+Актуально на: **31.08.2026**
 
-Фактический production state: active blue
-`fdf97624674112858dc7303dcee33c8acb7041e2`, cutover generation 11, exact
+Фактический production state: active green
+`a130c13e8d694b605d86a924b1524a6174ae1b51`, cutover generation 16, exact
 `CURRENT_188`, `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
-`GUEST_BUG_REPORTING_MODE=LIVE`. Rollback green `cc4d1c59…` работает на
-exact CURRENT188 с `OFF/OFF`. Серверный HTTP/DB/ACL/guard QA прошёл; первый
-signed-in guest canary должен использовать реальную гостевую сессию, а не
-синтетическую вставку в support tables.
+`GUEST_BUG_REPORTING_MODE=LIVE`. Source repair ещё не развёрнут: production
+форма по-прежнему требует 30 символов и multipart envelope с файлом может
+получить `Too many parts`. Наличие repair-кода или зелёных локальных тестов не
+означает production deployment.
 
 ## Назначение
 
@@ -47,7 +47,7 @@ runtime сохраняет оба логических периметра до �
 - интерфейс и отображение;
 - другое.
 
-Описание содержит 30–2000 символов. Сервер добавляет только ограниченную
+Описание содержит 20–2000 символов. Сервер добавляет только ограниченную
 диагностику: tenant/store/profile identity, masked guest reference, текущий
 route без query string, release SHA, класс браузера/устройства, viewport и
 timezone. Raw phone, guest JWT, corporate JWT, cookies, provider payloads и
@@ -57,6 +57,9 @@ secrets не сохраняются.
 
 - не более одного файла и 5 MiB;
 - только JPG, PNG или WebP;
+- multipart envelope содержит не более пяти allowlisted текстовых полей и
+  одного файла; Busboy `parts` использует отдельный exclusive cap `7`, поэтому
+  канонические `5 fields + 1 file` не блокируются как `Too many parts`;
 - заявленный MIME обязан совпасть с сигнатурой bytes;
 - выполняется структурная проверка и удаление EXIF/text/XMP metadata;
 - сохраняются canonical bytes, размер и SHA-256;
@@ -94,7 +97,28 @@ cutover до создания durable intent.
 ledger. Tenant API всегда добавляет `tenantId` в read/update/comment/download;
 несуществующий или cross-tenant объект возвращается как not found.
 
-## Миграция и включение
+## Source repair CURRENT_189
+
+Additive migration:
+`20260831120000_guest_support_bug_report_input_repair` (`CURRENT_189`, 189
+applied после rollout). Она только ослабляет check длины описания с `30..2000`
+до `20..2000` и перевыпускает fail-closed identity-mail worker receipt на exact
+новый head. Существующие обращения не переписываются и не удаляются.
+
+API и Web используют одну и ту же границу `20..2000`; controller сохраняет
+независимые limits `files=1`, `fields=5`, `fileSize=5 MiB`, `fieldSize=4 KiB` и
+`parts=7`. Регрессионный HTTP test обязан принимать ровно пять полей плюс JPG и
+отвергать шестое текстовое поле. Database check отдельно принимает 20 символов
+и отвергает 19.
+
+Production остаётся на `CURRENT_188` до exact-SHA CI/admission, rehearsal на
+копии production, отдельного контролируемого schema upgrade и обычного
+blue/green cutover. Дормантный noncanonical proposal, исторически помеченный
+как `CURRENT189 employee invite`, этим repair не активируется и перед любой
+будущей canonical promotion должен быть заново rebased/refrozen относительно
+фактического head.
+
+## Историческое включение CURRENT_188
 
 Additive migration:
 `20260828190000_guest_support_bug_reports` (`CURRENT_188`, 188 applied).

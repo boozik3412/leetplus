@@ -19,6 +19,16 @@ green exact `a130c13e…`, cutover generation 16; schema — exact `CURRENT_188`
 bridge `OFF`, bug reporting `LIVE`. Hot rollback blue — `4036d312…`; оба slot
 остаются active и проходят exact CURRENT188 readiness.
 
+Source repair candidate 31.08.2026 переводит следующий canonical head в
+`CURRENT_189` миграцией
+`20260831120000_guest_support_bug_report_input_repair`, но **production не
+изменён**. Кандидат синхронно снижает guest bug-report description minimum до
+20 символов в Web/API/DB и исправляет multipart exclusive cap: канонические
+пять allowlisted полей плюс один файл проходят при `parts=7`, тогда как
+`fields=5`, `files=1`, 5 MiB, signature/MIME sanitation и abuse guards
+сохранены. Dormant noncanonical employee-invite proposal с логическим ярлыком
+CURRENT189 не активирован и перед будущей promotion требует rebase/refreeze.
+
 Checklist review repair 31.08.2026 устранил ложный `400 Invalid attachment
 references` для старых run: review/cancel transition больше не повторяет write
 snapshot `answers` и derived score/evidence, а stale клиент принудительно

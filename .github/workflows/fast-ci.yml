@@ -418,6 +418,7 @@ jobs:
           pnpm --filter web test:users-roles-bff-boundary
           pnpm --filter web test:gate-1mt-staff-attachments-browser-boundary
           pnpm --filter web test:guest-session-transport
+          pnpm --filter web test:guest-bug-report
 
       - name: Lint, type-check and build Web
         run: |

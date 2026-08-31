@@ -932,6 +932,60 @@ export async function verifyGuestSupportCurrent189ProductionUpgradeFinal({
   }
 }
 
+export async function rehearseGuestSupportCurrent189ProductionUpgrade({
+  adapter,
+  artifactInspector = inspectArtifactAuthority,
+  executor,
+  manifest: rawManifest,
+  verifyArtifact = verifyCurrentReleaseArtifact,
+}) {
+  const manifest = normalizeGuestSupportCurrent189ProductionUpgradeManifest(rawManifest);
+  if (
+    !manifest.target.databaseName.startsWith("leetplus_restored_") ||
+    manifest.target.port === 5432 ||
+    manifest.target.socketDirectory === "/var/run/postgresql"
+  ) {
+    fail("CURRENT189_UPGRADE_REHEARSAL_TARGET_REQUIRED");
+  }
+  if (
+    typeof adapter?.inspect !== "function" ||
+    typeof artifactInspector !== "function" ||
+    typeof executor?.migrate !== "function"
+  ) {
+    fail("CURRENT189_UPGRADE_ADAPTER_INVALID");
+  }
+  const [artifactEvidence, rawSource] = await Promise.all([
+    artifactInspector(manifest, verifyArtifact),
+    adapter.inspect(),
+  ]);
+  const source = summarizeRawInventory(rawSource);
+  if (!exactSourceState(source, manifest)) {
+    fail("CURRENT189_UPGRADE_SOURCE_STATE_MISMATCH");
+  }
+  const result = await executor.migrate({
+    artifactRoot: manifest.release.artifactRoot,
+    source,
+    target: manifest.target,
+    timeoutSeconds: manifest.operation.timeoutSeconds,
+  });
+  if (!["AMBIGUOUS", "SUCCEEDED"].includes(result?.status)) {
+    fail("CURRENT189_UPGRADE_MIGRATION_FAILED");
+  }
+  const final = summarizeRawInventory(await adapter.inspect());
+  if (!exactFinalState(final, source, manifest)) {
+    fail("CURRENT189_UPGRADE_FINAL_DATABASE_STATE_NOT_REACHED");
+  }
+  return Object.freeze({
+    artifactEvidenceDigest: artifactEvidenceDigest(artifactEvidence),
+    contractVersion: GUEST_SUPPORT_CURRENT189_PRODUCTION_UPGRADE_CONTRACT,
+    databaseEvidenceDigest: databaseEvidenceDigest(final),
+    decision: "CURRENT189_RESTORED_COPY_REHEARSAL_PASS",
+    migrationCount: final.migrationCount,
+    migrationHead: final.migrationHead,
+    recoveredFromLostResponse: result.status === "AMBIGUOUS",
+  });
+}
+
 function sqlLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }

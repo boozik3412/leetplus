@@ -7,6 +7,7 @@ import {
   applyGuestSupportCurrent189ProductionUpgradePlan,
   buildGuestSupportCurrent189ProductionUpgradePlan,
   inspectGuestSupportCurrent189ProductionUpgradeInventory,
+  rehearseGuestSupportCurrent189ProductionUpgrade,
   signGuestSupportCurrent189ProductionUpgradePlan,
   verifyGuestSupportCurrent189ProductionUpgradeFinal,
 } from "./guest-support-current189-production-upgrade.mjs";
@@ -393,4 +394,40 @@ test("rejects a final state that changes table ownership or ACL", async () => {
     { reasonCode: "CURRENT189_UPGRADE_FINAL_DATABASE_STATE_NOT_REACHED" },
   );
   assert.equal(fixture.runtime.locks(), 0);
+});
+
+test("rehearses the exact executor only on an isolated restored-copy target", async () => {
+  const fixture = await planFixture();
+  await assert.rejects(
+    rehearseGuestSupportCurrent189ProductionUpgrade({
+      adapter: fixture.adapter,
+      artifactInspector: fixture.artifactInspector,
+      executor: { migrate: async () => ({ status: "SUCCEEDED" }) },
+      manifest: fixture.manifest,
+    }),
+    { reasonCode: "CURRENT189_UPGRADE_REHEARSAL_TARGET_REQUIRED" },
+  );
+  const restoredManifest = structuredClone(fixture.manifest);
+  restoredManifest.target.databaseName = "leetplus_restored_current189_test";
+  restoredManifest.target.port = 55488;
+  restoredManifest.target.socketDirectory = "/srv/leetplus/restored-current189-test/socket";
+  const restoredAdapter = {
+    inspect: async () => ({
+      ...(await fixture.adapter.inspect()),
+      databaseName: restoredManifest.target.databaseName,
+    }),
+  };
+  const result = await rehearseGuestSupportCurrent189ProductionUpgrade({
+    adapter: restoredAdapter,
+    artifactInspector: fixture.artifactInspector,
+    executor: {
+      migrate: async () => {
+        fixture.makeTarget();
+        return { status: "SUCCEEDED" };
+      },
+    },
+    manifest: restoredManifest,
+  });
+  assert.equal(result.decision, "CURRENT189_RESTORED_COPY_REHEARSAL_PASS");
+  assert.equal(result.migrationCount, 189);
 });

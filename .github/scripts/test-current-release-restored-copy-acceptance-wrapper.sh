@@ -1236,6 +1236,9 @@ log_path="${fixture_root}/systemd-argv.log"
 wrapper_output="${fixture_root}/wrapper.out"
 mkdir -p "$artifact_root/packages/database" "$credential_root" "$evidence_root" \
   "$control_root" "$cgroup_root" "$proc_root" "$bin_root"
+mkdir -p "$artifact_root/apps/web/.next/build/chunks"
+printf 'standard-next-build-chunk\n' \
+  > "$artifact_root/apps/web/.next/build/chunks/[root-of-the-server]__fixture._.js"
 chmod 0700 "$fixture_root" "$release_root" "$artifact_root" \
   "$artifact_root/packages" "$artifact_root/packages/database" \
   "$credential_root" "$control_root" "$cgroup_root" "$proc_root" "$bin_root"

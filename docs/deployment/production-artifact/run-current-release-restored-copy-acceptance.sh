@@ -505,7 +505,7 @@ validate_hash_manifest() {
   local manifest="$1" forbidden_basename="$2"
   awk -v forbidden="./${forbidden_basename}" '
     NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ ||
-    $2 !~ /^\.\/[A-Za-z0-9_.@+\/-]+$/ ||
+    $2 !~ /^\.\/[A-Za-z0-9_.@+\[\]\/-]+$/ ||
     $2 ~ /\/\.\.?($|\/)/ || $2 ~ /\/\// || $2 == forbidden { exit 1 }
     seen[$2]++ > 0 { exit 1 }
     { print $2 }

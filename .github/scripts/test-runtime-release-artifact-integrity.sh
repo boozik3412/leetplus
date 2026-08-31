@@ -34,6 +34,8 @@ readonly OPERATIONAL_SCRIPTS=(
   founder-pilot-production-history-rehearsal.mjs
   founder-pilot-restored-copy-preflight.cli.mjs
   founder-pilot-restored-copy-preflight.mjs
+  guest-support-current189-production-upgrade.cli.mjs
+  guest-support-current189-production-upgrade.mjs
   identity-mail-worker-enrollment.cli.mjs
   identity-mail-worker-enrollment.mjs
   run-current-release-restored-copy-acceptance.sh

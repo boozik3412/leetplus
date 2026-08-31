@@ -28,6 +28,8 @@ const EXPECTED_OPERATIONAL_SCRIPTS = [
   "packages/database/scripts/founder-pilot-production-history-rehearsal.mjs",
   "packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs",
   "packages/database/scripts/founder-pilot-restored-copy-preflight.mjs",
+  "packages/database/scripts/guest-support-current189-production-upgrade.cli.mjs",
+  "packages/database/scripts/guest-support-current189-production-upgrade.mjs",
   "packages/database/scripts/identity-mail-worker-enrollment.cli.mjs",
   "packages/database/scripts/identity-mail-worker-enrollment.mjs",
   "packages/database/scripts/run-current-release-restored-copy-acceptance.sh",

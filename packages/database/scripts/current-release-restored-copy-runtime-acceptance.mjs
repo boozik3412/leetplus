@@ -1324,13 +1324,15 @@ export async function verifyCurrentReleaseArtifact({
   if (
     !hydrationReceipt.endsWith("\n") ||
     hydrationReceipt.includes("\r") ||
-    hydrationLines.length !== 6 ||
+    hydrationLines.length !== 8 ||
     expectedHydrationReceipt.some(
       (line, index) => hydrationLines[index] !== line,
     ) ||
     !/^INVOCATION_ID=[0-9a-f]{32}$/u.test(hydrationLines[3]) ||
     !/^PNPM_STORE_LOCKFILE_SHA256=[0-9a-f]{64}$/u.test(hydrationLines[4]) ||
-    hydrationLines[5] !== ""
+    !/^PNPM_STORE_MANIFEST_SHA256=[0-9a-f]{64}$/u.test(hydrationLines[5]) ||
+    !/^PNPM_STORE_RECEIPT_SHA256=[0-9a-f]{64}$/u.test(hydrationLines[6]) ||
+    hydrationLines[7] !== ""
   ) {
     fail("CURRENT_RELEASE_ARTIFACT_HYDRATION_RECEIPT_INVALID");
   }

@@ -1406,6 +1406,10 @@ if [[ "${1:-}" == show ]]; then
     reloading) active_state=reloading; sub_state=reload; main_pid=123 ;;
     *) exit 64 ;;
   esac
+  if [[ -f "${control_root}/test-terminal-cgroup-collected" \
+    && ( "$state" == inactive || "$state" == failed ) ]]; then
+    control_group=''
+  fi
   if [[ -n "$control_group" ]]; then
     cgroup_directory="${cgroup_root}${control_group}"
     mkdir -p -- "$cgroup_directory"
@@ -2217,6 +2221,22 @@ grep -F -x 'CURRENT_RELEASE_RESTORED_COPY_RUNTIME_ACCEPTANCE=PASS' \
   && -f "${control_root}/writepass01.completion.json" \
   && "$(stat -c '%a' -- "${evidence_root}/writepass01/receipt.json")" == 440 ]] \
   || die 'verified reversible-write operation did not complete durably'
+
+# systemd may collect the empty cgroup of a loaded terminal transient unit
+# before the root controller observes it. The exact retained unit policy,
+# terminal state, MainPID=0 and global same-UID process drain remain required.
+collected_cgroup_arguments=("${base_arguments[@]}")
+collected_cgroup_arguments[1]=collectedcgroup01
+enable_fault terminal-cgroup-collected
+/usr/bin/bash -p "$WRAPPER" "${collected_cgroup_arguments[@]}" \
+  > "${fixture_root}/collected-cgroup.out"
+disable_fault terminal-cgroup-collected
+grep -F -x 'CURRENT_RELEASE_RESTORED_COPY_RUNTIME_ACCEPTANCE=PASS' \
+  "${fixture_root}/collected-cgroup.out" >/dev/null \
+  || die 'loaded terminal unit with a collected empty cgroup did not return PASS'
+[[ ! -e "$active_marker_path" \
+  && -f "${control_root}/collectedcgroup01.completion.json" ]] \
+  || die 'collected terminal cgroup operation did not complete durably'
 
 # A launch-attempt marker makes not-found ambiguous. It is retained until an
 # operator can prove the exact unit stopped and independently drain ports/DB.

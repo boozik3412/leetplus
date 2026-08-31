@@ -29,6 +29,14 @@ Source repair candidate 31.08.2026 переводит следующий canonic
 сохранены. Dormant noncanonical employee-invite proposal с логическим ярлыком
 CURRENT189 не активирован и перед будущей promotion требует rebase/refreeze.
 
+Corporate invite source repair 31.08.2026 возвращает прямой рабочий процесс
+менеджера по стандартам: canonical `CLUB_ADMINISTRATOR` и
+`SENIOR_ADMINISTRATOR` можно приглашать только в непустое подмножество свежего
+store scope инициатора. Это не выдаёт менеджеру игровые capabilities
+администраторов. Tenant role overrides и custom roles сохраняют полный
+capability-subset guard; чужой клуб, `NETWORK`, broad `CLUB_MANAGER`, `OWNER`
+и platform authority остаются fail-closed. Production пока не изменён.
+
 Checklist review repair 31.08.2026 устранил ложный `400 Invalid attachment
 references` для старых run: review/cancel transition больше не повторяет write
 snapshot `answers` и derived score/evidence, а stale клиент принудительно

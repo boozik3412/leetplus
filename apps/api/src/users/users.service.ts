@@ -82,6 +82,15 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
   [UserRole.TRAINEE]: [],
 };
 
+const canonicalRoleDelegationByActor: Partial<
+  Record<UserRole, readonly UserRole[]>
+> = {
+  [UserRole.STANDARDS_MANAGER]: [
+    UserRole.SENIOR_ADMINISTRATOR,
+    UserRole.CLUB_ADMINISTRATOR,
+  ],
+};
+
 const baseRoleOptions = [
   {
     role: UserRole.OWNER,
@@ -1433,12 +1442,24 @@ export class UsersService {
         permissions: true,
       },
     });
+
+    if (!roleOverride && this.canDelegateCanonicalSystemRole(actor, role)) {
+      return;
+    }
+
     this.assertCapabilitiesGrantable(
       actor,
       roleOverride
         ? resolveUserCapabilities({ role, roleOverride })
         : roleCapabilities[role],
     );
+  }
+
+  private canDelegateCanonicalSystemRole(
+    actor: AuthenticatedUser,
+    role: UserRole,
+  ) {
+    return Boolean(canonicalRoleDelegationByActor[actor.role]?.includes(role));
   }
 
   private assertCanAssignRole(actor: AuthenticatedUser, role: UserRole) {

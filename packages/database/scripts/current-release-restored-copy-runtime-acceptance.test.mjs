@@ -1117,6 +1117,10 @@ function currentReleaseDatabaseClient(identityOverrides = {}) {
         );
         assert.match(
           sql,
+          /ARRAY\(SELECT entity\.id::text FROM "StaffDisciplineRecord" entity\s+WHERE entity\."tenantId" = \$1 AND entity\.status = 'ACTIVE'/u,
+        );
+        assert.match(
+          sql,
           /AS "activeUserIds"/u,
         );
         assert.match(sql, /AS "disciplineUserIds"/u);

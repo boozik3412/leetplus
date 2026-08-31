@@ -70,6 +70,14 @@ employee selectors независимо от активности. Неакти�
 операций. Production runtime и данные этим source repair не меняются; до rollout
 обязательны новый exact-SHA admission и PASS на восстановленной копии.
 
+Следующая exact-SHA rehearsal также остановилась до production database effect:
+default `/staff/discipline` намеренно применяет `status=ACTIVE` и вернул 17
+активных записей, тогда как database oracle включил ещё 6 исторических
+`RESET`. Acceptance теперь сравнивает endpoint только с tenant-scoped
+`StaffDisciplineRecord.status=ACTIVE`; это не скрывает active строки, не меняет
+API и не переписывает 23 существующие записи. Новый exact-SHA admission и PASS
+на той же копии остаются обязательными до rollout.
+
 Для additive перехода `CURRENT_188 -> CURRENT_189` существует отдельный
 fail-closed режим `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_188`. Он
 допускает только exact пару

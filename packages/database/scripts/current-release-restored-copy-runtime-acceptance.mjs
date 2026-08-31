@@ -4081,7 +4081,8 @@ export async function inspectCurrentReleaseDatabase(
        ARRAY(SELECT entity.id::text FROM "StaffDisciplineRule" entity
              WHERE entity."tenantId" = $1 ORDER BY entity.id COLLATE "C") AS "disciplineRuleIds",
        ARRAY(SELECT entity.id::text FROM "StaffDisciplineRecord" entity
-             WHERE entity."tenantId" = $1 ORDER BY entity.id COLLATE "C") AS "disciplineRecordIds",
+             WHERE entity."tenantId" = $1 AND entity.status = 'ACTIVE'
+             ORDER BY entity.id COLLATE "C") AS "disciplineRecordIds",
        ARRAY(SELECT entity.id::text FROM "StaffSalaryScheme" entity
              WHERE entity."tenantId" = $1 ORDER BY entity.id COLLATE "C") AS "salarySchemeIds",
        ARRAY(SELECT entity.id::text FROM "StaffSalaryPeriod" entity

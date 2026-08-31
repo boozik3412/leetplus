@@ -200,6 +200,21 @@ async function runPrismaDeploy(databaseUrl, laneRoot) {
   );
 }
 
+async function truncateCanonicalLaneAtSourceHead(laneRoot) {
+  const migrationsRoot = path.join(laneRoot, "migrations");
+  const migrationNames = (
+    await readdir(migrationsRoot, { withFileTypes: true })
+  )
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+  assert.equal(migrationNames[SOURCE_MIGRATION_COUNT - 1], SOURCE_HEAD);
+  for (const migrationName of migrationNames.slice(SOURCE_MIGRATION_COUNT)) {
+    await rm(path.join(migrationsRoot, migrationName), { recursive: true });
+  }
+}
+
 async function synchronizeAppliedChecksums(client, laneRoot) {
   const migrationsRoot = path.join(laneRoot, "migrations");
   const migrationNames = (
@@ -384,6 +399,30 @@ async function captureCleanupError(operation, errors) {
 }
 
 test(
+  "CURRENT188 bootstrap fixture truncates every later canonical migration",
+  async (t) => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "leetplus-current188-bootstrap-test-"),
+    );
+    t.after(() => rm(root, { force: true, recursive: true }));
+    const laneRoot = path.join(root, "bootstrap-current187");
+
+    await cp(SOURCE_PRISMA_ROOT, laneRoot, { recursive: true });
+    await truncateCanonicalLaneAtSourceHead(laneRoot);
+    const migrationNames = (
+      await readdir(path.join(laneRoot, "migrations"), { withFileTypes: true })
+    )
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+
+    assert.equal(migrationNames.length, SOURCE_MIGRATION_COUNT);
+    assert.equal(migrationNames.at(-1), SOURCE_HEAD);
+    assert.equal(migrationNames.includes(TARGET_HEAD), false);
+  },
+);
+
+test(
   "CURRENT_188 controller upgrades an exact production-shaped CURRENT_187 on PostgreSQL 16",
   { skip: !enabled, timeout: 240_000 },
   async () => {
@@ -431,9 +470,7 @@ test(
         recursive: true,
       });
       await cp(SOURCE_PRISMA_ROOT, bootstrapLaneRoot, { recursive: true });
-      await rm(path.join(bootstrapLaneRoot, "migrations", TARGET_HEAD), {
-        recursive: true,
-      });
+      await truncateCanonicalLaneAtSourceHead(bootstrapLaneRoot);
       await writeFile(artifactPath, artifactBytes, { flag: "wx", mode: 0o600 });
 
       admin = new pg.Client({

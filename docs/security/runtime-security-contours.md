@@ -39,6 +39,15 @@ exclusive `parts` cap с 6 на 7 не расширяет allowlist: `fields=5`,
 noncanonical employee-invite proposal с логическим ярлыком CURRENT189 не
 активируется этим repair и требует будущего rebase/refreeze.
 
+Migration identity в release provenance вычисляется только из exact
+`prisma/migrations`, уже скопированного в immutable artifact. Независимый
+artifact verifier повторно выводит head/count из этого же sealed набора и
+отклоняет несовпадение. Это исключает stale metadata при добавлении миграции,
+но не является migration policy: отдельный API child-process fixture явно
+pin-ит reviewed head/count и сверяет их с runtime readiness на disposable БД.
+Production deploy controller по-прежнему требует заранее разрешённые exact SHA,
+schema transition, immutable handoff и отдельный GO.
+
 ## Три независимых контура
 
 | Контур            | Public guest                                                                             | Corporate tenant                                                                               | Workers / control plane                                              |

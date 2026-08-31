@@ -29,6 +29,14 @@ Source repair candidate 31.08.2026 переводит следующий canonic
 сохранены. Dormant noncanonical employee-invite proposal с логическим ярлыком
 CURRENT189 не активирован и перед будущей promotion требует rebase/refreeze.
 
+Release admission для source candidate больше не дублирует migration head и
+count вручную: provenance вычисляется из уже скопированного в immutable artifact
+набора `prisma/migrations`, после чего независимый verifier повторно сверяет оба
+значения с фактическим содержимым. Отдельный API child-process fixture при этом
+явно pin-ит reviewed `CURRENT_189/189`, поэтому неожиданная новая migration не
+становится допустимой автоматически. Это устраняет stale CURRENT_188 metadata,
+но само по себе не разрешает production deploy.
+
 Checklist review repair 31.08.2026 устранил ложный `400 Invalid attachment
 references` для старых run: review/cancel transition больше не повторяет write
 snapshot `answers` и derived score/evidence, а stale клиент принудительно

@@ -875,6 +875,14 @@ jobs:
           cp -a packages/database/package.json "$release_root/packages/database/"
           cp -a packages/database/prisma/schema.prisma "$release_root/packages/database/prisma/"
           cp -a packages/database/prisma/migrations "$release_root/packages/database/prisma/"
+          mapfile -t release_migrations < <(
+            find "$release_root/packages/database/prisma/migrations" \
+              -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
+              | LC_ALL=C sort
+          )
+          test "${#release_migrations[@]}" -gt 0
+          database_migration_count="${#release_migrations[@]}"
+          database_migration="${release_migrations[$((database_migration_count - 1))]}"
           cp -a \
             packages/database/scripts/canonical-prisma-deploy.mjs \
             packages/database/scripts/founder-pilot-restored-copy-preflight.mjs \
@@ -915,8 +923,8 @@ jobs:
             "  \"releaseSha\": \"$CI_RELEASE_SHA\"," \
             '  "nodeVersion": "22",' \
             '  "pnpmVersion": "10.33.2",' \
-            '  "databaseMigration": "20260828190000_guest_support_bug_reports",' \
-            '  "databaseMigrationCount": 188,' \
+            "  \"databaseMigration\": \"$database_migration\"," \
+            "  \"databaseMigrationCount\": $database_migration_count," \
             '  "runtimePackageManifestsIncluded": true,' \
             '  "canonicalPrismaDeployScriptsIncluded": true,' \
             '  "canonicalPrismaDeployScriptCount": 1,' \

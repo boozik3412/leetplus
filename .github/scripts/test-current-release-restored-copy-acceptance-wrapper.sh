@@ -385,7 +385,7 @@ NODE
       'CapabilityBoundingSet=' \
       'AmbientCapabilities=' \
       'IPAddressDeny=0.0.0.0/0 ::/0' \
-      'IPAddressAllow=127.0.0.0/8 ::1/128' \
+      'IPAddressAllow=127.0.0.1/32 ::1/128' \
       'Delegate=no' \
       'MemoryPressureWatch=skip' \
       'PrivateTmp=yes' \
@@ -779,7 +779,7 @@ NODE
     --property=SetLoginEnvironment=yes \
     --property=NoNewPrivileges=yes --property=CapabilityBoundingSet= \
     --property=AmbientCapabilities= --property=IPAddressDeny=any \
-    --property=IPAddressAllow=localhost --property=Delegate=no \
+    '--property=IPAddressAllow=127.0.0.1/32 ::1/128' --property=Delegate=no \
     --property=MemoryPressureWatch=skip \
     --property=ProtectSystem=strict --property=ProtectHome=yes --property=PrivateTmp=yes \
     --property=PrivateDevices=yes --property=ProtectProc=invisible --property=ProcSubset=pid \
@@ -851,7 +851,7 @@ NODE
     'CapabilityBoundingSet=' \
     'AmbientCapabilities=' \
     'IPAddressDeny=0.0.0.0/0 ::/0' \
-    'IPAddressAllow=127.0.0.0/8 ::1/128' \
+    'IPAddressAllow=127.0.0.1/32 ::1/128' \
     'Delegate=no' \
     'MemoryPressureWatch=skip' \
     'PrivateTmp=yes' \
@@ -917,7 +917,7 @@ NODE
     --property=SetLoginEnvironment=yes \
     --property=NoNewPrivileges=yes --property=CapabilityBoundingSet= \
     --property=AmbientCapabilities= --property=IPAddressDeny=any \
-    --property=IPAddressAllow=localhost --property=Delegate=no \
+    '--property=IPAddressAllow=127.0.0.1/32 ::1/128' --property=Delegate=no \
     --property=MemoryPressureWatch=skip \
     --property=ProtectSystem=strict --property=ProtectHome=yes --property=PrivateTmp=yes \
     --property=PrivateDevices=yes --property=ProtectProc=invisible --property=ProcSubset=pid \
@@ -989,7 +989,7 @@ NODE
     'CapabilityBoundingSet=' \
     'AmbientCapabilities=' \
     'IPAddressDeny=0.0.0.0/0 ::/0' \
-    'IPAddressAllow=127.0.0.0/8 ::1/128' \
+    'IPAddressAllow=127.0.0.1/32 ::1/128' \
     'Delegate=no' \
     'MemoryPressureWatch=skip' \
     'PrivateTmp=yes' \
@@ -1047,7 +1047,7 @@ NODE
     "--property=Environment=LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
     --property=SetLoginEnvironment=yes --property=NoNewPrivileges=yes \
     --property=CapabilityBoundingSet= --property=AmbientCapabilities= \
-    --property=IPAddressDeny=any --property=IPAddressAllow=localhost --property=Delegate=no \
+    --property=IPAddressDeny=any '--property=IPAddressAllow=127.0.0.1/32 ::1/128' --property=Delegate=no \
     --property=MemoryPressureWatch=skip \
     --property=ProtectSystem=strict --property=ProtectHome=yes --property=PrivateTmp=yes \
     --property=PrivateDevices=yes --property=ProtectProc=invisible --property=ProcSubset=pid \
@@ -1083,7 +1083,7 @@ NODE
     "--property=Environment=LEETPLUS_CHILD_POLICY_SHA256=${child_policy_sha256}" \
     --property=SetLoginEnvironment=yes --property=NoNewPrivileges=yes \
     --property=CapabilityBoundingSet= --property=AmbientCapabilities= \
-    --property=IPAddressDeny=any --property=IPAddressAllow=localhost --property=Delegate=no \
+    --property=IPAddressDeny=any '--property=IPAddressAllow=127.0.0.1/32 ::1/128' --property=Delegate=no \
     --property=MemoryPressureWatch=skip \
     --property=ProtectSystem=strict --property=ProtectHome=yes --property=PrivateTmp=yes \
     --property=PrivateDevices=yes --property=ProtectProc=invisible --property=ProcSubset=pid \
@@ -1584,9 +1584,6 @@ command_path="${arguments[$command_index]}"
 if [[ "$property_ip_address_deny" == any ]]; then
   property_ip_address_deny='0.0.0.0/0 ::/0'
 fi
-if [[ "$property_ip_address_allow" == localhost ]]; then
-  property_ip_address_allow='127.0.0.0/8 ::1/128'
-fi
 {
   printf 'User=%s\n' "$property_user"
   printf 'Group=%s\n' "$property_group"
@@ -1878,7 +1875,7 @@ for exact_argument in \
   '--property=CapabilityBoundingSet=' \
   '--property=AmbientCapabilities=' \
   '--property=IPAddressDeny=any' \
-  '--property=IPAddressAllow=localhost' \
+  '--property=IPAddressAllow=127.0.0.1/32 ::1/128' \
   '--property=Delegate=no' \
   '--property=MemoryPressureWatch=skip' \
   '--property=PrivateTmp=yes' \
@@ -2674,7 +2671,7 @@ for (const args of invocations) {
     "--property=Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C TZ=UTC SHELL=/usr/sbin/nologin",
     "--property=SetLoginEnvironment=yes", "--property=NoNewPrivileges=yes",
     "--property=CapabilityBoundingSet=", "--property=AmbientCapabilities=",
-    "--property=IPAddressDeny=any", "--property=IPAddressAllow=localhost",
+    "--property=IPAddressDeny=any", "--property=IPAddressAllow=127.0.0.1/32 ::1/128",
     "--property=Delegate=no", "--property=MemoryPressureWatch=skip",
     "--property=PrivateTmp=yes", "--property=PrivateDevices=yes",
     "--property=ProtectSystem=strict", "--property=ProtectHome=yes",

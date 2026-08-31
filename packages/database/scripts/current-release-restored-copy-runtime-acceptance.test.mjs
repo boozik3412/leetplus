@@ -30,6 +30,7 @@ import {
   buildCurrentReleaseApiEnvironment,
   buildCurrentReleaseNetworkGuardSource,
   cleanupCurrentReleaseFixture,
+  connectExpectingKernelDenial,
   createSignedCurrentReleaseReceipt,
   executeCurrentReleaseHttpAcceptance,
   finalizeCurrentReleaseRuntime,
@@ -1149,6 +1150,12 @@ test("requires a real non-root Linux kernel sandbox before runtime effects", asy
   await assert.rejects(attestCurrentReleaseKernelSandbox(), (error) =>
     /^CURRENT_RELEASE_KERNEL_SANDBOX_/u.test(error?.reasonCode ?? ""),
   );
+});
+
+test("kernel denial canary rejects an unfenced loopback alias", async () => {
+  await assert.rejects(connectExpectingKernelDenial(), {
+    reasonCode: "CURRENT_RELEASE_KERNEL_SANDBOX_BYPASSED",
+  });
 });
 
 test("accepts exact API/Web identity, BFF auth and the complete beta read matrix", async () => {

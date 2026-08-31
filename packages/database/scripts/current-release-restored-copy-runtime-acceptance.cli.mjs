@@ -308,8 +308,9 @@ HYDRATED_SHA256SUMS, an exact HYDRATED_SYMLINKS.json topology manifest and a
 valid no-egress hydration receipt. It must itself run
 as a non-root systemd service/scope named
 leetplus-current-release-acceptance-<8..32 lowercase alnum>.service|scope with
-NoNewPrivileges, no effective capabilities, IPAddressDeny=any and
-IPAddressAllow=localhost; a live kernel-denial probe is mandatory. It starts
+NoNewPrivileges, no effective capabilities, IPAddressDeny=any and the exact
+IPAddressAllow=127.0.0.1/32,::1/128 boundary; a live kernel-denial probe is
+mandatory. It starts
 the API and Web production builds only on alternate loopback ports. All
 schedulers and outbound effects are forced off. It accepts /version,
 /health/ready, dynamic Web release

@@ -1715,37 +1715,56 @@ async function assertPortAvailable(port) {
   });
 }
 
-async function connectExpectingKernelDenial() {
+export async function connectExpectingKernelDenial() {
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection({ host: "192.0.2.1", port: 9 });
-    const timer = setTimeout(() => {
-      socket.destroy();
-      reject(
-        new CurrentReleaseRuntimeAcceptanceError(
-          "CURRENT_RELEASE_KERNEL_SANDBOX_NOT_PROVEN",
-        ),
+    // systemd may enforce IPAddressDeny with either a connect-hook BPF program
+    // (which returns EACCES/EPERM immediately) or a cgroup_skb program (which
+    // silently drops the packet).  A remote TEST-NET target cannot distinguish
+    // the latter from an ordinary routing timeout.  Instead, create a known
+    // reachable listener on another loopback address.  The acceptance unit
+    // allowlists only 127.0.0.1/32, so a timeout here proves the packet was
+    // dropped; without the kernel fence this same connection succeeds.
+    const deniedHost = "127.0.0.2";
+    const server = net.createServer((peer) => peer.end());
+    let socket = null;
+    let timer = null;
+    let settled = false;
+    const finish = (error, denialCode = null) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      socket?.destroy();
+      if (server.listening) server.close(() => {});
+      if (error) reject(error);
+      else resolve(denialCode);
+    };
+    const notProven = () =>
+      new CurrentReleaseRuntimeAcceptanceError(
+        "CURRENT_RELEASE_KERNEL_SANDBOX_NOT_PROVEN",
       );
-    }, 2_000);
-    socket.once("connect", () => {
-      clearTimeout(timer);
-      socket.destroy();
-      reject(
-        new CurrentReleaseRuntimeAcceptanceError(
-          "CURRENT_RELEASE_KERNEL_SANDBOX_BYPASSED",
-        ),
-      );
-    });
-    socket.once("error", (error) => {
-      clearTimeout(timer);
-      if (error?.code !== "EACCES" && error?.code !== "EPERM") {
-        reject(
-          new CurrentReleaseRuntimeAcceptanceError(
-            "CURRENT_RELEASE_KERNEL_SANDBOX_NOT_PROVEN",
-          ),
-        );
+    server.once("error", () => finish(notProven()));
+    server.listen(0, deniedHost, () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        finish(notProven());
         return;
       }
-      resolve(error.code);
+      socket = net.createConnection({ host: deniedHost, port: address.port });
+      timer = setTimeout(() => finish(null, "ETIMEDOUT"), 2_000);
+      socket.once("connect", () => {
+        finish(
+          new CurrentReleaseRuntimeAcceptanceError(
+            "CURRENT_RELEASE_KERNEL_SANDBOX_BYPASSED",
+          ),
+        );
+      });
+      socket.once("error", (error) => {
+        if (error?.code === "EACCES" || error?.code === "EPERM") {
+          finish(null, error.code);
+          return;
+        }
+        finish(notProven());
+      });
     });
   });
 }
@@ -1917,10 +1936,9 @@ export async function attestCurrentReleaseKernelSandbox() {
       deny === "any" ||
       (deny.includes("0.0.0.0/0") && deny.includes("::/0"))
     ) ||
-    !(
-      allow.includes("localhost") ||
-      (allow.includes("127.0.0.0/8") && allow.includes("::1/128"))
-    )
+    new Set(allow.split(" ")).size !== 2 ||
+    !allow.includes("127.0.0.1/32") ||
+    !allow.includes("::1/128")
   ) {
     fail("CURRENT_RELEASE_KERNEL_SANDBOX_SYSTEMD_POLICY_MISMATCH");
   }

@@ -1064,7 +1064,7 @@ common_properties=(
   '--property=CapabilityBoundingSet='
   '--property=AmbientCapabilities='
   '--property=IPAddressDeny=any'
-  '--property=IPAddressAllow=localhost'
+  '--property=IPAddressAllow=127.0.0.1/32 ::1/128'
   '--property=Delegate=no'
   '--property=MemoryPressureWatch=skip'
   '--property=PrivateTmp=yes'
@@ -1288,7 +1288,7 @@ const expected = new Map([
   ["UnsetEnvironment", "CURRENT_RELEASE_RESTORED_DATABASE_URL CURRENT_RELEASE_EVIDENCE_HMAC_KEY CURRENT_RELEASE_LOGIN_EMAIL CURRENT_RELEASE_LOGIN_PASSWORD BASH_ENV ENV SGX_AESM_ADDR NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_DEBUG NODE_V8_COVERAGE NODE_COMPILE_CACHE SSLKEYLOGFILE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GCONV_PATH LOCPATH OPENSSL_CONF OPENSSL_MODULES GLIBC_TUNABLES MALLOC_CHECK_ MALLOC_PERTURB_ HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy ftp_proxy all_proxy no_proxy NODE_USE_ENV_PROXY CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR TMP TMPDIR TEMP XDG_CONFIG_HOME XDG_CACHE_HOME NPM_CONFIG_USERCONFIG npm_config_userconfig NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig NPM_CONFIG_NODE_OPTIONS npm_config_node_options NPM_CONFIG_SCRIPT_SHELL npm_config_script_shell PNPM_HOME COREPACK_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM"],
   ["NoNewPrivileges", "yes"], ["CapabilityBoundingSet", ""], ["AmbientCapabilities", ""],
   ["IPAddressDeny", "0.0.0.0/0 ::/0"],
-  ["IPAddressAllow", "127.0.0.0/8 ::1/128"], ["Delegate", "no"],
+  ["IPAddressAllow", "127.0.0.1/32 ::1/128"], ["Delegate", "no"],
   ["MemoryPressureWatch", "skip"],
   ["PrivateTmp", "yes"], ["PrivateDevices", "yes"], ["ProtectSystem", "strict"],
   ["ProtectHome", "yes"], ["ProtectProc", "invisible"], ["ProcSubset", "pid"],
@@ -1519,7 +1519,7 @@ assert_unit_effective_policy() {
     [CapabilityBoundingSet]=''
     [AmbientCapabilities]=''
     [IPAddressDeny]='0.0.0.0/0 ::/0'
-    [IPAddressAllow]='127.0.0.0/8 ::1/128'
+    [IPAddressAllow]='127.0.0.1/32 ::1/128'
     [Delegate]=no
     [MemoryPressureWatch]=skip
     [PrivateTmp]=yes

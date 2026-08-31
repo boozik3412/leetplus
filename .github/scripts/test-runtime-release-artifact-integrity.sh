@@ -34,6 +34,8 @@ readonly OPERATIONAL_SCRIPTS=(
   founder-pilot-production-history-rehearsal.mjs
   founder-pilot-restored-copy-preflight.cli.mjs
   founder-pilot-restored-copy-preflight.mjs
+  guest-support-current189-production-upgrade.cli.mjs
+  guest-support-current189-production-upgrade.mjs
   identity-mail-worker-enrollment.cli.mjs
   identity-mail-worker-enrollment.mjs
   run-current-release-restored-copy-acceptance.sh
@@ -139,7 +141,7 @@ make_runtime_root() {
   "canonicalPrismaDeployScriptsIncluded": true,
   "canonicalPrismaDeployScriptCount": 1,
   "founderPilotOperationalScriptsIncluded": true,
-  "founderPilotOperationalScriptCount": 16,
+  "founderPilotOperationalScriptCount": 18,
   "runtimeEnrollmentOperationalScriptsIncluded": true,
   "runtimeEnrollmentOperationalScriptCount": 6,
   "currentReleaseRuntimeAcceptanceScriptsIncluded": true,
@@ -148,7 +150,7 @@ make_runtime_root() {
   "currentNetworkAccessScopeClassificationScriptCount": 2,
   "staffAttachmentReconciliationScriptsIncluded": true,
   "staffAttachmentReconciliationScriptCount": 3,
-  "operationalScriptCount": 31,
+  "operationalScriptCount": 33,
   "webPublicAssetsIncluded": true
 }
 JSON
@@ -178,7 +180,7 @@ node "$VERIFIER" \
   --expected-release-sha "$RELEASE_SHA" > "${TEST_ROOT}/accepted.out"
 grep -F -x 'RUNTIME_RELEASE_ARTIFACT_INTEGRITY=PASS' "${TEST_ROOT}/accepted.out" > /dev/null
 grep -F -x "RUNTIME_RELEASE_SHA=${RELEASE_SHA}" "${TEST_ROOT}/accepted.out" > /dev/null
-grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=31' "${TEST_ROOT}/accepted.out" > /dev/null
+grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=33' "${TEST_ROOT}/accepted.out" > /dev/null
 
 unexpected_script_root="${TEST_ROOT}/unexpected-script"
 cp -a -- "$accepted_root" "$unexpected_script_root"

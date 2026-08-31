@@ -230,6 +230,10 @@ Bridge не является общим допуском N/N+1: он прини�
 `187 -> 188`, только `COMBINED` runtime и только при выключенной отправке багов.
 После второго cutover значение обязано вернуться в `OFF`.
 
+Исполняемый checksum-pinned контроллер перехода 188→189, формат подписанного
+плана, правила lost-response recovery и postflight описаны в
+[CURRENT_189 guest-support production controller](../open-beta/guest-support-current189-production-upgrade-controller.md).
+
 Rollback приложения не требует schema rollback: additive objects остаются, а
 после перехода схемы rollback target — первый bridge slot того же admitted SHA,
 который уже прошёл exact `CURRENT_188` readiness. Старый `CURRENT_187` runtime

@@ -66,6 +66,25 @@ employee selectors; неактивные users сохраняются в упр�
 28/28 тестов; production по-прежнему не изменён и требует нового exact-SHA
 admission и restored-copy PASS.
 
+Четвёртый restored-copy запуск также остановился до production effect на
+легитимной форме effective discipline policy: у унаследованных store-level
+строк API намеренно возвращает `id=null`, потому что persisted policy остаётся
+NETWORK-level. Acceptance oracle больше не применяет к этому endpoint общий
+exact-ID validator: он требует одну NETWORK policy, ровно одну effective policy
+на каждый store, `null` только у inherited rows и точное совпадение persisted ID
+у explicit rows. Ошибка построения bounded mismatch metadata с `null` также
+устранена. Локальный контракт проходит 30/30 тестов; production не менялся.
+
+Для единственного перехода `CURRENT_188 -> CURRENT_189` добавлен отдельный
+подписываемый controller
+[`GUEST_SUPPORT_PRODUCTION_188_TO_189_V1`](docs/open-beta/guest-support-current189-production-upgrade-controller.md).
+Он не принимает DATABASE_URL/пароль, работает локальной PostgreSQL authority
+через Unix socket, удерживает production-control и cutover locks, временно
+останавливает autonomous bonus-ledger worker, применяет только checksum-pinned
+миграцию, а до успеха сверяет `189`, оба runtime slot и неизменность
+OID/owner/ACL/role-membership digests. Исторический 187→188 controller не
+расширен и его тесты остаются зелёными.
+
 Checklist review repair 31.08.2026 устранил ложный `400 Invalid attachment
 references` для старых run: review/cancel transition больше не повторяет write
 snapshot `answers` и derived score/evidence, а stale клиент принудительно

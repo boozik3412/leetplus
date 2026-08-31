@@ -500,11 +500,6 @@ const CURRENT_RELEASE_RESPONSE_SCHEMAS = Object.freeze({
   "staff-motivation/discipline": Object.freeze({
     boundArrays: Object.freeze([
       Object.freeze({
-        key: "policies",
-        oracle: "disciplinePolicyIds",
-        exact: true,
-      }),
-      Object.freeze({
         key: "records",
         oracle: "disciplineRecordIds",
         exact: true,
@@ -2537,15 +2532,20 @@ function assertExactIdSet(rows, expectedIds, reasonCode, context = {}) {
       ? row.id
       : null,
   );
+  const sortableIds = ids.filter((id) => typeof id === "string");
   if (
     ids.some((id) => id === null) ||
     new Set(ids).size !== ids.length ||
-    stableJson([...ids].sort(compareUtf8Bytes)) !== stableJson(expectedIds)
+    stableJson([...sortableIds].sort(compareUtf8Bytes)) !==
+      stableJson(expectedIds)
   ) {
     fail(reasonCode, {
       ...context,
       actualCount: ids.length,
-      actualSetDigest: sha256(stableJson([...ids].sort(compareUtf8Bytes))),
+      actualInvalidIdCount: ids.length - sortableIds.length,
+      actualSetDigest: sha256(
+        stableJson([...sortableIds].sort(compareUtf8Bytes)),
+      ),
       expectedCount: expectedIds.length,
       expectedSetDigest: sha256(stableJson(expectedIds)),
     });
@@ -2554,6 +2554,80 @@ function assertExactIdSet(rows, expectedIds, reasonCode, context = {}) {
     count: ids.length,
     idSetDigest: sha256(stableJson(expectedIds)),
   });
+}
+
+function assertDisciplinePolicyProjection(body, oracle) {
+  if (!Array.isArray(body.policies)) {
+    fail("CURRENT_RELEASE_DISCIPLINE_POLICY_PROJECTION_INVALID");
+  }
+  const expectedPolicyIds = new Set(oracle.disciplinePolicyIds);
+  const expectedStoreIds = new Set(oracle.storeIds);
+  const observedPolicyIds = [];
+  const observedStoreIds = [];
+  let networkCount = 0;
+  for (const policy of body.policies) {
+    if (
+      !policy ||
+      typeof policy !== "object" ||
+      typeof policy.enabled !== "boolean" ||
+      typeof policy.label !== "string" ||
+      !["NETWORK", "STORE"].includes(policy.scope) ||
+      typeof policy.inheritedFromNetwork !== "boolean"
+    ) {
+      fail("CURRENT_RELEASE_DISCIPLINE_POLICY_PROJECTION_INVALID");
+    }
+    if (policy.scope === "NETWORK") {
+      networkCount += 1;
+      if (
+        typeof policy.id !== "string" ||
+        policy.storeId !== null ||
+        policy.inheritedFromNetwork !== false ||
+        !expectedPolicyIds.has(policy.id)
+      ) {
+        fail("CURRENT_RELEASE_DISCIPLINE_POLICY_PROJECTION_INVALID");
+      }
+      observedPolicyIds.push(policy.id);
+      continue;
+    }
+    if (
+      typeof policy.storeId !== "string" ||
+      !expectedStoreIds.has(policy.storeId) ||
+      (policy.inheritedFromNetwork === true && policy.id !== null) ||
+      (policy.inheritedFromNetwork === false &&
+        (typeof policy.id !== "string" || !expectedPolicyIds.has(policy.id)))
+    ) {
+      fail("CURRENT_RELEASE_DISCIPLINE_POLICY_PROJECTION_INVALID");
+    }
+    observedStoreIds.push(policy.storeId);
+    if (typeof policy.id === "string") observedPolicyIds.push(policy.id);
+  }
+  const sortedPolicyIds = [...observedPolicyIds].sort(compareUtf8Bytes);
+  const sortedStoreIds = [...observedStoreIds].sort(compareUtf8Bytes);
+  if (
+    networkCount !== 1 ||
+    new Set(observedPolicyIds).size !== observedPolicyIds.length ||
+    new Set(observedStoreIds).size !== observedStoreIds.length ||
+    stableJson(sortedPolicyIds) !== stableJson(oracle.disciplinePolicyIds) ||
+    stableJson(sortedStoreIds) !== stableJson(oracle.storeIds) ||
+    body.policies.length !== oracle.storeIds.length + 1
+  ) {
+    fail("CURRENT_RELEASE_DISCIPLINE_POLICY_SET_MISMATCH", {
+      actualPolicyCount: observedPolicyIds.length,
+      actualPolicySetDigest: sha256(stableJson(sortedPolicyIds)),
+      actualStoreCount: observedStoreIds.length,
+      actualStoreSetDigest: sha256(stableJson(sortedStoreIds)),
+      expectedPolicyCount: oracle.disciplinePolicyIds.length,
+      expectedPolicySetDigest: sha256(stableJson(oracle.disciplinePolicyIds)),
+      expectedStoreCount: oracle.storeIds.length,
+      expectedStoreSetDigest: sha256(stableJson(oracle.storeIds)),
+    });
+  }
+  return sha256(
+    stableJson({
+      policyIds: sortedPolicyIds,
+      storeIds: sortedStoreIds,
+    }),
+  );
 }
 
 function assertIdSubset(rows, expectedIds, reasonCode, context = {}) {
@@ -3311,7 +3385,9 @@ function assertCriticalReadProjection(result, probe, oracle) {
   const semanticMarkerDigest =
     schema.kind === "GAMIFICATION_WORKSPACE"
       ? assertGamificationWorkspaceProjection(body, oracle)
-      : sha256("NOT_APPLICABLE");
+      : probe.module === "staff-motivation" && probe.name === "discipline"
+        ? assertDisciplinePolicyProjection(body, oracle)
+        : sha256("NOT_APPLICABLE");
   if (schema.kind === "PAGED_PRODUCTS") {
     const products = assertIdSubset(
       body.items,

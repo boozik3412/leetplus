@@ -15,6 +15,7 @@
     "test:gate-1mt-staff-attachments-browser-boundary": "node --test --experimental-strip-types src/lib/gate-1mt-staff-attachments-browser-boundary.test.mts src/lib/staff-checklist-update-payload.test.mts",
     "test:release-build-boundary": "node --test --experimental-strip-types src/lib/release-build-boundary.test.mts src/lib/api-url.test.mts src/lib/web-release-identity.test.mts",
     "test:guest-session-transport": "node --test --experimental-strip-types src/lib/guest-session-transport.test.mts",
+    "test:guest-bug-report": "node --test --experimental-strip-types src/lib/guest-bug-report-bff.test.mts",
     "test:guest-session-current190-bff-candidate": "node --test --experimental-strip-types src/lib/guest-session-current190-bff-candidate.test.mts",
     "test:langame-current188-bff-candidate": "node --test --experimental-strip-types src/lib/langame-current188-bff-candidate.test.mts",
     "test:employee-invite-current189-bff-candidate": "node --test --experimental-strip-types src/lib/employee-invite-current189-bff-candidate.test.mts"

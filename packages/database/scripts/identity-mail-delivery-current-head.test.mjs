@@ -11,9 +11,11 @@ const repositoryRoot = path.resolve(databaseRoot, "../..");
 const migrationsRoot = path.join(databaseRoot, "prisma", "migrations");
 const guardMigrationName =
   "20260819010000_staff_attachment_parent_delete_guard";
-const previousCurrentMigrationName =
+const telegramMigrationName =
   "20260820010000_guest_portal_telegram_update_ledger";
-const currentMigrationName = "20260828190000_guest_support_bug_reports";
+const previousCurrentMigrationName = "20260828190000_guest_support_bug_reports";
+const currentMigrationName =
+  "20260831120000_guest_support_bug_report_input_repair";
 const predecessorName = "20260818020000_identity_mail_delivery_current_head_v1";
 const preterminalManifestDigest =
   "589dd0a39f2372041a284392c72ad6ed59027877e909e1a5d377b9017c662fda";
@@ -47,15 +49,16 @@ async function canonicalManifest() {
   return { entries, rows };
 }
 
-test("CURRENT188 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
+test("CURRENT189 preserves the reviewed CURRENT185 digest and advances readiness exactly once", async () => {
   const { entries, rows } = await canonicalManifest();
-  assert.equal(entries.length, 188);
-  assert.equal(entries.at(-4), predecessorName);
-  assert.equal(entries.at(-3), guardMigrationName);
+  assert.equal(entries.length, 189);
+  assert.equal(entries.at(-5), predecessorName);
+  assert.equal(entries.at(-4), guardMigrationName);
+  assert.equal(entries.at(-3), telegramMigrationName);
   assert.equal(entries.at(-2), previousCurrentMigrationName);
   assert.equal(entries.at(-1), currentMigrationName);
   assert.equal(
-    sha256(`${rows.slice(0, -3).join("\n")}\n`),
+    sha256(`${rows.slice(0, -4).join("\n")}\n`),
     preterminalManifestDigest,
   );
 
@@ -89,21 +92,33 @@ test("CURRENT188 preserves the reviewed CURRENT185 digest and advances readiness
   assert.match(sql, /SET search_path = public, pg_catalog/u);
   assert.match(sql, /privilege\.is_grantable/u);
   assert.match(sql, /FROM PUBLIC;/u);
+  const telegramSql = normalizedBytes(
+    await readFile(
+      path.join(migrationsRoot, telegramMigrationName, "migration.sql"),
+    ),
+  ).toString("utf8");
+  assert.match(telegramSql, /migration_count IS DISTINCT FROM 187/u);
+  assert.match(telegramSql, new RegExp(telegramMigrationName, "u"));
+  assert.match(telegramSql, new RegExp(guardMigrationName, "u"));
+  assert.match(telegramSql, new RegExp(preterminalManifestDigest, "u"));
+  assert.match(
+    telegramSql,
+    new RegExp(productionHistoryPreterminalManifestDigest, "u"),
+  );
+
   const previousCurrentSql = normalizedBytes(
     await readFile(
       path.join(migrationsRoot, previousCurrentMigrationName, "migration.sql"),
     ),
   ).toString("utf8");
-  assert.match(previousCurrentSql, /migration_count IS DISTINCT FROM 187/u);
+  assert.match(previousCurrentSql, /migration_count IS DISTINCT FROM 188/u);
   assert.match(
     previousCurrentSql,
     new RegExp(previousCurrentMigrationName, "u"),
   );
+  assert.match(previousCurrentSql, new RegExp(telegramMigrationName, "u"));
   assert.match(previousCurrentSql, new RegExp(guardMigrationName, "u"));
-  assert.match(
-    previousCurrentSql,
-    new RegExp(preterminalManifestDigest, "u"),
-  );
+  assert.match(previousCurrentSql, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     previousCurrentSql,
     new RegExp(productionHistoryPreterminalManifestDigest, "u"),
@@ -114,9 +129,14 @@ test("CURRENT188 preserves the reviewed CURRENT185 digest and advances readiness
       path.join(migrationsRoot, currentMigrationName, "migration.sql"),
     ),
   ).toString("utf8");
-  assert.match(currentSql, /migration_count IS DISTINCT FROM 188/u);
+  assert.match(
+    currentSql,
+    /pg_catalog\.length\("description"\) BETWEEN 20 AND 2000/u,
+  );
+  assert.match(currentSql, /migration_count IS DISTINCT FROM 189/u);
   assert.match(currentSql, new RegExp(currentMigrationName, "u"));
   assert.match(currentSql, new RegExp(previousCurrentMigrationName, "u"));
+  assert.match(currentSql, new RegExp(telegramMigrationName, "u"));
   assert.match(currentSql, new RegExp(guardMigrationName, "u"));
   assert.match(currentSql, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
@@ -125,7 +145,7 @@ test("CURRENT188 preserves the reviewed CURRENT185 digest and advances readiness
   );
 });
 
-test("the active worker repository consumes the exact CURRENT188 receipt", async () => {
+test("the active worker repository consumes the exact CURRENT189 receipt", async () => {
   const repository = await readFile(
     path.join(
       repositoryRoot,
@@ -138,7 +158,7 @@ test("the active worker repository consumes the exact CURRENT188 receipt", async
     "utf8",
   );
   assert.match(repository, new RegExp(currentMigrationName, "u"));
-  assert.match(repository, /CURRENT_MIGRATION_COUNT = 188 as const/u);
+  assert.match(repository, /CURRENT_MIGRATION_COUNT = 189 as const/u);
   assert.match(repository, new RegExp(preterminalManifestDigest, "u"));
   assert.match(
     repository,

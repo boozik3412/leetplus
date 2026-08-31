@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import {
+  GUEST_BUG_REPORT_MIN_DESCRIPTION_LENGTH,
   GuestSupportService,
   stripImageMetadata,
 } from './guest-support.service';
@@ -151,6 +152,31 @@ describe('GuestSupportService', () => {
       },
     );
     expect(tx.guestSupportTicket.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts exactly 20 visible description characters and rejects 19', async () => {
+    const { service } = fixture();
+    const acceptedDescription = 'я'.repeat(
+      GUEST_BUG_REPORT_MIN_DESCRIPTION_LENGTH,
+    );
+
+    await expect(
+      service.createBugReport(context, {
+        ...input,
+        description: acceptedDescription,
+      }),
+    ).resolves.toEqual({
+      ticketNumber: 'LP-BUG-A1B2C3D4',
+      createdAt: '2026-08-28T10:00:00.000Z',
+    });
+
+    const rejected = fixture().service;
+    await expect(
+      rejected.createBugReport(context, {
+        ...input,
+        description: 'я'.repeat(GUEST_BUG_REPORT_MIN_DESCRIPTION_LENGTH - 1),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a claimed image type that does not match the file signature', async () => {

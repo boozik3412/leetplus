@@ -254,7 +254,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260828190000_guest_support_bug_reports 188$/u,
+    /20260831120000_guest_support_bug_report_input_repair 189$/u,
   );
 });
 
@@ -859,7 +859,7 @@ test("rejects every activation-bound role before general enrollment", () => {
   );
 });
 
-test("binds enrollment to exact terminal migration 188 and exact count 188", () => {
+test("binds enrollment to exact terminal migration 189 and exact count 189", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

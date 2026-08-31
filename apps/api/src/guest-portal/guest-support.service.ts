@@ -12,6 +12,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
 export const GUEST_BUG_REPORT_MAX_BYTES = 5 * 1024 * 1024;
+export const GUEST_BUG_REPORT_MIN_DESCRIPTION_LENGTH = 20;
+export const GUEST_BUG_REPORT_MAX_DESCRIPTION_LENGTH = 2000;
+export const GUEST_BUG_REPORT_MULTIPART_LIMITS = Object.freeze({
+  fileSize: GUEST_BUG_REPORT_MAX_BYTES,
+  files: 1,
+  fields: 5,
+  fieldSize: 4 * 1024,
+  // Busboy emits partsLimit when the counter reaches the configured value.
+  // Five text fields plus one optional file therefore need an exclusive cap of 7.
+  parts: 7,
+});
 
 export const GUEST_BUG_REPORT_TOPICS = [
   'GAME_MODULE',
@@ -273,9 +284,12 @@ function normalizeTopic(value: unknown): GuestBugReportTopic {
 
 function normalizeDescription(value: unknown) {
   const description = typeof value === 'string' ? value.trim() : '';
-  if (description.length < 30 || description.length > 2000) {
+  if (
+    description.length < GUEST_BUG_REPORT_MIN_DESCRIPTION_LENGTH ||
+    description.length > GUEST_BUG_REPORT_MAX_DESCRIPTION_LENGTH
+  ) {
     throw new BadRequestException(
-      'Описание должно содержать от 30 до 2000 символов.',
+      `Описание должно содержать от ${GUEST_BUG_REPORT_MIN_DESCRIPTION_LENGTH} до ${GUEST_BUG_REPORT_MAX_DESCRIPTION_LENGTH} символов.`,
     );
   }
   return description;

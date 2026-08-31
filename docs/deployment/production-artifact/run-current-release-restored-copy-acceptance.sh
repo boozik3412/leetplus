@@ -1000,11 +1000,14 @@ assert_unit_safely_stopped() {
     && "${state[LoadState]}" == loaded \
     && ( ( "${state[ActiveState]}" == inactive && "${state[SubState]}" == dead ) \
       || ( "${state[ActiveState]}" == failed && "${state[SubState]}" == failed ) ) \
-    && "${state[ControlGroup]}" == "/system.slice/${unit}" ]] \
+    && ( -z "${state[ControlGroup]}" \
+      || "${state[ControlGroup]}" == "/system.slice/${unit}" ) ]] \
     || die "systemd unit is active, transitional, not-found-after-launch or ambiguous: ${unit}"
   assert_unit_effective_policy "$unit"
-  cgroup_path="${cgroup_root}${state[ControlGroup]}"
-  assert_empty_cgroup_procs "$cgroup_path/cgroup.procs"
+  if [[ -n "${state[ControlGroup]}" ]]; then
+    cgroup_path="${cgroup_root}${state[ControlGroup]}"
+    assert_empty_cgroup_procs "$cgroup_path/cgroup.procs"
+  fi
   assert_no_foreign_service_uid_processes
 }
 

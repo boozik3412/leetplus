@@ -114,7 +114,8 @@ markers и независимыми случайными process-local secrets.
 `promote-release-artifact` → `seal-release-artifact`. Он использует exact
 lockfile, заранее подготовленный root-owned offline pnpm store,
 `--ignore-scripts`, `--package-import-method=copy`, создаёт
-`HYDRATION_SANDBOX_RECEIPT`, полный `HYDRATED_SHA256SUMS` и привязанный к нему
+семиполевой `HYDRATION_SANDBOX_RECEIPT` с digest lockfile, store manifest и
+store receipt, полный `HYDRATED_SHA256SUMS` и привязанный к нему
 `HYDRATED_SYMLINKS.json`, затем переводит tree
 в root-owned immutable boundary. Ручной `pnpm install`, сетевой install,
 пересборка API/Web или копирование `dist/.next` из worktree запрещены.
@@ -343,6 +344,10 @@ Main при этом не запускается. `active`,
 `activating`, `deactivating`, `reloading`, transport error, timeout,
 неполный/unbounded ответ, неожиданный Id, unreadable/nonempty cgroup и любой
 другой state дают fail-closed с сохранением active marker и evidence.
+Для exact loaded terminal unit допускается уже собранный systemd пустой cgroup:
+при этом всё равно обязательны сохранённая exact effective policy, `MainPID=0`
+и отсутствие любых процессов service UID. `not-found` после launch по-прежнему
+разрешается только отдельной reconcile-веткой.
 
 Для `--with-reversible-write` absent/empty или иной непроверенный receipt нельзя
 закрыть даже как автоматический FAIL: запись могла успеть committed до crash, а

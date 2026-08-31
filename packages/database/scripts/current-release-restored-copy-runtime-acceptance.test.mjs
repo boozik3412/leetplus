@@ -701,6 +701,8 @@ async function artifactFixture() {
     "SANDBOX=SYSTEMD_IP_DENY_ANY_V1",
     "INVOCATION_ID=0123456789abcdef0123456789abcdef",
     `PNPM_STORE_LOCKFILE_SHA256=${"a".repeat(64)}`,
+    `PNPM_STORE_MANIFEST_SHA256=${"b".repeat(64)}`,
+    `PNPM_STORE_RECEIPT_SHA256=${"c".repeat(64)}`,
     "",
   ].join("\n");
   await writeFile(path.join(root, "SHA256SUMS"), sourceManifest);

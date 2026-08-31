@@ -2191,6 +2191,7 @@ function normalizeScopeOracle(scopeOracle) {
     "rewardIds",
     "seasonIds",
     "storeIds",
+    "tenantReferenceUserIds",
     "userIds",
     ...CURRENT_RELEASE_ENTITY_SET_NAMES,
   ];
@@ -2288,6 +2289,19 @@ function normalizeScopeOracle(scopeOracle) {
   }
   normalized.storeIdSet = new Set(normalized.storeIds);
   normalized.userIdSet = new Set(normalized.userIds);
+  normalized.tenantReferenceUserIdSet = new Set(
+    normalized.tenantReferenceUserIds,
+  );
+  if (
+    !normalized.tenantReferenceUserIdSet.has(normalized.loginUserId) ||
+    normalized.userIds.some(
+      (userId) => !normalized.tenantReferenceUserIdSet.has(userId),
+    )
+  ) {
+    fail("CURRENT_RELEASE_SCOPE_ORACLE_INVALID", {
+      semanticName: "tenantReferenceUserIds",
+    });
+  }
   const normalizeCapabilityList = (values, semanticName) => {
     if (
       !Array.isArray(values) ||
@@ -2804,7 +2818,7 @@ function assertTenantBoundReferences(value, oracle, options = {}, key = null) {
     options.validateUsers &&
     USER_OBJECT_KEYS.has(key) &&
     typeof value.id === "string" &&
-    !oracle.userIdSet.has(value.id)
+    !oracle.tenantReferenceUserIdSet.has(value.id)
   ) {
     fail("CURRENT_RELEASE_CROSS_TENANT_USER_REFERENCE");
   }
@@ -2833,7 +2847,8 @@ function assertTenantBoundReferences(value, oracle, options = {}, key = null) {
       options.validateUsers &&
       USER_ID_KEYS.has(childKey) &&
       childValue != null &&
-      (typeof childValue !== "string" || !oracle.userIdSet.has(childValue))
+      (typeof childValue !== "string" ||
+        !oracle.tenantReferenceUserIdSet.has(childValue))
     ) {
       fail("CURRENT_RELEASE_CROSS_TENANT_USER_REFERENCE");
     }
@@ -2841,7 +2856,9 @@ function assertTenantBoundReferences(value, oracle, options = {}, key = null) {
       if (
         !Array.isArray(childValue) ||
         childValue.some(
-          (id) => typeof id !== "string" || !oracle.userIdSet.has(id),
+          (id) =>
+            typeof id !== "string" ||
+            !oracle.tenantReferenceUserIdSet.has(id),
         )
       ) {
         fail("CURRENT_RELEASE_CROSS_TENANT_USER_REFERENCE");
@@ -3724,6 +3741,9 @@ export async function inspectCurrentReleaseDatabase(
        ARRAY(SELECT u.id::text FROM "User" u
              WHERE u."tenantId" = $1 AND u."isPlatformAdmin" = false
              ORDER BY u.id COLLATE "C") AS "userIds",
+       ARRAY(SELECT u.id::text FROM "User" u
+             WHERE u."tenantId" = $1
+             ORDER BY u.id COLLATE "C") AS "tenantReferenceUserIds",
        ARRAY(SELECT r.id::text FROM "UserAccessRole" r
              WHERE r."tenantId" = $1 ORDER BY r.id COLLATE "C") AS "customRoleIds",
        ARRAY(SELECT i.id::text FROM "UserInvite" i
@@ -4043,6 +4063,7 @@ export async function inspectCurrentReleaseDatabase(
     seasonIds: scopeRow.seasonIds,
     storeIds: scopeRow.storeIds,
     tenantId: subject.rows[0].tenantId,
+    tenantReferenceUserIds: scopeRow.tenantReferenceUserIds,
     userIds: scopeRow.userIds,
     userSemantics: scopeRow.userSemantics,
     roleOverrideSemantics: scopeRow.roleOverrideSemantics,
@@ -4086,6 +4107,9 @@ export async function inspectCurrentReleaseDatabase(
       rewards: sha256(stableJson(scopeOracle.rewardIds)),
       seasons: sha256(stableJson(scopeOracle.seasonIds)),
       stores: sha256(stableJson(scopeOracle.storeIds)),
+      tenantReferenceUsers: sha256(
+        stableJson(scopeOracle.tenantReferenceUserIds),
+      ),
       users: sha256(stableJson(scopeOracle.userIds)),
     }),
     gamificationWorkspaceOracleDigest: sha256(

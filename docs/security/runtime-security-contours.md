@@ -48,6 +48,16 @@ Restored-copy acceptance для CURRENT_189 сравнивает каталог 
 251 неактивный товар (`1489` вместо API `1238`). Повторный rehearsal и exact-SHA
 admission обязательны до rollout.
 
+Вторая fail-closed остановка rehearsal выявила не утечку данных, а смешение
+двух наборов identity внутри acceptance oracle. Tenant API намеренно не
+показывает platform-admin в каталоге сотрудников, однако исторические записи
+этого же tenant законно содержат его `createdBy/target/processedBy` ссылки.
+Oracle теперь хранит отдельно точный visible user set и полный tenant reference
+set: скрытый platform-admin того же tenant допустим только как ссылка, но не как
+строка `/users`; любой ID пользователя другого tenant по-прежнему даёт
+`CURRENT_RELEASE_CROSS_TENANT_USER_REFERENCE`. Production данные и runtime этим
+исправлением не меняются; нужен новый exact-SHA rehearsal и admission.
+
 Для additive перехода `CURRENT_188 -> CURRENT_189` существует отдельный
 fail-closed режим `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_188`. Он
 допускает только exact пару

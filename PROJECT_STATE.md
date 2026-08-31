@@ -45,6 +45,16 @@ count вручную: provenance вычисляется из уже скопир
 становится допустимой автоматически. Это устраняет stale CURRENT_188 metadata,
 но само по себе не разрешает production deploy.
 
+Два restored-copy запуска CURRENT_189 остановились fail-closed без production
+effect и уточнили acceptance oracle. Первый исключил 251 архивный товар из
+сравнения с active-only `/products`. Второй обнаружил, что visible `/users` set
+нельзя использовать как полный набор допустимых исторических ссылок: скрытый
+platform-admin того же tenant законно встречается в `createdBy/target` полях.
+Read-only сверка 103 tenant-scoped FK не нашла реальных cross-tenant ссылок.
+Candidate теперь держит отдельный tenant reference set, не показывает
+platform-admin в `/users` и по-прежнему отклоняет настоящий foreign user ID.
+Перед rollout обязателен новый exact-SHA admission и PASS на той же копии.
+
 Checklist review repair 31.08.2026 устранил ложный `400 Invalid attachment
 references` для старых run: review/cancel transition больше не повторяет write
 snapshot `answers` и derived score/evidence, а stale клиент принудительно

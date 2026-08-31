@@ -42,6 +42,9 @@ count из exact набора каталогов, уже скопированн�
 независимую повторную сверку verifier. Ранее workflow записывал stale
 `188/20260828190000_guest_support_bug_reports`, хотя artifact уже содержал 189
 миграций; admission корректно остановился до публикации deployable handoff.
+Изолированный API child-process fixture отдельно pin-ит reviewed
+`189/20260831120000_guest_support_bug_report_input_repair`, поэтому provenance,
+runtime readiness и реально применённая disposable schema должны совпасть.
 Исправление этой metadata-границы не меняет production и не заменяет отдельный
 production GO.
 

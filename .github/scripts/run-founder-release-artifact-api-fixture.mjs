@@ -10,8 +10,9 @@ const ACTIVATION_ROLE = "leetplus_founder_beta_activation_runtime";
 const DATABASE_PATTERN = /^lp_founder_artifact_api_[0-9a-f]{32}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const MAX_CHILD_OUTPUT_BYTES = 256 * 1024;
-const EXPECTED_MIGRATION = "20260828190000_guest_support_bug_reports";
-const EXPECTED_MIGRATION_COUNT = 188;
+const EXPECTED_MIGRATION =
+  "20260831120000_guest_support_bug_report_input_repair";
+const EXPECTED_MIGRATION_COUNT = 189;
 
 if (
   process.env.FOUNDER_RELEASE_ARTIFACT_API_CONFIRM !== REQUIRED_CONFIRMATION

@@ -32,8 +32,10 @@ CURRENT189 не активирован и перед будущей promotion т
 Release admission для source candidate больше не дублирует migration head и
 count вручную: provenance вычисляется из уже скопированного в immutable artifact
 набора `prisma/migrations`, после чего независимый verifier повторно сверяет оба
-значения с фактическим содержимым. Это устраняет stale CURRENT_188 metadata при
-наличии CURRENT_189 в artifact, но само по себе не разрешает production deploy.
+значения с фактическим содержимым. Отдельный API child-process fixture при этом
+явно pin-ит reviewed `CURRENT_189/189`, поэтому неожиданная новая migration не
+становится допустимой автоматически. Это устраняет stale CURRENT_188 metadata,
+но само по себе не разрешает production deploy.
 
 Checklist review repair 31.08.2026 устранил ложный `400 Invalid attachment
 references` для старых run: review/cancel transition больше не повторяет write

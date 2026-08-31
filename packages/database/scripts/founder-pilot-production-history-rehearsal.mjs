@@ -25,6 +25,8 @@ const SOURCE_ROLLED_BACK_MIGRATION_MANIFEST_DIGEST =
 const FINAL_MIGRATION_COUNT = 187;
 const FINAL_MIGRATION_HEAD =
   "20260820010000_guest_portal_telegram_update_ledger";
+const CURRENT188_MIGRATION_COUNT = 188;
+const CURRENT188_MIGRATION_HEAD = "20260828190000_guest_support_bug_reports";
 const CURRENT_SOURCE_MIGRATION_COUNT = 189;
 const CURRENT_SOURCE_MIGRATION_HEAD =
   "20260831120000_guest_support_bug_report_input_repair";
@@ -296,6 +298,8 @@ async function inspectSourceTree(
   const supportedTarget =
     (targetMigrationCount === FINAL_MIGRATION_COUNT &&
       targetMigrationHead === FINAL_MIGRATION_HEAD) ||
+    (targetMigrationCount === CURRENT188_MIGRATION_COUNT &&
+      targetMigrationHead === CURRENT188_MIGRATION_HEAD) ||
     (targetMigrationCount === CURRENT_SOURCE_MIGRATION_COUNT &&
       targetMigrationHead === CURRENT_SOURCE_MIGRATION_HEAD);
   if (!supportedTarget) {

@@ -75,6 +75,14 @@ acceptance остановился fail-closed до production effect на нес
 менялись. Новый exact-SHA acceptance на восстановленной копии остаётся
 обязательным gate.
 
+Повторный acceptance затем остановился на user-reference oracle. Read-only
+сверка 103 tenant-scoped FK к `User` не нашла ни одной реальной cross-tenant
+ссылки: отказ вызвали historical ссылки на platform-admin этого же tenant,
+скрытого из `/users`. Candidate разделяет visible user set и полный tenant
+reference set, сохраняя точный `/users` projection и отказ для настоящего
+foreign ID. Production не менялся; требуется новый exact-SHA admission и PASS
+на той же restored-copy.
+
 Для контролируемого rollout добавлен отдельный точный bridge
 `ALLOW_CURRENT_188`: только `COMBINED + reporting OFF`, source CURRENT_188 и
 target release CURRENT_189. Он нужен, чтобы до DDL оба independently admitted

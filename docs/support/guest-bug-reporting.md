@@ -125,6 +125,16 @@ effect: database oracle сравнивал `/products` со всеми 1489 ст
 а regression фиксирует SQL-предикат. Это не меняет данные и не скрывает
 расхождение активного каталога; новый exact-SHA rehearsal обязан пройти заново.
 
+Следующий exact-SHA rehearsal также остановился до production effect с
+`CURRENT_RELEASE_CROSS_TENANT_USER_REFERENCE`. Read-only разбор всех 103
+tenant-scoped foreign keys к `User` подтвердил ноль реальных cross-tenant
+ссылок. Причиной были исторические ссылки на platform-admin этого же tenant,
+которого `/users` корректно скрывает от tenant owner. Acceptance oracle теперь
+разделяет visible user set и полный tenant reference set: это разрешает только
+same-tenant ссылку, не добавляет platform-admin в API-каталог и сохраняет
+fail-closed отказ для настоящего foreign user ID. Регрессионный тест покрывает
+обе стороны границы; production остаётся неизменённым до нового admission.
+
 Для rollout CURRENT_189 добавлен отдельный режим
 `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_188`. Его контракт:
 

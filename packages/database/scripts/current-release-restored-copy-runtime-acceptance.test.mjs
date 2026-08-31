@@ -347,6 +347,10 @@ const SCOPE_ORACLE = Object.freeze({
   taskRuleRunIds: Object.freeze(["task-rule-run-1"]),
   taskTemplateIds: Object.freeze(["task-template-1"]),
   tenantId: "tenant-fixture",
+  tenantReferenceUserIds: Object.freeze([
+    "user-owner",
+    "user-platform-admin",
+  ]),
   trainingCourseIds: Object.freeze(["training-course-1"]),
   userIds: Object.freeze(["user-owner"]),
   userSemantics: Object.freeze([
@@ -1481,6 +1485,32 @@ test("binds report rows to the tenant database oracle and rejects silent empty d
         scopeOracle: SCOPE_ORACLE,
       }),
     { reasonCode: "CURRENT_RELEASE_CRITICAL_READ_ENTITY_SET_MISMATCH" },
+  );
+});
+
+test("accepts hidden same-tenant platform-admin references but rejects foreign users", () => {
+  const sameTenantReference = validCriticalBody("/api/staff/notifications");
+  sameTenantReference.rows[0].targetUserId = "user-platform-admin";
+  assert.doesNotThrow(() =>
+    assertCurrentReleaseCriticalReadForTestOnly({
+      body: sameTenantReference,
+      module: "communications",
+      name: "notifications",
+      scopeOracle: SCOPE_ORACLE,
+    }),
+  );
+
+  const foreignReference = structuredClone(sameTenantReference);
+  foreignReference.rows[0].targetUserId = "foreign-user";
+  assert.throws(
+    () =>
+      assertCurrentReleaseCriticalReadForTestOnly({
+        body: foreignReference,
+        module: "communications",
+        name: "notifications",
+        scopeOracle: SCOPE_ORACLE,
+      }),
+    { reasonCode: "CURRENT_RELEASE_CROSS_TENANT_USER_REFERENCE" },
   );
 });
 

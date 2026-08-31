@@ -55,6 +55,17 @@ cutover этот repair нельзя считать доступным поль�
 названием CURRENT189 этим изменением не активируется. Его будущая canonical
 promotion требует rebase/refreeze поверх фактического нового head.
 
+Release artifact provenance для кандидата теперь получает migration head и
+count из exact набора каталогов, уже скопированных в artifact, и затем проходит
+независимую повторную сверку verifier. Ранее workflow записывал stale
+`188/20260828190000_guest_support_bug_reports`, хотя artifact уже содержал 189
+миграций; admission корректно остановился до публикации deployable handoff.
+Изолированный API child-process fixture отдельно pin-ит reviewed
+`189/20260831120000_guest_support_bug_report_input_repair`, поэтому provenance,
+runtime readiness и реально применённая disposable schema должны совпасть.
+Исправление этой metadata-границы не меняет production и не заменяет отдельный
+production GO.
+
 ## Checklist review production rollout (31.08.2026)
 
 PR [#90](https://github.com/boozik3412/leetplus/pull/90) и

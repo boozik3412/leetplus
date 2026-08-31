@@ -37,6 +37,14 @@ store scope инициатора. Это не выдаёт менеджеру и
 capability-subset guard; чужой клуб, `NETWORK`, broad `CLUB_MANAGER`, `OWNER`
 и platform authority остаются fail-closed. Production пока не изменён.
 
+Release admission для source candidate больше не дублирует migration head и
+count вручную: provenance вычисляется из уже скопированного в immutable artifact
+набора `prisma/migrations`, после чего независимый verifier повторно сверяет оба
+значения с фактическим содержимым. Отдельный API child-process fixture при этом
+явно pin-ит reviewed `CURRENT_189/189`, поэтому неожиданная новая migration не
+становится допустимой автоматически. Это устраняет stale CURRENT_188 metadata,
+но само по себе не разрешает production deploy.
+
 Checklist review repair 31.08.2026 устранил ложный `400 Invalid attachment
 references` для старых run: review/cancel transition больше не повторяет write
 snapshot `answers` и derived score/evidence, а stale клиент принудительно

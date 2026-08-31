@@ -65,11 +65,14 @@ Production wrapper является root-authoritative controller. Сам runtim
 acceptance CLI исполняется фиксированным непривилегированным пользователем
 в transient systemd service `leetplus-current-release-acceptance-<operation-id>.service` с
 `NoNewPrivileges`, нулевыми effective capabilities, `IPAddressDeny=any` и
-`IPAddressAllow=localhost`, `Delegate=no`. Перед любым runtime effect CLI проверяет cgroup и
-`/proc/self/status`, доказывает живым probe, что loopback разрешён, а
-non-loopback TCP отклонён ядром с `EACCES|EPERM`. API/Web и любые их descendants
-наследуют тот же cgroup policy. Preload guard остаётся дополнительным
-route/port-level ограничением, но не считается kernel boundary.
+точным `IPAddressAllow=127.0.0.1/32 ::1/128`, `Delegate=no`. Перед любым
+runtime effect CLI проверяет cgroup и `/proc/self/status`, доказывает живым
+probe, что `127.0.0.1` разрешён, а соединение с заведомо доступным локальным
+listener на `127.0.0.2` отклоняется ядром. Connect-hook BPF подтверждается
+`EACCES|EPERM`, а `cgroup_skb` — таймаутом только этого self-hosted canary;
+обычный внешний routing timeout доказательством не считается. API/Web и любые
+их descendants наследуют тот же cgroup policy. Preload guard остаётся
+дополнительным route/port-level ограничением, но не считается kernel boundary.
 
 Все scheduler, scheduled HTTP, SMTP/provider, Langame, SMS, Telegram, MAX,
 founder activation и guest-delivery эффекты принудительно выключены. API всё
@@ -267,7 +270,7 @@ NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
 IPAddressDeny=any
-IPAddressAllow=localhost
+IPAddressAllow=127.0.0.1/32 ::1/128
 Delegate=no
 PrivateTmp=yes
 ProtectSystem=strict

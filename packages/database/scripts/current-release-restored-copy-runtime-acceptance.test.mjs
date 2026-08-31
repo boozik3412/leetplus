@@ -607,7 +607,26 @@ function validCriticalBody(pathname) {
     },
     "/api/staff/discipline": {
       access: {},
-      policies: [{ id: "discipline-policy-1", tenantId: "tenant-fixture" }],
+      policies: [
+        {
+          enabled: true,
+          id: "discipline-policy-1",
+          inheritedFromNetwork: false,
+          label: "Network policy",
+          scope: "NETWORK",
+          storeId: null,
+          storeName: null,
+        },
+        {
+          enabled: true,
+          id: null,
+          inheritedFromNetwork: true,
+          label: "Inherited policy",
+          scope: "STORE",
+          storeId: store.id,
+          storeName: store.name,
+        },
+      ],
       rules: [{ id: "discipline-rule-1", tenantId: "tenant-fixture" }],
       records: [{ id: "discipline-record-1", tenantId: "tenant-fixture" }],
       users: [],
@@ -1562,6 +1581,7 @@ test("separates inactive account management from active staff selectors", () => 
       );
       assert.deepEqual(error.safeMetadata, {
         actualCount: 2,
+        actualInvalidIdCount: 0,
         actualSetDigest: digest(
           JSON.stringify(["user-inactive", "user-owner"]),
         ),
@@ -1572,6 +1592,67 @@ test("separates inactive account management from active staff selectors", () => 
         probeName: "tasks",
         responseKey: "users",
       });
+      return true;
+    },
+  );
+});
+
+test("attests effective discipline policies without treating inherited rows as persisted ids", () => {
+  const valid = validCriticalBody("/api/staff/discipline");
+  const projection = assertCurrentReleaseCriticalReadForTestOnly({
+    body: valid,
+    module: "staff-motivation",
+    name: "discipline",
+    scopeOracle: SCOPE_ORACLE,
+  });
+  assert.match(projection.semanticMarkerDigest, /^[0-9a-f]{64}$/u);
+
+  const missingInheritedStore = structuredClone(valid);
+  missingInheritedStore.policies = missingInheritedStore.policies.filter(
+    (policy) => policy.scope === "NETWORK",
+  );
+  assert.throws(
+    () =>
+      assertCurrentReleaseCriticalReadForTestOnly({
+        body: missingInheritedStore,
+        module: "staff-motivation",
+        name: "discipline",
+        scopeOracle: SCOPE_ORACLE,
+      }),
+    { reasonCode: "CURRENT_RELEASE_DISCIPLINE_POLICY_SET_MISMATCH" },
+  );
+
+  const forgedInheritedId = structuredClone(valid);
+  forgedInheritedId.policies[1].id = "discipline-policy-1";
+  assert.throws(
+    () =>
+      assertCurrentReleaseCriticalReadForTestOnly({
+        body: forgedInheritedId,
+        module: "staff-motivation",
+        name: "discipline",
+        scopeOracle: SCOPE_ORACLE,
+      }),
+    { reasonCode: "CURRENT_RELEASE_DISCIPLINE_POLICY_PROJECTION_INVALID" },
+  );
+});
+
+test("reports malformed exact-id rows through bounded metadata", () => {
+  const invalid = validCriticalBody("/api/staff/directory");
+  invalid.users = [{}];
+  assert.throws(
+    () =>
+      assertCurrentReleaseCriticalReadForTestOnly({
+        body: invalid,
+        module: "staff-control",
+        name: "directory",
+        scopeOracle: SCOPE_ORACLE,
+      }),
+    (error) => {
+      assert.equal(
+        error.reasonCode,
+        "CURRENT_RELEASE_CRITICAL_READ_ENTITY_SET_MISMATCH",
+      );
+      assert.equal(error.safeMetadata.actualInvalidIdCount, 1);
       return true;
     },
   );

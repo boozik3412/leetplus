@@ -9,10 +9,7 @@ import {
   apiRuntimeServiceName,
   resolveApiRuntimeRole,
 } from './config/api-runtime-role';
-import {
-  GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE,
-  GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET,
-} from './config/environment-validation';
+import { guestSupportSchemaBridgeContract } from './config/environment-validation';
 import { PrismaService } from './prisma/prisma.service';
 
 @Injectable()
@@ -120,10 +117,9 @@ export class AppService {
               ? {
                   compatibility: {
                     mode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
-                    targetMigration:
-                      GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migration,
+                    targetMigration: schemaBridgeAccepted.target.migration,
                     targetMigrationCount:
-                      GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migrationCount,
+                      schemaBridgeAccepted.target.migrationCount,
                   },
                 }
               : {}),
@@ -179,21 +175,19 @@ export class AppService {
     expectedMigration: string | null;
     expectedMigrationCount: number | null;
   }) {
-    return (
-      this.optionalConfig('GUEST_SUPPORT_SCHEMA_BRIDGE_MODE') ===
-        'ALLOW_CURRENT_187' &&
-      this.optionalConfig('GUEST_BUG_REPORTING_MODE') === 'OFF' &&
+    const contract = guestSupportSchemaBridgeContract(
+      this.optionalConfig('GUEST_SUPPORT_SCHEMA_BRIDGE_MODE'),
+    );
+    if (!contract) return null;
+    return this.optionalConfig('GUEST_BUG_REPORTING_MODE') === 'OFF' &&
       resolveApiRuntimeRole(this.configService.get(API_RUNTIME_ROLE_KEY)) ===
         'COMBINED' &&
-      input.expectedMigration ===
-        GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migration &&
-      input.expectedMigrationCount ===
-        GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migrationCount &&
-      input.databaseMigration ===
-        GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE.migration &&
-      input.completedMigrations ===
-        GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE.migrationCount
-    );
+      input.expectedMigration === contract.target.migration &&
+      input.expectedMigrationCount === contract.target.migrationCount &&
+      input.databaseMigration === contract.source.migration &&
+      input.completedMigrations === contract.source.migrationCount
+      ? contract
+      : null;
   }
 
   private optionalConfig(key: string) {

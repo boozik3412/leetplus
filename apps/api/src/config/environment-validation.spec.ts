@@ -646,14 +646,17 @@ describe('resolveGuestBugReportingMode', () => {
 });
 
 describe('resolveGuestSupportSchemaBridgeMode', () => {
-  it('defaults to off and accepts only the explicit CURRENT_187 bridge', () => {
+  it('defaults to off and accepts only the explicit reviewed bridges', () => {
     expect(resolveGuestSupportSchemaBridgeMode(undefined)).toBe('OFF');
     expect(resolveGuestSupportSchemaBridgeMode(' off ')).toBe('OFF');
     expect(resolveGuestSupportSchemaBridgeMode('allow_current_187')).toBe(
       'ALLOW_CURRENT_187',
     );
+    expect(resolveGuestSupportSchemaBridgeMode('allow_current_188')).toBe(
+      'ALLOW_CURRENT_188',
+    );
     expect(() => resolveGuestSupportSchemaBridgeMode('enabled')).toThrow(
-      /GUEST_SUPPORT_SCHEMA_BRIDGE_MODE must be OFF or ALLOW_CURRENT_187/,
+      /must be OFF, ALLOW_CURRENT_187, or ALLOW_CURRENT_188/,
     );
   });
 
@@ -677,6 +680,37 @@ describe('resolveGuestSupportSchemaBridgeMode', () => {
       validateEnvironment({
         ...bridge,
         EXPECTED_DATABASE_MIGRATION_COUNT: '187',
+      }),
+    ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
+    expect(() =>
+      validateEnvironment({
+        ...bridge,
+        LEETPLUS_API_RUNTIME_ROLE: 'GUEST',
+      }),
+    ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
+  });
+
+  it('admits the CURRENT_188 bridge only for the disabled combined CURRENT_189 release', () => {
+    const bridge = {
+      ...validProductionEnvironment(),
+      EXPECTED_DATABASE_MIGRATION:
+        '20260831120000_guest_support_bug_report_input_repair',
+      EXPECTED_DATABASE_MIGRATION_COUNT: '189',
+      GUEST_BUG_REPORTING_MODE: 'OFF',
+      GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: 'ALLOW_CURRENT_188',
+    };
+
+    expect(validateEnvironment(bridge)).toMatchObject({
+      GUEST_BUG_REPORTING_MODE: 'OFF',
+      GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: 'ALLOW_CURRENT_188',
+    });
+    expect(() =>
+      validateEnvironment({ ...bridge, GUEST_BUG_REPORTING_MODE: 'LIVE' }),
+    ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
+    expect(() =>
+      validateEnvironment({
+        ...bridge,
+        EXPECTED_DATABASE_MIGRATION_COUNT: '188',
       }),
     ).toThrow(/requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF/);
     expect(() =>

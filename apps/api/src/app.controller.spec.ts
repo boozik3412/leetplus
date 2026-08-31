@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import {
+  GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT188_SOURCE,
+  GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_TARGET,
   GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE,
   GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET,
 } from './config/environment-validation';
@@ -174,6 +176,52 @@ describe('AppController', () => {
             targetMigration: GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migration,
             targetMigrationCount:
               GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migrationCount,
+          },
+        },
+      },
+    });
+  });
+
+  it('admits the exact CURRENT_188 bridge only while guest bug reporting is off', async () => {
+    prisma.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ ok: 1 }])
+      .mockResolvedValueOnce([
+        {
+          migration_name:
+            GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT188_SOURCE.migration,
+          completed_count:
+            GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT188_SOURCE.migrationCount,
+          unfinished_count: 0,
+        },
+      ]);
+    const service = new AppService(
+      new ConfigService({
+        LEETPLUS_API_RUNTIME_ROLE: 'COMBINED',
+        EXPECTED_DATABASE_MIGRATION:
+          GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_TARGET.migration,
+        EXPECTED_DATABASE_MIGRATION_COUNT: String(
+          GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_TARGET.migrationCount,
+        ),
+        GUEST_BUG_REPORTING_MODE: 'OFF',
+        GUEST_SUPPORT_SCHEMA_BRIDGE_MODE: 'ALLOW_CURRENT_188',
+      }),
+      prisma as unknown as PrismaService,
+    );
+
+    await expect(service.getReadiness()).resolves.toMatchObject({
+      ok: true,
+      dependencies: {
+        database: {
+          migration: GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT188_SOURCE.migration,
+          migrationCount:
+            GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT188_SOURCE.migrationCount,
+          compatibility: {
+            mode: 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE',
+            targetMigration:
+              GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_TARGET.migration,
+            targetMigrationCount:
+              GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_TARGET.migrationCount,
           },
         },
       },

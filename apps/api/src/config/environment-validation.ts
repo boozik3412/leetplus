@@ -132,6 +132,7 @@ export type GuestBugReportingMode = (typeof GUEST_BUG_REPORTING_MODES)[number];
 export const GUEST_SUPPORT_SCHEMA_BRIDGE_MODES = [
   'OFF',
   'ALLOW_CURRENT_187',
+  'ALLOW_CURRENT_188',
 ] as const;
 export type GuestSupportSchemaBridgeMode =
   (typeof GUEST_SUPPORT_SCHEMA_BRIDGE_MODES)[number];
@@ -143,6 +144,24 @@ export const GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE = Object.freeze({
 export const GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET = Object.freeze({
   migration: '20260828190000_guest_support_bug_reports',
   migrationCount: 188,
+});
+export const GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT188_SOURCE = Object.freeze({
+  migration: '20260828190000_guest_support_bug_reports',
+  migrationCount: 188,
+});
+export const GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_TARGET = Object.freeze({
+  migration: '20260831120000_guest_support_bug_report_input_repair',
+  migrationCount: 189,
+});
+export const GUEST_SUPPORT_SCHEMA_BRIDGE_CONTRACTS = Object.freeze({
+  ALLOW_CURRENT_187: Object.freeze({
+    source: GUEST_SUPPORT_SCHEMA_BRIDGE_SOURCE,
+    target: GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET,
+  }),
+  ALLOW_CURRENT_188: Object.freeze({
+    source: GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT188_SOURCE,
+    target: GUEST_SUPPORT_SCHEMA_BRIDGE_CURRENT189_TARGET,
+  }),
 });
 
 export function resolveGuestBugReportingMode(
@@ -169,8 +188,14 @@ export function resolveGuestSupportSchemaBridgeMode(
     return normalized as GuestSupportSchemaBridgeMode;
   }
   throw new Error(
-    'GUEST_SUPPORT_SCHEMA_BRIDGE_MODE must be OFF or ALLOW_CURRENT_187',
+    'GUEST_SUPPORT_SCHEMA_BRIDGE_MODE must be OFF, ALLOW_CURRENT_187, or ALLOW_CURRENT_188',
   );
+}
+
+export function guestSupportSchemaBridgeContract(value: unknown) {
+  const mode = resolveGuestSupportSchemaBridgeMode(value);
+  if (mode === 'OFF') return null;
+  return GUEST_SUPPORT_SCHEMA_BRIDGE_CONTRACTS[mode];
 }
 
 export const FOUNDER_OPERATOR_BETA_ACTIVATION_DATABASE_ROLE =
@@ -644,16 +669,21 @@ export function validateEnvironment(config: EnvironmentValues) {
   if (!/^[1-9]\d*$/.test(expectedMigrationCount)) {
     errors.push('EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer');
   }
+  const guestSupportSchemaBridgeContractValue =
+    guestSupportSchemaBridgeMode === 'OFF'
+      ? null
+      : GUEST_SUPPORT_SCHEMA_BRIDGE_CONTRACTS[guestSupportSchemaBridgeMode];
   if (
-    guestSupportSchemaBridgeMode === 'ALLOW_CURRENT_187' &&
+    guestSupportSchemaBridgeContractValue &&
     (apiRuntimeRole !== 'COMBINED' ||
       guestBugReportingMode !== 'OFF' ||
-      expectedMigration !== GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migration ||
+      expectedMigration !==
+        guestSupportSchemaBridgeContractValue.target.migration ||
       expectedMigrationCount !==
-        String(GUEST_SUPPORT_SCHEMA_BRIDGE_TARGET.migrationCount))
+        String(guestSupportSchemaBridgeContractValue.target.migrationCount))
   ) {
     errors.push(
-      'GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_187 requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF, and exact CURRENT_188 release identity',
+      `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=${guestSupportSchemaBridgeMode} requires COMBINED runtime, GUEST_BUG_REPORTING_MODE=OFF, and its exact target release identity`,
     );
   }
   if (!langameDiscrepancyLogRoot) {

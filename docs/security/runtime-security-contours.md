@@ -16,16 +16,16 @@ fail-closed правилу одного контура снова сломать
 
 ## Текущее состояние
 
-| Область                  | Состояние                                                                                                                                                                          |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Область                  | Состояние                                                                                                                                                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Runtime implementation   | Checklist status-only review boundary слита PR [#90](https://github.com/boozik3412/leetplus/pull/90) и [#91](https://github.com/boozik3412/leetplus/pull/91), merge SHA `a130c13e8d694b605d86a924b1524a6174ae1b51` |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33330505183) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33330505182) — `SUCCESS` |
-| Production API topology  | active green exact `a130c13e…`, generation 16, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `4036d312…`, оба slot active                      |
-| Source repair candidate  | guest bug-report input repair: 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair` (`CURRENT_189`); **не deployed** |
-| Corporate invite repair  | `STANDARDS_MANAGER` может делегировать canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides и custom permissions остаются capability-bounded; **не deployed** |
-| Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                           |
-| Corporate landing        | role-aware successor входит в active `a130c13e…`; real-account canary остаётся отдельной проверкой                                                                                 |
-| Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                   |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33330505183) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33330505182) — `SUCCESS`                                 |
+| Production API topology  | active green exact `a130c13e…`, generation 16, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `4036d312…`, оба slot active                                                    |
+| Source repair candidate  | guest bug-report input repair: 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair` (`CURRENT_189`); **не deployed**                                  |
+| Corporate invite repair  | `STANDARDS_MANAGER` может делегировать canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides и custom permissions остаются capability-bounded; **не deployed**   |
+| Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
+| Corporate landing        | role-aware successor входит в active `a130c13e…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
+| Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
 зелёный CI не доказывают production deployment. Фактический production runtime,
@@ -39,6 +39,25 @@ exclusive `parts` cap с 6 на 7 не расширяет allowlist: `fields=5`,
 остаётся exact CURRENT_188 до отдельного admitted rollout. Дормантный
 noncanonical employee-invite proposal с логическим ярлыком CURRENT189 не
 активируется этим repair и требует будущего rebase/refreeze.
+
+Restored-copy acceptance для CURRENT_189 сравнивает каталог `/products` только
+с активными `Product`: endpoint по контракту не возвращает архивные
+`isActive=false` строки. Эта граница закреплена в database oracle и отдельном
+регрессионном тесте; она не удаляет и не активирует товары. Первый rehearsal
+корректно остановился до production effect, когда старый oracle посчитал ещё
+251 неактивный товар (`1489` вместо API `1238`). Повторный rehearsal и exact-SHA
+admission обязательны до rollout.
+
+Для additive перехода `CURRENT_188 -> CURRENT_189` существует отдельный
+fail-closed режим `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_188`. Он
+допускает только exact пару
+`20260828190000_guest_support_bug_reports/188 ->
+20260831120000_guest_support_bug_report_input_repair/189`, только runtime
+`COMBINED` и только `GUEST_BUG_REPORTING_MODE=OFF`. Он не заменяет исторический
+`ALLOW_CURRENT_187`, не является общим N/N+1-допуском и не разрешает split
+runtime. До DDL оба active/rollback slot должны быть одним admitted target-189
+SHA с bridge/`OFF`; после DDL они обязаны перейти в exact CURRENT_189 readiness,
+после чего bridge возвращается в `OFF`, а reporting — в `LIVE`.
 
 Migration identity в release provenance вычисляется только из exact
 `prisma/migrations`, уже скопированного в immutable artifact. Независимый
@@ -142,7 +161,7 @@ Production activation завершена 30.08.2026 на exact admitted SHA
 
 - `USER_CALL` остаётся обычным public API request path. Advisory transaction
   lock обязан возвращать Prisma-поддерживаемый scalar (`::text AS
-  "lockResult"`); запрос, возвращающий PostgreSQL `void`, запрещён, потому что
+"lockResult"`); запрос, возвращающий PostgreSQL `void`, запрещён, потому что
   превращает корректный provider flow в HTTP 500 до создания challenge.
 - Автономный reward materializer и inline reward claim имеют разные controls.
   Безопасный обычный API overlay — `GUEST_GAME_REWARD_MATERIALIZER_ENABLED=false`
@@ -214,11 +233,13 @@ Support-функциональность следует тем же трём г�
   очищается от metadata и выдаётся только как private attachment;
 - runtime flag `GUEST_BUG_REPORTING_MODE=OFF|LIVE` fail-closed и по умолчанию
   равен `OFF`.
-- единственный schema bridge допускает exact `CURRENT_187 -> CURRENT_188`
-  только для `COMBINED` runtime при `GUEST_BUG_REPORTING_MODE=OFF`; любой другой
-  head/count, unfinished migration, split runtime или `LIVE` блокирует startup/
-  readiness. Это переходный deployment-контракт, а не разрешение читать
-  отсутствующие support tables.
+- schema bridge содержит только две именованные exact-пары:
+  `ALLOW_CURRENT_187` для `187 -> 188` и `ALLOW_CURRENT_188` для `188 -> 189`.
+  Обе разрешены только `COMBINED` runtime при
+  `GUEST_BUG_REPORTING_MODE=OFF`; любой другой head/count, target release,
+  unfinished migration, split runtime или `LIVE` блокирует startup/readiness.
+  Это переходные deployment-контракты, а не общий N/N+1-допуск и не разрешение
+  читать ещё отсутствующие таблицы/колонки.
 - фактическая production schema имеет историческую mixed-owner topology.
   Единственный допустимый переход — same-SHA signed legacy controller с
   пообъектным OID/owner/ACL digest, migration от локальной postgres identity,
@@ -267,9 +288,9 @@ Exact runtime `a130c13e8d694b605d86a924b1524a6174ae1b51` разделяет эт
   immutable handoff переключил production на generation 16, active green;
   public API/Web, exact schema `188`, authenticated catalog smoke и четыре
   последующих bonus-ledger tick прошли без ошибок и с пустой очередью.
-Это не меняет split-runtime решение: production по-прежнему
-`COMBINED`, а три логических security-контура сохраняются guards/module
-boundaries.
+  Это не меняет split-runtime решение: production по-прежнему
+  `COMBINED`, а три логических security-контура сохраняются guards/module
+  boundaries.
 
 Подробный контракт и rollout:
 [`docs/support/guest-bug-reporting.md`](../support/guest-bug-reporting.md).

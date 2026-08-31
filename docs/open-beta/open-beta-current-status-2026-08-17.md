@@ -1,19 +1,19 @@
 # LeetPlus open beta — текущее состояние на 31.08.2026
 
-| Поле                 | Состояние                                                                                                                        |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Release decision     | `NO-GO` для внешнего доступа                                                                                                     |
-| Production runtime   | healthy; active green `a130c13e…`, generation 16, `COMBINED`, bridge OFF, bug reporting LIVE                                      |
-| Prisma schema        | production exact `CURRENT_188`; source repair candidate `CURRENT_189` не deployed                                                 |
-| Release authority    | exact SHA `a130c13e…`: Fast CI `33330505183`, Full Release Admission `33330505182`, immutable handoff и generation 16 receipt     |
-| Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                  |
-| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                                 |
-| Role-aware landing   | входит в active `a130c13e…`; real-account canary pending                                                                         |
-| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                         |
-| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                      |
-| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                    |
-| Offline/USB key      | исключён из beta critical path                                                                                                   |
-| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                               |
+| Поле                 | Состояние                                                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
+| Production runtime   | healthy; active green `a130c13e…`, generation 16, `COMBINED`, bridge OFF, bug reporting LIVE                                  |
+| Prisma schema        | production exact `CURRENT_188`; source repair candidate `CURRENT_189` не deployed                                             |
+| Release authority    | exact SHA `a130c13e…`: Fast CI `33330505183`, Full Release Admission `33330505182`, immutable handoff и generation 16 receipt |
+| Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                |
+| Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
+| Role-aware landing   | входит в active `a130c13e…`; real-account canary pending                                                                      |
+| Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                      |
+| Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                   |
+| Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
+| Offline/USB key      | исключён из beta critical path                                                                                                |
+| Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 
 ## Standards-manager invite delegation repair candidate (31.08.2026)
 
@@ -65,6 +65,25 @@ count из exact набора каталогов, уже скопированн�
 runtime readiness и реально применённая disposable schema должны совпасть.
 Исправление этой metadata-границы не меняет production и не заменяет отдельный
 production GO.
+
+Restored-copy preflight 31.08.2026 восстановил production backup в отдельный
+PostgreSQL 16 contour и успешно применил canonical `188 -> 189`. Первый runtime
+acceptance остановился fail-closed до production effect на несовпадении
+каталога товаров: oracle включал 251 архивный `Product`, а `/products` по
+контракту отдаёт только `isActive=true` (`1489` против `1238`). Source repair
+синхронизирует oracle с endpoint и закрепляет это тестом; данные production не
+менялись. Новый exact-SHA acceptance на восстановленной копии остаётся
+обязательным gate.
+
+Для контролируемого rollout добавлен отдельный точный bridge
+`ALLOW_CURRENT_188`: только `COMBINED + reporting OFF`, source CURRENT_188 и
+target release CURRENT_189. Он нужен, чтобы до DDL оба independently admitted
+blue/green slot принадлежали одному target-189 SHA, а после additive migration
+оба автоматически перешли в exact-189 readiness. Любой иной head/count,
+release identity, `LIVE` или split runtime блокируется. После postflight bridge
+возвращается в `OFF`, reporting — в `LIVE`, bonus-ledger timer — в автономный
+режим. Это не меняет внешний beta decision и до завершённого rollout production
+остаётся на `a130c13e…`/CURRENT_188.
 
 ## Checklist review production rollout (31.08.2026)
 

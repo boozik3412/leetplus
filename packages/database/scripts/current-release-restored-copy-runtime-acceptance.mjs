@@ -2277,9 +2277,9 @@ function normalizeScopeOracle(scopeOracle) {
     normalized.gamificationWorkspaceSummary.activeSeasons >
       normalized.seasonIds.length ||
     normalized.gamificationWorkspaceSummary.pendingRewards +
-        normalized.gamificationWorkspaceSummary.approvedRewards +
-        normalized.gamificationWorkspaceSummary.paidRewards +
-        normalized.gamificationWorkspaceSummary.expiredRewards >
+      normalized.gamificationWorkspaceSummary.approvedRewards +
+      normalized.gamificationWorkspaceSummary.paidRewards +
+      normalized.gamificationWorkspaceSummary.expiredRewards >
       normalized.rewardIds.length
   ) {
     fail("CURRENT_RELEASE_SCOPE_ORACLE_INVALID", {
@@ -2626,9 +2626,7 @@ function assertReadinessProjection(
     (!Number.isSafeInteger(value.summary.readinessPercent) ||
       value.summary.readinessPercent !==
         Math.round(
-          ((counts.READY +
-            counts.PARTIAL * 0.5 +
-            counts.MANUAL_ONLY * 0.5) /
+          ((counts.READY + counts.PARTIAL * 0.5 + counts.MANUAL_ONLY * 0.5) /
             value.items.length) *
             100,
         ))
@@ -3894,7 +3892,8 @@ export async function inspectCurrentReleaseDatabase(
          ) events)
        ) AS "gamificationWorkspaceSummary",
        ARRAY(SELECT p.id::text FROM "Product" p
-             WHERE p."tenantId" = $1 ORDER BY p.id COLLATE "C") AS "productIds",
+             WHERE p."tenantId" = $1 AND p."isActive" = true
+             ORDER BY p.id COLLATE "C") AS "productIds",
        ARRAY(SELECT m.id::text FROM "GuestGameMission" m
              WHERE m."tenantId" = $1 ORDER BY m.id COLLATE "C") AS "missionIds",
        ARRAY(SELECT box.id::text FROM "GuestGameLootBox" box

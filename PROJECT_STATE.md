@@ -75,6 +75,14 @@ exact-ID validator: он требует одну NETWORK policy, ровно од
 у explicit rows. Ошибка построения bounded mismatch metadata с `null` также
 устранена. Локальный контракт проходит 30/30 тестов; production не менялся.
 
+Пятый restored-copy запуск exact merge SHA остановился fail-closed до
+production database effect на default-фильтре дисциплины. В копии находятся 23
+записи: 17 `ACTIVE` и 6 `RESET`; штатный `/staff/discipline` без query по
+контракту возвращает только `ACTIVE`, а database oracle ошибочно ожидал все 23.
+Oracle теперь использует тот же explicit `status = ACTIVE`, а unit-контракт
+закрепляет SQL-предикат. Данные дисциплины и сам endpoint не менялись; перед
+rollout снова обязательны новый exact-SHA admission и restored-copy PASS.
+
 Для единственного перехода `CURRENT_188 -> CURRENT_189` добавлен отдельный
 подписываемый controller
 [`GUEST_SUPPORT_PRODUCTION_188_TO_189_V1`](docs/open-beta/guest-support-current189-production-upgrade-controller.md).

@@ -1593,7 +1593,9 @@ fi
   printf 'Group=%s\n' "$property_group"
   printf 'SupplementaryGroups=%s\n' "$property_supplementary_groups"
   printf 'DynamicUser=no\n'
-  printf 'LoadCredential=current-release-runtime.json:%s\n' "$credential_file"
+  # Match systemctl 255 on the supported Ubuntu production host: the
+  # effective a(say) property is intentionally redacted even for root.
+  printf 'LoadCredential=[unprintable]\n'
   printf 'WorkingDirectory=%s\n' "$property_working_directory"
   printf 'Environment=%s\n' "$property_environment"
   printf 'EnvironmentFiles=\n'

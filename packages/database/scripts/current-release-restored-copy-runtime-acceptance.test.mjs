@@ -472,15 +472,9 @@ function validCriticalBody(pathname) {
       communicationQueue: {},
       deliveryOutbox: {},
       guestLogCatalog: {},
-      profiles: [
-        { id: "profile-1", level: 2, status: "ACTIVE", xp: 10 },
-      ],
-      lootBoxes: [
-        { id: "loot-box-1", status: "ACTIVE", storeIds: [store.id] },
-      ],
-      missions: [
-        { id: "mission-1", status: "ACTIVE", storeIds: [store.id] },
-      ],
+      profiles: [{ id: "profile-1", level: 2, status: "ACTIVE", xp: 10 }],
+      lootBoxes: [{ id: "loot-box-1", status: "ACTIVE", storeIds: [store.id] }],
+      missions: [{ id: "mission-1", status: "ACTIVE", storeIds: [store.id] }],
       seasons: [{ id: "season-1", status: "ACTIVE" }],
       promoCards: [{ id: "promo-card-1" }],
       rewards: [
@@ -1063,6 +1057,10 @@ function currentReleaseDatabaseClient(identityOverrides = {}) {
         };
       }
       if (sql.includes('ARRAY(SELECT s.id::text FROM "Store"')) {
+        assert.match(
+          sql,
+          /ARRAY\(SELECT p\.id::text FROM "Product" p\s+WHERE p\."tenantId" = \$1 AND p\."isActive" = true/u,
+        );
         return {
           rowCount: 1,
           rows: [{ ...SCOPE_ORACLE }],
@@ -1878,10 +1876,9 @@ test("normalizes startup timeout and rejects ambiguous or unsafe CLI values", ()
     90_000.5,
     Number.NaN,
   ]) {
-    assert.throws(
-      () => normalizeCurrentReleaseStartupTimeoutMs(invalid),
-      { reasonCode: "CURRENT_RELEASE_STARTUP_TIMEOUT_INVALID" },
-    );
+    assert.throws(() => normalizeCurrentReleaseStartupTimeoutMs(invalid), {
+      reasonCode: "CURRENT_RELEASE_STARTUP_TIMEOUT_INVALID",
+    });
   }
 
   const base = [

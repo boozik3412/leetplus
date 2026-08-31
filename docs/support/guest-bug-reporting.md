@@ -118,6 +118,34 @@ blue/green cutover. Дормантный noncanonical proposal, историче
 будущей canonical promotion должен быть заново rebased/refrozen относительно
 фактического head.
 
+Первый restored-copy acceptance корректно завершился `FAIL` до production
+effect: database oracle сравнивал `/products` со всеми 1489 строками `Product`,
+тогда как контракт endpoint возвращает 1238 активных товаров. Разница — 251
+архивный `isActive=false` товар. Oracle теперь использует тот же активный scope,
+а regression фиксирует SQL-предикат. Это не меняет данные и не скрывает
+расхождение активного каталога; новый exact-SHA rehearsal обязан пройти заново.
+
+Для rollout CURRENT_189 добавлен отдельный режим
+`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_188`. Его контракт:
+
+- source — exact `20260828190000_guest_support_bug_reports`, count `188`;
+- target — exact
+  `20260831120000_guest_support_bug_report_input_repair`, count `189`;
+- только `API_RUNTIME_ROLE=COMBINED` и
+  `GUEST_BUG_REPORTING_MODE=OFF`;
+- target release identity обязана быть exact CURRENT_189;
+- после применения migration readiness становится exact CURRENT_189 без
+  compatibility evidence; затем bridge обязан вернуться в `OFF`, а reporting —
+  в `LIVE`.
+
+Перед DDL оба blue/green slot заменяются одним independently admitted
+target-189 SHA и проверяются через этот bridge. Старый CURRENT_188 runtime после
+DDL не является rollback authority. Миграция выполняется под production-control
+install lock и blue/green cutover lock при остановленном bonus-ledger timer;
+после exact-189 postflight timer возвращается в автономный режим. Исторический
+`ALLOW_CURRENT_187` остаётся отдельным контрактом только для 187→188 и не
+расширяется.
+
 ## Историческое включение CURRENT_188
 
 Additive migration:

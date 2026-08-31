@@ -1561,6 +1561,18 @@ assert_unit_effective_policy() {
     [[ "${actual[$key]+present}" == present ]] \
       || die "systemd unit effective policy is missing ${key}: ${unit}"
     case "$key" in
+      LoadCredential)
+        # systemd exposes LoadCredential as a binary a(say) property.  Some
+        # supported systemctl 255 builds deliberately redact that value even
+        # for the privileged parent.  The wrapper already fixes the exact
+        # source in the systemd-run argv, binds its stable stat identity into
+        # the durable request and verifies the delivered bytes through the
+        # signed child evidence, so the canonical redaction is equivalent to
+        # the exact printable representation here.  No other value is valid.
+        [[ "${actual[$key]}" == "${expected[$key]}" \
+          || "${actual[$key]}" == '[unprintable]' ]] \
+          || die "systemd unit effective policy differs for ${key}: ${unit}"
+        ;;
       Environment|UnsetEnvironment|SupplementaryGroups|IPAddressDeny|IPAddressAllow|RestrictAddressFamilies|ReadOnlyPaths)
         exact_space_token_set_equal "${actual[$key]}" "${expected[$key]}" \
           || die "systemd unit effective policy differs for ${key}: ${unit}"

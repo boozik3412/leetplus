@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (31.08.2026)
+## Canonical current-state guardrail (01.09.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -45,7 +45,7 @@ count вручную: provenance вычисляется из уже скопир
 становится допустимой автоматически. Это устраняет stale CURRENT_188 metadata,
 но само по себе не разрешает production deploy.
 
-Два restored-copy запуска CURRENT_189 остановились fail-closed без production
+Первые два restored-copy запуска CURRENT_189 остановились fail-closed без production
 effect и уточнили acceptance oracle. Первый исключил 251 архивный товар из
 сравнения с active-only `/products`. Второй обнаружил, что visible `/users` set
 нельзя использовать как полный набор допустимых исторических ссылок: скрытый
@@ -54,6 +54,17 @@ Read-only сверка 103 tenant-scoped FK не нашла реальных cro
 Candidate теперь держит отдельный tenant reference set, не показывает
 platform-admin в `/users` и по-прежнему отклоняет настоящий foreign user ID.
 Перед rollout обязателен новый exact-SHA admission и PASS на той же копии.
+
+Третий restored-copy запуск CURRENT_189 также остановился fail-closed до
+production effect: `/users` корректно содержал 28 non-platform account rows, а
+активные staff selectors — 26 `isActive=true` rows. Source candidate теперь
+держит три точных набора: account-management users, active staff users и
+discipline-eligible active users. Platform-admin явно исключён из tenant
+employee selectors; неактивные users сохраняются в управлении аккаунтами, но не
+могут быть назначены в новые staff workflows. Evidence mismatch теперь содержит
+конкретные module/probe/response key. Локальный acceptance-контракт проходит
+28/28 тестов; production по-прежнему не изменён и требует нового exact-SHA
+admission и restored-copy PASS.
 
 Checklist review repair 31.08.2026 устранил ложный `400 Invalid attachment
 references` для старых run: review/cancel transition больше не повторяет write

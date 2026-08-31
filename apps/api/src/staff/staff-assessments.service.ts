@@ -256,7 +256,7 @@ export class StaffAssessmentsService {
       }),
       canManageAssessments
         ? this.prisma.user.findMany({
-            where: { tenantId },
+            where: { tenantId, isPlatformAdmin: false },
             select: {
               id: true,
               email: true,

@@ -1,4 +1,4 @@
-# LeetPlus open beta — текущее состояние на 31.08.2026
+# LeetPlus open beta — текущее состояние на 01.09.2026
 
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -82,6 +82,17 @@ acceptance остановился fail-closed до production effect на нес
 reference set, сохраняя точный `/users` projection и отказ для настоящего
 foreign ID. Production не менялся; требуется новый exact-SHA admission и PASS
 на той же restored-copy.
+
+Третий acceptance дошёл до staff selectors и также завершился fail-closed без
+production effect. В canonical tenant существуют 28 управляемых non-platform
+учётных записей, из которых 26 активны; `/staff/tasks` и аналогичные selectors
+по контракту не возвращают две `isActive=false` записи. Новый oracle разделяет
+account-management, active-staff и discipline-eligible sets, проверяет их
+отношения и добавляет endpoint context в signed failure evidence. Одновременно
+platform-admin явно исключён из tenant employee selectors. Неактивные аккаунты
+не удалены и доступны в `/users`, но не назначаются в staff workflows. Локальный
+контракт проходит 28/28 тестов; нужен новый exact-SHA admission и PASS на той же
+restored-copy до любого production rollout.
 
 Для контролируемого rollout добавлен отдельный точный bridge
 `ALLOW_CURRENT_188`: только `COMBINED + reporting OFF`, source CURRENT_188 и

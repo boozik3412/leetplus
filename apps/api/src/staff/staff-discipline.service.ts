@@ -771,6 +771,7 @@ export class StaffDisciplineService {
     return {
       tenantId,
       isActive: true,
+      isPlatformAdmin: false,
       role: {
         in: [
           UserRole.CLUB_ADMINISTRATOR,

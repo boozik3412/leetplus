@@ -122,16 +122,22 @@ export class StaffChecklistAccessPolicyService {
         tenantId: access.tenantId,
         id: access.userId,
         isActive: true,
+        isPlatformAdmin: false,
       };
     }
 
     if (access.mode === 'NETWORK') {
-      return { tenantId: access.tenantId, isActive: true };
+      return {
+        tenantId: access.tenantId,
+        isActive: true,
+        isPlatformAdmin: false,
+      };
     }
 
     return {
       tenantId: access.tenantId,
       isActive: true,
+      isPlatformAdmin: false,
       OR: [
         { accessScope: 'NETWORK' },
         {

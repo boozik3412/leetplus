@@ -1400,6 +1400,7 @@ export class StaffSalaryService {
     const where: Prisma.UserWhereInput = {
       tenantId,
       isActive: true,
+      isPlatformAdmin: false,
       role: { in: [...administratorRoles] },
     };
 

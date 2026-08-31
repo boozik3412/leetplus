@@ -106,6 +106,7 @@ describe('StaffChecklistAccessPolicyService', () => {
       tenantId: 'tenant-a',
       id: 'user-a1',
       isActive: true,
+      isPlatformAdmin: false,
     });
   });
 

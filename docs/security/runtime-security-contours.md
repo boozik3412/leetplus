@@ -2,7 +2,7 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **31.08.2026**
+Актуально на: **01.09.2026**
 Runtime implementation baseline:
 `a130c13e8d694b605d86a924b1524a6174ae1b51` (PR #90 + #91 поверх PR #88;
 включает status-only review-переходы чек-листов без повторной записи legacy
@@ -57,6 +57,18 @@ set: скрытый platform-admin того же tenant допустим тол�
 строка `/users`; любой ID пользователя другого tenant по-прежнему даёт
 `CURRENT_RELEASE_CROSS_TENANT_USER_REFERENCE`. Production данные и runtime этим
 исправлением не меняются; нужен новый exact-SHA rehearsal и admission.
+
+Третья fail-closed остановка rehearsal уточнила ещё одну допустимую границу:
+tenant account-management каталог содержит 28 non-platform пользователей, но
+активные staff selectors намеренно возвращают только 26 `isActive=true` строк.
+Acceptance oracle теперь отдельно фиксирует полный `/users` set, активный staff
+set и более узкий discipline-role set; каждое несовпадение дополнительно
+указывает module/probe/response key. Platform-admin исключён из всех tenant
+employee selectors независимо от активности. Неактивные учётные записи не
+удаляются и остаются управляемыми через `/users`, однако не могут быть выбраны
+для новых задач, чек-листов, обучения, чата, оценок, дисциплины или зарплатных
+операций. Production runtime и данные этим source repair не меняются; до rollout
+обязательны новый exact-SHA admission и PASS на восстановленной копии.
 
 Для additive перехода `CURRENT_188 -> CURRENT_189` существует отдельный
 fail-closed режим `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_188`. Он

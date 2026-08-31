@@ -2063,6 +2063,7 @@ export class StaffTeamChatService {
     return {
       tenantId,
       isActive: true,
+      isPlatformAdmin: false,
       ...(accessScope.mode === 'STORES'
         ? {
             OR: [

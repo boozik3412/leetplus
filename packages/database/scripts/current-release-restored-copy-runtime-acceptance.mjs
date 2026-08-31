@@ -434,7 +434,7 @@ const CURRENT_RELEASE_RESPONSE_SCHEMAS = Object.freeze({
     boundArrays: Object.freeze([
       Object.freeze({ key: "rows", oracle: "staffTaskIds" }),
       Object.freeze({ key: "stores", oracle: "storeIds", exact: true }),
-      Object.freeze({ key: "users", oracle: "userIds", exact: true }),
+      Object.freeze({ key: "users", oracle: "activeUserIds", exact: true }),
     ]),
     kind: "REPORT",
     requiredArrays: Object.freeze(["quickViews", "rows", "users", "stores"]),
@@ -444,7 +444,7 @@ const CURRENT_RELEASE_RESPONSE_SCHEMAS = Object.freeze({
     boundArrays: Object.freeze([
       Object.freeze({ key: "rows", oracle: "checklistRunIds" }),
       Object.freeze({ key: "stores", oracle: "storeIds", exact: true }),
-      Object.freeze({ key: "users", oracle: "userIds", exact: true }),
+      Object.freeze({ key: "users", oracle: "activeUserIds", exact: true }),
     ]),
     kind: "REPORT",
     requiredArrays: Object.freeze([
@@ -469,7 +469,7 @@ const CURRENT_RELEASE_RESPONSE_SCHEMAS = Object.freeze({
     boundArrays: Object.freeze([
       Object.freeze({ key: "rows", oracle: "taskTemplateIds" }),
       Object.freeze({ key: "stores", oracle: "storeIds", exact: true }),
-      Object.freeze({ key: "users", oracle: "userIds", exact: true }),
+      Object.freeze({ key: "users", oracle: "activeUserIds", exact: true }),
     ]),
     kind: "REPORT",
     requiredArrays: Object.freeze(["rows", "stores", "users"]),
@@ -485,7 +485,7 @@ const CURRENT_RELEASE_RESPONSE_SCHEMAS = Object.freeze({
         oracle: "taskTemplateIds",
         exact: true,
       }),
-      Object.freeze({ key: "users", oracle: "userIds", exact: true }),
+      Object.freeze({ key: "users", oracle: "activeUserIds", exact: true }),
     ]),
     kind: "REPORT",
     requiredArrays: Object.freeze([
@@ -511,7 +511,7 @@ const CURRENT_RELEASE_RESPONSE_SCHEMAS = Object.freeze({
       }),
       Object.freeze({ key: "rules", oracle: "disciplineRuleIds", exact: true }),
       Object.freeze({ key: "stores", oracle: "storeIds", exact: true }),
-      Object.freeze({ key: "users", oracle: "userIds", exact: true }),
+      Object.freeze({ key: "users", oracle: "disciplineUserIds", exact: true }),
     ]),
     kind: "REPORT",
     requiredArrays: Object.freeze([
@@ -660,7 +660,7 @@ const CURRENT_RELEASE_RESPONSE_SCHEMAS = Object.freeze({
         allowEmpty: true,
       }),
       Object.freeze({ key: "stores", oracle: "storeIds", exact: true }),
-      Object.freeze({ key: "users", oracle: "userIds", exact: true }),
+      Object.freeze({ key: "users", oracle: "activeUserIds", exact: true }),
     ]),
     kind: "REPORT",
     requiredArrays: Object.freeze([
@@ -2180,7 +2180,9 @@ function tokenFromCookie(cookie) {
 
 function normalizeScopeOracle(scopeOracle) {
   const setNames = [
+    "activeUserIds",
     "customRoleIds",
+    "disciplineUserIds",
     "eventIds",
     "inviteIds",
     "lootBoxIds",
@@ -2296,10 +2298,17 @@ function normalizeScopeOracle(scopeOracle) {
     !normalized.tenantReferenceUserIdSet.has(normalized.loginUserId) ||
     normalized.userIds.some(
       (userId) => !normalized.tenantReferenceUserIdSet.has(userId),
-    )
+    ) ||
+    normalized.activeUserIds.some(
+      (userId) => !normalized.userIdSet.has(userId),
+    ) ||
+    normalized.disciplineUserIds.some(
+      (userId) => !normalized.activeUserIds.includes(userId),
+    ) ||
+    !normalized.activeUserIds.includes(normalized.loginUserId)
   ) {
     fail("CURRENT_RELEASE_SCOPE_ORACLE_INVALID", {
-      semanticName: "tenantReferenceUserIds",
+      semanticName: "userVisibilitySets",
     });
   }
   const normalizeCapabilityList = (values, semanticName) => {
@@ -2465,6 +2474,38 @@ function normalizeScopeOracle(scopeOracle) {
       semanticName: "loginUserId",
     });
   }
+  if (
+    normalized.activeUserIds.some(
+      (userId) => normalized.userSemanticsById[userId]?.isActive !== true,
+    ) ||
+    normalized.userSemantics.some(
+      (row) => row.isActive === true && !normalized.activeUserIds.includes(row.id),
+    )
+  ) {
+    fail("CURRENT_RELEASE_SCOPE_ORACLE_INVALID", {
+      semanticName: "activeUserIds",
+    });
+  }
+  const expectedDisciplineUserIds = normalized.userSemantics
+    .filter(
+      (row) =>
+        row.isActive === true &&
+        [
+          "CLUB_ADMINISTRATOR",
+          "SENIOR_ADMINISTRATOR",
+          "CLUB_MANAGER",
+        ].includes(row.role),
+    )
+    .map((row) => row.id)
+    .sort(compareUtf8Bytes);
+  if (
+    stableJson(expectedDisciplineUserIds) !==
+    stableJson(normalized.disciplineUserIds)
+  ) {
+    fail("CURRENT_RELEASE_SCOPE_ORACLE_INVALID", {
+      semanticName: "disciplineUserIds",
+    });
+  }
   for (const row of [
     ...normalized.inviteSemantics,
     ...normalized.userSemantics,
@@ -2489,8 +2530,8 @@ function normalizeScopeOracle(scopeOracle) {
   return Object.freeze(normalized);
 }
 
-function assertExactIdSet(rows, expectedIds, reasonCode) {
-  if (!Array.isArray(rows)) fail(reasonCode);
+function assertExactIdSet(rows, expectedIds, reasonCode, context = {}) {
+  if (!Array.isArray(rows)) fail(reasonCode, context);
   const ids = rows.map((row) =>
     row && typeof row === "object" && typeof row.id === "string"
       ? row.id
@@ -2502,6 +2543,7 @@ function assertExactIdSet(rows, expectedIds, reasonCode) {
     stableJson([...ids].sort(compareUtf8Bytes)) !== stableJson(expectedIds)
   ) {
     fail(reasonCode, {
+      ...context,
       actualCount: ids.length,
       actualSetDigest: sha256(stableJson([...ids].sort(compareUtf8Bytes))),
       expectedCount: expectedIds.length,
@@ -2514,18 +2556,18 @@ function assertExactIdSet(rows, expectedIds, reasonCode) {
   });
 }
 
-function assertIdSubset(rows, expectedIds, reasonCode) {
-  if (!Array.isArray(rows)) fail(reasonCode);
+function assertIdSubset(rows, expectedIds, reasonCode, context = {}) {
+  if (!Array.isArray(rows)) fail(reasonCode, context);
   const allowed = new Set(expectedIds);
   const ids = [];
   for (const row of rows) {
     if (!row || typeof row !== "object" || typeof row.id !== "string") {
-      fail(reasonCode);
+      fail(reasonCode, context);
     }
-    if (!allowed.has(row.id)) fail(reasonCode);
+    if (!allowed.has(row.id)) fail(reasonCode, context);
     ids.push(row.id);
   }
-  if (new Set(ids).size !== ids.length) fail(reasonCode);
+  if (new Set(ids).size !== ids.length) fail(reasonCode, context);
   return Object.freeze({
     count: ids.length,
     idSetDigest: sha256(stableJson([...ids].sort(compareUtf8Bytes))),
@@ -2542,9 +2584,15 @@ function assertBoundEntityArray(body, binding, oracle, probe) {
     });
   }
   const reasonCode = "CURRENT_RELEASE_CRITICAL_READ_ENTITY_SET_MISMATCH";
+  const context = Object.freeze({
+    module: probe.module,
+    oracle: binding.oracle,
+    probeName: probe.name,
+    responseKey: binding.key,
+  });
   const evidence = binding.exact
-    ? assertExactIdSet(body[binding.key], expectedIds, reasonCode)
-    : assertIdSubset(body[binding.key], expectedIds, reasonCode);
+    ? assertExactIdSet(body[binding.key], expectedIds, reasonCode, context)
+    : assertIdSubset(body[binding.key], expectedIds, reasonCode, context);
   if (
     binding.allowEmpty !== true &&
     expectedIds.length > 0 &&
@@ -3739,6 +3787,19 @@ export async function inspectCurrentReleaseDatabase(
        ARRAY(SELECT s.id::text FROM "Store" s
              WHERE s."tenantId" = $1 ORDER BY s.id COLLATE "C") AS "storeIds",
        ARRAY(SELECT u.id::text FROM "User" u
+             WHERE u."tenantId" = $1 AND u."isActive" = true
+               AND u."isPlatformAdmin" = false
+             ORDER BY u.id COLLATE "C") AS "activeUserIds",
+       ARRAY(SELECT u.id::text FROM "User" u
+             WHERE u."tenantId" = $1 AND u."isActive" = true
+               AND u."isPlatformAdmin" = false
+               AND u.role IN (
+                 'CLUB_ADMINISTRATOR',
+                 'SENIOR_ADMINISTRATOR',
+                 'CLUB_MANAGER'
+               )
+             ORDER BY u.id COLLATE "C") AS "disciplineUserIds",
+       ARRAY(SELECT u.id::text FROM "User" u
              WHERE u."tenantId" = $1 AND u."isPlatformAdmin" = false
              ORDER BY u.id COLLATE "C") AS "userIds",
        ARRAY(SELECT u.id::text FROM "User" u
@@ -4046,8 +4107,10 @@ export async function inspectCurrentReleaseDatabase(
     ...Object.fromEntries(
       CURRENT_RELEASE_ENTITY_SET_NAMES.map((name) => [name, scopeRow[name]]),
     ),
+    activeUserIds: scopeRow.activeUserIds,
     customRoleIds: scopeRow.customRoleIds,
     customRoleSemantics: scopeRow.customRoleSemantics,
+    disciplineUserIds: scopeRow.disciplineUserIds,
     eventIds: scopeRow.eventIds,
     gamificationWorkspaceSummary: scopeRow.gamificationWorkspaceSummary,
     inviteIds: scopeRow.inviteIds,
@@ -4096,7 +4159,9 @@ export async function inspectCurrentReleaseDatabase(
       roleConfigCount: Number(row.runtimeRoleConfigCount),
     }),
     scopeSetDigests: Object.freeze({
+      activeUsers: sha256(stableJson(scopeOracle.activeUserIds)),
       customRoles: sha256(stableJson(scopeOracle.customRoleIds)),
+      disciplineUsers: sha256(stableJson(scopeOracle.disciplineUserIds)),
       events: sha256(stableJson(scopeOracle.eventIds)),
       invites: sha256(stableJson(scopeOracle.inviteIds)),
       lootBoxes: sha256(stableJson(scopeOracle.lootBoxIds)),

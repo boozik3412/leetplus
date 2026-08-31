@@ -48,7 +48,10 @@ describe('StaffTrainingAccessPolicyService', () => {
     const access = await policy.resolve(user('NETWORK', managerPermissions));
 
     expect(policy.readableCourseWhere(access)).toEqual({});
-    expect(policy.visibleUsersWhere(access)).toEqual({ tenantId: 'tenant-a' });
+    expect(policy.visibleUsersWhere(access)).toEqual({
+      tenantId: 'tenant-a',
+      isPlatformAdmin: false,
+    });
     expect(policy.canManageCourse(access, { storeId: null })).toBe(true);
     expect(policy.canManageCourse(access, { storeId: 'store-a2' })).toBe(true);
     expect(() => policy.assertWritableStore(access, null)).not.toThrow();
@@ -66,6 +69,7 @@ describe('StaffTrainingAccessPolicyService', () => {
     });
     expect(policy.visibleUsersWhere(access)).toEqual({
       tenantId: 'tenant-a',
+      isPlatformAdmin: false,
       storeAccesses: { some: { storeId: { in: ['store-a1'] } } },
     });
     expect(policy.canManageCourse(access, { storeId: 'store-a1' })).toBe(true);
@@ -109,6 +113,7 @@ describe('StaffTrainingAccessPolicyService', () => {
       tenantId: 'tenant-a',
       id: 'user-a1',
       isActive: true,
+      isPlatformAdmin: false,
     });
   });
 

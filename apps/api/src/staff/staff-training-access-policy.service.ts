@@ -253,15 +253,17 @@ export class StaffTrainingAccessPolicyService {
         tenantId: access.tenantId,
         id: access.userId,
         isActive: true,
+        isPlatformAdmin: false,
       };
     }
 
     if (access.mode === 'NETWORK') {
-      return { tenantId: access.tenantId };
+      return { tenantId: access.tenantId, isPlatformAdmin: false };
     }
 
     return {
       tenantId: access.tenantId,
+      isPlatformAdmin: false,
       storeAccesses: {
         some: { storeId: { in: [...access.allowedStoreIds] } },
       },

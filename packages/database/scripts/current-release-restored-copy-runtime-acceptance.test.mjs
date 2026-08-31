@@ -290,6 +290,7 @@ const BASE_ROLE_PERMISSIONS = Object.freeze({
   ]),
 });
 const SCOPE_ORACLE = Object.freeze({
+  activeUserIds: Object.freeze(["user-owner"]),
   assessmentIds: Object.freeze(["assessment-1"]),
   assessmentResultIds: Object.freeze(["assessment-result-1"]),
   chatChannelIds: Object.freeze(["chat-channel-1"]),
@@ -302,6 +303,7 @@ const SCOPE_ORACLE = Object.freeze({
   disciplinePolicyIds: Object.freeze(["discipline-policy-1"]),
   disciplineRecordIds: Object.freeze(["discipline-record-1"]),
   disciplineRuleIds: Object.freeze(["discipline-rule-1"]),
+  disciplineUserIds: Object.freeze([]),
   inviteIds: Object.freeze(["invite-1"]),
   inviteSemantics: Object.freeze([
     Object.freeze({
@@ -348,12 +350,22 @@ const SCOPE_ORACLE = Object.freeze({
   taskTemplateIds: Object.freeze(["task-template-1"]),
   tenantId: "tenant-fixture",
   tenantReferenceUserIds: Object.freeze([
+    "user-inactive",
     "user-owner",
     "user-platform-admin",
   ]),
   trainingCourseIds: Object.freeze(["training-course-1"]),
-  userIds: Object.freeze(["user-owner"]),
+  userIds: Object.freeze(["user-inactive", "user-owner"]),
   userSemantics: Object.freeze([
+    Object.freeze({
+      customRoleId: null,
+      id: "user-inactive",
+      isActive: false,
+      isPlatformAdmin: false,
+      role: "TRAINEE",
+      scope: "STORES",
+      storeIds: Object.freeze(["store-1"]),
+    }),
     Object.freeze({
       customRoleId: null,
       id: "user-owner",
@@ -384,6 +396,16 @@ function validCriticalBody(pathname) {
     role: "OWNER",
     scope: "NETWORK",
     stores: [],
+  };
+  const inactiveUser = {
+    ...user,
+    email: "inactive@example.test",
+    id: "user-inactive",
+    isActive: false,
+    permissions: fixtureRolePermissions("TRAINEE"),
+    role: "TRAINEE",
+    scope: "STORES",
+    stores: [store],
   };
   if (pathname === "/stores") return [store];
   if (pathname === "/api/products/catalog") {
@@ -530,7 +552,7 @@ function validCriticalBody(pathname) {
         updatedAt: "2026-08-20T00:00:00.000Z",
       })),
       stores: [store],
-      users: [user],
+      users: [inactiveUser, user],
     };
   }
   const report = {
@@ -545,7 +567,7 @@ function validCriticalBody(pathname) {
       rows: [
         { id: "staff-member-1", storeId: store.id, tenantId: "tenant-fixture" },
       ],
-      users: [user],
+      users: [inactiveUser, user],
       legacyMappings: [],
       langameUsers: [],
     },
@@ -588,7 +610,7 @@ function validCriticalBody(pathname) {
       policies: [{ id: "discipline-policy-1", tenantId: "tenant-fixture" }],
       rules: [{ id: "discipline-rule-1", tenantId: "tenant-fixture" }],
       records: [{ id: "discipline-record-1", tenantId: "tenant-fixture" }],
-      users: [user],
+      users: [],
     },
     "/api/staff/salary": {
       schemes: [{ id: "salary-scheme-1", tenantId: "tenant-fixture" }],
@@ -1039,14 +1061,14 @@ function currentReleaseDatabaseClient(identityOverrides = {}) {
               activeUnresolvedScopeCount: 0,
               customRoleCount: 0,
               storeCount: 1,
-              userCount: 1,
+              userCount: 2,
             },
           ],
         };
       }
       if (sql.includes("GROUP BY u.role")) {
         return {
-          rowCount: 1,
+          rowCount: 2,
           rows: [
             {
               accessScope: "NETWORK",
@@ -1057,6 +1079,15 @@ function currentReleaseDatabaseClient(identityOverrides = {}) {
               userCount: 1,
               usersWithStoreAccess: 0,
             },
+            {
+              accessScope: "STORES",
+              isActive: false,
+              isPlatformAdmin: false,
+              role: "TRAINEE",
+              storeAccessRows: 1,
+              userCount: 1,
+              usersWithStoreAccess: 1,
+            },
           ],
         };
       }
@@ -1065,6 +1096,11 @@ function currentReleaseDatabaseClient(identityOverrides = {}) {
           sql,
           /ARRAY\(SELECT p\.id::text FROM "Product" p\s+WHERE p\."tenantId" = \$1 AND p\."isActive" = true/u,
         );
+        assert.match(
+          sql,
+          /AS "activeUserIds"/u,
+        );
+        assert.match(sql, /AS "disciplineUserIds"/u);
         return {
           rowCount: 1,
           rows: [{ ...SCOPE_ORACLE }],
@@ -1259,10 +1295,10 @@ test("accepts exact API/Web identity, BFF auth and the complete beta read matrix
     accepted.usersProjection.storeIdSetDigest,
     digest(JSON.stringify(["store-1"])),
   );
-  assert.equal(accepted.usersProjection.userCount, 1);
+  assert.equal(accepted.usersProjection.userCount, 2);
   assert.equal(
     accepted.usersProjection.userIdSetDigest,
-    digest(JSON.stringify(["user-owner"])),
+    digest(JSON.stringify(["user-inactive", "user-owner"])),
   );
   for (const key of [
     "capabilityKeySetDigest",
@@ -1303,7 +1339,7 @@ test("binds users, invites, roles and capabilities to the database authority ora
     body: valid,
     scopeOracle: SCOPE_ORACLE,
   });
-  assert.equal(accepted.userCount, 1);
+  assert.equal(accepted.userCount, 2);
   assert.equal(accepted.inviteCount, 1);
 
   const missingInvite = structuredClone(valid);
@@ -1360,9 +1396,12 @@ test("pins every no-override base role permission set", () => {
       scopeOracle.roleOverrideSemantics.filter(
         (override) => override.role !== role,
       );
-    if (role === "OWNER") {
-      body.users[0].permissions = [...permissions];
-    } else {
+    body.users
+      .filter((candidate) => candidate.role === role)
+      .forEach((candidate) => {
+        candidate.permissions = [...permissions];
+      });
+    if (role !== "OWNER") {
       const option = body.roleOptions.find(
         (candidate) => candidate.role === role,
       );
@@ -1485,6 +1524,56 @@ test("binds report rows to the tenant database oracle and rejects silent empty d
         scopeOracle: SCOPE_ORACLE,
       }),
     { reasonCode: "CURRENT_RELEASE_CRITICAL_READ_ENTITY_SET_MISMATCH" },
+  );
+});
+
+test("separates inactive account management from active staff selectors", () => {
+  assert.doesNotThrow(() =>
+    assertCurrentReleaseCriticalReadForTestOnly({
+      body: validCriticalBody("/api/staff/directory"),
+      module: "staff-control",
+      name: "directory",
+      scopeOracle: SCOPE_ORACLE,
+    }),
+  );
+  const tasks = validCriticalBody("/api/staff/tasks");
+  assert.doesNotThrow(() =>
+    assertCurrentReleaseCriticalReadForTestOnly({
+      body: tasks,
+      module: "staff-control",
+      name: "tasks",
+      scopeOracle: SCOPE_ORACLE,
+    }),
+  );
+  const leakedInactiveUser = structuredClone(tasks);
+  leakedInactiveUser.users.push({ id: "user-inactive" });
+  assert.throws(
+    () =>
+      assertCurrentReleaseCriticalReadForTestOnly({
+        body: leakedInactiveUser,
+        module: "staff-control",
+        name: "tasks",
+        scopeOracle: SCOPE_ORACLE,
+      }),
+    (error) => {
+      assert.equal(
+        error.reasonCode,
+        "CURRENT_RELEASE_CRITICAL_READ_ENTITY_SET_MISMATCH",
+      );
+      assert.deepEqual(error.safeMetadata, {
+        actualCount: 2,
+        actualSetDigest: digest(
+          JSON.stringify(["user-inactive", "user-owner"]),
+        ),
+        expectedCount: 1,
+        expectedSetDigest: digest(JSON.stringify(["user-owner"])),
+        module: "staff-control",
+        oracle: "activeUserIds",
+        probeName: "tasks",
+        responseKey: "users",
+      });
+      return true;
+    },
   );
 });
 

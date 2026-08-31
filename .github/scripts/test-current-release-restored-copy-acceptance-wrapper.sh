@@ -1237,8 +1237,11 @@ wrapper_output="${fixture_root}/wrapper.out"
 mkdir -p "$artifact_root/packages/database" "$credential_root" "$evidence_root" \
   "$control_root" "$cgroup_root" "$proc_root" "$bin_root"
 mkdir -p "$artifact_root/apps/web/.next/build/chunks"
+mkdir -p "$artifact_root/apps/web/.next/server/app/(app)/support"
 printf 'standard-next-build-chunk\n' \
   > "$artifact_root/apps/web/.next/build/chunks/[root-of-the-server]__fixture._.js"
+printf 'standard-next-route-and-hashed-chunk\n' \
+  > "$artifact_root/apps/web/.next/server/app/(app)/support/01~!.[dynamic].js"
 chmod 0700 "$fixture_root" "$release_root" "$artifact_root" \
   "$artifact_root/packages" "$artifact_root/packages/database" \
   "$credential_root" "$control_root" "$cgroup_root" "$proc_root" "$bin_root"

@@ -272,6 +272,30 @@ test("creates a sealed 187-migration disposable Prisma lane", async (t) => {
   assert.equal(replay.treeDigest, receipt.treeDigest);
 });
 
+test("preserves the sealed CURRENT188 lane for its historical upgrade controller", async (t) => {
+  const root = await temporaryRoot(t);
+  const laneRoot = path.join(
+    root,
+    "leetplus-founder-production-history-current188-a1",
+  );
+  const receipt = await materializeFounderPilotProductionHistoryLane({
+    laneRoot,
+    sourcePrismaRoot: PRISMA_ROOT,
+    targetMigrationCount: 188,
+    targetMigrationHead: "20260828190000_guest_support_bug_reports",
+  });
+  const migrationNames = (await readdir(path.join(laneRoot, "migrations"), {
+    withFileTypes: true,
+  }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+  assert.equal(receipt.migrationCount, 188);
+  assert.equal(migrationNames.length, 188);
+  assert.equal(migrationNames.at(-1), "20260828190000_guest_support_bug_reports");
+});
+
 test("accepts the exact materialized CURRENT187 runtime fingerprint", async (t) => {
   const root = await temporaryRoot(t);
   const laneRoot = path.join(

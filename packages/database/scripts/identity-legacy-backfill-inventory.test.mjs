@@ -769,6 +769,10 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     CATALOG_STATE_SQL,
     /a9a4bf75b8d5a381ebfc5ed9a35c6b966cbaac9b631a321ee66c1a6c1cc113a5/u,
   );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /27ffb6a3028af529e549fc4e63e0aebfb34cf390e6d4980f3fcd1a75996e2590/u,
+  );
   assert.match(CATALOG_STATE_SQL, /releasedAt/u);
   assert.match(CATALOG_STATE_SQL, /secretCiphertext/u);
   assert.match(CATALOG_STATE_SQL, /identity_owner_invite_issue_hold_v1/u);

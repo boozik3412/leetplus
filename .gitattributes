@@ -13,5 +13,7 @@ packages/database/scripts/current180-current190-disposable-postgresql-rehearsal-
 *.sh text eol=lf
 docs/deployment/production-control-authority/** text eol=lf
 docs/deployment/production-artifact/*.mjs text eol=lf
+docs/deployment/production-artifact/production-topology-contract.json text eol=lf
 docs/deployment/production-artifact/CONTROL_BUNDLE_SHA256SUMS text eol=lf
+.github/scripts/test-production-topology-contract.mjs text eol=lf
 .github/workflows/*.yml text eol=lf

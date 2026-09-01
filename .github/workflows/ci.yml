@@ -70,6 +70,13 @@ jobs:
             *) printf 'unexpected operational Node path: %s\n' "$node_path" >&2; exit 1 ;;
           esac
 
+      - name: Verify canonical production topology contract
+        shell: bash
+        run: |
+          node --check docs/deployment/production-artifact/verify-production-topology-contract.mjs
+          node --check .github/scripts/test-production-topology-contract.mjs
+          node .github/scripts/test-production-topology-contract.mjs
+
       - name: Verify production-control installed-generation authority
         shell: bash
         run: |

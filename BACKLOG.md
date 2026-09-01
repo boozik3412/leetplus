@@ -1,5 +1,64 @@
 # LeetPlus Бэклог
 
+## Ускорение безопасного production release — 01.09.2026
+
+Статус: `[██░░░░░░░░] 2/8` — реализация начата, production не изменяется.
+Подробный контракт и целевые метрики:
+[release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
+
+Цель — сократить обычный runtime/config rollout до `20–45 минут`, а
+schema/security rollout до `60–120 минут`, не убирая exact-SHA admission,
+restored-copy rehearsal, backup, signed controller, blue/green rollback и
+разделение public guest / corporate tenant / workers-control-plane. Последняя
+суточная доставка была вызвана не длительностью одного CI-run (`Fast` около
+9 минут, `Full` около 17 минут), а последовательным обнаружением topology и
+receipt-contract drift уже после admission.
+
+### P0 — убрать поздние operational mismatch
+
+- [x] `REL-ACC-001`: зафиксировать каноническую production-топологию в
+  машиночитаемом
+  [`production-topology-contract.json`](./docs/deployment/production-artifact/production-topology-contract.json):
+  slots, ports, runtime users/groups, EnvironmentFiles, transient rehearsal
+  identity и independent slot-link receipts.
+- [x] `REL-ACC-002`: добавить fail-closed verifier и negative regression в
+  Fast CI и Full Release Admission. Drift shared NSS membership, USER_CALL
+  overlay или per-slot receipt теперь должен останавливаться до artifact/deploy.
+- [ ] `REL-ACC-003`: построить disposable Linux production twin, который за
+  один запуск воспроизводит оба blue/green slot, nginx receipt chain,
+  restored-copy transient phase и обязательное возвращение NSS в steady state.
+- [ ] `REL-ACC-004`: добавить machine-readable release impact classifier.
+  Неизвестный или смешанный diff автоматически повышается до максимальной
+  lane; classifier не имеет права понижать обязательный gate.
+
+### P1 — убрать повторные полные циклы
+
+- [ ] `REL-ACC-005`: выпускать один immutable exact merge-candidate и выполнять
+  Full Release Admission один раз для реально deployable SHA. Несвязанные
+  изменения входят в следующий release train, а docs-only SHA не выдаётся за
+  runtime artifact.
+- [ ] `REL-ACC-006`: готовить свежий backup/restored-copy contour параллельно
+  admission и повторно связывать его digest перед effect, вместо запуска после
+  всех остальных шагов.
+- [ ] `REL-ACC-007`: объединить hydration → bind → smoke → cutover → postcheck в
+  resumable orchestrator с защищёнными phase receipts и точным продолжением
+  после lost response.
+- [ ] `REL-ACC-008`: публиковать duration/failure-phase summary для каждого
+  rollout и держать p50/p95 по lane, чтобы ускорение измерялось, а не
+  оценивалось вручную.
+
+### Инварианты приёмки
+
+- Production не получает любой `main`: только admitted immutable exact SHA и
+  отдельный production GO.
+- Изменения схемы, runtime authority, security contour или worker state никогда
+  не переходят в облегчённую lane.
+- Machine-readable topology является CI/source контрактом, но не доказательством
+  live systemd/nginx/NSS/DB: production receipts и read-only probes остаются
+  обязательными.
+- Restored-copy transient membership завершается и проверяется до bind/cutover;
+  steady-state `leetplus-runtime` не получает explicit members.
+
 ## Выход на открытый тест — 26.07.2026
 
 Специальный исполнимый backlog перехода четырёх текущих клубов одной сети из operational `demo` в полноценный режим, подготовки обязательных модулей и расширения внешних когорт: [OPEN_BETA_BACKLOG.md](./OPEN_BETA_BACKLOG.md).

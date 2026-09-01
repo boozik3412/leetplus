@@ -6,6 +6,17 @@ Release Admission для одного exact SHA, проверяет его це�
 новую release directory. Скрипт не скачивает файлы, не читает secrets, не
 подключается к PostgreSQL и не управляет systemd.
 
+Канонические source-инварианты slots, ports, systemd EnvironmentFiles,
+runtime NSS groups, transient restored-copy identity и независимых slot-link
+receipts собраны в машиночитаемом
+[`production-topology-contract.json`](./production-topology-contract.json).
+[`verify-production-topology-contract.mjs`](./verify-production-topology-contract.mjs)
+сверяет его с operational scripts в Fast CI и Full Release Admission. Manifest
+не является live production evidence и не заменяет installed generation,
+read-only probes, signed receipts или отдельный production GO. План следующих
+этапов описан в
+[`release-pipeline-acceleration.md`](../release-pipeline-acceleration.md).
+
 ## Пример prepare-only проверки
 
 ```bash

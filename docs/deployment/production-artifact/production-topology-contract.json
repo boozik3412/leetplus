@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "contractId": "LEETPLUS_PRODUCTION_TOPOLOGY_V1",
+  "productionRuntimeMode": "COMBINED",
+  "securityContours": {
+    "independent": [
+      "corporate-tenant",
+      "public-guest",
+      "workers-control-plane"
+    ],
+    "releaseAccelerationMayNotCollapseContours": true
+  },
+  "slots": {
+    "blue": {
+      "apiPort": 4100,
+      "apiUser": "leetplus-api-blue",
+      "webPort": 3100,
+      "webUser": "leetplus-web-blue"
+    },
+    "green": {
+      "apiPort": 4200,
+      "apiUser": "leetplus-api-green",
+      "webPort": 3200,
+      "webUser": "leetplus-web-green"
+    },
+    "nminus1": {
+      "apiChildPort": 4301,
+      "apiPort": 4300,
+      "apiUser": "leetplus-api-nminus1",
+      "webPort": 3300,
+      "webUser": "leetplus-web-nminus1"
+    }
+  },
+  "runtimeIdentity": {
+    "primaryGroup": "leetplus-runtime",
+    "groups": {
+      "leetplus-api-runtime": {
+        "explicitMembers": [
+          "leetplus-api-blue",
+          "leetplus-api-green",
+          "leetplus-api-nminus1"
+        ],
+        "primaryUsers": []
+      },
+      "leetplus-runtime": {
+        "explicitMembers": [],
+        "primaryUsers": [
+          "leetplus-api-blue",
+          "leetplus-api-green",
+          "leetplus-api-nminus1",
+          "leetplus-web-blue",
+          "leetplus-web-green",
+          "leetplus-web-nminus1"
+        ]
+      },
+      "leetplus-web-runtime": {
+        "explicitMembers": [
+          "leetplus-web-blue",
+          "leetplus-web-green",
+          "leetplus-web-nminus1"
+        ],
+        "primaryUsers": []
+      }
+    }
+  },
+  "systemdTemplates": {
+    "api": {
+      "environmentFiles": [
+        "/etc/leetplus/runtime.env",
+        "/etc/leetplus/slots/%i.env",
+        "/etc/leetplus/canary-safe.env",
+        "/etc/leetplus/guest-user-call-live.env"
+      ],
+      "path": "docs/deployment/production-artifact/systemd/leetplus-api@.service",
+      "primaryGroup": "leetplus-runtime",
+      "supplementaryGroup": "leetplus-api-runtime",
+      "unit": "leetplus-api@.service",
+      "userPattern": "leetplus-api-%i"
+    },
+    "web": {
+      "environmentFiles": [
+        "/etc/leetplus/web-runtime.env",
+        "/etc/leetplus/slots/%i.env",
+        "/etc/leetplus/canary-safe.env"
+      ],
+      "path": "docs/deployment/production-artifact/systemd/leetplus-web@.service",
+      "primaryGroup": "leetplus-runtime",
+      "supplementaryGroup": "leetplus-web-runtime",
+      "unit": "leetplus-web@.service",
+      "userPattern": "leetplus-web-%i"
+    }
+  },
+  "transientPhases": {
+    "restoredCopyAcceptance": {
+      "exactGroups": [
+        "leetplus-rehearsal",
+        "leetplus-runtime"
+      ],
+      "mustFinishBefore": [
+        "bind-release-slot",
+        "blue-green-cutover"
+      ],
+      "primaryGroup": "leetplus-rehearsal",
+      "serviceUser": "leetplus-rehearsal"
+    }
+  },
+  "releaseBinding": {
+    "destinationSlots": [
+      "blue",
+      "green"
+    ],
+    "hydrationOriginSlots": [
+      "blue",
+      "green"
+    ],
+    "perDestinationSlotLinkReceiptRequired": true,
+    "sameSealedReleaseMayBindToBoth": true
+  }
+}

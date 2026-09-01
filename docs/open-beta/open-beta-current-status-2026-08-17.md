@@ -14,6 +14,25 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
+| Release acceleration | initial source/CI topology contract implemented; production не менялся; следующий этап — disposable dual-slot production twin |
+
+## Ускорение release pipeline без ослабления gates (01.09.2026)
+
+В backlog добавлена отдельная инициатива
+[`release-pipeline-acceleration.md`](../deployment/release-pipeline-acceleration.md).
+Первый срез уже фиксирует slots/ports, runtime NSS topology, exact API/Web
+EnvironmentFiles, transient restored-copy identity и независимые bind receipts
+в
+[`production-topology-contract.json`](../deployment/production-artifact/production-topology-contract.json).
+Fail-closed verifier и negative fixture включены в Fast CI и Full Release
+Admission.
+
+Это source/CI изменение, а не production rollout: текущая production baseline
+остаётся `22ab6b81…`, CURRENT189, generation 20. Ускорение не меняет решение
+open beta `NO-GO` и не закрывает Gate 1MT/2. Public guest, corporate tenant и
+workers/control-plane остаются независимыми; schema, auth/scope, systemd/nginx,
+worker и production-control изменения по-прежнему требуют полной admission,
+backup/restored-copy и отдельного production GO.
 
 ## Production CURRENT189 rollout (01.09.2026)
 

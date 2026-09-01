@@ -41,6 +41,17 @@ Release provenance вычисляется из immutable artifact `prisma/migrat
 Отдельный API child-process fixture pin-ит reviewed head, поэтому новая
 миграция не становится допустимой автоматически.
 
+Для сокращения поздних fail-closed итераций начат source/CI этап ускорения
+release pipeline. Канонические blue/green/N−1 ports, runtime NSS topology,
+API/Web EnvironmentFiles, transient restored-copy membership и независимые
+slot-link receipts зафиксированы в
+`docs/deployment/production-artifact/production-topology-contract.json` и
+сверяются negative-tested verifier одновременно в Fast CI и Full Release
+Admission. Это не deploy и не live evidence: production baseline выше не
+изменена, а exact-SHA admission, backup/restored-copy, signed controller,
+blue/green rollback, отдельный GO и независимость public guest / corporate
+tenant / workers-control-plane остаются обязательными.
+
 Ниже сохранена история fail-closed restored-copy итераций, которые предшествовали
 успешному rehearsal и production rollout 01.09.2026.
 

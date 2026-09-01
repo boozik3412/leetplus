@@ -46,8 +46,11 @@ isolated hydration, promotion, and sealing. The helper independently verifies:
   `BUILD_ID`;
 - exact external root-only
   `/var/lib/leetplus/deploy-receipts/release-hydration-attestation-<SHA>.receipt`:
-  its slot, release path, systemd policy/unit/stager digests and invocation must
-  match the inner hydration receipt and hydrated manifest. Missing, partial,
+  its hydration-origin slot must be exactly `blue` or `green`, while its release
+  path, systemd policy/unit/stager digests and invocation must match the inner
+  hydration receipt and hydrated manifest. The sealed artifact is shared and
+  may be bound to either reviewed runtime slot; every destination bind still
+  receives its own slot-scoped durable intent and receipt. Missing, partial,
   mutable, multiply-linked or drifted evidence makes the release unbindable;
 - canonical, sorted, duplicate-free manifest paths: source `SHA256SUMS` must
   be a subset of the hydrated manifest, while `HYDRATED_SHA256SUMS` must cover

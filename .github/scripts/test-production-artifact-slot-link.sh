@@ -190,6 +190,7 @@ chmod 0440 -- "$release_b/HYDRATED_SYMLINKS.json" "$release_b/HYDRATED_SHA256SUM
 
 create_hydration_attestation() {
   local sha="$1"
+  local origin_slot="${2:-blue}"
   local release="$TEST_ROOT/srv/leetplus/releases/$sha"
   local record="$TEST_ROOT/var/lib/leetplus/deploy-receipts/release-hydration-attestation-${sha}.receipt"
   local source_receipt_sha256 hydrated_manifest_sha256
@@ -198,7 +199,7 @@ create_hydration_attestation() {
   {
     printf 'RECORD_VERSION=1\n'
     printf 'RELEASE_SHA=%s\n' "$sha"
-    printf 'RELEASE_SLOT=blue\n'
+    printf 'RELEASE_SLOT=%s\n' "$origin_slot"
     printf 'HYDRATION_INVOCATION_ID=0123456789abcdef0123456789abcdef\n'
     printf 'HYDRATION_SOURCE_RECEIPT_SHA256=%s\n' "$source_receipt_sha256"
     printf 'HYDRATION_UNIT_SHA256=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n'
@@ -269,6 +270,13 @@ expect_blue_bind_rejected unauthorized-hydration-publication
 rm -- "$attestation_a"
 create_hydration_attestation "$SHA_A"
 
+chmod 0600 -- "$attestation_a"
+sed -i 's/^RELEASE_SLOT=blue$/RELEASE_SLOT=legacy/' "$attestation_a"
+chmod 0400 -- "$attestation_a"
+expect_blue_bind_rejected invalid-hydration-origin-slot
+rm -- "$attestation_a"
+create_hydration_attestation "$SHA_A"
+
 # A valid attestation digest is captured in the durable slot intent. Replacing
 # the root-only record after intent publication must make reconciliation fail.
 set +e
@@ -309,6 +317,19 @@ bind_a_receipt="$(awk -F= '$1 == "SLOT_LINK_ACCEPTED_RECEIPT" { print $2 }' <<< 
 [[ "$(realpath -e -- "$TEST_ROOT/srv/leetplus/slots/blue")" == "$TEST_ROOT/srv/leetplus/releases/$SHA_A" ]]
 /usr/bin/bash -p "$SLOT_LINK_HELPER" reconcile --slot blue "${common[@]}" > "$TEST_ROOT/post-response-reconcile.out"
 grep -F -x "SLOT_LINK_RECONCILED_LATEST_RECEIPT=${bind_a_receipt}" "$TEST_ROOT/post-response-reconcile.out" >/dev/null
+
+# Hydration attests the immutable artifact and records which reviewed slot
+# performed that operation. Each runtime destination still gets its own
+# durable slot-link authority, so the same sealed SHA can safely satisfy a
+# dual-slot schema bridge without rewriting the root-only hydration receipt.
+green_bind_output="$(/usr/bin/bash -p "$SLOT_LINK_HELPER" bind --slot green \
+  --release-sha "$SHA_A" "${common[@]}")"
+green_bind_receipt="$(awk -F= '$1 == "SLOT_LINK_ACCEPTED_RECEIPT" { print $2 }' \
+  <<< "$green_bind_output")"
+[[ -f "$green_bind_receipt" \
+  && "$(stat -c '%u:%g:%a:%h' -- "$green_bind_receipt")" == '0:0:600:1' ]]
+[[ "$(realpath -e -- "$TEST_ROOT/srv/leetplus/slots/green")" \
+  == "$TEST_ROOT/srv/leetplus/releases/$SHA_A" ]]
 
 set +e
 /usr/bin/bash -p "$SLOT_LINK_HELPER" bind --slot blue --release-sha "$SHA_B" \

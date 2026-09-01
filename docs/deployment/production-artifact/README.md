@@ -300,7 +300,11 @@ promoter O_EXCL-публикует и syncfs-ит root-only
 `/var/lib/leetplus/deploy-receipts/release-hydration-attestation-<SHA>.receipt`,
 который связывает source receipt, exact invocation, unit/stager/policy и hydrated
 manifest digests. Поэтому release никогда не становится bindable без durable
-authority. Повтор той же promotion после crash/lost response принимает только
+authority. Поле `RELEASE_SLOT` в этой записи фиксирует только проверенный
+blue/green origin процесса hydration, а не ограничивает destination slot:
+неизменяемый sealed artifact может быть отдельно привязан к обоим runtime slots,
+и каждый bind всё равно имеет собственные slot-scoped intent/receipt и unit
+preflight. Повтор той же promotion после crash/lost response принимает только
 один exact state, связанный durable intent: stopped source, builder/root-owned
 promotion quarantine (включая crash до/после seal или receipt) либо final sealed
 release с receipt. Он повторно проверяет inactive unit policy, отсутствие build

@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: fast-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: fast-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CI_RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -57,9 +57,14 @@ jobs:
           node --check .github/scripts/test-release-impact-classifier.mjs
           node --check .github/scripts/test-release-impact-ci.mjs
           node --check .github/scripts/test-release-impact-workflow.mjs
+          node --check .github/scripts/classify-release-candidate.mjs
+          node --check .github/scripts/test-release-candidate-classifier.mjs
+          node --check .github/scripts/test-release-candidate-workflow.mjs
           node .github/scripts/test-release-impact-classifier.mjs
           node .github/scripts/test-release-impact-ci.mjs
           node .github/scripts/test-release-impact-workflow.mjs
+          node .github/scripts/test-release-candidate-classifier.mjs
+          node .github/scripts/test-release-candidate-workflow.mjs
           receipt="$RUNNER_TEMP/leetplus-release-impact-$CI_RELEASE_SHA.json"
           test ! -e "$receipt"
           node .github/scripts/classify-release-impact-ci.mjs \

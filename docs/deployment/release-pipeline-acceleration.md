@@ -1,6 +1,6 @@
 # Ускорение безопасного release pipeline
 
-Статус: **4/8 backlog items implemented, source/CI only**
+Статус: **5/8 backlog items implemented, source/CI only**
 
 Актуально на: **02.09.2026**
 
@@ -153,6 +153,21 @@ manifest и runtime→docs rename. Workflow regression фиксирует, чт�
 immutable merge-candidate, который и становится deployable SHA; последующее
 изменение дерева инвалидирует admission. Docs-only commits после release не
 вызывают повторный runtime deploy и не считаются новой production baseline.
+
+Этот этап реализован отдельным exact-candidate receipt. Штатный путь теперь:
+Fast CI на PR → merge → параллельные Fast и Full на одном exact merge SHA.
+Только runtime-eligible `push` в `refs/heads/main` из exact main workflow может
+дойти до final handoff. Manual/scheduled/feature Full остаётся разрешённым как
+non-deployable validation, поэтому pre-merge проверка больше не создаёт второй
+«почти admission» artifact. Final job повторно скачивает и проверяет
+base/head/tree/impact/event/workflow authority перед публикацией payload.
+
+Concurrency также привязана к exact event/SHA: последующий docs или runtime
+merge не отменяет выполняющийся candidate. Для pull request Fast CI по-прежнему
+отменяет superseded head, чтобы не тратить runner на заведомо устаревший diff.
+Branch rules/merge queue не менялись; короткое окно release train остаётся
+операционным правилом. Полный контракт:
+[`release-candidate-admission.md`](./release-candidate-admission.md).
 
 ### 4. Параллельная подготовка и resumable rollout
 

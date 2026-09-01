@@ -2,8 +2,8 @@
 
 ## Ускорение безопасного production release — 01.09.2026
 
-Статус: `[████░░░░░░] 4/8` — P0 topology twin и impact classifier реализованы,
-production не изменяется.
+Статус: `[█████░░░░░] 5/8` — topology twin, impact classifier и один exact
+merge-candidate admission реализованы; production не изменяется.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 
@@ -43,10 +43,13 @@ receipt-contract drift уже после admission.
 
 ### P1 — убрать повторные полные циклы
 
-- [ ] `REL-ACC-005`: выпускать один immutable exact merge-candidate и выполнять
-  Full Release Admission один раз для реально deployable SHA. Несвязанные
-  изменения входят в следующий release train, а docs-only SHA не выдаётся за
-  runtime artifact.
+- [x] `REL-ACC-005`: один immutable exact merge SHA после Fast CI становится
+  deployable candidate. Только exact runtime-eligible `push` в `main` может
+  выпустить final Full Admission handoff; manual, schedule, feature branch и
+  docs-only остаются non-deployable. Fast отменяет только superseded PR head,
+  а новый main commit больше не отменяет Full для уже выбранного exact SHA.
+  Подробный контракт:
+  [`release-candidate-admission.md`](./docs/deployment/release-candidate-admission.md).
 - [ ] `REL-ACC-006`: готовить свежий backup/restored-copy contour параллельно
   admission и повторно связывать его digest перед effect, вместо запуска после
   всех остальных шагов.

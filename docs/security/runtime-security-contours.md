@@ -24,7 +24,7 @@ fail-closed правилу одного контура снова сломать
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `22ab6b81…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
-| Release acceleration     | source/CI topology twin и fail-closed impact classifier добавлены; только Markdown-only может пропустить runtime jobs; production не изменён; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
+| Release acceleration     | source/CI topology twin, impact classifier и exact main-push candidate authority добавлены; manual/schedule/feature/docs-only не выпускают handoff; production не изменён; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -64,6 +64,15 @@ schema/security lane. Неизвестный, смешанный или недо
 доказывает фактическое live состояние и не заменяет exact-SHA admission,
 installed-control verification, production receipts, backup/restored-copy или
 отдельный GO.
+
+Поверх impact lane действует независимый merge-candidate guard. Final runtime и
+production-control handoff разрешён только runtime-eligible exact `push` SHA в
+`refs/heads/main`, когда event base совпадает с повторно проверенным impact
+base, а workflow ref/SHA принадлежат тому же merge commit. Manual, schedule,
+feature branch и Markdown-only runs остаются non-deployable. Последующий main
+commit не отменяет уже выполняющийся exact Full, но это не разрешает смешивать
+release trains или устанавливать любой `main` без final admission и отдельного
+GO.
 
 Rollout 01.09.2026 прошёл на exact admitted SHA после restored-copy PASS и
 checksum-pinned перехода `CURRENT_188 -> CURRENT_189`. Оба runtime slot готовы

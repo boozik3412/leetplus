@@ -55,7 +55,11 @@ production evidence. Следующий source/CI срез добавляет о
 fail-closed impact job: только exact Markdown-only получает `L0` non-deployable
 receipt и пропускает тяжёлые runtime jobs; allowlisted application diff получает
 `L1`, а schema/security, unknown, mixed, rename/delete или недоверенный base —
-`L2`. Production baseline выше не изменена, а exact-SHA
+`L2`. Следующий implemented source/CI guard выпускает deployable handoff только
+для runtime-eligible exact `push` merge SHA из `main`; manual, schedule,
+feature-branch и docs-only Full остаются non-deployable. Новый main commit не
+отменяет уже выполняющийся exact-SHA Full, тогда как superseded PR Fast всё ещё
+отменяется. Production baseline выше не изменена, а exact-SHA
 admission, backup/restored-copy, signed controller, blue/green rollback,
 отдельный GO и независимость public guest / corporate tenant /
 workers-control-plane остаются обязательными.

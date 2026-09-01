@@ -157,7 +157,10 @@ Bootstrap не распаковывается и не запускается и�
 SHA: control archive, его `.sha256`, final admission JSON и его `.sha256`.
 Admission receipt должен быть canonical receipt автоматического Full CI для
 `boozik3412/leetplus`, `ci.yml@refs/heads/main`, с `workflowSha == release SHA` и
-exact `productionControlArchiveSha256`. После независимой проверки команда имеет
+exact `productionControlArchiveSha256`. Full CI теперь дополнительно выпускает
+его только после повторной проверки exact runtime-eligible main-push candidate;
+manual, scheduled, feature-branch и Markdown-only runs final handoff не создают.
+После независимой проверки команда имеет
 ровно один production input:
 
 ```bash

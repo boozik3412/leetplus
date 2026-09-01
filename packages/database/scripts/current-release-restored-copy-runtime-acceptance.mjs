@@ -2474,7 +2474,8 @@ function normalizeScopeOracle(scopeOracle) {
       (userId) => normalized.userSemanticsById[userId]?.isActive !== true,
     ) ||
     normalized.userSemantics.some(
-      (row) => row.isActive === true && !normalized.activeUserIds.includes(row.id),
+      (row) =>
+        row.isActive === true && !normalized.activeUserIds.includes(row.id),
     )
   ) {
     fail("CURRENT_RELEASE_SCOPE_ORACLE_INVALID", {
@@ -2485,11 +2486,9 @@ function normalizeScopeOracle(scopeOracle) {
     .filter(
       (row) =>
         row.isActive === true &&
-        [
-          "CLUB_ADMINISTRATOR",
-          "SENIOR_ADMINISTRATOR",
-          "CLUB_MANAGER",
-        ].includes(row.role),
+        ["CLUB_ADMINISTRATOR", "SENIOR_ADMINISTRATOR", "CLUB_MANAGER"].includes(
+          row.role,
+        ),
     )
     .map((row) => row.id)
     .sort(compareUtf8Bytes);
@@ -2523,6 +2522,44 @@ function normalizeScopeOracle(scopeOracle) {
     ),
   );
   return Object.freeze(normalized);
+}
+
+export async function refreshCurrentReleaseNotificationOracle(
+  client,
+  scopeOracle,
+) {
+  const oracle = normalizeScopeOracle(scopeOracle);
+  let result;
+  try {
+    result = await client.query(
+      `SELECT ARRAY(
+         SELECT entity.id::text
+         FROM "StaffNotification" entity
+         WHERE entity."tenantId" = $1
+           AND (entity."targetUserId" IS NULL OR entity."targetUserId" = $2)
+         ORDER BY entity.id COLLATE "C"
+         LIMIT 5000
+       ) AS "notificationIds"`,
+      [oracle.tenantId, oracle.loginUserId],
+    );
+  } catch {
+    fail("CURRENT_RELEASE_NOTIFICATION_ORACLE_REFRESH_FAILED");
+  }
+  const notificationIds = result?.rows?.[0]?.notificationIds;
+  if (
+    result?.rowCount !== 1 ||
+    !Array.isArray(notificationIds) ||
+    notificationIds.some(
+      (value) => typeof value !== "string" || value.length < 1,
+    ) ||
+    new Set(notificationIds).size !== notificationIds.length
+  ) {
+    fail("CURRENT_RELEASE_NOTIFICATION_ORACLE_REFRESH_FAILED");
+  }
+  return normalizeScopeOracle({
+    ...oracle,
+    notificationIds,
+  });
 }
 
 function assertExactIdSet(rows, expectedIds, reasonCode, context = {}) {
@@ -2979,8 +3016,7 @@ function assertTenantBoundReferences(value, oracle, options = {}, key = null) {
         !Array.isArray(childValue) ||
         childValue.some(
           (id) =>
-            typeof id !== "string" ||
-            !oracle.tenantReferenceUserIdSet.has(id),
+            typeof id !== "string" || !oracle.tenantReferenceUserIdSet.has(id),
         )
       ) {
         fail("CURRENT_RELEASE_CROSS_TENANT_USER_REFERENCE");
@@ -3475,6 +3511,7 @@ export async function executeCurrentReleaseHttpAcceptance({
   loginEmail,
   loginPassword,
   onFixtureCreated = () => {},
+  refreshNotificationOracle,
   releaseSha,
   scopeOracle,
   tenantSlug,
@@ -3489,7 +3526,13 @@ export async function executeCurrentReleaseHttpAcceptance({
   }
   const apiBase = `http://${LOOPBACK}:${apiPort}`;
   const webBase = `http://${LOOPBACK}:${webPort}`;
-  const oracle = normalizeScopeOracle(scopeOracle);
+  let oracle = normalizeScopeOracle(scopeOracle);
+  if (
+    refreshNotificationOracle !== undefined &&
+    typeof refreshNotificationOracle !== "function"
+  ) {
+    fail("CURRENT_RELEASE_NOTIFICATION_ORACLE_REFRESH_INVALID");
+  }
   const probes = [];
 
   const version = await request({
@@ -3620,6 +3663,13 @@ export async function executeCurrentReleaseHttpAcceptance({
     probes.push(
       aggregateProbe(`${probe.module}-${probe.name}`, response.result),
     );
+    if (
+      probe.module === "communications" &&
+      probe.name === "notifications" &&
+      refreshNotificationOracle
+    ) {
+      oracle = normalizeScopeOracle(await refreshNotificationOracle(oracle));
+    }
     moduleCounts[probe.module] = (moduleCounts[probe.module] ?? 0) + 1;
     readProjections.push(
       Object.freeze({
@@ -4100,12 +4150,15 @@ export async function inspectCurrentReleaseDatabase(
        ARRAY(SELECT entity.id::text FROM "StaffOnboardingPlan" entity
              WHERE entity."tenantId" = $1 ORDER BY entity.id COLLATE "C") AS "onboardingPlanIds",
        ARRAY(SELECT entity.id::text FROM "StaffNotification" entity
-             WHERE entity."tenantId" = $1 ORDER BY entity.id COLLATE "C") AS "notificationIds",
+             WHERE entity."tenantId" = $1
+               AND (entity."targetUserId" IS NULL OR entity."targetUserId" = $2)
+             ORDER BY entity.id COLLATE "C"
+             LIMIT 5000) AS "notificationIds",
        ARRAY(SELECT entity.id::text FROM "StaffChatChannel" entity
              WHERE entity."tenantId" = $1 ORDER BY entity.id COLLATE "C") AS "chatChannelIds",
        ARRAY(SELECT entity.id::text FROM "StaffChatMessage" entity
              WHERE entity."tenantId" = $1 ORDER BY entity.id COLLATE "C") AS "chatMessageIds"`,
-    [subject.rows[0]?.tenantId ?? ""],
+    [subject.rows[0]?.tenantId ?? "", subject.rows[0]?.userId ?? ""],
   );
   const row = identity.rows[0];
   const head = migrations.rows.at(-1)?.migrationName ?? null;
@@ -4640,6 +4693,8 @@ export async function runCurrentReleaseRestoredCopyRuntimeAcceptance(options) {
       onFixtureCreated(value) {
         fixture = value;
       },
+      refreshNotificationOracle: (currentOracle) =>
+        refreshCurrentReleaseNotificationOracle(client, currentOracle),
       releaseSha: expected.releaseSha,
       scopeOracle,
       tenantSlug: expected.tenantSlug,

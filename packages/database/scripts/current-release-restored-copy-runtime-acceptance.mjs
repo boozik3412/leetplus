@@ -107,22 +107,49 @@ const CURRENT_RELEASE_ROLE_OPTION_ROLES = Object.freeze(
 );
 const CURRENT_RELEASE_MINIMUM_ROLE_CAPABILITIES = Object.freeze({
   ADMIN: Object.freeze([
+    "view_communications",
+    "view_support_tickets",
+    "manage_support_tickets",
+    "view_staff",
+    "view_staff_tasks",
+    "view_staff_standards",
     "view_staff_knowledge",
     "edit_staff_knowledge",
     "review_staff_knowledge",
     "publish_staff_knowledge",
   ]),
+  BUYER: Object.freeze(["view_communications"]),
+  CLUB_ADMINISTRATOR: Object.freeze([
+    "view_communications",
+    "view_staff",
+    "view_staff_tasks",
+    "view_staff_standards",
+    "view_staff_knowledge",
+  ]),
+  CLUB_MANAGER: Object.freeze(["view_communications"]),
   MANAGER: Object.freeze([
+    "view_communications",
     "view_staff_knowledge",
     "edit_staff_knowledge",
     "review_staff_knowledge",
     "publish_staff_knowledge",
   ]),
+  MARKETER: Object.freeze(["view_communications"]),
   OWNER: Object.freeze([
+    "view_communications",
+    "view_support_tickets",
+    "manage_support_tickets",
     "view_staff_knowledge",
     "edit_staff_knowledge",
     "review_staff_knowledge",
     "publish_staff_knowledge",
+  ]),
+  SENIOR_ADMINISTRATOR: Object.freeze([
+    "view_communications",
+    "view_staff",
+    "view_staff_tasks",
+    "view_staff_standards",
+    "view_staff_knowledge",
   ]),
   STANDARDS_MANAGER: Object.freeze([
     "view_dashboard",
@@ -147,16 +174,17 @@ const CURRENT_RELEASE_MINIMUM_ROLE_CAPABILITIES = Object.freeze({
     "review_staff_knowledge",
     "publish_staff_knowledge",
   ]),
+  TRAINEE: Object.freeze(["view_communications"]),
 });
 const CURRENT_RELEASE_BASE_ROLE_PERMISSION_DIGESTS = Object.freeze({
   ADMIN: "d6a1685414b2e729ba32bcb8668cc313ee39e658a2cfda85b13060e0b282d565",
-  BUYER: "a27568ecc2d4a4edce5974039ad50bbd9f1493806d9e049d17e62cfbf37deb11",
+  BUYER: "e82d7dfd2d5fa52e005a31f2177c773fa1745ff30878f036dc3ca3c0edc8bdd5",
   CLUB_ADMINISTRATOR:
     "448e5c0bca56d6d1c0bb5134ddb4e3a51d79408f69a5e23e596655a607866a43",
   CLUB_MANAGER:
     "008ca8e2b8573b67c9a4c5ba2cf3a2b0b1c0f944efb0c063ad2c6f13f8a3d692",
   MANAGER: "052d3607edfa801fdbd03614ea531edfbf05669b6928d23f4499876ba5a052e0",
-  MARKETER: "63546df7b8295863813fe992d537768a38fa7ffdfa2e207579f9aa3b6a38c337",
+  MARKETER: "89397e45815587e098c5ebaf0ca8de92c4df61cb1632b7ccc04af9a76a70a515",
   OWNER: "d6a1685414b2e729ba32bcb8668cc313ee39e658a2cfda85b13060e0b282d565",
   SENIOR_ADMINISTRATOR:
     "448e5c0bca56d6d1c0bb5134ddb4e3a51d79408f69a5e23e596655a607866a43",

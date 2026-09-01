@@ -280,8 +280,13 @@ function parseSystemdProperties(raw, unit) {
     const separator = line.indexOf("=");
     if (separator < 1) fail(`${unit} returned a malformed systemd property`);
     const key = line.slice(0, separator);
-    if (properties.has(key)) fail(`${unit} returned duplicate systemd property ${key}`);
-    properties.set(key, line.slice(separator + 1));
+    const value = line.slice(separator + 1);
+    if (properties.has(key)) {
+      if (key !== "EnvironmentFiles") fail(`${unit} returned duplicate systemd property ${key}`);
+      properties.set(key, `${properties.get(key)}\n${value}`);
+    } else {
+      properties.set(key, value);
+    }
   }
   return properties;
 }

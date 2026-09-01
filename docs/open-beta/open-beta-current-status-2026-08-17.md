@@ -3,19 +3,45 @@
 | Поле                 | Состояние                                                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Release decision     | `NO-GO` для внешнего доступа                                                                                                  |
-| Production runtime   | healthy; active green `a130c13e…`, generation 16, `COMBINED`, bridge OFF, bug reporting LIVE                                  |
-| Prisma schema        | production exact `CURRENT_188`; source repair candidate `CURRENT_189` не deployed                                             |
-| Release authority    | exact SHA `a130c13e…`: Fast CI `33330505183`, Full Release Admission `33330505182`, immutable handoff и generation 16 receipt |
+| Production runtime   | healthy; active green `22ab6b81…`, generation 20, `COMBINED`, bridge OFF, bug reporting LIVE                                   |
+| Prisma schema        | production exact `CURRENT_189/189`; migration `20260831120000_guest_support_bug_report_input_repair` applied                  |
+| Release authority    | exact SHA `22ab6b81…`: Fast CI `33514154571`, Full Release Admission `33514154601`, immutable handoff и generation 20 receipt  |
 | Runtime successor    | Dedicated bonus-ledger worker active; bounded backlog recovery завершён, timer enabled/healthy                                |
 | Employee access      | восстановлен; 26 active users остаются в canonical `demo` tenant                                                              |
-| Role-aware landing   | входит в active `a130c13e…`; real-account canary pending                                                                      |
+| Role-aware landing   | входит в active `22ab6b81…`; real-account canary pending                                                                      |
 | Platform admin       | `/administration` → явный подписанный tenant context → `OWNER + NETWORK`                                                      |
 | Текущая сеть         | один canonical Tenant, четыре Store; два пустых duplicate tenant не удалены                                                   |
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
 
-## Standards-manager invite delegation repair candidate (31.08.2026)
+## Production CURRENT189 rollout (01.09.2026)
+
+Exact release `22ab6b81dacc726068d0dfcc5172fe67581a45b1` развёрнут на обоих
+blue/green API и Web slot. Active green и hot-rollback blue проходят readiness
+с exact `CURRENT_189/189`; nginx generation 20 направляет трафик на green.
+`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
+`GUEST_BUG_REPORTING_MODE=LIVE`.
+
+Перед production effect exact release прошёл restored-copy acceptance. Затем
+контроллер `GUEST_SUPPORT_PRODUCTION_188_TO_189_V1` под production-control и
+cutover locks применил только checksum-pinned migration
+`20260831120000_guest_support_bug_report_input_repair`. Backup
+`current189-preupgrade-20260901T1511Z` и подписанные evidence/receipts сохранены
+вне release; dump SHA-256 —
+`6839ec24f440339e672326d6ba500a9e02baa4bebee267a2a337bdf862625244`.
+
+Production QA подтвердил public `/`, `/game` и `/game/auth`, USER_CALL readiness,
+tenant и platform support queues, description `20..2000`, multipart
+`5 fields + 1 JPG`, а также standards-manager delegation только в exact fresh
+store scope. Bonus-ledger timer снова `active (waiting)`; actionable,
+stale-processing и failed backlog равны нулю. Disposable restored-copy contour
+удалён после копирования evidence; production backup не затронут.
+
+Внешний open-beta decision остаётся `NO-GO`: этот rollout исправляет текущий
+production, но сам по себе не закрывает остальные пункты внешнего admission.
+
+## История: standards-manager invite delegation repair candidate (31.08.2026)
 
 Локализована причина ошибки `You cannot grant permissions outside your access
 scope`: матрица ролей уже разрешала `STANDARDS_MANAGER` создавать
@@ -31,9 +57,10 @@ Source repair разделяет две границы. Неизменённые
 приглашение можно создать только для непустого подмножества клубов инициатора,
 а чужой клуб, `NETWORK`, broad `CLUB_MANAGER`, `OWNER` и platform authority не
 разрешены. Focused regression покрывает обе разрешённые роли и все эти
-отрицательные границы. Production этим изменением пока не затронут.
+отрицательные границы. На момент подготовки candidate production этим
+изменением ещё не был затронут; итоговый rollout зафиксирован выше.
 
-## Guest bug-report input repair candidate (31.08.2026)
+## История: guest bug-report input repair candidate (31.08.2026)
 
 Source candidate снижает минимальное описание обращения с 30 до 20 символов и
 исправляет ложный `Too many parts` для канонической формы с пятью служебными
@@ -46,10 +73,9 @@ Busboy `parts` cap исправлен на `7`.
 description check на `20..2000` и переводит exact worker readiness на 189-й
 head. Локально прошли API multipart/boundary tests, focused API, runtime
 boundary, Prisma validation/typecheck, Web boundary/lint/build и current-head
-operational gates. Фактический production не менялся: active runtime остаётся
-`a130c13e…`, generation 16, schema CURRENT_188, reporting LIVE. До exact-SHA
-CI/admission, restored-copy rehearsal и контролируемого schema/application
-cutover этот repair нельзя считать доступным пользователям.
+operational gates. На момент подготовки candidate active runtime оставался
+`a130c13e…`, generation 16, schema CURRENT_188, reporting LIVE. Итоговый
+exact-SHA admission, rehearsal и production rollout зафиксированы выше.
 
 Существующий dormant/noncanonical employee-invite proposal с логическим
 названием CURRENT189 этим изменением не активируется. Его будущая canonical

@@ -8,42 +8,41 @@ workers или deployment обязательно прочитать
 Он фиксирует три независимых контура: public guest, corporate tenant и
 workers/control plane, а также инцидентные уроки 27–28.08.2026.
 
-Текущий runtime implementation baseline — merge SHA
-`a130c13e8d694b605d86a924b1524a6174ae1b51` (PR #90 + #91 поверх PR #88).
-Fast CI `33330505183` и Full Release Admission `33330505182` зелёные на exact
-merge SHA. В source реализованы отдельные
-`CORPORATE`/`GUEST` entrypoints, module graphs, secret sets и bounded database
-pools. Split systemd/nginx candidate остаётся `DORMANT / NOT INSTALLED`, а
-production продолжает работать в `COMBINED`. Фактический active runtime —
-green exact `a130c13e…`, cutover generation 16; schema — exact `CURRENT_188`,
-bridge `OFF`, bug reporting `LIVE`. Hot rollback blue — `4036d312…`; оба slot
-остаются active и проходят exact CURRENT188 readiness.
+Текущий production runtime baseline — merge SHA
+`22ab6b81dacc726068d0dfcc5172fe67581a45b1` (PR #111). Fast CI
+`33514154571` и Full Release Admission `33514154601` зелёные на exact merge
+SHA. Active green и hot-rollback blue работают в `COMBINED`, оба проходят
+exact readiness `CURRENT_189/189`; nginx cutover generation — `20`.
+`GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
+`GUEST_BUG_REPORTING_MODE=LIVE`. Split systemd/nginx candidate остаётся
+`DORMANT / NOT INSTALLED`.
 
-Source repair candidate 31.08.2026 переводит следующий canonical head в
-`CURRENT_189` миграцией
-`20260831120000_guest_support_bug_report_input_repair`, но **production не
-изменён**. Кандидат синхронно снижает guest bug-report description minimum до
-20 символов в Web/API/DB и исправляет multipart exclusive cap: канонические
-пять allowlisted полей плюс один файл проходят при `parts=7`, тогда как
-`fields=5`, `files=1`, 5 MiB, signature/MIME sanitation и abuse guards
-сохранены. Dormant noncanonical employee-invite proposal с логическим ярлыком
-CURRENT189 не активирован и перед будущей promotion требует rebase/refreeze.
+Production migration
+`20260831120000_guest_support_bug_report_input_repair` применена
+контроллером `GUEST_SUPPORT_PRODUCTION_188_TO_189_V1` после PASS на
+восстановленной копии production. Перед DDL создан backup
+`current189-preupgrade-20260901T1511Z` с SHA-256 dump
+`6839ec24f440339e672326d6ba500a9e02baa4bebee267a2a337bdf862625244`;
+backup и подписанные rollout receipts сохранены вне runtime release.
 
-Corporate invite source repair 31.08.2026 возвращает прямой рабочий процесс
-менеджера по стандартам: canonical `CLUB_ADMINISTRATOR` и
-`SENIOR_ADMINISTRATOR` можно приглашать только в непустое подмножество свежего
-store scope инициатора. Это не выдаёт менеджеру игровые capabilities
-администраторов. Tenant role overrides и custom roles сохраняют полный
-capability-subset guard; чужой клуб, `NETWORK`, broad `CLUB_MANAGER`, `OWNER`
-и platform authority остаются fail-closed. Production пока не изменён.
+Guest bug-report description теперь согласованно принимает `20..2000`
+символов в Web/API/DB. Канонические пять allowlisted multipart-полей плюс один
+JPG/PNG/WebP проходят при `parts=7`; пределы `fields=5`, `files=1`, 5 MiB,
+signature/MIME sanitation, idempotency и abuse guards сохранены.
 
-Release admission для source candidate больше не дублирует migration head и
-count вручную: provenance вычисляется из уже скопированного в immutable artifact
-набора `prisma/migrations`, после чего независимый verifier повторно сверяет оба
-значения с фактическим содержимым. Отдельный API child-process fixture при этом
-явно pin-ит reviewed `CURRENT_189/189`, поэтому неожиданная новая migration не
-становится допустимой автоматически. Это устраняет stale CURRENT_188 metadata,
-но само по себе не разрешает production deploy.
+Менеджер по стандартам снова может приглашать canonical
+`CLUB_ADMINISTRATOR` и `SENIOR_ADMINISTRATOR`, но только в непустое подмножество
+свежего store scope инициатора. Tenant role overrides и custom roles сохраняют
+полный capability-subset guard; чужой клуб, `NETWORK`, broad `CLUB_MANAGER`,
+`OWNER` и platform authority остаются fail-closed.
+
+Release provenance вычисляется из immutable artifact `prisma/migrations`, а
+независимый verifier сверяет exact `CURRENT_189/189` с содержимым release.
+Отдельный API child-process fixture pin-ит reviewed head, поэтому новая
+миграция не становится допустимой автоматически.
+
+Ниже сохранена история fail-closed restored-copy итераций, которые предшествовали
+успешному rehearsal и production rollout 01.09.2026.
 
 Первые два restored-copy запуска CURRENT_189 остановились fail-closed без production
 effect и уточнили acceptance oracle. Первый исключил 251 архивный товар из
@@ -117,22 +116,21 @@ helpers с `PUBLIC` revoke. Postflight подтвердил public health, от�
 `AVAILABLE/<unconsumed>/PENDING` кейс «УТРО» у `***6035` без открытия от имени
 гостя.
 
-Autonomous bonus-ledger production rollout 30.08.2026 включён на exact active
-release, а встроенный scheduler в обоих API slot остаётся выключенным. Live
-canary подтвердила начисление `0 -> 500`; bounded recovery batch проверил 28
-записей, подтвердил 18 реальных начислений и отменил 10 staff/test записей до
-provider write без failed/blocked результатов. Unresolved ledger backlog равен
-нулю. Четыре wallet item остаются `PENDING`, потому что пользователи ещё не
-выполнили явный claim. Отдельный `leetplus-bonus-ledger-worker.timer` включён,
-находится в `active (waiting)` и два последовательных автоматических tick
-завершил с пустой очередью и кодом 0.
+Autonomous bonus-ledger production rollout 30.08.2026 включён, а встроенный
+scheduler в обоих API slot остаётся выключенным. Live canary подтвердила
+начисление `0 -> 500`; recovery подтвердил реальные начисления и отменил
+staff/test записи до provider write. На 01.09.2026 ledger содержит 242
+`CONFIRMED` на 33 150 бонусов и 10 `CANCELED` на 1 300 бонусов; actionable,
+stale-processing и failed backlog равны нулю. Отдельный
+`leetplus-bonus-ledger-worker.timer` включён, находится в `active (waiting)` и
+самостоятельно запускает idempotent обработку каждые 30 секунд.
 
 Публичный игровой вход (`/guest-portal*`) не зависит от corporate JWT/scope и
 не имеет общего лимита одновременно вошедших пользователей.
 `/guests/gamification*` — tenant-authenticated управление игрой и остаётся в
 corporate contour. Background jobs не регистрируются в public guest runtime.
 
-Bug-report production candidate следует этим же границам: guest submission
+Bug-report production contour следует этим же границам: guest submission
 `/guest-portal/session/support/bug-reports` принадлежит только GuestRuntime;
 tenant queue `/support/bug-reports*` и platform queue
 `/admin/support-tickets*` принадлежат CorporateRuntime. Вложения ограничены
@@ -167,7 +165,7 @@ dump SHA-256
 Production HTTP/DB/ACL/guard QA прошёл; синтетический тикет без guest JWT не
 создавался, поэтому интерактивный signed-in canary остаётся отдельной проверкой.
 
-## Detailed gamification state (updated through 30.08.2026)
+## Detailed gamification state (updated through 01.09.2026)
 
 - The canonical manager route is `/gamification`, diagnostics live at `/gamification/log`, missions are created and edited only in `/gamification/missions/wizard`, and the guest flow is `/game/auth -> /game/clubs -> /game` with reward history at `/game/rewards`.
 - Mission v2 and Battle Pass share the same condition family: `APP_OPEN`, `PLAY_TIME`, `PRODUCT_PURCHASE`, `BALANCE_TOPUP`, and `CHECK_IN`. Loot boxes accept `ANY`, `HOURLY`, or `PACKAGE_OR_SUBSCRIPTION`.
@@ -183,7 +181,7 @@ Production HTTP/DB/ACL/guard QA прошёл; синтетический тик�
 - A domain-scoped, idempotent identity resolver refreshes stale Langame links from the verified guest identity during authentication and synchronization. Ambiguous matches fail closed instead of binding a profile to the wrong guest.
 - Check-in streak progress is based on unique club-local calendar dates and resets after a missed date. Reward-only `REWARD_TEMPLATE` loot boxes are excluded from the standalone catalog.
 - Product categories keep separate `LANGAME` and `LEETPLUS` identities. Exact tariff dictionaries remain blocked by readiness checks until a reliable structured source is available.
-- The production snapshot at documentation time is exact release `a130c13e8d694b605d86a924b1524a6174ae1b51`, active green generation 16; admitted API/Web are aligned and both green and rollback blue services remain active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
+- The production snapshot at documentation time is exact release `22ab6b81dacc726068d0dfcc5172fe67581a45b1`, active green generation 20, exact `CURRENT_189/189`; admitted API/Web are aligned and both green and rollback blue services remain active. This revision marker is operational evidence only: runtime status and `/gamification/log` remain authoritative for feature modes and queue health.
 - The LIVE-primary purchase pipeline now reserves bounded scheduler capacity for `PRODUCT_EXPENSE`, drains eligible pending external purchase facts beyond the newest 30-row window, and prioritizes facts that match active category missions. A positive guest-bound device-rental expense can qualify like any other mapped product expense; it is not rejected merely because the business calls it a service. Stable sale identity, cancellation, return and supersede handling remain required before enabling a Ledger purchase fallback.
 - Purchase missions support `ANY_PRODUCT`, exact products, or explicitly sourced categories, plus ANY/ALL selection and per-purchase/cumulative amount thresholds. Guest-facing conditions list the selected categories and omit the internal completion-window value.
 - Mission and loot-box editors expose `maxPendingRewards` (`Максимальное количество накопленных наград для получения`). The default for newly created and migrated existing elements is `1`; an explicit operator value is preserved. The guard counts pending ordinary rewards and unconsumed entitlements from the same source and blocks only a new qualification, not an already-earned claim/open.

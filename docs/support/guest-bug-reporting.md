@@ -1,16 +1,16 @@
 # Сообщения о проблемах из игрового модуля
 
-Статус: **production LIVE на CURRENT_188; source repair candidate CURRENT_189**
+Статус: **production LIVE на CURRENT_189**
 
-Актуально на: **31.08.2026**
+Актуально на: **01.09.2026**
 
 Фактический production state: active green
-`a130c13e8d694b605d86a924b1524a6174ae1b51`, cutover generation 16, exact
-`CURRENT_188`, `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
-`GUEST_BUG_REPORTING_MODE=LIVE`. Source repair ещё не развёрнут: production
-форма по-прежнему требует 30 символов и multipart envelope с файлом может
-получить `Too many parts`. Наличие repair-кода или зелёных локальных тестов не
-означает production deployment.
+`22ab6b81dacc726068d0dfcc5172fe67581a45b1`, cutover generation 20, exact
+`CURRENT_189/189`, `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=OFF`,
+`GUEST_BUG_REPORTING_MODE=LIVE`. Active green и hot-rollback blue проходят
+exact readiness одного release. Production форма принимает описание от 20
+символов, а canonical multipart envelope `5 fields + 1 file` не блокируется
+ложной ошибкой `Too many parts`.
 
 ## Назначение
 
@@ -97,7 +97,7 @@ cutover до создания durable intent.
 ledger. Tenant API всегда добавляет `tenantId` в read/update/comment/download;
 несуществующий или cross-tenant объект возвращается как not found.
 
-## Source repair CURRENT_189
+## Production repair CURRENT_189
 
 Additive migration:
 `20260831120000_guest_support_bug_report_input_repair` (`CURRENT_189`, 189
@@ -111,12 +111,22 @@ API и Web используют одну и ту же границу `20..2000`;
 отвергать шестое текстовое поле. Database check отдельно принимает 20 символов
 и отвергает 19.
 
-Production остаётся на `CURRENT_188` до exact-SHA CI/admission, rehearsal на
-копии production, отдельного контролируемого schema upgrade и обычного
-blue/green cutover. Дормантный noncanonical proposal, исторически помеченный
-как `CURRENT189 employee invite`, этим repair не активируется и перед любой
-будущей canonical promotion должен быть заново rebased/refrozen относительно
-фактического head.
+Rollout завершён 01.09.2026 на exact SHA `22ab6b81…`: Fast CI
+`33514154571`, Full Release Admission `33514154601`, restored-copy acceptance
+PASS, затем checksum-pinned controller применил единственный переход
+`188 -> 189`. Перед DDL создан backup
+`current189-preupgrade-20260901T1511Z`, dump SHA-256
+`6839ec24f440339e672326d6ba500a9e02baa4bebee267a2a337bdf862625244`.
+После postflight оба slot готовы на exact CURRENT189, bridge возвращён в
+`OFF`, reporting включён в `LIVE`, а bonus-ledger timer работает автономно.
+
+Тесты закрепляют принятие ровно пяти полей плюс JPG, отказ для шестого поля,
+границу 20/19 символов и сохранение signature/MIME/size guards. Tenant queue
+проверена через `/support`, platform queue — через
+`/administration/support-tickets`; существующее обращение доступно в обеих
+очередях только в соответствующем authenticated contour.
+
+### История fail-closed rehearsal
 
 Первый restored-copy acceptance корректно завершился `FAIL` до production
 effect: database oracle сравнивал `/products` со всеми 1489 строками `Product`,

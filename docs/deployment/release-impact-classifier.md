@@ -68,3 +68,26 @@ node .github/scripts/classify-release-impact.mjs \
 Receipt является evidence классификации source diff. Он не подтверждает live
 systemd/nginx/NSS/DB, не заменяет admitted exact SHA, backup/restored-copy,
 signed controller, rollback postcheck или отдельный production GO.
+
+## Docs-only canary acceptance
+
+После включения gate его отдельный Markdown-only canary считается принятым,
+только если одновременно выполнены все условия:
+
+- receipt фиксирует `effectiveLane=L0_DOCS` и
+  `runtimeArtifactEligible=false`;
+- `Release impact classification` завершён `SUCCESS`;
+- Fast Application и Authority jobs имеют terminal `SKIPPED`, а не запускаются;
+- среди artifacts есть только impact receipt, без runtime candidate,
+  production-control candidate и admission handoff;
+- merge canary вызывает такой же `L0` post-merge Fast/Full результат на exact
+  merge SHA.
+
+Canary не использует production host, secrets, database или runtime artifact.
+
+Первый pre-merge canary принят 02.09.2026: Fast CI
+[`33556827337`](https://github.com/boozik3412/leetplus/actions/runs/33556827337)
+для exact `60b51c04… → d1c5ea33…` завершился за 16 секунд. Receipt зафиксировал
+`PULL_REQUEST_MERGE_BASE` и `L0_DOCS`; оба тяжёлых job получили `SKIPPED`.
+Единственным artifact стал impact receipt размером 1 124 байта с transport
+digest `sha256:191bdc70e381350a4200bb742a36e924676f0efb32440096363255fb6a62d274`.

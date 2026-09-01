@@ -129,6 +129,7 @@ remove_fixture_tree() {
 
 cleanup() {
   local cleanup_status=$?
+  local cleanup_failed=false
   trap - EXIT
   set +e
   if ((cleanup_status != 0)); then
@@ -136,8 +137,10 @@ cleanup() {
       /usr/bin/journalctl --no-pager -n 40 -u "$unit" >&2
     done
   fi
-  /usr/bin/systemctl stop "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT" >/dev/null 2>&1
-  /usr/bin/systemctl reset-failed "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT" >/dev/null 2>&1
+  for unit in "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT"; do
+    /usr/bin/systemctl stop "$unit" >/dev/null 2>&1 || true
+    /usr/bin/systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+  done
   /usr/bin/rm -f -- /run/leetplus-topology-twin-drift.out \
     /run/leetplus-topology-twin-phase.out
   /usr/bin/rm -f -- "$API_UNIT_PATH" "$WEB_UNIT_PATH" "$FIXED_LISTENER" "$FIXED_NODE"
@@ -169,6 +172,44 @@ cleanup() {
   if [[ "$libexec_parent_preexisting" == false \
     && -d /usr/local/libexec/leetplus && ! -L /usr/local/libexec/leetplus ]]; then
     /usr/bin/rmdir -- /usr/local/libexec/leetplus
+  fi
+  for unit in "${SLOT_UNITS[@]}" "$REHEARSAL_UNIT"; do
+    if [[ "$(/usr/bin/systemctl show "$unit" --value --property=LoadState 2>/dev/null || true)" != not-found ]]; then
+      printf 'production topology twin: cleanup left unit %s\n' "$unit" >&2
+      cleanup_failed=true
+    fi
+  done
+  for identity in "${RUNTIME_USERS[@]}" leetplus-rehearsal; do
+    if /usr/bin/getent passwd "$identity" >/dev/null 2>&1; then
+      printf 'production topology twin: cleanup left user %s\n' "$identity" >&2
+      cleanup_failed=true
+    fi
+  done
+  for identity in "${RUNTIME_GROUPS[@]}" leetplus-rehearsal; do
+    if /usr/bin/getent group "$identity" >/dev/null 2>&1; then
+      printf 'production topology twin: cleanup left group %s\n' "$identity" >&2
+      cleanup_failed=true
+    fi
+  done
+  for target in \
+    /etc/leetplus /srv/leetplus /var/lib/leetplus /var/log/leetplus \
+    /var/cache/leetplus-web-blue /var/cache/leetplus-web-green \
+    "$FIXED_NODE" "$FIXED_LISTENER" "$API_UNIT_PATH" "$WEB_UNIT_PATH" \
+    "$API_DROPIN_ROOT" "$WEB_DROPIN_ROOT" \
+    /run/leetplus-topology-twin-drift.out /run/leetplus-topology-twin-phase.out; do
+    if [[ -e "$target" || -L "$target" ]]; then
+      printf 'production topology twin: cleanup left target %s\n' "$target" >&2
+      cleanup_failed=true
+    fi
+  done
+  for port in 4100 4200 3100 3200; do
+    if [[ -n "$(/usr/bin/ss -H -ltn "sport = :${port}" 2>/dev/null)" ]]; then
+      printf 'production topology twin: cleanup left listener on %s\n' "$port" >&2
+      cleanup_failed=true
+    fi
+  done
+  if [[ "$cleanup_failed" == true && "$cleanup_status" -eq 0 ]]; then
+    cleanup_status=1
   fi
   exit "$cleanup_status"
 }

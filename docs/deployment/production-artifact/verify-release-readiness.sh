@@ -59,10 +59,11 @@ Usage:
 
 The API must expose /version and /health/ready. The probe accepts only an
 exact release SHA and either the expected completed migration name/count or
-the single exact guest-support CURRENT_187 -> CURRENT_188 compatibility
-envelope. It also requires an HTTP-success Web response and the exact Next.js
-BUILD_ID static manifest. It performs no write or restart operation. Tests may
-add --unprivileged-test-mode; root may not use that mode.
+one of the explicitly admitted guest-support forward-compatibility envelopes:
+CURRENT_187 -> CURRENT_188 or CURRENT_188 -> CURRENT_189. It also requires an
+HTTP-success Web response and the exact Next.js BUILD_ID static manifest. It
+performs no write or restart operation. Tests may add
+--unprivileged-test-mode; root may not use that mode.
 USAGE
 }
 
@@ -256,15 +257,31 @@ const bridge = database?.compatibility;
 const bridgeKeys = bridge && typeof bridge === 'object' && !Array.isArray(bridge)
   ? Object.keys(bridge).sort().join(',')
   : '';
+const admittedGuestSupportForwardBridges = [
+  {
+    sourceMigration: '20260820010000_guest_portal_telegram_update_ledger',
+    sourceMigrationCount: 187,
+    targetMigration: '20260828190000_guest_support_bug_reports',
+    targetMigrationCount: 188,
+  },
+  {
+    sourceMigration: '20260828190000_guest_support_bug_reports',
+    sourceMigrationCount: 188,
+    targetMigration: '20260831120000_guest_support_bug_report_input_repair',
+    targetMigrationCount: 189,
+  },
+];
 const guestSupportForwardBridgeAccepted =
-  expectedMigration === '20260828190000_guest_support_bug_reports' &&
-  expectedMigrationCountNumber === 188 &&
-  database?.migration === '20260820010000_guest_portal_telegram_update_ledger' &&
-  database?.migrationCount === 187 &&
   bridgeKeys === 'mode,targetMigration,targetMigrationCount' &&
   bridge.mode === 'GUEST_SUPPORT_SCHEMA_FORWARD_BRIDGE' &&
   bridge.targetMigration === expectedMigration &&
-  bridge.targetMigrationCount === expectedMigrationCountNumber;
+  bridge.targetMigrationCount === expectedMigrationCountNumber &&
+  admittedGuestSupportForwardBridges.some((candidate) =>
+    database?.migration === candidate.sourceMigration &&
+    database?.migrationCount === candidate.sourceMigrationCount &&
+    expectedMigration === candidate.targetMigration &&
+    expectedMigrationCountNumber === candidate.targetMigrationCount
+  );
 if (
   version.service !== 'leetplus-api' ||
   version.release?.sha !== releaseSha ||

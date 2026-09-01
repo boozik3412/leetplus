@@ -42,7 +42,7 @@
   "defaultRule": {
     "id": "UNKNOWN_OR_UNCLASSIFIED",
     "lane": "L2_SCHEMA_SECURITY",
-    "reason": "Unknown paths fail closed to the schema/security lane"
+    "reason": "Unknown and unclassified paths fail closed to the schema/security lane"
   },
   "rules": [
     {

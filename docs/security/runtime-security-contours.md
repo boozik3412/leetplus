@@ -24,7 +24,7 @@ fail-closed правилу одного контура снова сломать
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `22ab6b81…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
-| Release acceleration     | source/CI topology contract добавлен; production не изменён; public/corporate/worker контуры нельзя объединять или понижать ради скорости                                                                          |
+| Release acceleration     | source/CI topology twin и fail-closed impact classifier добавлены; только Markdown-only может пропустить runtime jobs; production не изменён; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -55,12 +55,15 @@ Zero-residue cleanup является частью gate; production host и prod
 
 Этот контракт не создаёт четвёртый security-контур и не позволяет применять
 правила corporate tenant к public guest либо worker authority к runtime.
-Release impact classifier в следующем этапе может только повышать lane:
-изменения auth/scope, guest boundary, DB/schema/ACL, systemd/nginx, workers или
-production-control всегда требуют полной schema/security lane. Неизвестный diff
-тоже считается максимальным риском. Manifest не доказывает фактическое live
-состояние и не заменяет exact-SHA admission, installed-control verification,
-production receipts, backup/restored-copy или отдельный GO.
+Release impact classifier теперь первым запускается в Fast и Full CI и может
+только повышать lane. Изменения auth/scope, guest boundary, DB/schema/ACL,
+systemd/nginx, workers или production-control всегда требуют полной
+schema/security lane. Неизвестный, смешанный или недоверенный diff тоже считается
+максимальным риском; `L1` ограничен явным allowlist. Только exact Markdown-only
+получает non-deployable `L0` receipt и пропускает runtime jobs. Manifest не
+доказывает фактическое live состояние и не заменяет exact-SHA admission,
+installed-control verification, production receipts, backup/restored-copy или
+отдельный GO.
 
 Rollout 01.09.2026 прошёл на exact admitted SHA после restored-copy PASS и
 checksum-pinned перехода `CURRENT_188 -> CURRENT_189`. Оба runtime slot готовы

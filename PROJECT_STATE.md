@@ -51,7 +51,11 @@ Admission. Disposable root/systemd twin на существующем GitHub run
 поднимает обе API/Web blue/green пары, проверяет exact live NSS,
 EnvironmentFiles и listener ownership, а transient restored-copy identity
 обязана исчезнуть без residue до bind/cutover fixtures. Это не deploy и не live
-production evidence: production baseline выше не изменена, а exact-SHA
+production evidence. Следующий source/CI срез добавляет отдельный первый
+fail-closed impact job: только exact Markdown-only получает `L0` non-deployable
+receipt и пропускает тяжёлые runtime jobs; allowlisted application diff получает
+`L1`, а schema/security, unknown, mixed, rename/delete или недоверенный base —
+`L2`. Production baseline выше не изменена, а exact-SHA
 admission, backup/restored-copy, signed controller, blue/green rollback,
 отдельный GO и независимость public guest / corporate tenant /
 workers-control-plane остаются обязательными.

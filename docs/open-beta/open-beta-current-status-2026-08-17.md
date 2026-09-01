@@ -14,7 +14,7 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
-| Release acceleration | topology contract и disposable dual-slot systemd/NSS twin реализованы в CI; production не менялся; следующий этап — fail-closed impact classifier |
+| Release acceleration | topology twin и fail-closed impact classifier реализованы в CI; только exact Markdown-only пропускает runtime jobs; production не менялся |
 
 ## Ускорение release pipeline без ослабления gates (01.09.2026)
 
@@ -32,6 +32,12 @@ Admission.
 process groups, а также transient restored-copy membership с обязательным
 zero-residue cleanup до существующих bind/cutover fixtures. Дополнительная
 инфраструктура и production-доступ для этого не нужны.
+
+Третий срез запускает machine-readable impact classifier отдельным первым job в
+Fast и Full CI. Он сохраняет exact base/head/rules receipt; неизвестный, mixed,
+rename/delete, schema/security или недоверенный event становится `L2`. Обычный
+runtime допускается в `L1` только по allowlist. Лишь доказанный Markdown-only
+`L0` завершает CI без тяжёлых runtime/database jobs и без runtime artifact.
 
 Это source/CI изменение, а не production rollout: текущая production baseline
 остаётся `22ab6b81…`, CURRENT189, generation 20. Ускорение не меняет решение

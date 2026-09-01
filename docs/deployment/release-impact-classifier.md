@@ -84,3 +84,10 @@ signed controller, rollback postcheck или отдельный production GO.
   merge SHA.
 
 Canary не использует production host, secrets, database или runtime artifact.
+
+Первый pre-merge canary принят 02.09.2026: Fast CI
+[`33556827337`](https://github.com/boozik3412/leetplus/actions/runs/33556827337)
+для exact `60b51c04… → d1c5ea33…` завершился за 16 секунд. Receipt зафиксировал
+`PULL_REQUEST_MERGE_BASE` и `L0_DOCS`; оба тяжёлых job получили `SKIPPED`.
+Единственным artifact стал impact receipt размером 1 124 байта с transport
+digest `sha256:191bdc70e381350a4200bb742a36e924676f0efb32440096363255fb6a62d274`.

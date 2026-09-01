@@ -291,7 +291,7 @@ for port in 4100 4200 3100 3200; do
   ready=false
   for _ in {1..30}; do
     if /usr/bin/curl --fail --silent --show-error --connect-timeout 1 --max-time 2 \
-      "http://127.0.0.1:${port}/health/ready" >/dev/null; then
+      "http://127.0.0.1:${port}/health/ready" >/dev/null 2>&1; then
       ready=true
       break
     fi
@@ -349,7 +349,9 @@ normalized_rehearsal_groups="$(printf '%s\n' "$rehearsal_groups" \
 [[ "$normalized_rehearsal_groups" == 'leetplus-rehearsal leetplus-runtime' ]] \
   || die 'transient rehearsal process did not receive its exact group set'
 /usr/sbin/userdel leetplus-rehearsal
-/usr/sbin/groupdel leetplus-rehearsal
+if /usr/bin/getent group leetplus-rehearsal >/dev/null 2>&1; then
+  /usr/sbin/groupdel leetplus-rehearsal
+fi
 /usr/bin/rm -f -- /run/leetplus-topology-twin-phase.out
 "$FIXED_NODE" "$CONTRACT_VERIFIER" --root "$REPOSITORY_ROOT" \
   --live-nss-phase steady-state --live-systemd

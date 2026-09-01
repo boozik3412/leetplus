@@ -59,6 +59,8 @@ export const CURRENT_RELEASE_CAPABILITY_KEYS = Object.freeze([
   "manage_marketing",
   "view_communications",
   "manage_communications",
+  "view_support_tickets",
+  "manage_support_tickets",
   "view_staff",
   "view_staff_shift_workspace",
   "view_staff_tasks",
@@ -147,7 +149,7 @@ const CURRENT_RELEASE_MINIMUM_ROLE_CAPABILITIES = Object.freeze({
   ]),
 });
 const CURRENT_RELEASE_BASE_ROLE_PERMISSION_DIGESTS = Object.freeze({
-  ADMIN: "6df54e4069983fe027d912a1d24a2769deadb4926d52b24154a75f6db616f0c9",
+  ADMIN: "d6a1685414b2e729ba32bcb8668cc313ee39e658a2cfda85b13060e0b282d565",
   BUYER: "a27568ecc2d4a4edce5974039ad50bbd9f1493806d9e049d17e62cfbf37deb11",
   CLUB_ADMINISTRATOR:
     "448e5c0bca56d6d1c0bb5134ddb4e3a51d79408f69a5e23e596655a607866a43",
@@ -155,7 +157,7 @@ const CURRENT_RELEASE_BASE_ROLE_PERMISSION_DIGESTS = Object.freeze({
     "008ca8e2b8573b67c9a4c5ba2cf3a2b0b1c0f944efb0c063ad2c6f13f8a3d692",
   MANAGER: "052d3607edfa801fdbd03614ea531edfbf05669b6928d23f4499876ba5a052e0",
   MARKETER: "63546df7b8295863813fe992d537768a38fa7ffdfa2e207579f9aa3b6a38c337",
-  OWNER: "6df54e4069983fe027d912a1d24a2769deadb4926d52b24154a75f6db616f0c9",
+  OWNER: "d6a1685414b2e729ba32bcb8668cc313ee39e658a2cfda85b13060e0b282d565",
   SENIOR_ADMINISTRATOR:
     "448e5c0bca56d6d1c0bb5134ddb4e3a51d79408f69a5e23e596655a607866a43",
   STANDARDS_MANAGER:

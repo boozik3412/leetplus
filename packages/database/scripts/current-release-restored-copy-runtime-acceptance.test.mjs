@@ -1399,6 +1399,8 @@ test("accepts exact API/Web identity, BFF auth and the complete beta read matrix
 });
 
 test("binds users, invites, roles and capabilities to the database authority oracle", () => {
+  assert.ok(CURRENT_RELEASE_CAPABILITY_KEYS.includes("view_support_tickets"));
+  assert.ok(CURRENT_RELEASE_CAPABILITY_KEYS.includes("manage_support_tickets"));
   const valid = validCriticalBody("/api/users");
   const accepted = assertCurrentReleaseUsersNetworkProjectionForTestOnly({
     body: valid,

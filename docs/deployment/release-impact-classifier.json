@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "classifierId": "LEETPLUS_RELEASE_IMPACT_V1",
+  "laneOrder": [
+    "L0_DOCS",
+    "L1_RUNTIME",
+    "L2_SCHEMA_SECURITY"
+  ],
+  "lanes": {
+    "L0_DOCS": {
+      "rank": 0,
+      "runtimeArtifactEligible": false,
+      "requiredGates": [
+        "FAST_CI",
+        "NON_DEPLOYABLE_RECEIPT"
+      ]
+    },
+    "L1_RUNTIME": {
+      "rank": 1,
+      "runtimeArtifactEligible": true,
+      "requiredGates": [
+        "FAST_CI",
+        "FOCUSED_TESTS",
+        "FULL_RELEASE_ADMISSION",
+        "BLUE_GREEN_ROLLOUT"
+      ]
+    },
+    "L2_SCHEMA_SECURITY": {
+      "rank": 2,
+      "runtimeArtifactEligible": true,
+      "requiredGates": [
+        "FAST_CI",
+        "FULL_RELEASE_ADMISSION",
+        "FRESH_BACKUP",
+        "RESTORED_COPY_ACCEPTANCE",
+        "SIGNED_CONTROLLER",
+        "BLUE_GREEN_ROLLBACK_POSTCHECK"
+      ]
+    }
+  },
+  "mixedLane": "L2_SCHEMA_SECURITY",
+  "defaultRule": {
+    "id": "UNKNOWN_OR_UNCLASSIFIED",
+    "lane": "L2_SCHEMA_SECURITY",
+    "reason": "Unknown paths fail closed to the schema/security lane"
+  },
+  "rules": [
+    {
+      "id": "DOCUMENTATION_ONLY",
+      "lane": "L0_DOCS",
+      "reason": "Markdown cannot produce a runtime or production-control payload",
+      "match": {
+        "exactPaths": [],
+        "prefixes": [],
+        "suffixes": [
+          ".md"
+        ],
+        "basenames": []
+      }
+    },
+    {
+      "id": "SCHEMA_SECURITY_AUTHORITY",
+      "lane": "L2_SCHEMA_SECURITY",
+      "reason": "Build, database, deployment, CI, environment, or authority surface",
+      "match": {
+        "exactPaths": [
+          ".env.example",
+          ".gitattributes",
+          ".gitignore",
+          "docker-compose.yml",
+          "package.json",
+          "pnpm-lock.yaml",
+          "pnpm-workspace.yaml"
+        ],
+        "prefixes": [
+          ".cursor/",
+          ".github/",
+          "docs/",
+          "packages/"
+        ],
+        "suffixes": [
+          ".prisma",
+          ".service",
+          ".socket",
+          ".sql",
+          ".timer"
+        ],
+        "basenames": [
+          ".env",
+          ".env.example",
+          "Dockerfile",
+          "nest-cli.json",
+          "next.config.js",
+          "next.config.mjs",
+          "next.config.ts",
+          "package.json",
+          "pnpm-lock.yaml",
+          "pnpm-workspace.yaml",
+          "tsconfig.json"
+        ]
+      }
+    },
+    {
+      "id": "API_SECURITY_CONTOUR",
+      "lane": "L2_SCHEMA_SECURITY",
+      "reason": "API authentication, tenant scope, public guest, worker, outbound, or runtime authority surface",
+      "match": {
+        "exactPaths": [
+          "apps/api/src/app.module.ts",
+          "apps/api/src/corporate-main.ts",
+          "apps/api/src/guest-main.ts",
+          "apps/api/src/main.ts"
+        ],
+        "prefixes": [
+          "apps/api/src/admin/",
+          "apps/api/src/auth/",
+          "apps/api/src/config/",
+          "apps/api/src/guest-gamification/",
+          "apps/api/src/guest-portal/",
+          "apps/api/src/guests/",
+          "apps/api/src/identity-mail-worker/",
+          "apps/api/src/integrations/",
+          "apps/api/src/mail/",
+          "apps/api/src/prisma/",
+          "apps/api/src/reports/",
+          "apps/api/src/runtime/",
+          "apps/api/src/settings/",
+          "apps/api/src/staff/",
+          "apps/api/src/stores/",
+          "apps/api/src/support/",
+          "apps/api/src/tenancy/",
+          "apps/api/src/users/",
+          "apps/api/src/utilities/"
+        ],
+        "suffixes": [],
+        "basenames": []
+      }
+    },
+    {
+      "id": "WEB_SECURITY_CONTOUR",
+      "lane": "L2_SCHEMA_SECURITY",
+      "reason": "Web authentication, role landing, public guest, BFF, invite, or release identity surface",
+      "match": {
+        "exactPaths": [
+          "apps/web/src/lib/api-url.ts",
+          "apps/web/src/lib/api.ts",
+          "apps/web/src/lib/auth.ts",
+          "apps/web/src/lib/employee-invite-current189-bff-candidate.ts",
+          "apps/web/src/lib/guest-portal-bff.ts",
+          "apps/web/src/lib/guest-portal.ts",
+          "apps/web/src/lib/invite-secret.mts",
+          "apps/web/src/lib/invite-transport-core.mts",
+          "apps/web/src/lib/landing.ts",
+          "apps/web/src/lib/langame-current188-bff-candidate.ts",
+          "apps/web/src/lib/langame-settings.ts",
+          "apps/web/src/lib/permissions.ts",
+          "apps/web/src/lib/proxy.ts",
+          "apps/web/src/lib/roles.ts",
+          "apps/web/src/lib/users.ts",
+          "apps/web/src/lib/web-release-identity.ts",
+          "apps/web/src/proxy.ts"
+        ],
+        "prefixes": [
+          "apps/web/src/app/(app)/administration/",
+          "apps/web/src/app/(app)/support/",
+          "apps/web/src/app/(app)/users/",
+          "apps/web/src/app/(auth)/",
+          "apps/web/src/app/api/",
+          "apps/web/src/app/game/",
+          "apps/web/src/app/guest/",
+          "apps/web/src/app/play/",
+          "apps/web/src/app/start/",
+          "apps/web/src/app/verify-email/",
+          "apps/web/src/lib/guest-"
+        ],
+        "suffixes": [],
+        "basenames": []
+      }
+    },
+    {
+      "id": "ORDINARY_RUNTIME",
+      "lane": "L1_RUNTIME",
+      "reason": "Explicitly allowlisted application runtime outside security and authority surfaces",
+      "match": {
+        "exactPaths": [],
+        "prefixes": [
+          "apps/api/src/categories/",
+          "apps/api/src/dashboard/",
+          "apps/api/src/imports/",
+          "apps/api/src/marketing/",
+          "apps/api/src/products/",
+          "apps/api/src/suppliers/",
+          "apps/web/src/app/(app)/",
+          "apps/web/src/app/guests/",
+          "apps/web/src/app/products/",
+          "apps/web/src/app/reports/",
+          "apps/web/src/components/"
+        ],
+        "suffixes": [],
+        "basenames": []
+      }
+    }
+  ]
+}

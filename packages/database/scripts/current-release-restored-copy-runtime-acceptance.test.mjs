@@ -55,35 +55,77 @@ const SYSTEM_IDENTIFIER = "7676240383393093856";
 const FIXTURE_OWNER_UID = process.getuid?.() ?? 0;
 const DATABASE_URL =
   "postgresql://runtime:fixture-secret-123456@127.0.0.1:55449/leetplus_restored_fixture?schema=public&sslmode=disable";
-const KNOWLEDGE_MINIMUM_PERMISSIONS = Object.freeze([
-  "view_staff_knowledge",
-  "edit_staff_knowledge",
-  "review_staff_knowledge",
-  "publish_staff_knowledge",
-]);
-const STANDARDS_MANAGER_MINIMUM_PERMISSIONS = Object.freeze([
-  "view_dashboard",
-  "view_communications",
-  "manage_communications",
-  "manage_users",
-  "view_staff",
-  "view_staff_tasks",
-  "view_staff_standards",
-  "view_staff_training",
-  "view_staff_knowledge",
-  "view_staff_control",
-  "view_staff_directory",
-  "view_staff_salary",
-  "manage_staff_salary",
-  "manage_staff_tasks",
-  "manage_staff_standards",
-  "manage_staff_training",
-  "manage_staff_control",
-  "manage_staff_directory",
-  "edit_staff_knowledge",
-  "review_staff_knowledge",
-  "publish_staff_knowledge",
-]);
+const MINIMUM_ROLE_PERMISSIONS = Object.freeze({
+  ADMIN: Object.freeze([
+    "view_communications",
+    "view_support_tickets",
+    "manage_support_tickets",
+    "view_staff",
+    "view_staff_tasks",
+    "view_staff_standards",
+    "view_staff_knowledge",
+    "edit_staff_knowledge",
+    "review_staff_knowledge",
+    "publish_staff_knowledge",
+  ]),
+  BUYER: Object.freeze(["view_communications"]),
+  CLUB_ADMINISTRATOR: Object.freeze([
+    "view_communications",
+    "view_staff",
+    "view_staff_tasks",
+    "view_staff_standards",
+    "view_staff_knowledge",
+  ]),
+  CLUB_MANAGER: Object.freeze(["view_communications"]),
+  MANAGER: Object.freeze([
+    "view_communications",
+    "view_staff_knowledge",
+    "edit_staff_knowledge",
+    "review_staff_knowledge",
+    "publish_staff_knowledge",
+  ]),
+  MARKETER: Object.freeze(["view_communications"]),
+  OWNER: Object.freeze([
+    "view_communications",
+    "view_support_tickets",
+    "manage_support_tickets",
+    "view_staff_knowledge",
+    "edit_staff_knowledge",
+    "review_staff_knowledge",
+    "publish_staff_knowledge",
+  ]),
+  SENIOR_ADMINISTRATOR: Object.freeze([
+    "view_communications",
+    "view_staff",
+    "view_staff_tasks",
+    "view_staff_standards",
+    "view_staff_knowledge",
+  ]),
+  STANDARDS_MANAGER: Object.freeze([
+    "view_dashboard",
+    "view_communications",
+    "manage_communications",
+    "manage_users",
+    "view_staff",
+    "view_staff_tasks",
+    "view_staff_standards",
+    "view_staff_training",
+    "view_staff_knowledge",
+    "view_staff_control",
+    "view_staff_directory",
+    "view_staff_salary",
+    "manage_staff_salary",
+    "manage_staff_tasks",
+    "manage_staff_standards",
+    "manage_staff_training",
+    "manage_staff_control",
+    "manage_staff_directory",
+    "edit_staff_knowledge",
+    "review_staff_knowledge",
+    "publish_staff_knowledge",
+  ]),
+  TRAINEE: Object.freeze(["view_communications"]),
+});
 const ROLE_OPTION_ROLES = Object.freeze([
   "ADMIN",
   "MANAGER",
@@ -134,12 +176,7 @@ const PILOT_READINESS_KEYS = Object.freeze([
   "BALANCE_RECONCILIATION",
 ]);
 function fixtureRolePermissions(role) {
-  const minimum =
-    role === "STANDARDS_MANAGER"
-      ? STANDARDS_MANAGER_MINIMUM_PERMISSIONS
-      : ["OWNER", "ADMIN", "MANAGER"].includes(role)
-        ? KNOWLEDGE_MINIMUM_PERMISSIONS
-        : [];
+  const minimum = MINIMUM_ROLE_PERMISSIONS[role] ?? [];
   return [...new Set([...minimum, "view_dashboard"])];
 }
 const BASE_ROLE_PERMISSIONS = Object.freeze({
@@ -151,6 +188,7 @@ const BASE_ROLE_PERMISSIONS = Object.freeze({
     "export_reports",
     "view_assortment_products",
     "view_assortment_catalog",
+    "view_communications",
     "use_utilities",
     "edit_products",
   ]),
@@ -263,6 +301,7 @@ const BASE_ROLE_PERMISSIONS = Object.freeze({
     "approve_guest_game_rewards",
     "view_marketing",
     "manage_marketing",
+    "view_communications",
   ]),
   OWNER: CURRENT_RELEASE_CAPABILITY_KEYS,
   SENIOR_ADMINISTRATOR: Object.freeze([
@@ -278,7 +317,7 @@ const BASE_ROLE_PERMISSIONS = Object.freeze({
     "manage_staff_tasks",
     "manage_staff_training",
   ]),
-  STANDARDS_MANAGER: STANDARDS_MANAGER_MINIMUM_PERMISSIONS,
+  STANDARDS_MANAGER: MINIMUM_ROLE_PERMISSIONS.STANDARDS_MANAGER,
   TRAINEE: Object.freeze([
     "view_communications",
     "manage_communications",

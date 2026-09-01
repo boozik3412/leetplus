@@ -36,6 +36,7 @@ import {
   finalizeCurrentReleaseRuntime,
   inspectCurrentReleaseDatabase,
   normalizeCurrentReleaseStartupTimeoutMs,
+  refreshCurrentReleaseNotificationOracle,
   writeCurrentReleaseEvidenceReceipt,
   verifyCurrentReleaseArtifact,
   verifySignedCurrentReleaseReceipt,
@@ -1015,7 +1016,7 @@ test("network guards have one exact listen port and one exact loopback connect p
 
 function currentReleaseDatabaseClient(identityOverrides = {}) {
   return {
-    async query(sql) {
+    async query(sql, params) {
       if (sql.includes("pg_control_system()")) {
         return {
           rowCount: 1,
@@ -1121,8 +1122,10 @@ function currentReleaseDatabaseClient(identityOverrides = {}) {
         );
         assert.match(
           sql,
-          /AS "activeUserIds"/u,
+          /ARRAY\(SELECT entity\.id::text FROM "StaffNotification" entity\s+WHERE entity\."tenantId" = \$1\s+AND \(entity\."targetUserId" IS NULL OR entity\."targetUserId" = \$2\)\s+ORDER BY entity\.id COLLATE "C"\s+LIMIT 5000\) AS "notificationIds"/u,
         );
+        assert.deepEqual(params, ["tenant-fixture", "user-owner"]);
+        assert.match(sql, /AS "activeUserIds"/u);
         assert.match(sql, /AS "disciplineUserIds"/u);
         return {
           rowCount: 1,
@@ -1174,6 +1177,31 @@ test("attests a NOINHERIT membership-free owner role and produces a private scop
   );
 });
 
+test("refreshes the notification oracle after endpoint-driven synchronization", async () => {
+  const calls = [];
+  const accepted = await refreshCurrentReleaseNotificationOracle(
+    {
+      async query(sql, params) {
+        calls.push({ params, sql });
+        return {
+          rowCount: 1,
+          rows: [{ notificationIds: ["notification-synced"] }],
+        };
+      },
+    },
+    SCOPE_ORACLE,
+  );
+  assert.deepEqual(accepted.notificationIds, ["notification-synced"]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].params, ["tenant-fixture", "user-owner"]);
+  assert.match(calls[0].sql, /entity\."tenantId" = \$1/u);
+  assert.match(
+    calls[0].sql,
+    /entity\."targetUserId" IS NULL OR entity\."targetUserId" = \$2/u,
+  );
+  assert.match(calls[0].sql, /ORDER BY entity\.id COLLATE "C"\s+LIMIT 5000/u);
+});
+
 test("attempts exact fixture cleanup even when runtime drain attestation fails", async () => {
   let cleanupCalls = 0;
   const finalized = await finalizeCurrentReleaseRuntime(
@@ -1223,6 +1251,7 @@ test("kernel denial canary rejects an unfenced loopback alias", async () => {
 
 test("accepts exact API/Web identity, BFF auth and the complete beta read matrix", async () => {
   const calls = [];
+  let notificationOracleRefreshes = 0;
   const fetchImpl = async (input, init = {}) => {
     const url = new URL(input);
     calls.push({
@@ -1278,6 +1307,11 @@ test("accepts exact API/Web identity, BFF auth and the complete beta read matrix
           tenantSlug: "fixture-network",
         },
       };
+    } else if (url.pathname === "/api/staff/notifications" && authenticated) {
+      body = {
+        ...validCriticalBody(url.pathname),
+        rows: [{ id: "notification-synced", tenantId: "tenant-fixture" }],
+      };
     }
     return new Response(JSON.stringify(body), { headers, status });
   };
@@ -1289,6 +1323,13 @@ test("accepts exact API/Web identity, BFF auth and the complete beta read matrix
     fetchImpl,
     loginEmail: "owner@example.test",
     loginPassword: "fixture-password",
+    refreshNotificationOracle: async (oracle) => {
+      notificationOracleRefreshes += 1;
+      return {
+        ...oracle,
+        notificationIds: ["notification-synced"],
+      };
+    },
     releaseSha: RELEASE_SHA,
     scopeOracle: SCOPE_ORACLE,
     tenantSlug: "fixture-network",
@@ -1298,6 +1339,7 @@ test("accepts exact API/Web identity, BFF auth and the complete beta read matrix
     accepted.probes.length,
     5 + CURRENT_RELEASE_CRITICAL_READS.length * 2,
   );
+  assert.equal(notificationOracleRefreshes, 1);
   assert.equal(
     accepted.probes.filter((probe) => probe.name.startsWith("unauthenticated-"))
       .length,

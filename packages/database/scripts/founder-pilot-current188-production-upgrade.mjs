@@ -1095,10 +1095,13 @@ async function inspectBridgeSlotReleaseAuthority({
     "RUNTIME_SWITCHED",
   ]);
   const hydrationAttestationSha256 = sha256(hydrationAttestationBytes);
+  // RELEASE_SLOT is the reviewed hydration origin. The immutable artifact may
+  // be bound to both runtime destinations, whose independent slot-link
+  // receipts are verified below.
   if (
     hydration.RECORD_VERSION !== "1" ||
     hydration.RELEASE_SHA !== releaseSha ||
-    hydration.RELEASE_SLOT !== slot ||
+    !["blue", "green"].includes(hydration.RELEASE_SLOT) ||
     !INVOCATION_ID.test(hydration.HYDRATION_INVOCATION_ID) ||
     hydration.RELEASE_DIRECTORY !== releaseRoot ||
     hydration.PUBLICATION_AUTHORIZED !== "true" ||

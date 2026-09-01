@@ -15,6 +15,9 @@ It does not modify guest tickets, role memberships, object owners or ACLs.
 - restored-copy runtime acceptance for that exact artifact is `PASS`;
 - both blue/green slots run that same SHA in `COMBINED` mode with bug reporting
   `OFF` and `GUEST_SUPPORT_SCHEMA_BRIDGE_MODE=ALLOW_CURRENT_188`;
+- the shared sealed artifact has one exact root-only hydration attestation from
+  a reviewed `blue` or `green` origin, and each destination slot has its own
+  accepted slot-link receipt for that same artifact evidence;
 - both slots attest source `188` and target `189`; the old release is not a
   rollback authority;
 - a fresh production backup and an isolated CURRENT_188 rehearsal exist;

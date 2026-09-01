@@ -279,6 +279,7 @@ validate_hydration_attestation() {
   local release_directory="$2"
   local record="${hydration_receipt_root}/release-hydration-attestation-${sha}.receipt"
   local digest_key digest_value
+  local hydration_origin_slot
   local invocation_id source_receipt_sha256 hydrated_manifest_sha256
 
   [[ -f "$record" && ! -L "$record" \
@@ -293,9 +294,15 @@ validate_hydration_attestation() {
     { if ($1 != expected[NR] || seen[$1]++) exit 1 }
     END { if (NR != 12) exit 1 }
   ' "$record" || die 'release hydration attestation schema is not canonical'
+  hydration_origin_slot="$(record_value "$record" RELEASE_SLOT)" \
+    || die 'release hydration origin slot is absent'
+  # Hydration authorizes the immutable artifact bytes and records which
+  # reviewed slot performed that operation. The destination slot is authorized
+  # separately by this helper's slot-scoped intent, receipt and unit preflight.
+  [[ "$hydration_origin_slot" == blue || "$hydration_origin_slot" == green ]] \
+    || die 'release hydration origin slot is invalid'
   [[ "$(record_value "$record" RECORD_VERSION)" == '1' \
     && "$(record_value "$record" RELEASE_SHA)" == "$sha" \
-    && "$(record_value "$record" RELEASE_SLOT)" == "$slot" \
     && "$(record_value "$record" RELEASE_DIRECTORY)" == "$release_directory" \
     && "$(record_value "$record" PUBLICATION_AUTHORIZED)" == 'true' \
     && "$(record_value "$record" RUNTIME_SWITCHED)" == 'false' ]] \

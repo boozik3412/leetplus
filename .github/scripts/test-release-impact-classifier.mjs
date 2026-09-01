@@ -171,6 +171,29 @@ try {
   assert.equal(mixed.parsed.mixedSourceLanes, true);
   assert.equal(mixed.parsed.inferredLane, "L2_SCHEMA_SECURITY");
 
+  const renameRoot = path.join(fixturesRoot, "runtime-to-docs-rename");
+  fs.mkdirSync(renameRoot, { recursive: true });
+  runGit(renameRoot, ["init", "--quiet"]);
+  writeFile(renameRoot, ".fixture-base", "base\n");
+  writeFile(renameRoot, "apps/web/src/components/old-status-card.tsx", "export const OldStatusCard = () => null;\n");
+  const renameBaseSha = commitAll(renameRoot, "base runtime");
+  fs.mkdirSync(path.join(renameRoot, "docs"), { recursive: true });
+  runGit(renameRoot, ["mv", "apps/web/src/components/old-status-card.tsx", "docs/old-status-card.md"]);
+  const renameHeadSha = commitAll(renameRoot, "rename runtime to docs");
+  const renameReceipt = path.join(fixturesRoot, "runtime-to-docs-rename.receipt.json");
+  const acceptedRename = runClassifier({
+    root: renameRoot,
+    baseSha: renameBaseSha,
+    headSha: renameHeadSha,
+    receipt: renameReceipt,
+  });
+  assert.equal(acceptedRename.status, 0, acceptedRename.stderr);
+  const parsedRename = JSON.parse(fs.readFileSync(renameReceipt, "utf8"));
+  assert.equal(parsedRename.changedFileCount, 2);
+  assert.deepEqual(parsedRename.sourceLaneSet, ["L0_DOCS", "L1_RUNTIME"]);
+  assert.equal(parsedRename.effectiveLane, "L2_SCHEMA_SECURITY");
+  assert.deepEqual(parsedRename.files.map((file) => file.status), ["D", "A"]);
+
   const elevated = classify(
     fixturesRoot,
     "manual-elevation",

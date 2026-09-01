@@ -38,8 +38,8 @@ gamification, assortment, staff, communications, users/roles и integrations.
 | Контур                    | Когда запускается                                        | Что проверяет                                                                                                                     | Что не разрешает                                         |
 | ------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | Fast CI                   | Каждый push/PR                                           | Authority roots, Prisma schema/client, focused API acceptance, API/Web typecheck и production builds, ключевые Web BFF boundaries | Deploy, artifact, миграции production, tenant activation |
-| Full Release Admission    | Ручной `workflow_dispatch` для exact SHA и push в `main` | Полный API suite, exhaustive PostgreSQL migration/rehearsal, SHA-bound artifact, downloaded-artifact child process                | Production GO сам по себе                                |
-| Nightly Release Admission | Ежедневно на `main`                                      | Регрессии historical security/migration evidence                                                                                  | Замена admission конкретного release SHA                 |
+| Full Release Admission    | Exact runtime-eligible `push` merge SHA в `main`         | Полный API suite, exhaustive PostgreSQL migration/rehearsal, SHA-bound artifact, downloaded-artifact child process                | Production GO сам по себе                                |
+| Manual/nightly validation | `workflow_dispatch` или ежедневный schedule              | Полный non-deployable regression run; final handoff запрещён                                                                      | Замена admission конкретного release SHA                 |
 
 Каждый production deploy обязан ссылаться на exact SHA с зелёным Fast CI и
 отдельно запущенным зелёным Full Release Admission. Если их SHA не совпадает,
@@ -66,8 +66,9 @@ Admission artifact `299c5a8b…`; он проверяет процедуру п�
 
 ## Critical path до первого invite
 
-1. Получить exact candidate SHA с зелёным Fast CI.
-2. Запустить Full Release Admission для этого SHA и получить SHA-bound artifact.
+1. Получить зелёный Fast CI на PR и слить согласованный короткий release train.
+2. Дождаться параллельных Fast CI и автоматического Full Release Admission на
+   одном exact merge SHA; использовать только его SHA-bound final handoff.
 3. Выполнить backup verification, rollback drill и production canary на этом
    artifact по [SHA-bound production canary plan](./controlled-beta-1-production-canary-plan.md).
    Isolated fresh-backup history и runtime-role lifecycle уже приняты, включая

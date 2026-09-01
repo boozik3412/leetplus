@@ -69,6 +69,13 @@ Receipt является evidence классификации source diff. Он �
 systemd/nginx/NSS/DB, не заменяет admitted exact SHA, backup/restored-copy,
 signed controller, rollback postcheck или отдельный production GO.
 
+Для runtime-eligible diff Full CI передаёт этот receipt во второй fail-closed
+контракт —
+[`release-candidate-admission.md`](./release-candidate-admission.md). Impact
+lane отвечает на вопрос «какие gates нужны», а candidate receipt — «может ли
+этот exact event/SHA вообще выпустить deployable handoff». Ручной или nightly
+Full не становится deployable только потому, что его impact lane равна `L2`.
+
 ## Docs-only canary acceptance
 
 После включения gate его отдельный Markdown-only canary считается принятым,

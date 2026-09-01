@@ -34,6 +34,8 @@ for (const [label, workflow] of workflows) {
     "node .github/scripts/test-release-impact-classifier.mjs",
     "node .github/scripts/test-release-impact-ci.mjs",
     "node .github/scripts/test-release-impact-workflow.mjs",
+    "node .github/scripts/test-release-candidate-classifier.mjs",
+    "node .github/scripts/test-release-candidate-workflow.mjs",
     "node .github/scripts/classify-release-impact-ci.mjs",
   ]) {
     assert.match(impact, new RegExp(command.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"), `${label} omits ${command}`);

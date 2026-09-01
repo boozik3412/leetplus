@@ -14,7 +14,7 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
-| Release acceleration | topology twin и fail-closed impact classifier реализованы в CI; только exact Markdown-only пропускает runtime jobs; production не менялся |
+| Release acceleration | topology twin, fail-closed impact classifier и exact main-push candidate authority реализованы в CI; manual/schedule/feature/docs-only handoff запрещён; production не менялся |
 
 ## Ускорение release pipeline без ослабления gates (01.09.2026)
 
@@ -38,6 +38,14 @@ Fast и Full CI. Он сохраняет exact base/head/rules receipt; неиз
 rename/delete, schema/security или недоверенный event становится `L2`. Обычный
 runtime допускается в `L1` только по allowlist. Лишь доказанный Markdown-only
 `L0` завершает CI без тяжёлых runtime/database jobs и без runtime artifact.
+
+Четвёртый срез устраняет двойной Full до и после merge. Deployable candidate
+теперь может возникнуть только из runtime-eligible exact `push` merge SHA в
+`main`; feature/manual/nightly и docs-only Full выпускают лишь non-deployable
+validation evidence. Final job повторно проверяет impact/candidate receipts в
+fresh checkout. Fast и Full для main SHA не отменяются последующим commit, а
+устаревший PR Fast по-прежнему отменяется. Production и решение open beta этим
+не изменены.
 
 Это source/CI изменение, а не production rollout: текущая production baseline
 остаётся `22ab6b81…`, CURRENT189, generation 20. Ускорение не меняет решение

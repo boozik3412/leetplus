@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
@@ -19,6 +20,8 @@ function fail(message) {
 function parseArguments(argv) {
   let root = DEFAULT_ROOT;
   let contract = DEFAULT_CONTRACT;
+  let liveNssPhase = null;
+  let liveSystemd = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--root") {
@@ -27,11 +30,22 @@ function parseArguments(argv) {
     } else if (argument === "--contract") {
       contract = path.resolve(argv[index + 1] ?? fail("--contract requires a path"));
       index += 1;
+    } else if (argument === "--live-nss-phase") {
+      liveNssPhase = argv[index + 1] ?? fail("--live-nss-phase requires a phase");
+      index += 1;
+    } else if (argument === "--live-systemd") {
+      liveSystemd = true;
     } else {
       fail(`unknown argument ${argument}`);
     }
   }
-  return { root, contract };
+  if (liveNssPhase !== null && !["steady-state", "restored-copy-acceptance"].includes(liveNssPhase)) {
+    fail("--live-nss-phase must be steady-state or restored-copy-acceptance");
+  }
+  if (liveSystemd && liveNssPhase !== "steady-state") {
+    fail("--live-systemd requires --live-nss-phase steady-state");
+  }
+  return { root, contract, liveNssPhase, liveSystemd };
 }
 
 function readFile(filePath, label) {
@@ -91,6 +105,270 @@ function unitEnvironmentFiles(unitText) {
     .split("\n")
     .filter((line) => line.startsWith("EnvironmentFile="))
     .map((line) => line.slice("EnvironmentFile=".length));
+}
+
+const LIVE_COMMAND_ENVIRONMENT = Object.freeze({
+  PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
+  LANG: "C.UTF-8",
+  LC_ALL: "C.UTF-8",
+  TZ: "UTC",
+});
+
+function runLiveCommand(command, args, label, { acceptedStatuses = [0] } = {}) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    env: LIVE_COMMAND_ENVIRONMENT,
+    maxBuffer: 1024 * 1024,
+    timeout: 15_000,
+  });
+  if (result.error) fail(`${label} could not execute: ${result.error.message}`);
+  if (result.signal !== null) fail(`${label} was terminated by ${result.signal}`);
+  if (!acceptedStatuses.includes(result.status)) {
+    const stderr = (result.stderr ?? "").trim().slice(0, 512);
+    fail(`${label} exited ${result.status}${stderr ? `: ${stderr}` : ""}`);
+  }
+  const stdout = (result.stdout ?? "").replaceAll("\r\n", "\n");
+  if (stdout.includes("\r") || stdout.length > 1024 * 1024) fail(`${label} output is non-canonical or unbounded`);
+  return { status: result.status, stdout };
+}
+
+function parseColonInventory(raw, fieldCount, label) {
+  const records = raw
+    .trimEnd()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const fields = line.split(":");
+      if (fields.length !== fieldCount) fail(`${label} contains a malformed record`);
+      return fields;
+    });
+  if (records.length === 0 || records.length > 100_000) fail(`${label} is empty or unbounded`);
+  return records;
+}
+
+function oneInventoryRecord(records, index, value, label) {
+  const matches = records.filter((record) => record[index] === value);
+  if (matches.length !== 1) fail(`${label} must resolve to exactly one record`);
+  return matches[0];
+}
+
+function sortedUnique(values, label) {
+  const sorted = [...values].sort();
+  if (new Set(sorted).size !== sorted.length) fail(`${label} contains duplicates`);
+  return sorted;
+}
+
+function validateLiveNss(contract, phase) {
+  if (process.platform !== "linux" || typeof process.getuid !== "function" || process.getuid() !== 0) {
+    fail("live NSS verification is Linux/root-only");
+  }
+  const passwdRecords = parseColonInventory(
+    runLiveCommand("/usr/bin/getent", ["passwd"], "complete passwd inventory").stdout,
+    7,
+    "passwd inventory",
+  );
+  const groupRecords = parseColonInventory(
+    runLiveCommand("/usr/bin/getent", ["group"], "complete group inventory").stdout,
+    4,
+    "group inventory",
+  );
+  const runtime = contract.runtimeIdentity;
+  const rehearsal = contract.transientPhases.restoredCopyAcceptance;
+  const groupIds = new Map();
+
+  for (const [groupName, groupContract] of Object.entries(runtime.groups)) {
+    const record = oneInventoryRecord(groupRecords, 0, groupName, `group ${groupName}`);
+    const [, password, gidText, membersText] = record;
+    if (password !== "x" || !/^[1-9][0-9]*$/.test(gidText)) fail(`group ${groupName} identity is invalid`);
+    oneInventoryRecord(groupRecords, 2, gidText, `group GID ${gidText}`);
+    groupIds.set(groupName, gidText);
+    const expectedMembers =
+      phase === "restored-copy-acceptance" && groupName === runtime.primaryGroup
+        ? [rehearsal.serviceUser]
+        : groupContract.explicitMembers;
+    const actualMembers = membersText === "" ? [] : membersText.split(",");
+    exactArray(sortedUnique(actualMembers, `${groupName} live members`), expectedMembers, `${groupName}.liveExplicitMembers`);
+  }
+
+  for (const [groupName, groupContract] of Object.entries(runtime.groups)) {
+    const actualPrimaryUsers = passwdRecords
+      .filter((record) => record[3] === groupIds.get(groupName))
+      .map((record) => record[0])
+      .sort();
+    exactArray(actualPrimaryUsers, groupContract.primaryUsers, `${groupName}.livePrimaryUsers`);
+  }
+
+  const expectedRuntimeUsers = runtime.groups[runtime.primaryGroup].primaryUsers;
+  const runtimeGid = groupIds.get(runtime.primaryGroup);
+
+  for (const userName of expectedRuntimeUsers) {
+    const record = oneInventoryRecord(passwdRecords, 0, userName, `user ${userName}`);
+    const [, password, uidText, gidText, gecos, home, shell] = record;
+    if (
+      password !== "x" ||
+      !/^[1-9][0-9]*$/.test(uidText) ||
+      gidText !== runtimeGid ||
+      gecos !== "" ||
+      home !== "/nonexistent" ||
+      shell !== "/usr/sbin/nologin" ||
+      fs.existsSync(home)
+    ) {
+      fail(`user ${userName} identity/home/shell is invalid`);
+    }
+    oneInventoryRecord(passwdRecords, 2, uidText, `user UID ${uidText}`);
+    const kind = userName.startsWith("leetplus-api-") ? "api" : "web";
+    const expectedGroups = [runtime.primaryGroup, `leetplus-${kind}-runtime`].sort();
+    const actualGroups = runLiveCommand("/usr/bin/id", ["-nG", userName], `groups for ${userName}`)
+      .stdout.trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .sort();
+    exactArray(actualGroups, expectedGroups, `${userName}.liveGroups`);
+  }
+
+  const rehearsalPasswd = runLiveCommand(
+    "/usr/bin/getent",
+    ["passwd", rehearsal.serviceUser],
+    "rehearsal passwd lookup",
+    { acceptedStatuses: [0, 2] },
+  );
+  const rehearsalGroup = runLiveCommand(
+    "/usr/bin/getent",
+    ["group", rehearsal.primaryGroup],
+    "rehearsal group lookup",
+    { acceptedStatuses: [0, 2] },
+  );
+  if (phase === "steady-state") {
+    if (rehearsalPasswd.status !== 2 || rehearsalGroup.status !== 2) {
+      fail("restored-copy rehearsal identity must be absent in steady state");
+    }
+    return;
+  }
+
+  if (rehearsalPasswd.status !== 0 || rehearsalGroup.status !== 0) {
+    fail("restored-copy rehearsal identity is absent during its transient phase");
+  }
+  const rehearsalUserRecord = rehearsalPasswd.stdout.trim().split(":");
+  const rehearsalGroupRecord = rehearsalGroup.stdout.trim().split(":");
+  if (
+    rehearsalUserRecord.length !== 7 ||
+    rehearsalGroupRecord.length !== 4 ||
+    rehearsalUserRecord[0] !== rehearsal.serviceUser ||
+    rehearsalUserRecord[3] !== rehearsalGroupRecord[2] ||
+    rehearsalUserRecord[5] !== "/nonexistent" ||
+    rehearsalUserRecord[6] !== "/usr/sbin/nologin" ||
+    rehearsalGroupRecord[0] !== rehearsal.primaryGroup ||
+    rehearsalGroupRecord[3] !== ""
+  ) {
+    fail("restored-copy rehearsal primary identity is invalid");
+  }
+  const rehearsalGroups = runLiveCommand(
+    "/usr/bin/id",
+    ["-nG", rehearsal.serviceUser],
+    "rehearsal group set",
+  )
+    .stdout.trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort();
+  exactArray(rehearsalGroups, [...rehearsal.exactGroups].sort(), "restoredCopyAcceptance.liveGroups");
+}
+
+function parseSystemdProperties(raw, unit) {
+  const properties = new Map();
+  for (const line of raw.trimEnd().split("\n")) {
+    const separator = line.indexOf("=");
+    if (separator < 1) fail(`${unit} returned a malformed systemd property`);
+    const key = line.slice(0, separator);
+    if (properties.has(key)) fail(`${unit} returned duplicate systemd property ${key}`);
+    properties.set(key, line.slice(separator + 1));
+  }
+  return properties;
+}
+
+function validateLiveSystemd(contract) {
+  for (const slot of ["blue", "green"]) {
+    for (const kind of ["api", "web"]) {
+      const template = contract.systemdTemplates[kind];
+      const slotContract = contract.slots[slot];
+      const unit = `leetplus-${kind}@${slot}.service`;
+      const properties = parseSystemdProperties(
+        runLiveCommand(
+          "/usr/bin/systemctl",
+          [
+            "show",
+            "--all",
+            "--no-pager",
+            "--property=ActiveState,SubState,Result,MainPID,User,Group,EnvironmentFiles",
+            unit,
+          ],
+          `systemd properties for ${unit}`,
+        ).stdout,
+        unit,
+      );
+      exactValue(properties.get("ActiveState"), "active", `${unit}.ActiveState`);
+      exactValue(properties.get("SubState"), "running", `${unit}.SubState`);
+      exactValue(properties.get("Result"), "success", `${unit}.Result`);
+      exactValue(properties.get("User"), slotContract[`${kind}User`], `${unit}.User`);
+      exactValue(properties.get("Group"), template.primaryGroup, `${unit}.Group`);
+      const expectedEnvironmentFiles = template.environmentFiles.map((entry) => entry.replaceAll("%i", slot));
+      const actualEnvironmentFiles = properties.get("EnvironmentFiles")?.match(/\/[A-Za-z0-9._%/@+-]+/g) ?? [];
+      exactArray(actualEnvironmentFiles, expectedEnvironmentFiles, `${unit}.EnvironmentFiles`);
+      const mainPidText = properties.get("MainPID");
+      if (!/^[1-9][0-9]*$/.test(mainPidText ?? "")) fail(`${unit}.MainPID is invalid`);
+      const mainPid = Number(mainPidText);
+      const status = readFile(`/proc/${mainPid}/status`, `${unit} process status`).replaceAll("\r\n", "\n");
+      const uidText = oneInventoryRecord(
+        parseColonInventory(runLiveCommand("/usr/bin/getent", ["passwd", slotContract[`${kind}User`]], `${unit} passwd`).stdout, 7, `${unit} passwd`),
+        0,
+        slotContract[`${kind}User`],
+        `${unit} user`,
+      )[2];
+      const primaryGid = runLiveCommand("/usr/bin/getent", ["group", template.primaryGroup], `${unit} primary group`)
+        .stdout.trim()
+        .split(":")[2];
+      const supplementaryGid = runLiveCommand(
+        "/usr/bin/getent",
+        ["group", template.supplementaryGroup],
+        `${unit} supplementary group`,
+      )
+        .stdout.trim()
+        .split(":")[2];
+      const uidLine = status.match(/^Uid:\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)$/m);
+      const gidLine = status.match(/^Gid:\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)$/m);
+      const groupsLine = status.match(/^Groups:\s*(.*)$/m);
+      if (
+        uidLine === null ||
+        gidLine === null ||
+        groupsLine === null ||
+        uidLine.slice(1).some((value) => value !== uidText) ||
+        gidLine.slice(1).some((value) => value !== primaryGid)
+      ) {
+        fail(`${unit} process UID/GID identity is invalid`);
+      }
+      const processGroups = groupsLine[1].trim().split(/\s+/).filter(Boolean);
+      if (
+        !processGroups.includes(supplementaryGid) ||
+        processGroups.some((value) => value !== primaryGid && value !== supplementaryGid)
+      ) {
+        fail(`${unit} process supplementary groups are invalid`);
+      }
+      const port = slotContract[`${kind}Port`];
+      const listener = runLiveCommand(
+        "/usr/bin/ss",
+        ["-H", "-ltnp", `sport = :${port}`],
+        `${unit} listener inventory`,
+      ).stdout.trim();
+      if (
+        listener === "" ||
+        listener.includes("\n") ||
+        !listener.includes(`127.0.0.1:${port}`) ||
+        !listener.includes(`pid=${mainPid},`)
+      ) {
+        fail(`${unit} does not exclusively own 127.0.0.1:${port}`);
+      }
+    }
+  }
 }
 
 function validateContractSchema(contract) {
@@ -298,7 +576,7 @@ function validateSourceBindings(root, contract) {
 }
 
 function main() {
-  const { root, contract: contractPath } = parseArguments(process.argv.slice(2));
+  const { root, contract: contractPath, liveNssPhase, liveSystemd } = parseArguments(process.argv.slice(2));
   const rawContract = readFile(contractPath, "contract");
   if (rawContract.includes("\r")) fail("contract must use LF line endings");
   let contract;
@@ -312,6 +590,8 @@ function main() {
   }
   validateContractSchema(contract);
   validateSourceBindings(root, contract);
+  if (liveNssPhase !== null) validateLiveNss(contract, liveNssPhase);
+  if (liveSystemd) validateLiveSystemd(contract);
   process.stdout.write(`PRODUCTION_TOPOLOGY_CONTRACT=PASS contractId=${contract.contractId}\n`);
 }
 

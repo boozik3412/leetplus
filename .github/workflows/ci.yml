@@ -156,6 +156,23 @@ jobs:
           bash -n .github/scripts/test-prepare-web-slot-cache.sh
           bash .github/scripts/test-prepare-web-slot-cache.sh
           bash -n docs/deployment/production-artifact/seal-release-artifact.sh
+          node --check .github/scripts/production-topology-twin-listener.mjs
+          bash -n .github/scripts/test-production-topology-twin.sh
+          authority_node="$(realpath "$(command -v node)")"
+          case "$authority_node" in
+            "$RUNNER_TOOL_CACHE"/node/22.*/x64/bin/node) ;;
+            *) printf 'unexpected topology twin Node path: %s\n' "$authority_node" >&2; exit 1 ;;
+          esac
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            PRODUCTION_TOPOLOGY_TWIN_CONFIRM=run-root-production-topology-twin-v1 \
+            LEETPLUS_TWIN_NODE_SOURCE="$authority_node" \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/test-production-topology-twin.sh --live-fixture
           bash -n docs/deployment/production-artifact/bind-release-slot.sh
           bash -n .github/scripts/test-production-artifact-slot-link.sh
           bash .github/scripts/test-production-artifact-slot-link.sh

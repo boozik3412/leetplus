@@ -4,10 +4,9 @@
 
 Актуально на: **01.09.2026**
 Runtime implementation baseline:
-`a130c13e8d694b605d86a924b1524a6174ae1b51` (PR #90 + #91 поверх PR #88;
-включает status-only review-переходы чек-листов без повторной записи legacy
-answers, отдельный bonus-ledger worker и все repair предыдущего production
-baseline)
+`22ab6b81dacc726068d0dfcc5172fe67581a45b1` (PR #111; включает
+status-only review-переходы чек-листов, отдельный bonus-ledger worker,
+CURRENT189 guest-support repair и standards-manager invite delegation)
 
 Этот документ обязателен перед изменениями авторизации, post-login routing,
 access scope, публичного игрового входа, управления геймификацией, интеграций,
@@ -18,27 +17,34 @@ fail-closed правилу одного контура снова сломать
 
 | Область                  | Состояние                                                                                                                                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime implementation   | Checklist status-only review boundary слита PR [#90](https://github.com/boozik3412/leetplus/pull/90) и [#91](https://github.com/boozik3412/leetplus/pull/91), merge SHA `a130c13e8d694b605d86a924b1524a6174ae1b51` |
-| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33330505183) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33330505182) — `SUCCESS`                                 |
-| Production API topology  | active green exact `a130c13e…`, generation 16, `COMBINED`, schema `CURRENT_188`, bridge `OFF`, reporting `LIVE`; hot rollback blue `4036d312…`, оба slot active                                                    |
-| Source repair candidate  | guest bug-report input repair: 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair` (`CURRENT_189`); **не deployed**                                  |
-| Corporate invite repair  | `STANDARDS_MANAGER` может делегировать canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides и custom permissions остаются capability-bounded; **не deployed**   |
+| Runtime implementation   | CURRENT189 production baseline, merge SHA `22ab6b81dacc726068d0dfcc5172fe67581a45b1`                                                                                                                          |
+| Admission merge SHA      | [Fast CI](https://github.com/boozik3412/leetplus/actions/runs/33514154571) и [Full Release Admission](https://github.com/boozik3412/leetplus/actions/runs/33514154601) — `SUCCESS`                                 |
+| Production API topology  | active green exact `22ab6b81…`, generation 20, `COMBINED`, schema `CURRENT_189/189`, bridge `OFF`, reporting `LIVE`; hot rollback blue exact того же SHA, оба slot active                                     |
+| Guest bug-report repair  | 20–2000 символов, canonical `5 fields + 1 file`, migration `20260831120000_guest_support_bug_report_input_repair`; **deployed**                                                                                |
+| Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
-| Corporate landing        | role-aware successor входит в active `a130c13e…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
+| Corporate landing        | role-aware successor входит в active `22ab6b81…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
 зелёный CI не доказывают production deployment. Фактический production runtime,
 env, systemd, nginx и database roles проверяются отдельно.
 
-Source repair CURRENT_189 не смешивает контуры: Web отправляет bug-report через
+Production repair CURRENT_189 не смешивает контуры: Web отправляет bug-report через
 same-origin guest BFF, GuestRuntime принимает только guest JWT и bounded
 multipart, а tenant/platform очереди остаются в CorporateRuntime. Изменение
 exclusive `parts` cap с 6 на 7 не расширяет allowlist: `fields=5`, `files=1`,
 тип, сигнатура и размер файла продолжают проверяться отдельно. Production
-остаётся exact CURRENT_188 до отдельного admitted rollout. Дормантный
-noncanonical employee-invite proposal с логическим ярлыком CURRENT189 не
-активируется этим repair и требует будущего rebase/refreeze.
+работает на exact CURRENT189, bridge выключен, reporting включён.
+
+Rollout 01.09.2026 прошёл на exact admitted SHA после restored-copy PASS и
+checksum-pinned перехода `CURRENT_188 -> CURRENT_189`. Оба runtime slot готовы
+на exact `CURRENT_189/189`; active nginx generation — 20. Перед DDL создан
+off-release backup `current189-preupgrade-20260901T1511Z`, а подписанные
+evidence и receipts сохранены вне runtime release. Bonus-ledger timer после
+postflight возвращён в автономный `active (waiting)` режим.
+
+### История подготовки CURRENT189
 
 Restored-copy acceptance для CURRENT_189 сравнивает каталог `/products` только
 с активными `Product`: endpoint по контракту не возвращает архивные
@@ -291,11 +297,12 @@ Support-функциональность следует тем же трём г�
   `187 -> 188`; сразу после DDL оба обязаны подтвердить exact CURRENT_188 без
   active compatibility evidence. До этого reporting LIVE запрещён.
 
-Bug-report schema rollout завершён 29.08.2026, runtime repair, последующий
+Bug-report schema rollout CURRENT188 завершён 29.08.2026, runtime repair, последующий
 Battle Pass/store-scope repair и autonomous bonus-ledger rollout — 30.08.2026.
-После checklist review rollout 31.08.2026 active green `a130c13e…` работает на
+После checklist review rollout 31.08.2026 active green `a130c13e…` работал на
 exact CURRENT188 с bridge `OFF` и reporting `LIVE`; hot rollback blue
-`4036d312…` остаётся exact CURRENT188 и активным.
+`4036d312…` оставался exact CURRENT188 и активным. Это исторический baseline,
+заменённый CURRENT189 rollout 01.09.2026, описанным в начале документа.
 
 ### Checklist review status-only rollout 31.08.2026
 

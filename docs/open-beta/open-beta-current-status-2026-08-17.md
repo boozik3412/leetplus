@@ -14,7 +14,7 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
-| Release acceleration | initial source/CI topology contract implemented; production не менялся; следующий этап — disposable dual-slot production twin |
+| Release acceleration | topology contract и disposable dual-slot systemd/NSS twin реализованы в CI; production не менялся; следующий этап — fail-closed impact classifier |
 
 ## Ускорение release pipeline без ослабления gates (01.09.2026)
 
@@ -26,6 +26,12 @@ EnvironmentFiles, transient restored-copy identity и независимые bin
 [`production-topology-contract.json`](../deployment/production-artifact/production-topology-contract.json).
 Fail-closed verifier и negative fixture включены в Fast CI и Full Release
 Admission.
+
+Второй срез поднимает на одноразовом GitHub runner обе API/Web blue/green пары
+на exact ports и runtime identities, проверяет effective EnvironmentFiles и
+process groups, а также transient restored-copy membership с обязательным
+zero-residue cleanup до существующих bind/cutover fixtures. Дополнительная
+инфраструктура и production-доступ для этого не нужны.
 
 Это source/CI изменение, а не production rollout: текущая production baseline
 остаётся `22ab6b81…`, CURRENT189, generation 20. Ускорение не меняет решение

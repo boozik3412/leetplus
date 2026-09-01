@@ -47,10 +47,14 @@ API/Web EnvironmentFiles, transient restored-copy membership и независи
 slot-link receipts зафиксированы в
 `docs/deployment/production-artifact/production-topology-contract.json` и
 сверяются negative-tested verifier одновременно в Fast CI и Full Release
-Admission. Это не deploy и не live evidence: production baseline выше не
-изменена, а exact-SHA admission, backup/restored-copy, signed controller,
-blue/green rollback, отдельный GO и независимость public guest / corporate
-tenant / workers-control-plane остаются обязательными.
+Admission. Disposable root/systemd twin на существующем GitHub runner теперь
+поднимает обе API/Web blue/green пары, проверяет exact live NSS,
+EnvironmentFiles и listener ownership, а transient restored-copy identity
+обязана исчезнуть без residue до bind/cutover fixtures. Это не deploy и не live
+production evidence: production baseline выше не изменена, а exact-SHA
+admission, backup/restored-copy, signed controller, blue/green rollback,
+отдельный GO и независимость public guest / corporate tenant /
+workers-control-plane остаются обязательными.
 
 Ниже сохранена история fail-closed restored-copy итераций, которые предшествовали
 успешному rehearsal и production rollout 01.09.2026.

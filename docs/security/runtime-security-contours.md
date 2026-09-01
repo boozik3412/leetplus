@@ -46,6 +46,13 @@ EnvironmentFiles, transient rehearsal membership и per-slot receipts.
 Fail-closed verifier запускается в Fast и Full CI, чтобы инцидентные topology
 mismatch обнаруживались до artifact hydration и production effect.
 
+Disposable topology twin воспроизводит обе API/Web slot-пары реальными systemd
+units, но только на одноразовом GitHub runner. Он проверяет exact effective
+EnvironmentFiles, NSS/process groups и ports, отдельно разрешает transient
+restored-copy identity и требует её удаления до slot bind/cutover fixtures.
+Zero-residue cleanup является частью gate; production host и production data
+этот тест не использует.
+
 Этот контракт не создаёт четвёртый security-контур и не позволяет применять
 правила corporate tenant к public guest либо worker authority к runtime.
 Release impact classifier в следующем этапе может только повышать lane:

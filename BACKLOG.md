@@ -30,6 +30,10 @@ receipt-contract drift уже после admission.
   listener ownership, проигрывает restored-copy transient phase и требует
   zero residue. Сразу после него существующие fixtures независимо создают
   bind receipts обоих slots и проигрывают nginx cutover/rollback chain.
+  Non-deployable runtime/control candidates привязаны к `run_id`, но не к
+  `run_attempt`, поэтому после внешнего runner/registry сбоя можно повторить
+  только failed jobs; deployable handoff и admission receipts по-прежнему
+  отдельно привязаны к exact producing attempt.
 - [ ] `REL-ACC-004`: добавить machine-readable release impact classifier.
   Неизвестный или смешанный diff автоматически повышается до максимальной
   lane; classifier не имеет права понижать обязательный gate.

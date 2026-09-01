@@ -101,6 +101,16 @@ step после cleanup существующие slot-link и blue-green fixture
 независимые bind receipts и проигрывают cutover/rollback. Дополнительный сервер
 или платный сервис не используется.
 
+Первый exact Full Admission этого среза обнаружил ещё одну потерю времени:
+внешний timeout Docker Hub возник до запуска child job, а `rerun failed jobs`
+не смог переиспользовать уже созданный runtime candidate, потому что consumer
+сам вычислял новый `run_attempt`. Теперь промежуточные non-deployable
+runtime/control candidates имеют неизменное внутри workflow-run имя
+`exact SHA + run_id`; producer при полном rerun атомарно заменяет их, а selective
+rerun скачивает уже проверенный candidate. Deployable handoff payload и финальный
+admission receipt остаются привязаны к producing `run_attempt`. Отдельный
+regression-test запрещает вернуть attempt-bound имя промежуточного candidate.
+
 ### 2. Fail-closed impact classifier
 
 Classifier получает base/head diff и выдаёт только повышение требований:

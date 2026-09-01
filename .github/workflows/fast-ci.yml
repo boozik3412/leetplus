@@ -72,6 +72,8 @@ jobs:
           node --check docs/deployment/production-artifact/verify-production-topology-contract.mjs
           node --check .github/scripts/test-production-topology-contract.mjs
           node .github/scripts/test-production-topology-contract.mjs
+          node --check .github/scripts/test-release-admission-selective-rerun.mjs
+          node .github/scripts/test-release-admission-selective-rerun.mjs
 
       - name: Verify production-control installed-generation authority
         shell: bash

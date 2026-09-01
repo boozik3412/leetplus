@@ -72,6 +72,8 @@ jobs:
           node --check docs/deployment/production-artifact/verify-production-topology-contract.mjs
           node --check .github/scripts/test-production-topology-contract.mjs
           node .github/scripts/test-production-topology-contract.mjs
+          node --check .github/scripts/test-release-admission-selective-rerun.mjs
+          node .github/scripts/test-release-admission-selective-rerun.mjs
 
       - name: Verify production-control installed-generation authority
         shell: bash
@@ -153,6 +155,20 @@ jobs:
             PATH=/usr/sbin:/usr/bin:/sbin:/bin \
             /usr/bin/bash -p .github/scripts/test-production-pnpm-store-integrity.sh
           printf 'FAST_CI_FIXTURE_PNPM_STORE_INTEGRITY=PASS\n'
+          node --check .github/scripts/production-topology-twin-listener.mjs
+          bash -n .github/scripts/test-production-topology-twin.sh
+          printf 'FAST_CI_FIXTURE_PRODUCTION_TOPOLOGY_TWIN=START\n'
+          sudo -n /usr/bin/env -i \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            PRODUCTION_TOPOLOGY_TWIN_CONFIRM=run-root-production-topology-twin-v1 \
+            LEETPLUS_TWIN_NODE_SOURCE="$authority_node" \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            TZ=UTC \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            /usr/bin/bash -p .github/scripts/test-production-topology-twin.sh --live-fixture
+          printf 'FAST_CI_FIXTURE_PRODUCTION_TOPOLOGY_TWIN=PASS\n'
           bash -n docs/deployment/production-artifact/bind-release-slot.sh
           bash -n .github/scripts/test-production-artifact-slot-link.sh
           printf 'FAST_CI_FIXTURE_SLOT_LINK=START\n'

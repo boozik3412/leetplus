@@ -1,6 +1,6 @@
 # Ускорение безопасного release pipeline
 
-Статус: **implementation started, source/CI only**
+Статус: **3/8 backlog items implemented, source/CI only**
 
 Актуально на: **01.09.2026**
 
@@ -77,22 +77,39 @@ N−1 auth edge. Negative fixture доказывает fail-closed отказ п
 инцидентных классах drift. Проверка подключена одновременно к Fast CI и Full
 Release Admission.
 
-Manifest пока является source/CI contract и намеренно не устанавливается в
+Manifest остаётся source/CI contract и намеренно не устанавливается в
 production-control generation. Поэтому он не заменяет live read-only probes,
 installed generation verifier, signed plan, runtime receipts или отдельный GO.
-Его следующий безопасный этап — использовать тот же contract в disposable
-production twin, а не добавлять новый production authority без rehearsal.
+Тот же contract теперь используется в disposable production twin; это не
+добавляет новую production authority и не обращается к production host.
 
-## Следующие этапы
+## Этапы
 
-### 1. Disposable dual-slot production twin
+### 1. Disposable dual-slot production twin — реализован
 
-Один Linux gate должен поднять обе systemd slot-пары, проверить exact NSS и
-EnvironmentFiles, отдельно выполнить transient restored-copy phase, доказать
-cleanup steady-state, создать независимые hydration/bind receipts для обоих
-slots и проиграть nginx cutover/rollback. Это переносит late production
-mismatch в CI без дополнительной инфраструктуры: используются существующие
-GitHub runners и PostgreSQL service containers.
+Root-isolated Linux fixture поднимает обе systemd slot-пары с checked-in
+templates и минимальными HTTP listeners на exact production ports. Live
+verifier проверяет effective API/Web EnvironmentFiles, User/Group, process
+UID/GID/supplementary groups и exclusive listener ownership. Negative drift
+добавляет лишний API EnvironmentFile и обязан остановить verifier.
+
+Затем fixture создаёт transient `leetplus-rehearsal` identity, доказывает, что
+steady-state её отклоняет, запускает systemd process с ровно двумя разрешёнными
+группами и полностью удаляет identity. Cleanup считается terminal только при
+отсутствии всех units, users/groups, paths и listeners. В том же authority CI
+step после cleanup существующие slot-link и blue-green fixtures создают
+независимые bind receipts и проигрывают cutover/rollback. Дополнительный сервер
+или платный сервис не используется.
+
+Первый exact Full Admission этого среза обнаружил ещё одну потерю времени:
+внешний timeout Docker Hub возник до запуска child job, а `rerun failed jobs`
+не смог переиспользовать уже созданный runtime candidate, потому что consumer
+сам вычислял новый `run_attempt`. Теперь промежуточные non-deployable
+runtime/control candidates имеют неизменное внутри workflow-run имя
+`exact SHA + run_id`; producer при полном rerun атомарно заменяет их, а selective
+rerun скачивает уже проверенный candidate. Deployable handoff payload и финальный
+admission receipt остаются привязаны к producing `run_attempt`. Отдельный
+regression-test запрещает вернуть attempt-bound имя промежуточного candidate.
 
 ### 2. Fail-closed impact classifier
 

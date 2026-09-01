@@ -17,8 +17,15 @@ const CONTRACT = path.join(
   "docs/deployment/production-artifact/production-topology-contract.json",
 );
 
-function run(contractPath) {
-  return spawnSync(process.execPath, [VERIFIER, "--root", REPOSITORY_ROOT, "--contract", contractPath], {
+function run(contractPath, extraArguments = []) {
+  return spawnSync(process.execPath, [
+    VERIFIER,
+    "--root",
+    REPOSITORY_ROOT,
+    "--contract",
+    contractPath,
+    ...extraArguments,
+  ], {
     encoding: "utf8",
   });
 }
@@ -34,6 +41,14 @@ function writeFixture(directory, name, mutate) {
 const accepted = run(CONTRACT);
 assert.equal(accepted.status, 0, accepted.stderr);
 assert.match(accepted.stdout, /PRODUCTION_TOPOLOGY_CONTRACT=PASS/);
+
+const rejectedLiveSystemdWithoutPhase = run(CONTRACT, ["--live-systemd"]);
+assert.notEqual(rejectedLiveSystemdWithoutPhase.status, 0);
+assert.match(rejectedLiveSystemdWithoutPhase.stderr, /requires --live-nss-phase steady-state/);
+
+const rejectedUnknownLivePhase = run(CONTRACT, ["--live-nss-phase", "cutover"]);
+assert.notEqual(rejectedUnknownLivePhase.status, 0);
+assert.match(rejectedUnknownLivePhase.stderr, /must be steady-state or restored-copy-acceptance/);
 
 const fixtureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "leetplus-production-topology-"));
 try {

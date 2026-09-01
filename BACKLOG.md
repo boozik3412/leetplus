@@ -2,7 +2,7 @@
 
 ## Ускорение безопасного production release — 01.09.2026
 
-Статус: `[██░░░░░░░░] 2/8` — реализация начата, production не изменяется.
+Статус: `[███░░░░░░░] 3/8` — P0 topology twin реализован, production не изменяется.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 
@@ -24,9 +24,16 @@ receipt-contract drift уже после admission.
 - [x] `REL-ACC-002`: добавить fail-closed verifier и negative regression в
   Fast CI и Full Release Admission. Drift shared NSS membership, USER_CALL
   overlay или per-slot receipt теперь должен останавливаться до artifact/deploy.
-- [ ] `REL-ACC-003`: построить disposable Linux production twin, который за
-  один запуск воспроизводит оба blue/green slot, nginx receipt chain,
-  restored-copy transient phase и обязательное возвращение NSS в steady state.
+- [x] `REL-ACC-003`: disposable Linux production twin на существующем GitHub
+  runner поднимает реальные API/Web systemd units обоих blue/green slot на
+  exact ports и NSS identities, сверяет effective EnvironmentFiles и
+  listener ownership, проигрывает restored-copy transient phase и требует
+  zero residue. Сразу после него существующие fixtures независимо создают
+  bind receipts обоих slots и проигрывают nginx cutover/rollback chain.
+  Non-deployable runtime/control candidates привязаны к `run_id`, но не к
+  `run_attempt`, поэтому после внешнего runner/registry сбоя можно повторить
+  только failed jobs; deployable handoff и admission receipts по-прежнему
+  отдельно привязаны к exact producing attempt.
 - [ ] `REL-ACC-004`: добавить machine-readable release impact classifier.
   Неизвестный или смешанный diff автоматически повышается до максимальной
   lane; classifier не имеет права понижать обязательный gate.

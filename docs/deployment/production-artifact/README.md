@@ -11,10 +11,14 @@ runtime NSS groups, transient restored-copy identity и независимых s
 receipts собраны в машиночитаемом
 [`production-topology-contract.json`](./production-topology-contract.json).
 [`verify-production-topology-contract.mjs`](./verify-production-topology-contract.mjs)
-сверяет его с operational scripts в Fast CI и Full Release Admission. Manifest
-не является live production evidence и не заменяет installed generation,
-read-only probes, signed receipts или отдельный production GO. План следующих
-этапов описан в
+сверяет его с operational scripts в Fast CI и Full Release Admission. Этот же
+verifier вызывается disposable root/systemd twin: обе blue/green API/Web пары
+поднимаются на exact ports и runtime identities, transient restored-copy phase
+обязана вернуться в steady state без residue, после чего отдельно выполняются
+fixtures slot bind и cutover/rollback. Это live evidence только одноразового CI
+runner, а не production: installed generation, production read-only probes,
+signed receipts и отдельный GO остаются обязательными. План следующих этапов
+описан в
 [`release-pipeline-acceleration.md`](../release-pipeline-acceleration.md).
 
 ## Пример prepare-only проверки

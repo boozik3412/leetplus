@@ -16,4 +16,5 @@ docs/deployment/production-artifact/*.mjs text eol=lf
 docs/deployment/production-artifact/production-topology-contract.json text eol=lf
 docs/deployment/production-artifact/CONTROL_BUNDLE_SHA256SUMS text eol=lf
 .github/scripts/test-production-topology-contract.mjs text eol=lf
+.github/scripts/production-topology-twin-listener.mjs text eol=lf
 .github/workflows/*.yml text eol=lf

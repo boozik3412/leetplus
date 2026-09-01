@@ -2,7 +2,8 @@
 
 ## Ускорение безопасного production release — 01.09.2026
 
-Статус: `[███░░░░░░░] 3/8` — P0 topology twin реализован, production не изменяется.
+Статус: `[████░░░░░░] 4/8` — P0 topology twin и impact classifier реализованы,
+production не изменяется.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 
@@ -34,9 +35,11 @@ receipt-contract drift уже после admission.
   `run_attempt`, поэтому после внешнего runner/registry сбоя можно повторить
   только failed jobs; deployable handoff и admission receipts по-прежнему
   отдельно привязаны к exact producing attempt.
-- [ ] `REL-ACC-004`: добавить machine-readable release impact classifier.
-  Неизвестный или смешанный diff автоматически повышается до максимальной
-  lane; classifier не имеет права понижать обязательный gate.
+- [x] `REL-ACC-004`: machine-readable release impact classifier запускается
+  первым отдельным job в Fast и Full CI. Только exact Markdown-only diff получает
+  `L0` non-deployable receipt и не запускает тяжёлые runtime jobs. Явно
+  allowlisted runtime получает `L1`; schema/security, неизвестный, смешанный,
+  rename/delete и недоверенный base получают `L2`. Ручного понижения lane нет.
 
 ### P1 — убрать повторные полные циклы
 

@@ -21,8 +21,83 @@ env:
   CI_RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
+  release_impact:
+    name: Release impact classification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      effective_lane: ${{ steps.classify.outputs.effective_lane }}
+      runtime_artifact_eligible: ${{ steps.classify.outputs.runtime_artifact_eligible }}
+
+    steps:
+      - name: Check out exact impact source and history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CI_RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact impact checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$CI_RELEASE_SHA"
+
+      - name: Set up exact impact Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Classify and re-verify exact release impact
+        id: classify
+        shell: bash
+        env:
+          RELEASE_IMPACT_EVENT_BASE_SHA: ${{ github.event.before || '' }}
+        run: |
+          set -euo pipefail
+          node --check .github/scripts/classify-release-impact.mjs
+          node --check .github/scripts/classify-release-impact-ci.mjs
+          node --check .github/scripts/test-release-impact-classifier.mjs
+          node --check .github/scripts/test-release-impact-ci.mjs
+          node --check .github/scripts/test-release-impact-workflow.mjs
+          node .github/scripts/test-release-impact-classifier.mjs
+          node .github/scripts/test-release-impact-ci.mjs
+          node .github/scripts/test-release-impact-workflow.mjs
+          receipt="$RUNNER_TEMP/leetplus-release-impact-$CI_RELEASE_SHA.json"
+          test ! -e "$receipt"
+          node .github/scripts/classify-release-impact-ci.mjs \
+            --root "$GITHUB_WORKSPACE" \
+            --head-sha "$CI_RELEASE_SHA" \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --ref "$GITHUB_REF" \
+            --event-base-sha "$RELEASE_IMPACT_EVENT_BASE_SHA" \
+            --output "$receipt"
+          RECEIPT="$receipt" node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const receipt = JSON.parse(fs.readFileSync(process.env.RECEIPT, "utf8"));
+          if (!["L0_DOCS", "L1_RUNTIME", "L2_SCHEMA_SECURITY"].includes(receipt.effectiveLane)) {
+            throw new Error("release impact receipt has an invalid effective lane");
+          }
+          if (typeof receipt.runtimeArtifactEligible !== "boolean") {
+            throw new Error("release impact receipt has an invalid runtime artifact decision");
+          }
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `effective_lane=${receipt.effectiveLane}\nruntime_artifact_eligible=${receipt.runtimeArtifactEligible}\n`,
+          );
+          NODE
+
+      - name: Upload exact non-deployable impact receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: leetplus-release-impact-${{ env.CI_RELEASE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/leetplus-release-impact-${{ env.CI_RELEASE_SHA }}.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
   authority-root-trust:
     name: Authority root trust gate
+    needs: release_impact
+    if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -287,6 +362,8 @@ jobs:
 
   application:
     name: Application checks
+    needs: release_impact
+    if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -1386,6 +1463,8 @@ jobs:
 
   migration-smoke:
     name: PostgreSQL migration smoke
+    needs: release_impact
+    if: needs.release_impact.outputs.effective_lane != 'L0_DOCS'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:

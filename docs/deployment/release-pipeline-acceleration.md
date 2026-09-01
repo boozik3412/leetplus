@@ -1,8 +1,8 @@
 # Ускорение безопасного release pipeline
 
-Статус: **3/8 backlog items implemented, source/CI only**
+Статус: **4/8 backlog items implemented, source/CI only**
 
-Актуально на: **01.09.2026**
+Актуально на: **02.09.2026**
 
 ## Результат анализа
 
@@ -111,7 +111,7 @@ rerun скачивает уже проверенный candidate. Deployable han
 admission receipt остаются привязаны к producing `run_attempt`. Отдельный
 regression-test запрещает вернуть attempt-bound имя промежуточного candidate.
 
-### 2. Fail-closed impact classifier
+### 2. Fail-closed impact classifier — реализован
 
 Classifier получает base/head diff и выдаёт только повышение требований:
 
@@ -124,6 +124,28 @@ Classifier получает base/head diff и выдаёт только повы
 
 Результат сохраняется как artifact/receipt и повторно проверяется Full gate.
 Ручной override может только повысить lane.
+
+Канонический manifest
+[`release-impact-classifier.json`](./release-impact-classifier.json) и CLI
+[`classify-release-impact.mjs`](../../.github/scripts/classify-release-impact.mjs)
+выдают детерминированный receipt для exact ancestor `base..head`. `L1` построен
+как закрытый allowlist обычных application paths, а не как широкое `apps/**`:
+новый путь по умолчанию становится `L2`. Rename намеренно разворачивается в
+`delete + add`, поэтому перенос runtime-файла в Markdown не маскирует effect.
+
+Отдельный первый job Fast/Full выбирает trusted base из PR merge-base или push
+`before`; manual feature branch использует merge-base с `origin/main`. Force
+push, schedule, manual `main`, отсутствующий base и иной неопределённый event
+принудительно получают минимум `L2`. Только exact `L0_DOCS` пропускает тяжёлые
+runtime/database jobs и не создаёт runtime candidate. `L1` и `L2` пока проходят
+одинаковый существующий Full Admission; дальнейшее сокращение этих lanes требует
+отдельных backlog items, а не неявного bypass.
+
+Negative matrix проверяет docs/runtime/schema/auth/guest/unknown/mixed,
+повышение minimum lane, tampered receipt, non-ancestor/head drift, повреждённый
+manifest и runtime→docs rename. Workflow regression фиксирует, что root jobs
+могут пропускаться только для exact `L0_DOCS`. Подробный контракт:
+[`release-impact-classifier.md`](./release-impact-classifier.md).
 
 ### 3. Один deployable exact SHA
 

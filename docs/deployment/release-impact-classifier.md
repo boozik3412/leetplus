@@ -1,0 +1,70 @@
+# Fail-closed release impact classifier
+
+Статус: **source/CI guard; production authority не предоставляется**
+
+Канонические правила находятся в
+[`release-impact-classifier.json`](./release-impact-classifier.json). Классификатор
+не анализирует намерение автора и не пытается угадать риск по содержимому diff:
+он сопоставляет exact committed `base..head` paths с закрытым allowlist.
+
+## Lanes
+
+| Lane | Допустимый diff | Результат |
+| --- | --- | --- |
+| `L0_DOCS` | Только Markdown | Fast CI + non-deployable receipt; runtime artifact запрещён |
+| `L1_RUNTIME` | Только явно allowlisted обычные application paths | Fast, focused tests, Full Admission и blue/green rollout |
+| `L2_SCHEMA_SECURITY` | Schema/DB/ACL, auth/scope, public guest, worker/outbound, systemd/deploy/control, unknown или mixed | Полный admission и production safety contour |
+
+`L1` не является правилом `apps/**`. Новый application path, которого ещё нет в
+allowlist, попадает в default `L2`. Удаление или rename runtime-файла также
+классифицируется по старому path: Git rename намеренно разворачивается в
+`delete + add`, а mixed lane повышается до `L2`.
+
+## Fail-closed contract
+
+- `headSha` обязан совпасть с checked-out `HEAD`;
+- `baseSha` и `headSha` — полные lowercase commit SHA, base обязан быть ancestor;
+- rules manifest — canonical LF JSON, regular one-link file с bounded size;
+- manifest фиксирует точный порядок lanes, gates и rule classes;
+- неизвестный status/path и non-UTF-8 diff останавливают классификацию либо
+  повышают её до `L2`;
+- `minimumLane` может только повысить результат;
+- receipt не содержит времени и детерминирован для exact base/head/rules;
+- запись receipt exclusive; повторная проверка пересчитывает exact bytes.
+
+CI adapter выбирает диапазон без пользовательского понижения:
+
+- pull request — merge-base exact event base и head;
+- обычный push — exact `before..head`;
+- manual feature branch — merge-base с `origin/main`;
+- force-push, schedule, manual `main`, отсутствующий trusted base или иной
+  неопределённый event — не ниже `L2`.
+
+## Локальная проверка
+
+```bash
+node .github/scripts/test-release-impact-classifier.mjs
+node .github/scripts/test-release-impact-ci.mjs
+```
+
+Прямой CLI требует явные commit SHA и создаёт новый receipt:
+
+```bash
+node .github/scripts/classify-release-impact.mjs \
+  --root . \
+  --base-sha "$BASE_SHA" \
+  --head-sha "$HEAD_SHA" \
+  --minimum-lane L0_DOCS \
+  --output "$RECEIPT"
+
+node .github/scripts/classify-release-impact.mjs \
+  --root . \
+  --base-sha "$BASE_SHA" \
+  --head-sha "$HEAD_SHA" \
+  --minimum-lane L0_DOCS \
+  --verify-receipt "$RECEIPT"
+```
+
+Receipt является evidence классификации source diff. Он не подтверждает live
+systemd/nginx/NSS/DB, не заменяет admitted exact SHA, backup/restored-copy,
+signed controller, rollback postcheck или отдельный production GO.

@@ -2218,6 +2218,18 @@ export async function main(argv = process.argv.slice(2)) {
     );
     return 0;
   } catch (error) {
+    if (args?.testMode && error?.safeContractError !== true) {
+      process.stderr.write(
+        JSON.stringify({
+          contractVersion: CONTRACT_VERSION,
+          testDiagnostic: {
+            message: String(error?.message ?? "unknown"),
+            name: String(error?.name ?? "Error"),
+            stack: String(error?.stack ?? "unavailable"),
+          },
+        }) + "\n",
+      );
+    }
     const reasonCode =
       error?.safeContractError === true
         ? error.reasonCode

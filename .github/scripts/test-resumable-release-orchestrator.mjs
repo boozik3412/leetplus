@@ -434,6 +434,10 @@ test("rejects a foreign cutover successor instead of adopting it", async (t) => 
   assert.equal((await fixtureState(fixture.root)).cutoverEffects, 0);
 });
 
-process.on("exit", () => {
-  process.stdout.write("resumable release orchestrator test: PASS\n");
+process.on("exit", (code) => {
+  process.stdout.write(
+    "resumable release orchestrator test: " +
+      (code === 0 ? "PASS" : "FAIL") +
+      "\n",
+  );
 });

@@ -38,6 +38,8 @@ readonly OPERATIONAL_SCRIPTS=(
   guest-support-current189-production-upgrade.mjs
   identity-mail-worker-enrollment.cli.mjs
   identity-mail-worker-enrollment.mjs
+  parallel-backup-restored-copy-evidence.cli.mjs
+  parallel-backup-restored-copy-evidence.mjs
   run-current-release-restored-copy-acceptance.sh
   runtime-function-enrollment.cli.mjs
   runtime-function-enrollment.mjs
@@ -146,11 +148,13 @@ make_runtime_root() {
   "runtimeEnrollmentOperationalScriptCount": 6,
   "currentReleaseRuntimeAcceptanceScriptsIncluded": true,
   "currentReleaseRuntimeAcceptanceScriptCount": 3,
+  "parallelBackupRestoredCopyEvidenceScriptsIncluded": true,
+  "parallelBackupRestoredCopyEvidenceScriptCount": 2,
   "currentNetworkAccessScopeClassificationScriptsIncluded": true,
   "currentNetworkAccessScopeClassificationScriptCount": 2,
   "staffAttachmentReconciliationScriptsIncluded": true,
   "staffAttachmentReconciliationScriptCount": 3,
-  "operationalScriptCount": 33,
+  "operationalScriptCount": 35,
   "webPublicAssetsIncluded": true
 }
 JSON
@@ -180,7 +184,7 @@ node "$VERIFIER" \
   --expected-release-sha "$RELEASE_SHA" > "${TEST_ROOT}/accepted.out"
 grep -F -x 'RUNTIME_RELEASE_ARTIFACT_INTEGRITY=PASS' "${TEST_ROOT}/accepted.out" > /dev/null
 grep -F -x "RUNTIME_RELEASE_SHA=${RELEASE_SHA}" "${TEST_ROOT}/accepted.out" > /dev/null
-grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=33' "${TEST_ROOT}/accepted.out" > /dev/null
+grep -F -x 'RUNTIME_RELEASE_OPERATIONAL_SCRIPT_COUNT=35' "${TEST_ROOT}/accepted.out" > /dev/null
 
 unexpected_script_root="${TEST_ROOT}/unexpected-script"
 cp -a -- "$accepted_root" "$unexpected_script_root"

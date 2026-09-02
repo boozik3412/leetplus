@@ -2,8 +2,9 @@
 
 ## Ускорение безопасного production release — 01.09.2026
 
-Статус: `[█████░░░░░] 5/8` — topology twin, impact classifier и один exact
-merge-candidate admission реализованы; production не изменяется.
+Статус: `[██████░░░░] 6/8` — topology twin, impact classifier, один exact
+merge-candidate admission и параллельный backup/restored-copy evidence bind
+реализованы; production не изменяется.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 
@@ -50,9 +51,14 @@ receipt-contract drift уже после admission.
   а новый main commit больше не отменяет Full для уже выбранного exact SHA.
   Подробный контракт:
   [`release-candidate-admission.md`](./docs/deployment/release-candidate-admission.md).
-- [ ] `REL-ACC-006`: готовить свежий backup/restored-copy contour параллельно
-  admission и повторно связывать его digest перед effect, вместо запуска после
-  всех остальных шагов.
+- [x] `REL-ACC-006`: fresh backup/off-host copy и restored-copy contour можно
+  готовить параллельно exact-SHA admission. `PREPARED_NOT_EFFECT_AUTHORIZATION`
+  связывает L2 candidate, runtime archive, backup/source DB, rehearsal и
+  topology receipts; после final admission короткоживущий
+  `PRE_EFFECT_EVIDENCE_BOUND_NOT_AUTHORIZATION` повторно связывает live DB,
+  installed control и zero pending intents. Drift/expiry блокируют effect, а
+  binding digest должен входить в отдельно подписанный schema-plan. Контракт:
+  [`parallel-backup-restored-copy-evidence.md`](./docs/deployment/parallel-backup-restored-copy-evidence.md).
 - [ ] `REL-ACC-007`: объединить hydration → bind → smoke → cutover → postcheck в
   resumable orchestrator с защищёнными phase receipts и точным продолжением
   после lost response.

@@ -2003,7 +2003,7 @@ function createFinalReceipt(context, lastReceiptSha256, args) {
     planSha256: context.planSha256,
     releaseSha: context.plan.releaseSha,
     targetSlot: context.plan.targetSlot,
-    lastPhaseReceiptSha256,
+    lastPhaseReceiptSha256: lastReceiptSha256,
     completedAt: nowIso(),
     decision: COMPLETE_DECISION,
   };

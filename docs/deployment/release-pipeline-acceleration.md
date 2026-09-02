@@ -1,6 +1,6 @@
 # Ускорение безопасного release pipeline
 
-Статус: **7/8 backlog items implemented; новый orchestrator source/CI only**
+Статус: **7/8 backlog items implemented; первый production preflight остановлен до runtime effect, hardening находится в admission**
 
 Актуально на: **02.09.2026**
 
@@ -198,15 +198,25 @@ service start/probes и cutover recovery повторно подтверждаю
 Production-control install lock удерживается через всю operation; promoter
 принимает только тот же унаследованный и повторно проверенный lock inode.
 
-Этот source/CI срез ещё не установлен в production. Он не включает schema,
-ACL, worker или security-flag effects: L2 продолжает использовать параллельный
-evidence binding и отдельно подписанный database/security controller.
+Первый production preflight 02.09.2026 установил и проверил admitted
+production-control generation, но не создавал plan и не менял runtime/nginx/DB:
+code/live topology review обнаружил, что прежний BIND вызывал cache и binder без
+перехода hot-rollback target из `active/enabled` в требуемое
+`masked/inactive`. Successor делает этот переход частью resumable контракта:
+BIND выполняет persistent exact `mask --now` API/Web, cache принимает exact
+root-owned mask, slot binder повторно проверяет обе fenced units, а SMOKE
+снимает masks перед enable/start. При сбое public active slot не меняется;
+resume продолжает ту же operation с target, оставленным fenced.
+
+Этот successor не включает schema, ACL, worker или security-flag effects: L2
+продолжает использовать параллельный evidence binding и отдельно подписанный
+database/security controller.
 
 ## Что не меняется
 
 - Production runtime остаётся по последнему каноническому evidence exact
-  `22ab6b81…`, CURRENT189, generation 20; этот source/CI срез не является
-  deploy и live состояние отдельно не пересверялось.
+  `22ab6b81…`, CURRENT189, generation 20; live состояние повторно сверено перед
+  preflight, runtime switch не выполнялся.
 - Public guest, corporate tenant и workers/control-plane не объединяются ради
   ускорения.
 - Schema/security lane сохраняет backup, restored-copy acceptance, signed

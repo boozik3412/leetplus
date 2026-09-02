@@ -18,6 +18,8 @@ const INSTALL_MAP_PATH =
 const INSTALLED_VERIFIER_PATH =
   "docs/deployment/production-control-authority/verify-installed-production-control-generation.mjs";
 const INNER_ROOT = "docs/deployment/production-artifact";
+const ORCHESTRATOR_ENGINE_PATH = `${INNER_ROOT}/resumable-release-orchestrator.mjs`;
+const ORCHESTRATOR_LAUNCHER_PATH = `${INNER_ROOT}/resumable-release-orchestrator.sh`;
 const INNER_MANIFEST_PATH = `${INNER_ROOT}/CONTROL_BUNDLE_SHA256SUMS`;
 const PROVENANCE_PATH = "production-control-provenance.json";
 const ROOT_MANIFEST_PATH = "SHA256SUMS";
@@ -71,6 +73,8 @@ const REQUIRED_PATHS = [
   `${INNER_ROOT}/preflight-release-slot.sh`,
   `${INNER_ROOT}/prepare-web-slot-cache.sh`,
   `${INNER_ROOT}/promote-release-artifact.sh`,
+  `${INNER_ROOT}/resumable-release-orchestrator.mjs`,
+  `${INNER_ROOT}/resumable-release-orchestrator.sh`,
   `${INNER_ROOT}/run-active-bonus-ledger-worker.sh`,
   `${INNER_ROOT}/run-current-release-restored-copy-acceptance.sh`,
   `${INNER_ROOT}/scheduler-free-n-minus-one-runbook.md`,
@@ -563,7 +567,7 @@ function assertInstallAuthorityContract(root) {
     priorLine = line;
     destinations.add(destination);
   }
-  if (lines.length !== 50) {
+  if (lines.length !== 52) {
     fail("production control install map does not have the exact reviewed entry count");
   }
   for (const requiredDestination of [
@@ -573,10 +577,12 @@ function assertInstallAuthorityContract(root) {
     "/srv/leetplus/control-bundles/scheduler-free-nminus1-v1/CONTROL_BUNDLE_SHA256SUMS",
     "/usr/local/libexec/leetplus/stage-release-artifact.sh",
     "/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh",
+    "/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs",
     "/usr/local/libexec/leetplus/verify-installed-production-control-generation.mjs",
     "/usr/local/libexec/leetplus/verify-release-hydration-systemd.mjs",
     "/usr/local/sbin/leetplus-install-scheduler-free-nminus1-v1",
     "/usr/local/sbin/leetplus-promote-release-artifact",
+    "/usr/local/sbin/leetplus-resumable-release-orchestrator",
     "/usr/local/sbin/leetplus-seal-release-artifact",
   ]) {
     if (!destinations.has(requiredDestination)) {
@@ -598,6 +604,32 @@ function assertInstallAuthorityContract(root) {
     if (pins.length !== 1 || pins[0][1] !== mapDigest) {
       fail(`${label} does not contain the unique exact install-map digest pin`);
     }
+  }
+}
+
+function assertResumableOrchestratorContract(root) {
+  const engineBytes = readMetadataFile(
+    root,
+    ORCHESTRATOR_ENGINE_PATH,
+    "resumable release orchestrator engine",
+  );
+  const launcher = decodeUtf8(
+    readMetadataFile(
+      root,
+      ORCHESTRATOR_LAUNCHER_PATH,
+      "resumable release orchestrator launcher",
+    ),
+    "resumable release orchestrator launcher",
+  );
+  const pins = [
+    ...launcher.matchAll(
+      /^readonly EXPECTED_ENGINE_SHA256='([0-9a-f]{64})'$/gmu,
+    ),
+  ];
+  if (pins.length !== 1 || pins[0][1] !== sha256(engineBytes)) {
+    fail(
+      "resumable release orchestrator launcher does not pin the exact engine bytes",
+    );
   }
 }
 
@@ -727,6 +759,7 @@ const provenance = readProvenance(
 );
 assertInnerBundle(root, innerBytes);
 assertInstallAuthorityContract(root);
+assertResumableOrchestratorContract(root);
 
 process.stdout.write(
   `PRODUCTION_CONTROL_ARTIFACT_INTEGRITY=PASS\n` +

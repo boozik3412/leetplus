@@ -14,9 +14,9 @@
 | Первый внешний пилот | отдельный `Tenant B/Store B1`                                                                                                 |
 | Offline/USB key      | исключён из beta critical path                                                                                                |
 | Owner onboarding     | email-bound invite, пользователь сам задаёт пароль                                                                            |
-| Release acceleration | topology twin, fail-closed impact classifier и exact main-push candidate authority реализованы в CI; manual/schedule/feature/docs-only handoff запрещён; production не менялся |
+| Release acceleration | 7/8: topology twin, impact classifier, exact main-push authority, parallel L2 evidence и resumable five-phase rollout реализованы; новый orchestrator source/CI only, production не менялся |
 
-## Ускорение release pipeline без ослабления gates (01.09.2026)
+## Ускорение release pipeline без ослабления gates (02.09.2026)
 
 В backlog добавлена отдельная инициатива
 [`release-pipeline-acceleration.md`](../deployment/release-pipeline-acceleration.md).
@@ -46,6 +46,24 @@ validation evidence. Final job повторно проверяет impact/candid
 fresh checkout. Fast и Full для main SHA не отменяются последующим commit, а
 устаревший PR Fast по-прежнему отменяется. Production и решение open beta этим
 не изменены.
+
+Пятый срез формализует deployable exact-main candidate как единственный runtime
+handoff: pre-merge/manual evidence не может стать production authority.
+
+Шестой срез разрешает готовить backup/off-host и restored-copy evidence
+параллельно Full Admission, но делает оба результата nonauthorizing. Перед L2
+effect короткоживущий binding повторно связывает exact runtime/control/live DB,
+backup и rehearsal с zero pending intents; его digest обязан войти в отдельно
+подписанный schema-plan.
+
+Седьмой срез добавляет
+[`resumable-release-orchestrator`](../deployment/resumable-release-orchestrator.md)
+для `HYDRATE -> BIND -> SMOKE -> CUTOVER -> POSTCHECK`. Exact plan не разрешает
+effect; `apply` требует отдельного production GO. Immutable phase receipts и
+повторная attestation позволяют продолжить ту же operation после lost response,
+не повторяя завершённые effects и не принимая чужую cutover generation.
+Orchestrator не выполняет schema/ACL/worker changes и оставляет previous slot
+горячим rollback.
 
 Это source/CI изменение, а не production rollout: текущая production baseline
 остаётся `22ab6b81…`, CURRENT189, generation 20. Ускорение не меняет решение

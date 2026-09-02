@@ -259,6 +259,13 @@ jobs:
           printf 'FAST_CI_FIXTURE_BLUE_GREEN=START\n'
           bash .github/scripts/test-production-artifact-blue-green.sh
           printf 'FAST_CI_FIXTURE_BLUE_GREEN=PASS\n'
+          bash -n docs/deployment/production-artifact/resumable-release-orchestrator.sh
+          node --check docs/deployment/production-artifact/resumable-release-orchestrator.mjs
+          node --check .github/scripts/resumable-release-orchestrator-fixture-command.mjs
+          node --check .github/scripts/test-resumable-release-orchestrator.mjs
+          printf 'FAST_CI_FIXTURE_RESUMABLE_RELEASE_ORCHESTRATOR=START\n'
+          node .github/scripts/test-resumable-release-orchestrator.mjs
+          printf 'FAST_CI_FIXTURE_RESUMABLE_RELEASE_ORCHESTRATOR=PASS\n'
           bash -n .github/scripts/test-production-artifact-systemd-templates.sh
           printf 'FAST_CI_FIXTURE_SYSTEMD_TEMPLATES=START\n'
           bash .github/scripts/test-production-artifact-systemd-templates.sh

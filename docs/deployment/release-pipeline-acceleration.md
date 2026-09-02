@@ -1,6 +1,6 @@
 # Ускорение безопасного release pipeline
 
-Статус: **6/8 backlog items implemented, source/CI only**
+Статус: **7/8 backlog items implemented; новый orchestrator source/CI only**
 
 Актуально на: **02.09.2026**
 
@@ -184,12 +184,29 @@ receipts; lost response продолжает ту же операцию вмес
 installed control, live DB/topology, backup/off-host и restored-copy receipts,
 а также zero pending intents. Оба решения намеренно nonauthorizing; schema-plan
 должен отдельно подписать `effectBindingDigest`. Resumable hydration/cutover
-phase orchestration остаётся `REL-ACC-007`.
+phase orchestration теперь реализована отдельным
+[`resumable-release-orchestrator`](./resumable-release-orchestrator.md).
+
+Orchestrator фиксирует nonauthorizing exact plan, а после отдельного
+production GO выполняет пять фаз `HYDRATE -> BIND -> SMOKE -> CUTOVER ->
+POSTCHECK`. Для каждой фазы durable intent/evidence/receipt связан с plan,
+installed production-control и предыдущим phase receipt. Потерянный ответ не
+запускает весь rollout заново: hydration/promotion, bind reconcile, idempotent
+service start/probes и cutover recovery повторно подтверждают только текущую
+незавершённую фазу. Чужая generation, изменённый control byte/record или
+расхождение active link останавливают продолжение. Previous slot остаётся hot.
+Production-control install lock удерживается через всю operation; promoter
+принимает только тот же унаследованный и повторно проверенный lock inode.
+
+Этот source/CI срез ещё не установлен в production. Он не включает schema,
+ACL, worker или security-flag effects: L2 продолжает использовать параллельный
+evidence binding и отдельно подписанный database/security controller.
 
 ## Что не меняется
 
-- Production runtime остаётся exact `22ab6b81…`, CURRENT189, generation 20;
-  этот source/CI срез не является deploy.
+- Production runtime остаётся по последнему каноническому evidence exact
+  `22ab6b81…`, CURRENT189, generation 20; этот source/CI срез не является
+  deploy и live состояние отдельно не пересверялось.
 - Public guest, corporate tenant и workers/control-plane не объединяются ради
   ускорения.
 - Schema/security lane сохраняет backup, restored-copy acceptance, signed

@@ -15,6 +15,7 @@ readonly AUTHORITY='docs/deployment/production-control-authority/leetplus-instal
 readonly INSTALL_AUTHORITY='docs/deployment/production-control-authority/leetplus-install-production-control-v1'
 readonly INSTALL_MAP='docs/deployment/production-control-authority/production-control-install-map.tsv'
 readonly INSTALLED_VERIFIER='docs/deployment/production-control-authority/verify-installed-production-control-generation.mjs'
+readonly ORCHESTRATOR_LAUNCHER='docs/deployment/production-artifact/resumable-release-orchestrator.sh'
 readonly DATABASE_FENCE_AUTHORITY='docs/deployment/production-artifact/systemd/legacy-database-login-fence-authority.sql.example'
 readonly FORBIDDEN_PATH='docs/deployment/production-artifact/nginx/legacy.conf.example'
 readonly CLEAN_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
@@ -206,7 +207,7 @@ grep -F -x 'PRODUCTION_CONTROL_ARTIFACT_INTEGRITY=PASS' \
   "${TEST_ROOT}/accepted.out" >/dev/null
 grep -F -x "PRODUCTION_CONTROL_RELEASE_SHA=${RELEASE_SHA}" \
   "${TEST_ROOT}/accepted.out" >/dev/null
-grep -F -x 'PRODUCTION_CONTROL_PAYLOAD_FILE_COUNT=62' \
+grep -F -x 'PRODUCTION_CONTROL_PAYLOAD_FILE_COUNT=64' \
   "${TEST_ROOT}/accepted.out" >/dev/null
 grep -F -x "PRODUCTION_CONTROL_NODE_SHA256=$(node_executable_sha256)" \
   "${TEST_ROOT}/accepted.out" >/dev/null
@@ -285,6 +286,17 @@ expect_rejected \
   pin-drift \
   "$pin_drift_root" \
   'control authority launcher manifest pin does not match the inner manifest'
+
+orchestrator_pin_drift_root="${TEST_ROOT}/orchestrator-pin-drift"
+cp -a -- "$accepted_root" "$orchestrator_pin_drift_root"
+sed -E -i \
+  "s/(EXPECTED_ENGINE_SHA256=')[0-9a-f]{64}(')/\\1$(printf '0%.0s' {1..64})\\2/" \
+  "$orchestrator_pin_drift_root/$ORCHESTRATOR_LAUNCHER"
+write_root_manifest "$orchestrator_pin_drift_root"
+expect_rejected \
+  orchestrator-pin-drift \
+  "$orchestrator_pin_drift_root" \
+  'resumable release orchestrator launcher does not pin the exact engine bytes'
 
 forbidden_root="${TEST_ROOT}/forbidden"
 cp -a -- "$accepted_root" "$forbidden_root"

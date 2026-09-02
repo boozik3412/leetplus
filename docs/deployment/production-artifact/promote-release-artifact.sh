@@ -68,11 +68,19 @@ find_has_match() {
 
 release_sha=''
 slot=''
+inherited_production_control_lock_fd=''
 while (($# > 0)); do
   case "$1" in
     --release-sha) release_sha="${2:-}"; shift 2 ;;
     --slot) slot="${2:-}"; shift 2 ;;
-    --help|-h) printf 'Usage: promote-release-artifact.sh --release-sha <sha> --slot blue|green\n'; exit 0 ;;
+    --inherited-production-control-lock-fd)
+      inherited_production_control_lock_fd="${2:-}"
+      shift 2
+      ;;
+    --help|-h)
+      printf 'Usage: promote-release-artifact.sh --release-sha <sha> --slot blue|green [--inherited-production-control-lock-fd 8]\n'
+      exit 0
+      ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -82,6 +90,9 @@ PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 export PATH
 [[ "$release_sha" =~ $RELEASE_SHA_PATTERN ]] || die 'release SHA must be 40 lowercase hexadecimal characters'
 [[ "$slot" =~ $SLOT_PATTERN ]] || die 'slot must be blue or green'
+[[ -z "$inherited_production_control_lock_fd" \
+  || "$inherited_production_control_lock_fd" == '8' ]] \
+  || die 'inherited production-control lock descriptor must be exact fd 8'
 for command_name in awk basename chmod chown dirname find flock getent grep id ln mktemp mv realpath rm sha256sum stat sync systemctl systemd-analyze timeout; do
   command -v "$command_name" >/dev/null 2>&1 || die "required command is unavailable: $command_name"
 done
@@ -165,7 +176,7 @@ validate_installed_generation_attestation() {
   [[ "${lines[0]}" == 'PRODUCTION_CONTROL_INSTALLED_GENERATION=PASS' \
     && "${lines[1]}" == "PRODUCTION_CONTROL_RELEASE_SHA=${release_sha}" \
     && "${lines[2]}" == "PRODUCTION_CONTROL_RECEIPT_PATH=${production_control_receipt}" \
-    && "${lines[13]}" == 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=50' ]] \
+    && "${lines[13]}" == 'PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52' ]] \
     || die 'installed-generation verifier output identity is malformed'
   [[ "${lines[3]}" =~ ^PRODUCTION_CONTROL_RECEIPT_SHA256=([0-9a-f]{64})$ \
     && "${lines[4]}" =~ ^PRODUCTION_CONTROL_ROOT_MANIFEST_SHA256=([0-9a-f]{64})$ \
@@ -935,7 +946,14 @@ assert_exact_build_identity
   && "$(stat -c '%U:%G:%a:%h' -- "$production_control_install_lock")" == 'root:root:600:1' ]] \
   || die 'production-control install lock must be root:root mode 0600 with one link'
 install_lock_identity="$(stat -c '%d:%i' -- "$production_control_install_lock")"
-exec 7<> "$production_control_install_lock"
+if [[ "$inherited_production_control_lock_fd" == '8' ]]; then
+  [[ -e /proc/self/fd/8 \
+    && "$(stat -Lc '%d:%i' -- /proc/self/fd/8)" == "$install_lock_identity" ]] \
+    || die 'inherited production-control lock descriptor differs from the validated path'
+  exec 7<&8
+else
+  exec 7<> "$production_control_install_lock"
+fi
 [[ "$(stat -Lc '%d:%i' -- /proc/self/fd/7)" == "$install_lock_identity" ]] \
   || die 'opened production-control install lock differs from the validated path'
 flock -n 7 || die 'another production-control install or promotion operation holds the install lock'

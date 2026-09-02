@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-## Canonical current-state guardrail (01.09.2026)
+## Canonical current-state guardrail (02.09.2026)
 
 Перед задачами по auth, landing, access scope, игровому модулю, integrations,
 workers или deployment обязательно прочитать
@@ -41,8 +41,8 @@ Release provenance вычисляется из immutable artifact `prisma/migrat
 Отдельный API child-process fixture pin-ит reviewed head, поэтому новая
 миграция не становится допустимой автоматически.
 
-Для сокращения поздних fail-closed итераций начат source/CI этап ускорения
-release pipeline. Канонические blue/green/N−1 ports, runtime NSS topology,
+Для сокращения поздних fail-closed итераций source/CI-инициатива ускорения
+release pipeline выполнена на 7/8. Канонические blue/green/N−1 ports, runtime NSS topology,
 API/Web EnvironmentFiles, transient restored-copy membership и независимые
 slot-link receipts зафиксированы в
 `docs/deployment/production-artifact/production-topology-contract.json` и
@@ -51,11 +51,11 @@ Admission. Disposable root/systemd twin на существующем GitHub run
 поднимает обе API/Web blue/green пары, проверяет exact live NSS,
 EnvironmentFiles и listener ownership, а transient restored-copy identity
 обязана исчезнуть без residue до bind/cutover fixtures. Это не deploy и не live
-production evidence. Следующий source/CI срез добавляет отдельный первый
+production evidence. Реализованный source/CI срез добавляет отдельный первый
 fail-closed impact job: только exact Markdown-only получает `L0` non-deployable
 receipt и пропускает тяжёлые runtime jobs; allowlisted application diff получает
 `L1`, а schema/security, unknown, mixed, rename/delete или недоверенный base —
-`L2`. Следующий implemented source/CI guard выпускает deployable handoff только
+`L2`. Независимый source/CI guard выпускает deployable handoff только
 для runtime-eligible exact `push` merge SHA из `main`; manual, schedule,
 feature-branch и docs-only Full остаются non-deployable. Новый main commit не
 отменяет уже выполняющийся exact-SHA Full, тогда как superseded PR Fast всё ещё
@@ -63,6 +63,18 @@ feature-branch и docs-only Full остаются non-deployable. Новый mai
 admission, backup/restored-copy, signed controller, blue/green rollback,
 отдельный GO и независимость public guest / corporate tenant /
 workers-control-plane остаются обязательными.
+
+Backup/off-host и restored-copy evidence для L2 теперь можно готовить
+параллельно admission, но их короткоживущий binding остаётся nonauthorizing и
+обязан войти в отдельно подписанный schema-plan. Новый resumable runtime
+orchestrator выполняет exact `HYDRATE -> BIND -> SMOKE -> CUTOVER -> POSTCHECK`
+после отдельного production GO. Защищённая цепочка intent/evidence/receipt
+продолжает ту же operation после lost response и отклоняет control, slot,
+receipt или generation drift; previous slot остаётся hot rollback. Orchestrator
+включён в immutable production-control payload и проверяется в Fast/Full, но
+ещё не устанавливался в production и не выполняет Prisma/SQL, ACL, auth/scope,
+guest flags или worker effects. Последний backlog item — измеримые
+duration/failure-phase p50/p95.
 
 Ниже сохранена история fail-closed restored-copy итераций, которые предшествовали
 успешному rehearsal и production rollout 01.09.2026.

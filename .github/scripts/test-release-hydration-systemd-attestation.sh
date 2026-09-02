@@ -282,10 +282,13 @@ grep -F 'index(target, receipts "/") == 1' "$PROMOTER_SOURCE" >/dev/null \
 grep -F -x 'flock -n 7 || die '\''another production-control install or promotion operation holds the install lock'\''' \
   "$PROMOTER_SOURCE" >/dev/null \
   || die 'promoter does not retain the production-control installer lock'
+grep -F 'inherited production-control lock descriptor differs from the validated path' \
+  "$PROMOTER_SOURCE" >/dev/null \
+  || die 'promoter does not verify the orchestrator-inherited install-lock inode'
 grep -F -x 'validate_installed_generation_attestation "$installed_generation_stdout"' \
   "$PROMOTER_SOURCE" >/dev/null \
   || die 'promoter does not require installed-generation verification'
-install_lock_line="$(grep -n '^exec 7<> "$production_control_install_lock"$' \
+install_lock_line="$(grep -n '^[[:space:]]*exec 7<> "$production_control_install_lock"$' \
   "$PROMOTER_SOURCE" | cut -d: -f1)"
 installed_generation_gate_line="$(grep -n \
   '^validate_installed_generation_attestation "$installed_generation_stdout"$' \
@@ -1204,7 +1207,7 @@ process.stdout.write(
     `PRODUCTION_CONTROL_HYDRATION_UNIT_SHA256=${digest("/etc/systemd/system/leetplus-release-hydrate@.service")}\n` +
     `PRODUCTION_CONTROL_SEALER_SHA256=${digest("/usr/local/sbin/leetplus-seal-release-artifact")}\n` +
     `PRODUCTION_CONTROL_PROMOTER_SHA256=${digest("/usr/local/sbin/leetplus-promote-release-artifact")}\n` +
-    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=50\n`,
+    `PRODUCTION_CONTROL_INSTALLED_FILE_COUNT=52\n`,
 );
 FIXTURE_GENERATION_VERIFIER
 /usr/bin/node --check "$fixture_generation_verifier"
@@ -1516,6 +1519,32 @@ run_promoter_required() {
   die "promoter failed unexpectedly: ${label}; Output=${bounded_output}"
 }
 
+run_promoter_inherited_required() {
+  local sha="$1" output_path="$2" label="$3" bounded_output status
+  exec 8<> "$PRODUCTION_CONTROL_INSTALL_LOCK"
+  flock -n 8 || die 'fixture could not acquire inherited production-control lock fd 8'
+  set +e
+  "$INSTALLED_PROMOTER" \
+    --release-sha "$sha" \
+    --slot blue \
+    --inherited-production-control-lock-fd 8 \
+    > "$output_path" 2>&1
+  status=$?
+  set -e
+  flock -u 8
+  exec 8>&-
+  if ((status == 0)); then
+    return 0
+  fi
+  if [[ -f "$output_path" && ! -L "$output_path" ]]; then
+    bounded_output="$(< "$output_path")"
+    bounded_output="${bounded_output:0:2048}"
+  else
+    bounded_output='[output absent or symlinked]'
+  fi
+  die "promoter failed with inherited install lock: ${label}; Output=${bounded_output}"
+}
+
 normal_sha='1111111111111111111111111111111111111111'
 prepare_recovery_hydration "$normal_sha"
 chmod 0755 -- "$INSTALLED_GENERATION_VERIFIER"
@@ -1549,7 +1578,8 @@ assert_fixture_output_contains \
 flock -u 9
 exec 9>&-
 
-run_promoter_required "$normal_sha" "${TEST_ROOT}/promote-normal.out" promote-normal
+run_promoter_inherited_required \
+  "$normal_sha" "${TEST_ROOT}/promote-normal.out" promote-normal-inherited-lock
 assert_promoted_release "$normal_sha" "${TEST_ROOT}/promote-normal.out"
 run_promoter_required "$normal_sha" "${TEST_ROOT}/promote-normal-retry.out" promote-normal-retry
 grep -F -x 'PROMOTED_RELEASE_PUBLICATION_RECONCILED=true' \

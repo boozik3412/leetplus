@@ -17,6 +17,8 @@ docs/deployment/production-artifact/preflight-legacy-rollback.sh
 docs/deployment/production-artifact/preflight-release-slot.sh
 docs/deployment/production-artifact/prepare-web-slot-cache.sh
 docs/deployment/production-artifact/promote-release-artifact.sh
+docs/deployment/production-artifact/resumable-release-orchestrator.mjs
+docs/deployment/production-artifact/resumable-release-orchestrator.sh
 docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh
 docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh
 docs/deployment/production-artifact/scheduler-free-n-minus-one-runbook.md

@@ -2,7 +2,7 @@
 
 Статус: **канонический current-state contract**
 
-Актуально на: **01.09.2026**
+Актуально на: **02.09.2026**
 Runtime implementation baseline:
 `22ab6b81dacc726068d0dfcc5172fe67581a45b1` (PR #111; включает
 status-only review-переходы чек-листов, отдельный bonus-ledger worker,
@@ -24,7 +24,7 @@ fail-closed правилу одного контура снова сломать
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `22ab6b81…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
-| Release acceleration     | source/CI topology twin, impact classifier и exact main-push candidate authority добавлены; manual/schedule/feature/docs-only не выпускают handoff; production не изменён; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
+| Release acceleration     | 7/8: topology twin, impact classifier, exact main-push candidate, parallel L2 evidence и resumable five-phase runtime orchestrator добавлены; новый orchestrator source/CI only, production не изменён; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -73,6 +73,20 @@ feature branch и Markdown-only runs остаются non-deployable. После
 commit не отменяет уже выполняющийся exact Full, но это не разрешает смешивать
 release trains или устанавливать любой `main` без final admission и отдельного
 GO.
+
+Runtime rollout теперь имеет отдельный source/CI orchestrator для exact порядка
+`HYDRATE -> BIND -> SMOKE -> CUTOVER -> POSTCHECK`. `prepare` создаёт только
+nonauthorizing план, а `apply` остаётся отдельным production effect boundary.
+Каждая фаза связана immutable intent/evidence/receipt; lost response допускает
+только reconcile той же operation с повторной сверкой installed control,
+active generation, slot link, readiness и authenticated smoke. Previous slot
+остаётся hot rollback. Canonical production-control `install.lock` удерживается
+на всей цепочке, включая promoter через проверенный inherited fd, поэтому
+generation bytes нельзя заменить между attestation и effect. Этот coordination
+layer не становится четвёртым
+security-контуром и не получает право на Prisma/SQL, ACL, auth/scope,
+USER_CALL, guest flags или worker state. Такие L2 effects по-прежнему требуют
+своих signed controllers, backup/restored-copy evidence и отдельного GO.
 
 Rollout 01.09.2026 прошёл на exact admitted SHA после restored-copy PASS и
 checksum-pinned перехода `CURRENT_188 -> CURRENT_189`. Оба runtime slot готовы

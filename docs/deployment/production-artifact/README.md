@@ -96,6 +96,13 @@ Admission только через
 после final admission его digests обязательно повторно связываются со свежим
 live evidence, а короткоживущий binding сам по себе не разрешает effect.
 
+Обычный runtime rollout после отдельного production GO можно выполнять через
+[`resumable-release-orchestrator`](../resumable-release-orchestrator.md). Он
+последовательно вызывает те же hydration/promote, slot bind, loopback smoke и
+blue/green authority, но связывает их защищённой цепочкой phase receipts и
+возобновляет exact operation после lost response. Orchestrator не выполняет
+schema/ACL/worker effects и не заменяет L2 signed controller.
+
 Legacy `git pull → build → restart` не является допустимым заменителем этой
 процедуры. Замена production timer/unit, перенос sensitive backup residue и
 runtime switch требуют отдельного разрешения владельца production.
@@ -397,6 +404,11 @@ evidence. Успешный switch оставляет accepted receipt для о�
 монотонным generation index, поэтому старый или уже использованный receipt
 fail-closed отклоняется. Durable `.intent` и атомарные phase records
 поддерживают crash/lost-response recovery до receipt/index.
+Установленный
+[`leetplus-resumable-release-orchestrator`](../resumable-release-orchestrator.md)
+добавляет внешний exact plan и SHA-256-linked receipts для полного порядка
+hydrate → bind → smoke → cutover → postcheck. Он не ослабляет внутренний
+cutover recovery и никогда не останавливает hot previous slot.
 Handled signal/exit запускает exact rollback guard. Для `SIGKILL`/host loss
 pre-nginx recovery unit восстанавливает и syntax-check'ит N-1 link без
 рекурсивного nginx systemd job, а отдельный 10-секундный post-start watchdog

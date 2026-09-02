@@ -15,6 +15,8 @@ docs/deployment/production-artifact/preflight-legacy-rollback.sh	/srv/leetplus/c
 docs/deployment/production-artifact/preflight-release-slot.sh	/usr/local/libexec/leetplus/preflight-release-slot.sh	0555
 docs/deployment/production-artifact/prepare-web-slot-cache.sh	/usr/local/libexec/leetplus/prepare-web-slot-cache.sh	0555
 docs/deployment/production-artifact/promote-release-artifact.sh	/usr/local/sbin/leetplus-promote-release-artifact	0500
+docs/deployment/production-artifact/resumable-release-orchestrator.mjs	/usr/local/libexec/leetplus/resumable-release-orchestrator.mjs	0555
+docs/deployment/production-artifact/resumable-release-orchestrator.sh	/usr/local/sbin/leetplus-resumable-release-orchestrator	0500
 docs/deployment/production-artifact/run-active-bonus-ledger-worker.sh	/usr/local/libexec/leetplus/run-active-bonus-ledger-worker.sh	0555
 docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh	/usr/local/sbin/leetplus-run-current-release-restored-copy-acceptance	0500
 docs/deployment/production-artifact/seal-release-artifact.sh	/usr/local/sbin/leetplus-seal-release-artifact	0500

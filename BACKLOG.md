@@ -2,9 +2,10 @@
 
 ## Ускорение безопасного production release — 01.09.2026
 
-Статус: `[██████░░░░] 6/8` — topology twin, impact classifier, один exact
-merge-candidate admission и параллельный backup/restored-copy evidence bind
-реализованы; production не изменяется.
+Статус: `[███████░░░] 7/8` — topology twin, impact classifier, один exact
+merge-candidate admission, параллельный backup/restored-copy evidence bind и
+resumable runtime rollout реализованы; новый orchestrator пока source/CI only,
+production не изменяется.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 
@@ -59,9 +60,13 @@ receipt-contract drift уже после admission.
   installed control и zero pending intents. Drift/expiry блокируют effect, а
   binding digest должен входить в отдельно подписанный schema-plan. Контракт:
   [`parallel-backup-restored-copy-evidence.md`](./docs/deployment/parallel-backup-restored-copy-evidence.md).
-- [ ] `REL-ACC-007`: объединить hydration → bind → smoke → cutover → postcheck в
-  resumable orchestrator с защищёнными phase receipts и точным продолжением
-  после lost response.
+- [x] `REL-ACC-007`: hydration → bind → smoke → cutover → postcheck объединены
+  в resumable orchestrator, включённый в immutable production-control payload.
+  Exact plan не разрешает effect; отдельный apply/GO создаёт approval, а
+  защищённая SHA-256 цепочка intent/evidence/receipt повторно подтверждает
+  незавершённую фазу после lost response. Schema/ACL/worker effects остаются у
+  отдельных L2 controllers. Контракт:
+  [`resumable-release-orchestrator.md`](./docs/deployment/resumable-release-orchestrator.md).
 - [ ] `REL-ACC-008`: публиковать duration/failure-phase summary для каждого
   rollout и держать p50/p95 по lane, чтобы ускорение измерялось, а не
   оценивалось вручную.

@@ -5,6 +5,7 @@ import {
   constants as fsConstants,
   closeSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -12,7 +13,6 @@ import {
   readdirSync,
   realpathSync,
   renameSync,
-  statSync,
   unlinkSync,
   writeFileSync,
   fsyncSync,
@@ -432,7 +432,7 @@ function validateBootstrap(args) {
     fail("ORCHESTRATOR_PRODUCTION_ENVIRONMENT_INVALID");
   }
   const lockPath = lstatSync(PRODUCTION_CONTROL_INSTALL_LOCK);
-  const lockDescriptor = statSync(PRODUCTION_CONTROL_INSTALL_LOCK_FD);
+  const lockDescriptor = fstatSync(PRODUCTION_CONTROL_INSTALL_LOCK_FD);
   if (
     !lockPath.isFile() ||
     lockPath.isSymbolicLink() ||
@@ -500,12 +500,12 @@ function readCanonicalJson(filePath, args, expectedModes = [0o400, 0o600]) {
     fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
   );
   try {
-    const before = statSync(fd);
+    const before = fstatSync(fd);
     if (fileIdentity(before) !== fileIdentity(beforePath)) {
       fail("ORCHESTRATOR_RECORD_FILE_CHANGED");
     }
     const bytes = readFileSync(fd);
-    const after = statSync(fd);
+    const after = fstatSync(fd);
     if (
       bytes.length !== before.size ||
       fileIdentity(before) !== fileIdentity(after)
@@ -693,10 +693,10 @@ function readKeyValueFile(
     fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
   );
   try {
-    const before = statSync(fd);
+    const before = fstatSync(fd);
     if (fileIdentity(before) !== fileIdentity(details)) fail(reasonCode);
     const bytes = readFileSync(fd);
-    const after = statSync(fd);
+    const after = fstatSync(fd);
     if (
       bytes.length !== before.size ||
       fileIdentity(before) !== fileIdentity(after)

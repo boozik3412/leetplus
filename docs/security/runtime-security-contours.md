@@ -24,7 +24,7 @@ fail-closed правилу одного контура снова сломать
 | Corporate invite repair  | `STANDARDS_MANAGER` делегирует canonical `SENIOR_ADMINISTRATOR`/`CLUB_ADMINISTRATOR` только внутри собственного store scope; overrides/custom permissions capability-bounded; **deployed**                    |
 | Split-runtime deployment | `DORMANT / NOT INSTALLED`; нужен отдельный production GO                                                                                                                                                           |
 | Corporate landing        | role-aware successor входит в active `22ab6b81…`; real-account canary остаётся отдельной проверкой                                                                                                                 |
-| Release acceleration     | 7/8: topology twin, impact classifier, exact main-push candidate, parallel L2 evidence и resumable five-phase runtime orchestrator добавлены; новый orchestrator source/CI only, production не изменён; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
+| Release acceleration     | 7/8: topology twin, impact classifier, exact main-push candidate, parallel L2 evidence и resumable five-phase runtime orchestrator добавлены; первая control-generation установлена без runtime effect, quiesce/mask hardening проходит новый admission; public/corporate/worker контуры нельзя объединять или понижать ради скорости |
 | Внешний open beta        | `NO-GO` до оставшихся Gate 1MT/2 и controlled production rollout                                                                                                                                                   |
 
 Слияние в `main`, наличие собранных `corporate-main.js`/`guest-main.js` или
@@ -80,7 +80,13 @@ nonauthorizing план, а `apply` остаётся отдельным producti
 Каждая фаза связана immutable intent/evidence/receipt; lost response допускает
 только reconcile той же operation с повторной сверкой installed control,
 active generation, slot link, readiness и authenticated smoke. Previous slot
-остаётся hot rollback. Canonical production-control `install.lock` удерживается
+остаётся hot rollback. Если target до rollout является hot rollback, BIND сам
+выполняет persistent exact `mask --now` обеих instance units; cache и slot-link
+effect разрешены только при exact masked/inactive/process-free состоянии.
+SMOKE снимает маски перед start. Сбой оставляет текущий public slot доступным,
+а target fenced; durable quiesce/unmask intents запрещают принимать или снимать
+pre-existing operator mask. Ручной обход этой границы запрещён. Canonical
+production-control `install.lock` удерживается
 на всей цепочке, включая promoter через проверенный inherited fd, поэтому
 generation bytes нельзя заменить между attestation и effect. Этот coordination
 layer не становится четвёртым

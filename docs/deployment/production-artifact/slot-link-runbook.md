@@ -68,17 +68,31 @@ isolated hydration, promotion, and sealing. The helper independently verifies:
 
 ## Bind an inactive slot
 
-The normal path is an inactive candidate slot. Verify both units are stopped,
-then bind the exact promoted release:
+The normal path is the resumable release orchestrator. A standalone bind is
+allowed only with both exact instance units persistently masked, inactive and
+process-free. Masking with `--now` closes the restart race before cache/link
+effects:
 
 ```bash
-systemctl is-active leetplus-api@blue.service || true
-systemctl is-active leetplus-web@blue.service || true
+systemctl mask --now \
+  leetplus-api@blue.service \
+  leetplus-web@blue.service
+
+/usr/local/libexec/leetplus/prepare-web-slot-cache.sh \
+  --slot blue \
+  --release-sha <exact-40-character-sha>
 
 /usr/local/sbin/leetplus-bind-release-slot bind \
   --slot blue \
   --release-sha <exact-40-character-sha>
 ```
+
+The binder requires exact root-owned symlinks
+`/etc/systemd/system/leetplus-{api,web}@blue.service -> /dev/null` and rechecks
+both unit/cgroup states immediately before the atomic link effect. Keep the
+units masked after bind until the separate smoke step is ready to unmask,
+enable and start them. Do not unmask an incomplete bind merely to restore a hot
+rollback; reconcile the same operation first.
 
 The helper acquires one protected global lock, records an O_EXCL durable intent,
 fsyncs the intent and journal directory, creates a temporary exact symlink,
@@ -96,7 +110,8 @@ success only from a symlink or from a disconnected shell exit status.
 ## Lost response or host/process interruption
 
 If the command was interrupted, timed out, or the operator lost its response,
-do not repeat `bind` and do not modify the link. Run:
+keep the exact instance masks in place, do not repeat `bind` and do not modify
+the link. Run:
 
 ```bash
 /usr/local/sbin/leetplus-bind-release-slot reconcile --slot blue

@@ -4,8 +4,11 @@
 
 Статус: `[███████░░░] 7/8` — topology twin, impact classifier, один exact
 merge-candidate admission, параллельный backup/restored-copy evidence bind и
-resumable runtime rollout реализованы; новый orchestrator пока source/CI only,
-production не изменяется.
+resumable runtime rollout реализованы. Первая control-generation установлена и
+проверена на production, но runtime rollout остановлен до prepare/apply: live
+preflight выявил пропущенную quiesce/mask границу hot-rollback target. Successor
+добавляет crash-safe `mask --now -> cache/bind -> unmask/start`; production
+runtime остаётся на предыдущем healthy SHA до нового exact admission.
 Подробный контракт и целевые метрики:
 [release-pipeline-acceleration.md](./docs/deployment/release-pipeline-acceleration.md).
 
@@ -65,7 +68,9 @@ receipt-contract drift уже после admission.
   Exact plan не разрешает effect; отдельный apply/GO создаёт approval, а
   защищённая SHA-256 цепочка intent/evidence/receipt повторно подтверждает
   незавершённую фазу после lost response. Schema/ACL/worker effects остаются у
-  отдельных L2 controllers. Контракт:
+  отдельных L2 controllers. Первый production preflight дополнительно закрепил
+  обязательную ownership-границу hot rollback: BIND сам маскирует/останавливает
+  target units, а SMOKE снимает masks только перед start. Контракт:
   [`resumable-release-orchestrator.md`](./docs/deployment/resumable-release-orchestrator.md).
 - [ ] `REL-ACC-008`: публиковать duration/failure-phase summary для каждого
   rollout и держать p50/p95 по lane, чтобы ускорение измерялось, а не

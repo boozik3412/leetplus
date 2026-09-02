@@ -71,9 +71,14 @@ orchestrator выполняет exact `HYDRATE -> BIND -> SMOKE -> CUTOVER -> PO
 после отдельного production GO. Защищённая цепочка intent/evidence/receipt
 продолжает ту же operation после lost response и отклоняет control, slot,
 receipt или generation drift; previous slot остаётся hot rollback. Orchestrator
-включён в immutable production-control payload и проверяется в Fast/Full, но
-ещё не устанавливался в production и не выполняет Prisma/SQL, ACL, auth/scope,
-guest flags или worker effects. Последний backlog item — измеримые
+включён в immutable production-control payload и проверяется в Fast/Full.
+Первая admitted control-generation `f521e201…` установлена и прошла root
+verification, но runtime rollout остановлен до plan/apply: live preflight
+обнаружил отсутствовавший переход hot-rollback target в exact
+masked/inactive состояние между cache и slot bind. Successor переносит
+`mask --now` в BIND, а `unmask` — в SMOKE; production runtime/nginx/DB остаются
+на healthy `22ab6b81…` до нового exact admission. Orchestrator не выполняет
+Prisma/SQL, ACL, auth/scope, guest flags или worker effects. Последний backlog item — измеримые
 duration/failure-phase p50/p95.
 
 Ниже сохранена история fail-closed restored-copy итераций, которые предшествовали

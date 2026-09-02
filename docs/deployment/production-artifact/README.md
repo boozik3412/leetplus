@@ -368,6 +368,12 @@ root-owned, service-readable и service-non-writable. Пустой `.next/cache`
 служит только bind-mount point; Web instance получает отдельный persistent
 `/var/cache/leetplus-web-blue|green`. Перед первым start и каждой сменой SHA root
 запускает `prepare-web-slot-cache.sh` только при доказанно остановленном unit.
+Допустимы ровно два unit-file состояния: обычное `loaded/enabled` либо exact
+root-owned instance mask `/etc/systemd/system/leetplus-web@<slot>.service ->
+/dev/null`. Resumable orchestrator использует второй вариант: BIND сначала
+выполняет `mask --now` для API/Web, затем готовит cache и меняет slot link;
+SMOKE снимает маски перед enable/start. Неожиданный mask target, owner или
+systemd state остаётся stop condition.
 Старый cache переносится в root-only quarantine, а root-owned authoritative
 marker `/var/lib/leetplus/web-cache-releases/<slot>.sha` привязывает новый cache
 к exact SHA. Web preflight отклоняет отсутствующий или чужой marker. Остальная

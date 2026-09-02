@@ -811,5 +811,18 @@ grep -F -x 'WEB_CACHE_PREPARED_SLOT=blue' /run/fixture-cache-prepared.out >/dev/
   sed -n '1,120p' /run/fixture-cache-prepared.out >&2
   die 'cache preparer did not publish its exact success receipt'
 }
+/usr/bin/systemctl mask --now leetplus-web@blue.service
+[[ -L /etc/systemd/system/leetplus-web@blue.service \
+  && "$(realpath -- /etc/systemd/system/leetplus-web@blue.service)" == /dev/null ]] \
+  || die 'real systemd fixture did not create the exact Web instance mask'
+/usr/bin/bash -p /usr/local/libexec/leetplus/prepare-web-slot-cache.sh \
+  --slot blue --release-sha 1111111111111111111111111111111111111111 \
+  > /run/fixture-cache-masked-retry.out
+grep -F -x 'WEB_CACHE_ALREADY_PREPARED_SLOT=blue' \
+  /run/fixture-cache-masked-retry.out >/dev/null || {
+    sed -n '1,120p' /run/fixture-cache-masked-retry.out >&2
+    die 'cache preparer did not accept an exact masked inactive Web slot'
+  }
+/usr/bin/systemctl unmask leetplus-web@blue.service
 
 printf 'production legacy rollback installer root fixture: PASS\n'

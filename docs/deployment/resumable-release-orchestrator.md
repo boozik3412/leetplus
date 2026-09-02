@@ -67,8 +67,8 @@ generation останавливает продолжение.
 | Фаза | Effect | Точное восстановление после lost response |
 | --- | --- | --- |
 | `HYDRATE` | versioned hydration unit + immutable promotion | existing sealed release принимается только через тот же hydration receipt; promoter выполняет собственный reconcile |
-| `BIND` | cache preparation + inactive slot link | pending binder intent продолжает только `reconcile`; accepted link обязан иметь exact latest bind receipt |
-| `SMOKE` | enable/start target API/Web, loopback readiness и authenticated reads | start/probes повторяются идемпотентно; invocation IDs и результаты должны совпасть |
+| `BIND` | persistent exact instance masks + `--now`, cache preparation + inactive slot link | повтор оставляет target fenced; cache принимает только stopped `enabled` unit или exact root-owned `/etc/systemd/system/<unit> -> /dev/null`; pending binder intent продолжает только `reconcile` |
+| `SMOKE` | снять exact masks, enable/start target API/Web, loopback readiness и authenticated reads | unmask/start/probes повторяются идемпотентно; invocation IDs и результаты должны совпасть |
 | `CUTOVER` | штатный atomic nginx switch с watchdog | pending child intent проходит `recover-pending`; terminal successor принимается только как baseline generation + 1 с exact target и previous-runtime contract |
 | `POSTCHECK` | public readiness + authenticated reads | read-only проверки повторяются; active link и accepted cutover receipt должны остаться теми же |
 
@@ -77,6 +77,18 @@ generation останавливает продолжение.
 сравнивает стабильные authority-поля с записанным evidence. Завершение
 публикует `final.json` с решением `ROLLOUT_PHASES_COMPLETED`. Предыдущий slot
 контроллер не останавливает — он остаётся hot rollback.
+
+До BIND target slot может быть предыдущим hot rollback и поэтому оставаться
+`active/enabled`. BIND сам создаёт persistent instance masks для обеих unit с
+`systemctl mask --now`, после чего cache и slot link могут меняться только при
+доказанно `masked/inactive/process-free` состоянии. Маски снимаются лишь в
+SMOKE непосредственно перед enable/start. Сбой до SMOKE оставляет public active
+slot неизменным, а target — безопасно fenced; `resume` продолжает ту же
+operation, не требуя ручной правки link или records. Отдельные durable
+quiesce/unmask intents связаны с plan и phase intent: контроллер не принимает и
+не снимает pre-existing operator mask, а после interrupted `mask --now` может
+продолжить только маски, созданные уже внутри той же operation. Эта схема
+использует record contract `LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V2`.
 
 ## Операторский интерфейс
 

@@ -41,16 +41,19 @@ count=$((count + 1))
 printf '%s\n' "$count" > "$TEST_SYSTEMCTL_COUNT"
 control_group="${TEST_CONTROL_GROUP:-/system.slice/leetplus-web@blue.service}"
 [[ "${TEST_EMPTY_CONTROL_GROUP:-false}" != true ]] || control_group=''
+unit_file_state="${TEST_UNIT_FILE_STATE:-enabled}"
+load_state=loaded
+[[ "$unit_file_state" != masked ]] || load_state=masked
 if [[ "${TEST_RACE_AT:-0}" == "$count" ]]; then
   printf '%s\n' \
     'ActiveState=active' 'SubState=running' 'MainPID=99999' \
     "ControlGroup=${control_group}" \
-    'UnitFileState=enabled' 'NeedDaemonReload=no'
+    "LoadState=${load_state}" "UnitFileState=${unit_file_state}" 'NeedDaemonReload=no'
 else
   printf '%s\n' \
     'ActiveState=inactive' 'SubState=dead' 'MainPID=0' \
     "ControlGroup=${control_group}" \
-    'UnitFileState=enabled' 'NeedDaemonReload=no'
+    "LoadState=${load_state}" "UnitFileState=${unit_file_state}" 'NeedDaemonReload=no'
 fi
 SYSTEMCTL
 chmod 0700 "$TEST_ROOT/bin/systemctl"
@@ -59,7 +62,7 @@ prepare_fixture() {
   local root="$1"
   mkdir -p \
     "$root/cache" "$root/markers" "$root/state" \
-    "$root/cgroup/system.slice/leetplus-web@blue.service"
+    "$root/cgroup/system.slice/leetplus-web@blue.service" "$root/unit-masks"
   : > "$root/cgroup/system.slice/leetplus-web@blue.service/cgroup.procs"
   : > "$root/systemctl.count"
 }
@@ -72,6 +75,7 @@ run_preparer() {
       --slot blue --release-sha "$RELEASE_SHA" \
       --cache-root "$root/cache" --marker-root "$root/markers" \
       --cutover-state-root "$root/state" --cgroup-root "$root/cgroup" \
+      --unit-mask-root "$root/unit-masks" \
       --service-user fixture-web --unprivileged-test-mode
 }
 
@@ -91,6 +95,35 @@ run_preparer "$empty_control_group_root" env TEST_EMPTY_CONTROL_GROUP=true \
   > "$empty_control_group_root/out"
 grep -F -x 'WEB_CACHE_PREPARED_SLOT=blue' "$empty_control_group_root/out" >/dev/null
 test "$(tr -d '\r\n' < "$empty_control_group_root/markers/blue.sha")" = "$RELEASE_SHA"
+
+masked_root="$TEST_ROOT/masked"
+prepare_fixture "$masked_root"
+ln -s /dev/null "$masked_root/unit-masks/leetplus-web@blue.service"
+run_preparer "$masked_root" env TEST_UNIT_FILE_STATE=masked > "$masked_root/out"
+grep -F -x 'WEB_CACHE_PREPARED_SLOT=blue' "$masked_root/out" >/dev/null
+test "$(tr -d '\r\n' < "$masked_root/markers/blue.sha")" = "$RELEASE_SHA"
+
+missing_mask_root="$TEST_ROOT/missing-mask"
+prepare_fixture "$missing_mask_root"
+if run_preparer "$missing_mask_root" env TEST_UNIT_FILE_STATE=masked \
+  > "$missing_mask_root/out" 2>&1; then
+  printf 'cache preparer accepted a missing systemd instance mask\n' >&2
+  exit 1
+fi
+grep -F 'Web slot systemd mask is not exact' "$missing_mask_root/out" >/dev/null
+test ! -e "$missing_mask_root/markers/blue.sha"
+
+wrong_mask_root="$TEST_ROOT/wrong-mask"
+prepare_fixture "$wrong_mask_root"
+printf 'not-dev-null\n' > "$wrong_mask_root/mask-target"
+ln -s "$wrong_mask_root/mask-target" "$wrong_mask_root/unit-masks/leetplus-web@blue.service"
+if run_preparer "$wrong_mask_root" env TEST_UNIT_FILE_STATE=masked \
+  > "$wrong_mask_root/out" 2>&1; then
+  printf 'cache preparer accepted a foreign systemd instance mask\n' >&2
+  exit 1
+fi
+grep -F 'Web slot systemd mask is not exact' "$wrong_mask_root/out" >/dev/null
+test ! -e "$wrong_mask_root/markers/blue.sha"
 
 wrong_control_group_root="$TEST_ROOT/wrong-control-group"
 prepare_fixture "$wrong_control_group_root"

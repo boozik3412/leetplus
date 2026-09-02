@@ -26,6 +26,7 @@ const releaseRoot = path.join(root, "srv/leetplus/releases");
 const slotRoot = path.join(root, "srv/leetplus/slots");
 const receiptRoot = path.join(root, "var/lib/leetplus/deploy-receipts");
 const nginxRoot = path.join(root, "etc/nginx/leetplus");
+const systemdUnitRoot = path.join(root, "etc/systemd/system");
 const releaseSha = state.releaseSha;
 
 function replaceLink(linkPath, target) {
@@ -215,7 +216,81 @@ switch (name) {
     writeControlAttestation();
     break;
   case "systemctl": {
-    const command = argv[0];
+    const command = argv[0] === "--quiet" ? argv[1] : argv[0];
+    if (command === "mask") {
+      if (
+        argv.join(" ") !==
+        "--quiet mask --now leetplus-api@" +
+          state.targetSlot +
+          ".service leetplus-web@" +
+          state.targetSlot +
+          ".service"
+      ) {
+        process.exit(94);
+      }
+      state.maskCalls += 1;
+      if (!state.slotMasked) {
+        for (const unit of [
+          "leetplus-api@" + state.targetSlot + ".service",
+          "leetplus-web@" + state.targetSlot + ".service",
+        ]) {
+          symlinkSync("/dev/null", path.join(systemdUnitRoot, unit));
+        }
+        state.slotMasked = true;
+        state.maskEffects += 1;
+      }
+      save();
+      break;
+    }
+    if (command === "unmask") {
+      if (
+        argv.join(" ") !==
+        "--quiet unmask leetplus-api@" +
+          state.targetSlot +
+          ".service leetplus-web@" +
+          state.targetSlot +
+          ".service"
+      ) {
+        process.exit(95);
+      }
+      state.unmaskCalls += 1;
+      if (
+        process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_UNMASK_ONCE === "true" &&
+        state.unmaskFailures === 0
+      ) {
+        state.unmaskFailures += 1;
+        save();
+        process.exit(96);
+      }
+      if (state.slotMasked) {
+        for (const unit of [
+          "leetplus-api@" + state.targetSlot + ".service",
+          "leetplus-web@" + state.targetSlot + ".service",
+        ]) {
+          unlinkSync(path.join(systemdUnitRoot, unit));
+        }
+        state.slotMasked = false;
+        state.unmaskEffects += 1;
+      }
+      save();
+      break;
+    }
+    if (command === "stop") {
+      if (
+        !state.slotMasked ||
+        argv.join(" ") !==
+          "stop leetplus-api@" +
+            state.targetSlot +
+            ".service leetplus-web@" +
+            state.targetSlot +
+            ".service"
+      ) {
+        process.exit(102);
+      }
+      state.stopCalls += 1;
+      save();
+      break;
+    }
     if (
       command === "start" &&
       argv[1]?.startsWith("leetplus-release-hydrate@")
@@ -229,17 +304,31 @@ switch (name) {
       break;
     }
     if (command === "enable") {
+      if (state.slotMasked) process.exit(97);
       state.enableCalls += 1;
       save();
       break;
     }
     if (command === "start") {
+      if (state.slotMasked) process.exit(98);
       state.runtimeStartCalls += 1;
       save();
       break;
     }
     if (command === "show") {
       const unit = argv.at(-1);
+      const property = argv
+        .find((argument) => argument.startsWith("--property="))
+        ?.slice("--property=".length);
+      if (property === "LoadState") {
+        process.stdout.write(state.slotMasked ? "masked\n" : "loaded\n");
+        break;
+      }
+      if (property === "UnitFileState") {
+        process.stdout.write(state.slotMasked ? "masked\n" : "enabled\n");
+        break;
+      }
+      if (property !== "InvocationID") process.exit(103);
       process.stdout.write(
         (unit.includes("api@") ? "a" : "b").repeat(32) + "\n",
       );
@@ -259,11 +348,21 @@ switch (name) {
     process.stdout.write("PROMOTED_RELEASE_SHA=" + releaseSha + "\n");
     break;
   case "prepare-web-slot-cache":
+    if (!state.slotMasked) process.exit(99);
     state.cacheCalls += 1;
+    if (
+      process.env.TEST_ORCHESTRATOR_FIXTURE_FAIL_CACHE_ONCE === "true" &&
+      state.cacheFailures === 0
+    ) {
+      state.cacheFailures += 1;
+      save();
+      process.exit(100);
+    }
     save();
     process.stdout.write("WEB_CACHE_PREPARED_SHA=" + releaseSha + "\n");
     break;
   case "bind-release-slot":
+    if (!state.slotMasked) process.exit(101);
     state.bindCalls += 1;
     if (!state.bound) {
       state.bound = true;

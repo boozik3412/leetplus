@@ -23,7 +23,7 @@ import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-export const CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V1";
+export const CONTRACT_VERSION = "LEETPLUS_RESUMABLE_RELEASE_ORCHESTRATOR_V2";
 export const PLAN_DECISION = "PREPARED_NOT_EFFECT_AUTHORIZATION";
 export const APPROVAL_DECISION = "EXACT_PLAN_DIGEST_APPLY_AUTHORIZED";
 export const COMPLETE_DECISION = "ROLLOUT_PHASES_COMPLETED";
@@ -372,6 +372,7 @@ function buildPaths(args) {
       slotRoot: "/srv/leetplus/slots",
       stateRoot: "/var/lib/leetplus/deploy-receipts/release-orchestrator",
       systemctl: "/usr/bin/systemctl",
+      systemdUnitRoot: "/etc/systemd/system",
     };
   }
   const root = path.resolve(args.fixtureRoot);
@@ -397,6 +398,7 @@ function buildPaths(args) {
       "var/lib/leetplus/deploy-receipts/release-orchestrator",
     ),
     systemctl: path.join(commandRoot, "systemctl"),
+    systemdUnitRoot: path.join(root, "etc/systemd/system"),
   };
 }
 
@@ -1111,6 +1113,7 @@ function validateEvidenceDetails(details, phase, plan) {
     ],
     BIND: [
       "commandOutputSha256",
+      "quiesceIntentSha256",
       "releaseSha",
       "slotLinkReceiptPath",
       "slotLinkReceiptSha256",
@@ -1123,6 +1126,7 @@ function validateEvidenceDetails(details, phase, plan) {
       "readinessSha256",
       "releaseSha",
       "targetSlot",
+      "unmaskIntentSha256",
       "webInvocationId",
     ],
     CUTOVER: [
@@ -1550,8 +1554,209 @@ function hydratePhase(plan, paths, args) {
   };
 }
 
-function bindPhase(plan, paths, args) {
-  let commandOutput = runCommand(
+function readSystemdProperty(unit, property, paths, args) {
+  const output = runCommand(
+    paths.systemctl,
+    ["show", "--value", "--property=" + property, unit],
+    args,
+    "ORCHESTRATOR_SYSTEMD_UNIT_BOUNDARY",
+    30000,
+  );
+  if (
+    !output.endsWith("\n") ||
+    output.includes("\r") ||
+    output.slice(0, -1).includes("\n")
+  ) {
+    fail("ORCHESTRATOR_SYSTEMD_UNIT_BOUNDARY_INVALID");
+  }
+  return output.slice(0, -1);
+}
+
+function inspectInstanceMask(unit, paths, args) {
+  const loadState = readSystemdProperty(unit, "LoadState", paths, args);
+  const unitFileState = readSystemdProperty(
+    unit,
+    "UnitFileState",
+    paths,
+    args,
+  );
+  const maskPath = path.join(paths.systemdUnitRoot, unit);
+  let details = null;
+  try {
+    details = lstatSync(maskPath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  if (!details) {
+    if (loadState !== "loaded" || unitFileState !== "enabled") {
+      fail("ORCHESTRATOR_TARGET_UNIT_BASELINE_INVALID");
+    }
+    return "UNMASKED";
+  }
+  const expectedUid = args.testMode ? process.getuid?.() : 0;
+  const expectedGid = args.testMode ? process.getgid?.() : 0;
+  let resolvedMask = "";
+  try {
+    resolvedMask = realpathSync(maskPath);
+  } catch {
+    fail("ORCHESTRATOR_TARGET_UNIT_MASK_INVALID");
+  }
+  if (
+    !details.isSymbolicLink() ||
+    resolvedMask !== "/dev/null" ||
+    details.uid !== expectedUid ||
+    details.gid !== expectedGid ||
+    loadState !== "masked" ||
+    unitFileState !== "masked"
+  ) {
+    fail("ORCHESTRATOR_TARGET_UNIT_MASK_INVALID");
+  }
+  return "MASKED";
+}
+
+function validateSlotTransitionIntent(
+  record,
+  recordType,
+  decision,
+  plan,
+  phaseIntentSha256,
+) {
+  exactKeys(
+    record,
+    [
+      "apiUnit",
+      "contractVersion",
+      "createdAt",
+      "decision",
+      "operationId",
+      "phaseIntentSha256",
+      "planSha256",
+      "recordType",
+      "releaseSha",
+      "schemaVersion",
+      "targetSlot",
+      "webUnit",
+    ],
+    "ORCHESTRATOR_SLOT_TRANSITION_INTENT_INVALID",
+  );
+  const apiUnit = "leetplus-api@" + plan.targetSlot + ".service";
+  const webUnit = "leetplus-web@" + plan.targetSlot + ".service";
+  if (
+    record.schemaVersion !== 1 ||
+    record.contractVersion !== CONTRACT_VERSION ||
+    record.recordType !== recordType ||
+    record.operationId !== plan.operationId ||
+    record.planSha256 !== canonicalRecordSha256(plan) ||
+    record.phaseIntentSha256 !== phaseIntentSha256 ||
+    record.releaseSha !== plan.releaseSha ||
+    record.targetSlot !== plan.targetSlot ||
+    record.apiUnit !== apiUnit ||
+    record.webUnit !== webUnit ||
+    record.decision !== decision
+  ) {
+    fail("ORCHESTRATOR_SLOT_TRANSITION_INTENT_INVALID");
+  }
+  exactIso(record.createdAt, "ORCHESTRATOR_SLOT_TRANSITION_INTENT_INVALID");
+}
+
+function ensureSlotTransitionIntent(
+  plan,
+  paths,
+  args,
+  phaseIntentSha256,
+  options,
+) {
+  const directory = operationDirectory(paths, plan.operationId);
+  const intentPath = path.join(directory, options.fileName);
+  const apiUnit = "leetplus-api@" + plan.targetSlot + ".service";
+  const webUnit = "leetplus-web@" + plan.targetSlot + ".service";
+  let intent;
+  if (existsSync(intentPath)) {
+    intent = readCanonicalJson(intentPath, args, [0o400]);
+    validateSlotTransitionIntent(
+      intent.value,
+      options.recordType,
+      options.decision,
+      plan,
+      phaseIntentSha256,
+    );
+  } else {
+    for (const unit of [apiUnit, webUnit]) {
+      if (inspectInstanceMask(unit, paths, args) !== options.initialState) {
+        fail(options.initialStateReason);
+      }
+    }
+    const value = {
+      schemaVersion: 1,
+      contractVersion: CONTRACT_VERSION,
+      recordType: options.recordType,
+      operationId: plan.operationId,
+      planSha256: canonicalRecordSha256(plan),
+      phaseIntentSha256,
+      releaseSha: plan.releaseSha,
+      targetSlot: plan.targetSlot,
+      apiUnit,
+      webUnit,
+      createdAt: nowIso(),
+      decision: options.decision,
+    };
+    publishCanonicalJson(intentPath, value, 0o400, args);
+    intent = { sha256: canonicalRecordSha256(value), value };
+  }
+  const unitStates = new Map();
+  for (const unit of [apiUnit, webUnit]) {
+    const state = inspectInstanceMask(unit, paths, args);
+    if (!options.allowedStates.includes(state)) {
+      fail("ORCHESTRATOR_SLOT_TRANSITION_STATE_INVALID");
+    }
+    unitStates.set(unit, state);
+  }
+  return { apiUnit, intentSha256: intent.sha256, unitStates, webUnit };
+}
+
+function bindPhase(plan, paths, args, phaseIntentSha256) {
+  const apiUnit = "leetplus-api@" + plan.targetSlot + ".service";
+  const webUnit = "leetplus-web@" + plan.targetSlot + ".service";
+  const quiesce = ensureSlotTransitionIntent(
+    plan,
+    paths,
+    args,
+    phaseIntentSha256,
+    {
+      allowedStates: ["UNMASKED", "MASKED"],
+      decision: "TARGET_SLOT_QUIESCE_AUTHORIZED",
+      fileName: "02-bind-quiesce.intent.json",
+      initialState: "UNMASKED",
+      initialStateReason: "ORCHESTRATOR_TARGET_PREEXISTING_MASK",
+      recordType: "TARGET_SLOT_QUIESCE_INTENT",
+    },
+  );
+  let commandOutput = "";
+  const unitsToMask = [apiUnit, webUnit].filter(
+    (unit) => quiesce.unitStates.get(unit) === "UNMASKED",
+  );
+  if (unitsToMask.length > 0) {
+    commandOutput += runCommand(
+      paths.systemctl,
+      ["--quiet", "mask", "--now", ...unitsToMask],
+      args,
+      "ORCHESTRATOR_SLOT_QUIESCE",
+      180000,
+    );
+  }
+  commandOutput += runCommand(
+    paths.systemctl,
+    ["stop", apiUnit, webUnit],
+    args,
+    "ORCHESTRATOR_SLOT_STOP",
+    180000,
+  );
+  for (const unit of [apiUnit, webUnit]) {
+    if (inspectInstanceMask(unit, paths, args) !== "MASKED") {
+      fail("ORCHESTRATOR_TARGET_UNIT_MASK_INVALID");
+    }
+  }
+  commandOutput += runCommand(
     paths.cache,
     ["--slot", plan.targetSlot, "--release-sha", plan.releaseSha],
     args,
@@ -1594,6 +1799,7 @@ function bindPhase(plan, paths, args) {
   }
   return {
     commandOutputSha256: sha256(commandOutput),
+    quiesceIntentSha256: quiesce.intentSha256,
     releaseSha: plan.releaseSha,
     slotLinkReceiptPath: authority.receiptPath,
     slotLinkReceiptSha256: authority.receiptSha256,
@@ -1601,10 +1807,42 @@ function bindPhase(plan, paths, args) {
   };
 }
 
-function smokePhase(plan, paths, args) {
+function smokePhase(plan, paths, args, phaseIntentSha256) {
   const apiUnit = "leetplus-api@" + plan.targetSlot + ".service";
   const webUnit = "leetplus-web@" + plan.targetSlot + ".service";
-  let commandOutput = runCommand(
+  const unmask = ensureSlotTransitionIntent(
+    plan,
+    paths,
+    args,
+    phaseIntentSha256,
+    {
+      allowedStates: ["MASKED", "UNMASKED"],
+      decision: "TARGET_SLOT_UNMASK_AUTHORIZED",
+      fileName: "03-smoke-unmask.intent.json",
+      initialState: "MASKED",
+      initialStateReason: "ORCHESTRATOR_TARGET_MASK_MISSING",
+      recordType: "TARGET_SLOT_UNMASK_INTENT",
+    },
+  );
+  let commandOutput = "";
+  const unitsToUnmask = [apiUnit, webUnit].filter(
+    (unit) => unmask.unitStates.get(unit) === "MASKED",
+  );
+  if (unitsToUnmask.length > 0) {
+    commandOutput += runCommand(
+      paths.systemctl,
+      ["--quiet", "unmask", ...unitsToUnmask],
+      args,
+      "ORCHESTRATOR_SLOT_UNMASK",
+      120000,
+    );
+  }
+  for (const unit of [apiUnit, webUnit]) {
+    if (inspectInstanceMask(unit, paths, args) !== "UNMASKED") {
+      fail("ORCHESTRATOR_TARGET_UNIT_UNMASK_INVALID");
+    }
+  }
+  commandOutput += runCommand(
     paths.systemctl,
     ["enable", apiUnit, webUnit],
     args,
@@ -1646,6 +1884,7 @@ function smokePhase(plan, paths, args) {
     readinessSha256: sha256(readiness),
     releaseSha: plan.releaseSha,
     targetSlot: plan.targetSlot,
+    unmaskIntentSha256: unmask.intentSha256,
     webInvocationId: readInvocationId(webUnit, paths, args),
   };
 }
@@ -1793,7 +2032,7 @@ function postcheckPhase(plan, paths, args) {
   };
 }
 
-function executePhase(phase, plan, paths, args) {
+function executePhase(phase, plan, paths, args, phaseIntentSha256) {
   const handlers = {
     HYDRATE: hydratePhase,
     BIND: bindPhase,
@@ -1801,7 +2040,7 @@ function executePhase(phase, plan, paths, args) {
     CUTOVER: cutoverPhase,
     POSTCHECK: postcheckPhase,
   };
-  return handlers[phase](plan, paths, args);
+  return handlers[phase](plan, paths, args, phaseIntentSha256);
 }
 
 function stableEvidenceDetails(phase, details) {
@@ -2067,7 +2306,13 @@ function runPipeline(context, paths, args) {
       if (beforeControl !== context.plan.controlAttestationSha256) {
         fail("ORCHESTRATOR_CONTROL_GENERATION_DRIFT");
       }
-      const observed = executePhase(phase, context.plan, paths, args);
+      const observed = executePhase(
+        phase,
+        context.plan,
+        paths,
+        args,
+        intent.sha256,
+      );
       validateEvidenceDetails(observed, phase, context.plan);
       const afterControl = verifyInstalledControl(
         context.plan.releaseSha,
@@ -2087,7 +2332,13 @@ function runPipeline(context, paths, args) {
       if (beforeControl !== context.plan.controlAttestationSha256) {
         fail("ORCHESTRATOR_CONTROL_GENERATION_DRIFT");
       }
-      const details = executePhase(phase, context.plan, paths, args);
+      const details = executePhase(
+        phase,
+        context.plan,
+        paths,
+        args,
+        intent.sha256,
+      );
       maybeSimulateLostResponse(phase, context, args);
       const afterControl = verifyInstalledControl(
         context.plan.releaseSha,

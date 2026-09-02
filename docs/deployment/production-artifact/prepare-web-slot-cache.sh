@@ -57,6 +57,7 @@ cache_parent='/var/cache'
 marker_root='/var/lib/leetplus/web-cache-releases'
 cutover_state_root='/var/lib/leetplus/deploy-receipts'
 cgroup_root='/sys/fs/cgroup'
+unit_mask_root='/etc/systemd/system'
 service_user=''
 unprivileged_test_mode=false
 while (($# > 0)); do
@@ -67,6 +68,7 @@ while (($# > 0)); do
     --marker-root) marker_root="${2:-}"; shift 2 ;;
     --cutover-state-root) cutover_state_root="${2:-}"; shift 2 ;;
     --cgroup-root) cgroup_root="${2:-}"; shift 2 ;;
+    --unit-mask-root) unit_mask_root="${2:-}"; shift 2 ;;
     --service-user) service_user="${2:-}"; shift 2 ;;
     --unprivileged-test-mode) unprivileged_test_mode=true; shift ;;
     --help|-h)
@@ -86,8 +88,9 @@ else
   [[ "$cache_parent" == '/var/cache' ]] || die 'production cache root cannot be overridden'
   [[ "$marker_root" == '/var/lib/leetplus/web-cache-releases' ]] || die 'production marker root cannot be overridden'
   [[ "$cutover_state_root" == '/var/lib/leetplus/deploy-receipts' \
-    && "$cgroup_root" == '/sys/fs/cgroup' ]] \
-    || die 'production cutover/cgroup roots cannot be overridden'
+    && "$cgroup_root" == '/sys/fs/cgroup' \
+    && "$unit_mask_root" == '/etc/systemd/system' ]] \
+    || die 'production cutover/cgroup/systemd roots cannot be overridden'
   PATH='/usr/sbin:/usr/bin:/sbin:/bin'
   export PATH
 fi
@@ -195,12 +198,21 @@ stable_process_status_has_uid() {
 }
 
 unit="leetplus-web@${slot}.service"
+[[ -d "$unit_mask_root" && ! -L "$unit_mask_root" ]] \
+  || die 'systemd unit mask root is absent or unsafe'
+unit_mask_root="$(realpath -e -- "$unit_mask_root")"
 if [[ "$unprivileged_test_mode" == true ]]; then
   install -d -m 0700 -- "$cutover_state_root"
+  expected_mask_identity="$(id -u):$(id -g)"
 else
+  [[ "$unit_mask_root" == '/etc/systemd/system' \
+    && "$(stat -c '%u:%g' -- "$unit_mask_root")" == '0:0' \
+    && -z "$(find -P "$unit_mask_root" -maxdepth 0 -perm /022 -print -quit)" ]] \
+    || die 'systemd unit mask root is not canonical root authority'
   [[ -d "$cutover_state_root" && ! -L "$cutover_state_root" \
     && "$(stat -c '%U:%G:%a' -- "$cutover_state_root")" == 'root:root:700' ]] \
     || die 'shared cutover state root is absent or unsafe'
+  expected_mask_identity='0:0'
 fi
 cutover_state_root="$(realpath -e -- "$cutover_state_root")"
 if [[ "$unprivileged_test_mode" == false ]]; then
@@ -284,7 +296,8 @@ unit_property() {
 
 attest_slot_stopped() {
   local phase="$1" snapshot active_state sub_state main_pid control_group unit_file_state need_reload
-  local expected_control_group cgroup_path pid_inventory status_file status_result
+  local load_state expected_control_group cgroup_path pid_inventory status_file status_result
+  local mask_path unit_file_boundary_safe
   snapshot="$(timeout --foreground --kill-after=2s 10s systemctl show --all --no-pager "$unit")" \
     || die "cannot prove Web slot unit state (${phase})"
   [[ -n "$snapshot" && ${#snapshot} -le 262144 && "$snapshot" != *$'\r'* ]] \
@@ -293,14 +306,25 @@ attest_slot_stopped() {
   sub_state="$(unit_property "$snapshot" SubState)" || die "Web slot SubState missing (${phase})"
   main_pid="$(unit_property "$snapshot" MainPID)" || die "Web slot MainPID missing (${phase})"
   control_group="$(unit_property "$snapshot" ControlGroup)" || die "Web slot ControlGroup missing (${phase})"
+  load_state="$(unit_property "$snapshot" LoadState)" || die "Web slot LoadState missing (${phase})"
   unit_file_state="$(unit_property "$snapshot" UnitFileState)" || die "Web slot UnitFileState missing (${phase})"
   need_reload="$(unit_property "$snapshot" NeedDaemonReload)" || die "Web slot NeedDaemonReload missing (${phase})"
+  unit_file_boundary_safe=false
+  if [[ "$load_state" == loaded && "$unit_file_state" == enabled ]]; then
+    unit_file_boundary_safe=true
+  elif [[ "$load_state" == masked && "$unit_file_state" == masked ]]; then
+    mask_path="${unit_mask_root}/${unit}"
+    [[ -L "$mask_path" && "$(realpath -- "$mask_path")" == '/dev/null' \
+      && "$(stat -c '%u:%g' -- "$mask_path")" == "$expected_mask_identity" ]] \
+      || die "Web slot systemd mask is not exact (${phase})"
+    unit_file_boundary_safe=true
+  fi
   expected_control_group="/system.slice/${unit}"
   [[ ( "$active_state" == inactive && "$sub_state" == dead \
       || "$active_state" == failed && "$sub_state" == failed ) \
     && "$main_pid" == 0 \
     && ( -z "$control_group" || "$control_group" == "$expected_control_group" ) \
-    && "$unit_file_state" == enabled && "$need_reload" == no ]] \
+    && "$unit_file_boundary_safe" == true && "$need_reload" == no ]] \
     || die "Web slot must be stopped with no MainPID before cache preparation (${phase})"
   # systemd 255 can omit/prune ControlGroup for a loaded, inactive instance
   # that has never owned a process. Inspect the canonical unit path anyway so

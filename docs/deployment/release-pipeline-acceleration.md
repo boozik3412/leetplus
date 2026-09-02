@@ -1,6 +1,6 @@
 # Ускорение безопасного release pipeline
 
-Статус: **5/8 backlog items implemented, source/CI only**
+Статус: **6/8 backlog items implemented, source/CI only**
 
 Актуально на: **02.09.2026**
 

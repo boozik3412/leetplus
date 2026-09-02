@@ -194,7 +194,10 @@ property_value() {
   esac
   case "$property" in
     LoadState)
-      if [[ -L "/run/systemd/system/${unit}" \
+      if [[ -L "/etc/systemd/system/${unit}" \
+        && "$(readlink -- "/etc/systemd/system/${unit}")" == /dev/null ]]; then
+        printf 'masked\n'
+      elif [[ -L "/run/systemd/system/${unit}" \
         && "$(readlink -- "/run/systemd/system/${unit}")" == /dev/null ]] \
         && { [[ "$unit" == leetplus-rollback-egress.service \
             && -e /run/fixture-systemd255-loaded-egress ]] \
@@ -332,15 +335,23 @@ case "$command_name" in
     exit 0
     ;;
   mask)
+    mask_root=/etc/systemd/system
+    for argument in "$@"; do
+      [[ "$argument" != --runtime ]] || mask_root=/run/systemd/system
+    done
     for argument in "$@"; do
       [[ "$argument" == leetplus-* ]] || continue
-      ln -s /dev/null "/run/systemd/system/${argument}"
+      ln -s /dev/null "${mask_root}/${argument}"
     done
     ;;
   unmask)
+    mask_root=/etc/systemd/system
+    for argument in "$@"; do
+      [[ "$argument" != --runtime ]] || mask_root=/run/systemd/system
+    done
     for argument in "$@"; do
       [[ "$argument" == leetplus-* ]] || continue
-      rm -f "/run/systemd/system/${argument}"
+      rm -f "${mask_root}/${argument}"
     done
     ;;
   show)
@@ -360,10 +371,13 @@ case "$command_name" in
         ;;
     esac
     if ((${#properties[@]} == 0)); then
+      load_state="$(property_value "$unit" LoadState)"
+      unit_file_state=enabled
+      [[ "$load_state" != masked ]] || unit_file_state=masked
       printf '%s\n' \
         'ActiveState=inactive' 'SubState=dead' 'MainPID=0' \
         "ControlGroup=/system.slice/${unit}" \
-        'UnitFileState=enabled' 'NeedDaemonReload=no'
+        "LoadState=${load_state}" "UnitFileState=${unit_file_state}" 'NeedDaemonReload=no'
       exit 0
     fi
     for property in "${properties[@]}"; do

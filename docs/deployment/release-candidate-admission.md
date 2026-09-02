@@ -84,3 +84,8 @@ intermediate authority.
 restored-copy для своей lane, installed-control verification, signed controller,
 blue/green rollback/postcheck и отдельное подтверждение production effect
 остаются обязательными.
+
+Для `L2_SCHEMA_SECURITY` backup/off-host copy и disposable restored-copy можно
+начинать параллельно этому admission. Nonauthorizing preparation и обязательный
+post-admission live rebind описаны в
+[`parallel-backup-restored-copy-evidence.md`](./parallel-backup-restored-copy-evidence.md).

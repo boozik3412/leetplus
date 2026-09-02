@@ -90,6 +90,12 @@ symlink, group/other write или unreviewed mount boundary. Единствен�
 5. atomic nginx link switch с bounded watchdog и exact rollback receipt;
 6. только после этого controlled `Tenant B/Store B1` activation.
 
+Для `L2_SCHEMA_SECURITY` первый пункт разрешено готовить параллельно Full
+Admission только через
+[`parallel-backup-restored-copy-evidence`](../parallel-backup-restored-copy-evidence.md):
+после final admission его digests обязательно повторно связываются со свежим
+live evidence, а короткоживущий binding сам по себе не разрешает effect.
+
 Legacy `git pull → build → restart` не является допустимым заменителем этой
 процедуры. Замена production timer/unit, перенос sensitive backup residue и
 runtime switch требуют отдельного разрешения владельца production.

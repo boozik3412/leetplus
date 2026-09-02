@@ -467,6 +467,7 @@ jobs:
           pnpm --filter database check:gate-1mt-operational-preflight
           pnpm --filter database check:current-network-access-scope-classification
           pnpm --filter database check:current-release-restored-copy-runtime-acceptance
+          pnpm --filter database check:parallel-backup-restored-copy-evidence
 
       - name: Validate current-release production-like Linux wrapper
         shell: bash

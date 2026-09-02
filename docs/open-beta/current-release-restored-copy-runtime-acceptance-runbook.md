@@ -8,6 +8,9 @@ CONTROLLED BETA-1 через связку production-build API + Web.
 
 Gate не выполняет миграции, не создаёт tenant, не меняет production, не
 авторизует canary/cutover и не заменяет свежий backup/restore rehearsal.
+Для параллельной подготовки к admission его terminal receipt связывается с
+backup/off-host и затем повторно с live pre-effect evidence по контракту
+[`parallel-backup-restored-copy-evidence.md`](../deployment/parallel-backup-restored-copy-evidence.md).
 
 Контракт:
 

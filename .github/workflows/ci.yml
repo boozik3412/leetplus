@@ -693,6 +693,9 @@ jobs:
       - name: Validate current-release restored-copy runtime acceptance
         run: pnpm --filter database check:current-release-restored-copy-runtime-acceptance
 
+      - name: Validate parallel backup and restored-copy pre-effect binding
+        run: pnpm --filter database check:parallel-backup-restored-copy-evidence
+
       - name: Validate current-release production-like Linux wrapper
         shell: bash
         run: |
@@ -1068,6 +1071,8 @@ jobs:
             packages/database/scripts/staff-task-integrity-migration-state.mjs \
             packages/database/scripts/current-release-restored-copy-runtime-acceptance.mjs \
             packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs \
+            packages/database/scripts/parallel-backup-restored-copy-evidence.mjs \
+            packages/database/scripts/parallel-backup-restored-copy-evidence.cli.mjs \
             docs/deployment/production-artifact/run-current-release-restored-copy-acceptance.sh \
             packages/database/scripts/current-network-access-scope-classification.mjs \
             packages/database/scripts/current-network-access-scope-classification.cli.mjs \
@@ -1093,11 +1098,13 @@ jobs:
             '  "runtimeEnrollmentOperationalScriptCount": 6,' \
             '  "currentReleaseRuntimeAcceptanceScriptsIncluded": true,' \
             '  "currentReleaseRuntimeAcceptanceScriptCount": 3,' \
+            '  "parallelBackupRestoredCopyEvidenceScriptsIncluded": true,' \
+            '  "parallelBackupRestoredCopyEvidenceScriptCount": 2,' \
             '  "currentNetworkAccessScopeClassificationScriptsIncluded": true,' \
             '  "currentNetworkAccessScopeClassificationScriptCount": 2,' \
             '  "staffAttachmentReconciliationScriptsIncluded": true,' \
             '  "staffAttachmentReconciliationScriptCount": 3,' \
-            '  "operationalScriptCount": 33,' \
+            '  "operationalScriptCount": 35,' \
             '  "webPublicAssetsIncluded": true' \
             '}' > "$release_root/release-provenance.json"
 
@@ -1183,6 +1190,8 @@ jobs:
             './packages/database/scripts/identity-mail-worker-enrollment.cli.mjs' \
             './packages/database/scripts/current-release-restored-copy-runtime-acceptance.mjs' \
             './packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs' \
+            './packages/database/scripts/parallel-backup-restored-copy-evidence.mjs' \
+            './packages/database/scripts/parallel-backup-restored-copy-evidence.cli.mjs' \
             './packages/database/scripts/run-current-release-restored-copy-acceptance.sh' \
             './packages/database/scripts/current-network-access-scope-classification.mjs' \
             './packages/database/scripts/current-network-access-scope-classification.cli.mjs' \
@@ -1198,7 +1207,7 @@ jobs:
             exit 1
           fi
           script_file_count="$(grep -E '^\./packages/database/scripts/[^/]+$' "$archive_listing" | wc -l | tr -d ' ')"
-          test "$script_file_count" = '33'
+          test "$script_file_count" = '35'
           if grep -E '^\./packages/database/scripts/.*(\.test\.|\.spec\.|\.pem$|\.key$)' "$archive_listing" > /dev/null; then
             printf 'Release artifact contains a forbidden operational fixture\n' >&2
             exit 1
@@ -1236,11 +1245,13 @@ jobs:
             test "$(node -p 'require("./release-provenance.json").runtimeEnrollmentOperationalScriptCount')" = '6'
             test "$(node -p 'require("./release-provenance.json").currentReleaseRuntimeAcceptanceScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").currentReleaseRuntimeAcceptanceScriptCount')" = '3'
+            test "$(node -p 'require("./release-provenance.json").parallelBackupRestoredCopyEvidenceScriptsIncluded')" = 'true'
+            test "$(node -p 'require("./release-provenance.json").parallelBackupRestoredCopyEvidenceScriptCount')" = '2'
             test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").currentNetworkAccessScopeClassificationScriptCount')" = '2'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptsIncluded')" = 'true'
             test "$(node -p 'require("./release-provenance.json").staffAttachmentReconciliationScriptCount')" = '3'
-            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '33'
+            test "$(node -p 'require("./release-provenance.json").operationalScriptCount')" = '35'
             test "$(node -p 'require("./release-provenance.json").webPublicAssetsIncluded')" = 'true'
             node --check packages/database/scripts/canonical-prisma-deploy.mjs
             node --check packages/database/scripts/founder-pilot-restored-copy-preflight.cli.mjs
@@ -1255,6 +1266,7 @@ jobs:
             node --check packages/database/scripts/runtime-function-enrollment.cli.mjs
             node --check packages/database/scripts/identity-mail-worker-enrollment.cli.mjs
             node --check packages/database/scripts/current-release-restored-copy-runtime-acceptance.cli.mjs
+            node --check packages/database/scripts/parallel-backup-restored-copy-evidence.cli.mjs
             bash -n packages/database/scripts/run-current-release-restored-copy-acceptance.sh
             node --check packages/database/scripts/current-network-access-scope-classification.cli.mjs
             node --check packages/database/scripts/staff-attachment-backfill-dry-run.mjs
@@ -1325,7 +1337,7 @@ jobs:
         run: |
           set -euo pipefail
           helper_source="$GITHUB_WORKSPACE/.github/scripts/hydrate-runtime-release-artifact-ci.sh"
-          helper_sha256='730b35b903328dada0e7fce57bb786e85f9aea9689540ecde3774d535efc8e22'
+          helper_sha256='c6cb3f115dbc5657f8f12c79b44a718f63475cfe9a8497233d35cd94b53f7891'
           authority_parent='/srv/leetplus-ci-runtime-authority'
           authority_root="$authority_parent/$CI_RELEASE_SHA"
           sudo -n /usr/bin/env -i \

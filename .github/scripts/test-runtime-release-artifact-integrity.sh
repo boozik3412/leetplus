@@ -38,6 +38,8 @@ readonly OPERATIONAL_SCRIPTS=(
   guest-support-current189-production-upgrade.mjs
   identity-mail-worker-enrollment.cli.mjs
   identity-mail-worker-enrollment.mjs
+  parallel-backup-restored-copy-evidence.cli.mjs
+  parallel-backup-restored-copy-evidence.mjs
   run-current-release-restored-copy-acceptance.sh
   runtime-function-enrollment.cli.mjs
   runtime-function-enrollment.mjs
@@ -146,11 +148,13 @@ make_runtime_root() {
   "runtimeEnrollmentOperationalScriptCount": 6,
   "currentReleaseRuntimeAcceptanceScriptsIncluded": true,
   "currentReleaseRuntimeAcceptanceScriptCount": 3,
+  "parallelBackupRestoredCopyEvidenceScriptsIncluded": true,
+  "parallelBackupRestoredCopyEvidenceScriptCount": 2,
   "currentNetworkAccessScopeClassificationScriptsIncluded": true,
   "currentNetworkAccessScopeClassificationScriptCount": 2,
   "staffAttachmentReconciliationScriptsIncluded": true,
   "staffAttachmentReconciliationScriptCount": 3,
-  "operationalScriptCount": 33,
+  "operationalScriptCount": 35,
   "webPublicAssetsIncluded": true
 }
 JSON

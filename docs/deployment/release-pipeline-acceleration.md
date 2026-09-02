@@ -177,6 +177,15 @@ Artifact build, backup transfer и disposable restored-copy можно выпо�
 Hydration, slot bind, smoke, cutover и postcheck получают terminal phase
 receipts; lost response продолжает ту же операцию вместо полного рестарта.
 
+Первая половина этого этапа реализована контрактом
+[`parallel-backup-restored-copy-evidence.md`](./parallel-backup-restored-copy-evidence.md).
+Только deployable exact-main `L2` candidate может получить preparation receipt.
+После final admission короткоживущий bind повторно проверяет exact runtime bytes,
+installed control, live DB/topology, backup/off-host и restored-copy receipts,
+а также zero pending intents. Оба решения намеренно nonauthorizing; schema-plan
+должен отдельно подписать `effectBindingDigest`. Resumable hydration/cutover
+phase orchestration остаётся `REL-ACC-007`.
+
 ## Что не меняется
 
 - Production runtime остаётся exact `22ab6b81…`, CURRENT189, generation 20;

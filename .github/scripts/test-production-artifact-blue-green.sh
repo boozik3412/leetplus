@@ -371,6 +371,7 @@ case "${1:-}" in
       printf 'SubState=%s\n' "$cache_sub_state"
       printf 'MainPID=%s\n' "$cache_main_pid"
       printf 'ControlGroup=/system.slice/%s\n' "$unit"
+      printf 'LoadState=loaded\n'
       printf 'UnitFileState=enabled\n'
       printf 'NeedDaemonReload=no\n'
       exit 0

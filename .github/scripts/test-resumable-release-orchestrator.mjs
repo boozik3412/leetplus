@@ -395,6 +395,7 @@ test("rejects a drifted digest and a tampered phase receipt", async (t) => {
   );
   const receipt = JSON.parse(await readFile(firstReceipt, "utf8"));
   receipt.previousPhaseReceiptSha256 = "f".repeat(64);
+  await chmod(firstReceipt, 0o600);
   await writeJson(firstReceipt, receipt);
   assert.equal(
     await main(continuationArgs("status", fixture.root, fixture.planSha256)),
